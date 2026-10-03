@@ -31,7 +31,8 @@ constexpr Holds kSlot = HoldsSlot;
 // --- the handlers: what serves each session row, through the part it names -----------------------
 
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
-	core.new_project(request.dir, request.title, request.game, request.import_pass);
+	core.new_project(request.dir, request.title, request.game, request.import_pass,
+	                 ProjectExpansion{ request.expansion, request.builds_on });
 }
 void serve_open_project(SessionCore &core, const EditorRequest &request) {
 	core.open_project(request.dir, request.import_pass, request.game_install);
@@ -75,11 +76,15 @@ void serve_create_missing(SessionCore &core, const EditorRequest &request) {
 }
 void serve_build(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(PlayIntent(), request.out_dir, request.rehash);
+		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent());
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(PlayIntent{ true, request.mission });
+		core.start_build(PlayIntent{ true, request.mission }, std::string(), false, ExportIntent());
+}
+void serve_export(SessionCore &core, const EditorRequest &request) {
+	if (core.view().project.open)
+		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir });
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
 	core.play().stop();
@@ -239,11 +244,13 @@ struct Request {
 // an operation of its own) or a rename waits.
 constexpr RequestKindRow kRows[] = {
 	Request(K::NewProject, "new_project", serve_new_project,
-			"A project made in dir (its title, else the folder's name; its game, else jo), then "
-			"opened as open_project opens it (import_pass false: no source the folder holds "
-			"imported); refused, the open project kept, where dir holds a project already or game "
-			"names no game.")
-			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::ImportPass }))
+			"A project made in dir (its title, else the folder's name; its game, else jo; S16: built as "
+			"the expansion `expansion` on the installed one `builds_on`, its version text made and, on "
+			"the base game, its text table), then opened as open_project opens it (import_pass false: "
+			"no source the folder holds imported); refused, the open project kept, where dir holds a "
+			"project already, game names no game, or the expansion is one the game cannot take or the "
+			"install refuses (a name it has, one it lacks to build on).")
+			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::ImportPass }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
@@ -379,6 +386,22 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({}, { F::Mission }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
+			.acts_on_saved()
+			.ends_edit_groups()
+			.row,
+	// ADR 0046 S16: what ships, through the build's gate.
+	Request(K::Export, "export", serve_export,
+			"A build, then the build copied into export_dir (left out, the project's export folder; "
+			"taken from the project's folder when relative; refused inside the project but its export "
+			"folder) as what ships: a standalone game's archives and loose files (the runtime's folder "
+			"under runtime/ when project.opennova's export.include_runtime asks), an expansion's "
+			"expansion/<name>/ laid out as in an install, with export.json naming the project. The "
+			"folder is replaced only when missing, empty or an export of this project (export.folder). "
+			"An operation (the outcome names it); a build running already serves it and exports once it "
+			"lands. rehash: every file read again.")
+			.takes(request_params({}, { F::ExportDir, F::Rehash }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
+			.guarded(GuardScope::AllDirty, "Export", "Save all and export")
 			.acts_on_saved()
 			.ends_edit_groups()
 			.row,
@@ -770,6 +793,10 @@ void join_operation(SessionCore &core, const EditorRequest &request) {
 	if (request.kind == EditorRequestKind::Play) {
 		core.view().activity.status = "Building, then playing...";
 		core.note("Play starts the game when the build lands.");
+	}
+	if (request.kind == EditorRequestKind::Export) {
+		core.view().activity.status = "Building, then exporting...";
+		core.note("Export copies the build when it lands.");
 	}
 }
 

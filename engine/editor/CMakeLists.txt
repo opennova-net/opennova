@@ -13,6 +13,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_choice.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/player_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
@@ -159,16 +160,20 @@ add_library(opennova_editor STATIC
     # project — project.opennova, the cache directory, machine-local settings, file plumbing,
     # and the one refresh (import, scan, requirements) and the one findings composer the
     # editor and the CLI share
+    ${CMAKE_CURRENT_SOURCE_DIR}/project/expansion_files.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project/expansion_name.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/local_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_findings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_refresh.cpp
-    # project_build — routing into the boot-table archives, the plan, the immutable build
-    # (the directory is not "build*": the lints skip those)
+    # project_build — routing into the boot-table archives (or an expansion's pair), the plan, the
+    # immutable build, the Export's copy of it (the directory is not "build*": the lints skip those)
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/archive_routing.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project_build/base_match.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_run.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project_build/export_build.cpp
     # requirements — the manifest rows evaluated against the project
     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirements.cpp
     # run — the Play launch plan, the run directory the game runs in, and the one managed child
@@ -237,6 +242,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/find_cursor.cpp

@@ -90,6 +90,12 @@ struct Kind {
 		out.row.scr = form;
 		return out;
 	}
+	// A loose kind's place in an expansion build (ExpansionLoose), cited where the row is.
+	constexpr Kind expansion(ExpansionLoose place) const {
+		Kind out = *this;
+		out.row.expansion_loose = place;
+		return out;
+	}
 };
 
 constexpr AssetKindRow kRows[] = {
@@ -155,8 +161,11 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	// The country code the boot opens with the C library's fopen, never through the archives,
 	// on every read [orig: Game_ReadCCBinFile @ 0x4a5860]: loose, as retail ships it.
+	// Its fopen names the bare file ("CC.BIN"), so the game reads it from its working directory, the
+	// install's folder, whatever expansion it runs [orig: Game_ReadCCBinFile @ 0x4a5860].
 	Kind(AssetKind::CountryCode, "country_code", "Country code", ArchiveSlot::Loose)
 	        .file("cc.bin")
+	        .expansion(ExpansionLoose::RootOnly)
 	        .row,
 	Kind(AssetKind::Credits, "credits", "Credits", ArchiveSlot::Localres)
 	        .runtime("credits")
@@ -218,9 +227,11 @@ constexpr AssetKindRow kRows[] = {
 	        .folder("menus")
 	        .row,
 	// Streamed by path, never through the archives (ArchiveSlot). It names no file: its entries are
-	// its own chunks of audio (formats/sbf).
+	// its own chunks of audio (formats/sbf). An expansion's banks, M<name>.sbf and G<name>.sbf, are read
+	// by their path in its own folder [orig: Expansion_LoadAssets @ 0x4a4906, @ 0x4a4936].
 	Kind(AssetKind::MusicBank, "music_bank", "Music bank", ArchiveSlot::Loose)
 	        .runtime("sbf")
+	        .expansion(ExpansionLoose::Folder)
 	        .row,
 	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their singles naming the waves
 	// (the graph's extract_sound_bank).
@@ -307,21 +318,36 @@ constexpr AssetKindRow kRows[] = {
 	        .names_files()
 	        .folder("defs")
 	        .row,
+	// Opened with fopen by its bare name, from the install's folder whatever the expansion [orig:
+	// CUIStringTable_OpenAndLoad @ 0x63a500, from @ 0x55262b].
 	Kind(AssetKind::StringTableCoo, "string_table_coo", "NovaWorld string table",
 	     ArchiveSlot::Loose)
 	        .extensions(kStringTableCoo)
 	        .folder("strings")
+	        .expansion(ExpansionLoose::RootOnly)
 	        .row,
 	// The NovaWorld screens' markup the game reads loose from its folder, where retail ships them:
 	// the error page [orig: "nw_error.mnx" @ 0x558449] and the login's start page, whose STARTUPURL
 	// the gate substitutes (docs/net/novaworld-net-re.md D-NET-31) (S13 A8: no kind before, so the
-	// build left them out).
+	// build left them out). Their reader is the front door [orig: FileSystem_LoadFileToBuffer @ 0x64dab0
+	// from @ 0x558937 and @ 0x5583e0], so an expansion's are packed and loose alike.
 	Kind(AssetKind::NovaWorldScreen, "novaworld_screen", "NovaWorld screen", ArchiveSlot::Loose)
 	        .extensions(kNovaWorldScreen)
+	        .expansion(ExpansionLoose::FrontDoor)
 	        .row,
-	Kind(AssetKind::Video, "video", "Video", ArchiveSlot::Loose).extensions(kVideo).row,
+	// A video by its name, the expansion's own folder first, then the install's: the menus' [orig:
+	// UI_CreateMenuBinkVideos @ 0x54b5ff..0x54b74a] and the intro's [orig: Game_PlayIntroVideos @
+	// 0x5637d7..0x563848] (JO:CA's jox01 ships its header, footer and prologue there).
+	Kind(AssetKind::Video, "video", "Video", ArchiveSlot::Loose)
+	        .extensions(kVideo)
+	        .expansion(ExpansionLoose::Folder)
+	        .row,
+	// An expansion's weapon.sav is the game's beside the expansion's files [orig:
+	// PlayerProfile_LoadAllFromDisk @ 0x54f6b7; the save @ 0x54becd]; a build packs no save
+	// (assets/player_files.h).
 	Kind(AssetKind::PlayerSave, "player_save", "Player save", ArchiveSlot::Loose)
 	        .extensions(kPlayerSave)
+	        .expansion(ExpansionLoose::Folder)
 	        .row,
 	// The HLSL effects, which the shader loader takes in the SCR form alone, under its own key
 	// [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060].
@@ -330,15 +356,27 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Shader)
 	        .scr(ScrForm::Shader)
 	        .row,
+	// Read from the install's folder before any archive mounts (game.cfg, assets.cd:
+	// docs/required-resources.md); gt.ssc, read loose first from the expansion's folder, is its own
+	// row of the expansion's files (route_for_expansion).
 	Kind(AssetKind::Config, "config", "Configuration", ArchiveSlot::Loose)
 	        .extensions(kConfig)
 	        .edited_by(DocumentTypeId::Text)
+	        .expansion(ExpansionLoose::RootOnly)
 	        .row,
-	// Loose in the install root, where retail ships it.
-	Kind(AssetKind::Score, "score", "Score table", ArchiveSlot::Loose).file("score.ini").row,
+	// Loose in the install root, where retail ships it, opened by its bare name [orig: ScoreConfig_LoadFile
+	// @ 0x52d8a0].
+	Kind(AssetKind::Score, "score", "Score table", ArchiveSlot::Loose)
+	        .file("score.ini")
+	        .expansion(ExpansionLoose::RootOnly)
+	        .row,
+	// A text the game reads opens its bare name in the install's folder (earlyerr.txt [orig:
+	// Game_ShowEarlyError @ 0x4a68a0 through Game_ReadLineFromFile @ 0x4a59a0]); an expansion's
+	// version.txt is its own row of the expansion's files (route_for_expansion).
 	Kind(AssetKind::Text, "text", "Text", ArchiveSlot::Loose)
 	        .extensions(kText)
 	        .edited_by(DocumentTypeId::Text)
+	        .expansion(ExpansionLoose::RootOnly)
 	        .row,
 	// No name gives it: the scan gives it to a file an importer converts while its import record
 	// is there (scan_project_assets), whatever the file's name would make it (a .png a texture).
@@ -395,6 +433,8 @@ constexpr bool rows_well_formed() {
 		const bool left_out = row.kind == AssetKind::Archive || row.kind == AssetKind::ImportSource ||
 		                      row.kind == AssetKind::Unknown || row.kind == AssetKind::MissionText;
 		if ((row.archive_slot == ArchiveSlot::None) != left_out) return false;
+		// A loose kind says where an expansion's game reads it; no other kind does.
+		if ((row.archive_slot == ArchiveSlot::Loose) != (row.expansion_loose != ExpansionLoose::None)) return false;
 		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::MaterialChunk;
 		if (by_the_scan && (*row.runtime || row.file_name || row.extensions)) return false;
 		if (static_cast<size_t>(row.document) > kDocumentTypeCount) return false;

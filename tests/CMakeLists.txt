@@ -3856,6 +3856,13 @@ target_link_libraries(editor_project_document_test PRIVATE opennova_editor)
 target_include_directories(editor_project_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_project_document COMMAND editor_project_document_test)
 
+# A project's expansion (ADR 0046 S16): the names the game takes for one, weighed against an install's;
+# the files its name forms; the install as the game serves it; a session's expansion project.
+add_executable(editor_expansion_test editor/expansion_test.cpp)
+target_link_libraries(editor_expansion_test PRIVATE opennova_editor)
+target_include_directories(editor_expansion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_expansion COMMAND editor_expansion_test)
+
 add_executable(editor_asset_registry_test editor/asset_registry_test.cpp)
 target_link_libraries(editor_asset_registry_test PRIVATE opennova_editor)
 target_include_directories(editor_asset_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

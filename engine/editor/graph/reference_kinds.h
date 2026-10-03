@@ -153,6 +153,23 @@ const ReferenceKindRow &reference_row(ReferenceKind kind);
 // the game's refusal to boot (RES_FATAL). Any other listed error blocks nothing.
 bool blocks_build(const Diagnostic &d);
 bool diagnostics_block_build(const std::vector<Diagnostic> &items);
+
+// The names an expansion's base game serves (ADR 0046 S16): the install mounted as a stock launch of
+// the project's game, no expansion (base_install_spec: its archives' files and the loose files it
+// ships beside them), each as its listing spells it, sorted by their normalized form. Under /exp the
+// game reads what the expansion lacks from the base's archives below the expansion's pair [orig:
+// PFF_OpenAllArchives @ 0x4a4310, slots 2..4].
+struct BaseNames {
+	const std::vector<std::string> *sorted = nullptr;
+	// Whether the base serves `name` (compared as the game compares names).
+	bool has(const std::string &name) const;
+};
+// blocks_build over an expansion's base: a required file, or a file a gating reference names, that the
+// project lacks and the base serves blocks nothing, the game reading the base's (requirement.missing,
+// reference.missing); a file of the name of another kind still blocks (requirement.wrong_kind,
+// reference.wrong_kind: the project's file is the one the game reads). Null `base`: blocks_build.
+bool blocks_build(const Diagnostic &d, const BaseNames *base);
+bool diagnostics_block_build(const std::vector<Diagnostic> &items, const BaseNames *base);
 // The kind a token names; false for none.
 bool reference_kind_from_token(const std::string &token, ReferenceKind &out);
 // The reference a stylesheet value naming a file of `file`'s kind makes where the game reads it

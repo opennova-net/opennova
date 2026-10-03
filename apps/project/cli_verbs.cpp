@@ -344,11 +344,13 @@ bool set_up(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	const std::string &dir = args.positional.front();
 	const bool dry_run = args.has("--dry-run");
 	const std::string install = args.value("--install");
-	const JsonValue opened = handled(
-	        cli, row.requests[0] == K::NewProject
-	                     ? editor::request::new_project(dir, args.value("--title"), args.value("--game"), row.import_pass)
-	                     : editor::request::open_project(dir, row.import_pass && !dry_run,
-	                                                     dry_run ? install : std::string()));
+	EditorRequest first = editor::request::open_project(dir, row.import_pass && !dry_run, dry_run ? install : std::string());
+	if (row.requests[0] == K::NewProject) {
+		first = editor::request::new_project(dir, args.value("--title"), args.value("--game"), row.import_pass);
+		first.expansion = args.value("--expansion");
+		first.builds_on = args.value("--builds-on");
+	}
+	const JsonValue opened = handled(cli, first);
 	if (!done(opened) || !project_open(cli)) {
 		print_setup_failure(cli, opened);
 		if (!has_error(items(opened, "findings")))
@@ -381,6 +383,12 @@ int run_new(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	const JsonValue &project = at(answer, "project");
 	std::fprintf(cli.out, "created %s (%s) at %s\n", project.get_string("title", "").c_str(),
 	             project.get_string("target_game", "").c_str(), project.get_string("root", "").c_str());
+	const JsonValue &expansion = at(project, "expansion");
+	if (const std::string name = expansion.get_string("name", ""); !name.empty()) {
+		const std::string builds_on = expansion.get_string("builds_on", "");
+		std::fprintf(cli.out, "  as the expansion %s, on %s\n", name.c_str(),
+		             builds_on.empty() ? "the base game" : ("the expansion " + builds_on).c_str());
+	}
 	return 0;
 }
 
@@ -394,6 +402,14 @@ int run_status(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	const JsonValue &project = at(answer, "project"), &run = at(answer, "run");
 	std::fprintf(cli.out, "project: %s (%s) at %s\n", project.get_string("title", "").c_str(),
 	             project.get_string("target_game", "").c_str(), project.get_string("root", "").c_str());
+	// Its expansion (ADR 0046 S16): what it builds as, on what.
+	const JsonValue &expansion = at(project, "expansion");
+	const std::string name = expansion.get_string("name", ""), builds_on = expansion.get_string("builds_on", "");
+	if (name.empty())
+		std::fprintf(cli.out, "expansion: none (a standalone project)\n");
+	else
+		std::fprintf(cli.out, "expansion: %s, on %s\n", name.c_str(),
+		             builds_on.empty() ? "the base game" : ("the expansion " + builds_on).c_str());
 	const std::string runtime = run.get_string("runtime_executable", "");
 	std::fprintf(cli.out, "runtime: %s\n", runtime.empty() ? "(beside the editor)" : runtime.c_str());
 	const std::string install = run.get_string("game_install", "");
@@ -801,7 +817,51 @@ int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		             dir.c_str(), count_at(build, "archives_written"), count_at(build, "archives_reused"),
 		             count_at(build, "archives_linked"), count_at(build, "loose_written"),
 		             count_at(build, "files_hashed"));
-	std::fprintf(cli.out, "run: opennova.exe -- --resource-dir \"%s\"\n", dir.c_str());
+	const std::string expansion = build.get_string("expansion", "");
+	if (expansion.empty()) {
+		std::fprintf(cli.out, "run: opennova.exe -- --resource-dir \"%s\"\n", dir.c_str());
+		return 0;
+	}
+	// ADR 0046 S16: an expansion, its files the base game serves the same left out.
+	const JsonValue &same = at(build, "same_as_base");
+	std::fprintf(cli.out, "expansion %s: %.0f file(s) (%.0f byte(s)) left out as the base game's own\n",
+	             expansion.c_str(), same.get_number("files", 0.0), same.get_number("bytes", 0.0));
+	std::fprintf(cli.out, "run: put %s/expansion/%s in the game's folder, then run the game with /exp %s\n", dir.c_str(),
+	             expansion.c_str(), expansion.c_str());
+	return 0;
+}
+
+// The project built and copied as what ships into the export folder, as the editor's Export does
+// (ADR 0046 S16): the import pass first, then the build run to its end, then the copy.
+int run_export(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
+	// --out is a path on the command line, taken from where the command runs.
+	const std::string out = from_here(args.value("--out"));
+	const JsonValue outcome = send(cli, editor::request::export_project(out, args.has("--rehash")));
+	JsonValue answer;
+	if (!answer_of(cli, row, answer)) return 2;
+	const JsonValue &operation = at(answer, "operation");
+	const JsonValue &build = at(operation, "build"), &exported = at(operation, "export"),
+	                &last = at(operation, "last_operation");
+	const bool landed = done(outcome) && last.get_number("id", 0.0) == outcome.get_number("operation", -1.0) &&
+	                    last.get_string("end", "") == "done" && exported.get_bool("ok", false);
+	if (cli.json) {
+		print_json(cli.out, answer);
+		return landed ? 0 : 1;
+	}
+	if (!done(outcome)) return 1; // refused: its findings said why
+	for (const JsonValue &finding : items(build, "diagnostics")) print_finding(cli.out, finding);
+	for (const JsonValue &finding : items(exported, "diagnostics")) print_finding(cli.out, finding);
+	if (!landed) {
+		std::fprintf(cli.out, "%s\n", build.get_bool("ok", false) ? "not ok: export failed" : "not ok: build failed");
+		return 1;
+	}
+	std::fprintf(cli.out, "exported %s (%zu file(s), %.0f byte(s)) from build %s\n", exported.get_string("dir", "").c_str(),
+	             size_t(exported.get_number("files", 0.0)), exported.get_number("bytes", 0.0),
+	             build.get_string("id", "").c_str());
+	const std::string expansion = build.get_string("expansion", "");
+	if (!expansion.empty())
+		std::fprintf(cli.out, "install: copy its expansion folder into the game's folder, then run the game with /exp %s\n",
+		             expansion.c_str());
 	return 0;
 }
 
@@ -1049,13 +1109,17 @@ constexpr K kImportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Pl
 	                              K::ImportFiles };
 constexpr K kReimportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Reimport };
 constexpr K kBuildRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Build };
+constexpr K kExportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Export };
 
 constexpr CliPositional kDir[] = { { "a project directory" } };
 constexpr CliPositional kImportArgs[] = { { "a project directory" }, { "a source file", false } };
 constexpr CliPositional kRequestArgs[] = { { "a project directory" }, { "a request as JSON" } };
 constexpr CliPositional kQueryArgs[] = { { "a project directory" }, { "a query's name" }, { "its args as JSON", false } };
 
-constexpr CliOption kNewOptions[] = { { "--title", "a text" }, { "--game", "a code" } };
+constexpr CliOption kNewOptions[] = { { "--title", "a text" },
+	                                  { "--game", "a code" },
+	                                  { "--expansion", "a name" },
+	                                  { "--builds-on", "an expansion" } };
 constexpr CliOption kCreateMissingOptions[] = { { "--role", "a token" } };
 constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 	                                     { "--replace" },
@@ -1069,10 +1133,12 @@ constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash"
 using V = CliVerb;
 
 constexpr VerbRow kRows[] = {
-	Verb(V::New, "new", "<dir> [--title <text>] [--game <code>]", kNewRequests, kDir, run_new,
+	Verb(V::New, "new", "<dir> [--title <text>] [--game <code>] [--expansion <name>] [--builds-on <expansion>]",
+	     kNewRequests, kDir, run_new,
 	     "create an empty project (project.opennova + .opennova/) in <dir> and open it, no\n"
 	     "source the folder holds imported; --title names it (else the folder's name), --game\n"
-	     "is its game's code (else jo)")
+	     "is its game's code (else jo); --expansion builds it as that expansion (played with\n"
+	     "/exp <name>), --builds-on on the game install's expansion of that name (else the base game)")
 	        .takes(kNewOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"project\"]}")
@@ -1128,6 +1194,16 @@ constexpr VerbRow kRows[] = {
 	     "<dir>/.opennova/build/play/<build-id>; --out from where the command runs, refused\n"
 	     "inside the project but in its cache or export folder); --rehash reads every file\n"
 	     "again, the build cache set aside (--json: the state query's import and operation)")
+	        .takes(kBuildOptions)
+	        .opens_without_import_pass()
+	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")
+	        .row,
+	Verb(V::Export, "export", "<dir> [--out <dir>] [--rehash]", kExportRequests, kDir, run_export,
+	     "build the project, then copy the build into its export folder as what ships (default:\n"
+	     "project.opennova's export.output; --out from where the command runs, replaced only when\n"
+	     "missing, empty or an export of this project): a standalone game's archives and loose\n"
+	     "files, an expansion's expansion/<name>/ as in an install, export.json naming the project\n"
+	     "(--json: the state query's import and operation)")
 	        .takes(kBuildOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")

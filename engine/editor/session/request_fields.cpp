@@ -17,6 +17,13 @@ constexpr RequestField kFields[] = {
 	{ F::Game, "game", J::String,
 			"A new project's game, a gameprofile code (jo, jodemo, dfx, dfx2, bhd; jo when left "
 			"out)." },
+	{ F::Expansion, "expansion", J::String,
+			"The expansion a new project builds as, played with /exp <name> from expansion\\<name>\\ "
+			"(left out, a standalone project): the game's rule for its name, 31 characters, one word, "
+			"11 for M<name>.bin to fit the archives (ADR 0046 S16)." },
+	{ F::BuildsOn, "builds_on", J::String,
+			"The installed expansion a new project builds on, by its folder's name (left out, the base "
+			"game); it needs an expansion." },
 	{ F::GameInstall, "game_install", J::String,
 			"A game install the project opens with for the session alone, in place of the one its "
 			".opennova/local.json names, which stays as it is (a dry run's install); left out, its "
@@ -40,6 +47,11 @@ constexpr RequestField kFields[] = {
 			"Where a build lands: a directory on disk, each build a directory under it named by "
 			"its id (left out, the project's .opennova/build/play; a relative one from the "
 			"project's folder; one inside the project refused but its cache or export folder)." },
+	{ F::ExportDir, "export_dir", J::String,
+			"Where an export lands: a folder on disk the export replaces, when it is missing, empty or an "
+			"export of this project (left out, the project's export folder, project.opennova's "
+			"export.output; a relative one from the project's folder; one inside the project refused but "
+			"its export folder)." },
 	{ F::Mission, "mission", J::String,
 			"A mission of the project by its logical name (04TR.bms): the one Play starts the game "
 			"in; left out, the game starts at its menu." },
@@ -54,10 +66,11 @@ constexpr RequestField kFields[] = {
 			"choose "
 			"from." },
 	{ F::Imports, "imports", J::Objects,
-			"Files chosen to import, {path, entry?, install?, native?}, each as the view's import rows "
-			"carry it "
+			"Files chosen to import, {path, entry?, install?, native?, as?}, each as the view's import "
+			"rows carry it "
 			"(install: the path is the game install; native: a loose file copied as the game's "
-			"own)." },
+			"own; as: the name the project gets an install's file under, a file the game reads by an "
+			"expansion's name taking the project's expansion's)." },
 	{ F::Edits, "edits", J::Objects,
 			"Edits over any rows of one document in the batch form, one undo step: [{op, id, "
 			"parent, kind, field, value, position, as, coalesce, gesture}], op one of set, clear, "
@@ -78,8 +91,9 @@ constexpr RequestField kFields[] = {
 	{ F::Choice, "choice", J::String,
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
-			"The settings to set, {serial?, title?, mission?, multiplayer?, game_install?, "
-			"runtime_executable?, play_in_install?}, each left out as it is." },
+			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
+			"game_install?, runtime_executable?, play_in_install?}, each left out as it is (expansion "
+			"\"\" a standalone project, builds_on \"\" the base game)." },
 	{ F::Viewport, "viewport", J::Object,
 			"A viewport's change, {kind?, device?, clock?, options?, camera?}: kind its kind's token "
 			"(menu, model, script; left out, the kind the document shows in: the Preview's kind that shows "

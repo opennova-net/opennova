@@ -84,6 +84,46 @@ static bool archive_has(const std::string &archive_path, const char *name) {
 	return found;
 }
 
+// An archive of `files` (name, text), as the PFF writer packs one.
+static bool write_archive(const std::string &path, const std::vector<std::pair<std::string, std::string>> &files) {
+	std::vector<opennova::pff::PffWriteEntry> entries;
+	for (const auto &[name, text] : files)
+		entries.push_back({name.c_str(), reinterpret_cast<const uint8_t *>(text.data()), uint32_t(text.size()), 0,
+		                   opennova::pff::PFF_NEW_ENTRY_TIMESTAMP, 0});
+	fs::create_directories(fs::path(path).parent_path());
+	return opennova::pff::pff_write_archive(path.c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                        entries.empty() ? nullptr : entries.data(),
+	                                        uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK;
+}
+
+// ADR 0046 S16: a project that builds as an expansion (project.opennova's expansion) builds its folder,
+// expansion/jxm/ with its pair and its own files loose, nothing at the build's root, and exports it laid
+// out as in an install.
+static int test_expansion_project() {
+	editor_test::TempProjectDir dir("opennova_project_cli_expansion");
+	const std::string install = dir.file("install"), root = dir.file("Mod");
+	TEST_EXPECT(write_archive(install + "/language.pff", { { "base.bin", "base" } }) &&
+	            write_archive(install + "/localres.pff", {}) && write_archive(install + "/resource.pff", {}));
+	opennova::editor::ProjectDocument doc;
+	opennova::editor::Diagnostic error;
+	TEST_EXPECT(opennova::editor::create_project(root, "Mod", "jo", doc, error, opennova::editor::ProjectExpansion{ "jxm", "" }));
+	TEST_EXPECT(run({ "create-missing", root, "--install", install }) == 0);
+	for (const char *role : { "expansion_table", "expansion_version" })
+		TEST_EXPECT(run({ "create-missing", root, "--role", role }) == 0);
+	TEST_EXPECT(run({ "build", root }) == 0);
+	const std::string built = opennova::editor::last_good_build_dir(root + "/.opennova/build/play");
+	TEST_EXPECT(!built.empty() && fs::is_regular_file(built + "/expansion/jxm/jxm.pff") &&
+	            fs::is_regular_file(built + "/expansion/jxm/jxmL.pff") && fs::is_regular_file(built + "/expansion/jxm/jxm.bin") &&
+	            fs::is_regular_file(built + "/expansion/jxm/version.txt") && !fs::exists(built + "/language.pff"));
+	TEST_EXPECT(archive_has(built + "/expansion/jxm/jxmL.pff", "gametext.bin") &&
+	            archive_has(built + "/expansion/jxm/jxm.pff", "main.mnu") && !archive_has(built + "/expansion/jxm/jxmL.pff", "jxm.bin"));
+	TEST_EXPECT(run({ "export", root }) == 0);
+	TEST_EXPECT(fs::is_regular_file(root + "/build/export/expansion/jxm/jxm.pff") &&
+	            fs::is_regular_file(root + "/build/export/expansion/jxm/version.txt") &&
+	            fs::is_regular_file(root + "/build/export/export.json") && !fs::exists(root + "/build/export/language.pff"));
+	return 0;
+}
+
 static int test_usage_errors() {
 	TEST_EXPECT(run({}) == 2);
 	TEST_EXPECT(run({"frobnicate"}) == 2);
@@ -116,6 +156,29 @@ static int test_usage_errors() {
 	TEST_EXPECT(text.find("--title is given twice") != std::string::npos && !fs::exists(dir.file("twice")));
 	TEST_EXPECT(run_usage(dir.file("err.txt"), { "new", dir.file("twice"), "--title", "--game", "jo" }, text) == 2);
 	TEST_EXPECT(text.find("--title needs a text") != std::string::npos && !fs::exists(dir.file("twice")));
+	return 0;
+}
+
+// ADR 0046 S16: a project made as an expansion, its version text and (on the base game) its text table
+// made with it; `new` and `status` say what it builds as; an expansion the game cannot take, or one to
+// build on with no name of its own, is refused with nothing made.
+static int test_new_expansion() {
+	editor_test::TempProjectDir dir("opennova_editor_project_cli_expansion");
+	const std::string root = dir.file("Mod");
+	std::string text;
+	TEST_EXPECT(run({"new", dir.file("bad"), "--expansion", "my mod"}) == 2 && !fs::exists(dir.file("bad")));
+	TEST_EXPECT(run({"new", dir.file("on"), "--builds-on", "jox01"}) == 2 && !fs::exists(dir.file("on")));
+	TEST_EXPECT(run_capture(dir.file("new.txt"), {"new", root, "--title", "Mod", "--expansion", "jxm"}, text) == 0 &&
+	            text.find("as the expansion jxm, on the base game") != std::string::npos);
+	TEST_EXPECT(fs::is_regular_file(root + "/version.txt") && fs::is_regular_file(root + "/strings/jxm.bin"));
+	TEST_EXPECT(run_capture(dir.file("status.txt"), {"status", root}, text) == 0 &&
+	            text.find("expansion: jxm, on the base game") != std::string::npos);
+	opennova::editor::ProjectDocument doc;
+	opennova::editor::Diagnostic error;
+	TEST_EXPECT(opennova::editor::open_project(root, doc, error) && doc.expansion.name == "jxm" && doc.expansion.builds_on.empty());
+	const std::string plain = dir.file("Plain");
+	TEST_EXPECT(run({"new", plain}) == 0 && run_capture(dir.file("plain.txt"), {"status", plain}, text) == 0 &&
+	            text.find("expansion: none") != std::string::npos);
 	return 0;
 }
 
@@ -170,6 +233,24 @@ static int test_new_status_validate() {
 		TEST_EXPECT(run_capture(dir.file("built.txt"), {"build", root, "--out", dir.file("rehashed"), "--rehash"}, built) == 0);
 		TEST_EXPECT(built.find("built ") != std::string::npos && built.find(" of them linked, ") != std::string::npos &&
 		            built.find(" file(s) hashed)") != std::string::npos);
+	}
+	// ADR 0046 S16: Export, the build copied as what ships into the project's export folder (or --out),
+	// replaced while it is this project's export; never into a folder of the person's files, nor into
+	// the project but its export folder.
+	{
+		TEST_EXPECT(run({"export", root, "--out"}) == 2);
+		std::string exported;
+		TEST_EXPECT(run_capture(dir.file("exported.txt"), {"export", root}, exported) == 0);
+		TEST_EXPECT(exported.find("exported ") != std::string::npos);
+		TEST_EXPECT(fs::is_regular_file(root + "/build/export/language.pff") &&
+		            fs::is_regular_file(root + "/build/export/export.json") && !fs::exists(root + "/build/export/build.json"));
+		TEST_EXPECT(run({"export", root}) == 0);
+		TEST_EXPECT(run({"export", root, "--out", dir.file("shipped")}) == 0 &&
+		            fs::is_regular_file(dir.file("shipped") + "/localres.pff"));
+		TEST_EXPECT(editor_test::write_text(dir.file("taken") + "/mine.txt", "mine"));
+		TEST_EXPECT(run({"export", root, "--out", dir.file("taken")}) == 1 && !fs::exists(dir.file("taken") + "/localres.pff"));
+		TEST_EXPECT(run({"export", root, "--out", root + "/inside"}) == 1 && !fs::exists(root + "/inside"));
+		TEST_EXPECT(run({"validate", root}) == 0); // the export folder is no file of the project
 	}
 
 	// Generic native file import uses the same core; a file the project holds already is kept as it
@@ -678,7 +759,9 @@ static int test_older_local_settings() {
 int main() {
 	int failures = 0;
 	failures += test_usage_errors();
+	failures += test_expansion_project();
 	failures += test_new_status_validate();
+	failures += test_new_expansion();
 	failures += test_validate_pins_the_rows();
 	failures += test_one_game_install();
 	failures += test_older_local_settings();

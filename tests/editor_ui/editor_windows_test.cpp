@@ -113,7 +113,7 @@ void test_requests_round_trip() {
 void test_frame_bracket_follows_the_table() {
 	using K = EditorRequestKind;
 	const std::vector<K> saved = {K::NewProject, K::OpenProject, K::CloseProject, K::Rescan, K::ImportFiles,
-	                              K::Build, K::Play, K::ReloadDocument, K::CloseDocument, K::Save, K::SaveAll,
+	                              K::Build, K::Play, K::Export, K::ReloadDocument, K::CloseDocument, K::Save, K::SaveAll,
 	                              K::ResolveUnsaved, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::Quit};
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.

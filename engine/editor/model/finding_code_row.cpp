@@ -65,6 +65,21 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BuildBlocked, code("build.blocked", G::Build) },
 	{ C::BuildChanged, code("build.changed", G::Build) },
 	{ C::BuildCopy, code("build.copy", G::Build) },
+	// An expansion whose base game does not mount (no install, none of its archives): its build cannot
+	// be compared with the base nor gated over it (ADR 0046 S16), so it gates, the editor's integrity.
+	{ C::BuildExpansionBaseMissing, code("build.expansion.base_missing", G::Build) },
+	// The Mods list's description of an expansion past its record's 272 bytes: the copy spills into the
+	// next expansion's record [orig: Expansion_ScanAndRegister @ 0x4a4612], a picture the game shows
+	// wrong, no refusal of it: listed.
+	{ C::BuildExpansionExpDesc, listed(code("build.expansion.exp_desc", G::Build)) },
+	// The Mods list's name of an expansion of 64 bytes or more: the copy runs into the record's folder
+	// name [orig: Expansion_ScanAndRegister @ 0x4a4598, after the folder's @ 0x4a4532], so choosing the
+	// expansion there loads another name's, the base game [orig: Options_HandleAcceptOrBack @ 0x55ad43;
+	// Expansion_LoadAssets @ 0x4a4767]: it gates.
+	{ C::BuildExpansionExpName, code("build.expansion.exp_name", G::Build) },
+	// A file an expansion's build leaves out because the game reads its kind only from the install's
+	// folder (ADR 0046 S16, AssetKindRow::expansion_loose): said, refusing nothing.
+	{ C::BuildExpansionRootOnly, listed(about_the_file("build.expansion.root_only", G::Build, F::None)) },
 	{ C::BuildNameUnstorable, about_the_file("build.name_unstorable", G::Build, F::Rename) },
 	{ C::BuildOutDirInProject, code("build.out_dir_in_project", G::Build) },
 	// A player's or this machine's file the project holds, which a build leaves out (ADR 0046 S14,
@@ -108,6 +123,15 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::EditorSettingsSchemaVersionUnsupported, code("editor_settings.schema_version.unsupported", G::EditorSettings) },
 	{ C::EditorSettingsUnreadable, code("editor_settings.unreadable", G::EditorSettings) },
 	{ C::EditorSettingsWrite, code("editor_settings.write", G::EditorSettings) },
+	// A project file the game never reads for the project's expansion setting (ADR 0046 S16): a music
+	// bank but the streamed pair, an expansion's base music scripts. Listed, its fix a Rename: the
+	// game runs without it.
+	{ C::ExpansionFileUnread, listed(about_the_file("expansion.file.unread", G::Expansion, F::Rename)) },
+	// Export (ADR 0046 S16, project_build/export_build.h): a folder that is the person's, never written
+	// over; the runtime to ship that is not there; a copy or a rename refused.
+	{ C::ExportFolder, code("export.folder", G::Export) },
+	{ C::ExportRuntime, code("export.runtime", G::Export) },
+	{ C::ExportWrite, code("export.write", G::Export) },
 	{ C::GraphUnreadable, from_graph(code("graph.unreadable", G::FilesNotChecked)) },
 	{ C::ImportAlphaDropped, code("import.alpha_dropped", G::Imports) },
 	{ C::ImportArchive, code("import.archive", G::Imports) },
@@ -162,6 +186,15 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlaySpawn, code("play.spawn", G::Play) },
 	{ C::PlayUnsupported, code("play.unsupported", G::Play) },
 	{ C::ProjectExists, code("project.exists", G::Project) },
+	// The project's expansion against its game install (ADR 0046 S16, expansion_name.h): a name the
+	// install has already, an expansion to build on it lacks. Refused where a project is made or its
+	// settings applied; listed where an open project's install is read again (the install is this
+	// machine's, the project the modder's), refusing no build: the game mounts the build's own
+	// expansion whatever else the install holds.
+	{ C::ProjectExpansionNameTaken, listed(code("project.expansion.name_taken", G::Project)) },
+	{ C::ProjectExpansionNotInstalled, listed(code("project.expansion.not_installed", G::Project)) },
+	// An expansion for a game other than Joint Operations, whose expansions alone are witnessed.
+	{ C::ProjectExpansionUnsupported, code("project.expansion.unsupported", G::Project) },
 	{ C::ProjectFieldInvalid, code("project.field.invalid", G::Project) },
 	{ C::ProjectFileMissing, code("project.file.missing", G::Project) },
 	{ C::ProjectFileUnreadable, code("project.file.unreadable", G::Project) },

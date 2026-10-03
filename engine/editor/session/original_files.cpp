@@ -2,8 +2,7 @@
 
 #include <utility>
 
-#include <base/vfs/vfs.h>
-#include <editor/assets/asset_import.h>
+#include <editor/assets/install_view.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
@@ -15,8 +14,10 @@ OriginalFiles::~OriginalFiles() = default;
 
 void OriginalFiles::want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document,
                          const std::string &root, const AssetScan &scan, const std::vector<Diagnostic> &findings) {
-	const std::string game = document ? document->target_game : std::string();
-	if (install != install_ || root != root_ || !document_ || !document || document_->target_game != game) {
+	// The install as the project imports it (its game, the expansion it builds on, its own expansion's
+	// name): what the files are compared with.
+	if (install != install_ || root != root_ || !document_ || !document ||
+	    install_spec(install, *document_) != install_spec(install, *document)) {
 		clear();
 		install_ = install;
 		root_ = root;
@@ -46,8 +47,9 @@ void OriginalFiles::want(const std::string &install, const std::shared_ptr<const
 bool OriginalFiles::mount() {
 	if (!mount_tried_) {
 		mount_tried_ = true;
-		game_ = std::make_unique<Vfs>();
-		if (!mount_retail(*game_, install_, *document_)) game_.reset();
+		game_ = std::make_unique<InstallView>();
+		std::string error;
+		if (!game_->open(install_spec(install_, *document_), error)) game_.reset();
 	}
 	return game_ != nullptr;
 }
@@ -64,7 +66,8 @@ bool OriginalFiles::step(uint64_t bytes) {
 		std::vector<uint8_t> held, served;
 		std::string error;
 		bool original = false;
-		if (mounted && read_file_bytes(join_path(root_, file.path), held, error) && read_served(*game_, file.name, served))
+		const InstallFile *served_file = mounted ? game_->find(file.name) : nullptr;
+		if (served_file && read_file_bytes(join_path(root_, file.path), held, error) && game_->read(*served_file, served))
 			original = held == served;
 		read += held.size() + served.size();
 		++checked_;

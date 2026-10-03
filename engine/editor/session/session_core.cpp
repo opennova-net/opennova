@@ -8,14 +8,18 @@
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
 #include <editor/model/edit.h>
+#include <editor/project/expansion_files.h>
+#include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_refresh.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/project_build/export_build.h>
 #include <editor/run/play_lease.h>
 #include <editor/session/build_operation.h>
 #include <editor/session/document_set.h>
@@ -25,6 +29,7 @@
 #include <editor/session/play_controller.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/refresh_operation.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/unsaved_guard.h>
 
@@ -82,6 +87,7 @@ void SessionCore::start() {
 	view_.project.import_dependencies = settings.import_dependencies;
 	view_.project.recent_items = settings.recent_items;
 	view_.activity.status = "No project open.";
+	read_install_expansions();
 	touch(ViewConcern::Preferences);
 	touch(ViewConcern::Graph);
 	touch(ViewConcern::Output);
@@ -201,6 +207,7 @@ void SessionCore::finish_operation() {
 	operations_.finish(*this);
 	problems().show_validation(); // a finish that read the files leaves their validation due
 	show_operation();
+	next_expansion_rename(); // the slot is free: a rename a change of the expansion's name left goes now
 }
 
 // The slot as the view shows it: the running operation (none) and what the last one came to.
@@ -213,30 +220,45 @@ void SessionCore::show_operation() {
 // --- the project ---------------------------------------------------------------------------
 
 // The project made in `dir`, then opened. What would refuse it (a project there already, a game no
-// gameprofile has) is asked before anything changes: the open project stays open, its operation
-// running. Then the open project closes, its operation cancelled (refused, nothing made, when it
-// cannot be), and only then is the folder made, titled `title` or else, left empty, after the
-// folder (create_project's rule, the one every path to a new project takes).
+// gameprofile has, an expansion the game cannot take or the install refuses) is asked before anything
+// changes: the open project stays open, its operation running. Then the open project closes, its
+// operation cancelled (refused, nothing made, when it cannot be), and only then is the folder made,
+// titled `title` or else, left empty, after the folder (create_project's rule, the one every path to a
+// new project takes).
 bool SessionCore::new_project(const std::string &dir, const std::string &title, const std::string &game,
-                              bool import_pass) {
+                              bool import_pass, const ProjectExpansion &expansion) {
 	if (dir.empty()) return false;
 	const std::string target_game = game.empty() ? std::string(kDefaultTargetGame) : game;
 	ProjectDocument doc;
 	Diagnostic error;
-	if (!can_create_project(dir, target_game, error)) {
-		report(error);
+	const auto refused = [this](const Diagnostic &why) {
+		report(why);
 		view_.activity.status = "The project could not be created.";
 		touch(ViewConcern::Output);
 		return false;
+	};
+	if (!can_create_project(dir, target_game, error, expansion)) return refused(error);
+	// The expansion against the game install a new project starts with (the one last chosen): a name
+	// it has already, one to build on it lacks (ADR 0046 S16). With no install, nothing to weigh.
+	if (!game_install().empty()) {
+		std::vector<Diagnostic> install;
+		expansion_install_findings(expansion, install_expansion_names_, DiagnosticSeverity::Error, install);
+		if (!install.empty()) return refused(install.front());
 	}
 	if (!close_project()) return false;
-	if (!create_project(dir, title, target_game, doc, error)) {
-		report(error);
-		view_.activity.status = "The project could not be created.";
-		touch(ViewConcern::Output);
-		return false;
-	}
+	if (!create_project(dir, title, target_game, doc, error, expansion)) return refused(error);
 	note("Created " + doc.title + ".");
+	// An expansion's own files a new project makes (ADR 0046 S16): its version text always, its text
+	// table on the base game (one that builds on an installed expansion imports that one's).
+	if (!doc.expansion.standalone()) {
+		std::vector<std::string> roles{ expansion_file_row(ExpansionFileRole::Version).manifest_role };
+		if (doc.expansion.builds_on.empty()) roles.push_back(expansion_file_row(ExpansionFileRole::Table).manifest_role);
+		const ProjectPaths paths = ProjectPaths::for_root(dir);
+		const CreateMissingResult made =
+				create_missing_requirements(paths, doc, evaluate_requirements(doc, scan_project_assets(paths, doc)), roles);
+		for (const std::string &path : made.created) note("Created " + path);
+		for (const Diagnostic &d : made.diagnostics) report(d);
+	}
 	return open_project(dir, import_pass);
 }
 
@@ -305,10 +327,13 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	view_.project.document = std::make_shared<const ProjectDocument>(open.document());
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
+	view_.activity.has_export = false;
+	view_.activity.last_export = std::make_shared<const ExportReport>();
 	preferences_.remember_recent_project(paths_.root);
 	save_preferences();
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
-	imports().set_install_files(std::move(open.install_files()));
+	imports().set_install_files(std::move(open.install_files()), std::move(open.base_files()));
+	read_install_expansions(); // the project's install's, before its requirements weigh them
 	absorb_refresh(open.refresh());
 	const std::string &title = view_.project.document->title;
 	note("Opened " + title + ".");
@@ -349,12 +374,16 @@ bool SessionCore::close_project() {
 	view_.findings.diagnostics.clear();
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
+	view_.activity.has_export = false;
+	view_.activity.last_export = std::make_shared<const ExportReport>();
 	// The last build's findings are this project's and go with it.
 	problems().clear_build_findings();
 	paths_ = ProjectPaths();
 	local_ = LocalSettings();
+	expansion_renames_.clear();
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	view_.project.retail_directory = game_install();
+	read_install_expansions();
 	note("Closed " + title + ".");
 	view_.activity.status = "No project open.";
 	// What the project was goes with it: every concern of the view moves.
@@ -389,7 +418,7 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	// The requirements over that scan, with the project's document as it is now: a features change
 	// made while the refresh ran (S13 A3: it waits for none) is the one they follow.
 	view_.project.requirements = std::make_shared<const RequirementReport>(
-			evaluate_requirements(*view_.project.document, *view_.project.scan));
+			requirements_of(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
 	// A whole refresh (an open, a Rescan, a Reimport) reads the install as it stands now too: which files
 	// are the game's own data is found again after the validation (S15).
@@ -412,7 +441,7 @@ void SessionCore::update_files(const std::vector<std::string> &paths) {
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
 	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
 	view_.project.requirements = std::make_shared<const RequirementReport>(
-			evaluate_requirements(*view_.project.document, *view_.project.scan));
+			requirements_of(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
 	problems().validate_later();
 }
@@ -458,25 +487,72 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		if (multiplayer) project.features.multiplayer = *change.multiplayer;
 		if (mission || multiplayer) project_changed = features_changed = true;
 	}
+	// The project's expansion (ADR 0046 S16): the game's rule for it, then the game install's
+	// expansions (the install this Apply leaves in effect: a name it has, one to build on it lacks),
+	// each refusal a failure the result carries, the expansion as it was. A name changed renames the
+	// project's own files of the old name's after it is written (next_expansion_rename).
+	ProjectExpansion expansion = project.expansion;
+	if (change.expansion) expansion.name = *change.expansion;
+	if (change.builds_on) expansion.builds_on = *change.builds_on;
+	bool expansion_changed = false;
+	const std::string expansion_was = project.expansion.name;
+	if (expansion != project.expansion) {
+		Diagnostic why;
+		std::vector<Diagnostic> install;
+		const std::string install_after =
+				change.game_install ? absolute_install_path(*change.game_install) : game_install();
+		if (!install_after.empty())
+			expansion_install_findings(expansion,
+			                           change.game_install ? vfs_list_expansions(install_after) : install_expansion_names_,
+			                           DiagnosticSeverity::Error, install);
+		if (!check_project_expansion(project.target_game, expansion, why)) {
+			failures.push_back(why);
+		} else if (!install.empty()) {
+			failures.insert(failures.end(), install.begin(), install.end());
+		} else if (busy_for(HoldsNothing, HoldsProject)) {
+			refuse_part("before changing the project's expansion");
+		} else {
+			project.expansion = expansion;
+			project_changed = expansion_changed = true;
+		}
+	}
 	if (project_changed && !view_.project.open) {
 		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
-		                                "Open a project to change its name or its features."));
-		project_changed = features_changed = false;
+		                                "Open a project to change its name, its features or its expansion."));
+		project_changed = features_changed = expansion_changed = false;
 	}
 	if (project_changed) {
 		Diagnostic error;
 		if (save_project_document(paths_.project_file, project, error)) {
 			view_.project.document = std::make_shared<const ProjectDocument>(project);
-			if (features_changed) {
-				// The requirements follow the features, over the files as the scan lists them.
+			if (features_changed || expansion_changed) {
+				// The requirements follow the features and the expansion, over the files as the scan
+				// lists them.
 				view_.project.requirements = std::make_shared<const RequirementReport>(
-						evaluate_requirements(project, *view_.project.scan));
+						requirements_of(project, *view_.project.scan));
 				touch(ViewConcern::Files);
 				problems().validate_later();
 			}
+			if (expansion_changed) {
+				// The install as the project imports it moved (install_view.h): its names, and which
+				// files are its own data, are found again.
+				imports().refresh_install_files();
+				problems().forget_originals();
+				// The project's own expansion files, under the new name's (none to rename to or from a
+				// standalone project).
+				if (!expansion_was.empty() && !project.expansion.name.empty() &&
+				    !strutil::iequals(expansion_was, project.expansion.name)) {
+					for (const ExpansionFile &file : expansion_files(expansion_was)) {
+						if (file.row->fixed) continue;
+						const AssetEntry *held = view_.project.scan->find(file.name);
+						if (held) expansion_renames_.emplace_back(held->relative_path,
+						                                          expansion_file_name(*file.row, project.expansion.name));
+					}
+				}
+			}
 		} else {
 			failures.push_back(error);
-			project_changed = false;
+			project_changed = expansion_changed = false;
 		}
 	}
 	// The game install is the open project's (ADR 0046 d6/d10), written to its local.json,
@@ -525,6 +601,14 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		view_.project.retail_directory = game_install();
 		touch(ViewConcern::Preferences);
 		imports().refresh_install_files();
+		read_install_expansions();
+		// The project's expansion weighed against the install's (listed).
+		if (view_.project.open) {
+			view_.project.requirements =
+					std::make_shared<const RequirementReport>(requirements_of(*view_.project.document, *view_.project.scan));
+			touch(ViewConcern::Files);
+			problems().validate_later();
+		}
 	}
 	for (const Diagnostic &failure : failures) report(failure);
 	view_.project.settings_result.failures = failures;
@@ -541,6 +625,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	if (install_changed || editor_changed) touch(ViewConcern::Preferences);
 	touch(ViewConcern::Dialogs);
 	touch(ViewConcern::Output);
+	next_expansion_rename();
 }
 
 // The required files `roles` names, made from their factories. The checklist the request
@@ -557,7 +642,7 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	const ProjectDocument &doc = *view_.project.document;
 	AssetScan now = scan_project_assets(paths_, doc);
 	now.set_import_findings(view_.project.scan->import_findings());
-	const CreateMissingResult result = create_missing_requirements(paths_, doc, evaluate_requirements(doc, now), roles);
+	const CreateMissingResult result = create_missing_requirements(paths_, doc, requirements_of(doc, now), roles);
 	for (const std::string &path : result.created) note("Created " + path);
 	for (const std::string &name : result.unavailable) {
 		note("The editor cannot create " + name + " yet: no writer exists for this kind of file.");
@@ -565,7 +650,7 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	now.update(paths_, doc, result.created);
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(now));
 	problems().set_scan(paths_.root, *view_.project.scan, doc.target_game);
-	view_.project.requirements = std::make_shared<const RequirementReport>(evaluate_requirements(doc, *view_.project.scan));
+	view_.project.requirements = std::make_shared<const RequirementReport>(requirements_of(doc, *view_.project.scan));
 	touch(ViewConcern::Files);
 	problems().validate_later();
 	for (const Diagnostic &d : result.diagnostics) report(d);
@@ -808,6 +893,36 @@ std::string SessionCore::game_install() const {
 	return view_.project.open ? local_.game_install : preferences_.values().game_install;
 }
 
+void SessionCore::read_install_expansions() {
+	const std::string install = game_install();
+	install_expansion_names_ = install.empty() ? std::vector<std::string>() : vfs_list_expansions(install);
+	std::vector<ProjectView::InstallExpansion> expansions;
+	for (const std::string &name : install_expansion_names_) {
+		const ExpansionInfo info = vfs_expansion_info(install, name);
+		expansions.push_back({ name, info.name, info.description });
+	}
+	view_.project.install_expansions = std::move(expansions);
+	touch(ViewConcern::Preferences);
+}
+
+RequirementReport SessionCore::requirements_of(const ProjectDocument &doc, const AssetScan &scan) const {
+	return evaluate_requirements(doc, scan, game_install().empty() ? nullptr : &install_expansion_names_);
+}
+
+// One rename a change of the expansion's name left at a time, each an operation through its own row
+// (the unsaved prompt guarding it as Files' Rename... is guarded); the next when the slot is free.
+void SessionCore::next_expansion_rename() {
+	while (!expansion_renames_.empty() && view_.project.open && !operations_.running() &&
+	       !view_.dialogs.unsaved_prompt.open) {
+		const auto [file, name] = expansion_renames_.front();
+		expansion_renames_.pop_front();
+		if (!project_file(file)) continue; // gone since
+		note("Renaming " + basename_of(file) + " to " + name + ", the expansion's new name.");
+		serve_request(*this, request::rename_asset(file, name));
+		if (operations_.running() || view_.dialogs.unsaved_prompt.open) return;
+	}
+}
+
 const RequirementRow *SessionCore::requirement_row(const std::string &role) const {
 	const RequirementRow *row = nullptr;
 	for (const RequirementRow &candidate : view_.project.requirements->rows)
@@ -832,8 +947,36 @@ const AssetEntry *SessionCore::project_file(const std::string &file) const {
 // then stepped by the polls and landed by the one that sees it done (absorb_build). Unsaved
 // edits never reach here: Build and Play wait on the unsaved prompt first (UnsavedGuard), whose
 // Save writes them. A build running already served the request at the busy gate (it joined).
-void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash) {
+std::string SessionCore::export_folder(const std::string &to) {
+	const std::string own = paths_.export_dir(*view_.project.document);
+	if (to.empty()) return own;
+	fs::path out = path_of(to);
+	if (out.is_relative()) out = path_of(paths_.root) / out;
+	out = out.lexically_normal();
+	if (inside(out, path_of(paths_.root)) && !inside(out, path_of(own))) {
+		view_.activity.status = "The export was refused: its folder is inside the project.";
+		report(make_finding(CoreFinding::ExportFolder, DiagnosticSeverity::Error,
+		                    "An export cannot land in " + utf8_of(out) +
+		                            ": it is inside the project, whose files the next build would pack. Choose a folder "
+		                            "outside it, or the project's export folder."));
+		return std::string();
+	}
+	return utf8_of(out);
+}
+
+BuildTarget SessionCore::build_target() const {
+	BuildTarget target;
+	if (!view_.project.open) return target;
+	target.expansion = view_.project.document->expansion.name;
+	target.install = game_install();
+	target.game = view_.project.document->target_game;
+	return target;
+}
+
+void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
+                              const ExportIntent &exported) {
 	if (intent.wanted && play().refused(intent.mission)) return;
+	if (exported.wanted && export_folder(exported.to).empty()) return;
 	// Where it lands: out_dir taken from the project's folder when relative. One inside the project
 	// but in its cache or its export folder (which the scan passes over) would be files of the
 	// project the next scan lists, an archive every later build refuses: refused before anything
@@ -860,8 +1003,9 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	// The plan gates on the findings the refresh above just produced (the Problems rows),
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
-	BuildPlan plan =
-			plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings());
+	const BaseNames base{&view_.project.base_files};
+	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings(),
+	                            build_target(), &base);
 	plan.rehash = rehash;
 	// No directory a game runs from is pruned, asked when the build publishes (a game started
 	// while it packed counts): this editor's game's, and every one whose lease names a process
@@ -876,16 +1020,18 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	std::string cache_error;
 	ensure_project_cache_dir(paths_, cache_error);
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
-	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, intent));
+	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, intent, exported));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
 	outcome_.operation = id;
-	view_.activity.status = intent.wanted ? "Building, then playing..." : "Building...";
+	view_.activity.status = intent.wanted     ? "Building, then playing..."
+	                        : exported.wanted ? "Building, then exporting..."
+	                                          : "Building...";
 	note("Build started.");
 	show_operation();
 }
 
 OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate,
-                                           const PlayIntent &intent) {
+                                           const PlayIntent &intent, const ExportIntent &exported) {
 	view_.activity.has_build = true;
 	view_.activity.last_build = std::make_shared<const BuildReport>(result);
 	// A blocked build's report repeats the findings that blocked it, which were Problems rows
@@ -914,9 +1060,54 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		view_.activity.status = "Build failed; see Problems.";
 	}
 	if (result.ok && intent.wanted) play().start(intent.mission);
+	bool exported_ok = true;
+	if (result.ok && exported.wanted) {
+		// What ships (ADR 0046 S16): the build copied whole into the export folder, the runtime's folder
+		// beside a standalone game when the project asks for it and a packaged runtime is set.
+		const ProjectDocument &document = *view_.project.document;
+		ExportRequest request;
+		request.build_dir = result.build_dir;
+		request.build_id = result.build_id;
+		request.expansion = result.expansion;
+		request.export_dir = export_folder(exported.to);
+		request.project_id = document.project_id;
+		// The runtime ships beside a standalone game alone (an expansion plays in the install's game),
+		// and only a packaged one: a source run's is the checkout.
+		const bool runtime = document.export_settings.include_runtime && result.expansion.empty();
+		const bool packaged = !view_.activity.source_run && !view_.activity.runtime_executable.empty();
+		if (runtime && packaged) request.runtime_dir = utf8_of(path_of(view_.activity.runtime_executable).parent_path());
+		ExportReport shipped;
+		if (request.export_dir.empty()) {
+			shipped.diagnostics.push_back(make_finding(CoreFinding::ExportFolder, DiagnosticSeverity::Error,
+			                                           "The export's folder is inside the project: nothing was copied."));
+		} else if (runtime && !packaged) {
+			shipped.diagnostics.push_back(make_finding(
+			        CoreFinding::ExportRuntime, DiagnosticSeverity::Error,
+			        "The project ships the runtime beside the game, and Play runs no packaged runtime here: set one in "
+			        "File > Project settings..., or export without it."));
+		} else {
+			shipped = export_build(request);
+		}
+		for (const Diagnostic &d : shipped.diagnostics) {
+			report(d);
+			own.push_back(d);
+		}
+		exported_ok = shipped.ok;
+		if (shipped.ok) {
+			note("Exported " + std::to_string(shipped.files.size()) + " file(s) to " +
+			     shown_path(shipped.export_dir, paths_.root));
+			view_.activity.status = "Exported.";
+		} else {
+			note("Export failed.");
+			view_.activity.status = "Export failed; see Problems.";
+		}
+		problems().set_build_findings(own);
+		view_.activity.has_export = true;
+		view_.activity.last_export = std::make_shared<const ExportReport>(std::move(shipped));
+	}
 	touch(ViewConcern::Operation);
 	OperationOutcome outcome;
-	outcome.end = result.ok ? OperationEnd::Done : OperationEnd::Failed;
+	outcome.end = result.ok && exported_ok ? OperationEnd::Done : OperationEnd::Failed;
 	outcome.findings = std::move(own);
 	return outcome;
 }

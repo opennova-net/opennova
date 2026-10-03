@@ -29,6 +29,15 @@ namespace opennova::editor {
 // the game never asks for (S13 A8: the build leaves it out).
 enum class ArchiveSlot { Language, Localres, Resource, Loose, None };
 
+// Where the game reads a loose file of a kind when it runs an expansion (`/exp <name>`, ADR 0046
+// S16): from the expansion's own folder, `expansion\<name>\`, which an expansion build ships; only
+// from the install's folder, which an expansion cannot change (the build leaves such a file out and
+// says so, build.expansion.root_only); or through the file system's front door, which reads the
+// archives alone by default and under `/d` the expansion's folder, the install's and then the
+// archives [orig: FileSystem_OpenFile @ 0x75b1c0], so an expansion ships it in its archive and in its
+// folder alike. None for a kind that is not loose (an archive's, or one no build packs).
+enum class ExpansionLoose { None, Folder, RootOnly, FrontDoor };
+
 // The document types the editor opens a kind with (ADR 0046 d9): documents/document_types holds
 // one DocumentType per value past None, in this order. None: a kind the build packs as it is.
 enum class DocumentTypeId {
@@ -73,6 +82,8 @@ struct AssetKindRow {
 	const char *file_name = nullptr;
 	const char *const *extensions = nullptr;
 	ArchiveSlot archive_slot = ArchiveSlot::Resource;
+	// A loose kind's place in an expansion build (ExpansionLoose): set exactly on the Loose rows.
+	ExpansionLoose expansion_loose = ExpansionLoose::None;
 	DocumentTypeId document = DocumentTypeId::None; // the type that edits it; None: packed as it is
 	// Its files name other files, or names other files define, that an import brings with them
 	// (import_plan's references_unread: those of a kind the graph does not read are not followed).

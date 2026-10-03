@@ -9,8 +9,11 @@
 
 #include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/blank/create_missing.h>
 #include <editor/project/project_document.h>
+#include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
+#include <formats/rtxt/rtxt.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -162,10 +165,71 @@ static int test_files_satisfy_rows_by_name_and_kind() {
 	return 0;
 }
 
+// An expansion's own files (ADR 0046 S16): rows of a project that builds as one, by the names its
+// expansion forms, every one optional and in the manifest's place; none for a standalone project. The
+// blanks make its table and its version text.
+static int test_expansion_rows() {
+	editor_test::TempProjectDir dir("opennova_editor_requirements_expansion_test");
+	ProjectDocument doc;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("X"), "Escalation Two", "jo", doc, error, ProjectExpansion{ "jxm", "" }));
+	const ProjectPaths paths = ProjectPaths::for_root(dir.file("X"));
+	const AssetScan empty = scan_project_assets(paths, doc);
+	const RequirementReport menu_only = evaluate_requirements(doc, empty);
+	for (const char *name : {"jxm.bin", "version.txt", "Mjxm.sbf", "Mjxm.bin"}) {
+		const RequirementRow *row = row_named(menu_only, name);
+		TEST_EXPECT(row && !row->required && row->state == RequirementState::Missing && row->resource &&
+		            (row->resource->flags & RES_F_EXPANSION));
+	}
+	TEST_EXPECT(row_named(menu_only, "jxm.bin")->expected_kind == AssetKind::Strings &&
+	            row_named(menu_only, "version.txt")->expected_kind == AssetKind::Text &&
+	            row_named(menu_only, "Mjxm.sbf")->expected_kind == AssetKind::MusicBank &&
+	            row_named(menu_only, "Mjxm.bin")->expected_kind == AssetKind::MusicScript);
+	// The mission phase's (the game music, the banks) with the feature.
+	TEST_EXPECT(!row_named(menu_only, "Gjxm.sbf") && !row_named(menu_only, "jxmL.lwf"));
+	doc.features.mission = true;
+	const RequirementReport with_missions = evaluate_requirements(doc, empty);
+	for (const char *name : {"Gjxm.sbf", "Gjxm.bin", "jxmL.lwf", "jxm.lwf"})
+		TEST_EXPECT(row_named(with_missions, name) && !row_named(with_missions, name)->required);
+	int last_phase = BOOT_PHASE_BOOT;
+	for (const RequirementRow &row : with_missions.rows) {
+		TEST_EXPECT(row.phase >= last_phase);
+		last_phase = row.phase;
+	}
+	// A standalone project has none.
+	doc.expansion = ProjectExpansion();
+	for (const RequirementRow &row : evaluate_requirements(doc, empty).rows)
+		TEST_EXPECT(!(row.resource->flags & RES_F_EXPANSION));
+	// The blanks: the table names the expansion by the project's title, the version text is a line.
+	doc.expansion = ProjectExpansion{ "jxm", "" };
+	const CreateMissingResult made =
+			create_missing_requirements(paths, doc, menu_only, {"expansion_table", "expansion_version"});
+	TEST_EXPECT(made.diagnostics.empty() && made.created.size() == 2);
+	const RequirementReport after = evaluate_requirements(doc, scan_project_assets(paths, doc));
+	TEST_EXPECT(row_named(after, "jxm.bin")->state == RequirementState::Present &&
+	            row_named(after, "version.txt")->state == RequirementState::Present);
+	std::string text, io_error;
+	TEST_EXPECT(read_file_text(paths.root + "/" + row_named(after, "version.txt")->asset_path, text, io_error) &&
+	            text == "Escalation Two\r\n");
+	std::vector<uint8_t> table;
+	TEST_EXPECT(read_file_bytes(paths.root + "/" + row_named(after, "jxm.bin")->asset_path, table, io_error));
+	opennova::rtxt::File parsed;
+	std::string parse_error;
+	TEST_EXPECT(opennova::rtxt::parse(table.data(), table.size(), parsed, parse_error));
+	bool name = false, description = false;
+	for (const opennova::rtxt::Entry &entry : parsed.entries) {
+		name = name || (entry.key == "EXP_NAME" && entry.text == "Escalation Two");
+		description = description || (entry.key == "EXP_DESC" && entry.text.empty());
+	}
+	TEST_EXPECT(name && description);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_row_set_follows_the_manifest_and_features();
 	failures += test_files_satisfy_rows_by_name_and_kind();
+	failures += test_expansion_rows();
 	if (failures == 0) std::printf("editor_requirements: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

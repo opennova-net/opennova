@@ -14,6 +14,7 @@
 #include <editor/import/import_run.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
+#include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
 #include <editor/session/problem_query.h>
 
@@ -60,11 +61,21 @@ JsonValue status_section(const SessionView &view) {
 }
 
 // The open project: its folder, its project document, how many files the scan lists (the files
-// query pages them), and whether the editor asked to quit.
+// query pages them), and whether the editor asked to quit; the game install's expansions (S16), a
+// new project's to build on as an open one's.
 JsonValue project_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(view.project.open));
 	out.set("quit_requested", boolean(view.dialogs.quit_requested));
+	JsonValue expansions = JsonValue::make_array();
+	for (const ProjectView::InstallExpansion &installed : view.project.install_expansions) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("name", json_string(installed.name));
+		entry.set("title", json_string(installed.title));
+		entry.set("description", json_string(installed.description));
+		expansions.push(std::move(entry));
+	}
+	out.set("install_expansions", std::move(expansions));
 	if (!view.project.open)
 		return out;
 	const ProjectDocument &document = *view.project.document;
@@ -77,6 +88,11 @@ JsonValue project_section(const SessionView &view) {
 	features.set("mission", boolean(document.features.mission));
 	features.set("multiplayer", boolean(document.features.multiplayer));
 	out.set("features", std::move(features));
+	// Its expansion (S16): the one it builds as ("" standalone) and the installed one it builds on.
+	JsonValue expansion = JsonValue::make_object();
+	expansion.set("name", json_string(document.expansion.name));
+	expansion.set("builds_on", json_string(document.expansion.builds_on));
+	out.set("expansion", std::move(expansion));
 	out.set("file_count", json_number(double(view.project.scan->entries.size())));
 	return out;
 }
@@ -345,9 +361,12 @@ using S = ViewSection;
 constexpr ViewSectionRow kSections[] = {
 	{ S::Status, "status", concern_set({ C::Output }), status_section,
 			"The status line: the last thing that happened, in a line." },
-	{ S::Project, "project", concern_set({ C::Project, C::Files }), project_section,
-			"The open project: open, its root, title, id, target game and features, file_count "
-			"(the files query pages the files), and quit_requested." },
+	{ S::Project, "project", concern_set({ C::Project, C::Files, C::Preferences }), project_section,
+			"The open project: open, its root, title, id, target game, features and expansion {name, "
+			"builds_on} (S16: \"\" a standalone project, \"\" the base game), file_count (the files query "
+			"pages the files), and quit_requested; open or not, install_expansions, the game install's "
+			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
+			"description)." },
 	{ S::Requirements, "requirements", concern_set({ C::Files, C::Run }), requirements_section,
 			"The required files: total, missing, wrong_kind, and every row with its role, name, "
 			"state and expected kind (boot_missing where the last game reported it missing)." },
@@ -588,6 +607,7 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 		build.set("ok", boolean(report.ok));
 		build.set("id", json_string(report.build_id));
 		build.set("dir", json_string(report.build_dir));
+		build.set("expansion", json_string(report.expansion));
 		build.set("reused_existing", boolean(report.reused_existing));
 		build.set("archives_written", json_number(double(report.archives_written.size())));
 		build.set("archives_reused", json_number(double(report.archives_reused.size())));
@@ -595,9 +615,26 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 		build.set("loose_written", json_number(double(report.loose_written.size())));
 		build.set("files_hashed", json_number(double(report.files_hashed)));
 		build.set("bytes_hashed", json_number(double(report.bytes_hashed)));
+		// An expansion's files left out as the base game's own (ADR 0046 S16, lean packing).
+		JsonValue same = JsonValue::make_object();
+		same.set("files", json_number(double(report.same_as_base_files)));
+		same.set("bytes", json_number(double(report.same_as_base_bytes)));
+		same.set("base_bytes_read", json_number(double(report.base_bytes_read)));
+		build.set("same_as_base", std::move(same));
 		build.set("diagnostics", diagnostics_to_json(report.diagnostics));
 	}
 	out.set("build", std::move(build));
+	JsonValue exported = JsonValue::make_object();
+	exported.set("has_export", boolean(activity.has_export));
+	if (activity.has_export) {
+		const ExportReport &report = *activity.last_export;
+		exported.set("ok", boolean(report.ok));
+		exported.set("dir", json_string(report.export_dir));
+		exported.set("files", json_number(double(report.files.size())));
+		exported.set("bytes", json_number(double(report.bytes)));
+		exported.set("diagnostics", diagnostics_to_json(report.diagnostics));
+	}
+	out.set("export", std::move(exported));
 	return out;
 }
 

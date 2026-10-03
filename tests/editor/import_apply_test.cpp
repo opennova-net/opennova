@@ -23,7 +23,11 @@
 #include <system_error>
 #include <vector>
 
+#include <base/io/strutil.h>
+#include <base/resource_index/boot_policy.h>
+#include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/player_files.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
@@ -1057,9 +1061,106 @@ static int test_apply_never_player_files() {
 	return 0;
 }
 
+// ADR 0046 S16: a project that builds as an expansion (jxm) on the installed one (jox01) imports the
+// install as `/exp jox01` serves it: the closure of jox01's smallest mission planned with what it needs,
+// the expansion's own files under the project's names (jox01.bin as jxm.bin), each byte for byte what the
+// game is served; and the whole install listed, each name once.
+static int test_apply_retail_expansion() {
+	const std::string install = retail::install();
+	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (an expansion's mission closure planned)");
+	if (!fs::is_regular_file(fs::path(install) / "expansion" / "jox01" / "jox01.pff"))
+		return retail::skip_leg("OPENNOVA_JO_DIR with the jox01 expansion");
+	editor_test::TempProjectDir dir("opennova_editor_apply_retail_expansion");
+	const std::string root = dir.file("project");
+	ProjectDocument created;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "Escalation Mod", "jo", created, error, ProjectExpansion{ "jxm", "jox01" }));
+	// The whole install as the project imports it, against the base game's.
+	std::vector<Diagnostic> diagnostics;
+	const std::vector<ImportChoice> whole = list_retail_import_choices(install, created, diagnostics);
+	ProjectDocument standalone = created;
+	standalone.expansion = ProjectExpansion();
+	const std::vector<ImportChoice> base = list_retail_import_choices(install, standalone, diagnostics);
+	TEST_EXPECT(diagnostics.empty() && whole.size() > base.size());
+	std::set<std::string> names;
+	size_t renamed = 0;
+	for (const ImportChoice &choice : whole) {
+		TEST_EXPECT(names.insert(normalized_logical_name(choice.name())).second);
+		renamed += choice.as.empty() ? 0 : 1;
+	}
+	TEST_EXPECT(names.count("JXM.BIN") && names.count("MJXM.SBF") && !names.count("JOX01.BIN") &&
+	            !names.count("MENUMUS.SBF") && !names.count("VERSION.TXT"));
+	std::printf("editor_import retail expansion: the whole install with jox01 as jxm lists %zu names (%zu under the "
+	            "project's own names), the base game %zu\n",
+	            whole.size(), renamed, base.size());
+	// The smallest mission of jox01's own.
+	InstallView origin;
+	std::string why;
+	TEST_EXPECT(origin.open(install_spec(install, created), why));
+	const InstallFile *smallest = nullptr;
+	for (const InstallFile &file : origin.files())
+		if (file.layer == InstallFile::Layer::Expansion && opennova::strutil::ends_with_icase(file.name, ".bms") &&
+		    (!smallest || origin.size(file) < origin.size(*smallest)))
+			smallest = &file;
+	TEST_EXPECT(smallest != nullptr);
+	if (!smallest) return 1;
+	// Planned through the session, the project opened on the install.
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::open_project(root));
+	editor_test::set_game_install(session, install);
+	const SessionView &view = session.view();
+	TEST_EXPECT(view.project.open && view.project.document->expansion == created.expansion);
+	EditorRequest listed = request::preview_install_import();
+	listed.names = { smallest->name };
+	listed.with_dependencies = true;
+	const auto started = std::chrono::steady_clock::now();
+	session.handle(listed);
+	session.run_operations();
+	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+	const ImportPlan &plan = *view.dialogs.import_preview.plan;
+	TEST_EXPECT(session.outcome().done() && !plan.truncated && !has_error(plan.diagnostics));
+	// What /exp jox01 serves, read the game's way, against each planned file of the install's archives.
+	opennova::Vfs game;
+	opennova::LaunchFlags flags;
+	flags.expansion = "jox01";
+	TEST_EXPECT(opennova::mount_install(game, install, flags) && game.mounted_expansion() == "jox01");
+	size_t checked = 0, own = 0, expansion_layer = 0;
+	for (const ImportPlanRow &row : plan.rows) {
+		if (row.state == State::NotFound || !row.source.install) continue;
+		const InstallFile *file = origin.find(row.name);
+		TEST_EXPECT(file && file->member == row.source.entry &&
+		            (row.source.as.empty() ? row.name == file->member : row.source.as == row.name));
+		if (!file || !file->loose_path.empty()) continue;
+		std::vector<uint8_t> planned, served;
+		TEST_EXPECT(origin.read(*file, planned) && read_served(game, file->member, served) && planned == served);
+		++checked;
+		own += row.source.as.empty() ? 0 : 1;
+		expansion_layer += file->layer == InstallFile::Layer::Expansion ? 1 : 0;
+	}
+	const auto row_called = [&plan](const char *wanted) -> const ImportPlanRow * {
+		for (const ImportPlanRow &row : plan.rows)
+			if (normalized_logical_name(row.name) == normalized_logical_name(wanted)) return &row;
+		return nullptr;
+	};
+	// The expansion's own files come with a mission as the game's fixed names do, under the project's.
+	const ImportPlanRow *table = row_called("jxm.bin");
+	TEST_EXPECT(table && table->state == State::Found && table->source.entry == "jox01.bin" &&
+	            table->needed_by.field.find("the game, ") == 0);
+	TEST_EXPECT(!row_called("jox01.bin") && !row_called("menumus.bin"));
+	std::printf("editor_import retail expansion: %s's closure %zu files (%.1f MB), %zu of the install's archives' checked "
+	            "byte for byte against /exp jox01 (%zu from the expansion's, %zu under the project's names), planned in "
+	            "%.1f s\n",
+	            smallest->name.c_str(), plan.file_count(), plan.total_bytes() / 1e6, checked, expansion_layer, own, seconds);
+	TEST_EXPECT(checked > 100 && expansion_layer > 0 && own > 0);
+	return 0;
+}
+
 int run_import_apply_tests() {
 	int failures = 0;
 	failures += test_apply_never_player_files();
+	failures += test_apply_retail_expansion();
 	failures += test_apply_retail_mission_closure();
 	failures += test_apply_closure();
 	failures += test_apply_unchecked();

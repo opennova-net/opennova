@@ -10,8 +10,11 @@
 #include <string>
 #include <vector>
 
+#include <base/resource_index/boot_policy.h>
+#include <base/vfs/vfs.h>
 #include <editor/project/project_files.h>
 #include <editor/run/launch_plan.h>
+#include <formats/pff/pff.h>
 #include <editor/run/play_session.h>
 
 #include "common/test_expect.h"
@@ -21,6 +24,12 @@
 using namespace opennova::editor;
 
 using editor_test::FakePlatform;
+
+// An archive of no entries (formats/pff's writer), as the game opens one.
+static bool write_empty_archive(const std::string &path) {
+	std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+	return opennova::pff::pff_write_archive(path.c_str(), opennova::pff::PFF_FORMAT_PFF3, nullptr, 0) == opennova::pff::PFF_WRITE_OK;
+}
 
 static int test_launch_plans() {
 	// S13 A8: the game runs on the build directory and works in the run directory, its log there.
@@ -194,10 +203,138 @@ static int test_install_staging() {
 	return 0;
 }
 
+// ADR 0046 S16: an expansion's build runs from its run directory with /exp: the runtime's
+// --resource-dir names the run directory (the install's base game and the build's expansion folder
+// prepare_expansion_run put there), not the build; a source run alike.
+static int test_expansion_launch_plans() {
+	const LaunchPlan play = make_play_launch_plan("opennova.exe", "C:/p/build/abc", "C:/p/run/1", "jo", 8975, "m.bms", {},
+	                                              "jxm");
+	TEST_EXPECT(play.build_dir == "C:/p/build/abc" && play.resource_dir == "C:/p/run/1" && play.expansion == "jxm");
+	const std::vector<std::string> expected = {"--log-file", "C:/p/run/1/session.log", "--", "--resource-dir", "C:/p/run/1",
+	                                           "/exp", "jxm", "/game", "jo", "--mcp-port", "8975", "--mission", "m.bms"};
+	TEST_EXPECT(play.args == expected);
+	const LaunchPlan source = make_source_launch_plan("godot", "C:/repo/godot", "C:/p/build", "C:/p/run/2", "jo", 0, "", {},
+	                                                  "jxm");
+	const auto at = std::find(source.args.begin(), source.args.end(), "--resource-dir");
+	TEST_EXPECT(at != source.args.end() && *(at + 1) == "C:/p/run/2" && *(at + 2) == "/exp" && *(at + 3) == "jxm");
+	const LaunchPlan standalone = make_play_launch_plan("opennova.exe", "C:/p/build/abc", "C:/p/run/1", "jo", 0);
+	TEST_EXPECT(standalone.resource_dir == "C:/p/build/abc" && standalone.expansion.empty());
+	TEST_EXPECT(std::find(standalone.args.begin(), standalone.args.end(), "/exp") == standalone.args.end());
+	return 0;
+}
+
+// ADR 0046 S16: an expansion's run directory. The install's boot archives and the loose files it
+// ships beside them linked at its root (nothing else of the install: not its notes, not its own
+// expansions); expansion/jxm a directory of the run's own, the build's archives and video linked
+// into it and its version.txt copied (the game may write a .txt); the run directory mounts with
+// /exp jxm as an install does; the install and the build read alone. The stock game staged the same
+// way, its executable, Bink DLL, configuration and saves the install's, launched /w /d /exp jxm
+// /FRISK. Where an install's file cannot be linked (another volume), its copy in the copy cache is,
+// copied once and kept while the install's file keeps its size and last write. Refused: no install,
+// an install with none of the game's archives (play.install_missing), a build with no expansion
+// folder (play.install_copy).
+static int test_expansion_staging() {
+	namespace fs = std::filesystem;
+	editor_test::TempProjectDir dir("opennova_editor_expansion_staging");
+	const std::string install = dir.file("install"), build = dir.file("build/0123456789abcdef"), cache = dir.file("copies");
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff"})
+		TEST_EXPECT(write_empty_archive(install + "/" + name));
+	TEST_EXPECT(editor_test::write_text(install + "/intro.bik", "video") && editor_test::write_text(install + "/menumus.sbf", "music") &&
+	            editor_test::write_text(install + "/cc.bin", "us") && editor_test::write_text(install + "/Readme.txt", "notes") &&
+	            editor_test::write_text(install + "/expansion/jox01/jox01.pff", "theirs") &&
+	            editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink") &&
+	            editor_test::write_text(install + "/game.cfg", "install settings") &&
+	            editor_test::write_text(install + "/player.sav", "install player"));
+	TEST_EXPECT(write_empty_archive(build + "/expansion/jxm/jxm.pff") && write_empty_archive(build + "/expansion/jxm/jxmL.pff"));
+	TEST_EXPECT(editor_test::write_text(build + "/expansion/jxm/header.bik", "their video") &&
+	            editor_test::write_text(build + "/expansion/jxm/version.txt", "1.0") &&
+	            editor_test::write_text(build + "/build.json", "{}"));
+	const std::string build_tree = editor_test::tree_digest(build), install_tree = editor_test::tree_digest(install);
+	const std::string run = dir.file("run/1");
+	fs::create_directories(run);
+	Diagnostic error;
+	TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run, cache, error));
+	std::error_code ec;
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff", "intro.bik", "menumus.sbf", "cc.bin"})
+		TEST_EXPECT(fs::equivalent(run + "/" + name, install + "/" + name, ec));
+	TEST_EXPECT(!fs::exists(run + "/Readme.txt") && !fs::exists(run + "/expansion/jox01") && !fs::exists(run + "/build.json"));
+	TEST_EXPECT(fs::is_directory(run + "/expansion/jxm") && !fs::is_symlink(run + "/expansion/jxm"));
+	for (const char *name : {"jxm.pff", "jxmL.pff", "header.bik"})
+		TEST_EXPECT(fs::equivalent(run + "/expansion/jxm/" + name, build + "/expansion/jxm/" + name, ec));
+	TEST_EXPECT(!fs::equivalent(run + "/expansion/jxm/version.txt", build + "/expansion/jxm/version.txt", ec));
+	TEST_EXPECT(!fs::exists(cache)); // every file linked: no copy made
+	{
+		opennova::Vfs vfs;
+		opennova::LaunchFlags flags;
+		flags.expansion = "jxm";
+		TEST_EXPECT(opennova::mount_install(vfs, run, flags) && vfs.mounted_expansion() == "jxm");
+	}
+	// The game writes its expansion's weapon.sav beside the expansion's files: the build keeps its own.
+	TEST_EXPECT(editor_test::write_text(run + "/expansion/jxm/weapon.sav", "saved") &&
+	            editor_test::write_text(run + "/expansion/jxm/version.txt", "edited"));
+	TEST_EXPECT(editor_test::tree_digest(build) == build_tree && editor_test::tree_digest(install) == install_tree);
+
+	// The stock game: the same staging, the install's own binaries, configuration and saves beside it.
+	LaunchPlan plan;
+	const std::string run2 = dir.file("run/2");
+	fs::create_directories(run2);
+	TEST_EXPECT(prepare_retail_launch_plan(install, build, run2, plan, error, "jxm", cache));
+	TEST_EXPECT(plan.args == std::vector<std::string>({"/w", "/d", "/exp", "jxm", "/FRISK"}));
+	TEST_EXPECT(plan.executable == run2 + "/Jointops.exe" && plan.resource_dir == run2 && plan.expansion == "jxm");
+	std::string text, io_error;
+	TEST_EXPECT(read_file_text(run2 + "/game.cfg", text, io_error) && text == "install settings");
+	TEST_EXPECT(read_file_text(run2 + "/player.sav", text, io_error) && text == "install player");
+	TEST_EXPECT(fs::equivalent(run2 + "/expansion/jxm/jxm.pff", build + "/expansion/jxm/jxm.pff", ec));
+
+	// Another volume: the install's files are copied once into the copy cache and linked from there.
+	const FileLink across = [&install](const std::string &from, const std::string &to, std::string &reason) {
+		if (from.rfind(install, 0) == 0) {
+			reason = "another volume";
+			return false;
+		}
+		return link_file(from, to, reason);
+	};
+	const std::string run3 = dir.file("run/3"), run4 = dir.file("run/4");
+	fs::create_directories(run3);
+	fs::create_directories(run4);
+	TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run3, cache, error, across));
+	TEST_EXPECT(!fs::equivalent(run3 + "/intro.bik", install + "/intro.bik", ec));
+	TEST_EXPECT(read_file_text(run3 + "/intro.bik", text, io_error) && text == "video");
+	std::vector<std::string> cached;
+	for (const fs::directory_entry &key : fs::directory_iterator(cache, ec))
+		for (const fs::directory_entry &file : fs::directory_iterator(key.path(), ec)) cached.push_back(file.path().filename().string());
+	std::sort(cached.begin(), cached.end());
+	TEST_EXPECT(cached == std::vector<std::string>({"cc.bin", "install_copy.json", "intro.bik", "language.pff", "localres.pff",
+	                                               "menumus.sbf", "resource.pff"}));
+	const std::string copy = cache + "/" + fs::directory_iterator(cache)->path().filename().string() + "/intro.bik";
+	TEST_EXPECT(fs::equivalent(run3 + "/intro.bik", copy, ec)); // linked from the cache
+	// The next run takes the same copy; an install file that changed is copied again.
+	TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run4, cache, error, across));
+	TEST_EXPECT(fs::equivalent(run4 + "/intro.bik", copy, ec));
+	TEST_EXPECT(editor_test::write_text(install + "/intro.bik", "a new video"));
+	const std::string run5 = dir.file("run/5");
+	fs::create_directories(run5);
+	TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run5, cache, error, across));
+	TEST_EXPECT(read_file_text(run5 + "/intro.bik", text, io_error) && text == "a new video");
+	TEST_EXPECT(read_file_text(run4 + "/intro.bik", text, io_error) && text == "video"); // the earlier run keeps its own
+
+	// Refused: no install, one with none of the game's archives, a build without the folder.
+	TEST_EXPECT(!prepare_expansion_run("", build, "jxm", dir.file("run/6"), cache, error) &&
+	            error.code() == "play.install_missing");
+	TEST_EXPECT(editor_test::write_text(dir.file("empty/readme.txt"), "x"));
+	TEST_EXPECT(!prepare_expansion_run(dir.file("empty"), build, "jxm", dir.file("run/6"), cache, error) &&
+	            error.code() == "play.install_missing");
+	TEST_EXPECT(!prepare_expansion_run(install, build, "jxn", dir.file("run/6"), cache, error) &&
+	            error.code() == "play.install_copy");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_launch_plans();
+	failures += test_expansion_launch_plans();
 	failures += test_install_staging();
+	failures += test_expansion_staging();
 	failures += test_lifecycle();
 	if (failures == 0) std::printf("editor_play_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;
