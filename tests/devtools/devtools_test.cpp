@@ -790,7 +790,71 @@ struct PlacedWindow : opennova::devtools::Window {
 
 bool near(float a, float b) { return a - b <= 4.0f && b - a <= 4.0f; }
 
+// A window with one button, reporting whether the mouse hovers it.
+struct HoverWindow : opennova::devtools::Window {
+	HoverWindow() { open = true; }
+	const char *title() const override { return "Hover"; }
+	void draw(opennova::devtools::ImGuiPass &, uint64_t) override {
+		ImGui::Button("target", ImVec2(200.0f, 100.0f));
+		hovered = ImGui::IsItemHovered();
+		at = ImGui::GetItemRectMin();
+	}
+	InitialDockPlacement initial_dock_placement() const override { return InitialDockPlacement::Center; }
+	bool hovered = false;
+	ImVec2 at{};
+};
+
 }  // namespace
+
+// The mouse is the pass's only while the shell's window has the focus and the cursor is over it
+// (ImGuiPass::set_mouse_place): the bridge feeds the global cursor every frame, so a window behind
+// another would otherwise take hovers (highlights, tooltips) through the window in front. Not the
+// pass's, the frame's mouse is forgotten (nothing hovered, the position unknown); a press the pass
+// took keeps its mouse while held, whatever the place says (a drag carried out of the window).
+void test_the_mouse_is_the_pass_only_in_its_window_in_use() {
+	NullBackend backend;
+	opennova::devtools::ImGuiPass pass;
+	auto *window = static_cast<HoverWindow *>(&pass.register_window(std::make_unique<HoverWindow>()));
+	pass.attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	pass.set_open(true);
+	CHECK(pass.mouse_focused() && pass.mouse_over(), "until the shell says, the mouse is the pass's");
+	uint64_t frame = 0;
+	const auto draw = [&](int frames) {
+		for (int i = 0; i < frames; ++i) {
+			// The bridge's feed: the global cursor, every frame.
+			ImGui::GetIO().AddMousePosEvent(window->at.x + 20.0f, window->at.y + 20.0f);
+			ImGui::NewFrame();
+			pass.draw_frame(++frame);
+			ImGui::Render();
+		}
+	};
+	draw(3);
+	CHECK(window->hovered, "focused and over its window: the button under the cursor is hovered");
+
+	pass.set_mouse_place(false, true);
+	draw(1);
+	CHECK(!window->hovered && !ImGui::IsMousePosValid(), "behind another window: nothing hovered, no position");
+	draw(30);
+	CHECK(!window->hovered, "however long the cursor rests there: no hover, so no tooltip");
+
+	pass.set_mouse_place(true, false);
+	draw(1);
+	CHECK(!window->hovered, "focused, the cursor over another window: nothing hovered");
+
+	pass.set_mouse_place(true, true);
+	draw(1);
+	CHECK(window->hovered && ImGui::IsMousePosValid(), "back over its window in use: hovered again");
+
+	ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	draw(1);
+	pass.set_mouse_place(false, false);
+	draw(1);
+	CHECK(window->hovered && ImGui::IsMousePosValid(), "a press held keeps its mouse");
+	ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	draw(2);
+	CHECK(!window->hovered, "let go, the place rules again");
+	pass.detach_imgui();
+}
 
 // The default docked layout is the host's say (DockLayout). The game's F3 workspace keeps
 // the defaults: its dockspace id, the right column 30% of the width, no bottom strip and
@@ -2106,6 +2170,7 @@ int main() {
 	test_external_feed_drives_the_window_without_draining();
 	test_layout_reset_brings_windows_home();
 	test_dock_layout_defaults_and_a_host_layout();
+	test_the_mouse_is_the_pass_only_in_its_window_in_use();
 	test_entities_window_formats_the_pushed_directory();
 	test_entities_control_request_queue_and_gating();
 	test_entities_window_selects_the_picked_handle();
