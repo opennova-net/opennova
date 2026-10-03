@@ -12,4 +12,8 @@ target_compile_features(opennova_project_cli PUBLIC cxx_std_17)
 add_executable(opennova_project main.cpp)
 set_target_properties(opennova_project PROPERTIES OUTPUT_NAME opennova-project)
 target_link_libraries(opennova_project PRIVATE opennova_project_cli)
+if(WIN32)
+  # main.cpp reads the arguments wide (CommandLineToArgvW) and hands the verbs UTF-8.
+  target_link_libraries(opennova_project PRIVATE shell32)
+endif()
 target_compile_features(opennova_project PRIVATE cxx_std_17)
