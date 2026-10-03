@@ -23,12 +23,29 @@ namespace opennova::menu {
 // numeric when set) and direction (+120: ascending when set). The XML HEADER /
 // BODY rows set them up; code installs its own (the stat RESULTLIST [orig:
 // StatScreen_PopulateStatResultsList @ 0x562240]).
-// A populate may also set the count first and init the columns one by one
-// (MenuRuntime::table_set_column_count / table_init_column): an entry no init
-// has defined yet keeps the column the resize left there (the authored one, or
-// a zeroed new one) [orig: resize_column_count @0x63f6c0 — new records zeroed,
-// existing ones copied; CTableWnd_InitRow @0x63f9c0 — -1 justify / vjustify
-// take 1 / 16].
+//
+// Code sets a column up the way the XML's HEADER does: the column count first, then
+// one init per column (MenuRuntime::table_set_column_count / table_init_column, or
+// table_set_columns for both). Each column is a record the table holds:
+// - `kept`: the record is the one the table had at this index (the authored
+//   column, as the frame compiles it), which a count that does not grow the table
+//   leaves in place; a count that grows it starts every record over, zeroed (no
+//   label, width 0, justification 0, text cells, no SUBST rows, no cell offsets),
+//   the old ones included [orig: CTableWnd_ResizeColumnCount @0x63f6c0, reached
+//   through the table's vtable +0x6C (0x7e0940): the shrink path @0x63f870 keeps
+//   the array and frees the dropped records; the grow path zeroes the new array
+//   @0x63f710 and copies the old COUNT in bytes, not its 180-byte records,
+//   @0x63f724, then frees the old @0x63f737].
+// - `defined`: an init set the record up. It writes the label, the width, the
+//   header justification (-1: 1 / 16) and the cell justification after it, the
+//   sort compare, the direction (ascending) and zeroes +4..+104; the cell type
+//   (+108), the cell offsets (+152 / +156), the SUBST rows (+164) and the bitmap
+//   scale (+168 / +172) stay the record's [orig: CTableWnd_InitRow @0x63f9c0 —
+//   the writes @0x63fa27..0x63fc10, none to +108 / +152..+172; the BODY sets
+//   those @0x643811..0x643870, a SUBST row @0x643a71].
+// The frame draws an undefined record as it is (the kept authored column, or a
+// zeroed one, width 0); `cell_type` is the record's as far as the runtime knows
+// it (a fresh record's 0) and orders its sort.
 struct MenuTableColumn {
 	std::string label;
 	int width = 0;
@@ -39,6 +56,7 @@ struct MenuTableColumn {
 	int cell_type = 0;
 	bool numeric_sort = false;
 	bool ascending = true;
+	bool kept = false;
 	bool defined = true;
 };
 
