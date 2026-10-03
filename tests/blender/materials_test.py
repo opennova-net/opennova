@@ -581,6 +581,39 @@ def flags_from_blender_settings():
 
 
 @case
+def surface_on_the_material_faces_keep_their_own():
+    # A material's bullet faces take its surface (14 metal); a polygon that
+    # keeps its own (the o3d_surface face attribute, 15 glass) exports with
+    # it. Import votes the material's from its faces and keeps the face that
+    # differs on its polygon, so a re-export writes the same faces; Make all
+    # (clearing the polygon's value) gives it the material's.
+    metal = textured("Metal", image("metal", (1, 1, 1, 1)))
+    metal.o3d.surface = 14
+    root, obs = model("surfaces", metal, metal, metal)
+    materials.set_face_overrides(obs[1].data, materials.FACE_SURFACE, [15])
+    _, sc = export_model(root)
+    faces = [f[3] for c in sc["cobjs"] for f in c["faces"]]
+    assert sorted(faces) == [14, 14, 15], faces
+    imported, notes = import_model(root.o3d.output_path)
+    meshes = [ob for ob in imported.children_recursive if ob.type == "MESH" and ob.material_slots]
+    mat = next(s.material for ob in meshes for s in ob.material_slots)
+    assert mat.o3d.surface == 14, mat.o3d.surface
+    own, drawn = materials.material_face_overrides(meshes, mat)
+    assert drawn == 3 and list(own.values()) == [(15, -1)], (own, drawn)
+    assert any("keep their own on their polygon" in n for n in notes), notes
+    # The surface by name, from the engine's table (`opennova-3di catalog`).
+    assert mat.o3d.surface_name == "METAL", mat.o3d.surface_name
+    imported.o3d.output_path = os.path.join(OUT, "surfaces_again", "surfaces.3di").replace("\\", "/")
+    _, again = export_model(imported)
+    assert sorted(f[3] for c in again["cobjs"] for f in c["faces"]) == [14, 14, 15], again["cobjs"]
+    # Make all: the face takes the material's.
+    for ob, pi in own:
+        materials.set_face_overrides(ob.data, materials.FACE_SURFACE, [-1] * len(ob.data.polygons))
+    _, unified = export_model(imported)
+    assert [f[3] for c in unified["cobjs"] for f in c["faces"]] == [14, 14, 14], unified["cobjs"]
+
+
+@case
 def colour_only_materials_draw_a_swatch():
     # geom-5: no image is no longer additive glass: its Base Color is written
     # as a swatch with a textured shader, and a mesh without a material draws

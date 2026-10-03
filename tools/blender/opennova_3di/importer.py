@@ -351,6 +351,7 @@ class Builder(Notes):
         self.roots = []          # LOD roots
         self.rig = None          # the model's rig
         self.part_empties = {}   # LOD -> {part: its PN## empty}
+        self.part_meshes = {}    # (LOD, part) -> a rigid part's mesh object, a polygon per triangle
         self.mesh_part = None    # a skinned model's mesh part
 
     def discard(self):
@@ -638,7 +639,9 @@ class Builder(Notes):
             pivot = self.blender(part["pivot"])
             if part["strips"]:
                 me, _ = self.mesh(f"{pi + 1:02d} Mesh", part["strips"], pivot, mats, False)
-                objs.append(self.put(bpy.data.objects.new(me.name, me), li, pi, Matrix.Translation(pivot)))
+                ob = self.put(bpy.data.objects.new(me.name, me), li, pi, Matrix.Translation(pivot))
+                self.part_meshes[(li, pi)] = ob
+                objs.append(ob)
             elif part["centre"] is not None:
                 objs.append(self.centre_helper(li, pi, part["centre"]))
         return objs
@@ -1077,13 +1080,23 @@ class Builder(Notes):
                 # models: Baricd02's two-sided wire stores its faces one-sided).
                 p.face_both_sides = "YES" if flags & 1 else "NO"
         if outvoted:
-            self.note(f"{outvoted} bullet faces take their material's most common surface and flags, not their own "
-                      "(a material carries one set)")
+            # Each such face keeps its own on its polygon (a rigid LOD's part
+            # meshes: a skinned model's meshes are laid out otherwise).
+            hits = []
+            self.face_votes(chosen, hits)
+            kept = self.keep_face_values(chosen, hits, mats)
+            self.note(f"{outvoted} bullet faces carry another surface or flags than their material's most common; "
+                      f"{kept} of them keep their own on their polygon (the {materials.FACE_SURFACE} and "
+                      f"{materials.FACE_FLAGS} face attributes; the material panel counts them and Make all gives "
+                      "them the material's)")
 
-    def face_votes(self, li):
+    def face_votes(self, li, hits=None):
         """Each material's votes for the (surface, flags) of the bullet faces
         LOD li's triangles meet (by centroid, within its section), and how many
-        they meet."""
+        they meet. `hits`, a list, gets each met triangle as (part, its index
+        among the part's triangles, material, (surface, flags)): the part
+        mesh's polygon of that index (mesh() makes a polygon per triangle, in
+        order)."""
         votes = {}
         met = 0
         lod = self.sc["lods"][li]
@@ -1092,18 +1105,66 @@ class Builder(Notes):
             for s in part["strips"]:
                 for tri in s["tris"]:
                     section_tris.setdefault(pi, []).append((s["material"], [s["verts"][x]["p"] for x in tri]))
+        # A face's middle and its triangle's lie within 1/512 m (the collision
+        # corners sit on the 8.8 grid): each triangle takes the face whose
+        # middle is nearest its own within 1/64 m, looked for in a grid of
+        # 1/64 m cells and their neighbours (a coarser key would let nearby
+        # faces take each other's place).
+        near = 1.0 / 64.0
+
+        def cell(m):
+            return tuple(int(math.floor(x * 64.0)) for x in m)
+
         for si, c in enumerate(self.sc["cobjs"]):
-            by_centre = {}
+            grid = {}
             for a, b, cc, poly, flags in c["faces"]:
                 p = [c["verts"][x] for x in (a, b, cc)]
-                by_centre[tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))] = (poly, flags)
-            for material, p in section_tris.get(si, []):
-                key = tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))
-                if key in by_centre:
-                    votes.setdefault(material, {}).setdefault(by_centre[key], 0)
-                    votes[material][by_centre[key]] += 1
-                    met += 1
+                m = tuple(sum(q[k] for q in p) / 3.0 for k in range(3))
+                grid.setdefault(cell(m), []).append((m, (poly, flags)))
+            for ti, (material, p) in enumerate(section_tris.get(si, [])):
+                m = tuple(sum(q[k] for q in p) / 3.0 for k in range(3))
+                at = cell(m)
+                best, value = near * near, None
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        for dz in (-1, 0, 1):
+                            for fm, fv in grid.get((at[0] + dx, at[1] + dy, at[2] + dz), ()):
+                                d = sum((fm[k] - m[k]) ** 2 for k in range(3))
+                                if d <= best:
+                                    best, value = d, fv
+                if value is None:
+                    continue
+                votes.setdefault(material, {}).setdefault(value, 0)
+                votes[material][value] += 1
+                met += 1
+                if hits is not None:
+                    hits.append((si, ti, material, value))
         return votes, met
+
+    def keep_face_values(self, li, hits, mats):
+        """The faces whose (surface, flags) is not their material's vote keep
+        their own on the polygon (materials.FACE_SURFACE and FACE_FLAGS), so a
+        re-export writes each face as the file held it; how many."""
+        kept = 0
+        by_mesh = {}
+        for pi, ti, mi, (surface, flags) in hits:
+            ob = self.part_meshes.get((li, pi))
+            if ob is None or not 0 <= mi < len(mats):
+                continue
+            mat = mats[mi]
+            own_surface = surface if surface != mat.o3d.surface else -1
+            own_flags = flags if flags != materials.face_flags(mat) else -1
+            if own_surface < 0 and own_flags < 0:
+                continue
+            values = by_mesh.setdefault(ob.name, (ob, [-1] * len(ob.data.polygons), [-1] * len(ob.data.polygons)))
+            if ti < len(values[1]):
+                values[1][ti] = own_surface
+                values[2][ti] = own_flags
+                kept += 1
+        for ob, surfaces, flags in by_mesh.values():
+            materials.set_face_overrides(ob.data, materials.FACE_SURFACE, surfaces)
+            materials.set_face_overrides(ob.data, materials.FACE_FLAGS, flags)
+        return kept
 
 
 def solve_planes(a, b, c):

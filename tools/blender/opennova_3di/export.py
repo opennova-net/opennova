@@ -949,12 +949,16 @@ class Exporter(Notes):
     def bullet_faces(self, section, meshes):
         """The meshes' triangles as a section's bullet faces, on the 8.8 grid
         the section stores, counter-clockwise about their outward normal (the
-        retail order)."""
+        retail order). A face takes its material's surface and flags, or its
+        polygon's own where the mesh keeps them (materials.FACE_SURFACE and
+        FACE_FLAGS: what an import of a retail model found on that face)."""
         for ob in meshes:
             ev = self.evaluated(ob)
             mesh = ev.to_mesh()
             try:
                 mesh.calc_loop_triangles()
+                own_surface = materials.face_overrides(mesh, materials.FACE_SURFACE)
+                own_flags = materials.face_overrides(mesh, materials.FACE_FLAGS)
                 mw = self.world(ob)
                 mirrored = mw.to_3x3().determinant() < 0
                 for tri in mesh.loop_triangles:
@@ -973,8 +977,14 @@ class Exporter(Notes):
                     if len(set(corners)) != 3:
                         continue
                     mat = slot_material(ev, tri.material_index)
-                    section["faces"].append((corners, mat.o3d.surface if mat is not None else 14,
-                                             materials.face_flags(mat)))
+                    surface = mat.o3d.surface if mat is not None else 14
+                    flags = materials.face_flags(mat)
+                    pi = tri.polygon_index
+                    if own_surface is not None and own_surface[pi] >= 0:
+                        surface = own_surface[pi]
+                    if own_flags is not None and own_flags[pi] >= 0:
+                        flags = own_flags[pi]
+                    section["faces"].append((corners, surface, flags))
             finally:
                 ev.to_mesh_clear()
 

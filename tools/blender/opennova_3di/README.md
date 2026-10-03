@@ -53,7 +53,8 @@ anything import set up: collision volume planes, seam flags, tangents,
 bounds, glass, emissive and the alpha pass are recomputed from the scene on
 every export, by the rules the retired OED exporter used. Export rebuilds
 bullet faces from the selected render LOD (face surfaces and flags come from
-the materials, voted on import), so retail face normals, zero-length or
+the materials, voted on import; a face that disagrees with its material's
+vote keeps its own on its polygon, on a rigid model), so retail face normals, zero-length or
 broken (NaN) vertex normals and seam flags can change. A skinned model's hit
 spheres and their bounds come back as helpers export writes again. Each
 collision volume imports as one polygon per retail plane, so export reads the
@@ -331,9 +332,16 @@ Culling, the Math node, the render method and Emission.
   points straight down.
 - **Material properties**: the shader (with what it implies) and export
   order, what Blender's settings give (two-sided, the alpha test, the alpha
-  pass, the glow), the bullet faces' surface type (metal 14, glass 15, ...)
-  and flags (both sides, bullets pass, front only: a bullet from behind
-  passes), the other flag bits, the reflection colour, the texture rows the
+  pass, the glow), the bullet faces' surface picked by name (Metal, Glass,
+  Wood: the effects row a round that hits them plays, the engine's own table
+  through `opennova-3di catalog`) and flags (both sides, bullets pass, front
+  only: a bullet from behind passes), set once for every face the material
+  makes; a model whose faces carry their own (an imported retail model's that
+  disagree with their material's) says so there, "Mixed: 3 of its 120 faces
+  keep their own (3 Glass)", with **Make all** and **Select them** (the faces
+  keep theirs on their polygons' `o3d_surface` and `o3d_face_flags`
+  attributes, -1 the material's, which export writes as they are), the other
+  flag bits, the reflection colour, the texture rows the
   nodes cannot give, and the RGB / alpha / UV generators and texture
   flipbook. A flipbook with frames on anim type 1 reads a register, which it
   selects by name; any other keeps its frame time.
