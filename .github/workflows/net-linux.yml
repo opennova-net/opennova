@@ -31,9 +31,9 @@ jobs:
           lfs: false   # net stack consumes no LFS game assets (net fixtures pulled below)
 
       # nwmsg_replay_test and nwmsg_codec_parity_test read the captured .nwmsg
-      # parity fixtures and
-      # nw_self_capture_test the committed opennova-produced self-capture pcap,
-      # both LFS-tracked (fixtures/** in .gitattributes). The rest of the net
+      # parity fixtures and nw_self_capture_test the committed
+      # opennova-produced self-capture pcap (fixtures/** in .gitattributes:
+      # the binaries LFS-tracked, the text fixtures plain blobs). The rest of the net
       # stack consumes no LFS assets, so pull only this subtree to keep checkout
       # fast.
       - name: Materialize net parity fixtures (LFS)
@@ -54,7 +54,7 @@ jobs:
             connection_registry_test connection_manager_test \
             db_sqlite_test session_hello_roundtrip_test lobby_session_test \
             backend_schema_test nw_codec_identity_test nw_self_capture_test \
-            unknown_tracker_test nwmsg_replay_test \
+            unknown_tracker_test nwmsg_replay_test nwmsg_codec_parity_test \
             opennova_extract nw_pp \
             mission_kernel_test mission_kernel_lifecycle_test host_role_test \
             inspect_test terrain_field_store_test
