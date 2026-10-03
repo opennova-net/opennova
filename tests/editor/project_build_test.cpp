@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #endif
 
+#include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
@@ -34,6 +35,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
@@ -361,6 +363,158 @@ static int test_new_kinds_land_where_their_rows_say() {
 	TEST_EXPECT(in(plan.archives[1].entries, "ASP_G7.npz"));
 	TEST_EXPECT(in(plan.archives[2].entries, "head.grm"));
 	TEST_EXPECT(in(plan.loose, "score.ini"));
+	return 0;
+}
+
+// ADR 0046 S16: an expansion's routing. The language slot's kinds go to <b>L.pff, the localres and
+// resource slots' to <b>.pff, a loose kind into the expansion's folder where its reader looks there
+// and nowhere where the game reads it from the install's folder alone; the files the game reads by
+// the expansion's name where their kind would put them elsewhere (<b>.bin also loose, version.txt in
+// the folder).
+static int test_expansion_routing() {
+	for (size_t i = 0; i < kAssetKindCount; ++i) {
+		const AssetKind kind = AssetKind(i);
+		const ExpansionPlace place = route_for_expansion(kind);
+		switch (route_asset(kind)) {
+		case ArchiveSlot::Language: TEST_EXPECT(place == ExpansionPlace::LanguageArchive); break;
+		case ArchiveSlot::Localres:
+		case ArchiveSlot::Resource: TEST_EXPECT(place == ExpansionPlace::Archive); break;
+		case ArchiveSlot::Loose:
+			// A file the front door reads (ExpansionLoose::FrontDoor) packs in <b>.pff, and is copied loose too.
+			TEST_EXPECT(place == ExpansionPlace::Folder || place == ExpansionPlace::RootOnly ||
+			            (place == ExpansionPlace::Archive &&
+			             asset_kind_row(kind).expansion_loose == ExpansionLoose::FrontDoor));
+			break;
+		case ArchiveSlot::None: TEST_EXPECT(place == ExpansionPlace::None); break;
+		}
+	}
+	TEST_EXPECT(route_for_expansion(AssetKind::Video) == ExpansionPlace::Folder);
+	TEST_EXPECT(route_for_expansion(AssetKind::MusicBank) == ExpansionPlace::Folder);
+	TEST_EXPECT(route_for_expansion(AssetKind::CountryCode) == ExpansionPlace::RootOnly);
+	TEST_EXPECT(expansion_archive_path("jxm", true) == "expansion/jxm/jxmL.pff");
+	TEST_EXPECT(expansion_archive_path("jxm", false) == "expansion/jxm/jxm.pff");
+	TEST_EXPECT(route_for_expansion(AssetKind::StringTableCoo) == ExpansionPlace::RootOnly);
+	TEST_EXPECT(route_for_expansion(AssetKind::NovaWorldScreen) == ExpansionPlace::Archive);
+	bool also_loose = false;
+	TEST_EXPECT(route_for_expansion(entry_of("JXM.bin", AssetKind::Strings), "jxm", also_loose) == ExpansionPlace::Folder &&
+	            !also_loose);
+	TEST_EXPECT(route_for_expansion(entry_of("gametext.bin", AssetKind::Strings), "jxm", also_loose) ==
+	                    ExpansionPlace::LanguageArchive &&
+	            !also_loose);
+	TEST_EXPECT(route_for_expansion(entry_of("version.txt", AssetKind::Text), "jxm", also_loose) == ExpansionPlace::Folder &&
+	            !also_loose);
+	TEST_EXPECT(route_for_expansion(entry_of("gt.ssc", AssetKind::Config), "jxm", also_loose) == ExpansionPlace::Folder);
+	TEST_EXPECT(route_for_expansion(entry_of("notes.txt", AssetKind::Text), "jxm", also_loose) == ExpansionPlace::RootOnly);
+	TEST_EXPECT(route_for_expansion(entry_of("nw_error.mnx", AssetKind::NovaWorldScreen), "jxm", also_loose) ==
+	                    ExpansionPlace::Archive &&
+	            also_loose);
+	return 0;
+}
+
+// ADR 0046 S16: the project built as the expansion jxm. Its folder holds its two archives (the
+// language slot's kinds in jxmL.pff, the rest in jxm.pff), its loose files where the game reads them
+// under /exp jxm (a video, its music bank, its version.txt, its jxm.bin, a NovaWorld screen packed and
+// loose alike), nothing at the build's root; a file the game reads only from the install's folder
+// left out and said (build.expansion.root_only); the build mounts with /exp jxm and resolves every
+// name; its id is another than the standalone game's of the same files and than another expansion
+// name's.
+static int test_expansion_layout() {
+	Project p("opennova_editor_build_expansion_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	TEST_EXPECT(write_table(p.root + "/strings/jxm.bin", "The expansion"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/video/header.bik", "BIKi"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/music/Mjxm.sbf", "SBF!"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/version.txt", "1.0"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/cc.bin", "us"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/nw_error.mnx", "<HTML/>"));
+	BuildTarget target;
+	target.expansion = "jxm";
+	target.game = "jo";
+	const AssetScan scan = scan_project_assets(p.paths, p.doc);
+	AssetGraph graph;
+	ValidationCache cache;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const auto plan_as = [&](const BuildTarget &as) {
+		return plan_build(p.paths, scan, evaluate_requirements(p.doc, scan),
+				validate_project({ p.paths, p.doc, scan, open }, graph, cache), as);
+	};
+	const BuildPlan plan = plan_as(target);
+	for (const Diagnostic &d : plan.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(plan.ok && plan.target.expansion == "jxm");
+	TEST_EXPECT(plan.archives.size() == 2);
+	TEST_EXPECT(plan.archives[0].file_name == "expansion/jxm/jxmL.pff" && plan.archives[0].slot == ArchiveSlot::Language);
+	TEST_EXPECT(plan.archives[1].file_name == "expansion/jxm/jxm.pff");
+	const auto in = [](const std::vector<BuildEntry> &entries, const char *name) {
+		for (const BuildEntry &entry : entries)
+			if (entry.logical_name == name) return true;
+		return false;
+	};
+	const auto loose_at = [&plan](const char *path) {
+		for (const BuildEntry &entry : plan.loose)
+			if (entry.build_path == path) return true;
+		return false;
+	};
+	TEST_EXPECT(!in(plan.archives[0].entries, "jxm.bin") && in(plan.archives[0].entries, "gametext.bin"));
+	TEST_EXPECT(in(plan.archives[1].entries, "main.mnu") && in(plan.archives[1].entries, "nw_error.mnx"));
+	TEST_EXPECT(loose_at("expansion/jxm/nw_error.mnx"));
+	TEST_EXPECT(loose_at("expansion/jxm/jxm.bin") && loose_at("expansion/jxm/header.bik"));
+	TEST_EXPECT(loose_at("expansion/jxm/Mjxm.sbf") && loose_at("expansion/jxm/version.txt"));
+	TEST_EXPECT(!in(plan.loose, "cc.bin") && !in(plan.archives[0].entries, "cc.bin"));
+	bool root_only = false;
+	for (const Diagnostic &d : plan.diagnostics)
+		root_only = root_only || (d.code() == "build.expansion.root_only" && d.asset == "cc.bin" &&
+		                          d.severity == DiagnosticSeverity::Warning && !blocks_build(d));
+	TEST_EXPECT(root_only);
+	for (const BuildEntry &entry : plan.loose) TEST_EXPECT(entry.build_path.rfind("expansion/jxm/", 0) == 0);
+
+	const BuildReport report = run_build(plan, p.output_root());
+	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(report.ok && report.archives_written.size() == 2);
+	const fs::path dir = fs::path(report.build_dir);
+	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/jxmL.pff") && fs::is_regular_file(dir / "expansion/jxm/jxm.pff"));
+	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/version.txt") && fs::is_regular_file(dir / "expansion/jxm/jxm.bin"));
+	TEST_EXPECT(!fs::exists(dir / "language.pff") && !fs::exists(dir / "header.bik") && !fs::exists(dir / "cc.bin"));
+	{
+		opennova::Vfs vfs;
+		opennova::LaunchFlags flags;
+		flags.expansion = "jxm";
+		TEST_EXPECT(opennova::mount_install(vfs, report.build_dir, flags) && vfs.mounted_expansion() == "jxm");
+		for (const BuildArchive &archive : plan.archives)
+			for (const BuildEntry &entry : archive.entries) TEST_EXPECT(vfs.has_file(entry.logical_name));
+	}
+	// The same content is the same build; as the standalone game, or as another expansion, another.
+	const BuildReport again = run_build(plan_as(target), p.output_root());
+	TEST_EXPECT(again.ok && again.reused_existing && again.build_id == report.build_id);
+	const BuildReport standalone = run_build(plan_as(BuildTarget()), p.paths.build_dir + "/standalone");
+	BuildTarget other = target;
+	other.expansion = "jxn";
+	const BuildReport renamed = run_build(plan_as(other), p.paths.build_dir + "/renamed");
+	TEST_EXPECT(standalone.ok && renamed.ok);
+	TEST_EXPECT(standalone.build_id != report.build_id && renamed.build_id != report.build_id);
+	TEST_EXPECT(fs::is_regular_file(fs::path(renamed.build_dir) / "expansion/jxn/jxnL.pff"));
+	return 0;
+}
+
+// ADR 0046 S16: an expansion with nothing to pack still has both archives, empty: the game opens
+// the pair by name, and a missing <b>.pff is no expansion at all [orig: Expansion_LoadAssets @
+// 0x4a4767]. The empty pair mounts with /exp and verifies.
+static int test_expansion_empty_pair() {
+	editor_test::TempProjectDir dir("opennova_editor_build_expansion_empty_test");
+	const ProjectPaths paths = ProjectPaths::for_root(dir.file("Game"));
+	BuildTarget target;
+	target.expansion = "x1";
+	const BuildPlan plan = plan_build(paths, AssetScan(), RequirementReport(), {}, target);
+	TEST_EXPECT(plan.ok && plan.archives.size() == 2 && plan.archives[0].entries.empty() && plan.archives[1].entries.empty());
+	const BuildReport report = run_build(plan, dir.file("out"));
+	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(report.ok && report.archives_written.size() == 2);
+	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "expansion/x1/x1L.pff"));
+	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "expansion/x1/x1.pff"));
+	opennova::Vfs vfs;
+	opennova::LaunchFlags flags;
+	flags.expansion = "x1";
+	TEST_EXPECT(opennova::mount_install(vfs, report.build_dir, flags) && vfs.mounted_expansion() == "x1");
 	return 0;
 }
 
@@ -947,6 +1101,9 @@ int main() {
 	failures += test_held_archives_are_never_written_through();
 	failures += test_publish_waits_for_a_held_file();
 	failures += test_deep_output_root();
+	failures += test_expansion_routing();
+	failures += test_expansion_layout();
+	failures += test_expansion_empty_pair();
 	if (failures == 0) std::printf("editor_project_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

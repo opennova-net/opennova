@@ -296,7 +296,7 @@ static int test_columns() {
 	                     "music_script.unserializable", "strings.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
-	                     "build.name_unstorable" }));
+	                     "build.expansion.root_only", "build.name_unstorable" }));
 	// S14, the build follows retail: the codes whose errors gate no build are listed (shown, fixable,
 	// never blocking): the ones whose subject names the game's refusal where it is witnessed (a
 	// reference, a required file), and the ones the audit found no refusal of the game's behind (the
@@ -304,7 +304,8 @@ static int test_columns() {
 	// error of any other row blocks, as does an error made from no row. A row that says its file does
 	// not serialize always gates.
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) ==
-	            Tokens({ "animation_map.no_reset", "catalog.item_type", "catalog.name_empty", "mission.event_missing",
+	            Tokens({ "animation_map.no_reset", "build.expansion.root_only", "catalog.item_type", "catalog.name_empty",
+	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
 	                     "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
 	                     "shader.form", "strings.key_empty", "strings.section_empty", "style.continued_duplicate",

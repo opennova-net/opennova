@@ -11,6 +11,7 @@
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
 #include <base/io/json.h>
+#include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_registry.h>
@@ -153,15 +154,28 @@ io::JsonValue build_record(const std::string &build_id, const std::map<std::stri
 	return json;
 }
 
+// The directory a loose file lands in, made first (an expansion's folder: ADR 0046 S16).
+bool ensure_parent(const std::string &path, std::string &error) {
+	const fs::path parent = path_of(path).parent_path();
+	return parent.empty() || ensure_directory(utf8_of(parent), error);
+}
+
 // Every planned name must resolve through the engine's own mount of the staged
 // directory: the one a stock launch boots with (mount_install: the fixed boot table,
-// archive-only), handed the directory's UTF-8 path as the game is handed its own, which it
-// opens past MAX_PATH itself (base/io/os_path.h).
+// archive-only; an expansion's build with `/exp <b>`, its pair mounted from its folder and
+// nothing under it, ADR 0046 S16), handed the directory's UTF-8 path as the game is handed its own,
+// which it opens past MAX_PATH itself (base/io/os_path.h).
 bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &error) {
 	Vfs vfs;
-	if (!mount_install(vfs, dir, LaunchFlags())) {
+	LaunchFlags flags;
+	flags.expansion = plan.target.expansion;
+	flags.game = plan.target.game;
+	if (!mount_install(vfs, dir, flags) || vfs.mounted_expansion() != plan.target.expansion) {
 		error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
-		                     "The built archives do not mount: " + vfs.last_error());
+		                     plan.target.is_expansion()
+		                             ? "The built expansion does not mount with /exp " + plan.target.expansion + ": " +
+		                                       vfs.last_error()
+		                             : "The built archives do not mount: " + vfs.last_error());
 		return false;
 	}
 	for (const BuildArchive &archive : plan.archives) {
@@ -176,9 +190,9 @@ bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &er
 	}
 	std::error_code ec;
 	for (const BuildEntry &entry : plan.loose) {
-		if (!fs::is_regular_file(system_path(join_path(dir, entry.logical_name)), ec)) {
+		if (!fs::is_regular_file(system_path(join_path(dir, entry.build_path)), ec)) {
 			error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
-			                     entry.logical_name + " is missing from the build directory", entry.logical_name);
+			                     entry.build_path + " is missing from the build directory", entry.logical_name);
 			return false;
 		}
 	}
@@ -381,6 +395,12 @@ BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protec
 	bytes_total_ = plan_.ok ? bytes * 2 : 0;
 	group_hash_ = archive_hash_seed();
 	build_hash_ = io::kFnv1a64Offset;
+	// An expansion's build is another build than the standalone game's of the same files, and than
+	// another expansion name's: its id starts from the name (ADR 0046 S16).
+	if (plan_.target.is_expansion()) {
+		const std::string seed = "expansion/" + strutil::to_lower(plan_.target.expansion);
+		build_hash_ = io::fnv1a64_bytes(build_hash_, seed.data(), seed.size());
+	}
 }
 
 // Where each archive's hash starts: the format it is written in, the writer's version and the time
@@ -403,7 +423,7 @@ size_t BuildRun::stamp_index(size_t group, size_t entry) const {
 
 const std::string &BuildRun::item_name(size_t index) const {
 	if (index < plan_.archives.size()) return plan_.archives[index].file_name;
-	return plan_.loose[index - plan_.archives.size()].logical_name;
+	return plan_.loose[index - plan_.archives.size()].build_path;
 }
 
 void BuildRun::advance(uint64_t bytes) {
@@ -715,6 +735,9 @@ void BuildRun::pack(uint64_t budget) {
 			               found->second == hashes_[archive.file_name] && recorded != last_sizes_.end() &&
 			               fs::is_regular_file(system_path(previous), ec) && size_of(previous) == recorded->second;
 			left -= std::min(left, kOpenCost);
+			std::string folder_error;
+			if (!ensure_parent(target, folder_error)) // an expansion's folder
+				return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, folder_error));
 			if (item_reused_) {
 				std::string link_error;
 				if (link_file(previous, target, link_error)) {
@@ -833,7 +856,11 @@ void BuildRun::copy_loose(uint64_t budget) {
 		if (!item_started_) {
 			item_started_ = true;
 			if (!s.open_unchanged(entry.source_path, stamp)) return fail(changed_while_packing(entry.logical_name));
-			if (!s.open_out(join_path(tmp_dir_, entry.logical_name))) {
+			const std::string target = join_path(tmp_dir_, entry.build_path);
+			std::string folder_error;
+			if (!ensure_parent(target, folder_error))
+				return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, folder_error));
+			if (!s.open_out(target)) {
 				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
 				                         "cannot copy " + entry.logical_name, entry.logical_name));
 			}
@@ -857,7 +884,7 @@ void BuildRun::copy_loose(uint64_t budget) {
 				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
 				                         "cannot copy " + entry.logical_name, entry.logical_name));
 			}
-			report_.loose_written.push_back(entry.logical_name);
+			report_.loose_written.push_back(entry.build_path);
 			item_started_ = false;
 			++loose_index_;
 			++items_done_;

@@ -10,18 +10,67 @@
 
 namespace opennova::editor {
 
+namespace {
+
+// Where a file goes in the build (an archive's slot, loose, or nowhere), and, for a loose one, its
+// path there.
+struct Placement {
+	ArchiveSlot slot = ArchiveSlot::None;
+	std::string loose_path; // a loose file's, or an archived file's second, loose copy ("" for none)
+	bool root_only = false; // an expansion's game reads it only from the install's folder
+};
+
+Placement place(const AssetEntry &asset, const BuildTarget &target) {
+	Placement out;
+	if (!target.is_expansion()) {
+		out.slot = route_asset(asset);
+		if (out.slot == ArchiveSlot::Loose) out.loose_path = asset.logical_name;
+		return out;
+	}
+	bool also_loose = false;
+	const std::string in_folder = expansion_folder(target.expansion) + "/" + asset.logical_name;
+	switch (route_for_expansion(asset, target.expansion, also_loose)) {
+	case ExpansionPlace::LanguageArchive: out.slot = ArchiveSlot::Language; break;
+	case ExpansionPlace::Archive: out.slot = ArchiveSlot::Localres; break; // <b>.pff, the plan's Localres archive
+	case ExpansionPlace::Folder:
+		out.slot = ArchiveSlot::Loose;
+		out.loose_path = in_folder;
+		break;
+	case ExpansionPlace::RootOnly: out.root_only = true; break;
+	case ExpansionPlace::None: break;
+	}
+	if (also_loose) out.loose_path = in_folder;
+	return out;
+}
+
+} // namespace
+
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
-                     const std::vector<Diagnostic> &document_findings) {
+                     const std::vector<Diagnostic> &document_findings, const BuildTarget &target) {
 	BuildPlan plan;
+	plan.target = target;
 	plan.hash_cache = paths.build_cache_file;
-	// The three boot-table archives always exist in a build, even empty: the boot gate
-	// counts archives opened, not entries [orig: fatal check @ 0x4a6f44], and retail
-	// ships all three.
-	for (const ArchiveSlot slot : {ArchiveSlot::Language, ArchiveSlot::Localres, ArchiveSlot::Resource}) {
-		BuildArchive archive;
-		archive.slot = slot;
-		archive.file_name = archive_slot_file_name(slot);
-		plan.archives.push_back(std::move(archive));
+	if (target.is_expansion()) {
+		// An expansion's two archives always exist in its build, even empty: the game opens the pair by
+		// its name, and a missing <b>.pff is no expansion at all, the base game loading in its place
+		// [orig: Expansion_LoadAssets @ 0x4a4767, @ 0x4a4775]. <b>.pff takes the localres and resource
+		// slots' kinds alike (route_for_expansion).
+		for (const bool language : {true, false}) {
+			BuildArchive archive;
+			archive.slot = language ? ArchiveSlot::Language : ArchiveSlot::Localres;
+			archive.file_name = expansion_archive_path(target.expansion, language);
+			plan.archives.push_back(std::move(archive));
+		}
+	} else {
+		// The three boot-table archives always exist in a build, even empty: the boot gate
+		// counts archives opened, not entries [orig: fatal check @ 0x4a6f44], and retail
+		// ships all three.
+		for (const ArchiveSlot slot : {ArchiveSlot::Language, ArchiveSlot::Localres, ArchiveSlot::Resource}) {
+			BuildArchive archive;
+			archive.slot = slot;
+			archive.file_name = archive_slot_file_name(slot);
+			plan.archives.push_back(std::move(archive));
+		}
 	}
 
 	// The same document gate CLI validate and the editor's Problems show.
@@ -58,15 +107,26 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		// An import source (its outputs, named after it, are in the scan) and a file of no kind the
 		// game knows, which the game never asks for (S13 A8), are left out.
 		if (!asset_kind_packed(asset.kind)) continue;
+		const Placement placement = place(asset, target);
+		if (placement.root_only) {
+			plan.diagnostics.push_back(make_finding(
+			        CoreFinding::BuildExpansionRootOnly, DiagnosticSeverity::Warning,
+			        asset.logical_name + " is read by the game from its install's folder alone, never from an "
+			                             "expansion's: the expansion's build leaves it out.",
+			        asset.relative_path));
+			continue;
+		}
 		BuildEntry entry;
 		entry.logical_name = asset.logical_name;
 		entry.source_path = join_path(paths.root, asset.relative_path);
 		entry.size_bytes = asset.size_bytes;
-		const ArchiveSlot slot = route_asset(asset);
-		if (slot == ArchiveSlot::Loose) {
-			plan.loose.push_back(std::move(entry));
-			continue;
+		if (!placement.loose_path.empty()) {
+			BuildEntry loose = entry;
+			loose.build_path = placement.loose_path;
+			plan.loose.push_back(std::move(loose));
 		}
+		const ArchiveSlot slot = placement.slot;
+		if (slot == ArchiveSlot::Loose) continue;
 		if (!logical_name_fits_archive(asset.logical_name)) {
 			plan.diagnostics.push_back(make_finding(
 			        CoreFinding::BuildNameUnstorable, DiagnosticSeverity::Error,
