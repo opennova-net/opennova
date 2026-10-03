@@ -5,7 +5,9 @@
 #include <editor/assets/player_files.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
+#include <formats/rtxt/rtxt.h>
 
 
 namespace opennova::editor {
@@ -41,6 +43,46 @@ Placement place(const AssetEntry &asset, const BuildTarget &target) {
 	}
 	if (also_loose) out.loose_path = in_folder;
 	return out;
+}
+
+// What the Mods list copies an expansion's [exp_info] EXP_NAME and EXP_DESC into: the 64-byte name and
+// the 272-byte description of its ExpansionRecord (stride 596: the name @+0, the folder's name @+0x40,
+// the description @+0x144), each copied whole with no bound [orig: Expansion_ScanAndRegister @ 0x4a4598,
+// @ 0x4a4612].
+constexpr size_t kExpansionRecordName = 64;
+constexpr size_t kExpansionRecordDescription = 272;
+
+// The expansion's table (<b>.bin, its row of project/expansion_files) read as the Mods list reads it:
+// a name of 64 bytes or more runs over the record's folder name, which choosing the expansion there
+// then loads (build.expansion.exp_name, gating); a description of 272 bytes or more spills into the
+// next record (build.expansion.exp_desc, listed). A table that does not read is its document's finding.
+void check_expansion_table(const ProjectPaths &paths, const AssetScan &scan, const std::string &expansion,
+                           std::vector<Diagnostic> &out) {
+	for (const AssetEntry &asset : scan.entries) {
+		const ExpansionFileRow *row = expansion_file_for(expansion, asset.logical_name);
+		if (!row || row->role != ExpansionFileRole::Table) continue;
+		rtxt::File table;
+		std::string error;
+		if (!rtxt::parse_file(join_path(paths.root, asset.relative_path), table, error)) return;
+		const rtxt::Entry *name = table.find_in_section("exp_info", "EXP_NAME");
+		if (name && name->text.size() >= kExpansionRecordName)
+			out.push_back(make_finding(
+			        CoreFinding::BuildExpansionExpName, DiagnosticSeverity::Error,
+			        "The expansion's name in the Mods list, EXP_NAME, is " + std::to_string(name->text.size()) +
+			                " bytes: the game copies it over the expansion's folder name past 63, so choosing it there "
+			                "loads the base game. Shorten it to 63 bytes or fewer.",
+			        asset.relative_path));
+		const rtxt::Entry *description = table.find_in_section("exp_info", "EXP_DESC");
+		if (description && description->text.size() >= kExpansionRecordDescription)
+			out.push_back(make_finding(
+			        CoreFinding::BuildExpansionExpDesc, DiagnosticSeverity::Warning,
+			        "The expansion's description in the Mods list, EXP_DESC, is " +
+			                std::to_string(description->text.size()) +
+			                " bytes: past 271 the game's copy runs into the next expansion's entry, whose title then "
+			                "shows in it.",
+			        asset.relative_path));
+		return;
+	}
 }
 
 } // namespace
@@ -98,6 +140,8 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 	// does without, never the build's business.
 	for (const Diagnostic &d : requirements.diagnostics)
 		if (d.severity == DiagnosticSeverity::Error) plan.diagnostics.push_back(d);
+	// An expansion's name and description as the Mods list copies them (ADR 0046 S16).
+	if (target.is_expansion()) check_expansion_table(paths, scan, target.expansion, plan.diagnostics);
 
 	for (const AssetEntry &asset : scan.entries) {
 		if (asset.kind == AssetKind::Archive) {

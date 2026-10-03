@@ -68,6 +68,15 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// An expansion whose base game does not mount (no install, none of its archives): its build cannot
 	// be compared with the base nor gated over it (ADR 0046 S16), so it gates, the editor's integrity.
 	{ C::BuildExpansionBaseMissing, code("build.expansion.base_missing", G::Build) },
+	// The Mods list's description of an expansion past its record's 272 bytes: the copy spills into the
+	// next expansion's record [orig: Expansion_ScanAndRegister @ 0x4a4612], a picture the game shows
+	// wrong, no refusal of it: listed.
+	{ C::BuildExpansionExpDesc, listed(code("build.expansion.exp_desc", G::Build)) },
+	// The Mods list's name of an expansion of 64 bytes or more: the copy runs into the record's folder
+	// name [orig: Expansion_ScanAndRegister @ 0x4a4598, after the folder's @ 0x4a4532], so choosing the
+	// expansion there loads another name's, the base game [orig: Options_HandleAcceptOrBack @ 0x55ad43;
+	// Expansion_LoadAssets @ 0x4a4767]: it gates.
+	{ C::BuildExpansionExpName, code("build.expansion.exp_name", G::Build) },
 	// A file an expansion's build leaves out because the game reads its kind only from the install's
 	// folder (ADR 0046 S16, AssetKindRow::expansion_loose): said, refusing nothing.
 	{ C::BuildExpansionRootOnly, listed(about_the_file("build.expansion.root_only", G::Build, F::None)) },

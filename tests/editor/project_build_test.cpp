@@ -671,6 +671,52 @@ static int test_lean_packing() {
 	return 0;
 }
 
+// An expansion's table with its [exp_info] name and description.
+static bool write_exp_info(const std::string &path, const std::string &name, const std::string &description) {
+	opennova::rtxt::File table;
+	table.sections.push_back({"exp_info", 2});
+	opennova::rtxt::Entry title;
+	title.key = "EXP_NAME";
+	title.text = name;
+	opennova::rtxt::Entry text;
+	text.key = "EXP_DESC";
+	text.text = description;
+	table.entries.push_back(title);
+	table.entries.push_back(text);
+	std::vector<uint8_t> bytes;
+	std::string error;
+	fs::create_directories(fs::path(path).parent_path());
+	return opennova::rtxt::write(table, bytes, error) && write_file_atomic(path, bytes.data(), bytes.size(), error);
+}
+
+// ADR 0046 S16 (IDA item 3): the Mods list copies EXP_NAME whole into a 64-byte name, after the folder
+// name it then runs over: 63 bytes build, 64 refuse the build (build.expansion.exp_name); EXP_DESC's
+// 272-byte description spills into the next record, a listed warning (build.expansion.exp_desc).
+static int test_expansion_table_texts() {
+	Project p("opennova_editor_build_exp_info_test");
+	TEST_EXPECT(p.create());
+	const BaseInstall install = make_base(p.dir.file("install"), { { "basetable.bin", bytes_of("base") } }, {}, {});
+	const BaseNames base = install.base();
+	BuildTarget target;
+	target.expansion = "jxm";
+	target.install = install.root;
+	const auto codes = [&](const std::string &name, const std::string &description, bool &ok) {
+		std::vector<std::string> out;
+		if (!write_exp_info(p.root + "/strings/jxm.bin", name, description)) return std::vector<std::string>{ "unwritten" };
+		const BuildPlan plan =
+		        plan_build(p.paths, scan_project_assets(p.paths, p.doc), RequirementReport(), {}, target, &base);
+		ok = plan.ok;
+		for (const Diagnostic &d : plan.diagnostics)
+			if (d.code().rfind("build.expansion.exp_", 0) == 0) out.push_back(d.code());
+		return out;
+	};
+	bool ok = false;
+	TEST_EXPECT(codes(std::string(63, 'N'), std::string(271, 'D'), ok).empty() && ok);
+	TEST_EXPECT(codes(std::string(64, 'N'), "", ok) == std::vector<std::string>{ "build.expansion.exp_name" } && !ok);
+	TEST_EXPECT(codes("Mod", std::string(272, 'D'), ok) == std::vector<std::string>{ "build.expansion.exp_desc" } && ok);
+	return 0;
+}
+
 // ADR 0046 S16, the gate over the base: an expansion's required file the project lacks blocks nothing
 // where the base serves it (requirement.missing), nor a gating reference's file (a mission's terrain);
 // a required file of another kind still blocks (requirement.wrong_kind); with no base listing the
@@ -1426,6 +1472,7 @@ int main() {
 	failures += test_export();
 	failures += test_lean_packing();
 	failures += test_base_gate();
+	failures += test_expansion_table_texts();
 	if (failures == 0) std::printf("editor_project_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
