@@ -107,6 +107,9 @@ ImVec4 severity_color(DiagnosticSeverity severity);
 // symbols): an error a filled red circle, a warning an amber triangle, a note a grey ring.
 // Hovered, it says which.
 void severity_marker(DiagnosticSeverity severity);
+// The same mark over the right end of the item just drawn, inside what the window shows of it (an
+// outline's line that spans the window), taking no room: true while the pointer is over it.
+bool severity_mark_on_item(DiagnosticSeverity severity);
 // How many findings of a severity, after a file's name or in the menu bar: the severity's
 // mark, then the number in the severity's colour. The mark sits centred in a box a line of
 // text wide and `height` high (a line of text for 0; a control's in the menu bar, whose
