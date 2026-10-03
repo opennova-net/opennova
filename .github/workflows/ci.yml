@@ -115,6 +115,10 @@ jobs:
           python scripts/lint/maturity_lint.py --enforce
           python scripts/lint/link_graph_check.py --enforce
           python scripts/lint/include_graph_check.py --enforce
+          # The godot-cpp build profile (godot/src/godot_cpp_profile.json) is
+          # derived from godot/src: a binding that starts using a new engine
+          # class must regenerate it (--write) or the extension fails to compile.
+          python scripts/lint/godot_cpp_profile.py --enforce
           # Orphan engine headers (the post-merge tidy rounds' recurring
           # finding): a header included only by its test must carry the
           # STAGED, NOT WIRED paragraph or a reasoned allowlist row.
