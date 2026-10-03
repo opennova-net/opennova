@@ -646,5 +646,8 @@ void run_rename_tests();
 void run_gate_tests();
 // A mission's logic in the Inspector (logic_test.cpp): S15.
 void run_logic_tests();
+// A clip's timeline, its keys and its words, and the animation types' Inspector (animation_test.cpp):
+// S17.
+void run_animation_tests();
 
 } // namespace editor_ui_test

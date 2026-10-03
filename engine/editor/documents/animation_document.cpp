@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include <base/io/strutil.h>
@@ -119,6 +120,33 @@ ClipRow::ClipRow() {
 
 bool is_animation_kind(AssetKind kind) {
 	return asset_kind_row(kind).document == DocumentTypeId::Animation;
+}
+
+std::string animation_trigger_words(uint32_t trigger) {
+	std::string words;
+	const auto add = [&words](const std::string &part) { words += (words.empty() ? "" : ", ") + part; };
+	uint32_t unread = trigger;
+	for (const anim::AnimEventBit &bit : anim::kAnimEventBits) {
+		if (!(trigger & bit.mask)) continue;
+		add(bit.words);
+		unread &= ~bit.mask;
+	}
+	if (unread) {
+		char hex[16];
+		std::snprintf(hex, sizeof(hex), "0x%X", unread);
+		add(std::string("an unread bit (") + hex + ")");
+	}
+	return words;
+}
+
+std::string AnimationDocument::record_title(const NodeAddress &address) const {
+	const ClipRow *row = clip();
+	if (!row || address.row != row->id || address.kind != kEvent) return record_name(address);
+	const size_t i = index_of(*row, address);
+	if (i == SIZE_MAX) return record_name(address);
+	const std::string words =
+			row->version == 0 ? std::string() : animation_trigger_words(static_cast<uint32_t>(row->events[i].trigger));
+	return "Frame " + std::to_string(i) + (words.empty() ? std::string() : ": " + words);
 }
 
 const std::vector<RecordKindRow> &AnimationDocument::kinds() const {

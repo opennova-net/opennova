@@ -98,14 +98,16 @@ void ProjectFind::draw(Workspace &workspace) {
 		ImGui::PushID(static_cast<int>(i));
 		// The result: its name, what it is and where, its uses; opened, the uses.
 		const std::string uses = std::to_string(hit.usages) + (hit.usages == 1 ? " use" : " uses");
-		const std::string title = hit.name + "  (" + what_of(hit) + ", " + hit.file + ")  " + uses;
+		// An item by its catalog's name first, its id after it (S17).
+		const std::string named = hit.words.empty() ? hit.name : hit.words + " " + hit.name;
+		const std::string title = named + "  (" + what_of(hit) + ", " + hit.file + ")  " + uses;
 		const float go_width = ui_kit::button_width("Go to") + ImGui::GetStyle().ItemSpacing.x;
 		const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
 		const bool expanded = ImGui::TreeNodeEx("result", hit.usages ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_Leaf, "%s",
 		                                        ui_kit::fit(title, ImGui::GetContentRegionAvail().x - go_width -
 		                                                                   ImGui::GetTreeNodeToLabelSpacing())
 		                                                .c_str());
-		std::string tip = hit.name + "\n" + what_of(hit) + " in " + hit.file + "\n" + uses;
+		std::string tip = named + "\n" + what_of(hit) + " in " + hit.file + "\n" + uses;
 		if (hit.symbol && hit.symbol->inert) tip += "\nNo lookup of the game finds it: " + hit.symbol->inert_reason + ".";
 		ui_kit::tooltip(tip);
 		ImGui::SameLine(right - ui_kit::button_width("Go to"));

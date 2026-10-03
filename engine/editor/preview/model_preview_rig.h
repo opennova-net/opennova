@@ -7,6 +7,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/model/node.h>
+#include <editor/preview/model_preview_camera.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/anim/rig_files.h>
 #include <runtime/anim/skeletal_clips.h>
@@ -55,13 +56,24 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 std::shared_ptr<const anim::SkeletalClips> load_preview_rig(const PreviewRig &rig, const threedi::Threedi3di3 &model,
                                                            const anim::RigFiles &files);
 
-// What the selection in an animation document plays on the loaded rig `clips`: a table's
-// selected clip (else its row's first clip the rig registered), as the key and variant the
-// game's loader registered that row's token under (SkeletalClips::variant_of); a clip as the
-// first token that registered its file; a lone clip plays under the key "clip". False when
-// nothing plays (the row names no slot, the clip's file does not load).
-bool preview_clip_of(const Document &document, const NodeAddress &selection, const PreviewRig &rig,
-                     const anim::SkeletalClips &clips, std::string &key, int &variant);
+// What the selection in an animation document plays on the loaded rig, and what the game plays
+// where the selection names a clip it does not load (ADR 0046 S17): the key and the variant of
+// the clip, and a note in words where it is not the one selected.
+struct PreviewClipChoice {
+	std::string key; // "" nothing plays
+	int variant = 0;
+	std::string note;
+};
+// A table's selected clip (else its row's first clip the rig registered), as the key and variant
+// the game's loader registered that row's token under (SkeletalClips::variant_of); a selected
+// token that registered nothing (its file not in the project, no failsafe.bad) plays the row's
+// first that did, and a row none of whose tokens registered plays what the game plays for an
+// unauthored slot, the reset row's first clip [orig: AnimMap_RegisterEntity @ 0x40BB60, the
+// backfill @ 0x40BC24, @ 0x40BD2E], each with its note; a key naming no slot plays nothing (the
+// game skips the row [orig: AnimMap_ParseConfigLine @ 0x40CB60, the test @ 0x40CBA4]). A clip
+// plays as the first token that registered its file; a lone clip plays under the key "clip".
+PreviewClipChoice preview_clip_choice(const Document &document, const NodeAddress &selection, const PreviewRig &rig,
+                                      const anim::SkeletalClips &clips);
 
 // The key a lone clip plays under.
 inline constexpr const char *kPreviewLoneClipKey = "clip";
@@ -78,5 +90,25 @@ struct PreviewClipEvent {
 // order, read from its file (`clip_file`); a frame the clock never runs on has none.
 std::vector<PreviewClipEvent> preview_clip_events(const anim::SkeletalClips &rig, const std::string &key, int variant,
                                                   const bad::BadFile &clip_file);
+
+// A bone of the rig as the clip poses it at a tick (ADR 0046 S17): its name (the bind clip's
+// bone, "Part N" past its bones), its parent (-1: a root), where its joint stands in the preview's
+// space, and the transform that carries a point of the model riding it from the rest pose to the
+// pose (the skin's: the posed global over the rest global's inverse), in the rig's frame, which is
+// the preview's (the X-negated model frame the device's skeleton stands in).
+struct PreviewJoint {
+	int bone = 0;
+	int parent = -1;
+	std::string name;
+	PreviewVec3 at;
+	anim::SkeletalClips::RestTransform deform;
+};
+// Every bone of the rig posed by `key`/`variant` at `ticks` of its clock (the sample the device
+// draws: SkeletalClips::eval_pose at clip_seconds_at_tick); empty when the rig is not FK-safe or
+// the key plays nothing.
+std::vector<PreviewJoint> preview_posed_joints(const anim::SkeletalClips &rig, const std::string &key, int variant,
+                                               int32_t ticks);
+// A point of the rest pose, the preview's space, carried by a joint's deform.
+PreviewVec3 preview_joint_carry(const PreviewJoint &joint, const PreviewVec3 &point, bool direction = false);
 
 } // namespace opennova::editor

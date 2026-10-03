@@ -7,11 +7,13 @@
 
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
@@ -141,8 +143,14 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 				return false;
 			}
 			options.rig_model = value.string;
+		} else if (key == "repeat" || key == "bones") {
+			if (!value.is_bool()) {
+				error = "options." + key + " is true or false.";
+				return false;
+			}
+			(key == "repeat" ? options.repeat : options.bones) = value.boolean;
 		} else {
-			error = "Unknown model option \"" + key + "\" (it takes lod, ctrl, overlays, rig_model).";
+			error = "Unknown model option \"" + key + "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones).";
 			return false;
 		}
 	}
@@ -249,6 +257,8 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 	marks.set("pivots", JsonValue::make_bool(held.overlays.pivots));
 	options.set("overlays", std::move(marks));
 	options.set("rig_model", json_string(held.rig_model));
+	options.set("repeat", JsonValue::make_bool(held.repeat));
+	options.set("bones", JsonValue::make_bool(held.bones));
 	return options;
 }
 
@@ -293,7 +303,27 @@ std::vector<ModelOverlay> ModelViewport::overlays(const PreviewClock &clock) con
 	if (!model_) return {};
 	int32_t bus[96];
 	model_preview_ctrl_bus(options_.ctrl, bus);
-	return model_overlays(*model_, lod(), clock.ms(), bus, options_.overlays);
+	std::vector<ModelOverlay> out = model_overlays(*model_, lod(), clock.ms(), bus, options_.overlays);
+	// A clip playing (S17): a user point on a bone rides it as the skin carries the mesh there, as
+	// the game's attachment resolve poses a point on its bone [orig: Entity_GetAttachmentWorldPosition
+	// @ 0x4B2670, as world::EntityPoseProvider ports it].
+	if (!animating_ || !skeleton_ || clip_key_.empty() || !options_.overlays.user_points) return out;
+	const std::vector<PreviewJoint> posed = joints(clock);
+	for (ModelOverlay &overlay : out) {
+		if (overlay.kind != ModelOverlayKind::UserPoint || overlay.index < 0 ||
+				size_t(overlay.index) >= model_->user_point_count)
+			continue;
+		const int bone = model_->user_points[overlay.index].subobject_index;
+		if (bone < 0 || size_t(bone) >= posed.size()) continue;
+		overlay.at = preview_joint_carry(posed[size_t(bone)], overlay.at);
+		if (overlay.has_direction) {
+			const PreviewVec3 axis = preview_joint_carry(posed[size_t(bone)], overlay.direction, true);
+			const float length = std::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+			if (length > 0.0f) overlay.direction = PreviewVec3{axis.x / length, axis.y / length, axis.z / length};
+		}
+		overlay.part = bone;
+	}
+	return out;
 }
 
 PreviewVec3 ModelViewport::axis_tip(const ModelOverlay &overlay) const {
@@ -374,10 +404,50 @@ int32_t ModelViewport::tick_of_frame(int frame) const {
 	return size_t(frame) < ticks.size() ? ticks[size_t(frame)] : -1;
 }
 
+uint32_t ModelViewport::clip_frame_count() const {
+	const anim::SkeletalClips::LoadedClip *clip =
+			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
+	return clip ? clip->clip.frame_count : 0u;
+}
+
+uint32_t ModelViewport::clip_fps() const {
+	const anim::SkeletalClips::LoadedClip *clip =
+			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
+	return clip ? clip->clip.fps : 0u;
+}
+
+int32_t ModelViewport::clip_ticks(const PreviewClock &clock) const {
+	const int32_t ticks = clock.ticks();
+	const int32_t length = clip_length_ticks();
+	if (!options_.repeat || length <= 0 || clip_loops()) return ticks;
+	return ticks % (length + kClipRepeatHoldTicks);
+}
+
 double ModelViewport::clip_frame(const PreviewClock &clock) const {
 	const anim::SkeletalClips::LoadedClip *clip =
 			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
-	return clip ? clip->clip.playback().frame_at(clock.ticks()) : 0.0;
+	return clip ? clip->clip.playback().frame_at(clip_ticks(clock)) : 0.0;
+}
+
+int32_t ModelViewport::tick_of_step(int32_t ticks, int by) const {
+	const anim::SkeletalClips::LoadedClip *clip =
+			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
+	if (!clip || by == 0) return ticks;
+	const anim::ClipTimeline &timeline = clip->clip.playback();
+	const std::vector<int32_t> first = timeline.first_ticks();
+	const int32_t length = timeline.length_ticks();
+	// The frame shown, within one pass of the clip.
+	const int32_t within = length > 0 && clip->clip.loops() ? ticks % length : std::min(ticks, std::max(length, 0));
+	const int frame = int(timeline.frame_index_at(within));
+	// The next frame along that the clock runs on (a fast clip's clock steps over some).
+	for (int f = frame + (by > 0 ? 1 : -1); f >= 0 && size_t(f) < first.size(); f += by > 0 ? 1 : -1)
+		if (first[size_t(f)] >= 0) return first[size_t(f)];
+	return by > 0 ? within : 0;
+}
+
+std::vector<PreviewJoint> ModelViewport::joints(const PreviewClock &clock) const {
+	if (!animating_ || !skeleton_ || clip_key_.empty()) return {};
+	return preview_posed_joints(*skeleton_, clip_key_, clip_variant_, clip_ticks(clock));
 }
 
 ViewportAction ModelViewport::stop_(ModelViewStatus reason, const std::string &detail, bool failed) {
@@ -406,6 +476,7 @@ void ModelViewport::reset_animation_() {
 	clip_file_.clear();
 	clip_variant_ = 0;
 	clip_events_.clear();
+	clip_note_.clear();
 }
 
 ViewportAction ModelViewport::follow_(const ViewportInput &input, PreviewClock &clock) {
@@ -546,6 +617,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_file_.clear();
 		clip_variant_ = 0;
 		clip_events_.clear();
+		clip_note_.clear();
 		return stop_(ModelViewStatus::Unserializable, unwritable_, true);
 	}
 	const std::string file = file_of(document.path());
@@ -560,6 +632,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		skeleton_.reset();
 		clip_key_.clear();
 		clip_events_.clear();
+		clip_note_.clear();
 		return stop_(ModelViewStatus::NoRig, file, false);
 	}
 	const FileSource &files = *view.findings.assets;
@@ -600,12 +673,17 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		++skeleton_serial_;
 	}
 	rig_ = rig;
-	// The clip the selection plays (the selection is the active document's).
+	// The clip the selection plays (the selection is the active document's), or what the game plays
+	// in its place, with why.
 	std::string key = clip_key_;
 	int variant = clip_variant_;
-	if (view.documents.active == document.path() &&
-			(!skeleton_ || !preview_clip_of(document, view.documents.selection.primary, rig_, *skeleton_, key, variant)))
-		key.clear();
+	if (view.documents.active == document.path()) {
+		PreviewClipChoice choice;
+		if (skeleton_) choice = preview_clip_choice(document, view.documents.selection.primary, rig_, *skeleton_);
+		key = choice.key;
+		variant = choice.variant;
+		clip_note_ = choice.note;
+	}
 	if (key != clip_key_ || variant != clip_variant_ || rig_moved || document_moved) {
 		if (key != clip_key_ || variant != clip_variant_) clock.seek_ticks(0);
 		clip_key_ = key;
@@ -655,7 +733,20 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 }
 
 bool ModelViewport::takes_(const std::string &member) const {
-	return member == "options" || member == "camera";
+	return member == "options" || member == "camera" || member == "frame";
+}
+
+int32_t ModelViewport::tick_of_frame_shown(int frame) const {
+	const anim::SkeletalClips::LoadedClip *clip =
+			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
+	if (!clip || frame < 0) return -1;
+	const std::vector<int32_t> first = clip->clip.playback().first_ticks();
+	for (size_t f = size_t(frame); f < first.size(); ++f)
+		if (first[f] >= 0) return first[f];
+	// Past the last frame the clock runs on: a one-shot holds its end, a loop its last frame shown.
+	for (size_t f = std::min(size_t(frame), first.size()); f-- > 0;)
+		if (first[f] >= 0) return clip->clip.loops() ? first[f] : clip->clip.playback().length_ticks();
+	return -1;
 }
 
 bool ModelViewport::check_(const io::JsonValue &json, std::string &error) const {
@@ -666,10 +757,30 @@ bool ModelViewport::check_(const io::JsonValue &json, std::string &error) const 
 	bool frame = false;
 	if (const JsonValue *member = json.get("camera"); member && !read_camera(*member, camera, frame, error))
 		return false;
+	// A clip's frame (S17): the clock held on the first tick the clip shows it, the wire's form of a
+	// scrub or a step of the timeline.
+	if (const JsonValue *member = json.get("frame")) {
+		int64_t number = 0;
+		if (!json_whole_in(*member, 0.0, 1000000.0, number)) {
+			error = "frame is a clip's frame, a whole number from 0.";
+			return false;
+		}
+		if (clip_key_.empty() || tick_of_frame_shown(int(number)) < 0) {
+			error = "frame: no clip plays in this viewport.";
+			return false;
+		}
+	}
 	return true;
 }
 
-void ModelViewport::apply_(const io::JsonValue &json, PreviewClock &) {
+void ModelViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
+	if (const JsonValue *member = json.get("frame")) {
+		int64_t number = 0;
+		if (json_whole_in(*member, 0.0, 1000000.0, number)) {
+			clock.seek_ticks(tick_of_frame_shown(int(number)));
+			clock.set_playing(false);
+		}
+	}
 	std::string error;
 	ModelViewportOptions options = options_;
 	if (const JsonValue *member = json.get("options"); member && read_options(*member, options, error) &&
@@ -701,6 +812,21 @@ ModelCanvasFrame ModelViewport::canvas_frame(const ViewportContext &context) con
 	frame.document = dynamic_cast<const ModelDocument *>(input.document ? records_of(*input.document) : nullptr);
 	frame.current = frame.document && current(input);
 	frame.overlays = overlays(input.clock);
+	// A clip playing (S17): its bones, and the clip's document while it is the active one (a joint's
+	// bone is its bone record of that index), its selected bone ringed.
+	if (animating_ && options_.bones) {
+		frame.joints = joints(input.clock);
+		const auto *clip = dynamic_cast<const AnimationDocument *>(input.document ? records_of(*input.document) : nullptr);
+		if (clip && input.view.documents.active == clip->path() && clip->clip()) {
+			frame.clip_document = clip;
+			const NodeAddress &primary = input.view.documents.selection.primary;
+			const std::vector<NodeId> &bones = clip->clip()->collections[0];
+			const auto found = primary.kind == node_kind(AnimationKind::Bone)
+			                           ? std::find(bones.begin(), bones.end(), primary.child)
+			                           : bones.end();
+			if (found != bones.end()) frame.selected_bone = int(found - bones.begin());
+		}
+	}
 	if (!frame.current || input.view.documents.active != frame.document->path()) return frame;
 	const Selection &selection = input.view.documents.selection;
 	model_overlay_of(*frame.document, selection.primary, frame.selected_kind, frame.selected);
@@ -912,8 +1038,21 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	}
 	body.set("lod", std::move(lod_json));
 	body.set("registers", std::move(registers));
+	const AssetGraph *graph = input.view.findings.graph.get();
+	const AssetScan *scan = input.view.project.scan.get();
 	if (!animating_) {
 		body.set("animation", JsonValue::make_null());
+		// The maps this model plays (S17): each item pairing it with one (its graphic, its anim_def).
+		JsonValue maps = JsonValue::make_array();
+		if (graph && scan && input.document)
+			for (const ModelAnimation &played : model_animations(*graph, *scan, input.document->path())) {
+				JsonValue row = JsonValue::make_object();
+				row.set("map", json_string(played.map));
+				row.set("record", json_string(played.record));
+				row.set("file", json_string(played.file));
+				maps.push(std::move(row));
+			}
+		body.set("animations", std::move(maps));
 		return body;
 	}
 	JsonValue animation = JsonValue::make_object();
@@ -925,19 +1064,83 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	animation.set("key", json_string(clip_key_));
 	animation.set("variant", json_number(clip_variant_));
 	animation.set("file", json_string(clip_file_));
+	animation.set("note", json_string(clip_note_));
 	animation.set("ticks", json_number(input.clock.ticks()));
+	// The clip's own clock (S17): the tick it plays (a repeated one-shot's taken again from 0), its
+	// frame, and both in seconds as the game's ticks pass.
+	const int32_t played = clip_ticks(input.clock);
+	const int32_t length = clip_length_ticks();
+	animation.set("clip_ticks", json_number(played));
 	animation.set("frame", json_number(clip_frame(input.clock)));
-	animation.set("length_ticks", json_number(clip_length_ticks()));
+	animation.set("frame_count", json_number(clip_frame_count()));
+	animation.set("fps", json_number(clip_fps()));
+	animation.set("seconds", json_number(played / io::kTickHz));
+	animation.set("length_ticks", json_number(length));
+	animation.set("length_seconds", json_number(length > 0 ? length / io::kTickHz : 0.0));
 	animation.set("loops", JsonValue::make_bool(clip_loops()));
+	animation.set("repeat", JsonValue::make_bool(options_.repeat));
 	JsonValue events = JsonValue::make_array();
 	for (const PreviewClipEvent &event : clip_events_) {
 		JsonValue row = JsonValue::make_object();
 		row.set("frame", json_number(event.frame));
 		row.set("tick", json_number(event.tick));
 		row.set("trigger", json_number(double(event.trigger)));
+		row.set("words", json_string(animation_trigger_words(event.trigger)));
 		events.push(std::move(row));
 	}
 	animation.set("events", std::move(events));
+	// The rig's bones as the clip poses them now: each by its name, its parent, where its joint
+	// stands and its pixel on the picture.
+	JsonValue bones = JsonValue::make_array();
+	for (const PreviewJoint &joint : joints(input.clock)) {
+		JsonValue row = JsonValue::make_object();
+		row.set("bone", json_number(joint.bone));
+		row.set("name", json_string(joint.name));
+		row.set("parent", json_number(joint.parent));
+		row.set("position", vec3(joint.at));
+		float x = 0.0f, y = 0.0f;
+		if (camera_.project(joint.at, size().width, size().height, x, y)) {
+			JsonValue screen = JsonValue::make_array();
+			screen.push(json_number(x));
+			screen.push(json_number(y));
+			row.set("screen", std::move(screen));
+		} else {
+			row.set("screen", JsonValue());
+		}
+		bones.push(std::move(row));
+	}
+	animation.set("bones", std::move(bones));
+	// Who plays it and what for (S17): a map's players (the items and weapons naming it, each item's
+	// model) and what the game does with the selected row; a clip's uses (the maps and slots naming it).
+	const Document *document = input.document ? records_of(*input.document) : nullptr;
+	JsonValue players = JsonValue::make_array();
+	JsonValue uses = JsonValue::make_array();
+	JsonValue notes = JsonValue::make_array();
+	if (const auto *map = dynamic_cast<const AnimationMapDocument *>(document)) {
+		if (graph && scan)
+			for (const MapPlayer &player : map_players(*graph, *scan, map->path())) {
+				JsonValue row = JsonValue::make_object();
+				row.set("record", json_string(player.record));
+				row.set("file", json_string(player.file));
+				row.set("model", json_string(player.model));
+				row.set("first_person", JsonValue::make_bool(player.first_person));
+				players.push(std::move(row));
+			}
+		if (input.view.documents.active == map->path())
+			for (const std::string &note : map_row_notes(*map, input.view.documents.selection.primary))
+				notes.push(json_string(note));
+	} else if (document && graph && scan) {
+		for (const ClipUse &use : clip_uses(*graph, *scan, document->path())) {
+			JsonValue row = JsonValue::make_object();
+			row.set("map", json_string(use.map));
+			row.set("key", json_string(use.key));
+			row.set("words", json_string(use.words));
+			uses.push(std::move(row));
+		}
+	}
+	animation.set("players", std::move(players));
+	animation.set("uses", std::move(uses));
+	animation.set("notes", std::move(notes));
 	body.set("animation", std::move(animation));
 	return body;
 }
