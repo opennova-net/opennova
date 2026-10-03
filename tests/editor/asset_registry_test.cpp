@@ -150,6 +150,12 @@ static int test_classification() {
 static int test_name_rules() {
 	TEST_EXPECT(normalized_logical_name("main.mnu") == "MAIN.MNU");
 	TEST_EXPECT(normalized_logical_name("Main.MNU  ") == "MAIN.MNU");
+	// The whole text, however long: a filter compares a record's text by it, so a word past its 255th
+	// byte is found (it stopped there before).
+	const std::string long_text = std::string(300, 'x') + " needle";
+	TEST_EXPECT(normalized_logical_name(long_text) == std::string(300, 'X') + " NEEDLE");
+	TEST_EXPECT(normalized_logical_name(long_text).find(normalized_logical_name("needle")) != std::string::npos);
+	TEST_EXPECT(normalized_logical_name(std::string("ab\0cd", 5)) == "AB");
 	TEST_EXPECT(logical_name_fits_archive("sixteen_chars.pf"));
 	TEST_EXPECT(!logical_name_fits_archive("seventeen_char.pff"));
 	TEST_EXPECT(!logical_name_fits_archive("   "));

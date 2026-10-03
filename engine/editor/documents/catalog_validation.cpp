@@ -15,10 +15,12 @@ constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
 	{ CatalogFinding::InvalidInput, { "catalog.invalid_input", FindingFix::None, nullptr, true } },
 	{ CatalogFinding::IgnoredInput, { "catalog.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
 	{ CatalogFinding::Unserializable, { "catalog.unserializable", FindingFix::None, nullptr, true } },
-	{ CatalogFinding::NameEmpty, { "catalog.name_empty" } },
+	// A record with no name, an item of type 0: the editor's own rules, no refusal of the game's
+	// witnessed (the gate follows retail, ADR 0046 S14): listed.
+	{ CatalogFinding::NameEmpty, listed_code("catalog.name_empty") },
 	{ CatalogFinding::NameDuplicate, { "catalog.name_duplicate" } },
 	{ CatalogFinding::ItemIdentity, { "catalog.item_identity" } },
-	{ CatalogFinding::ItemType, { "catalog.item_type" } },
+	{ CatalogFinding::ItemType, listed_code("catalog.item_type") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(CatalogFinding::kCount),
 		"every CatalogFinding has exactly one row");

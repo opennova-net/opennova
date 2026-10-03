@@ -372,6 +372,99 @@ static int test_lifecycle() {
 	return 0;
 }
 
+// A project under folders named outside ASCII (a user's own folder, C:/Users/José/..., a name in
+// another script): the editor keeps every path as UTF-8, as the Shell hands it over (String.utf8())
+// and the process seam widens it (CP_UTF8), so the project is made, listed, imported into, built and
+// played where its path says, and a file named so is listed by that name. Checked through the
+// system's own UTF-16 names (base/io/os_path.h), not the editor's conversions.
+static int test_utf8_project_path() {
+	namespace io = opennova::io;
+	editor_test::TempProjectDir dir("opennova_editor_Jos\xC3\xA9_\xE3\x83\xA2\xE3\x83\x87\xE3\x83\xAB"); // José_モデル
+	FakePlatform platform;
+	FilePreferencesStore preferences(dir.file("settings/editor.json"));
+	ProjectSession session(platform, preferences);
+	const std::string root = dir.file("Mon jeu \xC3\xA9t\xC3\xA9"); // "Mon jeu été"
+	TEST_EXPECT(session.handle(request::new_project(root, "Mon jeu")));
+	session.run_operations();
+	const SessionView &v = session.view();
+	TEST_EXPECT(session.project_open() && v.project.root == root);
+	TEST_EXPECT(fs::is_regular_file(io::os_path(root + "/" + kProjectFileName)));
+	TEST_EXPECT(fs::is_regular_file(io::os_path(dir.file("settings/editor.json"))));
+	TEST_EXPECT(v.project.recent_projects.size() == 1 && v.project.recent_projects[0] == root);
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(v.project.requirements->required_missing == 0 && v.project.requirements->required_wrong_kind == 0);
+	TEST_EXPECT(fs::is_regular_file(io::os_path(root + "/menus/main.mnu")));
+
+	// A file named outside ASCII is listed by its name; a loose file and an archive's member, both
+	// from a folder named so, are imported.
+	const std::string note = "notes_\xE3\x83\xA2.txt"; // notes_モ.txt
+	TEST_EXPECT(editor_test::write_text(root + "/" + note, "a note"));
+	const std::string loose = dir.file("sources \xC3\xA9/loose.txt");
+	const std::string packed = dir.file("sources \xC3\xA9/source.pff");
+	TEST_EXPECT(editor_test::write_text(loose, "loose file"));
+	const uint8_t data[] = {'p', 'a', 'c', 'k', 'e', 'd'};
+	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", data, sizeof(data), 0, 0, 0}};
+	TEST_EXPECT(opennova::pff::pff_write_archive(packed.c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	TEST_EXPECT(fs::is_regular_file(io::os_path(packed)));
+	EditorRequest importing = request::of(EditorRequestKind::ImportFiles);
+	importing.imports = {{loose, {}}, {packed, "note.txt"}};
+	session.handle(importing);
+	session.run_operations();
+	TEST_EXPECT(session.outcome().done());
+	TEST_EXPECT(v.project.scan->find(note) && v.project.scan->find(note)->relative_path == note);
+	TEST_EXPECT(v.project.scan->find("loose.txt") && v.project.scan->find("note.txt"));
+	std::string text, error;
+	TEST_EXPECT(read_file_text(root + "/note.txt", text, error) && text == "packed");
+	TEST_EXPECT(fs::is_regular_file(io::os_path(root + "/loose.txt")));
+
+	// The build lands under the project, and Play stages and spawns there: every path the plan
+	// hands the process is the project's own UTF-8 path.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::build()).done());
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok);
+	const std::string built = v.activity.has_build ? v.activity.last_build->build_dir : std::string();
+	TEST_EXPECT(built.rfind(root + "/.opennova/build/play/", 0) == 0);
+	TEST_EXPECT(fs::is_regular_file(io::os_path(built + "/localres.pff")));
+	const std::string runtime = dir.file("runtime \xC3\xA9/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	launcher.mcp_port = 8999;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running);
+	const std::string run_dir = root + "/.opennova/run/1";
+	const LaunchPlan &plan = platform.last_plan;
+	TEST_EXPECT(plan.executable == runtime && plan.working_dir == run_dir && plan.build_dir == built);
+	TEST_EXPECT(plan.log_file == run_dir + "/session.log");
+	const auto follows = [&](const char *flag, const std::string &value) {
+		const auto at = std::find(plan.args.begin(), plan.args.end(), flag);
+		return at != plan.args.end() && std::next(at) != plan.args.end() && *std::next(at) == value;
+	};
+	TEST_EXPECT(follows("--log-file", run_dir + "/session.log") && follows("--resource-dir", built));
+	TEST_EXPECT(fs::is_directory(io::os_path(run_dir)) && fs::is_regular_file(io::os_path(run_dir + "/run.json")));
+	TEST_EXPECT(output_has(v, "Running: "));
+	platform.codes[500] = 0;
+	platform.exit_child(500);
+	session.poll();
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
+
+	// Closed and opened again from the editor's settings file, by the path it keeps.
+	session.handle(request::close_project());
+	{
+		FakePlatform other;
+		FilePreferencesStore again_preferences(dir.file("settings/editor.json"));
+		ProjectSession again(other, again_preferences);
+		TEST_EXPECT(again.view().project.recent_projects.size() == 1 && again.view().project.recent_projects[0] == root);
+		TEST_EXPECT(again.handle(request::open_project(root)));
+		again.run_operations();
+		TEST_EXPECT(again.project_open() && again.view().project.document->title == "Mon jeu");
+		TEST_EXPECT(again.view().project.scan->find(note) != nullptr);
+	}
+	return 0;
+}
+
 static int test_import() {
 	editor_test::TempProjectDir dir("opennova_editor_import_test");
 	FakePlatform platform;
@@ -941,6 +1034,52 @@ static int test_requests_that_cannot_run() {
 	return 0;
 }
 
+// A request's words are its own: Play over the command line's process seam (NullProcessPlatform,
+// which starts no game) says that session starts none, never that Play is Windows-only; an Open,
+// a Reload and a Create say on the status line what they did, or that they did not, never the line
+// an earlier request left.
+static int test_status_says_the_request() {
+	editor_test::TempProjectDir dir("opennova_editor_session_status_line");
+	opennova::editor::NullProcessPlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Status"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+
+	session.handle(request::play());
+	TEST_EXPECT(!session.outcome().done() && !v.findings.diagnostics.empty() &&
+	            v.findings.diagnostics.back().code() == "play.unsupported");
+	const std::string play = v.findings.diagnostics.empty() ? std::string() : v.findings.diagnostics.back().message;
+	TEST_EXPECT(play.find("Windows-only") == std::string::npos && play.find("starts no game") != std::string::npos);
+	TEST_EXPECT(v.activity.status == "Play is not available here: see Problems.");
+
+	// An Open after a line another request left: its own line.
+	session.handle(request::open_document("main.mnu"));
+	const DocumentBase *menu = session.document_base_for("main.mnu");
+	TEST_EXPECT(menu != nullptr && session.outcome().done());
+	if (!menu) return 1;
+	const std::string menu_path = menu->path();
+	TEST_EXPECT(v.activity.status == "Opened " + menu_path + ".");
+	session.handle(request::create_missing({}));
+	session.handle(request::open_document("main.mnu"));
+	TEST_EXPECT(v.activity.status == "Showing " + menu_path + ".");
+	session.handle(request::reload_document("main.mnu"));
+	TEST_EXPECT(v.activity.status == "Reloaded " + menu_path + ".");
+	session.handle(request::open_document("nowhere.mnu"));
+	TEST_EXPECT(!session.outcome().done() && v.activity.status == "nowhere.mnu could not be opened: see Problems.");
+
+	// A Create: made and opened, or refused.
+	session.handle(request::create_file("extra.mnu", "menu"));
+	const DocumentBase *extra = session.document_base_for("extra.mnu");
+	TEST_EXPECT(session.outcome().done() && extra != nullptr);
+	TEST_EXPECT(extra && v.activity.status == "Created " + extra->path() + ".");
+	session.handle(request::create_file("extra.zzq", ""));
+	TEST_EXPECT(!session.outcome().done() && v.activity.status == "extra.zzq was not created: see Problems.");
+	return 0;
+}
+
 // After a rename the document the modder was in stays active: a document the rename
 // reloaded does not take over, an untouched one keeps its selection, and the renamed
 // file's own document follows it to the new name.
@@ -1199,8 +1338,9 @@ static int test_validation_cost() {
 	            items->dirty() == dirty_now);
 
 	// An unsaved edit that errs: Build waits on the unsaved prompt (the edit's finding listed at
-	// the poll); the prompt's Save writes the file and builds, and the plan gates on the session's
-	// own findings.
+	// the poll); the prompt's Save writes the file and builds over the session's own findings, which
+	// gate where the game refuses: an item of type 0 is the editor's own rule (listed, S14, the build
+	// follows retail), so the build lands with it listed.
 	set("type", int64_t(0));
 	session.handle(request::build());
 	TEST_EXPECT(!session.view().activity.operation.running() && v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::Build);
@@ -1214,12 +1354,12 @@ static int test_validation_cost() {
 	TEST_EXPECT(!items->dirty() && !v.dialogs.unsaved_prompt.open &&
 			session.view().activity.operation.running());
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && has_code(v.activity.last_build->diagnostics, "catalog.item_type"));
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && has_code(v.findings.diagnostics, "catalog.item_type"));
 	set("type", int64_t(4));
 	session.handle(request::save());
 	session.handle(request::build());
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok);
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !has_code(v.findings.diagnostics, "catalog.item_type"));
 
 	// A closed file changed on disk (another size) is read again at the next refresh,
 	// alone; a file that does not load keeps its finding while it stays as it is.
@@ -1267,7 +1407,8 @@ static int test_validation_cost() {
 			stats.files_reused == editable - 1);
 
 	// Build packs the files on disk: a clean open document whose file changed outside the
-	// editor is read again before the gate, so the gate sees what the build packs.
+	// editor is read again before the gate, so the gate sees what the build packs (here an item of
+	// type 0, the editor's own rule: listed, S14, so the build lands with its finding read).
 	Document *held = session.document_for("items.def");
 	TEST_EXPECT(held != nullptr && !held->dirty() && !held->rows().empty());
 	if (!held || held->rows().empty()) return 1;
@@ -1288,7 +1429,7 @@ static int test_validation_cost() {
 	TEST_EXPECT(!held->matches_file() && !has_code(v.findings.diagnostics, "catalog.item_type"));
 	session.handle(request::build());
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && has_code(v.activity.last_build->diagnostics, "catalog.item_type"));
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok);
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.item_type"));
 	held = session.document_for("items.def"); // read again: a new document
 	TEST_EXPECT(held != nullptr && !held->dirty() && held->matches_file());
@@ -2897,44 +3038,51 @@ static int test_build_findings_stay() {
 			!has_code(v.findings.diagnostics, "build.blocked"));
 
 	// The build's own findings are those its report adds to the rows it was gated on, not to
-	// the rows when it ends: an item type of zero, saved, blocks the build; corrected while it
-	// packs, the old blocker is not kept (and not listed twice once it is back).
-	const AssetEntry *items_entry = v.project.scan->find("items.def");
-	TEST_EXPECT(items_entry != nullptr);
-	if (!items_entry) return 1;
-	const std::string items_path = items_entry->relative_path;
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/" + items_path, "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	// the rows when it ends: a mission's terrain naming nothing, saved, blocks the build (the game
+	// refuses to start the mission, and the build follows retail, S14); corrected while it packs, the
+	// old blocker is not kept (and not listed twice once it is back).
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/terrain/island.trn", "trn") &&
+	            editor_test::write_text(v.project.root + "/day.env", "env"));
 	session.handle(request::rescan());
 	session.run_operations();
-	session.handle(request::open_document(items_path));
-	const Document *items = session.document_for(items_path);
-	TEST_EXPECT(items != nullptr && !items->rows().empty());
-	if (!items || items->rows().empty()) return 1;
-	const auto set_type = [&](int64_t type) {
-		EditorRequest edit = request::edit_record(items->path(), Edit());
-		edit.edits[0].address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
-		edit.edits[0].field = "type";
-		edit.edits[0].value = type;
+	session.handle(request::create_file("gate.bms", "", { { "terrain", "island" }, { "environment", "day" } }));
+	session.run_operations();
+	const Document *mission = session.document_for("gate.bms");
+	TEST_EXPECT(mission != nullptr && !mission->rows().empty());
+	if (!mission || mission->rows().empty()) return 1;
+	const auto terrain_missing = [](const std::vector<Diagnostic> &rows) {
+		size_t found = 0;
+		for (const Diagnostic &d : rows) {
+			const ReferenceSubject *subject = reference_subject(d);
+			found += d.code() == "reference.missing" && subject && subject->kind == ReferenceKind::Terrain ? 1 : 0;
+		}
+		return found;
+	};
+	const auto set_terrain = [&](const char *name) {
+		EditorRequest edit = request::edit_record(mission->path(), Edit());
+		edit.edits[0].address = {mission->rows()[0]->id, mission->rows()[0]->kind, 0};
+		edit.edits[0].field = "terrain";
+		edit.edits[0].value = std::string(name);
 		session.handle(edit);
 	};
-	set_type(0);
-	session.handle(request::save(items->path()));
+	set_terrain("nowhere");
+	session.handle(request::save(mission->path()));
 	session.run_operations(); // the validation the save left due
-	TEST_EXPECT(!items->dirty() && count_code(v.findings.diagnostics, "catalog.item_type") == 1);
+	TEST_EXPECT(!mission->dirty() && terrain_missing(v.findings.diagnostics) == 1);
 	session.handle(request::build());
 	TEST_EXPECT(session.view().activity.operation.running());
-	set_type(4);
+	set_terrain("island");
 	// The polls validate the edit while the build packs (S13 A3: no request runs it).
 	while (v.activity.validation.running) session.poll();
-	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.item_type"));
+	TEST_EXPECT(terrain_missing(v.findings.diagnostics) == 0);
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && has_code(v.activity.last_build->diagnostics, "catalog.item_type"));
-	TEST_EXPECT(count_code(v.findings.diagnostics, "build.blocked") == 1 && !has_code(v.findings.diagnostics, "catalog.item_type"));
-	set_type(0);
+	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && terrain_missing(v.activity.last_build->diagnostics) == 1);
+	TEST_EXPECT(count_code(v.findings.diagnostics, "build.blocked") == 1 && terrain_missing(v.findings.diagnostics) == 0);
+	set_terrain("nowhere");
 	while (v.activity.validation.running) session.poll();
-	TEST_EXPECT(count_code(v.findings.diagnostics, "catalog.item_type") == 1 && count_code(v.findings.diagnostics, "build.blocked") == 1);
-	session.handle(request::undo(items->path()));
-	session.handle(request::undo(items->path()));
+	TEST_EXPECT(terrain_missing(v.findings.diagnostics) == 1 && count_code(v.findings.diagnostics, "build.blocked") == 1);
+	session.handle(request::undo(mission->path()));
+	session.handle(request::undo(mission->path()));
 
 	// A build still packing when another project opens is cancelled (S13 A1: a project switch
 	// cancels the running operation), and nothing of it reaches the new project: no build, none
@@ -4016,9 +4164,11 @@ int main() {
 	failures += test_retail_play();
 	failures += test_import();
 	failures += test_lifecycle();
+	failures += test_utf8_project_path();
 	failures += test_outcomes_and_refusals();
 	failures += test_validation_cost();
 	failures += test_requests_that_cannot_run();
+	failures += test_status_says_the_request();
 	failures += test_rename_keeps_the_active_document();
 	failures += test_preview_target();
 	failures += test_project_settings();
