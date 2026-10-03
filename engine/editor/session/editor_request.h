@@ -81,7 +81,8 @@ enum class PickPurpose {
 	OpenProject,
 	RuntimeExecutable,
 	GameInstall,
-	ImportFiles
+	ImportFiles,
+	BuildFolder // Build > Build to folder...: where a build for players lands
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited

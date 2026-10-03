@@ -38,8 +38,6 @@ template <class T> struct Choice {
 	const char *label;
 	T value;
 };
-constexpr Choice<ProblemScope> kScopes[] = {{"Project", ProblemScope::Project},
-	{"Active file", ProblemScope::ActiveFile}, {"Open files", ProblemScope::OpenFiles}};
 constexpr Choice<ProblemGrouping> kGroupings[] = {
 	{"None", ProblemGrouping::None}, {"File", ProblemGrouping::File}, {"Kind", ProblemGrouping::Kind}};
 
@@ -147,19 +145,33 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	ui_kit::filter_box("##filter", text_, sizeof(text_), "Filter", filter,
 	                   "Only the problems whose message, file, record, field or code has this text.");
 	query.text = text_;
-	choice_combo(row, "Scope", kScopes, query.scope,
-	             "Which files' problems: the project's, the active file's, the open files'.");
-	// The active file's alone, one click (S15): on, the button lit; again, the whole project's.
-	if (!view.documents.active.empty()) {
-		const bool only = query.scope == ProblemScope::ActiveFile;
-		const std::string label = "Only " + basename_of(view.documents.active) + "###only_active";
-		row.next(ui_kit::button_width(label.c_str()));
-		if (only) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-		if (ImGui::Button(label.c_str())) query.scope = only ? ProblemScope::Project : ProblemScope::ActiveFile;
-		if (only) ImGui::PopStyleColor();
-		ui_kit::tooltip(only ? "Showing the active file's problems alone: click for the whole project's."
-		                     : "Only the active file's problems (Scope: Active file).");
+	// Whose problems, one control (the UX round's problems lane: a Scope combo beside an "Only <file>"
+	// button read like two states): the whole project's, the active file's (by its name, one click: S15),
+	// the open files'; the lit one is the scope.
+	struct Scope {
+		std::string label;
+		ProblemScope scope;
+		std::string tip;
+	};
+	std::vector<Scope> scopes = {{"Whole project###scope_project", ProblemScope::Project, "Every problem of the project."}};
+	if (!view.documents.active.empty())
+		scopes.push_back({basename_of(view.documents.active) + "###scope_active", ProblemScope::ActiveFile,
+		                  "Only the problems of " + view.documents.active + ", the active file."});
+	scopes.push_back({"Open files###scope_open", ProblemScope::OpenFiles, "Only the problems of the files open in Document."});
+	if (query.scope == ProblemScope::ActiveFile && view.documents.active.empty()) query.scope = ProblemScope::Project;
+	float scopes_width = 0.0f;
+	for (const Scope &scope : scopes) scopes_width += ui_kit::button_width(scope.label.c_str()) + 1.0f;
+	row.next(scopes_width);
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, ImGui::GetStyle().ItemSpacing.y));
+	for (size_t i = 0; i < scopes.size(); ++i) {
+		const bool lit = query.scope == scopes[i].scope;
+		if (i) ImGui::SameLine();
+		ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(lit ? ImGuiCol_ButtonActive : ImGuiCol_FrameBg));
+		if (ImGui::Button(scopes[i].label.c_str())) query.scope = scopes[i].scope;
+		ImGui::PopStyleColor();
+		ui_kit::tooltip(scopes[i].tip);
 	}
+	ImGui::PopStyleVar();
 	choice_combo(row, "Group", kGroupings, query.grouping,
 	             "Group the problems by file or by kind, or list them as one.");
 	row.next(ui_kit::checkbox_width("Only fixable"));

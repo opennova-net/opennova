@@ -228,6 +228,14 @@ constexpr QueryParam kCursorParams[] = {
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
 
+constexpr QueryParam kOutputParams[] = {
+	{ "cursor", J::Integer, false, "0", kCursorDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+	{ "unfold", J::Integer, false, nullptr,
+			"A line's absolute index: the lines folded under it instead (an import's files, the game's log), "
+			"a page of them from cursor (here their own index, 0 the first)." },
+};
+
 constexpr QueryParam kImportPreviewParams[] = {
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
@@ -861,8 +869,16 @@ JsonValue answer_import_preview(const QueryContext &context, const QueryArgs &ar
 	return import_preview_to_json(context.core.view(), page_of(args), kind);
 }
 
-JsonValue answer_output(const QueryContext &context, const QueryArgs &args, std::string &) {
-	return output_page_to_json(context.core.view().activity.output, args.cursor(), args.limit());
+JsonValue answer_output(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const OutputLog &output = context.core.view().activity.output;
+	if (!args.has("unfold")) return output_page_to_json(output, args.cursor(), args.limit());
+	const int64_t at = args.integer("unfold");
+	if (at < 0 || uint64_t(at) < output.first_index() || uint64_t(at) >= output.next_index()) {
+		error = "no line " + std::to_string(at) + " is held (the lines held are " + std::to_string(output.first_index()) +
+		        " to " + std::to_string(int64_t(output.next_index()) - 1) + ").";
+		return JsonValue::make_null();
+	}
+	return output_folded_to_json(output, uint64_t(at), args.cursor(), args.limit());
 }
 
 JsonValue answer_operation(const QueryContext &context, const QueryArgs &, std::string &) {
@@ -1375,11 +1391,13 @@ constexpr EditorQueryRow kRows[] = {
 			"project has defines, its own being kept (shadowed), truncated and the plan's findings.")
 			.pages("rows")
 			.row,
-	Query(K::Output, "output", answer_output, kCursorParams, concern_set({ C::Output }),
+	Query(K::Output, "output", answer_output, kOutputParams, concern_set({ C::Output }),
 			"A page of the output lines by absolute index: first (the oldest held), next (one "
 			"past the newest), cursor (the page's first) and next_cursor. Paging by next_cursor "
 			"repeats no line; the log keeps its last 2000, so a client more than 2000 lines behind "
-			"misses the lines dropped, the cursor coming back larger than it asked.")
+			"misses the lines dropped, the cursor coming back larger than it asked. A line with others "
+			"folded under it (an import's files, the game's log) is listed in folded ({at, count}); "
+			"unfold pages them.")
 			.pages("lines")
 			.row,
 	Query(K::Operation, "operation", answer_operation, concern_set({ C::Operation }),

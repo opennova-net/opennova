@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -87,6 +88,14 @@ public:
 	// The open edit group (a coalesced burst of typing, a gesture) ends: the next edit is a step
 	// of its own.
 	virtual void end_edit_group() = 0;
+	// What each step did, in words (the UX round's problems lane): the session names the step an edit
+	// made with the status line's words for it ("Set hp of Drivable Dune Buggy to 120"), a fold of the
+	// same group renaming it; what Undo and Redo then say they did, and what the Edit menu's items name.
+	// undo_words: the step Undo would take back; redo_words: the step Redo would make again; "" for none,
+	// or a step no words were given. A load forgets them.
+	void name_step(std::string words);
+	std::string undo_words() const;
+	std::string redo_words() const;
 	// The history, opaque to the lifecycle: whether the document differs from its saved
 	// checkpoint (dirty: an undo back to it makes the document clean again), whether a step can
 	// be undone or redone, the number of the state it is in (revision: a later state has a
@@ -190,6 +199,10 @@ private:
 	std::vector<SourceIssue> issues_;
 	bool blocked_ = false, wrote_file_ = false, snapshot_ = false;
 	uint64_t file_fingerprint_ = 0;
+	// Each step's words by the revision it made (revisions are never given twice within a load), and
+	// the revisions Redo goes back to, the next one last.
+	std::map<uint64_t, std::string> step_words_;
+	std::vector<uint64_t> redo_revisions_;
 };
 
 } // namespace opennova::editor

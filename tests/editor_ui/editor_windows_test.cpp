@@ -57,6 +57,7 @@
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/inspector_window.h>
 #include <editor/ui/menu_view.h>
+#include <editor/ui/output_window.h>
 #include <editor/ui/preview_window.h>
 #include <editor/ui/styles_view.h>
 #include <editor/ui/problems_window.h>
@@ -1632,11 +1633,11 @@ void test_problems_window_ui() {
 	CHECK(listed(ui).size() == 5, "the text cleared: every finding");
 
 	// The scope: the active menu's, the open menus', the project's.
-	pick("Scope", "Active file");
+	ui.activate(item_id(window, {"a.mnu###scope_active"}));
 	CHECK(listed(ui) == List({"Bravo:"}), "the active file's");
-	pick("Scope", "Open files");
+	ui.activate(item_id(window, {"Open files###scope_open"}));
 	CHECK(listed(ui) == List({"Bravo:", "Charlie:"}), "the open files'");
-	pick("Scope", "Project");
+	ui.activate(item_id(window, {"Whole project###scope_project"}));
 	CHECK(listed(ui).size() == 5, "the project's");
 
 	// The grouping: a header per file (the project's own findings first), then per kind; a
@@ -2086,16 +2087,17 @@ void test_problems_original() {
 	ui.frames(2);
 	text = logged_frame(ui);
 	CHECK(text.find("Charlie:") != std::string::npos && text.find("Echo:") != std::string::npos, "opened: its findings");
-	ui.activate(item_id(Ui::window_id("Problems"), {"Only mine.def###only_active"}));
+	// The scope, one control: the active file by its name, one click; the whole project's again.
+	ui.activate(item_id(Ui::window_id("Problems"), {"mine.def###scope_active"}));
 	ui.away();
 	text = logged_frame(ui);
 	CHECK(text.find("Alpha:") != std::string::npos && text.find("Charlie:") == std::string::npos &&
 	              text.find(kOriginalGroupTitle) == std::string::npos,
-	      "Only mine.def: the active file's alone, one click");
-	ui.activate(item_id(Ui::window_id("Problems"), {"Only mine.def###only_active"}));
+	      "mine.def: the active file's alone, one click");
+	ui.activate(item_id(Ui::window_id("Problems"), {"Whole project###scope_project"}));
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(text.find("Charlie:") != std::string::npos, "again: the whole project's");
+	CHECK(text.find("Charlie:") != std::string::npos, "the whole project's again");
 	CHECK(ui.windows.pending_requests() == 0, "drawing raises nothing");
 }
 
@@ -2600,8 +2602,48 @@ void run_styles_tests() {
 	test_styles_window_ui();
 	test_styles_lines_listed();
 }
+// Output's folded lines (the UX round's problems lane): an import's files under its one line and the
+// game's log under its own, a click opening one; the rows the window draws, opened and not; the log's
+// fold_into making a line's text and folded lines grow in place, one past its hold refused.
+void test_output_folded() {
+	OutputLog log;
+	log.append("Opened Folded.");
+	const uint64_t import = log.append_folded("Imported 3 files (1.0 KB): Menu 3.", {"Imported a.mnu", "Imported b.mnu", "Imported c.mnu"});
+	const uint64_t game = log.append_folded("Running: OpenNova on the build.", {"Command line: x"});
+	CHECK(log.fold_into(game, "Running: OpenNova on the build. Its log: 2 lines, 1 shown below.", {"banner", "error: x"}),
+	      "the game's line grows in place");
+	log.append("game: error: x");
+	CHECK(log.folded_at(game).size() == 3 && log.at(game).find("2 lines") != std::string::npos, "its text and lines");
+	CHECK(OutputWindow::rows(log, {}).size() == 4, "folded: one row a line");
+	const std::vector<std::pair<uint64_t, int64_t>> open = OutputWindow::rows(log, {import});
+	CHECK(open.size() == 7 && open[2] == std::make_pair(import, int64_t(0)) && open[4] == std::make_pair(import, int64_t(2)),
+	      "an import opened: its files under it");
+	CHECK(game_line_matters("USER ERROR: x") && game_line_matters("boot-required resource missing: main.mnu") &&
+	              !game_line_matters("PFF LOADED FILE: _ffp.fx") && !game_line_matters("Godot Engine v4.6.1"),
+	      "what of the game's log shows: errors, warnings, refusals and missing files");
+	log.clear();
+	CHECK(!log.fold_into(game, "gone", {"x"}), "a line the log no longer holds takes nothing");
+
+	// Drawn: the folded line with its count, a click opening it.
+	SessionView v;
+	v.project.open = true;
+	v.project.root = "C:/mods/Folded";
+	v.activity.output.append("Opened Folded.");
+	v.activity.output.append_folded("Imported 2 files (1.0 KB): Menu 2.", {"Imported a.mnu", "Imported b.mnu"});
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.focus("Output");
+	ui.away();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Imported 2 files (1.0 KB): Menu 2.  (2 lines)") != std::string::npos && text.find("Imported a.mnu") == std::string::npos,
+	      "the import's one line, its files folded");
+	CHECK(ui.windows.pending_requests() == 0, "drawing raises nothing");
+}
+
 void run_problems_tests() {
 	test_ui_kit();
+	test_output_folded();
 	test_problems_window_ui();
 	test_problems_confirmation_follows();
 	test_problems_narrow();

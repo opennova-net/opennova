@@ -14,6 +14,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/field_text.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/run/run_directory.h>
@@ -267,7 +268,12 @@ void PlayController::start(const std::string &mission) {
 	view_.activity.play_command_line = launch_plan_command_line(plan);
 	view_.activity.play_exited_on_its_own = false;
 	view_.activity.play_exit_code = -1;
-	core_.note("Running: " + view_.activity.play_command_line);
+	// One line for the game, its command line and its whole log folded under it; what matters of the log
+	// (an error, a warning, a file it lacks) shown below it as it comes (the UX round's problems lane).
+	game_name_ = in_install ? "the game install" : "OpenNova";
+	game_lines_ = 0;
+	game_shown_ = 0;
+	game_line_ = core_.note_folded(game_words(), {"Command line: " + view_.activity.play_command_line});
 	view_.activity.status = in_install                          ? "Game install running."
 	                        : view_.activity.play_mission.empty() ? "Game running."
 	                                                              : "Game running: " + view_.activity.play_mission + ".";
@@ -332,19 +338,37 @@ void PlayController::tail_game_log() {
 	game_log_offset_ = static_cast<uint64_t>(size);
 	game_log_partial_ += chunk;
 	size_t start = 0;
+	std::vector<std::string> folded;
 	for (;;) {
 		const size_t nl = game_log_partial_.find('\n', start);
 		if (nl == std::string::npos) break;
 		std::string line = game_log_partial_.substr(start, nl - start);
 		if (!line.empty() && line.back() == '\r') line.pop_back();
-		core_.note("game: " + line);
+		// Every line folded under the game's line; one that matters shown as well.
+		++game_lines_;
+		if (game_line_matters(line)) {
+			++game_shown_;
+			core_.note("game: " + line);
+		}
+		folded.push_back(line);
 		absorb_boot_report(line);
 		absorb_mission_report(line);
 		start = nl + 1;
 	}
 	game_log_partial_.erase(0, start);
+	// The game's line says how much its log holds; one Output no longer holds starts again below.
+	if (!folded.empty() && !core_.fold_into_note(game_line_, game_words(), folded))
+		game_line_ = core_.note_folded(game_words(), std::move(folded));
 	// The names the lines reported become their rows in the validation they left due
 	// (absorb_boot_report), which the polls step (S13 A3).
+}
+
+// "Running: OpenNova on the build. Its log: 412 lines, 3 shown below; open this line for all of it."
+std::string PlayController::game_words() const {
+	std::string out = "Running: " + game_name_ + " on the build.";
+	if (game_lines_ == 0) return out + " Its log follows, folded under this line.";
+	return out + " Its log: " + counted(game_lines_, "line") + ", " + std::to_string(game_shown_) +
+	       " shown below; open this line for all of it.";
 }
 
 // The runtime names each boot-required file it could not find, one line per file

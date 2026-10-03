@@ -129,20 +129,29 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 	}
 	// Reported last: the scan's update and the reloads above leave the rows' validation due.
 	for (const Diagnostic &d : transaction.findings()) core_.report(d);
+	// Undo does not take a rename back (it rewrote files): the way back is said, and the Edit menu offers
+	// the rename back (the UX round's problems lane).
+	const auto way_back = [](const std::string &from, const std::string &to) {
+		return " Undo does not take it back: Edit > Rename " + to + " back to " + from + " does.";
+	};
 	if (ok && operation.symbol()) {
 		const SymbolRenamePlan &plan = operation.symbol_plan();
 		const size_t uses = plan.sites.size() - 1;
 		core_.note("Renamed " + std::string(reference_row(plan.kind).phrase) + " " + plan.old_name + " to " + plan.new_name +
-		           " (" + std::to_string(uses) + " use" + (uses == 1 ? "" : "s") + " rewritten)");
+		           " (" + std::to_string(uses) + " use" + (uses == 1 ? "" : "s") + " rewritten)." +
+		           way_back(plan.old_name, plan.new_name));
 		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + " everywhere.";
+		view_.activity.last_rename = {true, true, plan.file, plan.locator, plan.field, plan.old_name, plan.new_name};
 	} else if (ok) {
 		const RenamePlan &plan = operation.file_plan();
 		std::string companions;
 		for (const RenameOutput &companion : plan.companions)
 			companions += (companions.empty() ? ", with " : ", ") + companion.old_name + " to " + companion.new_name;
 		core_.note("Renamed " + plan.old_name + " to " + plan.new_name + " (" + std::to_string(plan.sites.size()) +
-		           " reference" + (plan.sites.size() == 1 ? "" : "s") + " rewritten" + companions + ")");
+		           " reference" + (plan.sites.size() == 1 ? "" : "s") + " rewritten" + companions + ")." +
+		           way_back(plan.old_name, plan.new_name));
 		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + ".";
+		view_.activity.last_rename = {true, false, plan.new_path, std::string(), std::string(), plan.old_name, plan.new_name};
 	} else {
 		view_.activity.status = "The rename did not finish.";
 	}
@@ -172,15 +181,19 @@ bool RenameController::saved_file_uses(const std::string &path, const SymbolRena
 // validation it joins has ended; a preview's and the unsaved guard's read the graph as it stands.
 SymbolRenamePlan RenameController::plan_symbol(const EditorRequest &request) {
 	const AssetGraph &graph = core_.problems().graph();
-	const GraphSymbol *symbol = graph.symbol_at(request.path, request.locator, request.field);
+	// The file as every other request names it: its project-relative path, or its name alone (the
+	// graph keys a file's symbols by its path).
+	const AssetEntry *file = view_.project.open ? core_.project_file(request.path) : nullptr;
+	const std::string path = file ? file->relative_path : request.path;
+	const GraphSymbol *symbol = graph.symbol_at(path, request.locator, request.field);
 	if (!symbol) {
 		SymbolRenamePlan none;
-		none.file = request.path;
+		none.file = path;
 		none.new_name = request.new_name;
 		none.refusals.push_back(make_finding(CoreFinding::RenameUnknownSymbol, DiagnosticSeverity::Error,
-		                                     request.path + " defines no name in field " + request.field +
+		                                     path + " defines no name in field " + request.field +
 		                                             " of the record at " + request.locator + ".",
-		                                     request.path, request.field));
+		                                     path, request.field));
 		return none;
 	}
 	return plan_symbol_rename_project(*view_.project.scan, graph, *symbol, request.new_name);
