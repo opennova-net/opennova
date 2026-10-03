@@ -28,12 +28,14 @@
 #include <base/io/json.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_canvas.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_place.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <formats/mission/mission.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <editor/preview/preview_clock.h>
@@ -45,6 +47,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <runtime/world/model_geometry.h>
 #include <runtime/world/presentation_frame.h>
 
 #include "common/file_io.h"
@@ -444,6 +447,113 @@ static int test_hit_and_box() {
 	return 0;
 }
 
+// The polish: an entity's bound sphere about its position (the model's GHDR radius by the item's SCALE,
+// padded, none without a collision block: mission_item_bound_radius, the game's entity+0), read once per
+// item while the graph and its files stand and again when a file it read moves (a SCALE edited in the
+// open catalog, the model written again: the review's M1), each file parsed once by a cache's facts; a
+// pump clicked well above its anchor, past the slop, with no device to say, is picked through the
+// viewport's hit by its sphere, and the facts a drop reads carry the bound (the scaled pump's by its
+// SCALE).
+static int test_sphere_picking() {
+	Rig rig("opennova_editor_mission_viewport_spheres");
+	TEST_EXPECT(rig.open(true, true));
+	const MissionViewport *viewport = rig.viewport();
+	const SessionView &view = rig.session.view();
+	const std::vector<uint8_t> bytes = test_io::read_file(fixture("threedi/synth/pump.3di"));
+	opennova::threedi::Threedi3di3 model{};
+	TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) == 0);
+	const bool collision = model.collision != nullptr;
+	const int32_t radius_q16 = opennova::world::model_bound_radius_q16_from_3di(model);
+	opennova::threedi::threedi_3di3_free(&model);
+	TEST_EXPECT(collision && radius_q16 > 0);
+	const double pump = mission_item_bound_radius(radius_q16, true, 0, false, 0);
+	TEST_EXPECT(near(pump, double(radius_q16 + 0x1000) / 65536.0, 1e-9));
+	TEST_EXPECT(mission_item_bound_radius(radius_q16, false, 0, false, 0) == 0.0);
+	const auto &radii = viewport->items().radii();
+	TEST_EXPECT(radii.count(106100) == 1 && near(radii.at(106100), pump, 1e-4));
+	MissionItemFacts facts;
+	std::string error;
+	TEST_EXPECT(mission_item_facts(view, 106100, facts, error) && near(facts.radius, pump, 1e-9));
+	TEST_EXPECT(mission_item_facts(view, 106103, facts, error) &&
+			near(facts.radius, mission_item_bound_radius(radius_q16, true, int32_t(1.5 * 65536.0), false, 0), 1e-9) &&
+			facts.radius > pump * 1.4);
+	TEST_EXPECT(mission_item_facts(view, 100001, facts, error) && facts.radius == 0.0); // a marker draws no model
+	// A cache's facts parse each file once while it stands (the review's L3): asked again, nothing read.
+	MissionItemCache cache;
+	TEST_EXPECT(cache.facts(view, 106103, facts, error) && cache.files_read() == 2); // the pump and the catalog
+	TEST_EXPECT(cache.facts(view, 106100, facts, error) && cache.facts(view, 106103, facts, error) && cache.files_read() == 2);
+	// An edit of the mission alone (the asset source's generation moves, no file the items read does):
+	// no item asked again, no file read again.
+	const size_t asked = viewport->items().items_asked(), read = viewport->items().files_read();
+	TEST_EXPECT(asked > 0 && read > 0);
+	const NodeAddress some_item = first_of(*rig.document(), MissionKind::Item);
+	const uint64_t serial = viewport->scene().serial();
+	rig.session.handle(request::edit_record(kMission, set_of(some_item, "x", 77.25)));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	TEST_EXPECT(viewport->scene().serial() != serial); // the cache asked over the scene moved, not skipped
+	TEST_EXPECT(viewport->items().items_asked() == asked && viewport->items().files_read() == read);
+	// The pump's SCALE set to 3 in the open catalog (the review's M1: no edge or symbol moves, so the graph
+	// stands): the catalog read again, the pumps asked again, their bound tripled as the game scales it.
+	rig.session.handle(request::open_document("defs/items.def"));
+	TEST_EXPECT(rig.session.outcome().done());
+	const Document *catalog = records_of(*rig.session.document_for("defs/items.def"));
+	NodeAddress pump_row;
+	TEST_EXPECT(catalog && find_definition(AssetGraph(), *catalog, "106100", pump_row));
+	rig.session.handle(request::edit_record("defs/items.def", set_of(pump_row, "scale_q16", 3.0)));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const double scaled = mission_item_bound_radius(radius_q16, true, 3 * 65536, false, 0);
+	TEST_EXPECT(radii.count(106100) == 1 && near(radii.at(106100), scaled, 1e-4) && scaled > pump * 2.9);
+	TEST_EXPECT(viewport->items().files_read() == read + 1 && viewport->items().items_asked() > asked);
+	rig.session.handle(request::undo("defs/items.def"));
+	rig.pump();
+	TEST_EXPECT(near(radii.at(106100), pump, 1e-4));
+	// The pump's model written again with twice its GHDR radius and the project scanned again (no edge
+	// moves): the model read again, the bound grown.
+	{
+		opennova::threedi::Threedi3di3 larger{};
+		TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &larger) == 0);
+		larger.header.max_radius_fp16 = radius_q16 * 2;
+		std::vector<uint8_t> written;
+		TEST_EXPECT(opennova::threedi::threedi_3di3_write_memory(&larger, written) == 0);
+		opennova::threedi::threedi_3di3_free(&larger);
+		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/pump.3di", written));
+		rig.session.handle(request::rescan());
+		rig.session.run_operations();
+		rig.pump();
+		TEST_EXPECT(near(radii.at(106100), mission_item_bound_radius(radius_q16 * 2, true, 0, false, 0), 1e-4));
+		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/pump.3di", bytes));
+		rig.session.handle(request::rescan());
+		rig.session.run_operations();
+		rig.pump();
+		TEST_EXPECT(near(radii.at(106100), pump, 1e-4));
+	}
+	// A pump framed close, clicked above its anchor by most of its radius: the pump's.
+	const MissionEntityMark *target = nullptr;
+	for (const MissionEntityMark &entity : viewport->scene().entities())
+		if (!target && entity.item == 106100) target = &entity;
+	TEST_EXPECT(target != nullptr);
+	OrbitCamera camera = viewport->camera();
+	camera.target = target->at;
+	camera.distance = float(pump) * 8.0f;
+	rig.session.handle(request::set_viewport(kMission, mission_camera_change(camera)));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const ViewportContext context = rig.context();
+	const std::vector<MissionMark> marks = viewport->marks(context.width, context.height, context.device);
+	const int index = viewport->scene().mark_index(target->row);
+	TEST_EXPECT(index >= 0 && marks[size_t(index)].shown && near(marks[size_t(index)].radius, pump, 1e-4));
+	float x = 0.0f, y = 0.0f;
+	TEST_EXPECT(viewport->camera().project(mission_scene_point(target->x, target->y, target->z + pump * 0.7), context.width,
+			context.height, x, y));
+	TEST_EXPECT(std::fabs(y - marks[size_t(index)].y) > 2.0f * kMissionPickSlop);
+	const ViewportHit hit = viewport->hit(context, x, y);
+	TEST_EXPECT(hit.index == index && hit.id == target->row && hit.kind == "item");
+	std::printf("test_sphere_picking passed\n");
+	return 0;
+}
+
 static int test_envelope() {
 	Rig rig("opennova_editor_mission_viewport_envelope");
 	TEST_EXPECT(rig.open());
@@ -763,7 +873,8 @@ static int test_palette() {
 			rig.preferences.saves() == saves);
 	rig.session.poll();
 	TEST_EXPECT(rig.preferences.saves() == saves + 1 &&
-			rig.preferences.preferences().recent_items == std::vector<int64_t>({ 106101 }));
+			rig.preferences.preferences().recent_items.at("jo") == std::vector<int64_t>({ 106101 }) &&
+			rig.preferences.preferences().recent_items.size() == 1); // kept under the project's game
 	rig.session.handle(request::edit_in_viewport(kMission, drop));
 	rig.session.poll();
 	TEST_EXPECT(rig.session.outcome().done() && rig.preferences.saves() == saves + 1);
@@ -785,7 +896,7 @@ static int test_palette() {
 	drop.name = "106101";
 	rig.session.handle(request::edit_in_viewport(kMission, drop));
 	rig.session.poll();
-	TEST_EXPECT(rig.preferences.preferences().recent_items == std::vector<int64_t>({ 106101, 106102 }));
+	TEST_EXPECT(rig.preferences.preferences().recent_items.at("jo") == std::vector<int64_t>({ 106101, 106102 }));
 	answer = ask(rig, R"({"op": "palette", "limit": 1})", error);
 	rows = answer.get("items");
 	TEST_EXPECT(rows && rows->array.size() == 1 && rows->array[0].get_string("group", "") == "recent" &&
@@ -1148,6 +1259,128 @@ static int test_tweaking_commands() {
 	return 0;
 }
 
+// The polish's measure of the labels: the canvas's overlay (MissionCanvas::shapes, the labels' layout in
+// it) with the labels option on over `path`, on a 1600 x 900 picture framed on everything (the densest
+// place), the 24 nearest entities selected, each frame in the Shell's order (the view follows, takes the
+// pointer and draws the overlay; then the session serves what it raised and the viewport follows): 120
+// idle frames (the pointer still over nothing, nothing moving: the labels laid out and each title worded
+// at the first alone), then 120 drag frames (the primary's mark dragged a pixel a frame: no title worded
+// again, the layout made at most once a frame). Prints the mean and the slowest frame of each,
+// milliseconds; everything undone.
+static int measure_labels(Rig &rig, const std::string &path) {
+	rig.session.handle(request::open_document(path));
+	const DocumentBase *open = rig.session.document_for(path);
+	TEST_EXPECT(open != nullptr);
+	if (!open) return 1;
+	const std::string full = open->path();
+	const std::string before = records_of(*open)->serialize().text;
+	rig.session.handle(request::set_viewport(path,
+			R"({"kind": "mission", "device": {"width": 1600, "height": 900}, "options": {"marks": {"labels": true}}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	ViewportCommand frame;
+	frame.name = "frame";
+	frame.kind = ViewportKind::Mission;
+	rig.session.handle(request::edit_in_viewport(path, frame));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const MissionViewport *viewport =
+			static_cast<const MissionViewport *>(rig.session.viewports().find(full, ViewportKind::Mission));
+	TEST_EXPECT(viewport != nullptr);
+	if (!viewport) return 1;
+	const ViewportContext first = viewport_context(rig.session.view(), *viewport);
+	const int width = first.width, height = first.height;
+	const std::vector<MissionMark> marks = viewport->marks(width, height, first.device);
+	std::vector<size_t> nearest;
+	size_t shown = 0;
+	for (size_t i = 0; i < marks.size(); ++i) {
+		shown += marks[i].shown ? 1 : 0;
+		if (marks[i].shown && marks[i].entity >= 0) nearest.push_back(i);
+	}
+	std::sort(nearest.begin(), nearest.end(), [&](size_t a, size_t b) { return marks[a].depth < marks[b].depth; });
+	if (nearest.size() > 24) nearest.resize(24);
+	TEST_EXPECT(!nearest.empty());
+	if (nearest.empty()) return 1;
+	std::vector<NodeAddress> records;
+	for (const size_t i : nearest) records.push_back(marks[i].record);
+	rig.session.handle(request::select_record(path, records.front(), SelectMode::Replace, records));
+	MissionCanvas canvas;
+	editor_test::Gathered out;
+	const auto input_at = [&](float x, float y) {
+		CanvasInput in;
+		in.width = width;
+		in.height = height;
+		in.mouse = CanvasPoint{ x, y };
+		in.screen = CanvasPoint{ x, y };
+		in.hovered = true;
+		return in;
+	};
+	size_t labels = 0;
+	// One frame in the Shell's order: the view's frame start, the pointer and the overlay (timed); then
+	// the session serves what the canvas raised, and the viewport follows the document.
+	int frame_index = 0;
+	const auto frame_of = [&](const CanvasInput &in, double &total, double &slowest, int &slowest_at) {
+		const ViewportContext context = viewport_context(rig.session.view(), *viewport);
+		canvas.follow(*viewport, context, out);
+		canvas.input(context, in, out);
+		const auto started = std::chrono::steady_clock::now();
+		const OverlayList list = canvas.shapes(context, in);
+		const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+		editor_test::serve(rig.session, out.requests);
+		out.requests.clear();
+		rig.pump();
+		total += ms;
+		if (ms > slowest) slowest_at = frame_index;
+		slowest = std::max(slowest, ms);
+		++frame_index;
+		labels = 0;
+		for (const OverlayShape &shape : list.shapes) labels += shape.kind == OverlayKind::Text ? 1 : 0;
+	};
+	constexpr int kFrames = 120;
+	double idle = 0.0, idle_slowest = 0.0, drag = 0.0, drag_slowest = 0.0;
+	int idle_slowest_at = -1, drag_slowest_at = -1, ignored_at = -1;
+	// Idle: the labels laid out and every title worded by the first frame, never again.
+	frame_of(input_at(2.0f, 2.0f), idle, idle_slowest, idle_slowest_at);
+	const size_t layouts = canvas.label_layout().made(), titles = canvas.titles().made(), drops = canvas.titles().dropped();
+	TEST_EXPECT(labels > 0 && layouts > 0 && titles >= labels);
+	for (int i = 1; i < kFrames; ++i) frame_of(input_at(2.0f, 2.0f), idle, idle_slowest, idle_slowest_at);
+	TEST_EXPECT(canvas.label_layout().made() == layouts && canvas.titles().made() == titles && canvas.titles().dropped() == drops);
+	const size_t idle_labels = labels;
+	const MissionMark &primary = marks[nearest.front()];
+	CanvasInput press = input_at(primary.x, primary.y);
+	press.pressed = press.down = true;
+	double ignored = 0.0, ignored_slowest = 0.0;
+	frame_of(press, ignored, ignored_slowest, ignored_at);
+	// The drag: every sample a revision of the gesture's, no title worded again, the layout made at most
+	// once a frame (the dragged marks move).
+	const uint64_t revision = rig.session.document_for(path)->revision();
+	const size_t drag_titles = canvas.titles().made(), drag_drops = canvas.titles().dropped(),
+	             drag_layouts = canvas.label_layout().made();
+	frame_index = 1;
+	for (int i = 1; i <= kFrames; ++i) {
+		CanvasInput moved = input_at(primary.x + float(i), primary.y);
+		moved.down = true;
+		moved.delta = CanvasPoint{ 1.0f, 0.0f };
+		frame_of(moved, drag, drag_slowest, drag_slowest_at);
+	}
+	TEST_EXPECT(rig.session.document_for(path)->revision() > revision);
+	TEST_EXPECT(canvas.titles().dropped() == drag_drops && canvas.titles().made() == drag_titles);
+	TEST_EXPECT(canvas.label_layout().made() <= drag_layouts + size_t(kFrames));
+	frame_of(input_at(primary.x + float(kFrames), primary.y), ignored, ignored_slowest, ignored_at);
+	std::printf("labels: %s with the labels on, %zu marks shown, %zu labels drawn idle and %zu dragging 24 selected: idle "
+	            "%.3f ms a frame (slowest %.3f, frame %d), drag %.3f ms a frame (slowest %.3f, drag frame %d), %d frames each\n",
+	            path.c_str(), shown, idle_labels, labels, idle / kFrames, idle_slowest, idle_slowest_at, drag / kFrames,
+	            drag_slowest, drag_slowest_at, kFrames);
+	while (records_of(*rig.session.document_for(path))->dirty()) {
+		rig.session.handle(request::undo(path));
+		if (!rig.session.outcome().done()) break;
+	}
+	TEST_EXPECT(records_of(*rig.session.document_for(path))->serialize().text == before);
+	rig.session.handle(request::close_document(path));
+	rig.pump();
+	return 0;
+}
+
 // The retail leg (S14 V11; OPENNOVA_JO_DIR, base and each expansion through the VFS): every shipped
 // mission written into one project (a mission's own file, as an import writes it; its terrain, its
 // environment and its models are the device's, and the fake devices read none), then each opened in
@@ -1284,6 +1517,7 @@ static int test_retail() {
 	            "largest, %s: %zu entities (%s)\n",
 	            opened, hits, moved, seconds, largest.c_str(), largest_entities, largest_counts.c_str());
 	TEST_EXPECT(opened == paths.size() && opened > 0 && hits > 0 && moved > 0);
+	TEST_EXPECT(measure_labels(rig, largest) == 0);
 	std::printf("test_retail passed\n");
 	return 0;
 }
@@ -1297,6 +1531,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_files() == 0);
 	TEST_EXPECT(test_camera_frame() == 0);
 	TEST_EXPECT(test_hit_and_box() == 0);
+	TEST_EXPECT(test_sphere_picking() == 0);
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_drop() == 0);
 	TEST_EXPECT(test_ground_command() == 0);

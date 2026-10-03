@@ -69,7 +69,7 @@ std::string mission_canvas_hint(const MissionHintInput &in) {
 				").";
 	if (!in.hovered.empty()) {
 		std::string line = in.hovered + ": click to select";
-		if (in.editable) line += ", drag to move (Alt-drag copies)";
+		if (in.editable && in.hovered_drags) line += ", drag to move (Alt-drag copies)";
 		line += "; Shift adds, Ctrl toggles; right-click for more.";
 		return line;
 	}

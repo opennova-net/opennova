@@ -95,6 +95,11 @@ public:
 	bool surface_at(float x, float y, float point[3]) const override;
 	bool surface_between(const double from[3], const double to[3], double point[3]) const override;
 	bool ground_at(double x, double y, double &height) const override;
+	// What the segment meets first (ADR 0046, the polish after its review): the faces of the placed
+	// entities shown (a static's graphic's finest level through its instance's transform, an individual
+	// model's meshes through its nodes'), the nearer first, before the terrain; the terrain; nothing.
+	// Unknown until the placement stands.
+	opennova::editor::ViewportRayHit ray_between(const double from[3], const double to[3]) const override;
 	uint64_t scene_state() const override { return scene_state_; }
 	void publish_scene_state() override;
 	void present(double dt) override;
@@ -113,6 +118,14 @@ public:
 	int64_t last_place_us() const { return last_place_us_; }
 	// The placer's key of the entity whose row is `row` (0: none, or lifted).
 	int key_of(opennova::editor::NodeId row) const;
+
+	// What a pick casts against for one placed entity: its faces in its own space (three vertices a
+	// triangle) and their box.
+	struct PickShape {
+		PackedVector3Array faces;
+		AABB box;
+		bool any = false;
+	};
 
 private:
 	// One unit of a build, in the order they run.
@@ -238,6 +251,9 @@ private:
 	String graphic_of_(int64_t item);
 	Transform3D transform_of_(const opennova::editor::MissionEntityMark &entity) const;
 	static ObjectModel *model_of_(const Placed &placed);
+	// What a pick casts against for the placed entity of row `row`, and its transform in the picture's
+	// space now; null for none (hidden, a static not warm, a model with no meshes).
+	const PickShape *pick_shape_(opennova::editor::NodeId row, const Placed &placed, Transform3D &xform) const;
 
 	Node3D *root_ = nullptr;
 	WorldEnvironment *clear_ = nullptr;
@@ -280,6 +296,30 @@ private:
 	int place_units_planned_ = 0;
 	std::unique_ptr<Build> build_;
 	uint64_t scene_state_ = 0;
+	// The pick shapes kept: a static's by its graphic, an individual model's by its node (dropped with
+	// the entities), and the last ray's answer while the picture stands (a frame's hover and hint ask
+	// alike).
+	mutable std::unordered_map<std::string, PickShape> static_shapes_;
+	mutable std::unordered_map<uint64_t, PickShape> model_shapes_;
+	// Each row's shape as last found, while its entity is placed alike (its item, its key, its model):
+	// a ray asks every entity, its graphic named once.
+	struct RowShape {
+		int64_t item = 0;
+		int key = 0;
+		uint64_t model = 0;
+		const PickShape *shape = nullptr;
+	};
+	mutable std::unordered_map<opennova::editor::NodeId, RowShape> row_shapes_;
+	void drop_shapes_() {
+		static_shapes_.clear();
+		model_shapes_.clear();
+		row_shapes_.clear();
+	}
+	mutable bool ray_kept_ = false;
+	mutable double ray_from_[3] = { 0.0, 0.0, 0.0 }, ray_to_[3] = { 0.0, 0.0, 0.0 };
+	mutable opennova::editor::ViewportRayHit ray_hit_;
+	// The picture's records moved, placed, lifted or hidden: the kept ray goes.
+	void picture_moved_() { ray_kept_ = false; }
 	// The time applied (-2: none yet; -1 the mission's own; else the option's hour); the layers shown.
 	double applied_time_ = -2.0;
 	bool shown_water_ = true, shown_shadows_ = true;
