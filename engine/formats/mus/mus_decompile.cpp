@@ -138,6 +138,7 @@ struct Instruction {
     uint8_t    *table_data;
     int         table_entry_size;
     uint32_t    size;       /* total bytes including operands and tablexec data */
+    int         truncated;  /* an operand or the embedded table runs past the code's end */
 };
 
 /* Decode the bytecode into Instructions matching the Python disassembler
@@ -179,6 +180,7 @@ static void disassemble(const uint8_t *bytes, uint32_t size,
                 }
                 inst.operands[inst.operand_count++] = val;
             }
+            if (pos > size) inst.truncated = 1;
             /* tablexec (0x35): 4 immediates then count*entry_size embedded. */
             if (inst.opcode == MUS_OP_TABLEXEC && inst.operand_count >= 4) {
                 int count = inst.operands[0] & 0xFF;
@@ -189,6 +191,8 @@ static void disassemble(const uint8_t *bytes, uint32_t size,
                     inst.table_data = (uint8_t *)malloc((size_t)total);
                     memcpy(inst.table_data, bytes + pos, (size_t)total);
                     pos += (uint32_t)total;
+                } else if (total > 0) {
+                    inst.truncated = 1;
                 }
             }
         } else {
@@ -284,7 +288,7 @@ struct CFBlock {
     uint32_t end_offset;
     uint32_t else_offset;
     uint32_t body_start;
-    uint32_t body_end;
+    uint32_t body_end;      /* the if-body's end: the brfalse target, or an if/else's goto */
 };
 
 #define CF_TYPE_IF      1
@@ -310,50 +314,81 @@ static void cf_free(CFMap *m) {
     m->count = 0;
 }
 
-static void analyze_control_flow(const Instruction *insts, int n, CFMap *out) {
+/* The index of the instruction at `offset` (n for the code's end), -1 when `offset`
+   lands inside an instruction or past the end. The instructions are in offset order. */
+static int index_at(const Instruction *insts, int n, uint32_t offset) {
+    if (n == 0) return offset == 0 ? 0 : -1;
+    const uint32_t end = insts[n - 1].offset + insts[n - 1].size;
+    if (offset == end) return n;
+    int lo = 0, hi = n - 1;
+    while (lo <= hi) {
+        const int mid = lo + (hi - lo) / 2;
+        if (insts[mid].offset == offset) return mid;
+        if (insts[mid].offset < offset) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return -1;
+}
+
+static int is_section_entry(const MusScript *script, uint32_t offset) {
+    for (uint32_t s = 0; s < script->section_count; ++s)
+        if (script->sections[s].code_offset == offset) return 1;
+    return 0;
+}
+
+/* Every brfalse a block, kept apart from the Python reference where the reference
+   would mis-structure or loop:
+   - an instruction cut short by the code's end, or a branch (goto, brfalse, brtrue,
+     callv) to an offset inside an instruction or past the end, is malformed: the
+     analysis fails and the script does not decompile (the editor reports it unreadable);
+   - a brfalse to its own offset or before it is no if (a loop the text has no form
+     for): no block, so it prints as its `// if !(...) goto` comment;
+   - an if/else is a brfalse whose LAST body instruction is a goto to the brfalse
+     target or past it that names no section, exactly what the compiler writes for
+     `if (...) { } else { }` (mus_compile.cpp, the goto past the else then the
+     brfalse patched to the else); a goto elsewhere in the body, or to a section, is
+     the body's own `goto`.
+   Returns 0, or -1 for a malformed program. */
+static int analyze_control_flow(const Instruction *insts, int n, const MusScript *script, CFMap *out) {
     int cap = 0;
     out->blocks = NULL;
     out->count = 0;
 
-    /* Single pass replicating the Python detection logic. */
-    int i = 0;
-    while (i < n) {
+    for (int i = 0; i < n; ++i) {
         const Instruction *inst = &insts[i];
-        if (!inst->mnemonic) { ++i; continue; }
-        if (strcmp(inst->mnemonic, "brfalse") == 0 && inst->operand_count >= 1) {
-            uint32_t target = (uint32_t)inst->operands[0];
-            /* Look for a goto before target inside [i+1, target). */
-            int else_goto_idx = -1;
-            for (int j = i + 1; j < n; ++j) {
-                if (insts[j].offset >= target) break;
-                if (insts[j].mnemonic
-                    && strcmp(insts[j].mnemonic, "goto") == 0
-                    && insts[j].operand_count >= 1) {
-                    uint32_t goto_target = (uint32_t)insts[j].operands[0];
-                    if (goto_target > target) { else_goto_idx = j; break; }
-                }
-            }
-            CFBlock b{};
-            b.start_offset = inst->offset;
-            b.body_start   = inst->offset + inst->size;
-            if (else_goto_idx >= 0) {
-                b.type        = CF_TYPE_IF_ELSE;
-                b.else_offset = target;
-                b.end_offset  = (uint32_t)insts[else_goto_idx].operands[0];
-                b.body_end    = insts[else_goto_idx].offset;
-            } else {
-                b.type       = CF_TYPE_IF;
-                b.end_offset = target;
-                b.body_end   = target;
-            }
-            cf_add(out, &cap, b);
+        if (inst->truncated) return -1;
+        if (!inst->mnemonic || inst->operand_count < 1) continue;
+        const int branch = strcmp(inst->mnemonic, "brfalse") == 0 || strcmp(inst->mnemonic, "brtrue") == 0 ||
+                           strcmp(inst->mnemonic, "goto") == 0 || strcmp(inst->mnemonic, "callv") == 0;
+        if (!branch) continue;
+        const uint32_t target = (uint32_t)inst->operands[0];
+        const int target_idx = index_at(insts, n, target);
+        if (target_idx < 0) return -1;
+        if (strcmp(inst->mnemonic, "brfalse") != 0 || target <= inst->offset) continue;
+        /* The instruction ending at the target: an if/else's goto past the else. */
+        const Instruction *last = target_idx > i + 1 ? &insts[target_idx - 1] : NULL;
+        int else_goto = 0;
+        if (last && last->mnemonic && strcmp(last->mnemonic, "goto") == 0 && last->operand_count >= 1) {
+            const uint32_t goto_target = (uint32_t)last->operands[0];
+            else_goto = goto_target >= target && index_at(insts, n, goto_target) >= 0 &&
+                        !is_section_entry(script, goto_target);
         }
-        /* While/loop/untiltrue patterns aren't exercised by jo_gamemus.bin's
-           bytecode, and the Python decompiler emits them only when a back-
-           branch matches the start. We detect them with the same logic the
-           Python uses (no observed difference for the fixture). */
-        ++i;
+        CFBlock b{};
+        b.start_offset = inst->offset;
+        b.body_start   = inst->offset + inst->size;
+        if (else_goto) {
+            b.type        = CF_TYPE_IF_ELSE;
+            b.else_offset = target;
+            b.end_offset  = (uint32_t)last->operands[0];
+            b.body_end    = last->offset;
+        } else {
+            b.type       = CF_TYPE_IF;
+            b.end_offset = target;
+            b.body_end   = target;
+        }
+        cf_add(out, &cap, b);
     }
+    return 0;
 }
 
 /* ---- Expression reconstruction (matches Python `reconstruct_expression`) ---- */
@@ -575,7 +610,13 @@ struct Buf {
     char    *p;
     size_t   cap;
     size_t   used;
+    int      failed;  /* the program nests past kMaxNesting: it does not decompile */
 };
+
+/* How deep ifs nest before the decompile gives up (the recursion's bound: a crafted
+   program of a few KB nested ifs would otherwise overflow the stack). Retail nests 1
+   deep (MJox01.bin); the compiler takes the same bound (mus_compile.cpp). */
+constexpr int kMaxNesting = 64;
 
 static void buf_putc(Buf *b, char c) {
     if (b->p && b->used + 1 < b->cap) b->p[b->used] = c;
@@ -611,18 +652,16 @@ static void decompile_block(Buf *out,
                             uint32_t sbf_name_count);
 
 /* Resolve a branch/call code-offset target to its section name, else the
-   "@XXXX" fallback (Python: entry_points.get(target, f"@{target:04X}") with
-   entry_points = {section_offsets} at top level). Recursive bodies pass
-   suppress_entries and never name sections. Shared by goto/brfalse/brtrue/
-   callv. */
+   "@XXXX" fallback (Python: entry_points.get(target, f"@{target:04X}")). A body
+   names a section as the top level does: `suppress_entries` only keeps a body from
+   printing section headers, so a `goto` or a `call` inside an if-body compiles back
+   (the compiler resolves both by section name). Shared by goto/brfalse/brtrue/callv. */
 static const char *resolve_branch_target(const MusScript *script, int target,
-                                         int suppress_entries,
+                                         int /*suppress_entries*/,
                                          char *fb, size_t fb_size) {
-    if (!suppress_entries) {
-        for (uint32_t s = 0; s < script->section_count; ++s) {
-            if ((int)script->sections[s].code_offset == target) {
-                return script->sections[s].name;
-            }
+    for (uint32_t s = 0; s < script->section_count; ++s) {
+        if ((int)script->sections[s].code_offset == target) {
+            return script->sections[s].name;
         }
     }
     snprintf(fb, fb_size, "@%04X", (unsigned)target);
@@ -640,8 +679,13 @@ static void decompile_block(Buf *out,
     char buf256[256];
     char fallback[64];
 
+    /* indent is the nesting depth: a body one deeper than its if. */
+    if (indent > kMaxNesting) {
+        out->failed = 1;
+        return;
+    }
     int i = begin_idx;
-    while (i < end_idx) {
+    while (i < end_idx && !out->failed) {
         const Instruction *inst = &insts[i];
 
         /* Section entry-point label. Only at top-level walks (recursive
@@ -662,9 +706,11 @@ static void decompile_block(Buf *out,
            map holds every branch by its offset, so an if nested in an if's
            body is structured there too (the Python decompiler reanalyzes per
            inner call). Consulted at the top level alone, jox01's MJox01.bin
-           lost fourteen nested ifs (`if (Var02 != 11) { play; enter }` inside
-           an if) to `// if !(...) goto @...` comments, which compile to
-           nothing. */
+           lost sixteen nested ifs to `// if !(...) goto @...` comments, which
+           compile to nothing: eight `if (Var02 != 11) { play; enter }` in
+           MenuSP's first if and eight `if ((Var02 != 5) && (Var02 != 6))
+           { play; enter }` in MenuMP's. A drawn block always moves past its
+           brfalse, so a block can never be revisited. */
         const CFBlock *block = NULL;
         for (int k = 0; k < cf->count; ++k) {
             if (cf->blocks[k].start_offset == inst->offset) {
@@ -672,6 +718,7 @@ static void decompile_block(Buf *out,
                 break;
             }
         }
+        const int brfalse_idx = i;
         if (block && block->type == CF_TYPE_IF) {
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
@@ -698,6 +745,7 @@ static void decompile_block(Buf *out,
             emit_indent(out, indent);
             buf_puts(out, "}\n");
             while (i < end_idx && insts[i].offset < block->end_offset) ++i;
+            if (i <= brfalse_idx) i = brfalse_idx + 1;
             continue;
         }
         if (block && block->type == CF_TYPE_IF_ELSE) {
@@ -709,13 +757,13 @@ static void decompile_block(Buf *out,
             buf_printf(out, "if (%s)\n", expr);
             emit_indent(out, indent);
             buf_puts(out, "{\n");
-            /* if body is [body_start .. else_offset - 5) per Python:
-                 if_body = [ins for ins in instructions
-                            if block.body_start <= ins.offset < block.else_offset - 5] */
+            /* if body is [body_start .. the goto past the else) (Python:
+               block.else_offset - 5, the goto's offset: the goto is the last body
+               instruction, analyze_control_flow) */
             int if_begin = -1, if_end = -1;
             for (int k = 0; k < end_idx; ++k) {
                 if (insts[k].offset >= block->body_start && if_begin < 0) if_begin = k;
-                if (insts[k].offset >= (block->else_offset - 5) && if_end < 0) {
+                if (insts[k].offset >= block->body_end && if_end < 0) {
                     if_end = k;
                     break;
                 }
@@ -746,6 +794,7 @@ static void decompile_block(Buf *out,
             emit_indent(out, indent);
             buf_puts(out, "}\n");
             while (i < end_idx && insts[i].offset < block->end_offset) ++i;
+            if (i <= brfalse_idx) i = brfalse_idx + 1;
             continue;
         }
 
@@ -907,6 +956,13 @@ static void decompile_block(Buf *out,
             reconstruct_expression(insts, es, i, script, expr, sizeof(expr));
             if (!expr[0]) snprintf(expr, sizeof(expr), "condition");
 
+            /* The header's +1 byte names the table's action for the text; the VM never
+               reads it [orig: AudioVM_Op_TableExec @ 0x672BB0 reads +0 count @ 0x672BBC,
+               +2 stride @ 0x672BCF, +3 skip @ 0x672BC3]: it dispatches each entry's own
+               first byte, a 0 one skipping the table [orig: @ 0x672BE5..0x672C03]. So
+               each entry is read by its own opcode (0 null, 0x3B a section, 0x3E a byte
+               sound, 0x3D a word sound, 0x30 an address), the header a hint for the
+               action word alone. */
             const char *target_type = "enter";
             if (inner_op == MUS_OP_PLAYW || inner_op == MUS_OP_PLAY) target_type = "play";
             else if (inner_op == MUS_OP_GOTO)         target_type = "goto";
@@ -919,21 +975,21 @@ static void decompile_block(Buf *out,
             int es_size = inst->table_entry_size;
             for (int t = 0; t < count; ++t) {
                 const uint8_t *entry = inst->table_data + (size_t)t * es_size;
+                const int entry_op = es_size >= 1 ? entry[0] : 0;
                 char tname[64];
-                if (inner_op == MUS_OP_SETSTATE && es_size >= 2) {
+                if (entry_op == MUS_OP_SETSTATE && es_size >= 2) {
                     /* entry[0] = inner opcode byte, entry[1] = section idx */
                     int sidx = entry[1];
                     const char *n = resolve_section_idx(sidx, script,
                                                         tname, sizeof(tname));
                     snprintf(tname, sizeof(tname), "%s", n);
-                } else if ((inner_op == MUS_OP_PLAYW || inner_op == MUS_OP_PLAY) && es_size >= 2) {
-                    int sidx = entry[1];
-                    if (inner_op == MUS_OP_PLAYW && es_size >= 3) sidx = entry[1] | (entry[2] << 8);
+                } else if ((entry_op == MUS_OP_PLAY && es_size >= 2) || (entry_op == MUS_OP_PLAYW && es_size >= 3)) {
+                    int sidx = entry_op == MUS_OP_PLAYW ? entry[1] | (entry[2] << 8) : entry[1];
                     char raw[64];
                     resolve_play_name(sidx, sbf_names, sbf_name_count,
                                       raw, sizeof(raw));
                     format_play_token(raw, tname, sizeof(tname));
-                } else if (inner_op == MUS_OP_GOTO && es_size >= 5) {
+                } else if (entry_op == MUS_OP_GOTO && es_size >= 5) {
                     uint32_t addr = (uint32_t)entry[1]
                                   | ((uint32_t)entry[2] << 8)
                                   | ((uint32_t)entry[3] << 16)
@@ -981,6 +1037,7 @@ static int decompile_into_buf(const MusScript *script,
     b.p = out_text;
     b.cap = out_capacity;
     b.used = 0;
+    b.failed = 0;
 
     /* Disassemble the entire bytecode region. The Python decompiler mirrors
        this: it treats the chunk's bytecode as a flat stream with section
@@ -1127,9 +1184,9 @@ static int decompile_into_buf(const MusScript *script,
     /* ---- Section bodies ---- */
     CFMap cf{};
     if (n_insts > 0) {
-        analyze_control_flow(insts, n_insts, &cf);
-        decompile_block(&b, insts, 0, n_insts, script, &cf, /*suppress_entries=*/0, 0,
-                        sbf_names, sbf_name_count);
+        if (analyze_control_flow(insts, n_insts, script, &cf) != 0) b.failed = 1;
+        else decompile_block(&b, insts, 0, n_insts, script, &cf, /*suppress_entries=*/0, 0,
+                             sbf_names, sbf_name_count);
     }
 
     cf_free(&cf);
@@ -1137,6 +1194,9 @@ static int decompile_into_buf(const MusScript *script,
         free_instructions(insts, n_insts);
         free(insts);
     }
+    /* A malformed program (an instruction cut short, a branch into an instruction or
+       past the end) or one nested past kMaxNesting does not decompile. */
+    if (b.failed) return -3;
 
     /* Two-pass: first call (out=NULL) returns required size; second call
        writes into a sufficient buffer. NUL-terminate when there's room. */

@@ -4,6 +4,7 @@
 #include <formats/mus/mus.h>
 
 #include <string>
+#include <vector>
 
 using namespace opennova::mus;
 
@@ -163,6 +164,176 @@ static int test_play_track_widths(void) {
         }
     }
     CHECK(again == first, "the decompiled text compiles to the same bytecode");
+    /* The bound: no number in a sound name wraps (it stops accumulating past a word). */
+    const std::string top = bytecode("script t\nsection Begin\n{\n  play sound_65535\n  done\n}\n");
+    CHECK(top.find(std::string("\x3D\xFF\xFF", 3)) != std::string::npos, "sound_65535: the widest play");
+    CHECK(!compiles("script t\nsection Begin\n{\n  play sound_4294967296\n  done\n}\n"),
+          "sound_4294967296 must be refused, not wrapped to sound_0");
+    CHECK(!compiles("script t\nsection Begin\n{\n  play sound_99999999999999999999\n  done\n}\n"),
+          "a sound number past an int is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  on (Var00) play sound_1 sound_4294967552\n  done\n}\n"),
+          "a play table's sound past a word is refused");
+    return 1;
+}
+
+/* `src` compiles, decompiles and compiles again to the same bytecode, and its second
+   decompile is its first. */
+static bool round_trips(const char *src, std::string *text_out = nullptr) {
+    MusScript script = {};
+    int el = 0, ec = 0;
+    const char *em = NULL;
+    if (mus_compile(src, &script, &el, &ec, &em) != 0) {
+        fprintf(stderr, "  compile: %s (line %d)\n", em ? em : "?", el);
+        return false;
+    }
+    const int needed = mus_decompile(&script, NULL, 0);
+    std::string text(size_t(needed > 0 ? needed : 0) + 1, '\0');
+    const bool decompiled = needed > 0 && mus_decompile(&script, &text[0], text.size()) == needed;
+    text.resize(size_t(needed > 0 ? needed : 0));
+    const std::string first(reinterpret_cast<const char *>(script.code), script.code_size);
+    mus_script_free(&script);
+    if (text_out) *text_out = text;
+    if (!decompiled) return false;
+    const std::string again = bytecode(text.c_str());
+    if (again != first) fprintf(stderr, "  the text compiles to other bytes:\n%s\n", text.c_str());
+    return again == first;
+}
+
+/* Review M3: a `goto` or a `call` inside an if-body, to a section before or after it, names
+   its section in the text (a body prints no section headers, but names them as the top
+   level does) and compiles back; a body whose last statement is a `goto` to a later section
+   stays an if, not an if/else (the else-goto is only the one the compiler writes past an
+   else, which names no section). */
+static int test_branches_in_bodies(void) {
+    const char *src =
+        "script t\n"
+        "section A\n{\n"
+        "  if ((Var01 == 1))\n  {\n    goto C\n  }\n"
+        "  play sound_1\n"
+        "}\n"
+        "section B\n{\n"
+        "  if ((Var01 == 2))\n  {\n    call A\n  }\n"
+        "  if ((Var01 == 3))\n  {\n    goto A\n  }\n  else\n  {\n    call C\n  }\n"
+        "  if ((Var01 == 4))\n  {\n    play sound_2\n  }\n  else\n  {\n  }\n"
+        "}\n"
+        "section C\n{\n"
+        "  play sound_3\n"
+        "}\n";
+    std::string text;
+    CHECK(round_trips(src, &text), "goto and call inside if-bodies round-trip");
+    CHECK(text.find("goto C") != std::string::npos && text.find("call A") != std::string::npos &&
+          text.find("goto A") != std::string::npos && text.find("call C") != std::string::npos,
+          "every body branch names its section");
+    CHECK(text.find('@') == std::string::npos, "no unresolved @XXXX target");
+    return 1;
+}
+
+/* Review M2/L8: deep nesting is bounded on both sides: 64 nested ifs compile and decompile,
+   65 are refused by the compiler. */
+static int test_nesting_bound(void) {
+    const auto nested = [](int depth) {
+        std::string src = "script t\nsection Begin\n{\n";
+        for (int i = 0; i < depth; ++i) src += "if ((Var01 == 1))\n{\n";
+        src += "play sound_1\n";
+        for (int i = 0; i < depth; ++i) src += "}\n";
+        src += "}\n";
+        return src;
+    };
+    CHECK(round_trips(nested(64).c_str()), "64 nested ifs round-trip");
+    CHECK(!compiles(nested(65).c_str()), "65 nested ifs are refused");
+    std::string deep = "script t\nsection Begin\n{\nVar01 = ";
+    for (int i = 0; i < 300; ++i) deep += "~ ";
+    deep += "1\n}\n";
+    CHECK(!compiles(deep.c_str()), "an expression nested past the bound is refused");
+    return 1;
+}
+
+/* A one-byte global or local operand past 255 is refused, never wrapped [orig:
+   AudioVM_Op_PushGlobal @ 0x6727B0, AudioVM_Op_PushLocal @ 0x6727D0 read one byte]. */
+static int test_variable_operand_bounds(void) {
+    CHECK(compiles("script t\nsection Begin\n{\n  Var63 = 1\n}\n"), "Var63 (offset 252) compiles");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var64 = 1\n}\n"), "Var64 (offset 256) is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  g_300++\n}\n"), "g_300 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  l_256 = 1\n}\n"), "l_256 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var99999999999999999999 = 1\n}\n"), "a huge Var number is refused");
+    CHECK(compiles("script t\nsection Begin\n{\n  l_255 = (l_0 + 1)\n}\n"), "l_255 compiles");
+    return 1;
+}
+
+/* A program as raw bytecode, one section at 0, decompiled: the result's sign and text. */
+static int decompile_bytes(const std::vector<uint8_t> &code, std::string &text) {
+    MusSection section = {};
+    strcpy(section.name, "Begin");
+    MusScript script = {};
+    strcpy(script.name, "t");
+    script.code = const_cast<uint8_t *>(code.data());
+    script.code_size = (uint32_t)code.size();
+    script.sections = &section;
+    script.section_count = 1;
+    script.globals_size = 64;
+    const int needed = mus_decompile(&script, NULL, 0);
+    text.clear();
+    if (needed <= 0) return needed;
+    text.assign((size_t)needed + 1, '\0');
+    const int written = mus_decompile(&script, &text[0], text.size());
+    text.resize((size_t)needed);
+    return written;
+}
+
+/* Review M2/F1: the decompiler never loops and fails on malformed bytecode. A brfalse to its
+   own offset or before it (at the top level or inside a body) prints as its comment; a branch
+   past the end or into an instruction, an instruction cut short, and ifs nested past the bound
+   do not decompile (the editor reports the script unreadable). */
+static int test_decompiler_robustness(void) {
+    std::string text;
+    /* push 1; brfalse 0; done */
+    CHECK(decompile_bytes({0x01, 0x01, 0x31, 0x00, 0x00, 0x00, 0x00, 0x3F}, text) > 0 &&
+          text.find("// if !(1) goto Begin") != std::string::npos, "a backward brfalse is its comment");
+    /* push 1; brfalse 15 { push 1; brfalse 0; done }; done: the backward one inside a body */
+    CHECK(decompile_bytes({0x01, 0x01, 0x31, 0x0F, 0x00, 0x00, 0x00, 0x01, 0x01, 0x31, 0x00, 0x00, 0x00, 0x00,
+                           0x3F, 0x3F}, text) > 0 &&
+          text.find("// if !(1) goto Begin") != std::string::npos, "a backward brfalse inside a body");
+    CHECK(decompile_bytes({0x01, 0x01, 0x31, 0x02, 0x00, 0x00, 0x00, 0x3F}, text) > 0, "a brfalse to itself");
+    CHECK(decompile_bytes({0x01, 0x01, 0x31, 0xFF, 0x00, 0x00, 0x00, 0x3F}, text) < 0, "a branch past the end");
+    CHECK(decompile_bytes({0x01, 0x01, 0x31, 0x01, 0x00, 0x00, 0x00, 0x3F}, text) < 0, "a branch into an instruction");
+    CHECK(decompile_bytes({0x30, 0x01, 0x00, 0x00, 0x00, 0x3F}, text) < 0, "a goto into an instruction");
+    CHECK(decompile_bytes({0x01, 0x01, 0x31, 0x05, 0x00}, text) < 0, "an instruction cut short");
+    CHECK(decompile_bytes({0x01, 0x00, 0x35, 0x02, 0x3B, 0x02, 0x09, 0x3B, 0x00}, text) < 0, "a table cut short");
+    /* ifs nested `depth` deep, every brfalse to the final done */
+    const auto nest = [](int depth) {
+        std::vector<uint8_t> code;
+        const uint32_t end = (uint32_t)depth * 7 + 2;
+        for (int i = 0; i < depth; ++i) {
+            const uint8_t bytes[] = {0x01, 0x01, 0x31, (uint8_t)(end & 0xFF), (uint8_t)(end >> 8), 0x00, 0x00};
+            code.insert(code.end(), bytes, bytes + 7);
+        }
+        code.push_back(0x3E);
+        code.push_back(0x01);
+        code.push_back(0x3F);
+        return code;
+    };
+    CHECK(decompile_bytes(nest(64), text) > 0, "64 nested ifs decompile");
+    CHECK(decompile_bytes(nest(65), text) < 0, "65 nested ifs do not");
+    return 1;
+}
+
+/* Review L10/F7: a table's entries read by their own opcode, as the VM dispatches them, the
+   header's +1 byte only the action word: a byte play and a word play in one stride-3 table,
+   and a null entry (opcode 0: the VM skips the table [orig: AudioVM_Op_TableExec
+   @ 0x672BE5..0x672BFA]), which compiles back to zeros. */
+static int test_table_entries_by_opcode(void) {
+    std::string text;
+    /* push 0; tablexec count 2, header 0x3E, stride 3, skip 11: [3E 05 00] [3D 2C 01]; done */
+    CHECK(decompile_bytes({0x01, 0x00, 0x35, 0x02, 0x3E, 0x03, 0x0B, 0x3E, 0x05, 0x00, 0x3D, 0x2C, 0x01, 0x3F}, text) > 0,
+          "a mixed table decompiles");
+    CHECK(text.find("on (0) play sound_5 sound_300") != std::string::npos, "each entry by its own opcode");
+    /* push 0; tablexec count 2, setstate, stride 2, skip 9: [3B 00] [00 00]; done */
+    CHECK(decompile_bytes({0x01, 0x00, 0x35, 0x02, 0x3B, 0x02, 0x09, 0x3B, 0x00, 0x00, 0x00, 0x3F}, text) > 0 &&
+          text.find("on (0) enter Begin null") != std::string::npos, "a null entry prints as null");
+    const std::string null_table = bytecode("script t\nsection Begin\n{\n  on (Var00) enter Begin null\n}\n");
+    CHECK(null_table.find(std::string("\x35\x02\x3B\x02\x09\x3B\x00\x00\x00", 9)) != std::string::npos,
+          "null compiles to a zero entry");
+    CHECK(round_trips("script t\nsection Begin\n{\n  on (Var00) enter Begin null\n}\n"), "a null entry round-trips");
     return 1;
 }
 
@@ -233,6 +404,11 @@ int main(void) {
     RUN_TEST(test_compile_minimal_single_section);
     RUN_TEST(test_encode_file_minimal);
     RUN_TEST(test_play_track_widths);
+    RUN_TEST(test_branches_in_bodies);
+    RUN_TEST(test_nesting_bound);
+    RUN_TEST(test_variable_operand_bounds);
+    RUN_TEST(test_decompiler_robustness);
+    RUN_TEST(test_table_entries_by_opcode);
     RUN_TEST(test_reject_switch_over_64_targets);
     RUN_TEST(test_reject_goto_table_too_large);
     printf("\n%d passed, %d failed\n", passed, failed);

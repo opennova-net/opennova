@@ -189,7 +189,12 @@ const MusSection *mus_find_section(const MusScript *s, const char *name);
    without `done` leaks code into the next section's outer scope), the leading
    "// Decompiled from <path>" line is dropped (we have no filename context),
    and `bind sound_N "sound_N"` is synthesised aesthetic since the runtime
-   carries no bind table. */
+   carries no bind table.
+
+   A malformed program does not decompile (negative): an instruction cut short by
+   the code's end, a branch (goto, brfalse, brtrue, callv) into an instruction or past
+   the end, or ifs nested more than 64 deep. A brfalse to its own offset or before it
+   is no if; it prints as its `// if !(...) goto` comment. */
 int mus_decompile(const MusScript *script, char *out_text, size_t out_capacity);
 
 /* Names-aware variant. When `sbf_names` is non-NULL and the play index falls

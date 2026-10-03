@@ -47,6 +47,136 @@ static std::string g_retail_gamemus, g_retail_menumus;
    point (decompiled, compiled and decompiled again: the same text). */
 static int entry_roundtrip_file(MusFile &mf, bool same_text);
 
+/* ---- The instruction streams compared (review L7): the text fixed point cannot see what
+   the decompiler drops or conflates the same way twice, so the original's bytecode and the
+   recompile's are decoded by an oracle of their own (the operand widths each handler
+   reads [orig: the 65-entry dispatch table @ 0x84F220, AudioVM_Op_* @ 0x672770..0x672CF0])
+   and compared instruction by instruction: opcodes, operands, a branch's target as the
+   instruction it lands on, a table's entries, and each section's entry. `nop`s are dropped
+   (MDEdit pads with them; the text has none), and a push's width is the compiler's choice
+   (0x01 u8 / 0x02 u32 push the same value). ---- */
+struct OracleInst {
+    uint32_t offset = 0, size = 0;
+    uint8_t op = 0;
+    std::vector<uint8_t> operand;  /* the bytes after the opcode, the table's included */
+    uint32_t value = 0;            /* a push's value, a branch's target */
+    bool branch = false;           /* goto, brfalse, brtrue, callv: `value` an offset */
+};
+
+/* The bytes each opcode's handler reads after it; -1 for a tablexec (its own walk), -2 for
+   no opcode. */
+static int oracle_width(uint8_t op) {
+    switch (op) {
+    case 0x01: case 0x03: case 0x04: case 0x07: case 0x08: case 0x09:
+    case 0x28: case 0x29: case 0x2A: case 0x2B: case 0x33: case 0x38: case 0x3B: case 0x3E: case 0x40:
+        return 1;
+    case 0x05: case 0x06: case 0x0A: case 0x0B: case 0x3D: return 2;
+    case 0x02: case 0x30: case 0x31: case 0x32: case 0x34: return 4;
+    case 0x35: return -1;
+    default: return op <= 0x40 ? 0 : -2;
+    }
+}
+
+static bool oracle_decode(const uint8_t *code, uint32_t size, std::vector<OracleInst> &out) {
+    out.clear();
+    uint32_t pos = 0;
+    while (pos < size) {
+        OracleInst inst;
+        inst.offset = pos;
+        inst.op = code[pos++];
+        int width = oracle_width(inst.op);
+        if (width == -2) return false;
+        if (width == -1) {
+            if (pos + 4 > size) return false;
+            width = 4 + code[pos] * code[pos + 2];
+        }
+        if (pos + (uint32_t)width > size) return false;
+        inst.operand.assign(code + pos, code + pos + width);
+        pos += (uint32_t)width;
+        inst.size = pos - inst.offset;
+        const auto le = [&](size_t at, size_t n) {
+            uint32_t v = 0;
+            for (size_t k = 0; k < n; ++k) v |= (uint32_t)inst.operand[at + k] << (8 * k);
+            return v;
+        };
+        if (inst.op == 0x01 || inst.op == 0x02) {
+            inst.value = le(0, inst.operand.size());
+            inst.op = 0x01;
+            inst.operand.clear();
+        } else if (inst.op == 0x30 || inst.op == 0x31 || inst.op == 0x32 || inst.op == 0x34) {
+            inst.branch = true;
+            inst.value = le(0, 4);
+        }
+        if (inst.op != 0x00) out.push_back(inst);
+    }
+    return true;
+}
+
+/* The index of the first instruction (nops dropped) at `offset` or after it. */
+static size_t oracle_index(const std::vector<OracleInst> &insts, uint32_t offset) {
+    size_t i = 0;
+    while (i < insts.size() && insts[i].offset < offset) ++i;
+    return i;
+}
+
+/* Compare `a` (the original) with `b` (its recompile): 0 when the same program; `conflated`
+   counts the frame setups (0x38) the text wrote as section transitions (0x3B), which
+   D-MUS-14 records; any other difference is reported and fails. */
+static int same_program(const MusScript &a, const MusScript &b, int &conflated) {
+    conflated = 0;
+    std::vector<OracleInst> ia, ib;
+    CHECK(oracle_decode(a.code, a.code_size, ia), "decode the original's bytecode");
+    CHECK(oracle_decode(b.code, b.code_size, ib), "decode the recompile's bytecode");
+    if (ia.size() != ib.size())
+        fprintf(stderr, "  instructions: original %zu, recompiled %zu\n", ia.size(), ib.size());
+    CHECK(ia.size() == ib.size(), "as many instructions (nops dropped)");
+    for (size_t i = 0; i < ia.size(); ++i) {
+        const OracleInst &x = ia[i], &y = ib[i];
+        bool same = x.op == y.op && x.value == y.value && x.operand == y.operand;
+        if (x.op == 0x38 && y.op == 0x3B && x.operand == y.operand) {
+            ++conflated;
+            same = true;
+        }
+        if (x.branch && y.branch && x.op == y.op)
+            same = oracle_index(ia, x.value) == oracle_index(ib, y.value);
+        if (x.op == 0x35 && y.op == 0x35 && x.operand.size() == y.operand.size() && x.operand.size() >= 4) {
+            /* count, stride; each entry by its own opcode, an address entry by where it lands */
+            same = x.operand[0] == y.operand[0] && x.operand[2] == y.operand[2];
+            const size_t stride = x.operand[2];
+            for (size_t e = 0; same && e < x.operand[0]; ++e) {
+                const uint8_t *ex = &x.operand[4 + e * stride], *ey = &y.operand[4 + e * stride];
+                if (stride >= 5 && ex[0] == 0x30 && ey[0] == 0x30) {
+                    const uint32_t tx = ex[1] | ex[2] << 8 | ex[3] << 16 | (uint32_t)ex[4] << 24;
+                    const uint32_t ty = ey[1] | ey[2] << 8 | ey[3] << 16 | (uint32_t)ey[4] << 24;
+                    same = oracle_index(ia, tx) == oracle_index(ib, ty);
+                } else {
+                    same = memcmp(ex, ey, stride) == 0;
+                }
+            }
+        }
+        if (!same)
+            fprintf(stderr, "  instruction %zu differs: original op %02X at %u, recompiled op %02X at %u\n", i, x.op,
+                    x.offset, y.op, y.offset);
+        CHECK(same, "the same instruction");
+    }
+    for (uint32_t s = 0; s < a.section_count; ++s) {
+        bool found = false;
+        for (uint32_t r = 0; r < b.section_count; ++r)
+            if (strncmp(a.sections[s].name, b.sections[r].name, MUS_SECTION_NAME_SIZE) == 0) {
+                found = true;
+                if (oracle_index(ia, a.sections[s].code_offset) != oracle_index(ib, b.sections[r].code_offset))
+                    fprintf(stderr, "  section %s enters elsewhere\n", a.sections[s].name);
+                CHECK(oracle_index(ia, a.sections[s].code_offset) == oracle_index(ib, b.sections[r].code_offset),
+                      "each section enters at the same instruction");
+            }
+        CHECK(found, "each section is the recompile's too");
+    }
+    return 1;
+}
+
+/* What the programs' comparisons found, for the report: the frame setups D-MUS-14 records. */
+static int g_conflated = 0;
+
 static int entry_roundtrip(const char *path) {
     MusFile mf;
     int rc = mus_open(&mf, path);
@@ -114,6 +244,9 @@ static int entry_roundtrip_file(MusFile &mf, bool same_text) {
         }
         free(again);
         CHECK(same, "the recompiled program decompiles to the original's text");
+        int conflated = 0;
+        CHECK(same_program(*orig, recomp, conflated), "the recompiled program is the original's");
+        g_conflated += conflated;
     }
 
     free(text);
@@ -140,31 +273,43 @@ static int test_entry_roundtrip_menumus(void) {
 
 /* ADR 0046 S16: each installed expansion's two music programs (`G<exp>.bin`, `M<exp>.bin`, which
    `/exp <exp>` loads [orig: Expansion_LoadAssets @ 0x4a491d / 0x4a494a]) decompile, compile and
-   decompile again to the same text. jox01's MJox01.bin plays 61 sounds past index 255 through the word-wide
-   play [orig: AudioVM_Op_PlayWait @ 0x672C90], which the compiler once refused. */
-static int expansion_programs(void) {
-    int failures = 0;
+   decompile again to the same text, the same program. jox01's MJox01.bin plays 61 sounds past index
+   255 through the word-wide play [orig: AudioVM_Op_PlayWait @ 0x672C90], which the compiler once
+   refused. The mount must be the expansion's own (a mount falls back to the base game silently, where
+   no `<exp>` program is found); an install without expansions, or one whose expansions carry no
+   program, is a skipped leg; one that ships jox01 must read both of jox01's. */
+static void expansion_programs(void) {
     const std::string root = retail::install();
-    for (const std::string &expansion : retail::expansions()) {
+    const std::vector<std::string> expansions = retail::expansions();
+    int programs = 0;
+    for (const std::string &expansion : expansions) {
         opennova::Vfs vfs;
-        if (!vfs.mount_game(root, expansion, opennova::VfsMountMode::Packed)) { ++failures; continue; }
+        printf("Mounting /exp %s... ", expansion.c_str());
+        const bool mounted = vfs.mount_game(root, expansion, opennova::VfsMountMode::Packed) &&
+                             vfs.mounted_expansion() == expansion;
+        printf(mounted ? "PASS\n" : "FAIL\n");
+        if (!mounted) { ++failed; continue; }
+        ++passed;
+        int read = 0;
         for (const char *prefix : {"G", "M"}) {
             const std::string name = prefix + expansion + ".bin";
             std::vector<uint8_t> bytes;
             if (!vfs.read_file(name, bytes)) continue; /* an expansion without its own program plays the base's */
+            ++read;
             MusFile mf;
             printf("Running %s/%s... ", expansion.c_str(), name.c_str());
             const int ok = mus_open_memory(&mf, bytes.data(), bytes.size()) == 0 && entry_roundtrip_file(mf, true);
             printf(ok ? "PASS\n" : "FAIL\n");
-            if (ok) {
-                ++passed;
-            } else {
-                ++failed;
-                ++failures;
-            }
+            if (ok) ++passed;
+            else ++failed;
         }
+        if (expansion == "jox01" && read != 2) {
+            fprintf(stderr, "  FAIL: jox01 ships GJox01.bin and MJox01.bin; %d read\n", read);
+            ++failed;
+        }
+        programs += read;
     }
-    return failures;
+    if (programs == 0) retail::skip_leg("an installed expansion with a music program of its own (OPENNOVA_JO_DIR)");
 }
 
 int main(int argc, char **argv) {
@@ -182,6 +327,8 @@ int main(int argc, char **argv) {
     }
     if (retail::install().empty()) retail::skip_leg("OPENNOVA_JO_DIR (the expansions' music programs)");
     else expansion_programs();
+    /* D-MUS-14: the frame setups (0x38) the text writes as section transitions (0x3B). */
+    printf("frame setups written as transitions: %d\n", g_conflated);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }
