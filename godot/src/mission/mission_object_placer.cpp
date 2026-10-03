@@ -173,6 +173,9 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::get_static_instance_transform);
 	ClassDB::bind_method(D_METHOD("item_entity_transform", "position", "rotation_deg", "item_id"),
 			&MissionObjectPlacer::item_entity_transform);
+	ClassDB::bind_method(D_METHOD("get_static_graphic_faces", "graphic"),
+			&MissionObjectPlacer::get_static_graphic_faces);
+	ClassDB::bind_method(D_METHOD("graphic_for", "item_id"), &MissionObjectPlacer::graphic_for);
 	ClassDB::bind_method(D_METHOD("warm_static_graphic", "graphic", "tree_parent"),
 			&MissionObjectPlacer::warm_static_graphic);
 	ClassDB::bind_method(
@@ -256,6 +259,7 @@ void MissionObjectPlacer::_check_epoch() {
 	object_data_cache_.clear();
 	skeletal_cache_.clear();
 	static_batch_cache_.clear();
+	static_face_cache_.clear();
 	static_lod_profile_cache_.clear();
 	graphic_panm_cache_.clear();
 	occlusion_cache_.clear();
