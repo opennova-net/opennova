@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -384,15 +385,18 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 void mission_row_headings(const Document &document, std::vector<std::vector<RowHeading>> &out) {
 	const auto &rows = document.rows();
 	out.assign(rows.size(), std::vector<RowHeading>());
-	// Each pool's teams, and each pool's team's groups (a team or a group shown only where it tells
-	// rows apart).
+	// Each pool's teams, each pool's team's groups and how many rows each holds (a team shown only where
+	// it tells rows apart; a group only where it does and holds more than one row: a vehicle in a group of
+	// its own stands under its team, not under a heading over itself alone).
 	std::map<NodeKind, std::set<int>> teams;
 	std::map<std::pair<NodeKind, int>, std::set<int>> groups;
+	std::map<std::tuple<NodeKind, int, int>, size_t> members;
 	for (const auto &row : rows) {
 		if (!row || !is_entity_kind(row->kind)) continue;
 		const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
 		teams[row->kind].insert(entity.team);
 		groups[{row->kind, entity.team}].insert(entity.group_id);
+		++members[{row->kind, entity.team, entity.group_id}];
 	}
 	const auto number = [](char prefix, int value) {
 		char key[16];
@@ -411,7 +415,7 @@ void mission_row_headings(const Document &document, std::vector<std::vector<RowH
 		if (!is_entity_kind(row->kind)) continue;
 		const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
 		if (teams[row->kind].size() > 1) out[i].push_back({number('t', entity.team), "Team " + std::to_string(entity.team)});
-		if (groups[{row->kind, entity.team}].size() > 1)
+		if (groups[{row->kind, entity.team}].size() > 1 && members[{row->kind, entity.team, entity.group_id}] > 1)
 			out[i].push_back({number('g', entity.group_id),
 			                  entity.group_id ? "Group " + std::to_string(entity.group_id) : std::string("No group")});
 	}

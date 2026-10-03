@@ -666,11 +666,12 @@ private:
 };
 
 // ADR 0046 S15: the minted mission as a tree under the mission's headings (mission_row_headings): the
-// mission row first under none, then each pool's heading with its count over its rows, the organics'
-// two groups (their one team tells nothing apart) each a heading of its own; the rows titled with the
-// names given (the lines made anew when the names' generation moves); a heading closed hides what
-// stands under it and a click range leaves the headings out; a reveal of a row under a closed heading
-// opens it; a filter by a record's words keeps it and the headings over it, held open.
+// mission row first under none, then each pool's heading with its count over its rows, the organics
+// (one team, two groups of one each) under their pool's heading alone, a group of two items under a
+// heading of its own once the items are put so; the rows titled with the names given (the lines made
+// anew when the names' generation moves); a heading closed hides what stands under it and a click
+// range leaves the headings out; a reveal of a row under a closed heading opens it; a filter by a
+// record's words keeps it and the headings over it, held open.
 int test_mission_headings() {
 	const DocumentType *type = document_type_for(AssetKind::Mission);
 	std::unique_ptr<Document> mission = type ? records_of(type->make()) : nullptr;
@@ -693,25 +694,26 @@ int test_mission_headings() {
 	TEST_EXPECT(line_named("Buildings (2)") != SIZE_MAX && line_named("Markers (5)") != SIZE_MAX &&
 	            line_named("Area triggers (2)") != SIZE_MAX && line_named("Events (2)") != SIZE_MAX &&
 	            line_named("Waypoint paths (128)") != SIZE_MAX);
-	// The organics: one team, two groups, each its heading one deeper, its row under it.
-	TEST_EXPECT(organics != SIZE_MAX && lines[organics + 1].heading && lines[organics + 1].text == "Group 1 (1)" &&
-	            lines[organics + 1].depth == 1 && !lines[organics + 2].heading && lines[organics + 2].depth == 2);
-	const NodeAddress walker = lines[organics + 2].address;
+	// The organics: one team, two groups of one each: no heading over a row alone, each row one deeper
+	// than its pool's heading.
+	TEST_EXPECT(organics != SIZE_MAX && !lines[organics + 1].heading && lines[organics + 1].depth == 1 &&
+	            !lines[organics + 2].heading && lines[organics + 2].depth == 1);
+	const NodeAddress walker = lines[organics + 1].address;
 	const int32_t ssn = static_cast<const EntityRow *>(mission->row(walker.row))->native.id;
-	TEST_EXPECT(lines[organics + 2].text == "Wire Test Rifleman #" + std::to_string(ssn) && lines[organics + 2].name == std::to_string(ssn));
+	TEST_EXPECT(lines[organics + 1].text == "Wire Test Rifleman #" + std::to_string(ssn) && lines[organics + 1].name == std::to_string(ssn));
 	// The names' generation moved: the lines made anew; none given: the document's own words.
 	const size_t made = tree.lines_made();
 	names.generation_ = 8;
 	tree.lines(*mission, 0, &names);
 	TEST_EXPECT(tree.lines_made() == made + 1);
 	TEST_EXPECT(tree.lines(*mission).size() == lines.size() &&
-	            tree.lines(*mission)[organics + 2].text == "Organic #" + std::to_string(ssn));
-	// Closed, the organics' heading hides their groups and rows; a click on a heading selects nothing.
+	            tree.lines(*mission)[organics + 1].text == "Organic #" + std::to_string(ssn));
+	// Closed, the organics' heading hides their rows; a click on a heading selects nothing.
 	tree.lines(*mission, 0, &names);
 	const size_t before = tree.lines(*mission, 0, &names).size();
 	tree.set_open(tree.lines(*mission, 0, &names)[organics], false);
 	const std::vector<OutlineLine> &closed = tree.lines(*mission, 0, &names);
-	TEST_EXPECT(closed.size() == before - 4 && closed[organics].heading && !closed[organics].open);
+	TEST_EXPECT(closed.size() == before - 2 && closed[organics].heading && !closed[organics].open);
 	TEST_EXPECT(!tree.click(organics, NodeAddress(), false, false).record.row);
 	// A reveal of the walker opens it.
 	TEST_EXPECT(tree.reveal(*mission, {walker}, 0, &names) != SIZE_MAX && tree.lines(*mission, 0, &names).size() == before);
@@ -726,6 +728,32 @@ int test_mission_headings() {
 	}
 	TEST_EXPECT(walker_kept && !items_kept && !found.empty() && found[0].heading && found[0].forced &&
 	            found[0].text == "Organics (2)");
+	// Two items put in one group and the third in another (all of one team): the group of two under its
+	// heading, one deeper, after the item alone in its group (which stands under its pool's heading).
+	const std::vector<const Node *> placed = dynamic_cast<const MissionDocument &>(*mission).rows_of(MissionKind::Item);
+	TEST_EXPECT(placed.size() == 3);
+	if (placed.size() != 3) return 1;
+	std::vector<Edit> regroup;
+	for (size_t i = 0; i < placed.size(); ++i)
+		for (const auto &[field, value] : std::vector<std::pair<const char *, int64_t>>{{"team", 0}, {"group", i < 2 ? 7 : 8}}) {
+			Edit edit;
+			edit.address = {placed[i]->id, placed[i]->kind, 0};
+			edit.field = field;
+			edit.value = value;
+			regroup.push_back(edit);
+		}
+	TEST_EXPECT(mission->apply(regroup, error));
+	OutlineModel grouped(OutlineMode::Tree, nullptr, nullptr, mission_row_headings);
+	const std::vector<OutlineLine> &by_group = grouped.lines(*mission);
+	size_t pool = SIZE_MAX;
+	for (size_t i = 0; i < by_group.size(); ++i)
+		if (by_group[i].heading && by_group[i].text == "Items (3)") pool = i;
+	TEST_EXPECT(pool != SIZE_MAX && pool + 4 < by_group.size());
+	if (pool == SIZE_MAX || pool + 4 >= by_group.size()) return 1;
+	TEST_EXPECT(!by_group[pool + 1].heading && by_group[pool + 1].depth == 1 && by_group[pool + 1].address.row == placed[2]->id);
+	TEST_EXPECT(by_group[pool + 2].heading && by_group[pool + 2].text == "Group 7 (2)" && by_group[pool + 2].depth == 1);
+	TEST_EXPECT(by_group[pool + 3].address.row == placed[0]->id && by_group[pool + 3].depth == 2 &&
+	            by_group[pool + 4].address.row == placed[1]->id && by_group[pool + 4].depth == 2);
 	std::printf("test_mission_headings passed\n");
 	return 0;
 }
