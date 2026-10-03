@@ -1,6 +1,8 @@
 // The display-name service (display_names.h, ADR 0046 S15 Names).
 #include <editor/graph/display_names.h>
 
+#include <cstdio>
+#include <cstring>
 #include <optional>
 
 #include <base/io/strutil.h>
@@ -106,6 +108,51 @@ FieldUse picked_as(const FieldUse &field) {
 	return picking;
 }
 
+bool text_key_number(const std::string &key, const char *prefix, int64_t &out) {
+	if (!prefix) return false;
+	const size_t length = std::strlen(prefix);
+	if (key.size() <= length || !strutil::iequals(key.substr(0, length), prefix)) return false;
+	const std::string digits = key.substr(length);
+	if (!strutil::all_digits(digits)) return false;
+	const std::optional<int> number = strutil::parse_int(digits);
+	if (!number) return false;
+	// The key the game forms from the number ("%s%03i") is this one, or no number forms it.
+	char formed[32];
+	std::snprintf(formed, sizeof(formed), "%03i", *number);
+	if (digits != formed) return false;
+	out = int64_t(*number);
+	return true;
+}
+
+namespace {
+
+// The keys of a field whose number forms one (FieldUse::key_prefix), in its section of the table the
+// game reads (its own where the project has it, else the alternate: AssetGraph::lookup_scope), each
+// named by the number that forms it, only one the game looks a key up by (key_first..key_last) and
+// the field can hold, the key kept for its preview.
+std::vector<ReferenceChoice> text_key_choices(const AssetGraph &graph, const FieldUse &field) {
+	GraphEdge edge;
+	edge.kind = ReferenceKind::TextId;
+	edge.scope = field.scope;
+	if (field.scope_alternate) edge.scope_alternate = field.scope_alternate;
+	const std::string scope = graph.lookup_scope(edge);
+	std::vector<ReferenceChoice> out;
+	for (ReferenceChoice &choice : graph.choices(ReferenceKind::TextId, scope)) {
+		int64_t number = 0;
+		if (!text_key_number(choice.name, field.key_prefix, number)) continue;
+		if (number < field.key_first || number > field.key_last) continue;
+		if (field.schema && field.schema->ranged && (double(number) < field.schema->min || double(number) > field.schema->max))
+			continue;
+		choice.symbol = std::move(choice.name);
+		choice.symbol_scope = scope;
+		choice.name = std::to_string(number);
+		out.push_back(std::move(choice));
+	}
+	return out;
+}
+
+} // namespace
+
 std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Document &document, const NodeAddress &address,
                                             const FieldUse &field, const NameSource *names) {
 	const FieldUse picking = picked_as(field);
@@ -123,7 +170,9 @@ std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Docum
 		}
 	}
 	if (graph) {
-		std::vector<ReferenceChoice> listed = reference_choices(*graph, picking);
+		std::vector<ReferenceChoice> listed = picking.reference == ReferenceKind::TextId && picking.key_prefix
+		                                              ? text_key_choices(*graph, picking)
+		                                              : reference_choices(*graph, picking);
 		choices.insert(choices.end(), listed.begin(), listed.end());
 	}
 	word_choices(document, address, picking, names, choices);
@@ -159,8 +208,15 @@ const std::string &DisplayNameCache::record(const Document &document, const Node
 	key.has_names = names != nullptr;
 	key.names = names ? names->generation() : 0;
 	if (!(key == key_)) {
+		// Held: only the revision moved, by the held gesture's batches alone, which leave every title as it
+		// was.
+		const bool kept = held_ && key.document == key_.document && key.load == key_.load && key.names == key_.names &&
+		                  key.has_names == key_.has_names && document.gesture_alone_since(held_, key_.revision);
 		key_ = key;
-		titles_.clear();
+		if (!kept) {
+			titles_.clear();
+			++dropped_;
+		}
 	}
 	const auto found = titles_.find(address);
 	if (found != titles_.end()) return found->second;
