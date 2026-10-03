@@ -159,6 +159,29 @@ static int test_usage_errors() {
 	return 0;
 }
 
+// ADR 0046 S16: a project made as an expansion, its version text and (on the base game) its text table
+// made with it; `new` and `status` say what it builds as; an expansion the game cannot take, or one to
+// build on with no name of its own, is refused with nothing made.
+static int test_new_expansion() {
+	editor_test::TempProjectDir dir("opennova_editor_project_cli_expansion");
+	const std::string root = dir.file("Mod");
+	std::string text;
+	TEST_EXPECT(run({"new", dir.file("bad"), "--expansion", "my mod"}) == 2 && !fs::exists(dir.file("bad")));
+	TEST_EXPECT(run({"new", dir.file("on"), "--builds-on", "jox01"}) == 2 && !fs::exists(dir.file("on")));
+	TEST_EXPECT(run_capture(dir.file("new.txt"), {"new", root, "--title", "Mod", "--expansion", "jxm"}, text) == 0 &&
+	            text.find("as the expansion jxm, on the base game") != std::string::npos);
+	TEST_EXPECT(fs::is_regular_file(root + "/version.txt") && fs::is_regular_file(root + "/strings/jxm.bin"));
+	TEST_EXPECT(run_capture(dir.file("status.txt"), {"status", root}, text) == 0 &&
+	            text.find("expansion: jxm, on the base game") != std::string::npos);
+	opennova::editor::ProjectDocument doc;
+	opennova::editor::Diagnostic error;
+	TEST_EXPECT(opennova::editor::open_project(root, doc, error) && doc.expansion.name == "jxm" && doc.expansion.builds_on.empty());
+	const std::string plain = dir.file("Plain");
+	TEST_EXPECT(run({"new", plain}) == 0 && run_capture(dir.file("plain.txt"), {"status", plain}, text) == 0 &&
+	            text.find("expansion: none") != std::string::npos);
+	return 0;
+}
+
 static int test_new_status_validate() {
 	editor_test::TempProjectDir dir("opennova_editor_project_cli_test");
 	const std::string root = dir.file("CliGame");
@@ -738,6 +761,7 @@ int main() {
 	failures += test_usage_errors();
 	failures += test_expansion_project();
 	failures += test_new_status_validate();
+	failures += test_new_expansion();
 	failures += test_validate_pins_the_rows();
 	failures += test_one_game_install();
 	failures += test_older_local_settings();

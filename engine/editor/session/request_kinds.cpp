@@ -31,7 +31,8 @@ constexpr Holds kSlot = HoldsSlot;
 // --- the handlers: what serves each session row, through the part it names -----------------------
 
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
-	core.new_project(request.dir, request.title, request.game, request.import_pass);
+	core.new_project(request.dir, request.title, request.game, request.import_pass,
+	                 ProjectExpansion{ request.expansion, request.builds_on });
 }
 void serve_open_project(SessionCore &core, const EditorRequest &request) {
 	core.open_project(request.dir, request.import_pass, request.game_install);
@@ -249,11 +250,13 @@ struct Request {
 // an operation of its own) or a rename waits.
 constexpr RequestKindRow kRows[] = {
 	Request(K::NewProject, "new_project", serve_new_project,
-			"A project made in dir (its title, else the folder's name; its game, else jo), then "
-			"opened as open_project opens it (import_pass false: no source the folder holds "
-			"imported); refused, the open project kept, where dir holds a project already or game "
-			"names no game.")
-			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::ImportPass }))
+			"A project made in dir (its title, else the folder's name; its game, else jo; S16: built as "
+			"the expansion `expansion` on the installed one `builds_on`, its version text made and, on "
+			"the base game, its text table), then opened as open_project opens it (import_pass false: "
+			"no source the folder holds imported); refused, the open project kept, where dir holds a "
+			"project already, game names no game, or the expansion is one the game cannot take or the "
+			"install refuses (a name it has, one it lacks to build on).")
+			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::ImportPass }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")

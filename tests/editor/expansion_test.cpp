@@ -1,25 +1,36 @@
 // Pins a project's expansion (ADR 0046 S16): the names the game takes for one (expansion_name.h, each
 // refusal the game's own: docs/vfs/vfs-pff-mount-re.md § Expansions), the expansion weighed against
 // an install's, the files its name forms (expansion_files.h), and the install as the game serves it to
-// such a project (install_view.h) over a synthetic install written with the PFF writer.
+// such a project (install_view.h) over a synthetic install written with the PFF writer, and a session's
+// expansion project over it: made, checked against the install, renamed with its files.
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_view.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_document.h>
 #include <editor/session/original_files.h>
+#include <editor/session/preferences_store.h>
+#include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
+#include <editor/session/view_json.h>
 #include <formats/pff/pff.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 
 using namespace opennova::editor;
 
@@ -264,6 +275,120 @@ static int test_fold_follows_the_view() {
 	return 0;
 }
 
+namespace {
+
+size_t count_code(const std::vector<Diagnostic> &findings, const char *code, const std::string &about = std::string()) {
+	size_t count = 0;
+	for (const Diagnostic &d : findings)
+		if (d.code() == code && (about.empty() || d.message.find(about) != std::string::npos)) ++count;
+	return count;
+}
+
+std::string file_text(const std::string &path) {
+	std::ifstream in(opennova::io::os_path(path), std::ios::binary);
+	return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+} // namespace
+
+// A session's expansion project (ADR 0046 S16) over the synthetic install: a name the install has or
+// an expansion it lacks refused before anything is made; one made on the base game holds its version
+// text and its text table; a music file the setting leaves unread said; the name changed in the
+// settings renames the project's files of the old name; the expansion it builds on checked against the
+// install, and listed when the install changes under it.
+static int test_session() {
+	editor_test::TempProjectDir dir("opennova_editor_expansion_session");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(make_install(install));
+	Preferences chosen;
+	chosen.game_install = install; // the install a new project starts with
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	// The install's expansions, open or not.
+	TEST_EXPECT(view.project.install_expansions.size() == 1 && view.project.install_expansions[0].name == "x1");
+	{
+		const opennova::io::JsonValue project = view_section_to_json(view, ViewSection::Project);
+		const opennova::io::JsonValue *listed = project.get("install_expansions");
+		TEST_EXPECT(listed && listed->array.size() == 1 && listed->array[0].get_string("name", "") == "x1" &&
+		            !project.get("expansion"));
+	}
+	// Refused before anything is made: a name the install has (without case, as the file system
+	// compares), an expansion to build on that it lacks.
+	const std::string taken = dir.file("taken");
+	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_expansion_project(taken, "Taken", "X1"));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.expansion.name_taken") == 1 &&
+	            !std::filesystem::exists(opennova::io::os_path(taken)) && !view.project.open);
+	const std::string lacks = dir.file("lacks");
+	outcome = editor_test::handle_to_end(session, request::new_expansion_project(lacks, "Lacks", "jxm", "x2"));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.expansion.not_installed", "'x2'") == 1 &&
+	            !std::filesystem::exists(opennova::io::os_path(lacks)) && !view.project.open);
+	// On the base game: its version text, its table.
+	const std::string root = dir.file("own");
+	outcome = editor_test::handle_to_end(session, request::new_expansion_project(root, "Own", "jxm"));
+	TEST_EXPECT(!outcome.refused && view.project.open &&
+	            view.project.document->expansion == (ProjectExpansion{ "jxm", "" }));
+	const AssetEntry *version = view.project.scan->find("version.txt");
+	const AssetEntry *table = view.project.scan->find("jxm.bin");
+	TEST_EXPECT(version && table && file_text(root + "/" + version->relative_path) == "Own\r\n");
+	const std::string table_path = table ? root + "/" + table->relative_path : std::string(); // the scan moves on
+	{
+		const opennova::io::JsonValue project = view_section_to_json(view, ViewSection::Project);
+		const opennova::io::JsonValue *expansion = project.get("expansion");
+		TEST_EXPECT(expansion && expansion->get_string("name", "-") == "jxm" &&
+		            expansion->get_string("builds_on", "-").empty());
+	}
+	// The base game's music bank and script in an expansion's project: the game reads Mjxm.sbf and
+	// Mjxm.bin in their place.
+	TEST_EXPECT(editor_test::write_text(root + "/MENUMUS.SBF", "music") &&
+	            editor_test::write_text(root + "/menumus.bin", "SCR0....")); // a script by its bytes, as the scan types a .bin
+	editor_test::handle_to_end(session, request::rescan());
+	const std::vector<Diagnostic> &listed = view.project.requirements->diagnostics;
+	TEST_EXPECT(count_code(listed, "expansion.file.unread") == 2 &&
+	            count_code(listed, "expansion.file.unread", "Mjxm.sbf") == 1 &&
+	            count_code(listed, "expansion.file.unread", "Mjxm.bin") == 1);
+	// The name changed: its files of the old name follow it, the version text keeps its own.
+	ProjectSettingsChange renamed;
+	renamed.expansion = "jxk";
+	editor_test::apply_settings(session, renamed);
+	TEST_EXPECT(view.project.settings_result.failures.empty() && view.project.document->expansion.name == "jxk");
+	TEST_EXPECT(view.project.scan->find("jxk.bin") && !view.project.scan->find("jxm.bin") &&
+	            view.project.scan->find("version.txt") &&
+	            !table_path.empty() && !std::filesystem::exists(opennova::io::os_path(table_path)));
+	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "expansion.file.unread", "Mjxk.sbf") == 1);
+	// To build on an expansion the install lacks: refused, the expansion as it was; on one it has.
+	ProjectSettingsChange elsewhere;
+	elsewhere.builds_on = "x2";
+	editor_test::apply_settings(session, elsewhere);
+	TEST_EXPECT(count_code(view.project.settings_result.failures, "project.expansion.not_installed") == 1 &&
+	            view.project.document->expansion == (ProjectExpansion{ "jxk", "" }));
+	ProjectSettingsChange on_x1;
+	on_x1.builds_on = "x1";
+	editor_test::apply_settings(session, on_x1);
+	TEST_EXPECT(view.project.settings_result.failures.empty() &&
+	            view.project.document->expansion == (ProjectExpansion{ "jxk", "x1" }));
+	ProjectDocument saved;
+	Diagnostic error;
+	TEST_EXPECT(open_project(root, saved, error) && saved.expansion == (ProjectExpansion{ "jxk", "x1" }));
+	// An install without x1: listed, never refused.
+	const std::string bare = dir.file("bare");
+	std::error_code made;
+	std::filesystem::create_directories(opennova::io::os_path(bare), made);
+	editor_test::set_game_install(session, bare);
+	TEST_EXPECT(view.project.install_expansions.empty() &&
+	            count_code(view.project.requirements->diagnostics, "project.expansion.not_installed", "'x1'") == 1);
+	// A standalone project: none of its rows, none of its findings.
+	ProjectSettingsChange standalone;
+	standalone.expansion = "";
+	standalone.builds_on = "";
+	editor_test::apply_settings(session, standalone);
+	TEST_EXPECT(view.project.document->expansion.standalone() &&
+	            count_code(view.project.requirements->diagnostics, "project.expansion.not_installed") == 0 &&
+	            count_code(view.project.requirements->diagnostics, "expansion.file.unread") == 0);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_name_rule();
@@ -273,6 +398,7 @@ int main() {
 	failures += test_name_forms_no_game_file();
 	failures += test_install_view();
 	failures += test_fold_follows_the_view();
+	failures += test_session();
 	if (failures == 0) std::printf("editor_expansion: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

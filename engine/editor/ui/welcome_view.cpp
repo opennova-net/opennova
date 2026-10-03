@@ -26,11 +26,17 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
 	ImGui::EndDisabled();
 	ImGui::TextDisabled("The folder is created if it does not exist; it must not already hold a project.");
-	const bool ready = title_[0] != '\0' && folder_[0] != '\0' && allowed;
+	const bool expansion_ok = expansion_.draw(workspace.view());
+	const bool ready = title_[0] != '\0' && folder_[0] != '\0' && allowed && expansion_ok;
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create project") && ready;
 	ImGui::EndDisabled();
-	if (create) workspace.request(request::new_project(folder_, title_));
+	if (create) {
+		const ProjectExpansion expansion = expansion_.value();
+		workspace.request(expansion.standalone() ? request::new_project(folder_, title_)
+		                                         : request::new_expansion_project(folder_, title_, expansion.name,
+		                                                                          expansion.builds_on));
+	}
 	return create;
 }
 

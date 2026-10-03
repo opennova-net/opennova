@@ -231,8 +231,8 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 # The request's fields (engine/editor/session/request_fields.cpp), one flag each: the text fields,
 # the lists (comma-separated), the objects (JSON) and the switches. The kind's row says which it
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
-REQUEST_TEXTS = ("dir", "title", "game", "game_install", "path", "locator", "field", "new_name", "role", "file_kind",
-                 "out_dir", "export_dir", "mission", "mode", "choice", "purpose")
+REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install", "path", "locator", "field",
+                 "new_name", "role", "file_kind", "out_dir", "export_dir", "mission", "mode", "choice", "purpose")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
                     "planned")
@@ -638,6 +638,12 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--dir", default=None, help="a project's directory (new_project, open_project, forget_recent)")
     request.add_argument("--title", default=None, help="a new project's title (the folder's name when left out)")
     request.add_argument("--game", default=None, help="a new project's game, a gameprofile code (jo when left out)")
+    request.add_argument("--expansion", default=None,
+                         help="new_project: the expansion it builds as, played with /exp <name> (a standalone "
+                              "project when left out)")
+    request.add_argument("--builds-on", dest="builds_on", default=None,
+                         help="new_project: the game install's expansion it builds on (the base game when left "
+                              "out; needs --expansion)")
     request.add_argument("--game-install", dest="game_install", default=None,
                          help="open_project: a game install for the session alone, in place of the one the "
                               "project's .opennova/local.json names (which stays as it is)")

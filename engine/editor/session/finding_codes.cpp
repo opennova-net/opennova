@@ -28,6 +28,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::FilesNotChecked, "graph", "Files not checked" },
 	{ G::ProjectFiles, "asset", "Project files" },
 	{ G::Project, "project", "Project" },
+	{ G::Expansion, "expansion", "Expansion files" },
 	{ G::Documents, "document", "Documents" },
 	{ G::Imports, "import", "Imports" },
 	{ G::Build, "build", "Build" },

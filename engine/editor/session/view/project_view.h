@@ -40,6 +40,16 @@ struct ProjectView {
 	// likewise, which its build's gate reads (BaseNames); empty for a standalone project, and when
 	// the install mounts nothing (build.expansion.base_missing).
 	std::vector<std::string> base_files;
+	// The expansions the game install under `retail_directory` has (ADR 0046 S16: the ones the game
+	// mounts, vfs_list_expansions), each by its folder's name with the name and the description the
+	// Mods list shows for it (vfs_expansion_info): what a project builds on. Read with the install,
+	// whether a project is open or not.
+	struct InstallExpansion {
+		std::string name;
+		std::string title;
+		std::string description;
+	};
+	std::vector<InstallExpansion> install_expansions;
 	// What the last ApplyProjectSettings could not write (each also a finding); its
 	// SettingsApplied event (view_events.h) says it came.
 	struct SettingsResult {
