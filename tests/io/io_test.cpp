@@ -242,6 +242,21 @@ static int test_strutil_parse_numbers()
     TEST_EXPECT(!strutil::parse_float("x1.5"));
     TEST_EXPECT(!strutil::parse_float(""));
     TEST_EXPECT(!strutil::parse_float("1e999"));
+
+    // The 64-bit and double forms, as std::stoll / stoull / stod.
+    TEST_EXPECT(strutil::parse_llong("9223372036854775807") == 9223372036854775807LL);
+    TEST_EXPECT(strutil::parse_llong("-42x") == -42LL);
+    TEST_EXPECT(!strutil::parse_llong("9223372036854775808"));
+    TEST_EXPECT(!strutil::parse_llong(""));
+    TEST_EXPECT(strutil::parse_ullong("18446744073709551615") == 18446744073709551615ULL);
+    TEST_EXPECT(!strutil::parse_ullong("18446744073709551616"));
+    TEST_EXPECT(strutil::parse_double("0.125") == 0.125);
+    TEST_EXPECT(!strutil::parse_double("1e999"));
+    TEST_EXPECT(!strutil::parse_double("."));
+    // Digits alone: no sign, no blank, nothing after.
+    TEST_EXPECT(strutil::all_digits("0123"));
+    TEST_EXPECT(!strutil::all_digits("") && !strutil::all_digits("+1") && !strutil::all_digits(" 1") &&
+                !strutil::all_digits("1x") && !strutil::all_digits("-1"));
     return 0;
 }
 
