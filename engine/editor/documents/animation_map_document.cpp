@@ -277,7 +277,10 @@ namespace {
 constexpr FindingCodeEntry<AnimationMapFinding> kFindingEntries[] = {
 	{ AnimationMapFinding::InvalidInput, { "animation_map.invalid_input", FindingFix::None, nullptr, true } },
 	{ AnimationMapFinding::IgnoredInput, { "animation_map.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
-	{ AnimationMapFinding::NoReset, { "animation_map.no_reset", FindingFix::ResetRow } },
+	// The load returns no map [orig: AnimMap_LoadAdmFile @ 0x40cc40, the reset row's test @ 0x40ce03]:
+	// that map is not loaded, and no refusal of the game's load or run past it is witnessed: listed
+	// (the gate follows retail, ADR 0046 S14).
+	{ AnimationMapFinding::NoReset, listed_code("animation_map.no_reset", FindingFix::ResetRow) },
 	{ AnimationMapFinding::Row, { "animation_map.row" } },
 	{ AnimationMapFinding::KeyUnknown, { "animation_map.key_unknown" } },
 	{ AnimationMapFinding::SlotRepeated, { "animation_map.slot_repeated" } },

@@ -30,8 +30,8 @@ namespace {
 
 using graph_names::is_style_reference;
 using graph_names::key;
-std::string extension_of(const std::string &name) { return key(fs::path(name).extension().generic_string()); }
-std::string stem_of(const std::string &name) { return fs::path(name).stem().generic_string(); }
+std::string extension_of(const std::string &name) { return key(utf8_of(path_of(name).extension())); }
+std::string stem_of(const std::string &name) { return utf8_of(path_of(name).stem()); }
 
 // The file a path names, else the first of its logical name (two files of one name are the
 // scan's asset.name.duplicate: the path picks which is renamed).
@@ -134,7 +134,7 @@ std::string value_text(const Value &value) {
 } // namespace
 
 std::string companion_path(const RenameOutput &companion) {
-	return (fs::path(companion.path).parent_path() / companion.new_name).generic_string();
+	return utf8_of(path_of(companion.path).parent_path() / path_of(companion.new_name));
 }
 
 RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
@@ -148,8 +148,8 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 	}
 	plan.path = asset->relative_path;
 	plan.old_name = asset->logical_name;
-	const std::string dir = fs::path(asset->relative_path).parent_path().generic_string();
-	plan.new_path = (fs::path(dir) / new_name).generic_string();
+	const std::string dir = utf8_of(path_of(asset->relative_path).parent_path());
+	plan.new_path = join_path(dir, new_name);
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
 	if (!asset->imported_from.empty()) {
@@ -243,7 +243,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 				                                entry->relative_path));
 				continue;
 			}
-			const std::string member_dir = fs::path(entry->relative_path).parent_path().generic_string();
+			const std::string member_dir = utf8_of(path_of(entry->relative_path).parent_path());
 			FileNameProblem member_problem = FileNameProblem::None;
 			std::string why;
 			if (!check_project_file_name(paths.root, member_dir, member.new_name, entry->kind, member_problem, why)) {
@@ -274,7 +274,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 	// makes them again under the new names.
 	if (importer_for(asset->logical_name)) {
 		std::error_code ec;
-		if (fs::is_regular_file(fs::path(paths.root) / (asset->relative_path + kImportSidecarSuffix), ec)) {
+		if (fs::is_regular_file(system_path(join_path(paths.root, asset->relative_path + kImportSidecarSuffix)), ec)) {
 			plan.sidecar = asset->relative_path + kImportSidecarSuffix;
 			plan.new_sidecar = plan.new_path + kImportSidecarSuffix;
 		}
@@ -509,7 +509,7 @@ std::unique_ptr<DocumentBase> read_site_file(const ProjectPaths &paths, const Pr
 	const bool loaded = as_open
 	                            ? document->load_bytes(std::vector<uint8_t>(current.text.begin(), current.text.end()),
 	                                                   asset.relative_path, asset.kind, project.target_game, error)
-	                            : document->load((fs::path(paths.root) / asset.relative_path).generic_string(),
+	                            : document->load(join_path(paths.root, asset.relative_path),
 	                                             asset.relative_path, asset.kind, project.target_game, error);
 	if (!loaded) {
 		findings.push_back(error);
@@ -837,7 +837,7 @@ void RenameTransaction::stage_file(const std::string &file, const std::vector<co
 		return;
 	}
 	Diagnostic error;
-	if (!document->load((fs::path(paths_.root) / asset->relative_path).generic_string(), asset->relative_path, asset->kind,
+	if (!document->load(join_path(paths_.root, asset->relative_path), asset->relative_path, asset->kind,
 	                    project_.target_game, error)) {
 		found.push_back(error);
 		staged_ok_ = false;
@@ -898,8 +898,12 @@ void RenameTransaction::commit() {
 // record and its old outputs removed; a copy refused leaves everything as it was.
 void RenameTransaction::commit_file_rename() {
 	const RenamePlan &plan = file_plan_;
-	const fs::path old_path = fs::path(paths_.root) / plan.path;
-	const fs::path new_path = fs::path(paths_.root) / plan.new_path;
+	// Every call through the system's path (project_files.h): a project file past MAX_PATH renames too.
+	const auto at = [this](const std::string &relative) {
+		return system_path(join_path(paths_.root, relative));
+	};
+	const fs::path old_path = at(plan.path);
+	const fs::path new_path = at(plan.new_path);
 	std::error_code ec;
 	const bool same_file = key(plan.old_name) == key(plan.new_name);
 	if (!same_file) {
@@ -916,7 +920,7 @@ void RenameTransaction::commit_file_rename() {
 		// size and last write (the build's, the import's) would take it for the file that held the
 		// name before (two of a size swapping names): it is dated now (S13 A8).
 		std::string dated;
-		if (!refresh_last_write(new_path.generic_string(), dated)) {
+		if (!refresh_last_write(utf8_of(new_path), dated)) {
 			findings_.push_back(refusal(CoreFinding::RenameCopy, "The file could not be copied to its new name: " + dated, plan.path));
 			std::error_code ignored;
 			fs::remove(new_path, ignored);
@@ -925,7 +929,7 @@ void RenameTransaction::commit_file_rename() {
 		// The import record travels with its source (a stray record already at the new
 		// name, whose source was never there, is replaced).
 		if (!plan.sidecar.empty()) {
-			fs::copy_file(fs::path(paths_.root) / plan.sidecar, fs::path(paths_.root) / plan.new_sidecar,
+			fs::copy_file(at(plan.sidecar), at(plan.new_sidecar),
 			              fs::copy_options::overwrite_existing, ec);
 			if (ec) {
 				findings_.push_back(refusal(CoreFinding::RenameCopy, "The import record could not be copied to its new name: " +
@@ -939,17 +943,17 @@ void RenameTransaction::commit_file_rename() {
 		// one that cannot be copied takes every copy back.
 		std::vector<fs::path> copied;
 		for (const RenameOutput &companion : plan.companions) {
-			const fs::path to = fs::path(paths_.root) / companion_path(companion);
+			const fs::path to = at(companion_path(companion));
 			std::string dated;
-			fs::copy_file(fs::path(paths_.root) / companion.path, to, ec);
-			if (!ec && !refresh_last_write(to.generic_string(), dated)) ec = std::make_error_code(std::errc::io_error);
+			fs::copy_file(at(companion.path), to, ec);
+			if (!ec && !refresh_last_write(utf8_of(to), dated)) ec = std::make_error_code(std::errc::io_error);
 			if (ec) {
 				findings_.push_back(refusal(CoreFinding::RenameCopy, companion.old_name + " could not be copied to its new name: " +
 				                                    (dated.empty() ? ec.message() : dated), companion.path));
 				std::error_code ignored;
 				for (const fs::path &made : copied) fs::remove(made, ignored);
 				fs::remove(new_path, ignored);
-				if (!plan.sidecar.empty()) fs::remove(fs::path(paths_.root) / plan.new_sidecar, ignored);
+				if (!plan.sidecar.empty()) fs::remove(at(plan.new_sidecar), ignored);
 				return;
 			}
 			copied.push_back(to);
@@ -976,22 +980,23 @@ void RenameTransaction::commit_file_rename() {
 			findings_.push_back(refusal(CoreFinding::RenameRemove, "The old file could not be removed: " + ec.message(), plan.path));
 			return;
 		}
-		if (!plan.sidecar.empty()) fs::remove(fs::path(paths_.root) / plan.sidecar, ec);
-		for (const RenameOutput &companion : plan.companions) fs::remove(fs::path(paths_.root) / companion.path, ec);
+		if (!plan.sidecar.empty()) fs::remove(at(plan.sidecar), ec);
+		for (const RenameOutput &companion : plan.companions) fs::remove(at(companion.path), ec);
 	} else {
-		fs::rename(old_path, new_path, ec);
-		if (ec) {
+		// A rename an indexer or a scanner holding the file refuses for a moment is tried again
+		// (rename_with_retry: a bounded few ms), as a save's replace and the build's publish are.
+		if (!rename_with_retry(old_path, new_path, ec)) {
 			findings_.push_back(refusal(CoreFinding::RenameMove, "The file could not be renamed: " + ec.message(), plan.path));
 			return;
 		}
-		if (!plan.sidecar.empty()) fs::rename(fs::path(paths_.root) / plan.sidecar, fs::path(paths_.root) / plan.new_sidecar, ec);
+		if (!plan.sidecar.empty()) rename_with_retry(at(plan.sidecar), at(plan.new_sidecar), ec);
 		for (const RenameOutput &companion : plan.companions)
-			fs::rename(fs::path(paths_.root) / companion.path, fs::path(paths_.root) / companion_path(companion), ec);
+			rename_with_retry(at(companion.path), at(companion_path(companion)), ec);
 	}
 	// The old outputs are disposable: the next import pass makes the new ones. (A rename
 	// that only changes the case keeps its output directory, which is keyed case-blind.)
 	if (!plan.output_dir.empty() && plan.output_dir != plan.new_output_dir)
-		fs::remove_all(fs::path(paths_.root) / plan.output_dir, ec);
+		fs::remove_all(at(plan.output_dir), ec);
 	ok_ = true;
 }
 
@@ -1008,7 +1013,7 @@ void RenameTransaction::commit_symbol_rename() {
 			                            staged->document->path()));
 			return;
 		}
-		writes.push_back({(fs::path(paths_.root) / staged->document->path()).generic_string(),
+		writes.push_back({join_path(paths_.root, staged->document->path()),
 		                  staged->document->serialize().text});
 	}
 	std::vector<std::string> problems;
