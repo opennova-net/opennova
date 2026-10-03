@@ -203,7 +203,7 @@ struct MenuWidgetState {
 	// flags and colour of the 40-byte row records) [orig: CUITable_Render
 	// @ 0x6411d0]. scroll_row above is the first visible row.
 	std::vector<MenuTableRow> table_rows;
-	// The columns code installed (they replace the XML ones) and the sorted
+	// The column records code set up (menu_table.h MenuTableColumn) and the sorted
 	// column whose header shows the sort indicator (-1: none) [orig:
 	// CTableWnd_SortByColumn @ 0x640900 -> CTableWnd_SetRowTooltip].
 	bool has_table_columns = false;
@@ -774,8 +774,8 @@ private:
 			float sx, float sy) const;
 	void table_row_heights_(const WidgetNode &node, int *header_height,
 			int *body_row_height) const;
-	// One TABLE column as the XML sets it up, or as code installs it (a MenuTableColumn:
-	// no SUBST rows, no cell offsets) [orig: the 180-byte column records at +780: width
+	// One TABLE column as the XML sets it up, or as code sets its record up (a
+	// MenuTableColumn over the record a count kept or started over) [orig: the 180-byte column records at +780: width
 	// +124, label +0, header justification +128 / +132, cell justification +144 / +148,
 	// cell offsets +152 / +156, draw kind +108, the sort compare +112 and direction +120,
 	// SCALE_BITMAP +168, the SUBST list +164].
@@ -806,8 +806,8 @@ private:
 	static constexpr int kTableCellImageText = 4;
 	class TableCanvas;
 	void build_table_columns_(WidgetNode &node);
-	// The columns a table draws: the ones code installed (they replace the XML ones),
-	// else the XML set-up [orig: init_table_row @ 0x63f9c0 per HEADER, the BODY stores
+	// The columns a table draws: the records code set up (over the XML ones a count
+	// kept), else the XML set-up [orig: init_table_row @ 0x63f9c0 per HEADER, the BODY stores
 	// @ 0x6427d0; StatScreen_PopulateStatResultsList @ 0x562240 installs its own].
 	std::vector<TableColumnSetup> table_columns_(const WidgetNode &node,
 			const MenuWidgetState *ws) const;
