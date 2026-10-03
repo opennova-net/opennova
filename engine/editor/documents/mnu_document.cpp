@@ -71,6 +71,7 @@ constexpr FindingCodeEntry<Note> kNoteEntries[] = {
 	{ Note::TypeInteriorDeferred, note_row("menu.render.type_interior_deferred", P::Info) },
 	{ Note::ItemKindNotDrawn, note_row("menu.render.item_kind_not_drawn", P::Info) },
 	{ Note::TableCellsDeferred, note_row("menu.render.table_cells_deferred", P::Info) },
+	{ Note::TableCellsCustom, note_row("menu.render.table_cells_custom", P::None) },
 	{ Note::ScrollExtentDefault, note_row("menu.render.scroll_extent_default", P::None) },
 	{ Note::FontMissing, note_row("menu.render.font_missing", P::None) },
 	{ Note::FontUnreadable, note_row("menu.render.font_unreadable", P::Warning) },
@@ -738,33 +739,79 @@ std::shared_ptr<Node> MnuDocument::make_node(NodeKind kind, NodeId id,
 
 // --- editing ---------------------------------------------------------------------------
 
+bool MnuDocument::code_page_model() const {
+	const auto *state = dynamic_cast<const MenuFileState *>(file_state());
+	return !state || state->source_encoding == mnu::SourceEncoding::CodePage;
+}
+
+// A code-page menu's model holds its code page's bytes (mnu.h's SourceEncoding): read as UTF-8, as a
+// string table's text is, never handed to a widget as raw cp1252.
+bool MnuDocument::read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const {
+	if (!TableDocument::read(row, address, field, out)) return false;
+	if (auto *text = std::get_if<std::string>(&out); text && code_page_model()) *text = cp1252_to_utf8(*text);
+	return true;
+}
+
 bool MnuDocument::set_value(Node &node, const Located &at, size_t field, const Value &value, std::string &error) {
+	// A text as the model holds it, and its width as the game counts it: every text the reader reads
+	// is narrowed to the code page by WideCharToMultiByte(CP_ACP) [orig: CUIButtonWidget_ParseXMLAttributes
+	// @ 0x657c30, the STRING parse; CUIElement_ParseXMLDefinition @ 0x648120, the ACTION arm @ 0x648ee2;
+	// docs/mnu/menu-re.md, the numeric entity's byte], one byte a character
+	// on 1252 (one it lacks narrows to '?'), so a field's width counts characters in either encoding. A
+	// code-page menu stores the bytes (a character 1252 has no byte for refused, never stored as UTF-8
+	// the game would show as other characters); a Unicode menu keeps the UTF-8.
+	const TableKind &table_kind = *menu_table().kind(at.record.kind);
+	const FieldSchema &schema = table_kind.fields()[field];
+	Value stored = value;
+	if (const auto *text = std::get_if<std::string>(&value); text && schema.type == FieldType::Text) {
+		size_t characters = 0;
+		if (code_page_model()) {
+			std::string bytes;
+			std::u32string unstorable;
+			if (!utf8_to_cp1252(*text, bytes, &unstorable)) {
+				std::string named;
+				for (size_t i = 0; i < unstorable.size() && i < 5; ++i) {
+					if (i) named += ", ";
+					utf8_append(named, unstorable[i]);
+				}
+				error = "This menu is in the game's code page (Windows-1252), which has no " + named + ".";
+				return false;
+			}
+			characters = bytes.size();
+			stored = std::move(bytes);
+		} else {
+			for (const char c : *text) characters += (static_cast<unsigned char>(c) & 0xC0) != 0x80;
+		}
+		if (schema.width && characters >= schema.width) {
+			error = "The text is too long.";
+			return false;
+		}
+	}
 	// A name the reader would not keep here is refused: a window keeps only its PLAYERLIST
 	// and SERVERLIST attributes, and only the extra elements its parses read at its top level.
 	if (!at.is_row() && is_window_kind(at.step().owner.kind)) {
 		const mnu::SchemaShape shape = menu_shape(at.record.kind);
-		const TableKind &kind = *menu_table().kind(at.record.kind);
-		const std::string &id = kind.fields()[field].id;
+		const std::string &id = schema.id;
 		if (shape == mnu::SchemaShape::Attribute && id == "name") {
-			if (!text_width(value, 64, error)) return false;
-			if (!mnu::known_token(std::get<std::string>(value), mnu::kExtraAttributes)) {
+			if (!text_width(stored, 64, error)) return false;
+			if (!mnu::known_token(std::get<std::string>(stored), mnu::kExtraAttributes)) {
 				error = kWindowAttributes;
 				return false;
 			}
 		}
 		if (shape == mnu::SchemaShape::Attribute && id == "value") {
 			Value current;
-			if (!kind.value(field).get(at.record, current) || current != value) { error = kFlagsTakeNoValue; return false; }
+			if (!table_kind.value(field).get(at.record, current) || current != stored) { error = kFlagsTakeNoValue; return false; }
 		}
 		if (shape == mnu::SchemaShape::Element && id == "tag") {
-			if (!text_width(value, 64, error)) return false;
-			if (!mnu::known_token(std::get<std::string>(value), mnu::kExtraTags)) {
+			if (!text_width(stored, 64, error)) return false;
+			if (!mnu::known_token(std::get<std::string>(stored), mnu::kExtraTags)) {
 				error = window_elements_error();
 				return false;
 			}
 		}
 	}
-	return TableDocument::set_value(node, at, field, value, error);
+	return TableDocument::set_value(node, at, field, stored, error);
 }
 
 // Clear and Write flip the presence bit (the authored state) and leave the latent value in

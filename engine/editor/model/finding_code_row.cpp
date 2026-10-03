@@ -175,12 +175,14 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ProjectWrite, code("project.write", G::Project) },
 	// A name the project lacks is shown, counted and fixable, and gates no build (ADR 0046 S14): the
 	// shipped game's own files name what its install does not hold and it runs, so a build refused
-	// for one would assert a failure no one has witnessed. What the game cannot start without is
-	// the witnessed manifest's (requirement.missing), which gates.
+	// for one would assert a failure no one has witnessed; where the reference's kind cites the
+	// game's refusal (a mission's terrain: ReferenceKindRow::gates_when_missing) it gates.
 	{ C::ReferenceMissing, listed(from_graph(code("reference.missing", G::MissingReferences, F::Reference))) },
-	// A file of the name the project holds, of a kind the reference's loader does not load: the game
-	// opens it and reads it as what it is not. It gates (review F3).
-	{ C::ReferenceWrongKind, from_graph(code("reference.wrong_kind", G::MissingReferences)) },
+	// A file of the name the project holds, of a kind the reference's loader does not load: the
+	// loader finds nothing it loads there, as for a missing name, so it gates where a missing
+	// reference of its kind does and is listed elsewhere (the audit of the gate: no refusal of a
+	// file of the wrong kind is witnessed beyond the kind's own).
+	{ C::ReferenceWrongKind, listed(from_graph(code("reference.wrong_kind", G::MissingReferences))) },
 	{ C::RenameConflict, code("rename.conflict", G::Renames) },
 	{ C::RenameCopy, code("rename.copy", G::Renames) },
 	{ C::RenameExists, code("rename.exists", G::Renames) },
@@ -200,11 +202,20 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::RenameWrite, code("rename.write", G::Renames) },
 	{ C::RequirementAssigned, code("requirement.assigned", G::RequiredFiles) },
 	{ C::RequirementKind, code("requirement.kind", G::RequiredFiles) },
-	{ C::RequirementMissing, code("requirement.missing", G::RequiredFiles, F::Requirement) },
+	// A required file the project lacks: listed, and gating where its manifest row is the game's
+	// refusal to boot (RES_FATAL: the string tables the boot exits without, the main menu it dead-ends
+	// without; blocks_build reads the row); the game boots on without any other, degraded as the
+	// row's failure says.
+	{ C::RequirementMissing, listed(code("requirement.missing", G::RequiredFiles, F::Requirement)) },
 	{ C::RequirementOptionalMissing, code("requirement.optional_missing", G::OptionalFiles, F::Requirement) },
 	{ C::RequirementUnknown, code("requirement.unknown", G::RequiredFiles) },
 	{ C::RequirementUnknownFile, code("requirement.unknown_file", G::RequiredFiles) },
-	{ C::RequirementWrongKind, code("requirement.wrong_kind", G::RequiredFiles, F::WrongKind) },
+	// A required name holding a file of another kind: the boot's loaders read what the file holds
+	// with no check of its kind (a string table's keeps any bytes it opens [orig:
+	// TextResource_LoadFromArchive @ 0x75d0b0] and makes its header's offsets pointers unchecked
+	// [orig: TextResource_FixupPointers @ 0x75d050]): listed, gating where the row is the boot's
+	// refusal (RES_FATAL), whose table the boot then runs on wild pointers.
+	{ C::RequirementWrongKind, listed(code("requirement.wrong_kind", G::RequiredFiles, F::WrongKind)) },
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },
 	{ C::UnsavedNone, code("unsaved.none", G::UnsavedChanges) },
 	{ C::ViewportRefused, code("viewport.refused", G::Viewports) },

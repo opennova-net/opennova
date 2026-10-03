@@ -69,6 +69,7 @@
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/scr/scr.h>
+#include <net/novacrypto/pubcrypto.h>
 #include <runtime/wac/compiler.h>
 
 #include "common/file_io.h"
@@ -1103,6 +1104,37 @@ static int test_shader_and_text() {
 	return 0;
 }
 
+// gt.ssc, which the game reads by its name decoded under its key chain: shown decoded, written back
+// as stored byte for byte (its line end kept), an edit written encoded; a file that does not decode
+// (the game skips it) shown as stored and written in the form; any other configuration its own text,
+// encoded bytes included.
+static int test_gate_tag_config() {
+	const DocumentType *text = document_type_for(AssetKind::Config);
+	TEST_EXPECT(text != nullptr);
+	if (!text) return 1;
+	const std::string stored = opennova::encode_key_chain(bytes_of("jop:cus2"), "jop:2:oyez") + "\r\n";
+	Diagnostic error;
+	std::unique_ptr<DocumentBase> tag = text->make();
+	TEST_EXPECT(tag->load_bytes(bytes_of(stored), "GT.SSC", AssetKind::Config, "jo", error) && !tag->blocked());
+	TEST_EXPECT(text_of(*tag) && text_of(*tag)->text() == "jop:cus2" && tag->serialize().text == stored &&
+	            tag->rewrite_need() == DocumentBase::RewriteNeed::None);
+	TEST_EXPECT(apply(*tag, {TextDocument::replace(span(1, 5, 4), "abcd")}) && text_of(*tag)->text() == "jop:abcd");
+	std::vector<uint8_t> back;
+	TEST_EXPECT(opennova::decode_key_chain(tag->serialize().text, "jop:2:oyez", back) &&
+	            std::string(back.begin(), back.end()) == "jop:abcd" &&
+	            tag->serialize().text == opennova::encode_key_chain(bytes_of("jop:abcd"), "jop:2:oyez") + "\r\n");
+	// Not in the form: shown as stored, Save writes the form.
+	std::unique_ptr<DocumentBase> plain = text->make();
+	TEST_EXPECT(plain->load_bytes(bytes_of("jop:cus2"), "gt.ssc", AssetKind::Config, "jo", error) &&
+	            text_of(*plain)->text() == "jop:cus2" &&
+	            plain->serialize().text == opennova::encode_key_chain(bytes_of("jop:cus2"), "jop:2:oyez"));
+	// Another configuration holding the same bytes: its own text.
+	std::unique_ptr<DocumentBase> other = text->make();
+	TEST_EXPECT(other->load_bytes(bytes_of(stored), "game.cfg", AssetKind::Config, "jo", error) &&
+	            text_of(*other)->text() == stored && other->serialize().text == stored);
+	return 0;
+}
+
 // A shader imported from an archive: copied as stored, its loader's own SCR form (the text readers'
 // decode would make it noise), the project's file opening with no finding; the import plan's origin
 // reads it so.
@@ -1272,6 +1304,7 @@ int main(int argc, char **argv) {
 	failures += test_credits_unread();
 	failures += test_music_script();
 	failures += test_shader_and_text();
+	failures += test_gate_tag_config();
 	failures += test_import_shader();
 	failures += test_retail();
 	if (failures == 0) std::printf("editor_text_document: all passed\n");

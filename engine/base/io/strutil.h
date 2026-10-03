@@ -197,5 +197,41 @@ inline std::optional<float> parse_float(const std::string &s)
     return v;
 }
 
+// The signed 64-bit and double forms: std::stoll / std::stod without the throw (the unsigned
+// 64-bit one is parse_ullong above).
+inline std::optional<long long> parse_llong(const std::string &s, int base = 10)
+{
+    const char *begin = s.c_str();
+    char *end = nullptr;
+    errno = 0;
+    const long long v = std::strtoll(begin, &end, base);
+    if (end == begin || errno == ERANGE)
+        return std::nullopt;
+    return v;
+}
+
+inline std::optional<double> parse_double(const std::string &s)
+{
+    const char *begin = s.c_str();
+    char *end = nullptr;
+    errno = 0;
+    const double v = std::strtod(begin, &end);
+    if (end == begin || errno == ERANGE)
+        return std::nullopt;
+    return v;
+}
+
+// Whether `s` is a whole number written in decimal digits alone (no sign, no blank, nothing
+// after): the form an index or a count in a name or a locator takes.
+inline bool all_digits(std::string_view s)
+{
+    if (s.empty())
+        return false;
+    for (const char c : s)
+        if (c < '0' || c > '9')
+            return false;
+    return true;
+}
+
 } // namespace strutil
 } // namespace opennova

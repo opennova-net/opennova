@@ -144,8 +144,12 @@ protected:
 	// Whether the window type a list's owner sits under reads the list (the format's per-type
 	// parse chains, formats/mnu/mnu_schema.h).
 	Applicability list_applies(const Node &row, const Located &owner, size_t list) const override;
-	// A name the reader would not keep where the record sits is refused: a window keeps only its
-	// PLAYERLIST and SERVERLIST attributes, which take no value, and only the extra elements its
+	// A text of a code-page menu read as UTF-8 (the model holds the code page's bytes).
+	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
+	// A text stored as the model holds it (a code-page menu's in Windows-1252, a character it lacks
+	// refused), its width counted in the game's characters (the reader narrows every text to the code
+	// page); a name the reader would not keep where the record sits is refused: a window keeps only
+	// its PLAYERLIST and SERVERLIST attributes, which take no value, and only the extra elements its
 	// parses read at its top level.
 	bool set_value(Node &row, const Located &at, size_t field, const Value &value, std::string &error) override;
 	bool set_written(Node &row, const Located &at, size_t field, bool present, std::string &error) override;
@@ -169,6 +173,9 @@ protected:
 	                 std::string &error) const override;
 
 private:
+	// Whether the model holds the code page's bytes (a menu with no byte order mark, mnu.h's
+	// SourceEncoding::CodePage) rather than UTF-8.
+	bool code_page_model() const;
 	struct SavedImage {
 		bool made = false;
 		uint64_t load_generation = 0, revision = 0;

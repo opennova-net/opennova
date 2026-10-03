@@ -664,7 +664,13 @@ bool entry_set(const Entry &e, const Entry *block, void *record, const Value &va
 			error = "This field takes text.";
 			return false;
 		}
-		if (text->size() >= e.width) {
+		// The width counts characters (the reader narrows every text to the code page: one byte a
+		// character), which the document counts in the encoding its model holds before it sets the
+		// value (MnuDocument::set_value); here the UTF-8 a Unicode menu's model holds is counted by
+		// its characters, never its bytes.
+		size_t characters = 0;
+		for (const char c : *text) characters += (static_cast<unsigned char>(c) & 0xC0) != 0x80;
+		if (characters >= e.width) {
 			error = "The text is too long.";
 			return false;
 		}
@@ -979,6 +985,9 @@ LabelledField labelled(mnu::SchemaShape shape, const std::vector<Entry> &entries
 	schema.id = e.path;
 	schema.type = e.type == Type::Text ? FieldType::Text : FieldType::Integer;
 	schema.width = e.width;
+	// The game holds every text narrowed to its code page, one byte a character: the width counts
+	// characters (MnuDocument::set_value), as a box editing the text does.
+	schema.code_page = e.type == Type::Text;
 	schema.reference = reference_of(mnu::schema_field_reference(shape, e.path));
 	if (e.type == Type::Flag) schema.choices = yes_no();
 	for (const Choice &choice : e.choices) schema.choices.push_back({choice.name, choice.value, choice_label(shape, e.path, choice.name)});

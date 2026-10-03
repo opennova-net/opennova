@@ -491,7 +491,7 @@ bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &projec
                         Extracted &out, Diagnostic &error) {
 	std::vector<uint8_t> bytes;
 	std::string message;
-	if (!read_file_bytes((std::filesystem::path(paths.root) / asset.relative_path).generic_string(), bytes, message)) {
+	if (!read_file_bytes(join_path(paths.root, asset.relative_path), bytes, message)) {
 		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, asset.relative_path);
 		return false;
 	}
