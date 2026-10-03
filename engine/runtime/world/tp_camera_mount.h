@@ -23,17 +23,17 @@ namespace opennova::world {
 
 // ---------------------------------------------------------------------------
 // Seeds. Following a new tracked entity starts further back and pitched up
-// than entering play does (the play reset is player_view.h's kTpDistance /
-// kTpOrbitPitchDeg). [orig: Camera_SetTrackedEntity @0x4391D0 — orbit yaw 0
-// @0x439209, orbit pitch 0x04000000 BAM (5.625 deg) @0x439213, distance
+// than entering play does (the play reset is player_view.h's kTpDistanceQ16
+// with the orbit zeroed). [orig: Camera_SetTrackedEntity @0x4391D0 — orbit
+// yaw 0 @0x439209, orbit pitch 0x04000000 BAM (5.625 deg) @0x439213, distance
 // 0x30000 (3.0) @0x43921D; a DEAD target (Flags & 2) starts at 0xA0000 (10.0)
 // @0x439273..0x439275 and ThirdPersonCamera_Update reels it back to 3.0
-// @0x437CC0..0x437D02]. The tracked-entity/orbit state itself is a tracked
-// deferral (docs/correspondence.md, the Camera_SetTrackedEntity rows).
+// @0x437CC0..0x437D02]. The orbit state is PlayerViewState's chase fields
+// (player_view_track_entity / player_view_chase_tick).
 // ---------------------------------------------------------------------------
-inline constexpr float kTpTrackedDistance = 3.0f;
-inline constexpr float kTpTrackedOrbitPitchDeg = 5.625f;
-inline constexpr float kTpDeadTargetDistance = 10.0f;
+inline constexpr int32_t kTpTrackedDistanceQ16 = 0x30000;
+inline constexpr int32_t kTpTrackedOrbitPitchBam = 0x4000000;
+inline constexpr int32_t kTpDeadTargetDistanceQ16 = 0xA0000;
 
 // ---------------------------------------------------------------------------
 // Mounted anchor. A vehicle is not framed like a soldier: the anchor lifts and

@@ -1445,7 +1445,7 @@ public:
 	// on_respawn_init; ordered by HudToggles' EVENT_OVERLAY_WINDOWS_CLEARED).
 	void request_hud_map_close();
 	void request_waypoint_cycle(int p_direction); // NextWaypoint: WaypointTrack::manual_cycle
-	void request_spectate_action(int p_code); // rows 110..112: ClientReplicaPipeline::spectate_action
+	void request_spectate_action(int p_code); // rows 110..112: inmatch::spectate_action
 	int get_hud_map_mode() const;
 	int get_hud_big_zoom_q16() const;
 	// Mission attrib bit5 (AttribFlags::RotateMap180) rotates the gameplay

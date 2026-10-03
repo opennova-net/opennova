@@ -863,7 +863,8 @@ void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
     //  @0x452ce0].
     if (w.rules.logic_authority && !events_.empty() && &se >= events_.data() &&
             &se < events_.data() + events_.size())
-        w.script.waypoints.on_event_fired(static_cast<int32_t>(&se - events_.data()));
+        w.script.waypoints.on_event_fired(static_cast<int32_t>(&se - events_.data()),
+                w.waypoint_context());
 }
 
 void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {

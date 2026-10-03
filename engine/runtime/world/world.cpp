@@ -1,5 +1,6 @@
 #include <runtime/world/vehicle_system.h>
 #include <runtime/world/world.h>
+#include <base/gameprofile/game_type.h>
 #include <base/io/rotating_prng.h>
 #include <runtime/devtools/tick_profile.h>
 
@@ -525,6 +526,19 @@ void World::update_all_entities(const TickContext &ctx) {
 // [orig: Game_ProcessMainFrame @0x5263F0 (the Sound_TickPendingSlots call
 //  @0x526697), between the Client_ProcessNetworkFrame call @0x526692 and the
 //  Server_TickUpdate call @0x5266B6 (its receive pump @0x51D895)]
+WaypointCycleContext World::waypoint_context() const {
+    WaypointCycleContext ctx;
+    ctx.registry = &registry;
+    // [orig: g_GameType — Game_StartMission's SP derivation from the mission
+    //  attribs, AI_GetTaskTypeFromFlags @0x40DAE0; inmatch's
+    //  singleplayer_game_config feeds a session the same value]
+    ctx.game_type = match.rules().game_type != 0
+            ? match.rules().game_type
+            : game_type::for_mission_attribs(tables.mission_attrib_flags);
+    ctx.in_session = rules.mp_session;
+    return ctx;
+}
+
 void World::run_logic_tick(bool is_authority, TickPhase phase) {
     tick_pending_sound_slots();
     const TickContext ctx = begin_tick(is_authority, phase);
@@ -597,9 +611,15 @@ void World::run_entity_pass(const TickContext &ctx) {
     // the original's 16.16 fixed compare space. [orig: Player_UpdatePerFrame
     // @0x4de5f7]
     if (ctx.is_authority && gameplay && !script.waypoints.empty()) {
-        if (const Entity *lp = registry.get(cached.local_player))
-            script.waypoints.tick_advance(static_cast<int32_t>(lp->position.x * 65536.0f),
-                                   static_cast<int32_t>(lp->position.y * 65536.0f));
+        if (const Entity *lp = registry.get(cached.local_player)) {
+            WaypointFrameInputs in;
+            static_cast<WaypointCycleContext &>(in) = waypoint_context();
+            in.player_x = static_cast<int32_t>(lp->position.x * 65536.0f);
+            in.player_y = static_cast<int32_t>(lp->position.y * 65536.0f);
+            in.subgoals_won = script.subgoals.won; // [orig: dword_AC86F4 @0x452e14]
+            in.local = lp;
+            script.waypoints.tick_advance(in);
+        }
     }
     // The one-shot initial group recount, ordered right after the pre pass
     // [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b]. The live rescan is

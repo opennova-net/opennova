@@ -4,8 +4,8 @@ extends GameplayCamera
 ## Middle mouse: orbit. Scroll: zoom. Shift+middle: pan.
 ## Right click + move: look. Right click + WASD: fly.
 ## Right click + scroll: adjust fly speed. Shift: 3x speed boost.
-## The GameplayCamera hooks below are what LocalPlayerPresenter drives through
-## the base class's set_gameplay_locked / set_spectator_mode.
+## The GameplayCamera hook below is what LocalPlayerPresenter drives through
+## the base class's set_gameplay_locked.
 
 # Esc was pressed. Shell-neutral: each shell decides what the key means.
 signal escape_pressed
@@ -29,7 +29,6 @@ var _orbiting: bool = false
 var _panning: bool = false
 var _flying: bool = false
 var _gameplay_locked: bool = false
-var _spectator_mode: bool = false
 
 func _ready() -> void:
 	# MainGame consumes the final free-camera pose for world/frame preparation.
@@ -57,25 +56,6 @@ func _set_gameplay_locked(locked: bool) -> void:
 func is_gameplay_locked() -> bool:
 	return _gameplay_locked
 
-
-## Adopt the camera pose the player presenter last stamped before spectator
-## free-flight takes ownership. Without this edge sync, the first mouse motion
-## would jump back to FlyCamera's scene-start yaw/pitch.
-func _set_spectator_mode(active: bool) -> void:
-	if active == _spectator_mode:
-		return
-	_spectator_mode = active
-	_flying = false
-	_orbiting = false
-	_panning = false
-	if active:
-		_yaw = rotation.y
-		_pitch = rotation.x
-		_pivot = global_position - global_transform.basis.z * _distance
-
-
-func is_spectator_mode() -> bool:
-	return _spectator_mode
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _gameplay_locked:

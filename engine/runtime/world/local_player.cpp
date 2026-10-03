@@ -216,6 +216,53 @@ void LocalPlayer::look(float dx_px, float dy_px) {
     }
 }
 
+void LocalPlayer::look_chase_orbit(float dx_px, float dy_px) {
+	// The death screen raises no optical view, so no scoped reduction
+	// [orig: Input_ProcessMouseAxisBindings @0x499706..0x499714].
+	look_accum_x_ += dx_px;
+	look_accum_y_ += dy_px;
+	const int32_t dx = static_cast<int32_t>(look_accum_x_);
+	const int32_t dy = static_cast<int32_t>(look_accum_y_);
+	look_accum_x_ -= static_cast<float>(dx);
+	look_accum_y_ -= static_cast<float>(dy);
+	if (dx == 0 && dy == 0) return;
+	const auto delta = w::player_look_delta(look_settings, dx, dy, 0);
+	w::player_view_chase_orbit_look(view, delta.yaw, delta.pitch);
+}
+
+void LocalPlayer::place_on_composed_view() {
+	World &world = world_;
+	w::Entity *e = player();
+	w::AiEntity *p = player_ai();
+	if (e == nullptr || p == nullptr) return;
+	w::PlayerCameraPose pose;
+	bool mounted_camera = false;
+	if (!w::local_player_camera_compose(world, view, view_tracker, pose, mounted_camera)) return;
+	// [orig: @0x52b087..0x52b0b7 — g_ViewPos less CameraOffset (+0x6C..+0x74)]
+	const int32_t offset[3] = {e->eye_offset_x, e->eye_offset_y, e->eye_offset_z};
+	for (int axis = 0; axis < 3; ++axis)
+		p->pos[axis] = io::bam_sub(w::to_fixed(pose.eye[axis]), offset[axis]);
+	// [orig: @0x52b0ba..0x52b0ee — Yaw and g_LocalPlayerLookYaw = g_ViewRotYaw,
+	//  Pitch, Roll]. The port's view words are the composed mission angles.
+	const int32_t heading = w::bam_heading_from_mission_yaw_deg(pose.yaw_deg);
+	const int32_t pitch = static_cast<int32_t>(
+			std::lround(static_cast<double>(pose.pitch_deg) / w::kDegreesPerBam));
+	const int32_t roll = static_cast<int32_t>(
+			std::lround(static_cast<double>(pose.roll_deg) / w::kDegreesPerBam));
+	p->heading = heading;
+	p->pitch = pitch;
+	p->roll = roll;
+	p->inf.target_heading = heading;
+	p->inf.look_pitch = pitch;
+	input.look_heading = heading;
+	input.look_pitch = pitch;
+	e->position = {static_cast<float>(w::from_fixed(p->pos[0])),
+			static_cast<float>(w::from_fixed(p->pos[1])),
+			static_cast<float>(w::from_fixed(p->pos[2]))};
+	e->yaw = static_cast<int16_t>(std::lround(
+			w::normalize_mission_yaw_deg(w::mission_yaw_deg_from_bam_heading(heading))));
+}
+
 void LocalPlayer::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
 	const double dx = target.x - eye.x, dy = target.y - eye.y, dz = target.z - eye.z;
 	const double horizontal = std::sqrt(dx * dx + dy * dy);
@@ -604,7 +651,10 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
     // body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090 -- MoveOrder
     // 0x1000/0x2000 @0x4ae0bc/@0x4ae0df, 0x4000/0x8000 @0x4ae0fe/@0x4ae109,
     // 0x100 @0x4ae09e; called by the local body before aim/camera updates]
-    if ((world.logic_tick & 1u) != 0) {
+    // The death screen's free-fly motor replaces that body and turns by the
+    // same keys itself [orig: Entity_UpdateInfantryPlayerBody @0x4b40f8 ->
+    // Camera_UpdateFreeFly @0x4b2b13..0x4b2b70].
+    if ((world.logic_tick & 1u) != 0 && !world.spectator.death_screen) {
         int32_t pitch = input.look_pitch;
         player_look_keys(input.look_heading, pitch, move_order.turn_left,
             move_order.turn_right, move_order.look_up, move_order.look_down,
@@ -717,6 +767,12 @@ void LocalPlayer::reset_for_new_round() {
     world_.weather.core.hit_dim.fade_rate = 0;
     view.camera_mode = 0;
     view.third_person = false;
+    // The chase back on the local player at 1.0 with the orbit zeroed
+    // [orig: Camera_ResetToLocalPlayer @0x4a3d42..0x4a3d5b].
+    view.camera_tracked = 0;
+    view.chase_distance_q16 = w::kTpDistanceQ16;
+    view.chase_orbit_yaw = 0;
+    view.chase_orbit_pitch = 0;
     view.tp_anchor_valid = true;
     for (int axis = 0; axis < 3; ++axis) {
         const float pos = axis == 0 ? local->position.x :
@@ -726,7 +782,8 @@ void LocalPlayer::reset_for_new_round() {
         view.lookahead_q16[axis] = 0;
     }
     world_.cached.sound_listener_view_flags = 2;
-    world_.script.waypoints.reset_selection(world_.registry, *local, world_.match.rules().game_type);
+    world_.script.waypoints.reset_selection(world_.registry, *local,
+            world_.waypoint_context().game_type);
     input.look_heading = bam_heading_from_mission_yaw_deg(local->yaw);
     // Dialog and HUD buffers belong to the presenting device; one ordered
     // effect carries the reset without discarding unrelated mission events.

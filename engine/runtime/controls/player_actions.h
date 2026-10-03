@@ -62,6 +62,11 @@ struct PlayerActionPoll {
 	// this frame (hud::HudToggleState): a digit goes to the open menu.
 	bool emotes_menu_open = false;
 	bool radio_menu_open = false;
+	// The death screen is up (g_DeathScreenActive): the binding scan admits
+	// only the rows whose mode word carries bit 2, so the fire, reload and
+	// medic rows and the weapon/seat/scope rows stay silent
+	// [orig: Input_IsBindingActiveForMode @0x497ea0].
+	bool death_screen = false;
 };
 
 struct PlayerActionFrame {

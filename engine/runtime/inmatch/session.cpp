@@ -4,6 +4,7 @@
 #include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/role_feeds.h> // step_hud_radar
+#include <runtime/inmatch/spectator_session.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <utility>
@@ -29,23 +30,33 @@ Session::Session(Role &role) : role_(&role), kind_(role.kind()) {}
 
 void Role::apply_input(const TickInput &input) {
 	mission::MissionKernel &kernel = *kernel_;
-	const bool spectating = spectator();
-	const world::PlayerInput no_movement{};
-	const world::PlayerInput &movement = spectating ? no_movement : input.player.movement;
+	ClientRuntime *runtime = client_runtime();
+	const bool joiner = kind() == RoleKind::Joiner;
+	// The input pass's head drops the orbit-yaw bits before this tick's
+	// dispatch can raise them again [orig: Input_ProcessFrame
+	// `and g_InputActionBits, 0FFFFFFAFh` @0x49d52b].
+	kernel.world.script.input_action_bits &= ~0x50u;
+	// The spectate state the free-fly motor reads, ahead of the pack and the
+	// entity update (a joiner restamps it after its receive).
+	stamp_spectator_motor(kernel, runtime, joiner);
+	if (kernel.world.spectator.death_screen && runtime != nullptr) {
+		apply_death_screen_input(kernel, *runtime, joiner, input.player);
+		return;
+	}
+	const world::PlayerInput &movement = input.player.movement;
 	kernel.local.set_movement_keys(movement.forward, movement.back, movement.left,
 			movement.right, movement.lean_left, movement.lean_right, movement.jump);
     kernel.local.set_view_keys(movement.free_look, movement.look_up,
             movement.look_down, movement.turn_left, movement.turn_right);
-	if (!spectating && (input.player.look_delta_x != 0.0f || input.player.look_delta_y != 0.0f))
+	if (input.player.look_delta_x != 0.0f || input.player.look_delta_y != 0.0f)
 		kernel.local.look(input.player.look_delta_x, input.player.look_delta_y);
-	kernel.local.set_weapon_input(
-			!spectating && (input.player.held_action_bits & HELD_FIRE) != 0,
-			!spectating && (input.player.pressed_action_bits & PRESSED_FIRE) != 0,
-			!spectating && (input.player.pressed_action_bits & PRESSED_RELOAD) != 0);
+	kernel.local.set_weapon_input((input.player.held_action_bits & HELD_FIRE) != 0,
+			(input.player.pressed_action_bits & PRESSED_FIRE) != 0,
+			(input.player.pressed_action_bits & PRESSED_RELOAD) != 0);
 	// The medic-call edge is an action binding, not weapon state: it fires its
 	// request immediately like retail's binding dispatch (the gates and the
 	// cooldown live in request_medic).
-	if (!spectating && (input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
+	if ((input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
 		request_medic();
 }
 
@@ -102,6 +113,13 @@ world::LocalViewSessionInputs Role::view_session_inputs_for(
 	}
 	s.death_screen_active = runtime != nullptr && runtime->state().death_screen_active;
 	s.death_screen_submode = runtime != nullptr ? runtime->state().death_screen_submode : 0;
+	if (runtime != nullptr && runtime->state().spectate_target != 0xFFFF) {
+		const replication::ClientState &cs = runtime->state();
+		s.spectate_target_key = world::kCameraTrackedTargetKey | cs.spectate_target;
+		const replication::ClientEntityState *row = cs.find(cs.spectate_target);
+		s.spectate_target_dead =
+				row != nullptr && row->state_flags_known && (row->state_flags & 2u) != 0;
+	}
 	s.end_round_known = runtime != nullptr && runtime->state().end_round.known;
 	// [orig: NapiNPClientMsg_0x01D @0x430840 -> g_EndRoundWinnerTeam]
 	s.end_round_winner_team = runtime != nullptr && runtime->state().end_round.header_known

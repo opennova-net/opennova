@@ -1764,6 +1764,13 @@ target_include_directories(waypoint_track_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(waypoint_track_test PRIVATE cxx_std_17)
 add_test(NAME waypoint_track COMMAND waypoint_track_test)
 
+# The death screen's free-fly motor and the chase orbit state it drives.
+add_executable(spectator_motor_test world/spectator_motor_test.cpp)
+target_link_libraries(spectator_motor_test PRIVATE opennova_runtime)
+target_include_directories(spectator_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(spectator_motor_test PRIVATE cxx_std_17)
+add_test(NAME spectator_motor COMMAND spectator_motor_test)
+
 # Entity_ClassifyForMinimap: definition/entity marker classification shared by
 # every server producer before packet cadence/recipient policy.
 add_executable(minimap_overlay_test world/minimap_overlay_test.cpp)
@@ -2683,6 +2690,14 @@ add_executable(host_role_test mission/host_role_test.cpp)
 target_link_libraries(host_role_test PRIVATE opennova_net opennova_runtime)
 target_compile_features(host_role_test PRIVATE cxx_std_17)
 add_test(NAME host_role COMMAND host_role_test)
+
+# The death screen's spectator over the listen host's role and kernel: the
+# free-fly motor's sub-modes, the input filter, the wrap placement and the
+# replica track legs.
+add_executable(spectator_session_test mission/spectator_session_test.cpp)
+target_link_libraries(spectator_session_test PRIVATE opennova_net opennova_runtime)
+target_compile_features(spectator_session_test PRIVATE cxx_std_17)
+add_test(NAME spectator_session COMMAND spectator_session_test)
 
 # The tick digest (ADR 0043): the per-tick state hash a structural slice must
 # leave unchanged. The ctest leg is the synthetic mission (committed chain,
