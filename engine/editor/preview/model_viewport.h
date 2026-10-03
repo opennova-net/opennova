@@ -28,6 +28,9 @@ enum class ModelViewStatus : uint8_t {
 	Unserializable, // the model, clip or table cannot be written, so the game could not read it
 	Unreadable, // what it writes does not read back (or the rig's model does not read)
 	NoRig, // an animation no model plays: no item pairs its table with a graphic
+	// An animation no model plays yet while the project's references are still being read (its first
+	// validation runs): the pairing item may not be read yet (S17).
+	Reading,
 	Ready,
 };
 // "no_project", "ready", ...: its token on the wire.

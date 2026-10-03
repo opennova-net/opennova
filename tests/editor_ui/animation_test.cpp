@@ -85,7 +85,7 @@ void test_timeline() {
 	CHECK(text.find("l r footstep") != std::string::npos, "the events' legend");
 	// The Inspector: what the game does with the row, who plays the map.
 	CHECK(text.find("walk forward (slot 1): walking forward.") != std::string::npos, "the row's meaning");
-	CHECK(text.find("played by 1") != std::string::npos && text.find("skinned thing on skinned.3di") != std::string::npos,
+	CHECK(text.find("played by (1):") != std::string::npos && text.find("skinned thing on skinned.3di") != std::string::npos,
 	      "the map's player and its model");
 
 	// Space runs and holds the clock; Right steps a frame, Home goes back to the first.
@@ -131,7 +131,7 @@ void test_timeline() {
 	text = lowered(logged_frame(ui));
 	CHECK(text.find("4 frames at 30 a second:") != std::string::npos && text.find("it loops.") != std::string::npos,
 	      "the clip's length in frames and seconds");
-	CHECK(text.find("played by 1 map row(s)") != std::string::npos && text.find("anims/skin.adm: walk forward") != std::string::npos,
+	CHECK(text.find("played by these map rows (1):") != std::string::npos && text.find("anims/skin.adm: walk forward") != std::string::npos,
 	      "the rows that play it");
 	ui.drain();
 }

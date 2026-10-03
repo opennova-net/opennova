@@ -215,6 +215,7 @@ const char *model_view_status_token(ModelViewStatus status) {
 	case ModelViewStatus::Unserializable: return "unserializable";
 	case ModelViewStatus::Unreadable: return "unreadable";
 	case ModelViewStatus::NoRig: return "no_rig";
+	case ModelViewStatus::Reading: return "reading";
 	case ModelViewStatus::Ready: return "ready";
 	}
 	return "no_project";
@@ -231,6 +232,10 @@ std::string model_view_status_message(ModelViewStatus status, const std::string 
 	case ModelViewStatus::NoRig:
 		return "No item pairs " + (detail.empty() ? std::string("this animation") : detail) +
 		       " with a model: choose the model it plays on.";
+	case ModelViewStatus::Reading:
+		return "Reading the project's references: the model " +
+		       (detail.empty() ? std::string("this animation") : detail) +
+		       " plays on shows when they are read, or choose it.";
 	case ModelViewStatus::Ready: return std::string();
 	}
 	return std::string();
@@ -633,7 +638,9 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_key_.clear();
 		clip_events_.clear();
 		clip_note_.clear();
-		return stop_(ModelViewStatus::NoRig, file, false);
+		// While the first validation reads the project's references, the pairing item may not be read
+		// yet: said so, not that none pairs it.
+		return stop_(view.activity.validation.running ? ModelViewStatus::Reading : ModelViewStatus::NoRig, file, false);
 	}
 	const FileSource &files = *view.findings.assets;
 	const uint64_t generation = view.findings.assets->generation();

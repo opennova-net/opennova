@@ -76,12 +76,13 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 		if (players.empty()) {
 			note("No item or weapon of the project names this map: the game plays it for none.");
 		} else {
-			ImGui::Text("Played by %zu", players.size());
+			ImGui::Text("Played by (%zu):", players.size());
 			int id = 0;
 			for (const MapPlayer &player : players) {
 				std::string line = player.record + (player.first_person ? " (its first-person view)" : "");
 				if (!player.model.empty()) line += " on " + player.model;
-				use_line(workspace, player.edge, line + "  " + player.file, id++);
+				use_line(workspace, player.edge, line + " (" + player.file.substr(player.file.find_last_of('/') + 1) + ")",
+				         id++);
 			}
 		}
 	}
@@ -110,7 +111,7 @@ bool draw_clip_inspector(Workspace &workspace, const Document &document, const N
 		if (uses.empty()) {
 			note("No map of the project names this clip: the game never plays it.");
 		} else {
-			ImGui::Text("Played by %zu map row(s)", uses.size());
+			ImGui::Text("Played by these map rows (%zu):", uses.size());
 			int id = 0;
 			for (const ClipUse &use : uses) use_line(workspace, use.edge, use.map + ": " + use.words, id++);
 		}

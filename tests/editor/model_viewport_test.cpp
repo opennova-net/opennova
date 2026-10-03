@@ -1108,6 +1108,9 @@ static int test_clip_preview() {
 	const JsonValue *maps = shown.get("body")->get("animations");
 	TEST_EXPECT(maps && maps->array.size() == 1 && maps->array[0].get_string("map", "") == "anims/SKIN.adm" &&
 	            maps->array[0].get_string("record", "") == "Skinned Thing");
+	// While the first validation reads the references, an animation no item pairs yet says so.
+	TEST_EXPECT(std::string(model_view_status_token(ModelViewStatus::Reading)) == "reading" &&
+	            model_view_status_message(ModelViewStatus::Reading, "x.adm").rfind("Reading the project's references", 0) == 0);
 	const std::vector<std::string> animated = animated_models(*view.findings.graph, *view.project.scan);
 	TEST_EXPECT(animated.size() == 1 && strutil_iequals(animated[0], "skinned.3di"));
 	bool found = false;

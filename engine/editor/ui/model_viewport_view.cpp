@@ -109,7 +109,7 @@ void ModelViewportView::draw_empty(Workspace &workspace, const ViewportModel *mo
 	ViewportView::draw_empty(workspace, model, path);
 	// An animation no item pairs: the author picks the model it plays on.
 	const auto *shown = static_cast<const ModelViewport *>(model);
-	if (shown && shown->view_status() == ModelViewStatus::NoRig) {
+	if (shown && (shown->view_status() == ModelViewStatus::NoRig || shown->view_status() == ModelViewStatus::Reading)) {
 		ui_kit::WrapRow row;
 		tools_->rig_chooser(workspace, row, *shown);
 	}
@@ -163,7 +163,8 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 	tools_->toolbar(workspace, model, context);
 	snap = kModelHandleSnaps[std::clamp(tools_->snap, 0, 4)];
 	context.snap = snap;
-	const float timeline = model.animating() ? ImGui::GetFrameHeightWithSpacing() * 3.0f + 8.0f : 0.0f;
+	const float timeline =
+			model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + ImGui::GetFontSize() * 2.0f + 16.0f : 0.0f;
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - timeline));
 	if (model.animating()) tools_->timeline(workspace, model, context.input.clock);
 }
@@ -252,6 +253,14 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	if (ImGui::ArrowButton("##forward", ImGuiDir_Right) || (keys && ImGui::IsKeyPressed(ImGuiKey_RightArrow)))
 		seek_ticks(workspace, model, model.tick_of_step(shown, 1), true);
 	ui_kit::tooltip("A frame on (Right).");
+	char where[96];
+	std::snprintf(where, sizeof(where), "Frame %d of %u, %s of %s", int(std::floor(frame + 1e-6)), frames,
+	              seconds_text(shown / io::kTickHz).c_str(), seconds_text(length / io::kTickHz).c_str());
+	row.next(ui_kit::text_width(where));
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(where);
+	ui_kit::tooltip("The frame the clip shows (from 0) and the time, as the game's ticks pass (62.5 a "
+	                "second; tick " + std::to_string(shown) + " of " + std::to_string(length) + ").");
 	ModelViewportOptions options = model.options();
 	row.next(ui_kit::checkbox_width("Repeat"));
 	ImGui::BeginDisabled(model.clip_loops());
@@ -273,17 +282,10 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	ImGui::SetNextItemWidth(rate_width);
 	if (ImGui::Combo("Speed", &rate, kRateWords, int(std::size(kRateWords)))) set_rate(workspace, model, kRates[rate]);
 	ui_kit::tooltip("How fast the preview plays: 1x is the game's speed.");
-	char where[96];
-	std::snprintf(where, sizeof(where), "frame %d of %u  %s of %s", int(std::floor(frame + 1e-6)), frames,
-	              seconds_text(shown / io::kTickHz).c_str(), seconds_text(length / io::kTickHz).c_str());
-	row.next(ui_kit::text_width(where));
-	ImGui::AlignTextToFramePadding();
-	ImGui::TextUnformatted(where);
-	ui_kit::tooltip("The frame the clip shows (from 0) and the time, as the game's ticks pass (62.5 a "
-	                "second; tick " + std::to_string(shown) + " of " + std::to_string(length) + ").");
 
-	// The track: scrubbed by the mouse (the clock held where it lets go).
-	const float height = ImGui::GetFrameHeight() + 6.0f;
+	// The track: scrubbed by the mouse (the clock held where it is let go); the events' letters on its
+	// top line, the frames ruled and numbered on its bottom one.
+	const float height = ImGui::GetFontSize() * 2.0f + 8.0f;
 	const float width = std::max(1.0f, ImGui::GetContentRegionAvail().x);
 	const ImVec2 at = ImGui::GetCursorScreenPos();
 	ImGui::InvisibleButton("##track", ImVec2(width, height));
