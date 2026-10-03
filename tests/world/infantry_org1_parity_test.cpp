@@ -458,15 +458,16 @@ void test_org1_rider_turns_with_its_carrier() {
 
 // ---- the low-severity motor legs (R3-14, R3-15, R3-17, R3-18) ----
 
-// R3-14: while the SP epilog screen is up (a lost round, from the tick after it
-// ended) the NPC motor does nothing at all. [orig: Entity_UpdateInfantryAI
-// @0x4B998C..0x4B99CD]
+// R3-14: while the SP epilog screen is up (a lost round whose cine built its
+// MISSION FAILED screen) the NPC motor does nothing at all.
+// [orig: Entity_UpdateInfantryAI @0x4B998C..0x4B99CD]
 void test_org1_motor_holds_under_the_epilog() {
     Org1Rig rig;
     rig.e().pos[2] = fx(1) + fx(8);
     rig.airborne();
     rig.w->logic_tick = 2;
     rig.w->process_round_end(2);
+    rig.w->epilog.screen_active = true; // the lose cine's build [orig: @0x57450C]
     rig.tick(4); // an even key tick: gravity would run
     CHECK(rig.w->epilog_screen_active());
     CHECK(rig.e().pos[2] == fx(1) + fx(8));

@@ -967,13 +967,14 @@ func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 			"no mission presentation subtree remains")
 
 
-# The SP lose flow's SHELL half (world-wac-ai-re §20): the WAC Lose banner
-# effect and the "round_end" host effect (the Server_ProcessRoundEnd tail)
-# reach the shell over the world's mission_effects signal, the MISSION FAILED
-# screen mounts after the lead-in beat with the banner line, and ESC through
-# the real input path leaves to the menu [orig: ESC -> g_MissionExitReason=1
-# -> the "Post Menu" push @0x526867]. The sim half (kill tally -> WAC lose ->
-# round end, winner 2) is ctest lose_flow_04tr on the retail mission.
+# The SP lose flow's SHELL half (world-wac-ai-re §20): a WAC Lose ends the
+# round in the engine, which starts its end-of-round cine; the shell mounts the
+# cine's screen on the round_end effect, the HUD presenter stores the Lose
+# banner the screen's banner line draws, and ESC through the real input path
+# takes the round-over leg's exit to the menu [orig: ESC ->
+# g_MissionExitReason=1 -> the "Post Menu" push @0x526867]. The engine half
+# (the stage machine, the timings, the values) is ctest sp_mission_lifecycle;
+# the retail kill tally -> WAC lose chain is ctest lose_flow_04tr.
 func test_round_end_effect_mounts_the_failed_screen_and_esc_returns_to_the_menu() -> void:
 	_shell = await _make_shell()
 	if _shell == null:
@@ -991,35 +992,31 @@ func test_round_end_effect_mounts_the_failed_screen_and_esc_returns_to_the_menu(
 	assert_true(_shell.is_gameplay_input_active(), "gameplay input is live in the world")
 
 	var banner_key := "STRMISC_KILLEDGREEN"
-	world.mission_effects.emit([
-		MissionEffect.make("lose", 0, 0, 0, banner_key),
-		MissionEffect.make("round_end", 2),
-	])
-	assert_false(_shell.is_gameplay_input_active(),
-			"the round-end latch stops gameplay input while the world keeps ticking")
-	# The lead-in beat is 3 s of shell time (the cine stand-in); run it fast.
-	var saved_scale := Engine.time_scale
-	Engine.time_scale = 20.0
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		return
+	# The script's first execution loses the round (team 0: the green banner).
+	assert_true(sim.compile_and_set_wac(PackedStringArray(["Lose(0)"])))
 	var screen: Node = null
-	for _i in range(300):
+	for _i in range(600):
 		await get_tree().process_frame
 		screen = _shell.find_child("MissionEndScreen", true, false)
 		if screen != null:
 			break
-	Engine.time_scale = saved_scale
-	assert_not_null(screen, "the MISSION FAILED screen mounts after the lead-in beat")
+	assert_not_null(screen, "the cine's screen mounts on the round end")
 	if screen == null:
 		return
+	assert_false(_shell.is_gameplay_input_active(),
+			"the round-end latch stops gameplay input while the world keeps ticking")
 	assert_true(world.is_loaded(), "the world stays loaded under the end screen")
+	var cine: EpilogCineState = sim.get_epilog_cine()
+	assert_eq(cine.mode, EpilogCineState.MODE_LOSE, "the engine runs the lose cine")
 	var gametext: RtxtStringFile = Strings.get_table("gametext")
 	if gametext != null and gametext.has_string_in_section("Misc", banner_key):
 		var banner: String = Strings.lookup_display("gametext", "Misc", banner_key)
-		var banner_visible := false
-		for node in screen.find_children("*", "Label", true, false):
-			if (node as Label).text == banner:
-				banner_visible = true
-				break
-		assert_true(banner_visible, "the WAC Lose banner line is on the failed screen")
+		assert_eq(_shell.get_hud_presenter().endround_banner_line(), banner,
+				"the WAC Lose banner is the line the failed screen's banner node draws")
 
 	# ESC through the real input path.
 	for pressed in [true, false]:
@@ -1035,6 +1032,61 @@ func test_round_end_effect_mounts_the_failed_screen_and_esc_returns_to_the_menu(
 			"the end screen goes with the world")
 	assert_true(_shell.is_gameplay_input_active() == false,
 			"nothing is live in the menu")
+
+
+# The SP restart's SHELL half: on the lost round's screen the RESTART key
+# (gametext KeyPress/STRKEYPRESS_RESTART, 'R') takes the round-over leg's
+# restart exit, the shell routes it through the main frame's router and starts
+# the same mission again with no menu in between; the restarted world's round
+# is live and the end screen is gone. The engine half (the restart boots a
+# world equal to a fresh launch) is ctest sp_mission_lifecycle.
+func test_restart_key_on_the_failed_screen_restarts_the_mission() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var terrain = world.get_node("Terrain")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	menu_shell.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	_assert_loaded(world, terrain, menu_shell)
+	var first_sim: Simulation = world.get_sim()
+	assert_true(first_sim.compile_and_set_wac(PackedStringArray(["Lose(0)"])))
+	var screen: Node = null
+	for _i in range(600):
+		await get_tree().process_frame
+		screen = _shell.find_child("MissionEndScreen", true, false)
+		if screen != null:
+			break
+	assert_not_null(screen, "the failed screen is up")
+	if screen == null:
+		return
+	for pressed in [true, false]:
+		var key := InputEventKey.new()
+		key.keycode = KEY_R
+		key.physical_keycode = KEY_R
+		key.pressed = pressed
+		Input.parse_input_event(key)
+	var restarted := false
+	for _i in range(600):
+		await get_tree().process_frame
+		var sim: Simulation = world.get_sim()
+		if world.is_loaded() and not _shell.is_world_loading() and sim != null:
+			var live: RoundOutcome = sim.get_round_outcome_debug()
+			if live != null and not live.get_ended():
+				restarted = true
+				break
+	assert_true(restarted, "the same mission loads again")
+	if not restarted:
+		return
+	assert_false(menu_shell.visible, "no menu between the end screen and the restart")
+	assert_eq(world.get_loaded_mission_file(), "mnml.bms", "the restart loads the same mission")
+	assert_null(_shell.find_child("MissionEndScreen", true, false), "the end screen is gone")
+	var outcome: RoundOutcome = world.get_sim().get_round_outcome_debug()
+	assert_true(outcome != null and not outcome.get_ended(), "the restarted round is live")
+	assert_eq(world.get_sim().get_epilog_cine().mode, EpilogCineState.MODE_NONE,
+			"the restart's start leaves the cine idle")
 
 
 func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:

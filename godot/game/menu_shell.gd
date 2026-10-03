@@ -100,6 +100,11 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 @export var return_control_names := PackedStringArray([
 	"CONFIRM_YES",
 ])
+# The in-game RESTART command (game.mnu INGAME), the engine's
+# World::ingame_restart_command behind the shell's restart_requested.
+@export var restart_control_names := PackedStringArray([
+	"RESTART",
+])
 # The generic BACK command seam: the actionless named button the original
 # engine's shell binds by name (game.mnu's ESC-hotkeyed HIDDEN_BACK is the ONLY
 # resume affordance the shipped in-game menu has — there is no visible RESUME
@@ -148,6 +153,7 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 signal start_requested(bms_name: String)
 signal exit_to_desktop_requested()
 signal return_to_menu_requested()
+signal restart_requested()
 signal resume_requested()
 # The player chose NovaWorld (online multiplayer) from the menu. main_game
 # opens the NovaWorld panel; the shell stays out of the networking itself.
@@ -540,6 +546,7 @@ func _wire_named_controls() -> void:
 		_connect_named(start_control_names, _on_apply_selected_mod)
 	_connect_named(exit_control_names, _on_exit_control)
 	_connect_named(return_control_names, _on_return_control)
+	_connect_named(restart_control_names, _on_restart_control)
 	_connect_named(novaworld_control_names, _on_novaworld_control)
 	_connect_named(back_control_names, _on_quit_requested)
 
@@ -761,6 +768,14 @@ func _on_return_control() -> void:
 	if not _in_game:
 		return
 	return_to_menu_requested.emit()
+
+
+# RESTART is the in-game screen's own command; like CONFIRM_YES it answers only
+# while a mission is running.
+func _on_restart_control() -> void:
+	if not _in_game:
+		return
+	restart_requested.emit()
 
 
 func _on_novaworld_control() -> void:

@@ -11,6 +11,9 @@ class LocalRole final : public Role {
 public:
 	RoleKind kind() const override { return RoleKind::SinglePlayer; }
 	void run_tick(const TickInput &input) override;
+	// The world-side mission exit (the SP end screens, the round-over keys, the
+	// in-game RESTART) ends the bare local role's frames too.
+	bool session_lost(SessionError &error) const override;
 	bool reset_to_baseline(SessionError &error) override;
 	void close() override;
 };

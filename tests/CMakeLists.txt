@@ -2683,6 +2683,15 @@ target_include_directories(mission_kernel_lifecycle_test PRIVATE ${CMAKE_CURRENT
 target_compile_features(mission_kernel_lifecycle_test PRIVATE cxx_std_17)
 add_test(NAME mission_kernel_lifecycle COMMAND mission_kernel_lifecycle_test)
 
+# The SP mission lifecycle after the round end: the win epilog's and the lose
+# screen's stage machines, the round-over keys, the in-game RESTART, the main
+# frame's exit router and the SP restart as a fresh launch (ungated).
+add_executable(sp_mission_lifecycle_test mission/sp_mission_lifecycle_test.cpp)
+target_link_libraries(sp_mission_lifecycle_test PRIVATE opennova_runtime)
+target_include_directories(sp_mission_lifecycle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(sp_mission_lifecycle_test PRIVATE cxx_std_17)
+add_test(NAME sp_mission_lifecycle COMMAND sp_mission_lifecycle_test)
+
 # inmatch::HostRole over the kernel (ADR 0043 d3), ungated: the SP listen
 # bring-up and its per-tick frame over a null socket, the local C2S gameplay
 # drain, and the dedicated (HostOnly) bring-up.
@@ -3476,6 +3485,14 @@ opennova_add_gated_test(lose_flow_00tra COMMAND lose_flow_test --bms 00TRa.bms -
 # authors a `score`), so the WAC's bluekills lose never fires on it.
 opennova_add_gated_test(lose_flow_04tr_self_kill COMMAND lose_flow_test --bms 04TR.bms --self-kill)
 opennova_add_gated_test(lose_flow_05tr_self_kill COMMAND lose_flow_test --bms 05TR.bms --self-kill)
+# `--win-event 38`: 01TR's only BlueWin, its five prerequisite events staged with
+# their authored actions; the round ends won and the engine's win epilog builds
+# its score screen over the mission's own tallies.
+opennova_add_gated_test(win_flow_01tr COMMAND lose_flow_test --bms 01TR.bms --win-event 38)
+# `--restart-boot`: 00TRa booted fresh and then as the SP restart's boot; the
+# restarted world equals the fresh launch at the same world ages (the spawn,
+# the fired-event set including event 11's authored activation delay).
+opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bms --restart-boot)
 
 # The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped

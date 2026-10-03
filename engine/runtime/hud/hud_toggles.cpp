@@ -384,6 +384,21 @@ uint32_t hud_toggles_quit_dialog_key(HudToggleState &s, const HudQuitDialogKeyIn
 	return kChainTaken;
 }
 
+uint32_t hud_round_over_key(const HudRoundOverKeyInput &in) {
+	using namespace hud_round_over;
+	// [orig: @0x49c7d5..0x49c7fd — out of a session, or the co-op game type
+	//  0x10020 (bit 0x20000 masked) without bit 0x20000]
+	const bool coop = (in.game_type & 0xFFFDFFFFu) == 0x10020u && (in.game_type & 0x20000u) == 0;
+	if (in.in_session && !coop) return 0;
+	if (in.vk == in.restart_vk) return kConsumed | kRestart; // [orig: @0x49c871]
+	if (in.vk == 27) return kConsumed | kExit;                // [orig: @0x49c8da / @0x49c8e2]
+	return kConsumed;                                         // [orig: @0x49c8d5]
+}
+
+uint32_t hud_toggles_cine_start(HudToggleState &s, bool in_session) {
+	return respawn_init(s, in_session);
+}
+
 bool hud_toggles_server_status_page_key(const HudToggleState &s, int vk, bool in_session,
 		bool authority, bool mp_session_peer) {
 	// [orig: the in-session arm @0x49c903; @0x49c960 (!is_mp_session_peer) ||
@@ -426,9 +441,12 @@ void hud_toggles_reset_mission(HudToggleState &s) {
 	// A mission start zeroes the pause word [orig: Game_StartMission @0x525baa
 	// -> Game_ResetSessionHudState @0x434bd7].
 	s.paused = false;
-	// ... and the showing tip, keeping the once-counters [orig: Game_StartMission
-	// @0x525dec..0x525df2 -- CTipSystem_Reset(arg 0 on a mission start)].
-	tip_reset(s.tips, false);
+	// ... and the showing tip with the once-counters: the argument is the
+	// first-start flag, set on a start from the menu and clear on the SP
+	// restart [orig: Game_StartMission @0x525dec..0x525df2 --
+	// CTipSystem_Reset(ebp), ebp loaded @0x52540a from the `param == 0` slot
+	// stored @0x5243a6 (`setz al`); the restart passes 1 @0x5263d9].
+	tip_reset(s.tips, true);
 	s.playerlist.reset();
 	s.old_messages.reset();
 	s.show_score.reset();
@@ -449,8 +467,12 @@ void hud_toggles_tip_frames(HudToggleState &s, int frames) {
 }
 
 void hud_toggles_restart_round(HudToggleState &s) {
+	// The same windows and latches; the SP restart's tip reset keeps the
+	// once-counters (its CTipSystem_Reset argument is 0).
+	const TipSystem tips = s.tips;
 	hud_toggles_reset_mission(s);
-	tip_reset(s.tips, true);
+	s.tips = tips;
+	tip_reset(s.tips, false);
 }
 
 void hud_toggles_death_screen(HudToggleState &s) {

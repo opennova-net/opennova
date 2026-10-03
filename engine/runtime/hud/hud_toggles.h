@@ -264,7 +264,8 @@ void hud_key_poll_set_rows(HudKeyPoll &keys, uint32_t rows_down);
 uint32_t hud_toggles_poll(HudToggleState &state, const HudKeyPoll &keys);
 
 // The mission teardown clears the four overlay windows and their latches,
-// keeping the color, detail, showhud and friendly-tag globals.
+// keeping the color, detail, showhud and friendly-tag globals; the tip and
+// its once-counters clear as the next start from the menu clears them.
 void hud_toggles_reset_mission(HudToggleState &state);
 
 // An S2C 0x0F folded with the death screen up forces the declutter level to
@@ -346,6 +347,43 @@ inline constexpr uint32_t kRestartQueued = 0x8; // event 12, out of a session on
 } // namespace hud_special_key
 uint32_t hud_toggles_quit_dialog_key(HudToggleState &state, const HudQuitDialogKeyInput &input);
 
+// The special-key handler's round-over leg, reached once the round-over gate
+// holds (the round end raised it) and no earlier leg took the chain: out of a
+// session, or in a co-op game type without bit 0x20000, EVERY key is taken
+// there — the RESTART key (gametext KeyPress/STRKEYPRESS_RESTART's first
+// character, 'R' by default) restarts the round (the embedder re-runs the SP
+// splash over a custom loading background, then the world takes the
+// restart: the end screen down and exit reason 4), ESC leaves the mission
+// (exit reason 1), any other key does nothing. In a session the leg's page
+// and ADVANCED keys (the end-of-round board's) are not this leg's; it
+// returns 0 there.
+// [orig: Input_HandleSpecialKeys @0x49c5c0 — the g_SpawnSuccessGate arm
+//  @0x49c7cf; the session/co-op test @0x49c7d5..0x49c7fd; the RESTART key
+//  (dword_B3B744) @0x49c86b / @0x49c871: g_EpilogScreenActive = 0 @0x49c879,
+//  the splash re-run under g_LoadScreenHasCustomBg && !is_in_session
+//  @0x49c883..0x49c899, Input_QueueEvent(12) @0x49c8a3, g_MissionExitReason
+//  = 4 @0x49c8ad; every other key returns 1 @0x49c8d5, ESC (27) storing
+//  reason 1 @0x49c8e2]
+struct HudRoundOverKeyInput {
+	int vk = 0;
+	int restart_vk = 'R';
+	bool in_session = false;
+	uint32_t game_type = 0; // the session g_GameType word
+};
+namespace hud_round_over {
+inline constexpr uint32_t kConsumed = 0x1; // the key never reaches the action rows
+inline constexpr uint32_t kRestart = 0x2;  // the RESTART arm
+inline constexpr uint32_t kExit = 0x4;     // ESC: exit reason 1
+} // namespace hud_round_over
+uint32_t hud_round_over_key(const HudRoundOverKeyInput &input);
+
+// The SP end-of-round cine's start runs the respawn init over every HUD
+// window (the quit dialog, the voice menus, the stats, the briefing, the map
+// mode, the message log and the objectives) [orig: Cine_InitPlayback
+// @0x57867C / Cine_StartPlayback @0x57792D -> Game_InitRespawnState
+// @0x499360]. Returns the hud_toggle_event bits (the map-mode clear).
+uint32_t hud_toggles_cine_start(HudToggleState &state, bool in_session);
+
 // The special-key handler's status-page leg, after the Tab board's page
 // keys: on a dedicated host, or on the authority's view, Enter, PgUp and PgDn
 // step the page cursor and are consumed. The cursor both steppers clamp back
@@ -393,9 +431,11 @@ void hud_toggles_tip_events(HudToggleState &state, const uint8_t *events, size_t
 // @0x5b69f0, called once per Game_ProcessMainFrame @0x52675d whether or not
 // the SP pause holds (the pause gate @0x526779 comes after it)].
 void hud_toggles_tip_frames(HudToggleState &state, int frames);
-// The SP restart's reset: the once-counters clear too [orig:
-// Game_RestartRoundSP @0x5263db -> Game_StartMission(1) -> CTipSystem_Reset
-// @0x525df2 with the flag].
+// The SP restart's reset: the mission reset's windows and latches, but the
+// tip's once-counters survive (a start from the menu clears them)
+// [orig: Game_RestartRoundSP @0x5263db -> Game_StartMission(1) ->
+// CTipSystem_Reset(0) @0x525df2; the first start's Game_StartMission(0)
+// passes 1].
 void hud_toggles_restart_round(HudToggleState &state);
 
 // A menu pick closes its menu with a plain store, no respawn init (the

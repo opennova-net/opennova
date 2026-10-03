@@ -60,6 +60,7 @@ namespace {
 
 using namespace opennova;
 namespace w = opennova::world;
+namespace ms = opennova::mission;
 
 int failures = 0;
 bool expect(bool cond, const char *msg) {
@@ -451,7 +452,7 @@ void print_event_table(testrig::RetailMissionRig &rig, const std::string &bms) {
 		const uint32_t flags = static_cast<uint32_t>(ev.flags);
 		std::printf("event %-3zu flags=0x%x%s%s%s delay=%d reset=%d fired=%d\n", ei, flags,
 				(flags & 1u) ? " repeat" : "", (flags & 2u) ? " pre" : "", (flags & 4u) ? " post" : "",
-				ev.delay >> 22, ev.reset_after >> 22, rig.events.event_fired(ei) ? 1 : 0);
+				ev.delay, ev.reset_after, rig.events.event_fired(ei) ? 1 : 0);
 		for (int k = 0; k < int(ev.trigger_count); ++k) {
 			const size_t tx = size_t(ev.trigger_index) + size_t(k);
 			if (tx >= m.triggers.size()) continue;
@@ -531,6 +532,83 @@ int run_self_kill(testrig::RetailMissionRig &rig) {
 	return failures == 0 ? 0 : 1;
 }
 
+// WIN MODE (`--win-event N`): the mission's authored win event N, gated on its
+// Event-category triggers (the prerequisite events' fired latches). The
+// prerequisites are staged as fired, each with its authored action list run
+// through the real dispatcher (their SubGoalWon tallies included), so the
+// chain under test is the authored one: the quarter pass fires event N, its
+// BlueWin ends the round won, and the engine's win epilog builds its score
+// screen over the mission's own header and tallies. 01TR's only BlueWin is
+// event 38 (bms-event-runtime-re §11.2), gated on events 14, 24, 26, 34 and 36.
+// [orig: EventAction_Dispatch case 8 @0x45447b -> Server_ProcessRoundEnd(1);
+//  Cine_InitPlayback @0x578390; Cine_EpilogStateMachineUpdate @0x576240]
+int run_win_event(testrig::RetailMissionRig &rig, int win_event) {
+	Run run{rig};
+	const std::vector<ms::ScriptedEvent> &events = rig.events.events();
+	if (!expect(win_event >= 0 && static_cast<size_t>(win_event) < events.size(),
+				"the win event exists"))
+		return 1;
+	std::vector<int> prereqs;
+	for (const bms::Trigger &t : events[static_cast<size_t>(win_event)].triggers) {
+		std::printf("lose-flow: event %d trigger main %d sub %d p1 %d flags 0x%x\n", win_event,
+				static_cast<int>(t.main_type), t.sub_type, t.param1, t.condition_flags);
+		if (t.main_type == bms::TriggerMainType::Event) prereqs.push_back(t.param1);
+	}
+	{
+		const ms::ScriptedEvent &win = events[static_cast<size_t>(win_event)];
+		std::printf("lose-flow: event %d flags 0x%x delay reload %u repeat reload %u active %u\n",
+				win_event, static_cast<unsigned>(win.event.flags), win.activate_reload,
+				win.repeat_reload, win.active);
+		for (const bms::Action &a : win.actions)
+			std::printf("lose-flow: event %d action %d sub %d p1 %d\n", win_event,
+					static_cast<int>(a.action_type), a.action_sub_type, a.param1);
+	}
+	if (!expect(!prereqs.empty(), "the win event is gated on events")) return 1;
+	for (const int p : prereqs) {
+		if (!expect(p >= 0 && static_cast<size_t>(p) < events.size(), "a prerequisite event exists"))
+			return 1;
+		ms::ScriptedEvent &pre = rig.events.event_for_test(static_cast<size_t>(p));
+		for (const bms::Action &a : pre.actions) rig.events.dispatch_action_for_test(rig.world, a);
+		pre.active = 1;
+		pre.activate_countdown = 0;
+	}
+	std::printf("lose-flow: staged %zu prerequisite event(s) of event %d; subgoals won %d\n",
+			prereqs.size(), win_event, rig.world.kill_stats.subgoals_won);
+	if (!expect(!rig.world.match.outcome().ended, "the staged prerequisites end nothing")) return 1;
+	const int32_t won_before = rig.world.kill_stats.subgoals_won;
+	// The win event's own authored activation delay runs before its BlueWin
+	// (01TR event 38: 12 units, 768 ticks), on top of the 64-tick quarter
+	// cycle that first evaluates its chain [orig: EventTrigger_UpdateEntry
+	// @0x454c80 arms +16 from +18].
+	const int budget = static_cast<int>(events[static_cast<size_t>(win_event)].activate_reload) +
+			kTicksPerSecond * 4;
+	bool ended = false;
+	for (int t = 0; t < budget && !ended; ++t) {
+		run.tick();
+		ended = rig.world.match.outcome().ended;
+	}
+	if (!expect(ended && rig.world.match.outcome().winner_team == 1,
+				"the authored win event ends the round won (winner 1)"))
+		return 1;
+	if (!expect(rig.events.event_fired(static_cast<size_t>(win_event)), "the win event fired"))
+		return 1;
+	const w::EpilogCine &cine = rig.world.epilog;
+	if (!expect(cine.mode == w::EpilogCineMode::Win, "the win epilog runs")) return 1;
+	for (int t = 0; t < kTicksPerSecond * 4 && !cine.screen_active; ++t) run.tick();
+	if (!expect(cine.screen_active, "the score screen builds")) return 1;
+	const w::CineEvent *objective = nullptr;
+	for (const w::CineEvent &e : cine.events)
+		if (e.kind == w::CineEventKind::EpilogCounter && objective == nullptr) objective = &e;
+	if (!expect(objective != nullptr, "the OBJECTIVEBONUS line is built")) return 1;
+	std::printf("lose-flow: win epilog score screen at frame %d: OBJECTIVEBONUS %d/%d (won before the "
+				"win event %d)\n",
+			cine.frame, objective->value, objective->max, won_before);
+	expect(objective->value == rig.world.kill_stats.subgoals_won && objective->max > 0,
+			"the line carries the mission's won and defined subgoals");
+	expect(!rig.world.script_may_advance(), "the score screen holds the script");
+	return failures == 0 ? 0 : 1;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -538,14 +616,64 @@ int main(int argc, char **argv) {
 	int victim_team = -1;
 	bool events_only = false;
 	bool self_kill = false;
+	int win_event = -1;
+	bool restart_boot = false;
 	for (int i = 1; i < argc; ++i) {
 		if (std::strcmp(argv[i], "--bms") == 0 && i + 1 < argc) bms = argv[++i];
 		else if (std::strcmp(argv[i], "--victim-team") == 0 && i + 1 < argc) victim_team = std::atoi(argv[++i]);
 		else if (std::strcmp(argv[i], "--events") == 0) events_only = true;
 		else if (std::strcmp(argv[i], "--self-kill") == 0) self_kill = true;
+		else if (std::strcmp(argv[i], "--win-event") == 0 && i + 1 < argc) win_event = std::atoi(argv[++i]);
+		else if (std::strcmp(argv[i], "--restart-boot") == 0) restart_boot = true;
 	}
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying the training missions)");
+	if (restart_boot) {
+		// RESTART MODE (`--restart-boot`): the mission booted fresh, then again
+		// as the SP restart's boot in the same process (the load parity word
+		// flipped, the restart's start arm), each sampled at the same world
+		// ages. The restarted world equals the fresh launch: the spawn, the
+		// fired-event set at each age (it grows with the age: authored
+		// activation delays), the round live, the cine idle.
+		// [orig: Game_RestartRoundSP @0x5263a0 -> Game_StartMission(1); the
+		//  parity flip EventTrigger_LoadAllData @0x454029]
+		constexpr int kAges[] = {110, 200, 400};
+		std::vector<int> sets[2][3];
+		w::Vec3 spawn[2];
+		for (int pass = 0; pass < 2; ++pass) {
+			testrig::RetailMissionRig r;
+			std::string err;
+			if (!r.open(install, bms, err)) return retail::skip(err.c_str());
+			testrig::BootOptions o;
+			o.restart = pass == 1;
+			if (!expect(r.boot(o, err), "the mission boots")) return 1;
+			if (!expect(r.local.has_local_player(), "the player spawned")) return 1;
+			spawn[pass] = r.local.player_position();
+			Run run{r};
+			for (int a = 0; a < 3; ++a) {
+				run.tick(kAges[a] - run.ticks);
+				std::printf("lose-flow: %s boot (second time through %d) tick %d fired:",
+						pass == 0 ? "fresh" : "restart",
+						ms::BmsEventSystem::second_time_through() ? 1 : 0, kAges[a]);
+				for (size_t i = 0; i < r.events.events().size(); ++i)
+					if (r.events.event_fired(i)) {
+						sets[pass][a].push_back(static_cast<int>(i));
+						std::printf(" %zu", i);
+					}
+				std::printf("\n");
+			}
+			expect(!r.world.match.outcome().ended, "the round is live");
+			expect(!r.world.epilog.active && !r.world.epilog.screen_active, "the cine is idle");
+		}
+		for (int a = 0; a < 3; ++a)
+			expect(sets[0][a] == sets[1][a], "the restart fires the fresh launch's set at each age");
+		const float gap = std::hypot(spawn[0].x - spawn[1].x, spawn[0].y - spawn[1].y);
+		std::printf("lose-flow: spawn gap %.3f u\n", gap);
+		expect(gap < 0.001f, "the restart spawns at the fresh launch's spawn");
+		if (failures == 0)
+			std::printf("lose_flow %s: the restart boot equals the fresh launch\n", bms.c_str());
+		return failures == 0 ? 0 : 1;
+	}
 	testrig::RetailMissionRig rig;
 	std::string error;
 	if (!rig.open(install, bms, error)) return retail::skip(error.c_str());
@@ -562,6 +690,12 @@ int main(int argc, char **argv) {
 	if (!expect(rig.wac_loaded, "the mission's WAC compiled and installed")) return 1;
 	if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs")) return 1;
 	if (!expect(!rig.world.match.outcome().ended, "the round has not ended at spawn")) return 1;
+	if (win_event >= 0) {
+		const int rc = run_win_event(rig, win_event);
+		if (rc == 0) std::printf("lose_flow %s: event %d won the round and built the score screen\n",
+				bms.c_str(), win_event);
+		return rc;
+	}
 	if (!expect(rig.world.collision != nullptr, "the collision world is up")) return 1;
 	if (self_kill) {
 		const int rc = run_self_kill(rig);

@@ -57,6 +57,13 @@ public:
 		SPECIAL_KEY_QUIT_CONFIRMED = opennova::hud::hud_special_key::kQuitConfirmed,
 		SPECIAL_KEY_RESTART_QUEUED = opennova::hud::hud_special_key::kRestartQueued,
 	};
+	// The round-over leg's result bits (engine hud_round_over; the leg runs
+	// through Simulation.round_over_key, which applies the world's halves).
+	enum RoundOverKey {
+		ROUND_OVER_CONSUMED = opennova::hud::hud_round_over::kConsumed,
+		ROUND_OVER_RESTART = opennova::hud::hud_round_over::kRestart,
+		ROUND_OVER_EXIT = opennova::hud::hud_round_over::kExit,
+	};
 	// The polled catalog rows, one bit each (engine HudToggleRow).
 	enum Row {
 		ROW_HUD_DETAIL = opennova::hud::kRowHudDetail,
@@ -107,6 +114,9 @@ public:
 	static String row_token(int p_row);
 	// The respawn / mission init: the overlay windows and the latches clear.
 	void reset_mission();
+	// The SP end-of-round cine's start: the respawn init over every window;
+	// returns the Event bits.
+	int cine_start(bool p_in_session);
 	// The death-screen force of the live declutter level.
 	void force_death_screen_hud_detail();
 	// The friendly-tags cycle; returns the gametext Misc toast key for the new mode.
@@ -174,3 +184,4 @@ private:
 VARIANT_ENUM_CAST(godot::HudToggles::Event);
 VARIANT_ENUM_CAST(godot::HudToggles::Row);
 VARIANT_ENUM_CAST(godot::HudToggles::SpecialKey);
+VARIANT_ENUM_CAST(godot::HudToggles::RoundOverKey);

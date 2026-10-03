@@ -585,7 +585,9 @@ bool run_death_feed_classifier_matrix() {
 	reset();
 	world.rules.mp_session = false;
 	if (!expect(world.match.finish(2, world), "the SP round ends lost")) return false;
-	world.round_end_tick = 0;
+	// The lose cine has built its MISSION FAILED screen [orig: g_EpilogScreenActive
+	// @0x57450C].
+	world.epilog.screen_active = true;
 	world.logic_tick = 96;
 	world.env.water_z = 1 << 16;
 	submerged = world.registry.get(victim);

@@ -1674,7 +1674,7 @@ void test_epilog_entity_update() {
 
     r.w.rules.mp_session = false;
     CHECK(r.w.match.finish(2, r.w));
-    r.w.round_end_tick = 0;
+    r.w.epilog.screen_active = true; // the lose cine's build [orig: @0x57450C]
     r.w.logic_tick = 8;
     CHECK(r.w.epilog_screen_active());
     TickContext ctx{};
@@ -1692,7 +1692,7 @@ void test_epilog_entity_update() {
     CHECK(((r.veh().flags & 0x40u) != 0) && r.veh().veh.contact_wake_tick == 8);
     CHECK(r.w.entity_update_counter == 0);
 
-    r.w.rules.mp_session = true;
+    r.w.epilog.screen_active = false; // the round-over RESTART key's clear [orig: @0x49c879]
     CHECK(!r.w.epilog_screen_active());
     r.w.update_all_entities(ctx);
     CHECK(r.w.registry.get(prop_h)->pool1_visited);

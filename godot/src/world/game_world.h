@@ -222,6 +222,9 @@ public:
 	Node *release_novaworld_client();
 	// The post-mission route for an exit reason (SessionDrive::post_mission_route).
 	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
+	// What the main frame does with a stored exit reason over the loaded sim's
+	// session facts (inmatch::main_frame_exit): a MAIN_FRAME_EXIT_* value.
+	int main_frame_exit(int p_reason) const;
 	// The error record of the join that last failed (SessionDrive::last_connection_error).
 	Ref<ConnectionError> get_last_connection_error() const;
 	// The join screen's status while a join preload runs (SessionDrive::join_screen_status).

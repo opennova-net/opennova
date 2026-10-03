@@ -50,6 +50,9 @@ bool HudToggles::server_status_page_key(int p_vk, bool p_in_session, bool p_auth
 String HudToggles::row_token(int p_row) { return String(opennova::hud::hud_toggle_row_token(p_row)); }
 
 void HudToggles::reset_mission() { opennova::hud::hud_toggles_reset_mission(state_); }
+int HudToggles::cine_start(bool p_in_session) {
+	return static_cast<int>(opennova::hud::hud_toggles_cine_start(state_, p_in_session));
+}
 void HudToggles::force_death_screen_hud_detail() { opennova::hud::hud_toggles_death_screen(state_); }
 String HudToggles::cycle_friendly_tags() {
 	return String(opennova::hud::hud_toggles_cycle_friendly_tags(state_));
@@ -140,6 +143,7 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_quit_dialog_open"), &HudToggles::is_quit_dialog_open);
 	ClassDB::bind_static_method("HudToggles", D_METHOD("row_token", "row"), &HudToggles::row_token);
 	ClassDB::bind_method(D_METHOD("reset_mission"), &HudToggles::reset_mission);
+	ClassDB::bind_method(D_METHOD("cine_start", "in_session"), &HudToggles::cine_start);
 	ClassDB::bind_method(D_METHOD("force_death_screen_hud_detail"),
 			&HudToggles::force_death_screen_hud_detail);
 	ClassDB::bind_method(D_METHOD("cycle_friendly_tags"), &HudToggles::cycle_friendly_tags);
@@ -209,6 +213,9 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_CHAIN_TAKEN);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_QUIT_CONFIRMED);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_RESTART_QUEUED);
+	BIND_ENUM_CONSTANT(ROUND_OVER_CONSUMED);
+	BIND_ENUM_CONSTANT(ROUND_OVER_RESTART);
+	BIND_ENUM_CONSTANT(ROUND_OVER_EXIT);
 	BIND_ENUM_CONSTANT(ROW_HUD_DETAIL);
 	BIND_ENUM_CONSTANT(ROW_HUD_COLOR);
 	BIND_ENUM_CONSTANT(ROW_SHOWHUD);

@@ -17,7 +17,9 @@ inline constexpr int32_t kMissionExitQuit = 1;
 inline constexpr int32_t kMissionExitReset = 2;
 // A host's round linger expiring into the map cycle [orig: Server_TickUpdate @0x51db63].
 inline constexpr int32_t kMissionExitMapCycle = 3;
-// A joiner's round linger expiring [orig: Client_ProcessNetworkFrame @0x42c3d3].
+// A joiner's round linger expiring [orig: Client_ProcessNetworkFrame @0x42c3d3]; out of a
+// session the same value is the SP restart (the round-over RESTART key @0x49c8ad, the in-game
+// RESTART command @0x555437), which the main frame turns into Game_RestartRoundSP.
 inline constexpr int32_t kMissionExitRoundOver = 4;
 inline constexpr int32_t kMissionExitCdTrouble = 5;  // [orig: Input_HandleActionBinding case 36 @0x49b780]
 inline constexpr int32_t kMissionExitSystem = 6;
@@ -50,6 +52,28 @@ inline int32_t mission_exit_reason_for_disconnect(const DisconnectEvent &event) 
 		return kMissionExitDisconnectFirst + static_cast<int32_t>(event.dpc - 36);
 	}
 	return kMissionExitQuit;
+}
+
+// What the main frame does with the exit reason its update stored, after the logic update.
+enum class MainFrameExit : uint8_t {
+	None,           // reason 0: the mission loop goes on
+	RestartRoundSP, // reason 4 out of a session: Game_RestartRoundSP
+	GameLoop,       // reason 8, or 4 on an in-session non-authority: the "Game Loop" scene
+	PostMenu,       // any other reason: the "Post Menu" scene (PostMenu_RouteMissionExit)
+};
+
+// [orig: Game_ProcessMainFrame @0x526806..0x526867 — reason 8 @0x526806 -> UI_NavHistoryPush(
+//  &g_GameModeGameLoop) @0x526808; reason 4 @0x526822: out of a session (@0x52682A)
+//  Game_RestartRoundSP @0x52682C, a non-authority (@0x526841) the Game Loop; then any nonzero
+//  reason @0x526860 -> the Post Menu @0x526867. The dword_B4C4CC nav-pop arm ahead of the Post
+//  Menu push (@0x526849) is not modeled; its writers are unwalked.]
+inline MainFrameExit main_frame_exit(int32_t reason, bool in_session, bool authority) {
+	if (reason == 8) return MainFrameExit::GameLoop;
+	if (reason == kMissionExitRoundOver) {
+		if (!in_session) return MainFrameExit::RestartRoundSP;
+		if (!authority) return MainFrameExit::GameLoop;
+	}
+	return reason != kMissionExitNone ? MainFrameExit::PostMenu : MainFrameExit::None;
 }
 
 // What the post-mission router does with an exit: whether the session's network type (and with

@@ -1,132 +1,147 @@
 class_name MissionEndScreen
 extends Control
 
-## The SP end-of-mission screen, at the witnessed shapes [orig: the round-end SP tail
-## Server_ProcessRoundEnd @0x5164f0 -> Cinematic_EpilogUpdate @0x577950]:
-## - WIN (winner 1): the epilog score screen — jo_Epil.tga backdrop + letterbox +
-##   the four Epilog/STREPILOG_* counter lines, label + value as the engine
-##   composes them (hud::epilog_score_lines over the SP score block)
-##   [orig: Cine_EpilogStateMachineUpdate @0x576240 case 4].
-## - LOSE (anything else): the MISSION FAILED screen — jo_Epil2.tga backdrop +
-##   Overlays/STROVER_MISSION_FAILED + the WAC Lose banner line + the key hint
-##   [orig: the Cinematic_EpilogUpdate g_CineMode==2 leg @0x5744fd..].
-## Both exit on ESC or the 18600-tick (~300 s) timeout [orig: g_MissionExitReason=1
-## via Input_HandleSpecialKeys @0x49c8e2 (ESC 0x1B) / the state-machine timeout
-## @0x57621d — the main loop then pushes the "Post Menu" scene @0x526867].
-## Stand-ins (ledgered D-AI-10, docs/divergence-ledger.md): no flyaway cine /
-## .cne playback and a stacked line layout in place of the counters' witnessed
-## columns; the screen alpha ramps over the cine fade pair's tick span. Witness
-## record: docs/world/world-wac-ai-re.md §20.6.
+## The SP end-of-round cine's device half. Every frame it reads the engine's
+## cine (Simulation.get_epilog_cine; engine world/epilog_cine.h owns the
+## schedule, the stage machines, each node's live alpha and every value a line
+## shows) and draws the live timeline nodes in the engine's two passes: the
+## images and fades first, then the text and counter lines, then the cinematic
+## bars over everything. Node positions are the cine's 1024 x 768 space scaled
+## to the screen; the lines use the large HUD label font at its width/800 slot
+## scale. Nothing draws once the engine's cine has stopped. The exits are the
+## engine's (the round-over keys and the timeouts store the mission exit the
+## shell routes); this node only draws.
 
-signal exit_requested
-
-# The ESC-less exit timeout: engine truth 297.6 s — 18600 ticks of the 62.5 Hz
-# loop (world/world.h kEpilogExitTimeoutTicks carries the
-# [orig: @0x57621d/@0x5744ea] witness). Deliberate correction: the old
-# godot-side 300.0 assumed a 62 Hz tick; the engine value is adopted.
-static var EXIT_TIMEOUT_S: float = Simulation.epilog_exit_timeout_seconds()
-# The fade-in: engine truth 1.536 s, the 48+48-tick cine fade pair on the
-# 62.5 Hz loop (world/world.h kEpilogFadeInTicks carries the witness).
-static var FADE_IN_S: float = Simulation.epilog_fade_in_seconds()
-
-var _age := 0.0
-var _built := false
+var _sim: Simulation = null
+var _banner := Callable()
+var _root: ResourceRoot = null
+var _font: FontFile = null
+var _images := {} # image name -> Texture2D (null when it does not load)
+var _cine: EpilogCineState = null
 
 
-## `score` is the SP score block's epilog lines (Simulation.get_epilog_score, or
-## EndRoundStatistics.make_epilog for a sim-less mount); only the WIN form reads it.
-func setup(outcome: RoundOutcome, score: EndRoundStatistics, banner: String,
-		root: ResourceRoot) -> void:
-	# Full-rect dark backdrop + letterbox bars [orig: CCineEventLetterbox].
+## `banner` returns the stored end-of-round banner the lose screen's banner
+## line draws (an empty one draws nothing).
+func setup(sim: Simulation, banner: Callable, root: ResourceRoot) -> void:
+	_sim = sim
+	_banner = banner
+	_root = root
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	modulate.a = 0.0
-	var dim := ColorRect.new()
-	dim.color = Color(0.0, 0.0, 0.0, 0.62)
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(dim)
-	for top in [true, false]:
-		var bar := ColorRect.new()
-		bar.color = Color.BLACK
-		bar.set_anchors_and_offsets_preset(
-				Control.PRESET_TOP_WIDE if top else Control.PRESET_BOTTOM_WIDE)
-		bar.custom_minimum_size = Vector2(0, 64)
-		add_child(bar)
+	if root != null:
+		var res: FntResource = root.load_font(HudPos.loading_splash_continue_font())
+		if res != null:
+			_font = res.to_font_file()
 
-	var won := outcome.winner_team == 1
-	_add_backdrop(root, "jo_Epil.tga" if won else "jo_Epil2.tga")
 
-	var column := VBoxContainer.new()
-	column.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	column.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	column.grow_vertical = Control.GROW_DIRECTION_BOTH
-	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.add_theme_constant_override("separation", 14)
-	add_child(column)
+## The cine the screen last drew from (null before the first frame).
+func get_cine() -> EpilogCineState:
+	return _cine
 
-	if won:
-		# The four counter lines in the witnessed order, each label with its
-		# engine-formatted value (empty when retail draws none).
-		var keys := score.label_keys if score != null else PackedStringArray()
-		var values := score.values if score != null else PackedStringArray()
-		for i in keys.size():
-			_add_line(column, _epilog(keys[i]), values[i], 28)
+
+func _process(_delta: float) -> void:
+	_cine = _sim.get_epilog_cine() if _sim != null else null
+	queue_redraw()
+
+
+func _draw() -> void:
+	if _cine == null or not _cine.active:
+		return
+	var frame := _cine.frame
+	for second_pass in [false, true]:
+		for e: CineEventRecord in _cine.events:
+			if e.second_pass != second_pass or not e.is_live_at(frame):
+				continue
+			match e.kind:
+				CineEventRecord.KIND_IMAGE_FADE:
+					_draw_image_fade(e)
+				CineEventRecord.KIND_TEXT_FADE:
+					_draw_text_line(e)
+				CineEventRecord.KIND_EPILOG_COUNTER:
+					_draw_counter(e)
+	if _cine.bars_fading or _cine.bars_held:
+		_draw_bars(_cine.bars_alpha if _cine.bars_fading else 1.0)
+
+
+func _draw_image_fade(e: CineEventRecord) -> void:
+	var color := e.draw_color
+	if color.a <= 0.0:
+		return
+	var full := Rect2(Vector2.ZERO, size)
+	if e.fade_source != CineEventRecord.FADE_SOURCE_IMAGE:
+		draw_rect(full, color)
+		return
+	var tex := _image(e.image)
+	if tex != null:
+		draw_texture_rect(tex, full, false, color)
+
+
+func _draw_text_line(e: CineEventRecord) -> void:
+	if _font == null:
+		return
+	var text := ""
+	if e.text_source == CineEventRecord.TEXT_SOURCE_BANNER:
+		text = String(_banner.call()) if _banner.is_valid() else ""
 	else:
-		# MISSION FAILED + the WAC Lose cause [orig: Overlays/STROVER_MISSION_FAILED
-		# at y=120, the g_BannerText line at y=230].
-		_add_line(column,
-				Strings.lookup_display(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, "STROVER_MISSION_FAILED"),
-				"", 40)
-		if not banner.is_empty():
-			_add_line(column, banner, "", 26)
-
-	var hint := _epilog("STREPILOG_KEYINFO")
-	_add_line(column, hint, "", 20)
-	_built = true
-
-
-func _epilog(key: String) -> String:
-	return Strings.lookup_display(Strings.TABLE_GAMETEXT, "Epilog", key)
-
-
-func _add_line(column: VBoxContainer, text: String, value: String, size: int) -> void:
-	var label := Label.new()
-	label.text = text if value.is_empty() else "%s  %s" % [text, value]
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", size)
-	column.add_child(label)
-
-
-# The witnessed backdrop art, from the mounted resource root. Retail UI images
-# force loose-first for this lookup; a missing/unparsable image degrades to the
-# plain dim, never a load failure.
-# [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
-func _add_backdrop(root: ResourceRoot, image_name: String) -> void:
-	var backdrop := TgaTexture.load_from_root(root, image_name, true)
-	if backdrop == null:
+		text = Strings.lookup_display(Strings.TABLE_GAMETEXT, e.text_section, e.text_key)
+	if text.is_empty():
 		return
-	var tex := TextureRect.new()
-	tex.texture = backdrop
-	tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	tex.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	tex.modulate.a = 0.85
-	add_child(tex)
-	move_child(tex, 1) # over the dim, under the letterbox/text
+	var fscale := _font_scale()
+	var left := e.x * size.x / HudPos.DESIGN_WIDTH
+	var top := e.y * size.y / HudPos.DESIGN_HEIGHT
+	var width := e.box_width * size.x / HudPos.DESIGN_WIDTH
+	var bottom := top + e.box_height * size.y / HudPos.DESIGN_HEIGHT
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2(fscale, fscale))
+	HudPos.draw_wrapped_text(self, _font, _font_size(), text, int(left / fscale),
+			int(top / fscale), int(width / fscale), int(bottom / fscale),
+			HORIZONTAL_ALIGNMENT_CENTER, e.draw_color)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-func _process(delta: float) -> void:
-	if not _built:
+func _draw_counter(e: CineEventRecord) -> void:
+	if _font == null:
 		return
-	_age += delta
-	modulate.a = clampf(_age / FADE_IN_S, 0.0, 1.0)
-	if _age >= EXIT_TIMEOUT_S:
-		_built = false # one-shot
-		exit_requested.emit()
+	var fscale := _font_scale()
+	var fs := _font_size()
+	var y := e.row_y * size.y / HudPos.DESIGN_HEIGHT / fscale
+	var ascent := _font.get_ascent(fs)
+	var color := e.draw_color
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2(fscale, fscale))
+	var label := Strings.lookup_display(Strings.TABLE_GAMETEXT, "Epilog", e.label_key)
+	var label_x := e.label_x * size.x / HudPos.DESIGN_WIDTH / fscale
+	draw_string(_font, Vector2(label_x, y + ascent), label, HORIZONTAL_ALIGNMENT_LEFT, -1,
+			fs, color)
+	var value := e.value_text
+	if not value.is_empty():
+		var value_w := _font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var value_x := e.value_x * size.x / HudPos.DESIGN_WIDTH / fscale
+		draw_string(_font, Vector2(value_x - value_w, y + ascent), value,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-## The shell routes ESC here while the screen is up [orig: ESC -> reason 1 @0x49c8e2].
-func request_exit() -> void:
-	if not _built:
+func _draw_bars(alpha: float) -> void:
+	var bar := float(EpilogCineState.bar_height(int(size.x), int(size.y)))
+	if bar <= 0.0:
 		return
-	_built = false
-	exit_requested.emit()
+	var black := Color(0.0, 0.0, 0.0, alpha)
+	draw_rect(Rect2(0.0, 0.0, size.x, bar), black)
+	draw_rect(Rect2(0.0, size.y - bar, size.x, bar), black)
+
+
+func _font_scale() -> float:
+	return size.x / float(HudPos.SPLASH_FONT_SCALE_BASE_W)
+
+
+func _font_size() -> int:
+	var fs := _font.get_fixed_size() if _font != null else 0
+	return fs if fs > 0 else 16
+
+
+# Retail UI images force loose-first for this lookup; an image that does not
+# load draws nothing.
+func _image(image_name: String) -> Texture2D:
+	if not _images.has(image_name):
+		_images[image_name] = TgaTexture.load_from_root(_root, image_name, true) \
+				if _root != null else null
+	return _images[image_name]

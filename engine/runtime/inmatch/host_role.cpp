@@ -413,10 +413,14 @@ void HostRole::observe_frame_statistics(int32_t frames_last_second, int32_t cpu_
 
 bool HostRole::session_lost(SessionError &error) const {
 	const NapiNPServerCtx &ctx = state.host_owner.ctx;
-	// The NovaWorld session's end exits the mission on either host kind.
-	if (ctx.mission_exit_reason != 0) {
-		error = {SessionErrorCode::SessionLost,
-				"mission exit " + std::to_string(ctx.mission_exit_reason)};
+	// The NovaWorld session's end exits the mission on either host kind; the
+	// world-side writers (the SP end screens, the round-over keys, the in-game
+	// RESTART) store theirs on the world [orig: g_MissionExitReason, read by
+	// Game_ProcessMainFrame @0x526806..0x526867 after the frame's update].
+	const int32_t reason = ctx.mission_exit_reason != 0 ? ctx.mission_exit_reason
+			: kernel_ != nullptr ? kernel_->world.mission_exit_reason : 0;
+	if (reason != 0) {
+		error = {SessionErrorCode::SessionLost, "mission exit " + std::to_string(reason)};
 		return true;
 	}
 	if (ctx.connection_mode != ConnectionMode::HostOnly) return false;
