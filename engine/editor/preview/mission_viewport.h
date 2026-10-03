@@ -7,6 +7,7 @@
 
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_items.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
@@ -79,8 +80,11 @@ public:
 	bool gesture_open() const { return gesture_open_; }
 
 	// The marks on a picture `width` x `height` (mission_scene.h), an area's anchor on the ground of
-	// `device` where it answers.
+	// `device` where it answers, each entity's with its item's bound (picked by it).
 	std::vector<MissionMark> marks(int width, int height, const ViewportDevice *device) const;
+	// What it reads of its entities' items (preview/mission_items: a drop's facts, the bound each item's
+	// entity is picked by), as last followed.
+	const MissionItemCache &items() const { return items_; }
 	// How far from its anchor the primary's handles stand, metres: a share of the camera's distance,
 	// so they keep their size on the picture.
 	float handle_reach() const { return camera_.distance * 0.08f; }
@@ -162,6 +166,9 @@ protected:
 
 private:
 	ViewportAction stop_(MissionViewStatus reason);
+	// The scene's items' bounds asked of the project, where the scene, the graph or the asset source's
+	// generation moved.
+	void bound_items_(const SessionView &view);
 	// The mission document a planner works over: the one at its path while the picture is current;
 	// null, with why, otherwise.
 	const Document *planned_(const ViewportContext &context, std::string &error) const;
@@ -185,6 +192,12 @@ private:
 	std::string detail_;
 	PreviewFollow picture_;
 	MissionScene scene_;
+	// Mutable: a planner's facts (a drop's, the ground command's) read through it, each file parsed once
+	// while it stands.
+	mutable MissionItemCache items_;
+	uint64_t bounds_serial_ = 0; // the scene's serial the bounds were last asked over
+	uint64_t bounds_graph_ = 0; // the graph's generation then
+	uint64_t bounds_files_ = 0; // and the asset source's
 	std::vector<std::string> missing_;
 	bool ground_ = false;
 	bool gesture_open_ = false;

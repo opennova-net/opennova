@@ -158,21 +158,41 @@ inline constexpr size_t kMissionMarksDrawn = 2000;
 // A mark: an entity or an area as the picture shows it, its anchor (an entity's position; an
 // area's centre at its ground where a device answers, else at its z_min) projected by the camera.
 // The marks are made for every entity (in the scene's order, then every area), shown or not, so a
-// mark's index is stable within a frame.
+// mark's index is stable within a frame. An entity whose item's model has a bound carries its sphere
+// about its position (preview/mission_items: the entity's bound as the game's init stamps it, the
+// sphere the game's ray broad phase tests), which a click with no device to ask goes by.
 struct MissionMark {
 	NodeAddress record; // {row, kind, 0}
 	const char *kind = ""; // "item", "building", "marker", "organic", "area"
 	PreviewVec3 at;
 	float x = 0.0f, y = 0.0f, depth = 0.0f; // the picture's pixels; depth in front of the eye
 	bool shown = false; // on the picture, inside mark_range, its kind's marks on
+	// Its kind's marks on and inside mark_range, its anchor on the picture or not: what a pick may take
+	// by its model (a building's origin can stand off the picture while the building fills it).
+	bool pickable = false;
 	int entity = -1; // index into scene.entities(), -1 an area
 	int area = -1; // index into scene.areas(), -1 an entity
+	float radius = 0.0f; // its sphere about `at`, metres (0: none, picked by its anchor alone)
 };
+// The bound radius each item's entity is picked by, metres by item id (MissionItemCache::radii).
+using MissionPickRadii = std::unordered_map<int64_t, float>;
 std::vector<MissionMark> mission_marks(const MissionScene &scene, const MissionViewportOptions &options,
-		const OrbitCamera &camera, int width, int height, const ViewportDevice *device);
-// The front-most shown mark within `slop` of (x, y); -1 none.
-int pick_mission_mark(const std::vector<MissionMark> &marks, float x, float y, float slop = kMissionPickSlop);
-// The records of the shown marks whose anchors lie in the box from `a` to `b`, nearest first.
+		const OrbitCamera &camera, int width, int height, const ViewportDevice *device,
+		const MissionPickRadii *radii = nullptr);
+// What a pick is for: a press (what a drag would move: never more than the pointer is over) or a
+// click (a release that did not travel, the hover that says what a click takes, the wire's hit).
+enum class MissionPick : uint8_t { Press, Click };
+// The mark under (x, y) on a picture `width` x `height` seen by `camera` (ADR 0046, the polish after
+// its review): the front-most shown mark whose anchor lies within `slop` pixels first (a glyph clicked
+// is its mark's); else what `device`'s ray meets first (ViewportDevice::ray_between: an entity's drawn
+// surface takes its pickable mark, the nearer surface first; the ground or the sky takes none); else,
+// where no device can say, nothing for a press, and for a click the pickable mark with the smallest
+// sphere the ray passes through (a small entity nested in a large one's sphere is the small one's), its
+// anchor on the picture or not. -1 none.
+int pick_mission_mark(const std::vector<MissionMark> &marks, const OrbitCamera &camera, int width, int height, float x,
+		float y, const ViewportDevice *device, MissionPick by, float slop = kMissionPickSlop);
+// The records of the shown marks whose anchors (an entity's sphere's centre) lie in the box from `a`
+// to `b`, nearest first.
 std::vector<NodeAddress> mission_box_records(const std::vector<MissionMark> &marks, CanvasPoint a, CanvasPoint b);
 
 } // namespace opennova::editor

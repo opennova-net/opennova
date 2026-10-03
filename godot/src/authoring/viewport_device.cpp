@@ -125,6 +125,11 @@ bool ViewportDevice::ground_at(double x, double y, double &height) const {
 	return applier_->ground_at(x, y, height);
 }
 
+opennova::editor::ViewportRayHit ViewportDevice::ray_between(const double from[3], const double to[3]) const {
+	// The applier's to answer, as the surface is: its records stand while it builds another layer.
+	return applier_->ray_between(from, to);
+}
+
 void ViewportDevice::take(opennova::editor::ViewportAction action, const opennova::editor::ViewportModel &model,
 		const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &clock,
 		opennova::editor::ViewportDeviceReport &report) {

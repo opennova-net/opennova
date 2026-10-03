@@ -39,6 +39,7 @@
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
+#include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
@@ -279,6 +280,46 @@ int test_named_words() {
 	moved.generation_ = 2;
 	cache.record(*document, walker, &moved);
 	TEST_EXPECT(cache.made() == 2);
+	// Held by a gesture (the polish: a drag of marks), its own batches' revisions keep the titles; an
+	// edit of anything else meanwhile (one through the wire mid-drag: the walker's name index cleared)
+	// drops them, his title worded again; the gesture's next sample keeps them; an undo drops them;
+	// let go, the next revision drops them; held, other names still do.
+	const uint64_t drag = next_edit_gesture();
+	Edit nudge;
+	nudge.address = walker;
+	nudge.field = "x";
+	nudge.value = 12.5;
+	nudge.gesture = drag;
+	Diagnostic error;
+	cache.hold(drag);
+	TEST_EXPECT(document->apply(nudge, error));
+	TEST_EXPECT(cache.record(*document, walker, &moved) == record_display(*document, walker, &moved) && cache.made() == 2);
+	nudge.value = 13.0;
+	TEST_EXPECT(document->apply(nudge, error));
+	TEST_EXPECT(cache.record(*document, walker, &moved).find("Sgt. Walker") != std::string::npos && cache.made() == 2);
+	Edit unnamed;
+	unnamed.address = walker;
+	unnamed.field = "name_index";
+	unnamed.value = int64_t(0);
+	TEST_EXPECT(document->apply(unnamed, error));
+	TEST_EXPECT(cache.record(*document, walker, &moved) == record_display(*document, walker, &moved) &&
+	            cache.record(*document, walker, &moved).find("Sgt. Walker") == std::string::npos && cache.made() == 3);
+	nudge.value = 13.5;
+	TEST_EXPECT(document->apply(nudge, error));
+	cache.record(*document, walker, &moved);
+	TEST_EXPECT(cache.made() == 3);
+	document->undo();
+	cache.record(*document, walker, &moved);
+	TEST_EXPECT(cache.made() == 4);
+	cache.hold(0);
+	nudge.value = 14.5;
+	TEST_EXPECT(document->apply(nudge, error));
+	cache.record(*document, walker, &moved);
+	TEST_EXPECT(cache.made() == 5);
+	cache.hold(drag);
+	cache.record(*document, walker, &names);
+	TEST_EXPECT(cache.made() == 6);
+	cache.hold(0);
 	std::printf("named words: items, shown names, text keys, choices, the cache\n");
 	return 0;
 }
@@ -378,6 +419,100 @@ int test_session_words() {
 	const opennova::io::JsonValue *listed = wire.get("choices");
 	TEST_EXPECT(listed && listed->array.size() == offered.size() && listed->array[0].get_string("label", "") == "The player");
 	std::printf("session words: the graph's names, the picker, the wire, Problems' places, the status line\n");
+	return 0;
+}
+
+// The polish: a number that forms a text key picked by its string (FieldUse::key_prefix), through a
+// session whose mission's own table holds two STRNAME keys and two STRWINCOND keys, a key no number
+// forms (STRNAME7: the game forms STRNAME007), keys of numbers the game never looks up (STRNAME000,
+// STRWINCOND000 and STRWINCOND255) and another section's key: the name index's choices are the
+// section's keys of its form, each named by its number and worded by its string, "No name" first;
+// a pick writes the number (the walker renamed); the objectives row's the same over WinConditions; the
+// wire's reference_choices names the key's prefix; text_key_number is the game's sprintf inverted.
+int test_text_key_picks() {
+	int64_t number = -1;
+	TEST_EXPECT(text_key_number("STRNAME005", "STRNAME", number) && number == 5);
+	TEST_EXPECT(text_key_number("strname1234", "STRNAME", number) && number == 1234);
+	TEST_EXPECT(!text_key_number("STRNAME5", "STRNAME", number) && !text_key_number("STRNAME0005", "STRNAME", number) &&
+	            !text_key_number("STRNAME", "STRNAME", number) && !text_key_number("LOCATION001", "STRNAME", number) &&
+	            !text_key_number("STRNAME00x", "STRNAME", number));
+	editor_test::TempProjectDir dir("opennova_mission_text_keys");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Keys"));
+	editor_test::create_missing_files(session);
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(editor_test::write_bytes(root + "/defs/items.def", test_io::read_file(repo() + "/fixtures/def/items.def")));
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/synth_logic.bms", test_io::read_file(repo() + "/fixtures/bms/synth_logic.bms")));
+	opennova::rtxt::File table;
+	const auto section = [&table](const char *name, std::initializer_list<std::pair<const char *, const char *>> rows) {
+		const uint32_t index = static_cast<uint32_t>(table.sections.size());
+		table.sections.push_back({name, static_cast<uint32_t>(rows.size())});
+		for (const auto &row : rows) table.entries.push_back({row.first, row.second, {}, index});
+	};
+	section("Locations", {{"LOCATION001", "Pump House"}, {"STRNAME003", "Not a person"}});
+	section("PeopleNames", {{"STRNAME000", "Looked up by no index"}, {"STRNAME001", "Sgt. Walker"}, {"STRNAME7", "Never formed"},
+	                        {"STRNAME012", "Cpl. Ortiz"}});
+	section("WinConditions", {{"STRWINDIRECTIVE001", "Reach the pump house"}, {"STRWINCOND000", "An empty slot"},
+	                          {"STRWINCOND001", "Pump house reached"}, {"STRWINCOND004", "Radio tower held"},
+	                          {"STRWINCOND255", "An empty slot too"}});
+	std::vector<uint8_t> bytes;
+	std::string error;
+	TEST_EXPECT(opennova::rtxt::write(table, bytes, error));
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/synth_logic.bin", bytes));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("missions/synth_logic.bms"));
+	const Document *document = session.document_for("missions/synth_logic.bms");
+	const SessionView &view = session.view();
+	TEST_EXPECT(document && view.findings.graph);
+	if (!document || !view.findings.graph) return 1;
+	const GraphNameSource names(*view.findings.graph);
+	const NodeAddress walker = row_at(*document, MissionKind::Organic, 0);
+	FieldUse name_index;
+	for (const FieldSchema &schema : document->fields(walker.kind))
+		if (schema.id == "name_index") name_index = document->field_on(walker, schema);
+	TEST_EXPECT(name_index.schema && name_index.reference == ReferenceKind::None && name_index.picks == ReferenceKind::TextId &&
+	            same(name_index.scope, "SYNTH_LOGIC.BIN/PeopleNames") && name_index.key_prefix &&
+	            std::string(name_index.key_prefix) == "STRNAME");
+	const std::vector<ReferenceChoice> people = picker_choices(view.findings.graph.get(), *document, walker, name_index, &names);
+	std::string listed;
+	for (const ReferenceChoice &choice : people) listed += choice.name + "=" + choice.label + ";";
+	TEST_EXPECT(same(listed, "0=No name;1=\"Sgt. Walker\";12=\"Cpl. Ortiz\";")); // STRNAME000: no index looks it up
+	// Each keeps its key and the section that defines it, so its preview is the key's string.
+	TEST_EXPECT(people.size() == 3 && people[2].symbol == "STRNAME012" && same(people[2].symbol_scope, "SYNTH_LOGIC.BIN/PeopleNames") &&
+	            symbol_preview(*view.findings.graph, ReferenceKind::TextId, people[2].symbol, people[2].symbol_scope)
+	                            .find("Cpl. Ortiz") != std::string::npos);
+	// The wire: the same, the key's prefix named.
+	const opennova::io::JsonValue wire = reference_choices_to_json(*document, walker, "name_index", view, JsonPage());
+	const opennova::io::JsonValue *choices = wire.get("choices");
+	TEST_EXPECT(choices && choices->array.size() == 3 && wire.get_string("key", "") == "STRNAME" &&
+	            wire.get_string("reference", "") == "text_id" && choices->array[2].get_string("name", "") == "12" &&
+	            choices->array[2].get_string("label", "") == "\"Cpl. Ortiz\"");
+	// A pick writes the number: the walker named Cpl. Ortiz.
+	Edit rename;
+	rename.address = walker;
+	rename.field = "name_index";
+	rename.value = int64_t(12);
+	editor_test::handle_to_end(session, request::edit_record("missions/synth_logic.bms", rename));
+	TEST_EXPECT(session.last_edit_ok());
+	Value held;
+	TEST_EXPECT(document->get(walker, "name_index", held) && held == Value(int64_t(12)));
+	const std::string walker_ssn = std::to_string(ssn_of(*document, walker));
+	TEST_EXPECT(same(record_display(*document, walker, &names), "Wire Test Rifleman #" + walker_ssn + " (Cpl. Ortiz)"));
+	// The objectives panel's first row: the WinConditions keys of STRWINCOND's form.
+	const NodeAddress mission = row_at(*document, MissionKind::Mission, 0);
+	FieldUse objective;
+	for (const FieldSchema &schema : document->fields(mission.kind))
+		if (schema.id == "win_conditions[0]") objective = document->field_on(mission, schema);
+	TEST_EXPECT(objective.schema && objective.picks == ReferenceKind::TextId && objective.key_prefix &&
+	            std::string(objective.key_prefix) == "STRWINCOND");
+	listed.clear();
+	for (const ReferenceChoice &choice : picker_choices(view.findings.graph.get(), *document, mission, objective, &names))
+		listed += choice.name + "=" + choice.label + ";";
+	// STRWINCOND000 and STRWINCOND255 not among them: 0 and 255 are empty slots, no row of the panel.
+	TEST_EXPECT(same(listed, "0=No objective (the panel's rows end here);1=\"Pump house reached\";4=\"Radio tower held\";"));
+	std::printf("text key picks: the section's keys of the field's form by their strings, a pick its number\n");
 	return 0;
 }
 
@@ -549,5 +684,6 @@ int main(int argc, char **argv) {
 	if (test_document_words() != 0) return 1;
 	if (test_named_words() != 0) return 1;
 	if (test_session_words() != 0) return 1;
+	if (test_text_key_picks() != 0) return 1;
 	return test_retail();
 }
