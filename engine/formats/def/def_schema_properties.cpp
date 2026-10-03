@@ -47,7 +47,11 @@ const char *const kAmmoTurnRate = "Degrees a second (a decimal), stored as a bin
 // check, NapiNPServerMsg_HandlePlayerLoadout @ 0x515790); WeaponDef_ParseProperty
 // @ 0x54daae..0x54db08 (also yellow, violet: the armory's lists, PlayerInfo_PopulateWeaponSlotLists
 // @ 0x560430)]
-const char *const kTeamFilter = "A team the weapon is offered to: red or blue; yellow (as blue) and violet (as red) "
+// [orig: WeaponDefs_ParseLineCallback 'farpinfo' @ 0x544da3 -> +0xE8 / +0xEC; the rearm pass
+// Server_UpdateEntityTargetLockAndWeaponOverlays @ 0x51190b..0x511934]
+const char *const kFarpInfo = "On a FARP, the rounds added to the weapon's clip and reserve, then how many steps "
+                              "of the rearm count apart; 0 in either adds none.";
+const char *const kTeamFilter ="A team the weapon is offered to: red or blue; yellow (as blue) and violet (as red) "
                                 "only put it in the armory's lists, the host's check refusing it.";
 
 // Property syntax of the witnessed family parsers. The writer and inspector
@@ -246,6 +250,9 @@ const std::vector<DefProperty> kWeaponProperties = {
 	{"heat_values", {"heat_per_shot", "heat_decay_per_tick"}, DefEncoding::Heat, 1.0, "", {"Heat per shot", "Cooling per second"}, "", {"%", "%/s"}, kHeat},
 	{"heat_effect", {"heat_effect", "heat_glow_threshold"}, DefEncoding::Fixed16, 1.0, "", {"", "Glow threshold"}, "", {}, kFixed16},
 	{"heat_sound", {"heat_sound"}, DefEncoding::Plain, 1.0, ""},
+	{"farpinfo", {"farp_rounds", "farp_interval"}, DefEncoding::Plain, 1.0, "", {"FARP rounds", "FARP interval"}, "", {},
+	 kFarpInfo},
+	{"designation_time", {"designation_ticks"}, DefEncoding::ScaledInteger, 62.0, "", {}, "", {"s"}, kSeconds},
 };
 
 const std::vector<DefProperty> kAmmoProperties = {

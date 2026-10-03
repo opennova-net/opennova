@@ -7,8 +7,10 @@
 // dropped, never a blocker; malformed values and unterminated blocks still refuse the
 // write; a name whose closing quote is missing reads to the end of the line as the
 // retail tokenizer reads it, and a weapon or action name needs no quotes and ends its
-// keyword at a comma or a quote as at a space; and, with a JO install configured, the
-// three retail catalogs and the retail powerup.def parse with zero blocking findings and
+// keyword at a comma or a quote as at a space; jox01's bare `attrib:`, effect-only particle
+// slot and addeweap placeholder tail read as the game reads them; and, with a JO install
+// configured, the three retail catalogs (the base's and each installed expansion's) and the
+// retail powerup.def parse with zero blocking findings and
 // write back, the powerup table's canonical form a fixed point (written, parsed, written
 // again: the same bytes and the same rows). The numbers an
 // editor shows in the units the file writes them (def_authored_get / def_authored_set, ADR
@@ -180,6 +182,71 @@ int powerup_table() {
 	return failures;
 }
 
+// The three line forms of jox01's items.def the first authoring checks refused (281 times, ADR
+// 0046 S16), as the game reads them. A bare `attrib:` sets nothing [orig: ItemDef_ParseProperty
+// @ 0x4A06A8 -> 0x4A1CA6], and an addeweap's tokens past the sixth are never read [orig:
+// @ 0x4A1B42..0x4A1C9F]: reported as ignored, never blocking, absent from the output. A particle
+// slot with its effect alone stores no userpoint, the tokenizer having reset the token [orig:
+// @ 0x4A13BF..0x4A13FC; Terrain_TokenizeConfigLine @ 0x53CB71..0x53CB81]: no finding, written back
+// as the one token; and a later such line clears the userpoint an earlier one set, as the game's
+// copy does.
+int expansion_catalog_lines() {
+	int failures = 0;
+	const Outcome out = run("items.def",
+		"begin \"Flyable Ka-52\"\nid 100090\ntype vehicle\n"
+		"  addeweapG ewep01 100184 70 10 100 100   <down angle> <up angle> <right angle> <left angle>\nend\n"
+		"begin \"Beach Hut 1\"\nid 101300\ntype building\n  attrib: \nend\n"
+		"begin \"FX_Mosquitos 02M - 01 count\"\nid 100500\ntype effect\n  particlefx fx_Mosquitos_2m_L    \nend\n");
+	const std::string &text = out.written.text;
+	if (out.blocking() || out.ignored() != 9 || !out.written.ok() || out.count != 3 ||
+	    text.find("\taddeweapg ewep01 100184 70 10 100 100\r\n") == std::string::npos ||
+	    text.find("\tparticlefx fx_Mosquitos_2m_L\r\n") == std::string::npos || text.find("attrib:") != std::string::npos ||
+	    text.find("angle") != std::string::npos) {
+		std::printf("FAIL jox01 item lines: blocking=%d ignored=%zu write=%s\n%s\n", int(out.blocking()), out.ignored(),
+		            out.written.ok() ? "ok" : "refused", text.c_str());
+		for (const auto &d : out.diagnostics)
+			std::printf("  line %zu %s.%s: %s\n", d.line, d.record.c_str(), d.field.c_str(), d.message.c_str());
+		++failures;
+	}
+	if (!run("items.def", text.c_str()).diagnostics.empty()) { std::printf("FAIL jox01 item lines reparse\n"); ++failures; }
+	// One to three angles read stale slots: still refused (the parser's own check), as is a line
+	// past them with too few.
+	failures += refused("items.def", "begin \"Partial\"\naddeweapG ewep01 100184 70 10 100\nend\n");
+	const char *slot = "begin \"Slot\"\nparticlefx smoke exhaust\nparticlefx fire\nend\n";
+	DefItemsFile parsed{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(slot), std::strlen(slot), &parsed, nullptr);
+	if (parsed.count != 1 || std::strcmp(parsed.entries[0].particlefx.effect, "fire") != 0 ||
+	    parsed.entries[0].particlefx.userpoint[0] != 0) {
+		std::printf("FAIL a one-token particlefx clears the userpoint\n");
+		++failures;
+	}
+	def_free_items(&parsed);
+	// Two weapon.def keys the game reads, which the catalog once dropped as ignored: jox01's
+	// `farpinfo <rounds> <interval>` [orig: WeaponDefs_ParseLineCallback @ 0x544da3 -> +0xE8 /
+	// +0xEC] and the designator's `designation_time <seconds>`, stored x 62 [orig: @ 0x544895 ->
+	// +0x458]. Kept, no finding, written back; a farpinfo without its interval reads it as 0.
+	const char *keys = "weapon \"WPN_MINIGUN\"\ncategory 1\n\tfarpinfo\t100  1\ndesignation_time 30\nend\n"
+	                   "weapon \"WPN_ROCKETS\"\ncategory 2\nfarpinfo 3\nend\n";
+	const Outcome read = run("weapon.def", keys);
+	DefWeaponsFile weapons{};
+	def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(keys), std::strlen(keys), &weapons, nullptr);
+	const bool stored = weapons.count == 2 && weapons.entries[0].farp_rounds == 100 &&
+	                    weapons.entries[0].farp_interval == 1 && weapons.entries[0].designation_ticks == 1860 &&
+	                    weapons.entries[1].farp_rounds == 3 && weapons.entries[1].farp_interval == 0;
+	def_free_weapons(&weapons);
+	if (!stored || !read.diagnostics.empty() || !read.written.ok() ||
+	    read.written.text.find("\tfarpinfo 100 1\r\n") == std::string::npos ||
+	    read.written.text.find("\tdesignation_time 30\r\n") == std::string::npos ||
+	    read.written.text.find("\tfarpinfo 3 0\r\n") == std::string::npos ||
+	    !run("weapon.def", read.written.text.c_str()).diagnostics.empty()) {
+		std::printf("FAIL farpinfo / designation_time (stored %d):\n%s\n", int(stored), read.written.text.c_str());
+		for (const auto &d : read.diagnostics)
+			std::printf("  line %zu %s.%s: %s\n", d.line, d.record.c_str(), d.field.c_str(), d.message.c_str());
+		++failures;
+	}
+	return failures;
+}
+
 int ignored_input() {
 	int failures = 0;
 	// An unknown key, two attrib: tokens outside the chain and a husk token without a
@@ -214,9 +281,9 @@ int ignored_input() {
 	}
 	def_free_items(&pieces);
 	// The same rule for the other families: an unknown key is dropped, the record stays.
-	const Outcome weapon = run("weapon.def", "weapon \"WPN_DESIGNATOR\"\ncategory 1\ndesignation_time 30\nend\n");
+	const Outcome weapon = run("weapon.def", "weapon \"WPN_DESIGNATOR\"\ncategory 1\ndesignation_range 30\nend\n");
 	if (weapon.blocking() || weapon.ignored() != 1 || !weapon.written.ok() ||
-	    weapon.written.text.find("designation_time") != std::string::npos) { std::printf("FAIL ignored weapon\n"); ++failures; }
+	    weapon.written.text.find("designation_range") != std::string::npos) { std::printf("FAIL ignored weapon\n"); ++failures; }
 	const Outcome ammo = run("ammo.def", "ammo AMMO_SAW\npenetration 1\npenetration_impact 20\nend\n");
 	if (ammo.blocking() || ammo.ignored() != 1 || !ammo.written.ok() ||
 	    ammo.written.text.find("penetration_impact 20") == std::string::npos) { std::printf("FAIL ignored ammo\n"); ++failures; }
@@ -733,6 +800,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	failures += ignored_input();
+	failures += expansion_catalog_lines();
 	failures += powerup_table();
 	failures += tokenizer_rules();
 	failures += authored_units();
@@ -758,27 +826,39 @@ int main(int argc, char **argv) {
 		opennova::Vfs vfs;
 		vfs.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
 		if (!vfs.mount_game(root, "", opennova::VfsMountMode::Packed)) return 1;
-		for (const char *family : {"items.def", "weapon.def", "ammo.def"}) {
-			std::vector<uint8_t> bytes;
-			if (!vfs.read_file(family, bytes)) { std::printf("Cannot read %s\n", family); return 1; }
-			// Every retail catalog must open in the editor: nothing blocking, and the
-			// canonical rewrite must succeed. Ignored lines are counted for the record.
-			const Outcome out = run(family, bytes);
-			std::map<std::string, int> ignored;
-			for (const auto &d : out.diagnostics) ++ignored[d.field];
-			std::printf("%s: %zu records, %zu ignored line(s), %s\n", family, out.count, out.ignored(),
-			            out.written.ok() ? "written" : "REFUSED");
-			for (const auto &[key, n] : ignored) std::printf("  ignored %s: %d\n", key.c_str(), n);
-			if (out.blocking() || !out.written.ok()) {
-				for (const auto &d : out.diagnostics)
-					if (d.blocks()) std::printf("  BLOCKING line %zu %s.%s: %s\n", d.line, d.record.c_str(), d.field.c_str(), d.message.c_str());
-				for (const auto &d : out.written.diagnostics)
-					std::printf("  write %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
-				++failures;
+		// The base catalogs, then each installed expansion's (what `/exp <name>` serves: JO:CA's
+		// jox01, whose items.def carries bare `attrib:` lines, effect-only particle slots and
+		// addeweap placeholder text, ADR 0046 S16).
+		const auto catalogs = [&](opennova::Vfs &mounted, const std::string &label) {
+			for (const char *family : {"items.def", "weapon.def", "ammo.def"}) {
+				std::vector<uint8_t> bytes;
+				if (!mounted.read_file(family, bytes)) { std::printf("Cannot read %s%s\n", label.c_str(), family); ++failures; continue; }
+				// Every retail catalog must open in the editor: nothing blocking, and the
+				// canonical rewrite must succeed. Ignored lines are counted for the record.
+				const Outcome out = run(family, bytes);
+				std::map<std::string, int> ignored;
+				for (const auto &d : out.diagnostics) ++ignored[d.field];
+				std::printf("%s%s: %zu records, %zu ignored line(s), %s\n", label.c_str(), family, out.count, out.ignored(),
+				            out.written.ok() ? "written" : "REFUSED");
+				for (const auto &[key, n] : ignored) std::printf("  ignored %s: %d\n", key.c_str(), n);
+				if (out.blocking() || !out.written.ok()) {
+					for (const auto &d : out.diagnostics)
+						if (d.blocks()) std::printf("  BLOCKING line %zu %s.%s: %s\n", d.line, d.record.c_str(), d.field.c_str(), d.message.c_str());
+					for (const auto &d : out.written.diagnostics)
+						std::printf("  write %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
+					++failures;
+				}
+				// Every number the Inspector shows in written units reads back from the line
+				// the saved file writes, and a set of it leaves the record as it was.
+				failures += authored_catalog(family, bytes, true);
 			}
-			// Every number the Inspector shows in written units reads back from the line
-			// the saved file writes, and a set of it leaves the record as it was.
-			failures += authored_catalog(family, bytes, true);
+		};
+		catalogs(vfs, "");
+		for (const std::string &expansion : retail::expansions()) {
+			opennova::Vfs served;
+			served.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
+			if (!served.mount_game(root, expansion, opennova::VfsMountMode::Packed)) return 1;
+			catalogs(served, "/exp " + expansion + ": ");
 		}
 		// The powerup table opens with nothing blocking and writes; its canonical form written again
 		// is the same text (the writer compares the rows it parses back).

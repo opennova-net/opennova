@@ -548,6 +548,22 @@ typedef struct DefWeaponDef {
        numbering. */
     size_t open_line;
     size_t end_line;
+    /* 'farpinfo <rounds> <interval>': the FARP rearm of a vehicle's weapon. Two atol'd
+       ints -> +0xE8 / +0xEC, 0 = key absent (the entry memset; a missing second token
+       reads as the tokenizer's "", so 0). The rearm pass, standing on a FARP, adds
+       <rounds> to the held weapon's clip and reserve (capped by the def) on every
+       <interval>-th step of its counter; 0 in either does nothing. jox01 authors it on
+       its vehicle guns (`farpinfo 100 1`, `farpinfo 3 1`). Appended (layout stability).
+       [orig: WeaponDefs_ParseLineCallback 'farpinfo' @ 0x544da3 -> +0xE8 @ 0x544dc4,
+        +0xEC @ 0x544ddf; consumer Server_UpdateEntityTargetLockAndWeaponOverlays
+        @ 0x511820, @ 0x51190b..0x511934 -> the ammo top-up sub_546230 @ 0x546230] */
+    int farp_rounds;           /* +0xE8 */
+    int farp_interval;         /* +0xEC */
+    /* 'designation_time <seconds>': atol x 62 -> +0x458, the life of a designation in
+       62 Hz ticks (WPN_DESIGNATOR / WPN_COPILOT author 30). 0 = key absent.
+       [orig: WeaponDefs_ParseLineCallback 'designation_time' @ 0x544895 -> +0x458
+        @ 0x5448c5 (n*31*2); consumer the DesignateTarget spawn leg @ 0x4ec264] */
+    int designation_ticks;     /* +0x458 */
 } DefWeaponDef;
 
 /* One `ammoclass_max_carry <class> <n>` row: the class token and the carry cap,

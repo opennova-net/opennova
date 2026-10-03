@@ -593,6 +593,20 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "emplacedstance")) {
                 cw.emplacedstance = parse_int_n(v, vl);
                 parsed = 1;
+            } else if (key_is(key, "farpinfo")) {
+                /* The FARP rearm's rounds and interval, each atol'd; a token the line
+                   lacks reads as the tokenizer's "" (0). [orig: @ 0x544da3 -> +0xE8
+                   @ 0x544dc4, +0xEC @ 0x544ddf] */
+                Token fv[MAX_TOKENS];
+                const int fn = value_tokens(tokens, fv, MAX_TOKENS);
+                cw.farp_rounds = fn >= 1 ? parse_int_n(fv[0].s, fv[0].len) : 0;
+                cw.farp_interval = fn >= 2 ? parse_int_n(fv[1].s, fv[1].len) : 0;
+                parsed = 1;
+            } else if (key_is(key, "designation_time")) {
+                /* Seconds, atol x 62 (n*31*2, wrapping as the 32-bit imul does).
+                   [orig: @ 0x544895 -> +0x458 @ 0x5448c5] */
+                cw.designation_ticks = static_cast<int>(static_cast<uint32_t>(parse_int_n(v, vl)) * 62u);
+                parsed = 1;
             } else if (key_is(key, "special_hold")) {
                 /* 3P hold-pose kind, atol [orig: weapon.def key 'special_hold' ->
                    record+0xA4 @ 0x543cb7/0x543cd8]. */
