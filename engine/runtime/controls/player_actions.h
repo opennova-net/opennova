@@ -69,6 +69,13 @@ struct PlayerActionFrame {
 	bool fire_edge = false;
 	bool reload_edge = false;
 	bool medic_edge = false;
+	// ToSpecial (catalog row 37, default F, dispatch 220): its keys' live state
+	// and a dispatch on either edge, press or release — the row's flags carry
+	// the release bit (0x80000000) beside the press dispatch, and the handler
+	// tells the two apart by the keys' state [orig: Input_ProcessKeyboardEvents
+	// @0x49D249..0x49D2B9 (release) / @0x49D42F (press); row flags 0x8C000801].
+	bool to_special_held = false;
+	bool to_special_edge = false;
 	// Apply in order: the USE special-key/release arm precedes binding rows.
 	std::vector<PlayerActionRequest> requests;
 };
@@ -119,6 +126,7 @@ private:
 	bool fire_was_held_ = false;
 	bool reload_was_down_ = false;
 	bool medic_was_down_ = false;
+	bool to_special_was_down_ = false;
 	bool use_latched_ = false;
 	bool use_held_prev_ = false;
 	bool use_hold_consumed_ = false;

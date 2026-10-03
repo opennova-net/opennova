@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include <runtime/world/local_player.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
@@ -379,6 +380,142 @@ void test_committed_switch_only_draws_after_holstering() {
     }
 }
 
+// ToSpecial / QuickSwitch (input case 220): the local fill takes the first
+// QuickSwitch slot as the hold-swap target and clears the stash; the press
+// stashes the equipped slot and mounts the target, the release mounts the
+// stash again; a reload defers either dispatch (a draw defers the release), a
+// gunner seat refuses both legs' swaps, and a successful swap drops the
+// binoculars request.
+// [orig: WeaponSlotTable_LoadAllFromDefs @ 0x541626..0x54166E;
+//  Input_HandleActionBinding_0 case 0xDC @ 0x4E115B..0x4E1273;
+//  Player_EquipWeaponByEntity @ 0x4E0370; Player_MountWeaponSlot @ 0x4DFA40]
+void test_to_special_hold_swap() {
+    Fixture f;
+    const int mag = add_entry(f.t, "WPN_MAG58", 4, 0, 100, 400, "AMMO_762", 1, 1);
+    const int point_aim = add_entry(f.t, "WPN_MAG58_POINTAIM", 4, 1, 100, 400, "AMMO_762", 1, 1);
+    f.t.entries[static_cast<size_t>(point_aim)].flags = weapon_flag::kQuickSwitch;
+    (void)mag;
+    World world;
+    world.tables.weapons = f.t;
+    WeaponInventory inv;
+    inv.reset(f.t);
+    inv.quick_switch_stash = 7; // a stale stash the fill clears
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_MAG58", "WPN_MAG58_POINTAIM"},
+                                       inv, 8, false);
+    const int32_t m4_combo = 3 * 65;
+    const int32_t target = 4 * 65 + 1;
+    CHECK(inv.quick_switch_combo == target);
+    CHECK(inv.quick_switch_stash == -1);
+    {
+        WeaponInventory plain;
+        plain.reset(f.t);
+        weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_MAG58"}, plain, 8, false);
+        CHECK(plain.quick_switch_combo == -1);
+    }
+    weapon_inventory_seed_pools(f.t, inv, 8);
+    weapon_inventory_recalc_clips(f.t, inv);
+    inv.equipped_combo = m4_combo;
+    world.registry.configure_pool(0, 1);
+    Entity seed;
+    seed.alive = true;
+    seed.health = 100;
+    world.cached.local_player = world.registry.spawn(0, seed);
+    WeaponInstallData data;
+    data.name = "WPN_M4AUTO";
+    data.clipsize = 30;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    local_weapon_install(world, weapon, data, false, false, &inv, view);
+
+    // A reload defers the press; nothing changes.
+    weapon.slot.current = weapon_action::kReload;
+    CHECK(local_player_to_special(world, weapon, inv, view, true) == ToSpecialResult::kDeferred);
+    CHECK(inv.quick_switch_stash == -1 && inv.pending_combo != target);
+    weapon.slot.current = weapon_action::kIdle;
+    // A gunner seat refuses the press.
+    world.registry.get(world.cached.local_player)->mounted = true;
+    world.registry.get(world.cached.local_player)->mount_type = SeatType::Gunner;
+    CHECK(local_player_to_special(world, weapon, inv, view, true) == ToSpecialResult::kHandled);
+    CHECK(inv.quick_switch_stash == -1);
+    world.registry.get(world.cached.local_player)->mounted = false;
+    world.registry.get(world.cached.local_player)->mount_type = SeatType::None;
+    // The press: the M4 is stashed, the point-aim MAG58 is the pending slot,
+    // the M4 queues its switch-out, the binoculars request drops.
+    view.binoculars_requested = true;
+    CHECK(local_player_to_special(world, weapon, inv, view, true) == ToSpecialResult::kHandled);
+    CHECK(inv.quick_switch_stash == m4_combo);
+    CHECK(inv.pending_combo == target);
+    CHECK(weapon.switch_in_flight);
+    CHECK(!view.binoculars_requested);
+    // A second press while stashed does nothing.
+    CHECK(local_player_to_special(world, weapon, inv, view, true) == ToSpecialResult::kHandled);
+    CHECK(inv.quick_switch_stash == m4_combo && inv.pending_combo == target);
+    // The release waits out a draw (and a reload).
+    weapon.slot.current = weapon_action::kSwitchTo;
+    CHECK(local_player_to_special(world, weapon, inv, view, false) == ToSpecialResult::kDeferred);
+    weapon.slot.current = weapon_action::kReload;
+    CHECK(local_player_to_special(world, weapon, inv, view, false) == ToSpecialResult::kDeferred);
+    CHECK(inv.quick_switch_stash == m4_combo);
+    // The release in a gunner seat keeps the stash.
+    weapon.slot.current = weapon_action::kIdle;
+    world.registry.get(world.cached.local_player)->mounted = true;
+    world.registry.get(world.cached.local_player)->mount_type = SeatType::Gunner;
+    CHECK(local_player_to_special(world, weapon, inv, view, false) == ToSpecialResult::kHandled);
+    CHECK(inv.quick_switch_stash == m4_combo);
+    world.registry.get(world.cached.local_player)->mounted = false;
+    world.registry.get(world.cached.local_player)->mount_type = SeatType::None;
+    // The release: the M4 is mounted again and the stash clears.
+    inv.equipped_combo = target;
+    weapon.switch_in_flight = false;
+    view.binoculars_requested = true;
+    CHECK(local_player_to_special(world, weapon, inv, view, false) == ToSpecialResult::kHandled);
+    CHECK(inv.quick_switch_stash == -1);
+    CHECK(inv.pending_combo == m4_combo);
+    CHECK(!view.binoculars_requested);
+    // A release with no stash does nothing.
+    inv.pending_combo = -1;
+    CHECK(local_player_to_special(world, weapon, inv, view, false) == ToSpecialResult::kHandled);
+    CHECK(inv.pending_combo == -1);
+    // The equipped slot already the target: the press does nothing.
+    CHECK(local_player_to_special(world, weapon, inv, view, true) == ToSpecialResult::kHandled);
+    CHECK(inv.quick_switch_stash == -1);
+}
+
+// The LocalPlayer's dispatch queue: a deferred dispatch stays queued for the
+// next frame's flush, then runs with the keys' state at that time.
+// [orig: Input_QueueDeferredEvent @0x4993E0; Input_FlushDeferredEvents @0x497AC0]
+void test_to_special_queue_defers() {
+    Fixture f;
+    const int point_aim = add_entry(f.t, "WPN_MAG58_POINTAIM", 4, 1, 100, 400, "AMMO_762", 1, 1);
+    f.t.entries[static_cast<size_t>(point_aim)].flags = weapon_flag::kQuickSwitch;
+    World world;
+    world.tables.weapons = f.t;
+    world.registry.configure_pool(0, 1);
+    Entity seed;
+    seed.alive = true;
+    seed.health = 100;
+    world.cached.local_player = world.registry.spawn(0, seed);
+    LocalPlayer lp(world);
+    lp.inventory.reset(f.t);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_MAG58_POINTAIM"}, lp.inventory,
+                                       8, false);
+    lp.inventory_valid = true;
+    lp.inventory.equipped_combo = 3 * 65;
+    WeaponInstallData data;
+    data.name = "WPN_M4AUTO";
+    data.clipsize = 30;
+    local_weapon_install(world, lp.weapon, data, false, false, &lp.inventory, lp.view);
+    lp.weapon.slot.current = weapon_action::kReload;
+    lp.queue_to_special();
+    lp.dispatch_to_special(true);
+    CHECK(lp.to_special_queued == 1 && lp.inventory.quick_switch_stash == -1);
+    lp.weapon.slot.current = weapon_action::kIdle;
+    lp.dispatch_to_special(true);
+    CHECK(lp.to_special_queued == 0 && lp.inventory.quick_switch_stash == 3 * 65);
+    for (int i = 0; i < 40; ++i) lp.queue_to_special();
+    CHECK(lp.to_special_queued == 32);
+}
+
 void test_cycle() {
     Fixture f;
     WeaponInventory inv;
@@ -652,6 +789,8 @@ int main() {
     test_defaults();
     test_kit_damage_classes();
     test_cycle();
+    test_to_special_hold_swap();
+    test_to_special_queue_defers();
     if (failures == 0) std::printf("weapon_inventory_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

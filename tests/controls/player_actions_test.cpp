@@ -436,6 +436,40 @@ bool test_voice_menu_digits_pick_and_swallow_the_rows() {
 	return true;
 }
 
+// ToSpecial dispatches on both edges of its keys, press and release, with
+// their live state; an edge without captured gameplay input or a simulation
+// is not dispatched, and the latch follows the keys meanwhile.
+// [orig: Input_ProcessKeyboardEvents @0x49D249..0x49D2B9 (the release pass) and
+//  @0x49D42F (the press); ToSpecial's row flags 0x8C000801]
+bool test_to_special_dispatches_both_edges() {
+	PlayerActions actions;
+	Keys keys;
+	PlayerActionFrame frame = actions.poll(keys, kLive);
+	CHECK(!frame.to_special_held && !frame.to_special_edge);
+	keys.hold("ToSpecial", 0x46);
+	frame = actions.poll(keys, kLive);
+	CHECK(frame.to_special_held && frame.to_special_edge);
+	frame = actions.poll(keys, kLive);
+	CHECK(frame.to_special_held && !frame.to_special_edge);
+	keys.release("ToSpecial");
+	frame = actions.poll(keys, kLive);
+	CHECK(!frame.to_special_held && frame.to_special_edge);
+	// Uncaptured: the press latches, no dispatch; nor its release.
+	PlayerActionPoll uncaptured = kLive;
+	uncaptured.captured = false;
+	keys.hold("ToSpecial", 0x46);
+	frame = actions.poll(keys, uncaptured);
+	CHECK(frame.to_special_held && !frame.to_special_edge);
+	frame = actions.poll(keys, kLive);
+	CHECK(!frame.to_special_edge);
+	keys.release("ToSpecial");
+	PlayerActionPoll no_sim = kLive;
+	no_sim.simulation_available = false;
+	frame = actions.poll(keys, no_sim);
+	CHECK(!frame.to_special_held && !frame.to_special_edge);
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
@@ -447,7 +481,8 @@ int main() {
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
 			test_wheel_remainder_dispatches_whole_notches,
 			test_spectator_rows_edge_to_their_codes,
-			test_voice_menu_digits_pick_and_swallow_the_rows})
+			test_voice_menu_digits_pick_and_swallow_the_rows,
+			test_to_special_dispatches_both_edges})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

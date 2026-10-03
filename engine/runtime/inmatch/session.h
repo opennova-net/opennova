@@ -254,6 +254,9 @@ protected:
 // frame input carries besides the movement keys.
 enum HeldAction : uint32_t {
 	HELD_FIRE = 1u << 0,
+	// The ToSpecial keys' live state, which its dispatch reads (the hold-swap
+	// press or release; Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181).
+	HELD_TO_SPECIAL = 1u << 1,
 };
 enum PressedAction : uint32_t {
 	PRESSED_FIRE = 1u << 0,
@@ -261,6 +264,8 @@ enum PressedAction : uint32_t {
 	// The dead player's medic call edge (the MedicReq action row; retail
 	// Input_HandleActionBinding case 217 @0x49b4b4).
 	PRESSED_MEDIC_REQUEST = 1u << 2,
+	// A ToSpecial dispatch: a press or a release edge of its keys.
+	PRESSED_TO_SPECIAL = 1u << 3,
 };
 
 

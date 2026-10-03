@@ -427,6 +427,93 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 	}
 }
 
+void local_player_mount_weapon_slot(World &world, LocalPlayerWeapon &w,
+		WeaponInventory &inventory, PlayerViewState &view, int32_t combo) {
+	// [orig: Player_MountWeaponSlot @0x4DFA40]
+	const WeaponTable &table = world.tables.weapons;
+	const WeaponInventorySlot *slot = inventory.slot(combo);
+	const WeaponTableEntry *def = slot != nullptr && slot->adm_index >= 0
+			? table.by_index(static_cast<uint8_t>(slot->adm_index))
+			: nullptr;
+	if (def == nullptr) return; // @0x4DFA58
+	const WeaponInventorySlot *equipped = inventory.slot(inventory.equipped_combo);
+	const WeaponTableEntry *equipped_def = equipped != nullptr && equipped->adm_index >= 0
+			? table.by_index(static_cast<uint8_t>(equipped->adm_index))
+			: nullptr;
+	if (equipped_def == nullptr) return; // @0x4DFA6B..0x4DFA71
+	inventory.pending_combo = combo;     // g_PendingWeaponSlot @0x4DFB16
+	WeaponSwitchOutcome mount;
+	mount.kind = WeaponSwitchOutcome::kMount;
+	mount.combo = combo;
+	mount.same_category = equipped_def->category == def->category; // @0x4DFB8B
+	handle_weapon_switch_outcome(world, w, &inventory, mount, view);
+}
+
+bool local_player_equip_weapon_slot(World &world, LocalPlayerWeapon &w,
+		WeaponInventory &inventory, PlayerViewState &view, int32_t combo) {
+	// [orig: Player_EquipWeaponByEntity @0x4E0370]
+	const WeaponInventorySlot *slot = inventory.slot(combo);
+	if (slot == nullptr || slot->adm_index < 0 ||
+			world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index)) == nullptr) {
+		// The deny cue [orig: Sound_PlayInterfaceTriggerSet(dword_24E08C4) @0x4E037E]
+		WeaponPresentationEvent event;
+		event.tick = world.logic_tick;
+		event.world_position = local_player_mission_position(world);
+		event.switch_denied = true;
+		w.events.push_back(std::move(event));
+		return false;
+	}
+	local_player_mount_weapon_slot(world, w, inventory, view, combo); // @0x4E03B8
+	return true;
+}
+
+ToSpecialResult local_player_to_special(World &world, LocalPlayerWeapon &w,
+		WeaponInventory &inventory, PlayerViewState &view, bool keys_held) {
+	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E115B]
+	const Entity *player = world.registry.get(world.cached.local_player);
+	if (player == nullptr) return ToSpecialResult::kHandled;
+	// The seat word is the raw SeatType (entity+0x168): 0 on foot, 1 passenger,
+	// 3 gunner [orig: `cmp [eax+168h], ...` @0x4E11A4 / @0x4E123A].
+	const int32_t parent_slot = player->mounted ? static_cast<int32_t>(player->mount_type) : 0;
+	// EquippedSlot->currentAction (+0x2C) [orig: @0x4E1189 / @0x4E11EB]
+	const int32_t action = w.active ? active_local_weapon_slot(world, w)->current
+	                                : weapon_action::kIdle;
+	if (!keys_held) {
+		// The release [orig: @0x4E1183..0x4E11E0]: a reload or a draw in
+		// progress defers it @0x4E118C..0x4E1194.
+		if (action == weapon_action::kReload || action == weapon_action::kSwitchTo)
+			return ToSpecialResult::kDeferred;
+		if (inventory.quick_switch_stash < 0 ||
+				parent_slot == static_cast<int32_t>(SeatType::Gunner)) // @0x4E1196..0x4E11AB
+			return ToSpecialResult::kHandled;
+		// A stash whose slot has no weapon would leave retail's fallback
+		// Player_SwitchToWeaponByHandle(stash def+0) dereferencing a null def
+		// @0x4E11BE..0x4E11C9; the stash is cleared at every refill, so no
+		// stock state reaches it, and the port takes the deny cue alone.
+		local_player_equip_weapon_slot(world, w, inventory, view,
+				inventory.quick_switch_stash);                     // @0x4E11B2
+		inventory.quick_switch_stash = -1;                         // @0x4E11D1
+		view.binoculars_requested = false;                         // g_BinocularsToggle @0x4E11D7
+		return ToSpecialResult::kHandled;
+	}
+	// The press [orig: @0x4E11E5..0x4E1273]: a reload in progress defers it
+	// @0x4E11EB.
+	if (action == weapon_action::kReload) return ToSpecialResult::kDeferred;
+	// The borrowed UseGun slot is no personal slot this table can stash.
+	if (w.usegun_slot_active) return ToSpecialResult::kHandled;
+	if (inventory.quick_switch_combo < 0 || inventory.quick_switch_stash >= 0 ||
+			(parent_slot != 0 && parent_slot != 1) ||
+			inventory.quick_switch_combo == inventory.equipped_combo) // @0x4E1220..0x4E124E
+		return ToSpecialResult::kHandled;
+	inventory.quick_switch_stash = inventory.equipped_combo;      // @0x4E1255
+	if (local_player_equip_weapon_slot(world, w, inventory, view,
+			inventory.quick_switch_combo))                         // @0x4E125B
+		view.binoculars_requested = false;                         // @0x4E11D7
+	else
+		inventory.quick_switch_stash = -1;                         // @0x4E126B
+	return ToSpecialResult::kHandled;
+}
+
 namespace {
 
 // Restart the FP channel's primary half on a served clip: its clock follows

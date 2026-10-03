@@ -68,7 +68,8 @@ struct WeaponTableEntry {
 	int32_t hud_splash_radius = 0; // engine units [orig: AdmDef+0x454 @0x4DEBBD]
     std::string voice_macro_token; // [orig: WeaponDefs_ParseLineCallback @0x543C29]
     // The two FLAGS dwords [orig: AdmDef+8 / AdmDef+12; token table @0x830bf0].
-    // The switch/select paths read: flags bit 0x8000000 = the binoculars slot marker
+    // The switch/select paths read: flags bit 0x8000000 = QuickSwitch, the ToSpecial
+    // hold-swap target (an IDB misnomer once called it the binoculars slot)
     // [orig: WeaponSlotTable_LoadAllFromDefs tail @0x54165a]; flags2 bit 1 = NoSelect
     // (excluded from manual switching, but the ONLY defs the exact-slot select leg
     // takes — the parachute-style forced equips) [orig: Player_SwitchToWeaponByHandle

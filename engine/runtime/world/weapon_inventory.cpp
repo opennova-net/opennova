@@ -260,6 +260,20 @@ WeaponFillResult weapon_inventory_load_from_display(
         weapon_slot_init_from_def(*def, static_cast<int16_t>(adm), *slot, owner_class,
                                   allow_sniper_scope_zoom);
     }
+    // The local player's ToSpecial slots: both cleared, then the first slot in
+    // combo order whose def carries QuickSwitch is the target
+    // [orig: @ 0x541626..0x54166E -- the g_LocalPlayerEntity gate @ 0x541626,
+    //  the clears @ 0x541638 / @ 0x54163E, the walk @ 0x541647..0x541668,
+    //  `and eax, 8000000h` @ 0x541653]
+    inv.quick_switch_combo = -1;
+    inv.quick_switch_stash = -1;
+    for (int32_t combo = 0; combo < weapon_combo::kSlotCount; ++combo) {
+        const WeaponTableEntry *def = entry_at(table, inv, combo);
+        if (def != nullptr && (static_cast<uint32_t>(def->flags) & weapon_flag::kQuickSwitch) != 0) {
+            inv.quick_switch_combo = combo;
+            break;
+        }
+    }
     return result;
 }
 

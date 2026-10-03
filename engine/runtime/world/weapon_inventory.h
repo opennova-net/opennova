@@ -161,6 +161,15 @@ struct WeaponInventory {
     // entity+44 carry-presentation bits gathered by the fill (8 = def.flags&0x1000,
     // 0x10 = def.flags2&2) [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5415aa/0x5415bc].
     uint32_t carry_flags = 0;
+    // The ToSpecial hold-swap's two slots (input case 220): the target, the
+    // first slot whose def carries QuickSwitch (weapon.def flags 0x08000000;
+    // retail JO authors it only on WPN_MAG58_PointAim), and the stash, the slot
+    // the press swapped away from until the release swaps back; -1 = none.
+    // [orig: 0xB75FE0 / 0xB75FE4 (IDB-misnamed g_BinocularsWeaponSlot /
+    //  g_BinocularsStashedSlot), set by the local fill's tail
+    //  WeaponSlotTable_LoadAllFromDefs @ 0x541626..0x54166E]
+    int32_t quick_switch_combo = -1;
+    int32_t quick_switch_stash = -1;
 
     void reset(const WeaponTable &table) {
         slots.fill(WeaponInventorySlot{});
@@ -169,6 +178,8 @@ struct WeaponInventory {
         equipped_combo = -1;
         pending_combo = -1;
         carry_flags = 0;
+        quick_switch_combo = -1;
+        quick_switch_stash = -1;
     }
     const WeaponInventorySlot *slot(int32_t combo) const {
         return (combo >= 0 && combo < weapon_combo::kSlotCount)
@@ -200,7 +211,8 @@ void weapon_pool_add(const WeaponTable &table, WeaponInventory &inv, int class_i
 // The slot fill [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5414E0]: resolve each
 // display name, land it at slot rank+65*category, keep the FIRST def on a combo
 // collision (the original logs "overloading" and keeps the incumbent), gather the
-// carry bits. Unresolved names append a warning ("couldn't find wpn %s" shape).
+// carry bits, and (the local player's fill: its only caller here) clear the
+// ToSpecial stash and take the first QuickSwitch slot as its target. Unresolved names append a warning ("couldn't find wpn %s" shape).
 // Each landed slot takes the zoom seed with the local player as its owner
 // (owner_class, the sniper permission) [orig: WeaponSlotTable_LoadAllFromDefs
 // @ 0x5414E0, entityPtr @ 0x5414FC passed to the WeaponSlot_InitFromDef call

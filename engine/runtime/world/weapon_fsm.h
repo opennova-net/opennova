@@ -55,6 +55,9 @@ enum : int32_t {
     kUseSpreadTwo = 0x00400000,
     kFireWhileSwimming = 0x01000000,
     kNoCardSwitch = 0x02000000,
+    // The ToSpecial hold-swap target (weapon.def `quickswitch`)
+    // [orig: WeaponSlotTable_LoadAllFromDefs @ 0x541653]
+    kQuickSwitch = 0x08000000,
     kForceScoped = 0x20000000,
 };
 } // namespace weapon_flag

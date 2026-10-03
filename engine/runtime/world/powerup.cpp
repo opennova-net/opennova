@@ -437,26 +437,8 @@ bool powerup_weapon_grant_received(World &world, LocalPlayer &lp, const Entity *
             row->powerup_weapon, player->player_class, world.rules.allow_sniper_scope_zoom);
     if (landed.combo < 0) return false;                          // @0x4E040B
     powerup_sync_local_weapon_grant(world, lp, *player, landed);
-    // Player_MountWeaponSlot(slot) @0x4E040E: with an equipped weapon the slot
-    // becomes the pending one and the held weapon queues its switch-out, rank
-    // within a category, else from [orig: Player_MountWeaponSlot @0x4DFA40 --
-    //  the EquippedSlot def gate @0x4DFA6B..0x4DFA71, g_PendingWeaponSlot
-    //  @0x4DFB16, the category compare @0x4DFB8B]
-    const WeaponInventorySlot *equipped = lp.inventory.slot(lp.inventory.equipped_combo);
-    const WeaponTableEntry *equipped_def = equipped != nullptr && equipped->adm_index >= 0
-            ? table.by_index(static_cast<uint8_t>(equipped->adm_index))
-            : nullptr;
-    const WeaponInventorySlot *granted = lp.inventory.slot(landed.combo);
-    const WeaponTableEntry *granted_def = granted != nullptr && granted->adm_index >= 0
-            ? table.by_index(static_cast<uint8_t>(granted->adm_index))
-            : nullptr;
-    if (equipped_def == nullptr || granted_def == nullptr) return true;
-    lp.inventory.pending_combo = landed.combo;
-    WeaponSwitchOutcome mount;
-    mount.kind = WeaponSwitchOutcome::kMount;
-    mount.combo = landed.combo;
-    mount.same_category = equipped_def->category == granted_def->category;
-    handle_weapon_switch_outcome(world, lp.weapon, &lp.inventory, mount, lp.view);
+    // Player_MountWeaponSlot(slot) @0x4E040E
+    local_player_mount_weapon_slot(world, lp.weapon, lp.inventory, lp.view, landed.combo);
     return true;
 }
 
