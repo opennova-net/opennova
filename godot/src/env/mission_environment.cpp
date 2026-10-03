@@ -35,6 +35,10 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_loaded"), &MissionEnvironment::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_light_state"),
 			&MissionEnvironment::get_light_state);
+	ClassDB::bind_static_method("MissionEnvironment", D_METHOD("get_published_lighting_block"),
+			&MissionEnvironment::get_published_lighting_block);
+	ClassDB::bind_static_method("MissionEnvironment", D_METHOD("get_lighting_block_writes"),
+			&MissionEnvironment::get_lighting_block_writes);
 
 	ClassDB::bind_method(
 			D_METHOD("configure_mission_clock", "start_time_q8_8", "minutes_per_day"),
@@ -345,6 +349,38 @@ void MissionEnvironment::_write_lighting_block_globals(
 	rs->global_shader_parameter_set("opennova_fog_enabled", v.fog_enabled);
 	rs->global_shader_parameter_set("opennova_thermal_view", v.thermal_view);
 	lighting_block_writer_ = this;
+	published_block_.dir = v.dir;
+	published_block_.dir_color = v.dir_color;
+	published_block_.hemi_sky = v.hemi_sky;
+	published_block_.hemi_ground = v.hemi_ground;
+	published_block_.ceiling = v.ceiling;
+	published_block_.floor_color = v.floor_color;
+	published_block_.gain = v.gain;
+	published_block_.fog_enabled = v.fog_enabled;
+	published_block_.thermal_view = v.thermal_view;
+	++published_block_.writes;
+}
+
+MissionEnvironment::PublishedLightingBlock MissionEnvironment::published_block_;
+
+Ref<EnvLightValues> MissionEnvironment::get_published_lighting_block() {
+	const PublishedLightingBlock &b = published_block_;
+	Ref<EnvLightValues> out;
+	out.instantiate();
+	out->dir = b.dir;
+	out->dir_color = b.dir_color;
+	out->hemi_sky = b.hemi_sky;
+	out->hemi_ground = b.hemi_ground;
+	out->ceiling = b.ceiling;
+	out->floor_color = b.floor_color;
+	out->gain = b.gain;
+	out->fog_enabled = b.fog_enabled;
+	out->thermal_view = b.thermal_view;
+	return out;
+}
+
+int64_t MissionEnvironment::get_lighting_block_writes() {
+	return published_block_.writes;
 }
 
 void MissionEnvironment::_release_lighting_block() {

@@ -8,6 +8,8 @@
 
 #include "pff_internal.h"
 
+#include <base/io/os_path.h>
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -115,7 +117,7 @@ int pff_open(PffArchive *archive, const char *path)
 
     memset(archive, 0, sizeof(*archive));
 
-    f = fopen(path, "rb");
+    f = opennova::io::fopen_utf8(path, "rb"); /* UTF-8, long-path safe (base/io/os_path.h) */
     if (!f) return -1;
 
     /* Read and validate header. */
@@ -173,7 +175,7 @@ int pff_open_legacy(PffArchive *archive, const char *path)
 
     memset(archive, 0, sizeof(*archive));
 
-    f = fopen(path, "rb");
+    f = opennova::io::fopen_utf8(path, "rb"); /* UTF-8, long-path safe (base/io/os_path.h) */
     if (!f) return -1;
 
     /* num_entries lives at file offset 12 (PFF_OpenLegacyArchive @ 0x7683f0). */

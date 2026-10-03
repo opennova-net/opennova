@@ -1,3 +1,4 @@
+#include <net/novacrypto/ap_alphabet.h>
 #include <net/novacrypto/pubcrypto.h>
 
 #include <cstdio>
@@ -48,7 +49,11 @@ bool fixtures_match_python() {
 	               "hello/shortkey encoding")) return false;
 
 	// Round-trip.
-	const auto decoded = opennova::decode_pub_value("OHLMEGCCCBHHEJHFEB", "shortkey");
+	std::vector<uint8_t> decoded;
+	if (!opennova::decode_pub_value("OHLMEGCCCBHHEJHFEB", "shortkey", decoded)) {
+		std::fprintf(stderr, "FAIL: hello/shortkey decodes\n");
+		return false;
+	}
 	const std::vector<uint8_t> hello_bytes = {'h','e','l','l','o'};
 	if (!expect_eq_bytes(decoded, hello_bytes, "hello round-trip")) return false;
 
@@ -63,11 +68,47 @@ bool fixtures_match_python() {
 	               "NGPAIIAHFONBCAHJEEPDLEHGOMOIBOIN"),
 	               "OMIJONGKJMCOJOCCGJKCIPMOHBAIKAAMLKKMMBDJEDDCNCIG",
 	               "endpoint encoding")) return false;
-	const auto endpoint_decoded = opennova::decode_pub_value(
-		"OMIJONGKJMCOJOCCGJKCIPMOHBAIKAAMLKKMMBDJEDDCNCIG",
-		"NGPAIIAHFONBCAHJEEPDLEHGOMOIBOIN");
+	std::vector<uint8_t> endpoint_decoded;
+	if (!opennova::decode_pub_value("OMIJONGKJMCOJOCCGJKCIPMOHBAIKAAMLKKMMBDJEDDCNCIG",
+	                                "NGPAIIAHFONBCAHJEEPDLEHGOMOIBOIN", endpoint_decoded)) {
+		std::fprintf(stderr, "FAIL: endpoint decodes\n");
+		return false;
+	}
 	if (!expect_eq_bytes(endpoint_decoded, endpoint_plain, "endpoint round-trip")) return false;
 
+	return true;
+}
+
+// A bad value off the wire is a result, never a throw (ADR 0049 d5): false, the
+// output emptied, the reason named, for each way a value can be bad.
+bool bad_values_are_rejected() {
+	const std::string good = opennova::encode_pub_value(std::string("hello"), "shortkey");
+	std::string tampered = good;
+	tampered[0] = tampered[0] == 'A' ? 'B' : 'A'; // still A-P, the CRC no longer matches
+	const struct { std::string value; const char *key; const char *what; } cases[] = {
+		{good, "", "an empty key"},
+		{good.substr(1), "shortkey", "an odd length"},
+		{"AZ" + good.substr(2), "shortkey", "a character outside A-P"},
+		{"ABCDEF", "shortkey", "a payload shorter than its CRC"},
+		{tampered, "shortkey", "a CRC mismatch"},
+	};
+	for (const auto &c : cases) {
+		std::vector<uint8_t> out = {1, 2, 3};
+		std::string why;
+		if (opennova::decode_pub_value(c.value, c.key, out, &why) || !out.empty() || why.empty()) {
+			std::fprintf(stderr, "FAIL: %s must be rejected\n", c.what);
+			return false;
+		}
+	}
+	std::vector<uint8_t> bytes;
+	if (opennova::decode_ap("ABC", bytes) || opennova::decode_ap("AQ", bytes) || !bytes.empty()) {
+		std::fprintf(stderr, "FAIL: decode_ap rejects an odd length and 'Q'\n");
+		return false;
+	}
+	if (!opennova::decode_ap("CE", bytes) || bytes != std::vector<uint8_t>{0x42}) {
+		std::fprintf(stderr, "FAIL: decode_ap reads CE as 0x42\n");
+		return false;
+	}
 	return true;
 }
 
@@ -87,6 +128,7 @@ int main() {
 	bool ok = true;
 	ok = fixtures_match_python() && ok;
 	ok = empty_key_throws() && ok;
+	ok = bad_values_are_rejected() && ok;
 	if (!ok) {
 		std::fprintf(stderr, "pubcrypto_test failed\n");
 		return 1;

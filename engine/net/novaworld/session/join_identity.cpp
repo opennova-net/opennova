@@ -113,7 +113,7 @@ bool decrypt_join_cookie_field(const JoinCookiePairs &cookie, const std::string 
 	}
 	if (value == nullptr) return false;
 	std::vector<uint8_t> decoded;
-	if (!try_decode_ap(copy_capped(*value, kCookieValueCapacity), decoded) ||
+	if (!decode_ap(copy_capped(*value, kCookieValueCapacity), decoded) ||
 			decoded.size() > kCookieValueCapacity || decoded.size() <= 4)
 		return false;
 	std::vector<uint8_t> plaintext;

@@ -36,7 +36,7 @@ static std::string fixture_path(const char *name)
 static std::string temp_path(const char *name)
 {
     char path[4096];
-    snprintf(path, sizeof(path), "%s/%s", test_paths_temp_dir(), name);
+    snprintf(path, sizeof(path), "%s/%ld_%s", test_paths_temp_dir(), test_paths_pid(), name);
     return std::string(path);
 }
 

@@ -1092,21 +1092,25 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		// hit the same handler with raw values.
 		std::optional<opennova::EpaskParams> epask_in;
 		if (auto e_str = pick("EPASK"); !e_str.empty()) {
-			try { epask_in = opennova::epask_from_string(e_str); }
-			catch (const std::exception &e) {
-				std::fprintf(stderr, "[http] WARN EPASK form field bad: %s\n", e.what());
+			opennova::EpaskParams parsed;
+			std::string why;
+			if (opennova::epask_from_string(e_str, parsed, &why)) {
+				epask_in = parsed;
+			} else {
+				std::fprintf(stderr, "[http] WARN EPASK form field bad: %s\n", why.c_str());
 			}
 		}
 		auto epask_decode = [&](const std::string &name) -> std::string {
 			const auto v = pick(name.c_str());
 			if (v.empty() || !epask_in) return v;
-			try {
-				return opennova::epask_decrypt(v, *epask_in);
-			} catch (const std::exception &e) {
+			std::string plain;
+			std::string why;
+			if (!opennova::epask_decrypt(v, *epask_in, plain, &why)) {
 				std::fprintf(stderr, "[http] WARN EPASK decrypt(%s) failed: %s\n",
-				             name.c_str(), e.what());
+				             name.c_str(), why.c_str());
 				return std::string();
 			}
+			return plain;
 		};
 
 		// looks_encrypted is now only relevant for the no-EPASK fallback

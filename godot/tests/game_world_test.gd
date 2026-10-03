@@ -1853,38 +1853,58 @@ func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	blocker.close()
 
 
-func test_environment_load_failure_finishes_its_perf_timeline() -> void:
-	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
-		"timeline_env_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
-	var bms_name := "timeline_env_fail_%d.bms" % Time.get_ticks_usec()
-	assert_eq(DirAccess.copy_absolute(
-		ProjectSettings.globalize_path(RuntimeFixture.file("mnml.bms")),
-		root_dir.path_join(bms_name)), OK)
-	TestFs.write_text(self, root_dir.path_join("mnml.env"), "")
-	TestFs.write_text(self, root_dir.path_join("mnml.trn"), "terrain_name \"mnml\"\n")
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(root_dir), OK)
-
-	var packed := load("res://game/world/game_world.tscn") as PackedScene
-	var world := packed.instantiate() as GameWorld
-	add_child_autofree(world)
-	await get_tree().process_frame
-	world.set_playable(false)
-	world.set_resource_root(root)
-	assert_eq(world.load_mission(bms_name), ERR_CANT_OPEN)
-
-	var timeline: LoadTimeline = world.last_load_timeline()
-	assert_not_null(timeline, "a failed environment stage still retains its timeline")
-	if timeline == null:
-		return
-	assert_eq(timeline.label, "Mission load %s" % bms_name)
-	var spans := timeline.spans()
-	assert_eq(spans.size(), 1)
-	if spans.size() == 1:
-		assert_eq(spans[0].name, "environment")
-		assert_gt(spans[0].end_us, 0,
-			"finish closes the environment span left open by the early return")
+func test_a_mission_whose_environment_does_not_load_starts_on_the_engine_defaults() -> void:
+	# Retail starts the mission all the same: the .env pass returns when the file
+	# does not exist (or does not parse) before it seeds a color or snapshots a
+	# keyframe [orig: Environment_LoadTimeOfDayConfig @ 0x57db30, the FileExists
+	# check @ 0x57dca3], and nothing above it reads the outcome [orig:
+	# Game_LoadTerrainDuringConnect @ 0x520710]. What stands is the state every
+	# mission load reset first [orig: Terrain_LoadEnvironmentConfig @ 0x610947 ->
+	# Environment_InitDefaults @ 0x57c010]: the default fields, no keyframe. With no
+	# keyframe table nothing writes a color block (the compute's gate @ 0x57de8a), so a
+	# world without one, the .env missing or keyframe-less ("untimed"), runs on the
+	# parsed targets the load left: InitDefaults' (@ 0x57c03a..0x57c17d) or the .env's
+	# scratch keyframe (@ 0x57dce0), the same seed (env #39).
+	for staged_env in ["missing", "empty", "untimed"]:
+		var root_dir := _staged(WorldFixture.stage_minimal_root("env_skip_" + staged_env))
+		if staged_env == "missing":
+			assert_eq(DirAccess.remove_absolute(root_dir.path_join("mnml.env")), OK)
+		elif staged_env == "empty":
+			TestFs.write_text(self, root_dir.path_join("mnml.env"), "")
+		else:
+			TestFs.write_text(self, root_dir.path_join("mnml.env"), "fog_type 1\r\nwater_murk 0.8\r\n")
+		var world := WorldFixture.make_world(self)
+		await get_tree().process_frame
+		world.set_playable(false)
+		assert_eq(WorldFixture.load_mission(world, root_dir, WorldFixture.MINIMAL_MISSION), OK,
+			"a mission whose .env is %s starts" % staged_env)
+		var env_node: MissionEnvironment = world.get_environment_node()
+		var env: EnvFile = env_node.environment_data if env_node != null else null
+		assert_not_null(env, "the world carries the engine's default environment")
+		if env != null:
+			assert_true(env.is_loaded())
+			assert_eq(env.get_tod_keyframes().size(), 0, "no keyframe was snapshotted")
+			assert_eq(env.get_fog_level(), 1024.0, "Environment_InitDefaults fog level")
+			assert_eq(env.get_fog_type(), 1, "Environment_InitDefaults fog type")
+			assert_eq(env.get_sky_map1(), "cld_day1.pcx", "Environment_InitDefaults sky map")
+			assert_eq(env.get_sky_map2(), "cld_day1b.pcx")
+			assert_almost_eq(env.get_water_murk(), 0.8, 0.000001)
+			assert_almost_eq(env.get_iris_percent(), 50.0, 0.000001)
+		if env_node != null:
+			var byte := 1.0 / 255.0
+			assert_almost_eq(env_node.get_sun_light_target(), Vector3(0x64, 0x64, 0x40) * byte,
+				Vector3.ONE * 0.001, "the light block's InitDefaults target (%s .env)" % staged_env)
+			assert_almost_eq(env_node.get_sky_ambient_target(), Vector3(0x40, 0x40, 0x64) * byte,
+				Vector3.ONE * 0.001, "the sky block's InitDefaults target")
+			assert_almost_eq(env_node.get_fill_light_target(), Vector3(0x20, 0x20, 0x20) * byte,
+				Vector3.ONE * 0.001, "the ground block's InitDefaults target")
+			assert_almost_eq(env_node.get_fog_color_target(), Vector3.ONE,
+				Vector3.ONE * 0.001, "the fog block's 0xC0C0FF, doubled and saturated")
+		var timeline: LoadTimeline = world.last_load_timeline()
+		assert_not_null(timeline)
+		if timeline != null:
+			assert_eq(timeline.spans()[0].name, "environment", "the environment stage ran")
+		world.unload()
 
 
 func test_terrain_load_failure_finishes_its_perf_timeline() -> void:

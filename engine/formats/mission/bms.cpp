@@ -2,6 +2,7 @@
 #include <formats/mission/bms.h>
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 #include <cstdlib>
@@ -610,7 +611,7 @@ bool loadout_has_fourth_field(const std::string& value) {
 
 void parse_weapon_loadout_chunk(const std::vector<uint8_t>& raw, WeaponLoadout& out) {
     out.entries.clear();
-    // A damaged chunk can end inside a record (three shipped missions do).
+    // A damaged chunk can end inside a record (shipped missions do: mission_corpus names them).
     // Bound those reads to this chunk: missing string bytes read as NUL, like
     // the other format fields, instead of retail's read beyond raw_loadout.
     // Documented boundary: docs/mission/bms-event-runtime-re.md (D-EVT-7).
@@ -634,6 +635,7 @@ void parse_weapon_loadout_chunk(const std::vector<uint8_t>& raw, WeaponLoadout& 
             pos = next;
         } else {
             entry.flags = "-1";
+            entry.has_flags = false;
         }
         out.entries.push_back(std::move(entry));
     }
@@ -658,8 +660,11 @@ bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_
         out.push_back(0);
         out.insert(out.end(), entry.ammo_secondary.begin(), entry.ammo_secondary.end());
         out.push_back(0);
-        out.insert(out.end(), flags.begin(), flags.end());
-        out.push_back(0);
+        // A record that wrote three strings writes three (bms.h, has_flags).
+        if (entry.has_flags) {
+            out.insert(out.end(), flags.begin(), flags.end());
+            out.push_back(0);
+        }
     }
     if (!out.empty()) {
         out.push_back(0);
@@ -943,7 +948,7 @@ bool parse_header_blob(const uint8_t* data, size_t size, Header& out, std::strin
 }
 
 bool parse_file(const std::string& path, File& out, std::string& error) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    std::ifstream file(io::os_path(path), std::ios::binary | std::ios::ate); // UTF-8, long-path safe
     if (!file) {
         error = "Cannot open file: " + path;
         return false;
@@ -1170,7 +1175,8 @@ bool weapon_loadout_equal(const WeaponLoadout& a, const WeaponLoadout& b) {
         if (a.entries[i].name != b.entries[i].name ||
             a.entries[i].ammo_primary != b.entries[i].ammo_primary ||
             a.entries[i].ammo_secondary != b.entries[i].ammo_secondary ||
-            a.entries[i].flags != b.entries[i].flags) {
+            a.entries[i].flags != b.entries[i].flags ||
+            a.entries[i].has_flags != b.entries[i].has_flags) {
             return false;
         }
     }

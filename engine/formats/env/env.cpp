@@ -64,39 +64,69 @@ std::string format_tod_time(int time) {
 	return output.str();
 }
 
-void assign_tod_color(Keyframe &keyframe, const std::string &key, const std::string &value, bool &skyfog_set) {
+// The parser's color pack: each byte times the envscale read so far, truncated, clamped
+// to 255 [orig: Color_ScaleRGBAndPack @ 0x57f890] (and at 0: the original packs garbage
+// for a negative byte, divergence #11).
+bool parse_rgb_baked(const std::string &text, Rgb &out, float envscale) {
+	int rgb[3] = {0, 0, 0};
+	if (std::sscanf(text.c_str(), "%d,%d,%d", &rgb[0], &rgb[1], &rgb[2]) != 3) {
+		return false;
+	}
+	float *channels[3] = {&out.r, &out.g, &out.b};
+	for (int i = 0; i < 3; ++i) {
+		const int baked = clamp_int(static_cast<int>(static_cast<float>(rgb[i]) * envscale), 0, 255);
+		*channels[i] = static_cast<float>(baked) / 255.0f;
+	}
+	return true;
+}
+
+bool is_tod_color_key(const std::string &key) {
+	return key == "sun_rgb" || key == "ground_rgb" || key == "ambient_rgb" || key == "fog_rgb" ||
+			key == "sky_rgb" || key == "moon_rgb" || key == "skyfog_rgb" || key == "skybase_rgb" ||
+			key == "skybright_rgb" || key == "skyhighlight_rgb" || key == "cloudbase_rgb" ||
+			key == "cloudhighlight_rgb" || key == "cloudedge_rgb";
+}
+
+// `baked`: the keyframe is the scratch slot, whose colors are kept as the parser packs them
+// (`envscale` applied here); otherwise a timed keyframe, kept as authored (envscale applied
+// at interpolation, divergence #8).
+void assign_tod_color(Keyframe &keyframe, const std::string &key, const std::string &value, bool &skyfog_set,
+                      bool baked = false, float envscale = 1.0f) {
 	// [orig: TimeOfDay_ParseProperty @ 0x57c590] writes RGB values into the
 	// currently active TOD keyframe. fog_rgb also mirrors into skyfog_rgb while
 	// skyfog still holds its 0xC0C0FF sentinel (@ 0x57c9b8); we model that with
 	// a per-keyframe flag — tracked divergence #9 in docs/env/env-tod-re.md.
+	const auto parse = [baked, envscale](const std::string &text, Rgb &out) {
+		return baked ? parse_rgb_baked(text, out, envscale) : parse_rgb(text, out);
+	};
 	if (key == "sun_rgb") {
-		parse_rgb(value, keyframe.sun);
+		parse(value, keyframe.sun);
 	} else if (key == "ground_rgb" || key == "ambient_rgb") {
-		parse_rgb(value, keyframe.ground);
+		parse(value, keyframe.ground);
 	} else if (key == "fog_rgb") {
-		parse_rgb(value, keyframe.fog);
+		parse(value, keyframe.fog);
 		if (!skyfog_set) {
 			keyframe.skyfog = keyframe.fog;
 		}
 	} else if (key == "sky_rgb") {
-		parse_rgb(value, keyframe.sky);
+		parse(value, keyframe.sky);
 	} else if (key == "moon_rgb") {
-		parse_rgb(value, keyframe.moon);
+		parse(value, keyframe.moon);
 	} else if (key == "skyfog_rgb") {
-		parse_rgb(value, keyframe.skyfog);
+		parse(value, keyframe.skyfog);
 		skyfog_set = true;
 	} else if (key == "skybase_rgb") {
-		parse_rgb(value, keyframe.skybase);
+		parse(value, keyframe.skybase);
 	} else if (key == "skybright_rgb") {
-		parse_rgb(value, keyframe.skybright);
+		parse(value, keyframe.skybright);
 	} else if (key == "skyhighlight_rgb") {
-		parse_rgb(value, keyframe.skyhighlight);
+		parse(value, keyframe.skyhighlight);
 	} else if (key == "cloudbase_rgb") {
-		parse_rgb(value, keyframe.cloudbase);
+		parse(value, keyframe.cloudbase);
 	} else if (key == "cloudhighlight_rgb") {
-		parse_rgb(value, keyframe.cloudhighlight);
+		parse(value, keyframe.cloudhighlight);
 	} else if (key == "cloudedge_rgb") {
-		parse_rgb(value, keyframe.cloudedge);
+		parse(value, keyframe.cloudedge);
 	}
 }
 
@@ -219,6 +249,7 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 	bool in_tod = false;
 	bool overflow_block = false;
 	bool skyfog_set = false;
+	bool scratch_skyfog_set = false; // the scratch's skyfog still holds its 0xC0C0FF seed
 	Keyframe current;
 	int line_number = 0;
 
@@ -285,6 +316,16 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 		if (in_tod) {
 			if (!value.empty()) {
 				assign_tod_color(current, key, value, skyfog_set);
+			}
+			continue;
+		}
+		if (is_tod_color_key(key)) {
+			// Outside a block the slot pointer sits on the scratch keyframe, so the color
+			// lands there, packed with the envscale read so far [orig:
+			// TimeOfDay_ParseProperty @ 0x57c590 through g_EnvTodCurrentSlotPtr, reset to
+			// the scratch slot for the pass @ 0x57dc56 and by a tod_end @ 0x57c696].
+			if (!value.empty()) {
+				assign_tod_color(out.scratch, key, value, scratch_skyfog_set, true, out.envscale);
 			}
 			continue;
 		}
@@ -383,6 +424,36 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	output << NL;
 	output << "timeofday \"" << cfg.timeofday << "\"" << NL;
 	output << NL;
+	// The scratch keyframe's colors that are not its seed, as color lines outside every
+	// block. They precede the envscale line: they are kept packed (envscale already
+	// applied), so they must read back at envscale 1.
+	{
+		const Keyframe seed = scratch_keyframe_defaults();
+		const Keyframe &scratch = cfg.scratch;
+		bool any = false;
+		const auto line = [&](const char *key, const Rgb &value, const Rgb &seeded, bool force = false) {
+			if (!force && rgb_to_string(value) == rgb_to_string(seeded)) return;
+			output << key << " " << rgb_to_string(value) << NL;
+			any = true;
+		};
+		line("sun_rgb", scratch.sun, seed.sun);
+		line("moon_rgb", scratch.moon, seed.moon);
+		line("sky_rgb", scratch.sky, seed.sky);
+		line("ground_rgb", scratch.ground, seed.ground);
+		// skyfog before fog, both when either moved: a fog line mirrors into a skyfog that
+		// still holds its seed (@ 0x57c9b8), so the pair reads back as written.
+		const bool fog_moved = rgb_to_string(scratch.fog) != rgb_to_string(seed.fog) ||
+				rgb_to_string(scratch.skyfog) != rgb_to_string(seed.skyfog);
+		line("skyfog_rgb", scratch.skyfog, seed.skyfog, fog_moved);
+		line("fog_rgb", scratch.fog, seed.fog, fog_moved);
+		line("skybase_rgb", scratch.skybase, seed.skybase);
+		line("skybright_rgb", scratch.skybright, seed.skybright);
+		line("skyhighlight_rgb", scratch.skyhighlight, seed.skyhighlight);
+		line("cloudbase_rgb", scratch.cloudbase, seed.cloudbase);
+		line("cloudhighlight_rgb", scratch.cloudhighlight, seed.cloudhighlight);
+		line("cloudedge_rgb", scratch.cloudedge, seed.cloudedge);
+		if (any) output << NL;
+	}
 	output << "envscale " << number_to_string(cfg.envscale) << NL;
 	output << NL;
 	output << "iris_percent " << number_to_string(cfg.iris_percent) << NL;
@@ -395,7 +466,13 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	output << NL;
 	output << "sky_map1 " << cfg.sky_map1 << NL;
 	output << "sky_map2 " << cfg.sky_map2 << NL;
-	output << "sky_height " << number_to_string(cfg.sky_height) << NL;
+	// The keyword reads whole units (atol, stored << 16 [orig: TimeOfDay_ParseProperty
+	// @ 0x57cbc3]), so the engine's raw-200 default (~0.003 units [orig:
+	// Environment_InitDefaults @ 0x57c1ab]) has no file form: left unwritten, it reads back
+	// as itself, where any line would read back as 0.
+	if (cfg.sky_height != Config().sky_height) {
+		output << "sky_height " << number_to_string(cfg.sky_height) << NL;
+	}
 	output << "sky_speed " << number_to_string(cfg.sky_speed) << NL;
 	output << NL;
 	output << "fog_level " << number_to_string(cfg.fog_level) << NL;
@@ -590,6 +667,19 @@ Vec3 compute_moon_direction(float tod_time) {
 	// The active getter copies this selected moon tuple through the same
 	// direct path [orig: Environment_GetLightDirectionFloat @ 0x57d870].
 	return dir;
+}
+
+bool load_mission_env(const std::string *text, Config &out) {
+	// The defaults the load reset first stand unless the file parses over them (env.h)
+	// [orig: Environment_InitDefaults @ 0x57c010; Environment_LoadTimeOfDayConfig @ 0x57dca3].
+	out = Config();
+	if (text == nullptr) return false;
+	std::istringstream input(*text);
+	std::string error;
+	Config parsed;
+	if (!load_env(input, parsed, error)) return false;
+	out = std::move(parsed);
+	return true;
 }
 
 } // namespace opennova::env

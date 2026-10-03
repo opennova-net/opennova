@@ -8,6 +8,8 @@
 #include <string>
 #include <string_view>
 
+#include <base/io/os_path.h>
+
 namespace opennova::inmatch {
 
 // The two JOINTOPERATIONS connection-template values a loose `_NSTMOUT.TXT` in
@@ -111,10 +113,8 @@ inline void parse_nstmout(std::string_view text, SessionTimeoutConfig &cfg) {
 inline SessionTimeoutConfig load_session_timeout_config(std::string_view game_root_dir) {
 	SessionTimeoutConfig cfg;
 	if (game_root_dir.empty()) return cfg;
-	std::string path(game_root_dir);
-	if (path.back() != '/' && path.back() != '\\') path.push_back('/');
-	path += kSessionTimeoutOverrideFile;
-	std::ifstream file(path, std::ios::binary);
+	const std::string path = io::utf8_join(game_root_dir, kSessionTimeoutOverrideFile);
+	std::ifstream file(io::os_path(path), std::ios::binary); // UTF-8, long-path safe
 	if (!file.is_open()) return cfg;
 	const std::string text((std::istreambuf_iterator<char>(file)),
 			std::istreambuf_iterator<char>());

@@ -16,11 +16,14 @@
 #include <runtime/world/weather_state.h>
 #include <runtime/world/world.h>
 #include <runtime/renderer/device_fog.h>
+#include <formats/env/env.h>
 #include <formats/env/env_celestial.h>
 #include <formats/env/env_weather.h>
 
 #include <cmath>
 #include <cstdio>
+#include <sstream>
+#include <string>
 
 namespace {
 
@@ -1148,6 +1151,75 @@ int main() {
 		ok &= expect(env.debug_set_mission_minute_of_day(540.0) &&
 						env.standalone_weather().tod_fixed24 == (9u << 24),
 				"the dev-tool scrub lands exactly on the 8.24 clock");
+	}
+
+	// --- an empty keyframe table: the parsed targets the load left (env #39) -------
+	// With no keyframe table the per-tick compute writes no color block [orig:
+	// Environment_ComputeTimeOfDayColors @ 0x57de40, the gate @ 0x57de8a], so the blocks
+	// hold their parsed targets: what Environment_InitDefaults wrote when the .env was
+	// skipped [orig: @ 0x57c03a..0x57c17d: light 0x646440, sky 0x404064, ground 0x202020,
+	// fog and skyfog 0xC0C0FF, the sky/cloud ramps zero], the parse's scratch keyframe
+	// when it parsed [orig: Environment_LoadTimeOfDayConfig, seeded @ 0x57db54..0x57db7e,
+	// copied @ 0x57dce0..0x57dd57], a color line outside every tod_begin block written
+	// into it.
+	{
+		const auto packed = [](uint32_t value) { return opennova::env::packed_to_rgb01(value); };
+		const auto holds_defaults = [&](const EnvironmentState &env) {
+			return rgb_near(env.sun_light_target(), packed(0x646440)) &&
+					rgb_near(env.sky_ambient_target(), packed(0x404064)) &&
+					rgb_near(env.fill_light_target(), packed(0x202020)) &&
+					rgb_near(env.fog_color_base_target(), packed(0xC0C0FF)) &&
+					rgb_near(env.skyfog_color_target(), packed(0xC0C0FF)) &&
+					rgb_near(env.sky_base_target(), {}) && rgb_near(env.sky_bright_target(), {}) &&
+					rgb_near(env.sky_highlight_target(), {}) && rgb_near(env.cloud_base_target(), {}) &&
+					rgb_near(env.cloud_highlight_target(), {}) && rgb_near(env.cloud_edge_target(), {});
+		};
+		// No .env: the defaults alone.
+		const opennova::env::Config missing;
+		EnvironmentState skipped;
+		skipped.set_config(&missing, true);
+		skipped.set_time_of_day(2200.0f);
+		ok &= expect(!skipped.has_tod_keyframes() && holds_defaults(skipped),
+				"a skipped .env leaves the InitDefaults targets, day or night");
+		// A .env with no tod_begin block: the scratch keyframe, its seeded colors the same.
+		opennova::env::Config untimed;
+		std::string error;
+		std::istringstream plain("fog_level 640\r\nfog_type 2\r\n");
+		ok &= expect(opennova::env::load_env(plain, untimed, error), "a keyframe-less .env parses");
+		EnvironmentState parsed;
+		parsed.set_config(&untimed, true);
+		parsed.set_time_of_day(1200.0f);
+		ok &= expect(!parsed.has_tod_keyframes() && holds_defaults(parsed),
+				"a .env without keyframes leaves the scratch keyframe's seeded targets");
+		// Its color lines outside a block land in the scratch keyframe (baked with the
+		// envscale read before them [orig: Color_ScaleRGBAndPack @ 0x57f890]); fog mirrors
+		// into skyfog while skyfog holds its seed [orig: @ 0x57c9b8].
+		opennova::env::Config naked;
+		std::istringstream lines(
+				"sky_rgb 10,20,30\r\nenvscale 0.5\r\nsun_rgb 101,51,201\r\nfog_rgb 40,50,60\r\n"
+				"cloudedge_rgb 7,8,9\r\ntod_begin 1200\r\ntod_end\r\nground_rgb 1,2,3\r\n");
+		ok &= expect(opennova::env::load_env(lines, naked, error), "naked color lines parse");
+		naked.keyframes.clear(); // the table empty, the scratch kept
+		EnvironmentState scratch;
+		scratch.set_config(&naked, true);
+		scratch.set_time_of_day(1200.0f);
+		ok &= expect(rgb_near(scratch.sky_ambient_target(), packed(0x0A141E)) &&
+						rgb_near(scratch.sun_light_target(), packed(0x321964)) &&
+						rgb_near(scratch.fog_color_base_target(), packed(0x14191E)) &&
+						rgb_near(scratch.skyfog_color_target(), packed(0x14191E)) &&
+						rgb_near(scratch.cloud_edge_target(), packed(0x030404)) &&
+						rgb_near(scratch.fill_light_target(), packed(0x000101)),
+				"naked color lines become the untimed targets, baked by the envscale before them");
+		// A weather-driven world snaps its blocks to those targets at the start [orig:
+		// Environment_SnapStateToTargets @ 0x57d1e0].
+		EnvironmentState driven;
+		driven.set_config(&missing, true);
+		driven.set_time_of_day(1200.0f);
+		WeatherRuntime runtime;
+		runtime.prepare_world_driven(&driven);
+		ok &= expect(rgb_near(runtime.smooth_sky(), packed(0x404064), 2.0f / 255.0f) &&
+						rgb_near(runtime.smooth_fill(), packed(0x202020), 2.0f / 255.0f),
+				"the weather snap starts the world on those targets");
 	}
 
 	if (!ok) {

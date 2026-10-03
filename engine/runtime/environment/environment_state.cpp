@@ -339,13 +339,25 @@ bool EnvironmentState::set_thermal_view(bool world, bool terrain) {
 
 // --- keyframe targets ------------------------------------------------------
 
+// With no keyframe table the per-tick compute writes no color block [orig:
+// Environment_ComputeTimeOfDayColors @ 0x57de40, the gate @ 0x57de8a]: the eleven
+// keyframed blocks keep the parsed targets the load left them, the .env's scratch
+// keyframe [orig: Environment_LoadTimeOfDayConfig @ 0x57dce0..0x57dd57] or, the .env
+// skipped, Environment_InitDefaults' values [orig: @ 0x57c03a..0x57c17d] (the same seed,
+// formats/env/env.h scratch_keyframe_defaults). `sun` is the light block, sun or moon
+// alike: nothing switches it without a table.
+const Keyframe &EnvironmentState::untimed_targets() const {
+	static const Keyframe kSkipped = scratch_keyframe_defaults();
+	return config_ != nullptr ? config_->scratch : kSkipped;
+}
+
 Rgb EnvironmentState::fill_light_target() const {
-	return tod_valid_ ? tod_.ground : fill_light_;
+	return tod_valid_ ? tod_.ground : untimed_targets().ground;
 }
 
 Rgb EnvironmentState::sun_light_target() const {
 	if (!tod_valid_) {
-		return sun_light_;
+		return untimed_targets().sun;
 	}
 	return is_night_phase() ? tod_.moon : tod_.sun;
 }
@@ -355,15 +367,15 @@ Rgb EnvironmentState::fog_color_target() const {
 }
 
 Rgb EnvironmentState::fog_color_base_target() const {
-	return tod_valid_ ? tod_.fog : rgb_scale(fog_color_rt_, 0.5f);
+	return tod_valid_ ? tod_.fog : untimed_targets().fog;
 }
 
 Rgb EnvironmentState::sky_ambient_target() const {
-	return tod_valid_ ? tod_.sky : Rgb{0.3f, 0.4f, 0.6f};
+	return tod_valid_ ? tod_.sky : untimed_targets().sky;
 }
 
 Rgb EnvironmentState::skyfog_color_target() const {
-	return tod_valid_ ? tod_.skyfog : Rgb{};
+	return tod_valid_ ? tod_.skyfog : untimed_targets().skyfog;
 }
 
 Rgb EnvironmentState::ceiling_color_target() const {
@@ -395,27 +407,27 @@ Rgb EnvironmentState::lightning_color_target() const {
 }
 
 Rgb EnvironmentState::sky_base_target() const {
-	return tod_valid_ ? tod_.skybase : sky_base_rt_;
+	return tod_valid_ ? tod_.skybase : untimed_targets().skybase;
 }
 
 Rgb EnvironmentState::sky_bright_target() const {
-	return tod_valid_ ? tod_.skybright : sky_bright_rt_;
+	return tod_valid_ ? tod_.skybright : untimed_targets().skybright;
 }
 
 Rgb EnvironmentState::sky_highlight_target() const {
-	return tod_valid_ ? tod_.skyhighlight : sky_highlight_rt_;
+	return tod_valid_ ? tod_.skyhighlight : untimed_targets().skyhighlight;
 }
 
 Rgb EnvironmentState::cloud_base_target() const {
-	return tod_valid_ ? tod_.cloudbase : cloud_base_rt_;
+	return tod_valid_ ? tod_.cloudbase : untimed_targets().cloudbase;
 }
 
 Rgb EnvironmentState::cloud_highlight_target() const {
-	return tod_valid_ ? tod_.cloudhighlight : cloud_highlight_rt_;
+	return tod_valid_ ? tod_.cloudhighlight : untimed_targets().cloudhighlight;
 }
 
 Rgb EnvironmentState::cloud_edge_target() const {
-	return tod_valid_ ? tod_.cloudedge : cloud_edge_rt_;
+	return tod_valid_ ? tod_.cloudedge : untimed_targets().cloudedge;
 }
 
 // --- terrain / water -------------------------------------------------------

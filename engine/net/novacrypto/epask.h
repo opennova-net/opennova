@@ -37,20 +37,23 @@ struct EpaskParams {
 // failure-to-converge path (suitable for `static const auto` at boot).
 EpaskParams generate_epask();
 
-// Serialize / parse the cookie + form-field representation. Parsing throws
-// std::runtime_error when either ':' is missing or a numeric field is 512+
-// bytes — retail's parser returns -1 there and the bundle is unusable
-// [orig: EPASK_ParseColonDelimitedString @0x666710]. Numeric fields use atoi
-// prefixes ("123abc" -> 123, "" -> 0) like the retail _atoi64.
+// Serialize / parse the cookie + form-field representation. Parsing returns
+// false (`out` untouched, `error` naming why when given) when either ':' is
+// missing or a numeric field is 512+ bytes — retail's parser returns -1 there
+// and the bundle is unusable [orig: EPASK_ParseColonDelimitedString @0x666710].
+// Numeric fields use atoi prefixes ("123abc" -> 123, "" -> 0) like the retail
+// _atoi64. The bundle is input (a server's cookie), so a bad one is a result,
+// never a throw (ADR 0049 d5).
 std::string epask_to_string(const EpaskParams &p);
-EpaskParams epask_from_string(const std::string &s);
+bool epask_from_string(const std::string &s, EpaskParams &out, std::string *error = nullptr);
 
-// Decrypt one form field. Throws std::runtime_error on malformed input
-// (odd length, out-of-range A-P chars, ciphertext word with no
-// 0..255 inverse — the last typically means params are wrong or the
-// client used a different EPASK) and on rejected params (modulus <= 258 or
+// Decrypt one form field into `out`. False (`error` naming why when given) on
+// malformed input (odd length, out-of-range A-P chars, ciphertext word with no
+// 0..255 inverse — the last typically means params are wrong or the client
+// used a different EPASK) and on rejected params (modulus <= 258 or
 // exponent == 0 — retail's EPASK_ModexpEncrypt @0x666600 gate @0x66668a).
-std::string epask_decrypt(const std::string &ciphertext, const EpaskParams &params);
+bool epask_decrypt(const std::string &ciphertext, const EpaskParams &params, std::string &out,
+                   std::string *error = nullptr);
 
 // Encrypt a plaintext field. Useful only for tests — retail is the one
 // that does the encryption in the real flow. Throws on rejected params

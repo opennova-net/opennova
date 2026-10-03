@@ -416,6 +416,27 @@ Error EnvFile::load_from_resource_root(const Ref<ResourceRoot> &p_resource_root,
 	return OK;
 }
 
+// The skip itself, and what stands after it, is the engine's
+// (opennova::env::load_mission_env); this reads the file and binds the result.
+bool EnvFile::load_mission_environment(const Ref<ResourceRoot> &p_resource_root, const String &p_name) {
+	const String file = p_name.get_file();
+	const bool exists = p_resource_root.is_valid() && !file.is_empty() && p_resource_root->has_file(file);
+	std::string text;
+	if (exists) {
+		const PackedByteArray bytes = p_resource_root->read_file(file);
+		text.assign(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
+	}
+	const bool parsed = opennova::env::load_mission_env(exists ? &text : nullptr, env);
+	mission_overrides_active = false;
+	source_path = parsed ? file : String();
+	resource_root = p_resource_root;
+	_sync_properties_from_env();
+	_load_sky_textures();
+	loaded = true;
+	_notify_environment_changed();
+	return parsed;
+}
+
 Error EnvFile::save_to_path(const String &p_path) {
 	if (!mission_overrides_active) {
 		_sync_env_from_properties();

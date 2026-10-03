@@ -1026,10 +1026,62 @@ int main() {
 		            parsed.loadout.entries[0].ammo_primary.empty() &&
 		            parsed.loadout.entries[0].ammo_secondary.empty() &&
 		            parsed.loadout.entries[0].flags == "-1");
+
+		// A record that wrote three strings writes three (has_flags, bms.h): the chunk comes back as
+		// its own bytes, where the writer once gave every record a fourth. flags still reads the "-1"
+		// the sanitizer inserts.
+		const std::vector<std::string> mixed = {"WPN_FOUR", "6", "-1", "1", "WPN_THREE", "-1", "0",
+		                                        "WPN_ALSO", "2", "3"};
+		TEST_EXPECT(parse_loadout(mixed, parsed));
+		TEST_EXPECT(parsed.loadout.entries.size() == 3);
+		TEST_EXPECT(parsed.loadout.entries.size() == 3 && parsed.loadout.entries[0].has_flags &&
+		            !parsed.loadout.entries[1].has_flags && !parsed.loadout.entries[2].has_flags);
+		TEST_EXPECT(parsed.loadout.entries.size() == 3 && parsed.loadout.entries[1].flags == "-1" &&
+		            parsed.loadout.entries[2].flags == "-1");
+		std::vector<uint8_t> chunk;
+		for (const std::string &field : mixed) {
+			chunk.insert(chunk.end(), field.begin(), field.end());
+			chunk.push_back(0);
+		}
+		chunk.push_back(0);
+		const auto chunk_of = [](const std::vector<uint8_t> &bytes) {
+			const size_t length = read_u16_le(bytes, offsetof(opennova::bms::Header, weapon_loadout_chunk_len));
+			return std::vector<uint8_t>(bytes.begin() + opennova::bms::kHeaderSize,
+			                            bytes.begin() + opennova::bms::kHeaderSize + static_cast<std::ptrdiff_t>(length));
+		};
+		TEST_EXPECT(opennova::bms::write(parsed, canonical, err));
+		TEST_EXPECT(chunk_of(canonical) == chunk);
+		TEST_EXPECT(parsed.header.weapon_loadout_chunk_len == chunk.size());
+		opennova::mission::sync_counts(parsed);
+		TEST_EXPECT(parsed.header.weapon_loadout_chunk_len == chunk.size());
+		TEST_EXPECT(opennova::bms::parse(canonical.data(), canonical.size(), round_trip, err));
+		TEST_EXPECT(opennova::bms::equal(parsed, round_trip));
+		// The typed view carries it, so a loadout read and set again writes the same chunk.
+		auto entries = weapon_loadout(parsed);
+		TEST_EXPECT(entries.size() == 3 && entries[0].has_flags && !entries[1].has_flags);
+		TEST_EXPECT(set_weapon_loadout(parsed, entries, err));
+		TEST_EXPECT(opennova::bms::write(parsed, canonical, err) && chunk_of(canonical) == chunk);
+		opennova::bms::File changed = parsed;
+		changed.loadout.entries[1].has_flags = true;
+		TEST_EXPECT(!opennova::bms::equal(parsed, changed));
+		// A fourth string given to a record that had none is written.
+		entries[1].flags = "2";
+		entries[1].has_flags = true;
+		TEST_EXPECT(set_weapon_loadout(parsed, entries, err));
+		TEST_EXPECT(opennova::bms::write(parsed, canonical, err));
+		const std::vector<std::string> set = {"WPN_FOUR", "6", "-1", "1", "WPN_THREE", "-1", "0", "2",
+		                                      "WPN_ALSO", "2", "3"};
+		chunk.clear();
+		for (const std::string &field : set) {
+			chunk.insert(chunk.end(), field.begin(), field.end());
+			chunk.push_back(0);
+		}
+		chunk.push_back(0);
+		TEST_EXPECT(chunk_of(canonical) == chunk);
 	}
 
-	// --- Modeling policy: the loader sanitizes the loadout chunk into canonical four-string
-	// records. Bytes after the empty-name terminator are ignored by the retail sanitizer and are
+	// --- Modeling policy: the loader sanitizes the loadout chunk into the records it reads.
+	// Bytes after the empty-name terminator are ignored by the retail sanitizer and are
 	// dropped by the canonical writer. ---
 	{
 		std::string err;
@@ -1171,6 +1223,99 @@ int main() {
 		TEST_EXPECT(reloaded.area_triggers.size() == original_zones);
 		TEST_EXPECT(!area_trigger(reloaded, zone_index, zone));
 		TEST_EXPECT(!remove_area_trigger(reloaded, 999999, error));
+	}
+
+	// A zone parameter is the area trigger's ID in the file, never its index (the game remaps it at
+	// mission start [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000]): removing an area trigger
+	// rewrites no parameter, the ones naming another zone keep naming it, and the ones naming the
+	// removed zone name none (flagged, as the game neuters them).
+	{
+		opennova::bms::File doc;
+		make_default(doc);
+		for (const int id : {7, 3, 9}) {
+			AreaTriggerRecord zone;
+			zone.wp_number = id;
+			zone.max_x = 10;
+			zone.max_y = 10;
+			add_area_trigger(doc, zone);
+		}
+		MissionEventRecord seed;
+		TEST_EXPECT(add_event(doc, seed) == 0);
+		MissionTriggerRecord within;
+		within.main_type = static_cast<int>(opennova::bms::TriggerMainType::Group);
+		within.sub_type = static_cast<int>(opennova::bms::GroupTriggerType::GroupIsWithinArea);
+		within.param1 = 5;
+		within.param2 = 3; // the zone whose id is 3 (at index 1)
+		TEST_EXPECT(insert_event_trigger(doc, 0, 0, within, error));
+		MissionTriggerRecord satchel;
+		satchel.main_type = static_cast<int>(opennova::bms::TriggerMainType::Player);
+		satchel.sub_type = static_cast<int>(opennova::bms::PlayerTriggerType::PlayerSatchel);
+		satchel.param1 = 9; // the zone whose id is 9 (at index 2)
+		TEST_EXPECT(insert_event_trigger(doc, 0, 1, satchel, error));
+		MissionActionRecord area_ai;
+		area_ai.action_type = static_cast<int>(opennova::bms::ActionType::AreaAiRed);
+		area_ai.param1 = 9;
+		TEST_EXPECT(insert_event_action(doc, 0, 0, area_ai, error));
+		MissionEventChain chain;
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.empty());
+		const auto area_of = [&chain](int slot) {
+			for (const MissionLogicReference &reference : chain.references)
+				if (reference.target_kind == "area_trigger" && reference.param_slot == slot) return reference.target_index;
+			return -99;
+		};
+		TEST_EXPECT(area_of(2) == 1 && area_of(1) == 2);
+		// The first area trigger (id 7) out: the others' indexes move, their ids and every parameter stay.
+		TEST_EXPECT(remove_area_trigger(doc, 0, error) && doc.area_triggers.size() == 2);
+		TEST_EXPECT(doc.triggers[0].param2 == 3 && doc.triggers[1].param1 == 9 && doc.actions[0].param1 == 9);
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.empty() && area_of(2) == 0 && area_of(1) == 1);
+		// The zone a trigger names out: the trigger keeps its id and names none.
+		TEST_EXPECT(remove_area_trigger(doc, 0, error) && doc.triggers[0].param2 == 3);
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.size() == 1 &&
+		            chain.diagnostics[0].code == "logic.area_reference_out_of_range" && area_of(2) == -1 && area_of(1) == 0);
+		// A zone whose box is degenerate (x_min == x_max) is one the game neuters a trigger naming
+		// [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000, the test @0x453093]: flagged, its index kept.
+		AreaTriggerRecord flat;
+		TEST_EXPECT(area_trigger(doc, 0, flat));
+		flat.max_x = flat.min_x;
+		TEST_EXPECT(set_area_trigger(doc, 0, flat, error));
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.size() == 2 && area_of(1) == 0);
+	}
+
+	// What names an event by its index: an Event trigger's first parameter [orig:
+	// EventTrigger_EvaluateCondition @0x453620, main type 3 reads events[p1]] and a ResetEvent action's
+	// [orig: EventAction_Dispatch @0x4542e0, case 34]. Removing an event moves those past the hole down
+	// by one and leaves the ones naming it dangling (-1).
+	{
+		opennova::bms::File doc;
+		make_default(doc);
+		MissionEventRecord seed;
+		for (int i = 0; i < 4; ++i) TEST_EXPECT(add_event(doc, seed) == static_cast<size_t>(i));
+		MissionTriggerRecord fired;
+		fired.main_type = static_cast<int>(opennova::bms::TriggerMainType::Event);
+		for (const int named : {0, 1, 2}) {
+			fired.param1 = named;
+			TEST_EXPECT(insert_event_trigger(doc, 3, static_cast<size_t>(named), fired, error));
+		}
+		MissionActionRecord reset;
+		reset.action_type = static_cast<int>(opennova::bms::ActionType::ResetEvent);
+		reset.param1 = 2;
+		TEST_EXPECT(insert_event_action(doc, 3, 0, reset, error));
+		TEST_EXPECT(remove_event(doc, 1, error) && doc.events.size() == 3);
+		TEST_EXPECT(doc.triggers.size() == 3 && doc.triggers[0].param1 == 0 && doc.triggers[1].param1 == -1 &&
+		            doc.triggers[2].param1 == 1);
+		TEST_EXPECT(doc.actions.size() == 1 && doc.actions[0].param1 == 1);
+		// event_chain reports both the same way: each Event trigger's and each ResetEvent action's
+		// event, the dangling one flagged.
+		MissionEventChain chain;
+		TEST_EXPECT(event_chain(doc, 2, chain));
+		std::vector<std::pair<std::string, int>> named;
+		for (const MissionLogicReference &reference : chain.references)
+			if (reference.target_kind == "event") named.push_back({reference.source_kind, reference.target_index});
+		const std::vector<std::pair<std::string, int>> expected = {
+				{"trigger", 0}, {"trigger", -1}, {"trigger", 1}, {"action", 1}};
+		TEST_EXPECT(named == expected);
+		TEST_EXPECT(chain.diagnostics.size() == 1 && chain.diagnostics[0].code == "logic.event_reference_out_of_range" &&
+		            chain.diagnostics[0].subject_kind == "trigger" && chain.diagnostics[0].subject_index == 1);
 	}
 
 	// E1: entity-property inspection is portable. A group-only edit must

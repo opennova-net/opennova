@@ -22,7 +22,7 @@ int main(void) {
         "end\n";
 
     char temp_path[4096];
-    snprintf(temp_path, sizeof(temp_path), "%s/def_comment_strip_test.def", test_paths_temp_dir());
+    snprintf(temp_path, sizeof(temp_path), "%s/def_comment_strip_test_%ld.def", test_paths_temp_dir(), test_paths_pid());
     FILE *f = fopen(temp_path, "wb");
     if (!f) {
         fprintf(stderr, "FAIL: could not create temp file\n");

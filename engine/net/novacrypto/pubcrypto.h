@@ -40,11 +40,13 @@ std::string encode_pub_value(const std::vector<uint8_t> &plaintext,
 std::string encode_pub_value(const std::string &plaintext,
                              const std::string &pcid_key);
 
-// Reverse: decode + verify CRC. Returns the recovered plaintext (without
-// the trailing 4-byte CRC). Throws std::runtime_error on CRC mismatch,
-// odd-length input, or out-of-range A-P character.
-std::vector<uint8_t> decode_pub_value(const std::string &encoded,
-                                      const std::string &pcid_key);
+// Reverse: decode + verify CRC into `out`, the recovered plaintext (without
+// the trailing 4-byte CRC). False (`out` emptied, `error` naming why when
+// given) on an empty key, an odd length or a character outside A-P, a payload
+// shorter than its CRC, or a CRC mismatch: a value off the wire is input, so
+// a bad one is a result, never a throw (ADR 0049 d5).
+bool decode_pub_value(const std::string &encoded, const std::string &pcid_key,
+                      std::vector<uint8_t> &out, std::string *error = nullptr);
 
 // The non-throwing per-key probe over already A-P-decoded bytes: false for an
 // empty key, fewer than four bytes or a CRC mismatch; `payload` is the bytes

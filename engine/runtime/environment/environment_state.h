@@ -337,6 +337,10 @@ public:
 	Rgb cloud_base_target() const;
 	Rgb cloud_highlight_target() const;
 	Rgb cloud_edge_target() const;
+	// The targets a world with no keyframe table runs on: the loaded .env's
+	// scratch keyframe, the Environment_InitDefaults seed with none
+	// (environment_state.cpp).
+	const Keyframe &untimed_targets() const;
 
 	// --- terrain ----------------------------------------------------------
 

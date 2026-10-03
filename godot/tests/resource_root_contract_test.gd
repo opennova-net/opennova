@@ -374,7 +374,10 @@ func test_boot_manifest_reports_missing_fatal_resources() -> void:
 	assert_false("gametext.bin" in missing, "A mounted fatal-set file is not reported missing.")
 	assert_true("vmacros.bin" in missing, "Missing fatal-set files are named.")
 	assert_true("keyhelp.bin" in missing, "Missing fatal-set files are named.")
-	assert_true("items.def" in missing, "Missing fatal-set files are named.")
+	# items.def never refuses a boot: its loader returns 1 whatever the parse did,
+	# so the wired fatal is unreachable [orig: ItemDefs_LoadAndValidate @ 0x4a1da0,
+	# the return @ 0x4a20a2; the dead fatal @ 0x4a71af].
+	assert_false("items.def" in missing, "items.def is not in the fatal set.")
 	assert_true("main.mnu" in missing, "The menu-phase fatal is probed too.")
 	assert_false("resource.pff" in missing, "Archive-table rows are the mount gate's job, never probed per-file.")
 	assert_true(resources.boot_resource_failure_text("gametext.bin").contains("Unable to load game strings"),

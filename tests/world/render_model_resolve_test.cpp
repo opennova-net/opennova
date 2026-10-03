@@ -52,7 +52,7 @@ std::string repo_path(const char *rel) {
 struct TempRoot {
     std::string dir;
     TempRoot() {
-        dir = std::string(test_paths_temp_dir()) + "/opennova_render_model_resolve";
+        dir = std::string(test_paths_temp_dir()) + "/" + test_paths_unique("opennova_render_model_resolve");
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
         std::filesystem::create_directories(dir, ec);

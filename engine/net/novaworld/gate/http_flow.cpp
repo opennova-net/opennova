@@ -334,11 +334,10 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				if (!message.empty()) return login_fail(message);
 				return login_fail("server issued no EPASK cookie");
 			}
-			try {
-				epask_ = epask_from_string(*epask);
-			} catch (const std::exception &e) {
+			std::string epask_error;
+			if (!epask_from_string(*epask, epask_, &epask_error)) {
 				login_step_ = LoginStep::Idle;
-				return login_fail(std::string("bad EPASK bundle: ") + e.what());
+				return login_fail("bad EPASK bundle: " + epask_error);
 			}
 			// The modexp gate retail applies at the form submit (EPASK_ModexpEncrypt
 			// @0x66668a returns -1 for modulus <= 258 or a non-positive exponent):

@@ -6,9 +6,13 @@
 // below is witnessed by SoundBank_OpenFile @ 0x75caa0 + SoundBank_LoadTriggerSets
 // @ 0x75c370, and the field semantics by SoundBank_PlayTriggerEntries @ 0x75ccd0.
 // The on-disk layout is a pure index: Singles (audio refs, 52 B) -> optional
-// trigger records (12 B, unused by JO-era banks) -> MultiHeader -> Multis (sound
-// sets, 80 B) -> Playlists (layers, 48 B) -> Sndparms (members, 28 B) -> string
-// pool (256-byte .wav path slots, one per single). No audio is embedded.
+// trigger records (12 B, read and never interpreted; JO-era banks ship none) ->
+// MultiHeader -> Multis (sound sets, 80 B) -> Playlists (layers, 48 B) ->
+// Sndparms (members, 28 B) -> string pool (256-byte .wav path slots, one per
+// single). No audio is embedded. The engine checks no header field on open
+// [orig: SoundBank_OpenFile @ 0x75caa0 refuses only a file that does not open];
+// what this reader still refuses that the engine would open is D-SND-3
+// (docs/audio/lwf-dbf-sound-re.md).
 //
 // Round-trip is byte-exact on the *unmodified* parse->encode path: garbage in
 // unused/reserved slots and the original string pool are preserved verbatim.
@@ -47,12 +51,16 @@ inline uint32_t pitch_to_q16(double pitch) {
 
 struct Header {
   uint32_t header_size = 0;       // expected 28
-  uint32_t magic = 0;             // 'LWF1'
+  // 'LWF1' in every shipped bank, but the engine refuses no other: the magic only
+  // gates the 256-byte filename table [orig: SoundBank_LoadTriggerSets @ 0x75c671],
+  // so a bank of another magic loads its sets, layers and members and its singles
+  // name no file (Single::path empty). Written back as read.
+  uint32_t magic = kMagic;
   uint32_t single_count = 0;
-  // Count of 12-byte trigger records following the singles table. The engine
-  // allocates and reads 12 * trigger_count bytes ("SNDTRIG TRIGGERS")
-  // [orig: SoundBank_OpenFile @ 0x75cb63]; every known JO-era bank ships 0 and
-  // parse_lwf rejects nonzero counts (the table is not modeled here).
+  // Count of 12-byte trigger records following the singles table (File::triggers).
+  // The engine allocates and reads 12 * trigger_count bytes ("SNDTRIG TRIGGERS")
+  // and nothing reads them again [orig: SoundBank_OpenFile @ 0x75cb63 / 0x75cb7a];
+  // every known JO-era bank ships 0. The writer derives it from File::triggers.
   uint32_t trigger_count = 0;
   uint32_t multi_header_off = 0;  // offset to MultiHeader
   uint32_t string_pool_off = 0;   // offset to start of string pool
@@ -71,7 +79,7 @@ struct Single {
   std::string name;
   uint16_t value_hi = 0;          // high byte carries the numeric field
   uint32_t path_offset = 0;       // relative offset into string pool
-  std::string path;               // parsed from string pool (256-byte slots)
+  std::string path;               // parsed from string pool (256-byte slots); empty in a non-'LWF1' bank
   // Raw bytes for byte-perfect round-trip (includes garbage after null terminator).
   std::array<char, 32> raw_name{};
   uint16_t pad0 = 0;
@@ -152,10 +160,16 @@ struct Sndparm {
   std::array<uint32_t, 2> reserved{};       // trailing dwords; unread by the engine player
 };
 
+// One 12-byte trigger record, kept as its three raw dwords: the engine reads the
+// table and never interprets it [orig: SoundBank_OpenFile @ 0x75cb7a], so no field
+// meaning is witnessed.
+using TriggerRecord = std::array<uint32_t, 3>;
+
 struct File {
   Header header;
   MultiHeader multi_header;
   std::vector<Single> singles;
+  std::vector<TriggerRecord> triggers;     // after the singles, before the multi header
   std::vector<Multi> multis;
   std::vector<Playlist> playlists;
   std::vector<Sndparm> sndparms;

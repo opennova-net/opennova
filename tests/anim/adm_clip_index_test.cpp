@@ -58,7 +58,7 @@ int main() {
         // staged alone in a temp dir): every variant skips (continue-on-failure),
         // the load degrades to zero keys, and the FSM's 'auto' delays collapse
         // exactly as the model-never-loads path did.
-        const std::string dir = std::string(test_paths_temp_dir()) + "/opennova_clipindex_test";
+        const std::string dir = std::string(test_paths_temp_dir()) + "/" + test_paths_unique("opennova_clipindex_test");
 #ifdef _WIN32
         _mkdir(dir.c_str());
 #else
@@ -84,7 +84,7 @@ int main() {
         // whatever they are: `ANIM_RESET` is anim_reset and `xxxx_idle` is
         // anim_idle. [orig: AnimMap_FindSlotByName @ 0x40cfa0, stricmp on
         // key + 5]
-        const std::string dir = std::string(test_paths_temp_dir()) + "/opennova_clipindex_slots";
+        const std::string dir = std::string(test_paths_temp_dir()) + "/" + test_paths_unique("opennova_clipindex_slots");
 #ifdef _WIN32
         _mkdir(dir.c_str());
 #else

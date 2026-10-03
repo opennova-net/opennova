@@ -12,6 +12,7 @@
 
 #include "common/mus_scr_fixture.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include <base/resource_index/resource_index.h>
 
 namespace fs = std::filesystem;
@@ -35,7 +36,7 @@ static bool has(const std::vector<opennova::ResourceFileEntry> &entries, const s
 } // namespace
 
 int main() {
-    const fs::path root = fs::temp_directory_path() / "opennova_resource_index_mus_test";
+    const fs::path root = fs::temp_directory_path() / test_paths_unique("opennova_resource_index_mus_test");
     fs::remove_all(root);
     fs::create_directories(root);
 

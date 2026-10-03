@@ -356,45 +356,36 @@ func test_environment_publishes_the_world_lighting_block_as_shader_globals() -> 
 
 	assert_true(world_values.floor_color.is_equal_approx(env_node.get_floor_color()))
 	assert_true(world_values.ceiling.is_equal_approx(env_node.get_ceiling_color()))
-	var expected := {
-		"opennova_light_block_dir": world_values.dir,
-		"opennova_light_block_dir_color": world_values.dir_color,
-		"opennova_light_block_hemi_sky": world_values.hemi_sky,
-		"opennova_light_block_hemi_ground": world_values.hemi_ground,
-		"opennova_light_block_ceiling": world_values.ceiling,
-		"opennova_light_block_floor": world_values.floor_color,
-		"opennova_light_block_gain": world_values.gain,
-	}
-	# The headless Dummy RenderingServer does not retain global shader
-	# parameters (get returns null); a rendering run verifies the writes.
-	if RenderingServer.global_shader_parameter_get(
-			"opennova_light_block_dir_color") == null:
-		pending("the headless RenderingServer retains no global shader parameters")
-		return
-	for name in expected:
-		var published: Vector3 = RenderingServer.global_shader_parameter_get(name)
-		assert_true(published.is_equal_approx(expected[name]),
-				"%s carries the published block value" % name)
-	assert_true(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
-			"a loaded world fogs the object family")
+	# Outside the editor a RenderingServer gives no global back
+	# (global_shader_parameter_get is editor-only, headless or windowed), so the
+	# writes are read through the writer's own record of what it set.
+	var published: EnvLightValues = MissionEnvironment.get_published_lighting_block()
+	for field in ["dir", "dir_color", "hemi_sky", "hemi_ground", "ceiling", "floor_color", "gain"]:
+		assert_true(Vector3(published.get(field)).is_equal_approx(world_values.get(field)),
+				"opennova_light_block_%s carries the published block value" % field)
+	assert_true(published.fog_enabled, "a loaded world fogs the object family")
+	var writes := MissionEnvironment.get_lighting_block_writes()
 
 	# Leaving the tree restores the shipped noon register so a later preview
 	# or mission never inherits this world's block (the globals are process-wide).
 	remove_child(env_node)
+	published = MissionEnvironment.get_published_lighting_block()
 	var noon := EnvLightValues.retail_noon_defaults()
-	assert_true(Vector3(RenderingServer.global_shader_parameter_get(
-			"opennova_light_block_dir_color")).is_equal_approx(noon.dir_color),
+	assert_gt(MissionEnvironment.get_lighting_block_writes(), writes, "the exiting writer writes the block")
+	assert_true(published.dir_color.is_equal_approx(noon.dir_color),
 			"the exiting writer leaves the noon directional color behind")
-	assert_false(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
-			"and clears the object fog enable")
+	assert_true(published.hemi_sky.is_equal_approx(noon.hemi_sky), "and the noon hemisphere")
+	assert_false(published.fog_enabled, "and clears the object fog enable")
+	writes = MissionEnvironment.get_lighting_block_writes()
 	# Re-entering republishes the live block even though its generation did
 	# not move (the exit forgot the published generation).
 	add_child(env_node)
-	assert_true(Vector3(RenderingServer.global_shader_parameter_get(
-			"opennova_light_block_dir_color")).is_equal_approx(world_values.dir_color),
+	published = MissionEnvironment.get_published_lighting_block()
+	assert_gt(MissionEnvironment.get_lighting_block_writes(), writes,
 			"a re-entered environment writes its block again")
-	assert_true(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
-			"and re-enables the object fog")
+	assert_true(published.dir_color.is_equal_approx(world_values.dir_color),
+			"a re-entered environment writes its block again")
+	assert_true(published.fog_enabled, "and re-enables the object fog")
 
 
 func test_weather_publishes_the_active_moon_direction_at_night() -> void:

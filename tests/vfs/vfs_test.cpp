@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "common/test_paths.h"
 #include "pff/pff_test_writer.h"
 #include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
@@ -570,7 +571,7 @@ static int test_expansion_info() {
 
 int main() {
     std::error_code ec;
-    g_root = (fs::temp_directory_path(ec) / "opennova_vfs_test").string();
+    g_root = (fs::temp_directory_path(ec) / test_paths_unique("opennova_vfs_test")).string();
     fs::remove_all(g_root, ec);
     fs::create_directories(g_root, ec);
 

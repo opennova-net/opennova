@@ -135,9 +135,11 @@ void sync_counts(bms::File &file) {
 		loadout_chunk.push_back(0);
 		loadout_chunk.insert(loadout_chunk.end(), entry.ammo_secondary.begin(), entry.ammo_secondary.end());
 		loadout_chunk.push_back(0);
-		const std::string flags = entry.flags.empty() ? "-1" : entry.flags;
-		loadout_chunk.insert(loadout_chunk.end(), flags.begin(), flags.end());
-		loadout_chunk.push_back(0);
+		if (entry.has_flags) { // a record that wrote three strings writes three (bms.h)
+			const std::string flags = entry.flags.empty() ? "-1" : entry.flags;
+			loadout_chunk.insert(loadout_chunk.end(), flags.begin(), flags.end());
+			loadout_chunk.push_back(0);
+		}
 	}
 	if (!loadout_chunk.empty()) {
 		loadout_chunk.push_back(0);
@@ -538,26 +540,12 @@ bool remove_area_trigger(bms::File &file, size_t index, std::string &error) {
 		error = "Area trigger index out of range";
 		return false;
 	}
-	// Repair *IsWithinArea references. Phase-5 RE confirmed param2 is the area-trigger ARRAY INDEX
-	// (Entity_IsTeamInTriggerBounds @0x43c730: &unk_A32D10 + 32*param2), so removing a zone shifts every
-	// higher index down by one. A reference to the removed zone becomes -1 (dangling), which
-	// event_chain then flags. [orig: zone bounds consumers @0x43c730 / @0x43e510]
-	const int removed = static_cast<int>(index);
-	for (bms::Trigger &t : file.triggers) {
-		const bool is_area_trigger =
-				(t.main_type == bms::TriggerMainType::Group &&
-						t.sub_type == static_cast<int>(bms::GroupTriggerType::GroupIsWithinArea)) ||
-				(t.main_type == bms::TriggerMainType::Single &&
-						t.sub_type == static_cast<int>(bms::SingleTriggerType::SingleIsWithinArea));
-		if (!is_area_trigger) {
-			continue;
-		}
-		if (t.param2 == removed) {
-			t.param2 = -1;  // the referenced zone is gone
-		} else if (t.param2 > removed) {
-			--t.param2;     // zones above the hole shifted down
-		}
-	}
+	// A trigger's or an action's zone parameter is the area trigger's ID in the file, which the game
+	// remaps to its array index at mission start [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000,
+	// EventTrigger_ResolveZoneActionRefs @0x453100; docs/mission/bms-event-runtime-re.md section 7.3]:
+	// removing a zone moves no id, so nothing that names another zone is rewritten. What named the
+	// removed zone names none from then on: the load neuters such a trigger (it reads false, a negated
+	// one true) and zeroes such an action, which event_chain flags.
 	file.area_triggers.erase(file.area_triggers.begin() + static_cast<std::ptrdiff_t>(index));
 	sync_counts(file);
 	return true;
@@ -569,7 +557,7 @@ std::vector<WeaponLoadoutEntry> weapon_loadout(const bms::File &file) {
 	std::vector<WeaponLoadoutEntry> out;
 	out.reserve(file.loadout.entries.size());
 	for (const bms::WeaponLoadoutRecord &entry : file.loadout.entries) {
-		out.push_back({entry.name, entry.ammo_primary, entry.ammo_secondary, entry.flags});
+		out.push_back({entry.name, entry.ammo_primary, entry.ammo_secondary, entry.flags, entry.has_flags});
 	}
 	return out;
 }
@@ -591,7 +579,7 @@ bool set_weapon_loadout(bms::File &file, const std::vector<WeaponLoadoutEntry> &
 	for (const WeaponLoadoutEntry &entry : entries) {
 		// Names are guaranteed non-empty by the validation above.
 		records.push_back({entry.name, entry.ammo_primary, entry.ammo_secondary,
-		                   entry.flags.empty() ? "-1" : entry.flags});
+		                   entry.flags.empty() ? "-1" : entry.flags, entry.has_flags});
 	}
 	file.loadout.entries = std::move(records);
 	sync_counts(file);
@@ -938,19 +926,24 @@ bool remove_event(bms::File &file, size_t index, std::string &error) {
 	while (file.events[index].action_count > 0) {
 		remove_event_action(file, index, 0, drain_error);
 	}
-	// Repair ResetEvent action references (param1 = event index, the one proven cross-reference): events
-	// after the hole shift down by one; a reference to the removed event becomes dangling (-1), which
-	// event_chain then flags as out-of-range. (Area-trigger refs are left alone because their index
-	// semantics are still under RE; here the semantics are proven, so the repair is safe.)
+	// What names an event by its index (EVENT_REF, docs/mission/bms-event-runtime-re.md section 7.2): an
+	// Event trigger's param1 [orig: EventTrigger_EvaluateCondition @0x453620 main type 3 reads events[p1]]
+	// and a ResetEvent action's [orig: EventAction_Dispatch @0x4542e0 case 34 clears events[p1]'s latch].
+	// Events after the hole shift down by one; a reference to the removed event becomes -1 (dangling),
+	// which event_chain then flags as out of range. A zone parameter is an area trigger's id (section
+	// 7.3), no event's: removing an event moves none.
+	const auto repair = [index](int32_t &param) {
+		if (param > static_cast<int32_t>(index)) {
+			param -= 1;
+		} else if (param == static_cast<int32_t>(index)) {
+			param = -1;
+		}
+	};
+	for (bms::Trigger &trig : file.triggers) {
+		if (trig.main_type == bms::TriggerMainType::Event) repair(trig.param1);
+	}
 	for (bms::Action &act : file.actions) {
-		if (act.action_type != bms::ActionType::ResetEvent) {
-			continue;
-		}
-		if (act.param1 > static_cast<int32_t>(index)) {
-			act.param1 -= 1;
-		} else if (act.param1 == static_cast<int32_t>(index)) {
-			act.param1 = -1;
-		}
+		if (act.action_type == bms::ActionType::ResetEvent) repair(act.param1);
 	}
 	file.events.erase(file.events.begin() + static_cast<std::ptrdiff_t>(index));
 	sync_counts(file);
@@ -975,7 +968,20 @@ bool event_chain(const bms::File &file, size_t index, MissionEventChain &out) {
 			MissionTriggerRecord trig = to_trigger_record(file.triggers[trigger_index], trigger_index);
 			out.triggers.push_back(trig);
 			out.references.push_back(logic_reference("event", static_cast<int>(index), "trigger", static_cast<int>(trigger_index), 0, static_cast<int>(trigger_index), "trigger", true));
-			add_trigger_area_reference(trig, file.area_triggers.size(), out);
+			add_trigger_area_reference(trig, file.area_triggers, out);
+			// An Event trigger names an event by its index, as a ResetEvent action does
+			// [orig: EventTrigger_EvaluateCondition @0x453620, main type 3 reads events[p1]].
+			if (trig.main_type == static_cast<int>(bms::TriggerMainType::Event)) {
+				const bool valid = trig.param1 >= 0 && static_cast<size_t>(trig.param1) < file.events.size();
+				out.references.push_back(logic_reference("trigger", static_cast<int>(trigger_index), "event", trig.param1, 1, trig.param1, "fired event", valid));
+				if (!valid) {
+					out.diagnostics.push_back(logic_diagnostic(
+							"logic.event_reference_out_of_range",
+							"Trigger references an event index outside the mission event table.",
+							"trigger",
+							static_cast<int>(trigger_index)));
+				}
+			}
 		}
 	}
 	if (!valid_range(out.event.action_index, out.event.action_count, file.actions.size())) {
