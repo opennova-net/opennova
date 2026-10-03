@@ -579,4 +579,18 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"auto_deploy": { "type": "boolean", "default": false },
 					"exercise_motion": { "type": "boolean", "default": false },
 				}, [], false, false, 30_000),
+		ProbeDef.make("scenario_play",
+				"Play one shared network-parity scenario (the JSON the retail onHook driver "
+				+ "consumes: setup pose, then retail action-code steps keyed on the logic "
+				+ "tick) through the scripted input device at the binding seam, on any role: "
+				+ "the setup pose by teleport_local_player (host, single player) or "
+				+ "apply_local_pose (joiner), then the steps; the verdict carries the start "
+				+ "and end logic ticks and each step's applied tick. `wait` false returns once "
+				+ "the start latched; a run with neither `scenario` nor `path` collects the "
+				+ "attached scenario.",
+				NET + "scenario_play_probe.gd", {
+					"scenario": { "type": "object", "default": {} },
+					"path": { "type": "string", "default": "" },
+					"wait": { "type": "boolean", "default": true },
+				}, [], false, true, 1_800_000),
 	]

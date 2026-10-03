@@ -160,6 +160,14 @@ public:
     void aim_at(const Vec3 &eye, const Vec3 &target);
     void teleport_local_player(const Vec3 &mission_pos, double yaw_deg,
             double pitch_deg);
+    // The scenario driver's joiner setup (devtools, devtools/scripted_input.h):
+    // the onHook bridge's ApplyPose write, nothing more -- the person's 16.16
+    // position, its heading/pitch BAM and its air-velocity triple zeroed --
+    // so the next C2S 0x0C uplink carries the pose as a retail client's
+    // would. The port's float position and the input-owned look mirrors take
+    // the same values (or the next pre-tick snaps the view back). False with
+    // no local player.
+    bool apply_pose(const int32_t (&position_q16)[3], int32_t heading_bam, int32_t pitch_bam);
     void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
     // The ToSpecial action (input case 220): each press or release edge of its
     // keys queues one dispatch, and dispatch_to_special runs the queue with the

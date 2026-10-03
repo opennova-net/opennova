@@ -67,6 +67,7 @@ const EXPECTED_IDS: Array[StringName] = [
 	&"crew_vehicle",
 	&"crew_local_player",
 	&"local_player_look",
+	&"apply_local_pose",
 	&"local_spectator",
 ]
 
@@ -76,7 +77,7 @@ const WIRE_STATE_KEYS := ["id", "kind", "value", "desired_value", "available",
 		"writable", "authoritative", "reason"]
 # Engine rows end in a Simulation / Terrain / Weather / environment call;
 # device rows are viewport / audio / shell state.
-const ENGINE_ROWS := 43
+const ENGINE_ROWS := 44
 const DEVICE_ROWS := 14
 
 
@@ -208,6 +209,8 @@ func test_actions_validate_typed_arguments_before_the_engine() -> void:
 		[&"crew_vehicle", [3]],
 		[&"crew_local_player", ["11"]],
 		[&"local_player_look", ["3", 1.0]],
+		[&"apply_local_pose", [0.0, 0.0, 0.0, 0.0, 91.0]],
+		[&"apply_local_pose", [40000.0, 0.0, 0.0, 0.0, 0.0]],
 		[&"runtime_transport", ["warp"]],
 		[&"set_entity_item_attrib", [0xFFFF, 0, 0]],
 		[&"set_entity_item_attrib", [7, 0x100000000, 0]],
@@ -320,6 +323,12 @@ func test_confirmation_and_authority_are_distinct_gates() -> void:
 	assert_string_contains(joiner.reason, "host")
 	assert_false(_controls.get_state(&"local_spectator", true).writable,
 			"a joiner cannot use tooling to manufacture spectator authority")
+	assert_true(_controls.get_state(&"apply_local_pose", true).writable,
+			"the joiner's own pose write is not host-only")
+	assert_false(_controls.get_state(&"apply_local_pose").writable,
+			"it still wants the per-call confirmation")
+	assert_eq(int(_controls.invoke(&"apply_local_pose", [0.0, 0.0, 0.0], true).error),
+			ERR_UNAVAILABLE, "the engine answers: this session holds no joiner L")
 	_host.authority = true
 
 	assert_true(_controls.get_state(&"net_joiner_diagnostics").writable,
