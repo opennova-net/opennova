@@ -19,7 +19,8 @@ COPY . .
 # Configure the whole tree (cheap) but compile only the server target and
 # its lib deps. BUILD_NOVAWORLD_HTTP=ON pulls Crow + standalone Asio via
 # FetchContent. GDExtension is never touched (godot/src is its own
-# project). Mirrors the ci.yml `novaworld-server` job's flags.
+# project). Mirrors the flags of ci.yml's `test-linux` job and of
+# .github/workflows/net-linux.yml.
 RUN cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_NOVAWORLD_HTTP=ON \

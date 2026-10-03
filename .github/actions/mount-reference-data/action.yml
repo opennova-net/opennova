@@ -14,9 +14,12 @@ description: >-
 # REFERENCE_ASSETS_TOKEN secret (contents: read on both) they land beside the
 # tree and the gated tests run instead of reporting Skipped; without it the
 # gates stay closed (`enabled` is false). Both are restored from the Actions
-# cache keyed by their main commit and saved the moment the data is ready
-# (before the tests), so a red or cancelled run still leaves the next one
-# warm; only a new commit in a reference repository pays its clone again.
+# cache keyed by their main commit. Master runs save them the moment the data
+# is ready (before the tests), so a red or cancelled run still leaves the next
+# one warm; pull requests read master's copy and never save their own (a
+# PR-scoped copy is readable by that PR alone and crowds the repository's
+# 10 GB cache), so only a new commit in a reference repository pays its clone
+# again, until the next master run.
 
 inputs:
   token:
@@ -62,7 +65,7 @@ runs:
       shell: bash
       run: rm -rf .reference-assets/.git
     - name: Save the reference assets
-      if: inputs.enabled == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
+      if: inputs.enabled == 'true' && steps.assets-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
       uses: actions/cache/save@v4
       with:
         path: .reference-assets
@@ -91,7 +94,7 @@ runs:
         bash .reference-retail-packed/reassemble.sh
         rm -rf .reference-retail-packed/.git
     - name: Save the packed retail install
-      if: inputs.enabled == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
+      if: inputs.enabled == 'true' && steps.packed-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
       uses: actions/cache/save@v4
       with:
         path: .reference-retail-packed

@@ -82,6 +82,8 @@ jobs:
             type=ref,event=branch
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
 
+      # Only pushes export the layer cache: a PR's layers are readable by that
+      # PR alone and crowd the repository's 10 GB Actions cache.
       - name: Build + push server image
         uses: docker/build-push-action@v6
         with:
@@ -91,7 +93,7 @@ jobs:
           tags: ${{ steps.meta_server.outputs.tags }}
           labels: ${{ steps.meta_server.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
 
       - name: Image metadata (web)
         id: meta_web
@@ -112,4 +114,4 @@ jobs:
           tags: ${{ steps.meta_web.outputs.tags }}
           labels: ${{ steps.meta_web.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
