@@ -127,6 +127,10 @@ struct ReferenceKindRow {
 	// reference of a kind with one refuses a build (blocks_build); every other missing reference is
 	// listed and gates nothing.
 	const char *gates_when_missing = nullptr;
+	// The same for a kind whose references refuse only by what each gives its loader
+	// (GraphEdge::loader_arg: a texture's role, ADR 0046 S18, the terrain's colour map), the witness for
+	// that argument, null where that one is tolerated; null for a kind with no such rule.
+	const char *(*gates_when_missing_for)(int32_t loader_arg) = nullptr;
 
 	// A name some file defines, as a symbol or a style variable, or a record of a file's record set
 	// (a symbol of the kind named by its index).

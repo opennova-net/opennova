@@ -10,6 +10,7 @@
 #include <unordered_set>
 
 #include <editor/documents/document_types.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
 #include <editor/model/diagnostic.h>
@@ -163,7 +164,8 @@ bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_ar
 	const ReferenceKindRow &row = reference_row(kind);
 	if (row.resolution != ReferenceResolution::File) return false;
 	if (file == row.file) return true;
-	if (file != AssetKind::MaterialChunk || kind != ReferenceKind::Texture || loader_arg < 0) return false;
+	if (file != AssetKind::MaterialChunk || kind != ReferenceKind::Texture || !texture_arg_is_row_type(loader_arg))
+		return false;
 	// A chunk row reads its name as a chunk container whatever the name (a chunk reader for
 	// any name, renderer::material_texture_source): a file no rule types by its name serves one
 	// when its bytes hold a chunk (the scan's MaterialChunk), and no other texture row.

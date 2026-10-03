@@ -3,6 +3,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <runtime/renderer/texture_load_rules.h>
@@ -23,19 +24,19 @@ std::vector<SourceIssue> source_issues(const DefParseReport &report) {
 
 const ItemsFileState *items_state(const FileState *state) { return dynamic_cast<const ItemsFileState *>(state); }
 
-// The game's loader of a def's texture field (texture_loader_arg), by the field: the HUD loader in
-// alpha mode for a weapon's HUD art (hudicon, its clip and round graphics), its crosshair and an
-// item's HUD image; the menu loader for a weapon's loadout icon; the stage loader for a sight's
-// card (render-material-re.md "The game's texture loaders", the role table). None (-1) for a field
-// whose loader the game is not witnessed using (a weapon's crosshair_secondary, an item's
+// A def's texture field's role (ADR 0046 S18, documents/texture_roles.h), by the field: HUD art alpha
+// only for a weapon's HUD icon, its clip and round graphics, its crosshair and an item's HUD image
+// [orig: HUD_LoadAllTextures @ 0x59E248..0x59E26A, the ItemDef's +0xA74 in mode 1]; a menu image for a
+// weapon's loadout icon [orig: CTextureManager_LoadOrFindTexture @ 0x654980]; a sight card for a
+// sight's texture (render-material-re.md "The game's texture loaders", the role table). None (-1) for a
+// field whose loader the game is not witnessed using (a weapon's crosshair_secondary, an item's
 // shadow_texture): the name as written.
-int32_t def_texture_loader_arg(const std::string &field) {
-	using renderer::TextureLoader;
+int32_t def_texture_role_arg(const std::string &field) {
 	if (field == "hudicon" || field == "hudclipgfx_texture" || field == "hudrndgfx_texture" || field == "crosshair" ||
 	    field == "hud_image")
-		return texture_loader_arg(TextureLoader::HudAlpha);
-	if (field == "loadout_menu_icon") return texture_loader_arg(TextureLoader::Menu);
-	if (field == "texture") return texture_loader_arg(TextureLoader::Stage);
+		return texture_role_arg(TextureRoleId::HudAlphaOnly);
+	if (field == "loadout_menu_icon") return texture_role_arg(TextureRoleId::MenuImage);
+	if (field == "texture") return texture_role_arg(TextureRoleId::SightCard);
 	return -1;
 }
 
@@ -189,13 +190,14 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 	// What the table's labelled field decides on its record (none of a catalog's decides: the rows say
 	// it all), then the catalog's own rules.
 	TableDocument::refine_field(address, use);
+	// A texture through its use's loader, by its role (def_texture_role_arg).
+	if (use.reference == ReferenceKind::Texture) {
+		use.loader_arg = def_texture_role_arg(use.schema->id);
+		return;
+	}
 	// A bit per id of the file-wide registry (record_choices).
 	if (use.schema->id == "vehicle_spawn_mask" && def_kind(address.kind) == DefRecordKind::Item) {
 		use.own_choices = true;
-		return;
-	}
-	if (use.reference == ReferenceKind::Texture) {
-		use.loader_arg = def_texture_loader_arg(use.schema->id);
 		return;
 	}
 	if (use.reference != ReferenceKind::UserPoint) return;

@@ -376,18 +376,18 @@ bool scope_matches(const std::string &symbol_scope, const std::string &reference
 // The file names a reference of a file kind to `name` loads, in the order the game probes
 // them: the file is the first of them `exists` has (the graph asks the project, as the
 // kind; a fix the game install; the import plan each place it looks). A menu texture and a
-// model's texture row (`loader_arg` >= 0, its type) name the one file their loader opens,
-// picked by what `exists` has: a menu texture by its extension, a .tga the files lack loading its
-// .dds (menu::menu_texture_source); a texture row by the row's type, as the renderer's
-// loaders pick (renderer/material_texture.h; a loose file never first, the project's files
-// being packed as the game mounts them), none when that loader opens no file. A font names
-// the .fnt its name loads (menu::menu_font_file). A texture of anything but a model (a
-// particle's, a sky map's, a def's) names the files the game's loader for it opens, in its
-// order (`loader_arg` its texture_loader_arg: renderer::texture_load_attempts, no alternate
-// name), or the name as written alone where that loader is not known (-1).
-// Any other kind names the name as written, then with each extension the kind's loader
-// appends. None for a symbol, an unverified kind or an empty name. Each rule is the kind's row
-// (reference_kinds: its file_names, else its extensions).
+// texture name the one file their loader opens, picked by what `exists` has: a menu texture by
+// its extension, a .tga the files lack loading its .dds (menu::menu_texture_source); a texture by
+// its loader argument: a model row by the row's type, as the renderer's loaders pick
+// (renderer/material_texture.h); any other referrer by its role (ADR 0046 S18,
+// documents/texture_roles.h) or, where only that is known, the game's loader of it
+// (texture_loader_arg), the files that loader opens in its order (renderer::texture_load_attempts:
+// a sky map's .dds beside the name first, a colour map's name alone, no alternate name); a use whose
+// loader is not witnessed yet, the name as written (-1); a loose file never first, the project's
+// files being packed as the game mounts them; none when that loader opens no file. A font names the
+// .fnt its name loads (menu::menu_font_file). Any other kind names the name as written, then with
+// each extension the kind's loader appends. None for a symbol, an unverified kind or an empty name.
+// Each rule is the kind's row (reference_kinds: its file_names, else its extensions).
 std::vector<std::string> reference_file_candidates(ReferenceKind kind, const std::string &name, int32_t loader_arg,
                                                    const std::function<bool(const std::string &)> &exists);
 // Whether a project file, of the kind the scan gives it, can be what a reference of `kind`

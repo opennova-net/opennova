@@ -15,6 +15,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_file_set.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
@@ -78,7 +79,7 @@ bool loads_renamed(const AssetScan &scan, const GraphEdge &edge, const std::stri
 			break;
 		}
 	if (first.empty() || key(first) != key(renamed)) return false;
-	if (edge.kind != ReferenceKind::Texture || edge.loader_arg < 0) return true;
+	if (edge.kind != ReferenceKind::Texture || !texture_arg_is_row_type(edge.loader_arg)) return true;
 	const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(edge.loader_arg));
 	return renderer::material_texture_transform(type, value, true) == renderer::material_texture_transform(type, edge.value, true);
 }

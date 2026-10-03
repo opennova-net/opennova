@@ -808,6 +808,17 @@ its palette and what uses it; the Preview window shows the texture Files selects
 Read only for now (ADR 0046 S18).
 _Avoid_: image (the decoded texels alone), bitmap, sprite, asset (a project file by its logical name)
 
+**Texture role**:
+One way the game uses a texture file (ADR 0046 S18): a model's diffuse or normal map, a terrain's
+colour map or foliage map, a sky's cloud layer, a particle's graphic, a HUD's alpha-only art, a menu's
+image, a mission's loading screen, and so on, 46 in all. Each names the loader that picks the file for
+a name and the reader that decodes it (a model row's: the `.dds` beside the name first; the HUD's: the
+`.FULL` and `.ALPHA` suffixes, a PCX made white with its alpha from blue), the formats that work, the
+size the game needs, what the alpha means there, and what the game does with a wrong or missing file,
+each with its witness. A file has as many roles as uses; the role, not the file, decides what is
+right.
+_Avoid_: texture type (a model texture row's type field), usage, slot (a model row's slot field)
+
 **Texture viewport**:
 A texture's picture (the Main view of a texture document, and the Preview window's for a texture
 Files selects, read from its file while it is not open): its texels at a zoom (fitted, or a scale about

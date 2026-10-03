@@ -33,8 +33,9 @@ struct GraphEdge {
 	// texture), None where it stands for a colour.
 	ReferenceKind through = ReferenceKind::None;
 	// What the reference's loader picks the one file the name loads by, as its kind's row reads
-	// it (FieldUse::loader_arg, reference_file_candidates: a model's texture row's type, or the
-	// game's loader of another texture, texture_loader_arg); -1 for none.
+	// it (FieldUse::loader_arg, reference_file_candidates: a model's texture row's type, another
+	// texture's role, documents/texture_roles.h texture_role_arg, or the game's loader of it alone,
+	// texture_loader_arg); -1 for none.
 	int32_t loader_arg = -1;
 	// In a text document (ADR 0046 S13 D9), where the name is written: its line and column
 	// (1-based) and its length, which a rename rewrites and a Go to opens the document at; a line

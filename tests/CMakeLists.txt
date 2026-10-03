@@ -4172,6 +4172,16 @@ target_link_libraries(editor_texture_document_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_texture_document COMMAND editor_texture_document_test)
 
+# ADR 0046 S18, the texture roles: the catalog (documents/texture_roles: every way the game uses a
+# texture, its loader, formats, size rule and witness) and the loaders' name rules and transforms
+# (documents/texture_load_rules), against vectors worked by hand; the texture_roles query; the graph
+# resolving each texture reference by its loader, a terrain's colour map and blend map refusing a
+# build; the retail leg (OPENNOVA_JO_DIR) the install's texture references by role, none refusing one.
+add_executable(editor_texture_roles_test editor/texture_roles_test.cpp)
+target_link_libraries(editor_texture_roles_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_roles_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_texture_roles COMMAND editor_texture_roles_test)
+
 add_executable(editor_document_contract_test editor/editor_document_contract_test.cpp)
 target_link_libraries(editor_document_contract_test PRIVATE opennova_editor)
 target_include_directories(editor_document_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

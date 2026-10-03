@@ -20,6 +20,7 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/graph_names.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
@@ -50,6 +51,15 @@ GraphEdge edge_of(const std::string &source, const std::string &record, const st
 	edge.value = value;
 	edge.scope = scope;
 	edge.rewritable = rewritable;
+	return edge;
+}
+
+// A texture a native file names, used as `role` (ADR 0046 S18, texture_roles.h): its loader picks the
+// file (GraphEdge::loader_arg), `flags` what the file's own content says of the use (it gates).
+GraphEdge texture_edge(const std::string &source, const std::string &record, const std::string &field,
+                       const std::string &value, TextureRoleId role, int32_t flags = 0) {
+	GraphEdge edge = edge_of(source, record, field, ReferenceKind::Texture, value);
+	edge.loader_arg = texture_role_arg(role, flags);
 	return edge;
 }
 
@@ -167,11 +177,10 @@ bool extract_environment(const std::string &name, const std::vector<uint8_t> &by
 		out.edges.push_back(edge_of(name, std::string(), field, kind, value));
 		out.edges.back().loader_arg = loader_arg;
 	};
-	// The sky maps load through the archive loader naming the file twice, a PCX taking its own
-	// palette's luminance as alpha (renderer::TextureLoader::ArchiveSelfAlpha).
-	const int32_t sky = texture_loader_arg(renderer::TextureLoader::ArchiveSelfAlpha);
-	edge("sky_map1", ReferenceKind::Texture, config.sky_map1, sky);
-	edge("sky_map2", ReferenceKind::Texture, config.sky_map2, sky);
+	// The cloud layers, through ARCHIVE [orig: Terrain_InitRenderingResources @ 0x578A97].
+	for (const auto &[field, map] : {std::pair<const char *, const std::string *>{"sky_map1", &config.sky_map1},
+	                                 {"sky_map2", &config.sky_map2}})
+		if (!map->empty()) out.edges.push_back(texture_edge(name, std::string(), field, *map, TextureRoleId::SkyCloud));
 	edge("sun_3di", ReferenceKind::Model, config.sun_3di);
 	edge("moon_3di", ReferenceKind::Model, config.moon_3di);
 	edge("glare_3di", ReferenceKind::Model, config.glare_3di);
@@ -196,14 +205,13 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 		out.edges.push_back(edge_of(name, record, field, kind, value));
 		out.edges.back().loader_arg = loader_arg;
 	};
-	// Each texture by the loader the HUD hands it to (renderer::TextureLoader): the stance, status
-	// and vehicle panel art through the HUD loader in alpha mode, the static frame and the weapon
-	// bar's two through it in colour mode (render-material-re.md "The game's texture loaders").
-	// A vehicle panel's icon and static texture: no load of either is witnessed, the name as
-	// written.
-	using renderer::TextureLoader;
-	const int32_t alpha = texture_loader_arg(TextureLoader::HudAlpha);
-	const int32_t colour = texture_loader_arg(TextureLoader::HudColor);
+	// A texture through the HUD's loader, in the mode its keyword loads it in (ADR 0046 S18): a stance's
+	// icon and the parachute and armour icons alpha only, the static frame and the loadout's two in
+	// colour [orig: HUD_LoadAllTextures @ 0x59DDA0, HUD_LoadImageAsTexture @ 0x591550; record
+	// interface/hud-re].
+	auto texture = [&](const std::string &record, const char *field, TextureRoleId role, const char *value) {
+		if (value && *value) out.edges.push_back(texture_edge(name, record, field, value, role));
+	};
 	edge(std::string(), "fonthud1_hi", ReferenceKind::Font, hud.font_hi);
 	edge(std::string(), "fonthud1_lo", ReferenceKind::Font, hud.font_lo);
 	// A stance's icon is its slot's (ids 0 to 5), the last record of an id the one read; the static
@@ -212,20 +220,22 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 		const def::DefHudStance *read = nullptr;
 		for (size_t i = 0; i < hud.stances_count; ++i)
 			if (hud.stances[i].id == id) read = &hud.stances[i];
-		if (read) edge("HUDSTANCE " + std::to_string(id), "texture", ReferenceKind::Texture, read->texture, alpha);
+		if (read) texture("HUDSTANCE " + std::to_string(id), "texture", TextureRoleId::HudAlphaOnly, read->texture);
 	}
 	if (hud.static_frames_count > 0)
-		edge("StaticFrame", "texture", ReferenceKind::Texture, hud.static_frames[hud.static_frames_count - 1].texture,
-		     colour);
-	edge(std::string(), "parachute_icon", ReferenceKind::Texture, hud.parachute_icon.texture, alpha);
-	edge(std::string(), "armor_icon", ReferenceKind::Texture, hud.armor_icon.texture, alpha);
-	edge(std::string(), "hudls_bracket", ReferenceKind::Texture, hud.hudls_bracket, colour);
-	edge(std::string(), "hudls_moreav", ReferenceKind::Texture, hud.hudls_moreav, colour);
+		texture("StaticFrame", "texture", TextureRoleId::HudColour, hud.static_frames[hud.static_frames_count - 1].texture);
+	texture(std::string(), "parachute_icon", TextureRoleId::HudAlphaOnly, hud.parachute_icon.texture);
+	texture(std::string(), "armor_icon", TextureRoleId::HudAlphaOnly, hud.armor_icon.texture);
+	texture(std::string(), "hudls_bracket", TextureRoleId::HudColour, hud.hudls_bracket);
+	texture(std::string(), "hudls_moreav", TextureRoleId::HudColour, hud.hudls_moreav);
+	// A vehicle panel's interface art through the HUD loader in alpha mode (render-material-re.md "The
+	// game's texture loaders"); its icon and static texture: no load of either is witnessed, the name as
+	// written.
 	for (size_t i = 0; i < hud.vehicle_huds_count; ++i) {
 		const def::DefVehicleHudBlock &vehicle = hud.vehicle_huds[i];
 		const std::string record = std::string("VEHICLE_HUD ") + vehicle.sid;
 		edge(record, "icon", ReferenceKind::Texture, vehicle.icon);
-		edge(record, "interface", ReferenceKind::Texture, vehicle.interface_texture, alpha);
+		texture(record, "interface", TextureRoleId::HudAlphaOnly, vehicle.interface_texture);
 		edge(record, "statictexture", ReferenceKind::Texture, vehicle.static_texture);
 	}
 	def::def_free_hudpos(&file);
@@ -251,26 +261,27 @@ bool extract_terrain(const std::string &name, const std::vector<uint8_t> &bytes,
 		out.edges.push_back(edge_of(name, record, field, kind, value));
 		out.edges.back().loader_arg = loader_arg;
 	};
-	// Each map by its loader (renderer::TextureLoader): the colour, far detail, blend and tile-set
-	// maps through the TGA reader alone, the near detail maps through the stage loader (its .dds
-	// sibling first); the character and foliage maps are read by their own name, no texture loader
-	// (render-material-re.md "The game's texture loaders").
-	using renderer::TextureLoader;
-	const int32_t tga = texture_loader_arg(TextureLoader::Tga);
-	const int32_t stage = texture_loader_arg(TextureLoader::Stage);
 	edge(std::string(), "polytrn_polydata", ReferenceKind::TerrainData, config.polydata);
-	edge(std::string(), "polytrn_colormap", ReferenceKind::Texture, config.colormap, tga);
-	edge(std::string(), "polytrn_detailmap", ReferenceKind::Texture, config.detailmap, stage);
-	edge(std::string(), "polytrn_detailmap_c1", ReferenceKind::Texture, config.detailmap_c1, stage);
-	edge(std::string(), "polytrn_detailmap_c2", ReferenceKind::Texture, config.detailmap_c2, stage);
-	edge(std::string(), "polytrn_detailmap_c3", ReferenceKind::Texture, config.detailmap_c3, stage);
-	edge(std::string(), "polytrn_detailmap2", ReferenceKind::Texture, config.detailmap2, stage);
-	edge(std::string(), "polytrn_detailmapdist", ReferenceKind::Texture, config.detailmapdist, tga);
-	edge(std::string(), "polytrn_detailmapdist2", ReferenceKind::Texture, config.detailmapdist2, tga);
-	edge(std::string(), "polytrn_detailblendmap", ReferenceKind::Texture, config.detailblendmap, tga);
-	edge(std::string(), "polytrn_tilestrip", ReferenceKind::Texture, config.tilestrip, tga);
-	edge(std::string(), "polytrn_charmap", ReferenceKind::Texture, config.charmap);
-	edge(std::string(), "polytrn_foliagemap", ReferenceKind::Texture, config.foliagemap);
+	// Each map by its role's loader (ADR 0046 S18, the terrain's keys [orig: PolyTrn_InitTextures @
+	// 0x60AAA0]). Without its colour map the game logs "colormap" @ 0x60B389, and without its blend map
+	// once a splat detail is authored "blendermap" @ 0x60B19A: either aborts the mission
+	// (Game_StartMission @ 0x525AD8), so either missing refuses a build.
+	auto texture = [&](const char *field, TextureRoleId role, const std::string &value, int32_t flags = 0) {
+		if (!value.empty()) out.edges.push_back(texture_edge(name, std::string(), field, value, role, flags));
+	};
+	const bool splats = !config.detailmap_c1.empty() || !config.detailmap_c2.empty() || !config.detailmap_c3.empty();
+	texture("polytrn_colormap", TextureRoleId::TerrainColourMap, config.colormap, kTextureArgGates);
+	texture("polytrn_detailmap", TextureRoleId::TerrainDetailCoefficient, config.detailmap);
+	texture("polytrn_detailmap_c1", TextureRoleId::TerrainSplatDetail, config.detailmap_c1);
+	texture("polytrn_detailmap_c2", TextureRoleId::TerrainSplatDetail, config.detailmap_c2);
+	texture("polytrn_detailmap_c3", TextureRoleId::TerrainSplatDetail, config.detailmap_c3);
+	texture("polytrn_detailmap2", TextureRoleId::TerrainSecondDetail, config.detailmap2);
+	texture("polytrn_detailmapdist", TextureRoleId::TerrainFarDetail, config.detailmapdist);
+	texture("polytrn_detailmapdist2", TextureRoleId::TerrainFarDetail, config.detailmapdist2);
+	texture("polytrn_detailblendmap", TextureRoleId::TerrainBlendMap, config.detailblendmap, splats ? kTextureArgGates : 0);
+	texture("polytrn_tilestrip", TextureRoleId::TerrainTileAtlas, config.tilestrip);
+	texture("polytrn_charmap", TextureRoleId::TerrainCharMap, config.charmap);
+	texture("polytrn_foliagemap", TextureRoleId::TerrainFoliageMap, config.foliagemap);
 	for (size_t i = 0; i < config.foliage_defs.size(); ++i)
 		edge("foliage " + std::to_string(i + 1), "graphic", ReferenceKind::Model, config.foliage_defs[i].graphic);
 	return true;
@@ -329,19 +340,17 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 			// from the graphic's (its stem, lower case, and the frame's number), and never the
 			// graphic's own name [orig: CParticleDef_ReloadGraphicFrameTextures @0x5e4bb0]: each
 			// frame is a reference of its own (ADR 0046 S14).
-			const int32_t loader = texture_loader_arg(renderer::TextureLoader::Particle);
 			const int frames = std::clamp(layer.flip_frames, 1, particle::kMaxParticleFlipFrames);
+			// Each is packed into the particle atlas, a TGA alone (ADR 0046 S18 [orig:
+			// CParticleTextureEntry_ProbeSizeFromDisk @ 0x5DFAA0]).
 			if (frames <= 1) {
-				out.edges.push_back(edge_of(name, definition.id, field, ReferenceKind::Texture, layer.texture));
-				out.edges.back().loader_arg = loader;
+				out.edges.push_back(texture_edge(name, definition.id, field, layer.texture, TextureRoleId::ParticleGraphic));
 				continue;
 			}
-			for (int frame = 1; frame <= frames; ++frame) {
-				out.edges.push_back(edge_of(name, definition.id, field + "[" + std::to_string(frame) + "]",
-				                            ReferenceKind::Texture,
-				                            renderer::retail_particle_frame_name(layer.texture, frames, frame)));
-				out.edges.back().loader_arg = loader;
-			}
+			for (int frame = 1; frame <= frames; ++frame)
+				out.edges.push_back(texture_edge(name, definition.id, field + "[" + std::to_string(frame) + "]",
+				                                 renderer::retail_particle_frame_name(layer.texture, frames, frame),
+				                                 TextureRoleId::ParticleGraphic));
 		}
 	}
 	return true;

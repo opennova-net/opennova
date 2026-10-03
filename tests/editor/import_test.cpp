@@ -350,7 +350,8 @@ static int test_import_pass() {
 	// A menu's .tga the project lacks loads its .dds (from the first dot), as retail's
 	// loader does (a texture of no model finds it as its game loader does: the sky maps'
 	// archive loader takes the .dds sibling first, a loader that reads the name alone does
-	// not); with the .tga there the .tga is the file.
+	// not, nor does a use whose loader is not witnessed, ADR 0046 S18); with the .tga there the
+	// .tga is the file.
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/sky.dds", std::vector<uint8_t>{'D', 'D', 'S', ' '}));
 	editor_test::handle_to_end(session, request::rescan());
 	std::string sky;
@@ -363,6 +364,8 @@ static int test_import_pass() {
 			sky == "art/sky.dds");
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "sky.tga", std::string(), nullptr,
 						texture_loader_arg(opennova::renderer::TextureLoader::Particle)) ==
+			ReferenceStatus::Missing);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "sky.tga", std::string(), &sky) ==
 			ReferenceStatus::Missing);
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/sky.tga", std::vector<uint8_t>(18, 0)));
 	editor_test::handle_to_end(session, request::rescan());

@@ -11,6 +11,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/model/field_text.h>
@@ -224,11 +225,11 @@ bool same_file(const std::string &a, const std::string &b) { return normalized_l
 // has it alone, renderer::material_texture_source over the row's runtime type; a menu
 // texture's and any other texture's reader goes by the name's last extension, as the factory
 // does). None for a model's chunk row, which reads a chunk container and no image, for a
-// texture of no model row whose name's own extension the factory cannot write (its loader opens
-// that name, renderer::texture_load_attempts), nor for a name no loader of the reference opens
-// or the factory refuses.
+// texture of no model row whose name's own extension the factory cannot write (its role's loader
+// reads that name, texture_reference_load), nor for a name no loader of the reference opens or the
+// factory refuses.
 std::string placeholder_file(const ReferenceSubject &missing) {
-	const bool row = missing.kind == ReferenceKind::Texture && missing.loader_arg >= 0;
+	const bool row = missing.kind == ReferenceKind::Texture && texture_arg_is_row_type(missing.loader_arg);
 	const uint8_t type = row ? renderer::material_texture_runtime_type(static_cast<uint8_t>(missing.loader_arg)) : 0;
 	if (row && renderer::material_texture_source(missing.target, type, {}).reader == renderer::MaterialTextureReader::Chunk)
 		return std::string();
