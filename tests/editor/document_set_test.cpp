@@ -319,8 +319,38 @@ static int test_names_in_another_case() {
 	return 0;
 }
 
+// The status line of a batch setting one field (ADR 0046 S15, S17): one record's by its title, to
+// its value in words; several records' to the value they now share, or "to different values" when
+// they do not (never one record's value said of all).
+static int test_batch_status_says_each_value() {
+	Menus menus("opennova_editor_document_set_status");
+	const SessionView &v = menus.view();
+	const auto text = [&](const char *locator, const char *value) {
+		Edit edit;
+		edit.address = menus.at(locator);
+		edit.field = "string.value";
+		edit.value = std::string(value);
+		return edit;
+	};
+	menus.session.handle(request::edit_record("main.mnu", text(kTitle, "Same")));
+	const std::string one = v.activity.status;
+	const size_t of = one.find(" of "), to = one.rfind(" to ");
+	TEST_EXPECT(menus.session.last_edit_ok() && one.rfind("Set ", 0) == 0 && of != std::string::npos &&
+	            to != std::string::npos && one.back() == '.');
+	if (of == std::string::npos || to == std::string::npos) return 1;
+	const std::string title = one.substr(4, of - 4), shown = one.substr(to + 4, one.size() - to - 5);
+	TEST_EXPECT(!title.empty() && shown.find("Same") != std::string::npos);
+
+	menus.session.handle(request::edit_record("main.mnu", std::vector<Edit>{text(kTitle, "Same"), text(kExit, "Other")}));
+	TEST_EXPECT(menus.session.last_edit_ok() && v.activity.status == "Set " + title + " of 2 records to different values.");
+	menus.session.handle(request::edit_record("main.mnu", std::vector<Edit>{text(kTitle, "Same"), text(kExit, "Same")}));
+	TEST_EXPECT(menus.session.last_edit_ok() && v.activity.status == "Set " + title + " of 2 records to " + shown + ".");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_batch_status_says_each_value();
 	failures += test_paste_and_duplicate_agree();
 	failures += test_remembered_selections();
 	failures += test_selection_over_rows();
