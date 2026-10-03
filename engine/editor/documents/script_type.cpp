@@ -92,6 +92,66 @@ size_t script_compile_count() {
 	return g_compiles;
 }
 
+std::string script_report_words(const std::string &report) {
+	// Each report by the leg that makes it (runtime/wac/compiler.cpp, Script_Compile @ 0x4F31F0 and
+	// WacScript_ResolveParameter @ 0x4F2920).
+	struct Row {
+		const char *report, *words;
+	};
+	static constexpr Row kRows[] = {
+		{"Missing END", "A block opened on this line (an IF, a DOSEQ, a DORND or a loop) has no END."},
+		{"Unexpected END", "This END closes no block: none is open here."},
+		{"END inside IF", "An END among an IF's conditions, before its THEN."},
+		{"Unexpected ELSE", "An ELSE among an IF's conditions, before its THEN."},
+		{"Unexpected ELSEIF", "An ELSEIF among an IF's conditions, before its THEN."},
+		{"ELSE without THEN/ENTER/LEAVE", "This ELSE follows no THEN, ENTER or LEAVE block."},
+		{"ELSEIF without THEN/ENTER/LEAVE", "This ELSEIF follows no THEN, ENTER or LEAVE block."},
+		{"Unexpected NEXT", "A NEXT among an IF's conditions."},
+		{"NEXT without DO", "This NEXT is in no DOSEQ or DORND block."},
+		{"Unexpected IF", "An IF among another IF's conditions: a THEN is missing before it."},
+		{"Unexpected GLOOP", "A GLOOP among an IF's conditions."},
+		{"Unexpected PLOOP", "A PLOOP among an IF's conditions."},
+		{"No LOOP Nesting!", "A loop inside another loop: the compiler nests none."},
+		{"[ifname] without IF", "A name in brackets with no IF before it to name."},
+		{"If already named", "This IF has a name already."},
+		{"IF Name already used", "Another IF, a variable or a word of the language has this name already."},
+		{"Variable Name already used", "A variable, an IF or a word of the language has this name already."},
+		{"Over Variable Buffersize", "Too many variables are declared: the compiler's table of them is full."},
+		{"Wrong Parameter", "This value is not of the kind the command's parameter takes."},
+		{"Variable not set", "An assignment with no value after its =."},
+		{"Unexpected =", "An = after an operator that waits for its value."},
+		{"Open Paren", "A ( is left open at the end of the line."},
+		{"Unexpected )", "This ) closes no (."},
+		{"Paren nesting too deep", "Parentheses nest deeper than the compiler holds."},
+		{"Auto Paren nesting too deep", "The operators nest deeper than the compiler holds."},
+		{"Unexpected NOT", "Two NOTs in a row."},
+		{"Can't run files inside blocks", "A RUN inside a block: a file runs only at the top level."},
+		{"A run file can't run more files", "A RUN inside a file another RUN brought in."},
+		{"Unable to run file", "The file this RUN names could not be read."},
+		{"Out of IF space", "Too many IFs: the compiler's table of them is full."},
+		{"Out of DO space", "Too many DOSEQ and DORND blocks: the compiler's table of them is full."},
+		{"Out of num space", "Too many different numbers: the compiler's table of them is full."},
+		{"Out of string space", "Too much text: the compiler's table of strings is full."},
+		{"Over Compile Buffersize", "The script is longer than the compiler's buffer holds."},
+		{"V# too big", "A mission variable past V255: the compiler reads V255."},
+		{"G# too big", "A global variable past G255: the compiler reads G255."},
+		{"Unknown Group", "No script group has this name: the compiler reads group 0."},
+		{"Unknown FX", "No particle effect has this name."},
+		{"Unknown SOUNDSET", "No sound set has this name."},
+		{"Unknown AMMO", "No ammo has this name, nor ammo_ with it."},
+		{"Unknown FACE", "No facial expression has this name."},
+		{"Unknown ANIM", "No animation slot has this name."},
+		{"Unknown SSN", "No entity of the mission has this SSN."},
+	};
+	const std::string said(strutil::trim_view(report));
+	for (const Row &row : kRows)
+		if (said == row.report) return row.words;
+	// "Unknown 'TOKEN'": a word that is no command, keyword, variable or name.
+	if (said.rfind("Unknown '", 0) == 0 && said.size() > 10)
+		return "'" + said.substr(9, said.size() - 10) + "' is no command, keyword, variable or name the compiler knows.";
+	return said;
+}
+
 wac::Program compile_script(const TextDocument &document) {
 	wac::CompileEnv env;
 	env.source_names = { document.path() };
@@ -120,9 +180,9 @@ std::vector<Diagnostic> validate_script_file(const DocumentBase &document) {
 		const std::string said(strutil::trim_view(report.message));
 		findings.push_back(text_finding(finding_code(ScriptFinding::Compile),
 				DiagnosticSeverity::Warning,
-				"The WAC compiler reports \"" + said +
-						"\": the game runs the script as it compiled, and its script debug overlay "
-						"shows the first such report.",
+				script_report_words(said) + " (The WAC compiler: \"" + said +
+						"\". The game runs the script as it compiled; its script debug overlay "
+						"shows the first such report.)",
 				*text, report_offset(text->text(), report.line, report.offset)));
 	}
 	// A line end the reader reads otherwise than the editor's lines: it ends a line at a CR and reads

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <system_error>
 #include <utility>
 
@@ -11,7 +12,9 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/problems_service.h>
@@ -745,6 +748,16 @@ bool removes_only(const std::vector<Edit> &edits) {
 	return !edits.empty();
 }
 
+// A batch of Sets of one field, each naming a record it holds (the Inspector's edit of a field, on
+// one record or on several together).
+bool sets_one_field(const std::vector<Edit> &edits) {
+	for (const Edit &edit : edits)
+		if (edit.operation != EditOperation::Set || edit.field.empty() || edit.field != edits.front().field ||
+		    is_batch_made(edit.address.row) || is_batch_made(edit.address.child))
+			return false;
+	return !edits.empty();
+}
+
 } // namespace
 
 // One EditRecord: a single edit or a batch over any rows, then the selection follows (what
@@ -779,6 +792,11 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 	const uint64_t before = document.revision(), generation = document.load_generation();
 	const std::string active = view_.documents.active;
 	const uint64_t serial = view_.documents.selection.serial;
+	// The records a removal takes or a set changes, in words as they read before the edit (the status
+	// line's, ADR 0046 S15: a set of an entity's item renames it).
+	const bool removal = records && removes_only(requested);
+	const std::string named =
+	        records && (removal || sets_one_field(requested)) ? records_words(*records, requested) : std::string();
 	// A record's new name is its own edit: its uses keep the old name until Rename everywhere
 	// (RenameSymbol) rewrites them.
 	if (!document.apply(*edits, error)) {
@@ -814,9 +832,51 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 		if (gesture) open_gesture(document.path(), gesture);
 		else core_.problems().validate_later();
 	}
-	view_.activity.status = "Edited " + document.path() + ".";
+	view_.activity.status = removal ? "Removed " + named + "." : records ? edit_words(*records, *edits, named) : std::string();
+	if (view_.activity.status.empty()) view_.activity.status = "Edited " + document.path() + ".";
 	core_.touch(ViewConcern::Output);
 	return true;
+}
+
+// The records of edits in words (ADR 0046 S15: record_display with the graph's names): one by its
+// title ("Ranger #12"), several by their count.
+std::string DocumentSet::records_words(const Document &document, const std::vector<Edit> &edits) const {
+	std::vector<NodeAddress> records;
+	for (const Edit &edit : edits)
+		if (std::find(records.begin(), records.end(), edit.address) == records.end()) records.push_back(edit.address);
+	if (records.size() != 1) return std::to_string(records.size()) + " records";
+	std::optional<GraphNameSource> names;
+	if (view_.findings.graph) names.emplace(*view_.findings.graph);
+	return record_display(document, records.front(), names ? &*names : nullptr);
+}
+
+// What a batch did, in words, for the status line (ADR 0046 S15): a field set by its name, on its
+// record by its title as it read before (`named`), to what its new value names ("Set Group of Ranger
+// #12 to Group 3 (5 entities)."); a row added by its title; "" for any other batch (the line then
+// names the file).
+std::string DocumentSet::edit_words(const Document &document, const std::vector<Edit> &edits,
+                                    const std::string &named) const {
+	std::optional<GraphNameSource> names;
+	if (view_.findings.graph) names.emplace(*view_.findings.graph);
+	const NameSource *source = names ? &*names : nullptr;
+	if (edits.empty()) return std::string();
+	const Edit &first = edits.front();
+	if (!named.empty() && sets_one_field(edits) && document.row(first.address.row)) {
+		const FieldSchema *schema = nullptr;
+		for (const FieldSchema &field : document.fields(first.address.kind))
+			if (field.id == first.field) schema = &field;
+		if (!schema) return std::string();
+		const FieldUse use = document.field_on(first.address, *schema);
+		Value value;
+		if (!document.get(first.address, first.field, value)) return std::string();
+		const DisplayName words = value_display(document, first.address, use, value, source);
+		std::vector<FieldChoice> own;
+		const std::string shown = words.text.empty() ? shown_value(*schema, document.choices_on(first.address, use, own), value) : words.text;
+		return "Set " + field_title(use) + " of " + named + " to " + shown + ".";
+	}
+	if (edits.size() == 1 && first.operation == EditOperation::Add && document.last_added())
+		return "Added " + record_display(document, document.address_of(document.last_added()), source) + ".";
+	return std::string();
 }
 
 void DocumentSet::copy_records(Document &document, bool cut) {

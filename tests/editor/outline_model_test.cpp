@@ -16,16 +16,26 @@
 // ADR 0046 S14: a list or a tree lists the kinds its mask keeps and leaves out the rows its type's
 // listed hook does until all rows are listed, a reveal winning over both; a click selects a record
 // alone, with Ctrl joining or leaving, with Shift the lines from the primary's; and the Inspector's
-// shared form spans records of kinds whose fields are alike (ui/inspector_layout).
+// shared form spans records of kinds whose fields are alike (ui/inspector_layout). ADR 0046 S15: a
+// mission's tree reads like a mission (its rows under its type's headings: each pool, its teams and
+// groups where they tell rows apart, each with its count; a heading closed hides its rows, a reveal
+// opens it, a filter by a record's words keeps its headings), its rows titled with the names given.
 #include <cstdio>
+#include <map>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/document_types.h>
+#include <editor/documents/mission_document.h>
+#include <editor/documents/mission_labels.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/outline_model.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
@@ -630,10 +640,166 @@ int test_kinds_alike() {
 	return 0;
 }
 
+// A source of names standing in for the graph: the fixture's catalog's four items (ADR 0046 S15).
+class ItemNames : public NameSource {
+public:
+	ItemNames() {
+		for (const auto &[id, name] : std::vector<std::pair<const char *, const char *>>{
+		             {"106100", "Wire Test Pump"}, {"106101", "Wire Test Armory"}, {"106102", "Wire Test Rifleman"},
+		             {"100001", "Marker Alpha"}}) {
+			GraphSymbol symbol;
+			symbol.kind = ReferenceKind::Item;
+			symbol.name = symbol.display = id;
+			symbol.record = name;
+			symbol.file = "items.def";
+			items_.push_back(symbol);
+		}
+	}
+	const GraphSymbol *symbol(ReferenceKind kind, const std::string &name, const std::string &) const override {
+		for (const GraphSymbol &symbol : items_)
+			if (symbol.kind == kind && symbol.name == name) return &symbol;
+		return nullptr;
+	}
+	const GraphSymbol *reached(const GraphEdge &) const override { return nullptr; }
+	uint64_t generation() const override { return generation_; }
+	uint64_t generation_ = 7;
+
+private:
+	std::vector<GraphSymbol> items_;
+};
+
+// ADR 0046 S15: the minted mission as a tree under the mission's headings (mission_row_headings): the
+// mission row first under none, then each pool's heading with its count over its rows, the organics
+// (one team, two groups of one each) under their pool's heading alone, a group of two items under a
+// heading of its own once the items are put so; the rows titled with the names given (the lines made
+// anew when the names' generation moves); a heading closed hides what stands under it and a click
+// range leaves the headings out; a reveal of a row under a closed heading opens it; a filter by a
+// record's words keeps it and the headings over it, held open.
+int test_mission_headings() {
+	const DocumentType *type = document_type_for(AssetKind::Mission);
+	std::unique_ptr<Document> mission = type ? records_of(type->make()) : nullptr;
+	Diagnostic error;
+	const std::string repo = test_paths_repo_root(__FILE__);
+	TEST_EXPECT(mission && mission->load_bytes(test_io::read_file(repo + "/fixtures/bms/synth_logic.bms"), "synth_logic.bms",
+	                                           AssetKind::Mission, "jo", error));
+	if (!mission) return 1;
+	OutlineModel tree(OutlineMode::Tree, nullptr, nullptr, mission_row_headings);
+	ItemNames names;
+	const std::vector<OutlineLine> &lines = tree.lines(*mission, 0, &names);
+	const auto line_named = [&](const std::string &text) {
+		for (size_t i = 0; i < lines.size(); ++i)
+			if (lines[i].text == text) return i;
+		return SIZE_MAX;
+	};
+	TEST_EXPECT(!lines.empty() && !lines[0].heading && lines[0].address.kind == node_kind(MissionKind::Mission));
+	const size_t items = line_named("Items (3)"), organics = line_named("Organics (2)");
+	TEST_EXPECT(items == 1 && lines[items].heading && lines[items].depth == 0 && lines[items].open);
+	TEST_EXPECT(line_named("Buildings (2)") != SIZE_MAX && line_named("Markers (5)") != SIZE_MAX &&
+	            line_named("Area triggers (2)") != SIZE_MAX && line_named("Events (2)") != SIZE_MAX &&
+	            line_named("Waypoint paths (128)") != SIZE_MAX);
+	// The organics: one team, two groups of one each: no heading over a row alone, each row one deeper
+	// than its pool's heading.
+	TEST_EXPECT(organics != SIZE_MAX && !lines[organics + 1].heading && lines[organics + 1].depth == 1 &&
+	            !lines[organics + 2].heading && lines[organics + 2].depth == 1);
+	const NodeAddress walker = lines[organics + 1].address;
+	const int32_t ssn = static_cast<const EntityRow *>(mission->row(walker.row))->native.id;
+	TEST_EXPECT(lines[organics + 1].text == "Wire Test Rifleman #" + std::to_string(ssn) && lines[organics + 1].name == std::to_string(ssn));
+	// Each record's brief words beside its title, for a column too narrow for it: an event's first
+	// trigger's subject and verb, an entity's SSN first.
+	const size_t events = line_named("Events (2)");
+	TEST_EXPECT(events != SIZE_MAX && events + 1 < lines.size() &&
+	            lines[events + 1].brief == "Event 1: #" + std::to_string(ssn) + " is in zone 20");
+	TEST_EXPECT(lines[organics + 1].brief == "#" + std::to_string(ssn) + " Wire Test Rifleman");
+	// The markers under their types (their items): a type of two or more under a heading of its words
+	// (its item's name, else its id), one deeper than the pool's; a type of one marker under the pool alone.
+	std::map<int64_t, size_t> marker_types;
+	for (const Node *row : dynamic_cast<const MissionDocument &>(*mission).rows_of(MissionKind::Marker))
+		++marker_types[opennova::mission::entity_item_id(static_cast<const EntityRow *>(row)->native)];
+	TEST_EXPECT(marker_types.size() > 1);
+	for (const auto &[item, count] : marker_types) {
+		const std::string words = item == 100001 ? "Marker Alpha" : "Item " + std::to_string(item);
+		const size_t heading = line_named(words + " (" + std::to_string(count) + ")");
+		TEST_EXPECT(count > 1 ? heading != SIZE_MAX && lines[heading].heading && lines[heading].depth == 1 : heading == SIZE_MAX);
+	}
+	// The names' generation moved: the lines made anew; none given: the document's own words.
+	const size_t made = tree.lines_made();
+	names.generation_ = 8;
+	tree.lines(*mission, 0, &names);
+	TEST_EXPECT(tree.lines_made() == made + 1);
+	TEST_EXPECT(tree.lines(*mission).size() == lines.size() &&
+	            tree.lines(*mission)[organics + 1].text == "Organic #" + std::to_string(ssn));
+	// Closed, the organics' heading hides their rows; a click on a heading selects nothing.
+	tree.lines(*mission, 0, &names);
+	const size_t before = tree.lines(*mission, 0, &names).size();
+	tree.set_open(tree.lines(*mission, 0, &names)[organics], false);
+	const std::vector<OutlineLine> &closed = tree.lines(*mission, 0, &names);
+	TEST_EXPECT(closed.size() == before - 2 && closed[organics].heading && !closed[organics].open);
+	TEST_EXPECT(!tree.click(organics, NodeAddress(), false, false).record.row);
+	// A reveal of the walker opens it.
+	TEST_EXPECT(tree.reveal(*mission, {walker}, 0, &names) != SIZE_MAX && tree.lines(*mission, 0, &names).size() == before);
+	// A filter by the walker's item's name keeps it and the headings over it, held open (and the event
+	// whose trigger names it: its words name it too); no pool that holds none.
+	tree.set_filter("rifleman");
+	const std::vector<OutlineLine> &found = tree.lines(*mission, 0, &names);
+	bool walker_kept = false, items_kept = false;
+	for (const OutlineLine &line : found) {
+		walker_kept = walker_kept || (!line.heading && line.address == walker);
+		items_kept = items_kept || (line.heading && line.text.rfind("Items", 0) == 0);
+	}
+	TEST_EXPECT(walker_kept && !items_kept && !found.empty() && found[0].heading && found[0].forced &&
+	            found[0].text == "Organics (2)");
+	// Two items put in one group and the third in another (all of one team): the group of two under its
+	// heading, one deeper, after the item alone in its group (which stands under its pool's heading).
+	const std::vector<const Node *> placed = dynamic_cast<const MissionDocument &>(*mission).rows_of(MissionKind::Item);
+	TEST_EXPECT(placed.size() == 3);
+	if (placed.size() != 3) return 1;
+	std::vector<Edit> regroup;
+	for (size_t i = 0; i < placed.size(); ++i)
+		for (const auto &[field, value] : std::vector<std::pair<const char *, int64_t>>{{"team", 0}, {"group", i < 2 ? 7 : 8}}) {
+			Edit edit;
+			edit.address = {placed[i]->id, placed[i]->kind, 0};
+			edit.field = field;
+			edit.value = value;
+			regroup.push_back(edit);
+		}
+	TEST_EXPECT(mission->apply(regroup, error));
+	OutlineModel grouped(OutlineMode::Tree, nullptr, nullptr, mission_row_headings);
+	const std::vector<OutlineLine> &by_group = grouped.lines(*mission);
+	size_t pool = SIZE_MAX;
+	for (size_t i = 0; i < by_group.size(); ++i)
+		if (by_group[i].heading && by_group[i].text == "Items (3)") pool = i;
+	TEST_EXPECT(pool != SIZE_MAX && pool + 4 < by_group.size());
+	if (pool == SIZE_MAX || pool + 4 >= by_group.size()) return 1;
+	TEST_EXPECT(!by_group[pool + 1].heading && by_group[pool + 1].depth == 1 && by_group[pool + 1].address.row == placed[2]->id);
+	TEST_EXPECT(by_group[pool + 2].heading && by_group[pool + 2].text == "Group 7 (2)" && by_group[pool + 2].depth == 1);
+	TEST_EXPECT(by_group[pool + 3].address.row == placed[0]->id && by_group[pool + 3].depth == 2 &&
+	            by_group[pool + 4].address.row == placed[1]->id && by_group[pool + 4].depth == 2);
+	// A row whose title reads other rows follows them (S15 review m13): the first event names Zone 20, and
+	// the area made a mission area, its line reads so after the edit, though the event did not change.
+	OutlineModel follow(OutlineMode::Tree, nullptr, nullptr, mission_row_headings, mission_row_reads_others);
+	const auto event_text = [&] {
+		for (const OutlineLine &line : follow.lines(*mission))
+			if (!line.heading && !line.collection && line.address.kind == node_kind(MissionKind::Event)) return line.text;
+		return std::string();
+	};
+	TEST_EXPECT(event_text().find("Zone 20,") != std::string::npos);
+	const Node *zone = dynamic_cast<const MissionDocument &>(*mission).rows_of(MissionKind::Area).front();
+	Edit boundary;
+	boundary.address = {zone->id, zone->kind, 0};
+	for (const FieldSchema &field : mission->fields(zone->kind))
+		if (field.id.find("flag") != std::string::npos && boundary.field.empty()) boundary.field = field.id;
+	boundary.value = int64_t(1);
+	TEST_EXPECT(!boundary.field.empty() && mission->apply({boundary}, error));
+	TEST_EXPECT(event_text().find("Zone 20 (mission area)") != std::string::npos);
+	std::printf("test_mission_headings passed\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
+	failures += test_mission_headings();
 	failures += test_kinds_and_listed_rows();
 	failures += test_clicks();
 	failures += test_kinds_alike();
