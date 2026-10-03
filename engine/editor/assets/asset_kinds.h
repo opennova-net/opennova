@@ -47,6 +47,7 @@ enum class DocumentTypeId {
 	Credits,     // a .kda: a CBIN form held as its ConfigFile text
 	Shader,      // a .fx: the SCR form the shader loader takes, held as its text
 	Text,        // a configuration or a text, as the file stores it
+	Texture,     // a .tga .mdt .pcx .dds .png: its texels as the game reads them (ADR 0046 S18)
 	kCount, // the number of values, None among them
 };
 

@@ -613,7 +613,8 @@ bool stage_symbol_file(const ProjectPaths &paths, const ProjectDocument &project
 	const AssetEntry *asset = find_asset(scan, file);
 	const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;
 	const DocumentContent content = type ? document_content(*type) : DocumentContent::Other;
-	if (content == DocumentContent::Other) {
+	// An image (a texture, S18) names nothing either.
+	if (content == DocumentContent::Other || content == DocumentContent::Image) {
 		findings.push_back(cannot_rewrite(type, file));
 		return false;
 	}

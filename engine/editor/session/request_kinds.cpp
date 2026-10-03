@@ -97,6 +97,9 @@ void serve_open_document(SessionCore &core, const EditorRequest &request) {
 void serve_show_in_files(SessionCore &core, const EditorRequest &request) {
 	core.documents().show_in_files(request);
 }
+void serve_select_file(SessionCore &core, const EditorRequest &request) {
+	core.documents().select_file(request.path);
+}
 void serve_close_document(SessionCore &core, const EditorRequest &request) {
 	core.documents().close_document(request.path);
 }
@@ -417,6 +420,12 @@ constexpr RequestKindRow kRows[] = {
 			"file the editor does not open included; ask_name: and asks its new name "
 			"(Rename...).")
 			.takes(request_params({ F::Path }, { F::AskName }))
+			.row,
+	Request(K::SelectFile, "select_file", serve_select_file,
+			"The project file path selected in Files (left out, none): a file a viewport draws whether "
+			"or not it is open (a texture) shows in the Preview window until another document is made "
+			"active.")
+			.takes(request_params({}, { F::Path }))
 			.row,
 	Request(K::ReloadDocument, "reload_document", serve_open_document,
 			"The document at path read again from its file, its unsaved edits dropped (the prompt "

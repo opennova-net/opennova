@@ -718,8 +718,8 @@ generic form beside it)
 
 **Viewport**:
 One document's picture as the game would draw it, of one kind (a menu's screen, a model, a text in
-its script device, a mission's 3D view), kept by the session while the document is
-open: one per document and kind. Its role is Preview (shown by the Preview window while its document
+its script device, a mission's 3D view, a texture), kept by the session while the document is
+open: one per document and kind (a texture's also while Files selects the file, open or not). Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
 picture with the outline and the Inspector beside it: a mission's, for which the Preview window steps
 aside while that document is active and it has nothing to show, so the picture has the centre);
@@ -794,6 +794,29 @@ text while an operation holds the documents. Where no window draws it (headless)
 drawn over the tab (a menu, a dialog), the document's lines show instead, read only.
 _Avoid_: script editor (the whole editor), code view, text view (the lines shown read only where no
 device draws), CodeEdit (the Godot control behind it)
+
+**Texture document**:
+A texture file of the project (a .tga, .mdt, .pcx, .dds or .png) open in the editor, read as the
+game reads it: by the reader its name picks (a .tga or an .mdt the game's TGA reader, which takes every
+file's rows bottom up whatever its header says; a .pcx the PCX reader, every colour opaque; a .dds
+D3DX's loader, which reads the bytes by their content; a .png the menus' reader), never by what the
+bytes would say elsewhere. It holds the file's texels (each level a DDS stores, an indexed file's
+palette and indices) and what the texture is in a modder's words (its format, size, texels,
+compression, alpha, mip levels, palette, whether the game loads it and why not); a file the game
+cannot load still opens and says why. Its Document tab is its texture viewport beside those facts,
+its palette and what uses it; the Preview window shows the texture Files selects before it is opened.
+Read only for now (ADR 0046 S18).
+_Avoid_: image (the decoded texels alone), bitmap, sprite, asset (a project file by its logical name)
+
+**Texture viewport**:
+A texture's picture (the Main view of a texture document, and the Preview window's for a texture
+Files selects, read from its file while it is not open): its texels at a zoom (fitted, or a scale about
+a middle texel, which the wheel steps about the pointer and a drag pans), through its colour, one
+channel or its alpha as grey, or its colour over a checkerboard by its alpha, at a mip level; each a
+SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
+its palette entry), never a record. Its device draws the texels the portable decode made, texel for
+texel where a texel covers a pixel or more.
+_Avoid_: image viewer, preview (the Preview window, or the role)
 
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by

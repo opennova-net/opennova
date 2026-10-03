@@ -124,6 +124,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Texture, "texture", "Texture", ArchiveSlot::Resource)
 	        .extensions(kTexture)
+	        .edited_by(DocumentTypeId::Texture)
 	        .new_name("newtexture.tga")
 	        .row,
 	// No name gives it: a model's chunk row reads the file it names as a chunk container whatever

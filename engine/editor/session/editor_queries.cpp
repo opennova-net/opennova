@@ -196,10 +196,10 @@ constexpr QueryParam kMenuRenderParams[] = {
 
 constexpr QueryParam kViewportParams[] = {
 	{ "path", J::String, false, nullptr,
-			"An open document by its project-relative path or its logical name; left out, the active "
-			"one." },
+			"An open document by its project-relative path or its logical name, or the texture Files "
+			"selects (S18); left out, the active one." },
 	{ "kind", J::String, false, nullptr,
-			"The viewport's kind (menu, model, script, mission); left out, the one the document shows "
+			"The viewport's kind (menu, model, script, mission, texture); left out, the one the document shows "
 			"in: the Preview's kind that shows it (a menu's; a model's, over a model, a clip or an "
 			"animation table), else its Main view." },
 	{ "op", J::String, true, nullptr,
@@ -851,8 +851,20 @@ JsonValue answer_viewport(const QueryContext &context, const QueryArgs &args, st
 	ViewportKind kind = ViewportKind::kCount;
 	if (args.has("kind")) viewport_kind_from_token(args.text("kind"), kind);
 	const DocumentBase *document = open_document_of(context, args, error);
-	const ViewportModel *model =
-			document ? core.viewports().resolve(core.view(), document->path(), kind, error) : nullptr;
+	std::string at = document ? document->path() : std::string();
+	// A file Files selects that a kind draws open or not (S18: a texture), by its path or its name.
+	if (!document && args.has("path") && core.view().project.open) {
+		const AssetScan &scan = *core.view().project.scan;
+		const AssetEntry *entry = scan.at_path(args.text("path"));
+		if (!entry) entry = scan.find(args.text("path"));
+		for (size_t i = 0; entry && i < kViewportKindCount; ++i)
+			if ((kind == ViewportKind::kCount || kind == static_cast<ViewportKind>(i)) &&
+			    draws_selected_file(core.view(), entry->relative_path, static_cast<ViewportKind>(i))) {
+				at = entry->relative_path;
+				error.clear();
+			}
+	}
+	const ViewportModel *model = at.empty() ? nullptr : core.viewports().resolve(core.view(), at, kind, error);
 	if (!model) return JsonValue::make_null();
 	return read->answer(ViewportReadContext{ core.view(), *model, args, page_of(args) }, error);
 }
@@ -1255,7 +1267,9 @@ constexpr EditorQueryRow kRows[] = {
 			"as the outline shows them, the project's names read: a mission's entity by its item's "
 			"name and its SSN), change since the save (unchanged, changed, added) and the "
 			"collections it holds, their records at every depth; for a text document, by the same "
-			"offset and limit, a page of its lines (each its line, from 1, and its text).")
+			"offset and limit, a page of its lines (each its line, from 1, and its text); for a texture, "
+			"texture: its reader, whether the game loads it and why not, its sides, levels, palette "
+			"size, alpha and facts in words.")
 			.pages("rows, or a text document's lines")
 			.row,
 	Query(K::Record, "record", answer_record, kRecordParams, kRecordReads,

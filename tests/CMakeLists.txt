@@ -1109,6 +1109,25 @@ target_link_libraries(dds_write_test PRIVATE opennova_formats)
 target_include_directories(dds_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME dds_write COMMAND dds_write_test)
 
+# What the game's readers make of a texture file (ADR 0046 S18, the texture document): the TGA
+# reader's decode (its forms, the rows always bottom up, what it zeroes or leaves unset), D3DX's DDS
+# loader (its pixel-format table, the levels, what it refuses) and the PCX reader's indices and
+# palette, each over files minted by our writers or here.
+add_executable(tga_decode_test tga/tga_decode_test.cpp)
+target_link_libraries(tga_decode_test PRIVATE opennova_formats)
+target_include_directories(tga_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_decode COMMAND tga_decode_test)
+
+add_executable(dds_read_test dds/dds_read_test.cpp)
+target_link_libraries(dds_read_test PRIVATE opennova_formats)
+target_include_directories(dds_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dds_read COMMAND dds_read_test)
+
+add_executable(pcx_game_decode_test pcx/pcx_game_decode_test.cpp)
+target_link_libraries(pcx_game_decode_test PRIVATE opennova_formats)
+target_include_directories(pcx_game_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pcx_game_decode COMMAND pcx_game_decode_test)
+
 add_executable(til_roundtrip_test til/til_roundtrip_test.cpp)
 target_link_libraries(til_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(til_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4144,6 +4163,15 @@ add_test(NAME editor_symbol_rename COMMAND editor_symbol_rename_test)
 # type over a file of its kinds loads, serializes stably, labels its fields, keeps field_on's
 # read-only, sets a field to its own value with no byte changed, and defines each name as a symbol
 # find resolves, every reference kind with its reference_kinds row.
+# The texture viewer (ADR 0046 S18): a texture file as the game's readers read it, its facts in words
+# (documents/texture_image), the texture document, and its viewport through a session (Files'
+# selection previewed from its file, the viewport query and SetViewport, the texture opened, the item
+# using it); the retail leg (OPENNOVA_JO_DIR) a sample of the install's textures of each extension.
+add_executable(editor_texture_document_test editor/texture_document_test.cpp)
+target_link_libraries(editor_texture_document_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_texture_document COMMAND editor_texture_document_test)
+
 add_executable(editor_document_contract_test editor/editor_document_contract_test.cpp)
 target_link_libraries(editor_document_contract_test PRIVATE opennova_editor)
 target_include_directories(editor_document_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <editor/assets/asset_kinds.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/model/document_base.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_model.h>
@@ -23,6 +24,12 @@ DocumentTypeId type_of(const DocumentBase &document) {
 }
 
 } // namespace
+
+bool draws_selected_file(const SessionView &view, const std::string &path, ViewportKind kind) {
+	if (path.empty() || kind == ViewportKind::kCount || !viewport_kind_row(kind).files) return false;
+	const PreviewTarget &target = view.documents.previews[kind];
+	return target.path == path && viewport_kind_shows(kind, view.documents.file_selected.type);
+}
 
 Viewports::Viewports() = default;
 Viewports::~Viewports() = default;
@@ -57,9 +64,11 @@ ViewportModel &Viewports::ensure(const std::string &path, ViewportKind kind) {
 }
 
 void Viewports::track(const SessionView &view) {
-	// A viewport whose document is no longer open, or is open as a type its kind does not show.
+	// A viewport whose document is no longer open, or is open as a type its kind does not show; a files
+	// kind's (S18) stays while it draws the file Files selects, open or not.
 	slots_.erase(std::remove_if(slots_.begin(), slots_.end(),
 						 [&](const Slot &slot) {
+							 if (draws_selected_file(view, slot.model->path(), slot.model->kind())) return false;
 							 const DocumentBase *document = open_at(view, slot.model->path());
 							 return !document ||
 									 !viewport_kind_shows(slot.model->kind(), type_of(*document));
@@ -69,7 +78,8 @@ void Viewports::track(const SessionView &view) {
 		const auto kind = static_cast<ViewportKind>(i);
 		const std::string &target = view.documents.previews[kind].path;
 		const DocumentBase *document = target.empty() ? nullptr : open_at(view, target);
-		if (document && viewport_kind_shows(kind, type_of(*document))) ensure(target, kind);
+		if ((document && viewport_kind_shows(kind, type_of(*document))) || draws_selected_file(view, target, kind))
+			ensure(target, kind);
 	}
 	// A document whose type a Main-role kind shows owns that viewport while it is open (its tab's).
 	for (const auto &document : view.documents.open) {
@@ -165,8 +175,23 @@ bool Viewports::addressed_(const SessionView &view, const std::string &path, Vie
 	// No path: the active document, as every pathless read and edit names it (ADR 0046 S13 A5).
 	at = path.empty() ? view.documents.active : path;
 	const DocumentBase *document = at.empty() ? nullptr : open_at(view, at);
+	// A file Files selects that a files kind draws (S18), its document open or not.
+	if (!document)
+		for (size_t i = 0; i < kViewportKindCount; ++i) {
+			const auto files = static_cast<ViewportKind>(i);
+			if ((named == ViewportKind::kCount || named == files) && draws_selected_file(view, at, files)) {
+				kind = files;
+				return true;
+			}
+		}
 	if (!document) {
-		error = at.empty() ? std::string("No document is open.") : "No document is open at " + at + ".";
+		// A file whose kind draws when Files selects it (a texture) says so: selecting it is the other way
+		// to its viewport.
+		const AssetEntry *entry = at.empty() || !view.project.scan ? nullptr : view.project.scan->at_path(at);
+		if (entry && file_preview_kind(asset_kind_row(entry->kind).document) != ViewportKind::kCount)
+			error = "No document is open at " + at + ", and Files does not select it (select_file).";
+		else
+			error = at.empty() ? std::string("No document is open.") : "No document is open at " + at + ".";
 		return false;
 	}
 	const DocumentTypeId type = type_of(*document);

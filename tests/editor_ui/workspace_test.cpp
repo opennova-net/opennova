@@ -73,6 +73,15 @@ namespace editor_ui_test {
 
 namespace {
 
+// The requests but the SelectFiles a click in Files raises (ADR 0046 S18: the selection is the
+// session's too).
+std::vector<EditorRequest> without_selects(std::vector<EditorRequest> requests) {
+	requests.erase(std::remove_if(requests.begin(), requests.end(),
+	                              [](const EditorRequest &r) { return r.kind == EditorRequestKind::SelectFile; }),
+	               requests.end());
+	return requests;
+}
+
 bool near(float a, float b, float slack = 4.0f) { return std::fabs(a - b) <= slack; }
 
 // The requests the workspace raised, served by a real session as the shell's pump serves
@@ -255,7 +264,8 @@ void test_workspace_layout() {
 	      "Problems is the bottom's tab");
 	const std::string home = logged_frame(windows, 8);
 	CHECK(home.find("New project") != std::string::npos, "no project: the welcome view");
-	CHECK(home.find("Open a menu, a model or an animation to preview it.") != std::string::npos, "nothing to preview yet");
+	CHECK(home.find("Open a menu, a model or an animation to preview it, or select a texture in Files.") != std::string::npos,
+	      "nothing to preview yet");
 
 	// A seeded project with a catalog open: a missing model reference and a line the game
 	// ignores draw the inspector's Missing badge and the catalog's dropped-lines notice.
@@ -1179,12 +1189,16 @@ void test_files_window() {
 	CHECK(hover_find(ui, item_id(table, {"menus", "menus/main.mnu", "##row"}), x, top, bottom, row), "main.mnu's row");
 	ui.button(true);
 	ui.button(false);
-	CHECK(window->selected() == "menus/main.mnu" && ui.drain().empty(), "a click selects it");
+	std::vector<EditorRequest> selects = ui.drain();
+	// The selection is the session's too (ADR 0046 S18): a click raises its SelectFile.
+	CHECK(window->selected() == "menus/main.mnu" && one(selects, EditorRequestKind::SelectFile) &&
+	              selects[0].path == "menus/main.mnu",
+	      "a click selects it");
 	ui.button(true);
 	ui.button(false);
 	ui.button(true);
 	ui.button(false);
-	std::vector<EditorRequest> requests = ui.drain();
+	std::vector<EditorRequest> requests = without_selects(ui.drain());
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == "menus/main.mnu", "a double click opens it");
 	// A text opens too (S13 D9: a text document); an image source, which no document type opens, is
 	// selected, not opened.
@@ -1193,14 +1207,14 @@ void test_files_window() {
 	ui.button(false);
 	ui.button(true);
 	ui.button(false);
-	requests = ui.drain();
+	requests = without_selects(ui.drain());
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == "readme.txt", "a text file opens");
 	CHECK(hover_find(ui, item_id(table, {"art", "art/logo.png", "##row"}), x, top, bottom, row), "logo.png's row");
 	ui.button(true);
 	ui.button(false);
 	ui.button(true);
 	ui.button(false);
-	CHECK(window->selected() == "art/logo.png" && ui.drain().empty(), "an image source is selected, not opened");
+	CHECK(window->selected() == "art/logo.png" && without_selects(ui.drain()).empty(), "an image source is selected, not opened");
 
 	// New: weapon.def made at once; items.def, which the project has, not offered; a menu's
 	// name asked first, checked as it is typed.
@@ -1696,7 +1710,7 @@ void test_preview_follows() {
 	ui.windows.set_view(&v);
 	ui.windows.set_devices(&devices.cache);
 	PreviewRun run{ session, devices, ui, {} };
-	const char *const kNothing = "open a menu, a model or an animation to preview it.";
+	const char *const kNothing = "open a menu, a model or an animation to preview it, or select a texture in files.";
 	run.settle();
 	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "nothing to preview: what to open");
 

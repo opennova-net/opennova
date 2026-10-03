@@ -517,8 +517,9 @@ static int test_item_ids_within_a_table() {
 	return 0;
 }
 
-// The retail leg (OPENNOVA_JO_DIR): the install's files of every kind a document type opens (its
-// catalogs, string tables, menus, stylesheet, models, clips and animation tables) exported into a
+// The retail leg (OPENNOVA_JO_DIR): the install's files of every kind a document type opens and
+// validates (its catalogs, string tables, menus, stylesheet, models, clips and animation tables; a
+// texture's type makes no findings of a file of its own) exported into a
 // project and validated: every file's own findings made once, and no closed file's document
 // alive after (the models' geometry included); nothing made again while nothing changed; an edit
 // of the open item table validates that table alone and the graph extracts it alone.
@@ -540,8 +541,10 @@ static int test_retail_validation() {
 		const std::string &name = location.logical_name;
 		if (opennova::strutil::ends_with_icase(name, ".pff"))
 			continue;
+		// A type whose files take no findings of their own (a texture's) is no file the validation reads.
 		const AssetKind kind = origin.file_kind(name);
-		if (!document_type_for(kind))
+		const DocumentType *type = document_type_for(kind);
+		if (!type || !validates_files(*type))
 			continue;
 		std::vector<uint8_t> bytes;
 		if (!origin.read(name, bytes))

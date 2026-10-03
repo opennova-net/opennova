@@ -13,6 +13,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
@@ -256,6 +257,16 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const auto newest = std::find_if(reveals.rbegin(), reveals.rend(),
 			[](const ViewEvent &event) { return event.kind == ViewEventKind::RevealFile; });
 	if (newest != reveals.rend()) show_revealed(v, *newest);
+	// A file the session selected since Files last drew (a select_file over the wire, or this
+	// window's own click coming back) is the row selected, its folders opened and scrolled to.
+	if (v.documents.file_selected.path != followed_) {
+		followed_ = v.documents.file_selected.path;
+		if (const AssetEntry *entry = followed_.empty() ? nullptr : entry_at(v, followed_)) {
+			selected_ = entry->relative_path;
+			scroll_to_ = entry->relative_path;
+			open_to_ = entry->imported_from.empty() ? entry->relative_path : entry->imported_from;
+		}
+	}
 	draw_toolbar(v);
 	// The filter, and beside it how many files the project has (under it in a narrow dock).
 	const size_t count = v.project.scan->entries.size();
@@ -433,6 +444,12 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick |
 	                              ImGuiSelectableFlags_AllowOverlap)) {
 		selected_ = entry.relative_path;
+		// The selection is the session's too (S18): a texture so selected shows in the Preview window
+		// (again, once another document was made active since).
+		const bool previews = file_preview_kind(asset_kind_row(entry.kind).document) != ViewportKind::kCount;
+		if (view.allows(EditorRequestKind::SelectFile) &&
+		    (view.documents.file_selected.path != entry.relative_path || (previews && !view.documents.files_lead)))
+			workspace_.request(request::select_file(entry.relative_path));
 		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && is_editable_kind(entry.kind) &&
 		    view.allows(EditorRequestKind::OpenDocument))
 			workspace_.request(request::open_document(entry.relative_path));
