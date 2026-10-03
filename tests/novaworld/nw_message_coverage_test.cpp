@@ -197,16 +197,16 @@ int check_S_20_pool3_sync() {
 	return 0;
 }
 
-// S2C 0x0C — organic spawn batch: one empty-body record (slot + has_body=0).
+// S2C 0x0C — organic spawn batch: one empty-body record (slot + def_type 0).
 int check_S_0C_organic() {
 	LE w;
 	w.u16(1);        // entity_count
 	w.u16(0x0001);   // slot_id (not a sentinel)
-	w.u8(0);         // has_body = 0 -> record ends here
+	w.u8(0);         // def_type 0 -> record ends here
 	OrganicSpawnBatch out;
 	EXPECT(decode_organic_spawn_batch(w.b.data(), w.b.size(), out));
 	EXPECT(out.records.size() == 1);
-	EXPECT(!out.records[0].has_body);
+	EXPECT(!out.records[0].has_body());
 	cover('S', 0x0C);
 	return 0;
 }
@@ -459,16 +459,21 @@ int check_C_06_fired_round() {
 	return 0;
 }
 
-// C2S 0x21 — anti-cheat CRC reply: 5 B effective (u8 + u32).
+// C2S 0x21 — anti-cheat CRC reply: the builder's 9 B (u8 + u32 crc + u32
+// echoed key); the handler's 5-B read stays a valid body.
 int check_C_21_checksum_reply() {
 	LE w;
 	w.u8(7);         // player_index
 	w.u32(0xDEADBEEF); // expected_crc
+	w.u32(0x01020304); // echoed challenge key
 	ClientChecksumReply rec;
 	size_t consumed = 0;
 	EXPECT(decode_client_checksum_reply(w.b.data(), w.b.size(), rec, consumed));
-	EXPECT(consumed == 5);
+	EXPECT(consumed == 9);
 	EXPECT(rec.expected_crc == 0xDEADBEEF);
+	EXPECT(rec.has_echoed_key && rec.echoed_key == 0x01020304u);
+	EXPECT(decode_client_checksum_reply(w.b.data(), 5, rec, consumed));
+	EXPECT(consumed == 5 && !rec.has_echoed_key);
 	cover('C', 0x21);
 	return 0;
 }

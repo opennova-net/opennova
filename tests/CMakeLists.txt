@@ -3133,6 +3133,15 @@ target_link_libraries(nwmsg_replay_test PRIVATE opennova_net)
 target_include_directories(nwmsg_replay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nwmsg_replay_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
 add_test(NAME nwmsg_replay COMMAND nwmsg_replay_test)
+# R1 of the net parity proof ladder: every body in the retail captures decoded
+# to the byte and, where a struct encoder exists, re-encoded byte-identical
+# (net/npwire/ingame_body_codec.h). The _retail leg proves the authored
+# record-class table against the real items.def.
+add_executable(nwmsg_codec_parity_test novaworld/nwmsg_codec_parity_test.cpp)
+target_link_libraries(nwmsg_codec_parity_test PRIVATE opennova_runtime opennova_formats opennova_net)
+target_include_directories(nwmsg_codec_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nwmsg_codec_parity_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+opennova_add_mixed_test(nwmsg_codec_parity COMMAND nwmsg_codec_parity_test)
 
 # Host-row staleness backstop sweep (prune_stale_hosts).
 add_executable(host_prune_test novaworld/host_prune_test.cpp)

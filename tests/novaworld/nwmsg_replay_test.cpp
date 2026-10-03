@@ -18,194 +18,42 @@
 
 #include <net/npwire/protocol_message.h>
 
-#include <base/io/strutil.h>
-
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
 #include <map>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
+#include "common/nwmsg_fixture.h"
 #include "common/test_expect.h"
 
 using opennova::ProtocolMessage;
-using opennova::make_protocol_message;
-using opennova::strutil::hex_to_bytes;
+using nwmsg::FixtureBundle;
+using nwmsg::ManifestSection;
+using nwmsg::kRuns;
+using nwmsg::load_manifest;
+using nwmsg::load_nwmsg;
+using nwmsg::message_from_fixture;
+using nwmsg::runtime_full_type;
 
 namespace {
 
-struct FixtureMessage {
-	uint8_t flags_raw = 0;
-	uint16_t full_type = 0;
-	std::vector<uint8_t> body;
-};
-
-struct FixtureBundle {
-	std::string label;
-	std::vector<FixtureMessage> messages;
-};
-
-bool load_nwmsg(const std::string &path, std::vector<FixtureBundle> &out,
-                std::string &err) {
-	std::ifstream file(path);
-	if (!file) {
-		err = "cannot open " + path;
-		return false;
-	}
-	out.clear();
-	std::string line;
-	FixtureBundle current;
-	bool in_bundle = false;
-	bool saw_header = false;
-	while (std::getline(file, line)) {
-		if (!line.empty() && line.back() == '\r') line.pop_back();
-		if (line.empty()) continue;
-		if (line[0] == '#') {
-			if (line.find("novaworld fixture v1") != std::string::npos) saw_header = true;
-			continue;
-		}
-		std::istringstream ls(line);
-		std::string word;
-		ls >> word;
-		if (word == "bundle") {
-			if (in_bundle) {
-				err = "nested bundle in " + path;
-				return false;
-			}
-			current = FixtureBundle{};
-			ls >> current.label;
-			in_bundle = true;
-		} else if (word == "msg") {
-			if (!in_bundle) {
-				err = "msg outside bundle in " + path;
-				return false;
-			}
-			std::string flags_s, type_s, body_s;
-			ls >> flags_s >> type_s;
-			ls >> body_s; // "-" (or absent) for empty payloads
-			FixtureMessage m;
-			m.flags_raw = static_cast<uint8_t>(std::stoul(flags_s, nullptr, 16));
-			m.full_type = static_cast<uint16_t>(std::stoul(type_s, nullptr, 16));
-			if (body_s == "-") body_s.clear();
-			if (!body_s.empty() && !hex_to_bytes(body_s, m.body)) {
-				err = "bad hex in " + path + ": " + line.substr(0, 40);
-				return false;
-			}
-			current.messages.push_back(std::move(m));
-		} else if (word == "end") {
-			if (!in_bundle) {
-				err = "end outside bundle in " + path;
-				return false;
-			}
-			out.push_back(std::move(current));
-			in_bundle = false;
-		} else {
-			err = "unknown directive '" + word + "' in " + path;
+// `<name>_packets.nwmsg` re-splits `<name>.nwmsg` on decoded protocol-packet
+// boundaries instead of captured frames: the same message stream, other bundles.
+bool same_message_stream(const std::vector<FixtureBundle> &a,
+                         const std::vector<FixtureBundle> &b) {
+	std::vector<const nwmsg::FixtureMessage *> fa, fb;
+	for (const auto &x : a) for (const auto &m : x.messages) fa.push_back(&m);
+	for (const auto &x : b) for (const auto &m : x.messages) fb.push_back(&m);
+	if (fa.size() != fb.size()) return false;
+	for (size_t i = 0; i < fa.size(); ++i)
+		if (fa[i]->flags_raw != fb[i]->flags_raw || fa[i]->full_type != fb[i]->full_type ||
+		    fa[i]->body != fb[i]->body)
 			return false;
-		}
-	}
-	if (in_bundle) {
-		err = "unterminated bundle in " + path;
-		return false;
-	}
-	if (!saw_header) {
-		err = "missing fixture v1 header in " + path;
-		return false;
-	}
 	return true;
 }
-
-// The manifest's per-file sections name the .nwmsg files and their counts.
-struct ManifestSection {
-	int bundles = -1;
-	int messages = -1;
-	std::set<uint16_t> types;
-};
-
-bool load_manifest(const std::string &path,
-                   std::map<std::string, ManifestSection> &out, std::string &err) {
-	std::ifstream file(path);
-	if (!file) {
-		err = "cannot open " + path;
-		return false;
-	}
-	out.clear();
-	std::string line;
-	std::string section;
-	while (std::getline(file, line)) {
-		if (!line.empty() && line.back() == '\r') line.pop_back();
-		if (line.empty() || line[0] == '#') continue;
-		if (line.front() == '[' && line.back() == ']') {
-			section = line.substr(1, line.size() - 2);
-			out[section] = ManifestSection{};
-			continue;
-		}
-		if (section.empty()) continue;
-		const auto eq = line.find('=');
-		if (eq == std::string::npos) continue;
-		std::string key = line.substr(0, eq);
-		std::string value = line.substr(eq + 1);
-		auto trim = [](std::string &s) {
-			while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
-			while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
-		};
-		trim(key);
-		trim(value);
-		if (key == "bundles") out[section].bundles = std::stoi(value);
-		else if (key == "messages") out[section].messages = std::stoi(value);
-		else if (key == "types") {
-			std::istringstream ts(value);
-			std::string tok;
-			while (std::getline(ts, tok, ',')) {
-				trim(tok);
-				if (!tok.empty())
-					out[section].types.insert(
-					    static_cast<uint16_t>(std::stoul(tok, nullptr, 16)));
-			}
-		}
-	}
-	return true;
-}
-
-// Build a ProtocolMessage carrying the EXACT recorded wire flags byte.
-// make_protocol_message() coerces flags_raw==0 to LEN8, but retail really
-// does send zero-flag messages (no length field, empty payload), so the
-// roundtrip must preserve them.
-ProtocolMessage message_from_fixture(const FixtureMessage &m) {
-	ProtocolMessage msg;
-	msg.tag = static_cast<uint8_t>(m.full_type & 0xFFu);
-	msg.full_tag = static_cast<uint16_t>(
-			((m.flags_raw & 0x80u) ? 0x100u : 0u) | msg.tag);
-	msg.payload = m.body;
-	msg.length = static_cast<uint32_t>(m.body.size());
-	const uint8_t raw = m.flags_raw;
-	msg.flags.settings_update = (raw & 0x80u) != 0;
-	msg.flags.len16 = (raw & 0x40u) != 0;
-	msg.flags.len8 = (raw & 0x20u) != 0;
-	msg.flags.skip2 = (raw & 0x10u) != 0;
-	msg.flags.skip1 = (raw & 0x08u) != 0;
-	msg.flags.frag_cont = (raw & 0x04u) != 0;
-	msg.flags.frag_end = (raw & 0x02u) != 0;
-	msg.flags.msg_type_high_bit = (raw & 0x80u) != 0;
-	msg.flags.raw = raw;
-	return msg;
-}
-
-uint16_t runtime_full_type(const FixtureMessage &m) {
-	return static_cast<uint16_t>(
-			((m.flags_raw & 0x80u) ? 0x100u : 0u) |
-			static_cast<uint8_t>(m.full_type & 0xFFu));
-}
-
-const char *const kRuns[] = {
-	"run_20260426_113242",
-	"run_20260426_120102",
-	"run_20260426_120859",
-};
 
 } // namespace
 
@@ -276,6 +124,21 @@ int main() {
 				++total_bundles;
 				for (const auto &m : b.messages) seen_types.insert(runtime_full_type(m));
 			}
+		}
+
+		// Each `X_packets.nwmsg` carries exactly `X.nwmsg`'s message stream.
+		for (const auto &entry : manifest) {
+			const std::string &name = entry.first;
+			const std::string suffix = "_packets.nwmsg";
+			if (name.size() <= suffix.size() ||
+			    name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+				continue;
+			const std::string plain = name.substr(0, name.size() - suffix.size()) + ".nwmsg";
+			if (manifest.count(plain) == 0) continue; // e.g. server_load_packets has no sibling
+			std::vector<FixtureBundle> packets, frames;
+			TEST_EXPECT(load_nwmsg(run_dir + "/" + name, packets, err));
+			TEST_EXPECT(load_nwmsg(run_dir + "/" + plain, frames, err));
+			TEST_EXPECT(same_message_stream(packets, frames));
 		}
 
 		// §5.5 pin — the BMS-state bundle: [0x1C, 0x0B, 0x66, 0x76, 0x11],

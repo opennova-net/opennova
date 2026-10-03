@@ -523,15 +523,15 @@ void print_tag_0d(const std::vector<uint8_t> &body) {
 }
 
 void print_organic_record(int index, const OrganicSpawnRecord &r) {
-	if (!r.has_body) {
+	if (!r.has_body()) {
 		std::printf("        record %d slot=%s (empty spawn)\n", index,
 		            handle_str(r.slot_id).c_str());
 		return;
 	}
-	std::printf("        record %d slot=%s type=%s name=%-12s pos=(%.1f, %.1f, %.1f) "
+	std::printf("        record %d slot=%s def_type=%u type=%s name=%-12s pos=(%.1f, %.1f, %.1f) "
 	            "yaw=%.2f\xc2\xb0(0x%08x) team=0x%02x parent=%s owner(+0x78)=0x%08x "
 	            "miniFlags(+36)=0x%04x%s net=0x%04x anim_slot=%u(+0x374) player_class=%u(+0x294) ai_state=%u\n",
-	            index, handle_str(r.slot_id).c_str(),
+	            index, handle_str(r.slot_id).c_str(), unsigned(r.def_type),
 	            type_str(r.item_type_id).c_str(),
 	            ("\"" + r.entity_name + "\"").c_str(), fp16(r.pos_x), fp16(r.pos_y),
 	            fp16(r.pos_z),
@@ -612,6 +612,8 @@ void print_tag_58(const std::vector<uint8_t> &body) {
 	for (int i = 0; i < 39; ++i)
 		if (s.stat_values[i] != 0) std::printf(" [%02d]=%d", i, s.stat_values[i]);
 	for (const SessionStatusKV &kv : s.kv) std::printf(" kv%u=%u", kv.key, kv.value);
+	if (s.has_writer_sentinel)
+		std::printf(" sentinel={%u,%u}", unsigned(s.writer_sentinel.key), s.writer_sentinel.value);
 	if (s.trailing_bytes > 0) std::printf(" +%zuB unread tail", s.trailing_bytes);
 	std::printf("%s\n", clean ? "" : " DECODE INCOMPLETE");
 }
@@ -1012,6 +1014,7 @@ void print_tag_21_c2s(const std::vector<uint8_t> &body) {
 	}
 	std::printf("        [0x21 C2S] player=%u expected_crc=0x%08x",
 	            unsigned(r.player_index), r.expected_crc);
+	if (r.has_echoed_key) std::printf(" echoed_key=0x%08x", r.echoed_key);
 	if (body.size() > used) {
 		std::printf(" trailing %zu B: %s",
 		            body.size() - used,

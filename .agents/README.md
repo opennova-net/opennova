@@ -28,6 +28,10 @@ divergences in its §8 catalog):
   witnessed retail chain (phase counter + sub-blocks + priority/budget entity
   loop) and the verify loop (`scripts/net/diff_0a.py` + the golden). Ported-vs-not
   state lives in the ledger's D-NET table and net-re §8, not there.
+- `docs/adr/0050-net-parity-proof-ladder.md` — how retail parity is proved, rung by
+  rung (R1 corpus codec parity in CI through R6 field confidence), the pinned retail
+  reference, and the onHook lane. R1 is the `nwmsg_codec_parity` ctest over the
+  body codec registry (`engine/net/npwire/ingame_body_codec.h`).
 - `.agents/retail-lan-parity.md` — onHook-first four-topology retail/OpenNova LAN
   probing without the retired generated Python parity matrix. onHook is an
   external `opennova-int` executable passed as `-OnHookMcpPath`, never a

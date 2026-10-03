@@ -353,12 +353,17 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 // [orig: NapiNPClientMsg_0x00C @ 0x42E730]. Pool-0 "organics" — AI infantry and
 // human-player infantry — enter the world via 0x0C, NOT 0x0D (which handles
 // pool 1/3 and crashes on the player template type 0x14B9, §5.6). Unlike
-// PoolSpawnRecord, EVERY field after `has_body` is UNCONDITIONAL — there are no
+// PoolSpawnRecord, EVERY field after `def_type` is UNCONDITIONAL — there are no
 // flag-gated optionals — and the record is slot-id-first (0x0D is flags-first).
 // The name is parsed inline for every record (why 0x0C is crash-safe on 0x14B9).
 struct OrganicSpawnRecord {
 	uint16_t slot_id = 0;        // (pool<<12)|slot; 0xFFFF or (s&0xF000)>=0x5000 ends the batch
-	bool     has_body = false;   // u8 != 0; 0 ⇒ empty spawn, record ends after this byte
+	// The writer's itemDef+0x5C ItemDefType low byte (3 = person); the reader
+	// only tests it, 0 ⇒ empty spawn, the record ends after this byte.
+	// [orig: NetPacket_SerializeEntityStatesToBuffer gate @0x503195, byte
+	//  @0x5031d8, the empty slot's 0 @0x5031a6; reader @0x42e813]
+	uint8_t  def_type = 0;
+	bool has_body() const { return def_type != 0; }
 
 	uint16_t item_type_id = 0;   // entity+28 (ItemList_FindIndexByTypeId → Entity_InitFromItemDef)
 	uint32_t owner_connection_id = 0; // entity+120 (0x78); authenticated connection dcb
@@ -1339,10 +1344,13 @@ bool decode_client_fired_round(const uint8_t *body, size_t len,
                                ClientFiredRound &out, size_t &consumed);
 
 // ===========================================================================
-// C2S 0x21 — anti-cheat CRC reply. Fixed 9 B (effective 5; trailing 4 B are
-// observed-zero in capture and discarded by the handler). Sent in response to
-// S2C 0x30 / 0x31 challenges. Host re-computes CRC over the indexed 276-byte
-// player record (with 6 volatile fields temporarily zeroed), XORs against a
+// C2S 0x21 — anti-cheat CRC reply. Fixed 9 B: [u8 index][u32 crc][u32 echoed
+// challenge key]. The host handler reads only the first 5 B; the trailing dword
+// is the challenge key the client's builder echoes (zero when the challenge
+// carried a zero key) [orig: NetPacket_WriteEntityCRCChecksum @0x42B020, key echo
+// @0x42B14D; net-re §5.65]. Sent in response to S2C 0x30 / 0x31 challenges.
+// Host re-computes CRC over the indexed 276-byte player record (with 6
+// volatile fields temporarily zeroed), XORs against a
 // per-connection salt (`playerCtx+89924`), and compares against the reply's
 // `expected_crc`. Mismatch logs "ACRC" and disconnects with "PUNT ACRC".
 // [orig: NapiNPServerMsg_HandleAntiCheatCRCCheck @ 0x502050]
@@ -1351,6 +1359,8 @@ bool decode_client_fired_round(const uint8_t *body, size_t len,
 struct ClientChecksumReply {
 	uint8_t  player_index = 0;      // index into the 276-stride player array
 	uint32_t expected_crc = 0;      // u32 LE; host XORs computed CRC vs salt before compare
+	bool     has_echoed_key = false; // the builder's trailing dword was present
+	uint32_t echoed_key = 0;        // the challenge key echoed back; the host never reads it
 };
 
 bool decode_client_checksum_reply(const uint8_t *body, size_t len,

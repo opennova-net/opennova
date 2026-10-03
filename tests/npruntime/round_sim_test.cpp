@@ -1097,7 +1097,7 @@ bool test_dismemberment_damage_path() {
 		for (const OrganicSpawnRecord &record : batch.records) {
 			if (record.slot_id == piece->handle.packed) piece_record = &record;
 		}
-		if (!expect(piece_record != nullptr && piece_record->has_body &&
+		if (!expect(piece_record != nullptr && piece_record->has_body() &&
 					piece_record->net_id == 0,
 				"corpse clone joins the pool-0 spawn batch with a cleared net id"))
 			return false;

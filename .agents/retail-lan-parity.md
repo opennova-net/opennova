@@ -8,12 +8,12 @@ Use this runbook to probe the four Joint Operations LAN paths:
 4. OpenNova host to OpenNova joiner (`OO`).
 
 Two MCP servers, one client layer. The onHook MCP bridge is the only retail
-driver: it is NOT a registered MCP server in this environment and never
-appears in an agent's tool list; it is an external `opennova-int` executable
-(`onhook-mcp.exe`) that the repository adapter shells out to, located by the
-mandatory `-OnHookMcpPath` argument. An agent that does not have that
-executable on disk cannot run any retail leg of this runbook and must report
-the parity leg as BLOCKED rather than hunt for an onHook tool or substitute a
+driver: an external `opennova-int` executable (`onhook-mcp.exe`) that the
+repository adapter shells out to, located by the mandatory `-OnHookMcpPath`
+argument. A session may also have it registered as an MCP server (the
+`onhook_*` tools), but the runner never depends on that registration. An agent
+that does not have that executable on disk cannot run any retail leg of this
+runbook and must report the parity leg as BLOCKED rather than substitute a
 different probe. OpenNova endpoints are driven through the game's own
 `opennova-game` MCP (`docs/mcp.md`): the runner launches each OpenNova role on
 launch flags with `--mcp-port` (host 8975, joiner 8976 by default;
@@ -26,6 +26,11 @@ recorded with it.
 
 ## Safety and evidence
 
+- The retail reference is the maintainer's JO:CA install (`jox01`,
+  `Jointops.exe` SHA-256 `9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57`,
+  code-identical to the IDB image; ADR 0050 decision 2). Keep it pristine: the
+  SERVER and CLIENT copies below are hash-verified copies of it, and onHook is
+  deployed only into the copies.
 - Use two distinct retail copies for SERVER and CLIENT.
 - Use the complete patched-Bink deployment, including the original Bink DLL
   under the forwarding filename expected by that proxy. For revx02, retain
