@@ -452,6 +452,17 @@ static int test_request_round_trip() {
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"import_files\",\"imports\":[{\"path\":\"x\",\"retail\":true}]}", back).find("retail") !=
 	            std::string::npos);
+	// S16: an install's file under the project's own name (the expansion's: jox01.bin as jxm.bin), its
+	// `as`; one only an install's file has.
+	ImportChoice renamed = install;
+	renamed.entry = "jox01.bin";
+	renamed.as = "jxm.bin";
+	const EditorRequest as_import = request::import_files({renamed}, false);
+	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(as_import)).c_str(), parsed));
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back == as_import && back.imports[0].name() == "jxm.bin" &&
+	            parsed.get("imports")->array[0].get_string("as", "") == "jxm.bin");
+	TEST_EXPECT(request_error("{\"kind\":\"import_files\",\"imports\":[{\"path\":\"x\",\"entry\":\"a.bin\",\"as\":\"b.bin\"}]}",
+	                          back).find("install's file") != std::string::npos);
 
 	const EditorRequest pick = request::pick_file(PickPurpose::RuntimeExecutable);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(pick)).c_str(), parsed));

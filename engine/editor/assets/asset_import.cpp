@@ -298,15 +298,18 @@ private:
 	bool read(const ImportChoice &source, const std::string &name, std::vector<uint8_t> &bytes) {
 		std::string io_error;
 		if (source.install) {
-			if (!install_.is_open() || install_.spec().root != source.path) {
+			// The install as the project imports it (its expansion's view): the file by the name the
+			// project gets, served by the member the choice names.
+			const InstallSpec spec = install_spec(source.path, document_);
+			if (!install_.is_open() || install_.spec() != spec) {
 				std::string error;
-				if (!install_.open(install_spec(source.path, document_), error)) {
+				if (!install_.open(spec, error)) {
 					refuse(CoreFinding::ImportInstall, error, name);
 					return false;
 				}
 			}
 			const InstallFile *file = install_.find(name);
-			if (!file || !install_.read(*file, bytes)) {
+			if (!file || !strutil::iequals(file->member, source.entry) || !install_.read(*file, bytes)) {
 				refuse(CoreFinding::ImportRead, "The game data has no file named " + name + ".", name);
 				return false;
 			}

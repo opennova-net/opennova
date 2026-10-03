@@ -33,7 +33,9 @@ public:
 	// What to check: the install's folder (`install`, "" for none) and the project (`document` for its
 	// game, `root` its folder), the scan (each file's logical name, size and last write) and the
 	// findings (the files they are about, their `asset`: project-relative paths). What it found of a
-	// file that still stands is kept; an install or a project that moved forgets everything.
+	// file that still stands is kept; an install or a project that moved forgets everything, as does a
+	// change of the project's expansion or of the one it builds on (the install's view moved: ADR 0046
+	// S16, install_spec).
 	void want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document,
 	          const std::string &root, const AssetScan &scan, const std::vector<Diagnostic> &findings);
 	// Checks files within `bytes` (what it reads of the project and of the install; at least one file).

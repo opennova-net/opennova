@@ -14,8 +14,10 @@ OriginalFiles::~OriginalFiles() = default;
 
 void OriginalFiles::want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document,
                          const std::string &root, const AssetScan &scan, const std::vector<Diagnostic> &findings) {
-	const std::string game = document ? document->target_game : std::string();
-	if (install != install_ || root != root_ || !document_ || !document || document_->target_game != game) {
+	// The install as the project imports it (its game, the expansion it builds on, its own expansion's
+	// name): what the files are compared with.
+	if (install != install_ || root != root_ || !document_ || !document ||
+	    install_spec(install, *document_) != install_spec(install, *document)) {
 		clear();
 		install_ = install;
 		root_ = root;

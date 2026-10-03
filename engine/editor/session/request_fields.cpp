@@ -54,10 +54,11 @@ constexpr RequestField kFields[] = {
 			"choose "
 			"from." },
 	{ F::Imports, "imports", J::Objects,
-			"Files chosen to import, {path, entry?, install?, native?}, each as the view's import rows "
-			"carry it "
+			"Files chosen to import, {path, entry?, install?, native?, as?}, each as the view's import "
+			"rows carry it "
 			"(install: the path is the game install; native: a loose file copied as the game's "
-			"own)." },
+			"own; as: the name the project gets an install's file under, a file the game reads by an "
+			"expansion's name taking the project's expansion's)." },
 	{ F::Edits, "edits", J::Objects,
 			"Edits over any rows of one document in the batch form, one undo step: [{op, id, "
 			"parent, kind, field, value, position, as, coalesce, gesture}], op one of set, clear, "
