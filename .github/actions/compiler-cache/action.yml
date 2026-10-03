@@ -1,0 +1,98 @@
+name: Compiler cache
+description: >-
+  sccache on a local disk directory carried between runs as ONE Actions cache
+  entry per build flavour: restored by every run, saved only by master pushes.
+
+# Why not sccache's own GitHub Actions backend: it stores one cache entry per
+# object file. Seven flavours times ~1.5k objects put the repository past the
+# 10 GB Actions cache cap at ~21k entries, so entries evicted each other and
+# most writes failed (hundreds of "Cache write errors" per job), leaving even
+# warm runs at a 15-70% hit rate.
+#
+# Here the cache directory is one archive per flavour, keyed by commit:
+# - Restore (`mode: restore`, before the build) takes the newest entry of the
+#   flavour. A pull request reads master's entry; forks included.
+# - Save (`mode: save`, after the build, master pushes only) first prunes every
+#   object this build did not touch (sccache refreshes an entry's file times on
+#   each hit, sccache src/lru_disk_cache/mod.rs get_file), so the saved archive
+#   is exactly the latest master build's working set and never grows. It then
+#   deletes the flavour's older entries, which needs `actions: write` on the
+#   job.
+#
+# A flavour is one build tree (same flags, same paths): two jobs share one only
+# when they compile the same objects, and only the job that compiles the
+# superset saves it.
+
+inputs:
+  flavour:
+    description: The build tree's cache name (win-root, linux-root, win-gdext-debug, ...).
+    required: true
+  mode:
+    description: "'restore' (also installs sccache) before the build, 'save' after it."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Pinned: the save prune leans on the disk cache's hit-time refresh, so a
+    # sccache bump re-checks src/lru_disk_cache/mod.rs get_file first.
+    - name: Install sccache
+      if: inputs.mode == 'restore'
+      uses: mozilla-actions/sccache-action@v0.0.10
+      with:
+        version: v0.18.0
+
+    - name: Point sccache at the local cache directory
+      if: inputs.mode == 'restore'
+      shell: bash
+      run: |
+        echo "SCCACHE_DIR=${RUNNER_TEMP}/sccache" >> "$GITHUB_ENV"
+        # A ceiling for one build's objects; the save prune keeps the archive
+        # to the working set, so this never binds in steady state.
+        echo "SCCACHE_CACHE_SIZE=4G" >> "$GITHUB_ENV"
+
+    - name: Restore the compiler cache
+      if: inputs.mode == 'restore'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/sccache
+        key: cc-${{ inputs.flavour }}-${{ github.sha }}
+        restore-keys: cc-${{ inputs.flavour }}-
+
+    # Restored files keep their archived times; anything not newer than this
+    # stamp at save time went unused by this build.
+    - name: Stamp the restore
+      if: inputs.mode == 'restore'
+      shell: bash
+      run: touch "${RUNNER_TEMP}/sccache.restored"
+
+    - name: Prune objects this build did not use
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+      shell: bash
+      run: |
+        sccache --stop-server > /dev/null || true
+        before="$(du -sm "$SCCACHE_DIR" | cut -f1)"
+        find "$SCCACHE_DIR" -type f ! -newer "${RUNNER_TEMP}/sccache.restored" -delete
+        echo "compiler cache: ${before} MB before prune, $(du -sm "$SCCACHE_DIR" | cut -f1) MB saved"
+
+    - name: Save the compiler cache
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/sccache
+        key: cc-${{ inputs.flavour }}-${{ github.sha }}
+
+    - name: Delete the flavour's older entries
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        KEEP: cc-${{ inputs.flavour }}-${{ github.sha }}
+        PREFIX: cc-${{ inputs.flavour }}-
+      run: |
+        gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=${PREFIX}&ref=refs/heads/master&per_page=100" \
+            --jq ".actions_caches[] | select(.key != \"${KEEP}\") | .id" |
+          while read -r id; do
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}" ||
+              echo "::warning::could not delete cache entry ${id}"
+          done

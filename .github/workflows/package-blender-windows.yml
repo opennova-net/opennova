@@ -26,7 +26,6 @@ jobs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
       artifact_url: ${{ steps.upload.outputs.artifact-url }}
     env:
-      SCCACHE_GHA_ENABLED: "true"
       CMAKE_GENERATOR: Ninja
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
@@ -46,8 +45,13 @@ jobs:
         with:
           arch: x64
 
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+      # The apps package's build tree (same flags, a superset of this one's
+      # targets): package-apps-windows.yml saves it, this job only reads it.
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-mt
+          mode: restore
 
       - name: Package Blender add-on with Release CLI
         shell: bash
@@ -88,9 +92,11 @@ jobs:
       # extension into a user folder of the job's own, and every
       # tests/blender/*_test.py run against it (`-- --installed`, see
       # tests/blender/addon_harness.py).
-      - name: Cache portable Blender
+      # Restored everywhere, saved by master only: a PR-scoped copy is
+      # readable by that PR alone and crowds the repository's 10 GB cache.
+      - name: Restore portable Blender
         id: blender-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: build/blender-download
           key: blender-5.1.2-windows-x64
@@ -121,6 +127,13 @@ jobs:
             Remove-Item -Force -ErrorAction SilentlyContinue $zip
           }
           if (-not (Test-Path $zip)) { throw "Could not download $name" }
+
+      - name: Save portable Blender
+        if: steps.blender-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
+        uses: actions/cache/save@v4
+        with:
+          path: build/blender-download
+          key: blender-5.1.2-windows-x64
 
       - name: Test the installed add-on in Blender
         shell: pwsh

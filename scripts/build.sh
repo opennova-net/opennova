@@ -4,16 +4,20 @@
 # missing classes that engine/ has since added.
 #
 # Usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all]
-#   --no-godot  skip the Godot addon bootstrap and the GDExtension build
-#               (library-only iteration; what CI's engine test job runs)
-#   --jobs N    build/test parallelism (default: the machine's CPU count)
+#                         [--cmake-arg ARG]...
+#   --no-godot       skip the Godot addon bootstrap and the GDExtension build
+#                    (library-only iteration; what CI's engine test job runs)
+#   --jobs N         build/test parallelism (default: the machine's CPU count)
+#   --cmake-arg ARG  pass ARG to the root configure (repeatable), e.g.
+#                    -DBUILD_NOVAWORLD_HTTP=ON as CI's Linux job does
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 build_godot=1
 suite=all
-usage="usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all]"
+cmake_args=()
+usage="usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all] [--cmake-arg ARG]..."
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -26,6 +30,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
             jobs="$2"; shift 2 ;;
         --jobs=*) jobs="${1#--jobs=}"; shift ;;
+        --cmake-arg)
+            [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
+            cmake_args+=("$2"); shift 2 ;;
+        --cmake-arg=*) cmake_args+=("${1#--cmake-arg=}"); shift ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
 done
@@ -49,7 +57,7 @@ if [[ "$build_godot" == "1" ]]; then
 fi
 
 echo "Building opennova libraries and tests..."
-cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release "${cmake_args[@]}"
 cmake --build "$root/build" --config Release -j "$jobs"
 
 echo "Running $suite tests..."
