@@ -45,6 +45,8 @@ constexpr NodeKind node_kind(ModelKind kind) { return static_cast<NodeKind>(kind
 constexpr size_t kModelLods = 0, kModelMaterials = 1, kModelLights = 2, kModelUserPoints = 3, kModelRegisters = 4,
                  kModelFrames = 5;
 constexpr size_t kModelOwnList = 0;
+// The collision row's lists: its sections, volumes, bullet faces and occlusion records.
+constexpr size_t kCollisionSections = 0, kCollisionVolumes = 1, kCollisionFaces = 2, kCollisionOcclusion = 3;
 
 // A LOD: the base's LOD (its geometry pointers the base's) and its PANM rows, in part order.
 struct ModelLod {

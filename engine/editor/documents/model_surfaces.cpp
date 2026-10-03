@@ -21,8 +21,6 @@ namespace {
 
 constexpr NodeKind kMaterial = node_kind(ModelKind::Material);
 constexpr NodeKind kFace = node_kind(ModelKind::Face);
-// The collision row's lists (CollisionRow): 0 sections, 1 volumes, 2 faces, 3 occlusion records.
-constexpr size_t kCollisionFaces = 2;
 
 // The game's table plays a face byte's surface as row `byte + 4`.
 constexpr int kTagOffset = 4;

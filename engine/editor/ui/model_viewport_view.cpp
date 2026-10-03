@@ -422,7 +422,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	}
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
-	ui_kit::tooltip("What the viewport marks over the model.");
+	ui_kit::tooltip("What the viewport marks over the model, and the collision it draws.");
 	if (ImGui::BeginPopup("marks")) {
 		ImGui::Checkbox("User points", &options.overlays.user_points);
 		ImGui::Checkbox("Lights", &options.overlays.lights);
@@ -431,6 +431,30 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 			ImGui::Checkbox("Bones", &options.bones);
 			ui_kit::tooltip("The rig's bones as the clip poses them, each named under the pointer; in the "
 			                "clip's own document a click on one selects it.");
+		} else {
+			// The collision (S17, preview/model_collision): a layer per thing the game tests the model
+			// against, each in its colour, its count, what the game does with it in its tooltip.
+			ImGui::SeparatorText("Collision");
+			const float swatch = ImGui::GetFrameHeight() * 0.6f;
+			for (size_t l = 0; l < size_t(ModelCollisionLayer::kCount); ++l) {
+				const ModelCollisionLayer layer = ModelCollisionLayer(l);
+				const ModelCollisionLayerRow &row = model_collision_layer(layer);
+				const size_t count = model_collision_layer_count(shown, layer, model.lod());
+				bool on = model_collision_layer_on(options.overlays, layer);
+				ImGui::PushID(row.token);
+				ImGui::BeginDisabled(count == 0 && !on);
+				const ImVec4 color(((row.rgb >> 16) & 0xFF) / 255.0f, ((row.rgb >> 8) & 0xFF) / 255.0f, (row.rgb & 0xFF) / 255.0f, 1.0f);
+				ImGui::AlignTextToFramePadding();
+				ImGui::ColorButton("##swatch", color,
+				                   ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoDragDrop,
+				                   ImVec2(swatch, swatch));
+				ImGui::SameLine();
+				const std::string text = std::string(row.label) + " (" + std::to_string(count) + ")";
+				if (ImGui::Checkbox(text.c_str(), &on)) model_collision_layer_set(options.overlays, layer, on);
+				ImGui::EndDisabled();
+				ui_kit::tooltip(count == 0 ? std::string("This model has none.\n") + row.words : std::string(row.words));
+				ImGui::PopID();
+			}
 		}
 		ImGui::EndPopup();
 	}
@@ -451,14 +475,15 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 				context.input.document ? records_of(*context.input.document) : nullptr);
 		ModelOverlayKind kind;
 		int index = -1;
+		ModelCollisionPick picked;
 		if (view.documents.active == model.path() && selected.child && document &&
-		    model_overlay_of(*document, selected, kind, index))
+		    (model_overlay_of(*document, selected, kind, index) || model_collision_of(*document, selected, picked)))
 			ids.push_back(selected.child);
 		CanvasWindowRequests requests(workspace);
 		std::string error;
 		model.command(context, "frame", ids, requests, error);
 	}
-	ui_kit::tooltip("Look at the selected marker, or at the whole model (F).");
+	ui_kit::tooltip("Look at the selected marker or collision record, or at the whole model (F).");
 	row.next(ui_kit::button_width("Registers"));
 	ImGui::BeginDisabled(shown.ctrl.count == 0);
 	if (ImGui::Button("Registers")) ImGui::OpenPopup("registers");

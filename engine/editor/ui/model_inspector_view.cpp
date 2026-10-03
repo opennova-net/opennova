@@ -5,6 +5,7 @@
 
 #include <imgui.h>
 
+#include <editor/documents/model_collision_words.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
 #include <editor/documents/model_surfaces.h>
@@ -151,13 +152,99 @@ void face_material(Workspace &workspace, const ModelDocument &model, const NodeA
 	                        "all at once.");
 }
 
+// Words without their [orig: ...] citations: what the Inspector shows, the cited words in its tooltip.
+std::string plain(const std::string &words) {
+	std::string out;
+	size_t at = 0;
+	while (at < words.size()) {
+		const size_t open = words.find(" [orig:", at);
+		if (open == std::string::npos) {
+			out += words.substr(at);
+			break;
+		}
+		out += words.substr(at, open - at);
+		const size_t close = words.find(']', open);
+		if (close == std::string::npos) break;
+		at = close + 1;
+	}
+	return out;
+}
+
+// What a collision record is to the game (documents/model_collision_words.h): the words wrapped, muted,
+// their citations in the tooltip, and a second paragraph where the record's own kind says more.
+void game_words(const std::string &words, const std::string &more = std::string()) {
+	ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
+	ImGui::TextWrapped("%s", plain(words).c_str());
+	ImGui::PopStyleColor();
+	ui_kit::tooltip(words);
+	if (more.empty()) return;
+	ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
+	ImGui::TextWrapped("%s", plain(more).c_str());
+	ImGui::PopStyleColor();
+	ui_kit::tooltip(more);
+}
+
+// A collision record's words: the section (a person's hit sphere), the volume by its type, the bullet face,
+// the occlusion record by its type; false for any other record.
+bool collision_words(const ModelDocument &model, const NodeAddress &record) {
+	const CollisionRow *collision = model.collision_row();
+	const ModelRow *row = model.model_row();
+	Document::Placement at;
+	if (!collision || !row || !model.placement(record, at)) return false;
+	const size_t i = at.index;
+	ImGui::SeparatorText("In the game");
+	if (record.kind == k(ModelKind::Section) && i < collision->sections.size()) {
+		const threedi::ThreediCollisionObject &s = collision->sections[i];
+		const bool person =
+				row->header.mesh_type == threedi::THREEDI_MESH_SKINNED && s.num_faces == 0 && s.num_bounding_volumes == 0;
+		game_words(person ? kModelHitSphereWords : kModelSectionWords);
+		if (s.unk0 & 2) ImGui::TextColored(kMuted, "A blast breaks this section off.");
+		return true;
+	}
+	if (record.kind == k(ModelKind::Volume) && i < collision->volumes.size()) {
+		const ModelVolumeType &type = model_volume_type(collision->volumes[i].collidable_type);
+		game_words(std::string(type.code) + ", " + type.words + ": " + type.what, kModelVolumeWords);
+		return true;
+	}
+	if (record.kind == k(ModelKind::Face)) {
+		const bool person = row->header.mesh_type == threedi::THREEDI_MESH_SKINNED;
+		game_words(kModelBulletFaceWords,
+		           person ? "On a person a round meets the hit spheres instead: these faces serve the knife, the "
+		                    "laser and the other rays [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]."
+		                  : std::string());
+		return true;
+	}
+	if (record.kind == k(ModelKind::Occlusion) && i < collision->occlusion.size()) {
+		const int64_t type = collision->occlusion[i].type;
+		game_words(std::string(model_occlusion_type_words(type)) + ": " + model_occlusion_type_what(type),
+		           kModelOcclusionWords);
+		return true;
+	}
+	return false;
+}
+
 } // namespace
 
 bool draw_model_inspector(Workspace &workspace, const Document &document, const NodeAddress &record,
                           InspectorTaken &taken) {
 	(void)taken;
 	const auto *model = dynamic_cast<const ModelDocument *>(&document);
-	if (!model || !record.child) return false;
+	if (!model) return false;
+	// The collision row: what it holds and what the game tests with it (S17).
+	if (record.kind == k(ModelKind::Collision) && !record.child) {
+		ImGui::SeparatorText("In the game");
+		game_words(kModelCollisionWords, "Show draws it over the picture: the Collision part of its menu.");
+		return true;
+	}
+	if (!record.child) return false;
+	if (record.kind == k(ModelKind::Section) || record.kind == k(ModelKind::Volume) ||
+	    record.kind == k(ModelKind::Occlusion)) {
+		ImGui::PushID("model_collision");
+		const bool drawn = collision_words(*model, record);
+		ImGui::PopID();
+		if (drawn) ImGui::Spacing();
+		return drawn;
+	}
 	const bool editable = workspace.view().allows(EditorRequestKind::EditRecord);
 	if (record.kind == k(ModelKind::Material)) {
 		ImGui::PushID("model_material");
@@ -171,6 +258,7 @@ bool draw_model_inspector(Workspace &workspace, const Document &document, const 
 	if (record.kind == k(ModelKind::Face)) {
 		ImGui::PushID("model_face");
 		face_material(workspace, *model, record);
+		collision_words(*model, record);
 		ImGui::PopID();
 		ImGui::Spacing();
 		return true;

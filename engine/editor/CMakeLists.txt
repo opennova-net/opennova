@@ -67,6 +67,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document_edits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_surfaces.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_collision_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_labels.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
@@ -146,6 +147,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_collision.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_camera.cpp

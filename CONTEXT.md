@@ -673,6 +673,18 @@ it in one step (ADR 0046 S17), and a material whose faces disagree is mixed. The
 it on the material too, a face that differs keeping its own on its polygon.
 _Avoid_: impact material, poly type (the format's words), collision surface
 
+**Volume**:
+A model's collision solid (BVOL): the convex solid of its planes within its stored box, what the game
+tests contact, ladders, zones and lines of sight against, its type saying how (solid, a ladder, a blink
+box, a zone, damage). Rounds never meet volumes: they hit bullet faces (or a person's hit spheres). The
+model viewport draws them by their type's colour (ADR 0046 S17).
+_Avoid_: collision box (the collision block's bounds), hull, BVOL alone
+
+**Hit sphere**:
+A person's bone section (a skinned model's COBJ with no faces and no volumes): the sphere a round meets
+the bone at, 45 percent of its stored radius plus 1/20 m (the head 65 percent).
+_Avoid_: hitbox, bone sphere
+
 **Part name**:
 How the editor and the Blender add-on name a model's part: `PN01` (a rig's bone, `BN01`), two digits
 and 1-based for the 0-based index the file stores; the file keeps no names of its own.

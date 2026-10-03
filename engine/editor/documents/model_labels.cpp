@@ -6,6 +6,7 @@
 #include <set>
 
 #include <base/io/strutil.h>
+#include <editor/documents/model_collision_words.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_surfaces.h>
 #include <formats/threedi/threedi_panm.h>
@@ -239,23 +240,24 @@ std::string model_record_label(const Document &document, const NodeAddress &addr
 	}
 	case ModelKind::Section: {
 		// Section i is part i of the collision LOD (one section per part, WriteCOBJ;
-		// docs/threedi/3di-gp-format-re.md, Retail JO corpus layout).
+		// docs/threedi/3di-gp-format-re.md, Retail JO corpus layout); a person's bone section is its hit
+		// sphere (model_collision_words.h).
 		const CollisionRow *collision = model->collision_row();
 		if (!collision || i >= collision->sections.size()) return "";
 		const ThreediCollisionObject &s = collision->sections[i];
+		if (row->header.mesh_type == THREEDI_MESH_SKINNED && s.num_faces == 0 && s.num_bounding_volumes == 0)
+			return "Section of " + part_word(*row, int64_t(i)) + ": hit sphere" + (i == 14 ? " (the head)" : "");
 		return "Section of " + part_word(*row, int64_t(i)) + ": " + std::to_string(s.num_bounding_volumes) + " volumes, " +
 		       std::to_string(s.num_faces) + " faces";
 	}
 	case ModelKind::Volume: {
+		// A volume by what its type does in the game (model_collision_words.h), its code after.
 		const CollisionRow *collision = model->collision_row();
 		if (!collision || i >= collision->volumes.size()) return "";
-		const ThreediBoundingVolume &v = collision->volumes[i];
-		std::string type = std::to_string(v.collidable_type);
-		for (const FieldSchema &f : ModelDocument::schema(address.kind))
-			if (f.id == "type")
-				for (const FieldChoice &c : f.choices)
-					if (c.value == v.collidable_type) type = c.label.empty() ? c.name : c.label;
-		return "Volume " + std::to_string(i + 1) + ": " + type;
+		const ModelVolumeType &type = model_volume_type(collision->volumes[i].collidable_type);
+		return "Volume " + std::to_string(i + 1) + ": " + type.words +
+		       (type.code[0] ? std::string(" (") + type.code + ")"
+		                     : " (type " + std::to_string(collision->volumes[i].collidable_type) + ")");
 	}
 	case ModelKind::Face: {
 		const CollisionRow *collision = model->collision_row();
@@ -265,9 +267,10 @@ std::string model_record_label(const Document &document, const NodeAddress &addr
 	case ModelKind::Occlusion: {
 		const CollisionRow *collision = model->collision_row();
 		if (!collision || i >= collision->occlusion.size()) return "";
-		static const char *const kTypes[] = {"occluder", "open", "window", "portal", "OH (no witnessed meaning)"};
 		const uint8_t type = collision->occlusion[i].type;
-		return "Occlusion " + std::to_string(i + 1) + ": " + (type < 5 ? kTypes[type] : "type " + std::to_string(type));
+		return "Occlusion " + std::to_string(i + 1) + ": " +
+		       (type < 5 ? std::string(model_occlusion_type_words(type)) + (type == 4 ? " (no witnessed meaning)" : "")
+		                 : "type " + std::to_string(type));
 	}
 	default: return "";
 	}

@@ -12,7 +12,6 @@ using io::JsonValue;
 namespace {
 
 constexpr NodeKind kMaterial = node_kind(ModelKind::Material);
-constexpr size_t kCollisionFaces = 2;
 
 JsonValue number(double value) { return json_number(value); }
 

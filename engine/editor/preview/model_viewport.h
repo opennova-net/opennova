@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <editor/model/edit.h>
+#include <editor/preview/model_collision.h>
 #include <editor/preview/model_handle_edit.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_camera.h>
@@ -115,6 +116,10 @@ public:
 	// What the overlays mark on the model as drawn at `clock` (the level, the held registers);
 	// empty unless ready.
 	std::vector<ModelOverlay> overlays(const PreviewClock &clock) const;
+	// The collision the options show at `clock` (S17, preview/model_collision), and the record `also`
+	// names whatever its layer (the selection's); none while an animation plays (its rig's sections ride
+	// the skeleton, which the shapes do not pose).
+	std::vector<ModelCollisionShape> collision(const PreviewClock &clock, ModelCollisionPick also = ModelCollisionPick()) const;
 	// How long a marker's axis is drawn (its tip is the Axis handle): a share of the camera's
 	// distance, so it keeps its size on the picture.
 	float axis_length() const { return camera_.distance * 0.08f; }
@@ -194,8 +199,8 @@ public:
 			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
-	// The frame command: the camera on the marker of the first record named (one that is no marker
-	// refused), else on the whole model.
+	// The frame command: the camera on the marker or the collision shape of the first record named (one
+	// that is neither refused), else on the whole model.
 	bool command(const ViewportContext &context, const std::string &name,
 			const std::vector<NodeId> &ids, CanvasRequests &out, std::string &error) const override;
 	io::JsonValue options_json() const override;

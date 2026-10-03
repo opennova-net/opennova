@@ -2,11 +2,13 @@
 // a material selected heads the Inspector with its bullet faces' surface by name and their flags; a
 // mixed material counts its surfaces, Make all is one EditRecord of every face that differs (one undo
 // step) and Select the faces that differ one SelectRecord of them; a bullet face names the material it
-// was made from; a LOD says what it draws at; a user point what the game reads it as.
+// was made from; a LOD says what it draws at; a user point what the game reads it as; a collision
+// record (a volume, a face, the collision row) what the game does with it.
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include <editor/documents/model_collision_words.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
 #include <editor/documents/model_surfaces.h>
@@ -144,6 +146,34 @@ void test_material_surface() {
 	ui.away();
 	text = logged_frame(ui);
 	CHECK(text.find("Drawn " + model_lod_range(*model->model_row(), 0) + ".") != std::string::npos, "a LOD's range in words");
+
+	// The collision (S17): a volume by what its type does in the game, the face's words after its
+	// material, the collision row's.
+	CHECK(!collision->volumes.empty(), "the armory has volumes");
+	if (!collision->volumes.empty()) {
+		const NodeAddress volume{collision->id, node_kind(ModelKind::Volume), collision->ids.lists[kCollisionVolumes][0].id};
+		session.handle(request::select_record(path, volume));
+		run.settle();
+		run.take();
+		ui.away();
+		text = logged_frame(ui);
+		const ModelVolumeType &type = model_volume_type(collision->volumes[0].collidable_type);
+		const std::string words = std::string(type.code) + ", " + type.words;
+		CHECK(in_order(text, {"In the game", words.c_str(), "convex"}), "a volume by what its type does");
+		CHECK(text.find("[orig:") == std::string::npos, "the citations in the tooltip, not the text");
+	}
+	session.handle(request::select_record(path, glass.address));
+	run.settle();
+	run.take();
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Made from", "In the game", "A triangle"}), "a face's words");
+	session.handle(request::select_record(path, NodeAddress{collision->id, node_kind(ModelKind::Collision), 0}));
+	run.settle();
+	run.take();
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"In the game", "What the game"}), "the collision row's words");
 	CHECK(overflowing().empty(), "nothing runs past its window");
 }
 

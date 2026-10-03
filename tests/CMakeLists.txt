@@ -4475,6 +4475,15 @@ target_link_libraries(editor_model_surfaces_test PRIVATE opennova_editor)
 target_include_directories(editor_model_surfaces_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_model_surfaces COMMAND editor_model_surfaces_test)
 
+# A model's collision shown in its viewport (S17): a box's planes make the box, every synthetic
+# model's collision as shapes on the collision LOD's triangles, each record's shape and back, a
+# person's hit spheres at the game's radius, a live part carrying its section, picking; a SKIP-LEG
+# making every installed model's volumes into solids inside their boxes.
+add_executable(editor_model_collision_test editor/model_collision_test.cpp)
+target_link_libraries(editor_model_collision_test PRIVATE opennova_editor)
+target_include_directories(editor_model_collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_model_collision COMMAND editor_model_collision_test)
+
 # The clip and animation map documents (S10e): untouched saves, engine data edits,
 # the motion refused, rows and clips, the reset row, the validator and the clip edges;
 # a SKIP-LEG saving every retail clip and table untouched.

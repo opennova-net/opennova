@@ -63,6 +63,12 @@ int model_canvas_bone_under(const ModelCanvasFrame &frame, const CanvasInput &in
 	return best;
 }
 
+int model_canvas_collision_under(const ModelCanvasFrame &frame, const CanvasInput &in) {
+	if (!in.hovered || !frame.model || frame.collision.empty())
+		return -1;
+	return pick_model_collision(frame.collision, frame.model->camera(), in.width, in.height, in.mouse.x, in.mouse.y);
+}
+
 NodeAddress model_canvas_bone_record(const ModelCanvasFrame &frame, int joint) {
 	const auto *clip = dynamic_cast<const AnimationDocument *>(frame.clip_document);
 	const ClipRow *row = clip ? clip->clip() : nullptr;
@@ -119,12 +125,14 @@ void ModelCanvas::input(const ViewportContext &, const CanvasInput &in, CanvasRe
 
 OverlayList ModelCanvas::shapes(const ViewportContext &, const CanvasInput &in) const {
 	const int under = model_canvas_under(frame_, in);
-	return shapes(frame_, in, under, under < 0 ? model_canvas_bone_under(frame_, in) : -1);
+	const int bone = under < 0 ? model_canvas_bone_under(frame_, in) : -1;
+	return shapes(frame_, in, under, bone, under < 0 && bone < 0 ? model_canvas_collision_under(frame_, in) : -1);
 }
 
 std::string ModelCanvas::hover_tip(const ViewportContext &, const CanvasInput &in) const {
 	const int under = model_canvas_under(frame_, in);
-	return hover_tip(frame_, under, under < 0 ? model_canvas_bone_under(frame_, in) : -1);
+	const int bone = under < 0 ? model_canvas_bone_under(frame_, in) : -1;
+	return hover_tip(frame_, under, bone, under < 0 && bone < 0 ? model_canvas_collision_under(frame_, in) : -1);
 }
 
 void ModelCanvas::follow(const ModelCanvasFrame &frame, CanvasRequests &out) {
@@ -146,6 +154,7 @@ void ModelCanvas::input(
 		gesture_.press(subject_of(frame), in.screen, out);
 		grab_ = model_canvas_grab(frame, in, under);
 		if (under < 0) grab_.bone = model_canvas_bone_under(frame, in);
+		if (under < 0 && grab_.bone < 0) grab_.collision = model_canvas_collision_under(frame, in);
 	}
 	if (gesture_.pressed() && !in.down) {
 		// A click on a marker selects its record (while the picture is the document's).
@@ -161,6 +170,13 @@ void ModelCanvas::input(
 			const NodeAddress record = model_canvas_bone_record(frame, grab_.bone);
 			if (record.row)
 				out.request(request::select_record(frame.clip_document->path(), record));
+		}
+		// A click on a collision shape selects its record (S17), while the picture is the document's.
+		if (!gesture_.dragging() && grab_.pick < 0 && grab_.bone < 0 && grab_.collision >= 0 && frame.current &&
+				size_t(grab_.collision) < frame.collision.size()) {
+			const NodeAddress record = model_collision_record(*frame.document, frame.collision[size_t(grab_.collision)]);
+			if (record.row)
+				out.request(request::select_record(frame.document->path(), record));
 		}
 		gesture_.release(out);
 		grab_ = ModelGrab();
@@ -218,18 +234,67 @@ void ModelCanvas::frame_selected(
 		set_camera(frame, model.framed_on(overlay, width, height), out);
 		return;
 	}
+	// The selected collision record's shape (S17).
+	if (frame.selected_collision >= 0 && size_t(frame.selected_collision) < frame.collision.size()) {
+		PreviewVec3 center;
+		float radius = 0.0f;
+		model_collision_bounds(frame.collision[size_t(frame.selected_collision)], center, radius);
+		OrbitCamera camera = model.camera();
+		camera.frame(center, radius, width, height);
+		set_camera(frame, camera, out);
+		return;
+	}
 	if (model.model())
 		set_camera(frame, model.framed(width, height), out);
 }
 
 OverlayList ModelCanvas::shapes(
-		const ModelCanvasFrame &frame, const CanvasInput &in, int under, int bone_under) const {
+		const ModelCanvasFrame &frame, const CanvasInput &in, int under, int bone_under, int collision_under) const {
 	OverlayList list;
 	if (!frame.model)
 		return list;
 	const ModelViewport &model = *frame.model;
 	const OrbitCamera &camera = model.camera();
 	const int width = in.width, height = in.height;
+	// The collision under everything else (S17): each shape's edges and sphere in its colour; the one
+	// under the pointer and the selected one drawn over the rest, filled faintly.
+	const auto draw_collision = [&](const ModelCollisionShape &s, OverlayRole role) {
+		const bool lit = role != OverlayRole::Normal;
+		const float thickness = role == OverlayRole::Selected ? 2.0f : lit ? 1.5f : 1.0f;
+		const uint8_t alpha = lit ? 255 : 170;
+		if (lit)
+			for (size_t t = 0; t + 2 < s.triangles.size(); t += 3) {
+				CanvasPoint p[3];
+				bool seen = true;
+				for (int k = 0; k < 3 && seen; ++k) seen = camera.project(s.triangles[t + size_t(k)], width, height, p[k].x, p[k].y);
+				if (seen) list.quad(p[0], p[1], p[2], p[2], s.rgb, 60);
+			}
+		for (size_t e = 0; e + 1 < s.edges.size(); e += 2) {
+			CanvasPoint a, b;
+			if (camera.project(s.edges[e], width, height, a.x, a.y) && camera.project(s.edges[e + 1], width, height, b.x, b.y))
+				list.line(a, b, s.rgb, thickness, role, alpha);
+		}
+		float cx = 0.0f, cy = 0.0f, depth = 0.0f;
+		if (s.sphere && s.radius > 0.0f && camera.project(s.center, width, height, cx, cy, &depth) && depth > 0.0f) {
+			const float reach = s.radius * OrbitCamera::focal_pixels(width) / depth;
+			if (reach > 1.0f && reach < 4.0f * float(width)) list.ring(CanvasPoint{cx, cy}, reach, role, thickness, s.rgb, alpha);
+		}
+	};
+	for (size_t i = 0; i < frame.collision.size(); ++i)
+		if (int(i) != frame.selected_collision && int(i) != collision_under) draw_collision(frame.collision[i], OverlayRole::Normal);
+	if (collision_under >= 0 && size_t(collision_under) < frame.collision.size() && collision_under != frame.selected_collision)
+		draw_collision(frame.collision[size_t(collision_under)], OverlayRole::Hover);
+	if (frame.selected_collision >= 0 && size_t(frame.selected_collision) < frame.collision.size())
+		draw_collision(frame.collision[size_t(frame.selected_collision)], OverlayRole::Selected);
+	// The legend: a swatch and its words for each colour drawn, from the picture's lower left corner up.
+	const std::vector<ModelCollisionLegendRow> legend = model_collision_legend(frame.collision);
+	const float row_height = 16.0f;
+	for (size_t i = 0; i < legend.size(); ++i) {
+		const float y = float(height) - 10.0f - row_height * float(legend.size() - i);
+		list.quad(CanvasPoint{8.0f, y + 2.0f}, CanvasPoint{18.0f, y + 2.0f}, CanvasPoint{18.0f, y + 12.0f},
+				CanvasPoint{8.0f, y + 12.0f}, legend[i].rgb);
+		list.text(CanvasPoint{22.0f, y}, legend[i].words, 0xE6E6E6);
+	}
 	// A clip's bones under the markers: a line from each joint to its parent's, a dot at each, the
 	// one under the pointer and the selected one ringed.
 	std::vector<CanvasPoint> joints(frame.joints.size());
@@ -301,9 +366,14 @@ OverlayList ModelCanvas::shapes(
 	return list;
 }
 
-std::string ModelCanvas::hover_tip(const ModelCanvasFrame &frame, int under, int bone_under) const {
+std::string ModelCanvas::hover_tip(const ModelCanvasFrame &frame, int under, int bone_under, int collision_under) const {
 	if (gesture_.dragging())
 		return std::string();
+	// A collision shape by its words, and what a click does where the picture is the document's (S17).
+	if (under < 0 && bone_under < 0 && collision_under >= 0 && size_t(collision_under) < frame.collision.size()) {
+		const ModelCollisionShape &shape = frame.collision[size_t(collision_under)];
+		return shape.name + (shape.pickable && frame.current ? " (click to select it)" : std::string());
+	}
 	if (under >= 0 && size_t(under) < frame.overlays.size()) {
 		// A user point by its name and what the game reads it as (documents/model_labels.h).
 		const ModelOverlay &overlay = frame.overlays[size_t(under)];

@@ -6,6 +6,7 @@
 
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/canvas_half.h>
+#include <editor/preview/model_collision.h>
 #include <editor/preview/model_handle_edit.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_rig.h>
@@ -59,6 +60,10 @@ struct ModelCanvasFrame {
 	std::vector<PreviewJoint> joints;
 	const Document *clip_document = nullptr;
 	int selected_bone = -1;
+	// The collision shown (ADR 0046 S17, preview/model_collision), drawn under the markers with its
+	// legend, and the selected record's shape among them (-1: none), drawn highlighted.
+	std::vector<ModelCollisionShape> collision;
+	int selected_collision = -1;
 };
 
 // What a press on the canvas took: on the selected marker (or its axis tip) its handle, whose
@@ -68,6 +73,7 @@ struct ModelGrab {
 	bool pan = false; // the middle button, or Shift with the left
 	int pick = -1; // the marker under the press (-1 none)
 	int bone = -1; // the joint under the press where no marker is (-1 none; S17)
+	int collision = -1; // the collision shape under the press where no marker or joint is (-1 none; S17)
 	bool handle = false; // on the selected marker or its axis tip
 	ModelHandle which = ModelHandle::Place;
 	ModelOverlay marker; // the marker as pressed
@@ -80,6 +86,9 @@ int model_canvas_under(const ModelCanvasFrame &frame, const CanvasInput &in);
 // The front-most joint within kModelPickSlop of the pointer (S17), -1 none (or not hovered, or no
 // bones drawn).
 int model_canvas_bone_under(const ModelCanvasFrame &frame, const CanvasInput &in);
+// The pickable collision shape under the pointer (S17: the front-most face, else the smallest sphere),
+// -1 none (or not hovered).
+int model_canvas_collision_under(const ModelCanvasFrame &frame, const CanvasInput &in);
 // The bone record a joint is in the frame's clip document (by index: a clip's channels pair with
 // the model's parts by index); none past its bones or with no clip document.
 NodeAddress model_canvas_bone_record(const ModelCanvasFrame &frame, int joint);
@@ -123,12 +132,16 @@ public:
 	// x `height`: a SetViewport of the camera.
 	void frame_selected(const ModelCanvasFrame &frame, int width, int height, CanvasRequests &out) const;
 
-	// Over the picture: a clip's bones (each joint, a line to its parent; the one under the pointer,
-	// `bone_under`, and the selected one ringed), then each marker where the camera puts it, the one
-	// under the pointer (`under`) ringed, the selected one ringed with its axis tip's handle.
-	OverlayList shapes(const ModelCanvasFrame &frame, const CanvasInput &in, int under, int bone_under = -1) const;
-	// The name of the marker under the pointer, else of the joint ("" none, or while dragging).
-	std::string hover_tip(const ModelCanvasFrame &frame, int under, int bone_under = -1) const;
+	// Over the picture: the collision shown (each shape's edges and sphere in its colour, the one under
+	// the pointer, `collision_under`, and the selected one highlighted and filled) with its legend in the
+	// picture's lower left corner, a clip's bones (each joint, a line to its parent; the one under the
+	// pointer, `bone_under`, and the selected one ringed), then each marker where the camera puts it, the
+	// one under the pointer (`under`) ringed, the selected one ringed with its axis tip's handle.
+	OverlayList shapes(const ModelCanvasFrame &frame, const CanvasInput &in, int under, int bone_under = -1,
+	                   int collision_under = -1) const;
+	// The name of the marker under the pointer, else of the joint, else of the collision shape ("" none,
+	// or while dragging).
+	std::string hover_tip(const ModelCanvasFrame &frame, int under, int bone_under = -1, int collision_under = -1) const;
 
 private:
 	CanvasGesture gesture_;

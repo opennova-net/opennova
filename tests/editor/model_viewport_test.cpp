@@ -1120,6 +1120,112 @@ static int test_clip_preview() {
 	return 0;
 }
 
+// The collision shown (S17): the layers by their tokens, each shape an item with its record; the body's
+// layers and legend; a hit on a shape names its record; the selected record's shape drawn whatever its
+// layer, Frame looking at it; a click on a shape selects its record, its words on hover; the legend drawn.
+static int test_collision() {
+	editor_test::TempProjectDir dir("opennova_editor_model_viewport_collision");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	Rig rig{session};
+	session.handle(request::new_project(dir.file("project"), "Collision Test"));
+	session.run_operations();
+	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("models/armory.3di"));
+	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/armory.3di"));
+	TEST_EXPECT(document && rig.pump() == ViewportAction::Rebuild);
+	if (!document) return 1;
+	const CollisionRow *collision = document->collision_row();
+	TEST_EXPECT(collision && !collision->volumes.empty() && !collision->faces.empty());
+	if (!collision || collision->volumes.empty() || collision->faces.empty()) return 1;
+	// Off until shown: only the markers are items.
+	TEST_EXPECT(rig.viewport()->collision(rig.clock()).empty());
+	TEST_EXPECT(!rig.set(R"({"options": {"overlays": {"walls": true}}})"));
+	TEST_EXPECT(rig.set(R"({"options": {"overlays": {"volumes": true, "bullet_faces": true, "user_points": false, "lights": false}}})"));
+	TEST_EXPECT(rig.pump() == ViewportAction::Update);
+	JsonValue shown = rig.json();
+	TEST_EXPECT(shown.get("options")->get("overlays")->get_bool("volumes", false) &&
+	            !shown.get("options")->get("overlays")->get_bool("sections", true));
+	size_t faces = 0, volumes = 0;
+	JsonValue face_item;
+	for (const JsonValue &item : shown.get("items")->array) {
+		const std::string kind = item.get_string("kind", "");
+		TEST_EXPECT(item.get_number("id", 0) != 0 && !item.get_string("name", "").empty() && item.get("points"));
+		if (kind == "face" && !faces++) face_item = item;
+		volumes += kind == "volume" ? 1 : 0;
+	}
+	TEST_EXPECT(faces == collision->faces.size() && volumes == collision->volumes.size());
+	const JsonValue *layers = shown.get("body")->get("collision")->get("layers");
+	TEST_EXPECT(layers && layers->array.size() == size_t(ModelCollisionLayer::kCount) &&
+	            layers->array[0].get_string("token", "") == "bullet_faces" && layers->array[0].get_bool("shown", false) &&
+	            layers->array[0].get_number("count", 0) == double(collision->faces.size()));
+	TEST_EXPECT(!shown.get("body")->get("collision")->get("legend")->array.empty());
+
+	// A hit on a face's middle names a collision record.
+	TEST_EXPECT(face_item.get("screen") && face_item.get("screen")->array.size() == 2);
+	const float fx = float(face_item.get("screen")->array[0].number), fy = float(face_item.get("screen")->array[1].number);
+	const ViewportHit hit = rig.viewport()->hit(rig.context(), fx, fy);
+	TEST_EXPECT((hit.kind == "face" || hit.kind == "volume") && hit.id != 0 && hit.current);
+
+	// The canvas: a click on the shape under the pointer selects its record, its words on hover.
+	const ViewportContext context = rig.context();
+	ModelCanvasFrame frame = rig.viewport()->canvas_frame(context);
+	TEST_EXPECT(frame.collision.size() == faces + volumes && frame.selected_collision == -1);
+	ModelCanvas canvas;
+	RecordedRequests out;
+	canvas.follow(frame, out);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	in.hovered = true;
+	in.mouse = in.screen = CanvasPoint{fx, fy};
+	const int under = model_canvas_collision_under(frame, in);
+	TEST_EXPECT(under >= 0 && model_canvas_under(frame, in) < 0);
+	if (under < 0) return 1;
+	TEST_EXPECT(canvas.hover_tip(frame, -1, -1, under) == frame.collision[size_t(under)].name + " (click to select it)");
+	in.pressed = in.down = true;
+	canvas.input(frame, in, -1, out);
+	in.pressed = in.down = false;
+	canvas.input(frame, in, -1, out);
+	const NodeAddress picked = model_collision_record(*document, frame.collision[size_t(under)]);
+	TEST_EXPECT(out.raised.size() == 1 && out.raised[0].kind == EditorRequestKind::SelectRecord &&
+	            out.raised[0].address == picked && NodeId(hit.id) == picked.child);
+	// Drawn: lines in the shapes' colours and the legend's words.
+	const OverlayList list = canvas.shapes(frame, in, -1, -1, under);
+	size_t lines = 0, legend = 0;
+	for (const OverlayShape &shape : list.shapes) {
+		lines += shape.kind == OverlayKind::Line ? 1 : 0;
+		legend += shape.kind == OverlayKind::Text && shape.text == "Bullet faces" ? 1 : 0;
+	}
+	TEST_EXPECT(lines >= faces * 3 && legend == 1);
+
+	// The layers off, a volume selected: its shape alone, highlighted; Frame looks at it.
+	TEST_EXPECT(rig.set(R"({"options": {"overlays": {"volumes": false, "bullet_faces": false}}})"));
+	rig.pump();
+	const NodeAddress volume{collision->id, node_kind(ModelKind::Volume), collision->ids.lists[kCollisionVolumes][0].id};
+	session.handle(request::select_record(document->path(), volume));
+	frame = rig.viewport()->canvas_frame(rig.context());
+	TEST_EXPECT(frame.collision.size() == 1 && frame.selected_collision == 0 &&
+	            frame.collision[0].kind == ModelCollisionKind::Volume && frame.collision[0].index == 0);
+	const OrbitCamera before = rig.viewport()->camera();
+	RecordedRequests framed;
+	std::string error;
+	TEST_EXPECT(rig.viewport()->command(rig.context(), "frame", {volume.child}, framed, error) && framed.raised.size() == 1);
+	for (const EditorRequest &request : framed.raised) session.handle(request);
+	PreviewVec3 center;
+	float radius = 0.0f;
+	model_collision_bounds(frame.collision[0], center, radius);
+	const OrbitCamera &after = rig.viewport()->camera();
+	TEST_EXPECT(near(after.target.x, center.x, 1e-3) && near(after.target.y, center.y, 1e-3) &&
+	            near(after.target.z, center.z, 1e-3) && (!near(before.distance, after.distance, 1e-4) ||
+	                                                     !near(before.target.x, after.target.x, 1e-4)));
+	std::printf("test_collision passed\n");
+	return 0;
+}
+
 // Auto picks a coarser level as the camera backs away, the finest up close, never past
 // the last (the two-level scenes the add-on's fixtures mint).
 static int test_auto_lod() {
@@ -1164,6 +1270,7 @@ int main() {
 	TEST_EXPECT(test_camera() == 0);
 	TEST_EXPECT(test_options_from_json() == 0);
 	TEST_EXPECT(test_auto_lod() == 0);
+	TEST_EXPECT(test_collision() == 0);
 	std::printf("editor_model_viewport: all tests passed\n");
 	return 0;
 }

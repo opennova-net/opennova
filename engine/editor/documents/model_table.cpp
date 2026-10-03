@@ -28,6 +28,7 @@
 #include <formats/threedi/threedi_panm.h>
 #include <runtime/renderer/material_descriptor.h>
 
+#include <editor/documents/model_collision_words.h>
 #include <editor/documents/model_surfaces.h>
 
 #include "model_document_internal.h"
@@ -139,13 +140,22 @@ std::vector<Choice> style_choices() {
 }
 
 // The collidable-type codes of a volume's name (docs/world/world-wac-ai-re.md §15;
-// the add-on's VOLUME_CODES).
+// the add-on's VOLUME_CODES), each labelled by what the game does with it (model_collision_words.h:
+// "ladder (CL)").
 const std::vector<Choice> &volume_type_choices() {
-	static const std::vector<Choice> choices = {
-		{"CB", 1, ""}, {"CS", 2, ""}, {"CC", 3, ""}, {"CL", 4, "CL (ladder)"}, {"CV", 5, ""}, {"CA", 6, ""},
-		{"VC", 7, ""}, {"BB", 8, "BB (blink box)"}, {"CD", 9, ""}, {"CT", 10, ""}, {"CM", 11, ""}, {"VK", 12, ""},
-		{"CF", 13, ""}, {"LP", 14, ""}, {"DH", 16, ""}, {"DM", 17, ""}, {"DL", 18, ""}, {"CP", 19, ""},
-	};
+	static const int64_t kTypes[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19};
+	static const std::vector<std::string> labels = [] {
+		std::vector<std::string> out;
+		for (const int64_t type : kTypes)
+			out.push_back(std::string(model_volume_type(type).words) + " (" + model_volume_type(type).code + ")");
+		return out;
+	}();
+	static const std::vector<Choice> choices = [] {
+		std::vector<Choice> out;
+		for (size_t i = 0; i < labels.size(); ++i)
+			out.push_back({model_volume_type(kTypes[i]).code, kTypes[i], labels[i].c_str()});
+		return out;
+	}();
 	return choices;
 }
 

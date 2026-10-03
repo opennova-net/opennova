@@ -82,6 +82,13 @@ std::string file_of(const std::string &path) {
 	return path.substr(path.find_last_of("/\\") + 1);
 }
 
+// A colour on the wire: "RRGGBB".
+std::string rgb_hex(uint32_t rgb) {
+	char color[8];
+	std::snprintf(color, sizeof(color), "%06X", rgb & 0xFFFFFFu);
+	return color;
+}
+
 // The options an `options` member sets over `held`: {lod ("auto" or a level 0..255), ctrl
 // ({register: number}, the registers held, a 0 not held), overlays ({user_points, lights, pivots}
 // booleans), rig_model (a model's file name, "" the paired one)}, each optional, a number's fraction
@@ -120,8 +127,12 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 				if (number != 0) options.ctrl[register_held.key] = number;
 			}
 		} else if (key == "overlays") {
+			// The markers, and the collision layers by their tokens (preview/model_collision).
+			std::string tokens = "user_points, lights, pivots";
+			for (size_t l = 0; l < size_t(ModelCollisionLayer::kCount); ++l)
+				tokens += std::string(", ") + model_collision_layer(ModelCollisionLayer(l)).token;
 			if (!value.is_object()) {
-				error = "options.overlays is an object {user_points, lights, pivots}.";
+				error = "options.overlays is an object {" + tokens + "}.";
 				return false;
 			}
 			for (const io::JsonMember &mark : value.object) {
@@ -129,11 +140,18 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 					error = "options.overlays." + mark.key + " is true or false.";
 					return false;
 				}
+				bool layer = false;
+				for (size_t l = 0; l < size_t(ModelCollisionLayer::kCount) && !layer; ++l)
+					if (mark.key == model_collision_layer(ModelCollisionLayer(l)).token) {
+						model_collision_layer_set(options.overlays, ModelCollisionLayer(l), mark.value.boolean);
+						layer = true;
+					}
+				if (layer) continue;
 				if (mark.key == "user_points") options.overlays.user_points = mark.value.boolean;
 				else if (mark.key == "lights") options.overlays.lights = mark.value.boolean;
 				else if (mark.key == "pivots") options.overlays.pivots = mark.value.boolean;
 				else {
-					error = "Unknown overlay \"" + mark.key + "\" (user_points, lights, pivots).";
+					error = "Unknown overlay \"" + mark.key + "\" (" + tokens + ").";
 					return false;
 				}
 			}
@@ -260,6 +278,9 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 	marks.set("user_points", JsonValue::make_bool(held.overlays.user_points));
 	marks.set("lights", JsonValue::make_bool(held.overlays.lights));
 	marks.set("pivots", JsonValue::make_bool(held.overlays.pivots));
+	for (size_t l = 0; l < size_t(ModelCollisionLayer::kCount); ++l)
+		marks.set(model_collision_layer(ModelCollisionLayer(l)).token,
+		          JsonValue::make_bool(model_collision_layer_on(held.overlays, ModelCollisionLayer(l))));
 	options.set("overlays", std::move(marks));
 	options.set("rig_model", json_string(held.rig_model));
 	options.set("repeat", JsonValue::make_bool(held.repeat));
@@ -329,6 +350,13 @@ std::vector<ModelOverlay> ModelViewport::overlays(const PreviewClock &clock) con
 		overlay.part = bone;
 	}
 	return out;
+}
+
+std::vector<ModelCollisionShape> ModelViewport::collision(const PreviewClock &clock, ModelCollisionPick also) const {
+	if (!model_ || animating_) return {};
+	int32_t bus[96];
+	model_preview_ctrl_bus(options_.ctrl, bus);
+	return model_collision_shapes(model_, lod(), clock.ms(), bus, options_.overlays, also);
 }
 
 PreviewVec3 ModelViewport::axis_tip(const ModelOverlay &overlay) const {
@@ -834,7 +862,15 @@ ModelCanvasFrame ModelViewport::canvas_frame(const ViewportContext &context) con
 			if (found != bones.end()) frame.selected_bone = int(found - bones.begin());
 		}
 	}
-	if (!frame.current || input.view.documents.active != frame.document->path()) return frame;
+	// The collision shown (S17), and the selected record's shape whatever its layer.
+	const bool active = frame.current && input.view.documents.active == frame.document->path();
+	ModelCollisionPick picked;
+	if (active) model_collision_of(*frame.document, input.view.documents.selection.primary, picked);
+	frame.collision = collision(input.clock, picked);
+	for (size_t i = 0; picked.valid() && i < frame.collision.size(); ++i)
+		if (frame.collision[i].kind == picked.kind && frame.collision[i].index == picked.index)
+			frame.selected_collision = int(i);
+	if (!active) return frame;
 	const Selection &selection = input.view.documents.selection;
 	model_overlay_of(*frame.document, selection.primary, frame.selected_kind, frame.selected);
 	// The other selected records' markers (a place's drag moves them as far).
@@ -854,7 +890,20 @@ ViewportHit ModelViewport::hit(const ViewportContext &context, float x, float y)
 	if (status() != ViewportStatus::Ready || !model_) return out;
 	const std::vector<ModelOverlay> marks = overlays(context.input.clock);
 	out.index = pick_model_overlay(marks, camera_, context.width, context.height, x, y);
-	if (out.index < 0) return out;
+	if (out.index < 0) {
+		// No marker there: the collision shape the pixel is on (S17).
+		const std::vector<ModelCollisionShape> shapes = collision(context.input.clock);
+		const int at = pick_model_collision(shapes, camera_, context.width, context.height, x, y);
+		if (at < 0) return out;
+		const ModelCollisionShape &shape = shapes[size_t(at)];
+		const auto *document = dynamic_cast<const ModelDocument *>(
+				context.input.document ? records_of(*context.input.document) : nullptr);
+		out.index = shape.index;
+		out.id = document && out.current ? model_collision_record(*document, shape).child : 0;
+		out.name = shape.name;
+		out.kind = model_collision_kind_token(shape.kind);
+		return out;
+	}
 	const ModelOverlay &hit = marks[size_t(out.index)];
 	out.index = hit.index;
 	out.id = record_of(context.input, hit).child;
@@ -995,7 +1044,20 @@ bool ModelViewport::command(const ViewportContext &context, const std::string &n
 						model_camera_change(framed_on(overlay, context.width, context.height))));
 				return true;
 			}
-	error = "Record " + std::to_string(ids.front()) + " is no marker the viewport shows.";
+	// A collision record (S17): the camera on its shape, whatever its layer.
+	ModelCollisionPick picked;
+	if (document && model_collision_of(*document, document->address_of(ids.front()), picked))
+		for (const ModelCollisionShape &shape : collision(context.input.clock, picked))
+			if (shape.kind == picked.kind && shape.index == picked.index) {
+				PreviewVec3 center;
+				float radius = 0.0f;
+				model_collision_bounds(shape, center, radius);
+				OrbitCamera camera = camera_;
+				camera.frame(center, radius, context.width, context.height);
+				out.request(request::set_viewport(path(), model_camera_change(camera)));
+				return true;
+			}
+	error = "Record " + std::to_string(ids.front()) + " is no marker or collision shape the viewport shows.";
 	return false;
 }
 
@@ -1034,6 +1096,31 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		sphere.set("center", vec3(center));
 		sphere.set("radius", json_number(radius));
 		body.set("sphere", std::move(sphere));
+		// The collision layers (S17): each with its words, colour, count and whether it is shown, and the
+		// legend of what is drawn.
+		JsonValue layers = JsonValue::make_array();
+		for (size_t l = 0; l < size_t(ModelCollisionLayer::kCount); ++l) {
+			const ModelCollisionLayerRow &layer = model_collision_layer(ModelCollisionLayer(l));
+			JsonValue row = JsonValue::make_object();
+			row.set("token", json_string(layer.token));
+			row.set("label", json_string(layer.label));
+			row.set("words", json_string(layer.words));
+			row.set("color", json_string(rgb_hex(layer.rgb)));
+			row.set("count", json_number(double(model_collision_layer_count(shown, ModelCollisionLayer(l), lod()))));
+			row.set("shown", JsonValue::make_bool(model_collision_layer_on(options_.overlays, ModelCollisionLayer(l))));
+			layers.push(std::move(row));
+		}
+		JsonValue legend = JsonValue::make_array();
+		for (const ModelCollisionLegendRow &entry : model_collision_legend(collision(input.clock))) {
+			JsonValue row = JsonValue::make_object();
+			row.set("color", json_string(rgb_hex(entry.rgb)));
+			row.set("words", json_string(entry.words));
+			legend.push(std::move(row));
+		}
+		JsonValue collision_json = JsonValue::make_object();
+		collision_json.set("layers", std::move(layers));
+		collision_json.set("legend", std::move(legend));
+		body.set("collision", std::move(collision_json));
 		for (uint32_t i = 0; i < shown.ctrl.count; ++i) {
 			const std::string name = strutil::fixed_string(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
 			JsonValue row = JsonValue::make_object();
@@ -1176,9 +1263,57 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		if (overlay.kind == ModelOverlayKind::Light) {
 			row.set("radius", json_number(overlay.radius));
 			row.set("cone", json_number(overlay.cone));
-			char color[8];
-			std::snprintf(color, sizeof(color), "%06X", overlay.color & 0xFFFFFFu);
-			row.set("color", json_string(color));
+			row.set("color", json_string(rgb_hex(overlay.color)));
+		}
+		items.push(std::move(row));
+	}
+	// The collision shapes the options show (S17): each with its record (0 for a bound the game derives),
+	// its words, its colour, and its sphere or its corners in the preview's space, a handle's data.
+	const auto *document = dynamic_cast<const ModelDocument *>(input.document ? records_of(*input.document) : nullptr);
+	const bool now = document && current(input);
+	for (const ModelCollisionShape &shape : collision(input.clock)) {
+		JsonValue row = JsonValue::make_object();
+		row.set("kind", json_string(model_collision_kind_token(shape.kind)));
+		row.set("index", json_number(shape.index));
+		row.set("id", json_number(now ? double(model_collision_record(*document, shape).child) : 0.0));
+		row.set("name", json_string(shape.name));
+		row.set("legend", json_string(shape.legend));
+		row.set("section", json_number(shape.section));
+		row.set("color", json_string(rgb_hex(shape.rgb)));
+		if (shape.sphere) {
+			row.set("center", vec3(shape.center));
+			row.set("radius", json_number(shape.radius));
+		}
+		// Its corners once each (a face's three, a solid's), in the order first drawn.
+		JsonValue points = JsonValue::make_array();
+		std::vector<PreviewVec3> seen;
+		for (const PreviewVec3 &p : shape.edges.empty() ? shape.triangles : shape.edges) {
+			bool again = false;
+			for (const PreviewVec3 &q : seen)
+				again = again || (std::fabs(p.x - q.x) < 1e-5f && std::fabs(p.y - q.y) < 1e-5f && std::fabs(p.z - q.z) < 1e-5f);
+			if (again) continue;
+			seen.push_back(p);
+			points.push(vec3(p));
+		}
+		row.set("points", std::move(points));
+		// A pixel on it (where a hit takes it, nothing nearer in the way): a sphere's centre, else the
+		// middle of its first triangle, else the middle of its bounds.
+		PreviewVec3 center;
+		float radius = 0.0f;
+		model_collision_bounds(shape, center, radius);
+		if (shape.sphere) center = shape.center;
+		else if (shape.triangles.size() >= 3)
+			center = PreviewVec3{(shape.triangles[0].x + shape.triangles[1].x + shape.triangles[2].x) / 3.0f,
+			                     (shape.triangles[0].y + shape.triangles[1].y + shape.triangles[2].y) / 3.0f,
+			                     (shape.triangles[0].z + shape.triangles[1].z + shape.triangles[2].z) / 3.0f};
+		float x = 0.0f, y = 0.0f;
+		if (camera_.project(center, size().width, size().height, x, y)) {
+			JsonValue screen = JsonValue::make_array();
+			screen.push(json_number(x));
+			screen.push(json_number(y));
+			row.set("screen", std::move(screen));
+		} else {
+			row.set("screen", JsonValue());
 		}
 		items.push(std::move(row));
 	}
