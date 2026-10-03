@@ -590,7 +590,7 @@ bool Vfs::file_size(const std::string &name, uint64_t &out) const {
         return true;
     }
     std::error_code ec;
-    const auto size = fs::file_size(fs::path(e->loose_full_path), ec);
+    const auto size = fs::file_size(io::os_path(e->loose_full_path), ec);
     if (ec) return false;
     out = static_cast<uint64_t>(size);
     return true;

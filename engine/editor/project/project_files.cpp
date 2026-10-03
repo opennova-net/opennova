@@ -7,6 +7,7 @@
 #include <system_error>
 #include <thread>
 
+#include <base/io/os_path.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
@@ -51,9 +52,25 @@ bool write_whole(const std::string &path, const void *data, size_t size, std::st
 
 } // namespace
 
+fs::path path_of(const std::string &utf8) {
+#ifdef _WIN32
+	return fs::path(io::os_path_detail::widen_utf8(utf8));
+#else
+	return fs::path(utf8);
+#endif
+}
+
+std::string utf8_of(const fs::path &path) {
+	return io::utf8_generic_path(path);
+}
+
+std::string join_path(const std::string &dir, const std::string &name) {
+	return utf8_of(path_of(dir) / path_of(name));
+}
+
 fs::path system_path(const std::string &path) {
 #ifdef _WIN32
-	fs::path given(path);
+	fs::path given = path_of(path);
 	const std::wstring raw = given.wstring();
 	// Already in a form the system takes as it is, extended-length or a device's, its separators
 	// made backslashes (a generic spelling of one has slashes).
@@ -69,7 +86,7 @@ fs::path system_path(const std::string &path) {
 	if (normal.size() >= 3 && normal[1] == L':' && normal[2] == L'\\') return fs::path(L"\\\\?\\" + normal);
 	return absolute;
 #else
-	return fs::path(path);
+	return path_of(path);
 #endif
 }
 
@@ -242,19 +259,19 @@ bool link_file(const std::string &from, const std::string &to, std::string &erro
 }
 
 bool is_dot_directory(const fs::path &path) {
-	const std::string name = path.filename().string();
+	const std::string name = utf8_of(path.filename());
 	return !name.empty() && name[0] == '.';
 }
 
 std::string shown_path(const std::string &path, const std::string &root) {
 	if (root.empty()) return path;
-	const fs::path relative = fs::path(path).lexically_relative(root);
+	const fs::path relative = path_of(path).lexically_relative(path_of(root));
 	if (relative.empty() || *relative.begin() == "..") return path;
-	return relative.generic_string();
+	return utf8_of(relative);
 }
 
 std::string basename_of(const std::string &path) {
-	return fs::path(path).filename().generic_string();
+	return utf8_of(path_of(path).filename());
 }
 
 bool check_file_name(const std::string &name, AssetKind kind, FileNameProblem &problem, std::string &message) {
@@ -290,15 +307,15 @@ bool check_project_file_name(const std::string &root, const std::string &dir, co
 	std::error_code ec;
 	fs::path within;
 	if (!root.empty()) {
-		const fs::path base = fs::weakly_canonical(fs::path(root), ec);
+		const fs::path base = fs::weakly_canonical(path_of(root), ec);
 		if (!ec) {
-			const fs::path resolved = fs::weakly_canonical(fs::path(root) / dir / name, ec);
+			const fs::path resolved = fs::weakly_canonical(path_of(root) / path_of(dir) / path_of(name), ec);
 			if (!ec) within = resolved.lexically_relative(base);
 		}
 	}
 	if (within.empty() || within.is_absolute() || *within.begin() == "..") {
 		problem = FileNameProblem::Path;
-		message = "'" + (fs::path(dir) / name).generic_string() + "' would land outside the project.";
+		message = "'" + join_path(dir, name) + "' would land outside the project.";
 		return false;
 	}
 	return true;

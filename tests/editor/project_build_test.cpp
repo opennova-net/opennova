@@ -321,7 +321,10 @@ static int test_long_names_bind_packed_files_only() {
 		listed = listed || entry.logical_name == video;
 	TEST_EXPECT(listed);
 	const BuildReport report = run_build(loose, p.output_root());
-	TEST_EXPECT(report.ok && fs::is_regular_file(fs::path(report.build_dir) / video));
+	if (!report.ok)
+		for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "  build: %s %s\n", d.code().c_str(), d.message.c_str());
+	// Read through the system's path: under a deep TEMP the copy lies past MAX_PATH.
+	TEST_EXPECT(report.ok && fs::is_regular_file(system_path((fs::path(report.build_dir) / video).generic_string())));
 
 	const std::string texture = "art/a_long_texture_name.tga";
 	TEST_EXPECT(editor_test::write_text(p.root + "/" + texture, "x"));

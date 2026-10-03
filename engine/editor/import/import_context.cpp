@@ -24,20 +24,20 @@ ImportContext::ImportContext(std::string source_name, const std::vector<uint8_t>
 
 bool ImportContext::resolve(const std::string &folder, const std::string &root, const std::string &path,
                             std::string &file, std::string &relative) {
-	const fs::path asked(path);
+	const fs::path asked = path_of(path);
 	if (path.empty() || asked.has_root_name() || asked.has_root_directory()) return false;
-	const fs::path full = (fs::path(folder) / asked).lexically_normal();
-	const fs::path within = full.lexically_relative(fs::path(root).lexically_normal());
+	const fs::path full = (path_of(folder) / asked).lexically_normal();
+	const fs::path within = full.lexically_relative(path_of(root).lexically_normal());
 	if (within.empty() || within.filename().empty()) return false;
 	// Inside the project, and in no dot-folder on the way (the cache, a .git): the walks never
 	// enter one, so nothing there is a project file.
 	for (auto part = within.begin(); part != within.end(); ++part) {
-		const std::string name = part->string();
+		const std::string name = utf8_of(*part);
 		if (name == ".." || name == ".") return false;
 		if (std::next(part) != within.end() && !name.empty() && name[0] == '.') return false;
 	}
-	file = full.generic_string();
-	relative = within.generic_string();
+	file = utf8_of(full);
+	relative = utf8_of(within);
 	return true;
 }
 
@@ -66,7 +66,7 @@ bool ImportContext::read(const std::string &path, std::vector<uint8_t> &out) {
 	const std::string key = strutil::to_lower(relative);
 	for (const ImportInputStamp &known : stamps_)
 		if (strutil::to_lower(known.relative) == key) return true; // an input is listed once
-	inputs_.push_back({fs::path(path).lexically_normal().generic_string(),
+	inputs_.push_back({utf8_of(path_of(path).lexically_normal()),
 	                   io::fnv1a64_bytes(io::kFnv1a64Offset, out.data(), out.size())});
 	stamps_.push_back(std::move(stamp));
 	return true;

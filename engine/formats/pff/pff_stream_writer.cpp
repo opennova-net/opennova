@@ -11,10 +11,28 @@
 #include <string.h>
 
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
+
+#include <base/io/os_path.h>
 
 namespace opennova::pff {
 
 namespace {
+
+// The writer's paths are UTF-8 (the editor's, the VFS's): each file call goes through
+// base/io/os_path.h, so a path outside the ANSI code page or past MAX_PATH writes as any other.
+// Platform file I/O, not a port.
+void remove_file(const std::string &path) {
+	std::error_code ignored;
+	std::filesystem::remove(io::os_path(path), ignored);
+}
+
+bool rename_file(const std::string &from, const std::string &to) {
+	std::error_code ec;
+	std::filesystem::rename(io::os_path(from), io::os_path(to), ec);
+	return !ec;
+}
 
 // The largest chunk one read asks the caller for: a budget spans several.
 constexpr uint32_t kChunkBytes = 1u << 20;
@@ -50,7 +68,7 @@ void PffStreamWriter::abort() {
 	if (file_ != nullptr) {
 		fclose(file_);
 		file_ = nullptr;
-		remove(tmp_path_.c_str());
+		remove_file(tmp_path_);
 	}
 }
 
@@ -90,7 +108,7 @@ int PffStreamWriter::open(const char *path, PffFormat format, const PffWriteStre
 
 	path_ = path;
 	tmp_path_ = path_ + ".tmp";
-	file_ = fopen(tmp_path_.c_str(), "wb");
+	file_ = io::fopen_utf8(tmp_path_.c_str(), "wb");
 	if (file_ == nullptr) return PFF_WRITE_ERR_IO;
 	format_ = format;
 	entries_ = std::move(checked);
@@ -163,21 +181,20 @@ int PffStreamWriter::finish() {
 	const bool closed = fclose(file_) == 0;
 	file_ = nullptr;
 	if (!closed) {
-		remove(tmp_path_.c_str());
+		remove_file(tmp_path_);
 		return PFF_WRITE_ERR_IO;
 	}
-	/* rename() will not overwrite an existing file on Windows, so an existing target is moved
-	   aside first, to "<path>.bak" rather than removed: a crash mid-swap always leaves a copy.
-	   The backup goes once the new file is in place. */
+	/* An existing target is moved aside first, to "<path>.bak" rather than removed: a crash
+	   mid-swap always leaves a copy. The backup goes once the new file is in place. */
 	const std::string bak = path_ + ".bak";
-	remove(bak.c_str()); /* a stale backup from an interrupted save */
-	const bool had_original = rename(path_.c_str(), bak.c_str()) == 0;
-	if (rename(tmp_path_.c_str(), path_.c_str()) != 0) {
-		remove(tmp_path_.c_str());
-		if (had_original) rename(bak.c_str(), path_.c_str()); /* the original back */
+	remove_file(bak); /* a stale backup from an interrupted save */
+	const bool had_original = rename_file(path_, bak);
+	if (!rename_file(tmp_path_, path_)) {
+		remove_file(tmp_path_);
+		if (had_original) rename_file(bak, path_); /* the original back */
 		return PFF_WRITE_ERR_IO;
 	}
-	if (had_original) remove(bak.c_str());
+	if (had_original) remove_file(bak);
 	return PFF_WRITE_OK;
 }
 

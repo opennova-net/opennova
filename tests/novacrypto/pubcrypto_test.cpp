@@ -112,6 +112,45 @@ bool bad_values_are_rejected() {
 	return true;
 }
 
+// The key-chain form: one key is the single-key codec's encoding; each key of a chain is a layer of
+// it, so the chain decodes layer by layer through the single-key codec (the outer key first) to the
+// plaintext; the chain's own decode reads it back past a line end, and refuses a character outside
+// A-P, an odd count, a damaged CRC and too few bytes for the keys.
+bool key_chain_layers() {
+	const std::vector<uint8_t> hello = {'h', 'e', 'l', 'l', 'o'};
+	if (!expect_eq(opennova::encode_key_chain(hello, "shortkey"), "OHLMEGCCCBHHEJHFEB", "one key")) return false;
+	const std::vector<uint8_t> tag = {'j', 'o', 'p', ':', 'c', 'u', 's', '2'};
+	const std::string chained = opennova::encode_key_chain(tag, "jop:2:oyez");
+	if (chained.size() != 2 * (tag.size() + 12)) {
+		std::fprintf(stderr, "FAIL: a chain of three keys adds three CRCs\n");
+		return false;
+	}
+	std::vector<uint8_t> layer;
+	bool layered = opennova::decode_pub_value(chained, "oyez", layer);
+	layered = layered && opennova::decode_pub_value(opennova::encode_ap(layer), "2", layer);
+	layered = layered && opennova::decode_pub_value(opennova::encode_ap(layer), "jop", layer);
+	if (!layered) {
+		std::fprintf(stderr, "FAIL: each layer of the chain decodes through the single-key codec\n");
+		return false;
+	}
+	if (!expect_eq_bytes(layer, tag, "the chain's layers")) return false;
+	std::vector<uint8_t> back;
+	if (!opennova::decode_key_chain(chained + "\r\n", "jop:2:oyez", back) || back != tag) {
+		std::fprintf(stderr, "FAIL: the chain reads back past a line end\n");
+		return false;
+	}
+	std::string damaged = chained;
+	damaged[0] = damaged[0] == 'A' ? 'B' : 'A';
+	if (opennova::decode_key_chain(chained + "Z", "jop:2:oyez", back) ||
+	    opennova::decode_key_chain(chained.substr(1), "jop:2:oyez", back) ||
+	    opennova::decode_key_chain(damaged, "jop:2:oyez", back) ||
+	    opennova::decode_key_chain(opennova::encode_key_chain(tag, "jop"), "jop:2:oyez", back) || !back.empty()) {
+		std::fprintf(stderr, "FAIL: the chain's decode refuses what the original returns -1 for\n");
+		return false;
+	}
+	return true;
+}
+
 bool empty_key_throws() {
 	try {
 		opennova::encode_pub_value(std::string("x"), "");
@@ -129,6 +168,7 @@ int main() {
 	ok = fixtures_match_python() && ok;
 	ok = empty_key_throws() && ok;
 	ok = bad_values_are_rejected() && ok;
+	ok = key_chain_layers() && ok;
 	if (!ok) {
 		std::fprintf(stderr, "pubcrypto_test failed\n");
 		return 1;

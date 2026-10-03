@@ -41,6 +41,7 @@
 #include <editor/import/sidecar.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -613,6 +614,60 @@ static int test_deep_root_import() {
 	return 0;
 }
 
+// A project whose own files lie past Windows' MAX_PATH (a folder some 246 characters long, its
+// project file and its files under folders past 260): the project is made and opened, every missing
+// required file made, the scan walks and lists them (their sizes read), the import pass finds a source
+// there and imports it, a document opens and a file is made there, and a build packs them, every call
+// on them taking the system path (system_path).
+static int test_deep_project_files() {
+	editor_test::TempProjectDir dir("opennova_editor_deep_files");
+	std::string root = dir.root();
+	while (root.size() + 1 < 246) root += "/" + std::string(std::min<size_t>(60, 246 - root.size() - 1), 'f');
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(root, "Deep files"));
+	const SessionView &view = session.view();
+	TEST_EXPECT(view.project.open);
+	if (!view.project.open) return 1;
+	editor_test::create_missing_files(session);
+	if (view.project.requirements->required_missing != 0)
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.severity == DiagnosticSeverity::Error) std::printf("  deep: %s %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(view.project.requirements->required_missing == 0 && view.project.requirements->required_total > 0);
+	const AssetEntry *table = view.project.scan->find("gametext.bin");
+	TEST_EXPECT(table && (root + "/" + table->relative_path).size() > 260 && table->size_bytes > 0 &&
+	            table->kind == AssetKind::Strings);
+	// An import source under a folder past MAX_PATH: found by the pass, imported, its output listed.
+	PngSpec spec;
+	spec.width = 1;
+	spec.height = 1;
+	spec.rows = {0, 200, 100, 50, 255};
+	const std::vector<uint8_t> png = make_png(spec);
+	std::string write_error;
+	const std::string source = root + "/art/source/glow.png";
+	TEST_EXPECT(source.size() > 259 && ensure_directory(root + "/art/source", write_error) &&
+	            write_file_atomic(source, png.data(), png.size(), write_error) && mark_for_import(source));
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetEntry *output = view.project.scan->find("glow.pcx");
+	TEST_EXPECT(output && output->imported_from == "art/source/glow.png" && output->size_bytes > 0);
+	// A document opens, and a new file is made, there.
+	session.handle(request::open_document("gametext.bin"));
+	TEST_EXPECT(session.outcome().done() && session.document_base_for("gametext.bin") != nullptr);
+	session.handle(request::create_file("deep_extra.mnu", "menu"));
+	TEST_EXPECT(session.outcome().done() && session.document_base_for("deep_extra.mnu") != nullptr);
+	session.run_operations();
+	// And the build packs them.
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(view.activity.has_build && view.activity.last_build->ok);
+	if (view.activity.has_build && !view.activity.last_build->ok)
+		for (const Diagnostic &d : view.activity.last_build->diagnostics)
+			std::printf("  build: %s %s\n", d.code().c_str(), d.message.c_str());
+	std::printf("editor_import: a project folder %zu characters long, its string table at %zu\n", root.size(),
+	            table ? root.size() + 1 + table->relative_path.size() : size_t(0));
+	return 0;
+}
+
 // The sidecar's lifetime (S9c): it holds nothing a checkout changes (a touched source
 // leaves its bytes alone, new content changes its hash) while the machine-local import
 // cache holds the size and the time; a record that does not parse is never replaced;
@@ -1028,6 +1083,7 @@ int main(int argc, char **argv) {
 	failures += test_image_tga_output();
 	failures += test_renamed_import_outputs();
 	failures += test_deep_root_import();
+	failures += test_deep_project_files();
 	failures += test_import_lifetime();
 	failures += test_retail_source();
 	failures += test_scene_imports();

@@ -187,7 +187,7 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 		return;
 	}
 	std::string model = basename_of(std::get<std::string>(graphic));
-	if (std::filesystem::path(model).extension().empty()) model += ".3di";
+	if (path_of(model).extension().empty()) model += ".3di";
 	use.scope = strutil::to_upper(model);
 }
 

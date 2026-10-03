@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_field.h>
@@ -217,7 +218,7 @@ std::string worded(const char *key) {
 	std::string out;
 	for (const char *c = key; *c; ++c) {
 		if (*c == '[') {
-			out += ' ' + std::to_string(std::atoi(c + 1) + 1);
+			out += ' ' + std::to_string(strutil::parse_int(c + 1).value_or(0) + 1);
 			break;
 		}
 		out += *c == '_' ? ' ' : *c;

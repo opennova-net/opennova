@@ -20,7 +20,14 @@
 #include <variant>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <base/io/hash.h>
+#include <base/io/os_path.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
 #include <editor/session/finding_codes.h>
@@ -127,29 +134,42 @@ struct HoldingOperation : opennova::editor::SessionOperation {
 	opennova::editor::OperationOutcome finish(opennova::editor::SessionCore &) override { return {}; }
 };
 
+// The process's own suffix to a temporary directory's name: two runs of a test at once (a parallel
+// ctest beside another worktree's, an agent's beside a person's) share the system temp directory,
+// and each wipes its directory on construction and destruction, so a name both used would have one
+// run delete the other's project mid-test.
+inline std::string process_suffix() {
+#ifdef _WIN32
+	return "_" + std::to_string(_getpid());
+#else
+	return "_" + std::to_string(getpid());
+#endif
+}
+
+// `name` and every path it gives are UTF-8 (the editor's paths), turned into the system's own
+// through base/io/os_path.h, not the editor's conversions under test.
 struct TempProjectDir {
 	std::filesystem::path path;
 
 	explicit TempProjectDir(const char *name) {
-		path = std::filesystem::temp_directory_path() / name;
+		path = std::filesystem::temp_directory_path() / opennova::io::os_path(std::string(name) + process_suffix());
 		std::error_code ec;
-		std::filesystem::remove_all(opennova::editor::system_path(path.generic_string()), ec);
+		std::filesystem::remove_all(opennova::editor::system_path(root()), ec);
 		std::filesystem::create_directories(path, ec);
 	}
 	~TempProjectDir() {
 		std::error_code ec;
-		std::filesystem::remove_all(opennova::editor::system_path(path.generic_string()), ec);
+		std::filesystem::remove_all(opennova::editor::system_path(root()), ec);
 	}
-	std::string root() const { return path.generic_string(); }
-	std::string file(const char *relative) const {
-		return (path / relative).generic_string();
-	}
+	std::string root() const { return opennova::io::utf8_generic_path(path); }
+	std::string file(const char *relative) const { return opennova::io::utf8_join(root(), relative); }
 };
 
+// A file written at the UTF-8 `path`, its folders made.
 inline bool write_bytes(const std::string &path, const std::vector<uint8_t> &bytes) {
 	std::error_code ec;
-	std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
-	std::ofstream out(path, std::ios::binary);
+	std::filesystem::create_directories(opennova::io::os_path(path).parent_path(), ec);
+	std::ofstream out(opennova::io::os_path(path), std::ios::binary);
 	if (!out) return false;
 	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 	return static_cast<bool>(out);
@@ -224,7 +244,7 @@ inline std::string tree_digest(const std::string &dir) {
 	std::vector<std::pair<std::string, fs::path>> entries;
 	for (auto it = fs::recursive_directory_iterator(root, ec); !ec && it != fs::recursive_directory_iterator();
 	     it.increment(ec))
-		entries.emplace_back(it->path().lexically_relative(root).generic_string(), it->path());
+		entries.emplace_back(opennova::io::utf8_generic_path(it->path().lexically_relative(root)), it->path());
 	std::sort(entries.begin(), entries.end());
 	std::string digest;
 	for (const auto &[relative, path] : entries) {
@@ -233,7 +253,7 @@ inline std::string tree_digest(const std::string &dir) {
 		if (fs::is_regular_file(path, kind)) {
 			std::vector<uint8_t> bytes;
 			std::string error;
-			opennova::editor::read_file_bytes(path.string(), bytes, error);
+			opennova::editor::read_file_bytes(opennova::io::utf8_path(path), bytes, error);
 			digest += " " + std::to_string(bytes.size()) + " " +
 			          opennova::io::hex64(opennova::io::fnv1a64_bytes(opennova::io::kFnv1a64Offset, bytes.data(), bytes.size()));
 		}
