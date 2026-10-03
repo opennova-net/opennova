@@ -33,6 +33,9 @@ public:
 	// dropped from it. In effect at once, kept by the next save.
 	void remember_recent_project(const std::string &root);
 	void forget_recent_project(const std::string &root);
+	// `item` moved (or added) to the front of the recently placed items, capped at kRecentItemsMax.
+	// In effect at once, kept by the next save.
+	void remember_recent_item(int64_t item);
 
 private:
 	PreferencesStore &store_;

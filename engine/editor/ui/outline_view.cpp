@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
+#include <editor/assets/asset_kind.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/mission_table.h>
 #include <editor/graph/display_names.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/document_toolbar.h>
@@ -403,6 +405,17 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		ui_kit::change_dot(change, x + ImGui::GetTreeNodeToLabelSpacing());
 		ui_kit::tooltip_lazy([&] { return record_tip(line, change); });
 		if (ImGui::IsItemClicked() && !toggled) select_line(workspace, document, model_, index);
+		// A double click on a mission's entity or area frames it in the mission's picture (ADR 0046
+		// S15: the outline and the picture are one selection; its viewport plans the camera).
+		const bool placed = is_entity_kind(line.address.kind) || line.address.kind == node_kind(MissionKind::Area);
+		if (!toggled && !line.address.child && placed && document.kind() == AssetKind::Mission && ImGui::IsItemHovered() &&
+				ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+			ViewportCommand frame;
+			frame.name = "frame";
+			frame.kind = ViewportKind::Mission;
+			frame.ids = { line.address.row };
+			workspace.request(request::edit_in_viewport(document.path(), std::move(frame)));
+		}
 		finding_mark(view, document, line.address);
 	}
 	if (indent > 0.0f) ImGui::Unindent(indent);

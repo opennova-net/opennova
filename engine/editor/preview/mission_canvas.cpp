@@ -2,14 +2,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include <base/io/bam.h>
+#include <editor/graph/asset_graph.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -51,6 +54,10 @@ double turned(double from, double to) {
 	return by;
 }
 
+double snapped(double value, float snap) {
+	return snap > 0.0f ? std::round(value / double(snap)) * double(snap) : value;
+}
+
 // The selected records of the frame as a press finds them: the entities, and the areas where `areas`.
 std::vector<MissionPressed> selected_pressed(const MissionCanvasFrame &frame, bool areas, int grabbed_mark,
 		size_t &grabbed) {
@@ -68,11 +75,38 @@ std::vector<MissionPressed> selected_pressed(const MissionCanvasFrame &frame, bo
 	return out;
 }
 
+// The handles the primary carries, nearest the pointer first in this order.
+constexpr MissionHandle kPrimaryHandles[] = { MissionHandle::Yaw, MissionHandle::Height, MissionHandle::XMin,
+	MissionHandle::XMax, MissionHandle::YMin, MissionHandle::YMax };
+
+// A number of metres as the readout says it.
+std::string metres(double value) {
+	char text[32];
+	std::snprintf(text, sizeof(text), "%.2f m", value);
+	return text;
+}
+
 } // namespace
 
 int mission_canvas_under(const MissionCanvasFrame &frame, const CanvasInput &in) {
 	if (!in.hovered || !frame.viewport) return -1;
 	return pick_mission_mark(frame.marks, in.mouse.x, in.mouse.y);
+}
+
+bool mission_canvas_handle_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionHandle &out) {
+	if (!in.hovered || !frame.viewport || frame.primary < 0 || !frame.current || !frame.editable || !frame.document ||
+			frame.document->blocked())
+		return false;
+	const MissionViewport &viewport = *frame.viewport;
+	const MissionMark &primary = frame.marks[size_t(frame.primary)];
+	for (const MissionHandle handle : kPrimaryHandles) {
+		PreviewVec3 at;
+		CanvasPoint offset;
+		if (!viewport.handle_at(primary, handle, at) || !near_pointer(viewport.camera(), in, at, offset)) continue;
+		out = handle;
+		return true;
+	}
+	return false;
 }
 
 MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportContext &context, const CanvasInput &in,
@@ -88,12 +122,13 @@ MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportC
 	if (!frame.viewport) return grab;
 	const MissionViewport &viewport = *frame.viewport;
 	const OrbitCamera &camera = viewport.camera();
-	const bool edits = frame.current && frame.editable && !frame.document->blocked() && grab.join == CanvasJoin::Replace;
+	// Alt on a mark copies it as it drags; Alt on nothing orbits. Ctrl and Shift join the selection.
+	const bool joins = in.keys.ctrl || in.keys.shift;
+	const bool edits = frame.current && frame.editable && !frame.document->blocked() && !joins;
 	// The primary's own handles first: its height and its yaw, an area's edges.
-	if (edits && frame.primary >= 0) {
+	if (edits && !in.keys.alt && frame.primary >= 0) {
 		const MissionMark &primary = frame.marks[size_t(frame.primary)];
-		for (const MissionHandle handle : { MissionHandle::Yaw, MissionHandle::Height, MissionHandle::XMin,
-					 MissionHandle::XMax, MissionHandle::YMin, MissionHandle::YMax }) {
+		for (const MissionHandle handle : kPrimaryHandles) {
 			PreviewVec3 at;
 			if (!viewport.handle_at(primary, handle, at) || !near_pointer(camera, in, at, grab.offset)) continue;
 			grab.what = MissionGrab::What::Handle;
@@ -118,10 +153,11 @@ MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportC
 	if (under >= 0) {
 		if (!edits) return grab; // a click selects it; nothing a drag moves
 		// The mark moves on the ground with every selected record; one not selected alone, selected
-		// first.
+		// first. With Alt, copies of them do, placed where the drag is let go.
 		const MissionMark &mark = frame.marks[size_t(under)];
 		grab.what = MissionGrab::What::Handle;
 		grab.handle = MissionHandle::Move;
+		grab.copy = in.keys.alt;
 		grab.through = mark.at;
 		grab.offset = CanvasPoint{ mark.x - in.mouse.x, mark.y - in.mouse.y };
 		if (is_selected(frame, under)) {
@@ -147,8 +183,20 @@ MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportC
 // --- MissionCanvas -------------------------------------------------------------------------------
 
 void MissionCanvas::follow(const ViewportModel &viewport, const ViewportContext &context, CanvasRequests &out) {
-	frame_ = static_cast<const MissionViewport &>(viewport).canvas_frame(context);
+	const auto &mission = static_cast<const MissionViewport &>(viewport);
+	frame_ = mission.canvas_frame(context);
 	if (turn_ >= 0.0f) frame_.turn_snap = turn_;
+	// The tool, as the viewport's options say it; the placed item's name, as the catalogs define it.
+	const MissionViewportOptions &options = mission.options();
+	tool_ = options.tool;
+	path_ = options.path;
+	if (item_ != options.item || item_name_.empty()) {
+		item_ = options.item;
+		item_name_.clear();
+		const AssetGraph *graph = context.input.view.findings.graph.get();
+		if (const GraphSymbol *symbol = graph && item_ ? graph->resolve_symbol(ReferenceKind::Item, std::to_string(item_)) : nullptr)
+			item_name_ = symbol->record;
+	}
 	gesture_.frame(subject_of(frame_), out);
 	// A nudge is of the selection it began on.
 	if (gesture_.nudging() && nudged_ != frame_.records) gesture_.end(out);
@@ -184,11 +232,13 @@ void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in,
 	if (in.pressed) {
 		gesture_.press(subject_of(frame_), in.screen, out);
 		grab_ = mission_canvas_grab(frame_, context, in, under);
-		// Placing: a press takes no mark and draws no marquee (its click places).
-		if (place_ != 0 && grab_.what != MissionGrab::What::Pan && grab_.what != MissionGrab::What::Orbit) {
+		// Under a tool: a press takes no mark and draws no marquee (its click places, its drag draws the
+		// Area tool's box).
+		if (tool() != MissionTool::Select && grab_.what != MissionGrab::What::Pan && grab_.what != MissionGrab::What::Orbit) {
 			const CanvasPoint from = grab_.from;
 			grab_ = MissionGrab();
 			grab_.from = grab_.to = from;
+			if (tool() == MissionTool::Area) grab_.what = MissionGrab::What::Area;
 		}
 	}
 	if (gesture_.pressed() && !in.down) {
@@ -200,7 +250,8 @@ void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in,
 		if (gesture_.dragging()) {
 			switch (grab_.what) {
 			case MissionGrab::What::Handle: drag_(context, in, out); break;
-			case MissionGrab::What::Marquee: grab_.to = in.mouse; break;
+			case MissionGrab::What::Marquee:
+			case MissionGrab::What::Area: grab_.to = in.mouse; break;
 			case MissionGrab::What::Pan:
 				if (in.delta.x != 0.0f || in.delta.y != 0.0f) {
 					camera.pan(in.delta.x, in.delta.y, in.width);
@@ -236,11 +287,27 @@ void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in,
 		frame_selected(in.width, in.height, out);
 }
 
+float MissionCanvas::step_(const CanvasInput &in) const {
+	const float step = frame_.snap > 0.0f ? frame_.snap : 1.0f;
+	return in.keys.shift ? step * 0.1f : step;
+}
+
+void MissionCanvas::step_right(double &east, double &north) const {
+	// The file's axis nearest the camera's right: right of a heading (east, north) is (north, -east).
+	const double heading = frame_.viewport ? mission_camera_heading(frame_.viewport->camera()) * io::kRadiansPerDegree : 0.0;
+	const double forward_east = std::round(std::sin(heading)), forward_north = std::round(std::cos(heading));
+	const bool diagonal = forward_east != 0.0 && forward_north != 0.0;
+	const double fe = diagonal ? 0.0 : forward_east, fn = diagonal ? (forward_north > 0.0 ? 1.0 : -1.0) : forward_north;
+	east = fn;
+	north = -fe;
+}
+
 void MissionCanvas::keys_(const ViewportContext &, const CanvasInput &in, CanvasRequests &out) {
 	const CanvasKeyboard &keyboard = in.keyboard;
 	if (!keyboard.focused || gesture_.pressed() || !frame_.document) return;
 	const std::string &path = frame_.document->path();
-	if (keyboard.escape && !frame_.records.empty()) {
+	// Esc under a tool is the tool's (the view goes back to Select); else it selects nothing.
+	if (keyboard.escape && tool() == MissionTool::Select && !frame_.records.empty()) {
 		out.request(request::select_record(path, NodeAddress()));
 		return;
 	}
@@ -257,17 +324,27 @@ void MissionCanvas::keys_(const ViewportContext &, const CanvasInput &in, Canvas
 		out.request(request::edit_record(path, std::move(edits)));
 		return;
 	}
+	if (keyboard.duplicate && frame_.viewport) {
+		// A copy of the selection a step to the camera's right: one command the viewport plans.
+		double east = 0.0, north = 0.0;
+		step_right(east, north);
+		const double step = double(step_(in));
+		ViewportCommand command;
+		command.name = "duplicate";
+		command.kind = ViewportKind::Mission;
+		command.by = { east * step, north * step };
+		out.request(request::edit_in_viewport(frame_.viewport->path(), std::move(command)));
+		return;
+	}
 	if (!keyboard.arrow_x && !keyboard.arrow_y && !keyboard.page) return;
 	// A step along the file's axis nearest the camera's right (the left and right arrows) and its
-	// forward (up and down); PgUp and PgDn the height.
-	const float step = frame_.snap > 0.0f ? frame_.snap : 1.0f;
-	const double heading = mission_camera_heading(frame_.viewport->camera()) * io::kRadiansPerDegree;
-	const double forward_east = std::round(std::sin(heading)), forward_north = std::round(std::cos(heading));
-	const bool diagonal = forward_east != 0.0 && forward_north != 0.0;
-	const double fe = diagonal ? 0.0 : forward_east, fn = diagonal ? (forward_north > 0.0 ? 1.0 : -1.0) : forward_north;
-	// Right of a heading (east, north) is (north, -east).
-	const double east = (double(keyboard.arrow_x) * fn - double(keyboard.arrow_y) * fe) * step;
-	const double north = (-double(keyboard.arrow_x) * fe - double(keyboard.arrow_y) * fn) * step;
+	// forward (up and down); PgUp and PgDn the height. Shift: a tenth of the step.
+	const double step = double(step_(in));
+	double right_east = 0.0, right_north = 0.0;
+	step_right(right_east, right_north);
+	// Forward of a right (east, north) is (-north, east).
+	const double east = (double(keyboard.arrow_x) * right_east + double(keyboard.arrow_y) * right_north) * step;
+	const double north = (double(keyboard.arrow_x) * right_north - double(keyboard.arrow_y) * right_east) * step;
 	nudge_by_(east, north, double(keyboard.page) * step, out);
 }
 
@@ -278,7 +355,8 @@ void MissionCanvas::drag_(const ViewportContext &context, const CanvasInput &in,
 	const MissionPressed &held = grab_.pressed[grab_.grabbed];
 	// The handle follows the pointer, kept where the press took it.
 	const float x = in.mouse.x + grab_.offset.x, y = in.mouse.y + grab_.offset.y;
-	const float snap = in.keys.alt ? 0.0f : frame_.snap;
+	// Ctrl held: free of the snap.
+	const float snap = in.keys.ctrl ? 0.0f : frame_.snap;
 	std::vector<Edit> edits;
 	switch (grab_.handle) {
 	case MissionHandle::Move: {
@@ -286,6 +364,12 @@ void MissionCanvas::drag_(const ViewportContext &context, const CanvasInput &in,
 		double ground[3];
 		if (!grab_.grounded || !mission_ground_point(context, camera, x, y, grab_.ground[2], ground)) return;
 		const double to[2] = { held.x + (ground[0] - grab_.ground[0]), held.y + (ground[1] - grab_.ground[1]) };
+		if (grab_.copy) {
+			// The copies go as far as a move would take the grabbed record; nothing is written yet.
+			grab_.copy_by[0] = snapped(to[0], snap) - held.x;
+			grab_.copy_by[1] = snapped(to[1], snap) - held.y;
+			return;
+		}
 		mission_move_edits(*frame_.document, grab_.pressed, grab_.grabbed, to, snap, viewport.options().stick,
 				frame_.device, gesture_.token(), edits);
 		break;
@@ -304,7 +388,7 @@ void MissionCanvas::drag_(const ViewportContext &context, const CanvasInput &in,
 			return;
 		const double heading = std::atan2(at[0] - held.x, at[1] - held.y) / io::kRadiansPerDegree;
 		mission_yaw_edits(*frame_.document, grab_.pressed, grab_.grabbed, turned(double(held.yaw), heading),
-				in.keys.alt ? 0.0f : frame_.turn_snap, gesture_.token(), edits);
+				in.keys.ctrl ? 0.0f : frame_.turn_snap, gesture_.token(), edits, viewport.options().stick, frame_.device);
 		break;
 	}
 	default: {
@@ -322,6 +406,7 @@ void MissionCanvas::drag_(const ViewportContext &context, const CanvasInput &in,
 
 void MissionCanvas::release_(CanvasRequests &out) {
 	const std::string &path = gesture_.path();
+	const MissionTool now = tool();
 	if (grab_.what == MissionGrab::What::Marquee && gesture_.dragging()) {
 		// The records in the box, one selection: nearest last, the primary; joined as the keys say. A
 		// box that takes nothing selects nothing.
@@ -334,16 +419,44 @@ void MissionCanvas::release_(CanvasRequests &out) {
 			else if (replace && !frame_.records.empty())
 				out.request(request::select_record(path, NodeAddress()));
 		}
-	} else if (!gesture_.dragging() && grab_.what != MissionGrab::What::Pan && frame_.current && place_ != 0) {
-		// Placing: one of the item where the click was (the viewport plans the drop).
-		if (frame_.editable && frame_.viewport) {
+	} else if (grab_.what == MissionGrab::What::Area) {
+		// The Area tool: a box dragged on the ground is an area trigger over it (a click makes nothing).
+		if (gesture_.dragging() && frame_.current && frame_.editable && frame_.viewport) {
 			ViewportDrop drop;
-			drop.reference = "item";
-			drop.name = std::to_string(place_);
+			drop.reference = "area";
+			drop.box = true;
 			drop.x = grab_.from.x;
 			drop.y = grab_.from.y;
+			drop.x2 = grab_.to.x;
+			drop.y2 = grab_.to.y;
+			drop.snap = frame_.snap;
 			drop.kind = ViewportKind::Mission;
 			out.request(request::edit_in_viewport(frame_.viewport->path(), std::move(drop)));
+		}
+	} else if (!gesture_.dragging() && grab_.what != MissionGrab::What::Pan && frame_.current &&
+			(now == MissionTool::Place || now == MissionTool::Path)) {
+		// Placing: one of the item, or the path's next stop, where the click was (the viewport plans it);
+		// none picked yet, nothing (the hint says to pick one).
+		const int64_t picked = now == MissionTool::Place ? item_ : int64_t(path_);
+		if (frame_.editable && frame_.viewport && picked != 0) {
+			ViewportDrop drop;
+			drop.reference = now == MissionTool::Place ? "item" : "path";
+			drop.name = std::to_string(picked);
+			drop.x = grab_.from.x;
+			drop.y = grab_.from.y;
+			drop.snap = frame_.snap;
+			drop.kind = ViewportKind::Mission;
+			out.request(request::edit_in_viewport(frame_.viewport->path(), std::move(drop)));
+		}
+	} else if (grab_.what == MissionGrab::What::Handle && grab_.copy && gesture_.dragging()) {
+		// An Alt-drag let go: copies of what it took, as far as it went (one command the viewport plans).
+		if ((grab_.copy_by[0] != 0.0 || grab_.copy_by[1] != 0.0) && frame_.viewport) {
+			ViewportCommand command;
+			command.name = "duplicate";
+			command.kind = ViewportKind::Mission;
+			for (const MissionPressed &each : grab_.pressed) command.ids.push_back(each.record.row);
+			command.by = { grab_.copy_by[0], grab_.copy_by[1] };
+			out.request(request::edit_in_viewport(frame_.viewport->path(), std::move(command)));
 		}
 	} else if (!gesture_.dragging() && grab_.what == MissionGrab::What::Handle && grab_.pick < 0) {
 		// A tap on the primary's yaw, height or edge handle (no mark under it): nothing changes, the
@@ -406,7 +519,7 @@ void MissionCanvas::frame_selected(int width, int height, CanvasRequests &out) c
 	set_camera(frame_, frame_.viewport->framed(frame_.marks, of, width, height), out);
 }
 
-OverlayList MissionCanvas::shapes(const ViewportContext &, const CanvasInput &in) const {
+OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasInput &in) const {
 	if (!frame_.viewport) return OverlayList();
 	const MissionViewport &viewport = *frame_.viewport;
 	MissionOverlayInput overlay;
@@ -417,7 +530,8 @@ OverlayList MissionCanvas::shapes(const ViewportContext &, const CanvasInput &in
 	overlay.height = in.height;
 	overlay.marks = &frame_.marks;
 	// Nothing is under the pointer while it looks or drags.
-	overlay.hover = looking_ || gesture_.dragging() ? -1 : mission_canvas_under(frame_, in);
+	const bool busy = looking_ || gesture_.dragging();
+	overlay.hover = busy || tool() != MissionTool::Select ? -1 : mission_canvas_under(frame_, in);
 	overlay.primary = frame_.primary;
 	overlay.selected = &frame_.selected;
 	std::vector<NodeId> rows;
@@ -430,17 +544,105 @@ OverlayList MissionCanvas::shapes(const ViewportContext &, const CanvasInput &in
 	overlay.marquee = grab_.what == MissionGrab::What::Marquee && gesture_.dragging();
 	overlay.marquee_from = grab_.from;
 	overlay.marquee_to = grab_.to;
+	overlay.pointer = in.mouse;
+	// The handle the pointer is on (its words and step beside it), or the one a drag holds.
+	MissionHandle handle = MissionHandle::Move;
+	if (gesture_.dragging() && grab_.what == MissionGrab::What::Handle && !grab_.copy) {
+		overlay.active_handle = true;
+		overlay.handle = grab_.handle;
+	} else if (!busy && tool() == MissionTool::Select && mission_canvas_handle_under(frame_, in, handle)) {
+		overlay.active_handle = true;
+		overlay.handle = handle;
+	}
+	overlay.snap = in.keys.ctrl ? 0.0f : frame_.snap;
+	overlay.turn = in.keys.ctrl ? 0.0f : frame_.turn_snap;
+	overlay.dragging = gesture_.dragging() && grab_.what == MissionGrab::What::Handle && !grab_.copy;
+	// An Alt-drag's copies where they go.
+	if (gesture_.dragging() && grab_.what == MissionGrab::What::Handle && grab_.copy) {
+		overlay.copies = &grab_.pressed;
+		overlay.copy_by[0] = grab_.copy_by[0];
+		overlay.copy_by[1] = grab_.copy_by[1];
+	}
+	// The Area tool's box on the ground.
+	if (grab_.what == MissionGrab::What::Area && gesture_.dragging()) {
+		double target[3];
+		preview_to_mission(viewport.camera().target, target);
+		if (mission_ground_point(context, viewport.camera(), grab_.from.x, grab_.from.y, target[2], overlay.box_from) &&
+				mission_ground_point(context, viewport.camera(), grab_.to.x, grab_.to.y, target[2], overlay.box_to))
+			overlay.box = true;
+		overlay.box_snap = frame_.snap;
+	}
 	return mission_overlay_shapes(overlay);
 }
 
-CanvasCursor MissionCanvas::cursor(const ViewportContext &, const CanvasInput &) const {
-	return grab_.what == MissionGrab::What::Handle && gesture_.dragging() ? CanvasCursor::Move : CanvasCursor::Default;
+CanvasCursor MissionCanvas::cursor(const ViewportContext &, const CanvasInput &in) const {
+	if (grab_.what == MissionGrab::What::Handle && gesture_.dragging()) return CanvasCursor::Move;
+	MissionHandle handle = MissionHandle::Move;
+	if (!looking_ && !gesture_.pressed() && tool() == MissionTool::Select && mission_canvas_handle_under(frame_, in, handle))
+		return CanvasCursor::Move;
+	return CanvasCursor::Default;
 }
 
 std::string MissionCanvas::hover_tip(const ViewportContext &, const CanvasInput &in) const {
 	// The label beside the hovered mark says it (mission_overlay): no tip beside it.
 	(void)in;
 	return std::string();
+}
+
+std::string MissionCanvas::hint(const ViewportContext &, const CanvasInput &in) const {
+	MissionHintInput hint;
+	hint.tool = tool();
+	hint.item = item_name_.empty() && item_ ? "item " + std::to_string(item_) : item_name_;
+	hint.path = path_;
+	hint.editable = frame_.editable;
+	hint.not_editable = frame_.not_editable;
+	hint.current = frame_.current || !frame_.document;
+	hint.snap = in.keys.ctrl ? 0.0f : frame_.snap;
+	hint.turn = in.keys.ctrl ? 0.0f : frame_.turn_snap;
+	hint.dragging = gesture_.dragging() && (grab_.what == MissionGrab::What::Handle || grab_.what == MissionGrab::What::Marquee ||
+													grab_.what == MissionGrab::What::Area);
+	hint.handle = grab_.what == MissionGrab::What::Handle;
+	hint.which = grab_.handle;
+	hint.copying = grab_.copy;
+	if (!gesture_.pressed() && !looking_) {
+		MissionHandle handle = MissionHandle::Move;
+		if (tool() == MissionTool::Select && mission_canvas_handle_under(frame_, in, handle)) {
+			hint.handle = true;
+			hint.which = handle;
+		} else {
+			const int under = mission_canvas_under(frame_, in);
+			if (under >= 0 && frame_.document) {
+				const MissionMark &mark = frame_.marks[size_t(under)];
+				hint.hovered = frame_.document->record_title(mark.record);
+				hint.hovered_area = mark.area >= 0;
+				hint.hovered_selected = is_selected(frame_, under);
+			}
+		}
+	}
+	hint.selected = frame_.records.size();
+	if (frame_.viewport)
+		hint.empty_mission = frame_.viewport->scene().entities().empty() && frame_.viewport->scene().areas().empty();
+	// While a drag writes, what it has come to.
+	std::string line = mission_canvas_hint(hint);
+	if (gesture_.dragging() && grab_.what == MissionGrab::What::Handle && !grab_.pressed.empty() && frame_.viewport) {
+		const MissionPressed &held = grab_.pressed[grab_.grabbed];
+		std::string now;
+		if (grab_.copy) {
+			now = "copies go " + metres(grab_.copy_by[0]) + " east, " + metres(grab_.copy_by[1]) + " north";
+		} else if (const MissionEntityMark *entity = frame_.viewport->scene().entity(held.record.row)) {
+			char text[96];
+			if (grab_.handle == MissionHandle::Yaw)
+				std::snprintf(text, sizeof(text), "heading %d deg", entity->yaw);
+			else if (grab_.handle == MissionHandle::Height)
+				std::snprintf(text, sizeof(text), "height %.2f m (%+.2f)", entity->z, entity->z - held.z);
+			else
+				std::snprintf(text, sizeof(text), "at %.2f m east, %.2f m north (moved %+.2f, %+.2f)", entity->x, entity->y,
+						entity->x - held.x, entity->y - held.y);
+			now = text;
+		}
+		if (!now.empty()) line = now + ". " + line;
+	}
+	return line;
 }
 
 } // namespace opennova::editor

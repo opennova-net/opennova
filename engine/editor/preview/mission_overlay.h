@@ -24,9 +24,13 @@ struct OrbitCamera;
 // area's footprint (its corners at the ground where a device answers, else at its z_min; its top and
 // bottom too where its flags bound z) with its edge handles when primary, a path's line through its
 // stops (closed unless it does not loop; thick while it or one of its markers is selected), a label
-// beside the hovered and the selected marks (beside every shown one with the labels option), and
-// the marquee. A line with an end behind the near plane is clipped to it. At most
-// kMissionMarksDrawn marks are drawn, the nearest.
+// beside the hovered and the selected marks (beside the other shown ones with the labels option,
+// decluttered: preview/mission_labels), and the marquee. A line with an end behind the near plane is
+// clipped to it. At most kMissionMarksDrawn marks are drawn, the nearest. S15: the selected marks
+// ringed twice over a dark ring (they read on any ground, among thousands of glyphs) and the hovered
+// one ringed wide; the handle the pointer is on (or a drag holds) named beside it with its step ("Turn,
+// 15 deg steps"); an Alt-drag's copies as rings where they go, a line from each original; the Area
+// tool's box on the ground; and on an empty mission, a line saying how to start.
 
 inline constexpr uint32_t kMissionItemRgb = 0xFFDC5A;
 inline constexpr uint32_t kMissionBuildingRgb = 0xC0C0C0;
@@ -68,6 +72,21 @@ struct MissionOverlayInput {
 	std::function<std::string(const NodeAddress &)> title; // a mark's label (none: no labels)
 	bool marquee = false;
 	CanvasPoint marquee_from, marquee_to;
+	// S15: the pointer; the primary's handle it is on or a drag holds (its words and step beside it),
+	// the snap and the turn a drag takes now, a drag under way.
+	CanvasPoint pointer;
+	bool active_handle = false;
+	MissionHandle handle = MissionHandle::Move;
+	float snap = 0.0f, turn = 0.0f;
+	bool dragging = false;
+	// An Alt-drag's copies: the records it took, as pressed, and how far their copies go (metres east
+	// and north; null none).
+	const std::vector<MissionPressed> *copies = nullptr;
+	double copy_by[2] = { 0.0, 0.0 };
+	// The Area tool's box on the ground (mission points), snapped to `box_snap` metres as its drop is.
+	bool box = false;
+	double box_from[3] = { 0.0, 0.0, 0.0 }, box_to[3] = { 0.0, 0.0, 0.0 };
+	float box_snap = 0.0f;
 };
 OverlayList mission_overlay_shapes(const MissionOverlayInput &in);
 

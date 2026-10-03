@@ -238,6 +238,14 @@ int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows);
 // row among them.
 bool compose_mission(const std::vector<std::shared_ptr<const Node>> &rows, bms::File &out);
 
+// A clipboard payload of copied rows (MissionDocument::copy) placed elsewhere (ADR 0046 S15, Paste
+// here): the middle of its entities' positions and its areas' middles, mission x and y (false for a
+// payload of no such rows: a nested kind's, or events alone), and the payload with each copied entity
+// moved `east`, `north` and `up` metres and each area `east` and `north` ("" for one that holds no
+// rows), written and read back as a copy's is.
+bool mission_clip_middle(const std::string &payload, double out[2]);
+std::string mission_clip_moved(const std::string &payload, double east, double north, double up);
+
 // The scope the mission's symbols are defined in and looked up by: its file name, upper case
 // ("ASH_I5B.BMS").
 std::string mission_scope(const DocumentBase &document);

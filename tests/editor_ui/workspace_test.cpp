@@ -38,6 +38,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
@@ -2121,6 +2122,141 @@ void test_mission_view_ground() {
 	CHECK(grounded && std::fabs(grounded->z - ground(grounded->x, grounded->y)) < 1e-3, "the entity set down on the ground");
 }
 
+// Placing and tweaking in the mission's view (ADR 0046 S15), over a real session: Place opens the
+// palette beside the picture (the project's item by name in its group), a row picked there and a
+// click on the picture place one of it (one EditInViewport, the new entity selected), the tool kept
+// for the next; Esc goes back to Select; the line under the picture says what a click does; the
+// primary's place typed in the East field moves it there (one batch); the right button's click on a
+// mark opens the menu of what applies, whose Select same item selects every entity of its item.
+void test_mission_view_placing() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_mission_view_placing");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
+	      "the mission written");
+	session.handle(request::rescan());
+	session.run_operations();
+	DrawnDevices devices;
+	session.viewports().set_devices(&devices.cache);
+	Ui ui;
+	// A wide display: the first layout gives the Document tab 37.5% of the centre, and the lines this
+	// test reads are read whole there.
+	ImGui::GetIO().DisplaySize = ImVec2(4096.0f, 1600.0f);
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
+	run.open("missions/synth_logic.bms");
+	const Document *mission = session.document_for("missions/synth_logic.bms");
+	CHECK(mission != nullptr, "the mission open");
+	if (!mission) return;
+	const std::string path = mission->path();
+	ui.focus("Document");
+	run.settle();
+	run.take();
+	const auto *viewport = static_cast<const MissionViewport *>(session.viewports().find(path, ViewportKind::Mission));
+	const auto column_window = [] {
+		const ImGuiWindow *column = nullptr;
+		for (const ImGuiWindow *window : GImGui->Windows)
+			if (window->Active && !window->Hidden && std::strstr(window->Name, "/viewport_column_")) column = window;
+		return column;
+	};
+	const ImGuiWindow *column = column_window();
+	CHECK(viewport && column, "the mission's view drawn");
+	if (!viewport || !column) return;
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Click a mark to select it") != std::string::npos, "the line under the picture: what a click does");
+	// Place: the palette beside the picture, the project's item by name in its group.
+	ui.activate(item_id(column->ID, { "Place" }));
+	run.settle();
+	text = logged_frame(ui);
+	CHECK(text.find("Buildings (1)") != std::string::npos && text.find("Skinned Thing") != std::string::npos,
+	      "the palette: Buildings, Skinned Thing");
+	CHECK(text.find("Place: pick an item") != std::string::npos, "the line: pick an item first");
+	const ImGuiWindow *items = nullptr;
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "/palette_items")) items = window;
+	CHECK(items != nullptr, "the palette's rows drawn");
+	if (!items) return;
+	ui.activate(item_id(pushed(pushed(items->ID, int(MissionPaletteGroup::Buildings)), 0), { "###item" }));
+	run.settle();
+	text = logged_frame(ui);
+	CHECK(text.find("Place Skinned Thing: click the ground") != std::string::npos, "the line: placing the picked item");
+	// A click on the picture places one there, the new building selected; the tool stays.
+	DrawnDevice *device = devices.held(path, ViewportKind::Mission);
+	CHECK(device != nullptr && device->width > 0, "the picture drawn");
+	if (!device) return;
+	const size_t buildings = viewport->scene().count(MissionPool::Building);
+	run.take();
+	ui.click(ImVec2(device->origin.x + float(device->width) * 0.5f, device->origin.y + float(device->height) * 0.5f));
+	run.settle();
+	std::vector<EditorRequest> raised = run.take();
+	CHECK(count_of_kind(raised, EditorRequestKind::EditInViewport) == 1 && viewport->scene().count(MissionPool::Building) == buildings + 1,
+	      "a click places one");
+	const MissionEntityMark *placed = viewport->scene().entity(v.documents.selection.primary.row);
+	CHECK(placed && placed->item == 100200, "the placed building selected");
+	CHECK(v.project.recent_items == std::vector<int64_t>({ 100200 }), "the item among the recently placed");
+	// Esc: back to Select.
+	ui.key(ImGuiKey_Escape, true);
+	ui.key(ImGuiKey_Escape, false);
+	run.settle();
+	text = logged_frame(ui);
+	CHECK(text.find("Buildings (1)") == std::string::npos && text.find("Place Skinned Thing") == std::string::npos,
+	      "Esc: the palette gone, Select again");
+	// The East field: the placed building moved to 123.5 m east, one batch.
+	column = column_window();
+	CHECK(column != nullptr && placed, "the column again");
+	if (!column || !placed) return;
+	const ImGuiID east = item_id(column->ID, { "###east" });
+	run.take();
+	ImGui::ActivateItemByID(east);
+	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
+	ui.frames(2);
+	CHECK(GImGui->ActiveId == east, "the East field has the keyboard");
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
+	ui.frames(1);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+	ui.frames(1);
+	ImGui::GetIO().AddInputCharactersUTF8("123.5");
+	ui.frames(2);
+	ui.key(ImGuiKey_Enter, true);
+	ui.key(ImGuiKey_Enter, false);
+	run.settle();
+	raised = run.take();
+	const MissionEntityMark *moved = viewport->scene().entity(v.documents.selection.primary.row);
+	CHECK(count_of_kind(raised, EditorRequestKind::EditRecord) == 1 && moved && std::fabs(moved->x - 123.5) < 1e-3,
+	      "East typed: the building at 123.5 m east, one batch");
+	// The right button's click on a pump's mark: its menu; Select same item selects every pump.
+	std::vector<MissionMark> marks = viewport->marks(device->width, device->height, device);
+	int pump = -1;
+	for (size_t i = 0; i < marks.size() && pump < 0; ++i)
+		if (marks[i].shown && marks[i].entity >= 0 && viewport->scene().entities()[size_t(marks[i].entity)].item == 106100 &&
+				pick_mission_mark(marks, marks[i].x, marks[i].y) == int(i))
+			pump = int(i);
+	CHECK(pump >= 0, "a pump's mark on the picture");
+	if (pump < 0) return;
+	ui.mouse(device->origin.x + marks[size_t(pump)].x, device->origin.y + marks[size_t(pump)].y);
+	ui.button(true, 1);
+	ui.button(false, 1);
+	run.settle();
+	CHECK(v.documents.selection.primary == marks[size_t(pump)].record, "the right button selects the mark under it");
+	text = logged_frame(ui);
+	CHECK(in_order(text, { "Paste here", "Frame", "Drop to ground", "Duplicate", "Delete", "Select same item", "Go to in outline",
+	                         "Show events using this" }),
+	      "the menu of what applies");
+	column = column_window();
+	if (!column) return;
+	ui.activate(popup_item(item_id(column->ID, { "mission_canvas_menu" }), "Select same item"));
+	run.settle();
+	CHECK(v.documents.selection.records.size() == 3, "Select same item: the three pumps");
+}
+
 // A canvas whose picture fills it (the model's, the mission's), read through ImGui: the right
 // button is apart from a press (right_pressed, right_down; never pressed or down), a click of it
 // only when it comes up having travelled less than a drag; the left button is a press; the keys a
@@ -2537,6 +2673,7 @@ void run_workspace_tests() {
 	test_preview_model_pane_input();
 	test_mission_view_input();
 	test_mission_view_ground();
+	test_mission_view_placing();
 	test_canvas_fill_input();
 	test_window_title();
 	test_view_event_mailboxes();

@@ -70,10 +70,14 @@ bool mission_move_edits(const Document &document, const std::vector<MissionPress
 bool mission_height_edits(const Document &document, const std::vector<MissionPressed> &pressed, size_t grabbed,
 		double dz, float snap, uint64_t gesture, std::vector<Edit> &out);
 // A turn: the grabbed entity's yaw by `delta` degrees (its yaw then snapped to `snap` degrees; 0:
-// whole degrees), every other pressed entity as far, each about its own origin and kept in 0..359 as
-// the file stores it. False as a lift.
+// whole degrees), every other pressed entity as far, each kept in 0..359 as the file stores it. One
+// entity turns about its own origin; several turn together about their group's centre (ADR 0046
+// S15: the middle of their positions' box, each position carried round it clockwise as a compass
+// heading turns, its height over the ground kept with `stick` over a device that answers it). False
+// as a lift.
 bool mission_yaw_edits(const Document &document, const std::vector<MissionPressed> &pressed, size_t grabbed,
-		double delta, float snap, uint64_t gesture, std::vector<Edit> &out);
+		double delta, float snap, uint64_t gesture, std::vector<Edit> &out, bool stick = false,
+		const ViewportDevice *device = nullptr);
 // An area's edge to the mission coordinate `to` (snapped to `snap` metres), never past its opposite
 // edge. False for a record that is no area, or a handle that is no edge.
 bool mission_area_edge_edits(const Document &document, const MissionPressed &area, MissionHandle edge, double to,

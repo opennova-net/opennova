@@ -547,7 +547,8 @@ bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error
 	return true;
 }
 
-// A command in a viewport (S13 V7): {name, ids?, kind?}. The name is the viewport's kind to read.
+// A command in a viewport (S13 V7): {name, ids?, kind?, by?: [..], at?: [x, y]} (S15: a way in the
+// kind's units, a point of the picture). The name is the viewport's kind to read.
 JsonValue command_to_json(const ViewportCommand &command) {
 	JsonValue out = JsonValue::make_object();
 	out.set("name", json_string(command.name));
@@ -557,15 +558,26 @@ JsonValue command_to_json(const ViewportCommand &command) {
 		out.set("ids", std::move(ids));
 	}
 	if (command.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(command.kind)));
+	if (!command.by.empty()) {
+		JsonValue by = JsonValue::make_array();
+		for (const double each : command.by) by.push(json_number(each));
+		out.set("by", std::move(by));
+	}
+	if (command.has_at) {
+		JsonValue at = JsonValue::make_array();
+		at.push(json_number(command.at_x));
+		at.push(json_number(command.at_y));
+		out.set("at", std::move(at));
+	}
 	return out;
 }
 
 bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"command\" must be an object {name, ids, kind}.";
+		error = "\"command\" must be an object {name, ids, kind, by, at}.";
 		return false;
 	}
-	if (!members_known(json, {"name", "ids", "kind"}, "command", error)) return false;
+	if (!members_known(json, {"name", "ids", "kind", "by", "at"}, "command", error)) return false;
 	ViewportCommand command;
 	const JsonValue *name = json.get("name");
 	if (!name || !name->is_string() || name->string.empty()) {
@@ -588,12 +600,33 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 			command.ids.push_back(id);
 		}
 	}
+	if (const JsonValue *by = json.get("by")) {
+		bool numbers = by->is_array() && !by->array.empty() && by->array.size() <= 3;
+		for (size_t i = 0; numbers && i < by->array.size(); ++i) {
+			numbers = by->array[i].is_number() && std::isfinite(by->array[i].number);
+			if (numbers) command.by.push_back(by->array[i].number);
+		}
+		if (!numbers) {
+			error = "\"command.by\" must be an array of one to three numbers.";
+			return false;
+		}
+	}
+	if (const JsonValue *at = json.get("at")) {
+		if (!at->is_array() || at->array.size() != 2 || !io::json_float(at->array[0], command.at_x) ||
+				!io::json_float(at->array[1], command.at_y)) {
+			error = "\"command.at\" must be two numbers, [x, y].";
+			return false;
+		}
+		command.has_at = true;
+	}
 	out = std::move(command);
 	return true;
 }
 
-// A drop on a viewport's picture (S14): {file | reference + name, at: [x, y], kind?}. What is dropped
-// is the viewport's kind to read (a model's file, an item's id), so the names are texts here.
+// A drop on a viewport's picture (S14): {file | reference + name, at: [x, y], snap?, kind?}; a box drop
+// (S15) {reference, at: [x, y], to: [x2, y2], snap?, kind?}, a reference and no name. What is dropped
+// is the viewport's kind to read (a model's file, an item's id, a path's number, an area), so the
+// names are texts here.
 JsonValue drop_to_json(const ViewportDrop &drop) {
 	JsonValue out = JsonValue::make_object();
 	if (!drop.file.empty()) out.set("file", json_string(drop.file));
@@ -603,16 +636,23 @@ JsonValue drop_to_json(const ViewportDrop &drop) {
 	point.push(json_number(drop.x));
 	point.push(json_number(drop.y));
 	out.set("at", std::move(point));
+	if (drop.box) {
+		JsonValue to = JsonValue::make_array();
+		to.push(json_number(drop.x2));
+		to.push(json_number(drop.y2));
+		out.set("to", std::move(to));
+	}
+	if (drop.snap != 0.0f) out.set("snap", json_number(drop.snap));
 	if (drop.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(drop.kind)));
 	return out;
 }
 
 bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"drop\" must be an object {file | reference + name, at, kind}.";
+		error = "\"drop\" must be an object {file | reference + name, at, to, snap, kind}.";
 		return false;
 	}
-	if (!members_known(json, {"file", "reference", "name", "at", "kind"}, "drop", error)) return false;
+	if (!members_known(json, {"file", "reference", "name", "at", "to", "snap", "kind"}, "drop", error)) return false;
 	const auto text = [&](const char *member, std::string &into) {
 		const JsonValue *value = json.get(member);
 		if (!value) return true;
@@ -625,8 +665,20 @@ bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error
 	};
 	ViewportDrop drop;
 	if (!text("file", drop.file) || !text("reference", drop.reference) || !text("name", drop.name)) return false;
-	// A file, or a reference kind's name: one of them, the kind and its name together.
-	if (drop.file.empty() == drop.reference.empty() || drop.reference.empty() != drop.name.empty()) {
+	// A file, or a reference kind's name: one of them, the kind and its name together; a box (`to`) a
+	// reference kind and no name.
+	if (const JsonValue *to = json.get("to")) {
+		if (drop.reference.empty() || !drop.file.empty() || !drop.name.empty()) {
+			error = "\"drop\" with \"to\" (a box) names a reference kind and no file or name.";
+			return false;
+		}
+		if (!to->is_array() || to->array.size() != 2 || !io::json_float(to->array[0], drop.x2) ||
+				!io::json_float(to->array[1], drop.y2)) {
+			error = "\"drop.to\" must be two numbers, [x, y].";
+			return false;
+		}
+		drop.box = true;
+	} else if (drop.file.empty() == drop.reference.empty() || drop.reference.empty() != drop.name.empty()) {
 		error = "\"drop\" names a file, or a reference kind and a name of it, one of them.";
 		return false;
 	}
@@ -634,6 +686,10 @@ bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error
 	if (!at || !at->is_array() || at->array.size() != 2 || !io::json_float(at->array[0], drop.x) ||
 			!io::json_float(at->array[1], drop.y)) {
 		error = "\"drop.at\" must be two numbers, [x, y].";
+		return false;
+	}
+	if (const JsonValue *snap = json.get("snap"); snap && (!io::json_float(*snap, drop.snap) || drop.snap < 0.0f)) {
+		error = "\"drop.snap\" must be a number, 0 or more.";
 		return false;
 	}
 	if (!viewport_kind_member(json, "drop", drop.kind, error)) return false;

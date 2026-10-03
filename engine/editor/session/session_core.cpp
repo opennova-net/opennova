@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <base/io/json.h>
+#include <base/io/strutil.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
 #include <editor/model/edit.h>
@@ -79,6 +80,7 @@ void SessionCore::start() {
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
+	view_.project.recent_items = settings.recent_items;
 	view_.activity.status = "No project open.";
 	touch(ViewConcern::Preferences);
 	touch(ViewConcern::Graph);
@@ -104,6 +106,8 @@ void SessionCore::note(std::string line) {
 void SessionCore::report(const Diagnostic &d) {
 	problems().add_reported(d);
 	record_outcome(d);
+	// A request refused says why on the status line too (ADR 0046 S15), as well as in Output.
+	if (in_request_ && d.severity == DiagnosticSeverity::Error) view_.activity.status = d.message;
 	note(std::string(diagnostic_severity_label(d.severity)) + ": " + d.message);
 }
 
@@ -120,7 +124,9 @@ void SessionCore::record_outcome(const Diagnostic &d) {
 // request did nothing and its outcome says so.
 void SessionCore::refuse_now(CoreFinding code, const std::string &message, const std::string &asset) {
 	report(make_finding(code, DiagnosticSeverity::Warning, message, asset));
-	if (in_request_) outcome_.refused = true;
+	if (!in_request_) return;
+	outcome_.refused = true;
+	view_.activity.status = message;
 }
 
 // --- the operation slot ------------------------------------------------------------------
@@ -647,7 +653,7 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 			if (drop) {
 				viewport->drop(context, request.drop, planned, error);
 			} else if (!drag) {
-				viewport->command(context, request.command.name, request.command.ids, planned, error);
+				viewport->command_of(context, request.command, planned, error);
 			} else {
 				if (going && asked.by) {
 					x = going->x + asked.x;
@@ -687,6 +693,10 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	// Served in order, as the parts serve what they compose (never through handle()): each meets its
 	// own row's gate, and its findings are this request's outcome.
 	for (const EditorRequest &each : planned.requests) serve_request(*this, each);
+	// An item placed is among the recently placed (ADR 0046 S15: the Place tool's palette lists them
+	// first), kept with the editor's preferences.
+	if (drop && !outcome_.refused && request.drop.reference == "item" && !request.drop.box)
+		if (const std::optional<int> item = strutil::parse_int(request.drop.name)) remember_recent_item(*item);
 	if (!drag) return;
 	// The gesture ends with this sample (its EndEdit served), or stays open for the next: the
 	// document's open one, its last sample's time kept, and the point this sample took the handle to
@@ -752,7 +762,13 @@ void SessionCore::save_preferences() {
 	view_.project.retail_directory = game_install();
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.import_dependencies = settings.import_dependencies;
+	view_.project.recent_items = settings.recent_items;
 	touch(ViewConcern::Preferences);
+}
+
+void SessionCore::remember_recent_item(int64_t item) {
+	preferences_.remember_recent_item(item);
+	save_preferences();
 }
 
 std::string SessionCore::game_install() const {

@@ -391,8 +391,9 @@ int test_overlays() {
 	TEST_EXPECT(lines(kMissionBlueRgb, 2.5f) == 2);
 	in.selected_rows = nullptr;
 	// Hovered: a Hover ring; the primary: a thick Selected ring, its handles (the yaw handle of the
-	// yaw-90 building east of its anchor, the height handle above it); another selected: a thin ring;
-	// labels beside those alone, beside every shown mark with the option.
+	// yaw-90 building east of its anchor, the height handle above it); another selected: a thinner
+	// ring; each over a dark ring (S15); labels beside those alone, beside every shown mark with the
+	// option.
 	in.hover = 0;
 	in.primary = 1;
 	std::vector<int> selected = { 2 };
@@ -401,7 +402,8 @@ int test_overlays() {
 	in.title = [&](const NodeAddress &record) { return "row " + std::to_string(record.row); };
 	list = mission_overlay_shapes(in);
 	TEST_EXPECT(count(list, OverlayKind::Circle, OverlayRole::Hover) == 1);
-	TEST_EXPECT(count(list, OverlayKind::Circle, OverlayRole::Selected, 2.0f) == 1 && count(list, OverlayKind::Circle, OverlayRole::Selected, 1.0f) == 1);
+	TEST_EXPECT(count(list, OverlayKind::Circle, OverlayRole::Selected, 2.5f) == 1 && count(list, OverlayKind::Circle, OverlayRole::Selected, 1.5f) == 1);
+	TEST_EXPECT(count(list, OverlayKind::Circle, OverlayRole::Normal) == 3 + 3); // the team rings, a dark ring under each of the three
 	TEST_EXPECT(count(list, OverlayKind::Text, OverlayRole::Normal) == 3);
 	const PreviewVec3 yaw = mission_yaw_handle(scene.entities()[1], 10.0f);
 	TEST_EXPECT(near(yaw.x, 110.0) && near(yaw.y, 0.0) && near(yaw.z, 0.0)); // yaw 90 faces east

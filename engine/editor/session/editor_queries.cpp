@@ -193,15 +193,16 @@ constexpr QueryParam kViewportParams[] = {
 			"An open document by its project-relative path or its logical name; left out, the active "
 			"one." },
 	{ "kind", J::String, false, nullptr,
-			"The viewport's kind (menu, model, script); left out, the one the document shows in: the "
-			"Preview's kind that shows it (a menu's; a model's, over a model, a clip or an animation "
-			"table), else its Main view." },
+			"The viewport's kind (menu, model, script, mission); left out, the one the document shows "
+			"in: the Preview's kind that shows it (a menu's; a model's, over a model, a clip or an "
+			"animation table), else its Main view." },
 	{ "op", J::String, true, nullptr,
 			"What is read: state (the envelope, a page of its items and by the same page its "
 			"notes), items or notes (a page of one), hit (what lies under x, y), box (what the box from "
 			"x, y to x2, y2 takes, as a marquee over it: a menu's windows it touches), render (one row "
 			"of the document as the kind renders it apart: a menu's screen, as the render check "
-			"compiled it)." },
+			"compiled it), palette (what a mission's Place tool places: the items by name in their "
+			"groups, the recently placed first, those whose name, id or model holds text)." },
 	{ "x", J::Number, false, nullptr,
 			"hit's point across (box's first corner), in the viewport's units (a menu's 800x600 "
 			"design units, a model's picture pixels): a number a float holds." },
@@ -209,6 +210,9 @@ constexpr QueryParam kViewportParams[] = {
 	{ "x2", J::Number, false, nullptr, "box's other corner across, as x (x and y its first)." },
 	{ "y2", J::Number, false, nullptr, "box's other corner down, as x." },
 	{ "row", J::Integer, false, nullptr, "render's row, by its identity (a menu's screen)." },
+	{ "text", J::String, false, nullptr,
+			"palette's search: the items whose name, id or model's file holds it, case aside (left "
+			"out, every item)." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
@@ -732,17 +736,21 @@ JsonValue viewport_render(const ViewportReadContext &read, std::string &error) {
 	return read.model.render_json(viewport_context(read.view, read.model).input, NodeId(read.args.integer("row")),
 			read.page, error);
 }
+JsonValue viewport_palette(const ViewportReadContext &read, std::string &error) {
+	return read.model.palette_json(read.view, read.args.text("text"), read.page, error);
+}
 
 // The ops by name, in their order on the wire.
-enum class ViewportOp : uint8_t { State, Items, Hit, Box, Notes, Render, kCount };
+enum class ViewportOp : uint8_t { State, Items, Hit, Box, Notes, Render, Palette, kCount };
 
 // What an op takes beside the params every op takes (path, kind, op): a page (offset, limit), a point
-// of the picture (x, y), a row (row), a box's other corner (x2, y2).
+// of the picture (x, y), a row (row), a box's other corner (x2, y2), a search (text).
 enum ViewportTakes : uint8_t {
 	kViewportPage = 1u << 0,
 	kViewportPoint = 1u << 1,
 	kViewportRow = 1u << 2,
 	kViewportCorner = 1u << 3,
+	kViewportText = 1u << 4,
 };
 
 // One op: its token, what it takes and of that what it needs (each named, a point both its params),
@@ -762,6 +770,7 @@ constexpr ViewportOpRow kViewportOps[] = {
 	{ ViewportOp::Box, "box", kViewportPoint | kViewportCorner, kViewportPoint | kViewportCorner, viewport_box },
 	{ ViewportOp::Notes, "notes", kViewportPage, 0, viewport_notes },
 	{ ViewportOp::Render, "render", kViewportPage | kViewportRow, kViewportRow, viewport_render },
+	{ ViewportOp::Palette, "palette", kViewportPage | kViewportText, 0, viewport_palette },
 };
 
 // The flag of a viewport query param: 0 for those every op takes (path, kind, op), 0xFF for one no
@@ -772,6 +781,7 @@ constexpr uint8_t viewport_param_flag(const char *name) {
 			: same_text(name, "x") || same_text(name, "y")                             ? kViewportPoint
 			: same_text(name, "x2") || same_text(name, "y2")                           ? kViewportCorner
 			: same_text(name, "row")                                                   ? kViewportRow
+			: same_text(name, "text")                                                  ? kViewportText
 																					   : 0xFF;
 }
 
@@ -1236,9 +1246,12 @@ constexpr EditorQueryRow kRows[] = {
 			"and document; kind, index, id, name, current, the item's). render: one row of the "
 			"document as its kind renders it apart (a menu's screen as the render check compiled "
 			"it, the menu_render query's answer; a model's whole document is its picture, and it "
-			"refuses). A viewport neither the Preview window nor a canvas draws holds no device "
-			"(device.attached false, no device_rect). Its changes are set_viewport's and "
-			"edit_in_viewport's.")
+			"refuses). palette: what a mission's Place tool places (count, matching, groups {group, "
+			"words, pool, count}, a page of items {item, name, type, type_words, group, pool, model, "
+			"file, recent}: the recently placed first, then each TYPE's group by name; text a "
+			"search); another kind refuses it. A viewport neither the Preview window nor a canvas "
+			"draws holds no device (device.attached false, no device_rect). Its changes are "
+			"set_viewport's and edit_in_viewport's.")
 			.pages("items, notes or render's widgets")
 			.chooses(kViewportChoices)
 			.row,

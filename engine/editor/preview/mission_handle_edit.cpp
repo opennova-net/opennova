@@ -5,6 +5,7 @@
 #include <cstring>
 #include <variant>
 
+#include <base/io/bam.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/viewport_device.h>
@@ -150,14 +151,43 @@ bool mission_height_edits(const Document &document, const std::vector<MissionPre
 }
 
 bool mission_yaw_edits(const Document &document, const std::vector<MissionPressed> &pressed, size_t grabbed,
-		double delta, float snap, uint64_t gesture, std::vector<Edit> &out) {
+		double delta, float snap, uint64_t gesture, std::vector<Edit> &out, bool stick, const ViewportDevice *device) {
 	out.clear();
 	if (grabbed >= pressed.size() || pressed[grabbed].area) return false;
 	// The grabbed one's heading snapped (whole degrees when free); the others turn as far.
 	const double turned = snapped(double(pressed[grabbed].yaw) + delta, snap >= 1.0f ? snap : 1.0f);
 	const double by = turned - double(pressed[grabbed].yaw);
-	for (const MissionPressed &each : pressed)
-		if (!each.area) set_yaw(document, each.record, wrapped(double(each.yaw) + by), gesture, out);
+	// Several turn about their group's centre: the middle of their positions' box.
+	size_t entities = 0;
+	double low[2] = { 0.0, 0.0 }, high[2] = { 0.0, 0.0 };
+	for (const MissionPressed &each : pressed) {
+		if (each.area) continue;
+		if (!entities++) {
+			low[0] = high[0] = each.x;
+			low[1] = high[1] = each.y;
+		}
+		low[0] = std::min(low[0], each.x);
+		low[1] = std::min(low[1], each.y);
+		high[0] = std::max(high[0], each.x);
+		high[1] = std::max(high[1], each.y);
+	}
+	const double cx = (low[0] + high[0]) * 0.5, cy = (low[1] + high[1]) * 0.5;
+	// A compass heading turns clockwise: (east, north) by `by` degrees is (e cos + n sin, n cos - e sin).
+	const double radians = by * io::kRadiansPerDegree, c = std::cos(radians), s = std::sin(radians);
+	for (const MissionPressed &each : pressed) {
+		if (each.area) continue;
+		set_yaw(document, each.record, wrapped(double(each.yaw) + by), gesture, out);
+		if (entities < 2) continue;
+		const double e = each.x - cx, n = each.y - cy;
+		const double x = cx + e * c + n * s, y = cy + n * c - e * s;
+		set_position(document, each.record, "x", x, gesture, out);
+		set_position(document, each.record, "y", y, gesture, out);
+		double was = 0.0, now = 0.0;
+		if (stick && device && device->ground_at(each.x, each.y, was) && device->ground_at(x, y, now))
+			set_position(document, each.record, "z", now + (each.z - was), gesture, out);
+		else
+			set_position(document, each.record, "z", each.z, gesture, out);
+	}
 	return true;
 }
 

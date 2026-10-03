@@ -2,8 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <unordered_set>
 
+#include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_hint.h>
+#include <editor/preview/mission_labels.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/viewport_device.h>
 #include <formats/mission/bms.h>
@@ -13,7 +17,18 @@ namespace opennova::editor {
 
 namespace {
 
-constexpr float kLabelDx = 10.0f, kLabelDy = -7.0f;
+// The dark ring under a selected or hovered mark's (it reads on bright ground and among glyphs).
+constexpr uint32_t kMissionShadowRgb = 0x000000;
+constexpr uint8_t kMissionShadowAlpha = 170;
+
+std::string capitalized(std::string text) {
+	if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') text[0] = char(text[0] - 'a' + 'A');
+	return text;
+}
+
+double snapped(double value, float snap) {
+	return snap > 0.0f ? std::round(value / double(snap)) * double(snap) : value;
+}
 
 PreviewVec3 along(const PreviewVec3 &from, const PreviewVec3 &direction, float t) {
 	return PreviewVec3{ from.x + direction.x * t, from.y + direction.y * t, from.z + direction.z * t };
@@ -142,6 +157,9 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 		drawn.resize(kMissionMarksDrawn);
 		std::sort(drawn.begin(), drawn.end());
 	}
+	// The labels asked for, placed once every mark is drawn (over them).
+	std::vector<MissionLabelCandidate> labels;
+	std::vector<int> label_marks;
 	for (const int index : drawn) {
 		const MissionMark &mark = marks[size_t(index)];
 		const CanvasPoint at{ mark.x, mark.y };
@@ -199,16 +217,110 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 					list.marker(CanvasPoint{ hx, hy }, OverlayGlyph::Square, 4.0f, OverlayRole::Selected);
 			}
 		}
-		if (index == in.hover) list.ring(at, 8.0f, OverlayRole::Hover, 1.5f);
-		if (index == in.primary) list.ring(at, 9.0f, OverlayRole::Selected, 2.0f);
-		else if (is_selected(index)) list.ring(at, 9.0f, OverlayRole::Selected, 1.0f);
-		if (in.title && (in.options->labels || index == in.hover || is_selected(index)))
-			list.text(CanvasPoint{ at.x + kLabelDx, at.y + kLabelDy }, in.title(mark.record));
+		// The hovered and the selected rings over a dark one, so they read on any ground.
+		if (index == in.hover) {
+			list.ring(at, 11.0f, OverlayRole::Normal, 4.0f, kMissionShadowRgb, kMissionShadowAlpha);
+			list.ring(at, 11.0f, OverlayRole::Hover, 2.0f);
+		}
+		if (is_selected(index)) {
+			const bool primary = index == in.primary;
+			list.ring(at, 9.0f, OverlayRole::Normal, primary ? 5.0f : 3.5f, kMissionShadowRgb, kMissionShadowAlpha);
+			list.ring(at, 9.0f, OverlayRole::Selected, primary ? 2.5f : 1.5f);
+		}
+		if (in.title && (index == in.hover || is_selected(index) || in.options->labels)) {
+			MissionLabelCandidate label;
+			label.x = at.x;
+			label.y = at.y;
+			label.depth = mark.depth;
+			label.always = index == in.hover || is_selected(index);
+			labels.push_back(label);
+			label_marks.push_back(index);
+		}
+	}
+	// The labels, decluttered: the hovered and the selected first, then the nearest that overlap none.
+	if (!labels.empty()) {
+		std::vector<std::string> words(labels.size());
+		for (size_t i = 0; i < labels.size(); ++i) {
+			words[i] = in.title(marks[size_t(label_marks[i])].record);
+			labels[i].length = words[i].size();
+		}
+		for (const size_t pick : mission_label_picks(labels))
+			list.text(CanvasPoint{ labels[pick].x + kMissionLabelDx, labels[pick].y + kMissionLabelDy }, words[pick]);
+	}
+	// The handle the pointer is on, or a drag holds: what it does and its step, beside it.
+	if (in.active_handle && in.primary >= 0 && size_t(in.primary) < marks.size()) {
+		const MissionMark &primary = marks[size_t(in.primary)];
+		PreviewVec3 at;
+		bool has = false;
+		if (primary.area >= 0 && mission_handle_is_edge(in.handle)) {
+			const MissionAreaMark &area = scene.areas()[size_t(primary.area)];
+			at = mission_area_edge_middle(area, in.handle, mission_area_anchor_z(area, in.device));
+			has = true;
+		} else if (primary.entity >= 0 && (in.handle == MissionHandle::Yaw || in.handle == MissionHandle::Height) &&
+				in.handle_reach > 0.0f) {
+			const MissionEntityMark &entity = scene.entities()[size_t(primary.entity)];
+			at = in.handle == MissionHandle::Yaw ? mission_yaw_handle(entity, in.handle_reach)
+												 : mission_height_handle(entity, in.handle_reach);
+			has = true;
+		}
+		float hx = 0.0f, hy = 0.0f;
+		if (has && camera.project(at, in.width, in.height, hx, hy)) {
+			list.ring(CanvasPoint{ hx, hy }, 7.0f, OverlayRole::Hover, 2.0f);
+			list.text(CanvasPoint{ hx + kMissionLabelDx, hy + kMissionLabelDy - kMissionLabelHeight },
+					capitalized(mission_handle_words(in.handle)) + " (" + mission_handle_step(in.handle, in.snap, in.turn) + ")",
+					0xFFFFFF, OverlayRole::Hover);
+		}
+	}
+	// An Alt-drag's copies: a ring where each goes, a line from where it is.
+	if (in.copies) {
+		for (const MissionPressed &each : *in.copies) {
+			PreviewVec3 from, to;
+			if (each.area) {
+				const double mx = (each.min[0] + each.max[0]) * 0.5, my = (each.min[1] + each.max[1]) * 0.5;
+				from = mission_scene_point(mx, my, each.min[2]);
+				to = mission_scene_point(mx + in.copy_by[0], my + in.copy_by[1], each.min[2]);
+			} else {
+				from = mission_scene_point(each.x, each.y, each.z);
+				to = mission_scene_point(each.x + in.copy_by[0], each.y + in.copy_by[1], each.z);
+			}
+			line(from, to, 0xFFFFFF, 1.0f);
+			float cx = 0.0f, cy = 0.0f;
+			if (camera.project(to, in.width, in.height, cx, cy)) {
+				list.ring(CanvasPoint{ cx, cy }, 9.0f, OverlayRole::Normal, 3.5f, kMissionShadowRgb, kMissionShadowAlpha);
+				list.ring(CanvasPoint{ cx, cy }, 9.0f, OverlayRole::Hover, 2.0f);
+			}
+		}
+	}
+	// The Area tool's box on the ground, as its drop snaps it.
+	if (in.box) {
+		const double x0 = snapped(std::min(in.box_from[0], in.box_to[0]), in.box_snap);
+		const double x1 = snapped(std::max(in.box_from[0], in.box_to[0]), in.box_snap);
+		const double y0 = snapped(std::min(in.box_from[1], in.box_to[1]), in.box_snap);
+		const double y1 = snapped(std::max(in.box_from[1], in.box_to[1]), in.box_snap);
+		const double corners[4][2] = { { x0, y0 }, { x1, y0 }, { x1, y1 }, { x0, y1 } };
+		PreviewVec3 points[4];
+		for (int c = 0; c < 4; ++c) {
+			double z = (in.box_from[2] + in.box_to[2]) * 0.5;
+			if (in.device) in.device->ground_at(corners[c][0], corners[c][1], z);
+			points[c] = mission_scene_point(corners[c][0], corners[c][1], z);
+		}
+		for (int c = 0; c < 4; ++c) line(points[c], points[(c + 1) % 4], kMissionAreaRgb, 2.5f);
+		char size[64];
+		std::snprintf(size, sizeof(size), "%.1f m by %.1f m", x1 - x0, y1 - y0);
+		list.text(CanvasPoint{ in.pointer.x + kMissionLabelDx, in.pointer.y + kMissionLabelDy }, size, 0xFFFFFF,
+				OverlayRole::Hover);
 	}
 	if (in.marquee) {
 		list.rect(CanvasPoint{ std::min(in.marquee_from.x, in.marquee_to.x), std::min(in.marquee_from.y, in.marquee_to.y) },
 				CanvasPoint{ std::max(in.marquee_from.x, in.marquee_to.x), std::max(in.marquee_from.y, in.marquee_to.y) },
 				OverlayRole::Marquee);
+	}
+	// An empty mission says how to start, in the middle of the picture.
+	if (scene.entities().empty() && scene.areas().empty()) {
+		const std::string start = "An empty mission: pick Place to put people, vehicles and buildings on the ground.";
+		list.text(CanvasPoint{ float(in.width) * 0.5f - float(start.size()) * kMissionLabelCharWidth * 0.5f,
+						  float(in.height) * 0.5f },
+				start);
 	}
 	return list;
 }

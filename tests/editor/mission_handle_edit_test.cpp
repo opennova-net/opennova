@@ -294,10 +294,24 @@ int test_height_and_yaw() {
 	TEST_EXPECT(!mission_height_edits(document, pressed, 2, 1.0, 0.0f, 9, edits) && edits.empty());
 	// A turn: 350 by 20 wraps to 10, the other 90 to 110; snapped to 15 the grabbed one's 370 goes to
 	// 375 (15), the other by the same 25 (115); a turn of less than half a degree plans nothing; a
-	// turn the other way wraps below 0.
+	// turn the other way wraps below 0. Two entities turn together about their centre (S15: the
+	// middle of their box, 11.5 east and 22 north), each position carried round it clockwise as a
+	// compass heading turns, their heights standing; one alone turns about its own origin.
 	TEST_EXPECT(mission_yaw_edits(document, pressed, 0, 20.0, 0.0f, 9, edits));
-	TEST_EXPECT(edits.size() == 2 && set_of(edits, a, "yaw") == 10.0 && set_of(edits, b, "yaw") == 110.0);
-	for (const Edit &edit : edits) TEST_EXPECT(std::holds_alternative<int64_t>(edit.value) && edit.gesture == 9);
+	TEST_EXPECT(edits.size() == 6 && set_of(edits, a, "yaw") == 10.0 && set_of(edits, b, "yaw") == 110.0);
+	const double c = std::cos(20.0 * 3.14159265358979323846 / 180.0), s = std::sin(20.0 * 3.14159265358979323846 / 180.0);
+	TEST_EXPECT(near(set_of(edits, a, "x"), 11.5 + (-1.5 * c + -2.0 * s), 1e-9) &&
+			near(set_of(edits, a, "y"), 22.0 + (-2.0 * c - -1.5 * s), 1e-9) &&
+			near(set_of(edits, b, "x"), 11.5 + (1.5 * c + 2.0 * s), 1e-9) && near(set_of(edits, b, "y"), 22.0 + (2.0 * c - 1.5 * s), 1e-9) &&
+			std::isnan(set_of(edits, a, "z")) && std::isnan(set_of(edits, b, "z")));
+	for (const Edit &edit : edits) TEST_EXPECT(edit.gesture == 9);
+	// A quarter turn clockwise: what lay south-west of the centre (1.5 west, 2 south) lies north-west
+	// (2 west, 1.5 north).
+	TEST_EXPECT(mission_yaw_edits(document, pressed, 0, 90.0, 0.0f, 9, edits) && set_of(edits, a, "yaw") == 80.0 &&
+			near(set_of(edits, a, "x"), 9.5, 1e-9) && near(set_of(edits, a, "y"), 23.5, 1e-9));
+	const std::vector<MissionPressed> alone = { pressed[0] };
+	TEST_EXPECT(mission_yaw_edits(document, alone, 0, 20.0, 0.0f, 9, edits) && edits.size() == 1 &&
+			std::holds_alternative<int64_t>(edits[0].value) && set_of(edits, a, "yaw") == 10.0);
 	TEST_EXPECT(mission_yaw_edits(document, pressed, 0, 20.0, 15.0f, 9, edits) && set_of(edits, a, "yaw") == 15.0 &&
 			set_of(edits, b, "yaw") == 115.0);
 	TEST_EXPECT(mission_yaw_edits(document, pressed, 1, -100.0, 0.0f, 9, edits) && set_of(edits, b, "yaw") == 350.0 &&

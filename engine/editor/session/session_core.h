@@ -217,6 +217,8 @@ public:
 	void quit();
 	// The preferences kept by their store, and shown.
 	void save_preferences();
+	// `item` first among the recently placed items (ADR 0046 S15), kept and shown.
+	void remember_recent_item(int64_t item);
 	// The game install the editor imports from and plays in: the open project's (its local.json),
 	// else the one the editor last chose.
 	std::string game_install() const;

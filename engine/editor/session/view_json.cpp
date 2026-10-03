@@ -316,6 +316,9 @@ JsonValue preferences_section(const SessionView &view) {
 	out.set("play_in_install", boolean(view.project.play_retail));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("import_dependencies", boolean(view.project.import_dependencies));
+	JsonValue items = JsonValue::make_array();
+	for (const int64_t item : view.project.recent_items) items.push(json_number(double(item)));
+	out.set("recent_items", std::move(items));
 	return out;
 }
 
