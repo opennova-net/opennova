@@ -15,6 +15,7 @@
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
 #include <editor/requirements/requirements.h>
+#include <editor/session/problem_query.h>
 
 namespace opennova::editor {
 
@@ -273,22 +274,20 @@ JsonValue dialogs_section(const SessionView &view) {
 	return out;
 }
 
-// How many findings the Problems rows hold, by severity (the problems query pages them).
+// How many findings the Problems rows hold, by severity (the problems query pages them), counted as
+// Problems and the menu bar count them: the modder's, the game's own data's apart (ADR 0046 S15).
 JsonValue problem_counts_section(const SessionView &view) {
-	size_t errors = 0, warnings = 0, infos = 0;
-	for (const Diagnostic &d : view.findings.diagnostics) {
-		if (d.severity == DiagnosticSeverity::Error)
-			++errors;
-		else if (d.severity == DiagnosticSeverity::Warning)
-			++warnings;
-		else
-			++infos;
-	}
+	const ProblemCounts counts = count_problems(view);
 	JsonValue out = JsonValue::make_object();
 	out.set("count", json_number(double(view.findings.diagnostics.size())));
-	out.set("errors", json_number(double(errors)));
-	out.set("warnings", json_number(double(warnings)));
-	out.set("infos", json_number(double(infos)));
+	out.set("errors", json_number(double(counts.errors)));
+	out.set("warnings", json_number(double(counts.warnings)));
+	out.set("infos", json_number(double(counts.infos)));
+	JsonValue original = JsonValue::make_object();
+	original.set("errors", json_number(double(counts.original_errors)));
+	original.set("warnings", json_number(double(counts.original_warnings)));
+	original.set("infos", json_number(double(counts.original_infos)));
+	out.set("original", std::move(original));
 	return out;
 }
 
@@ -316,6 +315,9 @@ JsonValue preferences_section(const SessionView &view) {
 	out.set("play_in_install", boolean(view.project.play_retail));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("import_dependencies", boolean(view.project.import_dependencies));
+	JsonValue items = JsonValue::make_array();
+	for (const int64_t item : view.project.recent_items) items.push(json_number(double(item)));
+	out.set("recent_items", std::move(items));
 	return out;
 }
 
@@ -377,7 +379,7 @@ constexpr ViewSectionRow kSections[] = {
 			"The unsaved-changes prompt (what waits, the files it lists, whether Discard is "
 			"offered), the last rename's plan (rename_preview: its sites before and after, its "
 			"refusals) and what the settings' last Apply could not write." },
-	{ S::ProblemCounts, "problem_counts", concern_set({ C::Findings }), problem_counts_section,
+	{ S::ProblemCounts, "problem_counts", concern_set({ C::Findings, C::DocumentSet }), problem_counts_section,
 			"How many Problems rows there are, by severity (the problems query pages them)." },
 	{ S::GraphCounts, "graph_counts", concern_set({ C::Graph }), graph_counts_section,
 			"What the asset graph holds: files, edges, symbols and missing (the references that "

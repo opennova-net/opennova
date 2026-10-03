@@ -1143,6 +1143,122 @@ static int test_findings_index() {
 	return 0;
 }
 
+// ADR 0046 S15: the findings about the game's own data apart. A fake install serving a menu that names
+// a texture the project lacks; the project holds that menu byte for byte, and a menu of its own naming
+// the same texture. After the validation the session checks the files its findings are about against
+// the install's copies (session/original_files.h): the install's menu is the original's, the modder's
+// is not. The answer lists the modder's finding first (ungrouped: a group with no header) and the
+// install's menu's under the game's own data's group, last, counting them apart; grouped by file, the
+// same group last. The install's menu changed by a byte is the modder's again; with no install, none is
+// the original's.
+static int test_original_data() {
+	editor_test::TempProjectDir dir("opennova_editor_problems_original");
+	const auto menu = [](const char *name) {
+		return std::string("<SCREEN>\r\n\t<NAME>") + name + "</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+		       "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+		       "\t\t<APPEARANCE type=\"image\" state=\"default\">logo.tga</APPEARANCE>\r\n\t</WINDOW>\r\n</SCREEN>\r\n";
+	};
+	const std::string shipped = menu("SHIPPED");
+	const std::string install = dir.file("install");
+	const opennova::pff::PffWriteEntry entries[] = {
+		{"shipped.mnu", reinterpret_cast<const uint8_t *>(shipped.data()), uint32_t(shipped.size()), 0, 0, 0},
+	};
+	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Original"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	TEST_EXPECT(editor_test::write_text(root + "/menus/shipped.mnu", shipped));
+	TEST_EXPECT(editor_test::write_text(root + "/menus/mine.mnu", menu("MINE")));
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::rescan());
+	const auto logo_in = [&v](const char *path) {
+		for (size_t i = 0; i < v.findings.diagnostics.size(); ++i) {
+			const Diagnostic &d = v.findings.diagnostics[i];
+			if (d.code() == "reference.missing" && d.asset == path && subject_target(d) == "logo.tga") return i;
+		}
+		return SIZE_MAX;
+	};
+	const size_t theirs = logo_in("menus/shipped.mnu"), mine = logo_in("menus/mine.mnu");
+	TEST_EXPECT(theirs != SIZE_MAX && mine != SIZE_MAX);
+	if (theirs == SIZE_MAX || mine == SIZE_MAX) return 1;
+	TEST_EXPECT(v.findings.original_files && v.findings.original_files->count("menus/shipped.mnu") == 1 &&
+	            v.findings.original_files->count("menus/mine.mnu") == 0);
+	TEST_EXPECT(in_original_data(v.findings.diagnostics[theirs], v) && !in_original_data(v.findings.diagnostics[mine], v));
+	const auto group_of = [](const ProblemAnswer &answer, size_t finding) {
+		for (size_t g = 0; g < answer.groups.size(); ++g)
+			if (std::find(answer.groups[g].rows.begin(), answer.groups[g].rows.end(), finding) != answer.groups[g].rows.end())
+				return g;
+		return SIZE_MAX;
+	};
+	ProblemQuery query;
+	ProblemAnswer answer = answer_problems(query, v);
+	TEST_EXPECT(answer.grouped && answer.groups.size() == 2 && !answer.groups[0].header && answer.groups[1].original &&
+	            answer.groups[1].key == kOriginalGroupKey && answer.groups[1].title == kOriginalGroupTitle);
+	TEST_EXPECT(group_of(answer, mine) == 0 && group_of(answer, theirs) == 1 && answer.rows.back() == answer.groups[1].rows.back());
+	TEST_EXPECT(answer.original() == answer.groups[1].rows.size() && answer.total() == v.findings.diagnostics.size());
+	query.grouping = ProblemGrouping::File;
+	answer = answer_problems(query, v);
+	TEST_EXPECT(!answer.groups.empty() && answer.groups.back().original && group_of(answer, theirs) == answer.groups.size() - 1 &&
+	            group_of(answer, mine) < answer.groups.size() - 1 && answer.groups[group_of(answer, mine)].header);
+	// The counts every reader shares (Problems, the menu bar, problem_counts, the CLI's status) agree.
+	ProblemCounts counts = count_problems(v);
+	TEST_EXPECT(counts.original_errors + counts.original_warnings + counts.original_infos == answer.original() &&
+	            counts.errors == answer.errors && counts.warnings == answer.warnings);
+	// Open with an unsaved edit, the shipped menu is judged by what it holds: the modder's, never folded;
+	// saved as it was again (an undo), the game's own data's again.
+	editor_test::handle_to_end(session, request::open_document("menus/shipped.mnu"));
+	const Document *opened = records_of(*session.document_for("menus/shipped.mnu"));
+	TEST_EXPECT(opened != nullptr);
+	if (!opened) return 1;
+	Edit renamed;
+	for (const auto &row : opened->rows()) {
+		if (!row) continue;
+		for (const FieldSchema &field : opened->fields(row->kind))
+			if (field.type == FieldType::Text && !field.read_only && renamed.field.empty()) {
+				renamed.address = {row->id, row->kind, 0};
+				renamed.field = field.id;
+			}
+		if (!renamed.field.empty()) break;
+	}
+	renamed.value = std::string("RENAMED");
+	TEST_EXPECT(!renamed.field.empty());
+	editor_test::handle_to_end(session, request::edit_record("menus/shipped.mnu", renamed));
+	const size_t edited = logo_in("menus/shipped.mnu");
+	TEST_EXPECT(opened->dirty() && edited != SIZE_MAX && !in_original_data(v.findings.diagnostics[edited], v));
+	counts = count_problems(v);
+	TEST_EXPECT(counts.original_errors + counts.original_warnings + counts.original_infos == 0);
+	editor_test::handle_to_end(session, request::undo("menus/shipped.mnu"));
+	const size_t undone = logo_in("menus/shipped.mnu");
+	TEST_EXPECT(!opened->dirty() && undone != SIZE_MAX && in_original_data(v.findings.diagnostics[undone], v));
+	// Changed by a byte on disk: the modder's again.
+	TEST_EXPECT(editor_test::write_text(root + "/menus/shipped.mnu", shipped + " "));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(v.findings.original_files && v.findings.original_files->empty());
+	answer = answer_problems(ProblemQuery(), v);
+	TEST_EXPECT(!answer.grouped && answer.original() == 0);
+	// The install changed under the same folder (its copy now the project's bytes): a rescan finds it
+	// the original's again.
+	const std::string patched = shipped + " ";
+	const opennova::pff::PffWriteEntry patched_entries[] = {
+		{"shipped.mnu", reinterpret_cast<const uint8_t *>(patched.data()), uint32_t(patched.size()), 0, 0, 0},
+	};
+	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                             patched_entries, 1) == opennova::pff::PFF_WRITE_OK);
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(v.findings.original_files && v.findings.original_files->count("menus/shipped.mnu") == 1);
+	// With no install, none is the original's.
+	editor_test::set_game_install(session, std::string());
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(v.findings.original_files && v.findings.original_files->empty());
+	std::printf("original data: the install's own files' findings apart\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_findings_index();
@@ -1157,6 +1273,7 @@ int main() {
 	failures += test_fix_index();
 	failures += test_optional_group();
 	failures += test_placeholders();
+	failures += test_original_data();
 	if (failures == 0) std::printf("editor_problems: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

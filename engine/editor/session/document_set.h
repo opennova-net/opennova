@@ -129,6 +129,11 @@ public:
 
 private:
 	bool apply_edits(DocumentBase &document, const std::vector<Edit> &edits);
+	// The status line's words for a batch (ADR 0046 S15): its records by their titles, a field set by
+	// its name (on `named`, its records as they read before) and the new value's words; "" where a
+	// batch is none it words.
+	std::string records_words(const Document &document, const std::vector<Edit> &edits) const;
+	std::string edit_words(const Document &document, const std::vector<Edit> &edits, const std::string &named) const;
 	// After `document` moved from the state (load_generation, revision) by an edit, an undo or a
 	// redo: the active selection repaired against the rows that changed since (changes_since; all
 	// of them when the document cannot say), a gone primary giving way to `owner`.
