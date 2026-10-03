@@ -1,6 +1,7 @@
 #include <editor/preview/mission_options.h>
 
 #include <cmath>
+#include <iterator>
 
 namespace opennova::editor {
 
@@ -58,14 +59,33 @@ bool read_flags(const JsonValue &json, const char *group, const Flag (&flags)[N]
 	return true;
 }
 
+constexpr const char *kTools[] = { "select", "place", "path", "area" };
+
+// The path numbers a stop is added to: 1 to 122 (0 and 123 to 127 name no route).
+constexpr int64_t kLastRoutePath = 122;
+
 } // namespace
+
+const char *mission_tool_token(MissionTool tool) {
+	return size_t(tool) < std::size(kTools) ? kTools[size_t(tool)] : "select";
+}
+
+bool mission_tool_from_token(const std::string &token, MissionTool &out) {
+	for (size_t i = 0; i < std::size(kTools); ++i)
+		if (token == kTools[i]) {
+			out = MissionTool(i);
+			return true;
+		}
+	return false;
+}
 
 bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b) {
 	for (const Flag &flag : kShow)
 		if (a.*flag.member != b.*flag.member) return false;
 	for (const Flag &flag : kMarks)
 		if (a.*flag.member != b.*flag.member) return false;
-	return a.mark_range == b.mark_range && a.stick == b.stick && a.time == b.time;
+	return a.mark_range == b.mark_range && a.stick == b.stick && a.time == b.time && a.tool == b.tool &&
+			a.item == b.item && a.path == b.path;
 }
 
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
@@ -75,6 +95,9 @@ io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
 	out.set("mark_range", io::json_number(double(options.mark_range)));
 	out.set("stick", JsonValue::make_bool(options.stick));
 	out.set("time", options.time < 0.0 ? JsonValue::make_null() : io::json_number(options.time));
+	out.set("tool", io::json_string(mission_tool_token(options.tool)));
+	out.set("item", io::json_number(double(options.item)));
+	out.set("path", io::json_number(double(options.path)));
 	return out;
 }
 
@@ -112,8 +135,27 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 			} else {
 				read.time = value.number;
 			}
+		} else if (member.key == "tool") {
+			if (!value.is_string() || !mission_tool_from_token(value.string, read.tool)) {
+				error = "options.tool is select, place, path or area.";
+				return false;
+			}
+		} else if (member.key == "item") {
+			if (!value.is_number() || value.number < 0.0 || value.number != std::floor(value.number) || value.number > 2147483647.0) {
+				error = "options.item is an item's id, a whole number (0: none picked).";
+				return false;
+			}
+			read.item = int64_t(value.number);
+		} else if (member.key == "path") {
+			if (!value.is_number() || value.number < 0.0 || value.number != std::floor(value.number) ||
+					value.number > double(kLastRoutePath)) {
+				error = "options.path is a path's number, 1 to 122 (0: none picked; 123 to 127 are commands).";
+				return false;
+			}
+			read.path = int(value.number);
 		} else {
-			error = "Unknown options member \"" + member.key + "\" (it takes show, marks, mark_range, stick, time).";
+			error = "Unknown options member \"" + member.key +
+					"\" (it takes show, marks, mark_range, stick, time, tool, item, path).";
 			return false;
 		}
 	}

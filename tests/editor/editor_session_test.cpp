@@ -1077,6 +1077,19 @@ static int test_status_says_the_request() {
 	TEST_EXPECT(extra && v.activity.status == "Created " + extra->path() + ".");
 	session.handle(request::create_file("extra.zzq", ""));
 	TEST_EXPECT(!session.outcome().done() && v.activity.status == "extra.zzq was not created: see Problems.");
+
+	// A refusal's line is its request's (S15): the next request served with no line of its own (Clear
+	// on Output) clears it, so it never reads as that request's outcome; a served line stays past such
+	// a request; a refusal that said nothing on the line claims none.
+	const uint64_t before = v.revisions.of(ViewConcern::Output);
+	session.handle(request::clear_output());
+	TEST_EXPECT(session.outcome().done() && v.activity.status.empty() && v.revisions.of(ViewConcern::Output) > before);
+	session.handle(request::create_file("extra.zzq", ""));
+	TEST_EXPECT(v.activity.status == "extra.zzq was not created: see Problems.");
+	session.handle(request::open_document("main.mnu"));
+	TEST_EXPECT(session.outcome().done() && v.activity.status == "Showing " + menu_path + ".");
+	session.handle(request::clear_output());
+	TEST_EXPECT(v.activity.status == "Showing " + menu_path + ".");
 	return 0;
 }
 

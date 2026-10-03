@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -126,6 +127,29 @@ public:
 	// The mission row (null before a load); the rows of each kind in their band's order.
 	const MissionRow *mission_row() const;
 	std::vector<const Node *> rows_of(MissionKind kind) const;
+	// The row the game's lookups find for an SSN (the first in pool order: organics, items, buildings,
+	// markers [orig: Entity_KillByNetId @0x43DBD0]) and for a zone id (the first in file order [orig:
+	// EventTrigger_ResolveZoneTriggerRefs @0x453000]); 0 for none.
+	NodeId entity_holder(int64_t ssn) const;
+	NodeId zone_holder(int64_t id) const;
+	// The rows by their place (ADR 0046 S15: what the display names read per drawn row), from the same
+	// lookups, made once per state of the rows: the row of a kind at an index among that kind's rows (a
+	// stop's marker, a parameter's event, a path's number), null past them; a row's index among its
+	// kind's rows (SIZE_MAX for none); a type-2044 marker's one-based place among them in spawn order,
+	// its LOCATION key's number (0 for any other row); how many rows a kind has; how many entities name a
+	// group.
+	const Node *row_of(MissionKind kind, size_t index) const;
+	size_t index_of(const Node &row) const;
+	int location_of(const Node &row) const;
+	size_t count_of(MissionKind kind) const;
+	size_t group_members(int64_t group) const;
+	// What the windows show for a record (S15): the mission's own words without the project's names
+	// (mission_record_label, documents/mission_labels.h): an event as its sentence, "When <trigger> and
+	// <trigger>, then <action>; <action>." (documents/mission_sentence.h, Events and scripts), a trigger as
+	// its words after the join that ties it to the one before ("or Hostage #10034 is destroyed"), an
+	// action as its words; an entity by its pool and its SSN, a path by its stops, an area by its zone, a
+	// stop by its marker (Names). The graph, the Problems rows and the editor MCP keep record_name.
+	std::string record_title(const NodeAddress &address) const override;
 	// The file as the writer takes it: the mission row's file with every band's records and the
 	// chains joined, its counts synced. False before a load.
 	bool compose(bms::File &out) const;
@@ -182,19 +206,24 @@ protected:
 	                   std::string &error) override;
 
 private:
-	// The first record of each SSN in the lookups' pool order and of each zone id in file order, over
-	// the rows of one state (its load generation and revision): what refine_symbol reads, made once
-	// per state rather than a walk of the rows per symbol (a memo filled inside a const query, the
-	// thread confinement of model/document.h).
-	struct FirstHolders {
+	// Over the rows of one state (its load generation and revision): the first record of each SSN in
+	// the lookups' pool order and of each zone id in file order (what refine_symbol reads), each kind's
+	// rows in their order and each row's place among them, each type-2044 marker's place in spawn order,
+	// each group's entities; made once per state rather than a walk of the rows per symbol or per drawn
+	// row (a memo filled inside a const query, the thread confinement of model/document.h).
+	struct Lookups {
 		bool made = false;
 		uint64_t load_generation = 0, revision = 0;
 		std::unordered_map<int32_t, NodeId> ssns, zones;
+		std::vector<std::vector<const Node *>> by_kind;
+		std::unordered_map<NodeId, size_t> places;
+		std::unordered_map<NodeId, int> locations;
+		std::vector<size_t> groups;
 	};
-	const FirstHolders &first_holders() const;
+	const Lookups &lookups() const;
 
 	std::vector<MissionFinding> issue_codes_;
-	mutable FirstHolders first_holders_;
+	mutable Lookups lookups_;
 };
 
 bool is_mission_kind(AssetKind kind);
@@ -209,6 +238,18 @@ int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows);
 // records in the rows' order and the events' chains joined, its counts synced. False with no mission
 // row among them.
 bool compose_mission(const std::vector<std::shared_ptr<const Node>> &rows, bms::File &out);
+
+// A clipboard payload of copied rows (MissionDocument::copy) placed elsewhere (ADR 0046 S15, Paste
+// here): the middle of its entities' positions and its areas' middles, mission x and y (false for a
+// payload of no such rows: a nested kind's, or events alone), and the payload with each copied entity
+// moved `east` and `north` metres and up by what `rise` answers for it (given where it was and where it
+// goes, mission x and y: the ground's rise under it, which keeps its own height over the ground with
+// Stick; none when empty), each area `east` and `north`, written and read back as a copy's is. "" for
+// a payload that holds no rows, and for a move that would take a position past what the file's 16.16
+// words hold (-32768 m to just short of 32768 m): refused, never wrapped.
+using MissionClipRise = std::function<double(double from_x, double from_y, double to_x, double to_y)>;
+bool mission_clip_middle(const std::string &payload, double out[2]);
+std::string mission_clip_moved(const std::string &payload, double east, double north, const MissionClipRise &rise = {});
 
 // The scope the mission's symbols are defined in and looked up by: its file name, upper case
 // ("ASH_I5B.BMS").
@@ -231,5 +272,12 @@ std::string mission_scope(const DocumentBase &document);
 // docs/interface/hud-re.md, the waypoint HUD], so which key a mission reads is how it is played.
 // Then the files the mission's name finds and a dialog's bank.
 void mission_references(const Document &document, Extracted &out);
+
+// The text keys one record's numbers form, the TextId edges mission_references makes of it, each with
+// its field ("" a navpoint's LOCATION, "name_index" a STRNAME, "win_conditions[i]" an objectives row, an
+// action's "param1" the line it shows), in the order mission_references makes them; `placed` fills each
+// edge's record path and locator (the graph's), which the display names do without.
+void mission_text_edges(const MissionDocument &document, const NodeAddress &address, std::vector<GraphEdge> &out,
+                        bool placed = false);
 
 } // namespace opennova::editor

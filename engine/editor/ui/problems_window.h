@@ -48,7 +48,8 @@ private:
 	void draw_lines(const SessionView &view, const ProblemAnswer &answer, size_t first, size_t last);
 	void draw_header(const SessionView &view, const ProblemAnswer &answer, const Line &line);
 	void draw_finding(const SessionView &view, const Line &line, bool expanded);
-	void draw_fixes(const SessionView &view, size_t finding, const std::vector<ProblemFix> &fixes);
+	// `note`: what each fix says first (a finding about the game's own data: a file the game ships).
+	void draw_fixes(const SessionView &view, size_t finding, const std::vector<ProblemFix> &fixes, const std::string &note);
 	void draw_more(const SessionView &view);
 	void draw_confirm(const SessionView &view);
 	// A fix's button (or More's row): true when its click counts (PressLatch).

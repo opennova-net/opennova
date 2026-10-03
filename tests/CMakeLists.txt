@@ -4499,11 +4499,12 @@ if(OPENNOVA_IMGUI)
     add_executable(editor_ui_test editor_ui/editor_windows_test.cpp editor_ui/workspace_test.cpp
                                   editor_ui/markers_test.cpp editor_ui/bounds_test.cpp
                                   editor_ui/field_widgets_test.cpp editor_ui/reference_picker_test.cpp
-                                  editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp)
+                                  editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp
+                                  editor_ui/logic_test.cpp)
     target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
     target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
-                                  menu inspector preview styles problems gate)
+                                  menu inspector preview styles problems gate logic)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
@@ -4595,6 +4596,45 @@ add_executable(editor_mission_document_test editor/mission_document_test.cpp)
 target_link_libraries(editor_mission_document_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_document COMMAND editor_mission_document_test)
+
+# A mission's logic in words (editor/documents/mission_sentence.h, ADR 0046 S15): each trigger and
+# action worded from its type and its typed parameters, the chain's fold, an event's flags, delay and
+# repeat, a type or a value naming nothing said so; the minted mission's titles; the types "Add
+# trigger" and "Add action" offer; and (a SKIP-LEG without OPENNOVA_JO_DIR) every shipped event worded.
+add_executable(editor_mission_sentence_test editor/mission_sentence_test.cpp)
+target_link_libraries(editor_mission_sentence_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_sentence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_sentence COMMAND editor_mission_sentence_test)
+
+# Adding and editing a mission's logic without its format (editor/documents/mission_logic.h,
+# mission_uses.h, ADR 0046 S15): the forms, an add by type, the 20 an event holds refused before the
+# edit, a retype keeping what applies, a move, a negation and a join, what names a record, the
+# mission_logic and mission_uses queries; and (a SKIP-LEG without OPENNOVA_JO_DIR) every shipped record
+# given a form and the defaults' measured values.
+add_executable(editor_mission_logic_test editor/mission_logic_test.cpp)
+target_link_libraries(editor_mission_logic_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_logic_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_logic COMMAND editor_mission_logic_test)
+
+# The display names (ADR 0046 S15, Names: editor/documents/mission_labels.h and
+# editor/graph/display_names.h) over the minted synth_logic mission: every record and every value
+# that names something in a modder's words, with and without the project's names (an item by its
+# catalog's name, a text key by its string), what names nothing said in words, the picker's
+# choices worded, the cache, the wire's words through a session; and (a SKIP-LEG without
+# OPENNOVA_JO_DIR) every record and reference of the shipped missions worded with the install's
+# catalogs and tables, timed.
+add_executable(editor_mission_labels_test editor/mission_labels_test.cpp)
+target_link_libraries(editor_mission_labels_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_labels_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_labels COMMAND editor_mission_labels_test)
+
+# Help in a script's text (editor/session/script_assist.h, ADR 0046 S15): the completions from the WAC
+# compiler's tables and the mission of the script's name, what a word is, where it is defined, the
+# mission's script, a compiler report in plain words, and the script_assist query.
+add_executable(editor_script_assist_test editor/script_assist_test.cpp)
+target_link_libraries(editor_script_assist_test PRIVATE opennova_editor)
+target_include_directories(editor_script_assist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_script_assist COMMAND editor_script_assist_test)
 
 # The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
 # catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the

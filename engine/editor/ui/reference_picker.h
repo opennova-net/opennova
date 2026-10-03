@@ -6,6 +6,7 @@
 #include <tuple>
 #include <vector>
 
+#include <editor/documents/name_source.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/document.h>
 #include <editor/session/view/view_revisions.h>
@@ -51,6 +52,15 @@ public:
 	// variables); a stylesheet's own value names its file alone.
 	bool draw(Workspace &workspace, const Document &document, const NodeAddress &record, const FieldUse &field,
 	          const Value &value, bool compact, std::string &picked, bool others = true);
+	// A field whose value names something, picked by name (ADR 0046 S15): in the value's place, a
+	// frame like a list's showing what the value names (`words`, value_display's: an item's name, an
+	// entity's title; the value muted after them; one naming nothing in the missing colour, said so;
+	// "(mixed)" where the records edited differ), which opens the same list under it: each name by its
+	// words with the name muted, typed to narrow it, the arrows and Enter to pick; and a value typed that
+	// no name is, offered as typed ("Use 123") where the field takes it. True when a name was picked this
+	// frame, `picked` holding it (the caller sets it).
+	bool draw_field(Workspace &workspace, const Document &document, const NodeAddress &record, const FieldUse &field,
+	                const Value &value, const DisplayName &words, bool mixed, std::string &picked);
 	// A Files row dropped on the item just drawn (a reference field's value): true when the file is
 	// one a reference of the field's kind loads (file_serves_reference, by the field's loader_arg),
 	// `picked` its logical name. While a row is dragged over an item that does not fit, nothing
@@ -96,9 +106,10 @@ private:
 		bool unreachable = false;  // the inert names shown
 		size_t cursor = 0;         // the highlighted row among those shown
 		bool moved = false;        // the cursor moved this frame: its row scrolled to
-		// What the popup lists, kept while what it reads stands (cache_key).
+		// What the popup lists, kept while what it reads stands (cache_key), and the field it lists for.
 		const SessionView *view = nullptr;
 		ListKey key;
+		FieldUse field;
 		std::vector<ReferenceChoice> choices;
 		bool missing = false;
 		std::vector<ProblemFix> fixes;
@@ -110,7 +121,8 @@ private:
 	static void drop_list(Popup &popup);
 	// The lists of the popups not drawn open this frame or the last let go (held_ swept).
 	void let_go(int frame);
-	bool draw_popup(Workspace &workspace, Popup &popup, std::string &picked);
+	// The list (`typed_value`: a value typed that no name is offered as typed, draw_field's).
+	bool draw_popup(Workspace &workspace, Popup &popup, std::string &picked, bool typed_value);
 	// The popups of documents no longer open forgotten, once per change of which are open.
 	void prune(const SessionView &view);
 
