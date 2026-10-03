@@ -1764,6 +1764,13 @@ target_include_directories(waypoint_track_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(waypoint_track_test PRIVATE cxx_std_17)
 add_test(NAME waypoint_track COMMAND waypoint_track_test)
 
+# The death screen's free-fly motor and the chase orbit state it drives.
+add_executable(spectator_motor_test world/spectator_motor_test.cpp)
+target_link_libraries(spectator_motor_test PRIVATE opennova_runtime)
+target_include_directories(spectator_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(spectator_motor_test PRIVATE cxx_std_17)
+add_test(NAME spectator_motor COMMAND spectator_motor_test)
+
 # Entity_ClassifyForMinimap: definition/entity marker classification shared by
 # every server producer before packet cadence/recipient policy.
 add_executable(minimap_overlay_test world/minimap_overlay_test.cpp)
@@ -2676,6 +2683,15 @@ target_include_directories(mission_kernel_lifecycle_test PRIVATE ${CMAKE_CURRENT
 target_compile_features(mission_kernel_lifecycle_test PRIVATE cxx_std_17)
 add_test(NAME mission_kernel_lifecycle COMMAND mission_kernel_lifecycle_test)
 
+# The SP mission lifecycle after the round end: the win epilog's and the lose
+# screen's stage machines, the round-over keys, the in-game RESTART, the main
+# frame's exit router and the SP restart as a fresh launch (ungated).
+add_executable(sp_mission_lifecycle_test mission/sp_mission_lifecycle_test.cpp)
+target_link_libraries(sp_mission_lifecycle_test PRIVATE opennova_runtime)
+target_include_directories(sp_mission_lifecycle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(sp_mission_lifecycle_test PRIVATE cxx_std_17)
+add_test(NAME sp_mission_lifecycle COMMAND sp_mission_lifecycle_test)
+
 # inmatch::HostRole over the kernel (ADR 0043 d3), ungated: the SP listen
 # bring-up and its per-tick frame over a null socket, the local C2S gameplay
 # drain, and the dedicated (HostOnly) bring-up.
@@ -2683,6 +2699,14 @@ add_executable(host_role_test mission/host_role_test.cpp)
 target_link_libraries(host_role_test PRIVATE opennova_net opennova_runtime)
 target_compile_features(host_role_test PRIVATE cxx_std_17)
 add_test(NAME host_role COMMAND host_role_test)
+
+# The death screen's spectator over the listen host's role and kernel: the
+# free-fly motor's sub-modes, the input filter, the wrap placement and the
+# replica track legs.
+add_executable(spectator_session_test mission/spectator_session_test.cpp)
+target_link_libraries(spectator_session_test PRIVATE opennova_net opennova_runtime)
+target_compile_features(spectator_session_test PRIVATE cxx_std_17)
+add_test(NAME spectator_session COMMAND spectator_session_test)
 
 # The tick digest (ADR 0043): the per-tick state hash a structural slice must
 # leave unchanged. The ctest leg is the synthetic mission (committed chain,
@@ -3461,6 +3485,14 @@ opennova_add_gated_test(lose_flow_00tra COMMAND lose_flow_test --bms 00TRa.bms -
 # authors a `score`), so the WAC's bluekills lose never fires on it.
 opennova_add_gated_test(lose_flow_04tr_self_kill COMMAND lose_flow_test --bms 04TR.bms --self-kill)
 opennova_add_gated_test(lose_flow_05tr_self_kill COMMAND lose_flow_test --bms 05TR.bms --self-kill)
+# `--win-event 38`: 01TR's only BlueWin, its five prerequisite events staged with
+# their authored actions; the round ends won and the engine's win epilog builds
+# its score screen over the mission's own tallies.
+opennova_add_gated_test(win_flow_01tr COMMAND lose_flow_test --bms 01TR.bms --win-event 38)
+# `--restart-boot`: 00TRa booted fresh and then as the SP restart's boot; the
+# restarted world equals the fresh launch at the same world ages (the spawn,
+# the fired-event set including event 11's authored activation delay).
+opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bms --restart-boot)
 
 # The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped

@@ -157,11 +157,11 @@ void test_slope_raise_floor() {
 // following a tracked entity starts further back and pitched up, and a dead
 // target starts further back still.
 void test_seeds_differ() {
-	CHECK(kTpDistance < kTpTrackedDistance,
+	CHECK(kTpDistanceQ16 < kTpTrackedDistanceQ16,
 			"entering play starts closer than tracking");
-	CHECK(near(kTpOrbitPitchDeg, 0.0f), "play zeroes the orbit");
-	CHECK(kTpTrackedOrbitPitchDeg > 0.0f, "tracking starts pitched up");
-	CHECK(kTpDeadTargetDistance > kTpTrackedDistance,
+	CHECK(PlayerViewState{}.chase_orbit_pitch == 0, "play zeroes the orbit");
+	CHECK(kTpTrackedOrbitPitchBam > 0, "tracking starts pitched up");
+	CHECK(kTpDeadTargetDistanceQ16 > kTpTrackedDistanceQ16,
 			"a dead target is framed from 10.0 before the reel-in");
 }
 

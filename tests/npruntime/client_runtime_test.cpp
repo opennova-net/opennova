@@ -2844,6 +2844,46 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 			"reload order: the runtime preserves the notification for simulation consumers");
 }
 
+// S2C 0x35 (the powerup weapon grant) rides the joiner's framed receive into
+// the replica pipeline in arrival order; a malformed body is dropped. The role
+// then acts on the one naming its own player (client_weapon_replay.cpp).
+// [orig: NapiNPClientMsg_0x035 @0x4261A0]
+bool run_joiner_weapon_pickup_reaches_the_pipeline() {
+	const std::string client_scrk = "CLIENT-WEAPON-PICKUP-SCRK";
+	const std::string server_scrk = "SERVER-WEAPON-PICKUP-SCRK";
+	constexpr uint16_t kSelfHandle = 0x0002;
+	inmatch::ClientRuntime client("WeaponPickup");
+	client.seed_session(
+			0x10203041u, 1u, client_scrk, server_scrk,
+			1, 0, kSelfHandle, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/true);
+	WeaponPickupNotice own;
+	own.picker_handle = kSelfHandle;
+	own.powerup_handle = 0x1005;
+	WeaponPickupNotice other;
+	other.picker_handle = 0x0007;
+	other.powerup_handle = 0x1006;
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> frame = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{
+					make_protocol_message(0x35, encode_weapon_pickup(own)),
+					make_protocol_message(0x35, std::vector<uint8_t>{0x02, 0x00, 0x05}),
+					make_protocol_message(0x35, encode_weapon_pickup(other)),
+			});
+	client.receive(frame.data(), frame.size());
+	(void)client.Client_ProcessNetworkFrame(1);
+	const std::vector<WeaponPickupNotice> pickups = client.drain_weapon_pickups();
+	if (!expect(pickups.size() == 2, "weapon pickup: both well-formed 0x35 bodies folded"))
+		return false;
+	return expect(pickups[0].picker_handle == kSelfHandle &&
+					pickups[0].powerup_handle == 0x1005 &&
+					pickups[1].picker_handle == 0x0007 &&
+					pickups[1].powerup_handle == 0x1006 &&
+					client.drain_weapon_pickups().empty(),
+			"weapon pickup: arrival order kept and the drain empties");
+}
+
 bool run_host_client_discards_authority_owned_reload_echoes() {
 	ns::LoopbackChannel host_loop;
 	inmatch::ClientRuntime host_view(host_loop);
@@ -7337,6 +7377,7 @@ int main() {
 	                run_roundtrip_with_spawn_zones(/*under_send_holdoff=*/true) &&
 	                run_joiner_remote_reload_stamps_before_same_frame_body_tick() &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&
+	                run_joiner_weapon_pickup_reaches_the_pipeline() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
 	                run_zone_presence_updates_only_a_tracked_window() &&

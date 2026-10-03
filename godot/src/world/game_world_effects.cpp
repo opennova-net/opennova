@@ -34,6 +34,10 @@ void GameWorld::route_mission_effects(const Array &p_effects) {
 		const String kind = eff->get_kind();
         if (kind == "local_round_reset") {
             if (audio != nullptr) audio->reset_dialog_queue();
+        } else if (kind == "round_end" && eff->get_c() != 0) {
+            // The SP round end's dialog reset reaches the queue's waiting lines
+            // (engine World::process_round_end carries the witness).
+            if (audio != nullptr) audio->reset_dialog_queue();
         } else if (kind == "dialog") {
 			// BMS PlayWavList: dialog id resolved through the co-named .DBF (queued).
 			if (audio != nullptr) {

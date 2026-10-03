@@ -27,7 +27,9 @@ struct DefItemsFile;
 namespace opennova::world {
 
 class World;
+class LocalPlayer;
 struct WeaponTable;
+struct WeaponAvatarGrant;
 
 // One `action` row of a powerup.def entry: the bound handler (weapon_fsh.h's
 // registry id: powerup_pickup, powerup_respawn or the placeholder) and the keys
@@ -107,6 +109,21 @@ struct PowerupGrant {
     std::vector<std::pair<int32_t, int32_t>> ammo_adds; // (ammo class id, amount)
 };
 
+// The authority's `weapon` grant, recorded for every picker the arm admitted:
+// the host lands a REMOTE picker's on its connection's slot table and fans
+// S2C 0x35 [u16 picker][u16 powerup] to every in-match slot but its own, where
+// the picker's client mounts the weapon (the listen host's own pickup never
+// mounts). The local player's grant already ran in place.
+// [orig: Server_BroadcastWeaponOverlayUpdate @0x509FC0 -- the authority gate
+//  @0x509FC7, WeaponSlot_InitFromAvatarDef on the validated slot's table
+//  @0x509FE9, mask 0x90 @0x509FF1, the two handles @0x50A054..0x50A06C,
+//  SendFiltered(0x35, reliable) @0x50A07D]
+struct PowerupWeaponGrant {
+    EntityHandle picker;
+    EntityHandle powerup;
+    uint8_t weapon = 0; // the row's +0x2B0 byte
+};
+
 // The pickup: the powerup's pickup action run for `picker`, the body whose
 // movement resolve contacted it. Exposed for the tests; the tick reaches it
 // through powerup_process_contacts. [orig: Entity_InvokeCollisionCallback
@@ -126,6 +143,24 @@ void powerup_pickup_by(World &world, EntityHandle powerup, Entity &picker,
 // contact (the joiner's own body included; no authority gate precedes the
 // pickup) [orig: the branch @0x4B2FB8..0x4B2FE5].
 void powerup_process_contacts(World &world, const TickContext &ctx);
+
+// The local player's side of a `weapon` grant that landed in its own table:
+// the 80-tick 3P reload window the refill's reload stamps on the picker, and
+// the held weapon's FSM magazine when the refilled slot is the equipped one.
+// [orig: WeaponSlot_ReloadAmmo @0x54173c / @0x5417A2, reached from
+//  WeaponSlot_InitFromAvatarDef @0x542883 / @0x542909]
+void powerup_sync_local_weapon_grant(World &world, LocalPlayer &lp, const Entity &picker,
+                                     const WeaponAvatarGrant &landed);
+
+// A client's S2C 0x35 for its own player: the weapon its copy of `row` names
+// (the row's +0x2B0 byte, written by its own pickup) lands in its table and is
+// mounted. Refused for a dead player, a missing row, or a weapon that names no
+// slot; returns whether the weapon landed. The caller resolves the handles and
+// checks the picker is its own player.
+// [orig: NapiNPClientMsg_0x035 @0x4261A0 -> sub_4E03D0 @0x4E03D0 ->
+//  WeaponSlot_InitFromAvatarDef @0x4E0401, Player_MountWeaponSlot @0x4E040E]
+bool powerup_weapon_grant_received(World &world, LocalPlayer &lp, const Entity *row,
+                                   bool local_dead);
 
 // The respawn countdown over every bound row, authority only: a positive
 // countdown steps down, zero fires the respawn action, arms -1 and spends one

@@ -145,12 +145,33 @@ public:
     void clear_stance_latches();
     // Mouse pixels onto the look angles (the center-lock accumulator).
     void look(float dx_px, float dy_px);
+    // The same pixels onto the chase orbit instead, as the death screen's
+    // chase sub-mode takes them [orig: sub_52AD50 @0x52ae4f..0x52ae99].
+    void look_chase_orbit(float dx_px, float dy_px);
+    // The sub-mode cycle's wrap back to the free sub-mode: one camera compose,
+    // then the local entity takes its view pose — the position less the
+    // CameraOffset, the yaw (the look yaw too), the pitch and the roll — so
+    // free flight starts where the camera was.
+    // [orig: sub_52AFF0 — Camera_ComputeThirdPersonView @0x52b082, the
+    //  stores @0x52b087..0x52b0ee]
+    void place_on_composed_view();
     // Point the look straight at a mission-space target from a mission-space
     // eye (absolute heading + pitch, engine BAM frame).
     void aim_at(const Vec3 &eye, const Vec3 &target);
     void teleport_local_player(const Vec3 &mission_pos, double yaw_deg,
             double pitch_deg);
     void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
+    // The ToSpecial action (input case 220): each press or release edge of its
+    // keys queues one dispatch, and dispatch_to_special runs the queue with the
+    // keys' live state, keeping a deferred dispatch (and those behind it) for
+    // the next frame, as retail's 32-entry deferred input queue does.
+    // [orig: the release pass Input_ProcessKeyboardEvents @0x49D249..0x49D2B9
+    //  (row flags & 0x80800000; ToSpecial's row flags 0x8C000801), the press
+    //  @0x49D42F; Input_QueueDeferredEvent @0x4993E0 (the 32 cap @0x4993E8);
+    //  Input_FlushDeferredEvents @0x497AC0 from Input_ProcessFrame @0x49D591]
+    void queue_to_special();
+    void dispatch_to_special(bool keys_held);
+    int32_t to_special_queued = 0;
     // The USE-ITEM mount toggle [orig: Input_ProcessFrame release edge
     // @0x49d6dc -> Entity_ToggleVehicleMount @0x436950], including the
     // out-of-session UseGun rejection (rules.mp_session, the retail

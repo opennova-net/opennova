@@ -230,6 +230,7 @@ world::WeaponTable build_weapon_table(
 		e.ammo_class = d.ammo_class;
 		e.ammo_class_count = static_cast<int16_t>(d.ammo_class_count);
 		e.ammo_bucket = d.ammobucket;
+		e.sameas = d.sameas;
 		e.round_type = d.round_type; // resolved to an AmmoTable index by
 		                             // resolve_weapon_round_types (§5.60)
 		e.voice_macro_token = d.vmacrotoken;

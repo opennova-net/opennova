@@ -531,6 +531,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	collision_pose.set_assets(&assets());
 	bringup_net_session_ = options.bringup_net_session;
 	people_name_resolver_ = options.people_name_resolver;
+	restart_boot_ = options.restart;
 	boot_trace.clear();
 
 	// The mission's .cpt/.trn(+charmap) height field: the shell hands its
@@ -801,6 +802,9 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	// [orig: g_EntityUpdateCounter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;
+	// [orig: dword_26970F4, whose only live writer is the cine render pass
+	//  sub_570BB0 @0x570C66]
+	world.epilog.frame_drawn = previous.world.epilog.frame_drawn;
 	// [orig: dword_2C05A14 (the mode) and dword_2C05A18..20 (the camera),
 	// zero-initialized data whose only writer is Render_WeatherTrailParticles
 	// @0x5DEEB4..0x5DEED8]
@@ -844,6 +848,11 @@ bool MissionKernel::complete_mission_start() {
 	world.weather.mission_start_init();
 	for (int i = 0; i < 255; ++i) tick_weather();
 	w::count_mission_units(world);
+	// The mission start's cine legs, after the unit census: every node gone,
+	// the end screen down, and on a first SP start the intro-cine leg
+	// [orig: Game_StartMission — Score_CountMissionSubgoalsAndUnits @0x525D5D,
+	//  then sub_577940 @0x525DA8 and the intro arm @0x525DAF..0x525DD6].
+	world.epilog.mission_start(!restart_boot_, world.rules.mp_session, world);
 	if (world.rules.projectile_authority)
 		world.vehicles.initialize_mission_vehicles();
 	capture_baseline();

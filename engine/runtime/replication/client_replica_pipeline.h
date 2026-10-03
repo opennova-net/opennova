@@ -370,6 +370,9 @@ public:
 	// drained once per frame by the embedder that owns gametext.
 	std::vector<ClientGameText> drain_game_texts();
 	std::vector<WeaponReload> drain_weapon_reloads();
+	// S2C 0x35 powerup weapon grants, in receive order; the joiner role
+	// applies the ones naming its own player (inmatch/joiner_role.cpp).
+	std::vector<WeaponPickupNotice> drain_weapon_pickups();
 	std::vector<ClientEffectCommand> drain_effect_commands();
 	void post_chat_line(ClientChatLine line) {
 		line.feed_order = next_feed_order_++;
@@ -482,16 +485,22 @@ public:
 	//  Entity_TrySetMinimapTrackTarget @0x52abc0]
 	void set_spectate_local_handle(uint16_t handle) { spectate_local_handle_ = handle; }
 	void spectate_cycle_target(int direction);
-	void spectate_cycle_mode(int direction);
+	// True when the cycle landed on the free sub-mode by the arm that then
+	// places the local entity on the composed view pose (the forward wrap with
+	// a target, any backward step to free) — that placement is the caller's
+	// (inmatch::spectate_action) [orig: sub_52AFF0 @0x52b043 / @0x52b080 ->
+	// @0x52b082].
+	bool spectate_cycle_mode(int direction);
 	void spectate_track(uint16_t handle);
 	// The death screen's three spectator actions by their dispatch codes: 500
 	// cycles the sub-mode, 501 / 502 step the target +1 / -1 in a chase or
 	// first-person sub-mode [orig: Input_HandleActionBinding cases 500
 	// @0x49bd58, 501 @0x49bd67, 502 @0x49bd89; catalog rows 110..112].
+	// Returns the cycle's placement verdict.
 	static constexpr int kSpectateActionCycleMode = 500;
 	static constexpr int kSpectateActionNextTarget = 501;
 	static constexpr int kSpectateActionPrevTarget = 502;
-	void spectate_action(int code);
+	bool spectate_action(int code);
 
 	// The local player's roster slot (entity+0x154, which the host stamps
 	// from the slot id S2C 0x04 byte 17 carries): the slot
@@ -619,6 +628,7 @@ private:
 	// The dispatch stamp the ring-bound records take (ClientGameEvent::feed_order).
 	uint32_t next_feed_order_ = 0;
 	std::vector<WeaponReload> pending_weapon_reloads_;
+	std::vector<WeaponPickupNotice> pending_weapon_pickups_;
 	std::vector<ClientEffectCommand> pending_effect_commands_;
 	std::vector<ScriptRemoteCommand> pending_script_remote_commands_;
 	std::vector<ObjectiveNotification> pending_objective_notifications_;

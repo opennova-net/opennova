@@ -372,6 +372,11 @@ public:
 	// sentence against its roster + string table [orig: 0x426270 -> 0x422DA0].
 	std::vector<replication::ClientGameEvent> drain_game_events();
 	std::vector<WeaponReload> drain_reload_notifications();
+	// S2C 0x35 powerup weapon grants folded this frame (the joiner role lands
+	// and mounts the one naming its own player).
+	std::vector<WeaponPickupNotice> drain_weapon_pickups() {
+		return view_.drain_weapon_pickups();
+	}
 	// Consume sounds, explosions, and class death/state callbacks in receive
 	// order. Pure joiners apply death callbacks to the world twin; listen
 	// clients retain the authority's already-applied gameplay state.

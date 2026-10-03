@@ -772,6 +772,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			state_.death_screen_submode = 0;  // [orig: @0x42ffa6]
 			state_.spectate_target = 0xFFFF;  // [orig: @0x42ffac]
 			state_.enemy_tags_visible = true;
+			++state_.death_screen_opens;        // [orig: @0x42ffb8..0x42ffc9]
 			// The spectator tip, unless the round is over [orig:
 			// `cmp g_SpawnSuccessGate` @0x42ffd0 -> CTipSystem_HandleEvent(22)
 			// @0x42ffdf; the spectate-mode toast stamp dword_24C18F0 = 186

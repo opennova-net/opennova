@@ -73,6 +73,11 @@ struct KernelBootOptions {
 	// A world presenter seeds weather after boot, then completes mission start.
 	// Native boots with their weather already seeded finish here.
 	bool defer_mission_start = false;
+	// The single-player restart's boot: the same mission started again by the
+	// SP restart (Game_StartMission(1)), whose start skips the first start's
+	// intro-cine leg [orig: Game_RestartRoundSP @0x5263DB pushes 1; the first
+	// start's caller @0x526375 pushes 0; the restart arm @0x525DAF].
+	bool restart = false;
 	bool collision = true;
 	bool seat_specs = true; // the native seat/mount table (S16); off = the bare promote
 	// The mission's .cpt/.trn(+charmap) height field: when the embedder built
@@ -494,6 +499,8 @@ private:
 	BootFileSource files_;
 	// The per-boot net bring-up hook (KernelBootOptions::bringup_net_session).
 	std::function<void()> bringup_net_session_;
+	// This boot is the SP restart's (KernelBootOptions::restart).
+	bool restart_boot_ = false;
 	// The embedder source overrides (set_assets / set_items_table).
 	const assets::AssetStore *external_assets_ = nullptr;
 	const opennova::def::DefItemsFile *items_override_ = nullptr;

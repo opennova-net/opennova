@@ -316,16 +316,24 @@ func test_host_spectator_options_and_live_f3_transition() -> void:
 			"the listen host owns the player F3 will transition")
 
 	var start_tick := sim.get_logic_tick()
-	var body_position := sim.get_local_player_position()
 	assert_true(sim.set_local_spectator(true))
 	assert_true(sim.is_local_spectator())
+	# The host's own client folds the death screen from its loopback 0x75.
+	for _i in range(10):
+		assert_true(sim.step())
+	var body_position := sim.get_local_player_position()
 	sim.set_player_input(true, false, false, false, false, false, false)
 	for _i in range(3):
 		assert_true(sim.step())
-	assert_eq(sim.get_logic_tick(), start_tick + 3,
+	assert_eq(sim.get_logic_tick(), start_tick + 13,
 			"spectator free flight does not pause the authoritative game")
-	assert_eq(sim.get_local_player_position(), body_position,
-			"spectator input is detached from the hidden player body")
+	# The death screen's free-fly motor flies the hidden body itself:
+	# 10.0 u/s, 10570 / 65536 a tick along its heading, no climb level.
+	var flown := sim.get_local_player_position() - body_position
+	assert_almost_eq(Vector2(flown.x, flown.z).length(), 3.0 * 10570.0 / 65536.0, 0.001,
+			"forward flies the spectator's hidden entity at the free-fly speed")
+	assert_almost_eq(flown.y, 0.0, 0.0001, "level flight does not climb")
+	sim.set_player_input(false, false, false, false, false, false, false)
 
 	assert_true(sim.set_local_spectator(false))
 	assert_false(sim.is_local_spectator())

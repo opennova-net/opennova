@@ -1139,6 +1139,11 @@ struct ClientState {
 	// pool pointer]. The falling edge leaves it stale, as retail's does; every
 	// reader gates on the death screen.
 	std::uint16_t spectate_target = 0xFFFF;
+	// The 0x0A rising edges counted: each one seats the local entity's
+	// CameraOffset at (0, 0, 0xD000), the eye the death screen's free-fly
+	// camera composes from (world::spectator_seat_eye; the role applies it on
+	// the local entity) [orig: NapiNPClientMsg_0x00A @0x42ffb8..0x42ffc9].
+	std::uint32_t death_screen_opens = 0;
 	// The local entity's +0x1E0 "a medic is reviving me" latch: set by S2C
 	// 0x3A, cleared when the local player's own dead->alive edge runs
 	// Game_InitNewRound and at mission start. The DEATH screen hides its
@@ -1197,6 +1202,11 @@ struct ClientState {
 	ClientMountedAmmoState mounted_ammo;
 	ClientMinimapState minimap;
 	ClientWorldStateLoad world_state;
+	// The S2C 0x50 team assigns that named the local player's own entity
+	// (the player-classifier leg), counted: each one rebuilds the map POI list
+	// outside the waypoint gametypes [orig: NapiNPClientMsg_TeamAssign
+	//  @0x431b10..0x431b2d -> Entity_BuildMapPoiLists @0x42de40].
+	std::uint32_t local_team_assigns = 0;
 	ClientNetQuality net;
 
 	// The Tab board's two folded lanes: the 0x16 scoreboard and the 0x46

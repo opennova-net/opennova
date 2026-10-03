@@ -1806,6 +1806,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.
 			out.inbound_gameplay.emplace_back(m.tag, m.payload);
+		} else if (m.tag == s2c::WEAPON_PICKUP) {
+			// A powerup `weapon` grant: the replica pipeline folds it and the
+			// role lands and mounts the weapon when the picker is its own
+			// player. [orig: NapiNPClientMsg_0x035 @0x4261A0]
+			WeaponPickupNotice notice;
+			std::size_t consumed = 0;
+			if (decode_weapon_pickup(m.payload.data(), m.payload.size(), notice, consumed) &&
+					consumed == m.payload.size())
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::ENTITY_DEATH) {
 			// S2C 0x13 ENTITY DEATH — the host's per-death notify for every
 			// non-player victim (the AI/item leg of Entity_CheckAndProcessDeath).

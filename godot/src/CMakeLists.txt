@@ -150,6 +150,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/debug_pick_card.cpp
     simulation/hitbox_debug_report.cpp
     simulation/hud_view_records.cpp
+    simulation/epilog_cine_record.cpp
     simulation/deploy_rows.cpp
     simulation/player_weapon_view.cpp
     simulation/player_inventory.cpp

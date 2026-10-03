@@ -131,6 +131,23 @@ int main(int argc, char **argv) {
         def_free_weapons(&parsed);
     }
 
+    // `sameas` survives the promotion as the name the powerup weapon grant
+    // resolves at each use [orig: AdmDef+0x34; WeaponSlot_InitFromAvatarDef
+    // @0x542779].
+    {
+        static const char kSameAs[] =
+            "weapon \"WPN_BASE\"\nend\n"
+            "weapon \"WPN_VARIANT\"\nsameas WPN_BASE\nend\n";
+        DefWeaponsFile parsed{};
+        CHECK(def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kSameAs),
+                sizeof(kSameAs) - 1, &parsed) == 0);
+        const world::WeaponTable table = world::build_weapon_table(parsed);
+        CHECK(table.by_index(1) != nullptr && table.by_index(1)->sameas.empty());
+        CHECK(table.by_index(2) != nullptr && table.by_index(2)->sameas == "WPN_BASE");
+        CHECK(table.index_of(table.by_index(2)->sameas.c_str()) == 1);
+        def_free_weapons(&parsed);
+    }
+
 	if (const std::string install = retail::install(); !install.empty()) {
 		if (live_weapon_oracle(install, std::string()) != 0) return 1;
 		for (const std::string &expansion : retail::expansions())

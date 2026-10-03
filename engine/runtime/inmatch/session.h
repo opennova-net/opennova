@@ -177,16 +177,15 @@ public:
 // One role's tick over the kernel it binds: the SP/no-net frame, the listen
 // or dedicated host frame, or the joiner frame -- each the leg order it was
 // witnessed with, line for line (ADR 0043 d3). Session::run_one_tick applies
-// the frame's input through the role first (the spectator gate and the
-// medic-call send are the role's facts), then runs the role's tick.
+// the frame's input through the role first (the death screen's input filter
+// over the role's replica and the medic-call send are the role's facts), then
+// runs the role's tick.
 class Role {
 public:
 	virtual ~Role() = default;
 	virtual RoleKind kind() const = 0;
 	virtual void bind(mission::MissionKernel &kernel) { kernel_ = &kernel; }
 	mission::MissionKernel *kernel() const { return kernel_; }
-	// A spectating joiner drives no body: movement, look and fire are dropped.
-	virtual bool spectator() const { return false; }
 	// The dead player's medic call (C2S 0x2E) for this role; the entity, dead
 	// and cooldown gates are the shared prologue's. False = nothing sent.
 	virtual bool send_medic_request() { return false; }
@@ -254,6 +253,9 @@ protected:
 // frame input carries besides the movement keys.
 enum HeldAction : uint32_t {
 	HELD_FIRE = 1u << 0,
+	// The ToSpecial keys' live state, which its dispatch reads (the hold-swap
+	// press or release; Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181).
+	HELD_TO_SPECIAL = 1u << 1,
 };
 enum PressedAction : uint32_t {
 	PRESSED_FIRE = 1u << 0,
@@ -261,6 +263,8 @@ enum PressedAction : uint32_t {
 	// The dead player's medic call edge (the MedicReq action row; retail
 	// Input_HandleActionBinding case 217 @0x49b4b4).
 	PRESSED_MEDIC_REQUEST = 1u << 2,
+	// A ToSpecial dispatch: a press or a release edge of its keys.
+	PRESSED_TO_SPECIAL = 1u << 3,
 };
 
 
@@ -345,6 +349,7 @@ private:
 	void consume_pending_one_shots();
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
 	TickOutcome run_one_tick(const TickInput &input);
+	void step_cine_render_frame();
 	void step_hud_radar_frame();
 	static int64_t now_us();
 

@@ -23,6 +23,7 @@
 #include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/replica_query.h>
+#include <runtime/inmatch/replica_track.h>
 #include <runtime/inmatch/session.h>
 
 #include <runtime/replication/client_state.h>
@@ -126,7 +127,6 @@ public:
 			std::vector<world::EntityHandle> &out) const override;
 	bool remote_claimant(const world::Entity &carrier, world::Entity &out) const override;
 
-	bool spectator() const override { return runtime && runtime->is_spectator(); }
 	bool send_medic_request() override { return runtime && runtime->queue_medic_request(); }
 	void run_tick(const TickInput &input) override;
 	bool session_lost(SessionError &error) const override;
@@ -209,6 +209,7 @@ public:
 		weapon_availability_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
 		world_state_revision_seen_ = 0;
+		track_seen_ = ReplicaTrackSeen{};
 		replica_peer_scratch_src_ = nullptr;
 		replica_peer_scratch_count_ = 0;
 		replica_peer_scratch_tick_ = 0;
@@ -327,6 +328,8 @@ private:
 	uint32_t mounted_ammo_revision_seen_ = 0;
 	// The last S2C 0x0F landing applied to L (ClientState::world_state.revision).
 	uint32_t world_state_revision_seen_ = 0;
+	// The 0x0F / local 0x50 track legs consumed (replica_track.h).
+	ReplicaTrackSeen track_seen_;
 	bool redeploy_release_pending_ = false;
 	uint32_t redeploy_health_updates_at_release_ = 0;
 	uint32_t now_tick_ = 0;

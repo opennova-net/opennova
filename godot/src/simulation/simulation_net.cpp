@@ -883,8 +883,20 @@ int Simulation::get_mission_exit_reason() const {
 	if (is_joiner()) {
 		return runtime_ ? runtime_->mission_exit_reason() : 0;
 	}
+	// The net writers' store first, then the world-side writers' (the roles'
+	// session_lost reads the same pair).
 	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
-	return ctx != nullptr ? ctx->mission_exit_reason : 0;
+	if (ctx != nullptr && ctx->mission_exit_reason != 0) return ctx->mission_exit_reason;
+	return kernel_ != nullptr ? kernel_->world.mission_exit_reason : 0;
+}
+
+int Simulation::round_over_key(int p_vk, int p_restart_vk) {
+	if (!kernel_) return 0;
+	return static_cast<int>(opennova::inmatch::round_over_key(role_view(), p_vk, p_restart_vk));
+}
+
+bool Simulation::ingame_restart() {
+	return kernel_ != nullptr && kernel_->world.ingame_restart_command();
 }
 
 

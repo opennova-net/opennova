@@ -17,6 +17,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/player_look.h>
 #include <runtime/world/tp_camera_mount.h>
 #include <runtime/world/world.h>
 
@@ -160,6 +161,88 @@ void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bi
     }
     if (input_action_bits != nullptr) *input_action_bits |= bit;
     player_view_set_third_person_selected(v, chase);
+}
+
+void player_view_chase_action(PlayerViewState &v, int action, uint32_t *input_action_bits) {
+    // [orig: Input_HandleActionBinding cases 405..410 @0x49c10c..0x49c249;
+    //  every case first tests the debug pager toggle dword_A895A0, clear]
+    uint32_t bit = 0;
+    switch (action) {
+        case 405: bit = 0x10u; break; // [orig: @0x49c119]
+        case 406: bit = 0x40u; break; // [orig: @0x49c132]
+        case 407:
+        case 408: {
+            // The step, then the clamp read UNSIGNED: up to 0x80000000 caps at
+            // 0x40000000, above it floors at 0xD0000000 [orig: @0x49c14b..0x49c190].
+            uint32_t pitch = static_cast<uint32_t>(v.chase_orbit_pitch) +
+                    (action != 407 ? 0x800000u : 0xFF800000u);
+            if (pitch <= 0x80000000u) {
+                if (pitch > 0x40000000u) pitch = 0x40000000u;
+            } else if (pitch < 0xD0000000u) {
+                pitch = 0xD0000000u;
+            }
+            v.chase_orbit_pitch = static_cast<int32_t>(pitch);
+            bit = action != 407 ? 0x4u : 0x100u; // [orig: @0x49c1a3]
+            break;
+        }
+        case 409: {
+            // [orig: @0x49c1c5..0x49c203]
+            int32_t step = v.chase_distance_q16 >> 6;
+            if (step < 2048) step = 2048;
+            v.chase_distance_q16 -= step;
+            if (v.chase_distance_q16 < 0x8000) v.chase_distance_q16 = 0x8000;
+            bit = 0x80u;
+            break;
+        }
+        case 410: {
+            // [orig: @0x49c20f..0x49c249]
+            int32_t step = v.chase_distance_q16 >> 6;
+            if (step < 2048) step = 2048;
+            v.chase_distance_q16 += step;
+            if (v.chase_distance_q16 > 0x2000000) v.chase_distance_q16 = 0x2000000;
+            bit = 0x200u;
+            break;
+        }
+        default: return;
+    }
+    if (input_action_bits != nullptr) *input_action_bits |= bit;
+}
+
+void player_view_chase_orbit_look(PlayerViewState &v, int32_t yaw_delta, int32_t pitch_delta) {
+    // [orig: sub_52AD50 — the pitch @0x52ae4f..0x52ae86, the yaw @0x52ae93]
+    int32_t pitch = io::bam_add(v.chase_orbit_pitch, pitch_delta);
+    if (pitch > kLookPitchMax) pitch = kLookPitchMax;
+    else if (pitch < kLookPitchMin) pitch = kLookPitchMin;
+    v.chase_orbit_pitch = pitch;
+    v.chase_orbit_yaw = io::bam_add(v.chase_orbit_yaw, yaw_delta);
+}
+
+void player_view_track_entity(PlayerViewState &v, uint32_t tracked, bool mode_changed,
+                              bool tracked_dead) {
+    if (tracked != v.camera_tracked) {
+        // [orig: Camera_SetTrackedEntity @0x439201..0x43921d]
+        v.camera_tracked = tracked;
+        v.chase_orbit_yaw = 0;
+        v.chase_orbit_pitch = kTpTrackedOrbitPitchBam;
+        v.chase_distance_q16 = kTpTrackedDistanceQ16;
+    }
+    // [orig: @0x43925f..0x439275 — `test byte [tracked+24h], 2`]
+    if (mode_changed && tracked_dead) v.chase_distance_q16 = kTpDeadTargetDistanceQ16;
+}
+
+void player_view_chase_tick(PlayerViewState &v, uint32_t input_action_bits, bool tracked_dead) {
+    // [orig: ThirdPersonCamera_Update @0x437c1b..0x437c27]
+    if ((input_action_bits & 0x10u) != 0) v.chase_orbit_yaw = io::bam_sub(v.chase_orbit_yaw, 0x1000000);
+    if ((input_action_bits & 0x40u) != 0) v.chase_orbit_yaw = io::bam_add(v.chase_orbit_yaw, 0x1000000);
+    if (!tracked_dead) return;
+    // [orig: @0x437cc0..0x437d02]
+    if (v.chase_distance_q16 > 458752) {
+        v.chase_distance_q16 -= 0x10000;
+    } else if (v.chase_distance_q16 > 196608) {
+        const int32_t excess = v.chase_distance_q16 - 196608;
+        if (excess <= 16) v.chase_distance_q16 = kTpTrackedDistanceQ16;
+        else v.chase_distance_q16 -= excess >> 4;
+    }
 }
 
 namespace {
@@ -671,9 +754,14 @@ void compose_chase_camera(PlayerViewState &v, const float position[3],
     // shift [orig: @0x438138..0x43814A]; the fixed downward -11.25 pitch,
     // ASSIGNED rather than added [orig: mov esi, 0F8000000h @0x438150];
     // 1.0 + 1.5 r back [orig: @0x438121..0x438136].
-    double yaw_deg = aim_yaw_deg;
-    double pitch_deg = static_cast<double>(aim_pitch_deg) + kTpOrbitPitchDeg;
-    float distance = kTpDistance;
+    // The orbit yaw adds to the BAM heading, so the mission yaw (90 -
+    // heading) takes it negated [orig: `add eax, g_CameraOrbitYaw` @0x438109,
+    // `add esi, g_CameraOrbitPitch` @0x43810F, g_CameraChaseDistance @0x438100].
+    double yaw_deg = static_cast<double>(aim_yaw_deg) -
+                     static_cast<double>(v.chase_orbit_yaw) * kDegreesPerBam;
+    double pitch_deg = static_cast<double>(aim_pitch_deg) +
+                       static_cast<double>(v.chase_orbit_pitch) * kDegreesPerBam;
+    float distance = static_cast<float>(from_fixed(v.chase_distance_q16));
     // The anchor: the chased anchor, else (before the first tick seeds it)
     // the live eye, or the carrier lifted when mounted.
     float anchor[3] = {person_eye[0], person_eye[1], person_eye[2]};

@@ -296,6 +296,13 @@ typedef struct DefWeaponDef {
     int statid;
     int maxclips;
     int ammobucket;
+    /* 'sameas <weapon>': the weapon a pickup of this one refills when the
+       picker already holds that one (empty = key absent; no shipped weapon.def
+       authors it). [orig: WeaponDefs_ParseLineCallback @0x544056..0x544072,
+       strncpy into AdmDef+0x34 capped at 0x20; consumers
+       WeaponSlot_InitFromAvatarDef @0x542779 and WeaponSlot_RecalculateScore
+       @0x5424CA] */
+    char sameas[33];
     char ammo_class[64];
     int ammo_class_count;
     char charfilter[8][16];

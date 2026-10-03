@@ -3,6 +3,7 @@
 // 0028) with the shell's hook table folded into the role (ADR 0043 slice E8b).
 // See joiner_role.h for the ownership split; every phase keeps its witnesses.
 #include <runtime/inmatch/joiner_role.h>
+#include <runtime/inmatch/spectator_session.h>
 #include <runtime/inmatch/client_replica_emplaced.h>
 #include <runtime/inmatch/client_weapon_replay.h>
 #include <runtime/inmatch/game_config.h>
@@ -721,6 +722,7 @@ void JoinerRole::pump() {
 	materialize_replica_world();
 	spawn_and_arm_local_player();
 	apply_world_state_load();
+	apply_replica_track(world, rt.state(), rt.view().game_type(), true, track_seen_);
 	if (decoded.health) apply_authoritative_health();
 	// The S2C 0x3A revive tint. Retail arms the word inside the message handler;
 	// our replica state keeps the recipient's retained +0x1E0 "a medic is
@@ -776,6 +778,7 @@ void JoinerRole::pump() {
     world.rules.no_friendly_fire =
             (rt.view().mp_attributes() & GameConfig::kMpAttribNoFriendlyFire) != 0;
     materializer_.fill_minefield_actors(rt.state(), self_wire_handle(), world.minefields.remote_actors);
+	stamp_spectator_motor(kernel, runtime.get(), /*joiner=*/true); // this frame's receive folded
 	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.
 	world.run_logic_tick(
 			/*is_authority=*/false,
@@ -1586,15 +1589,12 @@ void JoinerRole::apply_authoritative_health() {
 // the death screen is up; the host sends it right after Server_PositionPlayer-
 // ForSpawn, so it is the authoritative admission pose (a later 0x0F re-snaps a
 // pose the 0x0C spawn record no longer matches). With no local entity the pose
-// is skipped, exactly the handler's null test. For a waypoint gametype the
-// route list is rebuilt from the wire's pool-3 slots (the host's team-1
-// filtered blue route, <= 128) with the host's name ids, keeping the locally
-// promoted marker facts (radius, linked event, chain-back) of a re-listed node.
+// is skipped, exactly the handler's null test. The same handler's track leg
+// (the route, or the map POI list) is apply_replica_track's.
 // [orig: NapiNPClientMsg_0x00F @0x42E200 — `if (!g_LocalPlayerEntity)` skip,
 //  the pose stores (Pitch @0x42E3E9, Roll @0x42E3F2), `Flags &= ~1` when
-//  !g_DeathScreenActive; the g_WaypointList rebuild @0x42E47F..0x42E4A3
-//  (Pool_GetEntryUnchecked(3, slot), STRWPNAME%03i name); Server_OnPlayerJoin
-//  positions @0x51A786 then serializes 0x0F @0x51A864]
+//  !g_DeathScreenActive; Server_OnPlayerJoin positions @0x51A786 then
+//  serializes 0x0F @0x51A864]
 void JoinerRole::apply_world_state_load() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
@@ -1645,38 +1645,6 @@ void JoinerRole::apply_world_state_load() {
 				local->flags &= ~world::kEntityFlagCarried;
 			}
 		}
-	}
-	if (ws.waypoints_set) {
-		world::WaypointTrack &track = world.script.waypoints;
-		std::vector<world::WaypointEntry> rebuilt;
-		rebuilt.reserve(ws.waypoints.size());
-		for (const WorldStateWaypoint &wp : ws.waypoints) {
-			world::WaypointEntry entry;
-			for (const world::WaypointEntry &old : track.entries) {
-				if (old.node == static_cast<int32_t>(wp.slot_id)) {
-					entry = old;
-					break;
-				}
-			}
-			entry.node = wp.slot_id;
-			entry.name_id = wp.name_id;
-			// The marker's own position: the registry's pool-3 entity (a
-			// full-BMS joiner promoted it), else the decoded pool-3 row (a
-			// wire-header joiner streamed it), else whatever the old entry held.
-			const world::EntityHandle marker_h = world::EntityHandle::make(3, wp.slot_id);
-			if (const world::Entity *marker = world.registry.get(marker_h)) {
-				entry.x = world::to_fixed(marker->position.x);
-				entry.y = world::to_fixed(marker->position.y);
-				entry.z = world::to_fixed(marker->position.z);
-			} else if (const replication::ClientEntityState *row =
-							   rt.state().find(marker_h.packed)) {
-				entry.x = row->x;
-				entry.y = row->y;
-				entry.z = row->z;
-			}
-			rebuilt.push_back(entry);
-		}
-		track.entries = std::move(rebuilt);
 	}
 }
 
@@ -2314,6 +2282,7 @@ void JoinerRole::apply_gameplay_events() {
 		if (player != nullptr && player->inf.active)
 			player->inf.reload_anim_ticks = 80;
 	}
+	apply_weapon_pickups(*this, rt, world, lp);
 
 	// The frame decays remote recoil after the emplacement channels consume it.
 }
@@ -2324,6 +2293,7 @@ void JoinerRole::reset_for_join() {
 	weather_revision_seen_ = 0;
 	weapon_availability_revision_seen_ = 0;
 	world_state_revision_seen_ = 0;
+	track_seen_ = ReplicaTrackSeen{};
 	// The verbatim enable_join latch reset. self_team_revision_seen_ is
 	// deliberately absent — the shipped binding never reset it on a fresh
 	// join, and this move preserves behavior exactly (S10b owns any

@@ -93,6 +93,7 @@
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
 #include "simulation/hud_view_records.h"
+#include "simulation/epilog_cine_record.h"
 #include "simulation/deploy_rows.h"
 #include "simulation/player_weapon_view.h"
 #include "simulation/player_inventory.h"
@@ -276,6 +277,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EndRoundColumn);
 	GDREGISTER_CLASS(EndRoundRow);
 	GDREGISTER_CLASS(RoundOutcome);
+	GDREGISTER_CLASS(CineEventRecord);
+	GDREGISTER_CLASS(EpilogCineState);
 	GDREGISTER_CLASS(DeployStatus);
 	GDREGISTER_CLASS(DeployZoneRow);
 	GDREGISTER_CLASS(DeployListRow);

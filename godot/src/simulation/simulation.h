@@ -101,6 +101,7 @@ class ScoreFeedback;
 class ScoreboardHeader;
 class EndRoundOverlay;
 class EndRoundStatistics;
+class EpilogCineState; // the SP end-of-round cine (simulation/epilog_cine_record.h)
 class DeployStatus;
 class ConnectionError;   // the joiner connection's error record (network/connection_error.h)
 class JoinScreenStatus;  // one read of the join screen (network/join_screen_status.h)
@@ -494,9 +495,6 @@ public:
 		// The "no local record" wire-handle sentinel (world/entity.h
 		// EntityHandle::kInvalid).
 		INVALID_WIRE_HANDLE = opennova::world::EntityHandle::kInvalid,
-		// The epilog/debrief ESC-less exit timeout in ticks (world/world.h
-		// kEpilogExitTimeoutTicks; epilog_exit_timeout_seconds() derives).
-		EPILOG_EXIT_TIMEOUT_TICKS = opennova::world::kEpilogExitTimeoutTicks,
 		// The item-effect attach scan reads only a model's first 16 userpoints
 		// (threedi_3di3.h THREEDI_USER_POINT_SCAN_LIMIT; pinned by
 		// static_assert in simulation_bind.cpp).
@@ -1138,18 +1136,6 @@ public:
 	static int ticks_from_ms(int64_t p_ms) {
 		return opennova::world::ticks_from_ms(p_ms);
 	}
-	// The epilog/debrief ESC-less exit timeout in seconds, derived from the
-	// engine tick constants (world/world.h kEpilogExitTimeoutTicks).
-	static double epilog_exit_timeout_seconds() {
-		return opennova::world::kEpilogExitTimeoutTicks *
-				opennova::world::TickAccumulator::kTickDt;
-	}
-	// The epilog/debrief screen fade-in in seconds (world/world.h
-	// kEpilogFadeInTicks, the 48+48-tick cine fade pair).
-	static double epilog_fade_in_seconds() {
-		return opennova::world::kEpilogFadeInTicks *
-				opennova::world::TickAccumulator::kTickDt;
-	}
 	// The DEATH screen refresh: a refresh tick in (prev, tick] (deploy_screen_feed.h).
 	static bool deploy_refresh_due(int64_t p_prev_tick, int64_t p_tick);
 
@@ -1256,8 +1242,14 @@ public:
 	String get_session_loss_reason() const;
 	// The same edge as a state test, for the in-world surfaces (the deploy screen).
 	bool is_session_lost() const;
-	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record.
+	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record,
+	// else the world's (the SP end screens' timeout, the round-over keys, the in-game RESTART).
 	int get_mission_exit_reason() const;
+	// The round-over leg of the special-key chain (inmatch::round_over_key): the
+	// hud_round_over bits for a Windows VK and the RESTART key.
+	int round_over_key(int p_vk, int p_restart_vk);
+	// The in-game menu's RESTART (World::ingame_restart_command): false in a session.
+	bool ingame_restart();
 	// True once the joiner has name-matched its organic-spawn record and received the
 	// applicable deployment release (self handle H known and gameplay uplink enabled).
 	bool is_joined_in_match() const;
@@ -1350,9 +1342,10 @@ public:
 	TypedArray<EndRoundRow> get_end_round_rows(int p_tab) const;
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.
 	static String strip_inline_tags(const String &p_text);
-	// The SP score block's Show Score rows / win epilog lines (null: no host world).
+	// The SP score block's Show Score rows (null: no host world); the SP end-of-round
+	// cine with its live events (null: no world).
 	Ref<EndRoundStatistics> get_end_round_statistics() const;
-	Ref<EndRoundStatistics> get_epilog_score() const;
+	Ref<EpilogCineState> get_epilog_cine() const;
 	// Send the player's deploy pick: 0 = default spawn (0xFFFF), 65534 = auto team
 	// spawn (0xFFFE), else the 1-based registry index resolved to its entity handle.
 	// Re-picks while awaiting the release match retail (the host silently drops an
@@ -1445,7 +1438,7 @@ public:
 	// on_respawn_init; ordered by HudToggles' EVENT_OVERLAY_WINDOWS_CLEARED).
 	void request_hud_map_close();
 	void request_waypoint_cycle(int p_direction); // NextWaypoint: WaypointTrack::manual_cycle
-	void request_spectate_action(int p_code); // rows 110..112: ClientReplicaPipeline::spectate_action
+	void request_spectate_action(int p_code); // rows 110..112: inmatch::spectate_action
 	int get_hud_map_mode() const;
 	int get_hud_big_zoom_q16() const;
 	// Mission attrib bit5 (AttribFlags::RotateMap180) rotates the gameplay

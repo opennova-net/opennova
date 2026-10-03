@@ -954,6 +954,16 @@ std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload) {
 	return out;
 }
 
+// [orig: Server_BroadcastWeaponOverlayUpdate @0x509FC0 -- [u16 picker][u16 powerup]
+//  @0x50A054..0x50A073]
+std::vector<uint8_t> encode_weapon_pickup(const WeaponPickupNotice &notice) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(notice.picker_handle);
+	w.u16(notice.powerup_handle);
+	return out;
+}
+
 std::vector<uint8_t> encode_mounted_weapon_slot_selection(
 		const MountedWeaponSlotSelection &selection) {
 	std::vector<uint8_t> out;

@@ -1226,6 +1226,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: Entity_UpdateInfantryPlayerBody / Entity_UpdateInfantryAI]
     Entity *tick_entity = world.registry.get(e.handle);
     if (tick_entity != nullptr && tick_entity->motor_suspended) return;
+    // The death screen hands the local player's whole body tick to the
+    // free-fly motor; the tail only mirrors the moved pose onto the registry.
+    // [orig: Entity_UpdateInfantryPlayerBody `cmp g_DeathScreenActive,0`
+    //  @0x4b40f8, the local test @0x4b4105, Camera_UpdateFreeFly @0x4b410d]
+    if (e.inf.is_local_player && world.spectator.death_screen) {
+        spectator_free_fly(world, e);
+        finish_infantry_tick(e, world);
+        return;
+    }
     // A newly spawned remote player is already org2 before its first pose
     // uplink sets net_is_remote_peer. NPC corpse ownership must follow the
     // entity's player bit, not whether a movement packet has arrived.

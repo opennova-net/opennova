@@ -126,26 +126,16 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		return frame_input;
 	}
 	const Ref<Simulation> tick_sim = sim();
-	if (tick_sim.is_valid() && tick_sim->is_local_spectator()) {
-		// A spectator owns no body motor. Submit the neutral frame while the
-		// existing FlyCamera consumes the viewport input; the world/session
-		// cadence continues through GameWorld.tick as normal. The death
-		// screen's own rows (the spectate sub-mode and target) still dispatch.
-		owner->set_fly_camera_locked(false);
-		release_mouse_capture();
-		owner->clear_models();
-		look_delta_ = Vector2();
-		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_),
-					 p_gameplay_input_active))
-			apply_player_action(*tick_sim.ptr(), request);
-		return frame_input;
-	}
+	// The death screen samples the same device input: the engine's filter
+	// hands it to the free-fly motor or the chase orbit, and the binding scan
+	// admits only the death-screen rows (PlayerActionPoll::death_screen).
+	const bool spectating = tick_sim.is_valid() && tick_sim->local_death_screen_active();
 	owner->set_fly_camera_locked(true);
 	Input *input = Input::get_singleton();
 	if (p_capture_mouse && input->get_mouse_mode() != Input::MOUSE_MODE_CAPTURED) {
 		input->set_mouse_mode(Input::MOUSE_MODE_CAPTURED);
 	}
-	owner->ensure_models();
+	if (!spectating) owner->ensure_models();
 	// A live UI overlay keeps the world ticking but must actively submit a
 	// neutral movement frame. Skipping this call leaves the sim holding its
 	// previous input, so a player who opened the armory while running would
@@ -174,9 +164,11 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	gate.keyboard_captured = controls_.is_valid() && controls_->is_keyboard_captured();
 	gate.emotes_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
 	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
+	gate.death_screen = spectating;
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
 	frame_input->set_weapon_input(actions.fire_held, actions.fire_edge,
 			actions.reload_edge, actions.medic_edge);
+	frame_input->set_to_special_input(actions.to_special_held, actions.to_special_edge);
 	for (const auto &request : actions.requests) {
 		// A menu pick closes its menu whether or not a session carries it
 		// (engine hud_toggles_close_voice_menu carries the witness).
@@ -185,6 +177,12 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 				hud_toggles_.is_valid())
 			hud_toggles_->close_voice_menu(radio);
 		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
+	}
+	// The death screen's own rows (the spectate sub-mode and target).
+	if (spectating && action_sim.is_valid()) {
+		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_),
+					 p_gameplay_input_active))
+			apply_player_action(*action_sim.ptr(), request);
 	}
 	return frame_input;
 }

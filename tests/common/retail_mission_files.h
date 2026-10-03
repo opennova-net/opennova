@@ -33,6 +33,9 @@ struct BootOptions {
 	// WAC 'humans' gate and the SP kill tallies. Off = the bare no-net world
 	// tick (what the AI-path and convoy tests drive).
 	bool listen_server = true;
+	// The SP restart's boot (Game_RestartRoundSP -> Game_StartMission(1)):
+	// mission::KernelBootOptions::restart.
+	bool restart = false;
 	std::string infantry_adm = mission::kDefaultInfantryAdm;
 };
 
@@ -56,9 +59,10 @@ public:
 	// listen_server is on.
 	bool boot(const BootOptions &options, std::string &error);
 
-	// One authoritative logic tick through the active role: the host role's
-	// listen frame (Server_TickUpdate's owner pump between the local pumps)
-	// or, with listen_server off, the local role's bare no-net tick.
+	// One frame of one authoritative logic tick through the active role: the
+	// host role's listen frame (Server_TickUpdate's owner pump between the
+	// local pumps) or, with listen_server off, the local role's bare no-net
+	// tick; then the frame's render-side cine pass.
 	void tick();
 	void tick(int count);
 

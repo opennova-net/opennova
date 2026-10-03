@@ -75,48 +75,50 @@ void ClientReplicaPipeline::spectate_cycle_target(int direction) {
 	state_.mark_changed();
 }
 
-void ClientReplicaPipeline::spectate_cycle_mode(int direction) {
+bool ClientReplicaPipeline::spectate_cycle_mode(int direction) {
 	// [orig: sub_52AFF0 @0x52aff0]
-	if (direction == 0) return;
+	if (direction == 0) return false;
 	const uint16_t local = spectate_local_handle_;
 	const auto without_target = [&] {
 		return state_.spectate_target == kNoTarget || state_.spectate_target == local;
 	};
 	int mode = state_.death_screen_submode;
 	bool pick = false;
+	bool place = false;
 	if (direction < 0) {
 		--mode; // [orig: @0x52afff]
 		if (mode < 0) mode = 2; // [orig: @0x52b009]
 		pick = mode == 1 || mode == 2;
+		// A backward step onto free places the entity, target or not
+		// [orig: `jmp short loc_52B082` @0x52b043].
+		place = mode == 0;
 	} else {
 		++mode; // [orig: @0x52b04e]
 		if (mode > 2) mode = 0; // [orig: @0x52b05b]
 		pick = mode == 1 || mode == 2; // [orig: @0x52b06f]
+		// The forward wrap onto free places it only with a target
+		// [orig: @0x52b071..0x52b080].
+		place = mode == 0 && !without_target();
 	}
 	state_.death_screen_submode = static_cast<uint8_t>(mode);
 	state_.mark_changed();
 	// A chase or first-person sub-mode with no target picks the next one
-	// [orig: @0x52b013..0x52b026]. The wrap back to free mode with a target
-	// instead recomposes the camera and moves the local entity onto its view
-	// pose (@0x52b082..0x52b0ee); that write belongs to the free-fly spectator
-	// camera the local entity then flies as (Camera_UpdateFreeFly @0x4b2980),
-	// which this runtime presents through its spectator camera instead
-	// (docs/interface/hud-re.md "Spinmap bit 10", the spectate section).
+	// [orig: @0x52b013..0x52b026].
 	if (pick && without_target()) spectate_cycle_target(1);
+	return place;
 }
 
-void ClientReplicaPipeline::spectate_action(int code) {
+bool ClientReplicaPipeline::spectate_action(int code) {
 	switch (code) {
 	case kSpectateActionCycleMode: // [orig: `push 1; call sub_52AFF0` @0x49bd58]
-		spectate_cycle_mode(1);
-		break;
+		return spectate_cycle_mode(1);
 	case kSpectateActionNextTarget: // [orig: @0x49bd67..0x49bd7c]
 	case kSpectateActionPrevTarget: // [orig: @0x49bd89..0x49bd9e]
 		if (state_.death_screen_submode == 1 || state_.death_screen_submode == 2)
 			spectate_cycle_target(code == kSpectateActionNextTarget ? 1 : -1);
-		break;
+		return false;
 	default:
-		break;
+		return false;
 	}
 }
 

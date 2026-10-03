@@ -190,6 +190,30 @@ func maybe_begin_start_mission_splash(audio: MissionAudio,
 	return true
 
 
+## The round-over RESTART key's splash re-run (engine hud_toggles.h
+## hud_round_over_key carries the witness): over a single-player mission with
+## a custom (sidecar) loading background, the loading screen comes back for the
+## mission and the start-mission splash runs on it, with the same device legs
+## as the load-end splash; the screen goes once the splash is dismissed (the
+## effect release). False when there is no custom background (nothing shows).
+func begin_restart_splash(owner: Node, root: ResourceRoot, world: GameWorld,
+		load_info: LoadingScreenInfo, audio: MissionAudio,
+		headless_skip: bool = GameRuntimeRoot.is_headless()) -> bool:
+	if not can_start() or owner == null or world == null or load_info == null \
+			or load_info.in_session:
+		return false
+	_owner = owner
+	_root = root
+	_world = world
+	_load_info = load_info
+	_show_screen(load_info)
+	if not maybe_begin_start_mission_splash(audio, headless_skip):
+		dismiss()
+		return false
+	splash_dismissed.connect(dismiss, CONNECT_ONE_SHOT)
+	return true
+
+
 func _run(operation: WorldLoadOperation, loader: Callable) -> void:
 	var screen := _screen
 	if screen != null:

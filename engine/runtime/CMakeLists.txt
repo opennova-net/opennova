@@ -204,12 +204,14 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/match.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/epilog_cine.cpp  # the SP end-of-round cine
     ${CMAKE_CURRENT_SOURCE_DIR}/world/powerup.cpp     # the med/ammo pack pickups (powerup.def)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/world.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_commands.cpp   # the Entity_* command layer (split from world.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weather_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/spectator_motor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/user_waypoints.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_combat.cpp     # acquisition, engagement, commands
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_aircraft.cpp
@@ -415,6 +417,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_net_quality.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_overlay_state.cpp        # the 14-tick minimap overlay visits (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_medic.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_powerup.cpp              # the remote powerup grants and the S2C 0x35 fan (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick.cpp
@@ -424,6 +427,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_radio_call.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_designations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/spectator_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/replica_track.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_status_feed.cpp # the status page's roster and host facts

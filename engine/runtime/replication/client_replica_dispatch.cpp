@@ -153,6 +153,17 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			++malformed_bodies_;
 		break;
 	}
+	case s2c::WEAPON_PICKUP: { // a powerup `weapon` grant; the role lands and mounts it
+		// [orig: NapiNPClientMsg_0x035 @0x4261A0]
+		WeaponPickupNotice notice;
+		size_t consumed = 0;
+		if (decode_weapon_pickup(body.data(), body.size(), notice, consumed) &&
+		    consumed == body.size())
+			pending_weapon_pickups_.push_back(notice);
+		else
+			++malformed_bodies_;
+		break;
+	}
 	case s2c::TEAM_ASSIGN: {
 		TeamAssign assign;
 		size_t consumed = 0;
@@ -171,6 +182,8 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 				refresh.slot = static_cast<uint8_t>(assign.entity_handle & 0xFFu);
 				refresh.fields = kTeamAssignSyncFields;
 				state_.pending_visible_refreshes.push_back(refresh);
+				// [orig: `cmp ebp, g_LocalPlayerEntity` @0x431b10]
+				if (assign.entity_handle == spectate_local_handle_) ++state_.local_team_assigns;
 			}
 		} else {
 			++malformed_bodies_;
@@ -444,6 +457,12 @@ std::vector<ClientGameText> ClientReplicaPipeline::drain_game_texts() {
 std::vector<WeaponReload> ClientReplicaPipeline::drain_weapon_reloads() {
 	std::vector<WeaponReload> out;
 	out.swap(pending_weapon_reloads_);
+	return out;
+}
+
+std::vector<WeaponPickupNotice> ClientReplicaPipeline::drain_weapon_pickups() {
+	std::vector<WeaponPickupNotice> out;
+	out.swap(pending_weapon_pickups_);
 	return out;
 }
 

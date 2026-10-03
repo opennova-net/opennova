@@ -4,6 +4,7 @@
 #include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/role_feeds.h> // step_hud_radar
+#include <runtime/inmatch/spectator_session.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <utility>
@@ -29,24 +30,51 @@ Session::Session(Role &role) : role_(&role), kind_(role.kind()) {}
 
 void Role::apply_input(const TickInput &input) {
 	mission::MissionKernel &kernel = *kernel_;
-	const bool spectating = spectator();
-	const world::PlayerInput no_movement{};
-	const world::PlayerInput &movement = spectating ? no_movement : input.player.movement;
+	ClientRuntime *runtime = client_runtime();
+	const bool joiner = kind() == RoleKind::Joiner;
+	// The input pass's head drops the orbit-yaw bits before this tick's
+	// dispatch can raise them again [orig: Input_ProcessFrame
+	// `and g_InputActionBits, 0FFFFFFAFh` @0x49d52b].
+	kernel.world.script.input_action_bits &= ~0x50u;
+	// The spectate state the free-fly motor reads, ahead of the pack and the
+	// entity update (a joiner restamps it after its receive).
+	stamp_spectator_motor(kernel, runtime, joiner);
+	if (kernel.world.spectator.death_screen && runtime != nullptr) {
+		apply_death_screen_input(kernel, *runtime, joiner, input.player);
+		return;
+	}
+	const world::PlayerInput &movement = input.player.movement;
 	kernel.local.set_movement_keys(movement.forward, movement.back, movement.left,
 			movement.right, movement.lean_left, movement.lean_right, movement.jump);
     kernel.local.set_view_keys(movement.free_look, movement.look_up,
             movement.look_down, movement.turn_left, movement.turn_right);
-	if (!spectating && (input.player.look_delta_x != 0.0f || input.player.look_delta_y != 0.0f))
+	if (input.player.look_delta_x != 0.0f || input.player.look_delta_y != 0.0f)
 		kernel.local.look(input.player.look_delta_x, input.player.look_delta_y);
-	kernel.local.set_weapon_input(
-			!spectating && (input.player.held_action_bits & HELD_FIRE) != 0,
-			!spectating && (input.player.pressed_action_bits & PRESSED_FIRE) != 0,
-			!spectating && (input.player.pressed_action_bits & PRESSED_RELOAD) != 0);
+	kernel.local.set_weapon_input((input.player.held_action_bits & HELD_FIRE) != 0,
+			(input.player.pressed_action_bits & PRESSED_FIRE) != 0,
+			(input.player.pressed_action_bits & PRESSED_RELOAD) != 0);
 	// The medic-call edge is an action binding, not weapon state: it fires its
 	// request immediately like retail's binding dispatch (the gates and the
 	// cooldown live in request_medic).
-	if (!spectating && (input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
+	if ((input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
 		request_medic();
+	// The ToSpecial dispatches, with the deferred ones, once per outer frame
+	// on its first tick, as retail's input frame precedes the logic tick
+	// [orig: Input_ProcessFrame @0x49D520 -> Input_FlushDeferredEvents @0x49D591].
+	// The row's flag 1 keeps a dead player's PRESS out of the queue; its
+	// release is dispatched regardless [orig: Input_ProcessKeyboardEvents
+	// @0x49D330..0x49D339 (the press pass), the release pass @0x49D249 has no
+	// such gate; ToSpecial's row flags 0x8C000801].
+	if (input.consume_one_shots) {
+		const bool held = (input.player.held_action_bits & HELD_TO_SPECIAL) != 0;
+		if ((input.player.pressed_action_bits & PRESSED_TO_SPECIAL) != 0) {
+			const bool local_dead = kind() == RoleKind::Joiner && client_runtime() != nullptr
+					? client_runtime()->local_player_dead()
+					: kernel.local.local_player_dead();
+			if (!held || !local_dead) kernel.local.queue_to_special();
+		}
+		kernel.local.dispatch_to_special(held);
+	}
 }
 
 void Role::observe_frame_rate(int32_t fps) {
@@ -102,6 +130,13 @@ world::LocalViewSessionInputs Role::view_session_inputs_for(
 	}
 	s.death_screen_active = runtime != nullptr && runtime->state().death_screen_active;
 	s.death_screen_submode = runtime != nullptr ? runtime->state().death_screen_submode : 0;
+	if (runtime != nullptr && runtime->state().spectate_target != 0xFFFF) {
+		const replication::ClientState &cs = runtime->state();
+		s.spectate_target_key = world::kCameraTrackedTargetKey | cs.spectate_target;
+		const replication::ClientEntityState *row = cs.find(cs.spectate_target);
+		s.spectate_target_dead =
+				row != nullptr && row->state_flags_known && (row->state_flags & 2u) != 0;
+	}
 	s.end_round_known = runtime != nullptr && runtime->state().end_round.known;
 	// [orig: NapiNPClientMsg_0x01D @0x430840 -> g_EndRoundWinnerTeam]
 	s.end_round_winner_team = runtime != nullptr && runtime->state().end_round.header_known
@@ -307,6 +342,15 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 	return out;
 }
 
+void Session::step_cine_render_frame() {
+	// The rendered frame's cine pass, after the frame's logic updates: the SP
+	// end-of-round cine marks its frame drawn, or stops past its last event
+	// (world/epilog_cine.h) [orig: Game_MainLoop's Game_ProcessMainFrame
+	// drain, then Render_ProcessMainSceneFrame @0x5CADFC -> sub_575A50].
+	if (role_ == nullptr || role_->kernel() == nullptr) return;
+	role_->kernel()->world.epilog.render_pass();
+}
+
 void Session::step_hud_radar_frame() {
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
 	static_assert(kHudRadarGatesDefault == hud::HudFrameCompiler::kRadarGatePass,
@@ -329,9 +373,12 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
-		// The paused frame still runs its HUD pass: no tick ran, so nothing
-		// ages, and the menu pause holds the lock tone.
-		if (state_ == State::Paused) step_hud_radar_frame();
+		// The paused frame still renders and runs its HUD pass: no tick ran,
+		// so nothing ages, and the menu pause holds the lock tone.
+		if (state_ == State::Paused) {
+			step_cine_render_frame();
+			step_hud_radar_frame();
+		}
 		return out;
 	}
 	latch_input(input);
@@ -380,9 +427,13 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		rebase_clock_ = true;
 	}
 	last_perf_ = out.perf;
-	// The frame's HUD pass follows the drain [orig: Game_MainLoop's
-	// Game_ProcessMainFrame drain, then the render's HUD_RenderAllOverlays].
-	if (!out.terminal()) step_hud_radar_frame();
+	// The frame's render follows the drain: the cine pass, then the HUD pass
+	// [orig: Game_MainLoop's Game_ProcessMainFrame drain, then the render's
+	// cine pass and HUD_RenderAllOverlays].
+	if (!out.terminal()) {
+		step_cine_render_frame();
+		step_hud_radar_frame();
+	}
 	return out;
 }
 
@@ -398,6 +449,7 @@ FrameOutcome Session::step_once(const FrameInput &input) {
 	latch_input(input);
 	out = run_ticks(1, input);
 	last_perf_ = out.perf;
+	if (!out.terminal()) step_cine_render_frame();
 	return out;
 }
 
@@ -414,6 +466,7 @@ FrameOutcome Session::drive_one(const FrameInput &input) {
 	latch_input(input);
 	out = run_ticks(1, input);
 	last_perf_ = out.perf;
+	if (!out.terminal()) step_cine_render_frame();
 	return out;
 }
 

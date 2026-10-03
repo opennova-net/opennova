@@ -7,6 +7,7 @@
 #include "simulation/simulation_internal.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/end_round_state.h"
+#include "simulation/epilog_cine_record.h"
 
 #include "rtxt/rtxt_string_file.h"
 #include "util/string_convert.h"
@@ -145,10 +146,13 @@ Ref<EndRoundStatistics> Simulation::get_end_round_statistics() const {
 	return out;
 }
 
-Ref<EndRoundStatistics> Simulation::get_epilog_score() const {
-	// The SP win epilog's four counter lines over the same block
-	// (hud::epilog_score_lines). Null without a host world.
-	if (kernel_ == nullptr) return Ref<EndRoundStatistics>();
-	return EndRoundStatistics::epilog(
-			opennova::world::end_round_statistics_input(kernel_->world));
+Ref<EpilogCineState> Simulation::get_epilog_cine() const {
+	// The SP end-of-round cine as the engine runs it (world/epilog_cine.h):
+	// the shell draws the live events, the engine owns their schedule and
+	// values. Null without a world.
+	if (kernel_ == nullptr) return Ref<EpilogCineState>();
+	Ref<EpilogCineState> out;
+	out.instantiate();
+	out->assign(kernel_->world.epilog);
+	return out;
 }

@@ -70,12 +70,12 @@ constexpr float kEyeTerrainClearance = 0.0625f;
 constexpr int kHeadBoneIndex = 14;
 constexpr float kAimProjectRange = 1000.0f;
 // The chase camera's in-play numbers: the ROUND-START reset (distance 1.0,
-// orbit zeroed — the tight over-the-shoulder view) and the pivot nudge/march.
+// orbit zeroed — the tight over-the-shoulder view; PlayerViewState's chase
+// orbit fields start there) and the pivot nudge/march.
 // [orig: Camera_ResetToLocalPlayer @ 0x4a3d30 (distance 0x10000 @ 0x4a3d4c,
 //  orbit zeroed @ 0x4a3d56/5b); nudge R*(0x2000,0x2000,0x2000) @ 0x43818a;
 //  0.25u march steps @ 0x438243, gate @ 0x4381e9]
-constexpr float kTpDistance = 1.0f;
-constexpr float kTpOrbitPitchDeg = 0.0f;
+constexpr int32_t kTpDistanceQ16 = 0x10000;
 constexpr float kTpPivotNudge = 0.125f;
 constexpr float kTpMarchStep = 0.25f;
 constexpr float kTpMarchGate = 8.0f;
@@ -433,8 +433,8 @@ struct PlayerViewState {
     int camera_mode = 0;
     // The arbiter's remaining inputs [orig: Render_ProcessMainSceneFrame
     // @0x5ca1f4..0x5ca24b]: the client-local death screen and its sub-mode
-    // (dword_A860F0: 0 / 1 / 2 = kill-cam; the sub-mode writers are the
-    // spectate actions, unported), the local dead bit (`Flags & 2`), the
+    // (dword_A860F0: 0 free / 1 chase / 2 first person on the target; the
+    // writers are the replica's spectate state), the local dead bit (`Flags & 2`), the
     // end-of-round gate (g_SpawnSuccessGate) with the on-foot test
     // (parentEntity == 0), and the two g_RulesFlags bits (bit 0 = no death
     // camera, bit 0x40 = server force-first-person while in session — both
@@ -497,7 +497,60 @@ struct PlayerViewState {
     //  cleared @0x437F9C].
     int32_t ground_leg_lift_q16 = 0;
     MountedCameraInput mount;
+    // THE CHASE ORBIT: the yaw and pitch the on-foot chase adds to the
+    // tracked entity's own, and its distance (16.16). Play starts and every
+    // round restarts at 0 / 0 / 1.0; following a new tracked entity reseeds
+    // 0 / 5.625 deg / 3.0. Only the death screen's chase sub-mode steers it:
+    // the movement keys reach the orbit/zoom actions 405..410 and the mouse
+    // the orbit itself (player_view_chase_*).
+    // [orig: g_CameraOrbitYaw @0xA89104, g_CameraOrbitPitch @0xA89108,
+    //  g_CameraChaseDistance @0xA8910C; Camera_ResetToLocalPlayer
+    //  @0x4a3d4c..0x4a3d5b; Camera_SetTrackedEntity @0x439209..0x43921d]
+    int32_t chase_orbit_yaw = 0;
+    int32_t chase_orbit_pitch = 0;
+    int32_t chase_distance_q16 = kTpDistanceQ16;
+    // The camera's tracked entity as a key: 0 the local player, else the
+    // spectate target the death screen's first-person sub-mode tracks
+    // (kCameraTrackedTargetKey | its wire handle) [orig: g_CameraTrackedEntity
+    // @0xA890CC; Camera_SetTrackedEntity @0x4391e0..0x4391f9].
+    uint32_t camera_tracked = 0;
 };
+
+inline constexpr uint32_t kCameraTrackedTargetKey = 0x10000u;
+
+// The orbit / zoom actions 405..410, as the death screen's chase sub-mode
+// dispatches them: 405 / 406 raise the orbit-yaw input bits 0x10 / 0x40 the
+// per-tick update turns by, 407 / 408 step the orbit pitch -/+ 0x800000
+// clamped to [-0x30000000, 0x40000000], 409 / 410 shrink / grow the distance
+// by max(d >> 6, 0x800) within [0.5, 512]; each also raises its BMS
+// input-action bit (407 0x100, 408 0x4, 409 0x80, 410 0x200) into
+// `input_action_bits` (the one g_InputActionBits word). The debug pager toggle
+// they test (dword_A895A0, action 380) has no catalog row, so it stays clear.
+// [orig: Input_HandleActionBinding cases 405..410 @0x49c10c..0x49c249]
+void player_view_chase_action(PlayerViewState &v, int action, uint32_t *input_action_bits);
+
+// The mouse onto the orbit in the death screen's chase sub-mode: the yaw
+// takes the look yaw delta, the pitch the look pitch delta clamped to
+// +-0x38E38E00. [orig: sub_52AD50 @0x52ae4f..0x52ae99 — actions 0xA4/0xA5
+//  (pitch) and 0xA6/0xA7 (yaw)]
+void player_view_chase_orbit_look(PlayerViewState &v, int32_t yaw_delta, int32_t pitch_delta);
+
+// The tracked-entity bookkeeping of the per-frame camera arbiter: a change of
+// tracked entity reseeds the orbit (0 / 5.625 deg / 3.0); a change of camera
+// mode with the tracked entity dead starts the distance at 10.0.
+// [orig: Camera_SetTrackedEntity @0x4391d0 — the reseed @0x439201..0x43921d,
+//  the dead start @0x43925f..0x439275; called @0x5ca262 when the tracked
+//  entity or the mode changed]
+void player_view_track_entity(PlayerViewState &v, uint32_t tracked, bool mode_changed,
+                              bool tracked_dead);
+
+// The orbit's per-tick legs of the third-person update, run whatever the
+// camera mode: the orbit-yaw input bits turn it -/+ 0x1000000, and a dead
+// tracked entity reels the distance in (by 1.0 a tick above 7.0, then a
+// sixteenth of the excess toward 3.0).
+// [orig: ThirdPersonCamera_Update @0x437c1b..0x437c27 (the bits),
+//  @0x437cc0..0x437d02 (the reel); called @0x52676f every tick]
+void player_view_chase_tick(PlayerViewState &v, uint32_t input_action_bits, bool tracked_dead);
 
 // THE MODE ARBITER, run every tick ahead of the anchor chase (retail: every
 // rendered frame) [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca262]:
@@ -518,9 +571,9 @@ struct PlayerViewState {
 // Entity_DetachFromVehicle @ 0x4355f0 zeroes parentSlot @ 0x435921 — the next
 // frame's arbiter does the rest: a driver arrives in the chase, a gunner or
 // passenger stays first person, a dismount returns to first person. The debug
-// on-foot override ORs in. RESIDUAL: mode 3 (the spectator camera) and the
-// death-screen sub-mode writers (the spectate actions) are not modelled; the
-// two g_RulesFlags bits are carried as inputs with no wire fold.
+// on-foot override ORs in. RESIDUAL: mode 3 (the overhead spectator camera)
+// is not modelled; the two g_RulesFlags bits
+// are carried as inputs with no wire fold.
 void player_view_resolve_mode(PlayerViewState &v);
 
 // The view actions' preference writes: `view1st` (400) and `viewwithgun` (401)
