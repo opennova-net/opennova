@@ -199,6 +199,25 @@ int main() {
 		// An unknown HostKey is ignored.
 		parsed.host_key = "HK-NOBODY";
 		TEST_EXPECT(!opennova::hostdb::apply_status_blob(db, parsed));
+
+		// A count that is no number, or out of int's range, keeps the stored one
+		// (a result, not a caught throw: strutil::parse_int).
+		const int max_before = row->max_players;
+		opennova::LobbyStatusBlob bad;
+		bad.host_key = "HK-A";
+		bad.send_player_names = false;
+		bad.host_vars = {{"Players", "lots"}, {"MaxPlayers", "99999999999"}};
+		TEST_EXPECT(opennova::hostdb::apply_status_blob(db, bad));
+		auto kept = opennova::hostdb::find_host_by_rid(db, a.rid);
+		TEST_EXPECT(kept.has_value());
+		TEST_EXPECT(kept->player_count == 4);
+		TEST_EXPECT(kept->max_players == max_before);
+		// A numeric prefix reads as std::stoi read it.
+		bad.host_vars = {{"Players", "6 players"}, {"MaxPlayers", " 24"}};
+		TEST_EXPECT(opennova::hostdb::apply_status_blob(db, bad));
+		kept = opennova::hostdb::find_host_by_rid(db, a.rid);
+		TEST_EXPECT(kept.has_value() && kept->player_count == 6 && kept->max_players == 24);
+		TEST_EXPECT(opennova::hostdb::list_roster(db, a.rid).size() == 4);
 	}
 
 	// Removing the host cascades the roster.

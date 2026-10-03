@@ -25,21 +25,29 @@ std::string subnet_key(const std::string &host) {
 	return host;
 }
 
-std::string build_login_post_body(const EpaskParams &pub,
-                                  const std::vector<LoginFormField> &fields) {
-	std::string body;
+bool build_login_post_body(const EpaskParams &pub, const std::vector<LoginFormField> &fields,
+                           std::string &body) {
+	body.clear();
+	std::string encrypted;
 	for (const auto &f : fields) {
 		if (!body.empty()) body.push_back('&');
 		body += f.name;
 		body.push_back('=');
-		body += f.encrypt ? epask_encrypt(f.value, pub) : f.value;
+		if (!f.encrypt) {
+			body += f.value;
+		} else if (epask_encrypt(f.value, pub, encrypted)) {
+			body += encrypted;
+		} else {
+			body.clear();
+			return false;
+		}
 	}
-	return body;
+	return true;
 }
 
-std::string build_credentials_post_body(
+bool build_credentials_post_body(
     const EpaskParams &pub, const std::string &name, const std::string &password,
-    const std::vector<std::pair<std::string, std::string>> &hidden) {
+    std::string &body, const std::vector<std::pair<std::string, std::string>> &hidden) {
 	std::vector<LoginFormField> fields;
 	fields.reserve(hidden.size() + 3);
 	// The echoed public key the server uses to decrypt the rest of the body.
@@ -51,7 +59,7 @@ std::string build_credentials_post_body(
 	for (const auto &kv : hidden) {
 		fields.push_back({kv.first, kv.second, false});
 	}
-	return build_login_post_body(pub, fields);
+	return build_login_post_body(pub, fields, body);
 }
 
 std::vector<std::pair<std::string, std::string>>

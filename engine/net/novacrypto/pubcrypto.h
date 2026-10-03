@@ -30,15 +30,17 @@ namespace opennova {
 // tests/novacrypto/pubcrypto_test.cpp cross-check against Python via
 // pre-computed fixtures.
 
-// Encrypt + A-P encode `plaintext` under `pcid_key`. `pcid_key` must be
-// non-empty (ASCII; key-fold treats it as latin-1 bytes). Returns the
-// encoded ASCII string of length `2 * (plaintext.size() + 4)`.
-std::string encode_pub_value(const std::vector<uint8_t> &plaintext,
-                             const std::string &pcid_key);
+// Encrypt + A-P encode `plaintext` under `pcid_key` (ASCII; key-fold treats it
+// as latin-1 bytes) into `out`, the encoded ASCII string of length
+// `2 * (plaintext.size() + 4)`. False (`out` emptied) for an empty key: the
+// service encodes only under the host's PCIDKey, and a key it cannot encode
+// under is a result, never a throw (ADR 0049 d5).
+bool encode_pub_value(const std::vector<uint8_t> &plaintext, const std::string &pcid_key,
+                      std::string &out);
 
 // Convenience overload for std::string plaintext.
-std::string encode_pub_value(const std::string &plaintext,
-                             const std::string &pcid_key);
+bool encode_pub_value(const std::string &plaintext, const std::string &pcid_key,
+                      std::string &out);
 
 // Reverse: decode + verify CRC into `out`, the recovered plaintext (without
 // the trailing 4-byte CRC). False (`out` emptied, `error` naming why when

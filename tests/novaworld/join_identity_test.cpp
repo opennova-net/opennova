@@ -17,6 +17,12 @@ void check(bool cond, const char *message) {
 	}
 }
 
+// The PUB* value of `plain` under `key` ("" where encode_pub_value refuses it).
+std::string pub_value(const std::vector<uint8_t> &plain, const std::string &key) {
+	std::string out;
+	return opennova::encode_pub_value(plain, key, out) ? out : std::string();
+}
+
 std::string cstr_at(const std::vector<uint8_t> &bytes, size_t offset) {
 	std::string out;
 	for (size_t i = offset; i < bytes.size() && bytes[i] != 0; ++i) {
@@ -36,7 +42,7 @@ void check_foo_player_payloads_round_trip() {
 	check(payloads.pcid == expected_pcid, "PUBPCID plaintext is pcid plus NUL");
 
 	std::vector<uint8_t> decoded_name;
-	check(opennova::decode_pub_value(opennova::encode_pub_value(payloads.name_info, key), key,
+	check(opennova::decode_pub_value(pub_value(payloads.name_info, key), key,
 	                                 decoded_name),
 	      "PUBNAMEINFO decodes");
 	check(decoded_name == payloads.name_info, "PUBNAMEINFO round-trips");
@@ -45,7 +51,7 @@ void check_foo_player_payloads_round_trip() {
 	      "PUBNAMEINFO is NUL-terminated");
 
 	std::vector<uint8_t> decoded_squad;
-	check(opennova::decode_pub_value(opennova::encode_pub_value(payloads.squad_info, key), key,
+	check(opennova::decode_pub_value(pub_value(payloads.squad_info, key), key,
 	                                 decoded_squad),
 	      "PUBSQUADINFO decodes");
 	check(decoded_squad == payloads.squad_info, "PUBSQUADINFO round-trips");
@@ -86,9 +92,9 @@ void check_host_loads_the_account_under_its_key_table() {
 	for (char c : std::string("CLN")) squad.push_back(static_cast<uint8_t>(c));
 	squad.push_back(0);
 	const opennova::JoinCookiePairs cookie = {
-		{"PUBNAMEINFO", opennova::encode_pub_value(bytes_of(std::string("Foo", 4)), key)},
-		{"pubpcid", opennova::encode_pub_value(bytes_of(std::string("00000007", 9)), key)},
-		{"PUBSQUADINFO", opennova::encode_pub_value(squad, key)},
+		{"PUBNAMEINFO", pub_value(bytes_of(std::string("Foo", 4)), key)},
+		{"pubpcid", pub_value(bytes_of(std::string("00000007", 9)), key)},
+		{"PUBSQUADINFO", pub_value(squad, key)},
 	};
 	opennova::JoinAccount account;
 	opennova::load_join_account(cookie, "PUB", ring, account);
@@ -114,8 +120,8 @@ void check_host_loads_the_account_under_its_key_table() {
 	for (int i = 0; i < 12; ++i) long_squad.push_back('t');
 	long_squad.push_back(0);
 	const opennova::JoinCookiePairs long_cookie = {
-		{"PUBPCID", opennova::encode_pub_value(bytes_of(std::string(40, 'p')), key)},
-		{"PUBSQUADINFO", opennova::encode_pub_value(long_squad, key)},
+		{"PUBPCID", pub_value(bytes_of(std::string(40, 'p')), key)},
+		{"PUBSQUADINFO", pub_value(long_squad, key)},
 	};
 	opennova::JoinAccount capped;
 	opennova::load_join_account(long_cookie, "PUB", ring, capped);
@@ -125,7 +131,7 @@ void check_host_loads_the_account_under_its_key_table() {
 
 	// A SQUADINFO shorter than its dword: the id is 0 and the name starts at byte 0.
 	const opennova::JoinCookiePairs short_cookie = {
-		{"PUBSQUADINFO", opennova::encode_pub_value(bytes_of("AB"), key)},
+		{"PUBSQUADINFO", pub_value(bytes_of("AB"), key)},
 	};
 	opennova::JoinAccount short_account;
 	short_account.squad_id = 9;

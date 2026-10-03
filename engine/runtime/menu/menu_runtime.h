@@ -105,7 +105,8 @@ public:
 			int value) = 0;
 	virtual void set_widget_selected_set(int index, const std::vector<int> &rows) = 0;
 	virtual void set_widget_table_rows(int index, const std::vector<MenuTableRow> &rows) = 0;
-	// The table's runtime column layout (menu_table_row.h MenuTableColumnDef).
+	// The table's runtime column records (menu_table_row.h MenuTableColumnDef:
+	// a record a count kept, one it started over, an init over either).
 	virtual void set_widget_table_columns(int index,
 			const std::vector<MenuTableColumnDef> &columns) = 0;
 	// CWnd_SetClipRect: the widget's own passes clipped to an absolute design
@@ -330,10 +331,13 @@ public:
 
 	// ---- tables (the CTableWnd operations, menu_table_row.h) ----
 	// The column count a populate sets before it defines its columns: false
-	// below 1 (the resize fails); existing columns are kept, new ones zeroed.
-	// [orig: CTableWnd vtable +0x6C -> resize_column_count @0x63f6c0]
+	// below 1 (the resize fails). A count that does not grow the table keeps
+	// its records (the authored columns); one that grows it starts every record
+	// over, zeroed (menu_table_row.h MenuTableColumnDef::kept).
+	// [orig: CTableWnd vtable +0x6C -> CTableWnd_ResizeColumnCount @0x63f6c0]
 	bool table_set_column_count(int id, int count);
-	// CTableWnd_InitRow on one column of the current count: false out of range.
+	// CTableWnd_InitRow on one record of the current count: false out of range.
+	// The record keeps its draw kind, cell offsets, SUBST rows and bitmap scale.
 	// [orig: CTableWnd_InitRow @0x63f9c0 — the bounds @0x63f9c8..0x63f9d9]
 	bool table_init_column(int id, int column, int width, const std::string &label,
 			int justify, int vjustify);
@@ -422,6 +426,10 @@ private:
 	void push_table_rows_(int id);
 	bool table_multiselect_(int id) const;
 	int table_column_count_(int id) const;
+	// The records at `count` (menu_table_row.h): kept when it does not grow the
+	// table, every one zeroed when it does.
+	void table_resize_records_(int id, int count);
+	void push_table_columns_(int id);
 	void emit_value_changed_for_(int id, int row);
 	void on_claim_changed_(int previous, int current);
 	void activate_widget_(int id, int index, float x, float y, uint32_t now_ms, bool ctrl_down);

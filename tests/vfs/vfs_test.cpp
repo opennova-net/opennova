@@ -569,6 +569,55 @@ static int test_expansion_info() {
     return 1;
 }
 
+// The expansion's text-override table [orig: Expansion_LoadAssets @ 0x4a49d4 ->
+// TextResource_LoadOverrideTable @ 0x75d5c0 -> File_LoadResource @ 0x75b540]: only a
+// loose expansion/<n>/<n>.bin serves it, never the archived copy; a load with the old
+// archives open (the menu's and the join's switch) reaches it only under /d.
+static int test_expansion_override_table() {
+    using opennova::ExpansionLoadPoint;
+    using opennova::vfs_expansion_override_table;
+    const auto load = [](const fs::path &root, const char *exp, ExpansionLoadPoint point,
+                         bool loose_first) {
+        std::vector<uint8_t> out = {1, 2, 3};
+        const bool ok = vfs_expansion_override_table(root.string(), exp, point, loose_first, out);
+        if (!ok) return std::string(out.empty() ? "<none>" : "<none, output kept>");
+        return std::string(out.begin(), out.end());
+    };
+    constexpr ExpansionLoadPoint kBoot = ExpansionLoadPoint::ArchivesClosed;
+    constexpr ExpansionLoadPoint kSwitch = ExpansionLoadPoint::ArchivesOpen;
+
+    fs::path root = fresh_dir("override_game");
+    fs::path exp = root / "expansion" / "jox01";
+    fs::create_directories(exp);
+    write_loose(exp / "jox01.bin", "LOOSE");
+    CHECK(load(root, "jox01", kBoot, false) == "<none>",
+          "no <n>.pff: the expansion is cleared, and its table with it [orig: @ 0x4a4775, @ 0x4a482a]");
+
+    write_pff1(exp / "jox01.pff", "other.txt", "x");
+    write_pff1(exp / "jox01L.pff", "jox01.bin", "ARCHIVED");
+    fs::remove(exp / "jox01.bin");
+    CHECK(load(root, "jox01", kBoot, false) == "<none>",
+          "the archived <n>.bin never serves the table (the whole query never matches an entry)");
+    CHECK(load(root, "jox01", kBoot, true) == "<none>", "nor under /d");
+
+    write_loose(exp / "jox01.bin", "LOOSE");
+    CHECK(load(root, "jox01", kBoot, false) == "LOOSE",
+          "at boot no archive is open: the loose walk serves expansion/<n>/<n>.bin [orig: @ 0x75b5a4]");
+    CHECK(load(root, "jox01", kSwitch, false) == "<none>",
+          "a switch with the old archives open walks only the archives [orig: @ 0x75b56c..0x75b57c]");
+    CHECK(load(root, "jox01", kSwitch, true) == "LOOSE", "under /d the switch walks the loose file first");
+    CHECK(load(root, "", kBoot, false) == "<none>", "no expansion, no table");
+
+    write_loose(exp / "expansion" / "jox01" / "jox01.bin", "SEARCH");
+    CHECK(load(root, "jox01", kBoot, false) == "SEARCH",
+          "the search path's join comes first [orig: @ 0x4a49bb, @ 0x75b5b9]");
+    fs::remove_all(exp / "expansion");
+
+    write_loose(exp / "jox01.bin", "");
+    CHECK(load(root, "jox01", kBoot, false) == "<none>", "an empty loose file is no table");
+    return 1;
+}
+
 int main() {
     std::error_code ec;
     g_root = (fs::temp_directory_path(ec) / test_paths_unique("opennova_vfs_test")).string();
@@ -592,6 +641,7 @@ int main() {
     RUN_TEST(test_list_files);
     RUN_TEST(test_expansion_version_checksum);
     RUN_TEST(test_expansion_info);
+    RUN_TEST(test_expansion_override_table);
 
     fs::remove_all(g_root, ec);
     printf("\n%d passed, %d failed\n", passed, failed);

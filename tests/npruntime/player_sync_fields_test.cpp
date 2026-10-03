@@ -96,8 +96,13 @@ std::vector<uint8_t> join_with_cookie(const std::string &key) {
 		cd.insert(cd.end(), value.begin(), value.end());
 		cd.push_back(0);
 	};
-	pair("PUBPCID", encode_pub_value(std::vector<uint8_t>(pcid.begin(), pcid.end()), key));
-	pair("PUBSQUADINFO", encode_pub_value(squad, key));
+	const auto pub = [&key](const std::vector<uint8_t> &plain) {
+		std::string out;
+		CHECK(encode_pub_value(plain, key, out));
+		return out;
+	};
+	pair("PUBPCID", pub(std::vector<uint8_t>(pcid.begin(), pcid.end())));
+	pair("PUBSQUADINFO", pub(squad));
 	pair("PUBJOINTICKET", "TICKET");
 	std::vector<uint8_t> body;
 	const uint8_t crc[] = {'0', 0};

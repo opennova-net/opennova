@@ -47,6 +47,8 @@ const SECTION_MENU := "Menu"
 var _table: RtxtStringFile
 var _tables: Dictionary = {}
 var _override_table: RtxtStringFile
+## The root whose expansion override table is installed (track_expansion_override).
+var _override_source: ResourceRoot
 
 
 ## Loads a strings .bin from a res:// or absolute path. Returns OK on success.
@@ -73,6 +75,7 @@ func get_string(key: StringName, default: String = "") -> String:
 func clear() -> void:
 	_table = null
 	_tables.clear()
+	_untrack_override_source()
 	_override_table = null
 	# The installed "Keys" table goes with the registry: every binding label
 	# falls back to its literal until the next keyhelp registration.
@@ -126,6 +129,38 @@ func set_override_table(table: RtxtStringFile) -> void:
 
 func get_override_table() -> RtxtStringFile:
 	return _override_table
+
+
+## Installs the expansion override table `root` carries and follows the root:
+## every later mount of it (the menu's expansion switch, a join's) installs the
+## table that mount left. Which file serves the table, and when, is the engine's
+## rule (ResourceRoot.get_expansion_override_table over vfs_expansion_override_table,
+## docs/interface/rtxt-strings-re.md "The override table's source"). A null root
+## stops following and clears the table.
+func track_expansion_override(root: ResourceRoot) -> void:
+	if root != _override_source:
+		_untrack_override_source()
+		_override_source = root
+		if root != null:
+			root.mounted.connect(_install_override_from_source)
+	_install_override_from_source()
+
+
+func _install_override_from_source() -> void:
+	var bytes := PackedByteArray()
+	if _override_source != null:
+		bytes = _override_source.get_expansion_override_table()
+	if bytes.is_empty():
+		_override_table = null
+		return
+	var table := RtxtStringFile.new()
+	_override_table = table if table.load_from_byte_array(bytes) == OK else null
+
+
+func _untrack_override_source() -> void:
+	if _override_source != null and _override_source.mounted.is_connected(_install_override_from_source):
+		_override_source.mounted.disconnect(_install_override_from_source)
+	_override_source = null
 
 
 ## --- Engine-faithful lookup [orig: TextResource_FindEntryBySectionAndKey

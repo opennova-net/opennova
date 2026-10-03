@@ -143,7 +143,7 @@ private:
 	std::vector<std::string> request_headers(bool form_content_type) const; // Content-Type + Cookie lines
 	void merge_response_cookies(const std::vector<std::string> &response_headers);
 	void seed_identity_cookies();
-	HttpRequestSpec login_post_request();     // build /NWLogin.dll POST (the 13-field form)
+	LoginResult login_post();                 // the /NWLogin.dll POST (the 13-field form), or Failed
 	std::string gsb_url() const;
 	std::string nwlogin_poll_url() const;     // /NWLogin.dll?tag=<LOGINSESSIONTAG>
 
