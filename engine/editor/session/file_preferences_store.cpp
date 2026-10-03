@@ -1,5 +1,6 @@
 #include <editor/session/file_preferences_store.h>
 
+#include <cmath>
 #include <filesystem>
 #include <system_error>
 #include <utility>
@@ -12,6 +13,17 @@
 namespace fs = std::filesystem;
 
 namespace opennova::editor {
+
+namespace {
+
+// A JSON number that is a whole number a double holds exactly (|n| < 2^53), so its cast to int64_t is
+// defined and keeps it.
+bool whole_number(const io::JsonValue &value) {
+	return value.is_number() && std::isfinite(value.number) && std::floor(value.number) == value.number &&
+	       std::fabs(value.number) < 9007199254740992.0;
+}
+
+} // namespace
 
 bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	const std::string &path = path_;
@@ -54,16 +66,19 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 			if (item.is_string() && !item.string.empty()) settings.recent_projects.push_back(item.string);
 		}
 	}
-	// The recently placed items (S15), per game (schema 3): an object of each game's list of whole
-	// numbers, the first kRecentItemsMax of each.
-	if (const io::JsonValue *recent = json.get("recent_items"); recent && recent->is_object()) {
+	// The recently placed items (S15), per game (the polish): `recent_items_by_game`, an object of each
+	// game's list of whole numbers, the first kRecentItemsMax of each; a number that is not whole, or
+	// past what a double holds exactly, is skipped before it is cast. S15's one list (`recent_items`,
+	// its items of whichever game) is not read: the next save drops it.
+	if (const io::JsonValue *recent = json.get("recent_items_by_game"); recent && recent->is_object()) {
 		for (const io::JsonMember &game : recent->object) {
 			if (game.key.empty() || !game.value.is_array()) continue;
 			std::vector<int64_t> &items = settings.recent_items[game.key];
 			for (const io::JsonValue &item : game.value.array) {
 				if (items.size() >= kRecentItemsMax) break;
-				if (item.is_number() && item.number == double(int64_t(item.number))) items.push_back(int64_t(item.number));
+				if (whole_number(item)) items.push_back(int64_t(item.number));
 			}
+			if (items.empty()) settings.recent_items.erase(game.key);
 		}
 	}
 	out = std::move(settings);
@@ -88,7 +103,7 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 		for (const int64_t item : game.second) items.push(io::JsonValue::make_number(double(item)));
 		by_game.set(game.first, std::move(items));
 	}
-	json.set("recent_items", std::move(by_game));
+	json.set("recent_items_by_game", std::move(by_game));
 	std::string io_error;
 	if (!ensure_directory(utf8_of(path_of(path).parent_path()), io_error) ||
 	    !write_file_atomic(path, io::json_write(json), io_error)) {

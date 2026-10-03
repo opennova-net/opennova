@@ -1,12 +1,15 @@
 // Pins the editor's preferences over their store (ADR 0046 S13 A2): the memory store gives back
 // every preference it was given; the file store writes the settings file, byte for byte, with the
-// game install's keys S13 A4 renamed and the recently placed items kept per game (the polish) under
-// schema 3, and sets aside a file of another schema, an older editor's among them (no reader for it:
-// pre-1.0; S15's schema 2 with its one list of items too), read as the defaults with a warning
-// naming everything it held and written again by the next save; EditorPreferences reads a store
+// game install's keys S13 A4 renamed and the recently placed items kept per game (the polish:
+// `recent_items_by_game`, schema 2 still), reads S15's file whole but for its one list of items
+// (ignored, not set aside: an additive change keeps a user's settings), skips an item that is no
+// whole number a double holds, and sets aside a file of another schema, an older editor's among them
+// (no reader for it: pre-1.0), read as the defaults with a warning naming everything it held and
+// written again by the next save; EditorPreferences reads a store
 // once, writes a change from a copy (a change the store refuses leaves the values in effect), and
 // keeps the recent-projects list and each game's recently placed items capped, most recent first;
 // and a session over each store shows them, a project's game's items alone.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -50,12 +53,13 @@ bool same(const Preferences &a, const Preferences &b) {
 }
 
 // The settings file every_preference() is: the keys sorted, two spaces an indent, a newline last;
-// the game install's keys as S13 A4 named them; the recently placed items (S15) per game, schema 3.
+// the game install's keys as S13 A4 named them; the recently placed items (S15) per game (the polish),
+// schema 2.
 const char *const kSettingsFile = "{\n"
                                   "  \"game_install\": \"D:/Joint Operations\",\n"
                                   "  \"import_dependencies\": false,\n"
                                   "  \"play_in_install\": true,\n"
-                                  "  \"recent_items\": {\n"
+                                  "  \"recent_items_by_game\": {\n"
                                   "    \"dfx\": [\n"
                                   "      7\n"
                                   "    ],\n"
@@ -69,18 +73,26 @@ const char *const kSettingsFile = "{\n"
                                   "    \"D:/mods/Harbor\"\n"
                                   "  ],\n"
                                   "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
-                                  "  \"schema_version\": 3\n"
+                                  "  \"schema_version\": 2\n"
                                   "}\n";
 
-// S15's file (schema 2): the recently placed items one list, whatever the game.
-const char *const kSchemaTwoFile = "{\n"
-                                   "  \"game_install\": \"D:/Joint Operations\",\n"
-                                   "  \"recent_items\": [\n"
-                                   "    106100,\n"
-                                   "    2044\n"
-                                   "  ],\n"
-                                   "  \"schema_version\": 2\n"
-                                   "}\n";
+// S15's file (schema 2 as well): every preference, the recently placed items one list whatever the
+// game.
+const char *const kS15File = "{\n"
+                             "  \"game_install\": \"D:/Joint Operations\",\n"
+                             "  \"import_dependencies\": false,\n"
+                             "  \"play_in_install\": true,\n"
+                             "  \"recent_items\": [\n"
+                             "    106100,\n"
+                             "    2044\n"
+                             "  ],\n"
+                             "  \"recent_projects\": [\n"
+                             "    \"C:/games/Armory\",\n"
+                             "    \"D:/mods/Harbor\"\n"
+                             "  ],\n"
+                             "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
+                             "  \"schema_version\": 2\n"
+                             "}\n";
 
 // The same preferences as an editor before S13 A4 wrote them: schema 1, the game install under
 // retail_directory and Play in it under play_retail.
@@ -143,10 +155,11 @@ static int test_memory_store_round_trips() {
 	return 0;
 }
 
-// The file store writes the settings file byte for byte and reads it back; a file an older editor
-// wrote (schema 1, the game install under its old keys) is set aside (S13 A4: no compat reader):
-// read as the defaults, the warning naming the file and everything it held, now gone, and written
-// again as a new file by the next save.
+// The file store writes the settings file byte for byte and reads it back; S15's file reads whole but
+// for its one list of items, no warning, and the next save writes the items per game in its place; a
+// file an older editor wrote (schema 1, the game install under its old keys) is set aside (S13 A4: no
+// compat reader): read as the defaults, the warning naming the file and everything it held, now gone,
+// and written again as a new file by the next save.
 static int test_file_store_writes_the_settings_file() {
 	editor_test::TempProjectDir dir("opennova_editor_preferences_file");
 	const std::string path = dir.file("a/b/editor_settings.json");
@@ -173,7 +186,7 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(finding.severity == DiagnosticSeverity::Warning &&
 			finding.code() == "editor_settings.schema_version.unsupported" &&
 			finding.message.find(older_editor + " is set aside") == 0);
-	for (const char *held : { "(schema 1; this editor reads schema 3)", "import_dependencies false",
+	for (const char *held : { "(schema 1; this editor reads schema 2)", "import_dependencies false",
 				 "play_retail true", "recent_projects (2 entries)",
 				 "retail_directory \"D:/Joint Operations\"",
 				 "runtime_executable \"C:/tools/opennova.exe\"" })
@@ -181,21 +194,34 @@ static int test_file_store_writes_the_settings_file() {
 	// Written over by the next save: the file the store writes.
 	TEST_EXPECT(FilePreferencesStore(older_editor).save(every_preference(), error));
 	TEST_EXPECT(test_io::read_file_text(older_editor, written) && written == kSettingsFile);
-	// S15's file, its items one list (the polish keeps them per game): set aside the same, no reader.
+	// S15's file, its items one list (the polish keeps them per game, under a key of their own): the
+	// game install, the recent projects, the runtime and the rest read as they are, no warning, the
+	// list ignored (its items of whichever game); the next save writes the items per game in its
+	// place, S15's key gone.
 	const std::string s15 = dir.file("user/s15_editor_settings.json");
-	TEST_EXPECT(editor_test::write_text(s15, kSchemaTwoFile));
-	loaded = every_preference();
+	TEST_EXPECT(editor_test::write_text(s15, kS15File));
+	Preferences kept = every_preference();
+	kept.recent_items.clear();
+	loaded = Preferences();
 	Diagnostic two;
-	TEST_EXPECT(FilePreferencesStore(s15).load(loaded, two) && same(loaded, Preferences()) &&
-	            two.code() == "editor_settings.schema_version.unsupported" &&
-	            two.message.find("(schema 2; this editor reads schema 3)") != std::string::npos &&
-	            two.message.find("recent_items (2 entries)") != std::string::npos);
+	TEST_EXPECT(FilePreferencesStore(s15).load(loaded, two) && same(loaded, kept) && two.code().empty());
+	loaded.recent_items = every_preference().recent_items;
+	TEST_EXPECT(FilePreferencesStore(s15).save(loaded, error));
+	TEST_EXPECT(test_io::read_file_text(s15, written) && written == kSettingsFile);
+	// An item that is no whole number a double holds exactly is skipped, never cast: a fraction, one
+	// past 2^53 either way (-2^63 among them: its cast would give it back), a string; a game left
+	// with none is no game.
+	TEST_EXPECT(editor_test::write_text(dir.file("odd.json"),
+			"{\"schema_version\": 2, \"recent_items_by_game\": {\"jo\": [1.5, 1e300, -9223372036854775808, "
+			"9007199254740992, \"7\", 12, -3], \"dfx\": [0.25], \"\": [4], \"tc\": 5}}"));
+	TEST_EXPECT(FilePreferencesStore(dir.file("odd.json")).load(loaded, error) && loaded.recent_items.size() == 1 &&
+	            loaded.recent_items.at("jo") == std::vector<int64_t>({12, -3}));
 
 	// A file that is not there reads as the defaults; one that does not say whether an import
 	// brings the files it needs reads as on; a newer schema is set aside too (it held nothing);
 	// a file that is not JSON is an error.
 	TEST_EXPECT(FilePreferencesStore(dir.file("missing.json")).load(loaded, error) && same(loaded, Preferences()));
-	TEST_EXPECT(editor_test::write_text(dir.file("bare.json"), "{\"schema_version\": 3}"));
+	TEST_EXPECT(editor_test::write_text(dir.file("bare.json"), "{\"schema_version\": 2}"));
 	TEST_EXPECT(FilePreferencesStore(dir.file("bare.json")).load(loaded, error) && loaded.import_dependencies &&
 	            loaded.game_install.empty() && !loaded.play_in_install);
 	TEST_EXPECT(editor_test::write_text(dir.file("newer.json"), "{\"schema_version\": 99}"));
@@ -203,7 +229,7 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(FilePreferencesStore(dir.file("newer.json")).load(loaded, newer) &&
 			same(loaded, Preferences()) &&
 			newer.code() == "editor_settings.schema_version.unsupported" &&
-			newer.message.find("(schema 99; this editor reads schema 3)") != std::string::npos &&
+			newer.message.find("(schema 99; this editor reads schema 2)") != std::string::npos &&
 			newer.message.find("what it held is gone: nothing.") != std::string::npos);
 	TEST_EXPECT(editor_test::write_text(dir.file("broken.json"), "not json"));
 	TEST_EXPECT(!FilePreferencesStore(dir.file("broken.json")).load(loaded, error) && error.code() == "editor_settings.json");
@@ -347,7 +373,7 @@ static int test_session_over_a_store() {
 		TEST_EXPECT(session.outcome().done());
 		std::string written;
 		TEST_EXPECT(session.project_open() && test_io::read_file_text(path, written) &&
-		            written.find("\"schema_version\": 3") != std::string::npos &&
+		            written.find("\"schema_version\": 2") != std::string::npos &&
 		            written.find("retail") == std::string::npos && written.find("\"game_install\": \"\"") != std::string::npos);
 	}
 	return 0;
