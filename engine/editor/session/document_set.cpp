@@ -336,7 +336,8 @@ void DocumentSet::open_document(const EditorRequest &request) {
 	// The file the request names, however it spells it (another case, the name alone): the
 	// project's file (SessionCore::project_file, the scan's case-insensitive lookup).
 	const std::string named = request.path.empty() ? view_.documents.active : request.path;
-	const AssetEntry *file = core_.project_file(named);
+	bool ambiguous = false;
+	const AssetEntry *file = core_.project_file(named, &ambiguous);
 	const std::string path = file ? file->relative_path : named;
 	// The record a request names (by its address, or by its locator: a Go to) is selected,
 	// and its field (a Problems row's, the defining field a Go to shows) shown: a RevealRecord
@@ -377,6 +378,13 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		core_.report(finding);
 		say(path + " could not be opened: see Problems.");
 	};
+	if (ambiguous) {
+		refuse(make_finding(CoreFinding::DocumentName, DiagnosticSeverity::Error,
+		                    "More than one file of the project is spelled like this in another case: name the one "
+		                    "to open as its path is spelled.",
+		                    named));
+		return;
+	}
 	if (request.kind == EditorRequestKind::OpenDocument && document_for(path)) {
 		// An open document comes back with the selection it had, unless the request names
 		// a record (a Problems row, a Go to).
@@ -434,7 +442,9 @@ void DocumentSet::show_in_files(const EditorRequest &request) {
 }
 
 void DocumentSet::close_document(const std::string &requested) {
-	const std::string path = requested.empty() ? view_.documents.active : requested;
+	// However the request spells it (another case, the name alone), as the open took it.
+	const DocumentBase *document = document_for(requested);
+	const std::string path = document ? document->path() : requested.empty() ? view_.documents.active : requested;
 	for (auto it = documents_.begin(); it != documents_.end(); ++it)
 		if ((*it)->path() == path) { documents_.erase(it); break; }
 	remembered_.erase(path);

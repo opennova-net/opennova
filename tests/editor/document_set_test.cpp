@@ -355,10 +355,10 @@ static int test_undo_says_what() {
 }
 
 // Names are the game's, case-insensitive in its archives and in the project (ADR 0046 S17): a file
-// named in another case, its folder's or its own, is the project's file (SessionCore::project_file,
-// the scan's lookup), opened as itself (its own path, no document.missing), shown again when it is
-// open already, and edited by a request that spells it so; a name the project has in no case is
-// still not found.
+// named in another case, its folder's or its own, is the project's file (AssetScan::named through
+// SessionCore::project_file), opened as itself (its own path, no document.missing), shown again when
+// it is open already, edited and closed by a request that spells it so; the name in a folder it is
+// not in, and a name the project has in no case, are still not found.
 static int test_names_in_another_case() {
 	Menus menus("opennova_editor_document_set_case");
 	const SessionView &v = menus.view();
@@ -392,6 +392,17 @@ static int test_names_in_another_case() {
 	menus.session.handle(request::edit_record(shouted, rename));
 	TEST_EXPECT(menus.session.last_edit_ok() && opened->dirty() && opened->record_name(opened->address_at(kMain)) == "SHOUTED");
 
+	// Another folder is another file: the name in a folder it is not in opens nothing, edits nothing.
+	std::string elsewhere = "strings/" + path.substr(path.find('/') + 1);
+	menus.session.handle(request::open_document(elsewhere));
+	TEST_EXPECT(!menus.session.outcome().done() && v.documents.active == path);
+	menus.session.handle(request::edit_record(elsewhere, rename));
+	TEST_EXPECT(!menus.session.last_edit_ok());
+	// Closed by any spelling of it, as it opened (its edit undone: clean, no prompt holds the close).
+	menus.session.handle(request::undo(path));
+	TEST_EXPECT(!opened->dirty());
+	menus.session.handle(request::close_document(lowered));
+	TEST_EXPECT(!menus.session.document_for(path));
 	menus.session.handle(request::open_document("MENUS/NOWHERE.MNU"));
 	bool missing = false;
 	for (const Diagnostic &finding : menus.session.outcome().findings)
