@@ -58,6 +58,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/install_view.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/value.h>
@@ -67,8 +68,7 @@ namespace opennova::editor {
 
 // A place the files of an import come from and its dependencies are looked for: the folder
 // a loose source sits in (listed once), the archive a member comes from, or the game install
-// (mounted as a stock launch mounts it: mount_retail, with the loose files the game ships beside
-// its archives and reads from there, list_install_loose_files, where no archive has the name).
+// (as the project imports it, assets/install_view.h: its files by the names the project gets).
 // Names compare as the scan's logical names do, without case (normalized_logical_name).
 class ImportOrigin {
 public:
@@ -104,7 +104,8 @@ public:
 private:
 	Kind kind_ = Kind::Folder;
 	std::string path_;
-	Vfs vfs_;                                        // the archive, or the game install
+	Vfs vfs_;                                        // the archive
+	InstallView install_;                            // the game install
 	std::map<std::string, std::string> names_;       // normalized name -> the origin's spelling
 	mutable std::map<std::string, AssetKind> kinds_; // normalized name -> file_kind, once asked
 };
