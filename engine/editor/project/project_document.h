@@ -76,6 +76,9 @@ struct ProjectPaths {
 	std::string build_cache_file; // each file's content hash by its size and last write (BuildRun)
 	std::string run_dir;     // where Play runs the game: a numbered directory a run (run/run_directory.h)
 	std::string staging_dir; // an import's files before they are published (import_assets)
+	// The game install's files an expansion's Play copied where they could not be linked into its run
+	// directory (another volume), a folder per install, kept for the next (prepare_expansion_run).
+	std::string install_copy_dir;
 
 	static ProjectPaths for_root(const std::string &root);
 	// The project-relative export output resolved against the root.
