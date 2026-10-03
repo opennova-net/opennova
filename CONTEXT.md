@@ -571,8 +571,16 @@ on the wire). One service makes it for every window and the wire
 (`engine/editor/graph/display_names.h`; a type's own words in its `record_label` and `value_label`
 hooks, the mission's `documents/mission_labels.h`), reading the project's names through a **name
 source** (the asset graph's). A record's display name is its **title**; its **name** stays what the
-graph keys it by (an entity's SSN).
+graph keys it by (an entity's SSN). Where a column cannot hold the title, its **brief** words show
+what tells the record apart first (an event's first trigger's subject and verb, an entity's SSN).
 _Avoid_: label (a field's own name), caption, alias
+
+**Game's own data**:
+A project file that is byte for byte the game install's copy as the game is served it, what an import
+of the install copies (ADR 0046 S15, `engine/editor/session/original_files.h`): its findings are the
+original's too, so Problems shows them apart, under "In the game's own data (also in the original)",
+and counts the modder's findings first. A file the modder changes leaves it.
+_Avoid_: stock files, vanilla, unmodified (as Problems words)
 
 **Event sentence**:
 A mission's event in words, as the game runs it (ADR 0046 S15): "When <trigger>, and/or <trigger>
