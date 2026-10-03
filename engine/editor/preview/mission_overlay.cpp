@@ -245,7 +245,11 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 			words[i] = in.title(marks[size_t(label_marks[i])].record);
 			labels[i].length = words[i].size();
 		}
-		for (const size_t pick : mission_label_picks(labels))
+		// The last layout where nothing it read moved (a frame with the selection, the camera, the hover
+		// and the titles as they were), else laid out again.
+		std::vector<size_t> made;
+		const std::vector<size_t> &picks = in.layout ? in.layout->picks(labels, words) : (made = mission_label_picks(labels));
+		for (const size_t pick : picks)
 			list.text(CanvasPoint{ labels[pick].x + kMissionLabelDx, labels[pick].y + kMissionLabelDy }, words[pick]);
 	}
 	// The handle the pointer is on, or a drag holds: what it does and its step, beside it.

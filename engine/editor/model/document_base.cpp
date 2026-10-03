@@ -47,7 +47,24 @@ bool DocumentBase::apply(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (blocked_)
 		return fail(error, path(), CoreFinding::DocumentParse,
 		            "Fix the reported source errors and reload this document before editing.");
-	return apply_edits(edits, error);
+	const uint64_t before = revision();
+	if (!apply_edits(edits, error)) return false;
+	if (revision() != before) {
+		// The batch's gesture: its edits' one token (0 when they carry none, or several).
+		uint64_t gesture = edits.empty() ? 0 : edits.front().gesture;
+		for (const Edit &edit : edits) gesture = edit.gesture == gesture ? gesture : 0;
+		if (!gesture || gesture != run_gesture_) {
+			run_from_ = before;
+			run_first_ = revision();
+		}
+		run_gesture_ = gesture;
+	}
+	return true;
+}
+
+bool DocumentBase::gesture_alone_since(uint64_t gesture, uint64_t revision) const {
+	if (!gesture || gesture != run_gesture_) return false;
+	return revision == run_from_ || (revision >= run_first_ && revision <= this->revision());
 }
 
 bool DocumentBase::apply(const Edit &edit, Diagnostic &error) {
@@ -55,11 +72,15 @@ bool DocumentBase::apply(const Edit &edit, Diagnostic &error) {
 }
 
 void DocumentBase::undo() {
-	if (!snapshot_ && !blocked_) undo_step();
+	if (snapshot_ || blocked_) return;
+	undo_step();
+	run_gesture_ = 0;
 }
 
 void DocumentBase::redo() {
-	if (!snapshot_ && !blocked_) redo_step();
+	if (snapshot_ || blocked_) return;
+	redo_step();
+	run_gesture_ = 0;
 }
 
 size_t DocumentBase::ignored_lines() const {
@@ -114,6 +135,7 @@ bool DocumentBase::load_bytes(const std::vector<uint8_t> &bytes, const std::stri
 	file_fingerprint_ = hash;
 	wrote_file_ = false;
 	load_generation_ = ++g_next_load;
+	run_gesture_ = 0;
 	return true;
 }
 
