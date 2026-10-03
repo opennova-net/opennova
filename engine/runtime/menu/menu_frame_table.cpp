@@ -200,20 +200,28 @@ void MenuFrameCompiler::set_table_columns(int index,
 	apply_table_column_defs_(index, node);
 }
 
-// The populate's layout over the authored one: the resize keeps the columns it
-// does not drop and zero-fills new ones; each init sets the label, the width
-// and the header justification, which the cells copy.
-// [orig: resize_column_count @0x63f6c0; CTableWnd_InitRow @0x63f9c0 —
-//  +0x80 / +0x84 (-1 -> 1 / 0x10) copied to +0x90 / +0x94 @0x63fbdf..0x63fc03]
+// The records code set up over the authored layout (menu_table_row.h
+// MenuTableColumnDef): a kept record is the authored column, any other the
+// runtime's own from zero (a count that grows the table starts every record
+// over, so the authored draw kinds, cell offsets, SUBST rows and scales go with
+// it); an init over either sets the label, the width and the header
+// justification, which the cells copy, and keeps the rest of the record.
+// [orig: CTableWnd_ResizeColumnCount @0x63f6c0 — the grow path's copy
+//  @0x63f724 takes the old count in bytes; CTableWnd_InitRow @0x63f9c0 —
+//  +0x80 / +0x84 (-1 -> 1 / 0x10) copied to +0x90 / +0x94 @0x63fbdf..0x63fc03,
+//  no write to +108 or +152..+172]
 void MenuFrameCompiler::apply_table_column_defs_(int index, WidgetNode &node) const {
 	const auto it = table_column_defs_.find(index);
 	if (it == table_column_defs_.end() || it->second.empty()) return;
 	const std::vector<MenuTableColumnDef> &defs = it->second;
-	node.table_columns.resize(defs.size(), TableColumnSetup{});
+	std::vector<TableColumnSetup> authored;
+	authored.swap(node.table_columns);
+	node.table_columns.assign(defs.size(), TableColumnSetup{});
 	for (size_t c = 0; c < defs.size(); ++c) {
 		const MenuTableColumnDef &def = defs[c];
-		if (!def.defined) continue;
 		TableColumnSetup &col = node.table_columns[c];
+		if (def.kept && c < authored.size()) col = authored[c];
+		if (!def.defined) continue;
 		col.width = def.width;
 		col.label = def.label;
 		col.header_justify = def.justify == -1 ? 1 : def.justify;

@@ -14,6 +14,17 @@ bool expect_eq(const std::string &got, const std::string &want, const char *what
 	return false;
 }
 
+// The encoded value, or "<refused>" where encode_pub_value returns false.
+std::string encode(const std::vector<uint8_t> &plaintext, const std::string &key) {
+	std::string out = "stale";
+	return opennova::encode_pub_value(plaintext, key, out) ? out : std::string("<refused>");
+}
+
+std::string encode(const std::string &plaintext, const std::string &key) {
+	std::string out = "stale";
+	return opennova::encode_pub_value(plaintext, key, out) ? out : std::string("<refused>");
+}
+
 bool expect_eq_bytes(const std::vector<uint8_t> &got,
                      const std::vector<uint8_t> &want, const char *what) {
 	if (got == want) return true;
@@ -32,19 +43,19 @@ bool fixtures_match_python() {
 	const std::vector<uint8_t> pcid_plain = {
 		'0', '0', '0', '0', '0', '0', '0', '2', 0x00,
 	};
-	if (!expect_eq(opennova::encode_pub_value(pcid_plain, key),
+	if (!expect_eq(encode(pcid_plain, key),
 	               "DMDIKKLGLMLNONCCOICCNPAPDC",
 	               "PCID encoding")) return false;
 
 	// Legacy empty NAMEINFO/SQUADINFO fixture: encode_pub_value(b'\x00' * 7, key).
 	// Real /NWJoin identity payload shape is covered by join_identity_test.
 	const std::vector<uint8_t> seven_zeros(7, 0x00);
-	if (!expect_eq(opennova::encode_pub_value(seven_zeros, key),
+	if (!expect_eq(encode(seven_zeros, key),
 	               "EMEGMGHGGMKKGLKOFGIPLM",
 	               "NAMEINFO encoding")) return false;
 
 	// Short-key fixture (sanity).
-	if (!expect_eq(opennova::encode_pub_value(std::string("hello"), "shortkey"),
+	if (!expect_eq(encode(std::string("hello"), "shortkey"),
 	               "OHLMEGCCCBHHEJHFEB",
 	               "hello/shortkey encoding")) return false;
 
@@ -64,8 +75,7 @@ bool fixtures_match_python() {
 	const std::vector<uint8_t> endpoint_plain = {
 		'1','9','2','.','1','6','8','.','1','.','1','0','0',':','1','7','4','7','1', 0x00,
 	};
-	if (!expect_eq(opennova::encode_pub_value(endpoint_plain,
-	               "NGPAIIAHFONBCAHJEEPDLEHGOMOIBOIN"),
+	if (!expect_eq(encode(endpoint_plain, "NGPAIIAHFONBCAHJEEPDLEHGOMOIBOIN"),
 	               "OMIJONGKJMCOJOCCGJKCIPMOHBAIKAAMLKKMMBDJEDDCNCIG",
 	               "endpoint encoding")) return false;
 	std::vector<uint8_t> endpoint_decoded;
@@ -82,7 +92,7 @@ bool fixtures_match_python() {
 // A bad value off the wire is a result, never a throw (ADR 0049 d5): false, the
 // output emptied, the reason named, for each way a value can be bad.
 bool bad_values_are_rejected() {
-	const std::string good = opennova::encode_pub_value(std::string("hello"), "shortkey");
+	const std::string good = encode(std::string("hello"), "shortkey");
 	std::string tampered = good;
 	tampered[0] = tampered[0] == 'A' ? 'B' : 'A'; // still A-P, the CRC no longer matches
 	const struct { std::string value; const char *key; const char *what; } cases[] = {
@@ -112,14 +122,20 @@ bool bad_values_are_rejected() {
 	return true;
 }
 
-bool empty_key_throws() {
-	try {
-		opennova::encode_pub_value(std::string("x"), "");
-	} catch (const std::exception &) {
-		return true;
+// An empty key is refused as a result, never a throw (ADR 0049 d5): false, the
+// output emptied, for either plaintext form.
+bool empty_key_is_refused() {
+	std::string out = "stale";
+	if (opennova::encode_pub_value(std::string("x"), "", out) || !out.empty()) {
+		std::fprintf(stderr, "FAIL: encode with an empty key must be refused\n");
+		return false;
 	}
-	std::fprintf(stderr, "FAIL: encode with empty key should throw\n");
-	return false;
+	out = "stale";
+	if (opennova::encode_pub_value(std::vector<uint8_t>{'x'}, "", out) || !out.empty()) {
+		std::fprintf(stderr, "FAIL: encode of bytes with an empty key must be refused\n");
+		return false;
+	}
+	return true;
 }
 
 } // namespace
@@ -127,7 +143,7 @@ bool empty_key_throws() {
 int main() {
 	bool ok = true;
 	ok = fixtures_match_python() && ok;
-	ok = empty_key_throws() && ok;
+	ok = empty_key_is_refused() && ok;
 	ok = bad_values_are_rejected() && ok;
 	if (!ok) {
 		std::fprintf(stderr, "pubcrypto_test failed\n");

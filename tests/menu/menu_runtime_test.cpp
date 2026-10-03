@@ -875,12 +875,11 @@ void test_options_screen() {
 
 } // namespace
 
-// A populate's column layout: the count first (below 1 refused; existing
-// columns kept), then one init per column (out of range refused); the layout
-// reaches the frame, is replayed when the screen is shown again, and bounds
-// the cell writes like an authored COLUMN COUNT.
-// [orig: resize_column_count @0x63f6c0; CTableWnd_InitRow @0x63f9c0;
-//  StatScreen_PopulateStatResultsList @0x5622fa..0x56237a]
+// A populate's column layout: the count first (below 1 refused), then one init
+// per column (out of range refused); the layout reaches the frame, is replayed
+// when the screen is shown again, and bounds the cell writes like an authored
+// COLUMN COUNT. [orig: CTableWnd_ResizeColumnCount @0x63f6c0; CTableWnd_InitRow
+// @0x63f9c0; StatScreen_PopulateStatResultsList @0x5622fa..0x56237a]
 void test_table_runtime_columns() {
 	const mnu::Document doc = make_document();
 	FakeFrame frame;
@@ -907,12 +906,53 @@ void test_table_runtime_columns() {
 	CHECK(frame.table_columns_seen.size() == 4 && frame.table_columns_seen[3].label == "Score");
 }
 
+// The column records a count leaves [orig: CTableWnd_ResizeColumnCount @0x63f6c0]:
+// one that does not grow the table keeps them (the authored columns, which an init
+// then sets up in place [orig: CTableWnd_InitRow @0x63f9c0]); one that grows it
+// starts every record over, zeroed, the authored ones too (the grow path copies
+// the old count in bytes @0x63f724).
+void test_table_column_records() {
+	mnu::Document doc = make_document();
+	mnu::Window &authored = doc.screens[0].root_window.children[11];
+	CHECK(authored.name == "TABLE");
+	authored.table_data.column.has_count = true;
+	authored.table_data.column.count = 3;
+	FakeFrame frame;
+	MenuRuntime rt;
+	seed_counts(frame);
+	rt.set_frame(&frame);
+	rt.open_document(&doc, "main.mnu", "");
+	// An init over the authored count: the three records stand, the one set up in place.
+	CHECK(rt.table_init_column(14, 1, 80, "Kills", -1, -1));
+	const std::vector<MenuTableColumnDef> &seen = frame.table_columns_seen;
+	CHECK(seen.size() == 3 && seen[0].kept && !seen[0].defined && seen[2].kept && !seen[2].defined);
+	CHECK(seen.size() == 3 && seen[1].kept && seen[1].defined && seen[1].label == "Kills" &&
+			seen[1].width == 80 && seen[1].justify == -1 && seen[1].vjustify == -1);
+	// A smaller count and the same one keep the records.
+	CHECK(rt.table_set_column_count(14, 2));
+	CHECK(seen.size() == 2 && seen[0].kept && seen[1].kept && seen[1].defined && seen[1].label == "Kills");
+	CHECK(rt.table_set_column_count(14, 2));
+	CHECK(seen.size() == 2 && seen[1].kept && seen[1].label == "Kills");
+	// A larger one starts every record over: zero, the authored ones lost.
+	CHECK(rt.table_set_column_count(14, 4));
+	bool zeroed = seen.size() == 4;
+	for (const MenuTableColumnDef &c : seen)
+		zeroed = zeroed && !c.kept && !c.defined && c.label.empty() && c.width == 0 && c.justify == 0 &&
+				c.vjustify == 0;
+	CHECK(zeroed);
+	// An init over a started record defines it; the others stay zero.
+	CHECK(rt.table_init_column(14, 3, 75, "Score", -1, 0x20));
+	CHECK(seen.size() == 4 && !seen[3].kept && seen[3].defined && seen[3].label == "Score" &&
+			!seen[2].defined);
+}
+
 int main() {
 	test_index_and_frameless();
 	test_navigation_replay_and_actions();
 	test_radio_spin_tables_scroll();
 	test_table_row_operations();
 	test_table_runtime_columns();
+	test_table_column_records();
 	test_input();
 	test_shell_flow();
 	test_host_dialog();

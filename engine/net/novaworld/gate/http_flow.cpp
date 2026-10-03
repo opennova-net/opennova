@@ -279,8 +279,10 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 	return login_need(std::move(req));
 }
 
-// [orig: send_login_post()] — the 13-field LoginFormField list, byte-preserved.
-HttpRequestSpec LobbyHttpFlow::login_post_request() {
+// [orig: send_login_post()] — the 13-field LoginFormField list, byte-preserved. A body
+// that does not build (params the modexp gate rejects, which the Prepare leg already
+// refuses) fails the login instead of posting.
+LoginResult LobbyHttpFlow::login_post() {
 	const std::vector<LoginFormField> fields = {
 		{"EPASK", epask_to_string(epask_), false}, // echoed bundle, PLAINTEXT
 		{"NAME", login_user_, true},
@@ -296,14 +298,19 @@ HttpRequestSpec LobbyHttpFlow::login_post_request() {
 		{"failure", "jop_2_login.htm", true},
 		{"success", "jop_2_main.htm", true},
 	};
+	std::string body;
+	if (!build_login_post_body(epask_, fields, body)) {
+		login_step_ = LoginStep::Idle;
+		return login_fail("bad EPASK bundle: params rejected (modulus <= 258 or exponent 0)");
+	}
 	login_step_ = LoginStep::Post;
 	HttpRequestSpec req;
 	req.valid = true;
 	req.method = HttpMethod::Post;
 	req.url = http_base() + "/NWLogin.dll";
 	req.headers = request_headers(true);
-	req.body = build_login_post_body(epask_, fields);
-	return req;
+	req.body = std::move(body);
+	return login_need(std::move(req));
 }
 
 std::string LobbyHttpFlow::nwlogin_poll_url() const {
@@ -341,7 +348,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 			}
 			// The modexp gate retail applies at the form submit (EPASK_ModexpEncrypt
 			// @0x66668a returns -1 for modulus <= 258 or a non-positive exponent):
-			// fail here rather than let build_login_post_body throw mid-POST.
+			// fail here, before NWStart, rather than at the post's body.
 			if (epask_.modulus <= 258u || epask_.exponent == 0u) {
 				login_step_ = LoginStep::Idle;
 				return login_fail("bad EPASK bundle: params rejected (modulus <= 258 or exponent 0)");
@@ -361,7 +368,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				req.headers = request_headers(false);
 				return login_need(std::move(req));
 			}
-			return login_need(login_post_request());
+			return login_post();
 		}
 		case LoginStep::NwStart: {
 			const std::string message = extract_message(body, false);
@@ -369,7 +376,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				login_step_ = LoginStep::Idle;
 				return login_fail(message);
 			}
-			return login_need(login_post_request());
+			return login_post();
 		}
 		case LoginStep::Post: {
 			const std::string *tag = jar_.find("LOGINSESSIONTAG");

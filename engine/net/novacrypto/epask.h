@@ -31,11 +31,12 @@ struct EpaskParams {
 	std::string key;       // ASCII timestamp+rand suffix (matches onnet's generate_epask_key)
 };
 
-// Random params: modulus is product of two distinct small primes p, q
-// chosen so 200_000 < p*q < 300_000; exponent is a random 5-digit value
-// coprime with phi(n). Throws std::runtime_error on the rare
-// failure-to-converge path (suitable for `static const auto` at boot).
-EpaskParams generate_epask();
+// Random params into `out`: modulus is product of two distinct small primes
+// p, q chosen so 200_000 < p*q < 300_000; exponent is a random 5-digit value
+// coprime with phi(n). False (`out` untouched) on the failure-to-converge
+// path (200 prime pairs, 200 exponents each): a result, never a throw
+// (ADR 0049 d5).
+bool generate_epask(EpaskParams &out);
 
 // Serialize / parse the cookie + form-field representation. Parsing returns
 // false (`out` untouched, `error` naming why when given) when either ':' is
@@ -55,9 +56,11 @@ bool epask_from_string(const std::string &s, EpaskParams &out, std::string *erro
 bool epask_decrypt(const std::string &ciphertext, const EpaskParams &params, std::string &out,
                    std::string *error = nullptr);
 
-// Encrypt a plaintext field. Useful only for tests — retail is the one
-// that does the encryption in the real flow. Throws on rejected params
-// (see epask_decrypt).
-std::string epask_encrypt(const std::string &plaintext, const EpaskParams &params);
+// Encrypt a plaintext field into `out` (the client's login form fields). False
+// (`out` emptied, `error` naming why when given) on rejected params (see
+// epask_decrypt), retail's EPASK_Encrypt -1 [orig: @0x666a9b]: a result,
+// never a throw (ADR 0049 d5).
+bool epask_encrypt(const std::string &plaintext, const EpaskParams &params, std::string &out,
+                   std::string *error = nullptr);
 
 } // namespace opennova

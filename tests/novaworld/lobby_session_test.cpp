@@ -553,6 +553,67 @@ int test_update_vars_is_accepted_without_reply() {
 	return 0;
 }
 
+// Rewrite one var of a request's named ClientVarList.
+void set_list_var(NapiMessage &request, const std::string &list, const std::string &name,
+                  const std::string &value) {
+	for (auto &child : request.children) {
+		if (field_str(find_field(child, "VarList")) != list) continue;
+		for (auto &var : child.children) {
+			if (field_str(find_field(var, "VarName")) != name) continue;
+			for (auto &f : var.fields)
+				if (f.name == "VarValue") f.data.assign(value.begin(), value.end());
+		}
+	}
+}
+
+// The numbers a host sends are read without exceptions (strutil::parse_int /
+// parse_ulong; ADR 0049 d5): what std::stoi / stoul refused reads as 0 (an
+// endpoint port falls through to the next source), a numeric prefix as its
+// number, a VarFNum that is no number as 0.
+int test_bad_numbers_are_results() {
+	LobbySession sess; // the default GSID generator, whose app field is the AppId
+	LobbyState state;
+	std::vector<test_novaworld::IndexedVar> players;
+	for (const auto &v : player_slot_vars(0, "Host", "10.0.0.5:notaport", "", "1", "0")) players.push_back(v);
+	NapiMessage in = make_retail_host_request("notanumber", players);
+	set_list_var(in, "Host", "Players", "many");
+	set_list_var(in, "HostSetup", "MaxPlayers", "99999999999");
+	auto r = sess.dispatch(in, state, "10.0.0.1", 64500);
+	TEST_EXPECT(r.reply_containers.size() == 1);
+	TEST_EXPECT(state.gsid.rfind("GSID-10-00000000-", 0) == 0);
+	TEST_EXPECT(state.player_count == 1); // 0, then the roster's size
+	TEST_EXPECT(state.max_players == 0);
+	TEST_EXPECT(state.host_ip == "10.0.0.1" && state.host_port == 64500);
+
+	LobbyState prefixed;
+	std::vector<test_novaworld::IndexedVar> slot0;
+	for (const auto &v : player_slot_vars(0, "Host", "10.0.0.5:32780xyz", "", "1", "0")) slot0.push_back(v);
+	NapiMessage request = make_retail_host_request("1234abc", slot0);
+	set_list_var(request, "Host", "Players", " 5 players");
+	set_list_var(request, "HostSetup", "MaxPlayers", "12/16");
+	sess.dispatch(request, prefixed, "10.0.0.1", 64500);
+	TEST_EXPECT(prefixed.gsid.rfind("GSID-10-000004d2-", 0) == 0);
+	TEST_EXPECT(prefixed.player_count == 5);
+	TEST_EXPECT(prefixed.max_players == 12);
+	TEST_EXPECT(prefixed.host_ip == "10.0.0.5" && prefixed.host_port == 32780);
+
+	NapiMessage list;
+	list.name = "ClientHostUpdate";
+	NapiMessage vars = make_client_var_list("Host", {{"ServerName", "x"}});
+	vars.children[0].fields[0].data = {'x'}; // VarFNum "x"
+	list.children.push_back(vars);
+	auto lists = extract_var_lists(list);
+	TEST_EXPECT(lists["Host"].size() == 1 && lists["Host"][0].fnum == 0);
+
+	NapiMessage removed;
+	removed.name = "ClientHostPlayerRemoved";
+	removed.fields.push_back({"PlayerNumber", std::vector<uint8_t>{'?'}});
+	auto rr = sess.dispatch(removed, prefixed, "10.0.0.1", 64500);
+	TEST_EXPECT(rr.label == "ClientHostPlayerRemoved");
+	TEST_EXPECT(prefixed.roster.empty()); // slot "?" reads as 0, the host's own
+	return 0;
+}
+
 int test_unknown_message_returns_no_reply_with_label() {
 	LobbySession sess;
 	LobbyState state;
@@ -581,6 +642,7 @@ int main() {
 	if (test_client_play_request_returns_server_play_result() != 0) return 1;
 	if (test_glsvss_request_answers_with_results_only_when_configured() != 0) return 1;
 	if (test_update_vars_is_accepted_without_reply() != 0) return 1;
+	if (test_bad_numbers_are_results() != 0) return 1;
 	if (test_unknown_message_returns_no_reply_with_label() != 0) return 1;
 	std::printf("OK: LobbySession dispatch (lifecycle, retail Host/PlayerList lists, RID minting, GLSVSS)\n");
 	return 0;

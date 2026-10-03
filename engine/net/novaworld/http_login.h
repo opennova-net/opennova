@@ -48,23 +48,24 @@ struct LoginFormField {
 	bool encrypt = false;
 };
 
-// Assemble the application/x-www-form-urlencoded body for POST /NWLogin.dll.
-// `pub` is the EPASK bundle the server issued via the EPASK cookie; encrypted
-// fields are transformed under it with epask_encrypt(). Values are emitted raw
-// (no percent-encoding), matching retail's faithful concatenation: every value
-// in this flow is already URL-safe (A-P ciphertext, digits/colons in the EPASK
-// bundle, template filenames in the hidden fields), and the server url-decodes
-// regardless.
-std::string build_login_post_body(const EpaskParams &pub,
-                                  const std::vector<LoginFormField> &fields);
+// Assemble the application/x-www-form-urlencoded body for POST /NWLogin.dll
+// into `body`. `pub` is the EPASK bundle the server issued via the EPASK
+// cookie; encrypted fields are transformed under it with epask_encrypt().
+// Values are emitted raw (no percent-encoding), matching retail's faithful
+// concatenation: every value in this flow is already URL-safe (A-P ciphertext,
+// digits/colons in the EPASK bundle, template filenames in the hidden fields),
+// and the server url-decodes regardless. False (`body` emptied) when an
+// encrypted field's encryption fails (params the modexp gate rejects).
+bool build_login_post_body(const EpaskParams &pub, const std::vector<LoginFormField> &fields,
+                           std::string &body);
 
 // Convenience over build_login_post_body for the standard credential submit:
 // the echoed EPASK public key (plaintext), then EPASK-encrypted NAME and
 // PASSWORD, then the IB3_FORM passthrough fields (success / failure / relay /
 // msgbase / enterkey / pfid / rememberlogin ...) plaintext, in that order.
-std::string build_credentials_post_body(
+bool build_credentials_post_body(
     const EpaskParams &pub, const std::string &name, const std::string &password,
-    const std::vector<std::pair<std::string, std::string>> &hidden = {});
+    std::string &body, const std::vector<std::pair<std::string, std::string>> &hidden = {});
 
 // Parse a batch of `Set-Cookie` header VALUES (the text after the colon, one
 // per header line) into name/value pairs. Only the leading `name=value` pair of

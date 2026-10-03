@@ -33,6 +33,13 @@ target_include_directories(opennova_test_rig PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(opennova_test_rig
     PUBLIC opennova_net opennova_runtime opennova_formats opennova_base)
 
+# The retail-root seam the gated tests share: a root resolves only to an
+# existing directory, so a root naming a missing folder skips like an unset one.
+add_executable(retail_paths_test common/retail_paths_test.cpp)
+target_compile_features(retail_paths_test PRIVATE cxx_std_17)
+target_include_directories(retail_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME retail_paths COMMAND retail_paths_test)
+
 # Shared io infrastructure unit tests
 add_executable(io_test io/io_test.cpp)
 target_link_libraries(io_test PRIVATE opennova_io)
