@@ -64,6 +64,15 @@ DisplayName value_display(const Document &document, const NodeAddress &address, 
 void word_choices(const Document &document, const NodeAddress &address, const FieldUse &field, const NameSource *names,
                   std::vector<ReferenceChoice> &choices);
 
+// The field as a picker lists it: its reference, else what it is picked by name as where its value names
+// nothing the game resolves itself (FieldUse::picks: a mission's SSN that is the player's).
+FieldUse picked_as(const FieldUse &field);
+// Every name a picker offers for the field, worded (the Inspector's and the wire's reference_choices
+// alike): the graph's (reference_choices over picked_as), the values the game resolves itself first
+// (DocumentType::game_choices: the player, SSN 10000), each worded (word_choices).
+std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Document &document, const NodeAddress &address,
+                                            const FieldUse &field, const NameSource *names);
+
 // What a definition the picker offers points at, for its tooltip, made only while it shows (cheap
 // enough per hover, not per row): an item's model (the file its graphic loads) and its catalog, a string
 // id's text and table, a record set's record by its own name; "" for nothing more than its name.

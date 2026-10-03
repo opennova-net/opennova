@@ -78,8 +78,17 @@ struct ProblemAnswer {
 	size_t original() const { return original_errors + original_warnings + original_infos; }
 	size_t total() const { return errors + warnings + infos + original(); }
 };
-// Whether a finding is about a file the project holds as the game install serves it (S15).
+// Whether a finding is about the game's own data (S15): a file the project holds as the game install
+// serves it (FindingsView::original_files), unless the build gates on the finding (it is then the
+// modder's to see) or its document is open with unsaved edits (judged by what it holds: the modder's).
 bool in_original_data(const Diagnostic &diagnostic, const SessionView &view);
+// The view's findings by severity, the modder's and the game's own data's apart: what Problems, the
+// menu bar, the view's problem_counts and `opennova-project status` all count.
+struct ProblemCounts {
+	size_t errors = 0, warnings = 0, infos = 0;
+	size_t original_errors = 0, original_warnings = 0, original_infos = 0;
+};
+ProblemCounts count_problems(const SessionView &view);
 
 ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view);
 

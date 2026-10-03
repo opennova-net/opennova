@@ -23,9 +23,9 @@ struct ProjectDocument;
 // project holds exactly as the game install serves it (asset_import's read_served over mount_retail,
 // what an import of the install copies), so a Problems row about it is the original's too, not the
 // modder's, and Problems shows it apart. Only the files a finding is about are checked, each once while
-// its size and last write stand; the install is mounted once while its folder and the project's game
-// stand. A file the install does not serve, an install that cannot be mounted, and a file that cannot
-// be read are not the original's.
+// its size and last write stand; the install is mounted while files wait to be checked and let go when
+// none does (its archives closed: a patch may write them). A file the install does not serve, an
+// install that cannot be mounted, and a file that cannot be read are not the original's.
 class OriginalFiles {
 public:
 	OriginalFiles();

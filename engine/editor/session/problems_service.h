@@ -75,6 +75,9 @@ public:
 	void step_validation(const PollBudget &budget, const OperationClock &clock);
 	// That check run to its end (a test's, after its operations: ProjectSession::run_operations).
 	void settle_originals();
+	// What it found forgotten (a whole refresh: the install may have changed under the same folder); the
+	// files the rows are about are checked again after the next validation.
+	void forget_originals();
 	// One step of the validation due or under way within `bytes` (an operation that joins it: its
 	// first steps are the validation's remaining ones), its rows composed on the step that ends it;
 	// none while a gesture's edits are open. True when none is due or under way.

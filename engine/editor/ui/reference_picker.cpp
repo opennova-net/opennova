@@ -75,18 +75,15 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 	popup.key = key;
 	popup.field = field;
 	++lists_made_;
-	popup.choices = view.findings.graph ? reference_choices(*view.findings.graph, field)
-										: std::vector<ReferenceChoice>();
+	// Each name by what it names (ADR 0046 S15: an item id by its catalog's name, an SSN by its entity, the
+	// player first), the name muted beside the words: picker_choices, as the wire's reference_choices.
+	std::optional<GraphNameSource> names;
+	if (view.findings.graph) names.emplace(*view.findings.graph);
+	popup.choices = picker_choices(view.findings.graph.get(), document, record, field, names ? &*names : nullptr);
 	if (!others)
 		popup.choices.erase(std::remove_if(popup.choices.begin(), popup.choices.end(),
 		                                   [&](const ReferenceChoice &choice) { return choice.kind != field.reference; }),
 		                    popup.choices.end());
-	// Each name by what it names (ADR 0046 S15: an item id by its catalog's name, an SSN by its entity),
-	// the name muted beside the words.
-	if (view.findings.graph) {
-		const GraphNameSource names(*view.findings.graph);
-		word_choices(document, record, field, &names, popup.choices);
-	}
 	popup.fixes.clear();
 	// The finding the graph makes of this value, as Problems shows it, for its fixes (a %NAME% the
 	// stylesheets do not define: the variable's).

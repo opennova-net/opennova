@@ -5,6 +5,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/model/field_text.h>
 
 namespace opennova::editor {
@@ -97,6 +98,36 @@ void word_choices(const Document &document, const NodeAddress &address, const Fi
 		const DisplayName words = value_display(document, address, field, value, names);
 		if (!words.text.empty() && words.text != choice.name) choice.label = words.text;
 	}
+}
+
+FieldUse picked_as(const FieldUse &field) {
+	FieldUse picking = field;
+	if (picking.reference == ReferenceKind::None) picking.reference = field.picks;
+	return picking;
+}
+
+std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Document &document, const NodeAddress &address,
+                                            const FieldUse &field, const NameSource *names) {
+	const FieldUse picking = picked_as(field);
+	std::vector<ReferenceChoice> choices;
+	if (const DocumentType *type = type_of(document); type && type->game_choices) {
+		std::vector<GameChoice> own;
+		type->game_choices(document, address, picking, own);
+		for (const GameChoice &game : own) {
+			ReferenceChoice choice;
+			choice.name = game.name;
+			choice.label = game.label;
+			choice.kind = picking.reference;
+			choice.file = document.path();
+			choices.push_back(std::move(choice));
+		}
+	}
+	if (graph) {
+		std::vector<ReferenceChoice> listed = reference_choices(*graph, picking);
+		choices.insert(choices.end(), listed.begin(), listed.end());
+	}
+	word_choices(document, address, picking, names, choices);
+	return choices;
 }
 
 std::string symbol_preview(const AssetGraph &graph, ReferenceKind kind, const std::string &name, const std::string &scope) {

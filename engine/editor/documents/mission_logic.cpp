@@ -197,8 +197,14 @@ bool logic_form(const MissionDocument &document, const NodeAddress &record, cons
 		out.type_words = out.type->title;
 	} else if (at.action) {
 		const bms::Action &action = at.event->native.actions[at.index];
-		out.type_words = "Unknown action type " + std::to_string(int32_t(action.action_type)) +
-		                 (action.action_sub_type ? " (" + std::to_string(action.action_sub_type) + ")" : std::string());
+		// A type the dispatcher has a case for whose sub-type selects nothing (an AI change 0, a variable
+		// change past 5, a special or a teammate call of no arm) does nothing [sections 1.5, 7.5].
+		if (const char *title = logic_action_title(int32_t(action.action_type)))
+			out.type_words = std::string(title) + ": no change (sub-type " + std::to_string(action.action_sub_type) +
+			                 " does nothing)";
+		else
+			out.type_words = "Unknown action type " + std::to_string(int32_t(action.action_type)) +
+			                 (action.action_sub_type ? " (" + std::to_string(action.action_sub_type) + ")" : std::string());
 	} else {
 		const bms::Trigger &trigger = at.event->native.triggers[at.index];
 		out.type_words = "Unknown trigger type " + std::to_string(int32_t(trigger.main_type)) + " (" +

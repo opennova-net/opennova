@@ -58,7 +58,7 @@ constexpr DocumentType kTypes[] = {
 	// narrow column (S15).
 	{ DocumentTypeId::Mission, "mission", make_mission, validate_mission_file, MissionDocument::schema,
 			mission_finding_codes, nullptr, nullptr, nullptr, mission_references, mission_record_label,
-			mission_value_label, mission_record_brief },
+			mission_value_label, mission_record_brief, mission_game_choices },
 	// The text types (S13 D9): one TextDocument class, a row per behaviour, none with records
 	// (text_fields) or a project check; the script's text names references, and its compiler's
 	// words are its highlights (S13 V10).

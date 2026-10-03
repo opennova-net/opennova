@@ -5,6 +5,7 @@
 #include <cstring>
 #include <optional>
 #include <string_view>
+#include <unordered_set>
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
@@ -323,18 +324,47 @@ bool wanted(const std::string &typed, const std::string &insert, const std::stri
 	return typed.empty() || starts_with_nocase(insert, typed) || (!words.empty() && contains_nocase(words, typed));
 }
 
+// The open mission's entities by SSN with their titles, kept while the document (its identity, load
+// and revision) and the graph's names (their generation) stand: completion asks on every keystroke, and
+// titling every entity of a large mission is not a keystroke's work (S15).
+const std::vector<std::pair<int64_t, std::string>> &entity_titles(const SessionView &view, const MissionDocument &mission) {
+	struct Titles {
+		bool held = false, has_graph = false;
+		uint64_t identity = 0, load = 0, revision = 0, generation = 0;
+		std::vector<std::pair<int64_t, std::string>> titles;
+	};
+	static Titles cache;
+	const AssetGraph *graph = view.findings.graph.get();
+	const uint64_t generation = graph ? graph->generation() : 0;
+	if (cache.held && cache.identity == mission.identity() && cache.load == mission.load_generation() &&
+	    cache.revision == mission.revision() && cache.has_graph == (graph != nullptr) && cache.generation == generation)
+		return cache.titles;
+	cache = Titles();
+	cache.held = true;
+	cache.identity = mission.identity();
+	cache.load = mission.load_generation();
+	cache.revision = mission.revision();
+	cache.has_graph = graph != nullptr;
+	cache.generation = generation;
+	std::optional<GraphNameSource> names;
+	if (graph) names.emplace(*graph);
+	for (const auto &row : mission.rows())
+		if (row && is_entity_kind(row->kind)) {
+			const int64_t ssn = static_cast<const EntityRow &>(*row).native.id;
+			if (mission.entity_holder(ssn) == row->id)
+				cache.titles.emplace_back(ssn, mission_entity_title(mission, *row, names ? &*names : nullptr));
+		}
+	return cache.titles;
+}
+
 void entities(const SessionView &view, const TextDocument &script, const std::string &prefix, const std::string &typed,
               ScriptCompletions &out) {
 	std::vector<std::pair<int64_t, std::string>> found;
 	if (const MissionDocument *mission = mission_open(view, script)) {
-		std::optional<GraphNameSource> names;
-		if (view.findings.graph) names.emplace(*view.findings.graph);
-		for (const auto &row : mission->rows())
-			if (row && is_entity_kind(row->kind)) {
-				const int64_t ssn = static_cast<const EntityRow &>(*row).native.id;
-				if (mission->entity_holder(ssn) == row->id)
-					found.emplace_back(ssn, mission_entity_title(*mission, *row, names ? &*names : nullptr));
-			}
+		// The player first: the game resolves SSN 10000 itself (S15).
+		found.emplace_back(10000, "The player");
+		const auto &titles = entity_titles(view, *mission);
+		found.insert(found.end(), titles.begin(), titles.end());
 	} else if (const AssetGraph *graph = view.findings.graph.get()) {
 		const std::string scope = mission_scope_of(script);
 		for (const GraphSymbol *symbol : graph->symbols_of_kind(ReferenceKind::MissionEntity)) {
@@ -386,8 +416,11 @@ void symbols(const SessionView &view, ReferenceKind kind, const char *what, cons
              const std::vector<std::string> &scopes, ScriptCompletions &out) {
 	const AssetGraph *graph = view.findings.graph.get();
 	if (!graph) return;
-	std::vector<std::string> seen;
+	// A name once (a set, not a list: a project's tables hold thousands of keys), and no more walking
+	// once the list holds the most it shows (S15: completion asks on every keystroke).
+	std::unordered_set<std::string> seen;
 	for (const GraphSymbol *symbol : graph->symbols_of_kind(kind)) {
+		if (out.items.size() >= kMostCompletions) break;
 		if (symbol->inert) continue;
 		if (!scopes.empty() && std::none_of(scopes.begin(), scopes.end(), [&](const std::string &scope) {
 			    return starts_with_nocase(symbol->scope, scope);
@@ -395,8 +428,7 @@ void symbols(const SessionView &view, ReferenceKind kind, const char *what, cons
 			continue;
 		const std::string &name = symbol->display.empty() ? symbol->name : symbol->display;
 		const std::string insert = prefix + name;
-		if (!wanted(typed, insert) || std::find(seen.begin(), seen.end(), upper(name)) != seen.end()) continue;
-		seen.push_back(upper(name));
+		if (!wanted(typed, insert) || !seen.insert(upper(name)).second) continue;
 		add(out, insert, insert, what, std::string(what) + " defined in " + symbol->file + (symbol->scope.empty() ? "" : " (" + symbol->scope + ")"));
 	}
 }
@@ -407,10 +439,13 @@ void names_for(const SessionView &view, const TextDocument &script, ParamType ty
                ScriptCompletions &out) {
 	const std::string stem = upper(mission::mission_base_name(basename_of(script.path())));
 	const auto prefixed = [&](const char *prefix) { return starts_with_nocase(typed, prefix); };
+	// The mission's table is its own <stem>.bin, else medmssn.bin, never both [orig:
+	// TextResource_LoadMissionTextBin @0x51ed90], then gametext.bin: the keys of the one it reads.
+	const bool own_table = view.project.scan && view.project.scan->find(stem + ".BIN") != nullptr;
+	const std::vector<std::string> text_scopes = {own_table ? stem + ".BIN/" : std::string("MEDMSSN.BIN/"), "GAMETEXT.BIN/"};
 	if (prefixed("SSN_")) return entities(view, script, "SSN_", typed, out);
 	if (prefixed("FX_")) return symbols(view, ReferenceKind::Particle, "effect", "FX_", typed, {}, out);
-	if (prefixed("TT_"))
-		return symbols(view, ReferenceKind::TextId, "text key", "TT_", typed, {stem + ".BIN/", "MEDMSSN.BIN/", "GAMETEXT.BIN/"}, out);
+	if (prefixed("TT_")) return symbols(view, ReferenceKind::TextId, "text key", "TT_", typed, text_scopes, out);
 	if (prefixed("AMMO_")) return symbols(view, ReferenceKind::Ammo, "ammo", "AMMO_", typed, {}, out);
 	switch (type) {
 	case ParamType::Ssn: return entities(view, script, "", typed, out);
@@ -422,8 +457,7 @@ void names_for(const SessionView &view, const TextDocument &script, ParamType ty
 		return;
 	case ParamType::Fx: return symbols(view, ReferenceKind::Particle, "effect", "", typed, {}, out);
 	case ParamType::Ammo: return symbols(view, ReferenceKind::Ammo, "ammo", "", typed, {}, out);
-	case ParamType::TextToken:
-		return symbols(view, ReferenceKind::TextId, "text key", "", typed, {stem + ".BIN/", "MEDMSSN.BIN/", "GAMETEXT.BIN/"}, out);
+	case ParamType::TextToken: return symbols(view, ReferenceKind::TextId, "text key", "", typed, text_scopes, out);
 	default: break;
 	}
 }

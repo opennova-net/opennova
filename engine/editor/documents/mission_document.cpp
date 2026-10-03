@@ -585,17 +585,22 @@ bool MissionDocument::record_choices(const NodeAddress &address, const FieldUse 
 	const std::string &id = use.schema->id;
 	const int slot = param_slot(id);
 	MissionChoices choices;
+	ParamKind kind = ParamKind::Raw;
 	if (address.kind == k(K::Trigger)) {
 		const bms::Trigger &trigger = record.as<bms::Trigger>();
 		if (id == "sub_type") choices = trigger_sub_types(int32_t(trigger.main_type));
-		else if (slot >= 0) choices = param_choices(trigger_param_kind(trigger, slot));
+		else if (slot >= 0) choices = param_choices(kind = trigger_param_kind(trigger, slot));
 	} else if (address.kind == k(K::Action)) {
 		const bms::Action &action = record.as<bms::Action>();
 		if (id == "action_sub_type") choices = action_sub_types(int32_t(action.action_type));
-		else if (slot >= 0) choices = param_choices(action_param_kind(action, slot));
+		else if (slot >= 0) choices = param_choices(kind = action_param_kind(action, slot));
 	}
 	if (!choices.count) return false;
 	out = choices_of(choices);
+	// A team by the one name the words give it everywhere (S15: the red team is team 2 in the round's end
+	// and the area actions alike), the original editor's own word kept as its name.
+	if (kind == ParamKind::Team)
+		for (FieldChoice &choice : out) choice.label = team_words(choice.value);
 	return true;
 }
 
@@ -624,13 +629,14 @@ void MissionDocument::refine_symbol(const NodeAddress &address, SymbolFacts &fac
 		return;
 	}
 	if (node->kind == k(K::Area)) {
-		// The resolver scans the table for the id [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000];
-		// which of two it takes is not read (D-MIS-5): the later is the one marked.
+		// The resolver scans the table for the id and takes the first area of it, in file order [orig:
+		// EventTrigger_ResolveZoneTriggerRefs @0x453000, the scan @0x453077; bms-event-runtime-re.md 7.3]:
+		// a later one of the same id is named by no trigger or action.
 		const Lookups &first = lookups();
 		const auto found = first.zones.find(static_cast<const AreaRow &>(*node).native.id);
 		if (found != first.zones.end() && found->second != node->id) {
 			facts.inert = true;
-			facts.inert_reason = "another area trigger has this zone id";
+			facts.inert_reason = "an earlier area trigger has this zone id, and the game's resolver takes the first of it";
 		}
 	}
 }

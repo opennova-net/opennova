@@ -27,6 +27,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
+#include <editor/documents/mission_uses.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
@@ -179,27 +180,27 @@ int test_document_words() {
 	// marker it visits.
 	const NodeAddress first = row_at(*document, MissionKind::Event, 0);
 	const std::string event_one = record_display(*document, first, nullptr);
-	TEST_EXPECT(event_one == "When Organic #" + walker_ssn + " is in Zone 20, then re-arm event 2.");
+	TEST_EXPECT(event_one == "Event 1: When Organic #" + walker_ssn + " is in Zone 20, then re-arm event 2.");
 	TEST_EXPECT(record_display(*document, first_child(*document, first, MissionKind::Trigger), nullptr) ==
 	            "Organic #" + walker_ssn + " is in Zone 20");
 	TEST_EXPECT(record_display(*document, first_child(*document, first, MissionKind::Action), nullptr) == "re-arm event 2");
 	// Briefly, for a narrow column: the event by its first trigger's subject and verb, an entity in it by
 	// its SSN; the entity by its SSN first; a path or an area has no brief words (its title is short).
-	TEST_EXPECT(same(record_brief(*document, first, nullptr), "#" + walker_ssn + " is in zone 20"));
+	TEST_EXPECT(same(record_brief(*document, first, nullptr), "Event 1: #" + walker_ssn + " is in zone 20"));
 	TEST_EXPECT(same(record_brief(*document, first_child(*document, first, MissionKind::Action), nullptr), "re-arm event 2"));
 	TEST_EXPECT(same(record_brief(*document, walker, nullptr), "#" + walker_ssn + " Organic"));
 	TEST_EXPECT(record_brief(*document, row_at(*document, MissionKind::Area, 0), nullptr).empty());
 	const NodeAddress stop = first_child(*document, row_at(*document, MissionKind::WaypointPath, 1), MissionKind::Stop);
 	const std::string marker_ssn = std::to_string(ssn_of(*document, row_at(*document, MissionKind::Marker, 0)));
-	TEST_EXPECT(record_display(*document, stop, nullptr) == "Stop 1: Marker #" + marker_ssn);
+	TEST_EXPECT(record_display(*document, stop, nullptr) == "Stop 0: Marker #" + marker_ssn);
 	// A value: the walker's group, path and start stop; an Event trigger's event; a stop's marker.
 	DisplayName group = shown(*document, walker, "group", nullptr);
 	TEST_EXPECT(group.text == "Group 1 (1 entity)" && group.raw == "1" && !group.dangling);
 	TEST_EXPECT(shown(*document, walker, "waypoint_id", nullptr).text == "Path 1 (4 stops)");
-	TEST_EXPECT(shown(*document, walker, "wp_number", nullptr).text == "Stop 1 of 4: Marker #" + marker_ssn);
+	TEST_EXPECT(shown(*document, walker, "wp_number", nullptr).text == "Stop 0 of path 1: Marker #" + marker_ssn);
 	const DisplayName event = shown(*document, first_child(*document, row_at(*document, MissionKind::Event, 1), MissionKind::Trigger),
 	                                "param1", nullptr);
-	TEST_EXPECT(event.text == "Event 1: " + event_one && event.raw == "0");
+	TEST_EXPECT(event.text == event_one && event.raw == "0");
 	TEST_EXPECT(shown(*document, stop, "marker", nullptr).text == "Marker #" + marker_ssn);
 	// Without names an item is its id alone (no words), and a name index forms its key.
 	TEST_EXPECT(shown(*document, walker, "item", nullptr).text.empty());
@@ -213,6 +214,15 @@ int test_document_words() {
 	TEST_EXPECT(mission_event_display(m, 8, nullptr).text == "No event 9 (the mission has 2 events)");
 	TEST_EXPECT(mission_group_display(m, 70).text == "No group 70 (the mission has 64)" && mission_group_display(m, 0).text == "No group");
 	TEST_EXPECT(mission_marker_display(m, 40, nullptr).text == "No marker 40 (the mission has 5 markers)");
+	// What names a record, kept while the document and the names stand (S15 review m11: the Inspector asks
+	// every frame).
+	MissionUsesCache uses;
+	const DocumentMissionNames plain(m);
+	const size_t named = uses.uses(m, walker, plain, false, 0).uses.size();
+	uses.uses(m, walker, plain, false, 0);
+	TEST_EXPECT(named > 0 && uses.made() == 1);
+	uses.uses(m, walker, plain, true, 3);
+	TEST_EXPECT(uses.made() == 2);
 	std::printf("document words: entities, paths, areas, events, stops, values, dangling\n");
 	return 0;
 }
@@ -248,7 +258,7 @@ int test_named_words() {
 	TEST_EXPECT(shown(*document, trigger, "param2", &names).text == "Zone 20");
 	// The event's sentence with the names: the walker by his item's name and his own.
 	TEST_EXPECT(record_display(*document, row_at(*document, MissionKind::Event, 0), &names) ==
-	            "When Wire Test Rifleman #" + walker_ssn + " (Sgt. Walker) is in Zone 20, then re-arm event 2.");
+	            "Event 1: When Wire Test Rifleman #" + walker_ssn + " (Sgt. Walker) is in Zone 20, then re-arm event 2.");
 	// The picker's choices worded: an SSN by its entity's title, an id muted beside it.
 	const FieldSchema *param1 = nullptr;
 	for (const FieldSchema &schema : document->fields(k(MissionKind::Trigger)))
@@ -359,6 +369,14 @@ int test_session_words() {
 	TEST_EXPECT(entity.schema && entity.reference == ReferenceKind::None && entity.picks == ReferenceKind::MissionEntity &&
 	            !entity.scope.empty());
 	TEST_EXPECT(same(shown(*document, trigger, "param1", &names).text, "The player"));
+	// Its picker offers the player by name, first, and the entities after; the wire's reference_choices
+	// the same (S15 review m12).
+	const std::vector<ReferenceChoice> offered = picker_choices(view.findings.graph.get(), *document, trigger, entity, &names);
+	TEST_EXPECT(offered.size() > 1 && offered[0].name == "10000" && offered[0].label == "The player" &&
+	            offered[0].kind == ReferenceKind::MissionEntity);
+	const opennova::io::JsonValue wire = reference_choices_to_json(*document, trigger, "param1", view, JsonPage());
+	const opennova::io::JsonValue *listed = wire.get("choices");
+	TEST_EXPECT(listed && listed->array.size() == offered.size() && listed->array[0].get_string("label", "") == "The player");
 	std::printf("session words: the graph's names, the picker, the wire, Problems' places, the status line\n");
 	return 0;
 }
@@ -477,7 +495,10 @@ int test_retail() {
 						if (!words.dangling) continue;
 						// What it is that names nothing: its first word ("No entity has SSN 5" an SSN).
 						const std::string &text = words.text;
-						const std::string what = text.find("SSN") != std::string::npos      ? "ssn"
+						// A value the game never records (an SSN of 128 or more in a sees, targeted, shot or
+						// visited trigger, a visited stop past 31: section 3a) apart from what names nothing.
+						const std::string what = text.find("never recorded") != std::string::npos ? "never recorded"
+						                         : text.find("SSN") != std::string::npos      ? "ssn"
 						                         : text.find("zone") != std::string::npos   ? "zone"
 						                         : text.find("item") != std::string::npos   ? "item"
 						                         : text.find("text") != std::string::npos   ? "text"

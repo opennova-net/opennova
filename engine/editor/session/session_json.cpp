@@ -266,7 +266,7 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 
 // A record's own collections (none for one that holds nothing), each record with the
 // collections it holds in turn.
-JsonValue collections_to_json(const Document &document, const NodeAddress &owner) {
+JsonValue collections_to_json(const Document &document, const NodeAddress &owner, const NameSource *names) {
 	JsonValue collections = JsonValue::make_array();
 	for (const Document::Collection &collection : document.collections_of(owner)) {
 		JsonValue entry = JsonValue::make_object();
@@ -287,11 +287,11 @@ JsonValue collections_to_json(const Document &document, const NodeAddress &owner
 			const std::string name = document.record_name(address);
 			record.set("name", json_string(name));
 			// What the windows show for it where its type words it otherwise (a mission's trigger or action
-			// in words, S15).
-			const std::string title = document.record_title(address);
+			// in words, S15), with the project's names as the row's own title has them.
+			const std::string title = record_display(document, address, names);
 			if (title != name) record.set("title", json_string(title));
 			record.set("change", json_string(record_change_token(document.record_change(address))));
-			JsonValue nested = collections_to_json(document, address);
+			JsonValue nested = collections_to_json(document, address, names);
 			if (!nested.array.empty()) record.set("collections", std::move(nested));
 			records.push(std::move(record));
 		}
@@ -1269,7 +1269,7 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page, const
 		const std::string title = record_display(document, {row->id, row->kind, 0}, names);
 		if (title != document.record_name({row->id, row->kind, 0})) entry.set("title", json_string(title));
 		entry.set("change", json_string(record_change_token(document.record_change({row->id, row->kind, 0}))));
-		JsonValue collections = collections_to_json(document, {row->id, row->kind, 0});
+		JsonValue collections = collections_to_json(document, {row->id, row->kind, 0}, names);
 		entry.set("collections", std::move(collections));
 		rows.push(std::move(entry));
 	}
@@ -1399,7 +1399,7 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		fields.push(std::move(entry));
 	}
 	out.set("fields", std::move(fields));
-	out.set("collections", collections_to_json(document, address));
+	out.set("collections", collections_to_json(document, address, source));
 	return out;
 }
 
@@ -1473,15 +1473,14 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	std::vector<ReferenceChoice> choices = view.findings.graph
-			? reference_choices(*view.findings.graph, field)
-			: std::vector<ReferenceChoice>();
-	// Each name by what it names (S15: an item id by its catalog's name, an SSN by its entity's
-	// title), as the picker shows it: its `label`.
-	if (view.findings.graph) {
-		const GraphNameSource names(*view.findings.graph);
-		word_choices(document, address, field, &names, choices);
-	}
+	// The names the Inspector's picker offers, each by what it names (S15: an item id by its catalog's
+	// name, an SSN by its entity's title, the player first): picker_choices, a field holding the
+	// player's SSN listed as an entity field (FieldUse::picks).
+	std::optional<GraphNameSource> names;
+	if (view.findings.graph) names.emplace(*view.findings.graph);
+	field = picked_as(field);
+	const std::vector<ReferenceChoice> choices =
+	        picker_choices(view.findings.graph.get(), document, address, field, names ? &*names : nullptr);
 	JsonValue list = JsonValue::make_array();
 	for (size_t i = page.first(choices.size()); i < page.last(choices.size()); ++i) {
 		const ReferenceChoice &choice = choices[i];

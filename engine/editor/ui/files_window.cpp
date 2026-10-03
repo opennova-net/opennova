@@ -52,14 +52,16 @@ const DocumentBase *open_document(const SessionView &view, const std::string &pa
 }
 
 // What the window's caches read of the view: the tree and each file's counts, the files and the
-// findings; a file's References..., the graph (its edges name their files by path and their
+// findings (and which documents have unsaved edits: the game's own data's fold, S15); a file's
+// References..., the graph (its edges name their files by path and their
 // fields by the kind the scan gives: the graph moves when either does).
 struct CacheKey {
 	RevisionKey tree;
 	RevisionKey references;
 };
 CacheKey cache_key(const SessionView &view) {
-	return {revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Findings}),
+	return {revision_key(view.revisions,
+	                     {ViewConcern::Files, ViewConcern::Findings, ViewConcern::DocumentSet}),
 	        revision_key(view.revisions, {ViewConcern::Graph})};
 }
 

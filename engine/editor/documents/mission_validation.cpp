@@ -232,8 +232,9 @@ struct Checker {
 			const NodeAddress address{row->id, row->kind, 0};
 			if (first.count(area.id))
 				on(address, MissionFinding::ZoneDuplicate, DiagnosticSeverity::Warning,
-				   "Another area trigger has zone " + std::to_string(area.id) +
-				           ": which of the two the game's triggers and actions take is not known.",
+				   "An earlier area trigger has zone " + std::to_string(area.id) +
+				           ": the game's resolver takes the first area of an id, so no trigger or action names this "
+				           "one.",
 				   "id");
 			else
 				first.emplace(area.id, row);

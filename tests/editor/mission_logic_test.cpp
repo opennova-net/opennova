@@ -130,6 +130,21 @@ int test_forms() {
 	TEST_EXPECT(logic_form(m, f.action, names, form));
 	TEST_EXPECT(form.action && same(form.type_words, "Re-arm event") && form.params.size() == 1 &&
 	            same(form.params[0].words, "event 2"));
+	// A type the dispatcher knows whose sub-type selects nothing is no unknown type (S15 review m15).
+	Fixture g;
+	TEST_EXPECT(g.load());
+	Edit no_change;
+	no_change.address = g.action;
+	no_change.field = "action_type";
+	no_change.value = int64_t(bms::ActionType::ChangeGroupAI);
+	Edit sub_zero = no_change;
+	sub_zero.field = "action_sub_type";
+	sub_zero.value = int64_t(0);
+	TEST_EXPECT(g.apply({no_change, sub_zero}));
+	LogicForm unchanged;
+	const DocumentMissionNames g_names(as_mission(*g.document));
+	TEST_EXPECT(logic_form(as_mission(*g.document), g.action, g_names, unchanged) && !unchanged.type &&
+	            same(unchanged.type_words, "Change group AI: no change (sub-type 0 does nothing)"));
 	// Neither an event nor an entity has a record form.
 	TEST_EXPECT(!logic_form(m, f.first, names, form) && !logic_form(m, f.walker, names, form));
 	// The event's form: its parts, its flags, its steps and what it holds of the most.
@@ -157,14 +172,14 @@ int test_add_and_limit() {
 	TEST_EXPECT(f.apply(edits));
 	TEST_EXPECT(f.count(f.second, MissionKind::Trigger) == 2);
 	TEST_EXPECT(same(m.record_title(f.second),
-	                 "When event 1 has fired and SSN 0 (no entity has it) is destroyed, then, after 5.1 s, kill group 2."));
+	                 "Event 2: When event 1 has fired and SSN 0 (no entity has it) is destroyed, then, after 5.1 s, kill group 2."));
 	TEST_EXPECT(f.document->can_undo());
 	// A sub-goal's action takes its kinds' defaults: the first sub-goal.
 	const LogicType *won = logic_type(true, int32_t(bms::ActionType::SubGoalWon), 0);
 	TEST_EXPECT(won && logic_add_edits(m, f.second.row, *won, 0, edits, refusal));
 	TEST_EXPECT(f.apply(edits));
 	TEST_EXPECT(same(m.record_title(f.second),
-	                 "When event 1 has fired and SSN 0 (no entity has it) is destroyed, then, after 5.1 s, win sub-goal 1; kill "
+	                 "Event 2: When event 1 has fired and SSN 0 (no entity has it) is destroyed, then, after 5.1 s, win sub-goal 1; kill "
 	                 "group 2."));
 	// Twenty triggers: the event's form and the add say so before the edit.
 	const LogicType *alive = logic_type(false, int32_t(bms::TriggerMainType::Single), 5);
@@ -213,14 +228,14 @@ int test_retype_move_negate() {
 	const LogicType *alive = logic_type(false, int32_t(bms::TriggerMainType::Single), 5);
 	TEST_EXPECT(logic_add_edits(m, f.first.row, *alive, SIZE_MAX, edits, refusal) && f.apply(edits));
 	TEST_EXPECT(logic_join_edit(m, f.trigger, LogicJoin::Or, edit) && f.apply({edit}));
-	TEST_EXPECT(same(m.record_title(f.first), "When " + walker + " is not in Zone 20 or SSN 0 (no entity has it) is alive, then re-arm event 2."));
+	TEST_EXPECT(same(m.record_title(f.first), "Event 1: When " + walker + " is not in Zone 20 or SSN 0 (no entity has it) is alive, then re-arm event 2."));
 	// The action moved to event 2 (added there with its fields, removed here: one step), then back.
 	const std::string before = f.document->serialize().text;
 	TEST_EXPECT(logic_move_edits(m, f.action, f.second.row, SIZE_MAX, edits, refusal));
 	TEST_EXPECT(edits.back().operation == EditOperation::Remove);
 	TEST_EXPECT(f.apply(edits));
 	TEST_EXPECT(f.count(f.first, MissionKind::Action) == 0 && f.count(f.second, MissionKind::Action) == 2);
-	TEST_EXPECT(same(m.record_title(f.second), "When event 1 has fired, then, after 5.1 s, kill group 2; re-arm event 2."));
+	TEST_EXPECT(same(m.record_title(f.second), "Event 2: When event 1 has fired, then, after 5.1 s, kill group 2; re-arm event 2."));
 	f.document->undo();
 	f.refresh();
 	TEST_EXPECT(f.document->serialize().text == before);
@@ -230,7 +245,7 @@ int test_retype_move_negate() {
 	TEST_EXPECT(logic_move_edits(m, f.action, f.first.row, 1, edits, refusal) && edits.size() == 1 &&
 	            edits[0].operation == EditOperation::Move && f.apply(edits));
 	TEST_EXPECT(same(m.record_title(f.first).substr(m.record_title(f.first).find(", then")),
-	                 ", then end the round: the blue team wins; re-arm event 2."));
+	                 ", then end the round: the blue team (team 1) wins; re-arm event 2."));
 	return 0;
 }
 
@@ -317,7 +332,7 @@ int test_wire() {
 	const JsonValue answer = session.handle_json(request);
 	session.run_operations();
 	TEST_EXPECT(answer.get_bool("ok", false));
-	TEST_EXPECT(same(m.record_title({event->id, event->kind, 0}), "When event 1 has fired, then, after 5.1 s, kill group 2; show text 0."));
+	TEST_EXPECT(same(m.record_title({event->id, event->kind, 0}), "Event 2: When event 1 has fired, then, after 5.1 s, kill group 2; show text 0."));
 	const JsonValue unknown = ask("mission_logic", "{\"path\": \"missions/logic.bms\", \"op\": \"add\", \"id\": " + id +
 	                                                   ", \"list\": \"action\", \"type\": 29}");
 	TEST_EXPECT(unknown.is_null());

@@ -131,7 +131,9 @@ constexpr TriggerRow kTriggers[] = {
 	{kVariable, 4, "Variable is at most", kLogic, "A mission variable is less than or equal to a number.", "{1} [is|is not] at most {2}"},
 	{kVariable, 5, "Variable is at least", kLogic, "A mission variable is greater than or equal to a number.", "{1} [is|is not] at least {2}"},
 	// The load parity: 0 at a session's first load, 1 after a restart [orig: cat 5 @0x453B24; D-EVT-3].
-	{kSecond, 0, "Second time through", kLogic, "The mission was restarted (the game flips this at each load: the first play reads false).",
+	{kSecond, 0, "Second time through", kLogic,
+	 "The game flips this at every mission load of the session, a campaign's next mission too: the first load reads false, the "
+	 "second true, the third false again.",
 	 "it [is|is not] the second time through"},
 	// Teammate [orig: cat 6: sub 1 @0x453b53, @0x453b67; subs 2 and 3 both the heli-lift count @0x453b42].
 	{kTeammate, 1, "Teammates are on", kMates, "Single player with the teammates option on (never in a multiplayer session).",
@@ -149,12 +151,16 @@ constexpr TriggerRow kTriggers[] = {
 	{kPlayerType, 37, "Satchel charge in an area", kPlace, "A placed satchel charge lies inside the area.",
 	 "a satchel charge [lies|does not lie] in {1}"},
 	{kPlayerType, 36, "Player has left the mission area", kPlace,
-	 "The player has been outside every mission area for at least this long (counted in 1.02 s steps).",
+	 "The player has been outside every mission area for at least this many steps of 64 ticks (about 1.02 s each).",
 	 "the player [has|has not] been outside the mission area for {1}"},
 	{kPlayerType, 34, "Dialog is not playing", kDialog, "The dialog is not among those playing now.", "{1} [is not|is] playing"},
 	{kPlayerType, 35, "Dialog has played", kDialog, "The dialog has played and is not playing now.",
 	 "{1} [has played and finished|has not played to its end]"},
-	{kPlayerType, 18, "Player is berserk", kPlayer, "The local player's berserk AI bit is set.", "the player [is|is not] berserk"},
+	// The bit is answered raw, 0x200, and the chain folds it bitwise [section 1.3].
+	{kPlayerType, 18, "Player is berserk", kPlayer,
+	 "The local player's berserk AI bit is set. The game reads it as a raw 0x200: negated it is always true, and-joined with "
+	 "a true trigger never true, or-else-joined it acts as or.",
+	 "the player [is|is not] berserk"},
 	{kPlayerType, 19, "Player chose first person", kPlayer, "The player pressed the first-person view key since the last check.",
 	 "the player [has|has not] chosen the first-person view"},
 	{kPlayerType, 20, "Player chose third person", kPlayer, "The player pressed the chase view key since the last check.",
@@ -212,9 +218,13 @@ constexpr ActionRow kActions[] = {
 	 "Shows (with its directive and the new-objective sound) or hides a win objective on the player's list.", ""},
 	{t(A::ShowLoseSubgoal), "Show or hide a lose objective", kGoals,
 	 "Shows (with its directive) or hides a lose objective on the player's list.", ""},
-	{t(A::BlueWin), "Blue team wins", kGoals, "Ends the round, the blue team (team 1) the winner.", "end the round: the blue team wins"},
-	{t(A::RedWin), "Red team wins", kGoals, "Ends the round, the red team (team 2) the winner.", "end the round: the red team wins"},
-	{t(A::GreenWin), "Round ends with no winner", kGoals, "Ends the round, team 0 the winner.", "end the round: team 0 wins"},
+	// [orig: Server_ProcessRoundEnd(1/2/0); docs/world/world-wac-ai-re.md 20.1: 1 = blue, 0 = green]
+	{t(A::BlueWin), "Blue team wins", kGoals, "Ends the round, the blue team (team 1) the winner.",
+	 "end the round: the blue team (team 1) wins"},
+	{t(A::RedWin), "Red team wins", kGoals, "Ends the round, the red team (team 2) the winner.",
+	 "end the round: the red team (team 2) wins"},
+	{t(A::GreenWin), "Green team wins", kGoals, "Ends the round, the green team (team 0) the winner.",
+	 "end the round: the green team (team 0) wins"},
 	{t(A::OutputText), "Show text", kText, "Shows a line of the mission's Triggered Text on the HUD.", ""},
 	{t(A::PlayWavList), "Play dialog", kText,
 	 "Plays a dialog of the mission's bank; after the round is over only when Always is on.", ""},
@@ -402,19 +412,18 @@ std::string param_word(ParamKind kind, int64_t value, const MissionNames &names)
 	case K::Zone: return names.zone(value);
 	case K::Event: return names.event(value);
 	case K::Path: return names.path(value);
-	case K::PathNode: return value == -1 ? "the nearest waypoint" : "waypoint " + number(value);
+	case K::PathNode:
+		// A waypoint trigger's stop, by the game's number (0 the first): the bit of the visited word, which
+		// holds stops 0 to 31 [section 3a]. (A Redirect's node is worded by redirect_words.)
+		return value >= 0 && value < 32 ? "stop " + number(value)
+		                                : "stop " + number(value) + " (never recorded: the game keeps stops 0 to 31)";
 	case K::MissionVar: return "variable " + number(value);
 	case K::Dialog: return "dialog " + number(value);
 	case K::DistanceM: return number(value) + " m";
 	case K::Seconds: return number(value) + " s";
 	case K::SpeedKph: return number(value) + " km/h";
 	case K::Bool: return value ? "on" : "off";
-	case K::Team: {
-		// [orig editor: Med_ParamTeam @0x449a90: 0 neutral, 1 good, 2 evil]
-		const mission::MissionChoices choices = mission::param_choices(kind);
-		const char *name = mission::mission_choice_name(choices.rows, choices.count, value);
-		return name ? std::string("the ") + name + " team (team " + number(value) + ")" : "team " + number(value);
-	}
+	case K::Team: return team_words(value);
 	case K::SubGoal: return "sub-goal " + number(value);
 	case K::HudTimer: return "HUD item " + number(value);
 	case K::LightChannel: return "light channel " + number(value);
@@ -496,12 +505,19 @@ std::string redirect_words(const bms::Action &action, const MissionNames &names,
 	const int64_t path = action.param2;
 	if (path == 0) return "stop " + subject + " (no path)";
 	if (mission::path_command_names_entity(path)) {
-		const char *seat = path == 123 ? " (as a passenger)" : path == 124 ? " (any seat but the driver's)" : " (any seat)";
+		// [world-wac-ai-re.md 9.1: 123 admits the passenger seats alone, 124 every seat but the controller's
+		// (the driver's, weighted lowest, is taken first), 125 any]
+		const char *seat = path == 123 ? " (a passenger seat)" : path == 124 ? " (any seat but the controller's)" : " (any seat)";
 		return "send " + subject + " to board " + names.entity(action.param3) + seat;
 	}
-	if (path == 126) return "send " + subject + " to its group (Goto group)";
-	if (path == 127) return "send " + subject + " to the player";
-	return "send " + subject + " along " + names.path(path) + ", from " + param_word(K::PathNode, action.param3, names);
+	// [world-wac-ai-re.md 3.2: 126 parks the walk within 10 m @ 0x4baabd; the rest is not witnessed]
+	if (path == 126)
+		return "send " + subject + " on command 126 (Goto group): it holds within 10 m; what else it does is unknown";
+	if (path == 127) return "send " + subject + " to follow the player";
+	// The Redirect's node: -1 the nearest, else the stop by its number from 0 [world-wac-ai-re.md: only
+	// node -1 requests the nearest, `Entity_SetWaypointByTeam @0x43CD20`].
+	return "send " + subject + " along " + names.path(path) + ", from " +
+	       (action.param3 == -1 ? std::string("the nearest stop") : "stop " + number(action.param3));
 }
 
 } // namespace
@@ -517,23 +533,54 @@ std::string MissionNames::zone(int64_t id) const { return "zone " + number(id); 
 
 std::string MissionNames::group(int64_t group) const { return group == 0 ? "no group" : "group " + number(group); }
 
-std::string MissionNames::path(int64_t number_) const {
+const char *path_command_words(int64_t number_) {
+	// As the game acts on them [docs/world/world-wac-ai-re.md 3.2, 9.1: the board order's seat admit term
+	// `(cmd != 124 || type != ctrlx) && (cmd != 123 || type == sitex)` @ 0x4353e6, the lowest weight
+	// winning (the controller's and the driver's seats lowest); 126 parks its walk within 10 m
+	// @ 0x4baabd; 127 follows the local player].
+	switch (number_) {
+	case 123: return "Goto SSN (passenger seat only)";
+	case 124: return "Goto SSN (not the controller seat)";
+	case 125: return "Goto SSN (any seat)";
+	case 126: return "Goto group";
+	case 127: return "Goto player";
+	default: return nullptr;
+	}
+}
+
+const char *path_command_editor_name(int64_t number_) {
 	// [orig editor: dfx2med Med_ParamWaypointList @0x449c60 names the commands]
 	switch (number_) {
-	case 0: return "no path";
 	case 123: return "Goto SSN (not driver, gunner)";
 	case 124: return "Goto SSN (not driver)";
 	case 125: return "Goto SSN (any)";
 	case 126: return "Goto group";
 	case 127: return "Goto player";
-	default: break;
+	default: return nullptr;
 	}
+}
+
+std::string MissionNames::path(int64_t number_) const {
+	if (number_ == 0) return "no path";
+	if (const char *command = path_command_words(number_)) return command;
 	return "path " + number(number_);
 }
 
 std::string MissionNames::event(int64_t index) const { return "event " + number(index + 1); }
 
 std::string MissionNames::text(const std::string &, const std::string &) const { return std::string(); }
+
+bool MissionNames::zone_resolves(int64_t) const { return true; }
+
+bool DocumentMissionNames::zone_resolves(int64_t id) const {
+	// The first area of the id; a missing one, or a flat box (x_min == x_max or y_min == y_max), does not
+	// resolve [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000, the scan @0x453077, the box test
+	// @0x453093; section 7.3].
+	const Node *row = document_.row(document_.zone_holder(id));
+	if (!row) return false;
+	const bms::AreaTrigger &area = static_cast<const AreaRow &>(*row).native;
+	return area.x_min != area.x_max && area.y_min != area.y_max;
+}
 
 std::string DocumentMissionNames::entity(int64_t ssn) const {
 	// The player's SSN names no record of the file [bms-event-runtime-re.md 7.3].
@@ -581,11 +628,48 @@ const char *logic_join_words(LogicJoin join) {
 	return "and";
 }
 
+bool trigger_ssn_unrecorded(const bms::Trigger &trigger, int slot) {
+	// The sees, targeted and shot records and the visited words keyed by an SSN hold rows 0 to 127: the
+	// setters skip any other [orig: the row bound-checks @0x452b60, @0x452bf0; section 3a]: the single's
+	// subs 1, 2, 13 (its p1) and 7 (the visited A word, its p1), 15 to 17 (both); the group's 15 to 17
+	// (the entity, p2).
+	const int32_t main = int32_t(trigger.main_type), sub = trigger.sub_type;
+	const bool relation = sub == 15 || sub == 16 || sub == 17;
+	bool keyed = false;
+	if (main == kGroup) keyed = relation && slot == 1;
+	if (main == kSingle) keyed = (relation && (slot == 0 || slot == 1)) || ((sub == 1 || sub == 2 || sub == 13 || sub == 7) && slot == 0);
+	if (!keyed) return false;
+	const int64_t ssn = param_of(trigger, slot);
+	return ssn < 0 || ssn >= 128;
+}
+
 std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names) {
 	const int32_t main = int32_t(trigger.main_type);
 	const bool negated = trigger.is_negated();
-	const auto word = [&](int slot) { return param_word(mission::trigger_param_kind(trigger, slot), param_of(trigger, slot), names); };
-	if (const TriggerRow *row = trigger_row(main, trigger.sub_type)) return fill(row->words, negated, std::string(), word);
+	const int32_t sub = trigger.sub_type;
+	const auto word = [&](int slot) {
+		// The AWOL counter counts 64-tick steps, not seconds [D-EVT-2]: its time as they come to.
+		if (main == kPlayerType && sub == 36 && slot == 0) {
+			char text[32];
+			std::snprintf(text, sizeof(text), "%.1f s", logic_units_seconds(param_of(trigger, slot)));
+			return std::string(text);
+		}
+		std::string out = param_word(mission::trigger_param_kind(trigger, slot), param_of(trigger, slot), names);
+		if (trigger_ssn_unrecorded(trigger, slot)) out += " (never recorded: the game keeps SSNs below 128)";
+		return out;
+	};
+	if (const TriggerRow *row = trigger_row(main, sub)) {
+		std::string out = fill(row->words, negated, std::string(), word);
+		// An area trigger naming a zone that does not resolve is dropped at the mission's start: it reads
+		// false, so negated it reads true [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000; section 7.3].
+		const int zone_slot = (main == kGroup || main == kSingle) && sub == 10 ? 1 : main == kPlayerType && sub == 37 ? 0 : -1;
+		if (zone_slot >= 0 && !names.zone_resolves(param_of(trigger, zone_slot)))
+			out += negated ? " (always true in the game: it drops a trigger whose area does not resolve, and reads it false)"
+			               : " (never true in the game: it drops a trigger whose area does not resolve)";
+		// The berserk bit is read raw, 0x200, so negated (0x201) it is always true [section 1.3].
+		if (main == kPlayerType && sub == 18 && negated) out += " (always true in the game: it reads the berserk bit as a raw 0x200)";
+		return out;
+	}
 	// A type the evaluator has no case for reads false [orig: EventTrigger_EvaluateCondition's default],
 	// a main type 0 the load's neutered zone reference among them.
 	std::string out;
@@ -658,8 +742,9 @@ std::string action_words(const bms::Action &action, const MissionNames &names, c
 	case A::Teammates:
 		// [orig: EventAction_Dispatch case 39: 1 HeliLift_SpawnPickup, 2 HeliLift_SpawnFlyover, any other none]
 		switch (sub) {
-		case 1: return "call a medevac for " + word(0) + " to the markers numbered " + number(action.param2);
-		case 2: return "call a flyover for " + word(0) + " to the markers numbered " + number(action.param2);
+		// [section 7.5: the first pool-3 type-6088 marker of the number]
+		case 1: return "call a medevac for " + word(0) + " to the first teleport marker numbered " + number(action.param2);
+		case 2: return "call a flyover for " + word(0) + " to the first teleport marker numbered " + number(action.param2);
 		default: return "do nothing (teammate call " + number(sub) + " has no effect)";
 		}
 	default: break;
@@ -668,10 +753,17 @@ std::string action_words(const bms::Action &action, const MissionNames &names, c
 		// [orig: Entity_HandleAlertCommand @0x43CF10, Entity_KillTeamInBounds @0x43D030, Entity_HandleAlertStateEvent
 		// @0x43DEE0: sub-type 0 does nothing]
 		std::string subject = word(0);
+		const bool area = action.action_type == A::AreaAiRed || action.action_type == A::AreaAiBlue;
 		if (action.action_type == A::AreaAiRed) subject = "the red team's soldiers in " + names.zone(action.param1);
 		if (action.action_type == A::AreaAiBlue) subject = "the blue team's soldiers in " + names.zone(action.param1);
+		// An area action naming a zone that does not resolve is dropped at the mission's start, and the load
+		// writes the area's box over the action's third and fourth values, which the command then reads
+		// [orig: EventTrigger_ResolveZoneActionRefs @0x453100, @0x4531B1 / @0x4531C6; section 7.3].
+		if (area && !names.zone_resolves(action.param1))
+			return "do nothing (the game drops this action: no area resolves zone " + number(action.param1) + ")";
+		const auto area_word = [&](int slot) { return area && slot >= 2 ? std::string("(a value of the area's box)") : word(slot); };
 		if (sub == 0) return "do nothing to " + subject + " (no AI change)";
-		if (const AiRow *row = ai_row(sub)) return fill(row->words, false, subject, word);
+		if (const AiRow *row = ai_row(sub)) return fill(row->words, false, subject, area_word);
 		return "apply AI command " + number(sub) + " to " + subject + " (what it does is unknown)";
 	}
 	if (const ActionRow *row = action_row(type); row && *row->words) return fill(row->words, false, std::string(), word);
@@ -690,6 +782,16 @@ std::string seconds_words(int64_t units) {
 
 } // namespace
 
+bool logic_steps_wrap(int64_t steps) { return steps > kLogicStepsUnwrapped; }
+
+std::string logic_steps_words(int64_t steps) {
+	// The countdown is the steps << 6 in a word the game tests as signed after each 64-tick decrement:
+	// past 512 steps it is negative after the first one, so it ends on the next pass [orig:
+	// EventTrigger_UpdateEntry @0x454cef, @0x454d40; bms-event-runtime-re.md 1.2].
+	if (logic_steps_wrap(steps)) return "about " + seconds_words(1) + " (past 512 steps the game's countdown wraps)";
+	return seconds_words(steps);
+}
+
 EventWords event_words(const mission::EventChain &chain, const MissionNames &names, const bms::Header *header) {
 	EventWords out;
 	const uint32_t flags = uint32_t(chain.event.flags);
@@ -698,35 +800,76 @@ EventWords event_words(const mission::EventChain &chain, const MissionNames &nam
 	// The chain's fold: flat, left to right, each join the previous trigger's [orig:
 	// EventTrigger_EvaluateChain @0x454050]: a join other than the one before it holds what came before
 	// it together.
+	// The berserk trigger answers a raw 0x200 the fold keeps bitwise [section 1.3]: an and of it with a true
+	// trigger reads 0, an or else of it reads true whatever the other is (an or). `raw`: the fold so far may
+	// hold that bit.
+	const auto plain_berserk = [](const bms::Trigger &trigger) {
+		return int32_t(trigger.main_type) == kPlayerType && trigger.sub_type == 18 && !trigger.is_negated();
+	};
 	std::string condition;
 	LogicJoin last = LogicJoin::And;
 	bool joined = false;
+	bool raw = false;
 	for (size_t i = 0; i < chain.triggers.size(); ++i) {
 		const std::string words = trigger_words(chain.triggers[i], names);
+		const bool berserk = plain_berserk(chain.triggers[i]);
 		if (i == 0) {
 			condition = words;
+			raw = berserk;
 			continue;
 		}
 		const LogicJoin join = trigger_join(chain.triggers[i - 1]);
 		if (joined && join != last) condition = "(" + condition + ")";
-		if (join == LogicJoin::Xor) condition = "either " + condition + " or else " + words + " (not both)";
-		else condition += std::string(" ") + logic_join_words(join) + " " + words;
+		if (join == LogicJoin::Xor) {
+			condition = "either " + condition + " or else " + words +
+			            (raw || berserk ? " (in the game either or both: it reads berserk as a raw 0x200)" : " (not both)");
+			raw = raw || berserk;
+		} else {
+			condition += std::string(" ") + logic_join_words(join) + " " + words;
+			if (join == LogicJoin::And && raw != berserk)
+				condition += " (never true in the game: it reads berserk as a raw 0x200, which an and with a true trigger clears)";
+			raw = join == LogicJoin::And ? raw && berserk : raw || berserk;
+		}
 		last = join;
 		joined = true;
 	}
-	if (pre) out.when = condition.empty() ? "At the mission's start" : "At the mission's start, if " + condition;
+	// A start event is checked once by the PreMission pass, an end event once by the PostMission pass, and
+	// the normal pass skips both [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0, UpdateAllWithFlag4
+	// @0x454e00; the quarter pass @0x454d50 takes (flags & 6) == 0; bms-event-runtime-re.md 1.6]. One with
+	// both bits is checked by both: at the end again only if its latch is clear (it did not fire at the
+	// start, or it repeats with no wait, which clears the latch as it fires [1.2]).
+	const bool repeats = (flags & uint32_t(bms::EventFlags::ResetAfter)) != 0;
+	if (pre && post) {
+		const bool again = repeats && chain.event.reset_after == 0;
+		out.when = again ? "At the mission's start and again at its end"
+		                 : "At the mission's start, and at its end if it did not fire then";
+		if (!condition.empty()) out.when += ", if " + condition;
+	} else if (pre) out.when = condition.empty() ? "At the mission's start" : "At the mission's start, if " + condition;
 	else if (post) out.when = condition.empty() ? "At the mission's end" : "At the mission's end, if " + condition;
 	else out.when = condition.empty() ? "Right away" : "When " + condition;
 	for (size_t i = 0; i < chain.actions.size(); ++i)
 		out.then += (i ? "; " : "") + action_words(chain.actions[i], names, header);
 	if (out.then.empty()) out.then = "nothing";
-	// The delay: the actions wait its units after the triggers hold [orig: @0x454c30, the reload armed
-	// from +18]; the repeat: the chain is checked again its units after it fired [orig: the cooldown
-	// armed from +14 when bit 0 is set; 0 checks again at the next pass].
-	if (chain.event.delay > 0) out.delay = "after " + seconds_words(chain.event.delay);
-	if (flags & uint32_t(bms::EventFlags::ResetAfter))
-		out.repeat = chain.event.reset_after > 0 ? "Checked again " + seconds_words(chain.event.reset_after) + " after it fires."
-		                                         : "Checked again each pass after it fires.";
+	// The delay: the actions run its steps after the triggers hold [orig: @0x454c30, the reload armed from
+	// +18]; past 512 steps the countdown wraps and ends on the next pass (logic_steps_words). A start or
+	// end event is never processed again after its one check, so a delay there never ends: its actions
+	// never run [1.2, 1.6].
+	const bool once = pre || post;
+	if (chain.event.delay > 0)
+		out.delay = once ? std::string("never (a start or end event is checked once, so its wait never ends)")
+		                 : "after " + logic_steps_words(chain.event.delay);
+	// The repeat: the cooldown is armed in the call that latches, so it counts from when the triggers held;
+	// its end clears the latch and the chain is checked on the pass after [orig: the cooldown armed from +14
+	// when bit 0 is set, decremented with the delay; 0 clears the latch at once]. A start or end event's
+	// cooldown is never counted down: it is never checked again by it.
+	if (repeats && !once) {
+		const int64_t reset = chain.event.reset_after;
+		const bool wraps = logic_steps_wrap(reset);
+		if (reset == 0) out.repeat = "Checked again each pass after its triggers held.";
+		else
+			out.repeat = "Checked again about " + seconds_words((wraps ? 1 : reset) + 1) + " after its triggers held" +
+			             (wraps ? " (past 512 steps the game's countdown wraps)." : ".");
+	}
 	out.sentence = out.when + ", " + (out.delay.empty() ? std::string("then ") : "then, " + out.delay + ", ") + out.then + ".";
 	if (!out.repeat.empty()) out.sentence += " " + out.repeat;
 	return out;
@@ -780,6 +923,23 @@ std::vector<LogicType> make_types(bool actions) {
 const std::vector<LogicType> &logic_types(bool actions) {
 	static const std::vector<LogicType> triggers = make_types(false), all_actions = make_types(true);
 	return actions ? all_actions : triggers;
+}
+
+std::string team_words(int64_t team) {
+	// By the colour the round's end names it [orig: Server_ProcessRoundEnd, RedWin 2, BlueWin 1, GreenWin 0;
+	// docs/world/world-wac-ai-re.md 20.1; AreaAiRed team 2, AreaAiBlue team 1, Entity_KillTeamInBounds
+	// @0x43D03B]; the original editor's words for them (neutral, good, evil) are its own.
+	switch (team) {
+	case 0: return "the green team (team 0)";
+	case 1: return "the blue team (team 1)";
+	case 2: return "the red team (team 2)";
+	default: return "team " + number(team);
+	}
+}
+
+const char *logic_action_title(int32_t type) {
+	const ActionRow *row = action_row(type);
+	return row ? row->title : nullptr;
 }
 
 const LogicType *logic_type(bool action, int32_t type, int32_t sub) {

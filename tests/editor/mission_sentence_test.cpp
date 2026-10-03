@@ -100,11 +100,11 @@ int test_words() {
 	            "Hostage #10034 is not destroyed");
 	TEST_EXPECT(trigger_words(trigger(M::Single, 10, 10000, 3), names) == "the player is in Zone 3 (bridge)");
 	TEST_EXPECT(trigger_words(trigger(M::Group, 6, 4, 3), names) == "group 4 has lost 3 units or more");
-	TEST_EXPECT(trigger_words(trigger(M::Group, 7, 4, 5, -1), names) == "group 4 has passed the nearest waypoint of path 5");
+	TEST_EXPECT(trigger_words(trigger(M::Group, 7, 4, 5, -1), names) == "group 4 has passed stop -1 (never recorded: the game keeps stops 0 to 31) of path 5");
 	TEST_EXPECT(trigger_words(trigger(M::Single, 43, 10034, 2200, 25), names) == "Hostage #10034 is within 25 m of Truck #2200");
 	TEST_EXPECT(trigger_words(trigger(M::Event, 9, 2), names) == "event 3 has fired"); // the sub-type unread
 	TEST_EXPECT(trigger_words(trigger(M::MissionVariable, 3, 1, 5), names) == "variable 1 is greater than 5");
-	TEST_EXPECT(trigger_words(trigger(M::Player, 36, 30), names) == "the player has been outside the mission area for 30 s");
+	TEST_EXPECT(trigger_words(trigger(M::Player, 36, 30), names) == "the player has been outside the mission area for 30.7 s");
 	// Never a guess: a type no row names says so.
 	TEST_EXPECT(trigger_words(trigger(M::Single, 8, 10034), names) == "a trigger of unknown kind 8 (false)");
 	TEST_EXPECT(trigger_words(trigger(static_cast<M>(0), 0), names) == "a trigger of no type (false)");
@@ -114,12 +114,12 @@ int test_words() {
 	TEST_EXPECT(action_words(action(A::OutputText, 0, 4), names, nullptr) == "show text 4: 'Mission failed'");
 	TEST_EXPECT(action_words(action(A::OutputText, 0, 5), names, nullptr) == "show text 5");
 	TEST_EXPECT(action_words(action(A::KillSingle, 0, 10034), names, nullptr) == "kill Hostage #10034");
-	TEST_EXPECT(action_words(action(A::ChangeGTeamAction, 0, 4, 2), names, nullptr) == "move group 4 to the Evil team (team 2)");
+	TEST_EXPECT(action_words(action(A::ChangeGTeamAction, 0, 4, 2), names, nullptr) == "move group 4 to the red team (team 2)");
 	TEST_EXPECT(action_words(action(A::MisvarChange, 2, 1, 7), names, nullptr) == "add 7 to variable 1");
 	TEST_EXPECT(action_words(action(A::MisvarChange, 4, 1, 7), names, nullptr) == "add 1 to variable 1");
 	// A Redirect: a path from a stop, or a command naming an entity [world-wac-ai-re.md 11].
 	TEST_EXPECT(action_words(action(A::RedirectGroupTo, 0, 4, 5, 2), names, nullptr) ==
-	            "send group 4 along path 5, from waypoint 2");
+	            "send group 4 along path 5, from stop 2");
 	TEST_EXPECT(action_words(action(A::RedirectSingleTo, 0, 10034, 125, 2200), names, nullptr) ==
 	            "send Hostage #10034 to board Truck #2200 (any seat)");
 	TEST_EXPECT(action_words(action(A::RedirectSingleTo, 0, 10034, 0, 0), names, nullptr) == "stop Hostage #10034 (no path)");
@@ -167,20 +167,91 @@ int test_sentences() {
 	// No trigger: at once; the flags, the delay and the repeat in words (a unit is 64 ticks: 1.024 s).
 	chain.triggers.clear();
 	chain.actions = {action(A::BlueWin)};
-	TEST_EXPECT(event_sentence(chain, names, nullptr) == "Right away, then end the round: the blue team wins.");
+	TEST_EXPECT(event_sentence(chain, names, nullptr) == "Right away, then end the round: the blue team (team 1) wins.");
 	chain.event.flags = bms::EventFlags::PreMission;
-	TEST_EXPECT(event_sentence(chain, names, nullptr) == "At the mission's start, then end the round: the blue team wins.");
+	TEST_EXPECT(event_sentence(chain, names, nullptr) == "At the mission's start, then end the round: the blue team (team 1) wins.");
 	chain.event.flags = bms::EventFlags::ResetAfter;
 	chain.event.delay = 5;
 	chain.event.reset_after = 10;
 	chain.triggers = {trigger(M::Single, 5, 10034)};
 	const EventWords words = event_words(chain, names, nullptr);
 	TEST_EXPECT(words.when == "When Hostage #10034 is alive" && words.delay == "after 5.1 s" &&
-	            words.repeat == "Checked again 10.2 s after it fires.");
+	            words.repeat == "Checked again about 11.3 s after its triggers held.");
 	TEST_EXPECT(words.sentence ==
-	            "When Hostage #10034 is alive, then, after 5.1 s, end the round: the blue team wins. Checked again 10.2 s after it "
-	            "fires.");
+	            "When Hostage #10034 is alive, then, after 5.1 s, end the round: the blue team (team 1) wins. Checked again about "
+	            "11.3 s after its triggers held.");
 	TEST_EXPECT(logic_units_seconds(1) == 1.024);
+	return 0;
+}
+
+// The game's reading where it differs from what the records seem to say (S15 review): a delay or a
+// repeat past 512 steps wraps and ends on the next pass [bms-event-runtime-re.md 1.2]; a start or end
+// event's delay never ends and its repeat never counts [1.6]; both passes; berserk's raw 0x200 [1.3];
+// command 124's seats and 126's unknown rest [world-wac-ai-re.md 3.2, 9.1]; the green team's win; the
+// stops by the game's number, a visited stop past 31 never recorded [3a]; an SSN of 128 or more never
+// recorded by the sees, targeted, shot and visited records [3a]; the teammate's marker [7.5].
+int test_game_reading() {
+	const Names names;
+	using M = bms::TriggerMainType;
+	using A = bms::ActionType;
+	mission::EventChain chain{};
+	chain.triggers = {trigger(M::Single, 5, 10034)};
+	chain.actions = {action(A::KillSingle, 0, 10034)};
+	chain.event.delay = 600;
+	TEST_EXPECT(same(event_words(chain, names, nullptr).delay, "after about 1.0 s (past 512 steps the game's countdown wraps)"));
+	chain.event.delay = 512;
+	TEST_EXPECT(same(event_words(chain, names, nullptr).delay, "after 524.3 s"));
+	TEST_EXPECT(logic_steps_wrap(513) && !logic_steps_wrap(512) && logic_steps_words(0) == "0.0 s");
+	chain.event.delay = 0;
+	chain.event.flags = bms::EventFlags::ResetAfter;
+	chain.event.reset_after = 700;
+	TEST_EXPECT(same(event_words(chain, names, nullptr).repeat,
+	                 "Checked again about 2.0 s after its triggers held (past 512 steps the game's countdown wraps)."));
+	chain.event.reset_after = 0;
+	TEST_EXPECT(same(event_words(chain, names, nullptr).repeat, "Checked again each pass after its triggers held."));
+	// A start event: its wait never ends, its repeat never counts; both passes worded.
+	chain.event.flags = bms::EventFlags(uint32_t(bms::EventFlags::PreMission) | uint32_t(bms::EventFlags::ResetAfter));
+	chain.event.delay = 5;
+	chain.event.reset_after = 10;
+	const EventWords start = event_words(chain, names, nullptr);
+	TEST_EXPECT(same(start.delay, "never (a start or end event is checked once, so its wait never ends)") && start.repeat.empty());
+	chain.event.flags = bms::EventFlags(uint32_t(bms::EventFlags::PreMission) | uint32_t(bms::EventFlags::PostMission));
+	chain.event.delay = 0;
+	TEST_EXPECT(same(event_words(chain, names, nullptr).when,
+	                 "At the mission's start, and at its end if it did not fire then, if Hostage #10034 is alive"));
+	// Berserk: negated always true; and-joined with a true trigger never; or-else-joined an or.
+	chain.event = {};
+	TEST_EXPECT(same(trigger_words(trigger(M::Player, 18, 0, 0, 0, bms::Trigger::kConditionNegated), names),
+	                 "the player is not berserk (always true in the game: it reads the berserk bit as a raw 0x200)"));
+	chain.triggers = {trigger(M::Player, 18), trigger(M::Single, 5, 10034)};
+	TEST_EXPECT(event_words(chain, names, nullptr).when.find("never true in the game") != std::string::npos);
+	chain.triggers = {trigger(M::Player, 18, 0, 0, 0, bms::Trigger::kConditionXor), trigger(M::Single, 5, 10034)};
+	TEST_EXPECT(event_words(chain, names, nullptr).when.find("in the game either or both") != std::string::npos);
+	// The board commands by their seats; 126's witnessed hold alone; the green team's win.
+	TEST_EXPECT(same(action_words(action(A::RedirectSingleTo, 0, 10034, 124, 2200), names, nullptr),
+	                 "send Hostage #10034 to board Truck #2200 (any seat but the controller's)"));
+	TEST_EXPECT(same(action_words(action(A::RedirectSingleTo, 0, 10034, 126, 0), names, nullptr),
+	                 "send Hostage #10034 on command 126 (Goto group): it holds within 10 m; what else it does is unknown"));
+	TEST_EXPECT(same(action_words(action(A::RedirectGroupTo, 0, 4, 5, -1), names, nullptr), "send group 4 along path 5, from the nearest stop"));
+	TEST_EXPECT(names.path(124) == "Goto SSN (not the controller seat)" && std::string(path_command_editor_name(124)) == "Goto SSN (not driver)");
+	TEST_EXPECT(same(action_words(action(A::GreenWin), names, nullptr), "end the round: the green team (team 0) wins"));
+	// Stops by the game's number; a visited stop past 31 and an SSN of 128 or more never recorded.
+	TEST_EXPECT(same(trigger_words(trigger(M::Single, 7, 12, 5, 8), names), "SSN 12 has passed stop 8 of path 5"));
+	TEST_EXPECT(same(trigger_words(trigger(M::Single, 7, 12, 5, 40), names),
+	                 "SSN 12 has passed stop 40 (never recorded: the game keeps stops 0 to 31) of path 5"));
+	TEST_EXPECT(same(trigger_words(trigger(M::Single, 16, 10034, 12), names),
+	                 "Hostage #10034 (never recorded: the game keeps SSNs below 128) has seen SSN 12"));
+	TEST_EXPECT(trigger_ssn_unrecorded(trigger(M::Group, 16, 4, 200), 1) && !trigger_ssn_unrecorded(trigger(M::Group, 16, 4, 20), 1) &&
+	            !trigger_ssn_unrecorded(trigger(M::Single, 4, 10034), 0));
+	// The teammate's marker; an area action's box values; an action type whose sub-type selects nothing.
+	TEST_EXPECT(same(action_words(action(A::Teammates, 1, 10034, 3), names, nullptr),
+	                 "call a medevac for Hostage #10034 to the first teleport marker numbered 3"));
+	bms::Action engage = action(A::AreaAiRed, 42, 3, 50, 90);
+	const std::string engaged = action_words(engage, names, nullptr);
+	TEST_EXPECT(engaged.rfind("set the red team's soldiers in Zone 3 (bridge)'s engage distance to 50", 0) == 0 &&
+	            engaged.find("to (a value of the area's box)") != std::string::npos);
+	TEST_EXPECT(std::string(logic_action_title(int32_t(A::ChangeGroupAI))) == "Change group AI" && !logic_action_title(29));
+	std::printf("game reading: wrapped and never-ending waits, berserk, the board seats, stops and SSNs never recorded\n");
 	return 0;
 }
 
@@ -207,8 +278,8 @@ int test_document_titles() {
 	const int32_t walker = static_cast<const EntityRow &>(*organics[0]).native.id;
 	const NodeAddress first{events[0]->id, k(MissionKind::Event), 0}, second{events[1]->id, k(MissionKind::Event), 0};
 	TEST_EXPECT(m.record_title(first) ==
-	            "When Organic #" + std::to_string(walker) + " is in Zone 20, then re-arm event 2.");
-	TEST_EXPECT(m.record_title(second) == "When event 1 has fired, then, after 5.1 s, kill group 2.");
+	            "Event 1: When Organic #" + std::to_string(walker) + " is in Zone 20, then re-arm event 2.");
+	TEST_EXPECT(m.record_title(second) == "Event 2: When event 1 has fired, then, after 5.1 s, kill group 2.");
 	// The record's name is still its kind and place (the graph's, Problems', the wire's).
 	TEST_EXPECT(m.record_name(first) == "Event 1");
 	// A trigger and an action by their words.
@@ -232,7 +303,7 @@ int test_document_titles() {
 	Diagnostic error;
 	TEST_EXPECT(document->apply({edit}, error));
 	TEST_EXPECT(m.record_title(first) ==
-	            "When Organic #" + std::to_string(walker) + " is in Zone 30 (mission area), then re-arm event 2.");
+	            "Event 1: When Organic #" + std::to_string(walker) + " is in Zone 30 (mission area), then re-arm event 2.");
 	return 0;
 }
 
@@ -278,7 +349,7 @@ int test_wire_and_problems() {
 	args.set("id", opennova::io::JsonValue::make_number(double(event->id)));
 	opennova::io::JsonValue answer = ask("record", args);
 	TEST_EXPECT(same(answer.get_string("name", ""), "Event 1"));
-	TEST_EXPECT(same(answer.get_string("title", ""), "When SSN 4321 (no entity has it) is in Zone 20, then re-arm event 2."));
+	TEST_EXPECT(same(answer.get_string("title", ""), "Event 1: When SSN 4321 (no entity has it) is in Zone 20, then re-arm event 2."));
 	args.set("id", opennova::io::JsonValue::make_number(double(trigger)));
 	answer = ask("record", args);
 	TEST_EXPECT(same(answer.get_string("title", ""), "SSN 4321 (no entity has it) is in Zone 20"));
@@ -418,6 +489,7 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	if (test_words() != 0) return 1;
 	if (test_sentences() != 0) return 1;
+	if (test_game_reading() != 0) return 1;
 	if (test_document_titles() != 0) return 1;
 	if (test_wire_and_problems() != 0) return 1;
 	if (test_types() != 0) return 1;

@@ -2041,8 +2041,11 @@ void test_problems_original() {
 	for (const char *name : {"mine.def", "shipped.def"})
 		editor_test::own(v.project.scan).entries.push_back(file_entry(name, std::string("defs/") + name, AssetKind::ItemDefs));
 	editor_test::own(v.project.scan).index();
+	// Missing textures: findings no build gates on (a gating one is never folded).
 	const auto add = [&v](DiagnosticSeverity severity, const char *message, const char *path) {
-		v.findings.diagnostics.push_back(editor_test::finding_of(severity, "catalog.ignored_input", message, path, "name"));
+		Diagnostic d = editor_test::finding_of(severity, "reference.missing", message, path, "name");
+		d.subject = ReferenceSubject{ReferenceKind::Texture, "skin.tga", std::string(), 0};
+		v.findings.diagnostics.push_back(d);
 	};
 	add(DiagnosticSeverity::Error, "Alpha: yours.", "defs/mine.def");
 	add(DiagnosticSeverity::Warning, "Bravo: yours too.", "defs/mine.def");

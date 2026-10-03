@@ -10,11 +10,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 
 #include <base/io/json.h>
 #include <editor/documents/mission_document.h>
+#include <editor/graph/asset_graph.h>
 #include <editor/documents/script_type.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/script_viewport.h>
@@ -125,6 +128,9 @@ int test_assist() {
 	completions = script_completions(view, *script, 3, 12);
 	const ScriptCompletion *walking = item(completions, std::to_string(walker));
 	TEST_EXPECT(walking && same(walking->detail, "Organic #" + std::to_string(walker)));
+	// The player first, by name: the game resolves SSN 10000 itself (S15 review m12).
+	TEST_EXPECT(!completions.items.empty() && same(completions.items[0].insert, "10000") &&
+	            same(completions.items[0].detail, "The player"));
 	// Typed letters find an entity by its words.
 	const std::string typed = "IF SSNdead orga\r\n";
 	{
@@ -159,6 +165,31 @@ int test_assist() {
 	TEST_EXPECT(script_hover(view, *script, 5, 12, hover) && hover.text.rfind("An entity: ", 0) == 0); // SSNarea's first: an SSN
 	TEST_EXPECT(script_hover(view, *script, 5, 15, hover) && same(hover.text, "An area: Zone 20."));
 	TEST_EXPECT(!script_definition(view, *script, 1, 3, go)); // a comment names nothing
+
+	// TT_ offers the keys of the table the mission reads: its own logic.bin where it has one, else
+	// medmssn.bin, never both [orig: TextResource_LoadMissionTextBin @0x51ed90] (S15 review m10).
+	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/";
+	TEST_EXPECT(editor_test::write_bytes(root + "/medmssn.bin", test_io::read_file(fixtures + "rtxt/synth_mission.bin")));
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/logic.bin", test_io::read_file(fixtures + "bms/synth_logic.bin")));
+	editor_test::handle_to_end(session, request::rescan());
+	std::set<std::string> own_keys;
+	std::string only_medmssn;
+	for (const GraphSymbol *symbol : view.findings.graph->symbols_of_kind(ReferenceKind::TextId))
+		if (symbol->scope.rfind("LOGIC.BIN/", 0) == 0) own_keys.insert(symbol->name);
+	for (const GraphSymbol *symbol : view.findings.graph->symbols_of_kind(ReferenceKind::TextId))
+		if (symbol->scope.rfind("MEDMSSN.BIN/", 0) == 0 && !own_keys.count(symbol->name)) only_medmssn = symbol->name;
+	TEST_EXPECT(!own_keys.empty() && !only_medmssn.empty());
+	const auto offers = [&](const std::string &key) {
+		const std::string line = "IF SSNdead TT_" + key;
+		for (const ScriptCompletion &each : script_completions(view, *script, 8, line.size() + 1, &line).items)
+			if (each.insert.size() >= key.size() && each.insert.compare(each.insert.size() - key.size(), key.size(), key) == 0)
+				return true;
+		return false;
+	};
+	TEST_EXPECT(offers(*own_keys.begin()) && !offers(only_medmssn));
+	std::filesystem::remove(root + "/missions/logic.bin");
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(offers(only_medmssn));
 
 	// The mission's script: found; one of another mission not yet made goes beside it.
 	MissionScript found = mission_script(view, "missions/logic.bms");

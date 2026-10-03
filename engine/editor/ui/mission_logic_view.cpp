@@ -169,9 +169,12 @@ void steps_field(Workspace &workspace, const MissionDocument &mission, const Nod
 	if (ImGui::IsItemDeactivatedAfterEdit()) window_requests::end_edit(workspace, mission.path());
 	ui_kit::tooltip(tip);
 	ImGui::SameLine();
-	char seconds[64];
-	std::snprintf(seconds, sizeof(seconds), "steps = %.1f s (0 to %lld)", logic_units_seconds(steps), (long long)most);
-	ImGui::TextDisabled("%s", seconds);
+	// What the steps come to in the game: past 512 the countdown wraps and ends on the next pass (S15).
+	const std::string seconds = "steps = " + logic_steps_words(steps) + " (0 to " + std::to_string(most) + ")";
+	if (logic_steps_wrap(steps))
+		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "%s", seconds.c_str());
+	else
+		ImGui::TextDisabled("%s", seconds.c_str());
 	ImGui::PopID();
 }
 
@@ -248,11 +251,20 @@ void event_form(Workspace &workspace, const MissionDocument &mission, NodeId eve
 	flag_box(workspace, mission, form.event, flags, int64_t(bms::EventFlags::PostMission), "Once, at the mission's end",
 	         "Checked once as the mission ends, after its soldiers, items and buildings are gone (the PostMission pass).");
 	flag_box(workspace, mission, form.event, flags, int64_t(bms::EventFlags::ResetAfter), "Repeats",
-	         "Checked again after it fires; without it, it fires once.");
-	const char *steps_tip = "In steps of 64 ticks, about 1.02 s each: the file holds 0 to 1023 of them.";
+	         "Checked again after its triggers held (the wait counts from then); without it, it fires once.");
+	const char *steps_tip = "In steps of 64 ticks, about 1.02 s each: the file holds 0 to 1023 of them, and past 512 the "
+	                        "game's countdown wraps and ends on the next pass.";
 	steps_field(workspace, mission, form.event, "Wait before acting", "delay", form.delay, form.most_steps, steps_tip);
 	if (form.repeats)
 		steps_field(workspace, mission, form.event, "Check again after", "reset_after", form.repeat, form.most_steps, steps_tip);
+	// A start or end event is checked once and never processed again: a wait never ends, and it is never
+	// checked again by its repeat [bms-event-runtime-re.md 1.2, 1.6].
+	const bool once = (flags & (int64_t(bms::EventFlags::PreMission) | int64_t(bms::EventFlags::PostMission))) != 0;
+	if (once && (form.delay > 0 || form.repeats)) {
+		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Warning));
+		ImGui::TextWrapped("%s", "A start or end event is checked once: its wait never ends and it is never checked again.");
+		ImGui::PopStyleColor();
+	}
 	ImGui::EndDisabled();
 	logic_list(workspace, mission, form, names, false, editable);
 	logic_list(workspace, mission, form, names, true, editable);
@@ -289,9 +301,13 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 	ImGui::SameLine();
 	const float room = ImGui::GetContentRegionAvail().x;
 	if (ui_kit::fitted_button(form.type_words, "type", room)) ImGui::OpenPopup("type");
-	ui_kit::tooltip((form.type ? std::string(form.type->group) + ": " + form.type->tip
-	                           : std::string("A type the game has no case for: it ") + (form.action ? "does nothing." : "reads false.")) +
-	                "\nClick to pick another; what still applies is kept.");
+	// A type with no row: an action type the dispatcher knows whose sub-type selects nothing, or a type the
+	// game has no case for (S15).
+	std::string type_tip;
+	if (form.type) type_tip = std::string(form.type->group) + ": " + form.type->tip;
+	else if (form.type_words.rfind("Unknown", 0) != 0) type_tip = "Its sub-type selects nothing the game does: it does nothing.";
+	else type_tip = std::string("A type the game has no case for: it ") + (form.action ? "does nothing." : "reads false.");
+	ui_kit::tooltip(type_tip + "\nClick to pick another; what still applies is kept.");
 	if (ImGui::BeginPopup("type")) {
 		if (const LogicType *type = type_menu(form.action, form.type)) {
 			std::vector<Edit> edits;
@@ -368,7 +384,13 @@ bool draw_mission_inspector(Workspace &workspace, const Document &document, cons
 void draw_mission_uses(Workspace &workspace, const Document &document, const NodeAddress &record, InspectorTaken &taken) {
 	const MissionDocument *mission = mission_of(document);
 	if (!mission) return;
-	const MissionUses uses = mission_uses(*mission, record, *ViewNames(workspace.view(), *mission));
+	// Kept while the document, the record and the graph's names stand: the Inspector draws every frame
+	// (S15), and wording each use's sentence is not a frame's work.
+	static MissionUsesCache cache;
+	const SessionView &view = workspace.view();
+	const ViewNames names(view, *mission);
+	const MissionUses &uses = cache.uses(*mission, record, *names, view.findings.graph != nullptr,
+	                                     view.findings.graph ? view.findings.graph->generation() : 0);
 	if (uses.what.empty()) return;
 	taken.own_uses = true;
 	ImGui::PushID("mission_uses");

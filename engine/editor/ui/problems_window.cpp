@@ -243,7 +243,8 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 	ui_kit::clipped_text(group.title + " (" + counts + ")");
 	if (group.original)
 		ui_kit::tooltip("Problems in files the project holds exactly as the game install has them: the original game "
-		                "has them too, so they are not yours to fix. A file you change leaves this group.");
+		                "has them too, so they are not yours to fix. A file you change leaves this group (an unsaved "
+		                "edit too), and a problem that would stop a build is never in it.");
 	ImGui::TableSetColumnIndex(3);
 	const ProblemsList::Proposal &all = list_.group_fixes(line.group);
 	if (all.findings >= 2 && !all.requests.empty()) {

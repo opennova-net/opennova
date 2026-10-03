@@ -271,12 +271,7 @@ bool is_reference(const FieldUse &field, const Value &value) {
 // A number naming a definition or a record of its own file (an item id, an SSN, a zone, an event, a
 // group, a path, a register by its index): picked by name in the value's place (ReferencePicker::
 // draw_field, ADR 0046 S15), never typed as a number; one whose value the game resolves itself (the
-// player's SSN) picked as what it would name otherwise (FieldUse::picks).
-FieldUse picked_as(const FieldUse &field) {
-	FieldUse picking = field;
-	if (picking.reference == ReferenceKind::None) picking.reference = field.picks;
-	return picking;
-}
+// player's SSN) picked as what it would name otherwise (FieldUse::picks; graph/display_names' picked_as).
 bool picks_by_name(const FieldUse &field) {
 	const ReferenceKind kind = field.reference != ReferenceKind::None ? field.reference : field.picks;
 	if (kind == ReferenceKind::None || field.schema->type == FieldType::Text) return false;

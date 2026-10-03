@@ -11,6 +11,7 @@
 // second holder are none, and its `inert` says why.
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -44,5 +45,23 @@ struct MissionUses {
 	std::vector<MissionUse> uses;
 };
 MissionUses mission_uses(const MissionDocument &document, const NodeAddress &record, const MissionNames &names);
+
+// The uses of one record kept while the document (its identity, load and revision), the record and the
+// names (their source's generation, `names_generation`, 0 for none) stand: the Inspector asks every
+// frame a record is selected, which would otherwise word every use's sentence each frame (S15).
+class MissionUsesCache {
+public:
+	const MissionUses &uses(const MissionDocument &document, const NodeAddress &record, const MissionNames &names,
+	                        bool has_names, uint64_t names_generation);
+	// How many times it worded them (for the tests).
+	size_t made() const { return made_; }
+
+private:
+	uint64_t identity_ = 0, load_ = 0, revision_ = 0, generation_ = 0;
+	bool has_names_ = false, held_ = false;
+	NodeAddress record_;
+	MissionUses uses_;
+	size_t made_ = 0;
+};
 
 } // namespace opennova::editor

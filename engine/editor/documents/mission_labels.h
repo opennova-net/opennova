@@ -43,6 +43,10 @@ std::string mission_record_label(const Document &document, const NodeAddress &ad
 // waypoint 8 of path 9"), or with no trigger by what it does first ("show win objective 1"); a trigger and
 // an action alike. "" for a record whose title is short already (a path, an area, a stop).
 std::string mission_record_brief(const Document &document, const NodeAddress &address, const NameSource *names);
+// The values an entity field's picker offers that no record defines (DocumentType::game_choices): the
+// player, SSN 10000, which the game resolves itself [bms-event-runtime-re.md 7.3].
+void mission_game_choices(const Document &document, const NodeAddress &address, const FieldUse &field,
+                          std::vector<GameChoice> &out);
 
 // An entity row's title ("Ranger #12", "Organic #12" without names), with its shown name where it has one.
 std::string mission_entity_title(const MissionDocument &document, const Node &entity, const NameSource *names);
@@ -71,6 +75,9 @@ std::unique_ptr<MissionNames> mission_label_names(const MissionDocument &documen
 // and an event under their kind ("Waypoint paths", "Area triggers", "Events"). The pools and the kinds
 // in the file's bands' order, the types by their words, the teams and the groups by number.
 void mission_row_headings(const Document &document, const NameSource *names, std::vector<std::vector<RowHeading>> &out);
+// Whether a row's title reads other rows: an event (its sentence names entities, areas, groups and
+// events by their titles) and a path (its stops name their markers).
+bool mission_row_reads_others(const Document &document, const Node &row);
 
 // --- values ------------------------------------------------------------------------------------------
 

@@ -57,7 +57,10 @@ MissionUses mission_uses(const MissionDocument &document, const NodeAddress &rec
 		value = static_cast<const AreaRow &>(*row).native.id;
 		out.what = names.zone(value);
 		if (document.zone_holder(value) != row->id)
-			out.inert = "Another area trigger has this zone id: which of the two the game's resolver finds is not read yet.";
+			// The resolver takes the first area of the id, in file order [bms-event-runtime-re.md 7.3, the scan
+			// @0x453077].
+			out.inert = "An earlier area trigger has this zone id: the game's resolver takes the first of it, so no trigger "
+			            "or action names this one.";
 	} else if (!record.child && row->kind == k(MissionKind::WaypointPath)) {
 		kind = ParamKind::Path;
 		value = static_cast<const PathRow &>(*row).native.number;
@@ -113,6 +116,23 @@ MissionUses mission_uses(const MissionDocument &document, const NodeAddress &rec
 					use(true, i, slot);
 	}
 	return out;
+}
+
+const MissionUses &MissionUsesCache::uses(const MissionDocument &document, const NodeAddress &record, const MissionNames &names,
+                                          bool has_names, uint64_t names_generation) {
+	if (held_ && identity_ == document.identity() && load_ == document.load_generation() && revision_ == document.revision() &&
+	    record_ == record && has_names_ == has_names && generation_ == names_generation)
+		return uses_;
+	held_ = true;
+	identity_ = document.identity();
+	load_ = document.load_generation();
+	revision_ = document.revision();
+	record_ = record;
+	has_names_ = has_names;
+	generation_ = names_generation;
+	uses_ = mission_uses(document, record, names);
+	++made_;
+	return uses_;
 }
 
 } // namespace opennova::editor

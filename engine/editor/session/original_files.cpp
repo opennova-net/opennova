@@ -74,6 +74,12 @@ bool OriginalFiles::step(uint64_t bytes) {
 		known_[file.path] = std::move(file);
 	} while (!queue_.empty() && read < bytes);
 	if (moved) publish();
+	// Nothing left to check: the install let go, its archives closed (the game, or a patch, may write
+	// them); the next check mounts it again.
+	if (queue_.empty()) {
+		game_.reset();
+		mount_tried_ = false;
+	}
 	return queue_.empty();
 }
 

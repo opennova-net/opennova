@@ -708,7 +708,7 @@ int test_mission_headings() {
 	// trigger's subject and verb, an entity's SSN first.
 	const size_t events = line_named("Events (2)");
 	TEST_EXPECT(events != SIZE_MAX && events + 1 < lines.size() &&
-	            lines[events + 1].brief == "#" + std::to_string(ssn) + " is in zone 20");
+	            lines[events + 1].brief == "Event 1: #" + std::to_string(ssn) + " is in zone 20");
 	TEST_EXPECT(lines[organics + 1].brief == "#" + std::to_string(ssn) + " Wire Test Rifleman");
 	// The markers under their types (their items): a type of two or more under a heading of its words
 	// (its item's name, else its id), one deeper than the pool's; a type of one marker under the pool alone.
@@ -774,6 +774,23 @@ int test_mission_headings() {
 	TEST_EXPECT(by_group[pool + 2].heading && by_group[pool + 2].text == "Group 7 (2)" && by_group[pool + 2].depth == 1);
 	TEST_EXPECT(by_group[pool + 3].address.row == placed[0]->id && by_group[pool + 3].depth == 2 &&
 	            by_group[pool + 4].address.row == placed[1]->id && by_group[pool + 4].depth == 2);
+	// A row whose title reads other rows follows them (S15 review m13): the first event names Zone 20, and
+	// the area made a mission area, its line reads so after the edit, though the event did not change.
+	OutlineModel follow(OutlineMode::Tree, nullptr, nullptr, mission_row_headings, mission_row_reads_others);
+	const auto event_text = [&] {
+		for (const OutlineLine &line : follow.lines(*mission))
+			if (!line.heading && !line.collection && line.address.kind == node_kind(MissionKind::Event)) return line.text;
+		return std::string();
+	};
+	TEST_EXPECT(event_text().find("Zone 20,") != std::string::npos);
+	const Node *zone = dynamic_cast<const MissionDocument &>(*mission).rows_of(MissionKind::Area).front();
+	Edit boundary;
+	boundary.address = {zone->id, zone->kind, 0};
+	for (const FieldSchema &field : mission->fields(zone->kind))
+		if (field.id.find("flag") != std::string::npos && boundary.field.empty()) boundary.field = field.id;
+	boundary.value = int64_t(1);
+	TEST_EXPECT(!boundary.field.empty() && mission->apply({boundary}, error));
+	TEST_EXPECT(event_text().find("Zone 20 (mission area)") != std::string::npos);
 	std::printf("test_mission_headings passed\n");
 	return 0;
 }

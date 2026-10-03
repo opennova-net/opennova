@@ -36,18 +36,9 @@ constexpr int64_t kGroupCount = 64;
 // A waypoint number from 1 to 122 names a path; 0 none, 123..127 a command.
 constexpr int64_t kLastPathNumber = 122;
 
-// The waypoint list's commands [orig editor: dfx2med Med_ParamWaypointList @0x449c60 names them;
-// docs/world/world-wac-ai-re.md section 11].
-const char *path_command_name(int64_t number) {
-	switch (number) {
-	case 123: return "Goto SSN (not driver, gunner)";
-	case 124: return "Goto SSN (not driver)";
-	case 125: return "Goto SSN (any)";
-	case 126: return "Goto group";
-	case 127: return "Goto player";
-	default: return nullptr;
-	}
-}
+// The waypoint list's commands by what the game does with them (mission_sentence's path_command_words;
+// the original editor's names in the tooltip, path_command_editor_name).
+const char *path_command_name(int64_t number) { return path_command_words(number); }
 
 // A pool's word for an entity of it ("Organic"), the table's label.
 const char *pool_word(NodeKind kind) {
@@ -137,27 +128,44 @@ int32_t param_of(const bms::Action &action, int slot) {
 	return slot == 0 ? action.param1 : slot == 1 ? action.param2 : slot == 2 ? action.param3 : action.param4;
 }
 
-// A stop of a path by its index (0 the first; -1 the nearest), and the marker it visits.
-DisplayName stop_display(const MissionDocument &document, int64_t path, int64_t index, const NameSource *names) {
+// What a stop number is read for: an entity's start stop, a waypoint trigger's visited stop (a bit of the
+// visited word), a Redirect's node.
+enum class StopUse { Start, Visited, Redirect };
+
+// The most stop numbers a waypoint trigger's visited word records: the bit is the stop's number, below
+// 32 [bms-event-runtime-re.md 3a, 7.4].
+constexpr int64_t kVisitedStops = 32;
+
+// A stop of a path by its number, the game's own (0 the first), and the marker it visits: a Redirect's
+// -1 the nearest [orig: Entity_SetWaypointByTeam @0x43CD20, only node -1 requests the nearest]; a
+// waypoint trigger's past 31 (or below 0) a stop the game never records.
+DisplayName stop_display(const MissionDocument &document, int64_t path, int64_t index, StopUse use,
+                         const NameSource *names) {
 	DisplayName out;
 	out.raw = std::to_string(index);
-	if (index == -1) {
+	if (use == StopUse::Redirect && index == -1) {
 		out.text = "The nearest stop";
+		return out;
+	}
+	if (use == StopUse::Visited && (index < 0 || index >= kVisitedStops)) {
+		out.text = "Stop " + out.raw + ": never recorded (the game keeps stops 0 to 31 of a path)";
+		out.dangling = true;
 		return out;
 	}
 	const Node *row = path >= 1 && path <= kLastPathNumber ? document.row_of(K::WaypointPath, size_t(path)) : nullptr;
 	if (!row) {
-		out.text = "Stop " + std::to_string(index + 1);
+		out.text = "Stop " + out.raw;
 		return out;
 	}
 	const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.record.waypoint_numbers;
 	if (index < 0 || size_t(index) >= stops.size()) {
 		// The walk reads the slot word there as written [orig: AIWaypoint_UpdateTarget @0x457476].
-		out.text = "Past the " + counted_words(stops.size(), "stop", "stops") + " of path " + std::to_string(path);
+		out.text = "Stop " + out.raw + ": past the " + counted_words(stops.size(), "stop", "stops") + " of path " +
+		           std::to_string(path);
 		out.dangling = true;
 		return out;
 	}
-	out.text = "Stop " + std::to_string(index + 1) + " of " + std::to_string(stops.size()) + ": " +
+	out.text = "Stop " + out.raw + " of path " + std::to_string(path) + ": " +
 	           mission_marker_display(document, stops[size_t(index)], names).text;
 	return out;
 }
@@ -165,15 +173,15 @@ DisplayName stop_display(const MissionDocument &document, int64_t path, int64_t 
 // A parameter of the kind as the Inspector words it beside its number, the record's other parameters
 // read where they decide it (a stop's path); false for a kind that names nothing (a count, a distance:
 // the number is its value).
-bool param_display(const MissionDocument &document, ParamKind kind, int64_t value, int64_t path, const NameSource *names,
-                   DisplayName &out) {
+bool param_display(const MissionDocument &document, ParamKind kind, int64_t value, int64_t path, StopUse use,
+                   const NameSource *names, DisplayName &out) {
 	switch (kind) {
 	case ParamKind::Entity: out = mission_ssn_display(document, value, names); return true;
 	case ParamKind::Zone: out = mission_zone_display(document, value); return true;
 	case ParamKind::Event: out = mission_event_display(document, value, names); return true;
 	case ParamKind::Group: out = mission_group_display(document, value); return true;
 	case ParamKind::Path: out = mission_path_display(document, value); return true;
-	case ParamKind::PathNode: out = stop_display(document, path, value, names); return true;
+	case ParamKind::PathNode: out = stop_display(document, path, value, use, names); return true;
 	case ParamKind::MissionVar: out.text = "Variable " + std::to_string(value); break;
 	case ParamKind::Dialog: out.text = "Dialog " + std::to_string(value); break;
 	default: return false;
@@ -279,6 +287,8 @@ DisplayName mission_path_display(const MissionDocument &document, int64_t number
 	}
 	if (const char *command = path_command_name(number)) {
 		out.text = command;
+		// The original editor's name for it, said beside (the Inspector's tooltip: "From ...").
+		out.source = std::string("the original editor's name: ") + path_command_editor_name(number);
 		return out;
 	}
 	const Node *row = number > 0 && number <= kLastPathNumber ? document.row_of(K::WaypointPath, size_t(number)) : nullptr;
@@ -340,7 +350,7 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 			// Beside a command 123..125 the SSN to board; beside a path the stop it starts at.
 			if (path_command_names_entity(entity.waypoint_id)) out = mission_ssn_display(*document, *number, names);
 			else if (entity.waypoint_id >= 1 && entity.waypoint_id <= kLastPathNumber)
-				out = stop_display(*document, entity.waypoint_id, *number, names);
+				out = stop_display(*document, entity.waypoint_id, *number, StopUse::Start, names);
 			else return false;
 		} else if (id == "name_index") {
 			return *number != 0 && text("");
@@ -354,7 +364,24 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 		out = mission_marker_display(*document, *number, names);
 		return true;
 	}
-	if (address.kind == k(K::Mission) && id.compare(0, 15, "win_conditions[") == 0) return *number != 0 && *number != 255 && text("");
+	if (address.kind == k(K::Mission)) {
+		const bool win = id.compare(0, 15, "win_conditions[") == 0, lose = id.compare(0, 16, "lose_conditions[") == 0;
+		if (!win && !lose) return false;
+		if (*number == 0 || *number == 255) return false; // an empty slot
+		// A win slot up to the first empty one is an objectives panel row, its STRWINCOND [orig:
+		// HUD_DrawWinConditions @0x5ba940, the break @0x5ba9e0].
+		if (win && text("")) return true;
+		// A win slot past it, and a lose slot, still key what the sub-goal actions show of the slot: its
+		// message (STRWINMSG / STRLOSEMSG) [orig: EventAction_Dispatch case 14 @0x454552, case 15 @0x45460c].
+		char key[32];
+		std::snprintf(key, sizeof(key), "%s%03i", win ? "STRWINMSG" : "STRLOSEMSG", int(*number));
+		const std::string message = LabelNames(*document, names).text(win ? "WinConditions" : "LoseConditions", key);
+		out = DisplayName();
+		out.raw = std::to_string(*number);
+		out.text = std::string(win ? "Not on the objectives panel (it stops at the first empty slot)" : "A lose objective") +
+		           (message.empty() ? std::string() : ": its message \"" + message + "\"");
+		return true;
+	}
 	const int slot = id.size() == 6 && id.compare(0, 5, "param") == 0 && id[5] >= '1' && id[5] <= '4' ? id[5] - '1' : -1;
 	if (slot < 0 || !address.child) return false;
 	const Document::RecordPath path = document->path_in(*row, address.child);
@@ -362,7 +389,15 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 	const EventRow &event = static_cast<const EventRow &>(*row);
 	if (address.kind == k(K::Trigger) && path[0].index < event.native.triggers.size()) {
 		const bms::Trigger &trigger = event.native.triggers[path[0].index];
-		return param_display(*document, trigger_param_kind(trigger, slot), *number, path_param(trigger, trigger_param_kind), names, out);
+		if (!param_display(*document, trigger_param_kind(trigger, slot), *number, path_param(trigger, trigger_param_kind),
+		                   StopUse::Visited, names, out))
+			return false;
+		// An SSN the sees, targeted, shot and visited records never keep (128 or more, section 3a).
+		if (trigger_ssn_unrecorded(trigger, slot)) {
+			out.text += " (never recorded: the game keeps SSNs below 128)";
+			out.dangling = true;
+		}
+		return true;
 	}
 	if (address.kind == k(K::Action) && path[0].index < event.native.actions.size()) {
 		const bms::Action &action = event.native.actions[path[0].index];
@@ -377,7 +412,7 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 			return true;
 		}
 		if (slot == 0 && action.action_type == bms::ActionType::OutputText) return text("");
-		return param_display(*document, kind, *number, path_param(action, action_param_kind), names, out);
+		return param_display(*document, kind, *number, path_param(action, action_param_kind), StopUse::Redirect, names, out);
 	}
 	return false;
 }
@@ -451,6 +486,10 @@ void mission_row_headings(const Document &document, const NameSource *names, std
 	}
 }
 
+bool mission_row_reads_others(const Document &, const Node &row) {
+	return row.kind == k(K::Event) || row.kind == k(K::WaypointPath);
+}
+
 std::string mission_path_title(const MissionPath &path) {
 	if (path.number == 0) return "No path";
 	if (const char *command = path_command_name(path.number)) return command;
@@ -502,7 +541,9 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 			const bms::AreaTrigger &area = static_cast<const AreaRow &>(*row).native;
 			return "Zone " + std::to_string(area.id) + (area.is_active() ? " (mission area)" : "");
 		}
-		case K::Event: return mission_event_title(*document, *row, names);
+		// An event by its number, what the triggers and the actions that name it say ("event 7"), then its
+		// sentence (S15).
+		case K::Event: return "Event " + std::to_string(document->index_of(*row) + 1) + ": " + mission_event_title(*document, *row, names);
 		default: return document->record_name(address);
 		}
 	}
@@ -524,8 +565,10 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 	}
 	case K::Stop: {
 		const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.record.waypoint_numbers;
+		// By the game's own number for it (0 the first: what the waypoint triggers and an entity's start
+		// stop name).
 		if (index < stops.size())
-			return "Stop " + std::to_string(index + 1) + ": " + mission_marker_display(*document, stops[index], names).text;
+			return "Stop " + std::to_string(index) + ": " + mission_marker_display(*document, stops[index], names).text;
 		break;
 	}
 	case K::Group: {
@@ -560,6 +603,10 @@ public:
 
 } // namespace
 
+void mission_game_choices(const Document &, const NodeAddress &, const FieldUse &field, std::vector<GameChoice> &out) {
+	if (field.reference == ReferenceKind::MissionEntity) out.push_back({std::to_string(kPlayerSsn), "The player"});
+}
+
 std::string mission_record_brief(const Document &base, const NodeAddress &address, const NameSource *names) {
 	const auto *document = dynamic_cast<const MissionDocument *>(&base);
 	const Node *row = document ? document->row(address.row) : nullptr;
@@ -581,11 +628,12 @@ std::string mission_record_brief(const Document &base, const NodeAddress &addres
 			return "#" + std::to_string(entity.id) + " " + what;
 		}
 		case K::Event: {
-			// What waits first, else what it does first.
+			// Its number, then what waits first, else what it does first.
 			const mission::EventChain &chain = static_cast<const EventRow &>(*row).native;
-			if (!chain.triggers.empty()) return trigger_words(chain.triggers.front(), brief);
-			if (!chain.actions.empty()) return action_words(chain.actions.front(), brief, header_of(*document));
-			return "nothing";
+			const std::string number = "Event " + std::to_string(document->index_of(*row) + 1) + ": ";
+			if (!chain.triggers.empty()) return number + trigger_words(chain.triggers.front(), brief);
+			if (!chain.actions.empty()) return number + action_words(chain.actions.front(), brief, header_of(*document));
+			return number + "nothing";
 		}
 		default: return std::string();
 		}

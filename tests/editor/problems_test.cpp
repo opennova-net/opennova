@@ -1205,12 +1205,56 @@ static int test_original_data() {
 	answer = answer_problems(query, v);
 	TEST_EXPECT(!answer.groups.empty() && answer.groups.back().original && group_of(answer, theirs) == answer.groups.size() - 1 &&
 	            group_of(answer, mine) < answer.groups.size() - 1 && answer.groups[group_of(answer, mine)].header);
-	// Changed by a byte: the modder's again.
+	// The counts every reader shares (Problems, the menu bar, problem_counts, the CLI's status) agree.
+	ProblemCounts counts = count_problems(v);
+	TEST_EXPECT(counts.original_errors + counts.original_warnings + counts.original_infos == answer.original() &&
+	            counts.errors == answer.errors && counts.warnings == answer.warnings);
+	// Open with an unsaved edit, the shipped menu is judged by what it holds: the modder's, never folded;
+	// saved as it was again (an undo), the game's own data's again.
+	editor_test::handle_to_end(session, request::open_document("menus/shipped.mnu"));
+	const Document *opened = records_of(*session.document_for("menus/shipped.mnu"));
+	TEST_EXPECT(opened != nullptr);
+	if (!opened) return 1;
+	Edit renamed;
+	for (const auto &row : opened->rows()) {
+		if (!row) continue;
+		for (const FieldSchema &field : opened->fields(row->kind))
+			if (field.type == FieldType::Text && !field.read_only && renamed.field.empty()) {
+				renamed.address = {row->id, row->kind, 0};
+				renamed.field = field.id;
+			}
+		if (!renamed.field.empty()) break;
+	}
+	renamed.value = std::string("RENAMED");
+	TEST_EXPECT(!renamed.field.empty());
+	editor_test::handle_to_end(session, request::edit_record("menus/shipped.mnu", renamed));
+	const size_t edited = logo_in("menus/shipped.mnu");
+	TEST_EXPECT(opened->dirty() && edited != SIZE_MAX && !in_original_data(v.findings.diagnostics[edited], v));
+	counts = count_problems(v);
+	TEST_EXPECT(counts.original_errors + counts.original_warnings + counts.original_infos == 0);
+	editor_test::handle_to_end(session, request::undo("menus/shipped.mnu"));
+	const size_t undone = logo_in("menus/shipped.mnu");
+	TEST_EXPECT(!opened->dirty() && undone != SIZE_MAX && in_original_data(v.findings.diagnostics[undone], v));
+	// Changed by a byte on disk: the modder's again.
 	TEST_EXPECT(editor_test::write_text(root + "/menus/shipped.mnu", shipped + " "));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(v.findings.original_files && v.findings.original_files->empty());
 	answer = answer_problems(ProblemQuery(), v);
 	TEST_EXPECT(!answer.grouped && answer.original() == 0);
+	// The install changed under the same folder (its copy now the project's bytes): a rescan finds it
+	// the original's again.
+	const std::string patched = shipped + " ";
+	const opennova::pff::PffWriteEntry patched_entries[] = {
+		{"shipped.mnu", reinterpret_cast<const uint8_t *>(patched.data()), uint32_t(patched.size()), 0, 0, 0},
+	};
+	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                             patched_entries, 1) == opennova::pff::PFF_WRITE_OK);
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(v.findings.original_files && v.findings.original_files->count("menus/shipped.mnu") == 1);
+	// With no install, none is the original's.
+	editor_test::set_game_install(session, std::string());
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(v.findings.original_files && v.findings.original_files->empty());
 	std::printf("original data: the install's own files' findings apart\n");
 	return 0;
 }

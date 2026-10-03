@@ -9,6 +9,8 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/display_names.h>
+#include <editor/graph/reference_kinds.h>
+#include <editor/model/document_base.h>
 #include <editor/model/field_text.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/problem_fixes.h>
@@ -76,7 +78,24 @@ bool ProblemQuery::operator==(const ProblemQuery &other) const {
 
 bool in_original_data(const Diagnostic &diagnostic, const SessionView &view) {
 	const auto &files = view.findings.original_files;
-	return files && !diagnostic.asset.empty() && files->count(diagnostic.asset) != 0;
+	if (!files || diagnostic.asset.empty() || files->count(diagnostic.asset) == 0) return false;
+	// A finding the build gates on stays the modder's to see, whatever file it is in: the gate follows the
+	// game's refusals, and a count of 0 errors beside a refused build would mislead.
+	if (blocks_build(diagnostic)) return false;
+	// An open document with unsaved edits is judged by what it holds, not by its file on disk: its
+	// findings are the modder's until it is saved as the install's bytes again.
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == diagnostic.asset && open->dirty()) return false;
+	return true;
+}
+
+ProblemCounts count_problems(const SessionView &view) {
+	ProblemCounts counts;
+	for (const Diagnostic &d : view.findings.diagnostics) {
+		if (in_original_data(d, view)) tally(d.severity, counts.original_errors, counts.original_warnings, counts.original_infos);
+		else tally(d.severity, counts.errors, counts.warnings, counts.infos);
+	}
+	return counts;
 }
 
 namespace {
@@ -159,7 +178,8 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 }
 
 RevisionKey problem_query_key(const SessionView &view, const ProblemQuery &query) {
-	RevisionKey key = revision_key(view.revisions, {ViewConcern::Findings});
+	// The game's own data's fold reads which documents have unsaved edits (in_original_data).
+	RevisionKey key = revision_key(view.revisions, {ViewConcern::Findings, ViewConcern::DocumentSet});
 	if (query.scope == ProblemScope::ActiveFile)
 		key = key | revision_key(view.revisions, {ViewConcern::ActiveDocument});
 	if (query.scope == ProblemScope::OpenFiles)

@@ -391,6 +391,9 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			evaluate_requirements(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
+	// A whole refresh (an open, a Rescan, a Reimport) reads the install as it stands now too: which files
+	// are the game's own data is found again after the validation (S15).
+	problems().forget_originals();
 	problems().validate_later();
 	return imports;
 }

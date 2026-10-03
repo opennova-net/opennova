@@ -446,14 +446,11 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	std::vector<const DocumentBase *> unsaved;
 	for (const auto &document : v.documents.open)
 		if (document->dirty()) unsaved.push_back(document.get());
-	// The modder's findings: those about the game's own data (S15) are counted apart, in the tooltip.
-	size_t errors = 0, warnings = 0, infos = 0, original = 0;
-	for (const Diagnostic &d : v.findings.diagnostics) {
-		if (in_original_data(d, v)) ++original;
-		else if (d.severity == DiagnosticSeverity::Error) ++errors;
-		else if (d.severity == DiagnosticSeverity::Warning) ++warnings;
-		else ++infos;
-	}
+	// The modder's findings: those about the game's own data (S15) are counted apart, in the tooltip, as
+	// Problems and the view's problem_counts count them.
+	const ProblemCounts counted = count_problems(v);
+	const size_t errors = counted.errors, warnings = counted.warnings, infos = counted.infos;
+	const size_t original = counted.original_errors + counted.original_warnings + counted.original_infos;
 	const std::string unsaved_text = std::to_string(unsaved.size()) + " unsaved";
 	std::string state, state_tip;
 	const bool cancel = v.activity.operation.running() && v.activity.operation.cancellable;

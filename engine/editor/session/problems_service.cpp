@@ -192,6 +192,11 @@ void ProblemsService::settle_originals() {
 	}
 }
 
+void ProblemsService::forget_originals() {
+	originals_->clear();
+	show_originals();
+}
+
 void ProblemsService::show_validation() {
 	ValidationStatus status;
 	status.running = validating();

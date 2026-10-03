@@ -45,7 +45,8 @@ constexpr OutlineSpec kCatalogOutline{OutlineMode::List, "", catalog_file_values
 // read like the mission (S15: each pool, then its teams and groups where they tell rows apart; the
 // paths, the areas, the events).
 constexpr OutlineSpec kMissionOutline{OutlineMode::Tree, "", nullptr, true, mission_row_listed, "Empty paths",
-                                      mission_adds_by_menu, draw_mission_add_menu, mission_row_headings};
+                                      mission_adds_by_menu, draw_mission_add_menu, mission_row_headings,
+                                      mission_row_reads_others};
 constexpr OutlineSpec kStringsOutline{OutlineMode::MasterDetail, "Sections", nullptr};
 constexpr OutlineSpec kTreeOutline{OutlineMode::Tree, "", nullptr};
 std::unique_ptr<DocumentView> make_menu_view() { return std::make_unique<MenuView>(); }

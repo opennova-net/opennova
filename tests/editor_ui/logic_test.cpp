@@ -115,7 +115,7 @@ void test_event_inspector() {
 	CHECK(add && add->edits.size() == 1 && add->edits[0].operation == EditOperation::Add && add->edits[0].field == "action_type" &&
 	              add->edits[0].value == Value(int64_t(blue)),
 	      "one EditRecord: the action added by its type");
-	CHECK(mission->record_title(first) == "When " + walker + " is in Zone 20, then re-arm event 2; end the round: the blue team wins.",
+	CHECK(mission->record_title(first) == "Event 1: When " + walker + " is in Zone 20, then re-arm event 2; end the round: the blue team (team 1) wins.",
 	      "the sentence reads the new action");
 
 	// The trigger: its type by name, its negation, its words; its event's sentence above.

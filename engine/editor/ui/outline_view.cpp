@@ -124,7 +124,7 @@ struct ViewNames {
 } // namespace
 
 OutlineView::OutlineView(const OutlineSpec &spec)
-    : spec_(spec), model_(spec.mode, spec.file_values, spec.row_listed, spec.groups) {}
+    : spec_(spec), model_(spec.mode, spec.file_values, spec.row_listed, spec.groups, spec.reads_others) {}
 
 void OutlineView::finding_mark(const SessionView &view, const Document &document, const NodeAddress &address) {
 	const std::vector<size_t> found = findings_.of_record(document.path(), address.row, address.child);

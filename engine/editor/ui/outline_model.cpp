@@ -26,8 +26,9 @@ const RecordKindRow *own_kind(const Document &document) {
 } // namespace
 
 OutlineModel::OutlineModel(OutlineMode mode, OutlineFileValuesHook file_values, OutlineRowListedHook row_listed,
-                           OutlineGroupsHook groups)
-    : mode_(mode), file_values_(file_values), row_listed_(row_listed), groups_(mode == OutlineMode::Tree ? groups : nullptr) {}
+                           OutlineGroupsHook groups, OutlineRowReadsOthersHook reads_others)
+    : mode_(mode), file_values_(file_values), row_listed_(row_listed), groups_(mode == OutlineMode::Tree ? groups : nullptr),
+      reads_others_(reads_others) {}
 
 void OutlineModel::set_filter(const std::string &filter) {
 	if (filter == filter_) return;
@@ -282,6 +283,12 @@ bool OutlineModel::follow_changes(const Document &document, const RowChanges &ch
 		}
 		rows_ = std::move(placed);
 	}
+	// A row whose title reads other rows (a mission's event its entities and areas, a path its stops'
+	// markers) made again with any change, its words the others' as they are now (S15).
+	if (reads_others_)
+		for (size_t i = 0; i < rows.size() && i < rows_.size(); ++i)
+			if (rows[i] && !changes.was_changed(rows[i]->id) && reads_others_(document, *rows[i]))
+				make_row(document, i, master, rows_[i]);
 	// A row's headings read the others' (a pool's teams): made again with any row's change.
 	make_groups(document);
 	join_rows();

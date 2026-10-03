@@ -49,6 +49,13 @@ public:
 
 // A heading a type's outline groups a row under (ui/outline_model's OutlineSpec::groups: a mission's
 // "Organics", "Team 1", "Group 3"): its key among its siblings, which orders them, and its words.
+// A value a picker offers that names no definition because the game resolves it itself (DocumentType::
+// game_choices: a mission's SSN 10000, the player): the value as the file writes it and its words.
+struct GameChoice {
+	std::string name;
+	std::string label;
+};
+
 struct RowHeading {
 	std::string key;
 	std::string text;

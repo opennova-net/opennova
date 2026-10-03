@@ -90,6 +90,10 @@ using OutlineGroup = RowHeading;
 // group), the headings worded with the project's names where `names` gives them (a marker's type by
 // its item's name). The rows of a heading are listed together under it, the headings in their keys'
 // order and each heading's rows in the file's order.
+// Whether a row's title reads other rows of its document (a mission's event its entities and areas by
+// their titles, a path its stops' markers): the hook of a type such rows are made again for with any
+// change, not only their own (S15).
+using OutlineRowReadsOthersHook = bool (*)(const Document &document, const Node &row);
 using OutlineGroupsHook = void (*)(const Document &document, const NameSource *names,
                                    std::vector<std::vector<OutlineGroup>> &out);
 
@@ -112,6 +116,8 @@ struct OutlineSpec {
 	OutlineAddMenuHook add_menu = nullptr;
 	// A tree's headings over its rows (null: none; ADR 0046 S15).
 	OutlineGroupsHook groups = nullptr;
+	// The rows whose titles read other rows, made again with any change (null: none; S15).
+	OutlineRowReadsOthersHook reads_others = nullptr;
 };
 
 // What a click on a record's line selects (OutlineModel::click): the record, how it joins the
@@ -137,7 +143,7 @@ class OutlineModel {
 public:
 	explicit OutlineModel(OutlineMode mode = OutlineMode::Tree,
 			OutlineFileValuesHook file_values = nullptr, OutlineRowListedHook row_listed = nullptr,
-			OutlineGroupsHook groups = nullptr);
+			OutlineGroupsHook groups = nullptr, OutlineRowReadsOthersHook reads_others = nullptr);
 
 	OutlineMode mode() const { return mode_; }
 
@@ -294,6 +300,7 @@ private:
 	OutlineFileValuesHook file_values_ = nullptr;
 	OutlineRowListedHook row_listed_ = nullptr;
 	OutlineGroupsHook groups_ = nullptr;
+	OutlineRowReadsOthersHook reads_others_ = nullptr;
 	// The names the titles read while the lines are made (lines()' argument; null after).
 	const NameSource *names_ = nullptr;
 	// The headings closed (by key): every other one is open.

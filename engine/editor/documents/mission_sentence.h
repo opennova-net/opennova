@@ -45,6 +45,10 @@ public:
 	virtual std::string event(int64_t index) const;
 	// A text key's string in the shown language, "" where none is known (the base knows none).
 	virtual std::string text(const std::string &section, const std::string &key) const;
+	// Whether a zone id resolves at the mission's start: an area has it and its box is not flat (the
+	// resolver neuters a trigger, and drops an area action, naming one that does not [section 7.3]). The
+	// base knows no areas: every id resolves.
+	virtual bool zone_resolves(int64_t id) const;
 };
 
 // The words a mission document gives what its records name: an entity by the record holding its SSN
@@ -58,6 +62,7 @@ public:
 	std::string entity(int64_t ssn) const override;
 	std::string zone(int64_t id) const override;
 	std::string event(int64_t index) const override;
+	bool zone_resolves(int64_t id) const override;
 
 private:
 	const MissionDocument &document_;
@@ -74,14 +79,23 @@ const char *logic_join_words(LogicJoin join);
 
 // One trigger in words, its negation in them ("Hostage #10034 is not destroyed").
 std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names);
+// Whether a trigger's SSN parameter at `slot` keys a sees, targeted, shot or visited record the game never
+// writes for it: those hold SSNs 0 to 127 alone [section 3a] (the player's 10000 among those never kept).
+bool trigger_ssn_unrecorded(const bms::Trigger &trigger, int slot);
+// A waypoint list's command (123..127) by what the game does with it [docs/world/world-wac-ai-re.md 3.2,
+// 9.1], and its name in the original editor (dfx2med), for a tooltip; null for any other number.
+const char *path_command_words(int64_t number);
+const char *path_command_editor_name(int64_t number);
 // One action in words ("show text 4: 'Mission failed'"). `header` gives a sub-goal's text keys, the
 // slots' ids (null: no text quoted).
 std::string action_words(const bms::Action &action, const MissionNames &names, const bms::Header *header);
 
 // An event in words: when it is checked and what it waits on (`when`: "When A and B", "Right away", "At
 // the mission's start, if A"), what it does (`then`: its actions joined by "; ", "nothing" for none),
-// how long after its triggers hold it does it (`delay`: "" or "after 5.1 s"), whether it does it again
-// (`repeat`: "" or "Checked again 10.2 s after it fires."), and the whole of it as one sentence.
+// how long after its triggers hold it does it (`delay`: "" or "after 5.1 s"; past 512 steps about one
+// pass, the countdown wrapping; "never" for a start or end event, checked once), whether it is checked
+// again (`repeat`: "" or "Checked again about 11.3 s after its triggers held."; none for a start or end
+// event), and the whole of it as one sentence [bms-event-runtime-re.md 1.2, 1.6].
 struct EventWords {
 	std::string when;
 	std::string then;
@@ -99,6 +113,14 @@ inline std::string event_sentence(const mission::EventChain &chain, const Missio
 // quarter pass's period [orig: EventTrigger_UpdateEntry @0x454c30 counts the reload << 6 down by 64 a
 // pass; docs/mission/bms-event-runtime-re.md 1.6].
 double logic_units_seconds(int64_t units);
+// The most steps a delay or a repeat counts down as written: past it the countdown (the steps << 6 in a
+// word the game tests as signed after each 64-tick decrement) is negative after the first decrement, so
+// it ends on the next pass [orig: EventTrigger_UpdateEntry @0x454cef, @0x454d40; section 1.2].
+inline constexpr int64_t kLogicStepsUnwrapped = 512;
+bool logic_steps_wrap(int64_t steps);
+// What a count of steps comes to in the game: "614.4 s", or past 512 steps "about 1.0 s (past 512 steps
+// the game's countdown wraps)".
+std::string logic_steps_words(int64_t steps);
 
 // A type of trigger or of action as "Add trigger" and "Add action" offer it: its type and sub-type (a
 // trigger's main type and sub-type, an action's type and sub-type), what it is called by itself ("Entity
@@ -116,5 +138,10 @@ struct LogicType {
 const std::vector<LogicType> &logic_types(bool actions);
 // The row of a trigger's or an action's type and sub-type (null: none: an unknown type).
 const LogicType *logic_type(bool action, int32_t type, int32_t sub);
+// An action type's own title whatever its sub-type ("Change group AI"); null for a type the dispatcher has
+// no case for.
+const char *logic_action_title(int32_t type);
+// A team by the colour the round's end names it ("the red team (team 2)"), one name everywhere.
+std::string team_words(int64_t team);
 
 } // namespace opennova::editor
