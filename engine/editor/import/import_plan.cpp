@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <deque>
-#include <exception>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -49,21 +48,17 @@ bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocumen
 	vfs_.clear();
 	if (kind == Kind::Folder) {
 		std::error_code ec;
-		fs::directory_iterator it(path, ec);
+		fs::directory_iterator it(system_path(path), ec);
 		if (ec) {
 			error = "The folder " + path + " could not be listed: " + ec.message() + ".";
 			return false;
 		}
 		for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
 			std::error_code status;
-			try {
-				if (it->is_regular_file(status)) {
-					const std::string name = it->path().filename().string();
-					names_.emplace(normalized_logical_name(name), name);
-				}
-			} catch (const std::exception &) {
-				// A name the narrow encoding cannot carry is no file an import reads.
-			}
+			if (!it->is_regular_file(status)) continue;
+			// Its name as UTF-8, whatever the code page (project_files.h, utf8_of).
+			const std::string name = utf8_of(it->path().filename());
+			names_.emplace(normalized_logical_name(name), name);
 		}
 		return true;
 	}
@@ -97,7 +92,7 @@ bool ImportOrigin::read(const std::string &name, std::vector<uint8_t> &out) cons
 	if (kind_ == Kind::GameInstall) return read_install_file(vfs_, path_, name, out);
 	if (kind_ == Kind::Archive) return read_served(vfs_, name, out);
 	std::string error;
-	return read_file_bytes((fs::path(path_) / name).generic_string(), out, error);
+	return read_file_bytes(join_path(path_, name), out, error);
 }
 
 uint64_t ImportOrigin::size(const std::string &name) const {
@@ -110,7 +105,7 @@ uint64_t ImportOrigin::size(const std::string &name) const {
 		// The install's loose file: on the disk, as a folder's.
 	}
 	std::error_code ec;
-	const auto on_disk = fs::file_size(fs::path(path_) / spelling, ec);
+	const auto on_disk = fs::file_size(system_path(join_path(path_, spelling)), ec);
 	return ec ? 0 : static_cast<uint64_t>(on_disk);
 }
 
@@ -139,7 +134,7 @@ AssetKind ImportOrigin::file_kind(const std::string &name) const {
 ImportChoice ImportOrigin::source(const std::string &name) const {
 	ImportChoice out;
 	if (kind_ == Kind::Folder) {
-		out.path = (fs::path(path_) / name).generic_string();
+		out.path = join_path(path_, name);
 		out.native = true;
 	} else {
 		out.path = path_;
@@ -173,9 +168,9 @@ std::string first_candidate(const ImportNeed &need, const Exists &exists) {
 // file of the same folder (names without case, as the folder's listing compares them).
 bool same_file(const ImportChoice &a, const ImportChoice &b) {
 	if (a.install != b.install || a.entry.empty() != b.entry.empty()) return false;
-	if (!a.entry.empty()) return fs::path(a.path) == fs::path(b.path) && key(a.entry) == key(b.entry);
-	const fs::path x(a.path), y(b.path);
-	return x.parent_path() == y.parent_path() && key(x.filename().string()) == key(y.filename().string());
+	if (!a.entry.empty()) return path_of(a.path) == path_of(b.path) && key(a.entry) == key(b.entry);
+	const fs::path x = path_of(a.path), y = path_of(b.path);
+	return x.parent_path() == y.parent_path() && key(utf8_of(x.filename())) == key(utf8_of(y.filename()));
 }
 
 // A file the walk reads the references of: its row, the place it came from, its bytes when
@@ -378,10 +373,10 @@ private:
 			cost_ += bytes.size();
 			// The folder it sits in (a bare name's is the working folder): where the files it
 			// names are looked for first.
-			std::string folder = fs::path(source.path).parent_path().generic_string();
+			std::string folder = utf8_of(path_of(source.path).parent_path());
 			if (folder.empty()) {
 				std::error_code ec;
-				folder = fs::current_path(ec).generic_string();
+				folder = utf8_of(fs::current_path(ec));
 			}
 			found_in = "the folder " + folder;
 			if (walk) {
@@ -754,7 +749,7 @@ private:
 			row.problem = row.name + " is " + player + ": an import never takes the player's own files.";
 		else if (row.kind == AssetKind::Unknown || row.kind == AssetKind::Archive)
 			row.problem = "Unsupported asset type: " + row.name;
-		else if (!check_project_file_name(paths_.root, fs::path(row.destination).parent_path().generic_string(), row.name,
+		else if (!check_project_file_name(paths_.root, utf8_of(path_of(row.destination).parent_path()), row.name,
 		                                  row.kind, problem, message))
 			row.problem = message;
 	}
@@ -767,7 +762,7 @@ private:
 		const AssetEntry *asset = scan_.find(name);
 		if (!asset || asset->kind != AssetKind::MenuStyle) return false;
 		std::string error;
-		return read_file_bytes((fs::path(paths_.root) / asset->relative_path).generic_string(), bytes, error);
+		return read_file_bytes(join_path(paths_.root, asset->relative_path), bytes, error);
 	}
 
 	// A planned row's bytes as the import writes them.

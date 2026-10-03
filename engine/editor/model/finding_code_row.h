@@ -101,10 +101,14 @@ enum class FindingProblem { None, Info, Warning };
 // under; `source` what made it, when not its group's own part; `problem`, on a render check's row
 // alone, whether a finding of it is a Problems row and at what severity; `gates_build` whether an
 // error of the code, among the rows a build reads, refuses the build (blocks_build,
-// graph/reference_kinds.h): false on a row whose findings are listed and block nothing (ADR 0046
-// S14: a missing reference, which the shipped game's own files carry and run with, but where its
-// kind's row cites the game's refusal, ReferenceKindRow::gates_when_missing; what the game cannot
-// start without is the requirements' rows).
+// graph/reference_kinds.h). The build follows retail, one set of rules (ADR 0046 S14, "the gate"):
+// it is refused exactly where the built game would fail to load or run as retail does, each such row
+// citing the original's refusal, and where the editor cannot vouch for what it packs (a file it
+// cannot read or write, a name the archives cannot store). Every other code is listed (false): its
+// findings are shown, counted and fixable and refuse nothing. A listed code whose subject names the
+// witness gates where it does: a missing reference of a kind whose row cites the game's refusal
+// (ReferenceKindRow::gates_when_missing), a missing required file whose manifest row is the game's
+// refusal to boot (RES_FATAL).
 struct FindingCodeRow {
 	const char *token = nullptr;
 	FindingFix fixes = FindingFix::None;
@@ -116,6 +120,18 @@ struct FindingCodeRow {
 	FindingProblem problem = FindingProblem::None;
 	bool gates_build = true;
 };
+
+// A document type's row of a code whose findings are listed and refuse no build (gates_build false):
+// what the game does with what it is about is no refusal of its load or its run, or is not witnessed.
+constexpr FindingCodeRow listed_code(const char *token, FindingFix fixes = FindingFix::None,
+		const char *rewrite_does = nullptr) {
+	FindingCodeRow row;
+	row.token = token;
+	row.fixes = fixes;
+	row.rewrite_does = rewrite_does;
+	row.gates_build = false;
+	return row;
+}
 
 // A table's rows, in the order of the enum it answers for.
 struct FindingTable {
