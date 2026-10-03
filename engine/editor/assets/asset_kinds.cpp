@@ -326,14 +326,17 @@ constexpr AssetKindRow kRows[] = {
 	        .folder("strings")
 	        .expansion(ExpansionLoose::RootOnly)
 	        .row,
-	// The NovaWorld screens' markup the game reads loose from its folder, where retail ships them:
-	// the error page [orig: "nw_error.mnx" @ 0x558449] and the login's start page, whose STARTUPURL
-	// the gate substitutes (docs/net/novaworld-net-re.md D-NET-31) (S13 A8: no kind before, so the
-	// build left them out). Their reader is the front door [orig: FileSystem_LoadFileToBuffer @ 0x64dab0
-	// from @ 0x558937 and @ 0x5583e0], so an expansion's are packed and loose alike.
-	Kind(AssetKind::NovaWorldScreen, "novaworld_screen", "NovaWorld screen", ArchiveSlot::Loose)
+	// The NovaWorld screens' markup: the error page [orig: "nw_error.mnx", UI_ShowNovaWorldErrorMessage
+	// @ 0x558449] and the login's start page [orig: "nw_startup.mnx", UI_EnterNovaWorldMenu @ 0x558937],
+	// whose STARTUPURL the gate substitutes (docs/net/novaworld-net-re.md D-NET-31) (S13 A8: no kind
+	// before, so the build left them out). The menus' scene loader reads them [orig: @ 0x63e1b0 ->
+	// FileSystem_LoadFileToBuffer @ 0x63e1c6], through the front door, which reads the archives alone
+	// unless /d [orig: FileSystem_OpenFile @ 0x75b1c0, the loose search only when searchLooseFirst @
+	// 0x75b1e5, set for the session by /d alone @ 0x4a6fac]. Retail ships them loose in its folder and
+	// in no archive, where a launch without /d never reads them; a build packs them with the menus
+	// (localres), the one place the game reads them with /d and without, and nowhere else.
+	Kind(AssetKind::NovaWorldScreen, "novaworld_screen", "NovaWorld screen", ArchiveSlot::Localres)
 	        .extensions(kNovaWorldScreen)
-	        .expansion(ExpansionLoose::FrontDoor)
 	        .row,
 	// A video by its name, the expansion's own folder first, then the install's: the menus' [orig:
 	// UI_CreateMenuBinkVideos @ 0x54b5ff..0x54b74a] and the intro's [orig: Game_PlayIntroVideos @

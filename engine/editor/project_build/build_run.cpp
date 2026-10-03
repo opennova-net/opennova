@@ -722,17 +722,6 @@ void BuildRun::compare_base(uint64_t budget) {
 }
 
 void BuildRun::drop_same_as_base() {
-	// A loose copy of a file the front door reads (ExpansionLoose::FrontDoor) goes with its archive copy.
-	std::map<std::string, bool> archived_same;
-	for (size_t a = 0; a < plan_.archives.size(); ++a)
-		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e)
-			archived_same[normalized_logical_name(plan_.archives[a].entries[e].logical_name)] = same_[stamp_index(a, e)];
-	for (size_t e = 0; e < plan_.loose.size(); ++e) {
-		const BuildEntry &entry = plan_.loose[e];
-		const auto archived = archived_same.find(normalized_logical_name(entry.logical_name));
-		if (asset_kind_row(entry.kind).expansion_loose == ExpansionLoose::FrontDoor && archived != archived_same.end())
-			same_[stamp_index(plan_.archives.size(), e)] = archived->second;
-	}
 	// A mission the expansion ships keeps its text table in <b>L.pff, however like the base's: the
 	// mission list titles a mission only from the archive paired with its own [orig:
 	// Mission_BuildMapListFromPFF @ 0x562c2d, PFF_FileExists(bin, textArchive)].
@@ -753,7 +742,6 @@ void BuildRun::drop_same_as_base() {
 	std::vector<Stamp> stamps;
 	std::vector<uint64_t> contents;
 	std::vector<size_t> group_base;
-	std::map<std::string, bool> counted;
 	const auto keep = [&](std::vector<BuildEntry> &entries, size_t group) {
 		std::vector<BuildEntry> kept;
 		for (size_t e = 0; e < entries.size(); ++e) {
@@ -764,10 +752,8 @@ void BuildRun::drop_same_as_base() {
 				contents.push_back(contents_[index]);
 				continue;
 			}
-			if (counted.emplace(normalized_logical_name(entries[e].logical_name), true).second) {
-				++report_.same_as_base_files;
-				report_.same_as_base_bytes += stamps_[index].size;
-			}
+			++report_.same_as_base_files;
+			report_.same_as_base_bytes += stamps_[index].size;
 		}
 		entries = std::move(kept);
 	};

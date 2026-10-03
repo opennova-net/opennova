@@ -44,8 +44,7 @@ std::string expansion_folder(const std::string &expansion);
 // Its archives' paths there: "expansion/<b>/<b>L.pff" (language) or "expansion/<b>/<b>.pff".
 std::string expansion_archive_path(const std::string &expansion, bool language);
 
-// Where a build puts a file of the expansion `<b>`: its kind's place, a file the front door reads
-// (ExpansionLoose::FrontDoor) packed in <b>.pff and loose in the folder alike (`also_loose`); and the
+// Where a build puts a file of the expansion `<b>`: its kind's place; and the
 // files the game reads by their path in the expansion's folder, whatever their kind would say, loose
 // there alone: the expansion's own files whose row says so (project/expansion_files.h,
 // ExpansionPlacement::Folder: `<b>.bin`, the override table, whose path-qualified query no archive
@@ -54,6 +53,6 @@ std::string expansion_archive_path(const std::string &expansion, bool language);
 // loose first [orig: Expansion_ScanAndRegister @ 0x4a43d0, the search path @ 0x4a4492]; `version.txt`;
 // the music banks), and `gt.ssc`, read loose first from the folder [orig: Mission_LoadEncryptedConfig
 // @ 0x4cdcf4].
-ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &expansion, bool &also_loose);
+ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &expansion);
 
 } // namespace opennova::editor

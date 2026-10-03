@@ -30,13 +30,14 @@ namespace opennova::editor {
 enum class ArchiveSlot { Language, Localres, Resource, Loose, None };
 
 // Where the game reads a loose file of a kind when it runs an expansion (`/exp <name>`, ADR 0046
-// S16): from the expansion's own folder, `expansion\<name>\`, which an expansion build ships; only
+// S16): from the expansion's own folder, `expansion\<name>\`, which an expansion build ships; or only
 // from the install's folder, which an expansion cannot change (the build leaves such a file out and
-// says so, build.expansion.root_only); or through the file system's front door, which reads the
-// archives alone by default and under `/d` the expansion's folder, the install's and then the
-// archives [orig: FileSystem_OpenFile @ 0x75b1c0], so an expansion ships it in its archive and in its
-// folder alike. None for a kind that is not loose (an archive's, or one no build packs).
-enum class ExpansionLoose { None, Folder, RootOnly, FrontDoor };
+// says so, build.expansion.root_only). None for a kind that is not loose (an archive's, or one no
+// build packs). A file the game reads through the file system's front door is no loose kind: the
+// front door reads the archives alone unless `/d` [orig: FileSystem_OpenFile @ 0x75b1c0, the loose
+// search only when searchLooseFirst @ 0x75b1e5; its one setter for the session, the /d gate
+// Game_InitSubsystems @ 0x4a6fa9..0x4a6fac], so such a kind packs (the NovaWorld screens).
+enum class ExpansionLoose { None, Folder, RootOnly };
 
 // The document types the editor opens a kind with (ADR 0046 d9): documents/document_types holds
 // one DocumentType per value past None, in this order. None: a kind the build packs as it is.

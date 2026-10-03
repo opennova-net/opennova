@@ -128,7 +128,9 @@ const Route kRoutes[] = {
 	{AssetKind::PowerupDefs, ArchiveSlot::Localres},
 	{AssetKind::OtherDefs, ArchiveSlot::Localres},
 	{AssetKind::StringTableCoo, ArchiveSlot::Loose},
-	{AssetKind::NovaWorldScreen, ArchiveSlot::Loose}, // .mnx, no kind (and left out) before S13 A8
+	// .mnx, no kind (and left out) before S13 A8; loose until S16, which the front door reads only under
+	// /d [orig: FileSystem_OpenFile @ 0x75b1c0; Game_InitSubsystems @ 0x4a6fac]
+	{AssetKind::NovaWorldScreen, ArchiveSlot::Localres},
 	{AssetKind::Video, ArchiveSlot::Loose},
 	{AssetKind::PlayerSave, ArchiveSlot::Loose},
 	{AssetKind::Shader, ArchiveSlot::Resource},
@@ -374,6 +376,15 @@ static int test_new_kinds_land_where_their_rows_say() {
 	TEST_EXPECT(in(plan.archives[1].entries, "ASP_G7.npz"));
 	TEST_EXPECT(in(plan.archives[2].entries, "head.grm"));
 	TEST_EXPECT(in(plan.loose, "score.ini"));
+	// S16: the NovaWorld screens in localres.pff with the menus and nowhere else, the one place the
+	// game reads them without /d [orig: @ 0x63e1c6 -> FileSystem_OpenFile @ 0x75b1c0, whose loose
+	// search only /d turns on @ 0x4a6fac].
+	TEST_EXPECT(editor_test::write_text(p.root + "/nw_error.mnx", "<HTML/>") &&
+	            editor_test::write_text(p.root + "/nw_startup.mnx", "<HTML/>"));
+	const BuildPlan screens = p.plan();
+	TEST_EXPECT(screens.ok && in(screens.archives[1].entries, "nw_error.mnx") && in(screens.archives[1].entries, "nw_startup.mnx"));
+	TEST_EXPECT(!in(screens.loose, "nw_error.mnx") && !in(screens.loose, "nw_startup.mnx") &&
+	            !in(screens.archives[0].entries, "nw_error.mnx") && !in(screens.archives[2].entries, "nw_error.mnx"));
 	return 0;
 }
 
@@ -391,10 +402,7 @@ static int test_expansion_routing() {
 		case ArchiveSlot::Localres:
 		case ArchiveSlot::Resource: TEST_EXPECT(place == ExpansionPlace::Archive); break;
 		case ArchiveSlot::Loose:
-			// A file the front door reads (ExpansionLoose::FrontDoor) packs in <b>.pff, and is copied loose too.
-			TEST_EXPECT(place == ExpansionPlace::Folder || place == ExpansionPlace::RootOnly ||
-			            (place == ExpansionPlace::Archive &&
-			             asset_kind_row(kind).expansion_loose == ExpansionLoose::FrontDoor));
+			TEST_EXPECT(place == ExpansionPlace::Folder || place == ExpansionPlace::RootOnly);
 			break;
 		case ArchiveSlot::None: TEST_EXPECT(place == ExpansionPlace::None); break;
 		}
@@ -406,19 +414,12 @@ static int test_expansion_routing() {
 	TEST_EXPECT(expansion_archive_path("jxm", false) == "expansion/jxm/jxm.pff");
 	TEST_EXPECT(route_for_expansion(AssetKind::StringTableCoo) == ExpansionPlace::RootOnly);
 	TEST_EXPECT(route_for_expansion(AssetKind::NovaWorldScreen) == ExpansionPlace::Archive);
-	bool also_loose = false;
-	TEST_EXPECT(route_for_expansion(entry_of("JXM.bin", AssetKind::Strings), "jxm", also_loose) == ExpansionPlace::Folder &&
-	            !also_loose);
-	TEST_EXPECT(route_for_expansion(entry_of("gametext.bin", AssetKind::Strings), "jxm", also_loose) ==
-	                    ExpansionPlace::LanguageArchive &&
-	            !also_loose);
-	TEST_EXPECT(route_for_expansion(entry_of("version.txt", AssetKind::Text), "jxm", also_loose) == ExpansionPlace::Folder &&
-	            !also_loose);
-	TEST_EXPECT(route_for_expansion(entry_of("gt.ssc", AssetKind::Config), "jxm", also_loose) == ExpansionPlace::Folder);
-	TEST_EXPECT(route_for_expansion(entry_of("notes.txt", AssetKind::Text), "jxm", also_loose) == ExpansionPlace::RootOnly);
-	TEST_EXPECT(route_for_expansion(entry_of("nw_error.mnx", AssetKind::NovaWorldScreen), "jxm", also_loose) ==
-	                    ExpansionPlace::Archive &&
-	            also_loose);
+	TEST_EXPECT(route_for_expansion(entry_of("JXM.bin", AssetKind::Strings), "jxm") == ExpansionPlace::Folder);
+	TEST_EXPECT(route_for_expansion(entry_of("gametext.bin", AssetKind::Strings), "jxm") == ExpansionPlace::LanguageArchive);
+	TEST_EXPECT(route_for_expansion(entry_of("version.txt", AssetKind::Text), "jxm") == ExpansionPlace::Folder);
+	TEST_EXPECT(route_for_expansion(entry_of("gt.ssc", AssetKind::Config), "jxm") == ExpansionPlace::Folder);
+	TEST_EXPECT(route_for_expansion(entry_of("notes.txt", AssetKind::Text), "jxm") == ExpansionPlace::RootOnly);
+	TEST_EXPECT(route_for_expansion(entry_of("nw_error.mnx", AssetKind::NovaWorldScreen), "jxm") == ExpansionPlace::Archive);
 	return 0;
 }
 
@@ -492,8 +493,8 @@ static BaseInstall make_base(const std::string &root, const Files &language, con
 
 // ADR 0046 S16: the project built as the expansion jxm. Its folder holds its two archives (the
 // language slot's kinds in jxmL.pff, the rest in jxm.pff), its loose files where the game reads them
-// under /exp jxm (a video, its music bank, its version.txt, its jxm.bin, a NovaWorld screen packed and
-// loose alike), nothing at the build's root; a file the game reads only from the install's folder
+// under /exp jxm (a video, its music bank, its version.txt, its jxm.bin; a NovaWorld screen packed
+// alone), nothing at the build's root; a file the game reads only from the install's folder
 // left out and said (build.expansion.root_only); the build mounts with /exp jxm and resolves every
 // name; its id is another than the standalone game's of the same files and than another expansion
 // name's.
@@ -540,7 +541,7 @@ static int test_expansion_layout() {
 	};
 	TEST_EXPECT(!in(plan.archives[0].entries, "jxm.bin") && in(plan.archives[0].entries, "gametext.bin"));
 	TEST_EXPECT(in(plan.archives[1].entries, "main.mnu") && in(plan.archives[1].entries, "nw_error.mnx"));
-	TEST_EXPECT(loose_at("expansion/jxm/nw_error.mnx"));
+	TEST_EXPECT(!in(plan.loose, "nw_error.mnx"));
 	TEST_EXPECT(loose_at("expansion/jxm/jxm.bin") && loose_at("expansion/jxm/header.bik"));
 	TEST_EXPECT(loose_at("expansion/jxm/Mjxm.sbf") && loose_at("expansion/jxm/version.txt"));
 	TEST_EXPECT(!in(plan.loose, "cc.bin") && !in(plan.archives[0].entries, "cc.bin") && in(plan.root_only, "cc.bin"));

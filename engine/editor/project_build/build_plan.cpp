@@ -21,7 +21,7 @@ namespace {
 // path there.
 struct Placement {
 	ArchiveSlot slot = ArchiveSlot::None;
-	std::string loose_path; // a loose file's, or an archived file's second, loose copy ("" for none)
+	std::string loose_path; // a loose file's ("" for none)
 	bool root_only = false; // an expansion's game reads it only from the install's folder
 };
 
@@ -32,19 +32,16 @@ Placement place(const AssetEntry &asset, const BuildTarget &target) {
 		if (out.slot == ArchiveSlot::Loose) out.loose_path = asset.logical_name;
 		return out;
 	}
-	bool also_loose = false;
-	const std::string in_folder = expansion_folder(target.expansion) + "/" + asset.logical_name;
-	switch (route_for_expansion(asset, target.expansion, also_loose)) {
+	switch (route_for_expansion(asset, target.expansion)) {
 	case ExpansionPlace::LanguageArchive: out.slot = ArchiveSlot::Language; break;
 	case ExpansionPlace::Archive: out.slot = ArchiveSlot::Localres; break; // <b>.pff, the plan's Localres archive
 	case ExpansionPlace::Folder:
 		out.slot = ArchiveSlot::Loose;
-		out.loose_path = in_folder;
+		out.loose_path = expansion_folder(target.expansion) + "/" + asset.logical_name;
 		break;
 	case ExpansionPlace::RootOnly: out.root_only = true; break;
 	case ExpansionPlace::None: break;
 	}
-	if (also_loose) out.loose_path = in_folder;
 	return out;
 }
 
@@ -214,13 +211,12 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 			plan.root_only.push_back(std::move(entry));
 			continue;
 		}
-		if (!placement.loose_path.empty()) {
-			BuildEntry loose = entry;
-			loose.build_path = placement.loose_path;
-			plan.loose.push_back(std::move(loose));
-		}
 		const ArchiveSlot slot = placement.slot;
-		if (slot == ArchiveSlot::Loose) continue;
+		if (slot == ArchiveSlot::Loose) {
+			entry.build_path = placement.loose_path;
+			plan.loose.push_back(std::move(entry));
+			continue;
+		}
 		for (BuildArchive &archive : plan.archives) {
 			if (archive.slot == slot) archive.entries.push_back(std::move(entry));
 		}
