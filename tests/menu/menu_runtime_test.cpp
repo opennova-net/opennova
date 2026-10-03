@@ -1441,12 +1441,11 @@ void test_options_screen() {
 
 } // namespace
 
-// A populate's column layout: the count first (below 1 refused; existing
-// columns kept), then one init per column (out of range refused); the layout
-// reaches the frame, is replayed when the screen is shown again, and bounds
-// the cell writes like an authored COLUMN COUNT.
-// [orig: resize_column_count @0x63f6c0; CTableWnd_InitRow @0x63f9c0;
-//  StatScreen_PopulateStatResultsList @0x5622fa..0x56237a]
+// A populate's column layout: the count first (below 1 refused), then one init
+// per column (out of range refused); the layout reaches the frame, is replayed
+// when the screen is shown again, and bounds the cell writes like an authored
+// COLUMN COUNT. [orig: CTableWnd_ResizeColumnCount @0x63f6c0; CTableWnd_InitRow
+// @0x63f9c0; StatScreen_PopulateStatResultsList @0x5622fa..0x56237a]
 void test_table_runtime_columns() {
 	const mnu::Document doc = make_document();
 	FakeFrame frame;
@@ -1471,6 +1470,86 @@ void test_table_runtime_columns() {
 	CHECK(rt.navigate_to_screen("OPTIONS") && rt.navigate_to_screen("MAIN"));
 	// Replayed with the rows when the screen shows again.
 	CHECK(frame.table_columns_seen.size() == 4 && frame.table_columns_seen[3].label == "Score");
+}
+
+// The column records a count leaves [orig: CTableWnd_ResizeColumnCount @0x63f6c0]: one
+// that does not grow the table keeps them (the authored columns, which an init then
+// sets up in place, keeping their cell type, offsets and SUBST rows [orig:
+// CTableWnd_InitRow @0x63f9c0]); one that grows it starts every record over, zeroed,
+// the authored ones too (the grow path copies the old count in bytes @0x63f724).
+void test_table_column_records() {
+	mnu::Document doc = make_document();
+	mnu::Window &authored = doc.screens[0].roots[0].children[11];
+	CHECK(authored.name == "TABLE");
+	authored.table_data.column.has_count = true;
+	authored.table_data.column.count = 3;
+	FakeFrame frame;
+	MenuRuntime rt;
+	seed_counts(frame);
+	rt.set_frame(&frame);
+	rt.open_document(&doc, "main.mnu", "");
+	// An init over the authored count: the three records stand, the one set up in place.
+	CHECK(rt.table_init_column(14, 1, 80, "Kills", -1, -1));
+	const std::vector<MenuTableColumn> &seen = frame.table_columns_seen;
+	CHECK(seen.size() == 3 && seen[0].kept && !seen[0].defined && seen[2].kept && !seen[2].defined);
+	CHECK(seen.size() == 3 && seen[1].kept && seen[1].defined && seen[1].label == "Kills" &&
+			seen[1].width == 80 && seen[1].justify == 1 && seen[1].vjustify == 16 &&
+			seen[1].body_justify == 1 && seen[1].body_vjustify == 16 && seen[1].ascending &&
+			!seen[1].numeric_sort);
+	// A smaller count and the same one keep the records.
+	CHECK(rt.table_set_column_count(14, 2));
+	CHECK(seen.size() == 2 && seen[0].kept && seen[1].kept && seen[1].defined && seen[1].label == "Kills");
+	CHECK(rt.table_set_column_count(14, 2));
+	CHECK(seen.size() == 2 && seen[1].kept && seen[1].label == "Kills");
+	// A larger one starts every record over: zero, the authored ones lost.
+	CHECK(rt.table_set_column_count(14, 4));
+	bool zeroed = seen.size() == 4;
+	for (const MenuTableColumn &c : seen)
+		zeroed = zeroed && !c.kept && !c.defined && c.label.empty() && c.width == 0 && c.justify == 0 &&
+				c.vjustify == 0 && c.cell_type == 0 && !c.ascending;
+	CHECK(zeroed);
+
+	// The stat fill's set-up is the same two steps: a set as wide as the authored
+	// table sets the authored records up in place; a wider one starts them over. An
+	// init reads its label, width, justification and sort compare, not the rest of
+	// the entry (the cell type and the cell justification are the record's).
+	std::vector<MenuTableColumn> set(3);
+	for (MenuTableColumn &c : set) {
+		c.width = 60;
+		c.justify = -1;
+		c.vjustify = 32;
+		c.body_justify = 2;
+		c.cell_type = 1;
+	}
+	set[2].numeric_sort = true;
+	MenuRuntime same;
+	FakeFrame same_frame;
+	seed_counts(same_frame);
+	same.set_frame(&same_frame);
+	same.open_document(&doc, "main.mnu", "");
+	same.table_set_columns(14, set);
+	const std::vector<MenuTableColumn> &kept = same_frame.table_columns_seen;
+	CHECK(kept.size() == 3 && kept[0].kept && kept[0].defined && kept[0].justify == 1 &&
+			kept[0].vjustify == 32 && kept[0].body_justify == 1 && kept[0].body_vjustify == 32 &&
+			kept[0].cell_type == 0 && kept[2].numeric_sort && !kept[1].numeric_sort);
+	set.push_back(set[0]);
+	MenuRuntime wider;
+	FakeFrame wider_frame;
+	seed_counts(wider_frame);
+	wider.set_frame(&wider_frame);
+	wider.open_document(&doc, "main.mnu", "");
+	wider.table_set_columns(14, set);
+	const std::vector<MenuTableColumn> &fresh = wider_frame.table_columns_seen;
+	CHECK(fresh.size() == 4 && !fresh[0].kept && fresh[0].defined && fresh[3].defined &&
+			fresh[0].width == 60 && fresh[0].cell_type == 0);
+	// An empty set is a count below 1: nothing is set up.
+	MenuRuntime none;
+	FakeFrame none_frame;
+	seed_counts(none_frame);
+	none.set_frame(&none_frame);
+	none.open_document(&doc, "main.mnu", "");
+	none.table_set_columns(14, {});
+	CHECK(none_frame.table_columns_seen.empty());
 }
 
 // The stat table's fill [orig: StatScreen_PopulateStatResultsList @ 0x562240]: installed
@@ -1537,6 +1616,7 @@ int main() {
 	test_radio_spin_tables_scroll();
 	test_table_row_operations();
 	test_table_runtime_columns();
+	test_table_column_records();
 	test_mouse();
 	test_keys();
 	test_two_root_keys();
