@@ -179,8 +179,10 @@ void Simulation::request_hud_map_close() {
 }
 
 void Simulation::request_waypoint_cycle(int p_direction) {
-	kernel_->world.script.waypoints.manual_cycle(p_direction < 0,
-			kernel_->world.waypoint_context());
+	// A joiner's g_GameType is the session's, which its replica holds.
+	opennova::world::WaypointCycleContext ctx = kernel_->world.waypoint_context();
+	if (is_joiner() && runtime_ != nullptr) ctx.game_type = runtime_->game_type();
+	kernel_->world.script.waypoints.manual_cycle(p_direction < 0, ctx);
 }
 
 void Simulation::request_spectate_action(int p_code) {

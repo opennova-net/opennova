@@ -848,14 +848,11 @@ public:
     // embedder feeds once, what the host stamps, what the drains consume.
     ScriptState script;
     // The waypoint/POI walks' view of this world (waypoint_track.h): the live
-    // entries' entities and the session facts the KOTH leg reads.
-    WaypointCycleContext waypoint_context() const {
-        WaypointCycleContext ctx;
-        ctx.registry = &registry;
-        ctx.game_type = match.rules().game_type;
-        ctx.in_session = rules.mp_session;
-        return ctx;
-    }
+    // entries' entities and the session facts the KOTH leg reads. The game
+    // type is g_GameType: the session's configured match type, or for a world
+    // no session configured (the bare local role) the type its mission header
+    // implies, the single-player launch's own derivation.
+    WaypointCycleContext waypoint_context() const;
     MissionDiagnostics diagnostics; // retained across ticks; restored with the mission baseline
     MissionTables tables;
     SessionRules rules;

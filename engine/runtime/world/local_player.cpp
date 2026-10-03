@@ -782,7 +782,8 @@ void LocalPlayer::reset_for_new_round() {
         view.lookahead_q16[axis] = 0;
     }
     world_.cached.sound_listener_view_flags = 2;
-    world_.script.waypoints.reset_selection(world_.registry, *local, world_.match.rules().game_type);
+    world_.script.waypoints.reset_selection(world_.registry, *local,
+            world_.waypoint_context().game_type);
     input.look_heading = bam_heading_from_mission_yaw_deg(local->yaw);
     // Dialog and HUD buffers belong to the presenting device; one ordered
     // effect carries the reset without discarding unrelated mission events.
