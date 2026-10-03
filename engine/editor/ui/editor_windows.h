@@ -99,6 +99,7 @@ private:
 	void draw_edit_menu(const SessionView &v, const DocumentBase *document);
 	void draw_build_menu(const SessionView &v);
 	void draw_new_project();
+	void draw_build_panel(const SessionView &v);
 	void shortcuts(const SessionView &v, const DocumentBase *document);
 
 	void dispatch_events();
@@ -113,6 +114,7 @@ private:
 	bool in_frame_ = false;
 	NewProjectForm new_project_;
 	bool open_new_project_ = false;
+	bool build_panel_open_ = false; // the build panel, open from a build's end (BuildEnded) until closed
 	ProjectSettingsDialog settings_;
 	ImportDialog import_;
 	NewFilePrompt new_file_;

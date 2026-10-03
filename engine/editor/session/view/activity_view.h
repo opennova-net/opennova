@@ -75,6 +75,17 @@ struct ActivityView {
 
 	OutputLog output;   // what the editor said and the running game's log, oldest first
 	std::string status; // the last thing that happened, one line
+
+	// The last rename that finished in this project (the UX round's problems lane): Undo does not take
+	// a rename back (it rewrote files, not a step of a document's history), so the Edit menu offers the
+	// rename back, every use rewritten again. A name's (`symbol`: its defining file, the record's locator
+	// and the field) or a file's (`path` its new path); `from` the old name, `to` the new.
+	struct LastRename {
+		bool made = false;
+		bool symbol = false;
+		std::string path, locator, field, from, to;
+	};
+	LastRename last_rename;
 };
 
 } // namespace opennova::editor

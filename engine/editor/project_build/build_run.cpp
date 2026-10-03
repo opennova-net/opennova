@@ -630,6 +630,7 @@ void BuildRun::settle() {
 			report_.ok = true;
 			report_.reused_existing = true;
 			report_.build_dir = final_dir_;
+			list_built();
 			bytes_done_ = bytes_total_;
 			label_ = "Build unchanged";
 			phase_ = Phase::Done;
@@ -902,8 +903,34 @@ void BuildRun::publish() {
 	                 protected_dirs_ ? protected_dirs_() : std::vector<std::string>());
 	report_.ok = true;
 	report_.build_dir = final_dir_;
+	list_built();
 	bytes_done_ = bytes_total_;
 	phase_ = Phase::Done;
+}
+
+void BuildRun::list_built() {
+	report_.built.clear();
+	const auto size_of = [this](const std::string &name) {
+		std::error_code ec;
+		const uintmax_t bytes = fs::file_size(system_path(join_path(final_dir_, name)), ec);
+		return ec ? uint64_t(0) : uint64_t(bytes);
+	};
+	for (const BuildArchive &archive : plan_.archives) {
+		BuiltFile file;
+		file.name = archive.file_name;
+		file.archive = true;
+		file.files = archive.entries.size();
+		file.bytes = size_of(archive.file_name);
+		file.reused = std::find(report_.archives_reused.begin(), report_.archives_reused.end(), archive.file_name) !=
+		              report_.archives_reused.end();
+		report_.built.push_back(std::move(file));
+	}
+	for (const BuildEntry &entry : plan_.loose) {
+		BuiltFile file;
+		file.name = entry.logical_name;
+		file.bytes = size_of(entry.logical_name);
+		report_.built.push_back(std::move(file));
+	}
 }
 
 BuildReport run_build(const BuildPlan &plan, const std::string &output_root, ProtectedDirs protected_dirs,

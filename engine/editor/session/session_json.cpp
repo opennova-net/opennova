@@ -63,6 +63,7 @@ constexpr Token<PickPurpose> kPurposeTokens[] = {
 	{PickPurpose::RuntimeExecutable, "runtime_executable"},
 	{PickPurpose::GameInstall, "game_install"},
 	{PickPurpose::ImportFiles, "import_files"},
+	{PickPurpose::BuildFolder, "build_folder"},
 };
 
 constexpr Token<UnsavedChoice> kChoiceTokens[] = {
@@ -1224,6 +1225,9 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page, const
 	out.set("revision", json_number(double(base.revision())));
 	out.set("can_undo", boolean(base.can_undo()));
 	out.set("can_redo", boolean(base.can_redo()));
+	// What Undo and Redo would take back or make again, in words (the UX round's problems lane).
+	if (const std::string words = base.undo_words(); !words.empty()) out.set("undo_words", json_string(words));
+	if (const std::string words = base.redo_words(); !words.empty()) out.set("redo_words", json_string(words));
 	out.set("ignored_lines", json_number(double(base.ignored_lines())));
 	if (records) {
 		out.set("row_count", json_number(double(records->rows().size())));

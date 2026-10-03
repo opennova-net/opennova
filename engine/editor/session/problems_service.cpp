@@ -311,7 +311,17 @@ void ProblemsService::add_reported(const Diagnostic &d) {
 	view_.findings.diagnostics.push_back(d);
 	++trailing_;
 	reported_.push_back({d, validating()});
-	mark_rows();
+	// A reported finding comes after the gate and is the request's (a refusal, an import's word), never the
+	// game's own: its marks follow the rows' without a plan (an import may report hundreds).
+	if (view_.findings.marks && view_.findings.marks->rows + 1 == view_.findings.diagnostics.size()) {
+		auto marks = std::make_shared<FindingMarks>(*view_.findings.marks);
+		++marks->rows;
+		marks->original.push_back(0);
+		marks->blocking.push_back(0);
+		view_.findings.marks = std::move(marks);
+	} else {
+		mark_rows();
+	}
 	core_.touch(ViewConcern::Findings);
 }
 
