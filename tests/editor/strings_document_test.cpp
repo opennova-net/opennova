@@ -184,6 +184,63 @@ int load_edit_save() {
 	return 0;
 }
 
+// A string moved and not saved (the found-bugs round's check of StringsDocument::place_of, which
+// reads the index's placement with the identity as its fallback): its fields read and write the
+// string by its identity wherever it now stands, alone and inside a batch that moves it first (the
+// staged row's order, not the committed one); its locator is its new place and names it back; a
+// finding on it and a reveal by its locator land on it.
+int moved_string_reads_itself() {
+	editor_test::TempProjectDir dir("opennova_strings_moved_test");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Moved"));
+	editor_test::create_missing_files(session);
+	const std::vector<uint8_t> bytes = minted_table();
+	std::string error;
+	TEST_EXPECT(write_file_atomic(session.view().project.root + "/strings/moved.bin", bytes.data(), bytes.size(), error));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("moved.bin"));
+	auto *document = dynamic_cast<StringsDocument *>(session.document_for("moved.bin"));
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const NodeId menu = document->rows()[0]->id;
+	const NodeAddress exit{menu, kString, document->rows()[0]->collections[0][0]};
+	const NodeAddress cafe{menu, kString, document->rows()[0]->collections[0][1]};
+	// MM_Cafe moved before MM_Exit, unsaved.
+	EditorRequest move = request::edit_record(document->path(), Edit());
+	move.edits[0].operation = EditOperation::Move;
+	move.edits[0].address = cafe;
+	move.edits[0].position = 0;
+	editor_test::handle_to_end(session, move);
+	TEST_EXPECT(session.outcome().done() && document->dirty() && document->rows()[0]->collections[0][0] == cafe.child);
+	TEST_EXPECT(text_of(*document, cafe, "key") == "MM_Cafe" && text_of(*document, exit, "key") == "MM_Exit");
+	TEST_EXPECT(document->locator(cafe) == "0/string:0" && document->address_at("0/string:0") == cafe &&
+	            document->locator(exit) == "0/string:1" && document->address_at("0/string:1") == exit);
+	editor_test::handle_to_end(session, request::edit_record(document->path(), set(cafe, "text", std::string("Tea"))));
+	TEST_EXPECT(document->table().entries[0].key == "MM_Cafe" && document->table().entries[0].text == "Tea" &&
+	            document->table().entries[1].text == "Exit");
+	// A batch that moves MM_Exit back first and then sets its text: the staged order, not the committed.
+	EditorRequest batch = request::edit_record(document->path(), Edit());
+	batch.edits[0].operation = EditOperation::Move;
+	batch.edits[0].address = exit;
+	batch.edits[0].position = 0;
+	batch.edits.push_back(set(exit, "text", std::string("Leave")));
+	editor_test::handle_to_end(session, batch);
+	TEST_EXPECT(session.outcome().done() && document->table().entries[0].key == "MM_Exit" &&
+	            document->table().entries[0].text == "Leave" && document->table().entries[1].text == "Tea");
+	// A finding on the moved string (an empty key) names it at its place; a reveal by that place shows it.
+	editor_test::handle_to_end(session, request::edit_record(document->path(), set(cafe, "key", std::string())));
+	session.run_operations();
+	const Diagnostic *empty = nullptr;
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		if (d.code() == "strings.key_empty" && d.asset == document->path()) empty = &d;
+	TEST_EXPECT(empty && empty->row_id == menu && empty->child_id == cafe.child);
+	session.handle(request::open_document(document->path(), document->locator(cafe)));
+	TEST_EXPECT(session.view().documents.selection.primary == cafe);
+	return 0;
+}
+
 int validation_and_session() {
 	editor_test::TempProjectDir dir("opennova_strings_session_test");
 	NoProcess platform;
@@ -338,4 +395,6 @@ int changes_since_save() {
 
 } // namespace
 
-int main() { return load_edit_save() || validation_and_session() || changes_since_save(); }
+int main() {
+	return load_edit_save() || validation_and_session() || changes_since_save() || moved_string_reads_itself();
+}

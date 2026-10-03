@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
+#include <optional>
 
+#include <base/io/strutil.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/staged_rows.h>
 
@@ -51,11 +54,13 @@ std::string locator_token(const Document &document, NodeKind kind) {
 	return *token ? std::string(token) : std::to_string(kind);
 }
 
+// A locator's index: decimal digits alone (strutil's parse, never a sign, a blank or a tail), within
+// what a size holds.
 bool whole_number(const std::string &text, size_t &out) {
-	if (text.empty() || text.size() > 18) return false;
-	for (const char c : text)
-		if (!std::isdigit(static_cast<unsigned char>(c))) return false;
-	out = size_t(std::strtoull(text.c_str(), nullptr, 10));
+	if (!strutil::all_digits(text)) return false;
+	const std::optional<unsigned long long> value = strutil::parse_ullong(text);
+	if (!value || *value > static_cast<unsigned long long>(SIZE_MAX)) return false;
+	out = static_cast<size_t>(*value);
 	return true;
 }
 

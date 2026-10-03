@@ -263,7 +263,7 @@ bool TextDocument::read_source(const std::vector<uint8_t> &decoded, bool adopt,
 	std::shared_ptr<const TextEncoding> encoding;
 	if (decode_) {
 		std::string message;
-		if (!decode_(decoded, text, encoding, issues, message))
+		if (!decode_(path(), decoded, text, encoding, issues, message))
 			return refuse(error, path(), CoreFinding::DocumentParse,
 					message.empty() ? std::string("The file does not read.") : message);
 	} else {
