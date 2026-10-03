@@ -45,7 +45,7 @@ bool make_project(ProjectSession &session, const editor_test::TempProjectDir &di
 	const std::string repo = test_paths_repo_root(__FILE__);
 	const std::string source = dir.file("source");
 	if (!editor_test::write_text(v.project.root + "/" + items->relative_path,
-	                             "begin \"Searched Thing\"\nid 100300\ntype vehicle\nturn_rate 90\nprimary_weapon Searchgun\n"
+	                             "begin \"Searched Thing\"\nid 100300\ntype vehicle\ngraphic armory\nturn_rate 90\nprimary_weapon Searchgun\n"
 	                             "end\n") ||
 	    !editor_test::write_text(v.project.root + "/" + weapons->relative_path, "weapon \"Searchgun\"\nend\n") ||
 	    !editor_test::write_bytes(v.project.root + "/models/armory.3di",
@@ -194,6 +194,16 @@ static int test_project_search() {
 	for (const GraphSearchHit &hit : graph.search("e"))
 		if (hit.symbol) TEST_EXPECT(hit.usages == graph.users_of(*hit.symbol).size() && (!hit.symbol->inert || hit.usages == 0));
 		else TEST_EXPECT(hit.usages == graph.usages_of(hit.file).size());
+	// A file found by a record that names it (ADR 0046 S17): the model by the item whose graphic it is.
+	const std::vector<GraphSearchHit> things = graph.search("thing");
+	const auto model = std::find_if(things.begin(), things.end(), [](const GraphSearchHit &hit) {
+		return !hit.symbol && hit.name == "armory.3di";
+	});
+	TEST_EXPECT(model != things.end() && model->via == "Searched Thing" &&
+	            model->via_file == view.project.scan->find("items.def")->relative_path);
+	// A file whose own name holds the text is found by it, with no record.
+	const std::vector<GraphSearchHit> armories = graph.search("armory");
+	TEST_EXPECT(!armories.empty() && armories.front().name == "armory.3di" && armories.front().via.empty());
 	return 0;
 }
 

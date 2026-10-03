@@ -64,13 +64,17 @@ struct ReferenceChoice {
 };
 
 // A file or a symbol whose name holds a searched text (AssetGraph::search), with how many uses
-// it has.
+// it has; or a file found by a record that names it (ADR 0046 S17: a model by its item's name).
 struct GraphSearchHit {
 	const GraphSymbol *symbol = nullptr; // the symbol; null for a file
 	std::string name;   // the file's logical name, or the symbol as defined
 	std::string words;  // what the symbol reads as where it is not its name (an item's catalog name); ""
 	std::string file;   // the file, or the file defining the symbol (project-relative)
 	size_t usages = 0;  // the file's usages (usages_of), or the symbol's users (users_of)
+	// A file whose name does not hold the text: the record naming it whose name does, and that record's
+	// file (Flyable Blackhawk in defs/ITEMS.DEF for models/Dblkhwk1.3di); empty otherwise.
+	std::string via;
+	std::string via_file;
 };
 
 // What the last update (or set_base) did.

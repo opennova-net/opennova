@@ -71,7 +71,7 @@ void ProjectFind::draw(Workspace &workspace) {
 	char typed[sizeof(text_)];
 	std::memcpy(typed, text_, sizeof(typed));
 	ImGui::SetNextItemWidth(-FLT_MIN);
-	ImGui::InputTextWithHint("##text", "A file or a name the files define", text_, sizeof(text_));
+	ImGui::InputTextWithHint("##text", "A file, a name the files define, or an item's name", text_, sizeof(text_));
 	if (escape) {
 		std::memcpy(text_, typed, sizeof(typed));
 		ImGui::CloseCurrentPopup();
@@ -88,7 +88,7 @@ void ProjectFind::draw(Workspace &workspace) {
 		window_requests::go_to(workspace, target);
 		ImGui::CloseCurrentPopup();
 	};
-	if (!text_[0]) ui_kit::empty_state("Type part of a file's name or of a name a file defines.");
+	if (!text_[0]) ui_kit::empty_state("Type part of a file's name, of a name a file defines, or of the record that names a file (an item's name finds its model).");
 	else if (hits_.empty()) ui_kit::empty_state("No file or name holds it.");
 	else if (hits_.size() > kShownMax)
 		ImGui::TextDisabled("%zu results; the first %zu listed. Type more to narrow them.", hits_.size(), kShownMax);
@@ -98,9 +98,11 @@ void ProjectFind::draw(Workspace &workspace) {
 		ImGui::PushID(static_cast<int>(i));
 		// The result: its name, what it is and where, its uses; opened, the uses.
 		const std::string uses = std::to_string(hit.usages) + (hit.usages == 1 ? " use" : " uses");
-		// An item by its catalog's name first, its id after it (S17).
+		// An item by its catalog's name first, its id after it; a file found by what names it says so:
+		// "Dblkhwk1.3di, used by Flyable Blackhawk" (S17).
 		const std::string named = hit.words.empty() ? hit.name : hit.words + " " + hit.name;
-		const std::string title = named + "  (" + what_of(hit) + ", " + hit.file + ")  " + uses;
+		const std::string by = hit.via.empty() ? std::string() : ", used by " + hit.via;
+		const std::string title = named + by + "  (" + what_of(hit) + ", " + hit.file + ")  " + uses;
 		const float go_width = ui_kit::button_width("Go to") + ImGui::GetStyle().ItemSpacing.x;
 		const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
 		const bool expanded = ImGui::TreeNodeEx("result", hit.usages ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_Leaf, "%s",
@@ -108,6 +110,7 @@ void ProjectFind::draw(Workspace &workspace) {
 		                                                                   ImGui::GetTreeNodeToLabelSpacing())
 		                                                .c_str());
 		std::string tip = named + "\n" + what_of(hit) + " in " + hit.file + "\n" + uses;
+		if (!hit.via.empty()) tip += "\nFound by " + hit.via + " (" + hit.via_file + "), which names it.";
 		if (hit.symbol && hit.symbol->inert) tip += "\nNo lookup of the game finds it: " + hit.symbol->inert_reason + ".";
 		ui_kit::tooltip(tip);
 		ImGui::SameLine(right - ui_kit::button_width("Go to"));

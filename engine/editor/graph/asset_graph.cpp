@@ -1122,11 +1122,22 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 		const GraphSlot &slot = index_.slot(id);
 		if (last && *last == slot.key) return;
 		last = &slot.key;
-		if (!holds(slot.logical_name)) return;
+		const std::vector<const GraphEdge *> usages = usages_of(slot.path);
 		GraphSearchHit hit;
+		if (!holds(slot.logical_name)) {
+			// Found by what names it: the first record naming the file whose name holds the text (a model
+			// by the item whose graphic it is, a texture by the material row naming it).
+			// A file's own records naming it (an item table's items naming each other) find nothing.
+			const auto by = std::find_if(usages.begin(), usages.end(), [&](const GraphEdge *edge) {
+				return edge->source != slot.path && holds(edge->record);
+			});
+			if (by == usages.end()) return;
+			hit.via = (*by)->record;
+			hit.via_file = (*by)->source;
+		}
 		hit.name = slot.logical_name;
 		hit.file = slot.path;
-		hit.usages = usages_of(slot.path).size();
+		hit.usages = usages.size();
 		hits.push_back(std::move(hit));
 	});
 	for_each_symbol([&](const GraphSymbol &symbol) {
