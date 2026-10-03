@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/documents/name_source.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
@@ -133,14 +134,17 @@ io::JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &ans
 // rows, set_page's), each row of the page with its collections (kind, kind token, label, fixed)
 // and their records (identities, names), each row and record with its change since the saved
 // baseline (Document::record_change: unchanged, changed, added) and the collections it holds in
-// turn.
-io::JsonValue document_to_json(const DocumentBase &document, const JsonPage *rows = nullptr);
-// A record: its address, name, path and locator, its change since the saved baseline
-// (unchanged, changed, added), its owner and index there, every field of its kind as it
-// applies to this record (Document::field_on) with the value, the choices, whether an
-// optional field is present, a reference's status against the view's tables, and for a
-// field changed since the saved baseline `changed` with what the saved file holds (`saved`,
-// null when the file lacks the record; `saved_present` for an optional field), then the
+// turn; each row its `title`, its words as the outline shows them (ADR 0046 S15: record_display
+// with `names`, the graph's where the caller has them).
+io::JsonValue document_to_json(const DocumentBase &document, const JsonPage *rows = nullptr,
+		const NameSource *names = nullptr);
+// A record: its address, name, `title` (its words, ADR 0046 S15), path and locator, its change since
+// the saved baseline (unchanged, changed, added), its owner and index there, every field of its kind
+// as it applies to this record (Document::field_on) with the value and, where the value names
+// something, its words (`display`; `dangling` where it names nothing; `display_source`), the
+// choices, whether an optional field is present, a reference's status against the view's tables,
+// and for a field changed since the saved baseline `changed` with what the saved file holds
+// (`saved`, null when the file lacks the record; `saved_present` for an optional field), then the
 // collections it holds. Null for a stale or wrong-kind address.
 io::JsonValue record_to_json(const Document &document, const NodeAddress &address, const SessionView &view);
 // The asset graph's edges (each with its resolution) and symbols.
@@ -149,7 +153,8 @@ io::JsonValue graph_edges_to_json(const AssetGraph &graph, const std::vector<con
 io::JsonValue graph_symbol_to_json(const GraphSymbol &symbol);
 // A reference field of a record, as it applies to it (Document::field_on): the names its
 // picker offers (reference_choices): {field, reference (its kind token), scope,
-// count, choices: [{name, kind, file, record, status, inert, reason}]}; and where its Go to
+// count, choices: [{name, kind, file, record, label (what the name names in words, ADR 0046 S15:
+// word_choices), status, inert, reason}]}; and where its Go to
 // leads with the value it holds (reference_targets): {field, reference, value,
 // count, targets: [{label, file, locator, field, editable}]}. A field that is no reference
 // has none. Null for a record the document does not hold or a field it does not have.

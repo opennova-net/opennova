@@ -6,6 +6,7 @@
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_validation.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/mns_document.h>
@@ -53,9 +54,11 @@ constexpr DocumentType kTypes[] = {
 			validate_animation_map_file, AnimationMapDocument::schema,
 			animation_map_finding_codes },
 	// The mission (S14): its records' references no field's value is are its record_references (the
-	// text keys a record's number forms).
+	// text keys a record's number forms); its records and values in a modder's words, and briefly for a
+	// narrow column (S15).
 	{ DocumentTypeId::Mission, "mission", make_mission, validate_mission_file, MissionDocument::schema,
-			mission_finding_codes, nullptr, nullptr, nullptr, mission_references },
+			mission_finding_codes, nullptr, nullptr, nullptr, mission_references, mission_record_label,
+			mission_value_label, mission_record_brief, mission_game_choices },
 	// The text types (S13 D9): one TextDocument class, a row per behaviour, none with records
 	// (text_fields) or a project check; the script's text names references, and its compiler's
 	// words are its highlights (S13 V10).

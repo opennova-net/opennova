@@ -13,7 +13,8 @@
 // nearest first. The options round-trip and refuse what they do not take. The overlays: a glyph per
 // pool, the team ring, the hover and selected rings, the primary's handles (a yaw-90 entity's yaw
 // handle east of it), an area's footprint and its z box, a path's lines (closed unless it does not
-// loop, thick when selected), the labels, the marquee, and a line clipped at the near plane.
+// loop, thick when selected), the labels, the marquee, and a line clipped at the near plane. The
+// labels' declutter (S15): what always draws, what draws first, what fits.
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_scene.h>
@@ -391,8 +393,9 @@ int test_overlays() {
 	TEST_EXPECT(lines(kMissionBlueRgb, 2.5f) == 2);
 	in.selected_rows = nullptr;
 	// Hovered: a Hover ring; the primary: a thick Selected ring, its handles (the yaw handle of the
-	// yaw-90 building east of its anchor, the height handle above it); another selected: a thin ring;
-	// labels beside those alone, beside every shown mark with the option.
+	// yaw-90 building east of its anchor, the height handle above it); another selected: a thinner
+	// ring; each over a dark ring (S15); labels beside those alone, beside every shown mark with the
+	// option.
 	in.hover = 0;
 	in.primary = 1;
 	std::vector<int> selected = { 2 };
@@ -401,7 +404,8 @@ int test_overlays() {
 	in.title = [&](const NodeAddress &record) { return "row " + std::to_string(record.row); };
 	list = mission_overlay_shapes(in);
 	TEST_EXPECT(count(list, OverlayKind::Circle, OverlayRole::Hover) == 1);
-	TEST_EXPECT(count(list, OverlayKind::Circle, OverlayRole::Selected, 2.0f) == 1 && count(list, OverlayKind::Circle, OverlayRole::Selected, 1.0f) == 1);
+	TEST_EXPECT(count(list, OverlayKind::Circle, OverlayRole::Selected, 2.5f) == 1 && count(list, OverlayKind::Circle, OverlayRole::Selected, 1.5f) == 1);
+	TEST_EXPECT(count(list, OverlayKind::Circle, OverlayRole::Normal) == 3 + 3); // the team rings, a dark ring under each of the three
 	TEST_EXPECT(count(list, OverlayKind::Text, OverlayRole::Normal) == 3);
 	const PreviewVec3 yaw = mission_yaw_handle(scene.entities()[1], 10.0f);
 	TEST_EXPECT(near(yaw.x, 110.0) && near(yaw.y, 0.0) && near(yaw.z, 0.0)); // yaw 90 faces east
@@ -452,6 +456,41 @@ int test_overlays() {
 	return 0;
 }
 
+// The labels' declutter (S15): the hovered mark's and the primary's always, even over each other; the
+// other selected before the rest but only where they fit, each nearest first; the rest after.
+int test_label_picks() {
+	const auto candidate = [](float x, float y, float depth, size_t length, bool always, bool first) {
+		MissionLabelCandidate label;
+		label.x = x;
+		label.y = y;
+		label.depth = depth;
+		label.length = length;
+		label.always = always;
+		label.first = first;
+		return label;
+	};
+	const std::vector<MissionLabelCandidate> candidates = {
+		candidate(0.0f, 0.0f, 50.0f, 10, true, false), // the primary
+		candidate(5.0f, 0.0f, 10.0f, 10, false, true), // a selected one over it: not drawn
+		candidate(0.0f, 100.0f, 30.0f, 10, false, true), // a selected one clear of it
+		candidate(0.0f, 102.0f, 1.0f, 5, false, false), // nearer, but over a selected one's
+		candidate(0.0f, 200.0f, 5.0f, 5, false, false), // clear
+		candidate(2.0f, 0.0f, 60.0f, 10, true, false), // the hovered, over the primary's: drawn
+	};
+	const std::vector<size_t> picks = mission_label_picks(candidates);
+	TEST_EXPECT((picks == std::vector<size_t>{ 0, 5, 2, 4 }));
+	// The cap: of 400 labels apart from one another and the hovered one, kMissionLabelsMax drawn in all,
+	// the hovered first, then the nearest.
+	std::vector<MissionLabelCandidate> many;
+	for (int i = 0; i < 400; ++i) many.push_back(candidate(0.0f, float(i) * 20.0f, float(i), 3, false, false));
+	many.push_back(candidate(500.0f, 0.0f, 1000.0f, 3, true, false));
+	const std::vector<size_t> capped = mission_label_picks(many);
+	TEST_EXPECT(capped.size() == kMissionLabelsMax && capped.front() == 400 && capped[1] == 0 &&
+			capped.back() == kMissionLabelsMax - 2);
+	std::printf("test_label_picks passed\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -459,6 +498,7 @@ int main() {
 	TEST_EXPECT(test_marks() == 0);
 	TEST_EXPECT(test_options() == 0);
 	TEST_EXPECT(test_overlays() == 0);
+	TEST_EXPECT(test_label_picks() == 0);
 	std::printf("editor_mission_scene: all tests passed\n");
 	return 0;
 }

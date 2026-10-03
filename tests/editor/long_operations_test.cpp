@@ -58,6 +58,7 @@
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/thread_cpu_clock.h"
 #include "editor/editor_test_support.h"
 #include "editor/fixture_projects.h"
 #include "editor/png_test_support.h"
@@ -1039,12 +1040,16 @@ static int test_retail_open() {
 	// than either takes at this budget.
 	constexpr size_t kPollCap = 100000;
 	size_t open_polls = 0, validation_polls = 0;
+	// A poll's cost is the thread's CPU over it (common/thread_cpu_clock.h): what the code spent, which
+	// another process's load (ctest -j8, a build beside it) does not stretch as it stretches the wall
+	// clock; the step floor below is measured the same way.
 	double longest_open = 0, longest_validation = 0, first_open = 0;
 	while (v.activity.operation.running() && open_polls < kPollCap) {
-		const auto poll = clock::now();
+		const double cpu = test_clock::thread_cpu_ms();
 		s.session.poll();
-		longest_open = std::max(longest_open, ms_since(poll));
-		if (open_polls++ == 0) first_open = ms_since(poll);
+		const double spent = test_clock::thread_cpu_ms() - cpu;
+		longest_open = std::max(longest_open, spent);
+		if (open_polls++ == 0) first_open = spent;
 	}
 	TEST_EXPECT(!v.activity.operation.running());
 	const double open_ms = ms_since(started);
@@ -1054,10 +1059,11 @@ static int test_retail_open() {
 	ValidationStatus before_longest;
 	while (v.activity.validation.running && validation_polls < kPollCap) {
 		const ValidationStatus before = v.activity.validation;
-		const auto poll = clock::now();
+		const double cpu = test_clock::thread_cpu_ms();
 		s.session.poll();
-		if (ms_since(poll) > longest_validation) {
-			longest_validation = ms_since(poll);
+		const double spent = test_clock::thread_cpu_ms() - cpu;
+		if (spent > longest_validation) {
+			longest_validation = spent;
 			before_longest = before;
 		}
 		++validation_polls;
@@ -1067,9 +1073,9 @@ static int test_retail_open() {
 	TEST_EXPECT(v.project.open && v.activity.last_operation.end == OperationEnd::Done && !v.findings.diagnostics.empty());
 	TEST_EXPECT(v.project.retail_files.size() > 1000);
 	std::printf("retail: %zu files exported (%.1f MB); opened in %zu polls, %.0f ms (the request %.1f ms, the first "
-	            "poll %.1f ms listing the install's %zu names, the longest poll %.1f ms); validated in %zu polls, %.0f "
-	            "ms (the longest poll %.1f ms, from %llu of %llu files); %zu files scanned, %zu Problems rows, %zu "
-	            "edges\n",
+	            "poll %.1f ms of CPU listing the install's %zu names, the longest poll %.1f ms of CPU); validated in %zu "
+	            "polls, %.0f ms (the longest poll %.1f ms of CPU, from %llu of %llu files); %zu files scanned, %zu "
+	            "Problems rows, %zu edges\n",
 	            exported, double(bytes_exported) / (1024.0 * 1024.0), open_polls, open_ms, request_ms, first_open,
 	            v.project.retail_files.size(), longest_open, validation_polls, validation_ms, longest_validation,
 	            static_cast<unsigned long long>(before_longest.done), static_cast<unsigned long long>(before_longest.total),
@@ -1083,9 +1089,9 @@ static int test_retail_open() {
 		const ProjectPaths paths = ProjectPaths::for_root(root);
 		const std::vector<std::shared_ptr<const DocumentBase>> open;
 		const ValidationInput input{paths, *v.project.document, *v.project.scan, open};
-		const auto slowest = [&ms_since](clock::time_point start, double &longest, std::string &name,
-		                                 const std::string &what) {
-			const double ms = ms_since(start);
+		// A single step's CPU (the clock the polls are measured on), the longest kept with its name.
+		const auto slowest = [](double cpu_start, double &longest, std::string &name, const std::string &what) {
+			const double ms = test_clock::thread_cpu_ms() - cpu_start;
 			if (ms > longest) {
 				longest = ms;
 				name = what;
@@ -1098,21 +1104,23 @@ static int test_retail_open() {
 		std::string slowest_read_name;
 		auto part = clock::now();
 		for (const AssetEntry *asset : graph.files_to_read(*v.project.scan, open)) {
-			const auto file = clock::now();
+			const double file = test_clock::thread_cpu_ms();
 			readings[asset->relative_path] = AssetGraph::read_file(paths, *v.project.document, *asset);
 			slowest(file, slowest_read, slowest_read_name, asset->relative_path);
 		}
 		const double read_ms = ms_since(part);
 		const size_t read = readings.size();
 		part = clock::now();
+		const double update_cpu = test_clock::thread_cpu_ms();
 		graph.update(paths, *v.project.document, *v.project.scan, open, &readings);
+		const double update_step = test_clock::thread_cpu_ms() - update_cpu;
 		const double update_ms = ms_since(part);
 		part = clock::now();
 		cache.begin();
 		double slowest_file = 0;
 		std::string slowest_file_name;
 		for (const AssetEntry *asset : validation_files(*v.project.scan)) {
-			const auto file = clock::now();
+			const double file = test_clock::thread_cpu_ms();
 			cache.file_findings(input, *asset);
 			slowest(file, slowest_file, slowest_file_name, asset->relative_path);
 		}
@@ -1127,28 +1135,32 @@ static int test_retail_open() {
 		bool moved = false, checked = false;
 		part = clock::now();
 		while (!checked) {
-			const auto step = clock::now();
+			const double step = test_clock::thread_cpu_ms();
 			checked = check.step({input, cache, assets}, 1, moved);
 			slowest(step, slowest_render, no_name, std::string());
 		}
 		const double render_ms = ms_since(part);
 		std::printf("retail: the validation's parts afresh: the graph's files read %.0f ms (%zu files, the longest %.1f "
-		            "ms, %s), its update over them %.0f ms, the files' own findings %.0f ms (%zu files, the longest "
-		            "%.1f ms, %s), the render check %.0f ms (%zu menus rendered, the longest step %.1f ms)\n",
-		            read_ms, read, slowest_read, slowest_read_name.c_str(), update_ms, files_ms,
+		            "ms of CPU, %s), its update over them %.0f ms (%.1f ms of CPU), the files' own findings %.0f ms (%zu "
+		            "files, the longest %.1f ms of CPU, %s), the render check %.0f ms (%zu menus rendered, the longest "
+		            "step %.1f ms of CPU)\n",
+		            read_ms, read, slowest_read, slowest_read_name.c_str(), update_ms, update_step, files_ms,
 		            validation_files(*v.project.scan).size(), slowest_file, slowest_file_name.c_str(), render_ms,
 		            check.rendered(), slowest_render);
-		step_floor = std::max({first_open, slowest_read, update_ms, slowest_file, slowest_render});
+		step_floor = std::max({first_open, slowest_read, update_step, slowest_file, slowest_render});
 	}
 	// No poll stalls the editor much past its budget (S13 A3 review): a poll steps until its 10 ms
 	// have passed, so it ends at most a step past them, and a step is at most one file's or one
 	// menu's work, which no step splits, or the Open's first (the install's names): the longest of
 	// those, measured above (on the JO install a menu the graph reads and ITEMS.DEF's own findings,
-	// some 50 to 60 ms on an idle machine). Twice that and 50 ms: room for a machine other builds
-	// share, and far short of a walk, the graph's reading or the files' findings run in one poll
-	// (the render check a menu a step is editor_menu_render's to pin, its whole run near the bound).
-	TEST_EXPECT(longest_open <= kDefaultPollBudget.ms + 2 * step_floor + 50);
-	TEST_EXPECT(longest_validation <= kDefaultPollBudget.ms + 2 * step_floor + 50);
+	// some 50 to 60 ms on an idle machine). Twice that and 50 ms, far short of a walk, the graph's
+	// reading or the files' findings run in one poll (the render check a menu a step is
+	// editor_menu_render's to pin, its whole run near the bound). The polls and the steps are the
+	// thread's CPU, so a loaded machine (ctest -j8) stretches neither; a tick each way for Windows'
+	// clock.
+	const double room = kDefaultPollBudget.ms + 2 * step_floor + 50 + 2 * test_clock::kThreadCpuTickMs;
+	TEST_EXPECT(longest_open <= room);
+	TEST_EXPECT(longest_validation <= room);
 	// The dependency mount's base layer over the whole install, which an expansion project's Open
 	// would build (ADR 0046 d12's later list): one call today, timed.
 	const auto layered = clock::now();
