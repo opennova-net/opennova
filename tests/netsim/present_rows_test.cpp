@@ -134,7 +134,7 @@ bool test_world_rows_carry_the_authoritative_record() {
 nw::OrganicSpawnRecord organic_record(uint16_t slot, uint16_t type_id) {
 	nw::OrganicSpawnRecord rec;
 	rec.slot_id = slot;
-	rec.has_body = true;
+	rec.def_type = 3; // ItemDefType person
 	rec.item_type_id = type_id;
 	rec.pos_x = 5 << 16;
 	rec.pos_y = 6 << 16;
@@ -219,7 +219,7 @@ bool test_organic_spawn_lands_the_flags_word() {
 	nw::OrganicSpawnBatch empty;
 	nw::OrganicSpawnRecord cleared;
 	cleared.slot_id = 0x0011u;
-	cleared.has_body = false;
+	cleared.def_type = 0;
 	empty.records = {cleared};
 	empty.entity_count = 1;
 	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(empty));

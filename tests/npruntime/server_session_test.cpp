@@ -3487,7 +3487,8 @@ bool check_session_status_reply_matches_retail_writer() {
 	if (!expect(decoded.kv_count == 2 && decoded.kv.size() == 2 &&
 	                    decoded.kv[0].key == 9 && decoded.kv[0].value == 2 &&
 	                    decoded.kv[1].key == 8 && decoded.kv[1].value == 30 &&
-	                    decoded.trailing_bytes == 5,
+	                    decoded.has_writer_sentinel && decoded.writer_sentinel.key == 0 &&
+	                    decoded.writer_sentinel.value == 0 && decoded.trailing_bytes == 0,
 	            "session-status carries subgoal-count/respawn pairs and writer sentinel"))
 		return false;
 	return expect(std::all_of(replies.front().payload.end() - 5,

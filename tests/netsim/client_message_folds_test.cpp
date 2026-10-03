@@ -45,7 +45,7 @@ std::vector<uint8_t> player_spawn(uint16_t handle, uint8_t team, uint16_t net_id
 		uint8_t anim_slot) {
 	OrganicSpawnRecord rec;
 	rec.slot_id = handle;
-	rec.has_body = true;
+	rec.def_type = 3; // ItemDefType person
 	rec.item_type_id = kPlayerPersonTypeId;
 	rec.entity_name = "player";
 	rec.minimap_flags = 0x0100u;

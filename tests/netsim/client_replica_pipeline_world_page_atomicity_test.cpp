@@ -73,7 +73,7 @@ nw::OrganicSpawnRecord organic_record(
 		std::uint16_t handle, std::uint16_t type_id, const char *name) {
 	nw::OrganicSpawnRecord rec;
 	rec.slot_id = handle;
-	rec.has_body = true;
+	rec.def_type = 3; // ItemDefType person
 	rec.item_type_id = type_id;
 	rec.owner_connection_id = 0x01020304u;
 	rec.entity_name = name;

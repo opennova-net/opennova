@@ -132,7 +132,7 @@ std::vector<uint8_t> encode_terrain_load_batch(const TerrainLoadBatch &batch);
 // Encode a §5.23 S2C 0x0C organic-entity spawn batch — the inverse of
 // decode_organic_spawn_batch and the bytes a host streams so a JOINER can name-match its
 // own pool-0 player (the type-0x14b9 organic whose entity_name == the joiner's player name)
-// and learn its wire handle. Every field after has_body is unconditional (no flag gates),
+// and learn its wire handle. Every field after def_type is unconditional (no flag gates),
 // so this is a straight field-order write. [orig: NapiNPClientMsg_0x00C @ 0x42E730.]
 std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch);
 

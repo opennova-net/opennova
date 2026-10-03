@@ -62,6 +62,8 @@ struct FourPoolWorld final : w::World {
 		organic.team = 2;
 		organic.net_id = 0x4242;
 		organic.anim_slot = 5;
+		organic.has_item_def = true; // a retail organic always has its person def
+		organic.item_type = 3;       // ItemDefType person: the 0x0C def-type byte
 		world.registry.spawn(0, organic);
 
 		w::Entity item;
@@ -107,6 +109,7 @@ bool run_pool0_organic() {
 	if (!expect(out.records.size() == 1, "one decoded organic")) return false;
 	const nw::OrganicSpawnRecord &r = out.records[0];
 	if (!expect(r.slot_id == w::EntityHandle::make(0, 0).packed, "slot_id = pool-0 handle")) return false;
+	if (!expect(r.def_type == 3, "def-type byte = the person def's type (D-NET-334)")) return false;
 	if (!expect(r.item_type_id == 0x0816, "AI type id")) return false;
 	if (!expect(r.entity_name == "tango1", "name carried")) return false;
 	if (!expect(r.pos_x == w::to_fixed(10.0) && r.pos_z == w::to_fixed(1.5), "pos 16.16")) return false;

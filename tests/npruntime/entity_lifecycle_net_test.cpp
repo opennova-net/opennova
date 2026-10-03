@@ -97,7 +97,7 @@ std::vector<uint8_t> organic_spawn(uint16_t handle, const std::string &name, uin
 	OrganicSpawnBatch batch;
 	OrganicSpawnRecord rec;
 	rec.slot_id = handle;
-	rec.has_body = true;
+	rec.def_type = 3; // ItemDefType person
 	rec.item_type_id = w::kPlayerInfantryTypeId;
 	rec.entity_name = name;
 	rec.pos_x = w::to_fixed(10.0);

@@ -43,8 +43,13 @@ struct SessionStatusBlock {
 	uint8_t  kv_count = 0;     // wire count; MAY exceed the pairs present (reader
 	                           // is bounds-tolerant, missing pairs read as zeros)
 	std::vector<SessionStatusKV> kv; // the pairs actually on the wire
-	size_t   trailing_bytes = 0; // bytes after the kv pairs the retail parser
-	                             // never reads (golden carries 5 zero bytes)
+	// The writer's unadvertised extra pair: it loops while pair_index <= count,
+	// so the zero-initialized report adds one five-byte {0, 0} pair after the
+	// counted ones; the reader stops at kv_count and never reads it.
+	// [orig: Server_BuildStatusReport @0x530A60; reader @0x531055]
+	bool     has_writer_sentinel = false;
+	SessionStatusKV writer_sentinel;
+	size_t   trailing_bytes = 0; // bytes past the sentinel pair (none in retail)
 };
 bool decode_session_status(const uint8_t *body, size_t len, SessionStatusBlock &out);
 

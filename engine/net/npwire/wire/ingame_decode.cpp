@@ -437,10 +437,10 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 			out.sentinel_ended_early = true;
 			return (c.p == c.end);
 		}
-		rec.has_body = (c.u8() != 0);
+		rec.def_type = c.u8();
 		if (!c.ok) { out.last_record_partial = true; out.records.push_back(std::move(rec)); return false; }
-		if (!rec.has_body) {
-			// Empty spawn — the record ends after the has_body byte (@ 0x42e813).
+		if (!rec.has_body()) {
+			// Empty spawn — the record ends after the def-type byte (@ 0x42e813).
 			out.records.push_back(std::move(rec));
 			continue;
 		}
@@ -713,19 +713,26 @@ bool decode_client_fired_round(const uint8_t *body, size_t len,
 	return consumed == 45;
 }
 
-// C2S 0x21 anti-cheat CRC reply. Handler reads u8 + u32 = 5 B effective; the
-// 9-B body observed in capture has 4 trailing zero bytes that the handler
-// never touches. We expose `consumed` so the caller can see the 5 vs 9 split.
-// [orig: NapiNPServerMsg_HandleAntiCheatCRCCheck @ 0x502050]
+// C2S 0x21 anti-cheat CRC reply. The handler reads u8 + u32 = 5 B; the 9-B
+// body the client builds ends in the echoed challenge key, which the handler
+// never touches. A 5-B body is still a valid handler read, so the key is
+// optional here and `consumed` reports 5 or 9.
+// [orig: NapiNPServerMsg_HandleAntiCheatCRCCheck @ 0x502050;
+//  NetPacket_WriteEntityCRCChecksum @0x42B020, key echo @0x42B14D]
 bool decode_client_checksum_reply(const uint8_t *body, size_t len,
                                   ClientChecksumReply &out, size_t &consumed) {
 	consumed = 0;
+	out = ClientChecksumReply{};
 	Cursor c{body, body + len, true};
 	out.player_index = c.u8();
 	out.expected_crc = c.u32();
 	if (!c.ok) return false;
+	if (c.p + 4 <= c.end) {
+		out.echoed_key = c.u32();
+		out.has_echoed_key = true;
+	}
 	consumed = size_t(c.p - body);
-	return consumed == 5;
+	return true;
 }
 
 // §5.9.1 round-event record. 17-20 B variable by flags gate (0x80, 0x40).
@@ -1759,9 +1766,15 @@ bool decode_session_status(const uint8_t *body, size_t len, SessionStatusBlock &
 		kv.value = (c.p + 4 <= c.end) ? c.u32() : 0;
 		out.kv.push_back(kv);
 	}
-	// The retail parser stops here; the dispatcher never requires full
-	// consumption, and golden retail carries trailing zero bytes after the kv
-	// pairs. Tolerate + surface them.
+	// The retail parser stops here and the dispatcher never requires full
+	// consumption. The writer's loop runs one pair past kv_count, so the body
+	// ends in that unadvertised {0, 0} pair [orig: Server_BuildStatusReport
+	// @0x530A60]; anything after it is surfaced as trailing bytes.
+	if (c.p + 5 <= c.end) {
+		out.writer_sentinel.key = c.u8();
+		out.writer_sentinel.value = c.u32();
+		out.has_writer_sentinel = true;
+	}
 	out.trailing_bytes = size_t(c.end - c.p);
 	c.skip(out.trailing_bytes);
 	return true;

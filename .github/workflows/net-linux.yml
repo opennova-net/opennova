@@ -30,7 +30,8 @@ jobs:
           submodules: recursive
           lfs: false   # net stack consumes no LFS game assets (net fixtures pulled below)
 
-      # nwmsg_replay_test reads the captured .nwmsg parity fixtures and
+      # nwmsg_replay_test and nwmsg_codec_parity_test read the captured .nwmsg
+      # parity fixtures and
       # nw_self_capture_test the committed opennova-produced self-capture pcap,
       # both LFS-tracked (fixtures/** in .gitattributes). The rest of the net
       # stack consumes no LFS assets, so pull only this subtree to keep checkout
@@ -61,4 +62,4 @@ jobs:
       - name: Run net ctests + the kernel smoke
         run: |
           ctest --test-dir build-server --output-on-failure --parallel "$(nproc)" -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store)$"

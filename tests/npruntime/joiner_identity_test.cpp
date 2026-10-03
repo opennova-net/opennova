@@ -53,10 +53,10 @@ bool run_identity() {
 		return joiner.handle_datagram(packet.data(), packet.size());
 	};
 	auto spawn = [&](uint16_t handle, uint32_t owner, uint16_t flags, const char *name,
-			bool has_body = true) {
+			uint8_t def_type = 3) { // ItemDefType person; 0 = empty spawn
 		OrganicSpawnRecord record;
 		record.slot_id = handle;
-		record.has_body = has_body;
+		record.def_type = def_type;
 		record.item_type_id = 0x14B9;
 		record.owner_connection_id = owner;
 		record.minimap_flags = flags;
@@ -91,7 +91,7 @@ bool run_identity() {
 	receive(s2c::EMPTY_SLOT_SWEEP, {12, 0});
 	if (!expect(!joiner.has_self_handle(), "empty-slot sweep retires self identity")) return false;
 	spawn(13, connection_id, 0x100, "SharedCallsign");
-	spawn(13, 0, 0, "", false);
+	spawn(13, 0, 0, "", 0);
 	if (!expect(!joiner.has_self_handle(), "empty organic record retires self identity")) return false;
 	bool lifecycle_ok = true;
 	spawn(14, connection_id, 0x100, "Local");
@@ -123,7 +123,7 @@ bool run_identity() {
 	OrganicSpawnBatch partial;
 	OrganicSpawnRecord first;
 	first.slot_id = 16;
-	first.has_body = true;
+	first.def_type = 3; // ItemDefType person
 	first.item_type_id = 0x14B9;
 	first.owner_connection_id = connection_id;
 	first.minimap_flags = 0x100;
