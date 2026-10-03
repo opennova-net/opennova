@@ -261,7 +261,7 @@ Window &ImGuiPass::register_window(std::unique_ptr<Window> window) {
 
 void ImGuiPass::sync_visibility() {
 	for (auto &window : windows_) {
-		const bool visible = open_ && window->open;
+		const bool visible = open_ && window->open && !window->stands_aside();
 		if (visible != window->visible_) {
 			window->visible_ = visible;
 			window->on_visibility(visible);
@@ -309,6 +309,10 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			// A closed window never carries a focus request forward: the pick
 			// that raised it was declined when the window was closed again.
 			window.take_focus_request();
+			continue;
+		}
+		if (window.stands_aside()) {
+			// Not drawn this frame; a focus request waits for its return.
 			continue;
 		}
 		if (window.owns_frame()) {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <string>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/model/document_base.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
@@ -31,6 +32,18 @@ PreviewWindow::PreviewWindow(Workspace &workspace) : workspace_(workspace) {
 }
 
 PreviewWindow::~PreviewWindow() = default;
+
+bool preview_stands_aside(const SessionView &view) {
+	const DocumentBase *document = open_document(view, view.documents.active);
+	if (!document) return false;
+	const DocumentTypeId type = asset_kind_row(document->kind()).document;
+	const ViewportKind main = main_viewport_kind(type);
+	return main != ViewportKind::kCount && viewport_kind_row(main).canvas && preview_kind_of(type) == ViewportKind::kCount;
+}
+
+bool PreviewWindow::stands_aside() const {
+	return preview_stands_aside(workspace_.view());
+}
 
 ViewportView *PreviewWindow::view_of(const std::string &path, ViewportKind kind) {
 	for (Slot &slot : views_)

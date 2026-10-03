@@ -28,6 +28,11 @@ struct SessionView;
 // and when the window itself does not draw (closed, collapsed, its tab hidden), which end_frame()
 // catches. The window never takes the focus, and the Shell's devices follow their viewports whether
 // the window shows them or not.
+//
+// It steps aside (ADR 0046 S15) while the active document is drawn by a picture of its own in its
+// Document tab (a Main-role kind with a canvas: the mission's) and feeds nothing the Preview shows:
+// its dock node hides and Document takes the centre, so a mission's picture is the main view; it
+// comes back, where it was docked, when a document it previews is made active.
 class PreviewWindow : public devtools::Window {
 public:
 	explicit PreviewWindow(Workspace &workspace);
@@ -35,6 +40,7 @@ public:
 	const char *title() const override { return "Preview"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override { return devtools::InitialDockPlacement::CenterRight; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
+	bool stands_aside() const override;
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 	// After each frame's windows, whether this one drew or not (the workspace's frame
 	// bracket): a viewport view whose canvas did not draw this frame ends its gesture.
@@ -57,5 +63,10 @@ private:
 	Workspace &workspace_;
 	std::vector<Slot> views_;
 };
+
+// Whether the Preview window steps aside over `view` (PreviewWindow::stands_aside): its active
+// document's type is shown by a Main-role kind whose picture a canvas draws, and no Preview-role
+// kind shows or is fed by it.
+bool preview_stands_aside(const SessionView &view);
 
 } // namespace opennova::editor

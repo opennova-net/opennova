@@ -2144,8 +2144,8 @@ void test_mission_view_placing() {
 	DrawnDevices devices;
 	session.viewports().set_devices(&devices.cache);
 	Ui ui;
-	// A wide display: the first layout gives the Document tab 37.5% of the centre, and the lines this
-	// test reads are read whole there.
+	// A wide display, so the lines this test reads are read whole (the Preview steps aside for the
+	// mission: the Document tab has the centre).
 	ImGui::GetIO().DisplaySize = ImVec2(4096.0f, 1600.0f);
 	ui.windows.set_view(&v);
 	ui.windows.set_devices(&devices.cache);
@@ -2255,6 +2255,61 @@ void test_mission_view_placing() {
 	ui.activate(popup_item(item_id(column->ID, { "mission_canvas_menu" }), "Select same item"));
 	run.settle();
 	CHECK(v.documents.selection.records.size() == 3, "Select same item: the three pumps");
+}
+
+// The Preview steps aside for a mission (ADR 0046 S15), over a real session at the first layout: a
+// menu active, Preview draws beside Document; the mission made active, Preview is not drawn (its
+// Windows item still open), its node hides and Document takes the whole centre, the mission's
+// picture the main view; the menu active again, Preview is back in the node it left and Document
+// has its share again.
+void test_preview_steps_aside() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_preview_steps_aside");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
+	      "the mission written");
+	session.handle(request::rescan());
+	session.run_operations();
+	DrawnDevices devices;
+	session.viewports().set_devices(&devices.cache);
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
+	const devtools::Window *preview_window = find_window(ui.windows.pass(), "Preview");
+	CHECK(preview_window != nullptr, "the Preview window");
+	if (!preview_window) return;
+	const auto centre = [] {
+		const ImGuiWindow *files = ImGui::FindWindowByName("Files");
+		const ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
+		return files && inspector ? inspector->Pos.x - (files->Pos.x + files->Size.x) : 0.0f;
+	};
+	run.open("main.mnu");
+	ImGuiWindow *preview = ImGui::FindWindowByName("Preview");
+	ImGuiWindow *document = ImGui::FindWindowByName("Document");
+	CHECK(preview && preview->Active && document && centre() > 0.0f, "a menu: Preview drawn beside Document");
+	if (!preview || !document) return;
+	const ImGuiID node = preview->DockId;
+	CHECK(node != 0 && document->Size.x < centre() * 0.5f, "Document its share of the centre, Preview the rest");
+	CHECK(!preview_stands_aside(v), "a menu's Preview stands");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
+	CHECK(preview_stands_aside(v) && !preview->Active && preview_window->open,
+	      "a mission: Preview steps aside, still open in the Windows menu");
+	const ImGuiDockNode *left = ImGui::DockBuilderGetNode(node);
+	CHECK(left && !left->IsVisible && left->Windows.Size == 0, "the node it left kept, empty and hidden");
+	// The whole centre but the separators between the docks.
+	CHECK(std::fabs(document->Size.x - centre()) < 2.0f * ImGui::GetStyle().DockingSeparatorSize + 1.0f,
+	      "Document the whole centre");
+	run.open("main.mnu");
+	ui.frames(3);
+	CHECK(preview->Active && preview->DockId == node && document->Size.x < centre() * 0.5f,
+	      "the menu again: Preview back in its node, Document its share");
 }
 
 // A canvas whose picture fills it (the model's, the mission's), read through ImGui: the right
@@ -2674,6 +2729,7 @@ void run_workspace_tests() {
 	test_mission_view_input();
 	test_mission_view_ground();
 	test_mission_view_placing();
+	test_preview_steps_aside();
 	test_canvas_fill_input();
 	test_window_title();
 	test_view_event_mailboxes();

@@ -357,13 +357,21 @@ void reach_wrapped_toolbars(Sweep &sweep) {
 	CHECK(move && edit_of(*move).operation == EditOperation::Move, "Outdent raised");
 	ui.away();
 
-	// The mission's view (S14) in this narrow layout (the Document window beside the Preview takes
-	// about 250 pixels, its viewport column about 100 beside the outline, narrower than the 320 the
-	// design named): its toolbar wraps within the viewport's column, nothing of it past the column,
-	// and the mouse reaches its Play mission (cut to the column where its label does not fit, found
-	// by ###; S15's tools before the rest, so within fourteen lines), under the first line; pressed, it
-	// raises Play in the mission.
+	// The mission's view (S14) in a narrow layout: the Preview steps aside for a mission (S15), so the
+	// Document window takes the centre, which an author's Inspector dragged 450 pixels wider narrows
+	// again (its viewport column under 320 pixels beside the outline, narrower than the 320 the design
+	// named): its toolbar wraps within the viewport's column, nothing of it past the column, and the
+	// mouse reaches its Play mission (cut to the column where its label does not fit, found by ###;
+	// S15's tools before the rest, so within fourteen lines), under the first line; pressed, it raises
+	// Play in the mission. The Inspector goes back to its width after.
 	sweep.open("missions/synth_logic.bms", nullptr);
+	const ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
+	const float inspector_width = inspector ? inspector->Size.x : 0.0f;
+	CHECK(inspector && inspector->DockId, "the Inspector docked");
+	if (inspector && inspector->DockId) {
+		ImGui::DockBuilderSetNodeSize(inspector->DockId, ImVec2(inspector_width + 450.0f, inspector->Size.y));
+		ui.frames(4);
+	}
 	const ImGuiWindow *documents = ImGui::FindWindowByName("Document");
 	const ImGuiWindow *column = nullptr;
 	for (const ImGuiWindow *window : GImGui->Windows)
@@ -391,6 +399,10 @@ void reach_wrapped_toolbars(Sweep &sweep) {
 		requests = ui.drain();
 		const EditorRequest *make = one(requests, EditorRequestKind::CreateFile);
 		CHECK(make && make->path == "missions/synth_logic.wac", "Script made the mission's script beside it");
+	}
+	if (inspector && inspector->DockId) {
+		ImGui::DockBuilderSetNodeSize(inspector->DockId, ImVec2(inspector_width, inspector->Size.y));
+		ui.frames(4);
 	}
 }
 
