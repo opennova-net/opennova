@@ -220,8 +220,12 @@ public:
 	void quit();
 	// The preferences kept by their store, and shown.
 	void save_preferences();
-	// `item` first among the recently placed items (ADR 0046 S15), kept and shown.
+	// `item` first among the recently placed items (ADR 0046 S15), shown at once; kept by the next
+	// poll's save_recent_items (nothing to keep when it was first already).
 	void remember_recent_item(int64_t item);
+	// The poll's (and a quit's, and the session's end): the recently placed items kept by the store when
+	// they changed since; a store that cannot keep them says so in Output, failing no request.
+	void save_recent_items();
 	// The game install the editor imports from and plays in: the open project's (its local.json),
 	// else the one the editor last chose.
 	std::string game_install() const;
@@ -282,6 +286,7 @@ private:
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's
 	std::string refusal_status_; // the status line the last refused request left, until a request is served
+	bool recent_items_unsaved_ = false; // the recently placed items changed since the store kept them
 };
 
 } // namespace opennova::editor

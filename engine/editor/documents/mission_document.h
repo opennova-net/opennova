@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -241,10 +242,14 @@ bool compose_mission(const std::vector<std::shared_ptr<const Node>> &rows, bms::
 // A clipboard payload of copied rows (MissionDocument::copy) placed elsewhere (ADR 0046 S15, Paste
 // here): the middle of its entities' positions and its areas' middles, mission x and y (false for a
 // payload of no such rows: a nested kind's, or events alone), and the payload with each copied entity
-// moved `east`, `north` and `up` metres and each area `east` and `north` ("" for one that holds no
-// rows), written and read back as a copy's is.
+// moved `east` and `north` metres and up by what `rise` answers for it (given where it was and where it
+// goes, mission x and y: the ground's rise under it, which keeps its own height over the ground with
+// Stick; none when empty), each area `east` and `north`, written and read back as a copy's is. "" for
+// a payload that holds no rows, and for a move that would take a position past what the file's 16.16
+// words hold (-32768 m to just short of 32768 m): refused, never wrapped.
+using MissionClipRise = std::function<double(double from_x, double from_y, double to_x, double to_y)>;
 bool mission_clip_middle(const std::string &payload, double out[2]);
-std::string mission_clip_moved(const std::string &payload, double east, double north, double up);
+std::string mission_clip_moved(const std::string &payload, double east, double north, const MissionClipRise &rise = {});
 
 // The scope the mission's symbols are defined in and looked up by: its file name, upper case
 // ("ASH_I5B.BMS").

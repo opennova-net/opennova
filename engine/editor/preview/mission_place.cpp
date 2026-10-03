@@ -8,6 +8,7 @@
 #include <editor/documents/mission_reads.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_device.h>
+#include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
 
@@ -39,23 +40,34 @@ bool mission_duplicate_edits(const Document &document, const MissionScene &scene
 		const NodeAddress &primary, double east, double north, bool stick, const ViewportDevice *device,
 		std::vector<Edit> &out, std::string &error) {
 	out.clear();
-	// The primary first: the batch selects what it made, its first the primary.
+	// The primary first: the batch selects what it made, its first the primary. Each record once, however
+	// often it is named.
 	std::vector<NodeAddress> ordered;
+	if (std::find(records.begin(), records.end(), primary) != records.end()) ordered.push_back(primary);
 	for (const NodeAddress &record : records)
-		if (record == primary) ordered.push_back(record);
-	for (const NodeAddress &record : records)
-		if (record != primary && std::find(ordered.begin(), ordered.end(), record) == ordered.end()) ordered.push_back(record);
+		if (std::find(ordered.begin(), ordered.end(), record) == ordered.end()) ordered.push_back(record);
 	if (ordered.empty()) {
 		error = "Nothing to duplicate: select an entity or an area first.";
 		return false;
 	}
 	const bool moves = east != 0.0 || north != 0.0;
+	// A copy that would go past what the file's positions hold is refused, never clamped or wrapped.
+	const auto holds = [](double metres) { return metres >= bms::kFixed16Min && metres <= bms::kFixed16Max; };
 	for (const NodeAddress &record : ordered) {
 		const MissionEntityMark *entity = scene.entity(record.row);
 		const MissionAreaMark *area = entity ? nullptr : scene.area(record.row);
 		if (!entity && !area) {
 			error = document.record_title(record) + " is no entity or area: the picture copies those (the outline "
 													"duplicates the rest).";
+			out.clear();
+			return false;
+		}
+		const bool inside = entity ? holds(entity->x + east) && holds(entity->y + north)
+								   : holds(area->min[0] + east) && holds(area->max[0] + east) && holds(area->min[1] + north) &&
+											 holds(area->max[1] + north);
+		if (!inside) {
+			error = "A copy of " + document.record_title(record) +
+					" would go past what the mission's positions hold (32,768 m from its origin).";
 			out.clear();
 			return false;
 		}
@@ -156,19 +168,19 @@ bool mission_stop_edits(const MissionDocument &document, int path, int64_t item,
 	return true;
 }
 
-int64_t mission_stop_item(const MissionDocument &document, const MissionScene &scene, int path) {
-	(void)document;
-	int64_t last = 0, any = 0;
+int64_t mission_stop_item(const MissionScene &scene, int path) {
+	// The scene's paths come by number: the last one met that has a marker is the last path's.
+	int64_t own = 0, last = 0;
 	for (const MissionPathMark &each : scene.paths()) {
 		for (auto stop = each.stops.rbegin(); stop != each.stops.rend(); ++stop) {
 			const MissionEntityMark *marker = *stop ? scene.entity(*stop) : nullptr;
 			if (!marker) continue;
-			if (each.index == path) last = marker->item;
-			if (!any) any = marker->item;
+			if (each.index == path) own = marker->item;
+			last = marker->item;
 			break;
 		}
 	}
-	return last ? last : any;
+	return own ? own : last;
 }
 
 std::vector<NodeAddress> mission_same_item(const MissionScene &scene, const std::vector<NodeAddress> &records) {

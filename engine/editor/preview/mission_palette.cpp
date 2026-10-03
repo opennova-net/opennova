@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <base/io/strutil.h>
 #include <editor/graph/asset_graph.h>
@@ -98,10 +99,13 @@ MissionPalette mission_palette(const AssetGraph &graph, const std::string &filte
 	};
 	const std::string wanted = strutil::to_lower(filter);
 	std::unordered_map<int64_t, size_t> by_id;
+	std::unordered_set<int64_t> seen;
 	for (const GraphSymbol *symbol : symbols) {
 		if (symbol->inert) continue;
 		const std::optional<int> id = strutil::parse_int(symbol->name);
 		if (!id) continue;
+		// The first definition of an id stands (as the lookup finds it): an id defined twice counts once.
+		if (!seen.insert(*id).second) continue;
 		++out.count;
 		MissionPaletteItem item;
 		item.item = *id;
@@ -117,8 +121,6 @@ MissionPalette mission_palette(const AssetGraph &graph, const std::string &filte
 			const std::string words = strutil::to_lower(item.name + " " + symbol->name + " " + file_name(item.model));
 			if (words.find(wanted) == std::string::npos) continue;
 		}
-		// The first definition of an id stands (as the lookup finds it).
-		if (by_id.count(item.item)) continue;
 		by_id.emplace(item.item, out.items.size());
 		out.items.push_back(std::move(item));
 	}

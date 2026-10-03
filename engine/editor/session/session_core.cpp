@@ -767,12 +767,14 @@ void SessionCore::quit() {
 		refuse_busy(std::string());
 		return;
 	}
+	save_recent_items();
 	view_.dialogs.quit_requested = true;
 	touch(ViewConcern::Project);
 }
 
 void SessionCore::save_preferences() {
 	Diagnostic error;
+	recent_items_unsaved_ = false; // this save keeps them
 	if (!preferences_.save(error)) report(error);
 	const Preferences &settings = preferences_.values();
 	view_.project.recent_projects = settings.recent_projects;
@@ -784,8 +786,22 @@ void SessionCore::save_preferences() {
 }
 
 void SessionCore::remember_recent_item(int64_t item) {
-	preferences_.remember_recent_item(item);
-	save_preferences();
+	// In effect at once (the palette lists it first); written at the next poll, outside the request that
+	// placed it, and not at all when it was first already.
+	if (!preferences_.remember_recent_item(item)) return;
+	view_.project.recent_items = preferences_.values().recent_items;
+	touch(ViewConcern::Preferences);
+	recent_items_unsaved_ = true;
+}
+
+void SessionCore::save_recent_items() {
+	if (!recent_items_unsaved_) return;
+	recent_items_unsaved_ = false;
+	// A placement already went through: a settings file that cannot be written is a note, never the
+	// placement's refusal.
+	Diagnostic error;
+	if (!preferences_.save(error))
+		note("note: the recently placed items could not be kept with the editor's settings: " + error.message);
 }
 
 std::string SessionCore::game_install() const {

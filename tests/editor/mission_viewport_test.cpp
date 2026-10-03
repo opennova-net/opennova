@@ -34,6 +34,7 @@
 #include <editor/preview/mission_place.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/graph/asset_graph.h>
+#include <formats/mission/mission.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_json.h>
@@ -78,12 +79,23 @@ constexpr const char *kDropItems = "begin \"Drop Pump\"\nid 106100\ntype object\
 								   "begin \"Drop Crate\"\nid 106190\ntype object\ngraphic crate\nend\n"
 								   "begin \"Marker Alpha\"\nid 100001\ntype marker\nend\n";
 
+// The preferences in memory, whose saves fail while `fail` is set (a settings file another program
+// holds, a read-only profile).
+struct FlakyStore : MemoryPreferencesStore {
+	bool fail = false;
+	bool save(const Preferences &preferences, Diagnostic &error) override {
+		if (!fail) return MemoryPreferencesStore::save(preferences, error);
+		error.message = "the settings file is held by another program";
+		return false;
+	}
+};
+
 // A session over a project holding the minted mission, the mission open and its viewport followed
 // once through the fake devices.
 struct Rig {
 	editor_test::TempProjectDir dir;
 	NoProcess platform;
-	MemoryPreferencesStore preferences;
+	FlakyStore preferences;
 	ProjectSession session{ platform, preferences };
 	FakeDevices devices;
 	std::string path;
@@ -534,15 +546,28 @@ static int test_drop() {
 		TEST_EXPECT(edits[i].address.row == batch_made(0) && edits[i].operation == EditOperation::Set);
 		TEST_EXPECT(near(std::get<double>(edits[i].value), target[i - 1], 1e-2));
 	}
-	// S15: facing the way the camera looks (its heading, north on the first framing).
+	// S15: facing the way the camera looks: north (0) on the first framing.
 	TEST_EXPECT(edits.size() == 5 && edits[1].field == "x" && edits[2].field == "y" && edits[3].field == "z" &&
-			edits[4].field == "yaw" && edits[4].address.row == batch_made(0) &&
-			std::get<int64_t>(edits[4].value) == mission_wrapped_yaw(mission_camera_heading(viewport->camera())));
+			edits[4].field == "yaw" && edits[4].address.row == batch_made(0) && std::get<int64_t>(edits[4].value) == 0);
 	const std::string before = rig.document()->serialize().text;
 	TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
 	TEST_EXPECT(static_cast<const MissionDocument &>(*rig.document()).rows_of(MissionKind::Building).size() == buildings + 1);
 	rig.session.handle(request::undo(kMission));
 	TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == before);
+	// The camera turned (the wire's camera yaw is a compass heading, docs/mcp.md): to look east (90),
+	// placed facing east, 90; to look south-west (225), 225; to look west (-90), 270.
+	for (const auto &[camera, faces] : { std::pair<const char *, int64_t>{ R"({"kind": "mission", "camera": {"yaw": 90}})", 90 },
+			std::pair<const char *, int64_t>{ R"({"kind": "mission", "camera": {"yaw": 225}})", 225 },
+			std::pair<const char *, int64_t>{ R"({"kind": "mission", "camera": {"yaw": -90}})", 270 } }) {
+		rig.session.handle(request::set_viewport(kMission, camera));
+		rig.pump();
+		gathered.requests.clear();
+		TEST_EXPECT(rig.session.outcome().done() && viewport->drop(rig.context(), drop, gathered, error) && gathered.requests.size() == 1);
+		TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 5 &&
+				std::get<int64_t>(gathered.requests[0].edits[4].value) == faces);
+	}
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "mission", "camera": {"yaw": 0}})"));
+	rig.pump();
 	// A model file of one item drops that item.
 	drop.reference.clear();
 	drop.name.clear();
@@ -724,17 +749,43 @@ static int test_palette() {
 	TEST_EXPECT(error.empty() && answer.get_number("matching", 0) == 1.0);
 	ask(rig, R"({"op": "palette", "x": 3})", error);
 	TEST_EXPECT(error.find("op palette takes no \"x\"") != std::string::npos);
-	// A served drop of an item: first among the recently placed, kept with the preferences, first in
-	// the palette.
+	// A served drop of an item: first among the recently placed at once (first in the palette), kept
+	// with the preferences by the next poll, outside the request; the same item again writes nothing.
 	ViewportDrop drop;
 	drop.reference = "item";
 	drop.name = "106101";
 	drop.x = float(rig.context().width) * 0.5f;
 	drop.y = float(rig.context().height) * 0.5f;
 	drop.kind = ViewportKind::Mission;
+	const size_t saves = rig.preferences.saves();
 	rig.session.handle(request::edit_in_viewport(kMission, drop));
 	TEST_EXPECT(rig.session.outcome().done() && rig.session.view().project.recent_items == std::vector<int64_t>({ 106101 }) &&
+			rig.preferences.saves() == saves);
+	rig.session.poll();
+	TEST_EXPECT(rig.preferences.saves() == saves + 1 &&
 			rig.preferences.preferences().recent_items == std::vector<int64_t>({ 106101 }));
+	rig.session.handle(request::edit_in_viewport(kMission, drop));
+	rig.session.poll();
+	TEST_EXPECT(rig.session.outcome().done() && rig.preferences.saves() == saves + 1);
+	// A store that cannot keep them fails no placement: the drop done, the placement made, a note in
+	// Output; the list shown all the same.
+	rig.preferences.fail = true;
+	drop.name = "106102";
+	rig.session.handle(request::edit_in_viewport(kMission, drop));
+	TEST_EXPECT(rig.session.outcome().done() && rig.session.view().project.recent_items.front() == 106102);
+	rig.session.poll();
+	bool noted = false;
+	for (const std::string &line : rig.session.view().activity.output)
+		noted = noted || line.find("could not be kept") != std::string::npos;
+	TEST_EXPECT(noted && rig.session.view().activity.status.find("settings") == std::string::npos);
+	rig.preferences.fail = false;
+	rig.session.handle(request::undo(kMission));
+	rig.session.handle(request::undo(kMission));
+	rig.session.handle(request::undo(kMission));
+	drop.name = "106101";
+	rig.session.handle(request::edit_in_viewport(kMission, drop));
+	rig.session.poll();
+	TEST_EXPECT(rig.preferences.preferences().recent_items == std::vector<int64_t>({ 106101, 106102 }));
 	answer = ask(rig, R"({"op": "palette", "limit": 1})", error);
 	rows = answer.get("items");
 	TEST_EXPECT(rows && rows->array.size() == 1 && rows->array[0].get_string("group", "") == "recent" &&
@@ -742,7 +793,7 @@ static int test_palette() {
 	// A refused drop is not noted, and says why on the status line.
 	drop.name = "999999";
 	rig.session.handle(request::edit_in_viewport(kMission, drop));
-	TEST_EXPECT(!rig.session.outcome().done() && rig.session.view().project.recent_items.size() == 1 &&
+	TEST_EXPECT(!rig.session.outcome().done() && rig.session.view().project.recent_items.size() == 2 &&
 			rig.session.view().activity.status.find("999999") != std::string::npos);
 	// The tool is the viewport's options' (the toolbar's and the wire's alike): Place with its item,
 	// which the envelope's body says in words; a tool, an item or a path of the wrong shape refused.
@@ -792,16 +843,34 @@ static int test_placing() {
 	drop.y = float(context.height) * 0.5f + 3.0f;
 	drop.snap = 5.0f;
 	TEST_EXPECT(viewport->drop(context, drop, gathered, error) && gathered.requests.size() == 1);
+	TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 5);
+	const auto on_grid = [](double value) {
+		return near(std::fmod(std::fabs(value), 5.0), 0.0, 1e-9) || near(std::fmod(std::fabs(value), 5.0), 5.0, 1e-9);
+	};
 	if (gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 5) {
 		const std::vector<Edit> &edits = gathered.requests[0].edits;
 		const double x = std::get<double>(edits[1].value), y = std::get<double>(edits[2].value);
-		TEST_EXPECT(near(std::fmod(std::fabs(x), 5.0), 0.0, 1e-9) || near(std::fmod(std::fabs(x), 5.0), 5.0, 1e-9));
-		TEST_EXPECT(near(std::fmod(std::fabs(y), 5.0), 0.0, 1e-9) || near(std::fmod(std::fabs(y), 5.0), 5.0, 1e-9));
+		TEST_EXPECT(on_grid(x) && on_grid(y));
 		TEST_EXPECT(near(std::get<double>(edits[3].value), 4.0 + x / 50.0, 1e-9));
+	}
+	// A model whose ground point is off its axis (the crate's, -0.5 east, -0.25 north, 0.75 up): the
+	// stored origin on the grid, the point a move snaps, its height the ground's under its ground point
+	// less the anchor's height. (Snapping the ground point instead left the origin off the grid by the
+	// anchor, and a first drag jumped it.)
+	TEST_EXPECT(mint_anchored_crate(rig));
+	gathered.requests.clear();
+	drop.name = "106190";
+	TEST_EXPECT(rig.viewport()->drop(rig.context(), drop, gathered, error) && gathered.requests.size() == 1 &&
+			gathered.requests[0].edits.size() == 5);
+	if (gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 5) {
+		const std::vector<Edit> &edits = gathered.requests[0].edits;
+		const double x = std::get<double>(edits[1].value), y = std::get<double>(edits[2].value);
+		TEST_EXPECT(on_grid(x) && on_grid(y));
+		TEST_EXPECT(near(std::get<double>(edits[3].value), 4.0 + (x + kCrateAnchor[0]) / 50.0 - kCrateAnchor[2], 1e-9));
 	}
 	// A path's next stop: path 1's markers are of item 100001, the marker the stop names the new one.
 	const size_t markers = document.rows_of(MissionKind::Marker).size();
-	TEST_EXPECT(mission_stop_item(document, viewport->scene(), 1) == 100001);
+	TEST_EXPECT(mission_stop_item(viewport->scene(), 1) == 100001);
 	gathered.requests.clear();
 	drop = ViewportDrop();
 	drop.reference = "path";
@@ -825,9 +894,71 @@ static int test_placing() {
 	rig.session.handle(request::undo(kMission));
 	TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == before);
 	rig.pump();
-	// Refused: a command path, a path none of whose stops (nor any path's) name a marker.
+	// Refused: a command path.
 	drop.name = "124";
 	TEST_EXPECT(!viewport->drop(context, drop, gathered, error) && error.find("command") != std::string::npos);
+	// The planner's refusals, nothing planned: path 0, no marker item, an item of another pool, a path
+	// holding its 32 stops (a path the mission has not, below).
+	{
+		const auto &mission = static_cast<const MissionDocument &>(*rig.document());
+		const double where[3] = { 0.0, 0.0, 0.0 };
+		std::vector<Edit> planned;
+		TEST_EXPECT(!mission_stop_edits(mission, 0, 100001, MissionKind::Marker, where, 0, planned, error) &&
+				error.find("path 0 is none") != std::string::npos && planned.empty());
+		TEST_EXPECT(!mission_stop_edits(mission, 1, 0, MissionKind::Marker, where, 0, planned, error) &&
+				error.find("Pick the marker") != std::string::npos);
+		TEST_EXPECT(!mission_stop_edits(mission, 1, 106101, MissionKind::Building, where, 0, planned, error) &&
+				error.find("among the buildings") != std::string::npos);
+		const Node *path_row = nullptr;
+		for (const Node *each : mission.rows_of(MissionKind::WaypointPath))
+			if (static_cast<const PathRow &>(*each).native.number == 1) path_row = each;
+		TEST_EXPECT(path_row != nullptr);
+		if (path_row) {
+			const size_t held = static_cast<const PathRow &>(*path_row).native.record.waypoint_numbers.size();
+			std::vector<Edit> fill;
+			for (size_t i = held; i < opennova::mission::kMaxWaypointPathMarkers; ++i) {
+				Edit stop;
+				stop.operation = EditOperation::Add;
+				stop.address = NodeAddress{ path_row->id, node_kind(MissionKind::Stop), 0 };
+				stop.field = "marker";
+				stop.value = int64_t(0);
+				fill.push_back(std::move(stop));
+			}
+			rig.session.handle(request::edit_record(kMission, fill));
+			TEST_EXPECT(rig.session.outcome().done());
+			TEST_EXPECT(!mission_stop_edits(static_cast<const MissionDocument &>(*rig.document()), 1, 100001, MissionKind::Marker,
+								 where, 0, planned, error) &&
+					error.find("holds its 32 stops") != std::string::npos);
+			rig.session.handle(request::undo(kMission));
+			TEST_EXPECT(rig.session.outcome().done());
+		}
+	}
+	// No path's stops left (each path's stops removed), and none placed recently: the drop asks for a
+	// marker placed first.
+	{
+		const auto &mission = static_cast<const MissionDocument &>(*rig.document());
+		std::vector<Edit> removes;
+		for (const Node *each : mission.rows_of(MissionKind::WaypointPath))
+			mission.walk_records(*each, [&](const NodeAddress &record, const Document::Placement &) {
+				if (record.kind == node_kind(MissionKind::Stop)) {
+					Edit remove;
+					remove.operation = EditOperation::Remove;
+					remove.address = record;
+					removes.push_back(std::move(remove));
+				}
+				return true;
+			});
+		TEST_EXPECT(!removes.empty());
+		rig.session.handle(request::edit_record(kMission, removes));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.pump();
+		drop.name = "1";
+		gathered.requests.clear();
+		TEST_EXPECT(!rig.viewport()->drop(rig.context(), drop, gathered, error) &&
+				error.find("No stop of the mission names a marker yet") != std::string::npos && gathered.requests.empty());
+		rig.session.handle(request::undo(kMission));
+		rig.pump();
+	}
 	// An area over a box on the ground; none with no extent.
 	gathered.requests.clear();
 	drop = ViewportDrop();
@@ -891,9 +1022,41 @@ static int test_tweaking_commands() {
 	for (const NodeAddress &record : selection.records)
 		if (const MissionEntityMark *each = viewport->scene().entity(record.row))
 			TEST_EXPECT(near(each->x, ax + 3.0, 1e-4) || near(each->x, bx + 3.0, 1e-4));
+	// The two copies made in one batch: each a fresh SSN, neither an original's nor the other's.
+	{
+		const Document &now_document = *rig.document();
+		const auto ssn_of = [&](const NodeAddress &record) {
+			Value value;
+			return now_document.get(record, "id", value) && std::holds_alternative<int64_t>(value) ? std::get<int64_t>(value)
+																							  : int64_t(-1);
+		};
+		std::vector<int64_t> ssns;
+		for (const NodeAddress &record : selection.records) ssns.push_back(ssn_of(record));
+		TEST_EXPECT(ssns.size() == 2 && ssns[0] >= 0 && ssns[1] >= 0 && ssns[0] != ssns[1] && ssns[0] != ssn_of(a) &&
+				ssns[0] != ssn_of(b) && ssns[1] != ssn_of(a) && ssns[1] != ssn_of(b));
+	}
 	rig.session.handle(request::undo(kMission));
 	TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == before);
 	rig.pump();
+	// The primary named twice is copied once; a copy past what the file holds (40 km east) is refused,
+	// nothing planned.
+	{
+		editor_test::Gathered planned;
+		std::string why;
+		ViewportCommand twice = duplicate;
+		twice.ids = { a.row, a.row };
+		rig.session.handle(request::select_record(kMission, a));
+		TEST_EXPECT(viewport->command_of(rig.context(), twice, planned, why) && planned.requests.size() == 1);
+		size_t copies = 0;
+		for (const Edit &edit : planned.requests.empty() ? std::vector<Edit>() : planned.requests[0].edits)
+			copies += edit.operation == EditOperation::Duplicate ? 1 : 0;
+		TEST_EXPECT(copies == 1);
+		planned.requests.clear();
+		ViewportCommand far = duplicate;
+		far.by = { 40000.0, 0.0 };
+		TEST_EXPECT(!viewport->command_of(rig.context(), far, planned, why) && why.find("32,768 m") != std::string::npos &&
+				planned.requests.empty());
+	}
 	// select_same: the three pumps share item 106100.
 	rig.session.handle(request::select_record(kMission, a));
 	editor_test::Gathered gathered;
@@ -931,6 +1094,36 @@ static int test_tweaking_commands() {
 	TEST_EXPECT(near((low + high) * 0.5, target[0], 0.05) && near((south + north) * 0.5, target[1], 0.05));
 	rig.session.handle(request::undo(kMission));
 	TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == unpasted);
+	// Moved past what the file's positions hold, the clipboard's copies are refused (never wrapped).
+	TEST_EXPECT(mission_clip_moved(rig.session.view().documents.clipboard, 40000.0, 0.0).empty() &&
+			!mission_clip_moved(rig.session.view().documents.clipboard, 10.0, 0.0).empty());
+	// Paste here with Stick over a sloped ground (z = 2 + x / 10): each copy keeps its own height over
+	// the ground under it, as a duplicate and a move keep it (not the middle's rise for all of them).
+	rig.session.viewports().set_devices(&rig.devices.cache);
+	rig.pump();
+	FakeDevice *device = rig.device();
+	TEST_EXPECT(device != nullptr);
+	if (device) {
+		device->ground = [](double x, double) { return 2.0 + x / 10.0; };
+		const auto clearance = [](const MissionEntityMark &each) { return each.z - (2.0 + each.x / 10.0); };
+		std::vector<double> before_clear = { clearance(*viewport->scene().entity(a.row)), clearance(*viewport->scene().entity(b.row)) };
+		std::sort(before_clear.begin(), before_clear.end());
+		TEST_EXPECT(!near(before_clear[0], before_clear[1], 0.5)); // the test tells one copy's rise from another's
+		paste.at_x = float(rig.context().width) * 0.7f;
+		rig.session.handle(request::edit_in_viewport(kMission, paste));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.pump();
+		std::vector<double> after_clear;
+		for (const NodeAddress &record : selection.records)
+			if (const MissionEntityMark *each = viewport->scene().entity(record.row)) after_clear.push_back(clearance(*each));
+		std::sort(after_clear.begin(), after_clear.end());
+		TEST_EXPECT(after_clear.size() == 2 && near(after_clear[0], before_clear[0], 1e-3) &&
+				near(after_clear[1], before_clear[1], 1e-3));
+		rig.session.handle(request::undo(kMission));
+		TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == unpasted);
+	}
+	rig.session.viewports().set_devices(nullptr);
+	rig.pump();
 	// Framing everything on a mission spread wide (one pump 6 km east): its densest place, not the
 	// middle of its box, which is empty ground 3 km out.
 	rig.session.handle(request::select_record(kMission, NodeAddress()));

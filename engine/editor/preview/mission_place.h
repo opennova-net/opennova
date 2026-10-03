@@ -54,8 +54,9 @@ bool mission_stop_edits(const MissionDocument &document, int path, int64_t item,
 		int yaw, std::vector<Edit> &out, std::string &error);
 
 // The marker item a new stop of path `path` takes: the item of the marker its last stop names, else
-// of the last stop of any path of the mission, else 0 (none: the planner asks for one).
-int64_t mission_stop_item(const MissionDocument &document, const MissionScene &scene, int path);
+// that of the last stop of the mission's last path (by number) whose stops name a marker, else 0
+// (none: the planner asks for one).
+int64_t mission_stop_item(const MissionScene &scene, int path);
 
 // Every entity of the scene whose item is the item of one of `records`, in the scene's order.
 std::vector<NodeAddress> mission_same_item(const MissionScene &scene, const std::vector<NodeAddress> &records);

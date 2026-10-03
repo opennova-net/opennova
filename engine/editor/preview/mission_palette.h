@@ -58,7 +58,7 @@ struct MissionPalette {
 	// the order they were placed, most recent first; each in its own group too), then each TYPE's
 	// group, its items by name (then id).
 	std::vector<MissionPaletteSection> sections;
-	size_t count = 0; // how many items the catalogs define (inert ones left out), matching or not
+	size_t count = 0; // how many items the catalogs define (inert ones left out; an id once), matching or not
 };
 
 // The palette over `graph`'s Item symbols that match `filter` (its words found, case aside, in the

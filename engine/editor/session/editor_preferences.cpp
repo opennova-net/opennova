@@ -28,11 +28,13 @@ void EditorPreferences::remember_recent_project(const std::string &root) {
 	if (values_.recent_projects.size() > kRecentProjectsMax) values_.recent_projects.resize(kRecentProjectsMax);
 }
 
-void EditorPreferences::remember_recent_item(int64_t item) {
+bool EditorPreferences::remember_recent_item(int64_t item) {
 	std::vector<int64_t> &recent = values_.recent_items;
+	if (!recent.empty() && recent.front() == item) return false;
 	recent.erase(std::remove(recent.begin(), recent.end(), item), recent.end());
 	recent.insert(recent.begin(), item);
 	if (recent.size() > kRecentItemsMax) recent.resize(kRecentItemsMax);
+	return true;
 }
 
 void EditorPreferences::forget_recent_project(const std::string &root) {

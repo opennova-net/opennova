@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <vector>
 
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -259,22 +260,37 @@ bool mission_clip_middle(const std::string &payload, double out[2]) {
 	return true;
 }
 
-std::string mission_clip_moved(const std::string &payload, double east, double north, double up) {
+std::string mission_clip_moved(const std::string &payload, double east, double north, const MissionClipRise &rise) {
 	Clip clip;
 	if (!read_clip(payload, clip) || clip.holds != "rows") return std::string();
 	bms::File &fragment = clip.fragment;
-	const int32_t dx = bms::to_fixed_16_16(east), dy = bms::to_fixed_16_16(north), dz = bms::to_fixed_16_16(up);
+	// A 16.16 position moved `by` metres, in metres (no word arithmetic: a sum past the word's range
+	// is refused, never wrapped).
+	const auto moved = [](int32_t word, double by, int32_t &out) {
+		const double metres = double(word) / io::kFp16OneD + by;
+		if (!(metres >= bms::kFixed16Min && metres <= bms::kFixed16Max)) return false;
+		out = bms::to_fixed_16_16(metres);
+		return true;
+	};
 	for (std::vector<bms::Entity> *pool : { &fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics })
 		for (bms::Entity &entity : *pool) {
-			entity.x += dx;
-			entity.y += dy;
-			entity.z += dz;
+			const double from_x = double(entity.x) / io::kFp16OneD, from_y = double(entity.y) / io::kFp16OneD;
+			const double up = rise ? rise(from_x, from_y, from_x + east, from_y + north) : 0.0;
+			int32_t x = 0, y = 0, z = 0;
+			if (!moved(entity.x, east, x) || !moved(entity.y, north, y) || !moved(entity.z, up, z)) return std::string();
+			entity.x = x;
+			entity.y = y;
+			entity.z = z;
 		}
 	for (bms::AreaTrigger &area : fragment.area_triggers) {
-		area.x_min += dx;
-		area.x_max += dx;
-		area.y_min += dy;
-		area.y_max += dy;
+		int32_t x_min = 0, x_max = 0, y_min = 0, y_max = 0;
+		if (!moved(area.x_min, east, x_min) || !moved(area.x_max, east, x_max) || !moved(area.y_min, north, y_min) ||
+				!moved(area.y_max, north, y_max))
+			return std::string();
+		area.x_min = x_min;
+		area.x_max = x_max;
+		area.y_min = y_min;
+		area.y_max = y_max;
 	}
 	return write_clip(clip.holds, clip.events, fragment);
 }

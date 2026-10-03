@@ -221,12 +221,14 @@ OrbitCamera MissionViewport::framed(const std::vector<MissionMark> &marks, const
 		}
 		const double spread = 0.5 * std::hypot(high_x - low_x, high_y - low_y);
 		if (some && spread > double(kMissionFrameSpread)) {
-			std::unordered_map<int64_t, int> cells;
+			std::unordered_map<uint64_t, int> cells;
+			// A cell's key: its column and row as two unsigned 32-bit halves (no shift of a negative value).
 			const auto cell_of = [](double x, double y) {
-				return (int64_t(std::floor(x / double(kMissionFrameCell))) << 32) ^
-						int64_t(uint32_t(int32_t(std::floor(y / double(kMissionFrameCell)))));
+				const uint32_t column = uint32_t(int32_t(std::floor(x / double(kMissionFrameCell))));
+				const uint32_t row = uint32_t(int32_t(std::floor(y / double(kMissionFrameCell))));
+				return (uint64_t(column) << 32) | uint64_t(row);
 			};
-			int64_t best = 0;
+			uint64_t best = 0;
 			int most = 0;
 			for (const MissionMark &mark : marks) {
 				double at[3];
@@ -485,7 +487,8 @@ std::vector<MissionPressed> MissionViewport::taken_(const ViewportContext &conte
 	}
 	for (const NodeAddress &each : selection->records) {
 		MissionPressed held;
-		if (!pressed(each, held) || (held.area && handle != MissionHandle::Move)) continue;
+		// Areas move and turn with the group (S15: a turn carries an area's middle); a lift leaves them.
+		if (!pressed(each, held) || (held.area && handle != MissionHandle::Move && handle != MissionHandle::Yaw)) continue;
 		if (each == record) grabbed = out.size();
 		out.push_back(held);
 	}
@@ -612,7 +615,7 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 			return false;
 		}
 		double a[3], b[3];
-		if (!ground_of_(context, drop.x, drop.y, 0.0f, a) || !ground_of_(context, drop.x2, drop.y2, 0.0f, b)) {
+		if (!ground_of_(context, drop.x, drop.y, a) || !ground_of_(context, drop.x2, drop.y2, b)) {
 			error = "The box's corners are not over the ground.";
 			return false;
 		}
@@ -634,7 +637,7 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		}
 		if (drop.reference == "path") {
 			path = *id;
-			item = mission_stop_item(mission, scene_, path);
+			item = mission_stop_item(scene_, path);
 			// None of the mission's stops names a marker yet: the marker placed most recently.
 			for (size_t i = 0; item == 0 && i < view.project.recent_items.size(); ++i) {
 				MissionItemFacts recent;
@@ -683,16 +686,25 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	MissionItemFacts facts;
 	if (!mission_item_facts(view, item, facts, error)) return false;
 	// Where the point meets the ground (the device's terrain, else the plane through the camera's
-	// target), snapped; on the terrain, the model's ground anchor baked in (the stored position is the
-	// ground point less the anchor: docs/world/world-wac-ai-re.md section 12).
+	// target); on the terrain, the model's ground anchor baked in (the stored position is the ground
+	// point less the anchor: docs/world/world-wac-ai-re.md section 12).
 	double at[3];
 	bool on_terrain = false;
-	if (!ground_of_(context, drop.x, drop.y, drop.snap, at, &on_terrain)) {
-		error = "The point is not over the ground.";
+	if (!ground_of_(context, drop.x, drop.y, at, &on_terrain)) {
+		error = "The point is not over the ground (or too far out): drop it nearer.";
 		return false;
 	}
 	if (on_terrain)
 		for (int i = 0; i < 3; ++i) at[i] -= facts.anchor[i];
+	// Snapped: the stored origin's x and y on the grid, the point a move and a copy snap, so the first
+	// drag of what was placed never jumps it by its anchor; its height then the ground's under its
+	// ground point there (else the plane's).
+	if (drop.snap > 0.0f) {
+		for (int axis = 0; axis < 2; ++axis) at[axis] = std::round(at[axis] / double(drop.snap)) * double(drop.snap);
+		double ground = 0.0;
+		if (on_terrain && context.device && context.device->ground_at(at[0] + facts.anchor[0], at[1] + facts.anchor[1], ground))
+			at[2] = ground - facts.anchor[2];
+	}
 	// Facing the way the camera looks (S15): its heading, a compass heading as a yaw is.
 	const int yaw = mission_wrapped_yaw(mission_camera_heading(camera_));
 	std::vector<Edit> edits;
@@ -718,18 +730,14 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	return true;
 }
 
-bool MissionViewport::ground_of_(const ViewportContext &context, float x, float y, float snap, double out[3],
-		bool *on_terrain) const {
+bool MissionViewport::ground_of_(const ViewportContext &context, float x, float y, double out[3], bool *on_terrain) const {
 	double target[3];
 	preview_to_mission(camera_.target, target);
 	bool terrain = false;
 	if (!mission_ground_point(context, camera_, x, y, target[2], out, &terrain)) return false;
-	if (snap > 0.0f) {
-		// On the grid, its height the ground's there (else the plane's).
-		for (int axis = 0; axis < 2; ++axis) out[axis] = std::round(out[axis] / double(snap)) * double(snap);
-		double ground = 0.0;
-		if (terrain && context.device && context.device->ground_at(out[0], out[1], ground)) out[2] = ground;
-	}
+	if (!terrain && std::hypot(out[0] - target[0], out[1] - target[1]) > kMissionPickReach) return false;
+	for (int axis = 0; axis < 3; ++axis)
+		if (!(out[axis] >= bms::kFixed16Min && out[axis] <= bms::kFixed16Max)) return false;
 	if (on_terrain) *on_terrain = terrain;
 	return true;
 }
@@ -790,18 +798,24 @@ bool MissionViewport::command_of(const ViewportContext &context, const ViewportC
 		return false;
 	}
 	double at[3];
-	if (!ground_of_(context, command.at_x, command.at_y, 0.0f, at)) {
+	if (!ground_of_(context, command.at_x, command.at_y, at)) {
 		error = "The point is not over the ground.";
 		return false;
 	}
-	// With stick, the copies keep their height over the ground: the ground's rise from where they were.
-	double up = 0.0, was = 0.0, now = 0.0;
-	if (options_.stick && context.device && context.device->ground_at(middle[0], middle[1], was) &&
-			context.device->ground_at(at[0], at[1], now))
-		up = now - was;
-	const std::string moved = mission_clip_moved(clipboard, at[0] - middle[0], at[1] - middle[1], up);
+	// With stick, each copy keeps its own height over the ground, as a duplicate and a move keep it: the
+	// ground's rise from under where it was to under where it goes.
+	MissionClipRise rise;
+	if (options_.stick && context.device) {
+		const ViewportDevice *device = context.device;
+		rise = [device](double from_x, double from_y, double to_x, double to_y) {
+			double was = 0.0, now = 0.0;
+			return device->ground_at(from_x, from_y, was) && device->ground_at(to_x, to_y, now) ? now - was : 0.0;
+		};
+	}
+	const std::string moved = mission_clip_moved(clipboard, at[0] - middle[0], at[1] - middle[1], rise);
 	if (moved.empty()) {
-		error = "The copies cannot be moved there (a position past what the file holds).";
+		error = "Pasted there, a copy would go past what the mission's positions hold (32,768 m from its origin): "
+				"paste it nearer.";
 		return false;
 	}
 	Edit paste;
@@ -949,6 +963,7 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 		if (!hint.editable) hint.not_editable = context.not_editable();
 		hint.current = current(input);
 		hint.snap = context.snap;
+		hint.grid = context.snap;
 		if (const Document *document = document_of(input))
 			if (const Selection *selection = selection_of(input, *document)) hint.selected = selection->records.size();
 		hint.empty_mission = scene_.entities().empty() && scene_.areas().empty();

@@ -167,10 +167,11 @@ private:
 	const Document *planned_(const ViewportContext &context, std::string &error) const;
 	// The mark of the record whose row is `id` among `marks` (made from the scene now; -1: none).
 	int mark_of_(const std::vector<MissionMark> &marks, NodeId id) const;
-	// Where the picture point (x, y) meets the ground (the device's terrain, else the plane through the
-	// camera's target), x and y snapped to `snap` metres (0 free) with the ground's height there.
-	bool ground_of_(const ViewportContext &context, float x, float y, float snap, double out[3],
-			bool *on_terrain = nullptr) const;
+	// Where the picture point (x, y) meets the ground for a placing gesture (the device's terrain, else
+	// the plane through the camera's target, that only as far as a pick reaches from the target: near
+	// the horizon the plane is tens of kilometres out); false past it, or past what the file's
+	// positions hold.
+	bool ground_of_(const ViewportContext &context, float x, float y, double out[3], bool *on_terrain = nullptr) const;
 	// The records a drag of `record` by `handle` takes with it, as pressed: the selected entities (and
 	// areas, for a move) when it is selected, itself alone when not; `grabbed` its place among them.
 	std::vector<MissionPressed> taken_(const ViewportContext &context, const Document &document,
