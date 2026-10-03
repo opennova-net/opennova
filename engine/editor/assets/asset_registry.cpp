@@ -87,9 +87,12 @@ bool listed(const std::vector<Diagnostic> &rows, const Diagnostic &d) {
 } // namespace
 
 std::string normalized_logical_name(std::string_view name) {
-	char buf[256];
-	pff::pff_norm_name(name.data(), name.size(), buf, sizeof(buf));
-	return std::string(buf);
+	// pff_norm_name's rule over a buffer of the name's own length plus its terminator, so nothing
+	// past a fixed size is cut off.
+	std::string out(name.size() + 1, '\0');
+	pff::pff_norm_name(name.data(), name.size(), out.data(), out.size());
+	out.resize(std::char_traits<char>::length(out.c_str()));
+	return out;
 }
 
 bool logical_name_fits_archive(std::string_view name) {
