@@ -2086,7 +2086,7 @@ void test_mission_view_ground() {
 	std::vector<MissionMark> marks = viewport->marks(device->width, device->height, device);
 	int item = -1;
 	for (size_t i = 0; i < marks.size() && item < 0; ++i)
-		if (marks[i].shown && std::string(marks[i].kind) == "item" && pick_mission_mark(marks, marks[i].x, marks[i].y) == int(i))
+		if (marks[i].shown && std::string(marks[i].kind) == "item" && pick_mission_mark(marks, viewport->camera(), device->width, device->height, marks[i].x, marks[i].y, nullptr, MissionPick::Press) == int(i))
 			item = int(i);
 	CHECK(item >= 0, "an item's mark on the picture");
 	if (item < 0) return;
@@ -2109,7 +2109,7 @@ void test_mission_view_ground() {
 	marks = viewport->marks(device->width, device->height, device);
 	bool area = false;
 	for (size_t i = 0; i < marks.size() && !area; ++i) {
-		if (marks[i].area < 0 || !marks[i].shown || pick_mission_mark(marks, marks[i].x, marks[i].y) != int(i)) continue;
+		if (marks[i].area < 0 || !marks[i].shown || pick_mission_mark(marks, viewport->camera(), device->width, device->height, marks[i].x, marks[i].y, nullptr, MissionPick::Press) != int(i)) continue;
 		ui.mouse(device->origin.x + marks[i].x, device->origin.y + marks[i].y);
 		ui.button(true);
 		ui.button(false);
@@ -2252,7 +2252,7 @@ void test_mission_view_placing() {
 	int pump = -1;
 	for (size_t i = 0; i < marks.size() && pump < 0; ++i)
 		if (marks[i].shown && marks[i].entity >= 0 && viewport->scene().entities()[size_t(marks[i].entity)].item == 106100 &&
-				pick_mission_mark(marks, marks[i].x, marks[i].y) == int(i))
+				pick_mission_mark(marks, viewport->camera(), device->width, device->height, marks[i].x, marks[i].y, nullptr, MissionPick::Press) == int(i))
 			pump = int(i);
 	CHECK(pump >= 0, "a pump's mark on the picture");
 	if (pump < 0) return;

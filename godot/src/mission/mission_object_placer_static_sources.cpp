@@ -281,6 +281,29 @@ bool MissionObjectPlacer::warm_static_graphic(const String &p_graphic, Node *p_t
 	return !_get_static_batches(p_graphic, p_tree_parent).is_empty();
 }
 
+PackedVector3Array MissionObjectPlacer::get_static_graphic_faces(const String &p_graphic) {
+	_check_epoch();
+	if (const PackedVector3Array *cached = static_face_cache_.getptr(p_graphic)) {
+		return *cached;
+	}
+	PackedVector3Array faces;
+	const Vector<StaticBatch> *batches = static_batch_cache_.getptr(p_graphic);
+	if (batches == nullptr) {
+		return faces; // not warm: nothing kept, asked again once it is
+	}
+	for (const StaticBatch &batch : *batches) {
+		if (batch.lod_index != 0 || batch.mesh.is_null()) {
+			continue;
+		}
+		const PackedVector3Array mesh_faces = batch.mesh->get_faces();
+		for (int64_t i = 0; i < mesh_faces.size(); ++i) {
+			faces.push_back(batch.offset.xform(mesh_faces[i]));
+		}
+	}
+	static_face_cache_[p_graphic] = faces;
+	return faces;
+}
+
 bool MissionObjectPlacer::item_places_static(int p_item_id) {
 	_check_epoch();
 	_ensure_item_db();
@@ -387,6 +410,7 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 	_complete_static_lod_profile(profile, retained);
 	object_data_cache_[p_graphic] = p_data;
 	static_batch_cache_[p_graphic] = retained;
+	static_face_cache_.erase(p_graphic);
 	static_lod_profile_cache_[p_graphic] = profile;
 	static_sources_.bump_shadow_revision();
 	return true;
