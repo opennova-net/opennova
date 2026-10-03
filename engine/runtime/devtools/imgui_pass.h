@@ -189,6 +189,16 @@ public:
 	void set_platform_windows_enabled(bool enabled);
 	bool platform_windows_enabled() const { return platform_windows_enabled_; }
 
+	// Whether the context keeps the user's window layout: the file the embedder's ImGui reads at
+	// its first frame and writes as the docking changes (imgui-godot's user://imgui.ini, one per
+	// product name, so every run of it shares the one file). A run that keeps none (the shell's
+	// say: a test runner's, an agent's over MCP) has the default layout every time, the file
+	// neither read nor written, so it never depends on whoever docked last and never changes the
+	// user's. Applied at attach_imgui: a layout the context already read is dropped, and the file
+	// is let go for the rest of the run. Default true (the shipped editor's and game's).
+	void set_user_layout(bool keep) { user_layout_ = keep; }
+	bool user_layout() const { return user_layout_; }
+
 	// The whole surface: closed = nothing drawn, no capture, no input.
 	void set_open(bool open);
 	bool is_open() const { return open_; }
@@ -279,6 +289,7 @@ private:
 	bool layout_focus_armed_ = false;
 	bool attached_ = false;
 	bool platform_windows_enabled_ = true;
+	bool user_layout_ = true;
 	bool open_ = false;
 	bool layout_reset_pending_ = false;
 	bool close_requested_ = false;

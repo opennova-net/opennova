@@ -219,6 +219,18 @@ bool ImGuiPass::attach_imgui(void *context, ImGuiAllocFn alloc, ImGuiFreeFn free
 	ImGui::SetCurrentContext(static_cast<ImGuiContext *>(context));
 	ImGuiIO &io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	if (!user_layout_) {
+		// No layout file for this run: none read from now on, none written, and what the context
+		// already read from the user's (its docking, its windows' places) dropped once, at the first
+		// such attach of the process, so the default layout is built. (The embedder's ImGui may hold
+		// the file's name itself and hand it back: the shell lets it go there too.)
+		static bool user_layout_dropped = false;
+		io.IniFilename = nullptr;
+		if (!user_layout_dropped) {
+			user_layout_dropped = true;
+			ImGui::ClearIniSettings();
+		}
+	}
 	attached_ = true;
 	set_platform_windows_enabled(platform_windows_enabled_);
 	return true;
