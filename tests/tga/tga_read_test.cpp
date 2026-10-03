@@ -148,6 +148,54 @@ void test_run_length() {
 	CHECK(pixel(decode(bytes), 1, 0) == Rgba({0, 0, 0, 255}), "bytes past the file read as 0");
 }
 
+void test_allocation_bounded_by_the_data() {
+	// A header naming 32767 x 32767 pixels over a few bytes fails before any
+	// header-sized buffer is allocated (retail's allocation failing, load code 2).
+	std::vector<uint8_t> bytes = header(2, 32767, 32767, 32, 8);
+	for (int i = 0; i < 12; ++i) bytes.push_back(0x7F);
+	TgaImage image;
+	std::string error;
+	CHECK(!tga_decode_retail(bytes.data(), bytes.size(), image, error), "a bogus header fails");
+	CHECK(image.rgba.empty(), "nothing allocated");
+	int w = 0, h = 0;
+	CHECK(!opennova::tga::tga_retail_size(bytes.data(), bytes.size(), w, h, error), "the size check fails too");
+	// 32 pixels a byte stays inside the bound: a 64-pixel run-length image in 4 bytes.
+	bytes = header(10, 64, 1, 24, 0);
+	for (uint8_t b : {0xFF, 1, 2, 3}) bytes.push_back(b);
+	CHECK(tga_decode_retail(bytes.data(), bytes.size(), image, error) && image.width == 64,
+			"a short run-length file expanding to its pixels decodes");
+}
+
+void test_particle_loose_leg() {
+	using opennova::tga::TgaReaderForm;
+	// The loose leg's flip steps the bottom rows by the height: a 3 x 2 image's row 0
+	// swaps with the words from 2 x 1 = 2 on [orig: CTextureData_LoadTGA @ 0x5F7FCD].
+	std::vector<uint8_t> bytes = header(3, 3, 2, 8, 0);
+	for (uint8_t b : {10, 11, 12, 13, 14, 15}) bytes.push_back(b);
+	TgaImage loose, archive;
+	std::string error;
+	CHECK(tga_decode_retail(bytes.data(), bytes.size(), loose, error, TgaReaderForm::ParticleLoose),
+			"the loose leg decodes");
+	CHECK(tga_decode_retail(bytes.data(), bytes.size(), archive, error), "the archive reader decodes");
+	const uint8_t want_loose[6] = {12, 13, 14, 11, 10, 15};
+	const uint8_t want_archive[6] = {13, 14, 15, 10, 11, 12};
+	bool loose_ok = true, archive_ok = true;
+	for (int i = 0; i < 6; ++i) {
+		loose_ok = loose_ok && loose.rgba[static_cast<size_t>(i) * 4] == want_loose[i];
+		archive_ok = archive_ok && archive.rgba[static_cast<size_t>(i) * 4] == want_archive[i];
+	}
+	CHECK(loose_ok, "the height-stride flip garbles a non-square image");
+	CHECK(archive_ok, "the archive reader flips whole rows");
+	// The loose leg reads the sides unsigned: 0x8000 wide is 32768 there, negative in
+	// the archive reader.
+	bytes = header(3, 0x8000, 1, 8, 0);
+	for (int i = 0; i < 0x8000; ++i) bytes.push_back(static_cast<uint8_t>(i));
+	CHECK(!tga_decode_retail(bytes.data(), bytes.size(), archive, error), "signed: no pixels");
+	CHECK(tga_decode_retail(bytes.data(), bytes.size(), loose, error, TgaReaderForm::ParticleLoose) &&
+					loose.width == 0x8000,
+			"unsigned: 32768 wide");
+}
+
 } // namespace
 
 int main() {
@@ -155,6 +203,8 @@ int main() {
 	test_pixels_follow_the_image_id_not_the_colour_map();
 	test_forms();
 	test_run_length();
+	test_allocation_bounded_by_the_data();
+	test_particle_loose_leg();
 	if (failures != 0) {
 		std::fprintf(stderr, "tga_read: %d failure(s)\n", failures);
 		return 1;
