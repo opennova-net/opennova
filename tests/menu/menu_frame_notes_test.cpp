@@ -303,9 +303,29 @@ static int test_configure_notes() {
 		list.items.items[0].text = "a";
 		list.items.items[1].type = "IMAGE";
 		list.items.items[1].text = "x.tga";
+		// A table's bitmap and bitmap-and-text cells and its SUBST images are the compiler's own
+		// draw (menu_frame_table.cpp): no note; an ITEMS IMAGEROW row is still deferred. A column a
+		// CUSTOM_DRAW BODY makes custom is the menu's code's to draw, noted at that BODY: the last
+		// one its running column index reaches (column 1's CUSTOM_DRAW is replaced by a BITMAP_TEXT
+		// BODY after it; column 5 is past the COUNT, so no column).
 		Window table = window(WindowType::Table, "TABLE", 0, 0, 100, 100);
-		table.table_data.column.bodies.resize(1);
+		table.table_data.column.has_count = true;
+		table.table_data.column.count = 3;
+		table.table_data.column.bodies.resize(5);
 		table.table_data.column.bodies[0].display = "BITMAP_DRAW";
+		table.table_data.column.bodies[1].has_column = true;
+		table.table_data.column.bodies[1].column = 1;
+		table.table_data.column.bodies[1].display = "CUSTOM_DRAW";
+		table.table_data.column.bodies[2].display = "BITMAP_TEXT";
+		table.table_data.column.bodies[3].has_column = true;
+		table.table_data.column.bodies[3].column = 2;
+		table.table_data.column.bodies[3].display = "CUSTOM_DRAW";
+		table.table_data.column.bodies[4].has_column = true;
+		table.table_data.column.bodies[4].column = 5;
+		table.table_data.column.bodies[4].display = "CUSTOM_DRAW";
+		table.table_data.column.substitutions.resize(1);
+		table.table_data.column.substitutions[0].value = "1";
+		table.items.appearances = {appearance("SELECTED", "IMAGEROW", "row.tga")};
 		// A SCROLL with no HEIGHT or WIDTH keeps the default arrow length; one with it does not.
 		Window scroll = window(WindowType::Scroll, "SCROLL", 0, 0, 20, 100);
 		Window sized = window(WindowType::Scroll, "SIZED", 0, 0, 20, 100);
@@ -317,7 +337,10 @@ static int test_configure_notes() {
 		TEST_EXPECT(is(find(notes, Code::TypeUnknown), 0, "", -1, "type", "SLIDER"));
 		TEST_EXPECT(is(find(notes, Code::TypeInteriorDeferred), 1, "", -1, "type"));
 		TEST_EXPECT(is(find(notes, Code::ItemKindNotDrawn), 2, "items.item", 1, "type", "IMAGE"));
-		TEST_EXPECT(is(find(notes, Code::TableCellsDeferred), 3, "column.body", 0, "display", "BITMAP_DRAW"));
+		TEST_EXPECT(count(notes, Code::TableCellsDeferred) == 1);
+		TEST_EXPECT(is(find(notes, Code::TableCellsDeferred), 3, "items.appearance", 0, "type", "IMAGEROW"));
+		TEST_EXPECT(count(notes, Code::TableCellsCustom) == 1);
+		TEST_EXPECT(is(find(notes, Code::TableCellsCustom), 3, "column.body", 3, "display", "CUSTOM_DRAW"));
 		TEST_EXPECT(count(notes, Code::ScrollExtentDefault) == 1);
 		TEST_EXPECT(is(find(notes, Code::ScrollExtentDefault), 4, "", -1, "scroll_extent", "20"));
 	}

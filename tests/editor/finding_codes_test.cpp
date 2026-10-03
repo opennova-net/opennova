@@ -222,7 +222,8 @@ static int test_type_tables() {
 	            Tokens({ "menu.render.appearance_custom", "menu.render.font_missing",
 	                     "menu.render.frame_stencil_unloaded", "menu.render.marquee_runtime_content",
 	                     "menu.render.scroll_extent_default", "menu.render.state_fallback",
-	                     "menu.render.style_var_unresolved", "menu.render.table_no_columns",
+	                     "menu.render.style_var_unresolved", "menu.render.table_cells_custom",
+	                     "menu.render.table_no_columns",
 	                     "menu.render.text_id_missing", "menu.render.text_table_missing",
 	                     "menu.render.texture_missing" }));
 	TEST_EXPECT(noted(FindingProblem::Info) ==
@@ -296,26 +297,57 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.name_unstorable" }));
-	// S14: the one code whose errors gate no build is the missing reference (listed, fixable, never
-	// blocking); a finding of it at any severity does not block, an error of any other row does, as
-	// does an error made from no row. A row that says its file does not serialize always gates.
-	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) == Tokens({ "reference.missing" }));
+	// S14, the build follows retail: the codes whose errors gate no build are listed (shown, fixable,
+	// never blocking): the ones whose subject names the game's refusal where it is witnessed (a
+	// reference, a required file), and the ones the audit found no refusal of the game's behind (the
+	// editor's own rules, a read past a table, a stylesheet read otherwise or read up to a line). An
+	// error of any other row blocks, as does an error made from no row. A row that says its file does
+	// not serialize always gates.
+	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) ==
+	            Tokens({ "animation_map.no_reset", "catalog.item_type", "catalog.name_empty", "mission.event_missing",
+	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
+	                     "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
+	                     "shader.form", "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
+	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
+	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
+	                     "style.value_is_directive" }));
+	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
+	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
+	// A missing required file blocks where its manifest row is the boot's refusal (gametext.bin: the
+	// boot exits), never where the game boots on (weapon.def: a single None weapon).
+	Diagnostic gametext = make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Error, "required");
+	gametext.subject = RequirementSubject{ "gametext", "gametext.bin" };
+	Diagnostic weapons = make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Error, "required");
+	weapons.subject = RequirementSubject{ "weapon_def", "weapon.def" };
+	// A file of another kind behind a fatal row's name gates as its absence does (the boot reads it as
+	// its table unchecked); behind any other row it is listed.
+	Diagnostic wrong = make_finding(CoreFinding::RequirementWrongKind, DiagnosticSeverity::Error, "wrong kind");
+	wrong.subject = RequirementSubject{ "gametext", "gametext.bin" };
+	Diagnostic wrong_weapons = make_finding(CoreFinding::RequirementWrongKind, DiagnosticSeverity::Error, "wrong kind");
+	wrong_weapons.subject = RequirementSubject{ "weapon_def", "weapon.def" };
+	TEST_EXPECT(blocks_build(gametext) && !blocks_build(weapons) && blocks_build(wrong) && !blocks_build(wrong_weapons));
 	TEST_EXPECT(!blocks_build(make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing")) &&
-	            blocks_build(make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Error, "required")) &&
+	            !blocks_build(make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Error, "no subject")) &&
 	            !blocks_build(make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Warning, "a warning")) &&
+	            blocks_build(make_finding(CoreFinding::DocumentStale, DiagnosticSeverity::Error, "stale")) &&
 	            blocks_build(Diagnostic{}));
 	TEST_EXPECT(!diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing") }) &&
 	            diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing"),
 	                                      make_finding(CoreFinding::DocumentStale, DiagnosticSeverity::Error, "stale") }));
 	// Review F3: where its kind's row cites the game's refusal (gates_when_missing, the terrain's), a
 	// missing reference gates; one of any other kind does not. A file of the name of the wrong kind
-	// is its own code, which gates.
+	// is its own code, gating where its kind's missing name does (its loader finds nothing it loads).
 	Diagnostic terrain = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "no terrain");
 	terrain.subject = ReferenceSubject{ ReferenceKind::Terrain, "nowhere.trn", "", -1 };
 	Diagnostic sound = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "no sound");
 	sound.subject = ReferenceSubject{ ReferenceKind::Sound, "nothing.wav", "", -1 };
 	TEST_EXPECT(blocks_build(terrain) && !blocks_build(sound));
-	TEST_EXPECT(blocks_build(make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, "wrong kind")));
+	Diagnostic wrong_terrain = make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, "wrong kind");
+	wrong_terrain.subject = ReferenceSubject{ ReferenceKind::Terrain, "island.trn", "", -1 };
+	Diagnostic wrong_texture = make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, "wrong kind");
+	wrong_texture.subject = ReferenceSubject{ ReferenceKind::Texture, "notes.txt", "", -1 };
+	TEST_EXPECT(blocks_build(wrong_terrain) && !blocks_build(wrong_texture) &&
+	            !blocks_build(make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, "wrong kind")));
 	std::vector<std::string> gating_kinds;
 	for (size_t k = 0; k < kReferenceKindCount; ++k)
 		if (reference_row(static_cast<ReferenceKind>(k)).gates_when_missing)

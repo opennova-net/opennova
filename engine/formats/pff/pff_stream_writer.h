@@ -36,7 +36,8 @@ public:
 
 	/* Checks and orders `entries` (names over PFF_NAME_SIZE, blank or repeated normalized names,
 	   payloads past the 32-bit offsets are refused before anything is written) and writes the
-	   header to "<path>.tmp". PFF_WRITE_OK, or a PFF_WRITE_ERR_* code with nothing left open. */
+	   header to "<path>.tmp", `path` a UTF-8 path (base/io/os_path.h). PFF_WRITE_OK, or a
+	   PFF_WRITE_ERR_* code with nothing left open. */
 	int open(const char *path, PffFormat format, const PffWriteStreamEntry *entries, uint32_t n,
 			ReadChunkFn read, void *ctx);
 	/* Writes payload bytes in the written order, at most `budget` of them; an empty payload is

@@ -22,8 +22,8 @@ bool import_source_named(const std::string &only, const std::string &source_rela
 std::string import_output_dir(const ProjectPaths &paths, const std::string &source_relative_path) {
 	const std::string key = strutil::to_lower(source_relative_path);
 	const uint64_t hash = io::fnv1a64_bytes(io::kFnv1a64Offset, key.data(), key.size());
-	const fs::path dir = fs::relative(fs::path(paths.imported_dir), fs::path(paths.root)) / io::hex64(hash);
-	return dir.generic_string();
+	const fs::path dir = path_of(paths.imported_dir).lexically_relative(path_of(paths.root)) / io::hex64(hash);
+	return utf8_of(dir);
 }
 
 ImportRunResult run_imports(const ProjectPaths &paths, const ProjectDocument &project, bool force, const std::string &only) {

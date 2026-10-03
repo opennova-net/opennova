@@ -167,11 +167,11 @@ void FilesWindow::refresh(const SessionView &view) {
 		const std::string &place = entry.imported_from.empty() ? entry.relative_path : entry.imported_from;
 		size_t at = 0;
 		std::string path;
-		for (const fs::path &part : fs::path(place).parent_path()) {
-			path += (path.empty() ? "" : "/") + part.generic_string();
+		for (const fs::path &part : path_of(place).parent_path()) {
+			path += (path.empty() ? "" : "/") + utf8_of(part);
 			auto found = index.find(path);
 			if (found == index.end()) {
-				folders_.push_back(Folder{part.generic_string(), path, {}, {}});
+				folders_.push_back(Folder{utf8_of(part), path, {}, {}});
 				found = index.emplace(path, folders_.size() - 1).first;
 				folders_[at].folders.push_back(found->second);
 			}
@@ -502,7 +502,7 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	}
 	const bool reveals = view.allows(EditorRequestKind::RevealPath);
 	if (ImGui::MenuItem("Show in folder", nullptr, false, reveals) && reveals)
-		workspace_.request(request::reveal_path((fs::path(view.project.root) / entry.relative_path).generic_string()));
+		workspace_.request(request::reveal_path(join_path(view.project.root, entry.relative_path)));
 	const bool reimports = view.allows(EditorRequestKind::Reimport);
 	const bool source = entry.kind == AssetKind::ImportSource;
 	if (source && ImGui::MenuItem("Import again", nullptr, false, reimports) && reimports)
