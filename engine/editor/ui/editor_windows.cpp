@@ -8,6 +8,7 @@
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
 #include <editor/session/rename_controller.h>
+#include <editor/project_build/export_build.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
@@ -426,6 +427,14 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	                                : "Build, then start the game in " + mission + ".");
 	if (menu_item("Stop", "Shift+F5", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
 		request(request::stop_play());
+	ImGui::Separator();
+	// ADR 0046 S16: what ships, the build copied into the project's export folder.
+	if (menu_item("Export", nullptr, v.project.open && v.allows(EditorRequestKind::Export)))
+		request(request::export_project());
+	ui_kit::tooltip("Build, then copy the build into the project's export folder as what ships.");
+	if (menu_item("Show export folder", nullptr,
+	              v.activity.has_export && v.activity.last_export->ok && v.allows(EditorRequestKind::RevealPath)))
+		request(request::reveal_path(v.activity.last_export->export_dir));
 	ImGui::Separator();
 	// An editor setting, never refused (the busy gate takes it, as it takes the settings'
 	// Apply); the next Play reads it, so it waits while a game runs.

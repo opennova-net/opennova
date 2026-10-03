@@ -146,6 +146,14 @@ inline EditorRequest play(std::string mission = std::string()) {
 	request.mission = std::move(mission);
 	return request;
 }
+// A build, then the build copied into `export_dir` ("" the project's export folder) as what ships
+// (ADR 0046 S16); with `rehash`, every file read again.
+inline EditorRequest export_project(std::string export_dir = std::string(), bool rehash = false) {
+	EditorRequest request = of(EditorRequestKind::Export);
+	request.export_dir = std::move(export_dir);
+	request.rehash = rehash;
+	return request;
+}
 inline EditorRequest stop_play() {
 	return of(EditorRequestKind::StopPlay);
 }

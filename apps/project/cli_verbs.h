@@ -56,6 +56,7 @@ enum class CliVerb : uint8_t {
 	Import,
 	Reimport,
 	Build,
+	Export,
 	Request,
 	Query,
 	kCount,

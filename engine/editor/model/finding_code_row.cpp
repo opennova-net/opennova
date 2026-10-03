@@ -111,6 +111,11 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::EditorSettingsSchemaVersionUnsupported, code("editor_settings.schema_version.unsupported", G::EditorSettings) },
 	{ C::EditorSettingsUnreadable, code("editor_settings.unreadable", G::EditorSettings) },
 	{ C::EditorSettingsWrite, code("editor_settings.write", G::EditorSettings) },
+	// Export (ADR 0046 S16, project_build/export_build.h): a folder that is the person's, never written
+	// over; the runtime to ship that is not there; a copy or a rename refused.
+	{ C::ExportFolder, code("export.folder", G::Export) },
+	{ C::ExportRuntime, code("export.runtime", G::Export) },
+	{ C::ExportWrite, code("export.write", G::Export) },
 	{ C::GraphUnreadable, from_graph(code("graph.unreadable", G::FilesNotChecked)) },
 	{ C::ImportAlphaDropped, code("import.alpha_dropped", G::Imports) },
 	{ C::ImportArchive, code("import.archive", G::Imports) },
