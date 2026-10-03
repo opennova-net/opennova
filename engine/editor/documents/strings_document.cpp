@@ -182,6 +182,11 @@ void StringsDocument::refine_symbol(const NodeAddress &address, SymbolFacts &fac
 	// 0x75d250]: the ids of a later one are defined but never read.
 	const Node *section = row(address.row);
 	if (!section) return;
+	// What the key stands for: its text, which the display names show for a key a record names (ADR
+	// 0046 S15: a mission's STRNAME by the name the game shows).
+	Value text;
+	if (address.child && get(address, "text", text))
+		if (const auto *words = std::get_if<std::string>(&text)) facts.value = *words;
 	for (const auto &node : rows()) {
 		if (node->id == section->id) return;
 		if (strutil::iequals(node->name(), section->name())) {

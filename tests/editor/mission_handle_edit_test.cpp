@@ -294,17 +294,75 @@ int test_height_and_yaw() {
 	TEST_EXPECT(!mission_height_edits(document, pressed, 2, 1.0, 0.0f, 9, edits) && edits.empty());
 	// A turn: 350 by 20 wraps to 10, the other 90 to 110; snapped to 15 the grabbed one's 370 goes to
 	// 375 (15), the other by the same 25 (115); a turn of less than half a degree plans nothing; a
-	// turn the other way wraps below 0.
-	TEST_EXPECT(mission_yaw_edits(document, pressed, 0, 20.0, 0.0f, 9, edits));
-	TEST_EXPECT(edits.size() == 2 && set_of(edits, a, "yaw") == 10.0 && set_of(edits, b, "yaw") == 110.0);
-	for (const Edit &edit : edits) TEST_EXPECT(std::holds_alternative<int64_t>(edit.value) && edit.gesture == 9);
-	TEST_EXPECT(mission_yaw_edits(document, pressed, 0, 20.0, 15.0f, 9, edits) && set_of(edits, a, "yaw") == 15.0 &&
+	// turn the other way wraps below 0. Two entities turn together about their centre (S15: the
+	// middle of their box, 11.5 east and 22 north), each position carried round it clockwise as a
+	// compass heading turns, their heights standing; one alone turns about its own origin.
+	const std::vector<MissionPressed> two = { pressed[0], pressed[1] };
+	TEST_EXPECT(mission_yaw_edits(document, two, 0, 20.0, 0.0f, 9, edits));
+	TEST_EXPECT(edits.size() == 6 && set_of(edits, a, "yaw") == 10.0 && set_of(edits, b, "yaw") == 110.0);
+	const double c = std::cos(20.0 * 3.14159265358979323846 / 180.0), s = std::sin(20.0 * 3.14159265358979323846 / 180.0);
+	TEST_EXPECT(near(set_of(edits, a, "x"), 11.5 + (-1.5 * c + -2.0 * s), 1e-9) &&
+			near(set_of(edits, a, "y"), 22.0 + (-2.0 * c - -1.5 * s), 1e-9) &&
+			near(set_of(edits, b, "x"), 11.5 + (1.5 * c + 2.0 * s), 1e-9) && near(set_of(edits, b, "y"), 22.0 + (2.0 * c - 1.5 * s), 1e-9) &&
+			std::isnan(set_of(edits, a, "z")) && std::isnan(set_of(edits, b, "z")));
+	for (const Edit &edit : edits) TEST_EXPECT(edit.gesture == 9);
+	// A quarter turn clockwise: what lay south-west of the centre (1.5 west, 2 south) lies north-west
+	// (2 west, 1.5 north).
+	TEST_EXPECT(mission_yaw_edits(document, two, 0, 90.0, 0.0f, 9, edits) && set_of(edits, a, "yaw") == 80.0 &&
+			near(set_of(edits, a, "x"), 9.5, 1e-9) && near(set_of(edits, a, "y"), 23.5, 1e-9));
+	const std::vector<MissionPressed> alone = { pressed[0] };
+	TEST_EXPECT(mission_yaw_edits(document, alone, 0, 20.0, 0.0f, 9, edits) && edits.size() == 1 &&
+			std::holds_alternative<int64_t>(edits[0].value) && set_of(edits, a, "yaw") == 10.0);
+	TEST_EXPECT(mission_yaw_edits(document, two, 0, 20.0, 15.0f, 9, edits) && set_of(edits, a, "yaw") == 15.0 &&
 			set_of(edits, b, "yaw") == 115.0);
-	TEST_EXPECT(mission_yaw_edits(document, pressed, 1, -100.0, 0.0f, 9, edits) && set_of(edits, b, "yaw") == 350.0 &&
+	TEST_EXPECT(mission_yaw_edits(document, two, 1, -100.0, 0.0f, 9, edits) && set_of(edits, b, "yaw") == 350.0 &&
 			set_of(edits, a, "yaw") == 250.0);
-	TEST_EXPECT(mission_yaw_edits(document, pressed, 0, 0.4, 0.0f, 9, edits) && edits.empty());
+	TEST_EXPECT(mission_yaw_edits(document, two, 0, 0.4, 0.0f, 9, edits) && edits.empty());
 	TEST_EXPECT(!mission_yaw_edits(document, pressed, 2, 20.0, 0.0f, 9, edits));
 	std::printf("test_height_and_yaw passed\n");
+	return 0;
+}
+
+// A group turn carries a selected area (S15 review): the centre the middle of the box of the entities'
+// positions and the area's middle; the area's middle carried round it, its box on the file's axes, its
+// extents swapped by a quarter turn and kept by an eighth; one entity with no other turns alone. And
+// what a cancelled drag writes: the pressed records' moved fields put back, nothing for what stands.
+int test_group_turn_with_an_area() {
+	MissionRows document;
+	Diagnostic error;
+	// The area 20 wide (x 30..50) and 10 deep (y -20..-10), its middle (40, -15).
+	TEST_EXPECT(document.load_bytes(bytes_of("E 10 20 5 350\nE 13 24 1.5 90\nA 30 50 -20 -10 0 8\n"), "rows.txt",
+			AssetKind::Unknown, "jo", error));
+	const std::vector<MissionPressed> pressed = press_all(document);
+	const NodeAddress a = row_at(document, 0), area = row_at(document, 2);
+	// The centre: x 10..40, y -15..24, so (25, 4.5); one record has none.
+	double centre[2] = { 0.0, 0.0 };
+	TEST_EXPECT(mission_turn_centre(pressed, centre) && near(centre[0], 25.0) && near(centre[1], 4.5));
+	TEST_EXPECT(!mission_turn_centre({ pressed[0] }, centre));
+	// A quarter turn clockwise: (east, north) to (north, -east). The area's middle, 15 east and 19.5
+	// south of the centre, goes to 19.5 west and 15 south: (5.5, -10.5); its extents swapped, 10 wide and
+	// 20 deep.
+	std::vector<Edit> edits;
+	TEST_EXPECT(mission_yaw_edits(document, pressed, 0, 90.0, 0.0f, 9, edits));
+	TEST_EXPECT(near(set_of(edits, area, "x_min"), 0.5, 1e-9) && near(set_of(edits, area, "x_max"), 10.5, 1e-9) &&
+			near(set_of(edits, area, "y_min"), -20.5, 1e-9) && near(set_of(edits, area, "y_max"), -0.5, 1e-9));
+	// The entity about the same centre: 15 west and 15.5 north of it goes to 15.5 east and 15 north.
+	TEST_EXPECT(near(set_of(edits, a, "x"), 40.5, 1e-9) && near(set_of(edits, a, "y"), 19.5, 1e-9) &&
+			set_of(edits, a, "yaw") == 80.0);
+	// An eighth of a turn: the middle carried round, the box's extents as they were (20 by 10).
+	TEST_EXPECT(mission_yaw_edits(document, pressed, 0, 45.0, 0.0f, 9, edits));
+	TEST_EXPECT(near(set_of(edits, area, "x_max") - set_of(edits, area, "x_min"), 20.0, 1e-9) &&
+			near(set_of(edits, area, "y_max") - set_of(edits, area, "y_min"), 10.0, 1e-9));
+	// Restored as pressed: a record whose press differs from the row has its moved fields written back.
+	std::vector<MissionPressed> moved = pressed;
+	moved[0].x = 11.0;
+	moved[2].min[1] = -21.0;
+	mission_restore_edits(document, pressed, 4, edits);
+	TEST_EXPECT(edits.empty());
+	mission_restore_edits(document, moved, 4, edits);
+	TEST_EXPECT(edits.size() == 2 && near(set_of(edits, a, "x"), 11.0) && near(set_of(edits, area, "y_min"), -21.0) &&
+			edits[0].gesture == 4);
+	std::printf("test_group_turn_with_an_area passed\n");
 	return 0;
 }
 
@@ -469,6 +527,7 @@ int main() {
 	TEST_EXPECT(test_tokens() == 0);
 	TEST_EXPECT(test_move() == 0);
 	TEST_EXPECT(test_height_and_yaw() == 0);
+	TEST_EXPECT(test_group_turn_with_an_area() == 0);
 	TEST_EXPECT(test_area_edges() == 0);
 	TEST_EXPECT(test_camera() == 0);
 	std::printf("editor_mission_handle_edit: all tests passed\n");

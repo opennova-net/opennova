@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <variant>
 
 #include <editor/assets/asset_kind.h>
@@ -12,6 +13,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <base/io/cp1252.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
@@ -264,7 +266,7 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 
 // A record's own collections (none for one that holds nothing), each record with the
 // collections it holds in turn.
-JsonValue collections_to_json(const Document &document, const NodeAddress &owner) {
+JsonValue collections_to_json(const Document &document, const NodeAddress &owner, const NameSource *names) {
 	JsonValue collections = JsonValue::make_array();
 	for (const Document::Collection &collection : document.collections_of(owner)) {
 		JsonValue entry = JsonValue::make_object();
@@ -282,9 +284,14 @@ JsonValue collections_to_json(const Document &document, const NodeAddress &owner
 			record.set("id", json_number(double(id)));
 			// A list of several kinds names each record's own.
 			if (!collection.kinds.empty()) record.set("kind_name", json_string(document.kind_token(address.kind)));
-			record.set("name", json_string(document.record_name(address)));
+			const std::string name = document.record_name(address);
+			record.set("name", json_string(name));
+			// What the windows show for it where its type words it otherwise (a mission's trigger or action
+			// in words, S15), with the project's names as the row's own title has them.
+			const std::string title = record_display(document, address, names);
+			if (title != name) record.set("title", json_string(title));
 			record.set("change", json_string(record_change_token(document.record_change(address))));
-			JsonValue nested = collections_to_json(document, address);
+			JsonValue nested = collections_to_json(document, address, names);
 			if (!nested.array.empty()) record.set("collections", std::move(nested));
 			records.push(std::move(record));
 		}
@@ -540,7 +547,8 @@ bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error
 	return true;
 }
 
-// A command in a viewport (S13 V7): {name, ids?, kind?}. The name is the viewport's kind to read.
+// A command in a viewport (S13 V7): {name, ids?, kind?, by?: [..], at?: [x, y]} (S15: a way in the
+// kind's units, a point of the picture). The name is the viewport's kind to read.
 JsonValue command_to_json(const ViewportCommand &command) {
 	JsonValue out = JsonValue::make_object();
 	out.set("name", json_string(command.name));
@@ -550,15 +558,26 @@ JsonValue command_to_json(const ViewportCommand &command) {
 		out.set("ids", std::move(ids));
 	}
 	if (command.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(command.kind)));
+	if (!command.by.empty()) {
+		JsonValue by = JsonValue::make_array();
+		for (const double each : command.by) by.push(json_number(each));
+		out.set("by", std::move(by));
+	}
+	if (command.has_at) {
+		JsonValue at = JsonValue::make_array();
+		at.push(json_number(command.at_x));
+		at.push(json_number(command.at_y));
+		out.set("at", std::move(at));
+	}
 	return out;
 }
 
 bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"command\" must be an object {name, ids, kind}.";
+		error = "\"command\" must be an object {name, ids, kind, by, at}.";
 		return false;
 	}
-	if (!members_known(json, {"name", "ids", "kind"}, "command", error)) return false;
+	if (!members_known(json, {"name", "ids", "kind", "by", "at"}, "command", error)) return false;
 	ViewportCommand command;
 	const JsonValue *name = json.get("name");
 	if (!name || !name->is_string() || name->string.empty()) {
@@ -581,12 +600,33 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 			command.ids.push_back(id);
 		}
 	}
+	if (const JsonValue *by = json.get("by")) {
+		bool numbers = by->is_array() && !by->array.empty() && by->array.size() <= 3;
+		for (size_t i = 0; numbers && i < by->array.size(); ++i) {
+			numbers = by->array[i].is_number() && std::isfinite(by->array[i].number);
+			if (numbers) command.by.push_back(by->array[i].number);
+		}
+		if (!numbers) {
+			error = "\"command.by\" must be an array of one to three numbers.";
+			return false;
+		}
+	}
+	if (const JsonValue *at = json.get("at")) {
+		if (!at->is_array() || at->array.size() != 2 || !io::json_float(at->array[0], command.at_x) ||
+				!io::json_float(at->array[1], command.at_y)) {
+			error = "\"command.at\" must be two numbers, [x, y].";
+			return false;
+		}
+		command.has_at = true;
+	}
 	out = std::move(command);
 	return true;
 }
 
-// A drop on a viewport's picture (S14): {file | reference + name, at: [x, y], kind?}. What is dropped
-// is the viewport's kind to read (a model's file, an item's id), so the names are texts here.
+// A drop on a viewport's picture (S14): {file | reference + name, at: [x, y], snap?, kind?}; a box drop
+// (S15) {reference, at: [x, y], to: [x2, y2], snap?, kind?}, a reference and no name. What is dropped
+// is the viewport's kind to read (a model's file, an item's id, a path's number, an area), so the
+// names are texts here.
 JsonValue drop_to_json(const ViewportDrop &drop) {
 	JsonValue out = JsonValue::make_object();
 	if (!drop.file.empty()) out.set("file", json_string(drop.file));
@@ -596,16 +636,23 @@ JsonValue drop_to_json(const ViewportDrop &drop) {
 	point.push(json_number(drop.x));
 	point.push(json_number(drop.y));
 	out.set("at", std::move(point));
+	if (drop.box) {
+		JsonValue to = JsonValue::make_array();
+		to.push(json_number(drop.x2));
+		to.push(json_number(drop.y2));
+		out.set("to", std::move(to));
+	}
+	if (drop.snap != 0.0f) out.set("snap", json_number(drop.snap));
 	if (drop.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(drop.kind)));
 	return out;
 }
 
 bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"drop\" must be an object {file | reference + name, at, kind}.";
+		error = "\"drop\" must be an object {file | reference + name, at, to, snap, kind}.";
 		return false;
 	}
-	if (!members_known(json, {"file", "reference", "name", "at", "kind"}, "drop", error)) return false;
+	if (!members_known(json, {"file", "reference", "name", "at", "to", "snap", "kind"}, "drop", error)) return false;
 	const auto text = [&](const char *member, std::string &into) {
 		const JsonValue *value = json.get(member);
 		if (!value) return true;
@@ -618,8 +665,20 @@ bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error
 	};
 	ViewportDrop drop;
 	if (!text("file", drop.file) || !text("reference", drop.reference) || !text("name", drop.name)) return false;
-	// A file, or a reference kind's name: one of them, the kind and its name together.
-	if (drop.file.empty() == drop.reference.empty() || drop.reference.empty() != drop.name.empty()) {
+	// A file, or a reference kind's name: one of them, the kind and its name together; a box (`to`) a
+	// reference kind and no name.
+	if (const JsonValue *to = json.get("to")) {
+		if (drop.reference.empty() || !drop.file.empty() || !drop.name.empty()) {
+			error = "\"drop\" with \"to\" (a box) names a reference kind and no file or name.";
+			return false;
+		}
+		if (!to->is_array() || to->array.size() != 2 || !io::json_float(to->array[0], drop.x2) ||
+				!io::json_float(to->array[1], drop.y2)) {
+			error = "\"drop.to\" must be two numbers, [x, y].";
+			return false;
+		}
+		drop.box = true;
+	} else if (drop.file.empty() == drop.reference.empty() || drop.reference.empty() != drop.name.empty()) {
 		error = "\"drop\" names a file, or a reference kind and a name of it, one of them.";
 		return false;
 	}
@@ -627,6 +686,10 @@ bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error
 	if (!at || !at->is_array() || at->array.size() != 2 || !io::json_float(at->array[0], drop.x) ||
 			!io::json_float(at->array[1], drop.y)) {
 		error = "\"drop.at\" must be two numbers, [x, y].";
+		return false;
+	}
+	if (const JsonValue *snap = json.get("snap"); snap && (!io::json_float(*snap, drop.snap) || drop.snap < 0.0f)) {
+		error = "\"drop.snap\" must be a number, 0 or more.";
 		return false;
 	}
 	if (!viewport_kind_member(json, "drop", drop.kind, error)) return false;
@@ -1077,6 +1140,12 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	counts.set("warnings", json_number(double(answer.warnings)));
 	counts.set("infos", json_number(double(answer.infos)));
 	out.set("counts", std::move(counts));
+	// The game's own data's findings, counted apart (S15).
+	JsonValue original = JsonValue::make_object();
+	original.set("errors", json_number(double(answer.original_errors)));
+	original.set("warnings", json_number(double(answer.original_warnings)));
+	original.set("infos", json_number(double(answer.original_infos)));
+	out.set("original_counts", std::move(original));
 	const size_t first = page.first(answer.rows.size());
 	const size_t last = page.last(answer.rows.size());
 	set_page(out, page, answer.rows.size());
@@ -1102,13 +1171,22 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 			entry.set("errors", json_number(double(group.errors)));
 			entry.set("warnings", json_number(double(group.warnings)));
 			entry.set("infos", json_number(double(group.infos)));
+			if (!group.header) entry.set("header", boolean(false));
+			if (group.original) entry.set("original", boolean(true));
 			groups.push(std::move(entry));
 		}
 		out.set("groups", std::move(groups));
 	}
 	JsonValue problems = JsonValue::make_array();
 	for (size_t i = first; i < last; ++i) {
-		JsonValue row = diagnostic_to_json(view.findings.diagnostics[answer.rows[i]]);
+		const Diagnostic &d = view.findings.diagnostics[answer.rows[i]];
+		JsonValue row = diagnostic_to_json(d);
+		// The record in the words the windows show for it, where its document is open (S15).
+		const std::string title = finding_record_title(d, view);
+		if (!title.empty()) row.set("record_title", json_string(title));
+		const std::string field = finding_field_title(d, view);
+		if (!field.empty()) row.set("field_title", json_string(field));
+		if (in_original_data(d, view)) row.set("original", boolean(true));
 		if (answer.grouped) row.set("group", json_string(answer.groups[group_of[i]].key));
 		JsonValue listed = JsonValue::make_array();
 		for (const ProblemFix &fix : fixes.fixes(view, answer.rows[i])) listed.push(problem_fix_to_json(fix));
@@ -1119,7 +1197,7 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	return out;
 }
 
-JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
+JsonValue document_to_json(const DocumentBase &base, const JsonPage *page, const NameSource *names) {
 	// The record document's rows and records where it is one; a text document's lines (S13 D9); the
 	// lifecycle alone for another kind.
 	const Document *records = records_of(base);
@@ -1186,8 +1264,12 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
 		entry.set("kind", json_number(double(row->kind)));
 		entry.set("kind_label", json_string(document.kind_label(row->kind)));
 		entry.set("name", json_string(row->name()));
+		// What the windows show for it where its type words it otherwise (S15: a mission's event as its
+		// sentence, an entity by its item's name and its SSN with the project's names: record_display).
+		const std::string title = record_display(document, {row->id, row->kind, 0}, names);
+		if (title != document.record_name({row->id, row->kind, 0})) entry.set("title", json_string(title));
 		entry.set("change", json_string(record_change_token(document.record_change({row->id, row->kind, 0}))));
-		JsonValue collections = collections_to_json(document, {row->id, row->kind, 0});
+		JsonValue collections = collections_to_json(document, {row->id, row->kind, 0}, names);
 		entry.set("collections", std::move(collections));
 		rows.push(std::move(entry));
 	}
@@ -1200,11 +1282,20 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 	Document::Placement at;
 	if (address.child) document.placement(address, at);
 	JsonValue out = JsonValue::make_object();
+	// The record's words and each value's (S15), with the graph's names.
+	const std::optional<GraphNameSource> names =
+	        view.findings.graph ? std::optional<GraphNameSource>(std::in_place, *view.findings.graph) : std::nullopt;
+	const NameSource *source = names ? &*names : nullptr;
 	out.set("row", json_number(double(address.row)));
 	out.set("kind", json_number(double(address.kind)));
 	out.set("child", json_number(double(address.child)));
 	out.set("kind_label", json_string(document.kind_label(address.kind)));
-	out.set("name", json_string(document.record_name(address)));
+	const std::string name = document.record_name(address);
+	out.set("name", json_string(name));
+	// What the windows show for it where its type words it otherwise (a mission's event as its
+	// sentence, a trigger or an action in words, an entity by its item's name and its SSN: S15).
+	const std::string title = record_display(document, address, source);
+	if (title != name) out.set("title", json_string(title));
 	out.set("path", json_string(document.record_path(address)));
 	out.set("locator", json_string(document.locator(address)));
 	out.set("change", json_string(record_change_token(document.record_change(address))));
@@ -1228,6 +1319,15 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		if (!schema.group.empty()) entry.set("group", json_string(schema.group));
 		entry.set("type", json_string(field_type_token(schema.type)));
 		entry.set("value", value_to_json(value));
+		// What the value names in words beside it (value_display), where it names something:
+		// `display`, `dangling` where it names nothing (the words say so), `display_source` where the
+		// words come from.
+		const DisplayName words = value_display(document, address, field, value, source);
+		if (!words.text.empty()) {
+			entry.set("display", json_string(words.text));
+			if (words.dangling) entry.set("dangling", boolean(true));
+			if (!words.source.empty()) entry.set("display_source", json_string(words.source));
+		}
 		// What the format table says of the field: its unit, its note, the key the file writes,
 		// the range it keeps to, how it holds a colour.
 		if (!schema.unit.empty()) entry.set("unit", json_string(schema.unit));
@@ -1299,7 +1399,7 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		fields.push(std::move(entry));
 	}
 	out.set("fields", std::move(fields));
-	out.set("collections", collections_to_json(document, address));
+	out.set("collections", collections_to_json(document, address, source));
 	return out;
 }
 
@@ -1373,9 +1473,14 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceChoice> choices = view.findings.graph
-			? reference_choices(*view.findings.graph, field)
-			: std::vector<ReferenceChoice>();
+	// The names the Inspector's picker offers, each by what it names (S15: an item id by its catalog's
+	// name, an SSN by its entity's title, the player first): picker_choices, a field holding the
+	// player's SSN listed as an entity field (FieldUse::picks).
+	std::optional<GraphNameSource> names;
+	if (view.findings.graph) names.emplace(*view.findings.graph);
+	field = picked_as(field);
+	const std::vector<ReferenceChoice> choices =
+	        picker_choices(view.findings.graph.get(), document, address, field, names ? &*names : nullptr);
 	JsonValue list = JsonValue::make_array();
 	for (size_t i = page.first(choices.size()); i < page.last(choices.size()); ++i) {
 		const ReferenceChoice &choice = choices[i];

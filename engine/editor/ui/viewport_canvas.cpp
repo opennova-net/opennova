@@ -193,7 +193,8 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 				ImGui::IsKeyDown(ImGuiKey_RightArrow) || ImGui::IsKeyDown(ImGuiKey_UpArrow) ||
 				ImGui::IsKeyDown(ImGuiKey_DownArrow);
 		keyboard.escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-		keyboard.frame = ImGui::IsKeyPressed(ImGuiKey_F, false);
+		keyboard.frame = !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false); // Ctrl+F finds
+		keyboard.duplicate = io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_D, false);
 		// The keys a camera flies by, held; no chord's letter is one (Ctrl+S saves, Ctrl+D duplicates).
 		if (!io.KeyCtrl) {
 			const auto held = [](ImGuiKey positive, ImGuiKey negative) {

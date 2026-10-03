@@ -7,6 +7,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <set>
@@ -116,6 +117,27 @@ std::vector<InspectorSection> plan_inspector(const Document &document, const Nod
 		kept.push_back(std::move(section));
 	}
 	return kept;
+}
+
+void leave_out(std::vector<InspectorSection> &plan, const std::vector<std::string> &fields,
+               const std::vector<NodeKind> &collections) {
+	if (fields.empty() && collections.empty()) return;
+	const auto taken_field = [&](const FieldUse &field) {
+		return std::find(fields.begin(), fields.end(), field.schema->id) != fields.end();
+	};
+	const auto taken_collection = [&](const Document::Collection &collection) {
+		return std::find(collections.begin(), collections.end(), collection.spec.kind) != collections.end();
+	};
+	std::vector<InspectorSection> kept;
+	for (InspectorSection &section : plan) {
+		section.fields.erase(std::remove_if(section.fields.begin(), section.fields.end(), taken_field), section.fields.end());
+		section.collections.erase(std::remove_if(section.collections.begin(), section.collections.end(), taken_collection),
+		                          section.collections.end());
+		if (section.has_toggle && taken_field(section.toggle)) section.has_toggle = false;
+		if (section.fields.empty() && !section.has_toggle && section.collections.empty()) continue;
+		kept.push_back(std::move(section));
+	}
+	plan = std::move(kept);
 }
 
 bool kinds_alike(const Document &document, NodeKind a, NodeKind b) {

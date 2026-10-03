@@ -86,8 +86,11 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 		// The last picture shows while its device builds the next (S13 V6), or after that build failed.
 		switch (model.picture_status()) {
 		case ViewportStatus::Loading: {
+			// What it builds now and how far (S15: "Loading terrain 120/348 (34%)").
 			const OperationProgress &units = model.build().progress;
-			ui.badge("Loading " + std::to_string(units.done) + "/" + std::to_string(units.total));
+			const int percent = units.total ? int(units.done * 100 / units.total) : 0;
+			ui.badge("Loading " + (units.label.empty() ? std::string() : units.label + " ") + std::to_string(units.done) +
+					"/" + std::to_string(units.total) + " (" + std::to_string(percent) + "%)");
 			break;
 		}
 		case ViewportStatus::Failed: ui.badge(model.picture_message()); break;
