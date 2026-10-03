@@ -497,50 +497,6 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 			"teardown clears the banner [orig: the round-start HUD reset @0x5b71b0]")
 
 
-func test_mission_end_screen_lose_form_and_exit() -> void:
-	# The MISSION FAILED form composes the failed line + the WAC Lose banner and
-	# exits over exit_requested [orig: the Cinematic_EpilogUpdate mode-2 leg; ESC ->
-	# g_MissionExitReason=1].
-	var screen := MissionEndScreen.new()
-	add_child_autofree(screen)
-	watch_signals(screen)
-	var lost := RoundOutcome.make(true, 2)
-	screen.setup(lost, EndRoundStatistics.make_epilog(0, 0, 0, 0, 0, 0),
-			"You shot a friendly unit!", null)
-	assert_true(_screen_has_label_containing(screen, "You shot a friendly unit!"),
-			"the lose form shows the stored banner line")
-	screen.request_exit()
-	assert_signal_emit_count(screen, "exit_requested", 1)
-	screen.request_exit()
-	assert_signal_emit_count(screen, "exit_requested", 1,
-			"the exit is one-shot (the shell tears the world down once)")
-
-
-func test_mission_end_screen_win_form_counts() -> void:
-	# The win form draws the engine's four counter lines: won/defined
-	# subgoals, the enemy count clamped to the census over the census, and the
-	# two unit sums [orig: Cine_EpilogStateMachineUpdate @0x576240 case 4 ->
-	# CineEventEpilogCounter_Draw @0x573440].
-	var screen := MissionEndScreen.new()
-	add_child_autofree(screen)
-	var won := RoundOutcome.make(true, 1)
-	screen.setup(won, EndRoundStatistics.make_epilog(2, 3, 7, 5, 4, 1), "", null)
-	assert_true(_screen_has_label_containing(screen, "2/3"),
-			"the objective line is won/defined, not a stand-in 0")
-	assert_true(_screen_has_label_containing(screen, "5/5"),
-			"the enemy line clamps to the census and shows it as the max")
-	assert_true(_screen_has_label_containing(screen, "4"), "the team-unit sum")
-
-
-func _screen_has_label_containing(node: Node, text: String) -> bool:
-	if node is Label and (node as Label).text.contains(text):
-		return true
-	for child in node.get_children():
-		if _screen_has_label_containing(child, text):
-			return true
-	return false
-
-
 func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)

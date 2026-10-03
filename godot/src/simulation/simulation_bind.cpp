@@ -7,6 +7,7 @@
 #include "rtxt/rtxt_string_file.h" // the gametext table type the end-round / deploy feeds bind
 #include "simulation/end_round_state.h" // the typed end-of-round record
 #include "simulation/hud_view_records.h" // the small per-frame HUD view records
+#include "simulation/epilog_cine_record.h" // the SP end-of-round cine record
 #include "simulation/weapon_profile_summary.h" // the weapon.sav slot-0 summary records
 #include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
 #include "simulation/present_event_records.h" // the per-tick present drain records
@@ -132,6 +133,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_screen_status"), &Simulation::get_join_screen_status);
 	ClassDB::bind_method(D_METHOD("is_session_lost"), &Simulation::is_session_lost);
 	ClassDB::bind_method(D_METHOD("get_mission_exit_reason"), &Simulation::get_mission_exit_reason);
+	ClassDB::bind_method(D_METHOD("round_over_key", "vk", "restart_vk"), &Simulation::round_over_key);
+	ClassDB::bind_method(D_METHOD("ingame_restart"), &Simulation::ingame_restart);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &Simulation::is_joined_in_match);
 	ClassDB::bind_method(D_METHOD("is_joiner_network_diagnostics_enabled"),
 	                     &Simulation::is_joiner_network_diagnostics_enabled);
@@ -182,7 +185,7 @@ void Simulation::_bind_methods() {
 	                            &Simulation::strip_inline_tags);
 	ClassDB::bind_method(D_METHOD("get_end_round_statistics"),
 	                     &Simulation::get_end_round_statistics);
-	ClassDB::bind_method(D_METHOD("get_epilog_score"), &Simulation::get_epilog_score);
+	ClassDB::bind_method(D_METHOD("get_epilog_cine"), &Simulation::get_epilog_cine);
 	ClassDB::bind_method(D_METHOD("get_join_assigned_team"),
 	                     &Simulation::get_join_assigned_team);
 	ClassDB::bind_method(D_METHOD("get_class_allow_mask"),
@@ -465,12 +468,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("player_aim_project_range"),
 			&Simulation::player_aim_project_range);
-	ClassDB::bind_static_method("Simulation",
-			D_METHOD("epilog_exit_timeout_seconds"),
-			&Simulation::epilog_exit_timeout_seconds);
-	ClassDB::bind_static_method("Simulation",
-			D_METHOD("epilog_fade_in_seconds"),
-			&Simulation::epilog_fade_in_seconds);
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("deploy_refresh_due", "prev_tick", "tick"),
 			&Simulation::deploy_refresh_due);

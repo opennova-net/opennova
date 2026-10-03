@@ -121,35 +121,7 @@ PackedStringArray EndRoundStatistics::get_values() const {
 	return out;
 }
 
-Ref<EndRoundStatistics> EndRoundStatistics::epilog(
-		const opennova::hud::EndRoundStatisticsInput &p_in) {
-	opennova::hud::EndRoundStatisticsPanel panel;
-	for (const opennova::hud::EndRoundStatisticsRow &row : opennova::hud::epilog_score_lines(p_in))
-		panel.rows.push_back(row);
-	Ref<EndRoundStatistics> out;
-	out.instantiate();
-	out->assign(panel);
-	return out;
-}
-
-Ref<EndRoundStatistics> EndRoundStatistics::make_epilog(int p_subgoals_won,
-		int p_subgoals_defined, int p_enemy_kills, int p_enemy_unit_total,
-		int p_team_unit_kills, int p_friendly_unit_kills) {
-	opennova::hud::EndRoundStatisticsInput in;
-	in.subgoals_won = p_subgoals_won;
-	in.subgoals_defined = p_subgoals_defined;
-	in.enemy_kills = p_enemy_kills;
-	in.enemy_unit_total = p_enemy_unit_total;
-	in.team_unit_kills = p_team_unit_kills;
-	in.friendly_unit_kills = p_friendly_unit_kills;
-	return epilog(in);
-}
-
 void EndRoundStatistics::_bind_methods() {
-	ClassDB::bind_static_method("EndRoundStatistics",
-			D_METHOD("make_epilog", "subgoals_won", "subgoals_defined", "enemy_kills",
-					"enemy_unit_total", "team_unit_kills", "friendly_unit_kills"),
-			&EndRoundStatistics::make_epilog);
 	OPENNOVA_RECORD_READ_ONLY(EndRoundStatistics, Variant::BOOL, raised)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundStatistics, Variant::PACKED_STRING_ARRAY, label_keys)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundStatistics, Variant::PACKED_STRING_ARRAY, values)

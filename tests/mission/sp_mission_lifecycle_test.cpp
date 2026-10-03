@@ -281,7 +281,17 @@ int main() {
 		m.frames(4);
 		w::World &world = m.world();
 		w::EpilogCine &cine = world.epilog;
+		world.script.dialog.register_started(5);
+		world.out.effects.clear();
 		world.process_round_end(2);
+		// The SP tail's Dialog_ResetAll clears the dialog registry, and the
+		// round_end effect carries the SP word (the shell's queue reset)
+		// [orig: Server_ProcessRoundEnd @0x516953].
+		CHECK(!world.script.dialog.registered(5) && !world.script.dialog.active_exists(5));
+		bool sp_word = false;
+		for (const w::Effect &e : world.out.effects.entries())
+			if (e.kind == "round_end") sp_word = e.c == 1;
+		CHECK(sp_word);
 		// Cine_StartPlayback: the 100-frame letterbox and the edit fade.
 		CHECK(cine.mode == w::EpilogCineMode::Lose && cine.lose_state == 0);
 		CHECK(cine.events.size() == 2);

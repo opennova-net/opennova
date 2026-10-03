@@ -1,5 +1,6 @@
 #include <runtime/world/epilog_cine.h>
 
+#include <runtime/hud/hud_math.h>
 #include <runtime/world/objectives_feed.h>
 #include <runtime/world/world.h>
 
@@ -92,6 +93,28 @@ CineEvent epilog_counter(int32_t start, const char *label_key, int32_t row_y, in
 }
 
 } // namespace
+
+uint32_t cine_event_draw_argb(const CineEvent &e) {
+	const uint32_t alpha_byte = static_cast<uint32_t>(static_cast<int32_t>(e.alpha * 255.0f));
+	switch (e.kind) {
+	case CineEventKind::ImageFade: {
+		if (e.fade_source == CineFadeSource::Image) return (alpha_byte << 24) | 0xFFFFFFu;
+		// The solid source's pixels, or the default fill for any other source
+		// [orig: CinematicFadeEvent_LoadTexture @0x570D56 (0xFF303060) /
+		//  @0x570F10 (+0x120)].
+		const uint32_t pixels =
+				e.fade_source == CineFadeSource::SolidColor ? e.solid_color : 0xFF303060u;
+		const uint32_t a = (alpha_byte * (pixels >> 24)) / 255u;
+		return (a << 24) | (pixels & 0xFFFFFFu);
+	}
+	case CineEventKind::TextFade:
+		return hud::half_bright_argb((alpha_byte << 24) + e.color_mask);
+	case CineEventKind::EpilogCounter:
+		return hud::half_bright_argb(0xFFFFFFFFu);
+	default:
+		return 0;
+	}
+}
 
 int32_t EpilogCine::end_frame() const {
 	// The largest start + duration over the list; an empty list ends at 0
@@ -316,9 +339,11 @@ void EpilogCine::update_lose(World &world) {
 		if (!frame_drawn) break;
 		build_lose_screen();
 		++lose_state; // [orig: @0x5747D4]
-		// The dialog reset and the audio channel shutdown that follow are the
-		// embedder's (the round_end effect's SP consumer) [orig: Dialog_ResetAll
-		//  @0x5747DA, Audio_ShutdownChannelsAndDeviceTable @0x5747E6].
+		// Then the dialog reset (its registry half; the waiting lines are the
+		// shell's queue) and the audio channel shutdown, a device leg the port
+		// does not run (D-HUD-46) [orig: Dialog_ResetAll @0x5747DA,
+		// Audio_ShutdownChannelsAndDeviceTable @0x5747E6].
+		world.script.dialog.reset();
 		break;
 	case 2:
 		++lose_age; // [orig: @0x5744B9]
@@ -393,6 +418,8 @@ void EpilogCine::update_win(World &world) {
 		fade_alpha -= kEpilogFadeStep; // [orig: @0x5767E6 fsub flt_7C56A8]
 		++win_age;                         // [orig: @0x5767F7]
 		if (fade_alpha < 0.0f) fade_quad = false; // [orig: @0x57680C / @0x57680E]
+		// (The unreferenced sibling Cine_ProcessEpilogSequence_Retail stores the
+		// same exit from its own fade state [orig: @0x57621d].)
 		if (win_age > kEpilogExitTimeoutTicks)
 			world.mission_exit_reason = kWorldMissionExitQuit; // [orig: @0x576824]
 		break;

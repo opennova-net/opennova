@@ -181,6 +181,26 @@ inline constexpr float kEpilogFadeStep = 0.01f;
 inline constexpr int32_t kWorldMissionExitQuit = 1;
 inline constexpr int32_t kWorldMissionExitRestart = 4;
 
+// The ARGB a live node draws in. An ImageFade's image quad carries the
+// MODULATE2X neutral under the node's alpha, drawn here as the unmodulated
+// image (white) at that alpha; a solid fill draws its pixels' colour, whose
+// own alpha byte multiplies the node's (the epilog's two fades pass
+// 0x00FFFFFF). A TextFade line is the half-bright fold of the node's alpha
+// over its colour; a counter the half-bright fold of white.
+// [orig: sub_5710B0 @0x5710B0 (8355711 - (alpha * -255) << 24) and the fill
+//  pixels CinematicFadeEvent_LoadTexture @0x570F1B; sub_573020 @0x5730A3 /
+//  @0x57314C -> HUD_DrawWrappedText @0x580CBE; CineEventEpilogCounter_Draw
+//  @0x5734DE (color -1)]
+uint32_t cine_event_draw_argb(const CineEvent &e);
+
+// The cinematic bars' height over a width x height viewport: the leftover of
+// the 16:9 band, halved, one bar at the top and one at the bottom (none when
+// the viewport is 16:9 or wider) [orig: sub_570240 @0x570285 — (bottom +
+// 9 * (left - right) / 16 - top) >> 1].
+inline int32_t epilog_bar_height(int32_t width, int32_t height) {
+	return (height - 9 * width / 16) >> 1;
+}
+
 // The g_CineMode values [orig: Cine_InitPlayback @0x57864F (1),
 //  Cine_StartPlayback @0x577922 (2), Cine_DestroyAllNodesAndFont @0x57685D
 //  and the intro-cine load sub_578270 @0x5782B8 (0)].

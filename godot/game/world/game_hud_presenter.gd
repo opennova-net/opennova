@@ -195,8 +195,10 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 
 ## Undo everything a mission built: the HUD node (its card/effects children go
 ## with it), its caches, the per-mission string table, and the mission-effects
-## tap (the built menu-era teardown main_game carried).
-func teardown() -> void:
+## tap (the built menu-era teardown main_game carried). `restart` is the SP
+## restart's teardown: the toggles take the restart's reset (the tip's
+## once-counters survive it).
+func teardown(restart := false) -> void:
 	finish_hud_hidden_capture()
 	if _game_hud != null:
 		_game_hud.queue_free()
@@ -211,7 +213,10 @@ func teardown() -> void:
 	_hud_weapon_name = ""
 	_hud_objective = ""
 	_endround_banner = ""
-	_toggles.reset_mission()
+	if restart:
+		_toggles.restart_round()
+	else:
+		_toggles.reset_mission()
 	_tip_ticks_seen = -1
 	_slot_bar_key_labels_revision = -1
 	_chat.reset()
@@ -1168,6 +1173,30 @@ func handle_escape() -> bool:
 		sim.request_hud_map_close()
 	_apply_toggle_events(events)
 	return (events & HudToggles.EVENT_ESCAPE_CLOSED_WINDOW) != 0
+
+
+## The SP end-of-round cine has started: its respawn init closes every HUD
+## window (engine hud_toggles_cine_start), the map mode with them.
+func begin_end_of_round_cine() -> void:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	var events := _toggles.cine_start(sim != null and sim.is_mp_session())
+	if events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED and sim != null:
+		sim.request_hud_map_close()
+	_apply_toggle_events(events)
+
+
+## One key-down once the round is over: the special-key chain's round-over
+## leg (engine inmatch round_over_key; the world takes the RESTART and ESC
+## halves). Returns the HudToggles.ROUND_OVER_* bits (0 = not taken).
+func handle_round_over_key(key: InputEventKey) -> int:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim == null:
+		return 0
+	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
+	var bits := int(sim.round_over_key(vk, _key_press_vk("STRKEYPRESS_RESTART", "R")))
+	if bits & HudToggles.ROUND_OVER_CONSUMED:
+		ControlsBindings.model().consume_key_press(vk)
+	return bits
 
 
 # A Misc gametext toast through the message feed.

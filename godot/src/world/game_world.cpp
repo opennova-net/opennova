@@ -208,6 +208,13 @@ Ref<PostMissionRoute> GameWorld::post_mission_route(int p_reason) const {
 	return drive_.post_mission_route(p_reason);
 }
 
+int GameWorld::main_frame_exit(int p_reason) const {
+	Ref<Simulation> sim = get_sim();
+	const bool in_session = sim.is_valid() && sim->is_mp_session();
+	const bool authority = sim.is_null() || !sim->is_joiner();
+	return static_cast<int>(opennova::inmatch::main_frame_exit(p_reason, in_session, authority));
+}
+
 Ref<ConnectionError> GameWorld::get_last_connection_error() const {
 	return drive_.last_connection_error();
 }
@@ -679,6 +686,16 @@ void GameWorld::_bind_methods() {
 			opennova::inmatch::kMissionExitMapCycle);
 	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_ROUND_OVER",
 			opennova::inmatch::kMissionExitRoundOver);
+	ClassDB::bind_method(D_METHOD("main_frame_exit", "reason"), &GameWorld::main_frame_exit);
+	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MAIN_FRAME_EXIT_NONE",
+			static_cast<int>(opennova::inmatch::MainFrameExit::None));
+	ClassDB::bind_integer_constant(get_class_static(), StringName(),
+			"MAIN_FRAME_EXIT_RESTART_ROUND_SP",
+			static_cast<int>(opennova::inmatch::MainFrameExit::RestartRoundSP));
+	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MAIN_FRAME_EXIT_GAME_LOOP",
+			static_cast<int>(opennova::inmatch::MainFrameExit::GameLoop));
+	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MAIN_FRAME_EXIT_POST_MENU",
+			static_cast<int>(opennova::inmatch::MainFrameExit::PostMenu));
 	ClassDB::bind_method(D_METHOD("load_mission_data", "mission", "bms_name", "dir"),
 			&GameWorld::load_mission_data, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("cancel_join_preload"), &GameWorld::cancel_join_preload);

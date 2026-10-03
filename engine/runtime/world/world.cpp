@@ -720,14 +720,19 @@ void World::process_round_end(int32_t winning_team) {
     // carries). The dialog and music legs are host presentation: the effect
     // carries the winner (a) and the end track (b); the shell, in SP only,
     // resets the dialog and signals the track.
+    // The registry half of Dialog_ResetAll is the world's; the effect's c word
+    // tells the shell the SP tail ran (its dialog queue's waiting lines go the
+    // same way; the playing line's stop is D-HUD-46).
     if (!rules.mp_session) {
+        script.dialog.reset(); // [orig: Dialog_ResetAll @0x516953 -> @0x44dc90]
         if (winning_team == 1)
             epilog.begin_win(registry.get(cached.local_player)); // [orig: @0x516965]
         else
             epilog.begin_lose(); // [orig: @0x51697b]
     }
     const int32_t end_track = winning_team == 1 ? 1 : 2;
-    out.effects.push({"round_end", winning_team, end_track, 0, 0, std::string()});
+    out.effects.push({"round_end", winning_team, end_track, rules.mp_session ? 0 : 1, 0,
+                      std::string()});
 }
 
 void World::round_over_restart() {

@@ -8,7 +8,8 @@ extends GameProbe
 ## `truck_ssn`, (4) boarding it with USE, (5) the instructor-driven ride with
 ## its area-triggered text, (6) arrival and dismount, (7) the armory zone,
 ## (8) the authored friendly-fire failure, (9) the clean exit to the menu,
-## (10) the repeat launch (a retry stand-in: the in-game RESTART is unported).
+## (10) the repeat launch from the menu, (11) the in-game RESTART (the pause
+## menu's RESTART button: the same mission again with no menu between).
 ## `auto` drives every key and look itself; `observe` only watches the
 ## maintainer play and advances a gate when the world reaches it. `travel`
 ## selects how the probe gets from place to place between gates: `teleport`
@@ -114,7 +115,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			gate_error = await _calibrate_look()
 	var gates: Array[Callable] = [_gate_1_load, _gate_2_movement, _gate_3_walk_to_truck, _gate_4_board,
 			_gate_5_ride, _gate_6_arrival_dismount, _gate_7_armory, _gate_8_friendly_fire_failure,
-			_gate_9_clean_exit, _gate_10_repeat_launch]
+			_gate_9_clean_exit, _gate_10_repeat_launch, _gate_11_ingame_restart]
 	for i in gates.size():
 		if not gate_error.is_empty():
 			break
@@ -471,17 +472,62 @@ func _gate_10_repeat_launch() -> String:
 		return _gate_done(10, "repeat_launch", false, "no local player on the repeat launch", started)
 	_connect_effects()
 	await _ctx.wait_ms(1500)
+	var check := await _fresh_launch_check("gate10_repeat", "gate10_respawn")
+	return _gate_done(10, "repeat_launch", bool(check[0]), String(check[1]), started)
+
+
+## The in-game RESTART: ESC opens the in-game menu, its RESTART button restarts
+## the same mission with no menu between (the engine's
+## World::ingame_restart_command and the main frame's reason-4 route); the
+## restarted world is a fresh launch (the spawn, the truck's rest, the boot
+## fired set, the round live), checked like gate 10.
+func _gate_11_ingame_restart() -> String:
+	var started := Time.get_ticks_msec()
+	var before := _ctx.sim()
+	if _mode == "observe":
+		_ctx.log("gate 11: open the in-game menu (ESC) and press RESTART")
+	else:
+		await _tap(KEY_ESCAPE)
+		var menu_up := await _wait_until(func() -> bool:
+			var g := _ctx.game()
+			return g != null and g.shell_state_name() == "paused", 5000, "in-game menu")
+		await _ctx.wait_ms(500)
+		await _capture("gate11_menu")
+		var pressed := menu_up and _ctx.menu_shell() != null \
+				and _ctx.menu_shell().menu_press("RESTART")
+		if not pressed:
+			return _gate_done(11, "ingame_restart", false,
+					"menu_up=%s: the RESTART control was not pressed" % str(menu_up), started)
+	var restarted := await _wait_until(func() -> bool:
+		var g := _ctx.game()
+		var w := _ctx.world()
+		var sim := _ctx.sim()
+		return sim != null and sim != before and w != null and w.is_loaded() \
+				and g != null and g.shell_state_name() == "world",
+			OBSERVE_GATE_TIMEOUT_MS if _mode == "observe" else LOAD_TIMEOUT_MS, "restarted world")
+	if not restarted or not await _ctx.wait_for_local_player(LOAD_TIMEOUT_MS):
+		return _gate_done(11, "ingame_restart", false, "the mission did not restart", started)
+	_connect_effects()
+	await _ctx.wait_ms(1500)
+	var check := await _fresh_launch_check("gate11_restart", "gate11_respawn")
+	var g := _ctx.game()
+	var detail := "%s; shell=%s" % [String(check[1]), g.shell_state_name() if g != null else "?"]
+	return _gate_done(11, "ingame_restart", bool(check[0]), detail, started)
+
+
+## The fresh-launch checks over the loaded world: the spawn and the truck's rest
+## at the first launch's, the boot fired set (the trigger-less events the
+## PreMission pass fires at every boot; none of the ride or failure events),
+## and the round live. Returns [ok, detail].
+func _fresh_launch_check(sample_label: String, capture_label: String) -> Array:
 	var sim := _ctx.sim()
 	var spawn := sim.get_local_player_position()
 	var truck := sim.entity_card_by_net_id(_truck_ssn)
 	var truck_pos := truck.get_position() if truck != null else Vector3.INF
 	var outcome: RoundOutcome = sim.get_round_outcome_debug()
-	# The PreMission pass fires the trigger-less events at every boot; a reset
-	# mission shows exactly the first launch's boot set, none of the ride or
-	# failure events.
 	var boot_fired := _fired_indices()
-	await _sample("gate10_repeat")
-	await _capture("gate10_respawn")
+	await _sample(sample_label)
+	await _capture(capture_label)
 	var spawn_gap := _planar(spawn, _spawn_pos)
 	var truck_gap := _planar(truck_pos, _truck_rest) if truck != null else INF
 	var same_boot_set := boot_fired == _boot_fired
@@ -489,7 +535,7 @@ func _gate_10_repeat_launch() -> String:
 			spawn_gap, truck_gap, str(boot_fired), str(_boot_fired), str(outcome != null and outcome.get_ended())]
 	var ok := spawn_gap <= 1.0 and truck_gap <= 1.0 and same_boot_set \
 			and outcome != null and not outcome.get_ended()
-	return _gate_done(10, "repeat_launch", ok, detail, started)
+	return [ok, detail]
 
 
 # --- drivers ---------------------------------------------------------------------------

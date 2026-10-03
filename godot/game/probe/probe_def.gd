@@ -444,11 +444,11 @@ static func _build_definitions() -> Array[ProbeDef]:
 		ProbeDef.make("mission_playthrough",
 				"The first SP mission played through its authored sequence on the real "
 				+ "input path (docs/world/npc-mission-completion.md): load `mission`, then "
-				+ "the ten gates in order — load, movement/view/stance, the walk to truck "
+				+ "the eleven gates in order — load, movement/view/stance, the walk to truck "
 				+ "`truck_ssn`, boarding with USE, the instructor ride and its triggered "
 				+ "text, dismount, the armory, the authored friendly-fire failure, the clean "
-				+ "exit and the repeat launch. `auto` drives every key itself; `observe` "
-				+ "watches the maintainer play; `travel` moves between gates by the debug "
+				+ "exit, the repeat launch and the in-game RESTART. `auto` drives every key "
+				+ "itself; `observe` watches the maintainer play; `travel` moves between gates by the debug "
 				+ "teleport (default) or on foot. The gates' own interactions always ride "
 				+ "the real input path; the per-gate verdict, a sample log and a PNG per "
 				+ "gate are the artifacts.",
@@ -459,7 +459,7 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"travel": { "type": "string", "enum": ["teleport", "walk"], "default": "teleport" },
 					"route": { "type": "array", "items": { "type": "array", "items": { "type": "number" } },
 							"default": [] },
-					"start_gate": { "type": "integer", "minimum": 1, "maximum": 10, "default": 1 },
+					"start_gate": { "type": "integer", "minimum": 1, "maximum": 11, "default": 1 },
 					"target_ssn": { "type": "integer", "minimum": 0, "default": 0 },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, false, 1_800_000),

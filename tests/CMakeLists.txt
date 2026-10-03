@@ -3459,6 +3459,10 @@ opennova_add_gated_test(lose_flow_00tra COMMAND lose_flow_test --bms 00TRa.bms -
 # authors a `score`), so the WAC's bluekills lose never fires on it.
 opennova_add_gated_test(lose_flow_04tr_self_kill COMMAND lose_flow_test --bms 04TR.bms --self-kill)
 opennova_add_gated_test(lose_flow_05tr_self_kill COMMAND lose_flow_test --bms 05TR.bms --self-kill)
+# `--win-event 38`: 01TR's only BlueWin, its five prerequisite events staged with
+# their authored actions; the round ends won and the engine's win epilog builds
+# its score screen over the mission's own tallies.
+opennova_add_gated_test(win_flow_01tr COMMAND lose_flow_test --bms 01TR.bms --win-event 38)
 
 # The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped

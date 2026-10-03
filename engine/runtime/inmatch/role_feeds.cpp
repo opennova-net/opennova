@@ -76,7 +76,7 @@ uint32_t round_over_key(const RoleView &view, int vk, int restart_vk) {
 	in.game_type = w.match.rules().game_type;
 	const uint32_t bits = hud::hud_round_over_key(in);
 	// The world halves of the SP arm; the co-op in-session arm's exits are
-	// not wired (docs/divergence-ledger.md D-NET-340).
+	// not wired (interface/hud-re.md D-HUD-45).
 	if (!in.in_session) {
 		if ((bits & hud::hud_round_over::kRestart) != 0) w.round_over_restart();
 		if ((bits & hud::hud_round_over::kExit) != 0) w.round_over_exit();

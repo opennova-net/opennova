@@ -190,13 +190,6 @@ protected:
 
 public:
 	void assign(const opennova::hud::EndRoundStatisticsPanel &p_value) { value_ = p_value; }
-	// The epilog's four lines composed by hud::epilog_score_lines.
-	static Ref<EndRoundStatistics> epilog(const opennova::hud::EndRoundStatisticsInput &p_in);
-	// The same over authored counters: the shell's sim-less mount and the
-	// end-screen tests.
-	static Ref<EndRoundStatistics> make_epilog(int p_subgoals_won, int p_subgoals_defined,
-			int p_enemy_kills, int p_enemy_unit_total, int p_team_unit_kills,
-			int p_friendly_unit_kills);
 
 	bool get_raised() const { return value_.raised; }
 	PackedStringArray get_label_keys() const;

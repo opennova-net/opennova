@@ -90,7 +90,9 @@ var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO s
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
 var _world_load_pending := false
-var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -> score screen)
+var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -> the cine's screen)
+var _sp_restart_info: LoadingScreenInfo = null  # the last SP load: the restart's entry
+var _sp_restart_loader := Callable()
 # The join screen (pre.mnu PRE_GAME_MENU) a join runs on until the host starts the game.
 var _join_screen := PreGameMenuPresenter.new()
 var _shutdown_prepared := false
@@ -413,6 +415,18 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if _dev_tools.handle_tools_toggle():
 			get_viewport().set_input_as_handled()
 		return
+	# Once the SP round is over the special-key chain's round-over leg takes
+	# every key: RESTART runs the splash re-run (over a custom loading
+	# background) and the restart, ESC the quit; both reach the shell as the
+	# session's mission exit (_on_session_lost).
+	if _state == State.WORLD and _end_flow.is_round_ended() and _hud_presenter != null \
+			and not _world_load_pending:
+		var bits := _hud_presenter.handle_round_over_key(key)
+		if bits & HudToggles.ROUND_OVER_RESTART:
+			_begin_restart_splash()
+		if bits & HudToggles.ROUND_OVER_CONSUMED:
+			get_viewport().set_input_as_handled()
+			return
 	# The special-key chain takes its keys before the action rows see them:
 	# the quit dialog's, the page keys (the Tab board, the status page, help,
 	# the briefing) and the status page's Enter.
@@ -567,36 +581,36 @@ func is_gameplay_input_active() -> bool:
 
 # --- End of mission (SP) -------------------------------------------------------
 
-# The sim's round_end effect arms MissionEndFlow; the flow's beat and screen run
-# from _process. The effect's b word is the end track the SP tail hands the
-# gamemus MessageHandler (1 win / 2 lose; the world's process_round_end selects
-# it): MusicDirector.signal_end_track runs the VM's restart frame (the engine's
-# mus_vm_signal, MusicCtx_SelectEndTrack's step) once the flow arms. Retail
-# signals right after the cine starts; the flow's lead-in beat stands in for
-# the cine, so the signal rides the arm. begin() refuses an MP round
-# (EndRoundPresenter owns it), so a net session never signals.
+# The sim's round_end effect: out of a session the engine started its
+# end-of-round cine on the same round end, so the flow arms, the HUD's windows
+# close (the cine start's respawn init), the cine's screen mounts at once, and
+# the effect's b word (1 win / 2 lose) reaches the gamemus MessageHandler
+# through MusicDirector.signal_end_track (the engine's mus_vm_signal). begin()
+# refuses an MP round (EndRoundPresenter owns it), so a net session never
+# signals. The exits are the session's (_on_session_lost routes them).
 func _on_shell_mission_effects(effects: Array) -> void:
 	for e_v in effects:
 		var e := e_v as MissionEffect
 		if e != null and e.kind == "round_end":
+			var sim: Simulation = _world.get_sim() if _world != null else null
 			var armed_before := _end_flow.is_round_ended()
-			_end_flow.begin(e.a, _world.get_sim() if _world != null else null)
+			_end_flow.begin(sim)
 			if not armed_before and _end_flow.is_round_ended():
+				if _hud_presenter != null:
+					_hud_presenter.begin_end_of_round_cine()
+				_show_end_screen()
 				var director: MusicDirector = MusicService.director()
 				if director != null:
 					director.signal_end_track(e.b)
 
 
 func _show_end_screen() -> void:
-	var banner := _hud_presenter.endround_banner_line() if _hud_presenter != null else ""
+	var banner := Callable()
+	if _hud_presenter != null:
+		banner = _hud_presenter.endround_banner_line
 	_end_flow.show_screen(_world.get_sim() if _world != null else null, banner, _root,
-			_hud if _hud != null else self, _on_end_screen_exit)
-
-
-# [orig: g_MissionExitReason = 1 (ESC / the epilog timeout) -> the main loop pushes
-# the "Post Menu" scene @0x526867 — our post-mission menu is the main menu.]
-func _on_end_screen_exit() -> void:
-	_on_return_to_menu()
+			_hud if _hud != null else self)
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
 func get_runtime() -> MissionRoot:
@@ -766,6 +780,7 @@ func _wire_shell() -> void:
 	_menu_shell.start_requested.connect(_on_start_requested)
 	_menu_shell.exit_to_desktop_requested.connect(_on_exit_to_desktop)
 	_menu_shell.return_to_menu_requested.connect(_on_return_to_menu)
+	_menu_shell.restart_requested.connect(_on_restart_requested)
 	_menu_shell.resume_requested.connect(resume)
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
 	_bundled_companion = BundledMenuCompanion.new()
@@ -952,15 +967,21 @@ func join_lan_server(target: JoinTarget) -> void:
 
 ## The common mission-start seam; ShellPresentationSession owns its visibility
 ## transition while this shell owns load state and the operation handoff.
-func start_world_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
+## `restart` is the SP restart's start: no loading screen comes up (and so no
+## closing splash). A single-player load is remembered as the restart's entry.
+func start_world_load(load_info: LoadingScreenInfo, operation: Callable,
+		restart := false) -> void:
 	if not _world_load.can_start():
 		return
 	if _lan_session != null:
 		_lan_session.stop()
+	if load_info != null and not load_info.in_session:
+		_sp_restart_info = load_info
+		_sp_restart_loader = operation
 	_world_load_pending = true
 	_world.set_local_player_spawn_loadout(PlayerSpawnLoadout.from_profile(_chosen_avatar))
 	_begin_world_load()
-	if _world_load.start(self, _root, _world, load_info, operation) == null:
+	if _world_load.start(self, _root, _world, load_info, operation, restart) == null:
 		_on_world_load_failed("mission load handoff could not start")
 
 
@@ -1159,6 +1180,18 @@ func _on_session_lost(reason: String) -> void:
 	var exit_reason := sim.get_mission_exit_reason() if sim != null else 0
 	if exit_reason == 0:
 		exit_reason = GameWorld.MISSION_EXIT_QUIT
+	# The main frame's router (engine inmatch/mission_exit.h main_frame_exit):
+	# the SP restart's reason starts the same mission again; every other reason
+	# leaves for the menu (the Post Menu's route).
+	if _world.main_frame_exit(exit_reason) == GameWorld.MAIN_FRAME_EXIT_RESTART_ROUND_SP:
+		_restart_mission()
+		return
+	if sim != null and not sim.is_mp_session():
+		# A single-player mission's own exit (the end screens' ESC and timeout):
+		# the ordinary way out, not an abort.
+		_world_load_pending = false
+		_teardown_world_to_menu(exit_reason)
+		return
 	_abort_to_menu("session ended", reason, exit_reason)
 
 
@@ -1214,11 +1247,10 @@ func _on_camera_escape() -> void:
 		if _world != null:
 			_world.cancel_join_admission()
 		return
-	# Round over: ESC leaves the mission instead of pausing (the witness rides
-	# MissionEndFlow.request_screen_exit).
+	# Round over: the special-key chain's round-over leg owns ESC (it stores the
+	# quit exit), and the escape action does nothing out of a session (engine
+	# hud_toggles.h hud_toggles_escape / hud_round_over_key).
 	if _end_flow.is_round_ended():
-		if not _end_flow.request_screen_exit():
-			_on_end_screen_exit()
 		return
 	# Over live play the HUD's escape chain closes one open HUD window first;
 	# only with none open does the in-game menu open.
@@ -1332,6 +1364,21 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 	var novaworld_client: NovaWorldClient = null
 	if route.keep_session:
 		novaworld_client = _world.release_novaworld_client() as NovaWorldClient
+	_teardown_world(false)
+	if _root != null and _enter_menu(_root.get_root_dir()):
+		_net.return_from_mission(novaworld_client, route.error, post_mission_error_text(route))
+		return
+	if novaworld_client != null:
+		novaworld_client.stop()
+		novaworld_client.free()
+	push_warning("OpenNova: the game-data directory is no longer mountable")
+	get_tree().quit(1)
+
+
+# The world and every presenter over it come down: the menu teardown's head, and
+# the SP restart's (`restart` keeps the HUD tip's once-counters, as the
+# restart's start does).
+func _teardown_world(restart: bool) -> void:
 	_world_load.dismiss()
 	_join_screen.close()
 	finish_hud_hidden_capture()
@@ -1355,15 +1402,42 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 	if _player_presenter != null:
 		_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
 	if _hud_presenter != null:
-		_hud_presenter.teardown()
-	if _root != null and _enter_menu(_root.get_root_dir()):
-		_net.return_from_mission(novaworld_client, route.error, post_mission_error_text(route))
+		_hud_presenter.teardown(restart)
+
+
+## The SP restart: the main frame routed exit reason 4 out of a session (engine
+## inmatch/mission_exit.h main_frame_exit). The mission comes down and the same
+## mission starts again from its own load entry, with no menu, no loading
+## screen and no closing splash (the restart's start draws neither).
+func _restart_mission() -> void:
+	var loader := _sp_restart_loader
+	var info := _sp_restart_info
+	if not loader.is_valid() or info == null:
+		_teardown_world_to_menu(GameWorld.MISSION_EXIT_QUIT)
 		return
-	if novaworld_client != null:
-		novaworld_client.stop()
-		novaworld_client.free()
-	push_warning("OpenNova: the game-data directory is no longer mountable")
-	get_tree().quit(1)
+	_teardown_world(true)
+	_state = State.WORLD
+	start_world_load(info, loader, true)
+
+
+## The round-over RESTART key's splash re-run, over a custom loading background
+## only (WorldLoadCoordinator.begin_restart_splash): the shell's frame holds the
+## world while it is up, so the restart exit follows its dismissal.
+func _begin_restart_splash() -> void:
+	if _sp_restart_info == null or _world == null:
+		return
+	_world_load.begin_restart_splash(self, _root, _world, _sp_restart_info,
+			_world.get_mission_audio())
+
+
+## The in-game menu's RESTART (World::ingame_restart_command): out of a session
+## the in-game screens close and the session resumes, and its next frame
+## carries the restart exit.
+func _on_restart_requested() -> void:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim == null or _world_load_pending or not sim.ingame_restart():
+		return
+	resume()
 
 
 # The error text the post-mission route stores: a gameerr.bin generic error, else the
@@ -1459,10 +1533,6 @@ func _process(delta: float) -> void:
 			or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-	# The end-of-mission lead-in: the world keeps ticking; the score/failed screen
-	# mounts after the short beat [orig: the SP world runs through the epilog cine].
-	if _world.is_loaded() and _end_flow.tick(delta):
-		_show_end_screen()
 	# The shell-control span closes before the early returns so every frame banks it.
 	var probe_t0 := Time.get_ticks_usec() if timing else 0
 	_frame_phase_sampler.finish_shell_control(probe_t0)

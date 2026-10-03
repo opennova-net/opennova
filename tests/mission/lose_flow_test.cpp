@@ -60,6 +60,7 @@ namespace {
 
 using namespace opennova;
 namespace w = opennova::world;
+namespace ms = opennova::mission;
 
 int failures = 0;
 bool expect(bool cond, const char *msg) {
@@ -531,6 +532,83 @@ int run_self_kill(testrig::RetailMissionRig &rig) {
 	return failures == 0 ? 0 : 1;
 }
 
+// WIN MODE (`--win-event N`): the mission's authored win event N, gated on its
+// Event-category triggers (the prerequisite events' fired latches). The
+// prerequisites are staged as fired, each with its authored action list run
+// through the real dispatcher (their SubGoalWon tallies included), so the
+// chain under test is the authored one: the quarter pass fires event N, its
+// BlueWin ends the round won, and the engine's win epilog builds its score
+// screen over the mission's own header and tallies. 01TR's only BlueWin is
+// event 38 (bms-event-runtime-re §11.2), gated on events 14, 24, 26, 34 and 36.
+// [orig: EventAction_Dispatch case 8 @0x45447b -> Server_ProcessRoundEnd(1);
+//  Cine_InitPlayback @0x578390; Cine_EpilogStateMachineUpdate @0x576240]
+int run_win_event(testrig::RetailMissionRig &rig, int win_event) {
+	Run run{rig};
+	const std::vector<ms::ScriptedEvent> &events = rig.events.events();
+	if (!expect(win_event >= 0 && static_cast<size_t>(win_event) < events.size(),
+				"the win event exists"))
+		return 1;
+	std::vector<int> prereqs;
+	for (const bms::Trigger &t : events[static_cast<size_t>(win_event)].triggers) {
+		std::printf("lose-flow: event %d trigger main %d sub %d p1 %d flags 0x%x\n", win_event,
+				static_cast<int>(t.main_type), t.sub_type, t.param1, t.condition_flags);
+		if (t.main_type == bms::TriggerMainType::Event) prereqs.push_back(t.param1);
+	}
+	{
+		const ms::ScriptedEvent &win = events[static_cast<size_t>(win_event)];
+		std::printf("lose-flow: event %d flags 0x%x delay reload %u repeat reload %u active %u\n",
+				win_event, static_cast<unsigned>(win.event.flags), win.activate_reload,
+				win.repeat_reload, win.active);
+		for (const bms::Action &a : win.actions)
+			std::printf("lose-flow: event %d action %d sub %d p1 %d\n", win_event,
+					static_cast<int>(a.action_type), a.action_sub_type, a.param1);
+	}
+	if (!expect(!prereqs.empty(), "the win event is gated on events")) return 1;
+	for (const int p : prereqs) {
+		if (!expect(p >= 0 && static_cast<size_t>(p) < events.size(), "a prerequisite event exists"))
+			return 1;
+		ms::ScriptedEvent &pre = rig.events.event_for_test(static_cast<size_t>(p));
+		for (const bms::Action &a : pre.actions) rig.events.dispatch_action_for_test(rig.world, a);
+		pre.active = 1;
+		pre.activate_countdown = 0;
+	}
+	std::printf("lose-flow: staged %zu prerequisite event(s) of event %d; subgoals won %d\n",
+			prereqs.size(), win_event, rig.world.kill_stats.subgoals_won);
+	if (!expect(!rig.world.match.outcome().ended, "the staged prerequisites end nothing")) return 1;
+	const int32_t won_before = rig.world.kill_stats.subgoals_won;
+	// The win event's own authored activation delay runs before its BlueWin
+	// (01TR event 38: 12 units, 768 ticks), on top of the 64-tick quarter
+	// cycle that first evaluates its chain [orig: EventTrigger_UpdateEntry
+	// @0x454c80 arms +16 from +18].
+	const int budget = static_cast<int>(events[static_cast<size_t>(win_event)].activate_reload) +
+			kTicksPerSecond * 4;
+	bool ended = false;
+	for (int t = 0; t < budget && !ended; ++t) {
+		run.tick();
+		ended = rig.world.match.outcome().ended;
+	}
+	if (!expect(ended && rig.world.match.outcome().winner_team == 1,
+				"the authored win event ends the round won (winner 1)"))
+		return 1;
+	if (!expect(rig.events.event_fired(static_cast<size_t>(win_event)), "the win event fired"))
+		return 1;
+	const w::EpilogCine &cine = rig.world.epilog;
+	if (!expect(cine.mode == w::EpilogCineMode::Win, "the win epilog runs")) return 1;
+	for (int t = 0; t < kTicksPerSecond * 4 && !cine.screen_active; ++t) run.tick();
+	if (!expect(cine.screen_active, "the score screen builds")) return 1;
+	const w::CineEvent *objective = nullptr;
+	for (const w::CineEvent &e : cine.events)
+		if (e.kind == w::CineEventKind::EpilogCounter && objective == nullptr) objective = &e;
+	if (!expect(objective != nullptr, "the OBJECTIVEBONUS line is built")) return 1;
+	std::printf("lose-flow: win epilog score screen at frame %d: OBJECTIVEBONUS %d/%d (won before the "
+				"win event %d)\n",
+			cine.frame, objective->value, objective->max, won_before);
+	expect(objective->value == rig.world.kill_stats.subgoals_won && objective->max > 0,
+			"the line carries the mission's won and defined subgoals");
+	expect(!rig.world.script_may_advance(), "the score screen holds the script");
+	return failures == 0 ? 0 : 1;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -538,11 +616,13 @@ int main(int argc, char **argv) {
 	int victim_team = -1;
 	bool events_only = false;
 	bool self_kill = false;
+	int win_event = -1;
 	for (int i = 1; i < argc; ++i) {
 		if (std::strcmp(argv[i], "--bms") == 0 && i + 1 < argc) bms = argv[++i];
 		else if (std::strcmp(argv[i], "--victim-team") == 0 && i + 1 < argc) victim_team = std::atoi(argv[++i]);
 		else if (std::strcmp(argv[i], "--events") == 0) events_only = true;
 		else if (std::strcmp(argv[i], "--self-kill") == 0) self_kill = true;
+		else if (std::strcmp(argv[i], "--win-event") == 0 && i + 1 < argc) win_event = std::atoi(argv[++i]);
 	}
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying the training missions)");
@@ -562,6 +642,12 @@ int main(int argc, char **argv) {
 	if (!expect(rig.wac_loaded, "the mission's WAC compiled and installed")) return 1;
 	if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs")) return 1;
 	if (!expect(!rig.world.match.outcome().ended, "the round has not ended at spawn")) return 1;
+	if (win_event >= 0) {
+		const int rc = run_win_event(rig, win_event);
+		if (rc == 0) std::printf("lose_flow %s: event %d won the round and built the score screen\n",
+				bms.c_str(), win_event);
+		return rc;
+	}
 	if (!expect(rig.world.collision != nullptr, "the collision world is up")) return 1;
 	if (self_kill) {
 		const int rc = run_self_kill(rig);
