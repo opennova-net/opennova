@@ -98,17 +98,26 @@ static func whole_numbers(value: Variant) -> Variant:
 
 ## The session pumped until no operation runs and the validation after one has ended (S13 A3: an
 ## Open, a Rescan, an import or a rename steps across pumps, and so does the validation an edit
-## leaves due), `timeout_ms` at most: true when it settled, false (a failure to its caller) when the
-## time ran out first.
-func settle(timeout_ms := 120000) -> bool:
-	var deadline := Time.get_ticks_msec() + timeout_ms
+## leaves due), for as long as it moves: true when it settled, false (a failure to its caller) when
+## nothing moved for `stall_ms` (the running operation's progress and the validation's, which name
+## what runs and how far it has come, the same over that long), so a long import on a busy machine
+## settles however long it takes while a hang still fails.
+func settle(stall_ms := 120000) -> bool:
+	var progress := ""
+	var moved_at := Time.get_ticks_msec()
 	while true:
-		var operation := query("operation")
-		if not bool(operation.get("operation", {}).get("running", false)) \
-				and not bool(operation.get("validation", {}).get("running", false)):
+		var answer := query("operation")
+		var operation: Variant = answer.get("operation", {})
+		var validation: Variant = answer.get("validation", {})
+		if not (operation is Dictionary and bool(operation.get("running", false))) \
+				and not (validation is Dictionary and bool(validation.get("running", false))):
 			return true
-		if Time.get_ticks_msec() >= deadline:
-			push_error("the editor did not settle within %d ms" % timeout_ms)
+		var now := JSON.stringify([operation, validation])
+		if now != progress:
+			progress = now
+			moved_at = Time.get_ticks_msec()
+		elif Time.get_ticks_msec() - moved_at >= stall_ms:
+			push_error("the editor did not settle: nothing moved for %d ms (%s)" % [stall_ms, now])
 			return false
 		app.call("pump")
 	return false
