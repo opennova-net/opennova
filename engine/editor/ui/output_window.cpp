@@ -1,5 +1,6 @@
 #include <editor/ui/output_window.h>
 
+#include <iterator>
 #include <string>
 
 #include <editor/model/field_text.h>
