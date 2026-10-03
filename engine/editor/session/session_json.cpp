@@ -1501,6 +1501,8 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	out.set("field", json_string(field.schema->id));
 	out.set("reference", json_string(reference_row(field.reference).token));
 	if (!field.scope.empty()) out.set("scope", json_string(field.scope));
+	// A number that forms a text key: the key's prefix, each choice named by its number.
+	if (field.key_prefix) out.set("key", json_string(field.key_prefix));
 	set_page(out, page, choices.size());
 	out.set("choices", std::move(list));
 	return out;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <utility>
 
 namespace opennova::editor {
 
@@ -21,6 +22,20 @@ bool overlaps(const Box &a, const Box &b) {
 }
 
 } // namespace
+
+bool operator==(const MissionLabelCandidate &a, const MissionLabelCandidate &b) {
+	return a.x == b.x && a.y == b.y && a.depth == b.depth && a.length == b.length && a.always == b.always && a.first == b.first;
+}
+
+const std::vector<size_t> &MissionLabelLayout::picks(std::vector<MissionLabelCandidate> candidates,
+		std::vector<std::string> words) {
+	if (made_ && candidates == candidates_ && words == words_) return picks_;
+	++made_;
+	picks_ = mission_label_picks(candidates);
+	candidates_ = std::move(candidates);
+	words_ = std::move(words);
+	return picks_;
+}
 
 std::vector<size_t> mission_label_picks(const std::vector<MissionLabelCandidate> &candidates) {
 	std::vector<size_t> order(candidates.size());

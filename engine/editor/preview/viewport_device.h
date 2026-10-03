@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/model/node.h>
 #include <editor/preview/viewport_build_report.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_kinds.h>
@@ -13,6 +14,17 @@ namespace opennova::editor {
 class PreviewClock;
 class ViewportModel;
 struct SessionView;
+
+// What a ray meets first of what a device's picture draws (ViewportDevice::ray_between): a record's
+// surface (a mission's placed entity: its row), the ground (a mission's terrain), nothing (the sky), or
+// Unknown where the device cannot say (no picture of records, or not built yet), when the caller goes
+// by its own marks instead.
+struct ViewportRayHit {
+	enum class Met : uint8_t { Unknown, Nothing, Surface, Record };
+	Met met = Met::Unknown;
+	NodeId row = 0; // Record: the row of the record met
+	double point[3] = { 0.0, 0.0, 0.0 }; // Surface, Record: where, the viewport's space
+};
 
 // What a device reports each pump (ADR 0046 S13 V5): the files its picture read, each with its
 // stamp then (a model's textures, a flipbook's frames, read as they are first drawn too, and while a
@@ -103,6 +115,16 @@ public:
 		(void)to;
 		(void)point;
 		return false;
+	}
+	// What the segment from `from` to `to` (the viewport's space, as surface_between takes it) meets
+	// first of what the picture draws: a placed record's faces before the surface, the surface, or
+	// nothing (ViewportRayHit). What a pick on a mission's picture takes (ADR 0046, the polish's
+	// review): the record whose drawn surface is under the pointer, nearer one first. Unknown where the
+	// device draws no records or has not placed them yet (the default).
+	virtual ViewportRayHit ray_between(const double from[3], const double to[3]) const {
+		(void)from;
+		(void)to;
+		return ViewportRayHit();
 	}
 	// The surface's height at (x, y) of the viewport's space (a mission's ground under an entity: a move
 	// of several keeps each one's height over it); false as surface_between.
