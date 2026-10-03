@@ -1,8 +1,8 @@
 #include "blank_makers.h"
 
-#include <filesystem>
 
 #include <base/io/strutil.h>
+#include <editor/project/project_files.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 
@@ -21,7 +21,7 @@ std::string base_name(const std::string &name, const char *extension) {
 
 std::string blank_mission_title(const BlankRequest &request) {
 	const std::string &title = request.value("title");
-	return title.empty() ? std::filesystem::path(request.logical_name).stem().string() : title;
+	return title.empty() ? utf8_of(path_of(request.logical_name).stem()) : title;
 }
 
 // A new mission (ADR 0046 S14): the header a mission the game lists and loads holds

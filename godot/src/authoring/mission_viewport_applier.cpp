@@ -20,6 +20,7 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
+#include <runtime/environment/environment_state.h>
 #include <runtime/renderer/render_order.h>
 
 #include "env/mission_environment_overrides.h"
@@ -513,10 +514,13 @@ void MissionViewportApplier::run_environment_(const MissionScene &scene) {
 		water_->set_mission_water_height_override(
 				overrides->get_has_water_height() ? overrides->get_water_height_world() : NAN);
 	}
-	// The overcast table beside it where the project has one (the game's, read the same way).
+	// The overcast table beside it where the project has one (the game's, read the same way: by the
+	// runtime's own name, env::kOvercastFile, which the import's fixed names list too).
 	Ref<EnvFile> overcast;
 	overcast.instantiate();
-	const bool has_overcast = root_files_->has_file("overcast.def") && overcast->load_from_resource_root(root_files_, "overcast.def") == OK;
+	const String overcast_name = opennova::to_gd(opennova::env::kOvercastFile);
+	const bool has_overcast = root_files_->has_file(overcast_name) &&
+			overcast->load_from_resource_root(root_files_, overcast_name) == OK;
 	environment_->set_overcast_data(has_overcast ? overcast : Ref<EnvFile>());
 	environment_->configure_mission_clock(header.start_time, header.minutes_per_day);
 	applied_time_ = -2.0;

@@ -861,13 +861,53 @@ int copy_between_encodings() {
 	TEST_EXPECT(from.apply(again, error));
 	NodeAddress returned;
 	TEST_EXPECT(find_definition(AssetGraph(), from, "CAFE2", returned) &&
-	            text_of(from, returned, "string.value") == "Caf\xE9" &&
+	            text_of(from, returned, "string.value") == "Caf\xC3\xA9" &&
+	            window_of(from, returned)->string_data.value == "Caf\xE9" &&
 	            depth_of(from, returned) == 0 && from.window_index(returned) == 0);
 	// A character the code page cannot hold refuses the paste.
 	Edit foreign = again;
 	foreign.value = std::string("\xEF\xBB\xBF<SCREEN><NAME>X</NAME><WINDOW type=\"static\" name=\"W\"><POSITION><LEFT>0"
 	                            "</LEFT></POSITION><STRING>\xE2\x82\xAC\xE4\xB8\xAD</STRING></WINDOW></SCREEN>");
 	TEST_EXPECT(!from.apply(foreign, error) && error.message.find("code page") != std::string::npos);
+	return 0;
+}
+
+// A menu's texts at the widget (the found-bugs round): a code-page menu's model holds Windows-1252
+// bytes, which a read gives as UTF-8 (never the raw byte a widget would show as another character)
+// and a set takes back in the code page, a character it has no byte for refused; a field's width
+// counts characters in either encoding, as the game's narrowed buffers count them (a Unicode menu's
+// text of two-byte characters past half the width in bytes is taken, and refused at the width).
+int texts_in_their_code_page() {
+	editor_test::TempProjectDir dir("opennova_menu_code_page_test");
+	const std::string code_page = dir.file("a.mnu"), unicode = dir.file("b.mnu");
+	TEST_EXPECT(editor_test::write_text(code_page, "<SCREEN><NAME>A</NAME><WINDOW type=\"static\" name=\"CAFE\">"
+	                                               "<POSITION><LEFT>0</LEFT></POSITION><STRING>Caf\xE9</STRING></WINDOW></SCREEN>"));
+	TEST_EXPECT(editor_test::write_text(unicode, "\xEF\xBB\xBF<SCREEN><NAME>B</NAME><WINDOW type=\"static\" name=\"MAIN\">"
+	                                             "<POSITION><LEFT>0</LEFT></POSITION><STRING>Caf\xC3\xA9</STRING></WINDOW></SCREEN>"));
+	MnuDocument cp, wide;
+	TEST_EXPECT(load(cp, code_page) && load(wide, unicode));
+	NodeAddress cafe, main;
+	TEST_EXPECT(find_definition(AssetGraph(), cp, "CAFE", cafe) && find_definition(AssetGraph(), wide, "MAIN", main));
+	if (!cafe.row || !main.row) return 1;
+	TEST_EXPECT(text_of(cp, cafe, "string.value") == "Caf\xC3\xA9" && window_of(cp, cafe)->string_data.value == "Caf\xE9");
+	TEST_EXPECT(text_of(wide, main, "string.value") == "Caf\xC3\xA9");
+	Diagnostic error;
+	TEST_EXPECT(cp.apply(set(cafe, "string.value", std::string("Na\xC3\xAFve")), error) &&
+	            window_of(cp, cafe)->string_data.value == "Na\xEFve" && text_of(cp, cafe, "string.value") == "Na\xC3\xAFve");
+	TEST_EXPECT(!cp.apply(set(cafe, "string.value", std::string("\xE2\x9C\x93 done")), error) &&
+	            error.message.find("Windows-1252") != std::string::npos);
+	// The window NAME is 128 bytes with its terminator: 127 characters in either encoding.
+	std::string e_acute;
+	for (int i = 0; i < 127; ++i) e_acute += "\xC3\xA9";
+	TEST_EXPECT(cp.apply(set(cafe, "name", e_acute), error) && window_of(cp, cafe)->name.size() == 127);
+	TEST_EXPECT(!cp.apply(set(cafe, "name", e_acute + "\xC3\xA9"), error) && error.message == "The text is too long.");
+	TEST_EXPECT(wide.apply(set(main, "name", e_acute), error) && window_of(wide, main)->name.size() == 254);
+	TEST_EXPECT(!wide.apply(set(main, "name", e_acute + "\xC3\xA9"), error));
+	// The box over a menu's text counts characters too.
+	const FieldSchema *name = nullptr;
+	for (const FieldSchema &field : MnuDocument::schema(kWindow))
+		if (field.id == "name") name = &field;
+	TEST_EXPECT(name && name->code_page && name->width == 128);
 	return 0;
 }
 
@@ -2061,6 +2101,7 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	return memos_follow_a_load_in_place() || colours_and_flags() || changes_since_save() || structure_and_save() || validation() || windows_at_depth() || every_list() || defaults_survive() ||
 	       window_index_matches_the_compiler() || copy_and_paste() || duplicate_selection() || copy_between_encodings() ||
+	       texts_in_their_code_page() ||
 	       copy_selection_shapes() || duplicate_screen() || typed_add_and_screen_copy() || screens_stay_found() ||
 	       nested_lists() || shipped_shape_edits() ||
 	       typed_clear_and_retype() || parse_notes() || blank_menu_edits() || name_is_its_own_edit() ||
