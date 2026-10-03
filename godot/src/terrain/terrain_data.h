@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <formats/cpt/cpt_io.h>
+#include <runtime/renderer/texture_load_rules.h>
 #include <runtime/terrain_query/coords.h>
 #include <runtime/terrain_query/height_field.h>
 #include <formats/trn/trn_io.h>
@@ -163,8 +164,10 @@ public:
 	Ref<Texture2D> get_tilestrip_tex() const;
 	// C++ runtime auxiliary-texture seam: resolves through the same mounted VFS
 	// (or loose TRN directory) as authored terrain slots without exposing the
-	// ResourceRoot or a second lookup policy.
-	Ref<Texture2D> load_source_texture(const String &p_filename) const;
+	// ResourceRoot or a second lookup policy; `p_loader` is the retail loader the
+	// texture's role uses (renderer::TextureLoader).
+	Ref<Texture2D> load_source_texture(const String &p_filename,
+			opennova::renderer::TextureLoader p_loader) const;
 
 	// Numeric accessors
 	void set_detail_density(int p_val);

@@ -144,7 +144,9 @@ Ref<Texture2D> ScarPresenter::texture_(const String &p_name) {
 	}
 	Ref<Texture2D> texture;
 	if (resource_root_.is_valid()) {
-		texture = resource_root_->load_texture(p_name);
+		// The scar table loads through Texture_LoadFromArchive with an empty
+		// alpha name (renderer::TextureLoader::Archive).
+		texture = resource_root_->load_texture(p_name, ResourceRoot::TEXTURE_LOADER_ARCHIVE);
 	}
 	// Only a resolved texture is remembered: a strip whose TGA is not there
 	// yet (no root, a root set later) is re-tried on the next present.

@@ -337,6 +337,10 @@ bool ResourceIndex::prefers_loose_file(const std::string &name) const {
     return impl_->vfs.prefers_loose_file(name);
 }
 
+bool ResourceIndex::loose_first_hit(const std::string &name, VfsLookupPolicy policy) const {
+	return impl_->vfs.loose_first_hit(name, policy);
+}
+
 bool ResourceIndex::has_file(const std::string &name) const {
 	return impl_->vfs.has_file(name);
 }

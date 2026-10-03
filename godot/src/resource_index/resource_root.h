@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -16,6 +17,9 @@
 
 #include <base/resource_index/resource_index.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/renderer/texture_load_rules.h>
+
+#include <vector>
 
 namespace godot {
 
@@ -27,6 +31,24 @@ public:
 		LOOKUP_SESSION_DEFAULT = 0,
 		LOOKUP_FORCE_LOOSE_FIRST,
 		LOOKUP_FORCE_ARCHIVE_ONLY,
+	};
+
+	// The game's texture loaders, by the role that calls them (the engine's
+	// renderer::TextureLoader, same order; renderer/texture_load_rules.h says
+	// which file each opens and how it decodes it).
+	enum TextureLoader {
+		TEXTURE_LOADER_STAGE = 0,
+		TEXTURE_LOADER_PLAIN,
+		TEXTURE_LOADER_ARCHIVE,
+		TEXTURE_LOADER_ARCHIVE_SELF_ALPHA,
+		TEXTURE_LOADER_FILE,
+		TEXTURE_LOADER_TGA,
+		TEXTURE_LOADER_PCX,
+		TEXTURE_LOADER_HUD_COLOR,
+		TEXTURE_LOADER_HUD_ALPHA,
+		TEXTURE_LOADER_MENU,
+		TEXTURE_LOADER_CINE_FADE,
+		TEXTURE_LOADER_PARTICLE,
 	};
 
 private:
@@ -54,8 +76,7 @@ private:
 
 	// Decoded-texture cache for VFS-backed load_texture. Both archive and loose winners
 	// resolve through the mounted index so the mount mode owns precedence. Negative
-	// results cache too — material resolvers probe load_texture for names resolve_file
-	// can't see, and a miss costs the full candidate scan. Same epoch self-clear as the
+	// results cache too, so a missing name is probed once. Same epoch self-clear as the
 	// memo above.
 	mutable std::unordered_map<std::string, Ref<Texture2D>> texture_cache_;
 	mutable uint64_t texture_cache_epoch_ = 0;
@@ -77,6 +98,13 @@ private:
 	// `discovery` selects the witnessed retail boot table or an explicit archive scan.
 	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
 	                      const String &game_code, opennova::VfsArchiveDiscovery discovery);
+	// The files a texture loader tries for `name` under `policy` (the mount's own
+	// query rules, the policy's loose-first answer), and one attempt's bytes.
+	std::vector<opennova::renderer::TextureLoad> texture_attempts_(const String &name,
+			TextureLoader loader, LookupPolicy policy) const;
+	PackedByteArray read_texture_attempt_(const opennova::renderer::TextureLoad &load,
+			LookupPolicy policy) const;
+
 	// mount_runtime's mount itself (the archives, the expansion that took).
 	Error mount_runtime_archives_(const String &path, const String &expansion,
 	                              bool allow_loose_override, const String &game_code);
@@ -159,7 +187,17 @@ public:
 	// only flat loose files for every policy value.
 	bool has_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	PackedByteArray read_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
-	Ref<Texture2D> load_texture(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
+	// The texture `loader` makes of `name` (mip chain generated; cached per epoch),
+	// null when nothing it opens decodes. No loader reads an alternate name.
+	Ref<Texture2D> load_texture(const String &name, TextureLoader loader,
+			LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
+	// C++ siblings only (not bound): the same load's decoded RGBA8 image, no
+	// mips, uncached, for a device that uploads it itself (the HUD, the menus);
+	// `r_alpha_only` reports whether the HUD loader resolved alpha mode (its
+	// ".FULL" / ".ALPHA" suffixes override the caller's), which picks the
+	// material the device draws it with.
+	Ref<Image> load_texture_image(const String &name, TextureLoader loader,
+			LookupPolicy policy = LOOKUP_SESSION_DEFAULT, bool *r_alpha_only = nullptr) const;
 	Ref<Texture> load_material_texture(const String &name, uint8_t type) const;
 	// A diffuse-family material row (runtime types 0, 1, 2, 8) decoded from the
 	// one file retail's loader selects for it; null when that file is absent.
@@ -187,3 +225,4 @@ public:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::ResourceRoot::LookupPolicy);
+VARIANT_ENUM_CAST(godot::ResourceRoot::TextureLoader);

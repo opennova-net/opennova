@@ -174,7 +174,7 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 		return
 	var resource_root: ResourceRoot = _shell.current_resource_root()
 	assert_not_null(resource_root)
-	var texture: Texture2D = resource_root.load_texture("mnml_c.tga")
+	var texture: Texture2D = resource_root.load_texture("mnml_c.tga", ResourceRoot.TEXTURE_LOADER_MENU)
 	assert_not_null(texture, "the packed runtime root owns a decoded ImageTexture")
 	# The compiled frame resolves the claim cursor (screen default) on the first
 	# pump; one mouse sample installs the retail cursor process-wide via Input.

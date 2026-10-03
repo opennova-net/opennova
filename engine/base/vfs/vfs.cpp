@@ -550,6 +550,21 @@ bool Vfs::prefers_loose_file(const std::string &name) const {
         resolved.source == VfsSource::LooseDir;
 }
 
+bool Vfs::loose_first_hit(const std::string &name, VfsLookupPolicy policy) const {
+    switch (policy) {
+    case VfsLookupPolicy::ForceArchiveOnly:
+        return false;
+    case VfsLookupPolicy::ForceLooseFirst: {
+        ResolvedEntry resolved;
+        return impl_->find_retail(name, VfsLookupPolicy::ForceLooseFirst, resolved) &&
+            resolved.source == VfsSource::LooseDir;
+    }
+    case VfsLookupPolicy::SessionDefault:
+        break;
+    }
+    return prefers_loose_file(name);
+}
+
 bool Vfs::has_file(const std::string &name) const {
     return impl_->find(name) != nullptr;
 }
