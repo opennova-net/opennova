@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -46,6 +47,7 @@
 #include <base/vfs/file_source.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/menu_canvas.h>
@@ -1322,6 +1324,9 @@ struct GroundDevice final : ViewportDevice {
 	bool surface_between(const double from[3], const double to[3], double point[3]) const override {
 		return ground && editor_test::ground_crossing(ground, from, to, point);
 	}
+	// What its ray meets, as a test says (Unknown: none set, the device cannot say).
+	ViewportRayHit met;
+	ViewportRayHit ray_between(const double *, const double *) const override { return met; }
 };
 
 // A session over a project holding the minted mission, the mission open and its viewport drawn at
@@ -1340,12 +1345,21 @@ struct MissionRig {
 	Recorder out;
 	ViewportDevice *device = nullptr;
 
-	bool open() {
+	// `items`: an item catalog drawing the mission's pumps (106100) with the synth pump, whose bound
+	// gives them a sphere.
+	bool open(bool items = false) {
 		session.handle(request::new_project(dir.file("project"), "Canvas Mission"));
 		session.run_operations();
 		editor_test::create_missing_files(session);
+		const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/";
 		if (!editor_test::write_bytes(view.project.root + "/missions/synth_logic.bms",
-					test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms")))
+					test_io::read_file(fixtures + "bms/synth_logic.bms")))
+			return false;
+		if (items &&
+				(!editor_test::write_text(view.project.root + "/defs/items.def",
+						 "begin \"Drop Pump\"\nid 106100\ntype object\ngraphic pump\nend\n") ||
+						!editor_test::write_bytes(view.project.root + "/models/pump.3di",
+								test_io::read_file(fixtures + "threedi/synth/pump.3di"))))
 			return false;
 		session.handle(request::rescan());
 		session.run_operations();
@@ -1386,7 +1400,7 @@ struct MissionRig {
 		const std::vector<MissionMark> shown = marks();
 		std::vector<int> out;
 		for (size_t i = 0; i < shown.size(); ++i)
-			if (shown[i].shown && shown[i].entity >= 0 && pick_mission_mark(shown, shown[i].x, shown[i].y) == int(i))
+			if (shown[i].shown && shown[i].entity >= 0 && pick_mission_mark(shown, follow()->camera(), width, height, shown[i].x, shown[i].y, nullptr, MissionPick::Press) == int(i))
 				out.push_back(int(i));
 		return out;
 	}
@@ -1566,6 +1580,123 @@ int test_mission_canvas() {
 	TEST_EXPECT(rig.click(2.0f, 2.0f).empty());
 	TEST_EXPECT(!rig.out.unexpected);
 	std::printf("test_mission_canvas passed\n");
+	return 0;
+}
+
+// The polish's picking after its review (H1): a press takes what the pointer is over. With a device to
+// say, a press on an entity's drawn surface away from its glyph takes it (a drag moves it alone, Alt
+// copies it), and a press on the ground is the marquee, Alt's orbit and a click's clear, as before. With
+// no device to say, a press off a glyph takes nothing (a drag inside a pump's sphere is a marquee, never
+// a move) while a click there selects the pump by its sphere, and the hint offers no drag of it.
+int test_mission_surface_picks() {
+	MissionRig rig;
+	GroundDevice device;
+	rig.device = &device;
+	TEST_EXPECT(rig.open(true));
+	const Selection &selection = rig.view.documents.selection;
+	std::vector<MissionMark> marks = rig.marks();
+	int pump = -1;
+	for (size_t i = 0; i < marks.size() && pump < 0; ++i)
+		if (marks[i].shown && marks[i].entity >= 0 && marks[i].radius > 0.0f &&
+				rig.follow()->scene().entities()[size_t(marks[i].entity)].item == 106100)
+			pump = int(i);
+	TEST_EXPECT(pump >= 0);
+	if (pump < 0) return 1;
+	const NodeAddress record = marks[size_t(pump)].record;
+	// The camera close on the pump, its sphere many glyphs across.
+	OrbitCamera close = rig.follow()->camera();
+	close.target = marks[size_t(pump)].at;
+	close.distance = marks[size_t(pump)].radius * 8.0f;
+	rig.session.handle(request::set_viewport(rig.path, mission_camera_change(close)));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.step(MissionRig::at(1.0f, 1.0f));
+	rig.out.take();
+	marks = rig.marks();
+	TEST_EXPECT(marks[size_t(pump)].shown);
+	// A point inside the pump's sphere, off every glyph and handle: on the ground toward the camera from
+	// its anchor (its height handle stands above it, its yaw handle beside it), past the slop.
+	const PreviewVec3 anchor = marks[size_t(pump)].at, eye = rig.follow()->camera().eye();
+	const float toward_x = eye.x - anchor.x, toward_z = eye.z - anchor.z;
+	const float toward = std::sqrt(toward_x * toward_x + toward_z * toward_z);
+	TEST_EXPECT(toward > 0.0f);
+	CanvasPoint point;
+	for (float out = 0.5f; toward > 0.0f && out < marks[size_t(pump)].radius; out += 0.25f) {
+		const PreviewVec3 near{ anchor.x + toward_x / toward * out, anchor.y, anchor.z + toward_z / toward * out };
+		float px = 0.0f, py = 0.0f;
+		if (!rig.follow()->camera().project(near, MissionRig::width, MissionRig::height, px, py)) continue;
+		bool by_handle = false;
+		for (const MissionHandle handle : { MissionHandle::Height, MissionHandle::Yaw }) {
+			PreviewVec3 at;
+			float hx = 0.0f, hy = 0.0f;
+			if (rig.follow()->handle_at(marks[size_t(pump)], handle, at) &&
+					rig.follow()->camera().project(at, MissionRig::width, MissionRig::height, hx, hy))
+				by_handle = by_handle || std::hypot(hx - px, hy - py) < 3.0f * kMissionPickSlop;
+		}
+		if (by_handle) continue;
+		if (pick_mission_mark(marks, rig.follow()->camera(), MissionRig::width, MissionRig::height, px, py, nullptr,
+					MissionPick::Press) >= 0)
+			continue;
+		point = CanvasPoint{ px, py };
+		break;
+	}
+	TEST_EXPECT(point.x != 0.0f || point.y != 0.0f);
+	const double x0 = rig.entity(record)->x;
+	// The device's ray meets the pump's surface: a drag from there selects it and moves it alone.
+	device.met.met = ViewportRayHit::Met::Record;
+	device.met.row = record.row;
+	std::vector<Request> requests = rig.drag(point, CanvasPoint{ point.x + 40.0f, point.y }, 2);
+	uint64_t gesture = 0;
+	size_t count = 0;
+	std::vector<Edit> last = batches(requests, gesture, count);
+	TEST_EXPECT(!requests.empty() && requests[0].kind == Request::Kind::Select && requests[0].record == record);
+	TEST_EXPECT(count == 2 && moves_only(last, { record }) && rig.serve(requests) == requests.size() &&
+			rig.entity(record)->x != x0);
+	rig.session.handle(request::undo(rig.path));
+	TEST_EXPECT(rig.entity(record)->x == x0);
+	// Alt on its surface copies it: one duplicate of it as the drag is let go.
+	CanvasKeys alt;
+	alt.alt = true;
+	requests = rig.drag(point, CanvasPoint{ point.x + 40.0f, point.y }, 2, alt);
+	TEST_EXPECT(count_of(requests, Request::Kind::Command) == 1 && count_of(requests, Request::Kind::Edits) == 0);
+	for (const Request &each : requests)
+		if (each.kind == Request::Kind::Command)
+			TEST_EXPECT(each.command.name == "duplicate" && each.command.ids == std::vector<NodeId>({ record.row }));
+	rig.out.take();
+	// The ray meets the ground there: a drag is the marquee (a selection, no edit), Alt orbits (a camera,
+	// no copy), a click clears the selection.
+	rig.session.handle(request::select_record(rig.path, record));
+	device.met = ViewportRayHit();
+	device.met.met = ViewportRayHit::Met::Surface;
+	requests = rig.drag(point, CanvasPoint{ point.x + 40.0f, point.y + 40.0f }, 2);
+	TEST_EXPECT(count_of(requests, Request::Kind::Edits) == 0 && count_of(requests, Request::Kind::Select) == 1);
+	rig.serve(requests);
+	requests = rig.drag(point, CanvasPoint{ point.x + 40.0f, point.y }, 2, alt);
+	TEST_EXPECT(count_of(requests, Request::Kind::Command) == 0 && count_of(requests, Request::Kind::Edits) == 0 &&
+			count_of(requests, Request::Kind::Viewport) >= 1);
+	rig.serve(requests);
+	marks = rig.marks();
+	rig.session.handle(request::select_record(rig.path, record));
+	requests = rig.click(point.x, point.y);
+	TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Select && !requests[0].record.row);
+	rig.serve(requests);
+	// No device to say: a press off the glyph takes nothing (the drag is a marquee), a click selects the
+	// pump by its sphere, and the hint says a click selects it with no drag offered.
+	device.met = ViewportRayHit();
+	marks = rig.marks();
+	TEST_EXPECT(marks[size_t(pump)].radius > 0.0f);
+	requests = rig.drag(point, CanvasPoint{ point.x + 40.0f, point.y + 40.0f }, 2);
+	TEST_EXPECT(count_of(requests, Request::Kind::Edits) == 0);
+	rig.serve(requests);
+	requests = rig.click(point.x, point.y);
+	TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Select && requests[0].record == record);
+	rig.serve(requests);
+	TEST_EXPECT(selection.primary == record);
+	const CanvasInput over = MissionRig::at(point.x, point.y);
+	rig.step(over);
+	const std::string hint = rig.canvas.hint(rig.context(), over);
+	TEST_EXPECT(hint.find("click to select") != std::string::npos && hint.find("drag to move") == std::string::npos);
+	TEST_EXPECT(!rig.out.unexpected);
+	std::printf("test_mission_surface_picks passed\n");
 	return 0;
 }
 
@@ -1875,7 +2006,7 @@ int test_mission_handle_tap_and_turn() {
 		const std::vector<MissionMark> marks = rig.marks();
 		if (!viewport->handle_at(marks[size_t(pick)], MissionHandle::Yaw, at) ||
 				!viewport->camera().project(at, MissionRig::width, MissionRig::height, hx, hy) ||
-				pick_mission_mark(marks, hx, hy) >= 0 || hx < 1.0f || hy < 1.0f || hx > MissionRig::width - 1.0f ||
+				pick_mission_mark(marks, viewport->camera(), MissionRig::width, MissionRig::height, hx, hy, nullptr, MissionPick::Press) >= 0 || hx < 1.0f || hy < 1.0f || hx > MissionRig::width - 1.0f ||
 				hy > MissionRig::height - 1.0f)
 			continue;
 		held = mark;
@@ -1923,7 +2054,7 @@ int test_mission_group_turn() {
 		float hx = 0.0f, hy = 0.0f;
 		if (!viewport->pressed(primary.record, a) || !viewport->pressed(other.record, b) ||
 				!viewport->handle_at(marks[size_t(picks[i])], MissionHandle::Yaw, handle) ||
-				!viewport->camera().project(handle, MissionRig::width, MissionRig::height, hx, hy) || pick_mission_mark(marks, hx, hy) >= 0)
+				!viewport->camera().project(handle, MissionRig::width, MissionRig::height, hx, hy) || pick_mission_mark(marks, viewport->camera(), MissionRig::width, MissionRig::height, hx, hy, nullptr, MissionPick::Press) >= 0)
 			continue;
 		double pivot[2];
 		TEST_EXPECT(mission_turn_centre({ a, b }, pivot));
@@ -2032,7 +2163,7 @@ int test_mission_ground_on_canvas() {
 		double anchor[3];
 		preview_to_mission(marks[i].at, anchor);
 		TEST_EXPECT(std::fabs(anchor[2] - ground.ground(mx, my)) < 1e-3);
-		if (pick_mission_mark(marks, marks[i].x, marks[i].y) != int(i)) continue;
+		if (pick_mission_mark(marks, rig.follow()->camera(), MissionRig::width, MissionRig::height, marks[i].x, marks[i].y, nullptr, MissionPick::Press) != int(i)) continue;
 		requests = rig.click(marks[i].x, marks[i].y);
 		TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Select && requests[0].record == marks[i].record);
 		area = true;
@@ -2214,7 +2345,7 @@ int test_mission_tools() {
 		float hx = 0.0f, hy = 0.0f;
 		const std::vector<MissionMark> now = rig.marks();
 		if (!viewport->handle_at(now[size_t(pick)], MissionHandle::Yaw, at) ||
-				!viewport->camera().project(at, MissionRig::width, MissionRig::height, hx, hy) || pick_mission_mark(now, hx, hy) >= 0)
+				!viewport->camera().project(at, MissionRig::width, MissionRig::height, hx, hy) || pick_mission_mark(now, viewport->camera(), MissionRig::width, MissionRig::height, hx, hy, nullptr, MissionPick::Press) >= 0)
 			continue;
 		const CanvasInput over = MissionRig::at(hx, hy);
 		rig.step(over);
@@ -2249,6 +2380,107 @@ int test_mission_tools() {
 	TEST_EXPECT(apart);
 	TEST_EXPECT(!rig.out.unexpected);
 	std::printf("test_mission_tools passed\n");
+	return 0;
+}
+
+// The polish's labels in the Shell's frame order (the view follows, takes the pointer and draws the
+// overlay; the session then serves what the canvas raised and the viewport follows), the labels option
+// on and three entities selected: frames over nothing lay the labels out and word each title once, at
+// the first; a drag of the primary keeps every title through its samples (each a revision of its
+// gesture), the layout made at most once a frame; an edit from outside the canvas mid-drag (the wire's:
+// the primary made a Drop Pump, the catalog's, or no longer one) drops the titles, the primary's label worded again at once, and the
+// drag's next samples keep the new ones.
+int test_mission_labels_held() {
+	MissionRig rig;
+	TEST_EXPECT(rig.open(true));
+	TEST_EXPECT(rig.tool(R"({"marks": {"labels": true}})"));
+	const std::vector<int> picks = rig.pickable();
+	TEST_EXPECT(picks.size() >= 3);
+	if (picks.size() < 3) return 1;
+	std::vector<MissionMark> marks = rig.marks();
+	const NodeAddress a = marks[size_t(picks[0])].record, b = marks[size_t(picks[1])].record, c = marks[size_t(picks[2])].record;
+	rig.session.handle(request::select_record(rig.path, c, SelectMode::Replace, { a, b, c }));
+	TEST_EXPECT(rig.view.documents.selection.primary == c && rig.view.documents.selection.records.size() == 3);
+	const auto texts = [](const OverlayList &list) {
+		std::vector<std::string> out;
+		for (const OverlayShape &shape : list.shapes)
+			if (shape.kind == OverlayKind::Text) out.push_back(shape.text);
+		return out;
+	};
+	const auto frame = [&](const CanvasInput &in) {
+		rig.step(in);
+		const OverlayList list = rig.canvas.shapes(rig.context(), in);
+		rig.serve(rig.out.take());
+		rig.follow();
+		return texts(list);
+	};
+	const DisplayNameCache &titles = rig.canvas.titles();
+	const MissionLabelLayout &layout = rig.canvas.label_layout();
+	// Over nothing: laid out and worded at the first frame alone.
+	const std::vector<std::string> idle = frame(MissionRig::at(2.0f, 2.0f));
+	const size_t laid = layout.made(), worded = titles.made(), drops = titles.dropped();
+	TEST_EXPECT(idle.size() >= 3 && laid > 0 && worded >= idle.size());
+	for (int i = 0; i < 5; ++i) TEST_EXPECT(frame(MissionRig::at(2.0f, 2.0f)) == idle);
+	TEST_EXPECT(layout.made() == laid && titles.made() == worded && titles.dropped() == drops);
+	// The primary pressed and dragged 5 pixels a frame: its samples' revisions keep every title.
+	marks = rig.marks();
+	const CanvasPoint from{ marks[size_t(picks[2])].x, marks[size_t(picks[2])].y };
+	CanvasInput press = MissionRig::at(from.x, from.y);
+	press.pressed = press.down = true;
+	frame(press);
+	const uint64_t pressed = rig.document->revision();
+	const size_t pressed_layouts = layout.made();
+	int sample = 0;
+	const auto drag = [&](int samples) {
+		for (int i = 0; i < samples; ++i) {
+			++sample;
+			CanvasInput moved = MissionRig::at(from.x + 5.0f * float(sample), from.y);
+			moved.down = true;
+			moved.delta = CanvasPoint{ 5.0f, 0.0f };
+			frame(moved);
+		}
+	};
+	drag(4);
+	TEST_EXPECT(rig.document->revision() != pressed && rig.document->dirty());
+	TEST_EXPECT(titles.made() == worded && titles.dropped() == drops && layout.made() <= pressed_layouts + 4);
+	// Mid-drag, the wire gives the primary another item: the titles dropped, its label its new title at
+	// the next frame; the drag's samples after keep them.
+	std::optional<GraphNameSource> names;
+	if (rig.view.findings.graph) names.emplace(*rig.view.findings.graph);
+	const NameSource *source = names ? &*names : nullptr;
+	const std::string before = record_display(*rig.document, c, source);
+	Value held;
+	TEST_EXPECT(rig.document->get(c, "item", held) && std::holds_alternative<int64_t>(held));
+	if (!std::holds_alternative<int64_t>(held)) return 1;
+	Edit item;
+	item.address = c;
+	item.field = "item";
+	item.value = std::get<int64_t>(held) == 106100 ? int64_t(106101) : int64_t(106100); // a Drop Pump, or none
+	rig.session.handle(request::edit_record(rig.path, item));
+	TEST_EXPECT(rig.session.outcome().done() && rig.session.last_edit_ok());
+	rig.follow();
+	const std::string after = record_display(*rig.document, c, source);
+	TEST_EXPECT(after != before);
+	++sample;
+	CanvasInput moved = MissionRig::at(from.x + 5.0f * float(sample), from.y);
+	moved.down = true;
+	moved.delta = CanvasPoint{ 5.0f, 0.0f };
+	const std::vector<std::string> renamed = frame(moved);
+	TEST_EXPECT(titles.dropped() == drops + 1 && titles.made() > worded);
+	TEST_EXPECT(std::find(renamed.begin(), renamed.end(), after) != renamed.end() &&
+	            std::find(renamed.begin(), renamed.end(), before) == renamed.end());
+	const size_t reworded = titles.made();
+	drag(3);
+	TEST_EXPECT(titles.dropped() == drops + 1 && titles.made() == reworded);
+	frame(MissionRig::at(from.x + 5.0f * float(sample), from.y));
+	TEST_EXPECT(rig.view.documents.gestures.empty());
+	while (rig.document->dirty()) {
+		rig.session.handle(request::undo(rig.path));
+		if (!rig.session.outcome().done()) break;
+	}
+	TEST_EXPECT(!rig.document->dirty() && record_display(*rig.document, c, source) == before);
+	TEST_EXPECT(!rig.out.unexpected);
+	std::printf("test_mission_labels_held passed\n");
 	return 0;
 }
 
@@ -2290,6 +2522,10 @@ int main() {
 	if (test_mission_tools() != 0)
 		return 1;
 	if (test_mission_marquee() != 0)
+		return 1;
+	if (test_mission_surface_picks() != 0)
+		return 1;
+	if (test_mission_labels_held() != 0)
 		return 1;
 	if (test_mission_camera() != 0)
 		return 1;

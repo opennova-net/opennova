@@ -266,7 +266,7 @@ int test_marks() {
 		float x = 0.0f, y = 0.0f;
 		TEST_EXPECT(mark.entity == int(i) && mark.record.row == scene.entities()[i].row && mark.shown);
 		TEST_EXPECT(camera.project(scene.entities()[i].at, width, height, x, y) && x == mark.x && y == mark.y);
-		TEST_EXPECT(pick_mission_mark(marks, mark.x + 3.0f, mark.y - 3.0f) == int(i));
+		TEST_EXPECT(pick_mission_mark(marks, camera, width, height, mark.x + 3.0f, mark.y - 3.0f, nullptr, MissionPick::Press) == int(i));
 	}
 	TEST_EXPECT(std::string(marks[0].kind) == "item" && std::string(marks[1].kind) == "building" &&
 			std::string(marks[2].kind) == "marker" && std::string(marks[3].kind) == "organic");
@@ -276,7 +276,7 @@ int test_marks() {
 	device.ground = [](double, double) { return 3.5; };
 	marks = mission_marks(scene, options, camera, width, height, &device);
 	TEST_EXPECT(marks[4].at.y == 3.5f);
-	TEST_EXPECT(pick_mission_mark(marks, -100.0f, -100.0f) == -1);
+	TEST_EXPECT(pick_mission_mark(marks, camera, width, height, -100.0f, -100.0f, nullptr, MissionPick::Press) == -1);
 	// Two marks on one ray: the nearer wins.
 	source.entity_rows.push_back(entity_of(15, kItemKind, MissionPool::Item, 1, 1, 0.0, 0.0, 50.0, 0, 0));
 	scene.read(source);
@@ -284,11 +284,12 @@ int test_marks() {
 	above.pitch = kOrbitPitchLimit; // straight down: the origin and 50 above it on one ray
 	marks = mission_marks(scene, options, above, width, height, nullptr);
 	TEST_EXPECT(marks[0].shown && marks[4].shown && std::fabs(marks[0].x - marks[4].x) < 0.5f);
-	TEST_EXPECT(pick_mission_mark(marks, marks[0].x, marks[0].y) == 4 && marks[4].depth < marks[0].depth);
+	TEST_EXPECT(pick_mission_mark(marks, above, width, height, marks[0].x, marks[0].y, nullptr, MissionPick::Press) == 4 && marks[4].depth < marks[0].depth);
 	// A kind's marks off: not shown, not picked; past the range the same; the range 0 is none.
 	options.items = false;
 	marks = mission_marks(scene, options, above, width, height, nullptr);
-	TEST_EXPECT(!marks[0].shown && !marks[4].shown && marks[1].shown && pick_mission_mark(marks, marks[0].x, marks[0].y) == -1);
+	TEST_EXPECT(!marks[0].shown && !marks[4].shown && marks[1].shown &&
+			pick_mission_mark(marks, above, width, height, marks[0].x, marks[0].y, nullptr, MissionPick::Press) == -1);
 	options.items = true;
 	options.mark_range = 280.0f;
 	marks = mission_marks(scene, options, above, width, height, nullptr);
@@ -304,6 +305,114 @@ int test_marks() {
 			scene.entities().size() + 1);
 	TEST_EXPECT(mission_box_records(marks, CanvasPoint{ -5.0f, -5.0f }, CanvasPoint{ -1.0f, -1.0f }).empty());
 	std::printf("test_marks passed\n");
+	return 0;
+}
+
+// The polish, after its review: what a pick takes past a glyph. With a device to say, what its ray meets
+// first (an entity's drawn surface takes its mark, press and click alike; the ground or the sky takes
+// none, whatever sphere the ray passes); the glyph still first. With none, a press takes nothing past the
+// glyph and a click the smallest sphere the ray passes through (a small entity nested in a large one's
+// sphere is the small one's; the eye inside a sphere taken by it), the anchor on the picture or not. The
+// box goes by the anchor.
+int test_sphere_picks() {
+	Source source = make_source();
+	// A second item 30 m north of the first and 8 m east (the camera south of both, looking north), and a
+	// crate nested in the second's sphere 7.2 m from its middle.
+	source.entity_rows.push_back(entity_of(15, kItemKind, MissionPool::Item, 1, 100302, 8.0, 30.0, 0.0, 0, 1));
+	source.entity_rows.push_back(entity_of(16, kItemKind, MissionPool::Item, 2, 100303, 4.0, 24.0, 0.0, 0, 1));
+	MissionScene scene;
+	scene.read(source);
+	MissionViewportOptions options;
+	OrbitCamera camera = camera_over(0.0, 0.0, 0.0, 60.0f);
+	camera.pitch = 0.2f; // looking north and a little down
+	const int width = 640, height = 480;
+	const MissionPickRadii radii = { { 100300, 8.0f }, { 100302, 12.0f }, { 100303, 2.0f } };
+	const std::vector<MissionMark> marks = mission_marks(scene, options, camera, width, height, nullptr, &radii);
+	TEST_EXPECT(marks.size() == 7 && marks[4].record.row == 15 && marks[5].record.row == 16 && marks[6].area == 0);
+	TEST_EXPECT(marks[0].radius == 8.0f && marks[4].radius == 12.0f && marks[5].radius == 2.0f && marks[1].radius == 0.0f);
+	const auto pick = [&](const std::vector<MissionMark> &of, float px, float py, const ViewportDevice *device,
+							  MissionPick by) { return pick_mission_mark(of, camera, width, height, px, py, device, by); };
+	// No device: 5 m above the first's anchor, past the slop. A click takes its sphere; a press takes
+	// nothing (it would move what the pointer may not be over); with no spheres, nothing either way.
+	float x = 0.0f, y = 0.0f;
+	TEST_EXPECT(camera.project(mission_scene_point(0.0, 0.0, 5.0), width, height, x, y));
+	TEST_EXPECT(std::fabs(y - marks[0].y) > 2.0f * kMissionPickSlop);
+	TEST_EXPECT(pick(marks, x, y, nullptr, MissionPick::Click) == 0 && pick(marks, x, y, nullptr, MissionPick::Press) == -1);
+	const std::vector<MissionMark> bare = mission_marks(scene, options, camera, width, height, nullptr);
+	TEST_EXPECT(pick(bare, x, y, nullptr, MissionPick::Click) == -1);
+	// That ray goes on through the second's sphere (with the second's alone, the second's); the smaller,
+	// the first's, takes it.
+	const MissionPickRadii second = { { 100302, 12.0f } };
+	const std::vector<MissionMark> behind = mission_marks(scene, options, camera, width, height, nullptr, &second);
+	TEST_EXPECT(pick(behind, x, y, nullptr, MissionPick::Click) == 4);
+	// Nested: on the crate's body past its glyph (a camera near it), inside the second's sphere, the crate
+	// (the review's M2: the larger sphere's entry came first); 10 m above the second, clear of the crate,
+	// the second.
+	OrbitCamera crate_view = camera_over(4.0, 24.0, 1.0, 10.0f);
+	crate_view.pitch = 0.2f;
+	const std::vector<MissionMark> by_crate = mission_marks(scene, options, crate_view, width, height, nullptr, &radii);
+	TEST_EXPECT(crate_view.project(mission_scene_point(4.0, 24.0, 1.8), width, height, x, y));
+	TEST_EXPECT(std::fabs(y - by_crate[5].y) > 2.0f * kMissionPickSlop);
+	TEST_EXPECT(pick_mission_mark(by_crate, crate_view, width, height, x, y, nullptr, MissionPick::Click) == 5);
+	TEST_EXPECT(camera.project(mission_scene_point(8.0, 30.0, 10.0), width, height, x, y));
+	TEST_EXPECT(pick(marks, x, y, nullptr, MissionPick::Click) == 4);
+	// A glyph within the slop is its own mark first, press and click: the ray to the second's anchor
+	// passes through the first's and the crate's spheres, yet the glyph is the second's.
+	TEST_EXPECT(pick(marks, marks[4].x, marks[4].y, nullptr, MissionPick::Click) == 4 &&
+			pick(marks, marks[4].x, marks[4].y, nullptr, MissionPick::Press) == 4);
+	// The marker (no bound) by its anchor alone.
+	TEST_EXPECT(pick(marks, marks[2].x + 3.0f, marks[2].y, nullptr, MissionPick::Click) == 2);
+	// A device to say: its ray met the second's surface (its row): taken by a press and a click wherever
+	// the pointer is (5 m above the first, the first's sphere passed); met the ground or the sky: nothing,
+	// a sphere passed or not; a record whose kind's marks are off: nothing.
+	editor_test::FakeDevice device;
+	device.ray = [](const double *, const double *) {
+		ViewportRayHit hit;
+		hit.met = ViewportRayHit::Met::Record;
+		hit.row = 15;
+		return hit;
+	};
+	TEST_EXPECT(camera.project(mission_scene_point(0.0, 0.0, 5.0), width, height, x, y));
+	TEST_EXPECT(pick(marks, x, y, &device, MissionPick::Press) == 4 && pick(marks, x, y, &device, MissionPick::Click) == 4);
+	// The glyph still first: the first's anchor is the first's, whatever the device's ray met.
+	TEST_EXPECT(pick(marks, marks[0].x, marks[0].y, &device, MissionPick::Press) == 0);
+	for (const ViewportRayHit::Met met : { ViewportRayHit::Met::Surface, ViewportRayHit::Met::Nothing }) {
+		device.ray = [met](const double *, const double *) {
+			ViewportRayHit hit;
+			hit.met = met;
+			return hit;
+		};
+		TEST_EXPECT(pick(marks, x, y, &device, MissionPick::Press) == -1 && pick(marks, x, y, &device, MissionPick::Click) == -1);
+	}
+	device.ray = [](const double *, const double *) {
+		ViewportRayHit hit;
+		hit.met = ViewportRayHit::Met::Record;
+		hit.row = 15;
+		return hit;
+	};
+	MissionViewportOptions no_items = options;
+	no_items.items = false;
+	const std::vector<MissionMark> hidden = mission_marks(scene, no_items, camera, width, height, nullptr, &radii);
+	TEST_EXPECT(pick(hidden, x, y, &device, MissionPick::Click) == -1);
+	// A device that cannot say (not placed yet): as with none.
+	device.ray = nullptr;
+	TEST_EXPECT(pick(marks, x, y, &device, MissionPick::Click) == 0 && pick(marks, x, y, &device, MissionPick::Press) == -1);
+	// A sphere is clicked by its model with its anchor off the picture (below it: the review's L1), the
+	// eye outside it.
+	OrbitCamera close = camera_over(0.0, 0.0, 9.0, 6.0f);
+	close.pitch = 0.0f; // level, 9 m up, 6 m south: the first's anchor below the frame
+	const std::vector<MissionMark> near = mission_marks(scene, options, close, width, height, nullptr, &radii);
+	TEST_EXPECT(!near[0].shown && near[0].pickable);
+	TEST_EXPECT(close.project(mission_scene_point(0.0, 0.0, 6.0), width, height, x, y) && y >= 0.0f && y <= float(height));
+	TEST_EXPECT(pick_mission_mark(near, close, width, height, x, y, nullptr, MissionPick::Click) == 0);
+	// The box takes an entity by its anchor: over the first's sphere above its anchor nothing; over its
+	// anchor, it.
+	TEST_EXPECT(camera.project(mission_scene_point(0.0, 0.0, 5.0), width, height, x, y));
+	TEST_EXPECT(mission_box_records(marks, CanvasPoint{ x - 3.0f, y - 3.0f }, CanvasPoint{ x + 3.0f, y + 3.0f }).empty());
+	const std::vector<NodeAddress> boxed = mission_box_records(marks, CanvasPoint{ marks[0].x - 3.0f, marks[0].y - 3.0f },
+			CanvasPoint{ marks[0].x + 3.0f, marks[0].y + 3.0f });
+	TEST_EXPECT(boxed.size() == 1 && boxed[0].row == 10);
+	std::printf("test_sphere_picks passed\n");
 	return 0;
 }
 
@@ -487,6 +596,19 @@ int test_label_picks() {
 	const std::vector<size_t> capped = mission_label_picks(many);
 	TEST_EXPECT(capped.size() == kMissionLabelsMax && capped.front() == 400 && capped[1] == 0 &&
 			capped.back() == kMissionLabelsMax - 2);
+	// The last layout (the polish): taken again while the candidates and their words are the same, made
+	// again when a candidate moves (a drag's selection, the camera) or a word does, once each.
+	MissionLabelLayout layout;
+	const std::vector<std::string> words(candidates.size(), "Wire Test");
+	TEST_EXPECT(layout.picks(candidates, words) == picks && layout.made() == 1);
+	TEST_EXPECT(layout.picks(candidates, words) == picks && layout.picks(candidates, words) == picks && layout.made() == 1);
+	std::vector<MissionLabelCandidate> moved = candidates;
+	moved[2].y = 0.0f; // the clear selected one dragged over the primary's: no longer drawn
+	TEST_EXPECT((layout.picks(moved, words) == std::vector<size_t>{ 0, 5, 3, 4 }) && layout.made() == 2);
+	TEST_EXPECT(layout.picks(moved, words) == std::vector<size_t>({ 0, 5, 3, 4 }) && layout.made() == 2);
+	std::vector<std::string> renamed = words;
+	renamed[4] = "Ranger";
+	TEST_EXPECT(layout.picks(moved, renamed).size() == 4 && layout.made() == 3);
 	std::printf("test_label_picks passed\n");
 	return 0;
 }
@@ -496,6 +618,7 @@ int test_label_picks() {
 int main() {
 	TEST_EXPECT(test_scene() == 0);
 	TEST_EXPECT(test_marks() == 0);
+	TEST_EXPECT(test_sphere_picks() == 0);
 	TEST_EXPECT(test_options() == 0);
 	TEST_EXPECT(test_overlays() == 0);
 	TEST_EXPECT(test_label_picks() == 0);
