@@ -60,7 +60,10 @@ ProjectSession::ProjectSession(ProcessPlatform &platform, PreferencesStore &pref
 	impl_->core.start();
 }
 
-ProjectSession::~ProjectSession() = default;
+ProjectSession::~ProjectSession() {
+	// The recently placed items a last placement left unkept (no poll since).
+	impl_->core.save_recent_items();
+}
 
 const SessionView &ProjectSession::view() const {
 	return impl_->core.view();
@@ -208,6 +211,7 @@ void ProjectSession::poll() {
 	session.core.step_operation(rest);
 	session.play.poll();
 	if (session.core.operations().done()) session.core.finish_operation();
+	session.core.save_recent_items();
 }
 
 void ProjectSession::set_poll_budget(const PollBudget &budget) {
@@ -220,6 +224,7 @@ void ProjectSession::run_operations() {
 		poll();
 	}
 	impl_->problems.validate_pending();
+	impl_->problems.settle_originals();
 }
 
 uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> operation) {

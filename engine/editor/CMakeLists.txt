@@ -53,9 +53,14 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_clipboard.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_logic.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_sentence.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_reads.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_file_set.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_labels.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/name_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mns_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document_edits.cpp
@@ -75,8 +80,9 @@ add_library(opennova_editor STATIC
     # their indexes, the one resolver, a base layer's names, the reference queries a document's
     # fields ask, the rename transaction; what other files make of what one defines (the use
     # checks, and what a stylesheet line's value is used as) and the one validation pass over the
-    # project's files
+    # project's files; the display names (a value as a modder reads it, the graph as the names)
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/asset_graph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/display_names.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_layer.cpp
@@ -124,9 +130,13 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_hint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_items.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_label_picks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_options.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_palette.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_place.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
@@ -182,8 +192,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_logic_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/operation_progress.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/original_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp
@@ -192,6 +204,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problems_service.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/project_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/record_batch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/script_assist.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/refresh_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_operation.cpp
@@ -233,6 +246,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_logic_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_palette_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_model.cpp

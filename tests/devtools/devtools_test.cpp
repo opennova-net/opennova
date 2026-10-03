@@ -152,6 +152,38 @@ void test_attach_sets_docking_and_viewport_policy() {
 	ImGui::SetCurrentContext(backend.context);
 }
 
+// The user's layout (ImGuiPass::set_user_layout): a pass that keeps it (the default, the shipped
+// products') leaves the context's layout file and what it read; one that keeps none (a test
+// runner's, an agent's run) lets the file go at attach and drops what the context already read, so
+// the default layout is built and nothing is written.
+void test_attach_keeps_or_drops_the_user_layout() {
+	NullBackend backend;
+	static const char kFile[] = "user_layout.ini"; // a name only: the context never reads or writes it here
+	static const char kLayout[] = "[Window][Stats]\nPos=10,10\nSize=300,200\nCollapsed=0\n";
+	const ImGuiID stats = ImHashStr("Stats");
+	ImGuiIO &io = ImGui::GetIO();
+	io.IniFilename = kFile;
+	ImGui::LoadIniSettingsFromMemory(kLayout);
+	{
+		GameDevTools tools;
+		CHECK(tools.pass().user_layout(), "the user's layout is the default");
+		CHECK(tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr), "attached");
+		CHECK(io.IniFilename == kFile && ImGui::FindWindowSettingsByID(stats) != nullptr, "kept: the file and what it read");
+		tools.pass().detach_imgui();
+		ImGui::SetCurrentContext(backend.context);
+	}
+	{
+		GameDevTools tools;
+		tools.pass().set_user_layout(false);
+		CHECK(tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr), "attached keeping none");
+		CHECK(io.IniFilename == nullptr && ImGui::FindWindowSettingsByID(stats) == nullptr,
+				"none: the file let go, what it read dropped");
+		tools.pass().detach_imgui();
+		ImGui::SetCurrentContext(backend.context);
+	}
+	io.IniFilename = nullptr;
+}
+
 void test_window_registry_order_groups_and_defaults() {
 	GameDevTools tools;
 	CHECK(tools.pass().window_count() == kExpectedWindowCount,
@@ -2060,6 +2092,7 @@ void test_ai_window_detail_pane_follows_the_selection() {
 int main() {
 	test_abi_fingerprint_is_the_pinned_one();
 	test_attach_sets_docking_and_viewport_policy();
+	test_attach_keeps_or_drops_the_user_layout();
 	test_window_registry_order_groups_and_defaults();
 	test_status_line_and_close_request();
 	test_control_board_catalog_states_and_wants();

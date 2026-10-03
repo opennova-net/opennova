@@ -38,6 +38,8 @@ struct ScriptMarkFinding {
 	DiagnosticSeverity severity = DiagnosticSeverity::Info;
 	size_t column = 0;
 	std::string message;
+	// Its message's first sentence (ADR 0046 S15): what the device writes after the line's text.
+	std::string note;
 };
 
 // A line's gutter mark (ADR 0046 S13 V10): the findings about a place on the line (each finding's
@@ -50,7 +52,11 @@ struct ScriptMark {
 	std::vector<ScriptMarkFinding> findings;
 	// The messages, one a line: the mark's tip.
 	std::string tip() const;
+	// What the line says after its text: the worst finding's note, and how many more there are.
+	std::string note() const;
 };
+// A message's first sentence: up to its first ". " (the period kept), the whole where it has none.
+std::string first_sentence(const std::string &message);
 
 // A run the control colours, in its own places (lines and columns from 0, characters as it holds
 // them: ShownText's): a word of the language the type's reader knows (TextHighlight).

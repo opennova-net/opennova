@@ -644,5 +644,7 @@ void run_rename_tests();
 // Every control that raises a request enabled exactly when the busy gate takes it
 // (gate_test.cpp): S13 A1.
 void run_gate_tests();
+// A mission's logic in the Inspector (logic_test.cpp): S15.
+void run_logic_tests();
 
 } // namespace editor_ui_test

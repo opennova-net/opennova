@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <unordered_map>
 #include <variant>
 
@@ -9,10 +10,16 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
+#include <editor/documents/mission_document.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_canvas.h>
+#include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_overlay.h>
+#include <editor/preview/mission_palette.h>
+#include <editor/preview/mission_place.h>
 #include <editor/preview/mission_source.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
@@ -70,6 +77,14 @@ Edit set_of(const NodeAddress &record, const char *field, Value value) {
 	edit.field = field;
 	edit.value = std::move(value);
 	return edit;
+}
+
+// A record by the project's names (the display names, S15: an entity by its item's name and SSN).
+std::string title_of(const SessionView &view, const Document &document, const NodeAddress &record) {
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph) return record_display(document, record, nullptr);
+	const GraphNameSource names(*graph);
+	return record_display(document, record, &names);
 }
 
 } // namespace
@@ -190,7 +205,59 @@ OrbitCamera MissionViewport::framed(const std::vector<MissionMark> &marks, const
 		high = PreviewVec3{ std::max(high.x, mark.at.x), std::max(high.y, mark.at.y), std::max(high.z, mark.at.z) };
 	};
 	if (of.empty()) {
-		for (const MissionMark &mark : marks) take(mark);
+		// Everything; a mission spread wider than a framing shows (its marks past the mark range from
+		// any eye that sees them all) looks at its densest place instead (S15: a large mission's middle
+		// can be open sea): the marks around the cell of kMissionFrameCell metres that holds the most.
+		double low_x = 0.0, high_x = 0.0, low_y = 0.0, high_y = 0.0;
+		bool some = false;
+		for (const MissionMark &mark : marks) {
+			double at[3];
+			preview_to_mission(mark.at, at);
+			low_x = some ? std::min(low_x, at[0]) : at[0];
+			high_x = some ? std::max(high_x, at[0]) : at[0];
+			low_y = some ? std::min(low_y, at[1]) : at[1];
+			high_y = some ? std::max(high_y, at[1]) : at[1];
+			some = true;
+		}
+		const double spread = 0.5 * std::hypot(high_x - low_x, high_y - low_y);
+		if (some && spread > double(kMissionFrameSpread)) {
+			std::unordered_map<uint64_t, int> cells;
+			// A cell's key: its column and row as two unsigned 32-bit halves (no shift of a negative value).
+			const auto cell_of = [](double x, double y) {
+				const uint32_t column = uint32_t(int32_t(std::floor(x / double(kMissionFrameCell))));
+				const uint32_t row = uint32_t(int32_t(std::floor(y / double(kMissionFrameCell))));
+				return (uint64_t(column) << 32) | uint64_t(row);
+			};
+			uint64_t best = 0;
+			int most = 0;
+			for (const MissionMark &mark : marks) {
+				double at[3];
+				preview_to_mission(mark.at, at);
+				const int count = ++cells[cell_of(at[0], at[1])];
+				if (count > most) {
+					most = count;
+					best = cell_of(at[0], at[1]);
+				}
+			}
+			// The middle of that cell's marks, then every mark within a cell's reach of it.
+			double sx = 0.0, sy = 0.0;
+			for (const MissionMark &mark : marks) {
+				double at[3];
+				preview_to_mission(mark.at, at);
+				if (cell_of(at[0], at[1]) != best) continue;
+				sx += at[0];
+				sy += at[1];
+			}
+			sx /= double(most);
+			sy /= double(most);
+			for (const MissionMark &mark : marks) {
+				double at[3];
+				preview_to_mission(mark.at, at);
+				if (std::hypot(at[0] - sx, at[1] - sy) <= double(kMissionFrameCell)) take(mark);
+			}
+		} else {
+			for (const MissionMark &mark : marks) take(mark);
+		}
 	} else {
 		for (const int index : of)
 			if (index >= 0 && size_t(index) < marks.size()) take(marks[size_t(index)]);
@@ -287,8 +354,13 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	MissionViewportOptions options = options_;
 	if (const JsonValue *member = json.get("options");
 			member && mission_options_from_json(*member, options, error) && options != options_) {
+		// The tool, its item and its path are the canvas's alone: no Update of the device.
+		MissionViewportOptions drawn = options;
+		drawn.tool = options_.tool;
+		drawn.item = options_.item;
+		drawn.path = options_.path;
+		if (drawn != options_) options_moved_ = true;
 		options_ = options;
-		options_moved_ = true;
 	}
 	if (const JsonValue *member = json.get("camera")) mission_camera_from_json(*member, camera_, error);
 }
@@ -312,6 +384,7 @@ MissionCanvasFrame MissionViewport::canvas_frame(const ViewportContext &context)
 	frame.snap = context.snap;
 	frame.turn_snap = context.snap > 0.0f ? kMissionTurnSnap : 0.0f;
 	frame.editable = context.editable();
+	if (!frame.editable) frame.not_editable = context.not_editable();
 	frame.device = context.device;
 	frame.document = reason_ == MissionViewStatus::Ready ? document_of(input) : nullptr;
 	frame.current = frame.document && current(input);
@@ -338,7 +411,7 @@ ViewportHit MissionViewport::hit(const ViewportContext &context, float x, float 
 	if (out.index < 0) return out;
 	const MissionMark &mark = shown[size_t(out.index)];
 	out.id = out.current ? mark.record.row : 0;
-	out.name = document->record_title(mark.record);
+	out.name = title_of(context.input.view, *document, mark.record);
 	out.kind = mark.kind;
 	return out;
 }
@@ -356,7 +429,7 @@ std::vector<ViewportHit> MissionViewport::box(const ViewportContext &context, fl
 		hit.current = true;
 		hit.index = index;
 		hit.id = record.row;
-		hit.name = document->record_title(record);
+		hit.name = title_of(context.input.view, *document, record);
 		hit.kind = shown[size_t(index)].kind;
 		out.push_back(std::move(hit));
 	}
@@ -414,7 +487,8 @@ std::vector<MissionPressed> MissionViewport::taken_(const ViewportContext &conte
 	}
 	for (const NodeAddress &each : selection->records) {
 		MissionPressed held;
-		if (!pressed(each, held) || (held.area && handle != MissionHandle::Move)) continue;
+		// Areas move and turn with the group (S15: a turn carries an area's middle); a lift leaves them.
+		if (!pressed(each, held) || (held.area && handle != MissionHandle::Move && handle != MissionHandle::Yaw)) continue;
 		if (each == record) grabbed = out.size();
 		out.push_back(held);
 	}
@@ -499,7 +573,8 @@ bool MissionViewport::drag(const ViewportContext &context, const ViewportDrag &d
 			return false;
 		}
 		const double heading = std::atan2(at[0] - held.x, at[1] - held.y) / io::kRadiansPerDegree;
-		planned = mission_yaw_edits(*document, taken, grabbed, turned(double(held.yaw), heading), drag.snap, gesture, edits);
+		planned = mission_yaw_edits(*document, taken, grabbed, turned(double(held.yaw), heading), drag.snap, gesture, edits,
+				options_.stick, context.device);
 		break;
 	}
 	default: {
@@ -532,15 +607,53 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		return false;
 	}
 	const SessionView &view = context.input.view;
-	// The item: named, else the one item whose graphic the dropped model is.
-	int64_t item = 0;
-	if (!drop.reference.empty()) {
-		const std::optional<int> id = strutil::parse_int(drop.name);
-		if (drop.reference != "item" || !id) {
-			error = "A mission viewport takes an item by its id (reference \"item\") or a model file.";
+	const auto &mission = static_cast<const MissionDocument &>(*document);
+	// An area (S15): a box on the ground, its corners where the box's corners meet it.
+	if (drop.box) {
+		if (drop.reference != "area") {
+			error = "A box drop on a mission viewport makes an area (reference \"area\").";
 			return false;
 		}
-		item = *id;
+		double a[3], b[3];
+		if (!ground_of_(context, drop.x, drop.y, a) || !ground_of_(context, drop.x2, drop.y2, b)) {
+			error = "The box's corners are not over the ground.";
+			return false;
+		}
+		std::vector<Edit> edits;
+		if (!mission_area_edits(a, b, drop.snap, edits, error)) return false;
+		out.request(request::edit_record(document->path(), std::move(edits)));
+		return true;
+	}
+	// The item: named, else the one item whose graphic the dropped model is; a path's stop the marker
+	// item its stops use.
+	int64_t item = 0;
+	int path = 0;
+	if (!drop.reference.empty()) {
+		const std::optional<int> id = strutil::parse_int(drop.name);
+		if ((drop.reference != "item" && drop.reference != "path") || !id) {
+			error = "A mission viewport takes an item by its id (reference \"item\"), a path's next stop by the "
+					"path's number (\"path\"), an area's box (\"area\" with \"to\") or a model file.";
+			return false;
+		}
+		if (drop.reference == "path") {
+			path = *id;
+			item = mission_stop_item(scene_, path);
+			// None of the mission's stops names a marker yet: the marker placed most recently.
+			for (size_t i = 0; item == 0 && i < view.project.recent_items.size(); ++i) {
+				MissionItemFacts recent;
+				std::string ignored;
+				if (mission_item_facts(view, view.project.recent_items[i], recent, ignored) && recent.pool == MissionKind::Marker)
+					item = recent.item;
+			}
+			if (item == 0) {
+				error = "No stop of the mission names a marker yet, so the editor knows no marker item to place: "
+						"place one marker with Place (the palette's Markers: JO's paths use \"waypoint\"), then add "
+						"path " + std::to_string(path) + "'s stops.";
+				return false;
+			}
+		} else {
+			item = *id;
+		}
 	} else {
 		const AssetEntry *entry = dropped_file(view, drop.file);
 		if (!entry) {
@@ -575,18 +688,33 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	// Where the point meets the ground (the device's terrain, else the plane through the camera's
 	// target); on the terrain, the model's ground anchor baked in (the stored position is the ground
 	// point less the anchor: docs/world/world-wac-ai-re.md section 12).
-	double target[3], at[3];
-	preview_to_mission(camera_.target, target);
+	double at[3];
 	bool on_terrain = false;
-	if (!mission_ground_point(context, camera_, drop.x, drop.y, target[2], at, &on_terrain)) {
-		error = "The point is not over the ground.";
+	if (!ground_of_(context, drop.x, drop.y, at, &on_terrain)) {
+		error = "The point is not over the ground (or too far out): drop it nearer.";
 		return false;
 	}
 	if (on_terrain)
 		for (int i = 0; i < 3; ++i) at[i] -= facts.anchor[i];
+	// Snapped: the stored origin's x and y on the grid, the point a move and a copy snap, so the first
+	// drag of what was placed never jumps it by its anchor; its height then the ground's under its
+	// ground point there (else the plane's).
+	if (drop.snap > 0.0f) {
+		for (int axis = 0; axis < 2; ++axis) at[axis] = std::round(at[axis] / double(drop.snap)) * double(drop.snap);
+		double ground = 0.0;
+		if (on_terrain && context.device && context.device->ground_at(at[0] + facts.anchor[0], at[1] + facts.anchor[1], ground))
+			at[2] = ground - facts.anchor[2];
+	}
+	// Facing the way the camera looks (S15): its heading, a compass heading as a yaw is.
+	const int yaw = mission_wrapped_yaw(mission_camera_heading(camera_));
+	std::vector<Edit> edits;
+	if (path) {
+		if (!mission_stop_edits(mission, path, item, facts.pool, at, yaw, edits, error)) return false;
+		out.request(request::edit_record(document->path(), std::move(edits)));
+		return true;
+	}
 	// One batch: the entity of the item added to the pool its TYPE puts it in, then placed.
 	const NodeKind kind = node_kind(facts.pool);
-	std::vector<Edit> edits;
 	Edit add;
 	add.operation = EditOperation::Add;
 	add.address = NodeAddress{ 0, kind, 0 };
@@ -597,19 +725,143 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	edits.push_back(set_of(made, "x", at[0]));
 	edits.push_back(set_of(made, "y", at[1]));
 	edits.push_back(set_of(made, "z", at[2]));
+	edits.push_back(set_of(made, "yaw", int64_t(yaw)));
 	out.request(request::edit_record(document->path(), std::move(edits)));
+	return true;
+}
+
+bool MissionViewport::ground_of_(const ViewportContext &context, float x, float y, double out[3], bool *on_terrain) const {
+	double target[3];
+	preview_to_mission(camera_.target, target);
+	bool terrain = false;
+	if (!mission_ground_point(context, camera_, x, y, target[2], out, &terrain)) return false;
+	if (!terrain && std::hypot(out[0] - target[0], out[1] - target[1]) > kMissionPickReach) return false;
+	for (int axis = 0; axis < 3; ++axis)
+		if (!(out[axis] >= bms::kFixed16Min && out[axis] <= bms::kFixed16Max)) return false;
+	if (on_terrain) *on_terrain = terrain;
+	return true;
+}
+
+io::JsonValue MissionViewport::palette_json(const SessionView &view, const std::string &text, const JsonPage &page,
+		std::string &error) const {
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph) {
+		error = "The project's asset graph is not made yet: no item catalog is read.";
+		return JsonValue::make_null();
+	}
+	return mission_palette_to_json(mission_palette(*graph, text, view.project.recent_items), page);
+}
+
+bool MissionViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+		std::string &error) const {
+	if (command.name != "duplicate" && command.name != "paste") return ViewportModel::command_of(context, command, out, error);
+	const Document *document = planned_(context, error);
+	if (!document) return false;
+	if (!context.editable()) {
+		error = context.not_editable();
+		return false;
+	}
+	if (command.name == "duplicate") {
+		if (command.has_at || command.by.size() > 2) {
+			error = "duplicate takes by [east, north], metres, and no at.";
+			return false;
+		}
+		// The records named, else the selection's entities and areas.
+		const Selection *selection = selection_of(context.input, *document);
+		std::vector<NodeAddress> records;
+		if (!command.ids.empty()) {
+			for (const NodeId id : command.ids) records.push_back(document->address_of(id));
+		} else if (selection) {
+			for (const NodeAddress &record : selection->records)
+				if (scene_.entity(record.row) || scene_.area(record.row)) records.push_back(record);
+		}
+		const NodeAddress primary = selection ? selection->primary : NodeAddress();
+		const double east = command.by.empty() ? 0.0 : command.by[0], north = command.by.size() > 1 ? command.by[1] : 0.0;
+		std::vector<Edit> edits;
+		if (!mission_duplicate_edits(*document, scene_, records, primary, east, north, options_.stick, context.device,
+					edits, error))
+			return false;
+		out.request(request::edit_record(document->path(), std::move(edits)));
+		return true;
+	}
+	// paste: the clipboard's copied entities and areas, their middle where the point meets the ground.
+	if (!command.has_at || !command.by.empty() || !command.ids.empty()) {
+		error = "paste takes at [x, y], the point of the picture the copies' middle goes to, and no by or ids.";
+		return false;
+	}
+	const std::string &clipboard = context.input.view.documents.clipboard;
+	double middle[2];
+	if (clipboard.empty() || !mission_clip_middle(clipboard, middle)) {
+		error = clipboard.empty() ? std::string("The clipboard is empty: copy entities or areas first.")
+								  : std::string("Paste here takes copied entities and areas (the clipboard holds other "
+												"records: paste them in the outline).");
+		return false;
+	}
+	double at[3];
+	if (!ground_of_(context, command.at_x, command.at_y, at)) {
+		error = "The point is not over the ground.";
+		return false;
+	}
+	// With stick, each copy keeps its own height over the ground, as a duplicate and a move keep it: the
+	// ground's rise from under where it was to under where it goes.
+	MissionClipRise rise;
+	if (options_.stick && context.device) {
+		const ViewportDevice *device = context.device;
+		rise = [device](double from_x, double from_y, double to_x, double to_y) {
+			double was = 0.0, now = 0.0;
+			return device->ground_at(from_x, from_y, was) && device->ground_at(to_x, to_y, now) ? now - was : 0.0;
+		};
+	}
+	const std::string moved = mission_clip_moved(clipboard, at[0] - middle[0], at[1] - middle[1], rise);
+	if (moved.empty()) {
+		error = "Pasted there, a copy would go past what the mission's positions hold (32,768 m from its origin): "
+				"paste it nearer.";
+		return false;
+	}
+	Edit paste;
+	paste.operation = EditOperation::Paste;
+	paste.value = moved;
+	out.request(request::edit_record(document->path(), std::move(paste)));
 	return true;
 }
 
 bool MissionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 		CanvasRequests &out, std::string &error) const {
-	if (name != "frame" && name != "top" && name != "ground") {
-		error = "Unknown mission command \"" + name + "\" (frame, top, ground).";
+	if (name != "frame" && name != "top" && name != "ground" && name != "select_same" && name != "duplicate" &&
+			name != "paste") {
+		error = "Unknown mission command \"" + name + "\" (frame, top, ground, select_same, duplicate, paste).";
 		return false;
 	}
 	if (reason_ != MissionViewStatus::Ready) {
 		error = "The viewport shows no mission.";
 		return false;
+	}
+	if (name == "duplicate" || name == "paste") {
+		ViewportCommand whole;
+		whole.name = name;
+		whole.ids = ids;
+		return command_of(context, whole, out, error);
+	}
+	if (name == "select_same") {
+		// Every entity of the named (else the selected) entities' items, the primary kept.
+		const Document *document = planned_(context, error);
+		if (!document) return false;
+		const Selection *selection = selection_of(context.input, *document);
+		std::vector<NodeAddress> of;
+		for (const NodeId id : ids) of.push_back(document->address_of(id));
+		if (ids.empty() && selection) of = selection->records;
+		std::vector<NodeAddress> same = mission_same_item(scene_, of);
+		if (same.empty()) {
+			error = "Select an entity first: the command selects every entity of its item.";
+			return false;
+		}
+		// The primary last (SelectRecord's records name it last).
+		NodeAddress primary = selection && scene_.entity(selection->primary.row) ? selection->primary : of.front();
+		if (std::find(same.begin(), same.end(), primary) == same.end()) primary = same.front();
+		same.erase(std::remove(same.begin(), same.end(), primary), same.end());
+		same.push_back(primary);
+		out.request(request::select_record(document->path(), primary, SelectMode::Replace, same));
+		return true;
 	}
 	if (name == "ground") {
 		// Each named entity (else each selected one) set down on the ground under it: its height the
@@ -693,8 +945,30 @@ io::JsonValue MissionViewport::camera_json() const {
 	return mission_camera_to_json(camera_);
 }
 
-io::JsonValue MissionViewport::body_json(const ViewportInput &) const {
+io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	JsonValue body = JsonValue::make_object();
+	// What the line under the picture says with no pointer over it (S15): the tool, the item or path
+	// it has picked, the selection.
+	if (reason_ == MissionViewStatus::Ready) {
+		const ViewportContext context = viewport_context(input.view, *this);
+		MissionHintInput hint;
+		hint.tool = options_.tool;
+		if (options_.item != 0) {
+			const AssetGraph *graph = input.view.findings.graph.get();
+			const GraphSymbol *symbol = graph ? graph->resolve_symbol(ReferenceKind::Item, std::to_string(options_.item)) : nullptr;
+			hint.item = symbol ? symbol->record : "item " + std::to_string(options_.item);
+		}
+		hint.path = options_.path;
+		hint.editable = context.editable();
+		if (!hint.editable) hint.not_editable = context.not_editable();
+		hint.current = current(input);
+		hint.snap = context.snap;
+		hint.grid = context.snap;
+		if (const Document *document = document_of(input))
+			if (const Selection *selection = selection_of(input, *document)) hint.selected = selection->records.size();
+		hint.empty_mission = scene_.entities().empty() && scene_.areas().empty();
+		body.set("hint", json_string(mission_canvas_hint(hint)));
+	}
 	const MissionSceneHeader &header = scene_.header();
 	body.set("terrain", json_string(header.terrain));
 	body.set("environment", json_string(header.environment));
@@ -718,13 +992,17 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 	const ViewportContext context = viewport_context(input.view, *this);
 	const std::vector<MissionMark> shown = marks(context.width, context.height, context.device);
 	const Selection *selection = selection_of(input, *document);
+	// Each mark by the project's names (the display names, S15).
+	DisplayNameCache titles;
+	std::optional<GraphNameSource> names;
+	if (const AssetGraph *graph = input.view.findings.graph.get()) names.emplace(*graph);
 	for (size_t index = 0; index < shown.size(); ++index) {
 		const MissionMark &mark = shown[index];
 		JsonValue item = JsonValue::make_object();
 		item.set("index", json_number(double(index)));
 		item.set("id", json_number(double(mark.record.row)));
 		item.set("kind", json_string(mark.kind));
-		item.set("name", json_string(document->record_title(mark.record)));
+		item.set("name", json_string(titles.record(*document, mark.record, names ? &*names : nullptr)));
 		item.set("at", mission_point(mark));
 		if (mark.entity >= 0) {
 			const MissionEntityMark &entity = scene_.entities()[size_t(mark.entity)];
@@ -776,7 +1054,7 @@ io::JsonValue MissionViewport::notes_json(const ViewportInput &input) const {
 			JsonValue note = JsonValue::make_object();
 			note.set("code", json_string("path.stop"));
 			note.set("id", json_number(double(path.row)));
-			note.set("name", json_string(document->record_title(NodeAddress{ path.row, path.kind, 0 })));
+			note.set("name", json_string(title_of(input.view, *document, NodeAddress{ path.row, path.kind, 0 })));
 			note.set("stop", json_number(double(stop)));
 			note.set("message", json_string("Stop " + std::to_string(stop + 1) + " names no marker."));
 			notes.push(std::move(note));

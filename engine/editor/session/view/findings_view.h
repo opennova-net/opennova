@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <set>
+#include <string>
 #include <vector>
 
 #include <editor/model/diagnostic.h>
@@ -32,6 +34,10 @@ struct FindingsView {
 	// compiled headless as the game draws it (S9j2; preview/menu_render_check.h's
 	// menu_render_check), whose render of a screen answers the menu_render query.
 	std::shared_ptr<const ProjectChecks> project_checks;
+	// The project's files a finding is about that are the game's own data, byte for byte as the game
+	// install serves them (session/original_files.h, ADR 0046 S15): Problems shows their findings apart,
+	// as the original's too. Project-relative paths; never null while a session holds the view.
+	std::shared_ptr<const std::set<std::string>> original_files;
 };
 
 } // namespace opennova::editor

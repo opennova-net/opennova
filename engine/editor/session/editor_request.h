@@ -162,17 +162,26 @@ inline bool operator!=(const ViewportDrag &a, const ViewportDrag &b) {
 }
 
 // A command in a viewport (EditInViewport, S13 V7): its name (a menu's arrange of windows,
-// "align_left" ... "send_to_back"; a model's "frame") over the records `ids` (the windows arranged,
-// the first the one the others follow; the marker a frame looks at, none the whole model), in the
-// viewport of `kind` (kCount: the one the document shows in).
+// "align_left" ... "send_to_back"; a model's "frame"; a mission's "frame", "top", "ground",
+// "duplicate", "select_same", "paste") over the records `ids` (the windows arranged, the first the one
+// the others follow; the marker a frame looks at, none the whole model; none: the selection), in the
+// viewport of `kind` (kCount: the one the document shows in). What a command takes beside them (ADR
+// 0046 S15): `by`, a way in the kind's units (a mission's duplicate: metres east and north the copies
+// go; empty none), and `at`, a point of the picture in the viewport's units (a mission's paste: where
+// the copied records' middle lands; `has_at` false none).
 struct ViewportCommand {
 	std::string name;
 	std::vector<NodeId> ids;
 	ViewportKind kind = ViewportKind::kCount;
+	std::vector<double> by;
+	bool has_at = false;
+	float at_x = 0.0f;
+	float at_y = 0.0f;
 };
 
 inline bool operator==(const ViewportCommand &a, const ViewportCommand &b) {
-	return a.name == b.name && a.ids == b.ids && a.kind == b.kind;
+	return a.name == b.name && a.ids == b.ids && a.kind == b.kind && a.by == b.by && a.has_at == b.has_at &&
+			a.at_x == b.at_x && a.at_y == b.at_y;
 }
 inline bool operator!=(const ViewportCommand &a, const ViewportCommand &b) {
 	return !(a == b);
@@ -181,10 +190,13 @@ inline bool operator!=(const ViewportCommand &a, const ViewportCommand &b) {
 // A drop on a viewport's picture (EditInViewport, ADR 0046 S14): what is dropped, a project file by
 // its logical name (a Files row let go on the canvas: a model, which the viewport finds the item of)
 // or a name of a reference kind (`reference` its token, `name` the name as a field of that kind holds
-// it: an item's id, picked for a mission's Place tool), at the picture's point (x, y) in the
-// viewport's units, in the viewport of `kind` (kCount: the one the document shows in). The viewport
-// plans what the drop makes (a mission: an entity of the item added where the point meets the
-// ground, one batch); a kind that takes no drop refuses it.
+// it: an item's id, picked for a mission's Place tool; a path's number, its Path tool's), at the
+// picture's point (x, y) in the viewport's units, in the viewport of `kind` (kCount: the one the
+// document shows in). A box drop (`box`, ADR 0046 S15) goes from (x, y) to (x2, y2) and names no name
+// (a mission's "area": an area trigger over the box). The viewport plans what the drop makes (a
+// mission: an entity of the item added where the point meets the ground, facing the way the camera
+// looks; a path's next stop; an area, one batch), snapped by `snap` (a mission's grid in metres, 0
+// free); a kind that takes no drop refuses it.
 struct ViewportDrop {
 	std::string file;
 	std::string reference;
@@ -192,11 +204,15 @@ struct ViewportDrop {
 	float x = 0.0f;
 	float y = 0.0f;
 	ViewportKind kind = ViewportKind::kCount;
+	bool box = false;
+	float x2 = 0.0f;
+	float y2 = 0.0f;
+	float snap = 0.0f;
 };
 
 inline bool operator==(const ViewportDrop &a, const ViewportDrop &b) {
 	return a.file == b.file && a.reference == b.reference && a.name == b.name && a.x == b.x && a.y == b.y &&
-			a.kind == b.kind;
+			a.kind == b.kind && a.box == b.box && a.x2 == b.x2 && a.y2 == b.y2 && a.snap == b.snap;
 }
 inline bool operator!=(const ViewportDrop &a, const ViewportDrop &b) {
 	return !(a == b);
