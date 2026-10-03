@@ -79,6 +79,10 @@ struct DocumentType {
 	std::string (*record_label)(const Document &document, const NodeAddress &address, const NameSource *names) = nullptr;
 	bool (*value_label)(const Document &document, const NodeAddress &address, const FieldUse &field, const Value &value,
 	                    const NameSource *names, DisplayName &out) = nullptr;
+	// A record's words for a column too narrow for its title, what tells it apart first (a mission's
+	// entity by its SSN, an event by its first trigger's subject and verb); "" (or null) where the
+	// title cut to the column says it.
+	std::string (*record_brief)(const Document &document, const NodeAddress &address, const NameSource *names) = nullptr;
 };
 
 // The type its row names (null for DocumentTypeId::None); the type that opens a kind (null for a

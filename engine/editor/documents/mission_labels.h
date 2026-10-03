@@ -37,6 +37,12 @@ namespace opennova::editor {
 // and members; a loadout entry and an availability rule by their weapon. "" for a record the document
 // does not have.
 std::string mission_record_label(const Document &document, const NodeAddress &address, const NameSource *names);
+// A record's words for a column too narrow for its title (DocumentType::record_brief), what tells it
+// apart first: an entity by its SSN then the name the game shows for it, else its item's ("#12 Sgt.
+// Miller"); an event by its first trigger's subject and verb, an entity in it by its SSN ("#29 has passed
+// waypoint 8 of path 9"), or with no trigger by what it does first ("show win objective 1"); a trigger and
+// an action alike. "" for a record whose title is short already (a path, an area, a stop).
+std::string mission_record_brief(const Document &document, const NodeAddress &address, const NameSource *names);
 
 // An entity row's title ("Ranger #12", "Organic #12" without names), with its shown name where it has one.
 std::string mission_entity_title(const MissionDocument &document, const Node &entity, const NameSource *names);

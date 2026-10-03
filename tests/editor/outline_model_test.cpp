@@ -701,6 +701,12 @@ int test_mission_headings() {
 	const NodeAddress walker = lines[organics + 1].address;
 	const int32_t ssn = static_cast<const EntityRow *>(mission->row(walker.row))->native.id;
 	TEST_EXPECT(lines[organics + 1].text == "Wire Test Rifleman #" + std::to_string(ssn) && lines[organics + 1].name == std::to_string(ssn));
+	// Each record's brief words beside its title, for a column too narrow for it: an event's first
+	// trigger's subject and verb, an entity's SSN first.
+	const size_t events = line_named("Events (2)");
+	TEST_EXPECT(events != SIZE_MAX && events + 1 < lines.size() &&
+	            lines[events + 1].brief == "#" + std::to_string(ssn) + " is in zone 20");
+	TEST_EXPECT(lines[organics + 1].brief == "#" + std::to_string(ssn) + " Wire Test Rifleman");
 	// The names' generation moved: the lines made anew; none given: the document's own words.
 	const size_t made = tree.lines_made();
 	names.generation_ = 8;

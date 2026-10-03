@@ -518,4 +518,58 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 	return document->record_name(address);
 }
 
+namespace {
+
+// The words a brief takes what a parameter names in: an entity by its SSN alone ("#29"; the player as
+// the player), everything else as the base says a value by itself ("zone 3", "group 4").
+class BriefNames : public MissionNames {
+public:
+	std::string entity(int64_t ssn) const override {
+		return ssn == kPlayerSsn ? MissionNames::entity(ssn) : "#" + std::to_string(ssn);
+	}
+};
+
+} // namespace
+
+std::string mission_record_brief(const Document &base, const NodeAddress &address, const NameSource *names) {
+	const auto *document = dynamic_cast<const MissionDocument *>(&base);
+	const Node *row = document ? document->row(address.row) : nullptr;
+	if (!row) return std::string();
+	const BriefNames brief;
+	if (!address.child) {
+		switch (static_cast<K>(row->kind)) {
+		case K::Item:
+		case K::Building:
+		case K::Marker:
+		case K::Organic: {
+			const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
+			std::string what = shown_name(*document, *row, names);
+			if (what.empty() && names) {
+				const DisplayName item = mission_item_display(entity_item_id(entity), names);
+				if (!item.dangling) what = item.text;
+			}
+			if (what.empty()) what = pool_word(row->kind);
+			return "#" + std::to_string(entity.id) + " " + what;
+		}
+		case K::Event: {
+			// What waits first, else what it does first.
+			const mission::EventChain &chain = static_cast<const EventRow &>(*row).native;
+			if (!chain.triggers.empty()) return trigger_words(chain.triggers.front(), brief);
+			if (!chain.actions.empty()) return action_words(chain.actions.front(), brief, header_of(*document));
+			return "nothing";
+		}
+		default: return std::string();
+		}
+	}
+	const Document::RecordPath path = document->path_in(*row, address.child);
+	if (path.empty() || static_cast<K>(row->kind) != K::Event) return std::string();
+	const size_t index = path[path.size() - 1].index;
+	const EventRow &event = static_cast<const EventRow &>(*row);
+	if (static_cast<K>(address.kind) == K::Trigger && index < event.native.triggers.size())
+		return trigger_words(event.native.triggers[index], brief);
+	if (static_cast<K>(address.kind) == K::Action && index < event.native.actions.size())
+		return action_words(event.native.actions[index], brief, header_of(*document));
+	return std::string();
+}
+
 } // namespace opennova::editor

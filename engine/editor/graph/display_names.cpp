@@ -43,6 +43,11 @@ std::string record_display(const Document &document, const NodeAddress &address,
 	return document.record_title(address);
 }
 
+std::string record_brief(const Document &document, const NodeAddress &address, const NameSource *names) {
+	const DocumentType *type = type_of(document);
+	return type && type->record_brief ? type->record_brief(document, address, names) : std::string();
+}
+
 DisplayName value_display(const Document &document, const NodeAddress &address, const FieldUse &field, const Value &value,
                           const NameSource *names) {
 	DisplayName out;

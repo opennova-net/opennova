@@ -183,6 +183,12 @@ int test_document_words() {
 	TEST_EXPECT(record_display(*document, first_child(*document, first, MissionKind::Trigger), nullptr) ==
 	            "Organic #" + walker_ssn + " is in Zone 20");
 	TEST_EXPECT(record_display(*document, first_child(*document, first, MissionKind::Action), nullptr) == "re-arm event 2");
+	// Briefly, for a narrow column: the event by its first trigger's subject and verb, an entity in it by
+	// its SSN; the entity by its SSN first; a path or an area has no brief words (its title is short).
+	TEST_EXPECT(same(record_brief(*document, first, nullptr), "#" + walker_ssn + " is in zone 20"));
+	TEST_EXPECT(same(record_brief(*document, first_child(*document, first, MissionKind::Action), nullptr), "re-arm event 2"));
+	TEST_EXPECT(same(record_brief(*document, walker, nullptr), "#" + walker_ssn + " Organic"));
+	TEST_EXPECT(record_brief(*document, row_at(*document, MissionKind::Area, 0), nullptr).empty());
 	const NodeAddress stop = first_child(*document, row_at(*document, MissionKind::WaypointPath, 1), MissionKind::Stop);
 	const std::string marker_ssn = std::to_string(ssn_of(*document, row_at(*document, MissionKind::Marker, 0)));
 	TEST_EXPECT(record_display(*document, stop, nullptr) == "Stop 1: Marker #" + marker_ssn);
@@ -222,6 +228,8 @@ int test_named_words() {
 	const NodeAddress walker = row_at(*document, MissionKind::Organic, 0);
 	const std::string walker_ssn = std::to_string(ssn_of(*document, walker));
 	TEST_EXPECT(record_display(*document, walker, &names) == "Wire Test Rifleman #" + walker_ssn + " (Sgt. Walker)");
+	// Briefly: the SSN, then the name the game shows for him before his item's.
+	TEST_EXPECT(same(record_brief(*document, walker, &names), "#" + walker_ssn + " Sgt. Walker"));
 	const NodeAddress location = row_at(*document, MissionKind::Marker, 4);
 	TEST_EXPECT(record_display(*document, location, &names) == "Marker #" + std::to_string(ssn_of(*document, location)) +
 	                                                                 " (Pump House)");

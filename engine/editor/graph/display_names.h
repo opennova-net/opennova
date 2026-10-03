@@ -43,6 +43,10 @@ private:
 // own title (Document::record_title). `names` null: the document's own words. "" for a record the
 // document does not have.
 std::string record_display(const Document &document, const NodeAddress &address, const NameSource *names);
+// What a column too narrow for that title shows of the record (DocumentType::record_brief: a mission's
+// entity by its SSN first, an event by its first trigger's subject and verb): "" where the title cut
+// to the column says it (a type with no brief words, a record whose title is short).
+std::string record_brief(const Document &document, const NodeAddress &address, const NameSource *names);
 
 // A field's value as the windows show it beside the value itself (the Inspector, the wire's `display`):
 // its type's words (DocumentType::value_label: a mission's SSN, zone, event, group, path, stop, item,

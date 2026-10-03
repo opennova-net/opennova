@@ -354,9 +354,15 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 	if (line.branch) ImGui::SetNextItemOpen(line.open);
 	else flags |= ImGuiTreeNodeFlags_Leaf;
 	if (line.heading) {
-		// A heading: its words and how many rows stand under it, opened and closed as a record is.
+		// A heading: its words and how many rows stand under it, opened and closed as a record is; a line
+		// as high as a record's (the clipper places every line at one height: a framed node, taller,
+		// would put the lines after it out of place), a band drawn behind it.
 		ImGui::PushID(line.key.c_str());
-		ImGui::TreeNodeEx("##heading", flags | ImGuiTreeNodeFlags_Framed, "%s", line.text.c_str());
+		const ImVec2 at = ImGui::GetCursorScreenPos();
+		ImGui::GetWindowDrawList()->AddRectFilled(
+		        at, ImVec2(at.x + ImGui::GetContentRegionAvail().x, at.y + ImGui::GetTextLineHeight()),
+		        ImGui::GetColorU32(ImGuiCol_Header, 0.55f));
+		ImGui::TreeNodeEx("##heading", flags, "%s", line.text.c_str());
 		if (ImGui::IsItemToggledOpen()) model_.set_open(line, !line.open);
 		ui_kit::tooltip(line.forced ? "Opened while the filter keeps a record under it." : line.open ? "Click to close." : "Click to open.");
 		ImGui::PopID();
@@ -393,9 +399,13 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		const float x = ImGui::GetCursorScreenPos().x;
 		// Cut to the column (a mission's event is its whole sentence, S15), room left at its end for its
 		// findings' mark: the whole in its tooltip.
-		const float room = ImGui::GetContentRegionAvail().x - ImGui::GetTreeNodeToLabelSpacing() -
-		                   ui_kit::text_width(ui_kit::kChangeRoom) - ImGui::GetTextLineHeight();
-		const std::string label = ui_kit::kChangeRoom + ui_kit::fit(line.text, std::max(room, ImGui::GetFontSize() * 6.0f));
+		const float room = std::max(ImGui::GetContentRegionAvail().x - ImGui::GetTreeNodeToLabelSpacing() -
+		                                    ui_kit::text_width(ui_kit::kChangeRoom) - ImGui::GetTextLineHeight(),
+		                            ImGui::GetFontSize() * 3.0f);
+		// A title the column cannot hold gives way to its brief words (what tells the record apart first:
+		// an event's first trigger's subject and verb, an entity's SSN), cut to the column in turn.
+		const bool fits = ui_kit::text_width(line.text.c_str()) <= room;
+		const std::string label = ui_kit::kChangeRoom + ui_kit::fit(fits || line.brief.empty() ? line.text : line.brief, room);
 		const NodeId id = line.address.child ? line.address.child : line.address.row;
 		ImGui::TreeNodeEx(reinterpret_cast<void *>(static_cast<uintptr_t>(id)), flags, "%s", label.c_str());
 		const bool toggled = ImGui::IsItemToggledOpen();

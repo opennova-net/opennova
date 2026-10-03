@@ -422,6 +422,8 @@ OutlineLine OutlineModel::record_line(const Document &document, const NodeAddres
 	line.text = record_display(document, record, names_);
 	std::string name = document.record_name(record);
 	if (name != line.text) line.name = std::move(name);
+	std::string brief = record_brief(document, record, names_);
+	if (brief != line.text) line.brief = std::move(brief);
 	return line;
 }
 

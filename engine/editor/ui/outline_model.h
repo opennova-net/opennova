@@ -45,10 +45,12 @@ struct OutlineLine {
 	// with the project's names; in a list, a row of another kind than the file's own after its kind's
 	// label), a collection's label and count, a heading's words and count; a record's name where the
 	// title words it otherwise (for its tooltip), and in master and detail the name of the row holding
-	// it.
+	// it; and a record's words for a column too narrow for its title (record_brief: a mission's event by
+	// its first trigger's subject and verb), "" where the title cut says it.
 	std::string text;
 	std::string name;
 	std::string row_name;
+	std::string brief;
 };
 
 // A document's file-wide values as its outline lists them after its records (an item table's
