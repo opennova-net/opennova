@@ -18,11 +18,20 @@ if [[ ! -f "$src/addons/gut/plugin.cfg" ]]; then
   exit 1
 fi
 
-rm -rf "$dst"
-mkdir -p "$dst"
-cp -r "$src/addons/gut/." "$dst/"
+# Copy only when a submodule file is missing or differs: a fresh copy rewrites
+# every file time, which sends the Godot editor rescanning the addon. Files the
+# editor adds under the copy (none today) do not count as a difference.
+stale="$(diff -rq "$src/addons/gut" "$dst" 2>&1 | grep -v "^Only in $dst" || true)"
+if [[ -n "$stale" ]]; then
+  rm -rf "$dst"
+  mkdir -p "$dst"
+  cp -r "$src/addons/gut/." "$dst/"
+  verb=installed
+else
+  verb="up to date"
+fi
 
-echo "GUT plugin installed at godot/addons/gut (version: $(grep '^version=' "$dst/plugin.cfg" | cut -d'"' -f2))"
+echo "GUT plugin $verb at godot/addons/gut (version: $(grep '^version=' "$dst/plugin.cfg" | cut -d'"' -f2))"
 
 # The imgui-godot addon (the Dear ImGui bridge for the in-engine dev tools, ADR 0039)
 # rides the same bootstrap; it has its own script so the packaging job can install

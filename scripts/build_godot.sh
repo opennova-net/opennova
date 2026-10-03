@@ -63,8 +63,13 @@ export MSYS2_ENV_CONV_EXCL="CL${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
 echo "Building Godot GDExtension ($flavor -> CMake config $config)..."
 # CMAKE_BUILD_TYPE drives single-config generators (Linux/macOS Makefiles or
 # Ninja); --config drives multi-config generators (Visual Studio). Passing both
-# keeps one code path for either.
-cmake -S "$root/godot/src" -B "$root/godot/src/build" -DCMAKE_BUILD_TYPE="$config"
-cmake --build "$root/godot/src/build" --config "$config" -j "$jobs"
+# keeps one code path for either. The tree configures only when it is new or
+# was last configured for another flavour; otherwise the build re-runs CMake
+# by itself whenever a CMakeLists.txt changes.
+build="$root/godot/src/build"
+if ! grep -qxE "CMAKE_BUILD_TYPE:[A-Z]+=$config" "$build/CMakeCache.txt" 2>/dev/null; then
+    cmake -S "$root/godot/src" -B "$build" -DCMAKE_BUILD_TYPE="$config"
+fi
+cmake --build "$build" --config "$config" -j "$jobs"
 
 echo "GDExtension ($flavor) built into godot/bin/ — restart the Godot editor to load it."

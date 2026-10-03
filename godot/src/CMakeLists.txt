@@ -7,6 +7,12 @@ set(CMAKE_PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/../../third_party/godot-cpp
 
 project(opennova_godot LANGUAGES C CXX)
 
+# FetchContent populates in the configure step itself (CMake 3.30+) instead of
+# configuring and building a sub-project per dependency on every configure.
+if(POLICY CMP0168)
+    cmake_policy(SET CMP0168 NEW)
+endif()
+
 if(EMSCRIPTEN)
     # Every object in the side module shares the main module's threaded
     # memory, so the engine and vendored libraries compile with -pthread too
