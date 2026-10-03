@@ -354,6 +354,52 @@ static int test_undo_says_what() {
 	return 0;
 }
 
+// Names are the game's, case-insensitive in its archives and in the project (ADR 0046 S17): a file
+// named in another case, its folder's or its own, is the project's file (SessionCore::project_file,
+// the scan's lookup), opened as itself (its own path, no document.missing), shown again when it is
+// open already, and edited by a request that spells it so; a name the project has in no case is
+// still not found.
+static int test_names_in_another_case() {
+	Menus menus("opennova_editor_document_set_case");
+	const SessionView &v = menus.view();
+	menus.session.handle(request::create_file("Extra.mnu", asset_kind_token(AssetKind::Menu)));
+	const Document *made = menus.session.document_for("Extra.mnu");
+	TEST_EXPECT(made != nullptr);
+	if (!made) return 1;
+	const std::string path = made->path();
+	TEST_EXPECT(path.find('/') != std::string::npos && path.substr(path.size() - 9) == "Extra.mnu");
+	menus.session.handle(request::close_document(path));
+	TEST_EXPECT(!menus.session.document_for(path));
+
+	std::string shouted = path;
+	for (char &c : shouted) c = static_cast<char>(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c);
+	menus.session.handle(request::open_document(shouted));
+	const Document *opened = menus.session.document_for(path);
+	TEST_EXPECT(menus.session.outcome().done() && opened && opened->path() == path && v.documents.active == path);
+	TEST_EXPECT(menus.session.outcome().findings.empty() && v.activity.status == "Opened " + path + ".");
+
+	std::string lowered = path;
+	for (char &c : lowered) c = static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+	menus.session.handle(request::open_document("main.mnu"));
+	menus.session.handle(request::open_document(lowered));
+	TEST_EXPECT(menus.session.document_for(lowered) == opened && v.documents.active == path &&
+	            v.activity.status == "Showing " + path + ".");
+
+	Edit rename;
+	rename.address = opened->address_at(kMain);
+	rename.field = "name";
+	rename.value = std::string("SHOUTED");
+	menus.session.handle(request::edit_record(shouted, rename));
+	TEST_EXPECT(menus.session.last_edit_ok() && opened->dirty() && opened->record_name(opened->address_at(kMain)) == "SHOUTED");
+
+	menus.session.handle(request::open_document("MENUS/NOWHERE.MNU"));
+	bool missing = false;
+	for (const Diagnostic &finding : menus.session.outcome().findings)
+		missing = missing || finding.code() == std::string("document.missing");
+	TEST_EXPECT(!menus.session.outcome().done() && missing);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_paste_and_duplicate_agree();
@@ -361,6 +407,7 @@ int main() {
 	failures += test_selection_over_rows();
 	failures += test_selection_concern();
 	failures += test_undo_says_what();
+	failures += test_names_in_another_case();
 	if (failures == 0) std::printf("editor_document_set: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
