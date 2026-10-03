@@ -16,6 +16,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
@@ -422,6 +423,28 @@ void DocumentSet::show_in_files(const EditorRequest &request) {
 	reveal.path = asset->relative_path;
 	reveal.flag = request.ask_name;
 	view_.events.post(std::move(reveal));
+	// Files selects it, as a click there does (S18).
+	select_file(asset->relative_path);
+	core_.touch(ViewConcern::Selection);
+}
+
+void DocumentSet::select_file(const std::string &path) {
+	if (!view_.project.open) return;
+	FileSelection selected;
+	if (!path.empty()) {
+		const AssetEntry *asset = core_.project_file(path);
+		if (!asset) {
+			core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
+			return;
+		}
+		selected.path = asset->relative_path;
+		selected.type = asset_kind_row(asset->kind).document;
+	}
+	// A file a viewport draws whether or not it is open leads the Preview window (a texture's).
+	const bool lead = file_preview_kind(selected.type) != ViewportKind::kCount;
+	if (selected.path == view_.documents.file_selected.path && lead == view_.documents.files_lead) return;
+	view_.documents.file_selected = std::move(selected);
+	view_.documents.files_lead = lead;
 	core_.touch(ViewConcern::Selection);
 }
 
@@ -706,6 +729,9 @@ void DocumentSet::close_all() {
 	stale_.clear();
 	conflicts_.clear();
 	end_gestures(false);
+	// No file of a project closed is selected in Files any more.
+	view_.documents.file_selected = FileSelection();
+	view_.documents.files_lead = false;
 }
 
 bool DocumentSet::position_after(const Document &document, const NodeAddress &record, NodeId &parent, size_t &position) {

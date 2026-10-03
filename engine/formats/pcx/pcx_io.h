@@ -32,4 +32,26 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 // buffer, which this port drops). Data the file does not hold reads as 0. RGBA8 out.
 bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error);
 
+// The same decode keeping what an 8-bit image is made of: the header's facts, and for an image the
+// 8-bit path reads (NPlanes other than 3) each texel's palette index and the palette, the last 768
+// bytes, as the game reads them. The models' reader decodes alike [orig: Texture_LoadPCXFromPFF32 @
+// 0x56EA30: the BPP check returning 3, the palette from Seek(-768, 2), file size - 896 bytes of RLE
+// data from offset 128, each row to BytesPerLine], so a texel's colour is its index's entry in
+// `palette`, opaque, exactly as decode_pcx_menu_rgba gives it. False, with `error`, where
+// decode_pcx_menu_rgba is.
+struct PcxGameImage {
+	int width = 0;
+	int height = 0;
+	int planes = 0;
+	int bits = 0; // the header's bits a plane (byte 3)
+	int bytes_per_line = 0;
+	int version = 0; // byte 1
+	bool rle = false; // byte 2 says run-length (1)
+	bool indexed = false; // the 8-bit path: indices and palette hold the image
+	bool palette_marker = false; // the byte before the last 768 is 0x0C (the format's marker; the game reads none)
+	std::vector<uint8_t> indices; // a texel's index, the top row first
+	uint8_t palette[256][3] = {};
+};
+bool decode_pcx_game(const uint8_t *data, size_t size, PcxGameImage &out, std::string &error);
+
 } // namespace opennova

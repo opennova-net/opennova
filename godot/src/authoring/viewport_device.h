@@ -61,7 +61,8 @@ public:
 	// the render withheld (UPDATE_DISABLED again, its units free to run this frame); the applier's
 	// legs before it renders, at the clock's seconds since its last present.
 	uint64_t scene_state() const override { return applier_->scene_state(); }
-	bool render_asked() const override { return render_asked_; }
+	// A picture that reads no render state (a texture's) never asks: it renders beside any state.
+	bool render_asked() const override { return render_asked_ && applier_->reads_scene_state(); }
 	uint64_t rendered_frame() const override { return rendered_frame_; }
 	void withhold_render() override;
 	// A state of the applier's own is its to publish; the shipped defaults (state 0: a menu's, a

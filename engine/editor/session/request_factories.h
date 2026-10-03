@@ -195,6 +195,12 @@ inline EditorRequest show_in_files(std::string path, bool ask_name = false) {
 	request.ask_name = ask_name;
 	return request;
 }
+// The project file `path` selected in Files ("" none, ADR 0046 S18).
+inline EditorRequest select_file(std::string path) {
+	EditorRequest request = of(EditorRequestKind::SelectFile);
+	request.path = std::move(path);
+	return request;
+}
 inline EditorRequest reload_document(std::string path = std::string()) {
 	EditorRequest request = of(EditorRequestKind::ReloadDocument);
 	request.path = std::move(path);

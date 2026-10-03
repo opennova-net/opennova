@@ -85,8 +85,9 @@ static int test_tokens_unique() {
 	size_t rows = 0;
 	for (const Table &table : tables()) {
 		// Every table has rows but the text type's (S13 D9): the game reads its files through readers
-		// the editor does not model, so it makes no finding of its own.
-		TEST_EXPECT(table.rows.count > 0 || table.owner == "text");
+		// the editor does not model, so it makes no finding of its own; nor does the texture type's yet
+		// (S18: what the game makes of a texture is its role's).
+		TEST_EXPECT(table.rows.count > 0 || table.owner == "text" || table.owner == "texture");
 		for (const FindingCodeRow &row : table.rows) {
 			++rows;
 			const std::string token = row.token ? row.token : "";

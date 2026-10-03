@@ -40,6 +40,7 @@ enum class EditorRequestKind {
 	CreateFile,
 	OpenDocument,
 	ShowInFiles,
+	SelectFile,
 	ReloadDocument,
 	CloseDocument,
 	SelectRecord,

@@ -1228,6 +1228,11 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page, const
 		issues.push(std::move(entry));
 	}
 	out.set("issues", std::move(issues));
+	// What a document of another content holds, by its type's name (S18: a texture's facts).
+	if (const DocumentType *type = document_type_for(base.kind()); type && type->content_json) {
+		JsonValue content = type->content_json(base);
+		if (!content.is_null()) out.set(type->name, std::move(content));
+	}
 	if (text && page) {
 		// A page of its lines, each its number and its text (in the game's code page, as UTF-8).
 		const size_t total = text->line_count();

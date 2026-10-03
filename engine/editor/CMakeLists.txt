@@ -68,6 +68,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/credits_type.cpp
@@ -149,7 +151,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/script_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/shown_text.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/text_burst.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_header.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_device_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_follow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_json.cpp
@@ -267,6 +271,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_view.cpp

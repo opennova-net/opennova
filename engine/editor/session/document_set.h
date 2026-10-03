@@ -84,6 +84,9 @@ public:
 	// OpenDocument and ReloadDocument.
 	void open_document(const EditorRequest &request);
 	void show_in_files(const EditorRequest &request);
+	// SelectFile (ADR 0046 S18): the project file at `path` selected in Files ("" none), leading the
+	// Preview window where a viewport draws it whether or not it is open (a texture).
+	void select_file(const std::string &path);
 	void close_document(const std::string &path);
 	void select_record(const EditorRequest &request);
 	void edit_record(const EditorRequest &request);

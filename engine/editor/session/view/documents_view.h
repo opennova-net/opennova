@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/model/value.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/selection.h>
@@ -49,7 +50,16 @@ struct OpenGesture {
 	bool wire() const { return open() && sampled_ms >= 0; }
 };
 
-// One target per ViewportKind (a Main-role kind's stays empty: its view is the Document tab's).
+// The file Files selects (ADR 0046 S18, the SelectFile request): its project-relative path ("" none)
+// and the document type that opens its kind (None for a kind the editor does not open), which picks
+// the kind that previews it (a texture's).
+struct FileSelection {
+	std::string path;
+	DocumentTypeId type = DocumentTypeId::None;
+};
+
+// One target per ViewportKind (a Main-role kind's stays empty: its view is the Document tab's; a kind
+// that previews files holds the file Files selects).
 struct PreviewTargets {
 	std::array<PreviewTarget, kViewportKindCount> targets;
 	PreviewTarget &operator[](ViewportKind kind) { return targets[static_cast<size_t>(kind)]; }
@@ -90,9 +100,16 @@ struct DocumentsView {
 	// when a record of the menu is selected). A target stays while another document is active (the
 	// stylesheet the menu's screen draws with), and clears when its document closes or its row goes.
 	PreviewTargets previews;
-	// The Preview-role kind the Preview window shows (S13 V5; preview/viewport_kinds' preview_kind):
-	// the active document's (the kind its type shows in or feeds), else the one it showed before;
-	// when that kind has no target, the first kind that has one; kCount when none has.
+	// The file Files selects (S18), and whether it leads what the Preview window shows: set as a file
+	// is selected, cleared once another document is made active (`previews_active` the active document
+	// when the targets were last updated).
+	FileSelection file_selected;
+	bool files_lead = false;
+	std::string previews_active;
+	// The kind the Preview window shows (S13 V5; preview/viewport_kinds' preview_kind): the file Files
+	// selects while Files leads, else the active document's (the kind its type shows in or feeds), else
+	// the one it showed before; when that kind has no target, the first kind that has one; kCount when
+	// none has.
 	ViewportKind preview_shown = ViewportKind::kCount;
 	// The session's viewports (preview/viewports.h), each a document's picture with its state, and
 	// the preview clock: shared const, the windows reading what a viewport shows and changing it
