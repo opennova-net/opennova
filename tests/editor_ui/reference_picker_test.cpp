@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <editor/documents/mission_document.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
@@ -394,6 +395,72 @@ void test_lists_let_go() {
 	CHECK(picker.lists_held() == 0, "closed: none held");
 }
 
+// ADR 0046 S15: a number naming something is picked by name in its value's place. Over a project
+// holding the fixture's item catalog and the minted mission with its table: the walker's Item shows
+// its catalog's name, the id muted beside it; the frame opens the list of the catalog's items by name,
+// typed to narrow, Enter setting the id of the one picked; an id no name is, typed, is set as typed
+// ("Use"); the walker's name index shows its string under its control; the outline beside it lists the
+// rows under their pools' headings.
+void test_pick_by_name() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_pick_by_name");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Names"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/defs/items.def", test_io::read_file(repo + "/fixtures/def/items.def")) &&
+	              editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                                       test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")) &&
+	              editor_test::write_bytes(v.project.root + "/missions/synth_logic.bin",
+	                                       test_io::read_file(repo + "/fixtures/bms/synth_logic.bin")),
+	      "the catalog, the mission and its table");
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("missions/synth_logic.bms"));
+	const auto *mission = dynamic_cast<const MissionDocument *>(session.document_for("missions/synth_logic.bms"));
+	CHECK(mission != nullptr, "the mission open");
+	if (!mission) return;
+	const std::vector<const Node *> organics = mission->rows_of(MissionKind::Organic);
+	CHECK(!organics.empty(), "the walker");
+	if (organics.empty()) return;
+	const NodeAddress walker{organics[0]->id, organics[0]->kind, 0};
+	session.handle(request::select_record(mission->path(), walker));
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Wire Test Rifleman") != std::string::npos && text.find("106102") != std::string::npos,
+	      "the walker's Item by its catalog's name, the id beside it");
+	CHECK(text.find("\"Sgt. Walker\"") != std::string::npos, "the name index by its string");
+	CHECK(text.find("Organics (2)") != std::string::npos && text.find("Area triggers (2)") != std::string::npos,
+	      "the outline's rows under their pools' headings, each with its count");
+	std::string section;
+	for (const InspectorSection &candidate : plan_inspector(*mission, walker, walker, ""))
+		for (const FieldUse &use : candidate.fields)
+			if (use.schema->id == "item") section = candidate.key;
+	const ImGuiID combo = item_id(Ui::window_id("Inspector"), {section.c_str(), "fields", "item", "##value"});
+	const auto pick = [&](const char *typed) {
+		ui.activate(combo);
+		ui.frames(2);
+		ImGui::GetIO().AddInputCharactersUTF8(typed);
+		ui.frames(2);
+		press(ui, ImGuiKey_Enter);
+		const std::vector<EditorRequest> requests = ui.drain();
+		const EditorRequest *edit = only(requests, EditorRequestKind::EditRecord);
+		const int64_t *id = edit ? std::get_if<int64_t>(&edit_of(*edit).value) : nullptr;
+		return edit && edit_of(*edit).field == "item" && edit_of(*edit).address == walker && id ? *id : int64_t(0);
+	};
+	CHECK(pick("Pump") == 106100, "the list by name, typed to narrow: Enter sets the id of the item picked");
+	CHECK(GImGui->OpenPopupStack.Size == 0, "a pick closes the list");
+	CHECK(pick("123456") == 123456, "an id no name is, typed: set as typed");
+}
+
 } // namespace
 
 void run_reference_picker_tests() {
@@ -402,6 +469,7 @@ void run_reference_picker_tests() {
 	test_missing_value_fixes();
 	test_list_kept();
 	test_lists_let_go();
+	test_pick_by_name();
 }
 
 } // namespace editor_ui_test

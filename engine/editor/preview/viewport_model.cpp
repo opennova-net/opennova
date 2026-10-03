@@ -203,6 +203,22 @@ std::string ViewportModel::picture_message() const {
 	}
 }
 
+bool ViewportModel::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+		std::string &error) const {
+	if (!command.by.empty() || command.has_at) {
+		error = std::string("A ") + viewport_kind_token(kind_) + " viewport's command \"" + command.name +
+				"\" takes no " + (command.by.empty() ? "\"at\"" : "\"by\"") + ".";
+		return false;
+	}
+	return this->command(context, command.name, command.ids, out, error);
+}
+
+io::JsonValue ViewportModel::palette_json(const SessionView &, const std::string &, const JsonPage &,
+		std::string &error) const {
+	error = std::string("a ") + viewport_kind_token(kind_) + " viewport places nothing: it has no palette.";
+	return io::JsonValue::make_null();
+}
+
 bool ViewportModel::drop(const ViewportContext &, const ViewportDrop &, CanvasRequests &, std::string &error) const {
 	error = std::string("A ") + viewport_kind_token(kind_) + " viewport takes no drop.";
 	return false;

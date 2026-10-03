@@ -105,19 +105,26 @@ constexpr RequestField kFields[] = {
 			"on the document, another gesture, or 10 s with no sample ends it; a token no gesture of "
 			"the document's holds is refused." },
 	{ F::Command, "command", J::Object,
-			"A command in a viewport, {name, ids?, kind?}: a menu's arrange of the windows ids, the "
-			"first the one the others follow (align_left, align_right, align_top, align_bottom, "
+			"A command in a viewport, {name, ids?, kind?, by?, at?}: a menu's arrange of the windows ids, "
+			"the first the one the others follow (align_left, align_right, align_top, align_bottom, "
 			"align_horizontal_centers, align_vertical_centers; distribute_horizontally and "
 			"distribute_vertically, three or more; bring_to_front, bring_forward, send_backward, "
-			"send_to_back), or a model's frame (its camera on the marker of the first id, else on "
-			"the whole model); kind the viewport's (left out, the one the document shows in)." },
+			"send_to_back), a model's frame (its camera on the marker of the first id, else on the "
+			"whole model), or a mission's frame, top, ground, select_same (every entity of the "
+			"selected entities' items), duplicate (the ids, else the selection, copied and moved by "
+			"[east, north] metres, one batch) or paste (the clipboard's copied entities and areas, "
+			"their middle where the point at [x, y] meets the ground, one batch); by a way in the "
+			"kind's units, at a point of the picture; kind the viewport's (left out, the one the "
+			"document shows in)." },
 	{ F::Drop, "drop", J::Object,
-			"A drop on a viewport's picture, {file | reference + name, at, kind?}: a project file by its "
-			"logical name (a Files row let go on the canvas), or a name of a reference kind (reference "
-			"its token, name the name as a field of that kind holds it), at the point [x, y] of the "
-			"picture in the viewport's units; kind the viewport's (left out, the one the document shows "
-			"in). The viewport plans what it makes, one batch, one undo step; one that takes no drop "
-			"refuses it (a menu's, a model's)." },
+			"A drop on a viewport's picture, {file | reference + name, at, to?, snap?, kind?}: a "
+			"project file by its logical name (a Files row let go on the canvas), or a name of a "
+			"reference kind (reference its token, name the name as a field of that kind holds it: a "
+			"mission's item by its id, a path's next stop by the path's number), at the point [x, y] "
+			"of the picture in the viewport's units, or a box from at to to (a mission's area: "
+			"reference area, no name); snap a mission's grid in metres; kind the viewport's (left out, "
+			"the one the document shows in). The viewport plans what it makes, one batch, one undo "
+			"step; one that takes no drop refuses it (a menu's, a model's)." },
 	{ F::Purpose, "purpose", J::String,
 			"What a picked path is for: new_project_location, open_project, runtime_executable, "
 			"game_install or import_files." },

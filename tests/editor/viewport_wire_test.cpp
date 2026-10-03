@@ -919,7 +919,11 @@ static int test_drop() {
 				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10]}})",
 				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [1e300, 0]}})",
 				 R"({"kind": "edit_in_viewport", "drop": {"file": "", "at": [10, 10]}})",
-				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10, 10], "snap": 1}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10, 10], "spin": 1}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10, 10], "snap": -1}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"reference": "area", "name": "1", "at": [1, 1], "to": [2, 2]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [1, 1], "to": [2, 2]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"reference": "area", "at": [1, 1], "to": [2]}})",
 				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10, 10], "kind": "map"}})",
 				 R"({"kind": "edit_in_viewport", "drop": "a.3di"})" }) {
 		const JsonValue answer = wired.wire(unread);
@@ -963,6 +967,37 @@ static int test_drop() {
 	std::string error;
 	TEST_EXPECT(editor_request_from_json(editor_request_to_json(made), back, error) && back == made &&
 			back.drop.file == "armory.3di" && back.drop.reference.empty());
+	// S15: a box drop (a mission's area) with its snap, and a command with a way and a point, read back
+	// as made; a command's members of the wrong shape not read.
+	ViewportDrop box;
+	box.reference = "area";
+	box.box = true;
+	box.x = 10.0f;
+	box.y = 20.0f;
+	box.x2 = 30.0f;
+	box.y2 = 45.0f;
+	box.snap = 5.0f;
+	const EditorRequest boxed = request::edit_in_viewport(menu->path(), box);
+	TEST_EXPECT(editor_request_from_json(editor_request_to_json(boxed), back, error) && back == boxed && back.drop.box &&
+			back.drop.x2 == 30.0f && back.drop.snap == 5.0f);
+	ViewportCommand command;
+	command.name = "duplicate";
+	command.by = { 3.0, -1.5 };
+	command.has_at = true;
+	command.at_x = 4.0f;
+	command.at_y = 8.0f;
+	const EditorRequest commanded = request::edit_in_viewport(menu->path(), command);
+	TEST_EXPECT(editor_request_from_json(editor_request_to_json(commanded), back, error) && back == commanded &&
+			back.command.by == std::vector<double>({ 3.0, -1.5 }) && back.command.has_at && back.command.at_y == 8.0f);
+	for (const char *unread : { R"({"kind": "edit_in_viewport", "command": {"name": "duplicate", "by": []}})",
+				 R"({"kind": "edit_in_viewport", "command": {"name": "duplicate", "by": ["east"]}})",
+				 R"({"kind": "edit_in_viewport", "command": {"name": "paste", "at": [1]}})" }) {
+		const JsonValue answer = wired.wire(unread);
+		TEST_EXPECT(!answer.get_bool("ok", true) && answer.get_string("error", "").find("command") != std::string::npos);
+	}
+	// A menu's command reads no way and no point.
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "command": {"name": "align_left", "by": [1]}})"),
+			"takes no \"by\""));
 	std::printf("test_drop passed\n");
 	return 0;
 }
