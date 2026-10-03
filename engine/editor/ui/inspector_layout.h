@@ -45,6 +45,11 @@ struct InspectorSection {
 // the collections whose name or token does ("" = everything); a section left empty is dropped.
 std::vector<InspectorSection> plan_inspector(const Document &document, const NodeAddress &record,
                                              const NodeAddress &collections_owner, const std::string &filter);
+// The plan without what a type's own part of the Inspector draws itself (ADR 0046 S15: a mission's
+// event, trigger or action in words): the fields of those ids and the collections of those kinds, a
+// section left with nothing dropped.
+void leave_out(std::vector<InspectorSection> &plan, const std::vector<std::string> &fields,
+               const std::vector<NodeKind> &collections);
 
 // --- several records at once (ADR 0046 S9k2) ---------------------------------------------
 
