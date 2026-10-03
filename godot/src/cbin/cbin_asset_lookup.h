@@ -48,13 +48,14 @@ inline Ref<Resource> find_font_by_name(const String &p_name, const String &p_bas
 	return path.is_empty() ? Ref<Resource>() : load_font_path(path);
 }
 
-// Resolve an image by filename in a single resource root directory. Extension
-// and case fallbacks are delegated to the shared engine texture resolver.
+// Resolve an image by filename in a single resource root directory: the credits
+// roll's images load through the menu texture loader (CMarqueeWnd_LoadCreditsFromIni
+// calls CTextureManager_LoadOrFindTexture; renderer::TextureLoader::Menu).
 inline Ref<Resource> find_texture_by_name(const String &p_name, const String &p_base_dir) {
 	if (p_name.is_empty() || p_base_dir.is_empty()) {
 		return Ref<Resource>();
 	}
-	return opennova::load_texture_from_dir(p_base_dir, p_name);
+	return opennova::load_texture_from_dir(p_base_dir, p_name, opennova::renderer::TextureLoader::Menu);
 }
 
 }  // namespace cbin_internal

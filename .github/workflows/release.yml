@@ -94,6 +94,11 @@ jobs:
       version: ${{ github.ref_name }}
 
   package-apps-windows:
+    # The called job asks for actions: write (its compiler cache's master
+    # save); a tag run restores only, but the grant must still cover it.
+    permissions:
+      contents: read
+      actions: write
     uses: ./.github/workflows/package-apps-windows.yml
 
   release:

@@ -293,10 +293,12 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	if (s.carrying) {
 		out.cargo_texture = cargo->hud_image;
 		// Texture defaults are filled from HUD_LoadAllTextures by the device.
-		if (cargo->item_id == 4091 || cargo->item_id == 4093 || cargo->item_id == 4095)
+		const bool flag = cargo->item_id == 4091 || cargo->item_id == 4093 || cargo->item_id == 4095;
+		if (flag)
 			out.cargo_texture = "H_flag.tga";
 		else if (out.cargo_texture.empty())
 			out.cargo_texture = "H_docmnt.tga";
+		out.cargo_texture_alpha = !flag && !cargo->hud_image.empty();
 	}
 }
 } // namespace opennova::world

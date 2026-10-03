@@ -116,14 +116,17 @@ func _build_damage_feedback_quads() -> void:
 
 func set_resource_root(root: ResourceRoot) -> void:
 	_root = root
-	_binocular_mask = _load_texture("Binoculr.tga")
-	_binocular_crosshair = _load_texture("BinoCH.tga")
-	_binocular_numbers = _load_texture("BNumbers.tga")
-	_nvg_mask = _load_texture("NVG.tga")
-	_nvg_scale = _load_texture("Nvgscale.tga")
+	# Each through its retail loader: the masks through the stage loader, the
+	# digits and the NVG scale through the file loader, the vignette through
+	# the archive loader (docs/render/render-material-re.md "Texture loaders").
+	_binocular_mask = _load_texture("Binoculr.tga", ResourceRoot.TEXTURE_LOADER_STAGE)
+	_binocular_crosshair = _load_texture("BinoCH.tga", ResourceRoot.TEXTURE_LOADER_STAGE)
+	_binocular_numbers = _load_texture("BNumbers.tga", ResourceRoot.TEXTURE_LOADER_FILE)
+	_nvg_mask = _load_texture("NVG.tga", ResourceRoot.TEXTURE_LOADER_STAGE)
+	_nvg_scale = _load_texture("Nvgscale.tga", ResourceRoot.TEXTURE_LOADER_FILE)
 	# The red damage vignette's texture; retail loads it once into the material
 	# behind the quad's mode-3 pass.
-	_vignette = _load_texture("vignette.tga")
+	_vignette = _load_texture("vignette.tga", ResourceRoot.TEXTURE_LOADER_ARCHIVE)
 	if _red_vignette != null:
 		_red_vignette.texture = _vignette
 	queue_redraw()
@@ -241,5 +244,5 @@ func _draw_binoculars(surface: Vector2) -> void:
 				HudPos.scale_rect(target, surface), source)
 
 
-func _load_texture(name: String) -> Texture2D:
-	return TgaTexture.load_from_root(_root, name)
+func _load_texture(name: String, loader: ResourceRoot.TextureLoader) -> Texture2D:
+	return _root.load_texture(name, loader) if _root != null else null

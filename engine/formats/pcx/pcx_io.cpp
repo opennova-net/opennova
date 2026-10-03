@@ -7,6 +7,18 @@ namespace opennova {
 
 namespace {
 
+// The game's PCX readers allocate the buffer the header sizes and fail the load (code 2)
+// when that allocation fails [orig: Texture_LoadPCXFromPFF32 @ 0x56EB1E;
+// Texture_LoadPCXFromPFF8Bit @ 0x56E0A0]. The port allocates it only when the file's
+// data can describe it, 32 pixels a byte after the 128-byte header (a two-byte run
+// pair expands to at most 63), and never past Godot's own image limit.
+constexpr size_t kMaxPcxPixels = size_t(1) << 28;
+
+bool pcx_pixels_fit(size_t pixels, size_t size) {
+	const size_t present = size > 128 ? size - 128 : 0;
+	return pixels <= kMaxPcxPixels && pixels <= present * 32u;
+}
+
 bool parse_header(const uint8_t *data,
                   size_t size,
                   int &width,
@@ -180,34 +192,196 @@ bool decode_pcx_rgb(const uint8_t *data, size_t size, RgbImage &out, std::string
 	return false;
 }
 
+// [orig: Texture_LoadPCXFromPFF8Bit @ 0x56E0A0 — the 0x46-byte header read, the bits
+// per pixel test (code 3, @ 0x56E109), the sides from the window (@ 0x56E126..0x56E14A),
+// one buffer of the pixels plus 1024 bytes with the palette at its end, the byte before
+// the last 768 read and never tested, the palette stored B, G, R, 0, the RLE rows of
+// BytesPerLine indices at a stride of `width` read from offset 128 through the file;
+// then Texture_LoadFromArchive @ 0x58B980's luminance table (@ 0x58BC35..0x58BCA9)
+// and per-pixel alpha (@ 0x58BCEE)]
 bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out, std::string &error) {
 	out = RgbaImage{};
-
-	IndexedImage8 indexed;
-	if (!decode_pcx_indexed(data, size, indexed, error)) {
+	if (data == nullptr || size < 0x46) {
+		error = "PCX header truncated";
 		return false;
 	}
-
-	// Palette luminance table, then the per-pixel alpha plane
-	// [orig: Texture_LoadFromArchive @ 0x58b980 — table build
-	// @ 0x58bc35..0x58bca9, per-pixel A @ 0x58bcee].
+	if (data[3] != 8) {
+		error = "PCX is not 8 bits per pixel";
+		return false;
+	}
+	const int16_t xmin = static_cast<int16_t>(data[4] | (data[5] << 8));
+	const int16_t ymin = static_cast<int16_t>(data[6] | (data[7] << 8));
+	const int16_t xmax = static_cast<int16_t>(data[8] | (data[9] << 8));
+	const int16_t ymax = static_cast<int16_t>(data[10] | (data[11] << 8));
+	const int16_t width = static_cast<int16_t>(xmax - xmin + 1);
+	const int16_t height = static_cast<int16_t>(ymax - ymin + 1);
+	const int bytes_per_line = data[0x42] | (data[0x43] << 8);
+	if (width <= 0 || height <= 0) {
+		error = "PCX dimensions out of range";
+		return false;
+	}
+	const size_t pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
+	if (!pcx_pixels_fit(pixels, size)) {
+		error = "PCX names more pixels than its data can describe";
+		return false;
+	}
+	const auto byte_at = [&](size_t offset) -> uint8_t { return offset < size ? data[offset] : 0; };
+	// The indices, then the palette as the reader stores it: B, G, R, 0 per entry.
+	std::vector<uint8_t> buffer(pixels + 1024u, 0);
+	const size_t palette_at = size >= 768 ? size - 768 : 0;
+	for (size_t i = 0; i < 256; ++i) {
+		uint8_t *entry = &buffer[pixels + 4u * i];
+		entry[0] = byte_at(palette_at + 3u * i + 2u);
+		entry[1] = byte_at(palette_at + 3u * i + 1u);
+		entry[2] = byte_at(palette_at + 3u * i);
+		entry[3] = 0;
+	}
+	// The rows: a row's pad pixels spill onto the next row's start, the last row's onto
+	// the palette that follows the indices (retail writes past the buffer after 1024
+	// bytes; this port stops there). Bytes past the file read as 0.
+	size_t pos = 128;
+	const auto write = [&](size_t at, uint8_t value) {
+		if (at < buffer.size()) buffer[at] = value;
+	};
+	for (int row = 0; row < height; ++row) {
+		const size_t row_start = static_cast<size_t>(row) * static_cast<size_t>(width);
+		int col = 0;
+		if (bytes_per_line == 0) continue;
+		do {
+			const uint8_t byte = byte_at(pos++);
+			if ((byte & 0xC0) == 0xC0) {
+				const uint8_t value = byte_at(pos++);
+				const int run = byte & 0x3F;
+				for (int n = 0; n < run; ++n) write(row_start + static_cast<size_t>(col + n), value);
+				col += run;
+			} else {
+				write(row_start + static_cast<size_t>(col++), byte);
+			}
+		} while (col < bytes_per_line);
+	}
+	// The luminance of each palette entry as the decode left it: (85 * (b + g + r)) >> 8
+	// in 16 bits.
 	uint8_t lum[256];
-	for (int i = 0; i < 256; ++i) {
-		const uint16_t sum = static_cast<uint16_t>(indexed.palette[i][0]) +
-				static_cast<uint16_t>(indexed.palette[i][1]) +
-				static_cast<uint16_t>(indexed.palette[i][2]);
+	for (size_t i = 0; i < 256; ++i) {
+		const uint8_t *entry = &buffer[pixels + 4u * i];
+		const uint16_t sum = static_cast<uint16_t>(entry[0] + entry[1] + entry[2]);
 		lum[i] = static_cast<uint8_t>(static_cast<uint16_t>(85u * sum) >> 8);
 	}
+	out.width = width;
+	out.height = height;
+	out.pixels.resize(pixels * 4u);
+	for (size_t i = 0; i < pixels; ++i) {
+		const uint8_t idx = buffer[i];
+		const uint8_t *entry = &buffer[pixels + 4u * idx];
+		out.pixels[4 * i + 0] = entry[2];
+		out.pixels[4 * i + 1] = entry[1];
+		out.pixels[4 * i + 2] = entry[0];
+		out.pixels[4 * i + 3] = lum[idx];
+	}
+	return true;
+}
 
-	out.width = indexed.width;
-	out.height = indexed.height;
-	out.pixels.resize(static_cast<size_t>(indexed.width) * static_cast<size_t>(indexed.height) * 4);
-	for (int i = 0; i < indexed.width * indexed.height; ++i) {
-		const uint8_t idx = indexed.indices[static_cast<size_t>(i)];
-		out.pixels[static_cast<size_t>(i) * 4 + 0] = indexed.palette[idx][0];
-		out.pixels[static_cast<size_t>(i) * 4 + 1] = indexed.palette[idx][1];
-		out.pixels[static_cast<size_t>(i) * 4 + 2] = indexed.palette[idx][2];
-		out.pixels[static_cast<size_t>(i) * 4 + 3] = lum[idx];
+// [orig: load_pcx_to_argb @ 0x664cc0 — the header read (0x46 bytes), the BPP check
+// (returns 3), width/height from the window, then the 8-bit path (Seek(-768, 2), the
+// 0xFF000000 | rgb palette, the RLE loop to BytesPerLine) or the NPlanes == 3 path]
+bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error) {
+	out = RgbaImage{};
+	if (size < 0x46) {
+		error = "PCX header truncated";
+		return false;
+	}
+	if (data[3] != 8) {
+		error = "PCX is not 8 bits per pixel";
+		return false;
+	}
+	const int16_t xmin = static_cast<int16_t>(data[4] | (data[5] << 8));
+	const int16_t ymin = static_cast<int16_t>(data[6] | (data[7] << 8));
+	const int16_t xmax = static_cast<int16_t>(data[8] | (data[9] << 8));
+	const int16_t ymax = static_cast<int16_t>(data[10] | (data[11] << 8));
+	const int16_t width = static_cast<int16_t>(xmax - xmin + 1);
+	const int16_t height = static_cast<int16_t>(ymax - ymin + 1);
+	const int planes = data[0x41];
+	const int bytes_per_line = data[0x42] | (data[0x43] << 8);
+	if (width <= 0 || height <= 0) {
+		error = "PCX dimensions out of range";
+		return false;
+	}
+	const size_t pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
+	if (!pcx_pixels_fit(pixels, size)) {
+		error = "PCX names more pixels than its data can describe";
+		return false;
+	}
+	// ARGB words; the 8-bit path's row writes run to BytesPerLine (plus a run's
+	// overshoot), so the scratch holds one row more than the image.
+	std::vector<uint32_t> argb(pixels + static_cast<size_t>(bytes_per_line) + 64u, 0u);
+	const auto byte_at = [&](size_t offset) -> uint8_t { return offset < size ? data[offset] : 0; };
+	if (planes != 3) {
+		uint32_t palette[256];
+		const size_t palette_at = size >= 768 ? size - 768 : 0;
+		for (int i = 0; i < 256; ++i) {
+			palette[i] = 0xFF000000u | (static_cast<uint32_t>(byte_at(palette_at + 3u * i)) << 16) |
+					(static_cast<uint32_t>(byte_at(palette_at + 3u * i + 1u)) << 8) |
+					static_cast<uint32_t>(byte_at(palette_at + 3u * i + 2u));
+		}
+		const size_t data_end = size >= 896 ? 128 + (size - 896) : 128;
+		size_t pos = 128;
+		const auto next = [&]() -> uint8_t { return pos < data_end ? data[pos++] : (++pos, 0); };
+		for (int row = 0; row < height; ++row) {
+			const size_t row_base = static_cast<size_t>(row) * static_cast<size_t>(width);
+			int col = 0;
+			if (bytes_per_line == 0) continue;
+			do {
+				const uint8_t byte = next();
+				if ((byte & 0xC0) == 0xC0) {
+					const int run = byte & 0x3F;
+					const uint32_t color = palette[next()];
+					for (int n = 0; n < run; ++n, ++col) {
+						const size_t at = row_base + static_cast<size_t>(col);
+						if (at < argb.size()) argb[at] = color;
+					}
+				} else {
+					const size_t at = row_base + static_cast<size_t>(col++);
+					if (at < argb.size()) argb[at] = palette[byte];
+				}
+			} while (col < bytes_per_line);
+		}
+	} else {
+		std::vector<uint8_t> scanline(static_cast<size_t>(3 * bytes_per_line) + 64u, 0);
+		size_t pos = 128;
+		const auto next = [&]() -> uint8_t { return pos < size ? data[pos++] : (++pos, 0); };
+		for (int row = 0; row < height; ++row) {
+			int col = 0;
+			while (col < 3 * bytes_per_line) {
+				const uint8_t byte = next();
+				if ((byte & 0xC0) == 0xC0) {
+					const int run = byte & 0x3F;
+					const uint8_t value = next();
+					for (int n = 0; n < run; ++n, ++col)
+						if (static_cast<size_t>(col) < scanline.size()) scanline[static_cast<size_t>(col)] = value;
+				} else {
+					if (static_cast<size_t>(col) < scanline.size()) scanline[static_cast<size_t>(col)] = byte;
+					++col;
+				}
+			}
+			const size_t row_base = static_cast<size_t>(row) * static_cast<size_t>(width);
+			for (int i = 0; i < width; ++i) {
+				const auto plane = [&](int p) -> uint32_t {
+					const size_t at = static_cast<size_t>(p) * static_cast<size_t>(width) + static_cast<size_t>(i);
+					return at < scanline.size() ? scanline[at] : 0u;
+				};
+				argb[row_base + static_cast<size_t>(i)] = 0xFF000000u | (plane(0) << 16) | (plane(1) << 8) | plane(2);
+			}
+		}
+	}
+	out.width = width;
+	out.height = height;
+	out.pixels.resize(pixels * 4u);
+	for (size_t i = 0; i < pixels; ++i) {
+		const uint32_t c = argb[i];
+		out.pixels[4 * i + 0] = static_cast<uint8_t>(c >> 16);
+		out.pixels[4 * i + 1] = static_cast<uint8_t>(c >> 8);
+		out.pixels[4 * i + 2] = static_cast<uint8_t>(c);
+		out.pixels[4 * i + 3] = static_cast<uint8_t>(c >> 24);
 	}
 	return true;
 }

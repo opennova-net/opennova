@@ -138,10 +138,11 @@ func _font_size() -> int:
 	return fs if fs > 0 else 16
 
 
-# Retail UI images force loose-first for this lookup; an image that does not
-# load draws nothing.
+# The cine's full-screen images load through the cine fade loader (a .tga, else
+# its .dds; any other name the PCX reader, then the TGA reader); an image that
+# does not load draws nothing.
 func _image(image_name: String) -> Texture2D:
 	if not _images.has(image_name):
-		_images[image_name] = TgaTexture.load_from_root(_root, image_name, true) \
-				if _root != null else null
+		_images[image_name] = _root.load_texture(image_name,
+				ResourceRoot.TEXTURE_LOADER_CINE_FADE) if _root != null else null
 	return _images[image_name]
