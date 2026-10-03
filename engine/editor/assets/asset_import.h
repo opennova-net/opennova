@@ -47,6 +47,10 @@ std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_r
 // The names the project gets of a game install's files (the same view), sorted by their normalized
 // form (the Problems Import fixes).
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document);
+// For a project that builds as an expansion (ADR 0046 S16), the names its base game serves
+// (base_install_spec's view: no expansion, no renames), sorted likewise, which its build's gate reads
+// (BaseNames); none for a standalone project, and when the install does not mount.
+std::vector<std::string> list_base_file_names(const std::string &retail_root, const ProjectDocument &document);
 // Where an import writes a file of `kind` (project-relative): over the project's file of
 // the name when it has one (a replace keeps its place), else in the kind's folder
 // (AssetKindRow::folder).

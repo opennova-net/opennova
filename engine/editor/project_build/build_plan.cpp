@@ -92,10 +92,25 @@ std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::str
 }
 
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
-                     const std::vector<Diagnostic> &document_findings, const BuildTarget &target) {
+                     const std::vector<Diagnostic> &document_findings, const BuildTarget &target,
+                     const BaseNames *base) {
 	BuildPlan plan;
 	plan.target = target;
 	plan.hash_cache = paths.build_cache_file;
+	const bool base_mounts = base && base->sorted && !base->sorted->empty();
+	if (target.is_expansion() && !base_mounts) {
+		// The expansion plays over the base game, which its build compares its files with and its gate
+		// reads (lean packing, BaseNames): no base, no build the editor can vouch for.
+		plan.diagnostics.push_back(make_finding(
+		        CoreFinding::BuildExpansionBaseMissing, DiagnosticSeverity::Error,
+		        target.install.empty()
+		                ? "The project builds as the expansion " + target.expansion +
+		                          ", which plays over the game install: choose its folder in File > Project settings..."
+		                : "The project builds as the expansion " + target.expansion + ", which plays over the game "
+		                                                                               "install, and " +
+		                          target.install + " does not mount as the game: choose its folder in File > Project "
+		                                           "settings..."));
+	}
 	if (target.is_expansion()) {
 		// An expansion's two archives always exist in its build, even empty: the game opens the pair by
 		// its name, and a missing <b>.pff is no expansion at all, the base game loading in its place
@@ -143,18 +158,18 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		// game knows, which the game never asks for (S13 A8), are left out.
 		if (!asset_kind_packed(asset.kind)) continue;
 		const Placement placement = place(asset, target);
-		if (placement.root_only) {
-			plan.diagnostics.push_back(make_finding(
-			        CoreFinding::BuildExpansionRootOnly, DiagnosticSeverity::Warning,
-			        asset.logical_name + " is read by the game from its install's folder alone, never from an "
-			                             "expansion's: the expansion's build leaves it out.",
-			        asset.relative_path));
-			continue;
-		}
 		BuildEntry entry;
 		entry.logical_name = asset.logical_name;
 		entry.source_path = join_path(paths.root, asset.relative_path);
 		entry.size_bytes = asset.size_bytes;
+		entry.kind = asset.kind;
+		if (placement.root_only) {
+			// Left out; the build compares it with the base's and says so where they differ
+			// (build.expansion.root_only).
+			entry.build_path = asset.relative_path;
+			plan.root_only.push_back(std::move(entry));
+			continue;
+		}
 		if (!placement.loose_path.empty()) {
 			BuildEntry loose = entry;
 			loose.build_path = placement.loose_path;
@@ -172,17 +187,15 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		});
 	}
 	// An error whose code gates refuses the build (blocks_build): a missing reference is listed
-	// among the plan's findings and refuses nothing (ADR 0046 S14).
-	plan.ok = !diagnostics_block_build(plan.diagnostics);
+	// among the plan's findings and refuses nothing (ADR 0046 S14); an expansion's required file or
+	// gating reference the base serves refuses nothing either (S16, BaseNames).
+	for (const Diagnostic &d : plan.diagnostics)
+		if (blocks_build(d, target.is_expansion() ? base : nullptr)) plan.blockers.push_back(d);
+	plan.ok = plan.blockers.empty();
 	return plan;
 }
 
-std::vector<Diagnostic> build_blockers(const BuildPlan &plan) {
-	std::vector<Diagnostic> out;
-	for (const Diagnostic &d : plan.diagnostics)
-		if (blocks_build(d)) out.push_back(d);
-	return out;
-}
+std::vector<Diagnostic> build_blockers(const BuildPlan &plan) { return plan.blockers; }
 
 namespace {
 

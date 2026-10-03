@@ -901,8 +901,11 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 	// The gate is the Problems rows a validation makes: the one left due or under way runs to its
 	// end first (S13 A3: the polls step it, and no request runs it).
 	core.problems().validate_pending();
+	// An expansion's gate reads over its base game's names (ADR 0046 S16).
+	const BaseNames base{&view.project.base_files};
+	const BuildTarget target = core.build_target();
 	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements,
-			core.problems().gate_findings(), core.build_target());
+			core.problems().gate_findings(), target, &base);
 	const std::vector<Diagnostic> blocking = build_blockers(plan);
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();

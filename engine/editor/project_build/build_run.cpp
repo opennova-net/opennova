@@ -19,6 +19,7 @@
 #include <editor/project/project_files.h>
 #include <formats/pff/pff.h>
 #include <formats/pff/pff_stream_writer.h>
+#include <runtime/mission/mission_sidecars.h>
 
 namespace fs = std::filesystem;
 
@@ -429,6 +430,7 @@ BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protec
 	base += plan_.loose.size();
 	for (const BuildEntry &entry : plan_.loose) bytes += entry.size_bytes;
 	stamps_.resize(base);
+	contents_.resize(base);
 	// Every byte hashed once (or vouched for by the hash cache), then written or copied once.
 	bytes_total_ = plan_.ok ? bytes * 2 : 0;
 	group_hash_ = archive_hash_seed();
@@ -503,6 +505,8 @@ bool BuildRun::step(uint64_t budget_bytes) {
 	switch (phase_) {
 	case Phase::Prepare: prepare(); break;
 	case Phase::Hash: hash(budget); break;
+	case Phase::Base: compare_base(budget); break;
+	case Phase::Fold: fold_all(); break;
 	case Phase::Settle: settle(); break;
 	case Phase::Archives: pack(budget); break;
 	case Phase::Loose: copy_loose(budget); break;
@@ -545,6 +549,7 @@ void BuildRun::load_cache() {
 	if (!io::json_parse(cache_text_, json, message) || !json.is_object() ||
 	    json.get_int("schema_version", -1) != kBuildCacheSchemaVersion)
 		return;
+	if (const io::JsonValue *base = json.get("base")) base_cache_ = *base;
 	const io::JsonValue *files = json.get("files");
 	if (!files || !files->is_array()) return;
 	for (const io::JsonValue &item : files->array) {
@@ -561,7 +566,7 @@ void BuildRun::load_cache() {
 	}
 }
 
-// Written when the hash pass ends, and only when it changed: the plan's files alone, each by what
+// Written when the hashes are folded, and only when it changed: the plan's files alone, each by what
 // this build read or took from the cache, so a file gone from the project leaves it; and of those
 // only a file whose last write lies far enough before the pass (io::file_stamp_settled), so a
 // rewrite of the same size inside the same timestamp tick is never taken for the bytes read
@@ -581,6 +586,10 @@ void BuildRun::save_cache() const {
 		files.push(std::move(item));
 	}
 	json.set("files", std::move(files));
+	// The base game's hashes an expansion's build read or took from the cache (lean packing); a build
+	// that compared none keeps the ones it read.
+	if (base_) json.set("base", base_->save());
+	else if (!base_cache_.is_null()) json.set("base", base_cache_);
 	const std::string text = io::json_write(json);
 	if (text == cache_text_) return;
 	std::string message;
@@ -608,19 +617,14 @@ void BuildRun::hash(uint64_t budget) {
 		const bool loose = hash_group_ == plan_.archives.size();
 		const std::vector<BuildEntry> &group = loose ? plan_.loose : plan_.archives[hash_group_].entries;
 		if (hash_entry_ == group.size()) {
-			build_hash_ = io::fnv1a64_value(build_hash_, group_hash_);
 			if (!loose) {
-				hashes_[plan_.archives[hash_group_].file_name] = io::hex64(group_hash_);
 				++hash_group_;
 				hash_entry_ = 0;
-				// The next archive's from its seed; the loose files, copied as they are, from none.
-				group_hash_ = hash_group_ < plan_.archives.size() ? archive_hash_seed() : io::kFnv1a64Offset;
 				continue;
 			}
-			build_hash_ = io::fnv1a64_value(build_hash_, static_cast<int>(kBuildArchiveFormat));
-			report_.build_id = io::hex64(build_hash_);
-			save_cache();
-			phase_ = Phase::Settle;
+			// An expansion's files are compared with its base game's first (lean packing).
+			phase_ = plan_.target.is_expansion() ? Phase::Base : Phase::Fold;
+			label_ = plan_.target.is_expansion() ? "Comparing with the base game" : label_;
 			return;
 		}
 		const BuildEntry &entry = group[hash_entry_];
@@ -641,7 +645,7 @@ void BuildRun::hash(uint64_t budget) {
 			const auto cached = plan_.rehash ? cache_.end() : cache_.find(entry.source_path);
 			if (stamp.written != 0 && cached != cache_.end() && cached->second.size == size &&
 			    cached->second.written == stamp.written) {
-				fold(entry, size, cached->second.hash);
+				contents_[stamp_index(hash_group_, hash_entry_)] = cached->second.hash;
 				seen_[entry.source_path] = cached->second;
 				advance(size);
 				++hash_entry_;
@@ -668,11 +672,151 @@ void BuildRun::hash(uint64_t budget) {
 		if (s.in_done == s.in_size) {
 			if (!s.at_end() || !still_as_read(entry.source_path, stamp.size, stamp.written))
 				return fail(changed_while_packing(entry.logical_name));
-			fold(entry, stamp.size, file_hash_);
+			contents_[stamp_index(hash_group_, hash_entry_)] = file_hash_;
 			if (stamp.written != 0) seen_[entry.source_path] = {stamp.size, stamp.written, file_hash_};
 			++hash_entry_;
 		}
 	}
+}
+
+// Lean packing (ADR 0046 S16): each of an expansion's files compared with the copy its base game
+// serves under its name (BaseMatch: an archive's member as stored and as served, a video's loose copy
+// in the install's folder, which the game reads when the expansion's folder has none), a budget of the
+// base's bytes at a time (none where the base's hashes are cached).
+void BuildRun::compare_base(uint64_t budget) {
+	if (!base_) {
+		base_ = std::make_unique<BaseMatch>();
+		std::string error;
+		if (!base_->open(plan_.target.install, plan_.target.game, error)) {
+			base_.reset();
+			return fail(make_finding(CoreFinding::BuildExpansionBaseMissing, DiagnosticSeverity::Error,
+			                         "The expansion " + plan_.target.expansion + " plays over the base game, and " + error +
+			                                 ": choose the game install in File > Project settings..."));
+		}
+		base_->load(base_cache_);
+		same_.assign(stamps_.size(), false);
+	}
+	uint64_t left = budget;
+	while (left > 0 && base_index_ < stamps_.size()) {
+		const size_t index = base_index_++;
+		size_t group = 0;
+		while (group + 1 < group_base_.size() && index >= group_base_[group + 1]) ++group;
+		const bool archived = group < plan_.archives.size();
+		const BuildEntry &entry =
+		        archived ? plan_.archives[group].entries[index - group_base_[group]] : plan_.loose[index - group_base_[group]];
+		BaseCopy copy;
+		uint64_t read = 0;
+		const bool found = archived ? base_->archive_copy(entry.logical_name, copy, read)
+		                   : entry.kind == AssetKind::Video ? base_->root_copy(entry.logical_name, copy, read)
+		                                                    : false;
+		const Stamp &stamp = stamps_[index];
+		same_[index] = found && ((copy.size == stamp.size && copy.raw == contents_[index]) ||
+		                         (copy.served_size == stamp.size && copy.served == contents_[index]));
+		report_.base_bytes_read += read;
+		label_ = "Comparing " + entry.logical_name + " with the base game";
+		left -= std::min(left, std::max(read, kOpenCost));
+	}
+	if (base_index_ < stamps_.size()) return;
+	drop_same_as_base();
+	phase_ = Phase::Fold;
+}
+
+void BuildRun::drop_same_as_base() {
+	// A loose copy of a file the front door reads (ExpansionLoose::FrontDoor) goes with its archive copy.
+	std::map<std::string, bool> archived_same;
+	for (size_t a = 0; a < plan_.archives.size(); ++a)
+		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e)
+			archived_same[normalized_logical_name(plan_.archives[a].entries[e].logical_name)] = same_[stamp_index(a, e)];
+	for (size_t e = 0; e < plan_.loose.size(); ++e) {
+		const BuildEntry &entry = plan_.loose[e];
+		const auto archived = archived_same.find(normalized_logical_name(entry.logical_name));
+		if (asset_kind_row(entry.kind).expansion_loose == ExpansionLoose::FrontDoor && archived != archived_same.end())
+			same_[stamp_index(plan_.archives.size(), e)] = archived->second;
+	}
+	// A mission the expansion ships keeps its text table in <b>L.pff, however like the base's: the
+	// mission list titles a mission only from the archive paired with its own [orig:
+	// Mission_BuildMapListFromPFF @ 0x562c2d, PFF_FileExists(bin, textArchive)].
+	std::map<std::string, bool> kept_tables;
+	for (size_t a = 0; a < plan_.archives.size(); ++a)
+		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
+			const BuildEntry &entry = plan_.archives[a].entries[e];
+			if (entry.kind == AssetKind::Mission && !same_[stamp_index(a, e)] &&
+			    strutil::ends_with_icase(entry.logical_name, ".bms"))
+				kept_tables[normalized_logical_name(mission::mission_base_name(entry.logical_name) + ".bin")] = true;
+		}
+	for (size_t a = 0; a < plan_.archives.size(); ++a)
+		if (plan_.archives[a].slot == ArchiveSlot::Language)
+			for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e)
+				if (kept_tables.count(normalized_logical_name(plan_.archives[a].entries[e].logical_name)))
+					same_[stamp_index(a, e)] = false;
+	// What stays, its stamps and hashes with it.
+	std::vector<Stamp> stamps;
+	std::vector<uint64_t> contents;
+	std::vector<size_t> group_base;
+	std::map<std::string, bool> counted;
+	const auto keep = [&](std::vector<BuildEntry> &entries, size_t group) {
+		std::vector<BuildEntry> kept;
+		for (size_t e = 0; e < entries.size(); ++e) {
+			const size_t index = stamp_index(group, e);
+			if (!same_[index]) {
+				kept.push_back(std::move(entries[e]));
+				stamps.push_back(stamps_[index]);
+				contents.push_back(contents_[index]);
+				continue;
+			}
+			if (counted.emplace(normalized_logical_name(entries[e].logical_name), true).second) {
+				++report_.same_as_base_files;
+				report_.same_as_base_bytes += stamps_[index].size;
+			}
+		}
+		entries = std::move(kept);
+	};
+	for (size_t a = 0; a < plan_.archives.size(); ++a) {
+		group_base.push_back(stamps.size());
+		keep(plan_.archives[a].entries, a);
+	}
+	group_base.push_back(stamps.size());
+	keep(plan_.loose, plan_.archives.size());
+	stamps_ = std::move(stamps);
+	contents_ = std::move(contents);
+	group_base_ = std::move(group_base);
+	// A file the game reads from the install's folder alone: like the base's, nothing to say; else said,
+	// an expansion cannot ship it.
+	for (const BuildEntry &entry : plan_.root_only) {
+		std::vector<uint8_t> bytes;
+		std::string error;
+		BaseCopy copy;
+		uint64_t read = 0;
+		const bool same = read_file_bytes(entry.source_path, bytes, error) && base_->root_copy(entry.logical_name, copy, read) &&
+		                  copy.size == bytes.size() &&
+		                  copy.raw == io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+		report_.base_bytes_read += read;
+		if (same) continue;
+		report_.diagnostics.push_back(make_finding(
+		        CoreFinding::BuildExpansionRootOnly, DiagnosticSeverity::Warning,
+		        entry.logical_name + " is read by the game from its install's folder alone, never from an expansion's: "
+		                             "the expansion's build leaves it out.",
+		        entry.build_path));
+	}
+}
+
+// Every archive's content and the loose files' folded into their hashes, the build id covering all of
+// it: each entry's normalized name, a 0, its size and its content hash, in the archive's order.
+void BuildRun::fold_all() {
+	for (size_t group = 0; group <= plan_.archives.size(); ++group) {
+		const bool loose = group == plan_.archives.size();
+		// An archive's from its seed; the loose files, copied as they are, from none.
+		group_hash_ = loose ? io::kFnv1a64Offset : archive_hash_seed();
+		const std::vector<BuildEntry> &entries = loose ? plan_.loose : plan_.archives[group].entries;
+		for (size_t e = 0; e < entries.size(); ++e)
+			fold(entries[e], stamps_[stamp_index(group, e)].size, contents_[stamp_index(group, e)]);
+		build_hash_ = io::fnv1a64_value(build_hash_, group_hash_);
+		if (!loose) hashes_[plan_.archives[group].file_name] = io::hex64(group_hash_);
+	}
+	build_hash_ = io::fnv1a64_value(build_hash_, static_cast<int>(kBuildArchiveFormat));
+	report_.build_id = io::hex64(build_hash_);
+	save_cache();
+	phase_ = Phase::Settle;
 }
 
 // Settle whether this content is built already, and open the staging directory.
