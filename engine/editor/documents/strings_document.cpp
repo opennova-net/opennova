@@ -364,9 +364,11 @@ constexpr FindingCodeEntry<StringsFinding> kFindingEntries[] = {
 	{ StringsFinding::InvalidInput, { "strings.invalid_input", FindingFix::None, nullptr, true } },
 	{ StringsFinding::Regrouped, { "strings.regrouped", FindingFix::Rewrite,
 				"with its strings grouped by section the way the game reads them" } },
-	{ StringsFinding::SectionEmpty, { "strings.section_empty" } },
+	// An empty section name or key: the editor's rule, no refusal of the game's witnessed (the gate
+	// follows retail, ADR 0046 S14): listed.
+	{ StringsFinding::SectionEmpty, listed_code("strings.section_empty") },
 	{ StringsFinding::SectionDuplicate, { "strings.section_duplicate" } },
-	{ StringsFinding::KeyEmpty, { "strings.key_empty" } },
+	{ StringsFinding::KeyEmpty, listed_code("strings.key_empty") },
 	{ StringsFinding::KeyDuplicate, { "strings.key_duplicate" } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(StringsFinding::kCount),

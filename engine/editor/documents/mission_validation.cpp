@@ -41,13 +41,15 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::ZoneDuplicate, { "mission.zone_duplicate" } },
 	{ MissionFinding::ZoneDegenerate, { "mission.zone_degenerate" } },
 	{ MissionFinding::ZoneId, { "mission.zone_id" } },
-	{ MissionFinding::EventMissing, { "mission.event_missing" } },
+	// Read with no bound, past the table, no refusal witnessed (the gate follows retail): listed.
+	{ MissionFinding::EventMissing, listed_code("mission.event_missing") },
 	{ MissionFinding::MarkerMissing, { "mission.marker_missing" } },
 	{ MissionFinding::PathCount, { "mission.path_count" } },
 	{ MissionFinding::PathOneShot, { "mission.path_one_shot" } },
 	{ MissionFinding::PathEmpty, { "mission.path_empty" } },
 	{ MissionFinding::PathStart, { "mission.path_start" } },
-	{ MissionFinding::GroupRange, { "mission.group_range" } },
+	// Past the 64 groups the tables hold, read as written, no refusal witnessed: listed.
+	{ MissionFinding::GroupRange, listed_code("mission.group_range") },
 	{ MissionFinding::PoolLimit, { "mission.pool_limit" } },
 	{ MissionFinding::GameMode, { "mission.game_mode" } },
 	{ MissionFinding::TriggerType, { "mission.trigger_type" } },
