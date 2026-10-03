@@ -1,6 +1,7 @@
 // Observable projectile consequence tests through RoundSim's public seam:
 // arming/dud substitution, NoDie, and geometric dead/indestructible blockers.
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -44,9 +45,12 @@ struct Rig : HeapWorldFixture {
 
     Rig() {
         world.registry.configure_pool(0, 8);
+        // Enemies: a same-side pair with an NPC shooter is a protected pair
+        // the damage pass skips [orig: Projectile_DamagePairEligible @0x4E74F0].
         Entity s;
         s.kind = EntityKind::Organic;
         s.item_type = 3;
+        s.team = 1;
         s.position = {0.0f, 0.0f, 0.0f};
         s.health = 100;
         shooter = world.registry.spawn(0, s);
@@ -55,6 +59,7 @@ struct Rig : HeapWorldFixture {
         t.kind = EntityKind::Organic;
         t.has_item_def = true;
         t.item_type = 3;
+        t.team = 2;
         t.position = {5.0f, 0.0f, 0.0f};
         t.health = 100;
         // entity+0: a round passing the person parks this far past the hit.
@@ -119,6 +124,7 @@ struct PosedDamageRig : HeapWorldFixture {
         Entity s;
         s.kind = EntityKind::Organic;
         s.item_type = 3;
+        s.team = 1; // enemies: a same-side NPC pair is a protected pair (D-WPN-42)
         s.health = 100;
         shooter = world.registry.spawn(0, s);
 
@@ -126,6 +132,7 @@ struct PosedDamageRig : HeapWorldFixture {
         t.kind = EntityKind::Organic;
         t.has_item_def = true;
         t.item_type = 3;
+        t.team = 2;
         t.position = {5.0f, 0.0f, 0.0f};
         t.health = 5000;
         t.bound_radius = 1.0f;
@@ -403,11 +410,13 @@ void test_posed_head_zone_multiplier() {
     Entity shooter;
     shooter.kind = EntityKind::Organic;
     shooter.item_type = 3;
+    shooter.team = 1; // enemies: a same-side NPC pair is a protected pair (D-WPN-42)
     const EntityHandle sh = world.registry.spawn(0, shooter);
     Entity target;
     target.kind = EntityKind::Organic;
     target.has_item_def = true;
     target.item_type = 3;
+    target.team = 2;
     target.position = {5.0f, 0.0f, 0.0f};
     target.health = 1000;
     const EntityHandle th = world.registry.spawn(0, target);
@@ -1877,6 +1886,53 @@ void test_zero_damage_hit_still_notifies_the_vehicle_brain() {
     }
 }
 
+// The friendly-fire gate: a same-side shooter that is not a human player lands
+// nothing on its teammate — no health, no hit record, no shot relation — while
+// a player's round does unless the host rules NoFriendlyFire; either side's
+// BERSERK bit lifts the protection. [orig: Projectile_DamagePairEligible
+// @0x4E74F0; Projectile_ProcessDamageOnTarget @0x4e8081..0x4e808f]
+void test_friendly_fire_gate() {
+    struct Case {
+        bool same_side;
+        bool player_shooter;
+        bool no_friendly_fire;
+        bool victim_berserk;
+        bool lands;
+    };
+    const Case cases[] = {
+            {true, false, false, false, false},  // an NPC on its own side: protected
+            {true, true, false, false, true},    // a player's round lands
+            {true, true, true, false, false},    // ... unless NoFriendlyFire
+            {true, false, false, true, true},    // a BERSERK victim is fair game
+            {false, false, false, false, true},  // the enemy always lands
+    };
+    for (const Case &c : cases) {
+        Rig r;
+        r.world.ai.is_authority = true;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+        r.world.rules.no_friendly_fire = c.no_friendly_fire;
+        Entity *s = r.world.registry.get(r.shooter);
+        Entity *t = r.world.registry.get(r.target);
+        s->team = 2;
+        t->team = c.same_side ? 2 : 1;
+        s->group_id = 3;
+        t->group_id = 4;
+        if (c.player_shooter) s->flags |= kEntityFlagPlayer;
+        if (c.victim_berserk) {
+            CHECK(r.world.ai.attach(r.target) >= 0);
+            AiEntity *ai = r.world.ai.for_handle(r.target);
+            CHECK(ai != nullptr);
+            if (ai != nullptr) ai->slot.f[AiSlot::kBehaviorFlags] |= 0x200;
+        }
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        t = r.world.registry.get(r.target);
+        CHECK((t->health < 100) == c.lands);
+        CHECK(r.world.round_sim.hits.empty() != c.lands);
+        CHECK(r.world.script.relations.group_group(TriggerRelations::kShot, 3, 4) == c.lands);
+    }
+}
+
 void test_vehicle_occupant_reduction_count_cap_and_depth() {
     Rig r;
     r.world.registry.configure_pool(1, 2);
@@ -2818,6 +2874,7 @@ void test_item_callbacks_receive_geometric_section_on_both_peers() {
         world.rules.mp_session = true; world.rules.logic_authority = authority;
         world.rules.projectile_authority = authority;
         Entity shooter; shooter.kind = EntityKind::Organic; shooter.item_type = 3;
+        shooter.team = 1; // an enemy of the teamless building (D-WPN-42)
         const auto owner = world.registry.spawn(0, shooter);
         Entity seed; seed.kind = EntityKind::Building; seed.item_type = 5;
         seed.item_id = 812; seed.has_item_def = true; seed.health = 500;
@@ -2882,6 +2939,7 @@ struct PlayerVictimRig : HeapWorldFixture {
         Entity s;
         s.kind = EntityKind::Organic;
         s.item_type = 3;
+        s.team = 2; // enemies: a same-side NPC pair is a protected pair (D-WPN-42)
         s.health = 100;
         shooter = world.registry.spawn(0, s);
 
@@ -2891,7 +2949,10 @@ struct PlayerVictimRig : HeapWorldFixture {
         spawn.yaw = 90; // engine heading 0: the +X round arrives from behind
         victim = spawn_remote_player(world, spawn);
         CHECK(victim.valid());
-        if (Entity *v = world.registry.get(victim)) v->bound_radius = 1.0f;
+        if (Entity *v = world.registry.get(victim)) {
+            v->bound_radius = 1.0f;
+            v->team = 1;
+        }
         AiEntity *body = world.ai.for_handle(victim);
         CHECK(body != nullptr);
         if (body != nullptr) body->net_is_remote_peer = true;
@@ -3103,6 +3164,7 @@ void test_same_projectile_second_player_kill_latches_0x100() {
     Entity s;
     s.kind = EntityKind::Organic;
     s.item_type = 3;
+    s.team = 1; // an enemy of its teamless victims (D-WPN-42)
     s.health = 100;
     const EntityHandle shooter = world.registry.spawn(0, s);
     auto spawn_player_victim = [&](float x) {
@@ -3170,6 +3232,7 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
     Entity s;
     s.kind = EntityKind::Organic;
     s.item_type = 3;
+    s.team = 1; // an enemy of its teamless victims (D-WPN-42)
     s.health = 100;
     const EntityHandle shooter = world.registry.spawn(0, s);
     auto spawn_victim = [&](int32_t health, uint32_t flags) {
@@ -3252,6 +3315,7 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     Entity s;
     s.kind = EntityKind::Organic;
     s.item_type = 3;
+    s.team = 1; // an enemy of its teamless victims (D-WPN-42)
     s.health = 100;
     const EntityHandle shooter = world.registry.spawn(0, s);
 
@@ -3565,58 +3629,76 @@ void test_jox_tank_round_bullets_class_splashes() {
     CHECK(r.world.registry.get(bystander_h)->health == 1000 - 205);
 }
 
-int main() {
-    test_armed_expiry_detonates_only_a_kill_zone_class();
-    test_impact_producers_apply_their_own_gates();
-    test_jox_tank_round_bullets_class_splashes();
-    test_guided_round_uses_live_target_ammo_and_pool_lifetime();
-    test_projectile_indoor_terrain_gate();
-    test_item_callbacks_receive_geometric_section_on_both_peers();
-    test_projectile_stamps_burn_before_death_dispatch();
-    test_arming_dud_and_armed_damage();
-    test_missing_item_def_person_takes_no_damage();
-    test_damage_uses_retail_signed_wrap_and_ftol_cap();
-    test_nodie_and_nontransparent_damage_gates();
-    test_posed_head_zone_multiplier();
-    test_item_type_zone_domain_and_attrib_0200_sections();
-    test_shooter_damage_class_runs_after_zone_truncation();
-    test_body_armor_energy_and_impact_row();
-    test_person_hit_applies_the_surface_drag_leg();
-    test_network_oneshot_authority_and_session_gate();
-    test_visual_only_rounds_have_no_gameplay_consequences();
-    test_visual_person_proxy_keeps_wire_identity_out_of_authority();
-    test_knife_instant_kill_zone_raycast();
-    test_bullet_building_material_is_plain_plus_four();
-    test_material_15_breaks_the_building_glass_section();
-    test_entity_material_penetration();
-    test_visual_round_wire_proxy_material_decides_survival();
-    test_terrain_impact_samples_charmap_surface();
-    test_terrain_impact_emits_permanent_scorch();
-    test_terrain_stop_records_the_round();
-    test_visual_dynamic_proxy_projects_decoded_pose_geometry();
-    test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises();
-    test_visual_dynamic_proxy_excludes_shooter_self_slot();
-    test_visual_throwable_motor_sweeps_wire_proxies();
-    test_visual_infantry_proxy_joins_person_walk();
-    test_person_walk_orders_local_player_by_its_server_handle();
-    test_signed_armor_equality_and_damage_state_gates();
-    test_signed_health_subtraction_wraps_at_entity_word();
-    test_person_impact_tag_splits_on_identity_and_squad_health();
-    test_exact_one_hop_vehicle_parent_damage_routing();
-    test_zero_damage_hit_still_notifies_the_vehicle_brain();
-    test_vehicle_occupant_reduction_count_cap_and_depth();
-    test_retail_force_order_and_stock_gates();
-    test_retail_aerodynamic_drag_vectors();
-    test_round_passes_through_people_in_a_line();
-    test_consumed_hit_skips_post_sweep_forces();
-    test_move_effect_water_release_reads_pre_move_z();
-    test_move_effect_ballistic_leg_ignores_the_water_plane();
-    test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence();
-    test_round_hit_records_the_round();
-    test_round_hit_runs_the_player_waypoint_tail();
-    test_same_projectile_second_player_kill_latches_0x100();
-    test_kill_event_reads_the_pre_hit_health_and_the_dead_flag();
-    test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequences();
+struct NamedTest { const char *name; void (*fn)(); };
+static const NamedTest kTests[] = {
+    {"test_armed_expiry_detonates_only_a_kill_zone_class", test_armed_expiry_detonates_only_a_kill_zone_class},
+    {"test_impact_producers_apply_their_own_gates", test_impact_producers_apply_their_own_gates},
+    {"test_jox_tank_round_bullets_class_splashes", test_jox_tank_round_bullets_class_splashes},
+    {"test_guided_round_uses_live_target_ammo_and_pool_lifetime", test_guided_round_uses_live_target_ammo_and_pool_lifetime},
+    {"test_projectile_indoor_terrain_gate", test_projectile_indoor_terrain_gate},
+    {"test_item_callbacks_receive_geometric_section_on_both_peers", test_item_callbacks_receive_geometric_section_on_both_peers},
+    {"test_projectile_stamps_burn_before_death_dispatch", test_projectile_stamps_burn_before_death_dispatch},
+    {"test_arming_dud_and_armed_damage", test_arming_dud_and_armed_damage},
+    {"test_missing_item_def_person_takes_no_damage", test_missing_item_def_person_takes_no_damage},
+    {"test_damage_uses_retail_signed_wrap_and_ftol_cap", test_damage_uses_retail_signed_wrap_and_ftol_cap},
+    {"test_nodie_and_nontransparent_damage_gates", test_nodie_and_nontransparent_damage_gates},
+    {"test_posed_head_zone_multiplier", test_posed_head_zone_multiplier},
+    {"test_item_type_zone_domain_and_attrib_0200_sections", test_item_type_zone_domain_and_attrib_0200_sections},
+    {"test_shooter_damage_class_runs_after_zone_truncation", test_shooter_damage_class_runs_after_zone_truncation},
+    {"test_body_armor_energy_and_impact_row", test_body_armor_energy_and_impact_row},
+    {"test_person_hit_applies_the_surface_drag_leg", test_person_hit_applies_the_surface_drag_leg},
+    {"test_network_oneshot_authority_and_session_gate", test_network_oneshot_authority_and_session_gate},
+    {"test_visual_only_rounds_have_no_gameplay_consequences", test_visual_only_rounds_have_no_gameplay_consequences},
+    {"test_visual_person_proxy_keeps_wire_identity_out_of_authority", test_visual_person_proxy_keeps_wire_identity_out_of_authority},
+    {"test_knife_instant_kill_zone_raycast", test_knife_instant_kill_zone_raycast},
+    {"test_bullet_building_material_is_plain_plus_four", test_bullet_building_material_is_plain_plus_four},
+    {"test_material_15_breaks_the_building_glass_section", test_material_15_breaks_the_building_glass_section},
+    {"test_entity_material_penetration", test_entity_material_penetration},
+    {"test_visual_round_wire_proxy_material_decides_survival", test_visual_round_wire_proxy_material_decides_survival},
+    {"test_terrain_impact_samples_charmap_surface", test_terrain_impact_samples_charmap_surface},
+    {"test_terrain_impact_emits_permanent_scorch", test_terrain_impact_emits_permanent_scorch},
+    {"test_terrain_stop_records_the_round", test_terrain_stop_records_the_round},
+    {"test_visual_dynamic_proxy_projects_decoded_pose_geometry", test_visual_dynamic_proxy_projects_decoded_pose_geometry},
+    {"test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises", test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises},
+    {"test_visual_dynamic_proxy_excludes_shooter_self_slot", test_visual_dynamic_proxy_excludes_shooter_self_slot},
+    {"test_visual_throwable_motor_sweeps_wire_proxies", test_visual_throwable_motor_sweeps_wire_proxies},
+    {"test_visual_infantry_proxy_joins_person_walk", test_visual_infantry_proxy_joins_person_walk},
+    {"test_person_walk_orders_local_player_by_its_server_handle", test_person_walk_orders_local_player_by_its_server_handle},
+    {"test_signed_armor_equality_and_damage_state_gates", test_signed_armor_equality_and_damage_state_gates},
+    {"test_signed_health_subtraction_wraps_at_entity_word", test_signed_health_subtraction_wraps_at_entity_word},
+    {"test_person_impact_tag_splits_on_identity_and_squad_health", test_person_impact_tag_splits_on_identity_and_squad_health},
+    {"test_exact_one_hop_vehicle_parent_damage_routing", test_exact_one_hop_vehicle_parent_damage_routing},
+    {"test_zero_damage_hit_still_notifies_the_vehicle_brain", test_zero_damage_hit_still_notifies_the_vehicle_brain},
+    {"test_friendly_fire_gate", test_friendly_fire_gate},
+    {"test_vehicle_occupant_reduction_count_cap_and_depth", test_vehicle_occupant_reduction_count_cap_and_depth},
+    {"test_retail_force_order_and_stock_gates", test_retail_force_order_and_stock_gates},
+    {"test_retail_aerodynamic_drag_vectors", test_retail_aerodynamic_drag_vectors},
+    {"test_round_passes_through_people_in_a_line", test_round_passes_through_people_in_a_line},
+    {"test_consumed_hit_skips_post_sweep_forces", test_consumed_hit_skips_post_sweep_forces},
+    {"test_move_effect_water_release_reads_pre_move_z", test_move_effect_water_release_reads_pre_move_z},
+    {"test_move_effect_ballistic_leg_ignores_the_water_plane", test_move_effect_ballistic_leg_ignores_the_water_plane},
+    {"test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence", test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence},
+    {"test_round_hit_records_the_round", test_round_hit_records_the_round},
+    {"test_round_hit_runs_the_player_waypoint_tail", test_round_hit_runs_the_player_waypoint_tail},
+    {"test_same_projectile_second_player_kill_latches_0x100", test_same_projectile_second_player_kill_latches_0x100},
+    {"test_kill_event_reads_the_pre_hit_health_and_the_dead_flag", test_kill_event_reads_the_pre_hit_health_and_the_dead_flag},
+    {"test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequences", test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequences},
+};
+
+int main(int argc, char **argv) {
+    // `--test <name>` runs one test; `--trace` names each test before it runs
+    // (the bisect aids; the ctest row passes neither).
+    const char *only = nullptr;
+    bool trace = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--test") == 0 && i + 1 < argc) only = argv[++i];
+        else if (std::strcmp(argv[i], "--trace") == 0) trace = true;
+    }
+    for (const NamedTest &t : kTests) {
+        if (only != nullptr && std::strcmp(only, t.name) != 0) continue;
+        if (trace) { std::printf("[test] %s\n", t.name); std::fflush(stdout); }
+        t.fn();
+    }
     if (failures == 0) std::printf("projectile_combat_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

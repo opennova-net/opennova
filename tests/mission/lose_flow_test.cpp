@@ -703,22 +703,30 @@ int main(int argc, char **argv) {
 		return rc;
 	}
 
-	// NPC fire stays LIVE: the chain under test is observed through it, never
-	// with the NPCs disarmed. The scenario invites retaliation (a friendly is
-	// shot at 4 u in the open), so the player's entity carries the engine's own
-	// no-damage flag: every NPC round still flies, connects and stamps its
-	// reactions; only the damage-side zero on the player changes [orig: the
-	// Flags & 0x4000000 test in Projectile_ProcessDamageOnTarget @0x4e7fb0,
-	// the test @0x4e7ff6]. A victim
-	// that falls to that fire is retargeted, not counted (see the kill leg).
+	// THE FRIENDLY-FIRE GATE on a retail mission. Out of a session the rules
+	// word is the literal 0x4204 [orig: CNapiGameSession_InitRandomSeedOrRequest
+	// @0x51E94B..0x51E957, the +0x2C of the mission-data block that IS
+	// g_RulesFlags @0x24D1E34], whose 0x200 bit protects every same-team pair
+	// whatever the shooter [orig: Projectile_DamagePairEligible @0x4E74F0; the
+	// damage pass's early return @0x4E808F]. So the player's rounds reach a
+	// same-side person and land nothing: no health, no tally, no WAC `Lose`, no
+	// round end (confirmed live in retail 00TRa, 2026-10-03: the seated
+	// instructor takes no damage). The authored `true(bluekills) -> Lose(1)`
+	// never fires from the player's own fire (D-WPN-42).
+	//
+	// NPC fire stays LIVE: the scenario invites retaliation (a friendly is shot
+	// at 4 u in the open), so the player's entity carries the engine's own
+	// no-damage flag; only the damage-side zero on the player changes [orig: the
+	// Flags & 0x4000000 test in Projectile_ProcessDamageOnTarget @0x4e7fb0, the
+	// test @0x4e7ff6].
 	if (w::Entity *me = rig.world.registry.get(rig.world.cached.local_player))
 		me->engine_flags |= kIndestructibleFlag;
 
 	Run run{rig};
-	const w::EntityHandle player = rig.world.cached.local_player;
 	std::set<uint16_t> blacklist;
 	int target_team = -1;
-	bool killed = false;
+	int on_victim_total = 0;
+	int victims_tried = 0;
 	// The by-player bucket the WAC predicate reads for the locked victim's team
 	// [orig: Score_TallyKillByLocalPlayer @0x4fd160 — victim+354 0 = green,
 	//  1 = blue, else the enemy count].
@@ -727,24 +735,22 @@ int main(int argc, char **argv) {
 		return team == 0 ? ks.greenkills_by_player
 				: team == 1 ? ks.bluekills_by_player : ks.enemy_kills_by_player();
 	};
-	while (run.seconds() < kMaxMissionSeconds && !killed) {
+	const int32_t player_team = [&]() -> int32_t {
+		const w::Entity *me = rig.world.registry.get(rig.world.cached.local_player);
+		return me != nullptr ? me->team : -1;
+	}();
+	while (run.seconds() < kMaxMissionSeconds && on_victim_total < kShotsPerVictim && victims_tried < 3) {
 		const Victim npc = pick_victim(rig, blacklist, victim_team);
 		if (npc.ai == nullptr) {
-			// Every candidate is retired for now: a mission with few lose-team
-			// people (00TRa has two, one of them the seated instructor) gets its
-			// retired victims back after a pause — they walk, and a line of fire
-			// a truck hull blocked opens again.
 			run.tick(kTicksPerSecond * 10);
-			if (!blacklist.empty()) {
-				std::printf("lose-flow: t=%ds every candidate retired — revisiting %zu of them\n", run.seconds(),
-						blacklist.size());
-				blacklist.clear();
-			}
+			if (!blacklist.empty()) blacklist.clear();
 			continue;
 		}
 		const w::EntityHandle target = npc.ai->handle;
 		target_team = npc.ai->team;
 		const int victim_net_id = int(npc.entity->net_id);
+		if (!expect(target_team == player_team, "the locked victim is on the player's own side"))
+			return 1;
 		w::Vec3 torso;
 		if (!stage_shot(run, target, torso)) {
 			std::printf("lose-flow: net=%d team=%d could not be staged (no open line of fire) — retargeting\n",
@@ -752,58 +758,20 @@ int main(int argc, char **argv) {
 			blacklist.insert(target.packed);
 			continue;
 		}
-		// Lock, then tap-fire verified shots; the victim keeps its authored
-		// health and dies to the rounds' own damage.
+		++victims_tried;
 		const int32_t tally_at_lock = player_tally(target_team);
-		if (const w::Entity *locked = rig.world.registry.get(target))
-			std::printf("lose-flow: target lock net=%d team=%d flags=0x%x\n", victim_net_id, target_team,
-					unsigned(locked->engine_flags));
+		const w::Entity *locked = rig.world.registry.get(target);
+		const int32_t hp_at_lock = locked != nullptr ? locked->health : -1;
+		std::printf("lose-flow: target lock net=%d team=%d hp=%d flags=0x%x\n", victim_net_id, target_team,
+				hp_at_lock, locked != nullptr ? unsigned(locked->engine_flags) : 0u);
 
 		int shots = 0;
-		bool round_on_victim = false; // one of the player's rounds stopped on the locked victim
-		// The locked victim is down: 0 = the player's kill down to a staged
-		// round, 1 = a stray credit (the test fails), 2 = retarget.
-		const auto settle_victim = [&]() -> int {
-			// Only a kill the host credits to the local player feeds the WAC
-			// (the by-player bucket, drained from the death record on the
-			// listen frame); a victim that fell to live NPC fire lands in the
-			// by-others family instead and is retargeted, never counted
-			// [orig: Score_TallyKillByLocalPlayer @0x4fd160 vs
-			//  Score_TallyKillByOthers @0x4fd300].
-			for (int t = 0; t < kTicksPerSecond && player_tally(target_team) == tally_at_lock; ++t) run.tick();
-			const bool credited = player_tally(target_team) > tally_at_lock;
-			if (credited && round_on_victim) {
-				killed = true;
-				std::printf("lose-flow: KILLED t=%ds team-%d person net=%d down to the staged round\n", run.seconds(),
-						target_team, victim_net_id);
-				return 0;
-			}
-			if (credited) {
-				// A credit without the aimed round on the victim is the stray
-				// dependency this test exists to refuse.
-				expect(false, "the kill credit came from a round that did not stop on the locked victim");
-				return 1;
-			}
-			std::printf("lose-flow: net=%d fell to another shooter (tally unchanged) — retargeting\n", victim_net_id);
-			blacklist.insert(target.packed);
-			return 2;
-		};
 		const int lock_ticks = run.ticks;
 		while (run.seconds() < kMaxMissionSeconds && shots < kShotsPerVictim &&
 				run.ticks - lock_ticks < kSecondsPerVictim * kTicksPerSecond) {
 			const w::AiEntity *tai = rig.world.ai.for_handle(target);
 			const w::Entity *tent = rig.world.registry.get(target);
-			if (tai == nullptr || tent == nullptr || !tent->alive || tent->health <= 0) {
-				// A tap that stopped on the victim can land its kill after the
-				// tap's resolve window, between two taps. Settle it here: the
-				// Lose that kill raises puts up the SP epilog screen, whose
-				// reduced entity update steps no projectile, so no later tap
-				// can land. [orig: Entity_UpdateAllEntities @0x4C211D..0x4C2128]
-				if (round_on_victim && settle_victim() == 1) return 1;
-				break;
-			}
-			// Re-verify before every tap (the victim walks); re-stage when the
-			// line of fire no longer holds or the victim left the envelope.
+			if (tai == nullptr || tent == nullptr || !tent->alive || tent->health <= 0) break;
 			if (!victim_torso(rig, *tai, torso)) break;
 			w::Vec3 origin = local_round_origin(rig);
 			if (testrig::distance(origin, torso) > kRestageDistance || !line_of_fire(rig, origin, torso, target).ok()) {
@@ -817,74 +785,46 @@ int main(int argc, char **argv) {
 			++shots;
 			const uint32_t fire_tick = rig.world.logic_tick;
 			w::RoundDebugEvent stop;
-			stop.tick = fire_tick > 0 ? fire_tick - 1 : 0; // "none landed yet"
+			stop.tick = fire_tick > 0 ? fire_tick - 1 : 0;
 			bool on_victim = false;
 			for (int t = 0; t < kShotResolveTicks && !on_victim; ++t) {
 				run.tick();
 				on_victim = scan_stops(rig, fire_tick, target, stop);
 			}
-			round_on_victim = round_on_victim || on_victim;
 			tent = rig.world.registry.get(target);
-			const bool stopped = stop.tick >= fire_tick;
 			const int hp = tent != nullptr ? tent->health : -1;
-			std::printf("lose-flow: shot %d t=%ds stop=%s kind=%d entity=0x%x hit=(%.1f,%.1f,%.1f) on_victim=%d target hp=%d alive=%d\n",
-					shots, run.seconds(), stopped ? "yes" : "NO", stopped ? int(stop.kind) : -1,
-					stopped ? unsigned(stop.entity) : 0u, stop.hit.x, stop.hit.y, stop.hit.z, int(on_victim), hp,
-					tent != nullptr ? int(tent->alive) : 0);
-			if (tent == nullptr || !tent->alive || hp <= 0) {
-				if (settle_victim() == 1) return 1;
-				break;
+			std::printf("lose-flow: shot %d t=%ds stop=%s on_victim=%d target hp=%d alive=%d\n", shots, run.seconds(),
+					stop.tick >= fire_tick ? "yes" : "NO", int(on_victim), hp, tent != nullptr ? int(tent->alive) : 0);
+			if (on_victim) {
+				++on_victim_total;
+				// The round stopped on the victim's own geometry and changed nothing.
+				expect(hp == hp_at_lock, "a same-side victim keeps its health through the player's hit");
+				expect(tent != nullptr && tent->alive, "a same-side victim stays alive through the player's hit");
 			}
-			if (on_victim) std::printf("lose-flow: HIT net=%d survived at hp=%d — firing again\n", victim_net_id, hp);
 		}
-		if (!killed && !blacklist.count(target.packed)) {
-			std::printf("lose-flow: stall on net=%d after %d shots — retargeting\n", victim_net_id, shots);
-			blacklist.insert(target.packed);
-		}
-		rig.local.set_weapon_input(false, false, false);
+		expect(player_tally(target_team) == tally_at_lock, "the player's tally never moves on a same-side victim");
+		if (on_victim_total < kShotsPerVictim) blacklist.insert(target.packed);
 	}
-	if (!expect(killed, "a candidate victim was killed by the staged round before the mission budget")) return 1;
+	if (!expect(on_victim_total >= 1, "at least one of the player's rounds stopped on a same-side victim")) return 1;
 
-	// --- Outcome: the tally, the WAC lose, the round end. The WAC VM runs every
-	// 62nd tick, so the lose lands within a mission-second or two.
-	const bool green = target_team == 0;
-	const char *expected_key = green ? "STRMISC_KILLEDGREEN" : "STRMISC_KILLEDBLUE";
-	bool ended = false;
-	for (int i = 0; i < 10 && !ended; ++i) {
-		run.tick(kTicksPerSecond);
-		const w::MatchOutcome &oc = rig.world.match.outcome();
-		std::printf("lose-flow: outcome t=%ds ended=%d winner=%d greenkills=%d bluekills=%d\n", run.seconds(), int(oc.ended),
-				oc.winner_team, rig.world.kill_stats.greenkills_by_player, rig.world.kill_stats.bluekills_by_player);
-		if (oc.ended) {
-			ended = true;
-			expect(oc.winner_team == 2, "the round ended with winner 2 (lose)");
-			expect((green ? rig.world.kill_stats.greenkills_by_player : rig.world.kill_stats.bluekills_by_player) >= 1,
-					"the kill tally counted the person");
-		}
-	}
-	if (!expect(ended, "the round ended after killing a lose-team person")) return 1;
-	// The SP epilog: the lose cine raises the end-of-round screen within two
-	// frames and the script never runs again, so the WAC's `Lose` (its chat line
-	// and banner) lands exactly once however long the screen stays up
-	// [orig: the WAC tick gate @0x51d8bd on g_EpilogScreenActive, raised by
-	//  the lose screen build @0x57450c].
-	run.tick(kTicksPerSecond * 4);
+	// --- Outcome: nothing. The WAC VM runs every 62nd tick; give the predicate
+	// two seconds, then read the effects the host raised.
+	run.tick(kTicksPerSecond * 2);
+	const w::MatchOutcome &oc = rig.world.match.outcome();
+	std::printf("lose-flow: outcome t=%ds ended=%d winner=%d greenkills=%d bluekills=%d on_victim=%d\n", run.seconds(),
+			int(oc.ended), oc.winner_team, rig.world.kill_stats.greenkills_by_player,
+			rig.world.kill_stats.bluekills_by_player, on_victim_total);
+	expect(!oc.ended, "the round stays live: no same-side kill reaches the WAC's Lose");
 	int lose_count = 0, round_end_count = 0;
-	bool saw_lose = false, saw_round_end = false;
 	for (const w::Effect &e : run.seen) {
 		if (e.kind == "lose") ++lose_count;
 		if (e.kind == "round_end") ++round_end_count;
-		if (e.kind == "lose" && e.str == expected_key) saw_lose = true;
-		if (e.kind == "round_end" && e.a == 2) saw_round_end = true;
 	}
-	expect(saw_lose, "the lose effect carries the witnessed Misc gametext key");
-	expect(saw_round_end, "the round_end host effect names winner 2");
-	std::printf("lose-flow: %d lose / %d round_end effect(s) over the four seconds after the end\n", lose_count,
-			round_end_count);
-	expect(lose_count == 1, "the WAC Lose ran exactly once: the SP end screen halts the script");
-	expect(round_end_count == 1, "the round ended exactly once");
+	expect(lose_count == 0, "no lose effect");
+	expect(round_end_count == 0, "no round_end effect");
 	if (failures == 0)
-		std::printf("lose_flow %s: team-%d person kill -> %s -> Lose -> round end (winner 2) in %d mission seconds\n",
-				bms.c_str(), target_team, green ? "greenkills" : "bluekills", run.seconds());
+		std::printf("lose_flow %s: %d of the player's rounds stopped on team-%d people and landed nothing (the "
+				"friendly-fire gate) in %d mission seconds\n",
+				bms.c_str(), on_victim_total, target_team, run.seconds());
 	return failures == 0 ? 0 : 1;
 }

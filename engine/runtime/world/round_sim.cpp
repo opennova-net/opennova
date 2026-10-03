@@ -19,6 +19,7 @@
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/damage_pair.h>
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/collision_force.h>
@@ -1479,6 +1480,13 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             if ((target->item_attrib & kItemAttribNoDie) != 0 &&
                 damage >= target->health)
                 damage = target->health - 1;
+            // The friendly-fire gate, asked of every owned round on both peers:
+            // a protected pair leaves here with nothing landed — no relations,
+            // no health write, no hit record, no class callback, no feedback
+            // [orig: Projectile_ProcessDamageOnTarget @0x4e8081..0x4e808f ->
+            //  Projectile_DamagePairEligible @0x4E74F0, the jump to the return
+            //  @0x4e808f].
+            if (shooter != nullptr && damage_pair_protected(world, *target, shooter)) return;
             const bool target_was_alive =
                 target->health > 0 && target->alive &&
                 (target->flags & kEntityFlagDead) == 0 &&

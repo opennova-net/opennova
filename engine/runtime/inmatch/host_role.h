@@ -124,7 +124,7 @@ public:
 	void observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) override;
 
 private:
-	void reset_state(const inmatch::GameConfig &config, bool serve_and_play);
+	void reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session);
 	void make_client_runtime(uint32_t game_type);
 
 	RoleKind kind_ = RoleKind::ListenHost;
