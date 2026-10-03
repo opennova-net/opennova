@@ -12,7 +12,9 @@
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/model/diagnostic.h>
+#include <formats/pff/pff.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
 #include <editor/project_build/build_run.h>
@@ -81,14 +83,45 @@ bool copy_to(const fs::path &from, const fs::path &to, std::string &reason) {
 	return !ec;
 }
 
-// The files the game install's game may write beside itself (its configuration, its saves, the
-// NovaWorld string tables, its logs): copied into the run directory, so its writes land there and
-// never in the build. Every other file of the build (an archive, a video, a music bank, which the
-// game only reads) is linked, copied where the file system will not link it (S13 A8).
-bool game_may_write(const std::string &name) {
-	for (const char *extension : {".cfg", ".sav", ".coo", ".txt"})
+// The files the game only reads: its archives, its videos, its music banks, its dialog banks and the
+// NovaWorld screens, which it opens through the archives' and the streams' readers alone. Only these
+// are linked into a run directory (copied where the file system will not link them, S13 A8). Every
+// other file is one the game may write beside itself, and is copied fresh into the run directory
+// every run, never linked and never kept in a cache: a write through a link lands in the file it
+// names, the install's, the build's or the cache's. The game writes its configuration [orig:
+// Game_SaveConfig @ 0x54c4af, "game.cfg" "w"], its saves [orig: PlayerProfile_SaveToFiles @ 0x54be00],
+// the NovaWorld cookie jar over the install's own file [orig: sub_63BA60 @ 0x63ba9a "wb", from
+// Menu_TeardownShellAndCloseBinkVideos @ 0x54e4aa with "nw_cdata.coo"], `score.ini` when it has none
+// [orig: GameType_CreateDefaultSettings @ 0x52f528 -> ScoreConfig_SaveFile @ 0x52cdd0], and its logs
+// and lists [orig: ErrorLog_WriteTimestamped @ 0x53c6e7 "_errlog.txt" "a"; BanList_SaveToFile
+// @ 0x4fdda3; HighScore_SaveToFile @ 0x56310b; CAdminServer_Construct @ 0x402c84 "admin_log.txt"].
+bool game_only_reads(const std::string &name) {
+	for (const char *extension : {".pff", ".bik", ".sbf", ".lwf", ".mnx"})
 		if (strutil::ends_with_icase(name, extension)) return true;
 	return false;
+}
+
+bool game_may_write(const std::string &name) {
+	return !game_only_reads(name);
+}
+
+// The install's own files beside the game that it reads by name from its folder whatever the
+// expansion, staged (copied: game_may_write) where the build has none of its own, as a player's
+// install holds them: the score table [orig: ScoreConfig_LoadFile @ 0x52d8a0, @ 0x52da99], the early
+// error text [orig: Game_ShowEarlyError @ 0x4a68c0] and the admin server's configuration [orig:
+// Game_InitSubsystems @ 0x4a72b8 -> CAdminServer_LoadConfig @ 0x406d80].
+constexpr const char *kInstallRootReads[] = {"score.ini", "earlyerr.txt", "admin.cfg"};
+
+// The install's file `name`, as its folder spells it (found without case, as the game's file calls
+// find it); "" when the folder has none.
+std::string install_file_named(const std::string &install, const char *name) {
+	std::error_code ec;
+	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(install), ec)) {
+		std::error_code kind;
+		const std::string found = utf8_of(entry.path().filename());
+		if (entry.is_regular_file(kind) && strutil::iequals(found, name)) return found;
+	}
+	return std::string();
 }
 
 // The saves the game keeps beside itself, read at boot from its working directory and written
@@ -106,11 +139,16 @@ int64_t last_write_of(const std::string &path) {
 }
 
 // The install's files a run's copy cache keeps for it, by name: the size and last write each was
-// copied at.
+// copied at. A copy is trusted by those alone only when the install file's last write had settled when
+// it was made (io::file_stamp_settled, git's racy rule: a rewrite of the same size in the same clock tick
+// keeps the stamp); one that had not is copied again the next run. The cache keeps what a run used, and
+// the current install's alone: every other copy, and every other install's folder, is removed.
 struct InstallCopies {
 	std::string dir;  // copy_cache/<the install's key>
 	io::JsonValue record = io::JsonValue::make_object();
 	bool changed = false;
+	int64_t pass_began = io::file_clock_now_ticks();
+	std::vector<std::string> used; // the names (lowercase) a run linked from the cache
 };
 
 // The folder of `copy_cache` an install's copies go in: one per install, named by its path's hash.
@@ -119,12 +157,14 @@ std::string install_copy_dir(const std::string &copy_cache, const std::string &i
 	return join_path(copy_cache, io::hex64(io::fnv1a64_bytes(io::kFnv1a64Offset, key.data(), key.size())));
 }
 
-// The install's file `name` at `to` in the run directory: linked, else (another volume) linked from
-// its copy in the copy cache, copied there first when the cache has none of its size and last
+// The install's file `name` at `to` in the run directory: one the game may write copied from the
+// install, fresh, never linked or cached; one it only reads linked, else (another volume) linked
+// from its copy in the copy cache, copied there first when the cache has none of its size and last
 // write, else copied. False with the OS reason.
 bool stage_install_file(const fs::path &install, const std::string &name, const fs::path &to, InstallCopies &copies,
                         const FileLink &link, std::string &reason) {
 	const std::string from = utf8_of(install / path_of(name));
+	if (game_may_write(name)) return copy_to(path_of(from), to, reason);
 	if (link(from, utf8_of(to), reason)) return true;
 	if (copies.dir.empty()) return copy_to(path_of(from), to, reason);
 	std::error_code ec;
@@ -149,10 +189,37 @@ bool stage_install_file(const fs::path &install, const std::string &name, const 
 		io::JsonValue entry = io::JsonValue::make_object();
 		entry.set("size", io::JsonValue::make_number(double(size)));
 		entry.set("modified", io::JsonValue::make_string(io::hex64(uint64_t(written))));
-		copies.record.set(strutil::to_lower(name), std::move(entry));
+		if (io::file_stamp_settled(written, copies.pass_began)) copies.record.set(strutil::to_lower(name), std::move(entry));
+		else copies.record.set(strutil::to_lower(name), io::JsonValue::make_null()); // not trusted next run
 		copies.changed = true;
 	}
+	copies.used.push_back(strutil::to_lower(name));
 	return link(cached, utf8_of(to), reason) || copy_to(path_of(cached), to, reason);
+}
+
+// The copy cache pruned to what this run used of the current install (InstallCopies).
+void prune_install_copies(const std::string &copy_cache, InstallCopies &copies) {
+	std::error_code ec;
+	const fs::path current = path_of(copies.dir).filename();
+	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(copy_cache), ec)) {
+		std::error_code removed;
+		if (entry.path().filename() != current) fs::remove_all(entry.path(), removed);
+	}
+	io::JsonValue kept = io::JsonValue::make_object();
+	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(copies.dir), ec)) {
+		const std::string name = strutil::to_lower(utf8_of(entry.path().filename()));
+		if (name == kInstallCopyRecordFileName) continue;
+		if (std::find(copies.used.begin(), copies.used.end(), name) != copies.used.end()) {
+			const io::JsonValue *was = copies.record.get(name);
+			if (was && was->is_object()) kept.set(name, *was);
+			continue;
+		}
+		std::error_code removed;
+		fs::remove(entry.path(), removed);
+		copies.changed = true;
+	}
+	if (copies.record.object.size() != kept.object.size()) copies.changed = true;
+	copies.record = std::move(kept);
 }
 
 // The install's boot archives, as its root spells them (the boot table's names, found without case
@@ -215,9 +282,39 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 			                     "Could not stage " + from + " in " + run_dir + ": " + reason);
 		return ok;
 	};
-	// The install's base game: its archives and the loose files it ships beside them.
+	// The names the expansion's archives hold: under /d (the stock game's Play) the file system's front
+	// door reads the expansion's folder, then the working directory, then the archives [orig:
+	// FileSystem_OpenFile @ 0x75b1c0, the loose walk @ 0x75b203..0x75b27b before the archives, run
+	// when searchLooseFirst is set; /d sets it @ 0x4a6fac], so an install's root copy of a file the
+	// expansion packs (a NovaWorld screen it edits) would stand over the packed edit a player's launch,
+	// without /d, reads. Such a root copy is left out of the run directory.
+	std::vector<std::string> packed;
+	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(utf8_of(built)), ec)) {
+		std::error_code kind;
+		if (!entry.is_regular_file(kind) || !strutil::ends_with_icase(utf8_of(entry.path().filename()), ".pff")) continue;
+		pff::PffArchive archive{};
+		if (pff::pff_open(&archive, utf8_of(entry.path()).c_str()) != 0) continue;
+		for (uint32_t i = 0; i < archive.entry_count; ++i) {
+			char name[32];
+			pff::pff_norm_name(archive.entries[i].filename, sizeof(archive.entries[i].filename), name, sizeof(name));
+			packed.push_back(name);
+		}
+		pff::pff_close(&archive);
+	}
+	const auto packs = [&packed](const std::string &name) {
+		const std::string wanted = normalized_logical_name(name);
+		return std::any_of(packed.begin(), packed.end(),
+		                   [&wanted](const std::string &held) { return normalized_logical_name(held) == wanted; });
+	};
+	// The install's base game: its archives and the loose files it ships beside them, but a file the
+	// expansion packs; and the files it reads from its folder by name (kInstallRootReads), copied.
 	std::vector<std::string> base = archives;
-	for (const std::string &loose : list_install_loose_files(install)) base.push_back(loose);
+	for (const std::string &loose : list_install_loose_files(install))
+		if (!packs(loose)) base.push_back(loose);
+	for (const char *read : kInstallRootReads) {
+		const std::string found = install_file_named(install, read);
+		if (!found.empty()) base.push_back(found);
+	}
 	bool ok = true;
 	for (const std::string &name : base) {
 		std::string reason;
@@ -225,6 +322,7 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 		            utf8_of(install_root / path_of(name)), reason);
 		if (!ok) break;
 	}
+	if (ok && !copy_cache.empty()) prune_install_copies(copy_cache, copies);
 	if (copies.changed) {
 		std::string message;
 		write_file_atomic(join_path(copies.dir, kInstallCopyRecordFileName), io::json_write(copies.record), message);
@@ -334,6 +432,15 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 		                             [save](const std::string &name) { return strutil::to_lower(name) == save; });
 		if (!own && fs::is_regular_file(system_path(utf8_of(retail / save)), ec)) saves.push_back(save);
 	}
+	// A standalone build's game beside the install's own files it reads by name where the build has none
+	// of its own, as a player's install holds them (an expansion's run stages them with its base game).
+	if (expansion.empty())
+		for (const char *read : kInstallRootReads) {
+			const bool own = std::any_of(built.begin(), built.end(),
+			                             [read](const std::string &name) { return strutil::iequals(name, read); });
+			const std::string found = install_file_named(retail_directory, read);
+			if (!own && !found.empty()) saves.push_back(found);
+		}
 	// An expansion's: the install's base game and the build's expansion folder.
 	if (!expansion.empty() && !prepare_expansion_run(retail_directory, build_dir, expansion, run_dir, copy_cache, error))
 		return false;
