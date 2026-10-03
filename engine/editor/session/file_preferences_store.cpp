@@ -16,7 +16,7 @@ namespace opennova::editor {
 bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	const std::string &path = path_;
 	std::error_code ec;
-	if (!fs::exists(path, ec)) {
+	if (!fs::exists(system_path(path), ec)) {
 		out = Preferences();
 		return true;
 	}
@@ -70,7 +70,7 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 	for (const std::string &root : settings.recent_projects) recent.push(io::JsonValue::make_string(root));
 	json.set("recent_projects", std::move(recent));
 	std::string io_error;
-	if (!ensure_directory(fs::path(path).parent_path().generic_string(), io_error) ||
+	if (!ensure_directory(utf8_of(path_of(path).parent_path()), io_error) ||
 	    !write_file_atomic(path, io::json_write(json), io_error)) {
 		error = make_finding(CoreFinding::EditorSettingsWrite, DiagnosticSeverity::Error, io_error);
 		return false;
