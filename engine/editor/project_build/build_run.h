@@ -80,6 +80,9 @@ struct BuildReport {
 	bool refused = false;
 	std::string build_id;
 	std::string build_dir;               // the published directory (empty on failure)
+	// The expansion the build made (BuildTarget::expansion; "" for the standalone game), which Play
+	// runs with /exp (ADR 0046 S16).
+	std::string expansion;
 	bool reused_existing = false;        // the same content was already built
 	std::vector<std::string> archives_written;
 	std::vector<std::string> archives_reused; // the last good build's, its content unchanged

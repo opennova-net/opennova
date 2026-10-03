@@ -82,6 +82,9 @@ struct ProjectPaths {
 	// logical name (the game install as the game is served it, which the game's own data's fold validates
 	// as a project of its own: session/original_files.h).
 	std::shared_ptr<const FileSource> files;
+	// The game install's files an expansion's Play copied where they could not be linked into its run
+	// directory (another volume), a folder per install, kept for the next (prepare_expansion_run).
+	std::string install_copy_dir;
 
 	static ProjectPaths for_root(const std::string &root);
 	// The project-relative export output resolved against the root.

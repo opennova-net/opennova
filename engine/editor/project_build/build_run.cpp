@@ -417,6 +417,7 @@ BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protec
 		plan_(std::move(plan)), output_root_(std::move(output_root)), protected_dirs_(std::move(protected_dirs)),
 		streams_(std::make_unique<Streams>()) {
 	streams_->run = this;
+	report_.expansion = plan_.target.expansion;
 	size_t base = 0;
 	uint64_t bytes = 0;
 	for (const BuildArchive &archive : plan_.archives) {

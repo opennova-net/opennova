@@ -210,8 +210,13 @@ void PlayController::start(const std::string &mission) {
 		core_.touch(ViewConcern::Output);
 		return;
 	}
+	// An expansion's build plays over the game install, with /exp (ADR 0046 S16): its run directory
+	// holds the install's base game and the build's expansion folder (prepare_expansion_run), for the
+	// stock game and the runtime alike.
+	const std::string &expansion = view_.activity.last_build->expansion;
+	const std::string &copy_cache = core_.paths().install_copy_dir;
 	if (in_install) {
-		if (!prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error)) {
+		if (!prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error, expansion, copy_cache)) {
 			core_.report(error);
 			view_.activity.status = "The game install could not be prepared; see Problems.";
 			core_.touch(ViewConcern::Output);
@@ -221,12 +226,19 @@ void PlayController::start(const std::string &mission) {
 		// build's mission is listed.
 		if (!in_mission.empty()) core_.note("The game install starts at its menu: choose " + in_mission + " there.");
 	} else {
+		if (!expansion.empty() &&
+		    !prepare_expansion_run(core_.game_install(), build_dir, expansion, run_dir, copy_cache, error)) {
+			core_.report(error);
+			view_.activity.status = "The expansion's run directory could not be prepared; see Problems.";
+			core_.touch(ViewConcern::Output);
+			return;
+		}
 		plan = launcher.source_run
 				? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir, run_dir,
 						  view_.project.document->target_game, launcher.mcp_port, in_mission,
-						  launcher.engine_args)
+						  launcher.engine_args, expansion)
 				: make_play_launch_plan(executable, build_dir, run_dir, view_.project.document->target_game,
-						  launcher.mcp_port, in_mission, launcher.engine_args);
+						  launcher.mcp_port, in_mission, launcher.engine_args, expansion);
 	}
 	// The run directory is new (emptied), so the tail starts clean.
 	game_log_file_ = plan.log_file;
