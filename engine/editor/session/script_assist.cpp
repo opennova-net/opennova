@@ -343,10 +343,14 @@ void entities(const SessionView &view, const TextDocument &script, const std::st
 			if (ssn) found.emplace_back(*ssn, entity_words(view, script, *ssn));
 		}
 	}
-	for (const auto &[ssn, words] : found) {
-		const std::string insert = prefix + std::to_string(ssn);
-		if (wanted(typed, insert, words)) add(out, std::to_string(ssn) + "  " + words, insert, "entity", words);
-	}
+	// Those whose SSN starts with what is typed first, then those whose words hold it.
+	for (int pass = 0; pass < 2; ++pass)
+		for (const auto &[ssn, words] : found) {
+			const std::string insert = prefix + std::to_string(ssn);
+			const bool by_number = typed.empty() || starts_with_nocase(insert, typed);
+			if (pass == 0 ? by_number : !by_number && wanted(typed, insert, words))
+				add(out, std::to_string(ssn) + "  " + words, insert, "entity", words);
+		}
 }
 
 void areas(const SessionView &view, const TextDocument &script, const std::string &typed, ScriptCompletions &out) {

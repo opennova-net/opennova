@@ -134,6 +134,18 @@ int test_assist() {
 	}
 	completions = script_completions(view, *script, 8, 16);
 	TEST_EXPECT(item(completions, std::to_string(walker)) != nullptr);
+	// A typed number: the SSNs it starts first, then the entities whose words hold it.
+	const std::string digit = std::to_string(walker).substr(0, 1);
+	const std::string numbered = "IF SSNdead " + digit;
+	completions = script_completions(view, *script, 8, numbered.size() + 1, &numbered);
+	TEST_EXPECT(!completions.items.empty() && completions.items[0].insert.rfind(digit, 0) == 0);
+	bool words_after = true, seen_words = false;
+	for (const ScriptCompletion &each : completions.items) {
+		const bool by_number = each.insert.rfind(digit, 0) == 0;
+		if (!by_number) seen_words = true;
+		else if (seen_words) words_after = false;
+	}
+	TEST_EXPECT(words_after);
 	// The number written: its words, and where it is defined.
 	{
 		Diagnostic error;

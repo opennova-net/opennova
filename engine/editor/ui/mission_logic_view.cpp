@@ -39,6 +39,7 @@ public:
 	ViewNames(const ViewNames &) = delete;
 	ViewNames &operator=(const ViewNames &) = delete;
 	const MissionNames &operator*() const { return *names_; }
+	const NameSource *source() const { return source_ ? &*source_ : nullptr; }
 
 private:
 	std::optional<GraphNameSource> source_;
@@ -93,7 +94,7 @@ void raise(Workspace &workspace, const Document &document, bool ok, std::vector<
 }
 
 // The events of the mission in a popup's body, each by its sentence, filtered: the one chosen.
-NodeId event_menu(const MissionDocument &mission, NodeId except) {
+NodeId event_menu(const MissionDocument &mission, const ViewNames &names, NodeId except) {
 	const float em = ImGui::GetFontSize();
 	ui_kit::filter_box("##events_filter", g_events_filter, sizeof(g_events_filter), "Find an event", em * 26.0f);
 	NodeId chosen = 0;
@@ -102,7 +103,8 @@ NodeId event_menu(const MissionDocument &mission, NodeId except) {
 		for (const Node *row : mission.rows_of(MissionKind::Event)) {
 			++index;
 			if (row->id == except) continue;
-			const std::string words = "Event " + std::to_string(index) + ": " + mission.record_title({row->id, row->kind, 0});
+			const std::string words =
+			        "Event " + std::to_string(index) + ": " + mission_record_label(mission, {row->id, row->kind, 0}, names.source());
 			if (g_events_filter[0] && !window_requests::matches(words, g_events_filter)) continue;
 			ImGui::PushID(static_cast<int>(row->id));
 			if (ImGui::Selectable(ui_kit::fit(words, ImGui::GetContentRegionAvail().x).c_str())) chosen = row->id;
@@ -120,8 +122,8 @@ NodeId event_menu(const MissionDocument &mission, NodeId except) {
 
 // A trigger's or an action's tools: Up, Down, Move to another event (a picker of the events by their
 // sentences), Remove; on `row`, or a context menu's items (`menu`).
-void record_tools(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record, size_t index, size_t count,
-                  bool editable) {
+void record_tools(Workspace &workspace, const MissionDocument &mission, const ViewNames &names, const NodeAddress &record,
+                  size_t index, size_t count, bool editable) {
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Up", editable && index > 0, index > 0 ? "Moves it before the one above it." : "It is the first.", true))
 		window_requests::edit(workspace, mission, EditOperation::Move, record, index - 1);
@@ -131,7 +133,7 @@ void record_tools(Workspace &workspace, const MissionDocument &mission, const No
 	if (ui_kit::tool(row, "Move to event...", editable, "Moves it to the end of another event's list (one undo step).", true))
 		ImGui::OpenPopup("move_to");
 	if (ImGui::BeginPopup("move_to")) {
-		if (const NodeId to = event_menu(mission, record.row)) {
+		if (const NodeId to = event_menu(mission, names, record.row)) {
 			std::vector<Edit> edits;
 			std::string refusal;
 			const bool ok = logic_move_edits(mission, record, to, SIZE_MAX, edits, refusal);
@@ -184,8 +186,8 @@ void flag_box(Workspace &workspace, const MissionDocument &mission, const NodeAd
 // An event's list of triggers or actions: its heading with Add (by type, off with why where the event
 // holds the most it holds), then each record in words, a click selecting it, its tools in its context
 // menu.
-void logic_list(Workspace &workspace, const MissionDocument &mission, const LogicEventForm &form, bool actions,
-                bool editable) {
+void logic_list(Workspace &workspace, const MissionDocument &mission, const LogicEventForm &form, const ViewNames &names,
+                bool actions, bool editable) {
 	const NodeKind kind = k(actions ? MissionKind::Action : MissionKind::Trigger);
 	std::vector<NodeId> ids;
 	for (const Document::Collection &collection : mission.collections_of(form.event))
@@ -217,13 +219,13 @@ void logic_list(Workspace &workspace, const MissionDocument &mission, const Logi
 	for (size_t i = 0; i < ids.size(); ++i) {
 		const NodeAddress address{form.event.row, kind, ids[i]};
 		ImGui::PushID(static_cast<int>(ids[i]));
-		const std::string words = std::to_string(i + 1) + ". " + mission.record_title(address);
+		const std::string words = std::to_string(i + 1) + ". " + mission_record_label(mission, address, names.source());
 		if (ImGui::Selectable(ui_kit::fit(words, ImGui::GetContentRegionAvail().x).c_str(),
 		                      view.documents.selection.holds(address)))
 			window_requests::select(workspace, mission, address);
 		ui_kit::tooltip(words + "\nRight-click: move it, or remove it.");
 		if (ImGui::BeginPopupContextItem("tools")) {
-			record_tools(workspace, mission, address, i, ids.size(), editable);
+			record_tools(workspace, mission, names, address, i, ids.size(), editable);
 			ImGui::EndPopup();
 		}
 		ImGui::PopID();
@@ -252,8 +254,8 @@ void event_form(Workspace &workspace, const MissionDocument &mission, NodeId eve
 	if (form.repeats)
 		steps_field(workspace, mission, form.event, "Check again after", "reset_after", form.repeat, form.most_steps, steps_tip);
 	ImGui::EndDisabled();
-	logic_list(workspace, mission, form, false, editable);
-	logic_list(workspace, mission, form, true, editable);
+	logic_list(workspace, mission, form, names, false, editable);
+	logic_list(workspace, mission, form, names, true, editable);
 }
 
 void record_form(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record, InspectorTaken &taken,
@@ -338,7 +340,7 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 		ImGui::TextWrapped("It holds values its type does not read (shown below, marked ignored).");
 		ImGui::PopStyleColor();
 	}
-	record_tools(workspace, mission, record, form.index, form.count, editable);
+	record_tools(workspace, mission, names, record, form.index, form.count, editable);
 	ImGui::Separator();
 }
 
