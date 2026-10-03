@@ -719,7 +719,7 @@ its script device, a mission's 3D view), kept by the session while the document 
 open: one per document and kind. Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
 picture with the outline and the Inspector beside it: a mission's, for which the Preview window steps
-aside while that document is active, so the picture has the centre);
+aside while that document is active and it has nothing to show, so the picture has the centre);
 a document type is shown by one Main kind at most and fed by one Preview kind at most (a mission has
 its 3D view alone; its top-down look is a camera command of that view, `top`, not a map). Its state (the size its device draws at where no
 canvas sizes the picture, the kind's options and camera) changes by a SetViewport request, every

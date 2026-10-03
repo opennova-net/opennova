@@ -34,6 +34,7 @@ PreviewWindow::PreviewWindow(Workspace &workspace) : workspace_(workspace) {
 PreviewWindow::~PreviewWindow() = default;
 
 bool preview_stands_aside(const SessionView &view) {
+	if (view.documents.preview_shown != ViewportKind::kCount) return false; // it has something to show
 	const DocumentBase *document = open_document(view, view.documents.active);
 	if (!document) return false;
 	const DocumentTypeId type = asset_kind_row(document->kind()).document;

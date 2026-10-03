@@ -29,10 +29,11 @@ struct SessionView;
 // catches. The window never takes the focus, and the Shell's devices follow their viewports whether
 // the window shows them or not.
 //
-// It steps aside (ADR 0046 S15) while the active document is drawn by a picture of its own in its
-// Document tab (a Main-role kind with a canvas: the mission's) and feeds nothing the Preview shows:
-// its dock node hides and Document takes the centre, so a mission's picture is the main view; it
-// comes back, where it was docked, when a document it previews is made active.
+// It steps aside (ADR 0046 S15) while it has nothing to show and the active document is drawn by a
+// picture of its own in its Document tab (a Main-role kind with a canvas: the mission's): its dock
+// node hides and Document takes the centre, so a mission's picture is the main view. It comes back,
+// where it was docked, when a menu, a model or a clip is opened, and keeps showing it beside the
+// mission until no document it shows is open.
 class PreviewWindow : public devtools::Window {
 public:
 	explicit PreviewWindow(Workspace &workspace);
@@ -64,9 +65,9 @@ private:
 	std::vector<Slot> views_;
 };
 
-// Whether the Preview window steps aside over `view` (PreviewWindow::stands_aside): its active
-// document's type is shown by a Main-role kind whose picture a canvas draws, and no Preview-role
-// kind shows or is fed by it.
+// Whether the Preview window steps aside over `view` (PreviewWindow::stands_aside): it shows nothing
+// (DocumentsView::preview_shown), and its active document's type is shown by a Main-role kind whose
+// picture a canvas draws and shows or feeds no Preview-role kind.
 bool preview_stands_aside(const SessionView &view);
 
 } // namespace opennova::editor

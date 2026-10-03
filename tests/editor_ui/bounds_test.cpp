@@ -357,8 +357,9 @@ void reach_wrapped_toolbars(Sweep &sweep) {
 	CHECK(move && edit_of(*move).operation == EditOperation::Move, "Outdent raised");
 	ui.away();
 
-	// The mission's view (S14) in a narrow layout: the Preview steps aside for a mission (S15), so the
-	// Document window takes the centre, which an author's Inspector dragged 450 pixels wider narrows
+	// The mission's view (S14) in a narrow layout: the sweep's one open document, nothing to preview,
+	// the Preview steps aside for it (S15), so the Document window takes the centre, which an author's
+	// Inspector dragged 450 pixels wider narrows
 	// again (its viewport column under 320 pixels beside the outline, narrower than the 320 the design
 	// named): its toolbar wraps within the viewport's column, nothing of it past the column, and the
 	// mouse reaches its Play mission (cut to the column where its label does not fit, found by ###;

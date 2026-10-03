@@ -2257,11 +2257,12 @@ void test_mission_view_placing() {
 	CHECK(v.documents.selection.records.size() == 3, "Select same item: the three pumps");
 }
 
-// The Preview steps aside for a mission (ADR 0046 S15), over a real session at the first layout: a
-// menu active, Preview draws beside Document; the mission made active, Preview is not drawn (its
-// Windows item still open), its node hides and Document takes the whole centre, the mission's
-// picture the main view; the menu active again, Preview is back in the node it left and Document
-// has its share again.
+// The Preview steps aside for a mission (ADR 0046 S15), over a real session at the first layout:
+// nothing open, Preview draws beside Document (what to open); the mission made active with nothing
+// to preview, Preview is not drawn (its Windows item still open), its node hides and Document takes
+// the whole centre, the mission's picture the main view; a menu opened, Preview is back in the node
+// it left and Document has its share again; the mission active again, Preview stays beside it,
+// showing the menu it has to show.
 void test_preview_steps_aside() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_steps_aside");
 	NoProcess platform;
@@ -2289,18 +2290,18 @@ void test_preview_steps_aside() {
 		const ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
 		return files && inspector ? inspector->Pos.x - (files->Pos.x + files->Size.x) : 0.0f;
 	};
-	run.open("main.mnu");
+	run.settle();
 	ImGuiWindow *preview = ImGui::FindWindowByName("Preview");
 	ImGuiWindow *document = ImGui::FindWindowByName("Document");
-	CHECK(preview && preview->Active && document && centre() > 0.0f, "a menu: Preview drawn beside Document");
+	CHECK(preview && preview->Active && document && centre() > 0.0f, "nothing open: Preview drawn beside Document");
 	if (!preview || !document) return;
 	const ImGuiID node = preview->DockId;
 	CHECK(node != 0 && document->Size.x < centre() * 0.5f, "Document its share of the centre, Preview the rest");
-	CHECK(!preview_stands_aside(v), "a menu's Preview stands");
+	CHECK(!preview_stands_aside(v), "with no mission active the Preview stands");
 	run.open("missions/synth_logic.bms");
 	ui.frames(3);
 	CHECK(preview_stands_aside(v) && !preview->Active && preview_window->open,
-	      "a mission: Preview steps aside, still open in the Windows menu");
+	      "a mission, nothing to preview: Preview steps aside, still open in the Windows menu");
 	const ImGuiDockNode *left = ImGui::DockBuilderGetNode(node);
 	CHECK(left && !left->IsVisible && left->Windows.Size == 0, "the node it left kept, empty and hidden");
 	// The whole centre but the separators between the docks.
@@ -2309,7 +2310,11 @@ void test_preview_steps_aside() {
 	run.open("main.mnu");
 	ui.frames(3);
 	CHECK(preview->Active && preview->DockId == node && document->Size.x < centre() * 0.5f,
-	      "the menu again: Preview back in its node, Document its share");
+	      "a menu opened: Preview back in its node, Document its share");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
+	CHECK(!preview_stands_aside(v) && preview->Active && v.documents.preview_shown == ViewportKind::Menu,
+	      "the mission again: Preview stays beside it, the menu its to show");
 }
 
 // A canvas whose picture fills it (the model's, the mission's), read through ImGui: the right
