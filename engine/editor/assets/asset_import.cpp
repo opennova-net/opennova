@@ -11,11 +11,11 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
-#include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/player_files.h>
 #include <editor/assets/project_scan.h>
 #include <editor/graph/asset_graph.h>
@@ -52,12 +52,6 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 	return sources;
 }
 
-bool mount_retail(Vfs &game, const std::string &retail_root, const ProjectDocument &document) {
-	LaunchFlags stock; // no /d, no expansion
-	stock.game = document.target_game;
-	return mount_install(game, retail_root, stock);
-}
-
 bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> &out) {
 	if (asset_kind_row(classify_asset(name, nullptr)).scr == ScrForm::Shader) return game.read_file_raw(name, out);
 	return game.read_file(name, out);
@@ -92,41 +86,6 @@ std::vector<std::string> list_install_loose_files(const std::string &retail_root
 	return names;
 }
 
-bool read_install_file(const Vfs &game, const std::string &retail_root, const std::string &name,
-                       std::vector<uint8_t> &out) {
-	if (read_served(game, name, out)) return true;
-	if (!install_loose_kind(classify_asset(name, nullptr))) return false;
-	const std::string wanted = normalized_logical_name(name);
-	for (const std::string &loose : list_install_loose_files(retail_root)) {
-		if (normalized_logical_name(loose) != wanted) continue;
-		std::string error;
-		return read_file_bytes(join_path(retail_root, loose), out, error);
-	}
-	return false;
-}
-
-namespace {
-
-// The game install's files by their logical names: the archives' (as a stock launch mounts them,
-// the archives themselves left out), then the root's loose files of the kinds the game ships loose
-// where no archive has the name. False when the folder holds none of the game's archives.
-bool list_install_names(const std::string &retail_root, const ProjectDocument &document, std::vector<std::string> &names) {
-	Vfs game;
-	if (retail_root.empty() || !mount_retail(game, retail_root, document)) return false;
-	std::set<std::string> known;
-	for (const VfsFileLocation &file : game.list_files()) {
-		if (strutil::ends_with_icase(file.logical_name, ".pff")) continue; // the archives themselves
-		if (is_player_file(file.logical_name)) continue;                   // never the game's
-		names.push_back(file.logical_name);
-		known.insert(normalized_logical_name(file.logical_name));
-	}
-	for (const std::string &loose : list_install_loose_files(retail_root))
-		if (known.insert(normalized_logical_name(loose)).second) names.push_back(loose);
-	return true;
-}
-
-} // namespace
-
 std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
                                                     std::vector<Diagnostic> &diagnostics) {
 	std::vector<ImportChoice> sources;
@@ -135,25 +94,24 @@ std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_r
 		                                  "Choose the game install folder in File > Project settings... first."));
 		return sources;
 	}
-	std::vector<std::string> names;
-	if (!list_install_names(retail_root, document, names)) {
-		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error,
-		                                  "No game archives found under " + retail_root + "."));
+	InstallView view;
+	std::string error;
+	if (!view.open(install_spec(retail_root, document), error)) {
+		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error, error));
 		return sources;
 	}
-	for (const std::string &name : names) {
-		ImportChoice source;
-		source.path = retail_root;
-		source.entry = name;
-		source.install = true;
-		sources.push_back(std::move(source));
-	}
+	sources.reserve(view.files().size());
+	for (const InstallFile &file : view.files()) sources.push_back(install_choice(retail_root, file));
 	return sources;
 }
 
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document) {
 	std::vector<std::string> names;
-	list_install_names(retail_root, document, names);
+	InstallView view;
+	std::string error;
+	if (retail_root.empty() || !view.open(install_spec(retail_root, document), error)) return names;
+	names.reserve(view.files().size());
+	for (const InstallFile &file : view.files()) names.push_back(file.name);
 	std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
 		return normalized_logical_name(a) < normalized_logical_name(b);
 	});
@@ -340,15 +298,15 @@ private:
 	bool read(const ImportChoice &source, const std::string &name, std::vector<uint8_t> &bytes) {
 		std::string io_error;
 		if (source.install) {
-			if (retail_root_ != source.path) {
-				retail_root_.clear();
-				if (!mount_retail(retail_, source.path, document_)) {
-					refuse(CoreFinding::ImportInstall, "No game archives found under " + source.path + ".", name);
+			if (!install_.is_open() || install_.spec().root != source.path) {
+				std::string error;
+				if (!install_.open(install_spec(source.path, document_), error)) {
+					refuse(CoreFinding::ImportInstall, error, name);
 					return false;
 				}
-				retail_root_ = source.path;
 			}
-			if (!read_install_file(retail_, source.path, source.entry, bytes)) {
+			const InstallFile *file = install_.find(name);
+			if (!file || !install_.read(*file, bytes)) {
 				refuse(CoreFinding::ImportRead, "The game data has no file named " + name + ".", name);
 				return false;
 			}
@@ -595,8 +553,7 @@ private:
 	std::set<std::string> selected_names_;
 	Vfs archive_;
 	std::string archive_path_;
-	Vfs retail_;
-	std::string retail_root_;
+	InstallView install_; // the game install, as the project imports it
 	std::vector<Output> outputs_;
 	fs::path stage_;                // the import's staging folder, made with its first staged file
 	std::vector<fs::path> folders_; // the destinations' folders the import made

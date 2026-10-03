@@ -11,17 +11,14 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/model/diagnostic.h>
 
-namespace opennova {
-class Vfs;
-}
-
 namespace opennova::editor {
 
+class InstallView;
 struct ProjectDocument;
 
 // The project's files that are the game's own data, byte for byte (ADR 0046 S15, Names): a file the
-// project holds exactly as the game install serves it (asset_import's read_served over mount_retail,
-// what an import of the install copies), so a Problems row about it is the original's too, not the
+// project holds exactly as the game install serves it (the install as the project imports it,
+// assets/install_view.h: what an import of the install copies), so a Problems row about it is the original's too, not the
 // modder's, and Problems shows it apart. Only the files a finding is about are checked, each once while
 // its size and last write stand; the install is mounted while files wait to be checked and let go when
 // none does (its archives closed: a patch may write them). A file the install does not serve, an
@@ -67,7 +64,7 @@ private:
 	std::string install_;
 	std::shared_ptr<const ProjectDocument> document_;
 	std::string root_;
-	std::unique_ptr<Vfs> game_;
+	std::unique_ptr<InstallView> game_;
 	bool mount_tried_ = false;
 	std::map<std::string, File> known_;
 	std::vector<File> queue_;
