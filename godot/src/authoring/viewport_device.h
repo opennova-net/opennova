@@ -49,6 +49,7 @@ public:
 	bool surface_at(float x, float y, float point[3]) const override;
 	bool surface_between(const double from[3], const double to[3], double point[3]) const override;
 	bool ground_at(double x, double y, double &height) const override;
+	opennova::editor::ViewportRayHit ray_between(const double from[3], const double to[3]) const override;
 	void take(opennova::editor::ViewportAction action, const opennova::editor::ViewportModel &model,
 			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &clock,
 			opennova::editor::ViewportDeviceReport &report) override;
