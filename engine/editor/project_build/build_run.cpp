@@ -921,8 +921,10 @@ void BuildRun::list_built() {
 		file.archive = true;
 		file.files = archive.entries.size();
 		file.bytes = size_of(archive.file_name);
-		file.reused = std::find(report_.archives_reused.begin(), report_.archives_reused.end(), archive.file_name) !=
-		              report_.archives_reused.end();
+		// An unchanged build hands back the last one whole: every archive of it is the one kept.
+		file.reused = report_.reused_existing ||
+		              std::find(report_.archives_reused.begin(), report_.archives_reused.end(), archive.file_name) !=
+		                      report_.archives_reused.end();
 		report_.built.push_back(std::move(file));
 	}
 	for (const BuildEntry &entry : plan_.loose) {

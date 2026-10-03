@@ -20,9 +20,11 @@ bool requirement_phase_enabled(const ProjectDocument &doc, int phase) {
 
 const char *requirement_phase_label(int phase) {
 	switch (phase) {
-	case BOOT_PHASE_BOOT: return "needed to start the game";
-	case BOOT_PHASE_MENU: return "needed by the main menu";
-	case BOOT_PHASE_MISSION: return "needed to start a mission";
+	// When the game reads it, not that it cannot go on without it: what it does then is the row's
+	// own words (requirement_without), and only the manifest's fatal rows stop it.
+	case BOOT_PHASE_BOOT: return "read as the game starts";
+	case BOOT_PHASE_MENU: return "read by the main menu";
+	case BOOT_PHASE_MISSION: return "read as a mission starts";
 	default: return "";
 	}
 }
