@@ -479,6 +479,14 @@ int test_label_picks() {
 	};
 	const std::vector<size_t> picks = mission_label_picks(candidates);
 	TEST_EXPECT((picks == std::vector<size_t>{ 0, 5, 2, 4 }));
+	// The cap: of 400 labels apart from one another and the hovered one, kMissionLabelsMax drawn in all,
+	// the hovered first, then the nearest.
+	std::vector<MissionLabelCandidate> many;
+	for (int i = 0; i < 400; ++i) many.push_back(candidate(0.0f, float(i) * 20.0f, float(i), 3, false, false));
+	many.push_back(candidate(500.0f, 0.0f, 1000.0f, 3, true, false));
+	const std::vector<size_t> capped = mission_label_picks(many);
+	TEST_EXPECT(capped.size() == kMissionLabelsMax && capped.front() == 400 && capped[1] == 0 &&
+			capped.back() == kMissionLabelsMax - 2);
 	std::printf("test_label_picks passed\n");
 	return 0;
 }
