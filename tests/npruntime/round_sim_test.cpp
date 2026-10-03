@@ -193,6 +193,7 @@ bool test_respawned_vehicle_takes_projectile_damage() {
 
 	w::Entity shooter_seed;
 	shooter_seed.kind = w::EntityKind::Organic;
+	shooter_seed.team = 2; // an enemy of the teamless vehicle (D-WPN-42)
 	const auto shooter = world.registry.spawn(0, shooter_seed);
 	w::Entity vehicle_seed;
 	vehicle_seed.kind = w::EntityKind::Item;
@@ -817,6 +818,7 @@ struct DismembermentRig {
 
 		w::Entity shooter_seed;
 		shooter_seed.kind = w::EntityKind::Organic;
+		shooter_seed.team = 2; // an enemy of the teamless victim (D-WPN-42)
 		shooter_seed.position = {0.0f, 0.0f, 0.0f};
 		shooter = world.registry.spawn(0, shooter_seed);
 

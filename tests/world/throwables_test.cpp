@@ -276,13 +276,16 @@ void seed_ammo(World &w) {
 }
 
 // The items.def ai_function/move_function bindings (the host feed).
+// Each row carries a nonzero items.def ordinal: a placed device is a typed item
+// (ItemTypeIndex +0x1C), which is what lets its owner's side shoot it through
+// the friendly-fire gate (D-WPN-42).
 void seed_classes(World &w) {
-    w.throwables.classes.set({kItemFrag, ThrowClass::kNade, ThrowClass::kNade, 5, 0, 0});
-    w.throwables.classes.set({kItemSatchel, ThrowClass::kSatchel, ThrowClass::kSatchel, 5, 0, 0});
-    w.throwables.classes.set({kItemClaymore, ThrowClass::kClaymore, ThrowClass::kClaymore, 5, 0, 0});
+    w.throwables.classes.set({kItemFrag, ThrowClass::kNade, ThrowClass::kNade, 5, 0, 0, 1});
+    w.throwables.classes.set({kItemSatchel, ThrowClass::kSatchel, ThrowClass::kSatchel, 5, 0, 0, 2});
+    w.throwables.classes.set({kItemClaymore, ThrowClass::kClaymore, ThrowClass::kClaymore, 5, 0, 0, 3});
     // the AT mine thinks as a mine but flies as a satchel (items.def: ai vmne,
     // move schl)
-    w.throwables.classes.set({kItemAvMine, ThrowClass::kAVMine, ThrowClass::kSatchel, 5, 0, 0});
+    w.throwables.classes.set({kItemAvMine, ThrowClass::kAVMine, ThrowClass::kSatchel, 5, 0, 0, 4});
 }
 
 struct Rig {

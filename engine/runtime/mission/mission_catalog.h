@@ -46,8 +46,9 @@ struct Row {
 // archives). The title is the .bin's [Info] TITLE; when NO .bin exists the
 // BMS header's embedded mission_name stands in; either miss leaves it empty
 // [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 title/briefing arm].
-// The .npj/.npz map-project legs are not ported (no shipped JO archive
-// carries either).
+// The .npj/.npz map-project legs are not ported (D-MIS-7: the shipped
+// localres.pff carries ASP_G7.npz and the JOX jox01.pff nine more, which
+// retail lists and OpenNova does not).
 std::vector<Row> build(const ResourceIndex &index);
 
 // The SP screen's row filter — (code_word & 0xFFFDFFFF) == 0x10020, i.e. the
