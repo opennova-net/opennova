@@ -245,6 +245,13 @@ static int test_filled_project_builds_and_mounts() {
 	const BuildReport again = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(again.ok && again.reused_existing && again.build_id == report.build_id);
 	TEST_EXPECT(again.build_dir == report.build_dir);
+	// What it lists: every archive the last build's, kept (the first build wrote each).
+	size_t listed = 0;
+	for (const BuiltFile &file : report.built) listed += file.archive && !file.reused;
+	TEST_EXPECT(listed == 3);
+	listed = 0;
+	for (const BuiltFile &file : again.built) listed += file.archive && file.reused;
+	TEST_EXPECT(listed == 3 && again.built.size() == report.built.size());
 
 	// One changed file: a new build in which only its archive is re-packed.
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "one")); // a valid table with new content
@@ -254,6 +261,8 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(changed.build_id != report.build_id);
 	TEST_EXPECT(changed.archives_written == std::vector<std::string>{"language.pff"});
 	TEST_EXPECT(changed.archives_reused.size() == 2);
+	for (const BuiltFile &file : changed.built)
+		if (file.archive) TEST_EXPECT(file.reused == (file.name != "language.pff"));
 	TEST_EXPECT(last_good_build_dir(p.output_root()) == changed.build_dir);
 	TEST_EXPECT(!fs::exists(report.build_dir)); // the older build is pruned
 	return 0;

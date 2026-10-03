@@ -445,6 +445,9 @@ void EditorWindows::draw_build_panel(const SessionView &v) {
 	const BuildResult result = build_result(report, in_project);
 	const ImGuiViewport *viewport = ImGui::GetMainViewport();
 	ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+	// Kept in the editor's own window: it comes forward on its own, so it never pops out as a window
+	// of its own over the desktop (a floating window that cannot merge into a minimized editor would).
+	ImGui::SetNextWindowViewport(viewport->ID);
 	if (!ImGui::Begin("Build result", &build_panel_open_,
 	                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
 	                          ImGuiWindowFlags_NoCollapse)) {
