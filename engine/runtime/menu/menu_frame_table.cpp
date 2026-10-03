@@ -113,14 +113,16 @@ void MenuFrameCompiler::build_table_columns_(WidgetNode &node) {
 	}
 }
 
-// The column set a table draws. Code-installed columns replace the XML ones (the
-// stat RESULTLIST resizes the table and sets every column up [orig:
-// StatScreen_PopulateStatResultsList @ 0x562240 -> init_table_row @ 0x63f9c0]):
-// a code column has no SUBST rows and no cell offsets. A column the populate's
-// resize left in place and no init has set up yet (MenuTableColumn::defined)
-// is the authored one, or a zeroed new one past the authored count
-// [orig: resize_column_count @0x63f6c0 — existing records copied, new ones
-// zeroed].
+// The column set a table draws: the XML set-up, or the records code set up over it
+// (menu_table.h MenuTableColumn). A record a count kept is the authored column, an
+// init over it replacing what CTableWnd_InitRow writes (the label, the width, the
+// header and cell justification, the sort compare and direction) and keeping its
+// cell type, cell offsets, SUBST rows and bitmap scale; any other record is the
+// runtime's own, from zero (a count that grows the table starts every record over:
+// the stat RESULTLIST's columns, which have no SUBST rows and no cell offsets).
+// [orig: CTableWnd_ResizeColumnCount @0x63f6c0 — the grow path's copy @0x63f724
+//  takes the old count in bytes; CTableWnd_InitRow @0x63f9c0 — no write to +108 or
+//  +152..+172; StatScreen_PopulateStatResultsList @ 0x562240]
 std::vector<MenuFrameCompiler::TableColumnSetup> MenuFrameCompiler::table_columns_(
 		const WidgetNode &node, const MenuWidgetState *ws) const {
 	if (ws == nullptr || !ws->has_table_columns) {
@@ -129,9 +131,20 @@ std::vector<MenuFrameCompiler::TableColumnSetup> MenuFrameCompiler::table_column
 	std::vector<TableColumnSetup> columns;
 	columns.reserve(ws->table_columns.size());
 	for (const MenuTableColumn &m : ws->table_columns) {
-		if (!m.defined) {
-			const size_t at = columns.size();
-			columns.push_back(at < node.table_columns.size() ? node.table_columns[at] : TableColumnSetup{});
+		const size_t at = columns.size();
+		if (m.kept && at < node.table_columns.size()) {
+			TableColumnSetup c = node.table_columns[at];
+			if (m.defined) {
+				c.width = m.width;
+				c.label = m.label;
+				c.header_justify = m.justify;
+				c.header_vjustify = m.vjustify;
+				c.body_justify = m.body_justify;
+				c.body_vjustify = m.body_vjustify;
+				c.numeric_sort = m.numeric_sort;
+				c.ascending = m.ascending;
+			}
+			columns.push_back(std::move(c));
 			continue;
 		}
 		TableColumnSetup c;
