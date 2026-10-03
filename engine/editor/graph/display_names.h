@@ -69,9 +69,17 @@ void word_choices(const Document &document, const NodeAddress &address, const Fi
 FieldUse picked_as(const FieldUse &field);
 // Every name a picker offers for the field, worded (the Inspector's and the wire's reference_choices
 // alike): the graph's (reference_choices over picked_as), the values the game resolves itself first
-// (DocumentType::game_choices: the player, SSN 10000), each worded (word_choices).
+// (DocumentType::game_choices: the player, SSN 10000), each worded (word_choices). A field whose
+// number forms a text key (FieldUse::key_prefix: a mission's name index, an objectives row) lists the
+// keys of that form its section holds, in the table the game reads (its own, else the alternate), each
+// by the number that forms it (text_key_number) and worded by its string, so a pick writes the number.
 std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Document &document, const NodeAddress &address,
                                             const FieldUse &field, const NameSource *names);
+
+// The number that forms the text key `key` as the game forms it from `prefix` (`prefix` and the number
+// in three digits at least, sprintf's "%s%03i": STRNAME005 is 5, STRNAME1234 is 1234); false for a key of
+// another prefix or one no number forms (STRNAME5, STRNAME0005), which no lookup of the game reads.
+bool text_key_number(const std::string &key, const char *prefix, int64_t &out);
 
 // What a definition the picker offers points at, for its tooltip, made only while it shows (cheap
 // enough per hover, not per row): an item's model (the file its graphic loads) and its catalog, a string
@@ -84,8 +92,16 @@ std::string symbol_preview(const AssetGraph &graph, ReferenceKind kind, const st
 class DisplayNameCache {
 public:
 	const std::string &record(const Document &document, const NodeAddress &address, const NameSource *names);
-	// How many titles were worded (made, not read from the cache): a test's measure.
+	// How many titles were worded (made, not read from the cache), and how many times the titles were
+	// dropped (what they were made of moved): a test's measures.
 	size_t made() const { return made_; }
+	size_t dropped() const { return dropped_; }
+	// While held by the gesture `gesture` (its token; 0 lets go), the document's revision moving by that
+	// gesture's batches alone keeps the titles (DocumentBase::gesture_alone_since): a gesture whose edits
+	// change nothing a title reads (a drag of a mission's marks writes their positions and headings alone)
+	// words each title once, not once a sample. Any other edit meanwhile (one through the wire mid-drag,
+	// an undo), its identity, its load or the names moving still drop them.
+	void hold(uint64_t gesture) { held_ = gesture; }
 
 private:
 	struct Key {
@@ -103,7 +119,8 @@ private:
 	};
 	Key key_;
 	std::unordered_map<NodeAddress, std::string, AddressHash> titles_;
-	size_t made_ = 0;
+	size_t made_ = 0, dropped_ = 0;
+	uint64_t held_ = 0; // the gesture holding the titles
 };
 
 } // namespace opennova::editor

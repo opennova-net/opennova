@@ -17,6 +17,7 @@
 #include <cctype>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <set>
 
 namespace opennova::editor {
@@ -593,7 +594,7 @@ SerializeResult MnuDocument::serialize() const {
 	std::vector<uint8_t> bytes;
 	std::string error;
 	if (!mnu::serialize_bytes(document, bytes, error)) {
-		result.issues.push_back({true, 0, "", "", error});
+		result.issues.push_back({true, 0, "", "", error, ""});
 		return result;
 	}
 	result.text.assign(bytes.begin(), bytes.end());
@@ -614,7 +615,8 @@ std::shared_ptr<const mnu::Document> MnuDocument::saved_image(std::vector<Source
 			if (mnu::parse(reinterpret_cast<const uint8_t *>(result.text.data()), result.text.size(), *image, error))
 				saved_.image = std::move(image);
 			else
-				saved_.issues.push_back({true, 0, std::string(), std::string(), "The game cannot read the menu back: " + error});
+				saved_.issues.push_back({true, 0, std::string(), std::string(), "The game cannot read the menu back: " + error,
+				                         std::string()});
 		} else {
 			saved_.issues = result.issues;
 		}
@@ -642,25 +644,27 @@ size_t MnuDocument::screen_position(NodeId row_id) const {
 
 std::string MnuDocument::copy(const std::vector<NodeAddress> &records) const {
 	if (records.empty()) return std::string();
-	const Node *node = row(records.front().row);
-	if (!node || node->kind != kScreen) return std::string();
-	const MenuScreen &screen = screen_of(*node);
-	std::set<NodeId> wanted;
+	// The windows named, by the screen that holds each: windows of several screens copy together.
+	std::map<NodeId, std::set<NodeId>> wanted;
+	size_t named = 0;
 	for (const NodeAddress &record : records) {
-		if (record.row != node->id || record.kind != kWindow || !record.child) return std::string();
-		wanted.insert(record.child);
+		const Node *node = row(record.row);
+		if (!node || node->kind != kScreen || record.kind != kWindow || !record.child) return std::string();
+		named += wanted[record.row].insert(record.child).second ? 1 : 0;
 	}
-	// The windows in document order: the clipboard's roots. The walk meets every window
-	// (the roots, the children and the windows a part holds, not a part itself); a selected
-	// window's windows come with it, so a selected one inside it is covered.
+	// The windows in document order, the screens in the file's and each one's windows in its own: the
+	// clipboard's roots, which a paste puts where the tree's rule says, in this order. The walk meets
+	// every window (the roots, the children and the windows a part holds, not a part itself); a
+	// selected window's windows come with it, so a selected one inside it is covered.
 	mnu::Document clip;
 	if (const auto *state = dynamic_cast<const MenuFileState *>(file_state())) clip.source_encoding = state->source_encoding;
 	clip.screens.emplace_back();
 	clip.screens.back().name = "CLIPBOARD";
 	size_t found = 0;
+	const std::set<NodeId> *screen_wanted = nullptr;
 	std::function<void(const RecordHandle &, const RecordIds &, bool, bool)> visit =
 	        [&](const RecordHandle &record, const RecordIds &ids, bool window, bool covered) {
-		        const bool selected = window && wanted.count(ids.id) != 0;
+		        const bool selected = window && screen_wanted->count(ids.id) != 0;
 		        if (selected) {
 			        ++found;
 			        if (!covered) clip.screens.back().roots.push_back(record.as<mnu::Window>());
@@ -673,11 +677,17 @@ std::string MnuDocument::copy(const std::vector<NodeAddress> &records) const {
 				        visit(kind.lists()[list].ops.at(record, i), ids.lists[list][i], held == kWindow, covered || selected);
 		        }
 	        };
-	if (!screen.ids.lists.empty())
-		for (size_t i = 0; i < screen.ids.lists[0].size() && i < screen.screen.roots.size(); ++i)
-			visit(RecordHandle{kWindow, const_cast<mnu::Window *>(&screen.screen.roots[i])}, screen.ids.lists[0][i],
-			      true, false);
-	if (found != wanted.size()) return std::string();
+	for (const auto &node : rows()) {
+		const auto of_screen = wanted.find(node->id);
+		if (of_screen == wanted.end()) continue;
+		screen_wanted = &of_screen->second;
+		const MenuScreen &screen = screen_of(*node);
+		if (!screen.ids.lists.empty())
+			for (size_t i = 0; i < screen.ids.lists[0].size() && i < screen.screen.roots.size(); ++i)
+				visit(RecordHandle{kWindow, const_cast<mnu::Window *>(&screen.screen.roots[i])}, screen.ids.lists[0][i],
+				      true, false);
+	}
+	if (found != named) return std::string();
 	// The payload must read back as written: a value the format cannot carry (a quote in
 	// an attribute, a window with nothing in it) is refused here, not lost in the paste.
 	const std::string text = mnu::serialize(clip);
