@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
@@ -26,8 +27,11 @@
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass seam
 
 #include "hud/hud_map_pass_renderer.h"
+#include "resource_index/resource_root.h"
 
 #include <array>
+#include <cstdint>
+#include <unordered_set>
 
 namespace godot {
 
@@ -368,6 +372,10 @@ public:
 	// Debug/test accessor: compile at the current surface size and report the
 	// draw list's element counts.
 	Ref<HudDrawListStats> get_draw_list_stats();
+	// Debug/test accessor: each textured quad's colour in draw order, the compiled
+	// vertex colour or (`p_drawn`) the colour the device draws it with, which an
+	// alpha-mode texture's material doubles (renderer::hud_alpha_material_argb).
+	PackedColorArray get_textured_quad_colors(bool p_drawn);
 
 	// F3 Stats seam: _draw() runs inside Godot's deferred flush (outside every
 	// Node callback), so its compile + canvas-emit cost is timed here and
@@ -513,7 +521,10 @@ private:
 	Vector2 draw_surface_() const;
 	// Restamp state_'s declutter visibility/level from declutter_.
 	void apply_declutter_();
-	Ref<Texture2D> load_hud_texture_(const String &p_name,
+	// One HUD texture through the retail loader its role uses (the HUD loader in
+	// colour or alpha mode, the file loader, the stage loader, the TGA reader:
+	// ResourceRoot::TextureLoader), uploaded with no mips unless asked.
+	Ref<Texture2D> load_hud_texture_(const String &p_name, ResourceRoot::TextureLoader p_loader,
 			bool p_generate_mipmaps = false) const;
 	// MODULATE2X equivalence for a white-modulated static sprite: RGB x2
 	// saturated, alpha unchanged (the compass ring's pipeline).
@@ -521,8 +532,16 @@ private:
 	void load_crosshair_texture_();
 	// The combat sprites' loads (the anchors are the engine fill's).
 	void configure_combat_(const opennova::hud::HudLayoutAssets &assets);
-	void combat_texture_(int slot, const String &name, opennova::hud::HudSprite &sprite);
+	void combat_texture_(int slot, const String &name, ResourceRoot::TextureLoader loader,
+			opennova::hud::HudSprite &sprite);
 	std::array<String, kTextureSlots> combat_texture_names_;
+	std::array<int, kTextureSlots> combat_texture_loaders_{};
+	// The textures the HUD loader made in alpha mode (by instance id): their quads
+	// draw with the alpha material's colour (renderer::hud_alpha_material_argb).
+	mutable std::unordered_set<uint64_t> alpha_mode_textures_;
+	// The colour a textured command draws with: the alpha material's for an
+	// alpha-mode texture, else the vertex colour.
+	Color texture_draw_color_(const Ref<Texture2D> &p_texture, uint32_t p_argb) const;
 	// Stamp the cached colour/spread options into layout_.
 	void apply_crosshair_options_();
 	void clear_font_();

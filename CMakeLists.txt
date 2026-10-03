@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 project(opennova LANGUAGES C CXX)
 
+# FetchContent populates in the configure step itself (CMake 3.30+) instead of
+# configuring and building a sub-project per dependency on every configure.
+if(POLICY CMP0168)
+    cmake_policy(SET CMP0168 NEW)
+endif()
+
 # Vendored dependencies used by the native network stack.
 add_subdirectory(third_party/sqlite)
 add_subdirectory(third_party/bcrypt)

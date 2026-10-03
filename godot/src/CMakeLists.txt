@@ -7,6 +7,12 @@ set(CMAKE_PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/../../third_party/godot-cpp
 
 project(opennova_godot LANGUAGES C CXX)
 
+# FetchContent populates in the configure step itself (CMake 3.30+) instead of
+# configuring and building a sub-project per dependency on every configure.
+if(POLICY CMP0168)
+    cmake_policy(SET CMP0168 NEW)
+endif()
+
 if(EMSCRIPTEN)
     # Every object in the side module shares the main module's threaded
     # memory, so the engine and vendored libraries compile with -pthread too
@@ -14,6 +20,15 @@ if(EMSCRIPTEN)
     add_compile_options(-pthread)
 endif()
 
+# Generate and compile only the engine classes this extension reaches (~190 of
+# ~1020): godot_cpp_profile.json is derived from godot/src by
+# scripts/lint/godot_cpp_profile.py (regenerate with --write when a binding
+# starts using a class the list lacks; CI's lint step fails on a stale list).
+# godot-cpp trims its API at configure time, so the profile is a configure
+# dependency.
+set(GODOTCPP_BUILD_PROFILE "${CMAKE_CURRENT_SOURCE_DIR}/godot_cpp_profile.json"
+    CACHE PATH "godot-cpp build profile (generated)" FORCE)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GODOTCPP_BUILD_PROFILE}")
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
 # sqlite is only needed to DEFINE the novaworld service target inside engine/;
 # the extension links opennova_runtime (which PUBLIC-links the wire-only

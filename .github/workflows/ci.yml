@@ -20,13 +20,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The C++ engine + ctest suite. Built with Ninja + sccache (GitHub Actions
-  # cache backend): the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER,
-  # so the ~640-TU engine compile used to run uncached (~16 min) on every push.
-  # scripts/build.sh lets CMake read CMAKE_GENERATOR and the launcher
-  # variables from the environment on a fresh configure — and Release carries no
-  # PDB flags, so every object is cacheable as-is. First run after a cache miss
-  # is cold; after that only changed sources recompile.
+  # A pull request that changes only the private docs pointer and markdown
+  # builds and tests nothing: no build or test reads those paths, and the lint
+  # gates that do read them still run in `test`. Every other PR, and every
+  # master push, runs everything. The two required checks (`test`,
+  # `godot-tests`) gate their steps on `code` instead of skipping the job: a
+  # skipped matrix job reports under its bare name, which would leave the
+  # required "<job> (windows-latest)" check pending forever.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+    steps:
+      - name: Classify the changed paths
+        id: scope
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          code=true
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            files="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --paginate \
+              --jq '.[] | .filename, (.previous_filename // empty)')"
+            if [[ -n "$files" ]] && ! grep -qvxE 'docs|.*\.md' <<< "$files"; then
+              code=false
+              echo "Only the docs pointer and markdown changed: the builds and tests skip." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+
+  # The C++ engine + ctest suites, core then retail, from ONE build. Built with
+  # Ninja + sccache (.github/actions/compiler-cache): the Visual Studio
+  # generator ignores CMAKE_*_COMPILER_LAUNCHER. scripts/build.sh lets CMake
+  # read CMAKE_GENERATOR and the launcher variables from the environment on a
+  # fresh configure, and Release carries no PDB flags, so every object is
+  # cacheable as-is. The retail leg (docs/asset-gated-tests.md) reuses the
+  # tree: the two roots are read at test time only, so `--suite retail`
+  # rebuilds nothing. It runs whenever the reference data is reachable (not on
+  # fork PRs) and blocks the merge like the core leg.
   test:
     # One-entry matrix on purpose: branch protection requires the check named
     # "test (windows-latest)", which the matrix produces.
@@ -35,13 +70,16 @@ jobs:
       matrix:
         os: [windows-latest]
     runs-on: ${{ matrix.os }}
+    needs: [changes, retail-availability]
+    permissions:
+      contents: read
+      actions: write   # the compiler cache's master save replaces its older entries
     env:
-      SCCACHE_GHA_ENABLED: "true"
       CMAKE_GENERATOR: Ninja
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
-      OPENNOVA_JO_DIR: ''
-      OPENNOVA_JO_ASSETS: ''
+      CODE: ${{ needs.changes.outputs.code }}
+      RETAIL: ${{ needs.retail-availability.outputs.available }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,6 +115,10 @@ jobs:
           python scripts/lint/maturity_lint.py --enforce
           python scripts/lint/link_graph_check.py --enforce
           python scripts/lint/include_graph_check.py --enforce
+          # The godot-cpp build profile (godot/src/godot_cpp_profile.json) is
+          # derived from godot/src: a binding that starts using a new engine
+          # class must regenerate it (--write) or the extension fails to compile.
+          python scripts/lint/godot_cpp_profile.py --enforce
           # Orphan engine headers (the post-merge tidy rounds' recurring
           # finding): a header included only by its test must carry the
           # STAGED, NOT WIRED paragraph or a reasoned allowlist row.
@@ -106,52 +148,96 @@ jobs:
       # takes the first compiler in PATH order); sccache in front of cl for the
       # compiler-launcher cache.
       - name: Set up MSVC environment
+        if: env.CODE == 'true'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Restore the compiler cache
+        if: env.CODE == 'true'
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-root
+          mode: restore
 
       - name: Toolchain sanity (Ninja + cl on PATH)
+        if: env.CODE == 'true'
         shell: bash
         run: |
           cmake --version
           ninja --version
           command -v cl
 
-      - name: Build and test
+      - name: Build and test (core)
+        if: env.CODE == 'true'
         shell: bash
         run: scripts/build.sh --no-godot --suite core
 
-      - name: sccache stats
-        if: always()
-        shell: bash
-        run: sccache --show-stats
-
-
       - name: Upload native core test reports
-        if: always()
+        if: always() && env.CODE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: native-core-reports
           if-no-files-found: warn
           path: build/Testing/
 
+      # The retail data the asset gates need (docs/asset-gated-tests.md): the
+      # composite action restores or checks out the two private reference
+      # repositories and exports the two roots.
+      - name: Mount the reference data
+        if: env.CODE == 'true' && env.RETAIL == 'true'
+        uses: ./.github/actions/mount-reference-data
+        with:
+          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+          enabled: ${{ env.RETAIL }}
+
+      - name: Test (retail)
+        if: env.CODE == 'true' && env.RETAIL == 'true'
+        shell: bash
+        run: scripts/build.sh --no-godot --suite retail
+
+      - name: Upload native retail test reports
+        if: always() && env.CODE == 'true' && env.RETAIL == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-retail-reports
+          if-no-files-found: warn
+          path: build/Testing/
+
+      - name: sccache stats
+        if: always() && env.CODE == 'true'
+        shell: bash
+        run: sccache --show-stats
+
+      - name: Save the compiler cache
+        if: env.CODE == 'true'
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-root
+          mode: save
+
+  # The same build on Linux, configured with the NovaWorld server's HTTP layer
+  # ON (the deploy target's flag set; it adds the Crow sources to the server
+  # target and changes no other object), so this job also covers the net leg
+  # .github/workflows/net-linux.yml runs for the NovaWorld images workflow.
+  # The two share the linux-root compiler cache.
   test-linux:
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: write   # the compiler cache's master save replaces its older entries
     env:
-      SCCACHE_GHA_ENABLED: "true"
       CMAKE_GENERATOR: Ninja
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
-      OPENNOVA_JO_DIR: ''
-      OPENNOVA_JO_ASSETS: ''
     steps:
+      # The root CMake project builds without godot-cpp or GUT, so the
+      # submodules stay uninitialized.
       - uses: actions/checkout@v4
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
-          submodules: recursive
 
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash
@@ -159,16 +245,25 @@ jobs:
           git lfs install --local
           git lfs pull --include="fixtures/**"
 
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: linux-root
+          mode: restore
 
       - name: Build and test
         shell: bash
-        run: scripts/build.sh --no-godot --suite core
+        run: scripts/build.sh --no-godot --suite core --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON
 
       - name: sccache stats
         if: always()
         run: sccache --show-stats
+
+      - name: Save the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: linux-root
+          mode: save
 
       - name: Upload Linux native core test reports
         if: always()
@@ -179,15 +274,22 @@ jobs:
           path: build/Testing/
 
   # Match the Windows flavours: PRs exercise the editor/debug extension;
-  # master pushes and manual runs also compile the release extension.
+  # master pushes and manual runs also compile the release extension. Both
+  # Linux flavours build as CMake Release (no debug info, stripped): the
+  # template_debug .so only feeds godot-tests-linux, and RelWithDebInfo made
+  # it a 674 MiB artifact and a compiler cache several times this size.
   build-gdextension-linux:
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: write   # the compiler cache's master save replaces its older entries
     strategy:
       fail-fast: false
       matrix:
         target: ${{ github.event_name == 'pull_request' && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
     env:
-      SCCACHE_GHA_ENABLED: "true"
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
@@ -196,26 +298,35 @@ jobs:
           submodules: recursive
           lfs: false
 
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: linux-gdext-${{ matrix.target }}
+          mode: restore
 
       - name: Build Linux GDExtension (${{ matrix.target }})
         env:
           GODOTCPP_TARGET: ${{ matrix.target }}
         run: |
           case "$GODOTCPP_TARGET" in
-            template_debug) config=RelWithDebInfo; build_dir=build-godot-debug ;;
-            template_release) config=Release; build_dir=build-godot-release ;;
+            template_debug) build_dir=build-godot-debug ;;
+            template_release) build_dir=build-godot-release ;;
             *) echo "unknown GODOTCPP_TARGET: $GODOTCPP_TARGET" >&2; exit 2 ;;
           esac
           cmake -S godot/src -B "$build_dir" -G Ninja \
-            -DGODOTCPP_TARGET="$GODOTCPP_TARGET" -DCMAKE_BUILD_TYPE="$config"
+            -DGODOTCPP_TARGET="$GODOTCPP_TARGET" -DCMAKE_BUILD_TYPE=Release
           cmake --build "$build_dir" --target opennova --parallel "$(nproc)"
           test -f "godot/bin/libopennova.linux.$GODOTCPP_TARGET.x86_64.so"
 
       - name: sccache stats
         if: always()
         run: sccache --show-stats
+
+      - name: Save the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: linux-gdext-${{ matrix.target }}
+          mode: save
 
       - name: Upload Linux GDExtension
         uses: actions/upload-artifact@v4
@@ -235,8 +346,10 @@ jobs:
     if: false
     runs-on: ubuntu-latest
     container: emscripten/emsdk:4.0.20
+    permissions:
+      contents: read
+      actions: write   # the compiler cache's master save replaces its older entries
     env:
-      SCCACHE_GHA_ENABLED: "true"
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
@@ -245,8 +358,11 @@ jobs:
           submodules: recursive
           lfs: false
 
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: web-gdext
+          mode: restore
 
       # The image's CMake predates the sqlite fetch's options.
       - name: Install CMake + Ninja
@@ -261,9 +377,15 @@ jobs:
         if: always()
         run: sccache --show-stats
 
+      - name: Save the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: web-gdext
+          mode: save
+
   godot-tests-linux:
     runs-on: ubuntu-latest
-    needs: [build-gdextension-linux]
+    needs: [build-gdextension-linux]   # skipped with it on docs-only PRs
     env:
       GODOT_VERSION: 4.6.1-stable
       OPENNOVA_JO_DIR: ''
@@ -329,19 +451,12 @@ jobs:
           if-no-files-found: warn
           path: build/Testing/
 
-  # Linux build of the standalone novaworld server with the Crow HTTP layer ON,
-  # plus the net-scoped ctests, on the deploy target's OS and flag set. One
-  # definition (.github/workflows/net-linux.yml) shared with the NovaWorld
-  # images workflow, so the two never drift. The Windows `test` job compiles
-  # the same net libs and runs the same tests with BUILD_NOVAWORLD_HTTP=OFF
-  # (no Crow/asio FetchContent on the hot legs).
-  novaworld-server:
-    uses: ./.github/workflows/net-linux.yml
-
   # Type-check + build the NovaWorld web portal (web/). The built dist is an
   # artifact only; production images bake it via web/Dockerfile (Track B).
   web:
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -383,6 +498,11 @@ jobs:
   # use Ninja: the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
   build-gdextension-windows:
     runs-on: windows-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: write   # the compiler cache's master save replaces its older entries
     strategy:
       fail-fast: false
       matrix:
@@ -392,7 +512,6 @@ jobs:
         # an extra combination and resurrect the release leg on PRs.
         target: ${{ github.event_name == 'pull_request' && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
     env:
-      SCCACHE_GHA_ENABLED: "true"
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
@@ -406,8 +525,11 @@ jobs:
         with:
           arch: x64
 
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-gdext-${{ matrix.target }}
+          mode: restore
 
       - name: Build GDExtension (${{ matrix.target }})
         shell: pwsh
@@ -423,10 +545,9 @@ jobs:
           # template_debug is built RelWithDebInfo: optimized native code plus
           # symbols, the same flavour scripts/build_godot.sh Dev produces for the
           # editor. template_release is a plain Release. The build dirs keep their
-          # historical names on purpose: sccache keys embed the absolute paths of
-          # godot-cpp's generated headers under the build dir, so renaming a dir
-          # invalidates every cached godot-cpp object (one cold ~28 min leg per
-          # cache scope).
+          # names on purpose: sccache keys embed the absolute paths of godot-cpp's
+          # generated headers under the build dir, so renaming a dir invalidates
+          # every cached godot-cpp object (one cold ~28 min leg).
           $flavours = @{
             template_debug   = @{ config = "RelWithDebInfo"; dir = "build-godot-debug" }
             template_release = @{ config = "Release"; dir = "build-godot-release" }
@@ -452,8 +573,15 @@ jobs:
           if (-not (Test-Path $dll)) { throw "missing GDExtension DLL: $dll" }
 
       - name: sccache stats
+        if: always()
         shell: bash
         run: sccache --show-stats
+
+      - name: Save the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-gdext-${{ matrix.target }}
+          mode: save
 
       - name: Upload Windows GDExtension
         uses: actions/upload-artifact@v4
@@ -470,18 +598,28 @@ jobs:
       matrix:
         os: [windows-latest]
     runs-on: ${{ matrix.os }}
-    needs: [build-gdextension-windows]
+    needs: [changes, build-gdextension-windows]
+    # Runs (its steps gated on `code`) when the extension build was skipped
+    # for a docs-only PR, so the required check still reports; skipped, as
+    # before, when that build failed. A failed `changes` skips it too, which
+    # leaves the required check pending rather than vacuously green.
+    if: >-
+      !cancelled() && needs.changes.result == 'success' &&
+      needs.build-gdextension-windows.result != 'failure'
     env:
       GODOT_VERSION: 4.6.1-stable
       OPENNOVA_JO_DIR: ''
       OPENNOVA_JO_ASSETS: ''
+      CODE: ${{ needs.changes.outputs.code }}
     steps:
       - uses: actions/checkout@v4
+        if: env.CODE == 'true'
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
           submodules: recursive
 
       - name: Pull Git LFS assets (fixtures/ only)
+        if: env.CODE == 'true'
         shell: bash
         run: |
           git lfs install --local
@@ -490,6 +628,7 @@ jobs:
       # runner.os, like the package and release jobs: one cache entry serves
       # every job that installs this binary.
       - name: Cache Godot binary
+        if: env.CODE == 'true'
         uses: actions/cache@v4
         with:
           path: .godot-bin
@@ -497,6 +636,7 @@ jobs:
 
       # This job uses the Windows console binary and matching GDExtension.
       - name: Install Godot (Windows)
+        if: env.CODE == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -511,12 +651,14 @@ jobs:
 
       # The editor binary that runs GUT loads the template_debug flavour only.
       - name: Download GDExtension (Windows)
+        if: env.CODE == 'true'
         uses: actions/download-artifact@v4
         with:
           name: gdext_windows_template_debug
           path: godot/bin
 
       - name: Prime Godot import cache
+        if: env.CODE == 'true'
         shell: bash
         run: |
           GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
@@ -536,13 +678,14 @@ jobs:
           fi
 
       - name: Run Godot tests
+        if: env.CODE == 'true'
         shell: bash
         run: |
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
           bash scripts/test_godot.sh --suite core
 
       - name: Upload godot core test reports
-        if: always()
+        if: always() && env.CODE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: godot-core-reports
@@ -565,14 +708,17 @@ jobs:
 
       # The models, clips and textures in assets/ ride LFS. Their objects are
       # cached by the pointer set, so a run restores them instead of
-      # spending LFS bandwidth on every package.
+      # spending LFS bandwidth on every package. Like every large cache here,
+      # only master saves it: a PR-scoped copy is readable by that PR alone
+      # and crowds the repository's 10 GB cache.
       - name: Key the bundled LFS assets
         id: assets-lfs
         shell: bash
         run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
-      - name: Cache the bundled LFS assets
-        uses: actions/cache@v4
+      - name: Restore the bundled LFS assets
+        id: assets-cache
+        uses: actions/cache/restore@v4
         with:
           path: .git/lfs/objects
           key: ${{ steps.assets-lfs.outputs.key }}
@@ -583,17 +729,31 @@ jobs:
           git lfs install --local
           git lfs pull --include="assets/**"
 
+      - name: Save the bundled LFS assets
+        if: github.ref == 'refs/heads/master' && steps.assets-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .git/lfs/objects
+          key: ${{ steps.assets-lfs.outputs.key }}
+
       - name: Cache Godot binary
         uses: actions/cache@v4
         with:
           path: .godot-bin
           key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
-      - name: Cache Godot export templates
-        uses: actions/cache@v4
+      # The x86_64 Windows templates only (the export preset's target), not the
+      # whole 1.2 GB set: package_godot_windows.ps1 skips its download
+      # whenever version.txt is present.
+      - name: Restore Godot export templates
+        id: templates-cache
+        uses: actions/cache/restore@v4
         with:
-          path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
-          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
+          path: |
+            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/version.txt
+            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/icudt_godot.dat
+            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/windows_*_x86_64*
+          key: godot-export-templates-windows-${{ env.GODOT_VERSION }}
 
       # Every flavour this run built (template_debug only on a PR).
       - name: Download GDExtension
@@ -610,6 +770,16 @@ jobs:
         shell: pwsh
         run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
 
+      - name: Save Godot export templates
+        if: github.ref == 'refs/heads/master' && steps.templates-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/version.txt
+            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/icudt_godot.dat
+            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/windows_*_x86_64*
+          key: godot-export-templates-windows-${{ env.GODOT_VERSION }}
+
       - name: Upload OpenNova Windows game zip
         id: upload_game
         uses: actions/upload-artifact@v7
@@ -620,11 +790,18 @@ jobs:
 
   # The same installable Blender package is built for PRs and tagged releases.
   package-blender-windows:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/package-blender-windows.yml
 
   # The native apps (opennova-3di, opennova-extract, nw_pp, nw-lan-probe and the
   # NovaWorld server) in one zip, built for PRs and tagged releases alike.
   package-apps-windows:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: write   # its compiler cache's master save replaces older entries
     uses: ./.github/workflows/package-apps-windows.yml
 
   # Surface the Windows packages on the PR as a single comment that updates
@@ -684,7 +861,8 @@ jobs:
             }
 
   # Secrets are unavailable on fork PRs. Record that explicitly and skip only
-  # compatibility jobs; ordinary engine and Godot checks always run.
+  # retail legs (test's retail steps, godot-tests-retail); ordinary engine and
+  # Godot checks always run.
   retail-availability:
     runs-on: ubuntu-latest
     outputs:
@@ -701,78 +879,6 @@ jobs:
             echo "::notice::Retail compatibility tests skipped: REFERENCE_ASSETS_TOKEN is unavailable."
             echo "Retail compatibility tests skipped: reference-data credentials are unavailable." >> "$GITHUB_STEP_SUMMARY"
           fi
-
-  test-retail:
-    needs: [retail-availability]
-    if: needs.retail-availability.outputs.available == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      CMAKE_GENERATOR: Ninja
-      CMAKE_CXX_COMPILER_LAUNCHER: sccache
-      CMAKE_C_COMPILER_LAUNCHER: sccache
-      HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: false   # scoped below: the tests read fixtures/ only
-          submodules: recursive
-
-      - name: Pull Git LFS assets (fixtures/ only)
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull --include="fixtures/**"
-
-      # The retail data the asset gates need (docs/asset-gated-tests.md): the
-      # composite action restores or checks out the two private reference
-      # repositories and exports the two roots; without the
-      # REFERENCE_ASSETS_TOKEN secret it does nothing and the gates stay closed.
-      - name: Mount the reference data
-        uses: ./.github/actions/mount-reference-data
-        with:
-          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          enabled: ${{ env.HAVE_REFERENCE_ASSETS }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
-
-      - name: Toolchain sanity (Ninja + cl on PATH)
-        shell: bash
-        run: |
-          cmake --version
-          ninja --version
-          command -v cl
-
-      - name: Build and test
-        shell: bash
-        run: scripts/build.sh --no-godot --suite retail
-
-      - name: sccache stats
-        if: always()
-        shell: bash
-        run: sccache --show-stats
-
-      - name: Upload native retail test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-retail-reports
-          if-no-files-found: warn
-          path: build/Testing/
 
   godot-tests-retail:
     if: needs.retail-availability.outputs.available == 'true'

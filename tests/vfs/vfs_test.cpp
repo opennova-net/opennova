@@ -263,6 +263,15 @@ static int test_per_call_resolution_policy() {
           "forced loose-first can reach a loose-only file");
     CHECK(!v.has_file("loose_only.dat", VfsLookupPolicy::ForceArchiveOnly),
           "archive-only force never falls through after an archive miss");
+    // The loose-first answer a .dds-sibling loader asks follows the same policy.
+    CHECK(!v.loose_first_hit("shared.dat", VfsLookupPolicy::SessionDefault),
+          "a packed session finds no loose-first hit");
+    CHECK(v.loose_first_hit("shared.dat", VfsLookupPolicy::ForceLooseFirst),
+          "a forced loose-first lookup finds the loose file");
+    CHECK(!v.loose_first_hit("packed_only.dat", VfsLookupPolicy::ForceLooseFirst),
+          "an archive-only entry is no loose hit");
+    CHECK(!v.loose_first_hit("shared.dat", VfsLookupPolicy::ForceArchiveOnly),
+          "archive-only never has a loose hit");
 
     CHECK(v.mount_game(root.string(), "", VfsMountMode::PackedWithLooseOverride),
           "mount /d runtime");
@@ -271,6 +280,10 @@ static int test_per_call_resolution_policy() {
           "BMS-style force bypasses /d loose override");
     CHECK(read_vfs(v, "packed_only.dat", VfsLookupPolicy::ForceLooseFirst) == "PACKED_ONLY",
           "loose-first force still falls back to archives");
+    CHECK(v.loose_first_hit("shared.dat", VfsLookupPolicy::SessionDefault),
+          "the /d session finds the loose hit");
+    CHECK(!v.loose_first_hit("shared.dat", VfsLookupPolicy::ForceArchiveOnly),
+          "an archive-only force ignores /d's loose hit");
     return 1;
 }
 

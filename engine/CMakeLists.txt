@@ -25,6 +25,14 @@
 # including root must have defined opennova_sqlite (third_party/sqlite) first —
 # the service target links it.
 
+# The Visual Studio generator compiles one project's sources one at a time
+# unless cl gets /MP; opennova_runtime alone is ~400 sources on the critical
+# path of both roots. Ninja schedules sources itself (and CI's sccache wants
+# one source per cl), so the flag is for the VS generator only.
+if(MSVC AND CMAKE_GENERATOR MATCHES "^Visual Studio")
+    add_compile_options(/MP)
+endif()
+
 add_subdirectory(base/io)
 add_subdirectory(base/crt)
 add_subdirectory(formats)

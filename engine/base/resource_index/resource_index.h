@@ -61,6 +61,8 @@ public:
 	uint64_t revision() const { return revision_; }
 	bool has_mounted_archive() const;
 	bool prefers_loose_file(const std::string &name) const;
+	// Vfs::loose_first_hit: the loose-first answer under a per-call policy.
+	bool loose_first_hit(const std::string &name, VfsLookupPolicy policy) const;
 
 	// Choose how read_file keys SCR payloads (forwards to the underlying Vfs). Pass a
 	// gameprofile ScrPolicy / VfsScrPolicy value; defaults to version-detect and persists

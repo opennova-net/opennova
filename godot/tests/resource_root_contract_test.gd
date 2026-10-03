@@ -187,7 +187,7 @@ func test_load_texture_obeys_runtime_vfs_precedence() -> void:
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
-	var packed_texture: Texture2D = resources.load_texture("mission.pcx")
+	var packed_texture: Texture2D = resources.load_texture("mission.pcx", ResourceRoot.TEXTURE_LOADER_PCX)
 	assert_not_null(packed_texture, "The packed PCX should decode through load_texture().")
 	if packed_texture != null:
 		assert_true(
@@ -196,7 +196,7 @@ func test_load_texture_obeys_runtime_vfs_precedence() -> void:
 		)
 
 	assert_eq(resources.mount_runtime(root, "", true), OK)
-	var override_texture: Texture2D = resources.load_texture("mission.pcx")
+	var override_texture: Texture2D = resources.load_texture("mission.pcx", ResourceRoot.TEXTURE_LOADER_PCX)
 	assert_not_null(override_texture, "The /d loose-override PCX should decode through load_texture().")
 	if override_texture != null:
 		assert_true(
@@ -216,13 +216,15 @@ func test_texture_cache_separates_policy_and_full_query() -> void:
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
-	var packed: Texture2D = resources.load_texture("swatch.pcx")
+	var packed: Texture2D = resources.load_texture("swatch.pcx", ResourceRoot.TEXTURE_LOADER_PCX)
 	var forced_loose: Texture2D = resources.load_texture(
 		"swatch.pcx",
+		ResourceRoot.TEXTURE_LOADER_PCX,
 		ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
 	)
 	var nested_loose: Texture2D = resources.load_texture(
 		"nested/swatch.pcx",
+		ResourceRoot.TEXTURE_LOADER_PCX,
 		ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
 	)
 	assert_not_null(packed)
@@ -237,7 +239,9 @@ func test_texture_cache_separates_policy_and_full_query() -> void:
 		)
 
 
-func test_editor_load_texture_retains_loose_png_support() -> void:
+func test_menu_loader_reads_a_loose_png() -> void:
+	# The menus' texture loader is the one retail loader that reads a PNG
+	# (renderer::TextureLoader::Menu); texture_loaders_test.gd covers the rest.
 	var image := Image.create(3, 2, false, Image.FORMAT_RGBA8)
 	image.fill(Color.GREEN)
 	var root := _make_flat_root("loose_png")
@@ -245,8 +249,8 @@ func test_editor_load_texture_retains_loose_png_support() -> void:
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.set_root_dir(root), OK)
-	var texture: Texture2D = resources.load_texture("swatch.png")
-	assert_not_null(texture, "A loose editor PNG should still decode through the VFS-backed texture interface.")
+	var texture: Texture2D = resources.load_texture("swatch.png", ResourceRoot.TEXTURE_LOADER_MENU)
+	assert_not_null(texture, "A loose menu PNG decodes through the VFS-backed texture interface.")
 	if texture != null:
 		assert_eq(texture.get_width(), 3)
 		assert_eq(texture.get_height(), 2)
@@ -312,7 +316,7 @@ func test_runtime_remount_in_place_switches_expansion() -> void:
 	assert_eq(resources.get_expansion(), "")
 	assert_eq(resources.read_file("shared.env").get_string_from_utf8(), "base env")
 	assert_false(resources.has_file("exponly.3di"))
-	var base_texture: Texture2D = resources.load_texture("briefing.pcx")
+	var base_texture: Texture2D = resources.load_texture("briefing.pcx", ResourceRoot.TEXTURE_LOADER_PCX)
 	assert_not_null(base_texture)
 	if base_texture != null:
 		assert_true(base_texture.get_image().get_pixel(0, 0).is_equal_approx(Color.RED))
@@ -325,7 +329,7 @@ func test_runtime_remount_in_place_switches_expansion() -> void:
 		"The expansion archive wins after the remount; the previous mount's entry is gone.")
 	assert_eq(resources.read_file("baseonly.trn").get_string_from_utf8(), "base trn", "Base archives stay mounted.")
 	assert_true(resources.has_file("exponly.3di"), "Expansion-only entries appear after the remount.")
-	var expansion_texture: Texture2D = resources.load_texture("briefing.pcx")
+	var expansion_texture: Texture2D = resources.load_texture("briefing.pcx", ResourceRoot.TEXTURE_LOADER_PCX)
 	assert_not_null(expansion_texture)
 	if expansion_texture != null:
 		assert_true(
@@ -425,7 +429,7 @@ func test_resource_root_loads_dds_from_pff() -> void:
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
-	var tex: Texture2D = resources.load_texture("swatch.dds")
+	var tex: Texture2D = resources.load_texture("swatch.dds", ResourceRoot.TEXTURE_LOADER_STAGE)
 	assert_not_null(tex, "A DDS resident only inside a .pff should decode to a texture.")
 	if tex != null:
 		assert_eq(tex.get_width(), 4)
@@ -434,8 +438,8 @@ func test_resource_root_loads_dds_from_pff() -> void:
 
 func test_packed_texture_collapses_compound_authored_extensions() -> void:
 	# Retail Wwall models author names such as Jbark_2.dds.tga while resource.pff
-	# stores Jbark_2.dds. The shared candidate generator must retain that inner
-	# recognized filename before probing alternate extensions.
+	# stores Jbark_2.dds. The stage loader cuts the name three characters after
+	# its first '.', so it opens Jbark_2.dds and never Jbark_2.dds.dds.
 	var inner_image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
 	inner_image.fill(Color.RED)
 	var fallback_image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
@@ -448,7 +452,7 @@ func test_packed_texture_collapses_compound_authored_extensions() -> void:
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
-	var tex: Texture2D = resources.load_texture("swatch.dds.tga")
+	var tex: Texture2D = resources.load_texture("swatch.dds.tga", ResourceRoot.TEXTURE_LOADER_STAGE)
 	assert_not_null(
 		tex,
 		"A compound authored .dds.tga reference should resolve the packaged .dds.",
@@ -456,7 +460,7 @@ func test_packed_texture_collapses_compound_authored_extensions() -> void:
 	if tex != null:
 		assert_true(
 			tex.get_image().get_pixel(0, 0).is_equal_approx(Color.RED),
-			"The exposed .dds filename must win before generic extension fallbacks.",
+			"The cut name's .dds is the file the loader opens.",
 		)
 
 
@@ -493,15 +497,16 @@ func test_packed_texture_loads_share_one_decode_per_epoch() -> void:
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
-	var first: Texture2D = resources.load_texture("swatch.dds")
-	var second: Texture2D = resources.load_texture("swatch.dds")
+	var stage := ResourceRoot.TEXTURE_LOADER_STAGE
+	var first: Texture2D = resources.load_texture("swatch.dds", stage)
+	var second: Texture2D = resources.load_texture("swatch.dds", stage)
 	assert_not_null(first)
 	assert_true(first == second, "Repeat packed loads should return the cached texture, not a fresh decode.")
-	assert_null(resources.load_texture("missing.dds"), "Misses stay misses when cached.")
-	assert_null(resources.load_texture("missing.dds"))
+	assert_null(resources.load_texture("missing.dds", stage), "Misses stay misses when cached.")
+	assert_null(resources.load_texture("missing.dds", stage))
 
 	ResourceRoot.bump_cache_epoch()
-	var after_bump: Texture2D = resources.load_texture("swatch.dds")
+	var after_bump: Texture2D = resources.load_texture("swatch.dds", stage)
 	assert_not_null(after_bump, "An epoch bump must not lose the texture, only the cache.")
 
 
@@ -515,7 +520,7 @@ func test_clear_releases_cached_texture_before_render_server_shutdown() -> void:
 	}])
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
-	var texture: Texture2D = resources.load_texture('swatch.dds')
+	var texture: Texture2D = resources.load_texture('swatch.dds', ResourceRoot.TEXTURE_LOADER_STAGE)
 	assert_not_null(texture)
 	var weak_texture: WeakRef = weakref(texture)
 	texture = null
@@ -553,7 +558,9 @@ func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> 
 	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "brick.dds", "bytes": source.save_dds_to_buffer()},
 		{"name": "brick.tga", "bytes": _normal_test_tga(61)},
-		{"name": "ready.mdt", "bytes": source.save_dds_to_buffer()},
+		# An MDT is a TGA the TGA reader decodes (a DDS payload under the
+		# name would decode as TGA garbage, as in retail).
+		{"name": "ready.mdt", "bytes": TestFs.tga_bytes(Vector2i(4, 4), Color8(50, 70, 121, 128))},
 	])
 	TestFs.write_bytes(self, root.path_join("brick.tga"), _normal_test_tga(233))
 	var resources := ResourceRoot.new()

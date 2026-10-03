@@ -44,9 +44,10 @@ Weather *Precipitation::_weather_node() const {
 Ref<Texture2D> Precipitation::_texture_for(bool p_snow) {
 	if (!textures_loaded_ && resource_root_.is_valid()) {
 		// (retail WeatherParticle_LoadTextures @ 0x5de840 — eraindrp.tga and
-		//  jsnwflk.tga through the archive texture loader)
-		rain_texture_ = resource_root_->load_texture(kRainTexture);
-		snow_texture_ = resource_root_->load_texture(kSnowTexture);
+		//  jsnwflk.tga through the stage texture loader; the install ships no
+		//  jsnwflk.tga, so snow loads no texture, as in retail)
+		rain_texture_ = resource_root_->load_texture(kRainTexture, ResourceRoot::TEXTURE_LOADER_STAGE);
+		snow_texture_ = resource_root_->load_texture(kSnowTexture, ResourceRoot::TEXTURE_LOADER_STAGE);
 		textures_loaded_ = true;
 	}
 	return p_snow ? snow_texture_ : rain_texture_;
