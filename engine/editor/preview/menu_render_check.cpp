@@ -1,7 +1,6 @@
 #include <editor/preview/menu_render_check.h>
 
 #include <algorithm>
-#include <filesystem>
 #include <iterator>
 #include <variant>
 
@@ -9,6 +8,7 @@
 #include <editor/documents/project_checks.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/make_menu_render_check.h>
+#include <editor/project/project_files.h>
 
 namespace opennova::editor {
 
@@ -34,7 +34,7 @@ std::shared_ptr<const MnuDocument> read_menu(
 	auto document = std::make_shared<MnuDocument>();
 	Diagnostic error;
 	if (!document->load(
-				(std::filesystem::path(input.paths.root) / asset.relative_path).generic_string(),
+				join_path(input.paths.root, asset.relative_path),
 				asset.relative_path, asset.kind, input.project.target_game, error) ||
 			document->blocked())
 		return nullptr;
@@ -78,7 +78,11 @@ std::string menu_note_message(const menu::MenuFrameNote &note) {
 		return "OpenNova draws only the text rows of a list or a combo box yet (D-MNU-5), so this " + s +
 		       " row is not drawn.";
 	case Code::TableCellsDeferred:
-		return "OpenNova does not draw a table's " + s + " cells yet (D-MNU-13).";
+		return "OpenNova does not draw a table's " + s + " row images yet (D-MNU-13).";
+	case Code::TableCellsCustom:
+		return "The game hands this " + s +
+		       " column's cells to the menu's own code to draw (the table's custom-draw event); the preview draws "
+		       "nothing for them.";
 	case Code::ScrollExtentDefault:
 		return "No HEIGHT or WIDTH sets this scroll bar's arrow length, so the game makes each arrow " + s +
 		       " long along the bar.";

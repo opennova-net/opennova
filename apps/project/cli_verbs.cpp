@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/run/null_process_platform.h>
 #include <editor/session/outcome_json.h>
@@ -89,8 +90,10 @@ struct CliArgs {
 std::string from_here(const std::string &path) {
 	if (path.empty()) return path;
 	std::error_code ec;
-	const std::filesystem::path full = std::filesystem::absolute(path, ec);
-	return (ec ? std::filesystem::path(path) : full).lexically_normal().generic_string();
+	// UTF-8 in and out, whatever the code page (base/io/os_path.h; the editor keeps its paths so).
+	const std::filesystem::path given = io::os_path(path);
+	const std::filesystem::path full = std::filesystem::absolute(given, ec);
+	return io::utf8_generic_path((ec ? given : full).lexically_normal());
 }
 
 // --- the session -------------------------------------------------------------------------------
@@ -425,7 +428,7 @@ std::string finding_key(const JsonValue &finding) {
 // notes), then the verdict of the build's gate (the build_gate query): validate fails exactly when
 // a build would be refused. A finding that blocks the build and no row shows (the build's own check
 // of the files: an archive in the project) is said before the verdict; an error row the build does
-// not gate on (a project check's: the render check's; a missing reference, ADR 0046 S14) is listed
+// not gate on (a project check's: the render check's; a listed code's, ADR 0046 S14) is listed
 // and fails nothing.
 int run_validate(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	std::vector<JsonValue> pages, gate;
@@ -1073,9 +1076,10 @@ constexpr VerbRow kRows[] = {
 	        .row,
 	Verb(V::Validate, "validate", "<dir>", kReadRequests, kDir, run_validate,
 	     "list every finding the editor's Problems lists; exit 1 exactly when a build would be\n"
-	     "refused (the build_gate query: a required file missing or wrong, an error the build\n"
-	     "gates on; an error it does not gate on, a missing reference or a project check's\n"
-	     "such as the render check's, is listed and fails nothing) (--json: the problems query)")
+	     "refused (the build_gate query: the build follows retail, refused where the game would\n"
+	     "fail to load or run, or where the editor cannot vouch for what it packs; an error it does\n"
+	     "not gate on, a listed code's or a project check's such as the render check's, is listed\n"
+	     "and fails nothing) (--json: the problems query)")
 	        .answers(Q::Problems)
 	        .row,
 	Verb(V::CreateMissing, "create-missing", "<dir> [--role <token>]", kCreateMissingRequests, kDir,
@@ -1276,7 +1280,7 @@ bool parse_args(const VerbRow &row, int argc, const char *const *argv, CliArgs &
 		if (name != "--install") continue;
 		const std::string folder = from_here(value);
 		std::error_code ec;
-		if (!std::filesystem::is_directory(folder, ec)) {
+		if (!std::filesystem::is_directory(io::os_path(folder), ec)) {
 			why = "--install names no folder: " + value;
 			return false;
 		}

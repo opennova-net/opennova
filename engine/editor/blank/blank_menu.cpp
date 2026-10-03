@@ -1,8 +1,8 @@
 #include "blank_makers.h"
 
-#include <filesystem>
 
 #include <base/io/strutil.h>
+#include <editor/project/project_files.h>
 #include <formats/mnu/mnu.h>
 
 namespace opennova::editor {
@@ -112,7 +112,7 @@ bool make_blank_main_menu(const BlankRequest &request, std::vector<uint8_t> &out
 }
 
 bool make_blank_menu(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
-	std::string screen = strutil::to_upper(std::filesystem::path(request.logical_name).stem().generic_string());
+	std::string screen = strutil::to_upper(utf8_of(path_of(request.logical_name).stem()));
 	if (screen.empty()) screen = "MAIN";
 	return menu_bytes(free_form_screen_xml(screen), request, out, error);
 }

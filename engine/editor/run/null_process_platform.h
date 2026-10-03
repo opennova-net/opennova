@@ -15,6 +15,10 @@ namespace opennova::editor {
 class NullProcessPlatform : public ProcessPlatform {
 public:
 	bool can_spawn() const override { return false; }
+	std::string no_spawn_reason() const override {
+		return "This session starts no game: it runs with no process seam (the command line's), so Play is "
+		       "the editor's.";
+	}
 	int64_t spawn(const LaunchPlan &) override { return -1; }
 	bool is_running(int64_t) override { return false; }
 	bool terminate(int64_t) override { return true; }
