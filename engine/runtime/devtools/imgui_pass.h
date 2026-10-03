@@ -127,10 +127,13 @@ public:
 	virtual MenuGroup menu_group() const { return MenuGroup::Tools; }
 	// An open window its product steps aside for now (the editor's Preview while the active
 	// document's own picture fills the Document tab): not drawn and not visible, as a closed one,
-	// its "Windows" menu item still ticked and `open` still the user's. ImGui keeps the dock node
-	// it leaves (the window's dock id kept), which hides while empty so its neighbour takes the
-	// room, and the window docks back into it the frame it draws again; the user's docking stands.
+	// `open` still the user's. ImGui keeps the dock node it leaves (the window's dock id kept),
+	// which hides while empty so its neighbour takes the room, and the window docks back into it
+	// the frame it draws again; the user's docking stands. Its "Windows" menu item reads unticked
+	// meanwhile, and ticking it calls show_anyway(): the author's ask to see it, which the window
+	// honours as its own rule says (the Preview's: for the document active then).
 	virtual bool stands_aside() const { return false; }
+	virtual void show_anyway() {}
 	// The debug-control rows this window reads through the control board
 	// (control_board.h) while it shows: the embedder pushes their live
 	// states on the board's cadence. The ids are debug_control_ids.h

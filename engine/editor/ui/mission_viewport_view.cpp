@@ -78,8 +78,6 @@ bool tool_button(ui_kit::WrapRow &row, const char *label, bool active, bool enab
 	return pressed;
 }
 
-} // namespace
-
 // The viewport's tool set (its options' tool, the Place tool's item, the Path tool's path): one
 // SetViewport, as the wire sets it.
 void set_tool(Workspace &workspace, const MissionViewport &mission, MissionTool tool, int64_t item = -1, int path = -1) {
@@ -89,6 +87,16 @@ void set_tool(Workspace &workspace, const MissionViewport &mission, MissionTool 
 	if (path >= 0) options.path = path;
 	if (options != mission.options()) set_options(workspace, mission, options);
 }
+
+// Whether the clipboard pastes at a point of the picture (S15, Paste here): copied entities or areas,
+// whose middle goes there. Another clipboard (events, a nested kind's records) pastes as the session's
+// rule puts it.
+bool pastes_here(const SessionView &view) {
+	double middle[2];
+	return !view.documents.clipboard.empty() && mission_clip_middle(view.documents.clipboard, middle);
+}
+
+} // namespace
 
 // What the view keeps of its own: the snaps; the palette; where the right-click menu was opened. The
 // tool, its item and its path are the viewport's options (the wire sets them too).
@@ -128,12 +136,14 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	// as "select nothing").
 	const MissionTool tool = mission.options().tool;
 	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput;
-	const bool stop = tool != MissionTool::Select && focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+	auto *canvas = static_cast<MissionCanvas *>(half());
+	// An Esc while a press is down is the canvas's (it cancels the press, the tool kept).
+	const bool stop = tool != MissionTool::Select && focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
+					  !(canvas && canvas->gesture().pressed());
 	tools.toolbar(workspace, mission, context);
 	snap = tools.snap_metres();
 	context.snap = snap;
 	tools.numbers(workspace, mission, context);
-	auto *canvas = static_cast<MissionCanvas *>(half());
 	if (canvas) canvas->set_turn(kMissionTurns[std::clamp(tools.turn, 0, 4)]);
 	// The clipboard's keys while the view has the keyboard and no press is down: Copy, Cut, and Paste at
 	// the pointer over the picture (else as the session's rule puts it).
@@ -149,8 +159,9 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 			cut.path = path;
 			workspace.request(std::move(cut));
 		} else if (context.editable() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V)) {
-			// Over the picture, the copies' middle where the pointer is; else as the session's rule puts it.
-			if (tools.mouse_on_picture) viewport_command(workspace, mission, "paste", {}, &tools.mouse);
+			// Over the picture, copied entities and areas with their middle where the pointer is; anything
+			// else, or off the picture, as the session's rule puts it.
+			if (tools.mouse_on_picture && pastes_here(view)) viewport_command(workspace, mission, "paste", {}, &tools.mouse);
 			else workspace.request(request::paste(path));
 		}
 	}
@@ -455,9 +466,12 @@ void MissionViewportView::Tools::canvas_menu(Workspace &workspace, const Mission
 	if (ImGui::MenuItem(item != 0 ? ("Place " + item_name + " here").c_str() : "Place here", nullptr, false, edits && item != 0))
 		drop_item(workspace, mission, item, menu_at, snap_metres());
 	if (item == 0) ui_kit::tooltip("Pick an item with Place first.");
-	const bool clip = !view.documents.clipboard.empty();
+	const bool clip = pastes_here(view);
 	if (ImGui::MenuItem("Paste here", "Ctrl+V", false, edits && clip)) viewport_command(workspace, mission, "paste", {}, &menu_at);
-	if (!clip) ui_kit::tooltip("Copy entities or areas first (Ctrl+C).");
+	if (!clip)
+		ui_kit::tooltip(view.documents.clipboard.empty()
+								? "Copy entities or areas first (Ctrl+C)."
+								: "The clipboard holds no entities or areas (events and nested records paste in the outline).");
 	ImGui::Separator();
 	if (ImGui::MenuItem("Frame", "F", false, true)) viewport_command(workspace, mission, "frame");
 	if (ImGui::MenuItem("Drop to ground", nullptr, false, edits && selected && mission.ground()))

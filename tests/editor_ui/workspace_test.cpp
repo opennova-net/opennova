@@ -35,6 +35,7 @@
 
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
@@ -2269,6 +2270,33 @@ void test_mission_view_placing() {
 	ui.activate(popup_item(item_id(column->ID, { "mission_canvas_menu" }), "Select same item"));
 	run.settle();
 	CHECK(v.documents.selection.records.size() == 3, "Select same item: the three pumps");
+	// Ctrl+V over the picture with an event on the clipboard (nothing with a place to paste at): the
+	// session's own paste, never Paste here's refusal (S15 review).
+	const auto *placed_in = static_cast<const MissionDocument *>(session.document_for(path));
+	const std::vector<const Node *> events = placed_in ? placed_in->rows_of(MissionKind::Event) : std::vector<const Node *>();
+	CHECK(!events.empty(), "the mission has events");
+	if (events.empty()) return;
+	session.handle(request::select_record(path, { events.front()->id, events.front()->kind, 0 }));
+	EditorRequest copy = request::of(EditorRequestKind::Copy);
+	copy.path = path;
+	session.handle(copy);
+	double middle[2];
+	CHECK(!v.documents.clipboard.empty() && !mission_clip_middle(v.documents.clipboard, middle), "an event copied");
+	run.settle();
+	// The picture clicked (its corner, the sky: the view has the keyboard), the pointer over its middle.
+	ui.click(ImVec2(device->origin.x + 3.0f, device->origin.y + 3.0f));
+	run.settle();
+	run.take();
+	ui.mouse(device->origin.x + float(device->width) * 0.5f, device->origin.y + float(device->height) * 0.5f);
+	ui.frames(1);
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+	ui.key(ImGuiKey_V, true);
+	ui.key(ImGuiKey_V, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+	run.settle();
+	raised = run.take();
+	CHECK(count_of_kind(raised, EditorRequestKind::Paste) == 1 && count_of_kind(raised, EditorRequestKind::EditInViewport) == 0,
+	      "Ctrl+V with an event: the session's paste");
 }
 
 // The Preview steps aside for a mission (ADR 0046 S15), over a real session at the first layout:
@@ -2329,6 +2357,36 @@ void test_preview_steps_aside() {
 	ui.frames(3);
 	CHECK(!preview_stands_aside(v) && preview->Active && v.documents.preview_shown == ViewportKind::Menu,
 	      "the mission again: Preview stays beside it, the menu its to show");
+	// The author's ask (S15 review): the menu closed, the Preview steps aside for the mission again;
+	// ticked in the Windows menu (show_anyway), it shows beside that mission until another document is
+	// made active.
+	devtools::Window *preview_item = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Preview") == 0) preview_item = &ui.windows.pass().window(i);
+	CHECK(preview_item != nullptr, "the Preview's window");
+	if (!preview_item) return;
+	const DocumentBase *menu = session.document_base_for("main.mnu");
+	if (menu) session.handle(request::close_document(menu->path()));
+	run.settle();
+	ui.frames(3);
+	CHECK(preview_item->stands_aside() && !preview->Active, "the menu closed: aside again");
+	preview_item->show_anyway();
+	ui.frames(3);
+	CHECK(!preview_item->stands_aside() && preview->Active, "asked for: shown beside the mission");
+	run.open("items.def");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
+	CHECK(preview_item->stands_aside() && !preview->Active, "another document made active between: aside again");
+	// Floated off the dockspace (another monitor), it never steps aside: it frees no room.
+	preview_item->show_anyway();
+	ui.frames(3);
+	ImGui::DockContextQueueUndockWindow(ImGui::GetCurrentContext(), preview);
+	ui.frames(3);
+	CHECK(preview->DockId == 0, "the Preview floated");
+	run.open("items.def");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
+	CHECK(!preview_item->stands_aside() && preview->Active, "floated: it stays beside the mission");
 }
 
 // A canvas whose picture fills it (the model's, the mission's), read through ImGui: the right

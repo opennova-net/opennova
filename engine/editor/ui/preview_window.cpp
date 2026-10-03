@@ -14,6 +14,7 @@
 #include <editor/ui/viewport_views.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 namespace opennova::editor {
 
@@ -43,7 +44,23 @@ bool preview_stands_aside(const SessionView &view) {
 }
 
 bool PreviewWindow::stands_aside() const {
-	return preview_stands_aside(workspace_.view());
+	const SessionView &view = workspace_.view();
+	// The author's ask (the Windows menu's tick) holds for the document active then.
+	if (!shown_for_.empty() && shown_for_ != view.documents.active) shown_for_.clear();
+	if (!shown_for_.empty() || !preview_stands_aside(view)) return false;
+	// Floated off the workspace's dockspace (its own window, another monitor), stepping aside frees no
+	// room beside Document: it stays.
+	if (ImGui::GetCurrentContext() != nullptr) {
+		const ImGuiWindow *window = ImGui::FindWindowByName(title());
+		const ImGuiDockNode *node = window && window->DockId ? ImGui::DockBuilderGetNode(window->DockId) : nullptr;
+		while (node && node->ParentNode) node = node->ParentNode;
+		if (window && (!node || !node->IsDockSpace())) return false;
+	}
+	return true;
+}
+
+void PreviewWindow::show_anyway() {
+	shown_for_ = workspace_.view().documents.active;
 }
 
 ViewportView *PreviewWindow::view_of(const std::string &path, ViewportKind kind) {

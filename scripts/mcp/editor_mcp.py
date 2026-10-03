@@ -366,9 +366,14 @@ def viewport_of(args: argparse.Namespace) -> dict:
         request["drag"] = drag
     elif drag:
         raise GameMcpError(EXIT_NOT_READ, "--id, --handle, --gesture and --end are op drag's")
-    if args.op not in ("drag", "drop", "command") and (args.by is not None or args.to is not None or args.at is not None
-                                                       or args.snap is not None):
-        raise GameMcpError(EXIT_NOT_READ, "--by, --to, --at and --snap are op drag's, drop's or command's")
+    # Each of --by, --to, --at and --snap only where its op sends it: never read and dropped.
+    takes = {"drag": ("by", "to", "snap"), "drop": ("at", "to", "snap"), "command": ("by", "at")}
+    given = [name for name in ("by", "to", "at", "snap") if getattr(args, name) is not None]
+    stray = [name for name in given if name not in takes.get(args.op, ())]
+    if stray:
+        ops = "; ".join(f"--{name} is op " + " or ".join(f"{op}'s" for op, names in takes.items() if name in names)
+                        for name in stray)
+        raise GameMcpError(EXIT_NOT_READ, f"op {args.op} takes no {', '.join('--' + name for name in stray)} ({ops})")
     return request
 
 

@@ -42,6 +42,9 @@ public:
 	devtools::InitialDockPlacement initial_dock_placement() const override { return devtools::InitialDockPlacement::CenterRight; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
 	bool stands_aside() const override;
+	// The Windows menu's tick while it stands aside: shown beside the document active now, until
+	// another is made active. A Preview floated off the dockspace never steps aside (it frees no room).
+	void show_anyway() override;
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 	// After each frame's windows, whether this one drew or not (the workspace's frame
 	// bracket): a viewport view whose canvas did not draw this frame ends its gesture.
@@ -63,6 +66,9 @@ private:
 
 	Workspace &workspace_;
 	std::vector<Slot> views_;
+	// The document the author asked to see the Preview beside (the Windows menu), until another is
+	// active ("" none).
+	mutable std::string shown_for_;
 };
 
 // Whether the Preview window steps aside over `view` (PreviewWindow::stands_aside): it shows nothing

@@ -418,7 +418,17 @@ void ImGuiPass::draw_menu_bar() {
 	}
 	const auto menu_item = [](Window &window) {
 		if (window.is_closeable()) {
-			ImGui::MenuItem(window.title(), nullptr, &window.open);
+			// Ticked while it shows: one standing aside reads unticked, and ticking it is the author's
+			// ask to see it anyway.
+			const bool aside = window.open && window.stands_aside();
+			bool shown = window.open && !aside;
+			if (ImGui::MenuItem(window.title(), nullptr, &shown)) {
+				if (shown && aside) {
+					window.show_anyway();
+				} else {
+					window.open = shown;
+				}
+			}
 		} else {
 			bool selected = true;
 			ImGui::BeginDisabled();
