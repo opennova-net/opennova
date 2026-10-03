@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 
 #include <editor/model/document_base.h>
 #include <editor/session/view/session_view.h>
@@ -30,15 +31,32 @@ void MainViewportView::draw(Workspace &workspace, const DocumentBase &document) 
 	// never so wide that the viewport beside it loses its own least width (a tab narrowed since, a
 	// window docked smaller than it first drew at; a viewport's toolbar wraps and narrows its
 	// controls down to that width).
+	// S15: the viewport keeps room of its own (24 lines' width in a wide tab, the least in a narrow one,
+	// growing between) however wide the outline is dragged, and until the outline is dragged its width
+	// follows the tab as the tab settles (a resizable child takes its first width once: a tab first
+	// drawn wider than its dock, as a docked window is for its first frames, left the outline a column
+	// of most of the tab and the picture a strip).
 	const float avail = ImGui::GetContentRegionAvail().x;
 	const float least = ImGui::GetFontSize() * 6.0f;
-	const float column = std::max(ImGui::GetFontSize() * 12.0f, avail * 0.3f);
-	ImGui::SetNextWindowSizeConstraints(ImVec2(least, 0.0f), ImVec2(std::max(least, avail - least), FLT_MAX));
+	const float room = std::clamp(avail - ImGui::GetFontSize() * 30.0f, least, std::max(least, ImGui::GetFontSize() * 24.0f));
+	const float widest = std::max(least, avail - room);
+	const float column = std::clamp(std::max(ImGui::GetFontSize() * 12.0f, avail * 0.3f), least, widest);
+	const bool follow = !column_dragged_ && avail != column_avail_;
+	if (follow) ImGui::SetNextWindowSize(ImVec2(column, 0.0f), ImGuiCond_Always);
+	else ImGui::SetNextWindowSizeConstraints(ImVec2(least, 0.0f), ImVec2(widest, FLT_MAX));
 	ImGui::BeginDisabled(!workspace.view().allows(EditorRequestKind::EditRecord));
-	if (ImGui::BeginChild("outline_column", ImVec2(column, 0.0f), ImGuiChildFlags_ResizeX | ImGuiChildFlags_Borders))
+	float width = column;
+	if (ImGui::BeginChild("outline_column", ImVec2(column, 0.0f), ImGuiChildFlags_ResizeX | ImGuiChildFlags_Borders)) {
+		width = ImGui::GetWindowWidth();
 		outline_->draw(workspace, document);
+	}
 	ImGui::EndChild();
 	ImGui::EndDisabled();
+	// A width that moved while the tab stood is the author's drag: kept from then on.
+	if (!follow && column_width_ > 0.0f && avail == column_avail_ && std::fabs(width - column_width_) > 0.5f)
+		column_dragged_ = true;
+	column_width_ = width;
+	column_avail_ = avail;
 	ImGui::SameLine();
 	if (ImGui::BeginChild("viewport_column", ImVec2(0.0f, 0.0f))) main_viewport(workspace, document);
 	ImGui::EndChild();

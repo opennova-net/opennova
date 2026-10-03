@@ -1,10 +1,12 @@
 #include <editor/ui/problems_window.h>
 
 #include <algorithm>
+#include <initializer_list>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <editor/project/project_files.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/view/session_view.h>
@@ -80,6 +82,19 @@ void disabled_wrapped(const std::string &text) {
 
 float line_height() { return ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2.0f; }
 
+// What a fix of a finding about the game's own data says first (S15): the file is one the game ships,
+// so the problem is the original's too and a fix makes the file the modder's. "" for any other finding.
+std::string shipped_note(const Diagnostic &d, const SessionView &view) {
+	return in_original_data(d, view) ? "Edits a file the game ships: the original has this problem too, and the file "
+	                                   "becomes yours."
+	                                 : std::string();
+}
+// A fix's tooltip: its label, that note, what it does, whether it waits.
+std::string fix_tip(const ProblemFix &fix, const std::string &note, bool allowed) {
+	return fix.label + "\n\n" + (note.empty() ? std::string() : note + "\n\n") + fix.detail +
+	       (allowed ? "" : std::string("\n") + kWaits);
+}
+
 } // namespace
 
 void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
@@ -103,6 +118,7 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	const ProblemAnswer &counts = list_.answer(view); // every finding's, whatever it shows
 	ProblemQuery &query = list_.query();
 	ui_kit::WrapRow row;
+	// Your project's own counts (S15: the game's own data's are counted apart, under their group).
 	severity_toggle(row, "Errors", "###errors", counts.errors, "errors", query.errors);
 	severity_toggle(row, "Warnings", "###warnings", counts.warnings, "warnings", query.warnings);
 	severity_toggle(row, "Info", "###infos", counts.infos, "info", query.infos);
@@ -113,13 +129,26 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	query.text = text_;
 	choice_combo(row, "Scope", kScopes, query.scope,
 	             "Which files' problems: the project's, the active file's, the open files'.");
+	// The active file's alone, one click (S15): on, the button lit; again, the whole project's.
+	if (!view.documents.active.empty()) {
+		const bool only = query.scope == ProblemScope::ActiveFile;
+		const std::string label = "Only " + basename_of(view.documents.active) + "###only_active";
+		row.next(ui_kit::button_width(label.c_str()));
+		if (only) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+		if (ImGui::Button(label.c_str())) query.scope = only ? ProblemScope::Project : ProblemScope::ActiveFile;
+		if (only) ImGui::PopStyleColor();
+		ui_kit::tooltip(only ? "Showing the active file's problems alone: click for the whole project's."
+		                     : "Only the active file's problems (Scope: Active file).");
+	}
 	choice_combo(row, "Group", kGroupings, query.grouping,
 	             "Group the problems by file or by kind, or list them as one.");
 	row.next(ui_kit::checkbox_width("Only fixable"));
 	ImGui::Checkbox("Only fixable", &query.fixable);
 	ui_kit::tooltip("Only the problems the editor offers a fix for.");
 	const ProblemAnswer &answer = list_.refresh(view);
-	const std::string shown = std::to_string(answer.rows.size()) + " of " + std::to_string(answer.total());
+	// The severities count the modder's findings; the game's own data's are said after the shown count.
+	std::string shown = std::to_string(answer.rows.size()) + " of " + std::to_string(answer.total());
+	if (answer.original()) shown += " (" + std::to_string(answer.original()) + " in the game's own data)";
 	row.next(ui_kit::text_width(shown.c_str()));
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", shown.c_str());
@@ -212,6 +241,10 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 	const std::string counts =
 	        ProblemsList::severity_counts(group.errors, group.warnings, group.infos);
 	ui_kit::clipped_text(group.title + " (" + counts + ")");
+	if (group.original)
+		ui_kit::tooltip("Problems in files the project holds exactly as the game install has them: the original game "
+		                "has them too, so they are not yours to fix. A file you change leaves this group (an unsaved "
+		                "edit too), and a problem that would stop a build is never in it.");
 	ImGui::TableSetColumnIndex(3);
 	const ProblemsList::Proposal &all = list_.group_fixes(line.group);
 	if (all.findings >= 2 && !all.requests.empty()) {
@@ -250,8 +283,11 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	const std::vector<ProblemFix> &fixes = list_.fixes(view, line.finding);
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();
+	const std::string note = fixes.empty() ? std::string() : shipped_note(d, view);
 	if (expanded) {
 		ImGui::TextWrapped("%s", d.message.c_str());
+		// A fix of the game's own data is marked as editing a file the game ships (S15).
+		if (!note.empty()) disabled_wrapped(note);
 		for (const ProblemFix &fix : fixes) {
 			ImGui::PushID(fix.label.c_str());
 			const float room = ImGui::GetContentRegionAvail().x;
@@ -260,7 +296,7 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 			if (fix_pressed(view, line.finding, fix, ui_kit::fitted_button(fix.label, "fix", room)) && allowed)
 				apply(view, line.finding, fix);
 			ImGui::EndDisabled();
-			ui_kit::tooltip_lazy([&] { return fix.label + "\n\n" + fix.detail + (allowed ? "" : std::string("\n") + kWaits); });
+			ui_kit::tooltip_lazy([&] { return fix_tip(fix, note, allowed); });
 			// What it does beside it when there is room for a few words, else under it.
 			if (room - ImGui::GetItemRectSize().x - ImGui::GetStyle().ItemSpacing.x >= ImGui::GetFontSize() * 12.0f)
 				ImGui::SameLine();
@@ -275,17 +311,28 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	}
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();
-	const std::string where = ProblemsList::location_of(d, false);
-	const std::string whole = ProblemsList::location_of(d, true);
+	// The record in the words its document shows it by where it is open (a mission's trigger as what it
+	// tests, an entity by its item's name, S15), and the field by what the record calls it; its path in
+	// the tooltip.
+	const std::string title = finding_record_title(d, view), field = finding_field_title(d, view);
+	const std::string plain = ProblemsList::location_of(d, false);
+	std::string where = plain;
+	if (!title.empty() || !field.empty()) {
+		where = basename_of(d.asset);
+		for (const std::string *part : {title.empty() ? &d.record : &title, field.empty() ? &d.field : &field})
+			if (!part->empty()) where += " - " + *part;
+	}
+	const std::string whole = ProblemsList::location_of(d, true) + (where == plain ? std::string() : "\n" + where);
 	ui_kit::clipped_text(where, whole != where ? whole : std::string());
 	ImGui::TableNextColumn();
-	if (!expanded && !fixes.empty()) draw_fixes(view, line.finding, fixes);
+	if (!expanded && !fixes.empty()) draw_fixes(view, line.finding, fixes, note);
 	ImGui::PopID();
 }
 
 // The Fix column: the first fix and More (every fix) when both fit with the fix's words
 // legible, else one Fix... that lists every fix; each no wider than the column.
-void ProblemsWindow::draw_fixes(const SessionView &view, size_t finding, const std::vector<ProblemFix> &fixes) {
+void ProblemsWindow::draw_fixes(const SessionView &view, size_t finding, const std::vector<ProblemFix> &fixes,
+                                const std::string &note) {
 	const ImGuiStyle &style = ImGui::GetStyle();
 	const float room = ImGui::GetContentRegionAvail().x;
 	const float more = fixes.size() > 1 ? ui_kit::button_width("More") + style.ItemSpacing.x : 0.0f;
@@ -297,14 +344,14 @@ void ProblemsWindow::draw_fixes(const SessionView &view, size_t finding, const s
 		const bool clicked = ui_kit::fitted_button(first.label, "fix", room - more);
 		if (fix_pressed(view, finding, first, clicked) && allowed) apply(view, finding, first);
 		ImGui::EndDisabled();
-		ui_kit::tooltip_lazy([&] { return first.label + "\n\n" + first.detail + (allowed ? "" : std::string("\n") + kWaits); });
+		ui_kit::tooltip_lazy([&] { return fix_tip(first, note, allowed); });
 		if (fixes.size() == 1) return;
 		ImGui::SameLine();
 		open = ImGui::Button("More");
 	} else {
 		open = ui_kit::fitted_button("Fix...", "fixes", room);
 	}
-	ui_kit::tooltip("Every fix for this problem");
+	ui_kit::tooltip(note.empty() ? std::string("Every fix for this problem") : "Every fix for this problem\n\n" + note);
 	if (!open) return;
 	more_ = list_.ref(view, finding);
 	open_more_ = true;
@@ -325,6 +372,9 @@ void ProblemsWindow::draw_more(const SessionView &view) {
 		return;
 	}
 	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.0f);
+	// The game's own data's: said first (S15).
+	const std::string note = shipped_note(view.findings.diagnostics[finding], view);
+	if (!note.empty()) ImGui::TextDisabled("%s", note.c_str());
 	for (const ProblemFix &fix : list_.fixes(view, finding)) {
 		const bool allowed = view.allows(fix.request.kind);
 		const bool clicked = ImGui::Selectable(fix.label.c_str(), false, allowed ? 0 : ImGuiSelectableFlags_Disabled);
