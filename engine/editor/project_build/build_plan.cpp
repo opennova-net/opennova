@@ -1,13 +1,12 @@
 #include <editor/project_build/build_plan.h>
 
 #include <algorithm>
-#include <filesystem>
 
 #include <editor/assets/player_files.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_files.h>
 
-namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
@@ -61,7 +60,7 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		if (!asset_kind_packed(asset.kind)) continue;
 		BuildEntry entry;
 		entry.logical_name = asset.logical_name;
-		entry.source_path = (fs::path(paths.root) / asset.relative_path).generic_string();
+		entry.source_path = join_path(paths.root, asset.relative_path);
 		entry.size_bytes = asset.size_bytes;
 		const ArchiveSlot slot = route_asset(asset);
 		if (slot == ArchiveSlot::Loose) {

@@ -1,7 +1,7 @@
 #include <editor/assets/asset_kinds.h>
 
-#include <filesystem>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_kind.h>
 
@@ -442,7 +442,7 @@ AssetKind asset_kind_for_runtime(const std::string &runtime_kind) {
 }
 
 AssetKind asset_kind_for_name(const std::string &logical_name) {
-	const std::string file = std::filesystem::path(logical_name).filename().string();
+	const std::string file = io::utf8_file_name(logical_name);
 	const std::string name = strutil::to_lower(file);
 	for (const AssetKindRow &row : kRows)
 		if (row.file_name && name == row.file_name) return row.kind;

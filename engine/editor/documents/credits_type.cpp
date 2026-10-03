@@ -224,7 +224,7 @@ private:
 	uint32_t key_;
 };
 
-bool decode_credits(const std::vector<uint8_t> &stored, std::string &text,
+bool decode_credits(const std::string &, const std::vector<uint8_t> &stored, std::string &text,
 		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues,
 		std::string &error) {
 	if (!cbin::is_cbin(stored.data(), stored.size())) {

@@ -253,7 +253,7 @@ struct CanvasRig {
 	float snap = 0.0f;
 	int width = 800;
 	int height = 600;
-	std::unique_ptr<CanvasHalf> half;
+	std::unique_ptr<CanvasHalf> half{};
 	Served out{ session };
 
 	const ViewportModel *viewport() { return session.viewports().find(path, kind); }

@@ -109,28 +109,33 @@ constexpr FindingCodeEntry<StyleFinding> kFindingEntries[] = {
 	{ StyleFinding::NestedVar, { "style.nested_var" } },
 	{ StyleFinding::Backslash, { "style.backslash" } },
 	{ StyleFinding::ReadDifferently, { "style.read_differently" } },
-	{ StyleFinding::DirectiveForm, { "style.directive_form" } },
-	{ StyleFinding::IfWithoutArgument, { "style.if_without_argument" } },
+	// The reader's errors gate where the game stops responding on the stylesheet (a line end it does
+	// not take, an unknown directive, a value starting with '#', style.hangs) [orig:
+	// NapiConfigMap_ParseKeyValueBuffer @ 0x639c3b; @ 0x639a11]; one it reads otherwise or stops
+	// reading at (every variable after it undefined, the menus drawn with what it read) is listed:
+	// the game runs (the gate follows retail, ADR 0046 S14).
+	{ StyleFinding::DirectiveForm, listed_code("style.directive_form") },
+	{ StyleFinding::IfWithoutArgument, listed_code("style.if_without_argument") },
 	{ StyleFinding::NoncanonicalIfArg, { "style.noncanonical_if_arg" } },
 	{ StyleFinding::UnbalancedElse, { "style.unbalanced_else" } },
 	{ StyleFinding::DuplicateElse, { "style.duplicate_else" } },
 	{ StyleFinding::UnbalancedEndif, { "style.unbalanced_endif" } },
 	{ StyleFinding::UnknownDirective, { "style.unknown_directive" } },
-	{ StyleFinding::DirectiveTail, { "style.directive_tail" } },
+	{ StyleFinding::DirectiveTail, listed_code("style.directive_tail") },
 	{ StyleFinding::LoneBackslash, { "style.lone_backslash" } },
-	{ StyleFinding::ValueIsDirective, { "style.value_is_directive" } },
+	{ StyleFinding::ValueIsDirective, listed_code("style.value_is_directive") },
 	{ StyleFinding::ValueStartsWithHash, { "style.value_starts_with_hash" } },
 	{ StyleFinding::ValueOnNextLine, { "style.value_on_next_line" } },
 	{ StyleFinding::DuplicateName, { "style.duplicate_name" } },
-	{ StyleFinding::ContinuedDuplicate, { "style.continued_duplicate" } },
-	{ StyleFinding::NulByte, { "style.nul_byte" } },
-	{ StyleFinding::InvalidNameChar, { "style.invalid_name_char" } },
-	{ StyleFinding::MissingValueDelimiter, { "style.missing_value_delimiter" } },
+	{ StyleFinding::ContinuedDuplicate, listed_code("style.continued_duplicate") },
+	{ StyleFinding::NulByte, listed_code("style.nul_byte") },
+	{ StyleFinding::InvalidNameChar, listed_code("style.invalid_name_char") },
+	{ StyleFinding::MissingValueDelimiter, listed_code("style.missing_value_delimiter") },
 	{ StyleFinding::NoValue, { "style.no_value" } },
 	{ StyleFinding::ContinuationAtEof, { "style.continuation_at_eof" } },
 	{ StyleFinding::UnterminatedIf, { "style.unterminated_if" } },
 	{ StyleFinding::Hangs, { "style.hangs" } },
-	{ StyleFinding::Stops, { "style.stops" } },
+	{ StyleFinding::Stops, listed_code("style.stops") },
 	{ StyleFinding::OverriddenByBrand, { "style.overridden_by_brand" } },
 	{ StyleFinding::Unused, { "style.unused" } },
 	{ StyleFinding::NotAColor, { "style.not_a_color" } },
@@ -553,16 +558,18 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 		findings.push_back(std::move(d));
 	};
 	const mns::EvaluationResult evaluated = styles->native().evaluate();
-	// What the game does with each odd line.
+	// What the game does with each odd line, were it to read the file: an error of a stylesheet the
+	// game reads, a warning of one it does not (nothing reads it, so it hangs and stops nothing; the
+	// gate follows retail, ADR 0046 S14).
+	const DiagnosticSeverity read_error = styles->read_by_game() ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning;
 	for (const mns::Diagnostic &d : evaluated.diagnostics)
-		on_line(d.severity == mns::Severity::Error ? DiagnosticSeverity::Error
-												   : DiagnosticSeverity::Warning,
+		on_line(d.severity == mns::Severity::Error ? read_error : DiagnosticSeverity::Warning,
 				kReaderRows[static_cast<size_t>(d.code)], sentence(d.message), d.line);
 	// The rows end CR LF; the file keeps the line ends it was read with until Save
 	// writes it (the build packs the file).
 	const auto *file = dynamic_cast<const StyleFileState *>(styles->file_state());
 	if (file && file->line_end_line && !styles->wrote_file())
-		on_line(DiagnosticSeverity::Error, StyleFinding::LineEnding,
+		on_line(read_error, StyleFinding::LineEnding,
 				sentence(file->line_end_message) +
 						" The editor ends every line CR LF when it saves the file.",
 				file->line_end_line);
