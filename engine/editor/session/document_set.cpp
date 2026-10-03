@@ -890,9 +890,9 @@ void DocumentSet::copy_records(Document &document, bool cut) {
 	std::string payload = document.copy(records);
 	if (payload.empty())
 		return core_.refuse_now(CoreFinding::DocumentCopy, "These records cannot be copied.", document.path());
-	view_.documents.clipboard = std::move(payload);
-	core_.touch(ViewConcern::Selection);
 	if (!cut) {
+		view_.documents.clipboard = std::move(payload);
+		core_.touch(ViewConcern::Selection);
 		last_edit_ok_ = true;
 		view_.activity.status = "Copied " + std::to_string(records.size()) + " record(s).";
 		core_.touch(ViewConcern::Output);
@@ -905,7 +905,12 @@ void DocumentSet::copy_records(Document &document, bool cut) {
 		edit.address = record;
 		removes.push_back(edit);
 	}
-	if (apply_edits(document, removes)) view_.activity.status = "Cut " + std::to_string(records.size()) + " record(s).";
+	// The records go to the clipboard once their removes apply: a cut the document refuses (a menu
+	// screen's only root window among windows of several screens) leaves the clipboard as it was.
+	if (!apply_edits(document, removes)) return;
+	view_.documents.clipboard = std::move(payload);
+	core_.touch(ViewConcern::Selection);
+	view_.activity.status = "Cut " + std::to_string(records.size()) + " record(s).";
 }
 
 void DocumentSet::paste_records(Document &document, const PasteAt &target) {

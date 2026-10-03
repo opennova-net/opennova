@@ -1,6 +1,11 @@
 #include "authoring/mission_viewport_applier.h"
 
 #include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/core/math.hpp>
+#include <godot_cpp/variant/aabb.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -479,6 +484,7 @@ bool MissionViewportApplier::run_(Build &build, const Unit &unit, const opennova
 
 ApplierStep MissionViewportApplier::step(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::PreviewClock &, std::string &failure) {
+	picture_moved_();
 	Build &build = *build_;
 	const Unit unit = build.units[build.next++];
 	if (!run_(build, unit, viewport, failure)) {
@@ -645,6 +651,8 @@ void MissionViewportApplier::run_place_begin_(const MissionScene &scene, Build &
 	origins_.clear();
 	lifted_.clear();
 	shadow_pending_.clear();
+	drop_shapes_();
+	picture_moved_();
 	placed_ = false;
 	place_started_us_ = now_us();
 	place_units_planned_ = 1;
@@ -740,6 +748,9 @@ ObjectModel *MissionViewportApplier::lift_(const MissionEntityMark &entity, int 
 }
 
 void MissionViewportApplier::free_lifted_(const Placed &placed) {
+	model_shapes_.erase(placed.model);
+	row_shapes_.clear();
+	picture_moved_();
 	ObjectModel *model = model_of_(placed);
 	if (model == nullptr) return;
 	if (placer_.is_valid() && placed.key != 0)
@@ -812,6 +823,8 @@ void MissionViewportApplier::drop_entities_() {
 	origins_.clear();
 	lifted_.clear();
 	shadow_pending_.clear();
+	drop_shapes_();
+	picture_moved_();
 	// The placed populations and models go with their container at the frame's end, renamed now: a
 	// placement begun before then makes a container of its own (the placer reuses one it finds by its
 	// name). This runs in a build's unit, whose frame renders nothing (the last picture stands).
@@ -856,6 +869,7 @@ opennova::editor::OperationProgress MissionViewportApplier::progress() const {
 // --- the state -----------------------------------------------------------------------------------
 
 void MissionViewportApplier::update(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &) {
+	picture_moved_();
 	apply_state_(viewport);
 }
 
@@ -949,6 +963,7 @@ void MissionViewportApplier::clear() {
 
 void MissionViewportApplier::apply(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &,
 		opennova::editor::ViewportDeviceReport &report) {
+	picture_moved_();
 	report.missing.clear();
 	for (const std::vector<std::string> &missing : layer_missing_)
 		report.missing.insert(report.missing.end(), missing.begin(), missing.end());
@@ -1053,6 +1068,170 @@ bool MissionViewportApplier::surface_at(float x, float y, float point[3]) const 
 	point[1] = mission.y;
 	point[2] = mission.z;
 	return true;
+}
+
+// --- the pick ------------------------------------------------------------------------------------
+
+namespace {
+
+// Whether the segment from `a` to `b` meets `box` at a parameter below `limit` (the slabs).
+bool segment_meets_box(const AABB &box, const Vector3 &a, const Vector3 &b, real_t limit) {
+	real_t low = 0.0f, high = limit;
+	const Vector3 along = b - a;
+	const Vector3 end = box.position + box.size;
+	for (int axis = 0; axis < 3; ++axis) {
+		if (Math::abs(along[axis]) < CMP_EPSILON) {
+			if (a[axis] < box.position[axis] || a[axis] > end[axis]) return false;
+			continue;
+		}
+		real_t t0 = (box.position[axis] - a[axis]) / along[axis], t1 = (end[axis] - a[axis]) / along[axis];
+		if (t0 > t1) std::swap(t0, t1);
+		low = MAX(low, t0);
+		high = MIN(high, t1);
+		if (low > high) return false;
+	}
+	return true;
+}
+
+// The parameter of the segment from `a` to `b` where it meets the triangle (either face), in [0, 1].
+bool segment_meets_triangle(const Vector3 &a, const Vector3 &b, const Vector3 &v0, const Vector3 &v1, const Vector3 &v2,
+		real_t &at) {
+	const Vector3 along = b - a;
+	const Vector3 e1 = v1 - v0, e2 = v2 - v0;
+	const Vector3 p = along.cross(e2);
+	const real_t det = e1.dot(p);
+	if (Math::abs(det) < 1e-12f) return false;
+	const real_t inverse = 1.0f / det;
+	const Vector3 t = a - v0;
+	const real_t u = t.dot(p) * inverse;
+	if (u < 0.0f || u > 1.0f) return false;
+	const Vector3 q = t.cross(e1);
+	const real_t v = along.dot(q) * inverse;
+	if (v < 0.0f || u + v > 1.0f) return false;
+	at = e2.dot(q) * inverse;
+	return at >= 0.0f && at <= 1.0f;
+}
+
+void add_faces(MissionViewportApplier::PickShape &shape, const PackedVector3Array &faces, const Transform3D &through) {
+	for (int64_t i = 0; i < faces.size(); ++i) {
+		const Vector3 at = through.xform(faces[i]);
+		if (!shape.any) {
+			shape.box = AABB(at, Vector3());
+			shape.any = true;
+		} else {
+			shape.box.expand_to(at);
+		}
+		shape.faces.push_back(at);
+	}
+}
+
+// Every mesh a node draws under `node` (its levels and parts), through its transform from `node`.
+void model_faces(Node *node, const Transform3D &into, MissionViewportApplier::PickShape &shape) {
+	for (int i = 0; i < node->get_child_count(); ++i) {
+		Node *child = node->get_child(i);
+		Node3D *spatial = Object::cast_to<Node3D>(child);
+		const Transform3D through = spatial ? into * spatial->get_transform() : into;
+		if (MeshInstance3D *mesh = Object::cast_to<MeshInstance3D>(child))
+			if (mesh->get_mesh().is_valid()) add_faces(shape, mesh->get_mesh()->get_faces(), through);
+		model_faces(child, through, shape);
+	}
+}
+
+} // namespace
+
+const MissionViewportApplier::PickShape *MissionViewportApplier::pick_shape_(opennova::editor::NodeId row, const Placed &placed,
+		Transform3D &xform) const {
+	if (placed.hidden) return nullptr;
+	RowShape &kept = row_shapes_[row];
+	const bool alike = kept.shape != nullptr && kept.item == placed.item && kept.key == placed.key && kept.model == placed.model;
+	if (placed.model != 0) {
+		// An individual model: its meshes through its nodes, in its own space; it where its node stands.
+		ObjectModel *model = model_of_(placed);
+		if (model == nullptr || model->is_queued_for_deletion() || !model->is_visible()) return nullptr;
+		xform = model->get_transform();
+		for (Node *up = model->get_parent(); up != nullptr && up != root_; up = up->get_parent())
+			if (Node3D *spatial = Object::cast_to<Node3D>(up)) xform = spatial->get_transform() * xform;
+		if (alike) return kept.shape;
+		auto found = model_shapes_.find(placed.model);
+		if (found == model_shapes_.end()) {
+			PickShape shape;
+			model_faces(model, Transform3D(), shape);
+			found = model_shapes_.emplace(placed.model, std::move(shape)).first;
+		}
+		if (!found->second.any) return nullptr;
+		kept = RowShape{ placed.item, placed.key, placed.model, &found->second };
+		return kept.shape;
+	}
+	if (placed.key == 0 || placer_.is_null()) return nullptr;
+	// A static: its graphic's finest level, where its rows draw it now.
+	const Variant at = placer_->get_static_instance_transform(placed.key);
+	if (at.get_type() != Variant::TRANSFORM3D) return nullptr;
+	xform = at;
+	if (alike) return kept.shape;
+	const String graphic = placer_->graphic_for(int(placed.item));
+	if (graphic.is_empty()) return nullptr;
+	const std::string key = graphic.utf8().get_data();
+	auto found = static_shapes_.find(key);
+	if (found == static_shapes_.end()) {
+		PickShape shape;
+		add_faces(shape, placer_->get_static_graphic_faces(graphic), Transform3D());
+		// Not warm yet: nothing kept, asked again.
+		if (!shape.any) return nullptr;
+		found = static_shapes_.emplace(key, std::move(shape)).first;
+	}
+	kept = RowShape{ placed.item, placed.key, placed.model, &found->second };
+	return kept.shape;
+}
+
+opennova::editor::ViewportRayHit MissionViewportApplier::ray_between(const double from[3], const double to[3]) const {
+	opennova::editor::ViewportRayHit out;
+	if (!placed_ || placer_.is_null()) return out; // Unknown: the placement does not stand yet
+	if (ray_kept_ && std::equal(from, from + 3, ray_from_) && std::equal(to, to + 3, ray_to_)) return ray_hit_;
+	const Vector3 start = MissionObjectPlacer::bms_to_godot_position(Vector3(float(from[0]), float(from[1]), float(from[2])));
+	const Vector3 end = MissionObjectPlacer::bms_to_godot_position(Vector3(float(to[0]), float(to[1]), float(to[2])));
+	const real_t length = (end - start).length();
+	// The terrain's point along the segment, then the nearest face before it.
+	real_t best = 1.0f;
+	bool ground = false;
+	if (terrain_built_ && terrain_data_.is_valid() && length > 0.0f) {
+		const Vector3 hit = terrain_data_->raycast_terrain(start, end);
+		if (hit.is_finite()) {
+			best = (hit - start).length() / length;
+			ground = true;
+		}
+	}
+	opennova::editor::NodeId row = 0;
+	for (const auto &entry : entities_) {
+		Transform3D xform;
+		const PickShape *shape = pick_shape_(entry.first, entry.second, xform);
+		if (shape == nullptr) continue;
+		const Transform3D inverse = xform.affine_inverse();
+		const Vector3 a = inverse.xform(start), b = inverse.xform(end);
+		if (!segment_meets_box(shape->box, a, b, best)) continue;
+		const Vector3 *faces = shape->faces.ptr();
+		for (int64_t i = 0; i + 2 < shape->faces.size(); i += 3) {
+			real_t at = 0.0f;
+			if (segment_meets_triangle(a, b, faces[i], faces[i + 1], faces[i + 2], at) && at < best) {
+				best = at;
+				row = entry.first;
+			}
+		}
+	}
+	if (row != 0 || ground) {
+		out.met = row != 0 ? opennova::editor::ViewportRayHit::Met::Record : opennova::editor::ViewportRayHit::Met::Surface;
+		out.row = row;
+		const Vector3 mission = MissionObjectPlacer::godot_to_bms_position(start + (end - start) * best);
+		out.point[0] = mission.x;
+		out.point[1] = mission.y;
+		out.point[2] = mission.z;
+	} else {
+		out.met = opennova::editor::ViewportRayHit::Met::Nothing;
+	}
+	ray_kept_ = true;
+	std::copy(from, from + 3, ray_from_);
+	std::copy(to, to + 3, ray_to_);
+	ray_hit_ = out;
+	return out;
 }
 
 // --- the read-backs ------------------------------------------------------------------------------

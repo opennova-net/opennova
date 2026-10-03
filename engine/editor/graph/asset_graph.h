@@ -56,6 +56,11 @@ struct ReferenceChoice {
 	ReferenceStatus status = ReferenceStatus::Present;
 	bool inert = false;  // defined where no lookup of the game finds it
 	std::string reason;  // why, when inert (GraphSymbol::inert_reason)
+	// The symbol a choice named otherwise stands for, and the scope that defines it (a text key's
+	// number: its key, STRNAME012, in the section the game reads it from), so its preview is the
+	// symbol's; empty: `name`, in the field's scope.
+	std::string symbol;
+	std::string symbol_scope;
 };
 
 // A file or a symbol whose name holds a searched text (AssetGraph::search), with how many uses
