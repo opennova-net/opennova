@@ -99,11 +99,13 @@ static func resolve_background(root: ResourceRoot, mission_file: String) -> Back
 
 
 ## Public texture-load seam for owners/tests; avoids private-state inspection (ADR 0018).
+## The background reads through the PCX reader alone (ResourceRoot.TEXTURE_LOADER_PCX).
 ## [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
 static func load_background_texture(root: ResourceRoot, image_name: String) -> Texture2D:
 	if root == null or image_name.is_empty():
 		return null
-	return root.load_texture(image_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
+	return root.load_texture(image_name, ResourceRoot.TEXTURE_LOADER_PCX,
+			ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 
 
 ## Build the screen for a mission load (LoadingScreenInfo):
@@ -409,7 +411,8 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 	if _texture == null or _splash_state != SplashState.NONE:
 		return false
 	if root != null:
-		_splash_arrow = TgaTexture.load_from_root(root, HudPos.loading_splash_arrow_image())
+		_splash_arrow = root.load_texture(HudPos.loading_splash_arrow_image(),
+				ResourceRoot.TEXTURE_LOADER_TGA)
 		_splash_font = _load_font(root, HudPos.loading_splash_continue_font())
 	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
 	_splash_state = SplashState.ACTIVE

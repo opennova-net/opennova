@@ -33,7 +33,7 @@
 #include "simulation/simulation.h"
 #include "util/axes.h"
 #include "util/color_convert.h"
-#include "util/pcx_texture_bridge.h"
+#include "resource_index/resource_root.h"
 #include "util/string_convert.h"
 #include "world/game_world.h"
 
@@ -138,10 +138,8 @@ Ref<Texture2D> FirePresenter::smoke_texture() {
 		return smoke_texture_;
 	}
 	smoke_texture_loaded_ = true;
-	const PackedByteArray bytes = resource_root_->read_file("smoktest.pcx");
-	if (!bytes.is_empty()) {
-		smoke_texture_ = opennova::build_pcx_luminance_alpha_texture(bytes);
-	}
+	smoke_texture_ = resource_root_->load_texture("smoktest.pcx",
+			ResourceRoot::TEXTURE_LOADER_ARCHIVE_SELF_ALPHA);
 	return smoke_texture_;
 }
 

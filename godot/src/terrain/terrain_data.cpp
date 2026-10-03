@@ -581,22 +581,19 @@ void TerrainData::_notify_terrain_changed() {
 
 // ---------------------------------------------------------------------------
 // Texture loading helper — delegates to shared util/texture_path_resolver.h.
-// res:// textures load through ResourceLoader (the imported .ctex), so they
-// survive export; absolute paths decode raw bytes.
+// Each slot loads through its retail loader (renderer::TextureLoader): the
+// mounted root's, or the loose TRN directory's.
 // ---------------------------------------------------------------------------
 
-static Ref<Texture2D> _load_texture_from_dir(const String &dir, const String &filename) {
-	return opennova::load_texture_from_dir(dir, filename);
-}
-
 Ref<Texture2D> TerrainData::load_source_texture(
-		const String &p_filename) const {
+		const String &p_filename, opennova::renderer::TextureLoader p_loader) const {
 	if (p_filename.is_empty()) return {};
 	if (resource_root.is_valid() && !resource_root->get_root_dir().is_empty()) {
-		return resource_root->load_texture(p_filename);
+		return resource_root->load_texture(p_filename,
+				static_cast<ResourceRoot::TextureLoader>(p_loader));
 	}
 	if (trn_path.is_empty()) return {};
-	return _load_texture_from_dir(trn_path.get_base_dir(), p_filename);
+	return opennova::load_texture_from_dir(trn_path.get_base_dir(), p_filename, p_loader);
 }
 
 // ---------------------------------------------------------------------------
@@ -684,10 +681,15 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 	// exported PCK) so the failure is visible instead of silently untextured.
 	const bool use_resource_root = resource_root.is_valid() && !resource_root->get_root_dir().is_empty();
 	String trn_dir = use_resource_root ? resource_root->get_root_dir() : trn_path.get_base_dir();
-	auto load_tex = [&](const char *slot, const String &filename) -> Ref<Texture2D> {
+	// Each slot through its retail loader (docs/render/render-material-re.md
+	// "Texture loaders"): the colour, blend, far detail and tile-set maps
+	// through the TGA reader alone, the near detail maps through the stage
+	// loader (its .dds sibling first).
+	using opennova::renderer::TextureLoader;
+	auto load_tex = [&](const char *slot, const String &filename, TextureLoader loader) -> Ref<Texture2D> {
 		Ref<Texture2D> tex = use_resource_root
-				? resource_root->load_texture(filename)
-				: _load_texture_from_dir(trn_dir, filename);
+				? resource_root->load_texture(filename, static_cast<ResourceRoot::TextureLoader>(loader))
+				: opennova::load_texture_from_dir(trn_dir, filename, loader);
 		if (tex.is_null() && !filename.is_empty()) {
 			UtilityFunctions::push_warning("TerrainData: ", slot, " texture '", filename,
 				"' did not resolve under ", trn_dir, " (terrain may render untextured)");
@@ -698,15 +700,15 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 	const String foliagemap_filename = String(trn.foliagemap.c_str());
 	const String tilestrip_filename = String(
 			opennova::trn_mission_tilestrip(trn, mission_tile_set).c_str());
-	colormap = load_tex("colormap", String(trn.colormap.c_str()));
-	detailmap = load_tex("detailmap", String(trn.detailmap.c_str()));
-	detailmap_c1 = load_tex("detailmap_c1", String(trn.detailmap_c1.c_str()));
-	detailmap_c2 = load_tex("detailmap_c2", String(trn.detailmap_c2.c_str()));
-	detailmap_c3 = load_tex("detailmap_c3", String(trn.detailmap_c3.c_str()));
-	detailmap2 = load_tex("detailmap2", String(trn.detailmap2.c_str()));
-	detailmapdist = load_tex("detailmapdist", String(trn.detailmapdist.c_str()));
-	detailmapdist2 = load_tex("detailmapdist2", String(trn.detailmapdist2.c_str()));
-	detailblendmap = load_tex("detailblendmap", String(trn.detailblendmap.c_str()));
+	colormap = load_tex("colormap", String(trn.colormap.c_str()), TextureLoader::Tga);
+	detailmap = load_tex("detailmap", String(trn.detailmap.c_str()), TextureLoader::Stage);
+	detailmap_c1 = load_tex("detailmap_c1", String(trn.detailmap_c1.c_str()), TextureLoader::Stage);
+	detailmap_c2 = load_tex("detailmap_c2", String(trn.detailmap_c2.c_str()), TextureLoader::Stage);
+	detailmap_c3 = load_tex("detailmap_c3", String(trn.detailmap_c3.c_str()), TextureLoader::Stage);
+	detailmap2 = load_tex("detailmap2", String(trn.detailmap2.c_str()), TextureLoader::Stage);
+	detailmapdist = load_tex("detailmapdist", String(trn.detailmapdist.c_str()), TextureLoader::Tga);
+	detailmapdist2 = load_tex("detailmapdist2", String(trn.detailmapdist2.c_str()), TextureLoader::Tga);
+	detailblendmap = load_tex("detailblendmap", String(trn.detailblendmap.c_str()), TextureLoader::Tga);
 	auto use_default_pcx_slot = [this](const String &slot_id) {
 		PcxSlotRefs refs;
 		if (!_resolve_pcx_slot(slot_id, refs)) {
@@ -749,17 +751,10 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 			? charmap_filename
 			: foliagemap_filename;
 		if (use_resource_root) {
-			PackedByteArray bytes = resource_root->read_file(filename);
-			String mounted_filename = filename;
-			if (bytes.is_empty()) {
-				for (const String &candidate : opennova::texture_candidate_filenames(filename)) {
-					bytes = resource_root->read_file(candidate);
-					if (!bytes.is_empty()) {
-						mounted_filename = candidate;
-						break;
-					}
-				}
-			}
+			// The map is read under its own name, no alternate.
+			const PackedByteArray bytes = filename.is_empty() ? PackedByteArray()
+					: resource_root->read_file(filename);
+			const String mounted_filename = filename;
 			if (!bytes.is_empty()) {
 				Error err = _import_pcx_slot_bytes(slot_id, mounted_filename, bytes);
 				if (err != OK) {
@@ -774,7 +769,7 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 				use_default_pcx_slot(slot_id);
 			}
 		} else {
-			String resolved = opennova::resolve_texture_path(trn_dir, filename);
+			String resolved = opennova::resolve_file_in_dir(trn_dir, filename);
 			if (!resolved.is_empty()) {
 				PackedByteArray bytes;
 				const Error err = read_nova_payload_file(resolved, bytes)
@@ -793,7 +788,7 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 			}
 		}
 	}
-	tilestrip_tex = load_tex("tilestrip", tilestrip_filename);
+	tilestrip_tex = load_tex("tilestrip", tilestrip_filename, TextureLoader::Tga);
 	trn.tilestrip = opennova::to_std(tilestrip_filename);
 
 	// load_trn's admission gate already rejected an empty polydata name (the

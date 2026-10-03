@@ -10,11 +10,9 @@
 
 namespace opennova {
 
-godot::Ref<godot::Image> decode_pcx_image(const uint8_t *data, size_t size);
-// PCX texture with the retail sky/effect-loader palette-luminance alpha (the
-// synthesis and its witness live at engine pcx/pcx_io.h
-// decode_pcx_luminance_alpha; this bridge only uploads the RGBA).
-godot::Ref<godot::Texture2D> build_pcx_luminance_alpha_texture(const godot::PackedByteArray &bytes);
+// The terrain's index-data PCX slots (the foliage and char maps): the indices and
+// the palette, uploaded as an RGB texture for display. A PCX texture the game draws
+// loads through util/texture_path_resolver.h's loaders instead.
 bool decode_pcx_with_palette(const uint8_t *data,
                              size_t size,
                              std::vector<uint8_t> &out_indices,

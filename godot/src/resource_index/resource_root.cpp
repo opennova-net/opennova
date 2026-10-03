@@ -22,6 +22,30 @@
 using namespace godot;
 using namespace opennova::gameprofile;
 
+// The bound loader enum is the engine's, value for value.
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_STAGE) ==
+		static_cast<int>(opennova::renderer::TextureLoader::Stage));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_PLAIN) ==
+		static_cast<int>(opennova::renderer::TextureLoader::Plain));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_ARCHIVE) ==
+		static_cast<int>(opennova::renderer::TextureLoader::Archive));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_ARCHIVE_SELF_ALPHA) ==
+		static_cast<int>(opennova::renderer::TextureLoader::ArchiveSelfAlpha));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_FILE) ==
+		static_cast<int>(opennova::renderer::TextureLoader::File));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_TGA) ==
+		static_cast<int>(opennova::renderer::TextureLoader::Tga));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_PCX) ==
+		static_cast<int>(opennova::renderer::TextureLoader::Pcx));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_HUD_COLOR) ==
+		static_cast<int>(opennova::renderer::TextureLoader::HudColor));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_HUD_ALPHA) ==
+		static_cast<int>(opennova::renderer::TextureLoader::HudAlpha));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_MENU) ==
+		static_cast<int>(opennova::renderer::TextureLoader::Menu));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_CINE_FADE) ==
+		static_cast<int>(opennova::renderer::TextureLoader::CineFade));
+
 namespace {
 
 bool case_insensitive_less(const String &a, const String &b) {
@@ -58,7 +82,8 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("particle_extension"), &ResourceRoot::particle_extension);
 	ClassDB::bind_method(D_METHOD("has_file", "name", "policy"), &ResourceRoot::has_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("read_file", "name", "policy"), &ResourceRoot::read_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
-	ClassDB::bind_method(D_METHOD("load_texture", "name", "policy"), &ResourceRoot::load_texture, DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("load_texture", "name", "loader", "policy"), &ResourceRoot::load_texture,
+			DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("load_material_texture", "name", "type"), &ResourceRoot::load_material_texture);
 	ClassDB::bind_method(D_METHOD("load_font", "name"), &ResourceRoot::load_font);
 	ClassDB::bind_method(D_METHOD("list_missing_boot_resources"), &ResourceRoot::list_missing_boot_resources);
@@ -66,6 +91,17 @@ void ResourceRoot::_bind_methods() {
 
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_LOOSE_FIRST);
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_ARCHIVE_ONLY);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_STAGE);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_PLAIN);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_ARCHIVE);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_ARCHIVE_SELF_ALPHA);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_FILE);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_TGA);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_PCX);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_HUD_COLOR);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_HUD_ALPHA);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_MENU);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_CINE_FADE);
 
 	// Every mount_runtime() / set_root_dir() is done: the mount, the expansion and
 	// the expansion's override table may have changed.
@@ -495,50 +531,47 @@ PackedByteArray ResourceRoot::read_file(const String &name, LookupPolicy policy)
 	return to_packed_bytes(bytes);
 }
 
-Ref<Texture2D> ResourceRoot::load_texture(const String &name, LookupPolicy policy) const {
-	if (root_dir_.is_empty() || name.is_empty()) {
-		return Ref<Texture2D>();
+Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader loader,
+		LookupPolicy policy) const {
+	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
+		return Ref<Image>();
 	}
-	const String file = lookup_name(name);
-	if (file.is_empty()) {
-		return Ref<Texture2D>();
-	}
+	// The loader receives the caller's whole query; read_file/has_file keep the
+	// mount's own rules for it (a runtime mount's qualified lookup, a loose
+	// mount's flat names).
+	opennova::renderer::TextureFileQuery files;
+	files.exists = [this, policy](const std::string &file) {
+		return has_file(opennova::to_gd(file), policy);
+	};
+	files.loose_first_hit = [this](const std::string &file) {
+		return index_.prefers_loose_file(file);
+	};
+	return opennova::load_texture_image(static_cast<opennova::renderer::TextureLoader>(loader),
+			name.strip_edges(), files,
+			[this, policy](const std::string &file) { return read_file(opennova::to_gd(file), policy); });
+}
 
+Ref<Texture2D> ResourceRoot::load_texture(const String &name, TextureLoader loader,
+		LookupPolicy policy) const {
+	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
+		return Ref<Texture2D>();
+	}
 	const uint64_t epoch = opennova::cache_epoch();
 	if (texture_cache_epoch_ != epoch) {
 		texture_cache_.clear();
 		texture_cache_epoch_ = epoch;
 	}
-	// Source policy and the normalized qualified texture query are part of texture identity.
-	// A prior archive/default decode must never poison a later forced-loose lookup (or vice versa).
-	const String cache_query = name.strip_edges().to_lower();
-	const std::string cache_key = std::to_string(static_cast<int>(policy)) + ":" +
-			opennova::to_std(cache_query);
+	// The loader, the source policy and the normalized query are the texture's
+	// identity: one loader's decode never serves another's, and a prior
+	// archive/default decode never poisons a later forced-loose lookup.
+	const std::string cache_key = std::to_string(static_cast<int>(loader)) + ":" +
+			std::to_string(static_cast<int>(policy)) + ":" +
+			opennova::to_std(name.strip_edges().to_lower());
 	const auto cached = texture_cache_.find(cache_key);
 	if (cached != texture_cache_.end()) {
 		return cached->second;
 	}
-
-	Ref<Texture2D> result;
-	// texture_candidate_filenames intentionally returns basenames. Reattach a runtime
-	// query's directory so every candidate keeps the retail path-qualified lookup.
-	const String runtime_dir = mount_kind_ == MountKind::Runtime
-			? name.replace("\\", "/").get_base_dir()
-			: String();
-	for (const String &candidate : opennova::texture_candidate_filenames(file)) {
-		const String query = runtime_dir.is_empty()
-				? candidate
-				: runtime_dir.path_join(candidate);
-		const PackedByteArray bytes = read_file(query, policy);
-		if (bytes.is_empty()) {
-			continue;
-		}
-		Ref<Texture2D> tex = opennova::load_texture_from_bytes(candidate, bytes);
-		if (tex.is_valid()) {
-			result = tex;
-			break;
-		}
-	}
+	const Ref<Texture2D> result = opennova::texture_with_mipmaps(load_texture_image(name, loader, policy));
 	texture_cache_.emplace(cache_key, result);
 	return result;
 }
@@ -549,18 +582,19 @@ Ref<Texture2D> ResourceRoot::load_material_image(const String &name, uint8_t typ
 	}
 	// The diffuse loaders resolve exactly one file: the DDS sibling or the
 	// row's own name, never an alternate extension or suffix
-	// (renderer::material_image_source).
+	// (renderer::stage_texture_load); type 1 the whole name, an upper-case
+	// .PCX turned white with its blue as alpha (renderer::plain_texture_load).
 	const std::string native = opennova::to_std(name);
-	opennova::renderer::MaterialImageSource source;
+	opennova::renderer::TextureLoad source;
 	if (type == 1) {
-		source = opennova::renderer::plain_material_image_source(native);
+		source = opennova::renderer::plain_texture_load(native);
 	} else {
 		const std::string query = opennova::renderer::material_texture_query(native);
-		source = opennova::renderer::material_image_source(query,
+		source = opennova::renderer::stage_texture_load(query,
 				index_.prefers_loose_file(query),
 				has_file(opennova::to_gd(opennova::renderer::material_dds_sibling(query))));
 	}
-	if (source.decoder == opennova::renderer::MaterialImageDecoder::None) {
+	if (source.reader == opennova::renderer::TextureReader::None) {
 		return Ref<Texture2D>();
 	}
 	const uint64_t epoch = opennova::cache_epoch();
@@ -569,13 +603,14 @@ Ref<Texture2D> ResourceRoot::load_material_image(const String &name, uint8_t typ
 		texture_cache_epoch_ = epoch;
 	}
 	const std::string key = std::string("material-image:") +
+			std::to_string(static_cast<int>(source.transform)) + ":" +
 			opennova::to_std(opennova::to_gd(source.file).to_lower());
 	const auto cached = texture_cache_.find(key);
 	if (cached != texture_cache_.end()) {
 		return cached->second;
 	}
 	const Ref<Texture2D> texture = opennova::load_material_image_from_bytes(
-			source.decoder, read_file(opennova::to_gd(source.file)));
+			source, read_file(opennova::to_gd(source.file)));
 	texture_cache_.emplace(key, texture);
 	return texture;
 }
@@ -588,13 +623,13 @@ Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t typ
     const std::string native_name = opennova::to_std(name);
     const std::string selected = opennova::renderer::normal_material_filename(native_name,
             index_.prefers_loose_file(native_name), has_file(dds));
-    const String source_name = opennova::to_gd(selected);
     const std::string key = "normal-source:" + selected;
     const uint64_t epoch = opennova::cache_epoch();
     if (texture_cache_epoch_ != epoch) { texture_cache_.clear(); texture_cache_epoch_ = epoch; }
     auto cached = texture_cache_.find(key);
     if (cached == texture_cache_.end()) {
-        const auto source = opennova::load_texture_from_bytes(source_name, read_file(source_name));
+        const auto source = opennova::load_material_image_from_bytes(
+                opennova::normal_material_load(name, selected), read_file(opennova::to_gd(selected)));
         cached = texture_cache_.emplace(key, source).first;
     }
     return opennova::prepare_material_texture(cached->second, name, type);

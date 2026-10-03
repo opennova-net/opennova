@@ -126,8 +126,8 @@ func _update_weapon_icons(name_suffix: String, selected_for: Callable) -> void:
 		if icon_name.is_empty() or _root == null:
 			icon_rect.texture = null
 		else:
-			icon_rect.texture = _root.load_texture(
-					icon_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
+			icon_rect.texture = _root.load_texture(icon_name,
+					ResourceRoot.TEXTURE_LOADER_MENU, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 
 
 func _clear_icon_mounts() -> void:

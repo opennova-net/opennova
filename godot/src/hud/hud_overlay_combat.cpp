@@ -12,10 +12,11 @@
 #include <runtime/hud/hud_layout_from_hudpos.h>
 
 namespace godot {
-void HudOverlay::combat_texture_(int slot, const String &name, opennova::hud::HudSprite &sprite) {
+void HudOverlay::combat_texture_(int slot, const String &name, ResourceRoot::TextureLoader loader,
+		opennova::hud::HudSprite &sprite) {
 	if (combat_texture_names_[slot] != name) {
 		combat_texture_names_[slot] = name;
-		textures_[slot] = load_hud_texture_(name);
+		textures_[slot] = load_hud_texture_(name, loader);
 	}
 	const auto &texture = textures_[slot];
 	sprite = { texture.is_valid() ? texture->get_width() : 0,
@@ -24,16 +25,21 @@ void HudOverlay::combat_texture_(int slot, const String &name, opennova::hud::Hu
 void HudOverlay::configure_combat_(const opennova::hud::HudLayoutAssets &assets) {
 	using namespace opennova::hud;
 	auto &l = layout_.combat;
-	combat_texture_(kHudTexVehicleFixed, "rockpip.tga", l.vehicle_fixed);
-	combat_texture_(kHudTexVehicleLag, "turrpip.tga", l.vehicle_lag);
-	combat_texture_(kHudTexDriverCrosshair, "dirguide.tga", l.driver_crosshair);
-	combat_texture_(kHudTexTarget, "comalck2.tga", l.target);
-	combat_texture_(kHudTexTargetFriendly, "comlck2x.tga", l.target_friendly);
-	combat_texture_(kHudTexParachute, opennova::to_gd(assets.parachute_icon), l.parachute);
-	combat_texture_(kHudTexArmor, opennova::to_gd(assets.armor_icon), l.armor);
-	combat_texture_(kHudTexLogoHelo, "LogoHelo.tga", l.logo_helo);
-	combat_texture_(kHudTexLogoHumm, "LogoHumm.tga", l.logo_humm);
-	combat_texture_(kHudTexLogoBoat, "LogoBoat.tga", l.logo_boat);
+	// HUD_LoadAllTextures loads the fixed art in colour mode and the hudpos
+	// parachute and armor icons in alpha mode (docs/interface/hud-re.md
+	// "The HUD texture loader").
+	constexpr ResourceRoot::TextureLoader colour = ResourceRoot::TEXTURE_LOADER_HUD_COLOR;
+	constexpr ResourceRoot::TextureLoader alpha = ResourceRoot::TEXTURE_LOADER_HUD_ALPHA;
+	combat_texture_(kHudTexVehicleFixed, "rockpip.tga", colour, l.vehicle_fixed);
+	combat_texture_(kHudTexVehicleLag, "turrpip.tga", colour, l.vehicle_lag);
+	combat_texture_(kHudTexDriverCrosshair, "dirguide.tga", colour, l.driver_crosshair);
+	combat_texture_(kHudTexTarget, "comalck2.tga", colour, l.target);
+	combat_texture_(kHudTexTargetFriendly, "comlck2x.tga", colour, l.target_friendly);
+	combat_texture_(kHudTexParachute, opennova::to_gd(assets.parachute_icon), alpha, l.parachute);
+	combat_texture_(kHudTexArmor, opennova::to_gd(assets.armor_icon), alpha, l.armor);
+	combat_texture_(kHudTexLogoHelo, "LogoHelo.tga", colour, l.logo_helo);
+	combat_texture_(kHudTexLogoHumm, "LogoHumm.tga", colour, l.logo_humm);
+	combat_texture_(kHudTexLogoBoat, "LogoBoat.tga", colour, l.logo_boat);
 }
 void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
 		const Projection &projection, bool has_camera, const Ref<RtxtStringFile> &gametext,
@@ -45,11 +51,16 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 	state_.combat = v.state;
 	auto &s = state_.combat;
 	auto &l = layout_.combat;
-	combat_texture_(kHudTexCustomAim, String(v.custom_texture.c_str()), l.custom_aim);
-	combat_texture_(kHudTexCommander, String(v.commander_texture.c_str()), l.commander);
-	combat_texture_(kHudTexWeaponSilhouette, String(v.weapon_texture.c_str()), l.weapon);
-	combat_texture_(kHudTexVehicleStatus, String(v.vehicle_texture.c_str()), l.vehicle);
-	combat_texture_(kHudTexCargo, String(v.cargo_texture.c_str()), l.cargo);
+	// The weapon def's crosshair, commandersX and hudicon art and the item
+	// defs' HUD images load in alpha mode; the cargo's stock flag and document
+	// art in colour mode (world::HudCombatView::cargo_texture_alpha).
+	constexpr ResourceRoot::TextureLoader alpha = ResourceRoot::TEXTURE_LOADER_HUD_ALPHA;
+	combat_texture_(kHudTexCustomAim, String(v.custom_texture.c_str()), alpha, l.custom_aim);
+	combat_texture_(kHudTexCommander, String(v.commander_texture.c_str()), alpha, l.commander);
+	combat_texture_(kHudTexWeaponSilhouette, String(v.weapon_texture.c_str()), alpha, l.weapon);
+	combat_texture_(kHudTexVehicleStatus, String(v.vehicle_texture.c_str()), alpha, l.vehicle);
+	combat_texture_(kHudTexCargo, String(v.cargo_texture.c_str()),
+			v.cargo_texture_alpha ? alpha : ResourceRoot::TEXTURE_LOADER_HUD_COLOR, l.cargo);
 	const Vector2 surface = draw_surface_();
 	const auto project = [&](const std::array<int32_t, 3> &point, bool valid) {
 		HudProjectedPoint out;

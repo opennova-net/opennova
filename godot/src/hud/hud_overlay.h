@@ -26,6 +26,7 @@
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass seam
 
 #include "hud/hud_map_pass_renderer.h"
+#include "resource_index/resource_root.h"
 
 #include <array>
 
@@ -513,7 +514,10 @@ private:
 	Vector2 draw_surface_() const;
 	// Restamp state_'s declutter visibility/level from declutter_.
 	void apply_declutter_();
-	Ref<Texture2D> load_hud_texture_(const String &p_name,
+	// One HUD texture through the retail loader its role uses (the HUD loader in
+	// colour or alpha mode, the file loader, the stage loader, the TGA reader:
+	// ResourceRoot::TextureLoader), uploaded with no mips unless asked.
+	Ref<Texture2D> load_hud_texture_(const String &p_name, ResourceRoot::TextureLoader p_loader,
 			bool p_generate_mipmaps = false) const;
 	// MODULATE2X equivalence for a white-modulated static sprite: RGB x2
 	// saturated, alpha unchanged (the compass ring's pipeline).
@@ -521,7 +525,8 @@ private:
 	void load_crosshair_texture_();
 	// The combat sprites' loads (the anchors are the engine fill's).
 	void configure_combat_(const opennova::hud::HudLayoutAssets &assets);
-	void combat_texture_(int slot, const String &name, opennova::hud::HudSprite &sprite);
+	void combat_texture_(int slot, const String &name, ResourceRoot::TextureLoader loader,
+			opennova::hud::HudSprite &sprite);
 	std::array<String, kTextureSlots> combat_texture_names_;
 	// Stamp the cached colour/spread options into layout_.
 	void apply_crosshair_options_();

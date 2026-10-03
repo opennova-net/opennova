@@ -161,7 +161,9 @@ int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
 		return 0;
 	}
 	root_ = p_root;
-	texture_provider_ = Callable(p_root.ptr(), "load_texture");
+	// A particle graphic loads through the TGA reader alone (the atlas's
+	// CTextureData_LoadTGA, renderer::TextureLoader::Tga).
+	texture_provider_ = Callable(p_root.ptr(), "load_texture").bind(ResourceRoot::TEXTURE_LOADER_TGA);
 	_ensure_renderer()->set_texture_provider(texture_provider_);
 	Array entries = p_root->list_file_entries(".ptl");
 	entries.append_array(p_root->list_file_entries(p_root->particle_extension()));
