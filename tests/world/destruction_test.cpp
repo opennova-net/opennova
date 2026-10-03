@@ -298,6 +298,7 @@ void test_explosion_damage_gates() {
     Entity attacker_seed;
     attacker_seed.kind = EntityKind::Organic;
     attacker_seed.health = 100;
+    attacker_seed.team = 2; // an enemy of the teamless barrel: the pair is not protected
     attacker_seed.position = Vec3{50.0f, 0.0f, 0.0f};
     w.registry.configure_pool(0, 4);
     const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
@@ -607,6 +608,7 @@ void test_explosion_resolves_attacker_chain_for_events() {
     Entity live_seed;
     live_seed.kind = EntityKind::Organic;
     live_seed.health = 100;
+    live_seed.team = 2; // the resolved attacker is an enemy of its teamless victims
     live_seed.position = Vec3{100.0f, 0.0f, 0.0f};
     const EntityHandle live_attacker = w.registry.spawn(0, live_seed);
 
@@ -2216,6 +2218,7 @@ void test_round_destroys_item() {
 
     Entity shooter_seed;
     shooter_seed.kind = EntityKind::Organic;
+    shooter_seed.team = 2; // an enemy of the teamless barrel (D-WPN-42)
     shooter_seed.position = Vec3{0.0f, 0.0f, 1.0f};
     const EntityHandle shooter = w.registry.spawn(0, shooter_seed);
 
@@ -3713,6 +3716,7 @@ void test_zero_damage_blast_still_runs_the_item_leg() {
     Entity shooter;
     shooter.kind = EntityKind::Organic;
     shooter.health = 100;
+    shooter.team = 2; // an enemy of the teamless building (D-WPN-42)
     shooter.position = Vec3{200.0f, 0.0f, 0.0f};
     const EntityHandle owner = w.registry.spawn(0, shooter);
     Entity seed;
@@ -3895,6 +3899,52 @@ void test_team_immunity_compares_the_blast_source() {
     run_blast(w, e);
     CHECK(w.registry.get(protected_item)->health == 120);
     CHECK(w.registry.get(protected_item)->last_attacker == killer);
+}
+
+// The blast legs ask the friendly-fire gate of (victim, resolved attacker): a
+// same-side NPC source spares the barrel, a human player's lands unless the host
+// rules NoFriendlyFire, an enemy's always lands. [orig: Projectile_ProcessExplosionQueue
+// @0x4eb45b -> Projectile_DamagePairEligible @0x4E74F0]
+void test_blast_friendly_fire_gate() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.health = 100;
+    npc.team = 1;
+    npc.position = Vec3{50.0f, 0.0f, 0.0f};
+    const EntityHandle source = w.registry.spawn(0, npc);
+    Entity barrel;
+    barrel.kind = EntityKind::Item;
+    barrel.item_id = 500;
+    barrel.health = barrel.health_max = 120;
+    barrel.team = 1;
+    barrel.bound_radius = 1.0f;
+    barrel.position = Vec3{10.0f, 0.0f, 0.0f};
+    const EntityHandle item = w.registry.spawn(1, barrel);
+    w.tables.item_death_traits.set(500, barrel_traits());
+    ExplosionEntry e;
+    e.pos = Vec3{10.0f, 0.0f, 0.0f};
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    e.owner = source;
+    run_blast(w, e);
+    CHECK(w.registry.get(item)->health == 120); // a same-side NPC: protected
+    w.registry.get(source)->flags |= kEntityFlagPlayer;
+    run_blast(w, e);
+    CHECK(w.registry.get(item)->health == 20); // a player's blast lands
+    w.registry.get(item)->health = 120;
+    w.rules.no_friendly_fire = true;
+    run_blast(w, e);
+    CHECK(w.registry.get(item)->health == 120); // ... unless NoFriendlyFire
+    w.rules.no_friendly_fire = false;
+    w.registry.get(source)->flags &= ~kEntityFlagPlayer;
+    w.registry.get(item)->team = 2;
+    run_blast(w, e);
+    CHECK(w.registry.get(item)->health == 20); // an enemy's always lands
 }
 
 // A hop of the dead-source walk takes the link as stored: a dead source
@@ -4195,6 +4245,7 @@ int main() {
     test_person_blast_quadrant_faces_the_blast();
     test_zero_damage_kill_zone_still_burns();
     test_team_immunity_compares_the_blast_source();
+    test_blast_friendly_fire_gate();
     test_dead_unattributed_source_credits_no_one();
     test_session_peer_without_authority_applies_no_blast();
     test_knife_kill_zone();

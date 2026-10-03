@@ -219,6 +219,9 @@ int main() {
     CHECK(dim.fade_rate == 352);
     world.rules.no_friendly_fire = false;
     world.cached.local_player = EntityHandle{};
+    // An enemy's blast from here: a same-side NPC pair is a protected pair the
+    // blast legs pass over (D-WPN-42).
+    world.registry.get(owner)->team = 2;
 
     // Blast burn precedes the damage callback's armor rejection; outside the
     // radius, neither damage nor burn occurs. The blast passes kz_physics too.

@@ -12,6 +12,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/damage_pair.h>
 #include <runtime/world/dir_table.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/collision_force.h>
@@ -827,6 +828,13 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         if (blast_radius <= 0.0f) continue;
         const int32_t cone_half = ammo->kz_pieslice_bam; // [orig: E+28 -> +60 @ 0x4eadad]
         const EntityHandle resolved = resolve_attacker_chain(world, e.owner);
+        // The friendly-fire gate each pool leg asks of (victim, resolved
+        // attacker) [orig: Projectile_DamagePairEligible @0x4E74F0, the calls
+        // @0x4eb086 / @0x4eb45b / @0x4eb7f6].
+        const Entity *resolved_entity = world.registry.get(resolved);
+        const auto pair_protected = [&](const Entity &t) {
+            return damage_pair_protected(world, t, resolved_entity);
+        };
         // One victim's callback, then the drain's own attacker store when the
         // callback left the victim without one [orig: `call [esp+var_9C]`
         // @ 0x4eb312 / @ 0x4eb58c / @ 0x4eb868, the +0x178 fallbacks
@@ -870,6 +878,11 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // near-miss stamps no AI reaction here yet.
                 if (t->item_type == 3) entity_on_damage_received(world, *t, ammo);
                 if (surface > blast_radius) continue; // [orig: @0x4eb064..0x4eb06c]
+                // A medic entry and the attacker's own body pass the gate
+                // unasked [orig: `cmp [esi+18h], 3` @0x4eb076, the self compare
+                // @0x4eb07c, the call @0x4eb086].
+                if (e.type != ammo_kz::kMedic && t->handle != resolved && pair_protected(*t))
+                    continue;
                 if (e.type != ammo_kz::kRadiusBlast) {
                     // The mounted-occupant gate ahead of the LOS [orig: the
                     // parentSlot switch @0x4eb0e2..0x4eb136]: seats 1/2/5 with
@@ -973,6 +986,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                     continue;
                 const float dist = vec_len(d);
                 if (dist > reach) continue;
+                if (pair_protected(*t)) continue; // [orig: @0x4eb45b]
                 // LOS with the witnessed +0.25 lift [orig: @ 0x4eb4ca]; this
                 // leg leaves the item's parentEntity in place.
                 if (e.type != ammo_kz::kRadiusBlast &&
@@ -1011,6 +1025,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 float surface = vec_len(d) - bound;
                 if (surface < 0.0f) surface = 0.0f;
                 if (surface > blast_radius) continue;
+                if (pair_protected(*t)) continue; // [orig: @0x4eb7f6]
                 // Window shatter at the GLASS1..4 user points [orig:
                 // Terrain_SpawnEffectsAtUserPoint x4 @ 0x4eb814-0x4eb85d].
                 // Collision resolution retained the intact-model point; this

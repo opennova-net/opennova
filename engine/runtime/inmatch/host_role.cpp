@@ -53,10 +53,13 @@ void HostRole::set_item_catalog(
 		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
 
+// The rules word out of a session [orig: `mov [esi+2Ch], 4204h` @0x51E957].
+constexpr uint32_t kSpRulesWord = 0x4204u;
+
 // The shared bring-up preamble: a fresh loopback + owner over the kernel's
 // world and mission, the rule words the world reads at tick time, and the
 // is_in_session fact.
-void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_play) {
+void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime.reset();
     local_round_reset_seen_ = kernel.local.round_reset_revision;
@@ -72,15 +75,20 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	// config at every mission start [orig: Client_BuildMissionDataRequestBlock
 	// @0x51E8C5..0x51E8CB from dword_24D2258 = unlimitedVehicles_4D0].
 	kernel.world.rules.vehicle_respawns = config.unlimited_vehicles;
-	// The mpattrib word's 0x10000 bit the scope-zero -1 floor reads in session
-	// [orig: `test g_RulesFlags,10000h` @0x4dbd15; g_RulesFlags @0x24D1E34 is
-	// the host's mpattrib word, the S2C 0x64 +44 dword on a joiner].
-	kernel.world.rules.mpattrib = config.mp_attributes;
+	// The rules word every in-match reader tests (g_RulesFlags @0x24D1E34) is the
+	// +0x2C dword of the mission-data block the authority builds at every mission
+	// start: the host config's mpattrib word IN a session, the literal 0x4204 out
+	// of one (SP: TEAM_CHOOSE 0x4, NoFriendlyFire 0x200 and 0x4000), and the S2C
+	// 0x64 +44 dword on a joiner. The SP launcher's own mpattrib (0x3A06) never
+	// reaches it [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E94B..
+	//  0x51E957; the scope-zero floor's `test g_RulesFlags,10000h` @0x4dbd15].
+	const uint32_t rules_word = in_session ? config.mp_attributes : kSpRulesWord;
+	kernel.world.rules.mpattrib = rules_word;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
 	kernel.world.rules.auto_scope_zero =
-			(config.mp_attributes & GameConfig::kMpAttribAutoScopeZero) != 0;
+			(rules_word & GameConfig::kMpAttribAutoScopeZero) != 0;
 	kernel.world.rules.no_friendly_fire =
-			(config.mp_attributes & GameConfig::kMpAttribNoFriendlyFire) != 0;
+			(rules_word & GameConfig::kMpAttribNoFriendlyFire) != 0;
 	// The is_mp_session_peer bit is the is_client half of the connection
 	// mode: set for the SP/listen HostClient, clear for a HostOnly dedicated
 	// host. [orig: g_NapiNPCtx +0x64; napi_np_server_ctx.h connection modes]
@@ -115,7 +123,7 @@ void HostRole::bring_up_singleplayer() {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::GameConfig config = singleplayer_game_config(
 			game_type::for_mission_attribs(kernel.mission.header.attrib_flags));
-	reset_state(config, /*serve_and_play=*/true);
+	reset_state(config, /*serve_and_play=*/true, /*in_session=*/false);
 	state.host_owner.host_loopback = &state.host_loop;
 	inmatch::HostConfig host_cfg;
 	host_cfg.config = config;
@@ -136,7 +144,7 @@ void HostRole::bring_up_singleplayer() {
 void HostRole::bring_up(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
-	reset_state(host_cfg.config, host_cfg.serve_and_play);
+	reset_state(host_cfg.config, host_cfg.serve_and_play, /*in_session=*/true);
 	state.host_owner.host_loopback = &state.host_loop;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	ctx.terrain_til_data = bringup.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)

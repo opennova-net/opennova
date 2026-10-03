@@ -7,6 +7,13 @@ health. Divergences from the original engine belong in
 
 ## Cleanup & verification backlog
 
+- [ ] `mission_playthrough` probe gates 8 to 11 (`godot/probes/runtime/mission_playthrough_probe.gd`)
+      encode the refuted 00TRa friendly-fire failure: gate 8 fires at the instructor until the
+      round ends, and gates 9 to 11 leave through the end screen it expects. Retail protects
+      every same-team pair out of a session (D-WPN-42, D-NET-333; world-wac-ai-re.md §40.5), so
+      gate 8 becomes the protected-pair pin (hits land on the instructor, no damage, the round
+      live) and gates 9 to 11 route through the in-game menu's exit and RESTART instead.
+      Acceptance: a `mission_playthrough` run on 00TRa through the game MCP passes 11 of 11.
 - [ ] Retire the launcher and expansion-distribution infrastructure ADR 0048 left
       standing: the `infra/aws` downloads bucket + CloudFront + ACM cert + Cloudflare
       CNAME, the `launcher_ci` IAM user and its outputs, the unproxied `nw` record, the
