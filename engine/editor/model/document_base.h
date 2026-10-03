@@ -110,6 +110,12 @@ public:
 		(void)out;
 		return false;
 	}
+	// Whether the batches of the gesture `gesture` (Edit::gesture) alone made the document's state from
+	// its state `revision` of this load, nothing else between (no batch of another, no undo, no redo):
+	// what a cache held through a gesture's samples asks (the mission canvas's titles, the polish), so
+	// it keeps what it made of that state through the gesture's own edits and drops it on any other
+	// (one through the wire mid-drag). False for gesture 0.
+	bool gesture_alone_since(uint64_t gesture, uint64_t revision) const;
 
 	// --- what it is ----------------------------------------------------------------------------
 	const std::string &path() const { return relative_path_; }
@@ -185,6 +191,10 @@ private:
 	                     Diagnostic &error);
 
 	uint64_t identity_ = 0, load_generation_ = 0;
+	// The run of batches of one gesture that made the state (gesture_alone_since): its gesture (0: the
+	// state was made otherwise), the state it began from, and the revision its first batch made (every
+	// state the run made has one from there on, a revision being taken anew by each batch).
+	uint64_t run_gesture_ = 0, run_from_ = 0, run_first_ = 0;
 	std::string absolute_path_, relative_path_, game_;
 	AssetKind kind_ = AssetKind::Unknown;
 	std::vector<SourceIssue> issues_;

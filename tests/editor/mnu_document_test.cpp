@@ -686,7 +686,8 @@ int window_index_matches_the_compiler() {
 }
 
 // Windows copied and pasted: across screens, into another file, names made unique;
-// anything else cannot be copied; Cut is a copy and a Remove.
+// anything else cannot be copied; Cut is a copy and a Remove; windows of two screens copied and
+// cut together (the polish).
 int copy_and_paste() {
 	editor_test::TempProjectDir dir("opennova_menu_clipboard_test");
 	NoProcess platform;
@@ -751,6 +752,35 @@ int copy_and_paste() {
 	TEST_EXPECT(session.last_edit_ok() && !window_of(*document, title));
 	editor_test::handle_to_end(session, request::undo(document->path()));
 	TEST_EXPECT(window_of(*document, title) != nullptr);
+	// Windows of two screens (the polish; S13 D7 refused them): the second screen's TITLE and the
+	// first's EXIT copied together, in the file's order whatever the selection's (EXIT, then TITLE),
+	// and pasted by the tree's rule in one step: right after the primary of the menu pasted into.
+	NodeAddress second_title;
+	document->walk_records(*document->rows()[1], [&](const NodeAddress &record, const Document::Placement &) {
+		if (record.kind == kWindow && window_of(*document, record)->name == "TITLE") second_title = record;
+		return !second_title.child;
+	});
+	TEST_EXPECT(second_title.child != 0 && second_title.row != exit.row);
+	select(second_title, SelectMode::Replace);
+	select(exit, SelectMode::Add);
+	editor_test::handle_to_end(session, request::copy(document->path()));
+	TEST_EXPECT(session.last_edit_ok());
+	TEST_EXPECT(find_definition(AssetGraph(), *extra, "TITLE", pasted));
+	editor_test::handle_to_end(session, request::select_record(extra->path(), pasted, SelectMode::Replace));
+	const std::string extra_before = extra->serialize().text;
+	editor_test::handle_to_end(session, request::paste(extra->path()));
+	TEST_EXPECT(session.last_edit_ok() && extra->identities_match());
+	TEST_EXPECT(window_names(*extra, *extra->rows()[0]) == std::vector<std::string>({"MAIN", "TITLE", "EXIT2", "TITLE2", "EXIT"}));
+	editor_test::handle_to_end(session, request::undo(extra->path()));
+	TEST_EXPECT(extra->serialize().text == extra_before);
+	// Cut across the two screens: one step removing both, undone to the bytes.
+	const std::string two_screens = document->serialize().text;
+	select(second_title, SelectMode::Replace);
+	select(exit, SelectMode::Add);
+	editor_test::handle_to_end(session, request::cut(document->path()));
+	TEST_EXPECT(session.last_edit_ok() && !window_of(*document, exit) && !window_of(*document, second_title));
+	editor_test::handle_to_end(session, request::undo(document->path()));
+	TEST_EXPECT(document->serialize().text == two_screens);
 	// A paste that is not a menu's clipboard is refused.
 	Edit foreign = op(EditOperation::Paste, {document->rows()[0]->id, kWindow, 0}, document->window_at(*document->rows()[0], 0));
 	foreign.value = std::string("key=value");

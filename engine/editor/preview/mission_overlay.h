@@ -7,6 +7,7 @@
 #include <editor/model/node.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_overlay.h>
 
@@ -70,6 +71,9 @@ struct MissionOverlayInput {
 	float handle_reach = 0.0f; // metres the primary's handles stand from its anchor
 	const ViewportDevice *device = nullptr; // the ground an area's corners sit on
 	std::function<std::string(const NodeAddress &)> title; // a mark's label (none: no labels)
+	// The labels' last layout, taken again where its candidates and words are this frame's (the
+	// polish: laid out again only when what they read moved); null: laid out every frame.
+	MissionLabelLayout *layout = nullptr;
 	bool marquee = false;
 	CanvasPoint marquee_from, marquee_to;
 	// S15: the pointer; the primary's handle it is on or a drag holds (its words and step beside it),

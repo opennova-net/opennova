@@ -12,9 +12,10 @@ class MnuDocument;
 
 // What the clipboard does with a menu's selection (ADR 0046 S9k2; S13 V1: one rule, which the
 // menu view's tree and the Preview's canvas both ask). Copy, Cut and Duplicate take the
-// selection only while every selected record is a window the tree lists: a window of the
-// screen that the screen or windows alone hold, never one a part holds (a list's scrollbar,
-// a combo's list box: a part goes with its owner). A Paste goes after the window the tree
+// selection only while every selected record is a window the tree lists: a window that its
+// screen or windows alone hold (of any screen: windows of several screens copy together, in
+// the file's order), never one a part holds (a list's scrollbar, a combo's list
+// box: a part goes with its owner). A Paste goes after the window the tree
 // lists that is the primary record or holds it, among its siblings, else at the end of the
 // screen's root windows (the screen itself selected, or nothing of it).
 struct MenuClipboard {
