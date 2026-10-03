@@ -276,8 +276,10 @@ void mission_references(const Document &document, Extracted &out);
 // The text keys one record's numbers form, the TextId edges mission_references makes of it, each with
 // its field ("" a navpoint's LOCATION, "name_index" a STRNAME, "win_conditions[i]" an objectives row, an
 // action's "param1" the line it shows), in the order mission_references makes them; `placed` fills each
-// edge's record path and locator (the graph's), which the display names do without.
+// edge's record path and locator (the graph's), which the display names do without. With `as_field`, the
+// keys the record would form were that field `as_value` (a picker wording a value the field does not
+// hold yet: the display names' choices).
 void mission_text_edges(const MissionDocument &document, const NodeAddress &address, std::vector<GraphEdge> &out,
-                        bool placed = false);
+                        bool placed = false, const char *as_field = nullptr, int64_t as_value = 0);
 
 } // namespace opennova::editor

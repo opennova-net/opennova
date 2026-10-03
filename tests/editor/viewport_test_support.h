@@ -98,6 +98,13 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 	bool surface_between(const double from[3], const double to[3], double point[3]) const override {
 		return ground && editor_test::ground_crossing(ground, from, to, point);
 	}
+	// What a ray meets of the picture, as a test says (none: the device cannot say), and how often asked.
+	std::function<opennova::editor::ViewportRayHit(const double from[3], const double to[3])> ray;
+	mutable int rays = 0;
+	opennova::editor::ViewportRayHit ray_between(const double from[3], const double to[3]) const override {
+		++rays;
+		return ray ? ray(from, to) : opennova::editor::ViewportRayHit();
+	}
 	void draw(const opennova::editor::ViewportPicture &picture) override {
 		++draws;
 		width = picture.width;
