@@ -574,6 +574,16 @@ source** (the asset graph's). A record's display name is its **title**; its **na
 graph keys it by (an entity's SSN).
 _Avoid_: label (a field's own name), caption, alias
 
+**Event sentence**:
+A mission's event in words, as the game runs it (ADR 0046 S15): "When <trigger>, and/or <trigger>
+..., then <action>; <action>.", the triggers folded left to right with the joins their flags make
+(bracketed where the join changes), a negated one in its type's negative words, the start, end and
+repeat flags and the two times in seconds, each parameter by its display name
+(`engine/editor/documents/mission_sentence.h`). An event's title; a trigger's and an action's are
+their part of it. Its type's name in the Add trigger and Add action pickers is its **title**, under
+its **group**.
+_Avoid_: description, summary, event label
+
 **Base layer**:
 What a read-only dependency mount (a game install a project builds on) gives the project's
 asset graph: its files and the names they define, read once and never edited. A lookup by name
@@ -762,8 +772,11 @@ a Godot code editor placed over its Document tab, which owns the pointer and the
 shows the document's text as it stands (the text is the document's: an undo, a reload or another
 client's edit comes back into the control). What is typed goes to the document as spans replaced,
 each run of typing one gesture and one undo step, Undo and Redo the editor's and never the
-control's; the findings are marks in its gutter, their messages on hover; a script's words the WAC
-compiler knows (its keywords, commands and operands) are coloured, nothing else; a Go to or a
+control's; the findings are marks in its gutter, their messages on hover and the worst one's first
+sentence after its line's text; a script's words the WAC compiler knows (its keywords, commands and
+operands) are coloured, nothing else; as a script is typed it offers what may complete the word (the
+commands and keywords, or the names the command's parameter takes), says what a word is on hover, and
+a Ctrl+click goes where the word is defined (ADR 0046 S15, `session/script_assist`); a Go to or a
 Problems row selects its place. A file its text form cannot carry shows read only, and so does every
 text while an operation holds the documents. Where no window draws it (headless) or something is
 drawn over the tab (a menu, a dialog), the document's lines show instead, read only.
