@@ -65,7 +65,7 @@ void Role::apply_input(const TickInput &input) {
 	// release is dispatched regardless [orig: Input_ProcessKeyboardEvents
 	// @0x49D330..0x49D339 (the press pass), the release pass @0x49D249 has no
 	// such gate; ToSpecial's row flags 0x8C000801].
-	if (!spectating && input.consume_one_shots) {
+	if (input.consume_one_shots) {
 		const bool held = (input.player.held_action_bits & HELD_TO_SPECIAL) != 0;
 		if ((input.player.pressed_action_bits & PRESSED_TO_SPECIAL) != 0) {
 			const bool local_dead = kind() == RoleKind::Joiner && client_runtime() != nullptr
