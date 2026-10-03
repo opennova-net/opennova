@@ -771,7 +771,7 @@ const RequirementRow *SessionCore::requirement_row(const std::string &role) cons
 const AssetEntry *SessionCore::project_file(const std::string &file) const {
 	for (const AssetEntry &candidate : view_.project.scan->entries)
 		if (candidate.relative_path == file) return &candidate;
-	const std::string wanted = normalized_logical_name(fs::path(file).filename().string());
+	const std::string wanted = normalized_logical_name(basename_of(file));
 	for (const AssetEntry &candidate : view_.project.scan->entries)
 		if (normalized_logical_name(candidate.logical_name) == wanted) return &candidate;
 	return nullptr;
@@ -791,19 +791,19 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	// is read.
 	std::string output_root = paths_.build_dir + "/play";
 	if (!out_dir.empty()) {
-		fs::path out(out_dir);
-		if (out.is_relative()) out = fs::path(paths_.root) / out;
+		fs::path out = path_of(out_dir);
+		if (out.is_relative()) out = path_of(paths_.root) / out;
 		out = out.lexically_normal();
-		if (inside(out, paths_.root) && !inside(out, paths_.cache_dir) &&
-		    !inside(out, paths_.export_dir(*view_.project.document))) {
+		if (inside(out, path_of(paths_.root)) && !inside(out, path_of(paths_.cache_dir)) &&
+		    !inside(out, path_of(paths_.export_dir(*view_.project.document)))) {
 			view_.activity.status = "The build was refused: its folder is inside the project.";
 			report(make_finding(CoreFinding::BuildOutDirInProject, DiagnosticSeverity::Error,
-			                    "A build cannot land in " + out.generic_string() +
+			                    "A build cannot land in " + utf8_of(out) +
 			                            ": it is inside the project, whose files the next build would pack. "
 			                            "Choose a folder outside it, or its export folder."));
 			return;
 		}
-		output_root = out.generic_string();
+		output_root = utf8_of(out);
 	}
 	problems().clear_build_findings(); // the last build's rows go: this one reports anew
 	documents().reload_changed();

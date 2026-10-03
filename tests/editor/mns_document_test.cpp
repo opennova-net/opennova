@@ -402,6 +402,10 @@ static int test_validation() {
 		return false;
 	};
 	TEST_EXPECT(line_ending_on(note_path));
+	// Nothing reads note.mns: what the game would do reading it is a warning, which gates no build
+	// (the build follows retail, S14); brand.mns's, which the game reads, was an error (above).
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == "style.line_ending" && d.asset == note_path) TEST_EXPECT(d.severity == DiagnosticSeverity::Warning);
 	editor_test::handle_to_end(session, request::open_document(note_path));
 	TEST_EXPECT(session.document_for(note_path) && !session.document_for(note_path)->dirty());
 	editor_test::handle_to_end(session, request::save(note_path));

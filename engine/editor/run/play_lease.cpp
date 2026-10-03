@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <optional>
 #include <system_error>
 
 #include <base/io/json.h>
+#include <base/io/strutil.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 
@@ -17,7 +19,7 @@ namespace {
 
 // A build directory's name and the path it lives at.
 fs::path normalized_dir(const std::string &build_dir) {
-	fs::path dir = fs::path(build_dir).lexically_normal();
+	fs::path dir = path_of(build_dir).lexically_normal();
 	if (dir.filename().empty()) dir = dir.parent_path();
 	return dir;
 }
@@ -25,22 +27,23 @@ fs::path normalized_dir(const std::string &build_dir) {
 // The lease the game `pid` holds on `build_dir`: <build-id>.<pid>.lease beside it.
 fs::path lease_path_of(const std::string &build_dir, int64_t pid) {
 	const fs::path dir = normalized_dir(build_dir);
-	return dir.parent_path() / (dir.filename().string() + "." + std::to_string(pid) + kPlayLeaseSuffix);
+	return dir.parent_path() / path_of(utf8_of(dir.filename()) + "." + std::to_string(pid) + kPlayLeaseSuffix);
 }
 
 // The build id and the pid a lease's file name carries (<build-id>.<pid>.lease); false for any
 // other name.
 bool parse_lease_name(const fs::path &path, std::string &build_id, int64_t &pid) {
 	if (path.extension() != kPlayLeaseSuffix) return false;
-	const std::string stem = path.stem().string(); // <build-id>.<pid>
+	const std::string stem = utf8_of(path.stem()); // <build-id>.<pid>
 	const size_t dot = stem.find('.');
 	if (dot == std::string::npos) return false;
 	build_id = stem.substr(0, dot);
 	const std::string digits = stem.substr(dot + 1);
-	if (!is_build_id(build_id) || digits.empty() || digits.size() > 18 ||
-	    !std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; }))
-		return false;
-	pid = std::stoll(digits);
+	if (!is_build_id(build_id) || !strutil::all_digits(digits)) return false;
+	// A pid a 64-bit signed number holds (strutil's parse: no throw).
+	const std::optional<long long> number = strutil::parse_llong(digits);
+	if (!number) return false;
+	pid = static_cast<int64_t>(*number);
 	return true;
 }
 
@@ -48,7 +51,7 @@ bool parse_lease_name(const fs::path &path, std::string &build_id, int64_t &pid)
 // the creation time it records.
 bool read_lease(const fs::path &path, const std::string &build_id, int64_t pid, std::string &created) {
 	std::string text, error;
-	if (!read_file_text(path.string(), text, error)) return false;
+	if (!read_file_text(utf8_of(path), text, error)) return false;
 	io::JsonValue json;
 	if (!io::json_parse(text, json, error) || !json.is_object()) return false;
 	if (json.get_int("schema_version", -1) != kPlayLeaseSchemaVersion) return false;
@@ -62,7 +65,7 @@ bool read_lease(const fs::path &path, const std::string &build_id, int64_t pid, 
 } // namespace
 
 bool write_play_lease(const PlayLease &lease, std::string &error) {
-	const std::string build_id = normalized_dir(lease.build_dir).filename().string();
+	const std::string build_id = utf8_of(normalized_dir(lease.build_dir).filename());
 	if (!is_build_id(build_id) || lease.pid < 0) {
 		error = "not a build directory and a process: " + lease.build_dir;
 		return false;
@@ -75,13 +78,13 @@ bool write_play_lease(const PlayLease &lease, std::string &error) {
 	json.set("image", io::JsonValue::make_string(lease.image));
 	// A string: a creation time (a FILETIME's 100 ns count) passes a JSON number's exact range.
 	json.set("created", io::JsonValue::make_string(lease.created));
-	return write_file_atomic(path.generic_string(), io::json_write(json), error);
+	return write_file_atomic(utf8_of(path), io::json_write(json), error);
 }
 
 void remove_play_lease(const std::string &build_dir, int64_t pid) {
-	if (!is_build_id(normalized_dir(build_dir).filename().string()) || pid < 0) return;
+	if (!is_build_id(utf8_of(normalized_dir(build_dir).filename())) || pid < 0) return;
 	std::error_code ec;
-	fs::remove(system_path(lease_path_of(build_dir, pid).generic_string()), ec);
+	fs::remove(system_path(utf8_of(lease_path_of(build_dir, pid))), ec);
 }
 
 std::vector<std::string> leased_build_dirs(const std::string &output_root, const LeaseLiveness &liveness) {
@@ -102,7 +105,7 @@ std::vector<std::string> leased_build_dirs(const std::string &output_root, const
 			fs::remove(path, removed);
 			continue;
 		}
-		const std::string dir = (fs::path(output_root) / build_id).generic_string();
+		const std::string dir = join_path(output_root, build_id);
 		if (std::find(dirs.begin(), dirs.end(), dir) == dirs.end()) dirs.push_back(dir);
 	}
 	return dirs;

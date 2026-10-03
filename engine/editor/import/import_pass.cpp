@@ -32,8 +32,8 @@ ImportPass::ImportPass(const ProjectPaths &paths, const ProjectDocument &project
 		force_(force),
 		only_(std::move(only)),
 		table_(&table),
-		root_(paths.root),
-		export_dir_(paths.export_dir(project)) {}
+		root_(path_of(paths.root)),
+		export_dir_(path_of(paths.export_dir(project))) {}
 
 // A cache that is missing, broken or of another schema reads as empty: every source
 // is then imported again, which is all a lost cache costs.
@@ -122,7 +122,9 @@ bool ImportPass::step(uint64_t budget) {
 			pass_began_ = io::file_clock_now_ticks();
 			cache_ = load_cache(paths_.import_cache_file, cache_text_);
 			std::error_code ec;
-			walk_ = fs::recursive_directory_iterator(root_, fs::directory_options::skip_permission_denied, ec);
+			// Through the system's paths (project_files.h): a source past MAX_PATH is found and read.
+			walk_ = fs::recursive_directory_iterator(system_path(utf8_of(root_)),
+					fs::directory_options::skip_permission_denied, ec);
 			if (ec) {
 				// No project to walk: nothing imported, and the cache as it was.
 				phase_ = Phase::Done;
@@ -143,10 +145,11 @@ bool ImportPass::step(uint64_t budget) {
 			const fs::directory_entry &entry = *walk_;
 			const fs::path path = entry.path();
 			if (entry.is_directory(ec)) {
-				if (is_dot_directory(path) || fs::equivalent(path, export_dir_, ec)) walk_.disable_recursion_pending();
-			} else if (entry.is_regular_file(ec) && importer_for(path.filename().string(), *table_)) {
-				std::string relative = fs::relative(path, root_, ec).generic_string();
-				if (ec) relative = path.filename().string();
+				if (is_dot_directory(path) || fs::equivalent(path, system_path(utf8_of(export_dir_)), ec))
+					walk_.disable_recursion_pending();
+			} else if (entry.is_regular_file(ec) && importer_for(utf8_of(path.filename()), *table_)) {
+				std::string relative = utf8_of(fs::relative(path, system_path(utf8_of(root_)), ec));
+				if (ec) relative = utf8_of(path.filename());
 				listed_.emplace_back(std::move(relative), path);
 			}
 			walk_.increment(ec);
@@ -201,7 +204,7 @@ bool ImportPass::file_hash(const std::string &file, const std::string &relative,
 
 void ImportPass::take_source(const fs::path &path, const std::string &relative, uint64_t &spent) {
 	std::error_code ec;
-	const std::string filename = path.filename().string();
+	const std::string filename = utf8_of(path.filename());
 	const Importer *importer = importer_for(filename, *table_);
 	if (!importer || !fs::is_regular_file(path, ec)) return; // gone since it was listed
 	ImportedSource source;
@@ -209,10 +212,11 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 	source.sidecar = source.source + kImportSidecarSuffix;
 	source.importer = importer->id;
 	source.output_dir = import_output_dir(paths_, source.source);
-	const std::string sidecar_path = (root_ / source.sidecar).generic_string();
-	// Where the files an import reads are named from: the source's folder.
-	const std::string folder = path.parent_path().generic_string();
-	const std::string root = root_.generic_string();
+	const std::string sidecar_path = utf8_of(root_ / path_of(source.sidecar));
+	// Where the files an import reads are named from: the source's folder, under the project's root as
+	// given (the walk's path is the system's, which the context's checks would not find under it).
+	const std::string folder = utf8_of((root_ / path_of(relative)).parent_path());
+	const std::string root = utf8_of(root_);
 	ImportSidecar sidecar;
 	Diagnostic error;
 	if (!load_import_sidecar(sidecar_path, sidecar, error)) {
@@ -245,7 +249,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 	bool have_bytes = false;
 	const auto read_source = [&]() {
 		std::string message;
-		if (!read_file_bytes(path.generic_string(), bytes, message)) {
+		if (!read_file_bytes(utf8_of(path), bytes, message)) {
 			result_.diagnostics.push_back(make_finding(CoreFinding::ImportRead, DiagnosticSeverity::Error, message, source.source));
 			return false;
 		}
@@ -283,7 +287,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 	// The outputs live under the cache, deeper than the source: their checks take the system path.
 	bool outputs_present = !sidecar.outputs.empty();
 	for (const std::string &output : sidecar.outputs)
-		if (!fs::is_regular_file(system_path((root_ / source.output_dir / output).generic_string()), ec))
+		if (!fs::is_regular_file(system_path(utf8_of(root_ / path_of(source.output_dir) / path_of(output))), ec))
 			outputs_present = false;
 	const bool stale = sidecar.importer != importer->id || sidecar.version != importer->version ||
 	                   now.hash != sidecar.source_hash || !inputs_current || !outputs_present || made.record == 0 ||
@@ -308,9 +312,9 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 		if (!ok) {
 			source.ok = false;
 		} else {
-			const fs::path out_dir = root_ / source.output_dir;
+			const fs::path out_dir = root_ / path_of(source.output_dir);
 			std::string dir_error;
-			if (!ensure_project_cache_dir(paths_, dir_error) || !ensure_directory(out_dir.generic_string(), dir_error)) {
+			if (!ensure_project_cache_dir(paths_, dir_error) || !ensure_directory(utf8_of(out_dir), dir_error)) {
 				result_.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error, dir_error, source.source));
 				source.ok = false;
 			} else {
@@ -318,12 +322,12 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 				for (const std::string &old : sidecar.outputs) {
 					bool kept = false;
 					for (const ImportOutput &output : product.outputs) if (output.name == old) kept = true;
-					if (!kept) fs::remove(system_path((out_dir / old).generic_string()), ec);
+					if (!kept) fs::remove(system_path(utf8_of(out_dir / path_of(old))), ec);
 				}
 				sidecar.outputs.clear();
 				for (const ImportOutput &output : product.outputs) {
 					std::string write_error;
-					if (!write_file_atomic((out_dir / output.name).generic_string(), output.bytes.data(), output.bytes.size(),
+					if (!write_file_atomic(utf8_of(out_dir / path_of(output.name)), output.bytes.data(), output.bytes.size(),
 					                       write_error)) {
 						result_.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error, write_error, source.source));
 						source.ok = false;
@@ -365,7 +369,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 		if (ImportContext::resolve(folder, root, input, file, input_relative)) source.inputs.push_back(input_relative);
 	}
 	for (const std::string &output : sidecar.outputs)
-		source.outputs.push_back((fs::path(source.output_dir) / output).generic_string());
+		source.outputs.push_back(join_path(source.output_dir, output));
 	result_.sources.push_back(std::move(source));
 }
 
