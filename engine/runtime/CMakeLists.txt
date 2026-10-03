@@ -146,6 +146,7 @@ add_library(opennova_runtime STATIC
     renderer/model_controls.cpp
     renderer/model_panm_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_texture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_load_rules.cpp   # the game's texture loaders as rules
     renderer/material_texture_producers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp
