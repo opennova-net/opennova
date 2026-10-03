@@ -1,6 +1,7 @@
 #include "authoring/script_edit.h"
 
 #include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
@@ -11,6 +12,7 @@
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/rect2.hpp>
+#include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/transform2d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -90,11 +92,13 @@ void ScriptEdit::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mark_count"), &ScriptEdit::get_mark_count);
 	ClassDB::bind_method(D_METHOD("get_mark_severity", "line"), &ScriptEdit::get_mark_severity);
 	ClassDB::bind_method(D_METHOD("get_mark_tip", "line"), &ScriptEdit::get_mark_tip);
+	ClassDB::bind_method(D_METHOD("get_mark_note", "line"), &ScriptEdit::get_mark_note);
+	ClassDB::bind_method(D_METHOD("get_word_tip", "line", "column"), &ScriptEdit::get_word_tip);
 }
 
 ScriptEdit::ScriptEdit() {
-	// A script's text as written: its line numbers, no folding, completion, braces or the debugger's
-	// gutters, tabs kept as tabs.
+	// A script's text as written: its line numbers, no folding, braces or the debugger's gutters, tabs
+	// kept as tabs.
 	set_draw_line_numbers(true);
 	set_line_folding_enabled(false);
 	set_draw_fold_gutter(false);
@@ -102,7 +106,24 @@ ScriptEdit::ScriptEdit() {
 	set_draw_bookmarks_gutter(false);
 	set_draw_executing_lines_gutter(false);
 	set_auto_brace_completion_enabled(false);
-	set_code_completion_enabled(false);
+	// The names a script can use as it is typed (S15): a word's character asks the device's list, as
+	// Ctrl+Space does; Ctrl+click goes where the word is defined.
+	set_code_completion_enabled(true);
+	TypedArray<String> prefixes;
+	for (char c = 'a'; c <= 'z'; ++c) prefixes.push_back(String::chr(c));
+	for (char c = 'A'; c <= 'Z'; ++c) prefixes.push_back(String::chr(c));
+	for (char c = '0'; c <= '9'; ++c) prefixes.push_back(String::chr(c));
+	prefixes.push_back("_");
+	set_code_completion_prefixes(prefixes);
+	set_symbol_lookup_on_click_enabled(true);
+	// The WAC compiler's strings and comments (a '"' runs to its closing quote, ';' or '//' ends the
+	// line: session/script_assist's tokens), not Godot's defaults, whose '\'' would open a string at a
+	// comment's apostrophe and quote every completion after it.
+	clear_string_delimiters();
+	add_string_delimiter("\"", "\"", true);
+	clear_comment_delimiters();
+	add_comment_delimiter(";", "", true);
+	add_comment_delimiter("//", "", true);
 	set_indent_using_spaces(false);
 	set_highlight_current_line(true);
 	// One caret and no selection dragged elsewhere in the text: a change at several places is a step of
@@ -126,6 +147,60 @@ ScriptEdit::ScriptEdit() {
 	connect("text_changed", callable_mp(this, &ScriptEdit::on_text_changed_));
 	connect("focus_exited", callable_mp(this, &ScriptEdit::on_focus_exited_));
 	connect("gui_input", callable_mp(this, &ScriptEdit::on_gui_input_));
+	connect("symbol_validate", callable_mp(this, &ScriptEdit::on_symbol_validate_));
+	connect("symbol_lookup", callable_mp(this, &ScriptEdit::on_symbol_lookup_));
+}
+
+void ScriptEdit::set_assist(Assist assist) {
+	assist_ = std::move(assist);
+}
+
+void ScriptEdit::_request_code_completion(bool p_force) {
+	if (assist_.complete) assist_.complete(p_force);
+}
+
+void ScriptEdit::on_symbol_validate_(const String &p_symbol) {
+	// A word with something under it is looked up; the device says where (or nothing) on the click.
+	set_symbol_lookup_word_as_valid(!p_symbol.is_empty() && bool(assist_.lookup));
+}
+
+void ScriptEdit::on_symbol_lookup_(const String &, int64_t p_line, int64_t p_column) {
+	if (!assist_.lookup) return;
+	const int line = int(p_line), column = int(p_column);
+	// Raised outside the input's handling, at the next deferred call.
+	defer([this, line, column] {
+		if (assist_.lookup) assist_.lookup(line, column);
+	});
+}
+
+String ScriptEdit::get_mark_note(int p_line) const {
+	const opennova::editor::ScriptMark *mark = mark_at_(p_line);
+	return mark ? opennova::to_gd(mark->note()) : String();
+}
+
+String ScriptEdit::get_word_tip(int p_line, int p_column) const {
+	return assist_.hover ? opennova::to_gd(assist_.hover(p_line, p_column)) : String();
+}
+
+void ScriptEdit::draw_notes_() {
+	const Ref<Font> font = get_theme_font("font");
+	const int size = get_theme_font_size("font_size");
+	if (font.is_null() || size <= 0) return;
+	const float gap = float(size) * 2.0f;
+	for (int line = get_first_visible_line(); line <= get_last_full_visible_line() + 1 && line < get_line_count(); ++line) {
+		const opennova::editor::ScriptMark *mark = mark_at_(line);
+		if (!mark) continue;
+		const std::string note = mark->note();
+		if (note.empty()) continue;
+		const Rect2i end = get_rect_at_line_column(line, get_line(line).length());
+		if (end.position.x < 0 || end.position.y < 0) continue;
+		const float x = float(end.position.x + end.size.x) + gap;
+		if (x >= get_size().x) continue;
+		const float baseline = float(end.position.y) + (float(end.size.y) + font->get_ascent(size) - font->get_descent(size)) * 0.5f;
+		Color color = severity_color(mark->severity);
+		color.a = 0.85f;
+		draw_string(font, Vector2(x, baseline), opennova::to_gd(note), HORIZONTAL_ALIGNMENT_LEFT, get_size().x - x, size, color);
+	}
 }
 
 void ScriptEdit::_notification(int p_what) {
@@ -143,6 +218,9 @@ void ScriptEdit::_notification(int p_what) {
 			if (window->is_connected("window_input", call)) window->disconnect("window_input", call);
 		}
 		window_id_ = 0;
+	} else if (p_what == NOTIFICATION_DRAW) {
+		// After the text control drew its text: each marked line's note after it (S15).
+		draw_notes_();
 	}
 }
 
@@ -215,14 +293,20 @@ void ScriptEdit::on_gui_input_(const Ref<InputEvent> &p_event) {
 		accept_event();
 		return;
 	}
-	// Over the gutters: the findings of the line under the pointer, its tooltip.
+	// Over the gutters: the findings of the line under the pointer, its tooltip. Over the text (S15):
+	// what the word there is, in words, then the line's findings.
 	const InputEventMouseMotion *motion = Object::cast_to<InputEventMouseMotion>(p_event.ptr());
 	if (!motion) return;
 	const Vector2 at = motion->get_position();
 	String tip;
+	const Vector2i place = get_line_column_at_pos(Vector2i(int(at.x), int(at.y)), false);
 	if (at.x < float(get_total_gutter_width())) {
-		const Vector2i place = get_line_column_at_pos(Vector2i(int(at.x), int(at.y)), false);
 		if (const opennova::editor::ScriptMark *mark = mark_at_(place.y)) tip = opennova::to_gd(mark->tip());
+	} else if (place.x >= 0 && place.y >= 0) {
+		std::string words = assist_.hover ? assist_.hover(place.y, place.x) : std::string();
+		if (const opennova::editor::ScriptMark *mark = mark_at_(place.y))
+			words += (words.empty() ? "" : "\n\n") + mark->tip();
+		tip = opennova::to_gd(words);
 	}
 	if (tip != get_tooltip_text()) set_tooltip_text(tip);
 }
@@ -243,6 +327,7 @@ void ScriptEdit::set_marks(const std::vector<opennova::editor::ScriptMark> &mark
 		set_line_gutter_icon(line, gutter_, icons_[severity_index(marks_[i].severity)]);
 		set_line_gutter_metadata(line, gutter_, int64_t(i));
 	}
+	queue_redraw(); // the notes after the lines' text
 }
 
 const opennova::editor::ScriptMark *ScriptEdit::mark_at_(int p_line) const {

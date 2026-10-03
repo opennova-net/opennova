@@ -1,6 +1,7 @@
 #include "authoring/script_device.h"
 
 #include <godot_cpp/classes/canvas_layer.hpp>
+#include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -16,7 +17,9 @@
 #include <editor/preview/shown_text.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
+#include <editor/model/text_document.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
 
 #include "authoring/script_edit.h"
@@ -73,6 +76,9 @@ ScriptDevice::ScriptDevice(Node &owner, ViewportDeviceSink sink) : sink_(std::mo
 	highlighter_.instantiate();
 	edit->set_syntax_highlighter(highlighter_);
 	edit->set_listener([this] { on_text_changed_(); }, [this] { on_focus_exited_(); });
+	edit->set_assist({[this](bool force) { complete_(force); },
+	                  [this](int line, int column) { return hover_(line, column); },
+	                  [this](int line, int column) { lookup_(line, column); }});
 	layer->add_child(edit);
 	owner.add_child(layer);
 	layer_id_ = layer->get_instance_id();
@@ -302,6 +308,56 @@ void ScriptDevice::on_text_changed_() {
 
 void ScriptDevice::on_focus_exited_() {
 	end_burst_();
+}
+
+const opennova::editor::TextDocument *ScriptDevice::text_() const {
+	const opennova::editor::DocumentBase *document = document_();
+	return document ? opennova::editor::text_of(*document) : nullptr;
+}
+
+void ScriptDevice::complete_(bool force) {
+	ScriptEdit *edit = this->edit();
+	const opennova::editor::TextDocument *text = text_();
+	if (!edit || !text || !view_) return;
+	// The control's places are the document's (a script's text is its code page's characters, one
+	// each), from 0. The line as the control holds it: the keystroke that asked for the list reaches the
+	// document at the next deferred call. A character past ASCII is no word's.
+	const int caret_line = edit->get_caret_line();
+	const String held = edit->get_line(caret_line);
+	std::string line(size_t(held.length()), '?');
+	for (int64_t i = 0; i < held.length(); ++i)
+		if (held[i] < 0x80) line[size_t(i)] = char(held[i]);
+	const opennova::editor::ScriptCompletions completions = opennova::editor::script_completions(
+			*view_, *text, size_t(caret_line) + 1, size_t(edit->get_caret_column()) + 1, &line);
+	for (const opennova::editor::ScriptCompletion &item : completions.items) {
+		const CodeEdit::CodeCompletionKind kind = item.kind == "command" ? CodeEdit::KIND_FUNCTION
+		                                          : item.kind == "keyword" ? CodeEdit::KIND_PLAIN_TEXT
+		                                          : item.kind == "text key" || item.kind == "effect" || item.kind == "ammo"
+		                                                  ? CodeEdit::KIND_MEMBER
+		                                                  : CodeEdit::KIND_CONSTANT;
+		edit->add_code_completion_option(kind, opennova::to_gd(item.label), opennova::to_gd(item.insert), Color(1, 1, 1),
+				Ref<Resource>(), opennova::to_gd(item.detail));
+	}
+	edit->update_code_completion_options(force);
+}
+
+std::string ScriptDevice::hover_(int line, int column) const {
+	const opennova::editor::TextDocument *text = text_();
+	if (!text || !view_) return std::string();
+	opennova::editor::ScriptHover hover;
+	return opennova::editor::script_hover(*view_, *text, size_t(line) + 1, size_t(column) + 1, hover) ? hover.text
+	                                                                                                     : std::string();
+}
+
+void ScriptDevice::lookup_(int line, int column) {
+	const opennova::editor::TextDocument *text = text_();
+	if (!text || !view_) return;
+	opennova::editor::EditorRequest request;
+	if (opennova::editor::script_definition(*view_, *text, size_t(line) + 1, size_t(column) + 1, request)) {
+		if (sink_.request) sink_.request(request);
+	} else if (sink_.notice) {
+		sink_.notice("The editor knows no place that defines this word.");
+	}
 }
 
 void ScriptDevice::end_burst_() {
