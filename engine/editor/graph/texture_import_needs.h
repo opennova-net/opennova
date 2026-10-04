@@ -15,9 +15,11 @@ namespace opennova::editor {
 // with why, in the use's words. Where two uses ask two things of one option the strictest that serves
 // both wins (a TGA serves a model row as well as the HUD, which reads no .dds), else it is a conflict,
 // said and left out (a loading screen and a particle graphic of one name: no one file serves both). A
-// foliage or char map's indices are data an import from colours cannot keep: a conflict too. No use
-// asks nothing. `source_name` is the import's source (its stem the output's name unless a use names
-// another).
+// foliage or char map's indices are data the game reads: from an 8-bit PCX source a PCX keeping them
+// (palette indices), from any other a conflict (an import from colours cannot keep them). A model's
+// normal row naming a .tga asks the height in the alpha (normal height). No use asks nothing.
+// `source_name` is the import's source (its stem the output's name unless a use names another; its
+// extension whether it holds indices).
 struct TextureImportNeeds {
 	ImportOptions options;
 	std::vector<std::string> reasons;   // one line an option asked: "format dds: the model diffuse of ..."

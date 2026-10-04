@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdlib>
 
 #include <base/io/strutil.h>
@@ -14,6 +15,7 @@
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
+#include <formats/tga/tga_read.h>
 #include <runtime/renderer/texture_dxt.h>
 
 namespace opennova::editor {
@@ -152,6 +154,7 @@ const std::vector<ImportOptionRow> &image_import_option_rows() {
 		palette.values = {
 		        {"median_cut", "the source's colours when 256 or fewer, else a median cut"},
 		        {"exact", "the source's colours, refused past 256"},
+		        {"indices", "an 8-bit PCX source's indices and palette as they are: a foliage or char map's data"},
 		};
 		palette.fallback = "median_cut";
 		palette.applies_to = "format";
@@ -195,6 +198,20 @@ const std::vector<ImportOptionRow> &image_import_option_rows() {
 		};
 		green.fallback = "game";
 		out.push_back(green);
+		ImportOptionRow normal;
+		normal.key = "normal";
+		normal.label = "Normal map";
+		normal.words = "What a model's normal row naming a .tga is made from: a finished normal map, or a height map "
+		               "the game turns into one.";
+		normal.values = {
+		        {"normal", "the source's colour as it is"},
+		        {"height", "the source's brightness into the alpha, the height the game makes the normal map from, "
+		                   "and its alpha into the blue, the map's alpha"},
+		};
+		normal.fallback = "normal";
+		normal.applies_to = "format";
+		normal.applies_values = {"tga"};
+		out.push_back(normal);
 		return out;
 	}();
 	return rows;
@@ -215,7 +232,60 @@ ImageImportSettings image_import_settings(const ImportOptions &options) {
 	out.dds = value("dds", "dxt5");
 	out.mips = value("mips", "full");
 	out.green = value("green", "game");
+	out.normal = value("normal", "normal");
 	return out;
+}
+
+bool decode_image_source(const std::string &name, const std::vector<uint8_t> &bytes, ImageSource &out,
+                         std::string &error) {
+	out = ImageSource();
+	const std::string extension = strutil::to_lower(utf8_of(path_of(name).extension()));
+	if (extension == ".png") return decode_png(bytes, out.image, error);
+	if (extension == ".tga") {
+		tga::TgaImage image;
+		if (!tga::tga_decode_retail(bytes.data(), bytes.size(), image, error)) return false;
+		out.image.width = image.width;
+		out.image.height = image.height;
+		out.image.pixels = std::move(image.rgba);
+		return true;
+	}
+	if (extension == ".pcx") {
+		PcxGameImage game;
+		if (!decode_pcx_game(bytes.data(), bytes.size(), game, error)) return false;
+		if (!game.indexed) return decode_pcx_menu_rgba(bytes.data(), bytes.size(), out.image, error);
+		const size_t texels = size_t(game.width) * size_t(game.height);
+		if (game.indices.size() < texels) {
+			error = name + "'s indices are short of its sides";
+			return false;
+		}
+		out.indexed = true;
+		out.indices.width = game.width;
+		out.indices.height = game.height;
+		out.indices.indices.assign(game.indices.begin(), game.indices.begin() + std::ptrdiff_t(texels));
+		std::copy(&game.palette[0][0], &game.palette[0][0] + 256 * 3, &out.indices.palette[0][0]);
+		out.image.width = game.width;
+		out.image.height = game.height;
+		out.image.pixels.resize(texels * 4);
+		for (size_t i = 0; i < texels; ++i) {
+			const uint8_t *entry = game.palette[out.indices.indices[i]];
+			out.image.pixels[i * 4] = entry[0];
+			out.image.pixels[i * 4 + 1] = entry[1];
+			out.image.pixels[i * 4 + 2] = entry[2];
+			out.image.pixels[i * 4 + 3] = 255;
+		}
+		return true;
+	}
+	error = name + " is no image the importer reads (a PNG, a TGA or a PCX)";
+	return false;
+}
+
+void height_into_alpha(RgbaImage &image) {
+	uint8_t *p = image.pixels.data();
+	for (size_t i = 0; i + 3 < image.pixels.size(); i += 4) {
+		const uint8_t height = uint8_t((85u * (uint32_t(p[i]) + p[i + 1] + p[i + 2])) >> 8);
+		p[i + 2] = p[i + 3];
+		p[i] = p[i + 1] = p[i + 3] = height;
+	}
 }
 
 std::string image_format_extension(const std::string &format) {
@@ -418,18 +488,34 @@ bool run_image_import(ImportContext &context, ImportProduct &out) {
 		              "The file name " + name + " does not end in " + image_format_extension(settings.format) +
 		                      ", the extension of the format " + settings.format + ".",
 		              "name");
-	RgbaImage image;
+	ImageSource source;
 	std::string error;
-	if (!decode_png(context.source(), image, error)) return refuse(CoreFinding::ImportDecode, error);
+	if (!decode_image_source(source_name, context.source(), source, error)) return refuse(CoreFinding::ImportDecode, error);
+	RgbaImage &image = source.image;
 	uint32_t width = 0, height = 0;
 	if (!image_target_size(settings.size, uint32_t(image.width), uint32_t(image.height), width, height, error))
 		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", "size");
-	image = resize_image(image, width, height);
-	if (settings.green == "flip") flip_image_green(image);
-	if (settings.format != "tga24" && settings.format != "pcx" && !apply_image_alpha(image, settings.alpha, error))
-		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", "alpha");
 	ImportOutput output;
 	output.name = name;
+	if (settings.format == "pcx" && settings.palette == "indices") {
+		// The source's own indices and palette, written as they are.
+		if (!source.indexed)
+			return refuse(CoreFinding::ImportOption,
+			              "The palette indices keeps an 8-bit PCX source's indices, and " + source_name + " holds colours.",
+			              "palette");
+		if (width != uint32_t(image.width) || height != uint32_t(image.height))
+			return refuse(CoreFinding::ImportOption,
+			              "The palette indices keeps every texel's index, so the size stays the source's.", "size");
+		if (!encode_pcx_indexed(source.indices, output.bytes, error))
+			return refuse(CoreFinding::ImportEncode, "Could not write " + name + ": " + error + ".");
+		out.outputs.push_back(std::move(output));
+		return true;
+	}
+	image = resize_image(image, width, height);
+	if (settings.green == "flip") flip_image_green(image);
+	if (settings.format == "tga" && settings.normal == "height") height_into_alpha(image);
+	else if (settings.format != "tga24" && settings.format != "pcx" && !apply_image_alpha(image, settings.alpha, error))
+		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", "alpha");
 	std::string note;
 	if (!encode_image(image, settings, output.bytes, error, note))
 		return refuse(CoreFinding::ImportEncode, "Could not write " + name + ": " + error + ".");

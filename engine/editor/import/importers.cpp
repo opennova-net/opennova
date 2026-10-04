@@ -1,5 +1,6 @@
 // The importer table (ADR 0046 d10, S8). The image importer (import/texture_import, S18): a PNG made into
-// the texture file its uses read, by its record's options.
+// the texture file its uses read, by its record's options; a TGA or a PCX too, where a record makes it a
+// source (Replace, Edit externally).
 #include <editor/import/importer.h>
 
 #include <filesystem>
@@ -17,6 +18,7 @@ const std::vector<Importer> &importers() {
 		image.id = "image";
 		image.version = kImageImporterVersion;
 		image.extensions = {".png"};
+		image.record_extensions = {".tga", ".pcx"};
 		image.options = image_import_option_rows();
 		image.run = run_image_import;
 		rows.push_back(std::move(image));
@@ -29,13 +31,29 @@ const Importer *importer_for(const std::string &source_name) {
 	return importer_for(source_name, importers());
 }
 
-const Importer *importer_for(const std::string &source_name, const std::vector<Importer> &table) {
+namespace {
+
+const Importer *importer_by_extension(const std::string &source_name, const std::vector<Importer> &table, bool records) {
 	const std::string extension = strutil::to_lower(utf8_of(path_of(source_name).extension()));
 	if (extension.empty()) return nullptr;
-	for (const Importer &importer : table)
+	for (const Importer &importer : table) {
 		for (const std::string &candidate : importer.extensions)
 			if (candidate == extension) return &importer;
+		if (records)
+			for (const std::string &candidate : importer.record_extensions)
+				if (candidate == extension) return &importer;
+	}
 	return nullptr;
+}
+
+} // namespace
+
+const Importer *importer_for(const std::string &source_name, const std::vector<Importer> &table) {
+	return importer_by_extension(source_name, table, true);
+}
+
+const Importer *authored_importer_for(const std::string &source_name) {
+	return importer_by_extension(source_name, importers(), false);
 }
 
 const ImportOptionRow *import_option_row(const std::vector<ImportOptionRow> &rows, const std::string &key) {

@@ -66,6 +66,10 @@ struct Importer {
 	const char *id = "";
 	int version = 0; // bump it and every source imports again
 	std::vector<std::string> extensions; // lower-case, with the dot
+	// The extensions of files the game reads as they are, which the importer converts only where an
+	// import record already makes the file a source (S18: a TGA or a PCX made one by Replace or Edit
+	// externally, its record written then): an import of such a file copies it and writes no record.
+	std::vector<std::string> record_extensions;
 	// What a new record holds (import_assets writes it); an option it leaves out means its row's
 	// fallback.
 	ImportOptions default_options;
@@ -78,10 +82,15 @@ struct Importer {
 };
 
 const std::vector<Importer> &importers();
-// The importer for a source file name, by extension, in `table` (the compiled-in importers(), or a
-// test's own); null when the file is native.
+// The importer for a source file name, by extension (its extensions or its record_extensions), in
+// `table` (the compiled-in importers(), or a test's own); null when the file is native. A file it names
+// is a source only while its import record is there (the scan, the import pass).
 const Importer *importer_for(const std::string &source_name);
 const Importer *importer_for(const std::string &source_name, const std::vector<Importer> &table);
+// The importer an author's file of this name is imported through, its record written with it (import_assets,
+// the import plan): by its extensions alone; null for a native file and for one its importer converts only
+// where a record already names it (record_extensions).
+const Importer *authored_importer_for(const std::string &source_name);
 
 // What an output of a source is called once the source is renamed (ADR 0046 d6, S9c):
 // an importer names its outputs after the source's stem (logo.png makes logo.pcx), and an importer

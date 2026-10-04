@@ -11,7 +11,9 @@ namespace opennova::editor {
 
 // The image importer (ADR 0046 d10, S8; S18): a PNG made into the texture file its uses read, by the
 // options its import record holds, each a row of image_import_option_rows (the import_options query
-// answers them, set_import_options sets them):
+// answers them, set_import_options sets them). A TGA or a PCX is a source too where a record makes it one
+// (Replace, Edit externally: importer.h's record_extensions), read as the game's reader reads it
+// (decode_image_source). The options:
 // - `format`, what it writes: `tga` (32-bit, its alpha kept: the form every TGA loader reads), `tga24`
 //   (24-bit, no alpha: a terrain colour map's form), `pcx` (8-bit indexed, 256 colours, no alpha: the
 //   loading screens', sky clouds' and foliage maps' reader), `dds` (the D3DX codec's DXT5 or DXT1 with
@@ -23,8 +25,14 @@ namespace opennova::editor {
 //   texel), `threshold:<n>` (255 above n, 0 at or below: a cut-out's own test) or `key:#RRGGBB` (that
 //   colour clear, every other opaque);
 // - `size`: `source`, `pow2_down`, `pow2_up`, `<W>x<H>` or `fit:<W>x<H>` (inside it, its shape kept);
-// - `palette` (pcx): `median_cut` (the colours as they are when 256 or fewer, else a median cut) or
-//   `exact` (refused past 256 colours);
+// - `palette` (pcx): `median_cut` (the colours as they are when 256 or fewer, else a median cut),
+//   `exact` (refused past 256 colours) or `indices` (an 8-bit PCX source's texels written as the indices
+//   and palette it holds, never quantized: a foliage or char map's indices are data the game reads; at
+//   the source's size);
+// - `normal` (tga): `normal` (the source a finished normal map, its colour written as it is) or `height`
+//   (the source a height map: its brightness, (85 x (r + g + b)) >> 8, written into the alpha, from which
+//   a model's normal row naming a .tga makes the normal map, and its alpha into the blue, which becomes
+//   the map's alpha [orig: Texture_LoadAsNormalMap @0x58C985..0x58CAED]);
 // - `dds` (dds): `dxt5`, `dxt1` or `argb`; `mips` (a DXT dds): `full` (every level to 1 x 1, each the
 //   D3DX box filter of the level before, decoded from its own blocks, as the game's texture creator
 //   builds its levels) or `none`;
@@ -39,8 +47,24 @@ const std::vector<ImportOptionRow> &image_import_option_rows();
 
 // The options as an import reads them, every one left out its fallback.
 struct ImageImportSettings {
-	std::string format, name, alpha, size, palette, dds, mips, green;
+	std::string format, name, alpha, size, palette, dds, mips, green, normal;
 };
+
+// A source as the import reads it: its texels (RGBA, the top row first) and, for an 8-bit PCX, its
+// indices and palette as the game reads them. A PNG's through the PNG reader; a TGA's as the game's TGA
+// reader decodes it (formats/tga tga_decode_retail: its rows flipped whatever its origin bit says, a
+// 24-bit file opaque); a PCX's as the game's model and menu readers decode it (decode_pcx_game: an 8-bit
+// file's texel the palette entry of its index, opaque; a 24-bit file's colour). False, with `error`, for
+// a file its reader refuses or a name of another extension.
+struct ImageSource {
+	RgbaImage image;
+	bool indexed = false;
+	IndexedImage8 indices;
+};
+bool decode_image_source(const std::string &name, const std::vector<uint8_t> &bytes, ImageSource &out,
+                         std::string &error);
+// `normal height` applied: each texel's brightness into its alpha, its alpha into its blue.
+void height_into_alpha(RgbaImage &image);
 ImageImportSettings image_import_settings(const ImportOptions &options);
 // The extension a format writes, with its dot (".tga" for tga24, ".mdt" for mdt).
 std::string image_format_extension(const std::string &format);

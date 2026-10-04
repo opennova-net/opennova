@@ -2,12 +2,15 @@
 // of an import (graph/texture_import_needs, session/texture_import_state): the option rows and the values
 // each takes; the pieces (the sizes asked, a halving by 2 x 2 boxes, an area average, each alpha, a green
 // flipped); every format written and read back by the reader the game picks (a 24-bit TGA, a PCX, a DXT5
-// DDS with its whole chain each level the ported codec's, a DXT1, an A8R8G8B8, an MDT, a PNG); over a
+// DDS with its whole chain each level the ported codec's, a DXT1, an A8R8G8B8, an MDT, a PNG); a TGA and a
+// PCX as sources (read as the game reads them, a PCX's indices kept, a height map's brightness into the
+// alpha); an author's TGA copied with no record, a record beside it making it a source; over a
 // minted project, a PNG imported to a TGA by default, what its uses ask (a model row's DDS, a colour
 // map's 24-bit 1024 x 1024 TGA, a loading screen's PCX, a conflict), set_import_options writing the
 // record and importing again under the new name, the old file gone, a value no row takes refused; the
 // import_options query.
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -38,6 +41,7 @@
 using namespace opennova;
 using namespace opennova::editor;
 using io::JsonValue;
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -67,7 +71,7 @@ int test_rows() {
 	const std::vector<ImportOptionRow> &rows = image_import_option_rows();
 	std::vector<std::string> keys;
 	for (const ImportOptionRow &row : rows) keys.push_back(row.key);
-	TEST_EXPECT(keys == std::vector<std::string>({"format", "name", "alpha", "size", "palette", "dds", "mips", "green"}));
+	TEST_EXPECT(keys == std::vector<std::string>({"format", "name", "alpha", "size", "palette", "dds", "mips", "green", "normal"}));
 	const ImportOptionRow *format = import_option_row(rows, "format");
 	const ImportOptionRow *alpha = import_option_row(rows, "alpha");
 	const ImportOptionRow *size = import_option_row(rows, "size");
@@ -83,11 +87,15 @@ int test_rows() {
 	TEST_EXPECT(import_option_accepts(*name, "Body.dds") && !import_option_accepts(*name, "a/b.tga") &&
 	            !import_option_accepts(*name, "a_name_far_too_long.tga"));
 	TEST_EXPECT(import_option_takes(*size) == "source, pow2_down, pow2_up, <W>x<H> or fit:<W>x<H>");
-	// The importer's row carries them.
+	// The importer's row carries them. A PNG an author imports is a source; a TGA or a PCX is one only where
+	// a record makes it one, so an import copies it as it is.
 	const Importer *importer = importer_for("logo.png");
 	TEST_EXPECT(importer && importer->version == kImageImporterVersion && importer->options.size() == rows.size() &&
 	            importer->default_options.empty());
-	std::printf("rows: eight options, each its values and forms\n");
+	TEST_EXPECT(importer_for("map.TGA") == importer && importer_for("sky.pcx") == importer && !importer_for("a.dds") &&
+	            authored_importer_for("logo.png") == importer && !authored_importer_for("map.tga") &&
+	            !authored_importer_for("sky.pcx"));
+	std::printf("rows: nine options, each its values and forms\n");
 	return 0;
 }
 
@@ -197,6 +205,78 @@ int test_formats() {
 	return 0;
 }
 
+std::string png_of(const RgbaImage &image);
+
+// A TGA and a PCX as sources (a record makes them one): read as the game reads them; an 8-bit PCX's
+// indices kept by palette indices, refused from a source of colours or at another size; normal height.
+int test_sources() {
+	ImageSource source;
+	std::string why;
+	// A TGA read as the game's reader reads it: its first row the bottom one, whatever its origin bit says.
+	const RgbaImage image = graded(4, 2);
+	std::vector<uint8_t> tga;
+	TEST_EXPECT(tga::tga_write_rgba32(image.pixels.data(), 4, 2, tga, why));
+	TEST_EXPECT(decode_image_source("art/a.tga", tga, source, why) && !source.indexed && source.image.pixels == image.pixels);
+	tga[17] |= 0x20;
+	TEST_EXPECT(decode_image_source("a.TGA", tga, source, why) && source.image.pixels == image.pixels);
+	// An 8-bit PCX: its indices and palette kept, each texel its entry's colour, opaque.
+	IndexedImage8 indexed;
+	indexed.width = 3;
+	indexed.height = 2;
+	indexed.indices = {0, 5, 9, 9, 5, 0};
+	for (int i = 0; i < 256; ++i) {
+		indexed.palette[i][0] = uint8_t(i);
+		indexed.palette[i][1] = uint8_t(255 - i);
+		indexed.palette[i][2] = 7;
+	}
+	std::vector<uint8_t> pcx;
+	TEST_EXPECT(encode_pcx_indexed(indexed, pcx, why));
+	TEST_EXPECT(decode_image_source("map.pcx", pcx, source, why) && source.indexed && source.indices.indices == indexed.indices &&
+	            source.image.pixels[4] == 5 && source.image.pixels[5] == 250 && source.image.pixels[6] == 7 &&
+	            source.image.pixels[7] == 255);
+	TEST_EXPECT(!decode_image_source("map.bmp", pcx, source, why) && !why.empty());
+	// Imported with palette indices: the PCX written from them as they are, never quantized.
+	const ImportOptions keep{{"format", "pcx"}, {"palette", "indices"}};
+	{
+		ImportContext context("map.pcx", pcx, keep, ".", ".");
+		ImportProduct product;
+		TEST_EXPECT(run_image_import(context, product) && product.outputs.size() == 1 && product.outputs[0].name == "map.pcx");
+		ImageSource back;
+		TEST_EXPECT(!product.outputs.empty() && decode_image_source("map.pcx", product.outputs[0].bytes, back, why) &&
+		            back.indexed && back.indices.indices == indexed.indices && back.indices.palette[9][1] == 246);
+	}
+	// From a source of colours, refused; at another size, refused.
+	const std::string png_text = png_of(image);
+	const std::vector<uint8_t> png(png_text.begin(), png_text.end());
+	{
+		ImportContext context("map.png", png, keep, ".", ".");
+		ImportProduct product;
+		TEST_EXPECT(!run_image_import(context, product) && product.outputs.empty() && !product.diagnostics.empty() &&
+		            product.diagnostics[0].code() == "import.option" && product.diagnostics[0].field == "palette");
+	}
+	{
+		const ImportOptions sized{{"format", "pcx"}, {"palette", "indices"}, {"size", "6x4"}};
+		ImportContext context("map.pcx", pcx, sized, ".", ".");
+		ImportProduct product;
+		TEST_EXPECT(!run_image_import(context, product) && !product.diagnostics.empty() && product.diagnostics[0].field == "size");
+	}
+	// normal height: each texel's brightness into its alpha, its alpha into its blue.
+	{
+		const ImportOptions height{{"normal", "height"}};
+		ImportContext context("bump.png", png, height, ".", ".");
+		ImportProduct product;
+		TEST_EXPECT(run_image_import(context, product) && product.outputs.size() == 1 && product.outputs[0].name == "bump.tga");
+		ImageSource back;
+		TEST_EXPECT(!product.outputs.empty() && decode_image_source("bump.tga", product.outputs[0].bytes, back, why));
+		const uint8_t *was = &image.pixels[4];
+		const uint8_t *now = &back.image.pixels[4];
+		TEST_EXPECT(now[3] == uint8_t((85u * (uint32_t(was[0]) + was[1] + was[2])) >> 8) && now[2] == was[3] &&
+		            now[0] == now[3]);
+	}
+	std::printf("sources: a TGA as the game reads it, a PCX's indices kept, refusals, a height map\n");
+	return 0;
+}
+
 std::string png_of(const RgbaImage &image) {
 	const std::vector<uint8_t> bytes = encode_png_rgba(image.pixels.data(), uint32_t(image.width), uint32_t(image.height));
 	return std::string(bytes.begin(), bytes.end());
@@ -250,6 +330,33 @@ int test_project() {
 	TEST_EXPECT(!body_source.empty() && !isle_source.empty() && !m01_source.empty() && !logo_source.empty());
 	const AssetEntry *logo = output_of(view, logo_source);
 	TEST_EXPECT(logo && logo->logical_name == "logo.tga" && logo->kind == AssetKind::Texture);
+	// An author's TGA is copied as it is, with no record: the texture the game loads. A record beside it
+	// makes it a source, its output made.
+	{
+		const RgbaImage art_image = graded(8, 8);
+		std::vector<uint8_t> tga;
+		std::string why;
+		TEST_EXPECT(tga::tga_write_rgba32(art_image.pixels.data(), 8, 8, tga, why) && editor_test::write_bytes(art + "/plain.tga", tga));
+		TEST_EXPECT(import_assets({{art + "/plain.tga", {}}}, paths, *view.project.document, false).imported.size() == 1);
+		editor_test::handle_to_end(session, request::rescan());
+		session.run_operations();
+		const AssetEntry *plain = view.project.scan->find("plain.tga");
+		TEST_EXPECT(plain && plain->kind == AssetKind::Texture && plain->imported_from.empty());
+		if (!plain) return 1;
+		const std::string plain_path = plain->relative_path;
+		TEST_EXPECT(!fs::exists(root + "/" + plain_path + kImportSidecarSuffix));
+		ImportSidecar record;
+		record.importer = "image";
+		record.version = kImageImporterVersion;
+		record.options = {{"format", "pcx"}};
+		Diagnostic error;
+		TEST_EXPECT(save_import_sidecar(root + "/" + plain_path + kImportSidecarSuffix, record, error));
+		editor_test::handle_to_end(session, request::rescan());
+		session.run_operations();
+		const AssetEntry *source = view.project.scan->at_path(plain_path);
+		const AssetEntry *made = output_of(view, plain_path);
+		TEST_EXPECT(source && source->kind == AssetKind::ImportSource && made && made->logical_name == "plain.pcx");
+	}
 
 	// What the uses ask: the model row's body.tga, DXT5 beside it; the colour map, a 24-bit 1024 x 1024 TGA;
 	// the coefficient detail, a TGA whose sides are powers of two.
@@ -301,9 +408,9 @@ int test_project() {
 	TEST_EXPECT(error.empty() && answer.get_string("source", "") == isle_source && answer.get_string("importer", "") == "image");
 	const JsonValue *rows = answer.get("rows");
 	const JsonValue *needs = answer.get("needs");
-	TEST_EXPECT(rows && rows->array.size() == 8 && needs && needs->get("options") &&
+	TEST_EXPECT(rows && rows->array.size() == 9 && needs && needs->get("options") &&
 	            needs->get("options")->get_string("format", "") == "tga24");
-	if (rows && rows->array.size() == 8) {
+	if (rows && rows->array.size() == 9) {
 		TEST_EXPECT(rows->array[0].get_string("key", "") == "format" && rows->array[0].get_bool("applies_now", false));
 		TEST_EXPECT(rows->array[4].get_string("key", "") == "palette" && !rows->array[4].get_bool("applies_now", true));
 	}
@@ -337,10 +444,21 @@ int test_needs_conflict() {
 	foliage.words = "Terrain foliage map: isle.trn";
 	needs = texture_import_needs({foliage}, "isle_f.png");
 	TEST_EXPECT(needs.options.empty() && needs.conflicts.size() == 1);
+	// From an 8-bit PCX its indices are kept.
+	needs = texture_import_needs({foliage}, "art/isle_f.pcx");
+	TEST_EXPECT(needs.conflicts.empty() && needs.options["format"] == "pcx" && needs.options["palette"] == "indices");
+	// A model's normal row naming a .tga: the height in its alpha.
+	TextureUse bump;
+	bump.role = TextureRoleId::ModelHeightNormal;
+	bump.name_written = "bump.tga";
+	bump.words = "Model normal map (height): Stone in rock.3di";
+	needs = texture_import_needs({bump}, "bump.png");
+	TEST_EXPECT(needs.conflicts.empty() && needs.options["format"] == "tga" && needs.options["normal"] == "height");
 	// A name of another stem asks for it.
 	needs = texture_import_needs({screen}, "screen.png");
 	TEST_EXPECT(needs.options.count("name") && needs.options["name"] == "m01.pcx");
-	std::printf("needs: a loading screen's PCX, two uses no one file serves, a foliage map, another stem\n");
+	std::printf("needs: a loading screen's PCX, two uses no one file serves, a foliage map from colours and from a "
+	            "PCX, a height map, another stem\n");
 	return 0;
 }
 
@@ -351,6 +469,7 @@ int main() {
 	failures += test_rows();
 	failures += test_pieces();
 	failures += test_formats();
+	failures += test_sources();
 	failures += test_needs_conflict();
 	failures += test_project();
 	if (failures == 0) std::printf("editor_texture_import: all passed\n");

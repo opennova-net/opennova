@@ -78,16 +78,26 @@ void choose(TextureImportNeeds &out, const std::string &option, const std::strin
 
 TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, const std::string &source_name) {
 	TextureImportNeeds out;
-	std::vector<Ask> formats, stems, sizes;
+	std::vector<Ask> formats, stems, sizes, palettes, normals;
+	const bool indexed_source = extension_of(source_name) == ".pcx";
 	for (const TextureUse &use : uses) {
 		++out.uses;
-		if (use.role == R::TerrainFoliageMap || use.role == R::TerrainCharMap) {
-			out.conflicts.push_back(use.words + ": its palette indices are data the game reads, which an import from "
-			                                    "colours cannot keep. Make it an 8-bit PCX in a paint program.");
-			continue;
-		}
 		std::string why;
-		const std::string format = format_for(use, why);
+		std::string format = format_for(use, why);
+		if (use.role == R::TerrainFoliageMap || use.role == R::TerrainCharMap) {
+			// Its palette indices are data the game reads: kept as they are from an 8-bit PCX source.
+			if (!indexed_source) {
+				out.conflicts.push_back(use.words + ": its palette indices are data the game reads, which an import from "
+				                                    "colours cannot keep. Make it an 8-bit PCX in a paint program, and import that.");
+				continue;
+			}
+			format = "pcx";
+			why = "its palette indices are data the game reads";
+			palettes.push_back({"indices", why + ", kept from the 8-bit PCX source", &use});
+		}
+		if (use.role == R::ModelHeightNormal)
+			// [orig: Texture_LoadAsNormalMap @0x58C985..0x58CAED: the alpha's height made into the normal map]
+			normals.push_back({"height", "the game makes the normal map from the height in its alpha", &use});
 		if (format.empty()) continue;
 		formats.push_back({format, why, &use});
 		stems.push_back({stem_of(use.name_written), "it names " + basename_of(use.name_written), &use});
@@ -124,6 +134,15 @@ TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, con
 	if (!sizes.empty()) {
 		if (values_of(sizes).size() == 1) choose(out, "size", sizes.front().value, sizes);
 		else out.conflicts.push_back(conflict("size", sizes));
+	}
+	if (format == "pcx" && !palettes.empty()) choose(out, "palette", "indices", palettes);
+	if (format == "tga" && !normals.empty()) {
+		// A use that reads the colour as it is (the HUD, a model's diffuse) and one that reads a height in
+		// the alpha do not share a file.
+		if (normals.size() == formats.size()) choose(out, "normal", "height", normals);
+		else out.conflicts.push_back("normal: height for " + normals.front().use->words +
+		                             ", and its colour as it is for the other uses. No one file serves them all: make "
+		                             "one file for each.");
 	}
 	return out;
 }
