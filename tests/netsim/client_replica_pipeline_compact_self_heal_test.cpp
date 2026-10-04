@@ -42,7 +42,7 @@ nw::EntityClass classify(uint16_t type_id) {
 std::vector<uint8_t> player_frame(uint16_t handle, uint16_t type_id) {
 	nw::FrameUpdate fu;
 	fu.flags2 = 0;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 100;
 	fu.anchor_x = 100 << 16;
 	fu.anchor_y = 200 << 16;

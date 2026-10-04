@@ -52,7 +52,7 @@ nw::FrameUpdate hull_frame(int32_t ax, int32_t ay, int32_t az, int32_t x,
                            int32_t y, int16_t euler_z_high) {
 	nw::FrameUpdate fu;
 	fu.flags2 = 0;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 100;
 	fu.anchor_x = ax;
 	fu.anchor_y = ay;

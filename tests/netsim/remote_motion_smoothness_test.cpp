@@ -70,7 +70,7 @@ nw::EntityClass class_of(uint16_t type_id) {
 nw::FrameUpdate header_only_frame() {
 	nw::FrameUpdate fu;
 	fu.flags2 = 0;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 100;
 	return fu;
 }

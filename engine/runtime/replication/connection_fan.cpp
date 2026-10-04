@@ -52,8 +52,11 @@ struct FrameHeaderState {
 	// MoveOrder bits 8-9) -> latches @0x430562/@0x430570]; a hardcoded 0 force-stands a
 	// crouched retail client each frame (the pre-v32 crouch/prone bug).
 	uint8_t tail_state_byte = 0;
-	// Tail mount handle = the recipient's OWN carrier (its ridden vehicle), 0xFFFF free.
-	uint16_t tail_mount_handle = 0xFFFF;
+	// Tail carried-object handle = the recipient's OWN carried object (entity+0x268),
+	// 0xFFFF none. A retail client attaches whatever this names as the thing it
+	// carries, so it never names the ridden vehicle.
+	// [orig: NetPacket_WritePlayerState @0x4FFCC3..0x4FFD3D]
+	uint16_t tail_carried_handle = 0xFFFF;
 	// Tail health = the recipient's LIVE Health — the client STORES it as its own
 	// (g_LocalPlayerEntity->Health @0x4305df); 0 is the victim's death signal (with the
 	// record byte13 dead bit). The pre-v34 hardcoded 150 meant a killed client never
@@ -186,7 +189,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	// 7-byte tail: the recipient's OWN stance echo (bits 0-1 = prone/crouch — the client
 	// re-latches from it every frame) + its own carrier handle. See FrameHeaderState.
 	fu.state_flag_byte = hdr.tail_state_byte;
-	fu.mount_handle = hdr.tail_mount_handle;
+	fu.carried_handle = hdr.tail_carried_handle;
 	// TAIL health (v121) -> g_LocalPlayerEntity->Health [orig: @0x4305df] — the recipient's
 	// LIVE health (FrameHeaderState.tail_health): the client STORES it as its own, so damage
 	// reads red (the decrease-detector flash [orig: @0x43059a]) and 0 is the authoritative
@@ -1177,8 +1180,11 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			// the not-rearming arm's 0 [orig: @0x4FF901 / @0x4FF90F].
 			hs.reload_seconds = 0;
 			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
+			// [orig: NetPacket_WritePlayerState @0x4FFCC3 -- entity+0x268, 0xFFFF
+			//  when empty @0x4FFD3D]
+			if (own->mounted_child.valid())
+				hs.tail_carried_handle = own->mounted_child.packed;
 			if (own->mounted && own->mount_target.valid()) {
-				hs.tail_mount_handle = own->mount_target.packed;
 				hs.mount_ammo.mount_handle = own->mount_target.packed;
 				hs.mount_ammo.has_mount = true;
 				if (const world::Entity *mount = w.registry.get(own->mount_target)) {

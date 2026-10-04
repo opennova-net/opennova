@@ -127,7 +127,7 @@ struct Harness {
 		const w::Entity &e = hull();
 		FrameUpdate fu;
 		fu.flags2 = 0;
-		fu.mount_handle = 0xFFFF;
+		fu.carried_handle = 0xFFFF;
 		fu.health = 100;
 		fu.anchor_x = w::to_fixed(e.position.x);
 		fu.anchor_y = w::to_fixed(e.position.y);

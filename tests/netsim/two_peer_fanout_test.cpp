@@ -1473,7 +1473,11 @@ bool run_0x26_attach_mounted_echo() {
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
 	            "0x0A frame decodes")) return false;
 	const std::size_t phase1_body_size = dg.body.size();
-	if (!expect(fu.mount_handle == vh.packed, "tail mount handle names the recipient's carrier"))
+	// The tail word is the recipient's carried object (entity+0x268), never its
+	// ridden vehicle: a retail client attaches whatever it names as the thing it
+	// carries [orig: NetPacket_WritePlayerState @0x4FFCC3; NapiNPClientMsg_0x00A
+	// @0x430695]. Witnessed by the drive scenario (D-NET-337).
+	if (!expect(fu.carried_handle == 0xFFFF, "a mounted recipient's tail names no carried object"))
 		return false;
 	const nw::FrameUpdateRecord *rec = nullptr;
 	for (const auto &r : fu.records)
@@ -1519,6 +1523,15 @@ bool run_0x26_attach_mounted_echo() {
 	if (!expect(rec != nullptr, "player record present post-detach")) return false;
 	if (!expect(rec->player.vehicle_bone == 0 && rec->player.carrier_handle == 0xFFFF,
 	            "post-detach record is free-standing")) return false;
+
+	// A carried object rides the tail whatever the mount state.
+	player->mounted_child = vh;
+	ns::test::emit_all(world, conns);
+	if (!expect(ch.client_recv(dg), "carrying 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
+	            "carrying 0x0A decodes")) return false;
+	if (!expect(fu.carried_handle == vh.packed, "the tail names the recipient's carried object"))
+		return false;
 	std::printf("PASS 0x26_attach_mounted_echo\n");
 	return true;
 }

@@ -307,7 +307,7 @@ function ConvertFrom-ParityLines {
             continue
         }
 
-        if ($line -match '^PARITY_STATE frame=(\d+) ts_ns=(\d+) dir=S session=(\d+) tag=0x0a kind=frame decode=([01]) len=(\d+) sub=(\d+) flags=(\d+),(\d+) anchor=(-?\d+),(-?\d+),(-?\d+) local=([01]) local_state=(\d+),(-?\d+),(-?\d+) records=(\d+) players=(\d+) vehicles=(\d+) infantry=(\d+) none=(\d+) rounds=(\d+) local_mount=(\d+) weapon=([01]),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(-?\d+) timer=([01]),(\d+),(\d+),(\d+),(\d+),(-?\d+) env=([01]),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+) objective=([01]),(-?\d+),(-?\d+),(-?\d+),(-?\d+) mount=([01]),(\d+),([01]),(\d+),(\d+)$') {
+        if ($line -match '^PARITY_STATE frame=(\d+) ts_ns=(\d+) dir=S session=(\d+) tag=0x0a kind=frame decode=([01]) len=(\d+) sub=(\d+) flags=(\d+),(\d+) anchor=(-?\d+),(-?\d+),(-?\d+) local=([01]) local_state=(\d+),(-?\d+),(-?\d+) records=(\d+) players=(\d+) vehicles=(\d+) infantry=(\d+) none=(\d+) rounds=(\d+) carried=(\d+) weapon=([01]),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(-?\d+) timer=([01]),(\d+),(\d+),(\d+),(\d+),(-?\d+) env=([01]),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+) objective=([01]),(-?\d+),(-?\d+),(-?\d+),(-?\d+) mount=([01]),(\d+),([01]),(\d+),(\d+)$') {
             $passengerBound = [uint32]$Matches[53] -ne 0xffff
             if (($Matches[54] -eq '1') -ne $passengerBound) {
                 throw 'PARITY_STATE phase-8 has_mount disagrees with its mount handle.'
@@ -939,7 +939,7 @@ function New-SyntheticParityLines {
         if ($i -lt $FrameCount) {
             $frame = Add-SyntheticEvent $builder 'S' '0a' ($timestamp + 2000000) '-' 600
             $builder.lines.Add(
-                ('PARITY_STATE frame={0} ts_ns={1} dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 local_mount=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=0,65535,0,0,0' -f
+                ('PARITY_STATE frame={0} ts_ns={1} dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 carried=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=0,65535,0,0,0' -f
                     $frame, ($timestamp + 2000000)))
             $builder.lines.Add(
                 ('PARITY_ENTITY frame={0} ts_ns={1} session=32776 class=P handle={2} type=5305 pos=1,2,3 orient=4,5 state=0,0 vital=100' -f
@@ -1033,7 +1033,7 @@ function Invoke-WireReadinessSelfTest {
     foreach ($malformedCurrentRecord in @(
         'PARITY_PACKET frame=1 ts_ns=1 dir=S session=32776 sid=0x22222222 seq=1 ack=0 flags=0x00 records=1 tags=0x00a wire=0x00b:0x20:3:-',
         'PARITY_STATE frame=1 ts_ns=1 dir=C session=32776 tag=0x0c kind=uplink decode=1 len=48 handle=136 type=5305 sub=10 carrier=65535 pos=1,2,3 orient=4,5 move=0 state=1 analog=0,0,0 adm=16 priority_nonzero=1 priority=0:0,0:0,0:0,0:0',
-        'PARITY_STATE frame=1 ts_ns=1 dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 local_mount=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=1,65535,1,0,0'
+        'PARITY_STATE frame=1 ts_ns=1 dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 carried=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=1,65535,1,0,0'
     )) {
         $malformedCurrentRecordRejected = $false
         try { $null = ConvertFrom-ParityLines @($malformedCurrentRecord) }
@@ -1119,8 +1119,8 @@ function Invoke-WireReadinessSelfTest {
         'PARITY_PACKET frame=900 ts_ns=17000000000 dir=S session=32776 sid=0x22222222 seq=900 ack=0 flags=0x00 records=2 tags=0x00a,0x00a wire=0x00a:0x40:600:-,0x00a:0x40:600:-'
         'PARITY_EVENT frame=900 ts_ns=17000000000 dir=S session=32776 participant=1 tag=0x0a settings=0 len=600 body=-'
         'PARITY_EVENT frame=900 ts_ns=17000000000 dir=S session=32776 participant=1 tag=0x0a settings=0 len=600 body=-'
-        'PARITY_STATE frame=900 ts_ns=17000000000 dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 local_mount=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=0,65535,0,0,0'
-        'PARITY_STATE frame=900 ts_ns=17000000000 dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 local_mount=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=0,65535,0,0,0'
+        'PARITY_STATE frame=900 ts_ns=17000000000 dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 carried=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=0,65535,0,0,0'
+        'PARITY_STATE frame=900 ts_ns=17000000000 dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 carried=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=0,65535,0,0,0'
     )
     $null = ConvertFrom-ParityLines $duplicateOrdinary
     $missingDuplicateStateRejected = $false

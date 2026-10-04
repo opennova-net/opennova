@@ -47,7 +47,7 @@ std::vector<uint8_t> player_frame(uint8_t anim_state, uint8_t ratio) {
 	fu.anchor_y = 200 << 16;
 	fu.anchor_z = 10 << 16;
 	fu.flags2 = 0;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 
 	FrameUpdateRecord rec;
 	rec.handle = kPlayerHandle;

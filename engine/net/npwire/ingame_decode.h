@@ -1001,7 +1001,13 @@ struct FrameUpdate {
 	uint8_t  sub_block = 0;         // flags2 & 3 (0/1/2/3)
 	// 7-byte fixed tail (local-player state) [orig: 0x4303E5..0x430442].
 	uint8_t  state_flag_byte = 0;
-	uint16_t mount_handle = 0xFFFF; // local-player vehicle-mount (header tail)
+	// The recipient's CARRIED object (entity+0x268, the flag or carryable it
+	// holds), 0xFFFF none -- not its mount. The writer packs +0x268 unconditionally;
+	// the client drops whatever it carries when the word names another entity and
+	// attaches the named one. [orig: NetPacket_WritePlayerState @0x4FFCC3..0x4FFD3D;
+	//  NapiNPClientMsg_0x00A @0x4305F2..0x430695 -> Entity_DropCarriedObject
+	//  @0x439DF0 / Entity_AttachCarriedObject @0x43C130]
+	uint16_t carried_handle = 0xFFFF;
 	int16_t  health = 0;            // local-player health
 	int16_t  state_word = 0;
 	bool     local_tail_present = false; // all seven recipient-local tail bytes decoded

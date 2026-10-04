@@ -219,7 +219,7 @@ bool run_carried_vehicles_predict_and_ride_their_carrier() {
 	{
 		FrameUpdate fu;
 		fu.flags2 = 0;
-		fu.mount_handle = 0xFFFF;
+		fu.carried_handle = 0xFFFF;
 		fu.health = 100;
 		fu.anchor_x = fixed_of(origin.x);
 		fu.anchor_y = fixed_of(origin.y);

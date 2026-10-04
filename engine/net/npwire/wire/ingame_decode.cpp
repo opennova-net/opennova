@@ -913,9 +913,9 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 	// [orig: NapiNPClientMsg_0x00A @0x430174].
 	if (authority_recipient) return finish(true);
 
-	// 7-byte fixed tail: state_flag u8, mount u16, health i16, state_word i16.
+	// 7-byte fixed tail: state_flag u8, carried-object u16, health i16, state_word i16.
 	out.state_flag_byte = c.u8();
-	out.mount_handle    = c.u16();
+	out.carried_handle  = c.u16();
 	out.health          = c.i16();
 	out.state_word      = c.i16();
 	if (!c.ok) return finish(false);

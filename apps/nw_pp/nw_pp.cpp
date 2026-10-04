@@ -1090,8 +1090,8 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		            fu.objective.state[0], fu.objective.state[1],
 		            fu.objective.state[2], fu.objective.state[3]);
 
-	std::printf("            header: state=0x%02x mount=%s health=%d state_word=0x%04x\n",
-	            unsigned(fu.state_flag_byte), handle_str(fu.mount_handle).c_str(),
+	std::printf("            header: state=0x%02x carried=%s health=%d state_word=0x%04x\n",
+	            unsigned(fu.state_flag_byte), handle_str(fu.carried_handle).c_str(),
 	            int(fu.health), unsigned(uint16_t(fu.state_word)));
 
 	if (fu.passenger.present) {
@@ -1265,7 +1265,7 @@ void print_parity_semantics(const InGameMessage &message, uint64_t ts_nanos) {
 			"PARITY_STATE frame=%d ts_ns=%llu dir=S session=%d tag=0x0a "
 			"kind=frame decode=%u len=%zu sub=%u flags=%u,%u anchor=%d,%d,%d "
 			"local=%u local_state=%u,%d,%d records=%zu players=%u vehicles=%u "
-			"infantry=%u none=%u rounds=%zu local_mount=%u "
+			"infantry=%u none=%u rounds=%zu carried=%u "
 			"weapon=%u,%u,%u,%u,%u,%u,%u,%u,%d "
 			"timer=%u,%u,%u,%u,%u,%d "
 			"env=%u,%u,%u,%u,%u,%u,%u,%u,%u "
@@ -1277,7 +1277,7 @@ void print_parity_semantics(const InGameMessage &message, uint64_t ts_nanos) {
 			frame.local_tail_present ? 1u : 0u, unsigned(frame.state_flag_byte),
 			int(frame.health), int(frame.state_word), frame.records.size(), players,
 			vehicles, infantry, no_callback, frame.round_events.size(),
-			unsigned(frame.mount_handle),
+			unsigned(frame.carried_handle),
 			frame.weapon.present ? 1u : 0u, unsigned(frame.weapon.preround_timer),
 			unsigned(frame.weapon.slot_state360), unsigned(frame.weapon.slot_state368),
 			unsigned(frame.weapon.slot_state364), unsigned(frame.weapon.slot_state356),
