@@ -100,6 +100,10 @@ public:
 	// makes (its import's options make it), an operation no row names, one the file cannot take.
 	void texture_operation(const EditorRequest &request);
 	void revert_to_saved(const EditorRequest &request);
+	// The text of the string a field's string id names (SetStringText, the plain-words lane): the table
+	// that defines the id as the game's lookup reaches it (the graph's), opened in the background where it
+	// is not, its string's text set there as one undo step of that table.
+	void set_string_text(const EditorRequest &request);
 	// Copy and Cut.
 	void copy(const EditorRequest &request);
 	void paste(const EditorRequest &request);
@@ -114,6 +118,8 @@ public:
 	// which also writes one with none whose file holds other bytes than it would write), past a
 	// failure, then one refresh; false when one could not be written.
 	bool save_documents(const std::vector<std::string> &paths, bool rewrite);
+	// What a document's last save said beyond writing, an Output line each; how many lines.
+	size_t note_save(const DocumentBase &document);
 	// EndEdit on every open document: the coalesced groups and the gestures end, and the validation
 	// a gesture's edits left waiting is due.
 	void end_edit_groups();

@@ -17,6 +17,11 @@ struct GraphEdge {
 	std::string source;   // the referencing file, project-relative
 	std::string record;   // the record inside it, every name from the row down ("" = the file itself)
 	std::string record_key; // the record as itself (Document::record_identity), "" for none
+	// The record in its type's words with no project names (record_display's own words: a menu's action
+	// as what it does), where they are not its name: what a place in a file names the record by where the
+	// file is not open (a closed file's Problems row, the import plan, a find's uses, a file's page; the
+	// plain-words lane). "" where its name says it.
+	std::string record_title;
 	// A document record's place, stable across a reload (Document::locator); a text's span's,
 	// "line:column" (TextDocument::locator).
 	std::string locator;
@@ -87,6 +92,7 @@ struct GraphSymbol {
 	std::string file;    // the defining file, project-relative
 	std::string record;  // the defining record, every name from the row down ("" = the file itself)
 	std::string record_key; // the record as itself (Document::record_identity), "" for none
+	std::string title;   // the defining record in its type's own words where they are not its name (GraphEdge::record_title)
 	std::string locator; // a document record's place, stable across a reload (Document::locator)
 	NodeAddress address; // the defining record in the document it was read from
 	std::string field;   // the field that defines it ("" for a native file's)
