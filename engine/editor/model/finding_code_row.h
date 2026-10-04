@@ -32,6 +32,8 @@ enum class FindingFix {
 	Reload,            // an open document whose file changed outside the editor: Reload it
 	Reimport,          // an import whose output is missing: Import it again
 	Rewrite,           // input a rewrite drops or normalizes: Rewrite the file (rewrite_does)
+	TextureRows,       // a TGA stored top first (S18): Save it bottom first (texture_operation)
+	ImportFitsUse,     // what a use asks of a texture an import makes (S18): Make the import fit the use
 };
 
 // Where Problems takes a finding of the code: what the file holds (its document opened on the
@@ -77,6 +79,7 @@ enum class FindingGroup {
 	Credits,
 	Shaders,
 	Missions,
+	Textures,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -220,7 +223,9 @@ inline constexpr const char *kRewriteDropsIgnoredInput = "without the input the 
 
 // The editor's own codes, which no document type declares: the project, its files and their names,
 // the requirements, the documents' lifecycle and edits, the graph, imports, the build, Play,
-// renames, the settings, the session's operations and the unsaved-changes prompt.
+// renames, the settings, the session's operations and the unsaved-changes prompt; and what a texture
+// use asks of the file its loader opens (ADR 0046 S18, graph/texture_checks), a finding on the use
+// (the referring file's field, of any type) or on a file the game opens by name.
 enum class CoreFinding {
 	AssetKindUnknown,
 	AssetNameDuplicate,
@@ -386,6 +391,23 @@ enum class CoreFinding {
 	RequirementUnknown,
 	RequirementUnknownFile,
 	RequirementWrongKind,
+	TextureAlphaNotLoaded,
+	TextureBlendMapSize,
+	TextureColourMapSize,
+	TextureExternal,
+	TextureFoliageMapOverrun,
+	TextureFoliageMapShape,
+	TextureHeightWrap,
+	TextureLoadingScreenSize,
+	TextureMfdNotPowerOfTwo,
+	TextureNormalMapHalved,
+	TextureOperation,
+	TextureParticleTooBig,
+	TextureReplace,
+	TextureShowUse,
+	TextureSplit,
+	TextureTileAtlasCells,
+	TextureWrongReader,
 	UnsavedDiscard,
 	UnsavedNone,
 	ViewportRefused,

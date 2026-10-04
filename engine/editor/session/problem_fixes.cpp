@@ -11,8 +11,16 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/document_types.h>
+#include <base/io/strutil.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/graph/texture_import_needs.h>
+#include <editor/graph/texture_uses.h>
+#include <editor/import/importer.h>
+#include <editor/import/texture_import.h>
+#include <editor/session/texture_import_state.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/model/field_text.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/project/project_files.h>
@@ -224,11 +232,11 @@ bool same_file(const std::string &a, const std::string &b) { return normalized_l
 // has it alone, renderer::material_texture_source over the row's runtime type; a menu
 // texture's and any other texture's reader goes by the name's last extension, as the factory
 // does). None for a model's chunk row, which reads a chunk container and no image, for a
-// texture of no model row whose name's own extension the factory cannot write (its loader opens
-// that name, renderer::texture_load_attempts), nor for a name no loader of the reference opens
-// or the factory refuses.
+// texture of no model row whose name's own extension the factory cannot write (its role's loader
+// reads that name, texture_reference_load), nor for a name no loader of the reference opens or the
+// factory refuses.
 std::string placeholder_file(const ReferenceSubject &missing) {
-	const bool row = missing.kind == ReferenceKind::Texture && missing.loader_arg >= 0;
+	const bool row = missing.kind == ReferenceKind::Texture && texture_arg_is_row_type(missing.loader_arg);
 	const uint8_t type = row ? renderer::material_texture_runtime_type(static_cast<uint8_t>(missing.loader_arg)) : 0;
 	if (row && renderer::material_texture_source(missing.target, type, {}).reader == renderer::MaterialTextureReader::Chunk)
 		return std::string();
@@ -317,6 +325,66 @@ void reference_fixes(const ReferenceSubject &missing, const SessionView &view, s
 		               request::create_file(name, asset_kind_token(kind)), false});
 }
 
+// What a use asks of a texture an import makes (ADR 0046 S18), weighed with every other use of the file
+// (texture_import_state's needs, never the one use alone: another use may read what this one would
+// change): the import made as they all ask, where they agree and its options ask otherwise now, the words
+// naming the file it makes and saying when that is another name; where they ask what no one file serves,
+// the split that gives the uses that ask otherwise a copy of their own. The finding's subject is the use's
+// reference, which reaches the file; the use is the referrer's field naming it. None for a file no import
+// makes, a use not among its uses, or one already made as they ask.
+void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<ProblemFix> &out) {
+	const ReferenceSubject *reference = reference_subject(d);
+	if (!reference || !view.findings.graph || !view.documents.texture_uses) return;
+	std::string served;
+	if (view.findings.graph->resolve(reference->kind, reference->target, reference->scope, &served, reference->loader_arg) !=
+	    ReferenceStatus::Present)
+		return;
+	TextureImportState state;
+	std::string error;
+	if (!texture_import_state(view, served, state, error) || !state.importer) return;
+	const TextureUse *use = nullptr;
+	for (const TextureUse &each : view.documents.texture_uses->uses_of(view, served))
+		if (!each.fixed && each.referrer == d.asset && each.field == d.field && each.record == d.record) use = &each;
+	if (!use) return;
+	const TextureImportNeeds &needs = state.needs;
+	const std::string file = basename_of(served);
+	if (!needs.conflicts.empty()) {
+		// No one file serves its uses: the ones that ask otherwise given a copy of their own.
+		const std::string copy = free_texture_copy_name(view, served);
+		if (needs.split_referrers.empty() || copy.empty()) return;
+		std::string files;
+		for (const std::string &referrer : needs.split_referrers) files += (files.empty() ? "" : ", ") + basename_of(referrer);
+		out.push_back({"Split " + file + " into two files",
+		               "Its uses ask what no one file serves (" + needs.conflicts.front() + ") Makes " + copy + ", a copy of " +
+		                       file + ", which the uses in " + files +
+		                       " name from then on; each file is then made as its own uses ask." + kNotUndoable,
+		               request::split_texture(served, copy, needs.split_referrers), false});
+		return;
+	}
+	std::vector<std::pair<std::string, std::string>> changes;
+	std::string words;
+	ImportOptions after = state.sidecar.options;
+	for (const auto &[option, value] : needs.options) {
+		const ImportOptionRow *row = import_option_row(state.importer->options, option);
+		if (!row || strutil::to_lower(import_option_value(state, *row)) == strutil::to_lower(value)) continue;
+		changes.emplace_back(option, value);
+		after[option] = value;
+		words += (words.empty() ? "" : ", ") + option + " " + value;
+	}
+	if (changes.empty()) return;
+	std::string reasons;
+	for (const std::string &reason : needs.reasons) reasons += (reasons.empty() ? "" : "; ") + reason;
+	// The file it makes then, by the format's extension and the name option.
+	const std::string made = image_import_output_name(state.source, image_import_settings(after));
+	const bool renamed = normalized_logical_name(made) != normalized_logical_name(file);
+	out.push_back({"Make " + file + "'s import fit " + (needs.uses > 1 ? "its uses" : "this use"),
+	               "Sets the import of " + state.source + " to " + words + " (" + reasons + "), then imports it again, which makes " +
+	                       (renamed ? made + " in place of " + file + ": every use of it reads " + made + " from then on."
+	                                : file + " anew.") +
+	                       kNotUndoable,
+	               request::set_import_options(state.source, std::move(changes)), false});
+}
+
 // The fixes of one finding, over the view's index (a Rewrite reads it): what its code's row offers
 // (FindingCodeRow::fixes), for what the finding is about.
 void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex &index, bool plan,
@@ -385,6 +453,16 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		out.push_back({"Rewrite " + basename_of(d.asset), detail, request::save(d.asset), true});
 		return;
 	}
+	case FindingFix::TextureRows:
+		// A TGA stored top first: its rows saved bottom first, an edit of its document (opened first) that
+		// Undo takes back and Save writes; a file an import makes is made again by its import.
+		if (const AssetEntry *file = view.project.scan->at_path(d.asset); file && file->imported_from.empty())
+			out.push_back({"Save " + basename_of(d.asset) + " bottom first",
+			               "Writes " + d.asset + "'s rows bottom first, the way up its header meant, so the game draws it "
+			               "the right way up. Undo takes it back, and Save writes it.",
+			               request::texture_operation(d.asset, "reorder_rows", {}, true), false});
+		return;
+	case FindingFix::ImportFitsUse: import_fit_fix(d, view, out); return;
 	}
 }
 
