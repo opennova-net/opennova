@@ -83,7 +83,9 @@ std::vector<ProblemFix> bulk_fixes_for(const Diagnostic &diagnostic, const Sessi
                                        const ProblemFixIndex *index = nullptr);
 // A Fix all: the bulk fixes among `fixes` (the caller passes each finding's first bulk fix)
 // as the requests to raise, in the order the fixes come: one CreateMissing naming every
-// role, one game-data import list naming every file, and every other request once.
+// role, one game-data import list naming every file, and every other request once; an import's
+// preview last (it starts an operation over the project's files, which a request after it would
+// find busy).
 std::vector<EditorRequest> merge_fixes(const std::vector<ProblemFix> &fixes);
 
 // What the fixes of a view's findings read, as a cache's key (view_revisions.h): the

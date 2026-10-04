@@ -53,6 +53,9 @@ struct ProjectView {
 	std::string runtime_setting;
 	bool import_dependencies = true;
 	std::vector<int64_t> recent_items;
+	// The folder the project's last Build to folder built into (its local settings' build_folder; "" for
+	// none): Build > Build to <it> builds there again (the UX round's problems lane).
+	std::string build_folder;
 };
 
 } // namespace opennova::editor
