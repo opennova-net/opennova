@@ -1,6 +1,8 @@
 #pragma once
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -100,7 +102,14 @@ private:
 	UsersKey users_key_;
 	size_t users_made_ = 0;
 	FindingsIndex findings_; // the record's Problems rows, found without a scan of every finding
-	char filter_[128]{};
+	// The filter over the fields, one per open document (the UX round's project lane: a filter typed on
+	// a menu's window never hides an item's fields), by the document's path; a closed document's goes.
+	static constexpr size_t kFilterSize = 128;
+	std::map<std::string, std::array<char, kFilterSize>> filters_;
+	// The active document's filter (made empty the first time it is asked for).
+	char *filter_of(const std::string &path);
+	// The filter's empty state: what matched nothing, and Clear.
+	void nothing_matches(char *filter, const char *what);
 	// The RevealRecord events held until it draws, then the field the last one asked to show, on
 	// its record and in the document it was in (the selection moving off either lets it go);
 	// whether the form still has to scroll to it, and when it was asked (its row's light fades

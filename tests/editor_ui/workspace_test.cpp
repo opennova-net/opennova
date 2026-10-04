@@ -1763,13 +1763,20 @@ void test_preview_follows() {
 	      "the table: the model pane, the table on the model it plays on");
 	text = run.open("anims/walk.bad");
 	CHECK(text.find("walk.bad on skinned.3di") != std::string::npos, "a lone clip: on the model its table plays on");
-	text = run.open("menu_style.mns");
-	CHECK(text.find("main.mnu - startup") != std::string::npos, "the stylesheet: the screen it styles");
-	text = run.open("gametext.bin");
-	CHECK(text.find("main.mnu - startup") != std::string::npos, "a string table: the menu pane too");
+	// What the pane holds while a document it has nothing of to show is active (the UX round's project lane:
+	// the pane steps aside then, project_test.cpp's; at this width a table that feeds it too, lacking the
+	// room): the kind the view keeps, shown again as such a document goes.
+	const DocumentBase *shown_menu = session.document_base_for("main.mnu");
+	run.open("menu_style.mns");
+	CHECK(v.documents.preview_shown == ViewportKind::Menu && shown_menu &&
+	              v.documents.previews[ViewportKind::Menu].path == shown_menu->path(),
+	      "the stylesheet: the screen it styles");
+	run.open("gametext.bin");
+	CHECK(v.documents.preview_shown == ViewportKind::Menu, "a string table: the menu pane too");
 	run.open("anims/SKIN.adm");
-	text = run.open("items.def");
-	CHECK(text.find("skin.adm on skinned.3di") != std::string::npos, "a catalog keeps the pane shown");
+	run.open("items.def");
+	CHECK(v.documents.preview_shown == ViewportKind::Model && v.documents.previews[ViewportKind::Model].path == "anims/SKIN.adm",
+	      "a catalog keeps the pane shown");
 	CHECK(preview_kind(v.documents, ViewportKind::kCount) == ViewportKind::Menu &&
 	              v.documents.preview_shown == ViewportKind::Model,
 	      "before it showed anything, with both: the menu's; after the table, still the table's");
@@ -1777,7 +1784,7 @@ void test_preview_follows() {
 	// A family with nothing to show gives way to the other.
 	session.handle(request::close_document("anims/SKIN.adm"));
 	run.settle();
-	CHECK(lowered(logged_frame(ui)).find("main.mnu - startup") != std::string::npos, "the table closed: the menu's pane");
+	CHECK(v.documents.preview_shown == ViewportKind::Menu, "the table closed: the menu's pane");
 	run.open("anims/walk.bad");
 	run.open("main.mnu");
 	run.open("items.def");
@@ -1786,12 +1793,18 @@ void test_preview_follows() {
 	if (!main_menu) return;
 	session.handle(request::close_document(main_menu->path()));
 	run.settle();
-	CHECK(lowered(logged_frame(ui)).find("walk.bad on skinned.3di") != std::string::npos, "the menu closed: the clip's pane");
-	text = run.open("gametext.bin");
-	CHECK(text.find("walk.bad on skinned.3di") != std::string::npos, "a string table with no menu open: the clip's pane");
+	CHECK(v.documents.preview_shown == ViewportKind::Model && v.documents.previews[ViewportKind::Model].path == "anims/walk.bad",
+	      "the menu closed: the clip's pane");
+	run.open("gametext.bin");
+	CHECK(v.documents.preview_shown == ViewportKind::Model, "a string table with no menu open: the clip's pane");
 	session.handle(request::close_document("anims/walk.bad"));
 	run.settle();
-	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "neither: what to open");
+	CHECK(v.documents.preview_shown == ViewportKind::kCount, "neither: nothing to show");
+	session.handle(request::close_document("gametext.bin"));
+	session.handle(request::close_document("items.def"));
+	session.handle(request::close_document("menu_style.mns"));
+	run.settle();
+	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "nothing open: what to open");
 
 	// A model opened while Document has the focus: the model pane shows, the focus stays.
 	ui.focus("Document");
@@ -2360,8 +2373,8 @@ void test_mission_view_placing() {
 // nothing open, Preview draws beside Document (what to open); the mission made active with nothing
 // to preview, Preview is not drawn (its Windows item still open), its node hides and Document takes
 // the whole centre, the mission's picture the main view; a menu opened, Preview is back in the node
-// it left and Document has its share again; the mission active again, Preview stays beside it,
-// showing the menu it has to show.
+// it left and Document has its share again; the mission active again, Preview steps aside again (the
+// UX round's project lane), though it has the menu to show.
 void test_preview_steps_aside() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_steps_aside");
 	NoProcess platform;
@@ -2410,10 +2423,12 @@ void test_preview_steps_aside() {
 	ui.frames(3);
 	CHECK(preview->Active && preview->DockId == node && document->Size.x < centre() * 0.5f,
 	      "a menu opened: Preview back in its node, Document its share");
+	// The UX round's project lane: the Preview steps aside for a document it has nothing of to show, whatever
+	// else it could show (S15 kept the menu beside the mission).
 	run.open("missions/synth_logic.bms");
 	ui.frames(3);
-	CHECK(!preview_stands_aside(v) && preview->Active && v.documents.preview_shown == ViewportKind::Menu,
-	      "the mission again: Preview stays beside it, the menu its to show");
+	CHECK(preview_stands_aside(v) && !preview->Active && v.documents.preview_shown == ViewportKind::Menu,
+	      "the mission again: Preview steps aside, though it has the menu to show");
 	// The author's ask (S15 review): the menu closed, the Preview steps aside for the mission again;
 	// ticked in the Windows menu (show_anyway), it shows beside that mission until another document is
 	// made active.

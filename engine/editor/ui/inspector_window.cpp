@@ -1077,6 +1077,27 @@ void InspectorWindow::receive(const ViewEvent &event) {
 	events_.post(std::move(held));
 }
 
+char *InspectorWindow::filter_of(const std::string &path) {
+	// A closed document's filter goes with it.
+	const SessionView &view = workspace_.view();
+	for (auto kept = filters_.begin(); kept != filters_.end();) {
+		const bool open = std::any_of(view.documents.open.begin(), view.documents.open.end(),
+		                              [&](const std::shared_ptr<const DocumentBase> &d) { return d->path() == kept->first; });
+		kept = open ? std::next(kept) : filters_.erase(kept);
+	}
+	auto found = filters_.find(path);
+	if (found == filters_.end()) found = filters_.emplace(path, std::array<char, kFilterSize>{}).first;
+	return found->second.data();
+}
+
+void InspectorWindow::nothing_matches(char *filter, const char *what) {
+	const std::string said = std::string("No ") + what + " matches \"" + filter + "\".";
+	ImGui::TextDisabled("%s", said.c_str());
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Clear##nothing")) filter[0] = '\0';
+	ui_kit::tooltip("Clear the filter: every field and list again. Each file keeps a filter of its own.");
+}
+
 void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
 	// The fields asked to show since the Inspector last drew, each taken now (read below).
@@ -1092,6 +1113,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		return;
 	}
 	const NodeAddress selection = view.documents.selection.primary;
+	char *filter = filter_of(document->path());
 	// A field a request asks to show (a Problems row's): each ask on the record selected now, in
 	// this document, shown once, the filter cleared so nothing hides it; the same row clicked
 	// again is another ask, shown again. An ask about a record no longer selected shows nothing,
@@ -1109,7 +1131,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		reveal_record_ = selection;
 		reveal_scroll_ = true;
 		reveal_time_ = ImGui::GetTime();
-		filter_[0] = '\0';
+		filter[0] = '\0';
 	}
 	if (reveal_document_ != document->identity() || reveal_record_ != selection)
 		reveal_field_.clear();
@@ -1152,15 +1174,15 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	// draws itself the generic form leaves out.
 	InspectorTaken taken;
 	if (own && own->inspector_top) own->inspector_top(workspace_, *document, selection, taken);
-	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter fields and lists");
+	ui_kit::filter_box("##filter", filter, kFilterSize, "Filter fields and lists");
 	// The selection's own collections, or its owner's when it holds none, so the records
 	// beside it (a window's other actions) stay one click away.
 	NodeAddress owner = selection;
 	Document::Placement at;
 	if (document->collections_of(selection).empty() && document->placement(selection, at)) owner = at.owner;
-	std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter_);
+	std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter);
 	leave_out(plan, taken.fields, taken.collections);
-	if (plan.empty() && filter_[0]) ui_kit::empty_state("No field or list matches the filter.");
+	if (plan.empty() && filter[0]) nothing_matches(filter, "field or list");
 	Controls controls{picker_, typed_};
 	ImGui::BeginDisabled(!editable);
 	for (const InspectorSection &section : plan) draw_section(workspace_, controls, *document, selection, owner, section, &reveal);
@@ -1212,9 +1234,10 @@ void InspectorWindow::draw_together(const Document &document, const std::vector<
 		}
 	}
 	ImGui::EndChild();
-	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter fields");
-	const std::vector<InspectorSection> plan = plan_shared_inspector(document, records, filter_);
-	if (plan.empty() && filter_[0]) ui_kit::empty_state("No field matches the filter.");
+	char *filter = filter_of(document.path());
+	ui_kit::filter_box("##filter", filter, kFilterSize, "Filter fields");
+	const std::vector<InspectorSection> plan = plan_shared_inspector(document, records, filter);
+	if (plan.empty() && filter[0]) nothing_matches(filter, "field");
 	for (const InspectorSection &section : plan) {
 		if (!section.key.empty()) {
 			const bool shown = section.written || section_changed(document, records, section);

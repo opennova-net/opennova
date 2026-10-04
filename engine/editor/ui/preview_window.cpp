@@ -1,6 +1,7 @@
 #include <editor/ui/preview_window.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <string>
 
 #include <editor/assets/asset_kinds.h>
@@ -34,20 +35,65 @@ PreviewWindow::PreviewWindow(Workspace &workspace) : workspace_(workspace) {
 
 PreviewWindow::~PreviewWindow() = default;
 
-bool preview_stands_aside(const SessionView &view) {
-	if (view.documents.preview_shown != ViewportKind::kCount) return false; // it has something to show
+namespace {
+
+// The Preview-role kind the active document's type reaches (shown or fed), kCount for none or no document.
+ViewportKind active_preview_kind(const SessionView &view, DocumentTypeId &type) {
 	const DocumentBase *document = open_document(view, view.documents.active);
-	if (!document) return false;
-	const DocumentTypeId type = asset_kind_row(document->kind()).document;
-	const ViewportKind main = main_viewport_kind(type);
-	return main != ViewportKind::kCount && viewport_kind_row(main).canvas && preview_kind_of(type) == ViewportKind::kCount;
+	if (!document) return ViewportKind::kCount;
+	type = asset_kind_row(document->kind()).document;
+	return preview_kind_of(type);
+}
+
+} // namespace
+
+bool preview_stands_aside(const SessionView &view) {
+	DocumentTypeId type = DocumentTypeId::None;
+	if (view.documents.active.empty()) return false; // nothing open: it says what to open
+	const ViewportKind kind = active_preview_kind(view, type);
+	// Nothing of the document shows in it: a definition table, a text, a mission (whose picture is its tab's).
+	if (kind == ViewportKind::kCount) return true;
+	// A table that feeds a picture (a string table, a stylesheet) with no picture of it open (no menu).
+	return !viewport_kind_shows(kind, type) && view.documents.previews[kind].path.empty();
+}
+
+bool preview_feeds_table(const SessionView &view) {
+	DocumentTypeId type = DocumentTypeId::None;
+	const ViewportKind kind = active_preview_kind(view, type);
+	return kind != ViewportKind::kCount && !viewport_kind_shows(kind, type) && !view.documents.previews[kind].path.empty();
+}
+
+// The room the Document window would have beside the Preview in the split they share (the default layout's
+// centre): its width while the two show side by side; while the Preview stands aside, what ImGui's split
+// would give it, from the sizes the two nodes ask for (the author's drag of the splitter kept in them): the
+// central node takes what the other leaves, else the two share by their asks [imgui.cpp
+// DockNodeTreeUpdatePosSize]. A large room where the two share no split (the author docked them
+// otherwise), so the rule never takes the Preview away.
+float PreviewWindow::document_room() const {
+	if (ImGui::GetCurrentContext() == nullptr) return FLT_MAX;
+	const ImGuiWindow *preview = ImGui::FindWindowByName(title());
+	const ImGuiWindow *document = ImGui::FindWindowByName("Document");
+	const ImGuiDockNode *p = preview && preview->DockId ? ImGui::DockBuilderGetNode(preview->DockId) : nullptr;
+	const ImGuiDockNode *d = document && document->DockId ? ImGui::DockBuilderGetNode(document->DockId) : nullptr;
+	if (!p || !d || !p->ParentNode || p->ParentNode != d->ParentNode || p->ParentNode->SplitAxis != ImGuiAxis_X)
+		return FLT_MAX;
+	if (p->IsVisible && d->IsVisible) return d->Size.x;
+	const ImGuiStyle &style = ImGui::GetStyle();
+	const float room = std::max(p->ParentNode->Size.x - style.DockingSeparatorSize, 0.0f);
+	const float least = std::min(room, style.WindowMinSize.x * 2.0f) * 0.5f;
+	if (d->HasCentralNodeChild && p->SizeRef.x > 0.0f) return room - std::min(room - least, p->SizeRef.x);
+	if (p->HasCentralNodeChild && d->SizeRef.x > 0.0f) return std::min(room - least, d->SizeRef.x);
+	const float asked = p->SizeRef.x + d->SizeRef.x;
+	return asked > 0.0f ? room * d->SizeRef.x / asked : room * kDocumentShare;
 }
 
 bool PreviewWindow::stands_aside() const {
 	const SessionView &view = workspace_.view();
 	// The author's ask (the Windows menu's tick) holds for the document active then.
 	if (!shown_for_.empty() && shown_for_ != view.documents.active) shown_for_.clear();
-	if (!shown_for_.empty() || !preview_stands_aside(view)) return false;
+	if (!shown_for_.empty()) return false;
+	const bool aside = preview_stands_aside(view);
+	if (!aside && !preview_feeds_table(view)) return false;
 	// Floated off the workspace's dockspace (its own window, another monitor), stepping aside frees no
 	// room beside Document: it stays.
 	if (ImGui::GetCurrentContext() != nullptr) {
@@ -56,7 +102,10 @@ bool PreviewWindow::stands_aside() const {
 		while (node && node->ParentNode) node = node->ParentNode;
 		if (window && (!node || !node->IsDockSpace())) return false;
 	}
-	return true;
+	if (aside) return true;
+	// A table that feeds the picture: the table first, while the Document beside the Preview would be
+	// narrower than it needs.
+	return ImGui::GetCurrentContext() != nullptr && document_room() < kFeedTableRoomEm * ImGui::GetFontSize();
 }
 
 void PreviewWindow::show_anyway() {

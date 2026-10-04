@@ -107,7 +107,7 @@ devtools::DockLayout editor_layout() {
 	layout.bottom = 0.25f;
 	layout.left = 260.0f / 1280.0f;
 	layout.right = 320.0f / (1280.0f - 260.0f);
-	layout.center_right = 0.625f;
+	layout.center_right = 1.0f - kDocumentShare;
 	layout.focus = {"Document", "Problems"};
 	return layout;
 }
