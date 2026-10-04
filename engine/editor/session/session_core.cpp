@@ -10,7 +10,9 @@
 #include <base/io/strutil.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/edit.h>
+#include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
@@ -18,6 +20,7 @@
 #include <editor/project_build/build_plan.h>
 #include <editor/run/play_lease.h>
 #include <editor/session/build_operation.h>
+#include <editor/session/build_result.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_controller.h>
@@ -25,6 +28,7 @@
 #include <editor/session/play_controller.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/refresh_operation.h>
+#include <editor/session/rename_controller.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/unsaved_guard.h>
 
@@ -115,6 +119,18 @@ SessionCore::RequestScope::~RequestScope() {
 void SessionCore::note(std::string line) {
 	view_.activity.output.append(std::move(line));
 	touch(ViewConcern::Output);
+}
+
+uint64_t SessionCore::note_folded(std::string line, std::vector<std::string> folded) {
+	const uint64_t index = view_.activity.output.append_folded(std::move(line), std::move(folded));
+	touch(ViewConcern::Output);
+	return index;
+}
+
+bool SessionCore::fold_into_note(uint64_t index, std::string line, std::vector<std::string> more) {
+	if (!view_.activity.output.fold_into(index, std::move(line), std::move(more))) return false;
+	touch(ViewConcern::Output);
+	return true;
 }
 
 void SessionCore::report(const Diagnostic &d) {
@@ -300,6 +316,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 		outcome.findings.push_back(local_finding); // what the Open came to says it too
 	}
 	if (!open.run_install().empty()) local_.game_install = absolute_install_path(open.run_install());
+	view_.project.build_folder = local_.build_folder;
 	view_.project.open = true;
 	view_.project.root = paths_.root;
 	view_.project.document = std::make_shared<const ProjectDocument>(open.document());
@@ -347,12 +364,16 @@ bool SessionCore::close_project() {
 	view_.project.scan = std::make_shared<const AssetScan>();
 	view_.project.requirements = std::make_shared<const RequirementReport>();
 	view_.findings.diagnostics.clear();
+	view_.findings.marks.reset();
+	view_.activity.last_rename = ActivityView::LastRename(); // its way back is this project's
+	renames().forget();
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
 	// The last build's findings are this project's and go with it.
 	problems().clear_build_findings();
 	paths_ = ProjectPaths();
 	local_ = LocalSettings();
+	view_.project.build_folder.clear();
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	view_.project.retail_directory = game_install();
 	show_recent_items(); // the project's game's go with it
@@ -393,9 +414,8 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			evaluate_requirements(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
-	// A whole refresh (an open, a Rescan, a Reimport) reads the install as it stands now too: which files
-	// are the game's own data is found again after the validation (S15).
-	problems().forget_originals();
+	// A whole refresh (an open, a Rescan, a Reimport) makes a new scan, on which the game's own data's
+	// baseline looks at the install's folder again (S15: a patch over it is validated again).
 	problems().validate_later();
 	return imports;
 }
@@ -504,6 +524,28 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 			failures.push_back(error);
 		}
 	}
+	// The folder Build to folder builds into, kept with the project's local settings (Build > Build to <it>): the
+	// modder's pick, never what a build request's out_dir names (a script's build keeps nothing, L4).
+	if (change.build_folder && !view_.project.open) {
+		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
+		                                "Open a project to keep a folder to build it into."));
+	} else if (change.build_folder && !change.build_folder->empty() &&
+	           inside(path_of(*change.build_folder).lexically_normal(), path_of(paths_.root))) {
+		failures.push_back(make_finding(CoreFinding::BuildOutDirInProject, DiagnosticSeverity::Error,
+		                                "A folder to build into for players lies outside the project: " +
+		                                        *change.build_folder + " is inside it."));
+	} else if (change.build_folder && *change.build_folder != local_.build_folder) {
+		LocalSettings local = local_;
+		local.build_folder = *change.build_folder;
+		Diagnostic error;
+		if (save_local_settings(paths_, local, error)) {
+			local_ = std::move(local);
+			view_.project.build_folder = local_.build_folder;
+			touch(ViewConcern::Preferences);
+		} else {
+			failures.push_back(error);
+		}
+	}
 	const Preferences &settings = preferences_.values();
 	Preferences editor = settings;
 	if (install) editor.game_install = *install;
@@ -574,7 +616,7 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	if (result.created.empty() && result.unavailable.empty() && result.diagnostics.empty()) {
 		view_.activity.status = "Nothing to create.";
 	} else {
-		view_.activity.status = std::to_string(result.created.size()) + " file(s) created" +
+		view_.activity.status = counted(result.created.size(), "file") + " created" +
 		               (result.unavailable.empty()
 		                        ? "."
 		                        : ", " + std::to_string(result.unavailable.size()) + " not yet possible.");
@@ -872,6 +914,11 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	BuildPlan plan =
 			plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings());
 	plan.rehash = rehash;
+	// The build is this project's: in a folder several projects build into (Build to folder), it reuses, prunes
+	// and replaces only its own. Inside the project (its default folder, its cache, its export folder) every
+	// build there is its own.
+	plan.project = view_.project.document->project_id;
+	plan.own_folder = inside(path_of(output_root), path_of(paths_.root));
 	// No directory a game runs from is pruned, asked when the build publishes (a game started
 	// while it packed counts): this editor's game's, and every one whose lease names a process
 	// that may still run (a game left running across an editor restart; one the platform cannot
@@ -907,17 +954,31 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 			own.push_back(d);
 	for (const Diagnostic &d : own) report(d);
 	problems().set_build_findings(own);
+	// The build panel comes forward with what it came to (the UX round's problems lane).
+	// `flag` it landed; `tag` 1 when a Play waits on it (the game is what follows, not the panel).
+	ViewEvent ended;
+	ended.kind = ViewEventKind::BuildEnded;
+	ended.flag = result.ok;
+	ended.tag = intent.wanted ? 1 : 0;
+	view_.events.post(std::move(ended));
+	touch(ViewConcern::Dialogs);
 	if (result.ok) {
-		if (result.reused_existing) {
-			note("Build unchanged: " + shown_path(result.build_dir, paths_.root));
-			view_.activity.status = "Build unchanged.";
-		} else {
-			note("Built " + shown_path(result.build_dir, paths_.root) + " (" + std::to_string(result.archives_written.size()) +
-			     " archive(s) written, " + std::to_string(result.archives_reused.size()) + " reused, " +
-			     std::to_string(result.loose_written.size()) + " loose file(s); " + std::to_string(result.files_hashed) +
-			     " file(s) hashed)");
-			view_.activity.status = "Build finished.";
-		}
+		BuildResult said = build_result(result, true);
+		said.where = shown_path(result.build_dir, paths_.root);
+		note(build_result_line(said));
+		view_.activity.status = said.headline;
+	} else if (result.refused) {
+		// What refused it, by name (the UX round's problems lane): its first refusal on the status line,
+		// the whole line (the build.blocked row's) in Output and Problems.
+		std::vector<Diagnostic> blockers;
+		for (const Diagnostic &d : result.diagnostics)
+			if (blocks_build(d) && d.row() != &finding_code(CoreFinding::BuildBlocked)) blockers.push_back(d);
+		note("Build refused.");
+		view_.activity.status = blockers.empty()
+		                                ? std::string("Build refused: see Problems.")
+		                                : "Build refused: " + blocker_words(blockers.front()) +
+		                                          (blockers.size() > 1 ? " (and " + std::to_string(blockers.size() - 1) + " more)" : "") +
+		                                          ". See Problems.";
 	} else {
 		note("Build failed.");
 		view_.activity.status = "Build failed; see Problems.";

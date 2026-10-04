@@ -31,6 +31,11 @@ using editor::EditorRequestKind;
 using io::json_string;
 using io::JsonValue;
 
+// A count with its noun, plural but for one ("1 file", "3 files"), as the editor's status lines count.
+std::string words(size_t count, const char *noun) {
+	return std::to_string(count) + " " + noun + (count == 1 ? "" : "s");
+}
+
 using K = EditorRequestKind;
 using Q = EditorQueryKind;
 
@@ -398,7 +403,7 @@ int run_status(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	std::fprintf(cli.out, "runtime: %s\n", runtime.empty() ? "(beside the editor)" : runtime.c_str());
 	const std::string install = run.get_string("game_install", "");
 	if (!install.empty()) std::fprintf(cli.out, "game install: %s\n", install.c_str());
-	std::fprintf(cli.out, "assets: %zu file(s)\n", count_at(project, "file_count"));
+	std::fprintf(cli.out, "assets: %s\n", words(count_at(project, "file_count"), "file").c_str());
 	const std::vector<JsonValue> &imported = items(at(answer, "import"), "imported");
 	if (!imported.empty()) {
 		size_t now = 0, failed = 0;
@@ -406,7 +411,8 @@ int run_status(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 			now += source.get_bool("reimported", false) ? 1 : 0;
 			failed += source.get_bool("ok", true) ? 0 : 1;
 		}
-		std::fprintf(cli.out, "imports: %zu source(s), %zu imported now, %zu failed\n", imported.size(), now, failed);
+		std::fprintf(cli.out, "imports: %s, %zu imported now, %zu failed\n", words(imported.size(), "source").c_str(), now,
+		             failed);
 	}
 	const JsonValue &requirements = at(answer, "requirements");
 	std::fprintf(cli.out, "requirements: %zu required, %zu missing, %zu wrong kind (missions %s)\n",
@@ -415,27 +421,21 @@ int run_status(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	// The modder's findings, as the editor's Problems and menu bar count them; the game's own data's
 	// (files the project holds as the install serves them, ADR 0046 S15) said after them.
 	const JsonValue &problems = at(answer, "problem_counts");
-	std::fprintf(cli.out, "problems: %zu error(s), %zu warning(s), %zu info\n", count_at(problems, "errors"),
-	             count_at(problems, "warnings"), count_at(problems, "infos"));
+	std::fprintf(cli.out, "problems: %s, %s, %zu info\n", words(count_at(problems, "errors"), "error").c_str(),
+	             words(count_at(problems, "warnings"), "warning").c_str(), count_at(problems, "infos"));
 	const JsonValue &original = at(problems, "original");
 	if (const size_t more = count_at(original, "errors") + count_at(original, "warnings") + count_at(original, "infos"))
-		std::fprintf(cli.out, "  and in the game's own data: %zu error(s), %zu warning(s), %zu info\n",
-		             count_at(original, "errors"), count_at(original, "warnings"), count_at(original, "infos"));
+		std::fprintf(cli.out, "  and in the game's own data: %s, %s, %zu info\n",
+		             words(count_at(original, "errors"), "error").c_str(),
+		             words(count_at(original, "warnings"), "warning").c_str(), count_at(original, "infos"));
 	return 0;
-}
-
-// A finding as validate tells two apart: its severity, code, message and file.
-std::string finding_key(const JsonValue &finding) {
-	return finding.get_string("severity", "") + "\n" + finding.get_string("code", "") + "\n" +
-	       finding.get_string("message", "") + "\n" + finding.get_string("asset", "");
 }
 
 // Every Problems row, as the editor's Problems window lists them (errors, then warnings, then
 // notes), then the verdict of the build's gate (the build_gate query): validate fails exactly when
-// a build would be refused. A finding that blocks the build and no row shows (the build's own check
-// of the files: an archive in the project) is said before the verdict; an error row the build does
-// not gate on (a project check's: the render check's; a listed code's, ADR 0046 S14) is listed
-// and fails nothing.
+// a build would be refused. Every finding a build is refused for is a row (the build's own word on
+// the files among them: an archive in the project); an error row the build does not gate on (a
+// project check's: the render check's; a listed code's, ADR 0046 S14) is listed and fails nothing.
 int run_validate(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	std::vector<JsonValue> pages, gate;
 	if (!pages_of(cli, row, !cli.json, pages) || !ask_pages(cli, Q::BuildGate, JsonValue(), !cli.json, gate))
@@ -445,29 +445,20 @@ int run_validate(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 		print_json(cli.out, pages.front());
 		return blocked ? 1 : 0;
 	}
-	std::set<std::string> shown;
-	for (const JsonValue &page : pages) {
-		for (const JsonValue &problem : items(page, "problems")) {
-			print_finding(cli.out, problem);
-			shown.insert(finding_key(problem));
-		}
-	}
-	for (const JsonValue &page : gate) {
-		for (const JsonValue &finding : items(page, "blocking")) {
-			if (shown.count(finding_key(finding))) continue;
-			std::fputs("blocks a build: ", cli.out);
-			print_finding(cli.out, finding);
-		}
-	}
+	for (const JsonValue &page : pages)
+		for (const JsonValue &problem : items(page, "problems")) print_finding(cli.out, problem);
 	// Every error row: the modder's and the game's own data's (S15), none of which the gate refuses.
 	const size_t errors = count_at(at(pages.front(), "counts"), "errors") +
 	                      count_at(at(pages.front(), "original_counts"), "errors");
+	const size_t blocking = count_at(gate.front(), "count");
 	if (blocked)
-		std::fprintf(cli.out, "not ok: %zu finding(s) block a build\n", count_at(gate.front(), "count"));
+		std::fprintf(cli.out, "not ok: %s %s a build\n", words(blocking, "finding").c_str(),
+		             blocking == 1 ? "blocks" : "block");
 	else if (errors > 0)
-		std::fprintf(cli.out, "ok: nothing blocks a build (%zu error(s) the build does not gate on)\n", errors);
+		std::fprintf(cli.out, "ok: nothing blocks a build (%s the build does not gate on)\n",
+		             words(errors, "error").c_str());
 	else
-		std::fprintf(cli.out, "ok: 0 error(s)\n");
+		std::fprintf(cli.out, "ok: no errors\n");
 	return blocked ? 1 : 0;
 }
 
@@ -523,7 +514,7 @@ int run_create_missing(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		print_json(cli.out, after);
 	} else {
 		for (const std::string &line : lines) std::fprintf(cli.out, "%s\n", line.c_str());
-		std::fprintf(cli.out, "%zu file(s) created%s\n", created, complete ? "" : ", some requirements remain");
+		std::fprintf(cli.out, "%s created%s\n", words(created, "file").c_str(), complete ? "" : ", some requirements remain");
 	}
 	return complete ? 0 : 1;
 }
@@ -573,7 +564,8 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages, bool rows) {
 		for (const JsonValue &row : items(page, "not_found")) print_not_found(to, row);
 	const JsonValue &plan = pages.front();
 	for (const JsonValue &entry : items(plan, "summary"))
-		std::fprintf(to, "  %s: %zu file(s), %.1f MB\n", entry.get_string("kind", "").c_str(), count_at(entry, "files"),
+		std::fprintf(to, "  %s: %s, %.1f MB\n", entry.get_string("kind", "").c_str(),
+		             words(count_at(entry, "files"), "file").c_str(),
 		             entry.get_number("bytes", 0.0) / 1e6);
 	for (const JsonValue &entry : items(plan, "not_followed")) {
 		const std::string reference = entry.get_string("reference", "");
@@ -594,7 +586,8 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages, bool rows) {
 		             entry.get_string("reference", "").c_str(), count_at(entry, "count"), entry.get_string("first", "").c_str());
 	if (plan.get_bool("truncated", false))
 		std::fprintf(to, "the plan stopped at %zu files: the files past them are not in it\n", count_at(plan, "count"));
-	std::fprintf(to, "plan: %zu file(s) to import, %zu not found, %.1f MB\n", take, count_at(plan, "not_found_count"),
+	std::fprintf(to, "plan: %s to import, %zu not found, %.1f MB\n", words(take, "file").c_str(),
+	             count_at(plan, "not_found_count"),
 	             plan.get_number("total_bytes", 0.0) / 1e6);
 }
 
@@ -724,7 +717,8 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 			import_errors = import_errors || !imported.get_bool("ok", true);
 		}
 		if (imported.get_bool("reimported", false) && !cli.json)
-			std::fprintf(cli.out, "imported %s -> %zu output(s)\n", name.c_str(), items(imported, "outputs").size());
+			std::fprintf(cli.out, "imported %s -> %s\n", name.c_str(),
+			             words(items(imported, "outputs").size(), "output").c_str());
 	}
 	std::vector<JsonValue> problems;
 	if (!wrote.empty() && ask_pages(cli, Q::Problems, JsonValue(), true, problems))
@@ -749,11 +743,11 @@ int run_reimport(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		for (const JsonValue &source : sources) {
 			const bool now = source.get_bool("reimported", false);
 			reimported += now ? 1 : 0;
-			std::fprintf(cli.out, "%s %s -> %zu output(s)%s\n", now ? "imported" : "kept",
-			             source.get_string("source", "").c_str(), items(source, "outputs").size(),
+			std::fprintf(cli.out, "%s %s -> %s%s\n", now ? "imported" : "kept",
+			             source.get_string("source", "").c_str(), words(items(source, "outputs").size(), "output").c_str(),
 			             source.get_bool("ok", true) ? "" : " (failed)");
 		}
-		std::fprintf(cli.out, "%zu source(s), %zu imported\n", sources.size(), reimported);
+		std::fprintf(cli.out, "%s, %zu imported\n", words(sources.size(), "source").c_str(), reimported);
 	}
 	return done(outcome) ? 0 : 1;
 }
@@ -779,8 +773,8 @@ int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	}
 	for (const JsonValue &imported : items(at(answer, "import"), "imported"))
 		if (imported.get_bool("reimported", false))
-			std::fprintf(cli.out, "imported %s -> %zu output(s)\n", imported.get_string("source", "").c_str(),
-			             items(imported, "outputs").size());
+			std::fprintf(cli.out, "imported %s -> %s\n", imported.get_string("source", "").c_str(),
+			             words(items(imported, "outputs").size(), "output").c_str());
 	if (!done(outcome)) return 1; // refused: its findings said why
 	const std::vector<JsonValue> &findings = items(build, "diagnostics");
 	for (const JsonValue &finding : findings) print_finding(cli.out, finding);
@@ -795,12 +789,10 @@ int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	if (build.get_bool("reused_existing", false))
 		std::fprintf(cli.out, "unchanged: %s\n", dir.c_str());
 	else
-		std::fprintf(cli.out,
-		             "built %s (%zu archive(s) written, %zu reused, %zu of them linked, %zu loose file(s); "
-		             "%zu file(s) hashed)\n",
-		             dir.c_str(), count_at(build, "archives_written"), count_at(build, "archives_reused"),
-		             count_at(build, "archives_linked"), count_at(build, "loose_written"),
-		             count_at(build, "files_hashed"));
+		std::fprintf(cli.out, "built %s (%s written, %zu reused, %zu of them linked, %s; %s hashed)\n", dir.c_str(),
+		             words(count_at(build, "archives_written"), "archive").c_str(), count_at(build, "archives_reused"),
+		             count_at(build, "archives_linked"), words(count_at(build, "loose_written"), "loose file").c_str(),
+		             words(count_at(build, "files_hashed"), "file").c_str());
 	std::fprintf(cli.out, "run: opennova.exe -- --resource-dir \"%s\"\n", dir.c_str());
 	return 0;
 }
