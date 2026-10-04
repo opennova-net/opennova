@@ -115,6 +115,10 @@ void serve_select_record(SessionCore &core, const EditorRequest &request) {
 void serve_edit_record(SessionCore &core, const EditorRequest &request) {
 	core.documents().edit_record(request);
 }
+void serve_set_string_text(SessionCore &core, const EditorRequest &request) {
+	core.documents().set_string_text(request);
+}
+
 void serve_revert_to_saved(SessionCore &core, const EditorRequest &request) {
 	core.documents().revert_to_saved(request);
 }
@@ -528,6 +532,17 @@ constexpr RequestKindRow kRows[] = {
 			"saved).")
 			.takes(request_params({ F::Edits }, { F::Path }))
 			.holds(kNone, kDocuments)
+			.names_active()
+			.row,
+	// The plain-words lane (the audit's 3.2): a label edited as the words the player sees.
+	Request(K::SetStringText, "set_string_text", serve_set_string_text,
+			"The string a field's string id names (the record at address of the document at path, its "
+			"field: a menu window's Text, a weapon's loadout name) given the text values.text: the string "
+			"table that defines the id, as the game's lookup reaches it, opened where it is not (the active "
+			"document kept), its string's text set there, one undo step in that table; refused where the "
+			"field names no string id or the project defines none of that id.")
+			.takes(request_params({ F::Address, F::Field, F::Values }, { F::Path }))
+			.holds(kFiles, kDocuments)
 			.names_active()
 			.row,
 	Request(K::EndEdit, "end_edit", serve_end_edit,

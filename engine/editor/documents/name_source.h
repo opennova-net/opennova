@@ -27,6 +27,9 @@ struct DisplayName {
 	std::string source;
 	// The value names nothing the document or the project has, which the words say.
 	bool dangling = false;
+	// What a stylesheet variable the value is (%NAME%) stands for: the value of the definition the game
+	// reads ("FFFFFFFF", "Gunpl22b.fnt"), which a colour field shows as its swatch; "" for none.
+	std::string resolved;
 	bool empty() const { return text.empty(); }
 };
 

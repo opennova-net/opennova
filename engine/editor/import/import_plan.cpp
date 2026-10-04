@@ -17,6 +17,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/player_files.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
@@ -165,6 +166,13 @@ std::string ImportOrigin::words(const std::string &name) const {
 }
 
 namespace {
+
+// A need's record and field in words, as every window names them (the plain-words lane: the record in its
+// type's own words, the field by its type's label).
+void word_need(ImportNeed &need, const GraphEdge &edge) {
+	need.record_title = edge_record_words(edge);
+	need.field_title = edge_field_words(edge, asset_kind_for_name(need.file));
+}
 
 using Exists = std::function<bool(const std::string &)>;
 
@@ -673,7 +681,8 @@ private:
 		scopes.push_back(&first);
 		if (owned)
 			for (const std::string &scope : edge.scopes_after) scopes.push_back(&scope);
-		const ImportNeed need{use.file, edge.record, edge.field, edge.kind, edge.value, edge.loader_arg};
+		ImportNeed need{use.file, edge.record, edge.field, edge.kind, edge.value, edge.loader_arg};
+		word_need(need, edge);
 		const ImportOrigin *own = origin_of(use.file);
 		const ImportOrigin *install = install_ != own ? install_ : nullptr;
 		for (const std::string *scope : scopes) {
@@ -949,6 +958,7 @@ private:
 		const ImportOrigin *own = node.origin;
 		const ImportOrigin *install = install_ != own ? install_ : nullptr;
 		ImportNeed need{file, edge.record, edge.field, edge.kind, name, edge.loader_arg};
+		word_need(need, edge);
 		std::string mine, theirs;
 		for (const std::string &candidate : names) {
 			need.name = candidate;

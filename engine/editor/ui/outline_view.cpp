@@ -11,7 +11,9 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_table.h>
+#include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
+#include <editor/model/field_text.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
@@ -59,12 +61,16 @@ std::string record_tip(const OutlineLine &line, Document::RecordChange change) {
 // it (the primary's row, or a row selected with others); `id` its item's id after its text. True
 // when it was clicked: its caller selects.
 bool row_line(Workspace &workspace, const Document &document, const RecordReveal &reveal, const OutlineLine &line,
-              const char *id) {
+              const char *id, bool middle = false) {
 	const SessionView &view = workspace.view();
 	ImGui::PushID(static_cast<int>(line.address.row));
 	const float x = ImGui::GetCursorScreenPos().x;
 	const std::string label = ui_kit::kChangeRoom + line.text;
-	const std::string shown = ui_kit::fit(label, ImGui::GetContentRegionAvail().x);
+	// A master column's names cut in their middle, so names that share a start stay apart ("HelpSc...Keys",
+	// "HelpSc...Text"; the audit's 5.1).
+	const std::string shown = middle ? ui_kit::kChangeRoom + ui_kit::fit_middle(line.text, ImGui::GetContentRegionAvail().x -
+	                                                                                           ui_kit::text_width(ui_kit::kChangeRoom))
+	                                 : ui_kit::fit(label, ImGui::GetContentRegionAvail().x);
 	const bool selected = view.documents.selection.primary.row == line.address.row ||
 	                      view.documents.selection.holds(line.address);
 	const bool clicked = ImGui::Selectable((shown + id).c_str(), selected);
@@ -530,7 +536,9 @@ void OutlineView::draw_master_detail(Workspace &workspace, const Document &docum
 	// The selection moved to a record: its line shown (a filter hiding it cleared) and scrolled to.
 	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path(), master_id) : SIZE_MAX;
 	model_.lines(document, master_id);
-	const float masters = std::max(std::min(ImGui::GetFontSize() * 16.0f, ImGui::GetContentRegionAvail().x * 0.35f),
+	// The rows' column as wide as its widest name (two fifths of the room at most), its tools' widest at
+	// least (the audit's 5.1: sections cut to "HelpScreen...").
+	const float masters = std::max(std::min(masters_width(document), ImGui::GetContentRegionAvail().x * 0.4f),
 	                               ui_kit::button_width("Duplicate"));
 	if (ImGui::BeginTable("master", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV)) {
 		ImGui::TableSetupColumn(spec_.rows, ImGuiTableColumnFlags_WidthFixed, masters);
@@ -574,7 +582,7 @@ void OutlineView::draw_masters(Workspace &workspace, const Document &document) {
 	row_tool(workspace, document, tool, address, index);
 	if (rows.empty()) ui_kit::empty_state(("No " + lower(spec_.rows) + " yet.").c_str());
 	for (const OutlineLine &line : model_.masters())
-		if (row_line(workspace, document, reveal_, line, "###row")) select(workspace, document, line.address);
+		if (row_line(workspace, document, reveal_, line, "###row", true)) select(workspace, document, line.address);
 	ImGui::PopID();
 }
 
@@ -613,16 +621,30 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 	if (lines.empty())
 		return ui_kit::empty_state(every ? "Nothing in any of them matches the filter." : "Nothing matches the filter.");
 	const std::vector<const FieldSchema *> &columns = model_.columns();
-	const int count = (every ? 2 : 1) + static_cast<int>(columns.size());
+	// The column of the name a record is found by (a string's key) as wide as its widest value, up to two
+	// fifths of the table, and a Uses column after the others where the project's graph counts what names
+	// each record (the plain-words lane, the audit's 5.1 and 5.2).
+	const FieldSchema *defining = model_.defining_column();
+	const AssetGraph *graph = view.findings.graph.get();
+	const bool uses = defining && graph;
+	const int count = (every ? 2 : 1) + static_cast<int>(columns.size()) + (uses ? 1 : 0);
+	const float key_room = defining ? defining_width(document, lines, *defining) : 0.0f;
 	if (!ImGui::BeginTable("records", count, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY))
 		return;
 	ImGui::TableSetupScrollFreeze(0, 1);
 	ImGui::TableSetupColumn("##changed", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width(ui_kit::kChangeRoom));
 	const RecordKindRow *rows_kind = own_kind(document);
 	if (every) ImGui::TableSetupColumn(rows_kind ? rows_kind->label : "Row", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-	for (const FieldSchema *field : columns)
-		ImGui::TableSetupColumn(field_widgets::column_header(*field).c_str(), ImGuiTableColumnFlags_WidthStretch,
-		                        field->multiline ? 3.0f : 1.0f);
+	const float table_width = ImGui::GetContentRegionAvail().x;
+	for (const FieldSchema *field : columns) {
+		if (field == defining)
+			ImGui::TableSetupColumn(field_widgets::column_header(*field).c_str(), ImGuiTableColumnFlags_WidthFixed,
+			                        std::min(key_room, table_width * 0.4f));
+		else
+			ImGui::TableSetupColumn(field_widgets::column_header(*field).c_str(), ImGuiTableColumnFlags_WidthStretch,
+			                        field->multiline ? 3.0f : 1.0f);
+	}
+	if (uses) ImGui::TableSetupColumn("Uses", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("Uses 9999"));
 	ImGui::TableHeadersRow();
 	// Where the table's rows show (its own scrolling window), and how tall a row is: its tallest
 	// cell's box and the table's padding.
@@ -670,10 +692,61 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 			if (ImGui::IsItemActivated()) select(workspace, document, line.address);
 			if (ImGui::IsItemActive()) editing = line.address;
 		}
+		if (uses) {
+			// How many references of the project's files name it, each listed in the tooltip.
+			ImGui::TableNextColumn();
+			ImGui::AlignTextToFramePadding();
+			const size_t count = model_.uses(*graph, document, line.address);
+			if (count) ImGui::Text("%zu", count);
+			else ImGui::TextDisabled("0");
+			ui_kit::tooltip_lazy([&] {
+				const GraphSymbol *symbol = graph->symbol_at(document.path(), document.locator(line.address), defining->id);
+				if (!symbol || !count) return std::string("No file of the project names it.");
+				std::string tip = counted(count, "use") + ":";
+				size_t listed = 0;
+				for (const GraphEdge *edge : graph->users_of(*symbol)) {
+					if (++listed > 12) {
+						tip += "\n...";
+						break;
+					}
+					const AssetEntry *source = view.project.scan->at_path(edge->source);
+					const std::string place = edge_place_words(*edge, source ? source->kind : AssetKind::Unknown);
+					tip += "\n" + (source ? source->logical_name : edge->source) + (place.empty() ? std::string() : ": " + place);
+				}
+				return tip;
+			});
+		}
 		ImGui::PopID();
 	}
 	ImGui::EndTable();
 	editing_ = editing;
+}
+
+float OutlineView::defining_width(const Document &document, const std::vector<OutlineLine> &lines, const FieldSchema &field) {
+	if (defining_.document == document.identity() && defining_.revision == document.revision() && defining_.lines == lines.size() &&
+	    defining_.first == (lines.empty() ? nullptr : &lines.front()))
+		return defining_.width;
+	float widest = ui_kit::text_width(field_widgets::column_header(field).c_str());
+	for (const OutlineLine &line : lines) {
+		Value value;
+		if (!document.get(line.address, field.id, value)) continue;
+		if (const auto *text = std::get_if<std::string>(&value)) widest = std::max(widest, ui_kit::text_width(text->c_str()));
+	}
+	defining_ = {widest + ImGui::GetStyle().FramePadding.x * 4.0f + ImGui::GetStyle().CellPadding.x * 2.0f, document.identity(),
+	             document.revision(), lines.size(), lines.empty() ? nullptr : &lines.front()};
+	return defining_.width;
+}
+
+float OutlineView::masters_width(const Document &document) {
+	const std::vector<OutlineLine> &masters = model_.masters();
+	if (masters_.document == document.identity() && masters_.revision == document.revision() && masters_.lines == masters.size())
+		return masters_.width;
+	float widest = 0.0f;
+	for (const OutlineLine &line : masters) widest = std::max(widest, ui_kit::text_width(line.text.c_str()));
+	masters_ = {widest + ui_kit::text_width(ui_kit::kChangeRoom) + ImGui::GetStyle().FramePadding.x * 2.0f +
+	                    ImGui::GetStyle().CellPadding.x * 2.0f + ImGui::GetStyle().ScrollbarSize,
+	            document.identity(), document.revision(), masters.size(), nullptr};
+	return masters_.width;
 }
 
 } // namespace opennova::editor

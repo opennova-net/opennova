@@ -4,6 +4,7 @@
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/catalog_labels.h>
 #include <editor/documents/catalog_validation.h>
+#include <editor/documents/menu_labels.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mission_document.h>
@@ -47,8 +48,10 @@ constexpr DocumentType kTypes[] = {
 			catalog_record_label },
 	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file,
 			StringsDocument::schema, strings_finding_codes },
+	// The menu: its parts by what they do (an action, a look, a sound), never "Action 1" (the plain-words
+	// lane).
 	{ DocumentTypeId::Menu, "menu", make_menu, validate_menu_file, MnuDocument::schema,
-			menu_finding_codes, make_menu_render_check },
+			menu_finding_codes, make_menu_render_check, nullptr, nullptr, nullptr, menu_record_label },
 	{ DocumentTypeId::Styles, "styles", make_styles, validate_styles_file, MnsDocument::schema,
 			style_finding_codes },
 	// The model: its records and the values naming a part or a surface in a modder's words (S17).
@@ -126,6 +129,14 @@ DocumentContent content_made(const DocumentType &type) {
 }
 
 } // namespace
+
+std::string record_own_title(const Document &document, const NodeAddress &address) {
+	std::string title;
+	if (const DocumentType *type = document_type_for(document.kind()); type && type->record_label)
+		title = type->record_label(document, address, nullptr);
+	if (title.empty()) title = document.record_title(address);
+	return title == document.record_name(address) ? std::string() : title;
+}
 
 const DocumentType *document_type(DocumentTypeId id) {
 	if (const DocumentType *stand_in = g_stand_in.load(); stand_in && stand_in->id == id)

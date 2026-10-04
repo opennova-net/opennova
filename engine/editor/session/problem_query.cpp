@@ -306,7 +306,9 @@ std::string finding_record_title(const Diagnostic &diagnostic, const SessionView
 		const std::string title = record_display(*document, address, names ? &*names : nullptr);
 		return title == document->record_name(address) ? std::string() : title;
 	}
-	return std::string();
+	// A closed file's: the words cached with the finding (Diagnostic::record_title, its type's own words;
+	// the plain-words lane, the audit's 6.7).
+	return diagnostic.record_title;
 }
 
 std::string finding_field_title(const Diagnostic &diagnostic, const SessionView &view) {
@@ -323,7 +325,10 @@ std::string finding_field_title(const Diagnostic &diagnostic, const SessionView 
 		}
 		return std::string();
 	}
-	return std::string();
+	// A closed file's: the label its type gives the field, no document read (the audit's 6.7: "key" where an
+	// open file's row said "Key").
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(diagnostic.asset) : nullptr;
+	return entry ? field_words(entry->kind, diagnostic.record_kind, diagnostic.field) : std::string();
 }
 
 EditorRequest ProblemLocation::request() const {

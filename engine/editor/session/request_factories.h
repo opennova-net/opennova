@@ -355,6 +355,15 @@ inline EditorRequest revert_to_saved(std::string path, std::vector<Edit> targets
 	request.edits = std::move(targets);
 	return request;
 }
+// The words the player sees for a field's string id set to `text`, in the table that defines the id.
+inline EditorRequest set_string_text(std::string path, NodeAddress address, std::string field, std::string text) {
+	EditorRequest request = of(EditorRequestKind::SetStringText);
+	request.path = std::move(path);
+	request.address = address;
+	request.field = std::move(field);
+	request.values = {{"text", std::move(text)}};
+	return request;
+}
 inline EditorRequest end_edit(std::string path = std::string()) {
 	EditorRequest request = of(EditorRequestKind::EndEdit);
 	request.path = std::move(path);

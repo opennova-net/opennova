@@ -402,7 +402,15 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		const AssetEntry &asset = *file;
 		const DocumentType *type = document_type_for(asset.kind);
 		if (!type) {
-			refuse(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This kind of file has no editor yet.", path));
+			// A kind the editor has no editor for: its page, what it is and who uses it (the plain-words lane,
+			// the audit's 4.6: a double-click did nothing and said nothing), never a finding.
+			if (request.kind == EditorRequestKind::ReloadDocument) {
+				refuse(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This kind of file has no editor yet.", path));
+				return;
+			}
+			view_.documents.page = asset.relative_path;
+			core_.touch(ViewConcern::ActiveDocument);
+			say("Showing the page of " + asset.relative_path + ": the editor has no editor for its kind yet.");
 			return;
 		}
 		std::shared_ptr<DocumentBase> document = type->make(); Diagnostic error;
@@ -467,6 +475,15 @@ void DocumentSet::select_file(const std::string &path) {
 }
 
 void DocumentSet::close_document(const std::string &requested) {
+	// A file's page closed (the plain-words lane), however the request spells its file.
+	if (!view_.documents.page.empty() && !document_for(requested)) {
+		const AssetEntry *file = core_.project_file(requested);
+		if (requested == view_.documents.page || (file && file->relative_path == view_.documents.page)) {
+			view_.documents.page.clear();
+			core_.touch(ViewConcern::ActiveDocument);
+			return;
+		}
+	}
 	// However the request spells it (another case, the name alone), as the open took it.
 	const DocumentBase *document = document_for(requested);
 	const std::string path = document ? document->path() : requested.empty() ? view_.documents.active : requested;
@@ -566,6 +583,60 @@ void DocumentSet::texture_operation(const EditorRequest &request) {
 	// The step named with the operation's words, what Undo says it takes back.
 	view_.activity.status = words;
 	name_step(*document);
+}
+
+void DocumentSet::set_string_text(const EditorRequest &request) {
+	last_edit_ok_ = false;
+	const auto refuse = [&](const std::string &why, const std::string &where) {
+		core_.refuse_now(CoreFinding::DocumentValue, why, where);
+	};
+	const Document *document = records_for(request.path);
+	if (!document) return refuse_records(request.path, "Open the file before setting the words its field names.");
+	std::string text;
+	bool given = false;
+	for (const auto &[key, value] : request.values)
+		if (key == "text") text = value, given = true;
+	if (!given) return refuse("Give the words as values.text.", document->path());
+	// The string the field names, where the game's lookup reaches it (its scope, then the table the game
+	// reads in its place: AssetGraph::symbol_reached).
+	const FieldSchema *schema = nullptr;
+	for (const FieldSchema &field : document->fields(request.address.kind))
+		if (field.id == request.field) schema = &field;
+	Value value;
+	if (!schema || !document->get(request.address, request.field, value))
+		return refuse("No field " + request.field + " on that record.", document->path());
+	const FieldUse use = document->field_on(request.address, *schema);
+	ReferenceKind kind = ReferenceKind::None;
+	std::string name, scope;
+	if (!reference_target(use, value, kind, name, scope) || kind != ReferenceKind::TextId)
+		return refuse("This field names no string id: its words are its own value.", document->path());
+	const AssetGraph *graph = view_.findings.graph.get();
+	GraphEdge edge;
+	edge.kind = kind;
+	edge.value = name;
+	edge.scope = scope;
+	if (use.scope_alternate) edge.scope_alternate = use.scope_alternate;
+	const GraphSymbol *symbol = graph ? graph->symbol_reached(edge) : nullptr;
+	if (!symbol)
+		return refuse("No string table of the project defines " + name + (scope.empty() ? "" : " in " + scope) +
+		                      ": pick a string id first, or add it to the table.",
+		              document->path());
+	// The table opened where it is not, the active document kept as it was.
+	const std::string table_path = symbol->file, locator = symbol->locator;
+	if (!document_for(table_path)) {
+		const std::string was = view_.documents.active;
+		open_document(request::open_document(table_path));
+		if (!was.empty() && document_for(was)) activate(was);
+		core_.touch(ViewConcern::Selection);
+	}
+	Document *table = records_for(table_path);
+	const NodeAddress row = table ? table->address_at(locator) : NodeAddress();
+	if (!row.row) return refuse("The string " + name + " is no longer where the table had it: validate again.", table_path);
+	Edit set;
+	set.address = row;
+	set.field = "text";
+	set.value = text;
+	apply_edits(*table, {set});
 }
 
 void DocumentSet::revert_to_saved(const EditorRequest &request) {

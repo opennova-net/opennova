@@ -77,6 +77,16 @@ private:
 	Workspace &workspace_;
 	ReferencePicker picker_;
 	std::string typed_; // what an open list of choices' box holds (field_widgets: one open at a time)
+public:
+	// The words box of a string id's field (the plain-words lane): what it holds while it is edited, for
+	// which field (its document, record and field), and whether it is; one edited at a time.
+	struct WordsBox {
+		std::string text, key;
+		bool editing = false;
+	};
+
+private:
+	WordsBox words_;
 	// "Referenced by": each use of what the selected record defines, its edge and its line, and
 	// what they were made from.
 	struct Use {

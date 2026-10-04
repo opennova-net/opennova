@@ -122,6 +122,10 @@ struct ImportNeed {
 	ReferenceKind reference = ReferenceKind::None;
 	std::string name;
 	int32_t loader_arg = -1;
+	// The record and the field in words (the plain-words lane: the record titles every window reads,
+	// graph/display_names' edge_record_words and edge_field_words), "" where none.
+	std::string record_title;
+	std::string field_title;
 };
 
 // Another place with a file for a reference the planned file serves, which the plan's order

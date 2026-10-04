@@ -696,8 +696,51 @@ static int plain_words() {
 	return 0;
 }
 
+// A def's names are the game's code page (Windows-1252), the editor's UTF-8 (the plain-words lane, the
+// audit's 9.1): a weapon named "Caf\xE9" in the file reads as "Café", the item naming it reaches it in the
+// graph (both read in the one encoding), a name set is written back in the code page, and one the code
+// page has no character of is refused.
+static int code_page_names() {
+	editor_test::TempProjectDir dir("opennova_catalog_code_page");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Code page"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const AssetEntry *weapon_entry = view.project.scan->find("weapon.def");
+	const AssetEntry *item_entry = view.project.scan->find("items.def");
+	TEST_EXPECT(weapon_entry && item_entry);
+	if (!weapon_entry || !item_entry) return 1;
+	const std::string weapon_file = weapon_entry->relative_path, item_file = item_entry->relative_path;
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/" + weapon_file, "weapon \"Caf\xE9\"\nend\n") &&
+	            editor_test::write_text(view.project.root + "/" + item_file,
+	                                    "begin \"Thing\"\nid 100300\nprimary_weapon Caf\xE9\nend\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(view.findings.graph != nullptr);
+	if (!view.findings.graph) return 1;
+	const AssetGraph &graph = *view.findings.graph;
+	TEST_EXPECT(graph.symbols_named(ReferenceKind::Weapon, "Caf\xC3\xA9").size() == 1);
+	bool reached = false;
+	for (const GraphEdge *edge : graph.references_of(item_file))
+		if (edge->field == "primary_weapon")
+			reached = edge->value == "Caf\xC3\xA9" && graph.resolve(*edge) == ReferenceStatus::Present;
+	TEST_EXPECT(reached);
+	DefCatalogDocument weapons;
+	Diagnostic error;
+	TEST_EXPECT(weapons.load(view.project.root + "/" + weapon_file, weapon_file, AssetKind::WeaponDefs, "jo", error));
+	const NodeAddress gun{weapons.rows()[0]->id, weapons.rows()[0]->kind, 0};
+	Value name;
+	TEST_EXPECT(weapons.get(gun, "weapon_name", name) && std::get<std::string>(name) == "Caf\xC3\xA9");
+	TEST_EXPECT(weapons.apply(field(gun, "weapon_name", std::string("Caf\xC3\xA9 2")), error) &&
+	            weapons.serialize().text.find("\"Caf\xE9 2\"") != std::string::npos);
+	TEST_EXPECT(!weapons.apply(field(gun, "weapon_name", std::string("\xE6\x97\xA5")), error) &&
+	            error.message.find("Windows-1252") != std::string::npos);
+	return 0;
+}
+
 int main() {
-	return history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
+	return code_page_names() || history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
 	       witnessed_enums() || powerup_weapon() || duplicates_apart() || plain_words();
 }

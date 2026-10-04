@@ -475,8 +475,8 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		if (view.allows(EditorRequestKind::SelectFile) &&
 		    (view.documents.file_selected.path != entry.relative_path || (previews && !view.documents.files_lead)))
 			workspace_.request(request::select_file(entry.relative_path));
-		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && is_editable_kind(entry.kind) &&
-		    view.allows(EditorRequestKind::OpenDocument))
+		// Opened: a document, or for a kind the editor has no editor for its page (the plain-words lane).
+		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && view.allows(EditorRequestKind::OpenDocument))
 			workspace_.request(request::open_document(entry.relative_path));
 	}
 	// Dragged onto a reference field whose kind loads it, the file becomes its value
@@ -555,8 +555,8 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entry) {
 	if (!ImGui::BeginPopupContextItem("file_menu")) return;
 	selected_ = entry.relative_path;
-	const bool opens = is_editable_kind(entry.kind) && view.allows(EditorRequestKind::OpenDocument);
-	if (ImGui::MenuItem("Open", nullptr, false, opens) && opens)
+	const bool opens = view.allows(EditorRequestKind::OpenDocument);
+	if (ImGui::MenuItem(is_editable_kind(entry.kind) ? "Open" : "About this file", nullptr, false, opens) && opens)
 		workspace_.request(request::open_document(entry.relative_path));
 	const bool renames = view.allows(EditorRequestKind::RenameAsset);
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);

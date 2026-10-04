@@ -1236,7 +1236,8 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	for (size_t i = first; i < last; ++i) {
 		const Diagnostic &d = view.findings.diagnostics[answer.rows[i]];
 		JsonValue row = diagnostic_to_json(d);
-		// The record in the words the windows show for it, where its document is open (S15).
+		// The record and the field in the words the windows show for them (S15), a closed file's as its
+		// finding cached them (the plain-words lane).
 		const std::string title = finding_record_title(d, view);
 		if (!title.empty()) row.set("record_title", json_string(title));
 		const std::string field = finding_field_title(d, view);
@@ -1483,9 +1484,10 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 
 JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	JsonValue out = JsonValue::make_object();
-	// A text's reference (S13 D9) is written as its text is, in the game's code page: as UTF-8 here.
+	// Every name is UTF-8 in the graph (a text's and a native file's read from the game's code page,
+	// extract_from_text and extract_from_bytes).
 	const bool text = edge.span.line != 0;
-	const auto written = [text](const std::string &value) { return text ? cp1252_to_utf8(value) : value; };
+	const auto written = [](const std::string &value) { return value; };
 	out.set("source", json_string(edge.source));
 	if (!edge.record.empty()) out.set("record", json_string(edge.record));
 	if (!edge.locator.empty()) out.set("locator", json_string(edge.locator));

@@ -1,5 +1,6 @@
 #include "project_find.h"
 
+#include <editor/graph/display_names.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
@@ -37,7 +38,10 @@ const std::vector<ProjectFind::Usage> &ProjectFind::usages(const SessionView &vi
 	const GraphSearchHit &result = hits_[hit];
 	for (const GraphEdge *edge : result.symbol ? view.findings.graph->users_of(*result.symbol) : view.findings.graph->usages_of(result.file)) {
 		Usage use;
-		use.line = edge->source + ": " + (edge->record.empty() ? "" : edge->record + " - ") + edge_field_title(view, *edge);
+		// Its place in words, its file open or not (the plain-words lane: a record by its type's words).
+		const AssetEntry *source = view.project.scan->at_path(edge->source);
+		const std::string place = edge_place_words(*edge, source ? source->kind : AssetKind::Unknown);
+		use.line = edge->source + (place.empty() ? std::string() : ": " + place);
 		use.tip = use.line + "\n" + edge->field + " = " + edge->value;
 		use.target = usage_target(*view.project.scan, *edge);
 		out.push_back(std::move(use));

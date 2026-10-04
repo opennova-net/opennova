@@ -172,6 +172,8 @@ void plan_sites(RenamePlan &plan, const AssetScan &scan, const AssetGraph &graph
 		site.file = edge->source;
 		if (const AssetEntry *source = find_asset(scan, edge->source)) site.kind = source->kind;
 		site.record = edge->record;
+		site.record_title = edge->record_title;
+		site.record_kind = edge->address.kind;
 		site.locator = edge->locator;
 		site.field = edge->field;
 		site.before = edge->value;
@@ -524,6 +526,8 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		site.file = edge->source;
 		site.kind = source->kind;
 		site.record = edge->record;
+		site.record_title = edge->record_title;
+		site.record_kind = edge->address.kind;
 		site.locator = edge->locator;
 		site.field = edge->field;
 		site.span = edge->span;
@@ -631,10 +635,13 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 	const std::string &file = document.path();
 	Extracted extracted;
 	extract_from_text(document, extracted);
+	// The names are UTF-8 (the graph's, extract_from_text), the text the game's code page: a site's old
+	// name and its new one in the text's own bytes.
 	struct Found {
 		const RenameSite *site;
 		size_t offset;
-		std::string after; // in the document's code page
+		std::string after;   // in the document's code page
+		size_t length = 0;   // the old name's bytes there
 	};
 	std::vector<Found> found;
 	std::vector<bool> taken(extracted.edges.size(), false);
@@ -645,18 +652,18 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 			const GraphEdge &edge = extracted.edges[i];
 			if (!taken[i] && edge.locator == site->locator && edge.value == site->before && reaches(edge)) match = i;
 		}
-		std::string after;
+		std::string after, before;
 		size_t offset = 0;
-		if (match == extracted.edges.size() || !utf8_to_cp1252(site->after, after) ||
+		if (match == extracted.edges.size() || !utf8_to_cp1252(site->after, after) || !utf8_to_cp1252(site->before, before) ||
 		    !document.offset_of(extracted.edges[match].span.line, extracted.edges[match].span.column, offset))
 			continue;
 		taken[match] = true;
-		found.push_back({site, offset, std::move(after)});
+		found.push_back({site, offset, std::move(after), before.size()});
 	}
 	std::sort(found.begin(), found.end(), [](const Found &a, const Found &b) { return a.offset > b.offset; });
 	std::vector<Edit> edits;
 	for (const Found &place : found) {
-		const TextSpan span = document.span_at(place.offset, place.site->before.size());
+		const TextSpan span = document.span_at(place.offset, place.length);
 		edits.push_back(TextDocument::replace(span, place.after));
 	}
 	Diagnostic error;
@@ -674,7 +681,7 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 		const TextSpan at = document.span_at(size_t(std::ptrdiff_t(place.offset) + moved), place.after.size());
 		const std::string locator = TextDocument::locator(at.line, at.column);
 		const bool read = std::any_of(again.edges.begin(), again.edges.end(), [&](const GraphEdge &edge) {
-			return edge.locator == locator && edge.value == place.after;
+			return edge.locator == locator && edge.value == place.site->after;
 		});
 		if (!read) {
 			findings.push_back(refusal(CoreFinding::RenameName,
@@ -683,7 +690,7 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 			                           file));
 			ok = false;
 		}
-		moved += std::ptrdiff_t(place.after.size()) - std::ptrdiff_t(place.site->before.size());
+		moved += std::ptrdiff_t(place.after.size()) - std::ptrdiff_t(place.length);
 	}
 	if (found.size() < sites.size()) {
 		findings.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Error,
@@ -1031,10 +1038,10 @@ void RenameTransaction::stage_native(const AssetEntry &asset, const std::vector<
 			return edge.rewritable && edge.record == site->record && edge.field == site->field && edge.value == site->before &&
 			       graph_.resolve(edge, &resolved) == ReferenceStatus::Present && resolved == site->target;
 		});
-		// The new name in the text's code page (its old one is the text's own bytes, as read); one it cannot
-		// hold was refused as the rename was planned.
-		std::string after;
-		if (there && utf8_to_cp1252(site->after, after)) wanted.push_back({site->record, site->field, site->before, after});
+		// The names as the graph reads them (UTF-8; rewrite_native_text writes them in the text's code page);
+		// a new name the code page cannot hold was refused as the rename was planned.
+		std::string stored;
+		if (there && utf8_to_cp1252(site->after, stored)) wanted.push_back({site->record, site->field, site->before, site->after});
 	}
 	std::vector<size_t> missed;
 	staged.rewritten = rewrite_native_text(asset.relative_path, asset.kind, project_.target_game, staged.text, wanted, missed);

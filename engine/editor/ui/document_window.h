@@ -97,6 +97,7 @@ private:
 	// the user chose, the OpenDocument raised for it.
 	std::string followed_;
 	std::string raised_;
+	std::string page_followed_; // the file page whose tab was last selected for it (the plain-words lane)
 	// The find bar: open, the keyboard to go to its text on the next draw, the text and whether
 	// case matters, where it is among the hits.
 	struct Find {

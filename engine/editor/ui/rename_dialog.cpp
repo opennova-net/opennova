@@ -1,5 +1,6 @@
 #include "rename_dialog.h"
 
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/session/request_factories.h>
@@ -17,10 +18,19 @@ namespace {
 constexpr const char *kTitle = "Rename everywhere";
 constexpr const char *kBackTitle = "Rename back";
 
-// A site of a rename, on one line.
+// A site of a rename, on one line, its record and its field in words (the plain-words lane, the audit's
+// 8.3: "menus/main.mnu: STARTUP/MAIN/BUTTONS/OPTIONS - Text", not "string.value").
 std::string site_line(const RenameSite &site) {
-	return site.file + ": " + (site.record.empty() ? std::string() : site.record + " - ") + site.field + ": " + site.before +
-	       " -> " + site.after;
+	std::string record = site.record;
+	if (!site.record_title.empty()) {
+		const size_t slash = site.record.rfind('/');
+		record = slash == std::string::npos ? site.record_title : site.record.substr(0, slash + 1) + site.record_title;
+	}
+	const std::string words = field_words(site.kind, site.record_kind, site.field);
+	const std::string field = words.empty() ? site.field : words;
+	std::string place = record;
+	if (!field.empty()) place += (place.empty() ? "" : " - ") + field;
+	return site.file + ": " + (place.empty() ? std::string() : place + ": ") + site.before + " -> " + site.after;
 }
 
 } // namespace

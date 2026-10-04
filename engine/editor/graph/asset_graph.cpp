@@ -11,6 +11,7 @@
 
 #include <editor/documents/document_types.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
 #include <editor/model/diagnostic.h>
@@ -39,7 +40,8 @@ Diagnostic unreadable(const AssetEntry &asset, const Diagnostic &error) {
 
 // An edge as its file's reading makes it: every field but the target, which its resolution sets.
 bool same_reading(const GraphEdge &a, const GraphEdge &b) {
-	return a.source == b.source && a.record == b.record && a.record_key == b.record_key && a.locator == b.locator &&
+	return a.source == b.source && a.record == b.record && a.record_key == b.record_key &&
+			a.record_title == b.record_title && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.kind == b.kind &&
 			a.value == b.value && a.scope == b.scope && a.rewritable == b.rewritable &&
 			a.through == b.through && a.loader_arg == b.loader_arg && a.use_context == b.use_context &&
@@ -54,7 +56,8 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 bool same_reading(
 		const GraphSymbol &a, bool a_inert, const std::string &a_reason, const GraphSymbol &b) {
 	return a.kind == b.kind && a.name == b.name && a.display == b.display && a.value == b.value &&
-			a.file == b.file && a.record == b.record && a.record_key == b.record_key && a.locator == b.locator &&
+			a.file == b.file && a.record == b.record && a.record_key == b.record_key && a.title == b.title &&
+			a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.scope == b.scope &&
 			a_inert == b.inert && a_reason == b.inert_reason && a.line == b.line;
 }
@@ -1166,17 +1169,21 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 		hit.usages = usages_of(slot.path).size();
 		hits.push_back(std::move(hit));
 	});
+	// The names a symbol reads as with the project's names (definition_words: an item by its catalog's name,
+	// a string by its text, a weapon and an ammo by the names the player sees for them) and its record in
+	// its type's words (GraphSymbol::title: a menu's part by what it does): each searched as its name is
+	// (ADR 0046 S17's items; every kind since the plain-words lane, the audit's 8.2).
+	const GraphNameSource names(*this);
 	for_each_symbol([&](const GraphSymbol &symbol) {
 		// A record set's records go by their index, no name.
 		if (reference_row(symbol.kind).resolution == ReferenceResolution::Record) return;
-		// An item by its catalog's name too (ADR 0046 S17: a soldier found by the name a modder knows
-		// it by, "Indonesian Soldier #1", not its id).
-		const std::string words = symbol.kind == ReferenceKind::Item ? symbol_words(symbol) : std::string();
-		if (!holds(symbol.display) && (words.empty() || !holds(words))) return;
+		const std::string words = definition_words(symbol, &names);
+		if (!holds(symbol.display) && (words == symbol.display || !holds(words)) && (symbol.title.empty() || !holds(symbol.title)))
+			return;
 		GraphSearchHit hit;
 		hit.symbol = &symbol;
 		hit.name = symbol.display;
-		hit.words = words == symbol.display ? std::string() : words;
+		hit.words = words != symbol.display ? words : symbol.title;
 		hit.file = symbol.file;
 		hit.usages = users_of(symbol).size();
 		hits.push_back(std::move(hit));
@@ -1238,6 +1245,7 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	                     : make_finding(CoreFinding::ReferenceMissing, row.severity_when_missing, message, edge.source, edge.field);
 	d.record = edge.record;
 	d.record_key = edge.record_key;
+	d.record_title = edge.record_title;
 	// A text's reference: its place, where Problems opens the document.
 	d.line = edge.span.line;
 	d.column = edge.span.column;

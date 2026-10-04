@@ -34,11 +34,14 @@ std::string joined(const std::vector<std::string> &words) {
 	return out;
 }
 
-// What wanted a file: the file naming it, then the record and the field.
+// What wanted a file: the file naming it, then the record and the field, in words where they have them
+// (the plain-words lane: "MAIN.MNU: STARTUP/MAIN/BUTTONS/OPTIONS/Go to OPTIONS in options.mnu - Menu file").
 std::string need_words(const ImportNeed &need) {
+	const std::string &record = need.record_title.empty() ? need.record : need.record_title;
+	const std::string &field = need.field_title.empty() ? need.field : need.field_title;
 	std::string out = need.file;
-	if (!need.record.empty()) out += ": " + need.record;
-	if (!need.field.empty()) out += (need.record.empty() ? ": " : " ") + need.field;
+	if (!record.empty()) out += ": " + record;
+	if (!field.empty()) out += (record.empty() ? ": " : need.field_title.empty() ? " " : " - ") + field;
 	return out;
 }
 

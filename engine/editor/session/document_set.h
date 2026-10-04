@@ -96,6 +96,10 @@ public:
 	// makes (its import's options make it), an operation no row names, one the file cannot take.
 	void texture_operation(const EditorRequest &request);
 	void revert_to_saved(const EditorRequest &request);
+	// The text of the string a field's string id names (SetStringText, the plain-words lane): the table
+	// that defines the id as the game's lookup reaches it (the graph's), opened in the background where it
+	// is not, its string's text set there as one undo step of that table.
+	void set_string_text(const EditorRequest &request);
 	// Copy and Cut.
 	void copy(const EditorRequest &request);
 	void paste(const EditorRequest &request);

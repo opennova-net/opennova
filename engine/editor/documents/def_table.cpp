@@ -11,6 +11,7 @@
 #include <new>
 #include <utility>
 
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <editor/documents/def_words.h>
 #include <runtime/hud/game_text_lookup.h>
@@ -276,17 +277,32 @@ LabelledField labelled(R kind, const DefField &field) {
 		                                              : std::string(words->meaning) + "\n" + entry.description;
 	}
 
+	// A text the game holds in its code page (Windows-1252, one byte a character): the editor reads and
+	// writes it as UTF-8, as a string table's and a menu's (the plain-words lane: a name compared with the
+	// project's UTF-8 file names in one encoding), refusing a character the code page has no byte for.
+	if (entry.type == FieldType::Text) entry.code_page = true;
 	const auto shared = std::make_shared<const DefMember>(member);
 	out.value.get = [shared](const RecordHandle &record, Value &value) {
 		// In written units while the line carries the stored word, else as stored.
 		if (shared->authored != DefAuthored::None && def_authored_get(*shared, record.data, value)) return true;
 		value = def_get(record.data, *shared->field);
+		if (auto *text = std::get_if<std::string>(&value)) *text = cp1252_to_utf8(*text);
 		return true;
 	};
-	out.value.set = [shared, flag](const RecordHandle &record, const Value &value, std::string &error) {
+	out.value.set = [shared, flag](const RecordHandle &record, const Value &given, std::string &error) {
 		if (flag) {
 			error = "Whether the line is written is the field's own tick.";
 			return false;
+		}
+		Value value = given;
+		if (auto *text = std::get_if<std::string>(&value)) {
+			std::string stored;
+			std::u32string unstorable;
+			if (!utf8_to_cp1252(*text, stored, &unstorable)) {
+				error = "The game's text encoding (Windows-1252) has no character for part of this text.";
+				return false;
+			}
+			*text = std::move(stored);
 		}
 		const DefValue before = def_get(record.data, *shared->field);
 		// A number in the units the file writes it goes through the file's own line.

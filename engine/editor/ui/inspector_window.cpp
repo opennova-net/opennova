@@ -16,8 +16,11 @@
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/rename_dialog.h>
+#include <editor/ui/text_edit.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
+#include <formats/mnu/mnu_layout.h>
+#include <formats/mns/mns.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -66,6 +69,7 @@ struct Reveal {
 struct Controls {
 	ReferencePicker &picker;
 	std::string &typed;
+	InspectorWindow::WordsBox &words;
 };
 
 const Document *active(const SessionView &view) {
@@ -296,8 +300,18 @@ struct ViewNames {
 // What a value names, in words, under its control (ADR 0046 S15): a field with no choices and not
 // picked by name whose value names something (a name index's string, the stop an entity starts at),
 // muted, or in the missing colour where it names nothing; cut to the column, whole in its tooltip.
-void value_words(const DisplayName &words) {
+void value_words(const DisplayName &words, FieldColor color = FieldColor::None) {
 	if (words.text.empty()) return;
+	// A colour a stylesheet variable stands for, as its swatch before its words (the audit's 3.3).
+	if (color == FieldColor::HexArgb && !words.resolved.empty() && !mns::is_variable_reference(words.resolved)) {
+		const uint32_t word = mnu::color_value(words.resolved);
+		const ImVec4 rgba(float((word >> 16) & 0xFF) / 255.0f, float((word >> 8) & 0xFF) / 255.0f, float(word & 0xFF) / 255.0f,
+		                  float((word >> 24) & 0xFF) / 255.0f);
+		const float side = ImGui::GetTextLineHeight();
+		ImGui::ColorButton("##resolved", rgba, ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_AlphaPreviewHalf,
+		                   ImVec2(side, side));
+		ImGui::SameLine();
+	}
 	const std::string shown = ui_kit::fit(words.text, ImGui::GetContentRegionAvail().x);
 	if (words.dangling) ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "%s", shown.c_str());
 	else ImGui::TextDisabled("%s", shown.c_str());
@@ -548,6 +562,35 @@ float begin_row(Reveal *reveal, const NodeAddress &address, const RowFields &fie
 	return ImGui::GetCursorScreenPos().x - ImGui::GetStyle().CellPadding.x;
 }
 
+// A string id's words as an editable box (the plain-words lane, the audit's 3.2: a menu button's Text
+// edited the key, never the words): the string the id names, as the game's lookup reaches it, edited in
+// place and set in the table that defines it when the box lets go (SetStringText: that table opened in
+// the background, one undo step there), then a muted line saying it is the id's, which the field's own
+// control under it picks. The box holds what is typed while it is edited, the string as it stands
+// otherwise.
+void string_words(Workspace &workspace, InspectorWindow::WordsBox &box, const Document &document,
+                  const NodeAddress &address, const FieldUse &field, const DisplayName &words) {
+	const std::string shown = words.text.empty() ? words.raw : words.text;
+	const std::string key = document.path() + "|" + std::to_string(address.row) + "|" + std::to_string(address.child) + "|" +
+	                        field.schema->id;
+	if (!box.editing || box.key != key) box.text = shown;
+	text_edit::Box options;
+	options.code_page = true;
+	options.multiline = shown.find('\n') != std::string::npos;
+	options.height = ImGui::GetTextLineHeight() * 3.0f + ImGui::GetStyle().FramePadding.y * 2.0f;
+	ImGui::SetNextItemWidth(-FLT_MIN);
+	text_edit::edit("##words", box.text, 4096, options);
+	box.editing = ImGui::IsItemActive();
+	box.key = key;
+	if (ImGui::IsItemDeactivatedAfterEdit() && box.text != shown)
+		workspace.request(request::set_string_text(document.path(), address, field.schema->id, box.text));
+	ui_kit::tooltip("The words the player sees: the string " + words.raw + " in " + words.source +
+	                ". A change is made there, so every use of the string shows it (Undo there takes it back).\n"
+	                "{hot} before a letter makes it the button's key: the game takes the marker out and underlines "
+	                "the letter (case matters: {HOT} stays as written).");
+	ImGui::TextDisabled("String id in %s:", words.source.c_str());
+}
+
 // One field of the form: its name (the optional tick before it, marked where it changed
 // since the last save) and its control, which shows the primary target's value and sets
 // every target. The field a request asked to show is scrolled to once and lit a moment.
@@ -587,12 +630,17 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	const float tools = (is_reference(field, value) ? reference_tools_width(field) : 0.0f) + rename_width;
 	const bool beside = (is_reference(field, value) || renames) && !schema.multiline &&
 	                    ImGui::GetContentRegionAvail().x - tools >= ImGui::GetFontSize() * 6.0f;
-	ImGui::BeginDisabled(!present);
-	ImGui::SetNextItemWidth(beside ? -tools : -FLT_MIN);
 	// What the value names, in words (ADR 0046 S15): the picker's frame shows them, any other control
 	// has them under it.
 	const ViewNames names(workspace.view());
 	const DisplayName words = value_display(document, address, field, value, names.get());
+	// A string id's words first, as the value the modder edits (the plain-words lane, the audit's 3.2),
+	// the id after them.
+	const bool words_first = present && !mixed && targets.size() == 1 && !document.blocked() &&
+	                         value_reference(field, value) == ReferenceKind::TextId && !words.dangling && !words.source.empty();
+	if (words_first) string_words(workspace, controls.words, document, address, field, words);
+	ImGui::BeginDisabled(!present);
+	ImGui::SetNextItemWidth(beside ? -tools : -FLT_MIN);
 	const bool by_name = picks_by_name(field);
 	if (by_name) {
 		std::string picked;
@@ -615,7 +663,7 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	const bool chosen = std::any_of(choices.begin(), choices.end(), [&](const FieldChoice &c) {
 		return number ? c.value == *number : std::holds_alternative<std::string>(value) && c.name == std::get<std::string>(value);
 	});
-	if (!by_name && !mixed && present && !schema.flags && !chosen) value_words(words);
+	if (!by_name && !mixed && present && !schema.flags && !chosen && !words_first) value_words(words, field.color);
 	if (renames) {
 		if (beside) ImGui::SameLine();
 		if (ImGui::SmallButton("Rename...")) rename_everywhere(workspace, document, address, field, value);
@@ -1197,7 +1245,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter_);
 	leave_out(plan, taken.fields, taken.collections);
 	if (plan.empty() && filter_[0]) ui_kit::empty_state("No field or list matches the filter.");
-	Controls controls{picker_, typed_};
+	Controls controls{picker_, typed_, words_};
 	ImGui::BeginDisabled(!editable);
 	for (const InspectorSection &section : plan) draw_section(workspace_, controls, *document, selection, owner, section, &reveal);
 	ImGui::EndDisabled();
@@ -1268,7 +1316,7 @@ void InspectorWindow::draw_together(const Document &document, const std::vector<
 			        !section.key.empty() && std::any_of(section.fields.begin(), section.fields.end(), [&](const FieldUse &field) {
 				        return field.schema->id == section.key && is_yes_no(*field.schema);
 			        });
-			Controls controls{picker_, typed_};
+			Controls controls{picker_, typed_, words_};
 			field_rows(workspace_, controls, document, records, section.fields, nullptr, has_switch ? section.key : std::string());
 			ImGui::EndTable();
 		}
