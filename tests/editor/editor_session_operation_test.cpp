@@ -224,9 +224,11 @@ static int test_request_table() {
 		for (const bool cancellable : {true, false})
 			for (const K kind : {K::SetImportDependencies, K::Copy})
 				TEST_EXPECT(gate_answer(kind, status_of(static_cast<OperationKind>(k), cancellable)) == GateAnswer::Proceed);
-	TEST_EXPECT(request_kind_row(K::Build).on_busy == OnBusy::Join && request_kind_row(K::Play).on_busy == OnBusy::Join);
+	TEST_EXPECT(request_kind_row(K::Build).on_busy == OnBusy::Join && request_kind_row(K::Play).on_busy == OnBusy::Join &&
+	            request_kind_row(K::Export).on_busy == OnBusy::Join);
 	TEST_EXPECT(operation_kind_row(OperationKind::Build).joined_by.has(K::Build) &&
 	            operation_kind_row(OperationKind::Build).joined_by.has(K::Play) &&
+	            operation_kind_row(OperationKind::Build).joined_by.has(K::Export) &&
 	            !operation_kind_row(OperationKind::Build).joined_by.has(K::Save));
 	for (const K kind : {K::PreviewImport, K::PlanImport, K::PreviewInstallImport, K::CancelImport})
 		TEST_EXPECT(request_kind_row(kind).on_busy == OnBusy::Supersede &&
@@ -268,7 +270,8 @@ static int test_request_table() {
 		TEST_EXPECT(gate_answer(kind, refreshing) == GateAnswer::Refuse);
 	TEST_EXPECT(gate_answer(K::SelectRecord, refreshing) == GateAnswer::Proceed &&
 	            gate_answer(K::CloseProject, refreshing) == GateAnswer::CancelRunning);
-	TEST_EXPECT(gate_answer(K::Build, build) == GateAnswer::Join && gate_answer(K::Play, build) == GateAnswer::Join);
+	TEST_EXPECT(gate_answer(K::Build, build) == GateAnswer::Join && gate_answer(K::Play, build) == GateAnswer::Join &&
+	            gate_answer(K::Export, build) == GateAnswer::Join);
 	for (const K kind : {K::NewProject, K::OpenProject, K::CloseProject, K::Quit})
 		TEST_EXPECT(gate_answer(kind, build) == GateAnswer::CancelRunning && !busy_refuses(kind, build));
 	const OperationStatus stubborn_build = status_of(OperationKind::Build, false);
