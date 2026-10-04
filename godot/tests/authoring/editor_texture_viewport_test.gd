@@ -248,3 +248,41 @@ func test_a_texture_draws_as_a_use() -> void:
 		state = _viewport("textures/brick.tga")
 	texture = material.get_shader_parameter("level_nearest") as Texture2D
 	assert_eq(texture.get_image().get_pixel(0, 1), Color8(10, 100, 200, 50), "the file as it holds it")
+
+
+## S18: a texture's whole-image edit through the wire: its rows saved bottom first (texture_operation), the
+## device drawing the document's new texels once it follows; Undo puts the file's own back.
+func test_a_texture_edit_redraws() -> void:
+	if _app == null:
+		return
+	var root := _new_project()
+	_write(root.path_join("textures/brick.tga"), _tga(0x28))
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.open_document("textures/brick.tga"))
+	var state := await _await_ready("textures/brick.tga")
+	assert_true(bool(state.get("body", {}).get("upside_down", false)), "a top-left TGA shows upside down")
+	var builds := int(state.get("builds", 0))
+	assert_true(_seam.done({"kind": "texture_operation", "path": "textures/brick.tga", "operation": "reorder_rows"}),
+			"texture_operation is served")
+	for _frame in 600:
+		if int(state.get("builds", 0)) > builds:
+			break
+		_app.pump()
+		await get_tree().process_frame
+		state = _viewport("textures/brick.tga")
+	assert_false(bool(state.get("body", {}).get("upside_down", true)), "saved bottom first, it shows the right way up")
+	var material := _material("textures/brick.tga")
+	assert_not_null(material)
+	if material == null:
+		return
+	var texture := material.get_shader_parameter("level_nearest") as Texture2D
+	assert_eq(texture.get_image().get_pixel(0, 0), Color8(10, 100, 200, 50), "the file's first texel now the top row's first")
+	builds = int(state.get("builds", 0))
+	assert_true(_seam.done({"kind": "undo", "path": "textures/brick.tga"}))
+	for _frame in 600:
+		if int(state.get("builds", 0)) > builds:
+			break
+		_app.pump()
+		await get_tree().process_frame
+		state = _viewport("textures/brick.tga")
+	assert_true(bool(state.get("body", {}).get("upside_down", false)), "Undo puts the file's own rows back")

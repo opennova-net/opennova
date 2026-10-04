@@ -65,6 +65,7 @@ enum class EditorRequestKind {
 	RenameBack,
 	Reimport,
 	SetImportOptions,
+	TextureOperation,
 	PreviewInstallImport,
 	ClearOutput,
 	SetViewport,
@@ -264,9 +265,11 @@ struct EditorRequest {
 	std::string export_dir;
 	// The mission Play starts the game in, by its logical name ("" the game's menu; S14).
 	std::string mission;
+	// A texture operation's name (TextureOperation, S18: documents/texture_operations.h).
+	std::string operation;
 	// Named values, in their names' order: a new file's starting values, by its blank's parameter tokens
 	// (blank_factory.h: a mission's title, terrain and environment); an import's options, by their keys
-	// (SetImportOptions, S18).
+	// (SetImportOptions, S18); a texture operation's params (TextureOperation, S18).
 	std::vector<std::pair<std::string, std::string>> values;
 	// Requirements' roles; the game install's files by logical name; files on disk to import.
 	std::vector<std::string> roles;
@@ -318,7 +321,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.game_install == b.game_install && a.path == b.path && a.locator == b.locator &&
 			a.field == b.field &&
 			a.new_name == b.new_name && a.role == b.role && a.file_kind == b.file_kind &&
-			a.out_dir == b.out_dir && a.export_dir == b.export_dir && a.mission == b.mission && a.values == b.values &&
+			a.out_dir == b.out_dir && a.export_dir == b.export_dir && a.mission == b.mission &&
+			a.operation == b.operation && a.values == b.values &&
 			a.roles == b.roles &&
 			a.names == b.names && a.paths == b.paths && a.imports == b.imports &&
 			a.edits == b.edits && a.address == b.address && a.records == b.records &&

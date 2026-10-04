@@ -787,6 +787,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::OutDir: return text_of(json, token, request.out_dir, error);
 	case F::ExportDir: return text_of(json, token, request.export_dir, error);
 	case F::Mission: return text_of(json, token, request.mission, error);
+	case F::Operation: return text_of(json, token, request.operation, error);
 	case F::Values: {
 		// An object of strings, sorted by key: the writer emits an object's keys sorted, so the order
 		// is the keys', and request::create_file sorts them the same way (review F10).
@@ -909,6 +910,7 @@ bool field_to_json(
 	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
 	case F::ExportDir: out = json_string(request.export_dir); return !request.export_dir.empty();
 	case F::Mission: out = json_string(request.mission); return !request.mission.empty();
+	case F::Operation: out = json_string(request.operation); return !request.operation.empty();
 	case F::Values:
 		out = JsonValue::make_object();
 		for (const auto &entry : request.values) out.set(entry.first, json_string(entry.second));

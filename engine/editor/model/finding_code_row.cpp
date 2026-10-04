@@ -273,17 +273,20 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// finding cites its witness). An error of one gates: a terrain's colour map read past its texels, a
 	// foliage map read past its rows, a terrain map the mission needs that its loader cannot read (the
 	// mission aborts); the others are warnings and notes.
-	{ C::TextureAlphaNotLoaded, code("texture.alpha_not_loaded", G::Textures) },
-	{ C::TextureColourMapSize, code("texture.colormap_size", G::Textures) },
-	{ C::TextureFoliageMapOverrun, code("texture.foliage_map_overrun", G::Textures) },
-	{ C::TextureFoliageMapShape, code("texture.foliage_map_shape", G::Textures) },
-	{ C::TextureHeightWrap, code("texture.height_wrap", G::Textures) },
-	{ C::TextureLoadingScreenSize, code("texture.loading_screen_size", G::Textures) },
-	{ C::TextureMfdNotPowerOfTwo, code("texture.mfd_not_pow2", G::Textures) },
-	{ C::TextureNormalMapHalved, code("texture.normal_map_halved", G::Textures) },
-	{ C::TextureParticleTooBig, code("texture.particle_too_big", G::Textures) },
-	{ C::TextureTileAtlasCells, code("texture.tile_atlas_cells", G::Textures) },
-	{ C::TextureWrongReader, code("texture.wrong_reader", G::Textures) },
+	// What a use asks of the file its loader opens: where an import makes that file, the import made as the
+	// use asks.
+	{ C::TextureAlphaNotLoaded, code("texture.alpha_not_loaded", G::Textures, F::ImportFitsUse) },
+	{ C::TextureColourMapSize, code("texture.colormap_size", G::Textures, F::ImportFitsUse) },
+	{ C::TextureFoliageMapOverrun, code("texture.foliage_map_overrun", G::Textures, F::ImportFitsUse) },
+	{ C::TextureFoliageMapShape, code("texture.foliage_map_shape", G::Textures, F::ImportFitsUse) },
+	{ C::TextureHeightWrap, code("texture.height_wrap", G::Textures, F::ImportFitsUse) },
+	{ C::TextureLoadingScreenSize, code("texture.loading_screen_size", G::Textures, F::ImportFitsUse) },
+	{ C::TextureMfdNotPowerOfTwo, code("texture.mfd_not_pow2", G::Textures, F::ImportFitsUse) },
+	{ C::TextureNormalMapHalved, code("texture.normal_map_halved", G::Textures, F::ImportFitsUse) },
+	{ C::TextureOperation, code("texture.operation", G::Textures) },
+	{ C::TextureParticleTooBig, code("texture.particle_too_big", G::Textures, F::ImportFitsUse) },
+	{ C::TextureTileAtlasCells, code("texture.tile_atlas_cells", G::Textures, F::ImportFitsUse) },
+	{ C::TextureWrongReader, code("texture.wrong_reader", G::Textures, F::ImportFitsUse) },
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },
 	{ C::UnsavedNone, code("unsaved.none", G::UnsavedChanges) },
 	{ C::ViewportRefused, code("viewport.refused", G::Viewports) },

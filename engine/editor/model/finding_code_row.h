@@ -32,6 +32,8 @@ enum class FindingFix {
 	Reload,            // an open document whose file changed outside the editor: Reload it
 	Reimport,          // an import whose output is missing: Import it again
 	Rewrite,           // input a rewrite drops or normalizes: Rewrite the file (rewrite_does)
+	TextureRows,       // a TGA stored top first (S18): Save it bottom first (texture_operation)
+	ImportFitsUse,     // what a use asks of a texture an import makes (S18): Make the import fit the use
 };
 
 // Where Problems takes a finding of the code: what the file holds (its document opened on the
@@ -397,6 +399,7 @@ enum class CoreFinding {
 	TextureLoadingScreenSize,
 	TextureMfdNotPowerOfTwo,
 	TextureNormalMapHalved,
+	TextureOperation,
 	TextureParticleTooBig,
 	TextureTileAtlasCells,
 	TextureWrongReader,

@@ -11,6 +11,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/texture_document.h>
+#include <editor/documents/texture_image.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
@@ -59,7 +60,8 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 	const auto *texture = dynamic_cast<const TextureDocument *>(&document);
 	const TextureImage *image = texture ? texture->image().get() : nullptr;
 	ImGui::TextUnformatted(basename_of(document.path()).c_str());
-	ui_kit::tooltip(document.path() + "\nRead only: the texture editor shows a texture as the game reads it.");
+	ui_kit::tooltip(document.path() + "\nShown as the game reads it. Its edits are whole-image ones (Edit, below); paint it in "
+	                                  "your own program.");
 	if (!image) {
 		ui_kit::empty_state("This texture did not read.");
 		return;
@@ -83,7 +85,82 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 	}
 	if (!image->palette.empty() && ImGui::CollapsingHeader("Palette", ImGuiTreeNodeFlags_DefaultOpen)) draw_palette(image->palette);
 	draw_import(workspace, document);
+	if (!import_.imported) draw_edits(workspace, document, *image);
 	draw_uses(workspace, document);
+}
+
+// The whole-image edits of a texture no import makes (ADR 0046 S18, texture_operation): each one undo
+// step, the file made anew through the editor's writers in the form it is stored in, Save writing it.
+void TextureView::draw_edits(Workspace &workspace, const DocumentBase &document, const TextureImage &image) {
+	if (!ImGui::CollapsingHeader("Edit###texture_edit")) return;
+	const SessionView &view = workspace.view();
+	const bool allowed = view.allows(EditorRequestKind::TextureOperation) && image.loads && image.decoded;
+	const std::string &path = document.path();
+	const auto operate = [&](const char *operation, std::vector<std::pair<std::string, std::string>> params) {
+		if (allowed) workspace.request(request::texture_operation(path, operation, std::move(params)));
+	};
+	const std::string extension = strutil::to_lower(utf8_of(path_of(path).extension()));
+	const uint32_t w = image.width(), h = image.height();
+	ImGui::BeginDisabled(!allowed);
+	ImGui::PushTextWrapPos(0.0f);
+	// Its rows, where the game draws it upside down.
+	if (image.upside_down) {
+		if (ImGui::Button("Save it bottom first")) operate("reorder_rows", {});
+		ui_kit::tooltip("Its rows are stored top first, and the game reads every TGA bottom up: written bottom first, the "
+		                "game draws it the way up its header meant.");
+	}
+	// Its size: halved as the game halves, or its sides to powers of two.
+	ImGui::TextDisabled("Size");
+	if (w > 1 && h > 1) {
+		if (ImGui::Button("Halve")) operate("resize", {{"size", std::to_string(w / 2) + "x" + std::to_string(h / 2)}});
+		ui_kit::tooltip("Each texel the 2 x 2 box of the four under it, as the game halves a texture.");
+		ImGui::SameLine();
+	}
+	if (ImGui::Button("Powers of two")) operate("resize", {{"size", "pow2_down"}});
+	ui_kit::tooltip("Each side down to a power of two.");
+	// Its alpha (a PCX holds none; a 24-bit TGA's edit says to store it as 32-bit first).
+	if (extension != ".pcx") {
+		ImGui::TextDisabled("Alpha");
+		if (ImGui::Button("Opaque")) operate("alpha", {{"alpha", "opaque"}});
+		ImGui::SameLine();
+		if (ImGui::Button("Invert")) operate("alpha", {{"alpha", "invert"}});
+		ImGui::SameLine();
+		if (ImGui::Button("From brightness")) operate("alpha", {{"alpha", "luminance"}});
+		ui_kit::tooltip("Each texel's alpha its brightness, (85 x (r + g + b)) >> 8, as the game makes a sky PCX's.");
+	}
+	// Its stored form, within its extension.
+	if (extension == ".tga") {
+		ImGui::TextDisabled("Stored as");
+		if (ImGui::Button("32-bit")) operate("format", {{"format", "tga"}});
+		ImGui::SameLine();
+		if (ImGui::Button("24-bit")) operate("format", {{"format", "tga24"}});
+		ui_kit::tooltip("Colour alone: a terrain colour map's form.");
+	} else if (extension == ".dds") {
+		ImGui::TextDisabled("Stored as");
+		if (ImGui::Button("DXT5 with mips")) operate("format", {{"dds", "dxt5"}, {"mips", "full"}});
+		ImGui::SameLine();
+		if (ImGui::Button("DXT1")) operate("format", {{"dds", "dxt1"}, {"mips", "full"}});
+		ImGui::SameLine();
+		if (ImGui::Button("A8R8G8B8")) operate("format", {{"dds", "argb"}});
+	}
+	// An 8-bit PCX's indices, which a foliage or char map reads as data.
+	if (extension == ".pcx" && !image.palette.empty()) {
+		ImGui::TextDisabled("Move a palette index");
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
+		ImGui::InputInt("##from", &remap_from_, 0);
+		ImGui::SameLine();
+		ImGui::TextUnformatted("to");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
+		ImGui::InputInt("##to", &remap_to_, 0);
+		remap_from_ = std::clamp(remap_from_, 0, 255);
+		remap_to_ = std::clamp(remap_to_, 0, 255);
+		ImGui::SameLine();
+		if (ImGui::Button("Move")) operate("remap_palette", {{std::to_string(remap_from_), std::to_string(remap_to_)}});
+		ui_kit::tooltip("Every texel of the first index takes the second, the palette as it is: a foliage map's codes.");
+	}
+	ImGui::PopTextWrapPos();
+	ImGui::EndDisabled();
 }
 
 // How the texture is made, where an import makes it (ADR 0046 S18): its source; each option of its

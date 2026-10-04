@@ -4216,6 +4216,14 @@ target_link_libraries(editor_texture_import_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_import COMMAND editor_texture_import_test)
 
+# ADR 0046 S18, the texture document's edits (documents/texture_operations, texture_operation): each
+# whole-image operation one undo step written through the editor's writers, Undo, Redo and Save; an
+# import's output and an operation it cannot do refused; the Problems fix of an upside-down TGA's rows.
+add_executable(editor_texture_document_edit_test editor/texture_document_edit_test.cpp)
+target_link_libraries(editor_texture_document_edit_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_document_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_document_edit COMMAND editor_texture_document_edit_test)
+
 # A file's rename through the native texts (ADR 0046 S18, graph/native_text_sites): a terrain's, an
 # environment's, a particle file's and the HUD layout's names rewritten as text, only the token the game
 # reads at each site; a flipbook's frame refused; a file in the SCR form written back as plain text. The

@@ -93,8 +93,11 @@ std::string use_words(const TextureRoleRow &role, const GraphEdge &edge) {
 	return "the " + std::string(role.words) + " of " + (edge.record.empty() ? file : edge.record + " in " + file);
 }
 
+// A finding on a use: at the referrer's field, about the reference (what Problems' "Make the import fit
+// this use" reaches the file by).
 Diagnostic on_use(const GraphEdge &edge, F code, DiagnosticSeverity severity, const std::string &message) {
 	Diagnostic d = make_finding(finding_code(code), severity, message, edge.source, edge.field);
+	d.subject = ReferenceSubject{edge.kind, edge.value, edge.scope, edge.loader_arg};
 	d.record = edge.record;
 	d.row_id = edge.address.row;
 	d.child_id = edge.address.child;

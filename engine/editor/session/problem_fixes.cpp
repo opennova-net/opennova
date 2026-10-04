@@ -11,9 +11,15 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/document_types.h>
+#include <base/io/strutil.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/graph/texture_import_needs.h>
+#include <editor/graph/texture_uses.h>
+#include <editor/import/importer.h>
+#include <editor/session/texture_import_state.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/model/field_text.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/project/project_files.h>
@@ -318,6 +324,42 @@ void reference_fixes(const ReferenceSubject &missing, const SessionView &view, s
 		               request::create_file(name, asset_kind_token(kind)), false});
 }
 
+// What a use asks of a texture an import makes (ADR 0046 S18): the import made as that one use asks
+// (graph/texture_import_needs over it), where the import's options ask otherwise now: the finding's
+// subject is the use's reference, which reaches the file; the use is the referrer's field naming it. None
+// for a file no import makes, a use the needs ask nothing of, or one already made as it asks.
+void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<ProblemFix> &out) {
+	const ReferenceSubject *reference = reference_subject(d);
+	if (!reference || !view.findings.graph || !view.documents.texture_uses) return;
+	std::string served;
+	if (view.findings.graph->resolve(reference->kind, reference->target, reference->scope, &served, reference->loader_arg) !=
+	    ReferenceStatus::Present)
+		return;
+	TextureImportState state;
+	std::string error;
+	if (!texture_import_state(view, served, state, error) || !state.importer) return;
+	const TextureUse *use = nullptr;
+	for (const TextureUse &each : view.documents.texture_uses->uses_of(view, served))
+		if (!each.fixed && each.referrer == d.asset && each.field == d.field && each.record == d.record) use = &each;
+	if (!use) return;
+	const TextureImportNeeds needs = texture_import_needs({*use}, state.source);
+	std::vector<std::pair<std::string, std::string>> changes;
+	std::string words;
+	for (const auto &[option, value] : needs.options) {
+		const ImportOptionRow *row = import_option_row(state.importer->options, option);
+		if (!row || strutil::to_lower(import_option_value(state, *row)) == strutil::to_lower(value)) continue;
+		changes.emplace_back(option, value);
+		words += (words.empty() ? "" : ", ") + option + " " + value;
+	}
+	if (changes.empty()) return;
+	std::string reasons;
+	for (const std::string &reason : needs.reasons) reasons += (reasons.empty() ? "" : "; ") + reason;
+	out.push_back({"Make " + basename_of(served) + "'s import fit this use",
+	               "Sets the import of " + state.source + " to " + words + " (" + reasons +
+	                       "), then imports it again, which makes " + basename_of(served) + " anew." + kNotUndoable,
+	               request::set_import_options(state.source, std::move(changes)), false});
+}
+
 // The fixes of one finding, over the view's index (a Rewrite reads it): what its code's row offers
 // (FindingCodeRow::fixes), for what the finding is about.
 void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex &index, bool plan,
@@ -386,6 +428,16 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		out.push_back({"Rewrite " + basename_of(d.asset), detail, request::save(d.asset), true});
 		return;
 	}
+	case FindingFix::TextureRows:
+		// A TGA stored top first: its rows saved bottom first, an edit of its document (opened first) that
+		// Undo takes back and Save writes; a file an import makes is made again by its import.
+		if (const AssetEntry *file = view.project.scan->at_path(d.asset); file && file->imported_from.empty())
+			out.push_back({"Save " + basename_of(d.asset) + " bottom first",
+			               "Writes " + d.asset + "'s rows bottom first, the way up its header meant, so the game draws it "
+			               "the right way up. Undo takes it back, and Save writes it.",
+			               request::texture_operation(d.asset, "reorder_rows", {}, true), false});
+		return;
+	case FindingFix::ImportFitsUse: import_fit_fix(d, view, out); return;
 	}
 }
 

@@ -131,6 +131,18 @@ inline EditorRequest set_import_options(std::string path, std::vector<std::pair<
 	request.values = std::move(values);
 	return request;
 }
+// The texture document at `path` edited as a whole image (S18: documents/texture_operations.h): the
+// operation `operation` with its `params`, one undo step; `open_first`: the document opened first (a fix).
+inline EditorRequest texture_operation(std::string path, std::string operation,
+                                       std::vector<std::pair<std::string, std::string>> params = {}, bool open_first = false) {
+	EditorRequest request = of(EditorRequestKind::TextureOperation);
+	request.path = std::move(path);
+	request.operation = std::move(operation);
+	std::sort(params.begin(), params.end());
+	request.values = std::move(params);
+	request.open_first = open_first;
+	return request;
+}
 // The import dialog on the game install's files: `names` alone, chosen; none, every file listed.
 inline EditorRequest preview_install_import(
 		std::vector<std::string> names = {}, bool with_dependencies = false) {

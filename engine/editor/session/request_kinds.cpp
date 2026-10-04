@@ -170,6 +170,9 @@ void serve_reimport(SessionCore &core, const EditorRequest &request) {
 void serve_set_import_options(SessionCore &core, const EditorRequest &request) {
 	core.imports().set_options(request.path, request.values);
 }
+void serve_texture_operation(SessionCore &core, const EditorRequest &request) {
+	core.documents().texture_operation(request);
+}
 void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
 	core.imports().preview_install(request);
 }
@@ -649,6 +652,22 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::Path, F::Values }))
 			.holds(kFiles, kFiles | kSlot)
 			.ends_edit_groups()
+			.row,
+	// A texture's whole-image edit is an edit of its document (S18), as edit_record's.
+	Request(K::TextureOperation, "texture_operation", serve_texture_operation,
+			"The texture document at path (left out, the active one) edited as a whole image by "
+			"operation, one undo step, its "
+			"params in values: resize (size: pow2_down, pow2_up, <W>x<H> or fit:<W>x<H>), alpha "
+			"(alpha: opaque, luminance, invert, threshold:<n> or key:#RRGGBB), format (the stored form "
+			"within the name's extension: format tga or tga24, a DDS's dds and mips, a PCX's palette), "
+			"reorder_rows (a TGA stored top first saved bottom first) or remap_palette (an 8-bit PCX's "
+			"indices, each \"<from>\": \"<to>\"); the file made anew through the editor's writers, which "
+			"Save writes. open_first: the document opened first when it is not (a fix's). Refused, "
+			"nothing changed (texture.operation): a file an import makes (its import's options make it), "
+			"an operation it does not take, one it cannot do (a form that holds no alpha).")
+			.takes(request_params({ F::Operation }, { F::Path, F::Values, F::OpenFirst }))
+			.holds(kFiles, kDocuments)
+			.names_active()
 			.row,
 	Request(K::PreviewInstallImport, "preview_install_import", serve_preview_install_import,
 			"The import dialog on the game install's files: the names alone, chosen, or with none "

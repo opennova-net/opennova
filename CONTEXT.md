@@ -829,7 +829,10 @@ palette and indices) and what the texture is in a modder's words (its format, si
 compression, alpha, mip levels, palette, whether the game loads it and why not); a file the game
 cannot load still opens and says why. Its Document tab is its texture viewport beside those facts,
 its palette and what uses it; the Preview window shows the texture Files selects before it is opened.
-Read only for now (ADR 0046 S18).
+Its edits are whole-image ones (a texture operation: a resize, an alpha, its stored form, an upside-down
+TGA's rows, an 8-bit PCX's palette indices), each one undo step that makes the file anew through the
+editor's writers, which Save writes; no paint program. A file an import makes is made by its import's
+options, never edited in place (ADR 0046 S18).
 _Avoid_: image (the decoded texels alone), bitmap, sprite, asset (a project file by its logical name)
 
 **Texture role**:

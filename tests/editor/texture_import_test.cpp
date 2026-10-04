@@ -25,6 +25,7 @@
 #include <editor/import/texture_import.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/texture_import_state.h>
@@ -369,6 +370,26 @@ int test_project() {
 	TEST_EXPECT(state.needs.options == ImportOptions({{"format", "tga24"}, {"size", "1024x1024"}}));
 	TEST_EXPECT(texture_import_state(view, logo_source, state, error) &&
 	            state.needs.options == ImportOptions({{"format", "tga"}, {"size", "pow2_down"}}));
+	// Problems: the colour map's size finding on the terrain offers its import made as that use asks; applied,
+	// the import makes a 24-bit 1024 x 1024 TGA and the finding goes.
+	{
+		const Diagnostic *size = nullptr;
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "texture.colormap_size" && d.asset == "terrains/isle.trn") size = &d;
+		TEST_EXPECT(size);
+		if (!size) return 1;
+		const std::vector<ProblemFix> fixes = fixes_for(*size, view);
+		TEST_EXPECT(fixes.size() == 1 && fixes[0].label == "Make isle_c.tga's import fit this use" &&
+		            fixes[0].request == request::set_import_options(isle_source, {{"format", "tga24"}, {"size", "1024x1024"}}));
+		if (fixes.empty()) return 1;
+		editor_test::handle_to_end(session, fixes[0].request);
+		session.run_operations();
+		for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(d.code() != "texture.colormap_size");
+		const AssetEntry *map = output_of(view, isle_source);
+		TEST_EXPECT(map && map->logical_name == "isle_c.tga");
+		// Made as it asks: no fix left to offer on the use (none of its findings stands).
+		TEST_EXPECT(texture_import_state(view, isle_source, state, error) && state.sidecar.options.count("size"));
+	}
 	// Nothing names m01 yet: it asks nothing. A loading screen names it; a particle graphic too: no one
 	// file serves both.
 	TEST_EXPECT(texture_import_state(view, m01_source, state, error) && state.needs.options.empty() && state.needs.uses == 0);
@@ -414,7 +435,8 @@ int test_project() {
 		TEST_EXPECT(rows->array[0].get_string("key", "") == "format" && rows->array[0].get_bool("applies_now", false));
 		TEST_EXPECT(rows->array[4].get_string("key", "") == "palette" && !rows->array[4].get_bool("applies_now", true));
 	}
-	TEST_EXPECT(answer.get("effective") && answer.get("effective")->get_string("format", "") == "tga");
+	// Made as its use asked (the Problems fix above).
+	TEST_EXPECT(answer.get("effective") && answer.get("effective")->get_string("format", "") == "tga24");
 	TEST_EXPECT(io::json_parse("{\"path\":\"terrains/isle.trn\"}", args, error));
 	session.query("import_options", args, error);
 	TEST_EXPECT(!error.empty());
