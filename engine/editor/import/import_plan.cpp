@@ -1,6 +1,7 @@
 #include <editor/import/import_plan.h>
 
 #include <algorithm>
+#include <cctype>
 #include <deque>
 #include <filesystem>
 #include <functional>
@@ -17,11 +18,13 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/player_files.h>
+#include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
 #include <editor/import/mission_fixed_files.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/field_text.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
@@ -39,6 +42,14 @@ using graph_names::symbol_name;
 
 bool references_unread(AssetKind kind) {
 	return asset_kind_row(kind).names_files && !graph_reads_kind(kind);
+}
+
+std::string import_need_text(const ImportNeed &need) {
+	if (!need.words.empty()) return need.file + (need.record.empty() ? ": " : ", ") + need.words;
+	std::string out = need.file;
+	if (!need.record.empty()) out += ": " + need.record;
+	if (!need.field.empty()) out += (need.record.empty() ? ": " : " ") + need.field;
+	return out;
 }
 
 bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error) {
@@ -447,10 +458,11 @@ private:
 				              output.name + ".";
 			place(row);
 			// A file of a name the project holds is left as it is unless the import is asked to replace
-			// it (review F2): marked, and not taken by default.
-			if (scan_.find(output.name)) {
+			// it (review F2): marked, and not taken by default, and said whether it differs.
+			if (const AssetEntry *own = scan_.find(output.name)) {
 				row.held = true;
 				row.selected = false;
+				row.held_as = compare_held(*own, loaded || converter ? &output.bytes : nullptr, from, name);
 			}
 			plan_.rows.push_back(std::move(row));
 			++files_;
@@ -480,6 +492,7 @@ private:
 		const auto taken = provided_.find(key(name));
 		if (taken != provided_.end()) {
 			if (row_out) *row_out = taken->second.row;
+			add_wanting(taken->second.row, need.file);
 			return true;
 		}
 		const ImportOrigin *install = install_ != own ? install_ : nullptr;
@@ -500,6 +513,7 @@ private:
 		row.size = from->size(spelling);
 		row.found_in = from->words(spelling);
 		row.needed_by = need;
+		if (!need.file.empty()) row.wanted_by.push_back(need.file);
 		place(row);
 		row.selected = row.problem.empty();
 		const size_t index = plan_.rows.size();
@@ -673,7 +687,7 @@ private:
 		scopes.push_back(&first);
 		if (owned)
 			for (const std::string &scope : edge.scopes_after) scopes.push_back(&scope);
-		const ImportNeed need{use.file, edge.record, edge.field, edge.kind, edge.value, edge.loader_arg};
+		const ImportNeed need{use.file, edge.record, edge.field, edge.kind, edge.value, edge.loader_arg, edge.address.kind};
 		const ImportOrigin *own = origin_of(use.file);
 		const ImportOrigin *install = install_ != own ? install_ : nullptr;
 		for (const std::string *scope : scopes) {
@@ -948,18 +962,20 @@ private:
 		if (!edge.fallback.empty()) names.push_back(edge.fallback);
 		const ImportOrigin *own = node.origin;
 		const ImportOrigin *install = install_ != own ? install_ : nullptr;
-		ImportNeed need{file, edge.record, edge.field, edge.kind, name, edge.loader_arg};
+		ImportNeed need{file, edge.record, edge.field, edge.kind, name, edge.loader_arg, edge.address.kind};
 		std::string mine, theirs;
 		for (const std::string &candidate : names) {
 			need.name = candidate;
 			if (graph_.resolve(edge.kind, candidate, edge.scope, nullptr, edge.loader_arg) == ReferenceStatus::Present) return;
 			mine = look(own, need);
 			theirs = look(install, need);
-			// A file the plan takes serves it: the places that have one too are that file's rivals.
+			// A file the plan takes serves it: the places that have one too are that file's rivals, and this
+			// file wants it too.
 			if (const Provided *taken = provided_for(need)) {
 				const size_t row = taken->row;
 				add_rival(row, own, mine);
 				add_rival(row, install, theirs);
+				add_wanting(row, file);
 				return;
 			}
 			if (!mine.empty() || !theirs.empty()) break;
@@ -989,6 +1005,7 @@ private:
 		row.size = from->size(spelling);
 		row.found_in = from->words(spelling);
 		row.needed_by = need;
+		row.wanted_by.push_back(file);
 		place(row);
 		row.selected = row.problem.empty(); // one the project cannot take is listed, not taken
 		const size_t index = plan_.rows.size();
@@ -1043,6 +1060,88 @@ private:
 		for (size_t i = 0; i < plan_.rows.size(); ++i)
 			if (!met[i]) rows.push_back(std::move(plan_.rows[i]));
 		plan_.rows = std::move(rows);
+		// What wanted each row, in words (the UX round's project lane), once per row: the wanting
+		// file's type words the record and the field.
+		for (ImportPlanRow &row : plan_.rows) {
+			ImportNeed &need = row.needed_by;
+			if (need.file.empty() || (need.record.empty() && need.reference == ReferenceKind::None)) continue;
+			const auto wanting = provided_.find(key(need.file));
+			need.words = need_words(wanting == provided_.end() ? AssetKind::Unknown : wanting->second.kind, need);
+		}
+	}
+
+	// The record and the field of a reference of a file of `kind`, as its document type words them: the
+	// record by its kind's label and each of its names ("window STARTUP > MAIN"), the field by its title
+	// ("String table"); each as written where the type has no words for it.
+	std::string need_words(AssetKind kind, const ImportNeed &need) {
+		const DocumentType *type = document_type_for(kind);
+		std::string field = need.field;
+		if (type && type->fields && !field.empty())
+			for (const FieldSchema &schema : type->fields(need.record_kind))
+				if (schema.id == need.field) {
+					field = field_title(schema);
+					break;
+				}
+		if (need.record.empty()) return field;
+		std::string record;
+		for (const char c : need.record) {
+			if (c == '/') record += " > ";
+			else record += c;
+		}
+		// The kind's label from a document the type makes, empty (its kinds are the type's static table).
+		const Document *blank = nullptr;
+		if (type && type->make) {
+			std::unique_ptr<DocumentBase> &made = blanks_[type->id];
+			if (!made) made = type->make();
+			blank = made ? made->as_records() : nullptr;
+		}
+		std::string label = blank ? blank->kind_label(need.record_kind) : "";
+		// "Window" reads "window" inside a line; "SSN entity" keeps its capitals.
+		if (label.size() > 1 && std::isupper(static_cast<unsigned char>(label[0])) &&
+		    std::islower(static_cast<unsigned char>(label[1])))
+			label[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(label[0])));
+		// Not where the record's own name says its kind ("Appearance 1").
+		const size_t last = record.rfind(" > ");
+		const std::string own = last == std::string::npos ? record : record.substr(last + 3);
+		if (!label.empty() && !strutil::starts_with_icase(own, label)) record = label + " " + record;
+		return field.empty() ? record : record + ": " + field;
+	}
+
+	// A planned file names the row's file too (ImportPlanRow::wanted_by), once.
+	void add_wanting(size_t row, const std::string &file) {
+		ImportPlanRow &wanted_row = plan_.rows[row];
+		if (file.empty() || key(file) == key(wanted_row.name)) return;
+		for (const std::string &known : wanted_row.wanted_by)
+			if (known == file) return;
+		wanted_row.wanted_by.push_back(file);
+	}
+
+	// Whether the project's file `own` holds the bytes the chosen file of its name brings (`bytes` in
+	// hand, else read from `from` by `name`), for the first kHeldCompared held files: the sizes first
+	// (kHeldReadBytes), then the bytes.
+	ImportPlanRow::Held compare_held(const AssetEntry &own, const std::vector<uint8_t> *bytes, const ImportOrigin *from,
+	                                 const std::string &name) {
+		using Held = ImportPlanRow::Held;
+		if (held_compared_ >= kHeldCompared) return Held::Unknown;
+		++held_compared_;
+		std::vector<uint8_t> theirs;
+		if (!bytes) {
+			if (!from) return Held::Unknown;
+			const uint64_t stored = from->size(name);
+			if (stored != own.size_bytes) {
+				if (from->kind() == ImportOrigin::Kind::Folder) return Held::Differs; // served as stored
+				if (stored > kHeldReadBytes) return Held::Unknown;
+			}
+			if (!from->read(name, theirs)) return Held::Unknown;
+			cost_ += theirs.size();
+			bytes = &theirs;
+		}
+		if (own.size_bytes != bytes->size()) return Held::Differs;
+		std::vector<uint8_t> mine;
+		std::string error;
+		if (!read_file_bytes(join_path(paths_.root, own.relative_path), mine, error)) return Held::Unknown;
+		cost_ += mine.size();
+		return mine == *bytes ? Held::Same : Held::Differs;
 	}
 
 	ImportPlan plan_;
@@ -1085,6 +1184,8 @@ private:
 	std::map<std::string, Missing> missing_;                               // the names looked for in vain
 	mns::StyleSheet sheet_;                                                // the variables a %NAME% expands through
 	size_t files_ = 0;                                                     // the files the plan takes
+	size_t held_compared_ = 0;                                             // the held files compared
+	std::map<DocumentTypeId, std::unique_ptr<DocumentBase>> blanks_;       // a document of each type, for its words
 };
 
 ImportPlanner::ImportPlanner(std::vector<ImportChoice> sources, bool with_dependencies, const ProjectPaths &paths,
