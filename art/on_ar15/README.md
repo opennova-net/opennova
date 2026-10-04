@@ -29,16 +29,17 @@ rig.
 
 | Parts | Bones |
 |---|---|
-| BN01-BN37 | The stock first-person arms (the player rig's rest) |
-| BN38 Body | The gun |
-| BN39-BN46 | Bolt, Charger, Magazine, Trigger, Safety, Cartridge, Dustcover, MagRelease |
-| BN47 Follower, BN48-BN50 Round1-3 | The magazine's follower and its top three rounds |
+| BN01-BN47 | The player's first-person arms (`on_arms Rig`, its rest) |
+| BN48 Body | The gun |
+| BN49-BN56 | Bolt, Charger, Magazine, Trigger, Safety, Cartridge, Dustcover, MagRelease |
+| BN57 Follower, BN58-BN60 Round1-3 | The magazine's follower and its top three rounds |
 
-BN38 to BN46 have their Track parent set to Itself (Bone properties, Stored
-as). The mag-feed tracks give the model a part animation table, and with one
-the game re-places every part without a track about its PANM row's parent,
-keeping only the clip's turn; a row naming its part itself keeps the whole
-posed part, so the magazine, bolt and charger travel as the clips move them.
+Every part but the root, the follower and the rounds has its Track parent
+set to Itself (Bone properties, Stored as). The mag-feed tracks give the
+model a part animation table, and with one the game re-places every part
+without a track about its PANM row's parent, keeping only the clip's turn; a
+row naming its part itself keeps the whole posed part, so the arms, the gun
+and its magazine, bolt and charger stand exactly where the clips put them.
 Their own parents stay the hierarchy the clips pose. The follower and rounds
 keep the magazine as their row parent and ride it.
 
@@ -50,7 +51,7 @@ playing a pack clip, frame by frame.
 
 | Slot | From |
 |---|---|
-| idle | `TR15_Idle_Grip` (10.7 s, the loop with a regrip), 30 fps |
+| idle | `TR15_Idle_Grip` (10.7 s, the loop with a regrip), 20 fps (at 30 its 60 parts would pass the loader's 500000 bytes a clip) |
 | fire, recoil | the idle pose, the bolt cycling (`TR15_W_Fire`) and a kick about the stock, 60 fps: fire is its first 3 frames, recoil the rest |
 | reload | `TR15_Reload_Tactical`, 30 fps |
 | empty | the idle pose with the trigger pulled |

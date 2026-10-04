@@ -17,8 +17,8 @@ Models, clips and textures ride Git LFS; everything else is a plain git blob.
 |---|---|
 | `main.mnu` | The placeholder main menu: one `STARTUP` screen with literal text, `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT`. Hand-written. |
 | `opennova.fnt` | The menu's one font (uppercase 5x7 stroke art drawn at 2x). Minted by `engine/editor/blank/blank_font_art.h` (the same art as the editor's blank font); `minimal_fnt_gen_test --write` regenerates it and the `minimal_fnt_gen` ctest keeps it byte-identical to the builder. |
-| `on_ar15.3di` | A first-person AR-15-pattern carbine (the KINEMATION TR15), 50 parts on one rig: the stock first-person arms' 37 bones, then 13 of the gun's own. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` file below. |
-| `on_arms.3di` | The player's first-person arms on the stock arms' 37 bones, so they draw on any first-person gun. Exported from `art/on_player/on_player.blend`, like every `on_arms*` file below. |
+| `on_ar15.3di` | A first-person AR-15-pattern carbine (the KINEMATION TR15), 60 parts on one rig: the player's 47 arm bones, then 13 of the gun's own. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` file below. |
+| `on_arms.3di` | The player's first-person arms on 47 bones, the KINEMATION Operator's arm chains with their twist bones, so they draw on guns built on that rig. Exported from `art/on_player/on_player.blend`, like every `on_arms*` file below. |
 | `on_ar15.adm` | `on_ar15`'s animation table: the reset and nine weapon slots and the clip each plays. |
 | `on_ar15_{rst,i,f,rc,r,e,ei,swt,swf,swr}.bad` | The clips: reset, idle, fire, recoil, reload, empty, empty idle, switch to, switch from and switch rank. |
 | `on_ar15_{0,1,2}.tga`, `on_ar15_{0,1,2}n.mdt` | The carbine's diffuse textures and normal maps. |
