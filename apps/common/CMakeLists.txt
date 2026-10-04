@@ -1,4 +1,5 @@
 add_library(opennova_app_common STATIC
+    net_http.cpp
     net_sockets.cpp
 )
 

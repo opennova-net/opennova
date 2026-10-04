@@ -797,8 +797,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/package-blender-windows.yml
 
-  # The native apps (opennova-3di, opennova-extract, nw_pp, nw-lan-probe and the
-  # NovaWorld server) in one zip, built for PRs and tagged releases alike.
+  # The native apps (opennova-3di, opennova-extract, nw_pp, nw-lan-probe, nw-lister
+  # and the NovaWorld server) in one zip, built for PRs and tagged releases alike.
   package-apps-windows:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
@@ -843,7 +843,7 @@ jobs:
               '| --- | --- |',
               `| Runtime: opennova.exe with the placeholder menu; PLAY RETAIL plays your own Joint Operations install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
-              `| Apps: opennova-3di, opennova-extract, nw_pp, nw-lan-probe and the NovaWorld server (gate and session listeners) | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
+              `| Apps: opennova-3di, opennova-extract, nw_pp, nw-lan-probe, nw-lister and the NovaWorld server (gate and session listeners) | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');

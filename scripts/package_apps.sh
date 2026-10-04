@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Package the native apps under apps/ for Windows: build every app (Release)
 # and zip the executables flat, with the NovaWorld server's migrations and seed
-# beside them and a README.txt naming each tool.
+# and nw-lister's example listing beside them and a README.txt naming each tool.
 #
 #   scripts/package_apps.sh [out.zip]
 #
@@ -18,6 +18,7 @@ apps=(
     opennova_extract:opennova-extract:extract
     nw_pp:nw_pp:nw_pp
     opennova_nw_lan_probe:nw-lan-probe:nw_lan_probe
+    opennova_nw_lister:nw-lister:nw_lister
     opennova_novaworld_server:opennova-novaworld:novaworld_server
 )
 
@@ -68,6 +69,13 @@ nw-lan-probe.exe
     Waits for a LAN game host to answer the discovery probe and reports
     whether it is ready. It never joins the game.
 
+nw-lister.exe
+    Lists one server on a NovaWorld master without running the game: the
+    name, map, players and settings come from a JSON file it re-reads
+    (listing.example.json), or from the game server's remote-admin port
+    with --admin. Stopping it removes the row. It sends to 127.0.0.0/8
+    only unless given --allow-public.
+
 opennova-novaworld.exe
     The NovaWorld server: the gate (UDP 7597) and session (UDP 64206)
     listeners. The web portal and HTTP routes are only in the Linux container
@@ -81,6 +89,7 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("README.txt", readme.replace("\n", "\r\n"))
     for exe in exes:
         z.write(exe, os.path.basename(exe))
+    z.write(os.path.join(root, "apps", "nw_lister", "listing.example.json"), "listing.example.json")
     for sub in ("migrations", "seed"):
         src = os.path.join(root, "backend", sub)
         for name in sorted(os.listdir(src)):
