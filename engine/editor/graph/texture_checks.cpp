@@ -241,20 +241,40 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	                                                             : texture_load(row.loader, edge.value, exists, 0, -1, role);
 	const std::string where = use_words(row, edge);
 	// A file of the name written that the loader passes over for another (a .tga beside the .dds a model
-	// row loads) [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B5C0]: on that file, once.
-	if (const AssetEntry *written = input.scan.find(basename_of(edge.value)))
-		if (written->kind == AssetKind::Texture && written->relative_path != served &&
-		    passed_over.insert({written->relative_path, served}).second)
-			out.push_back(make_finding(finding_code(TextureFinding::NotRead), DiagnosticSeverity::Warning,
-			                           "The game never reads " + written->logical_name + " for " + where +
-			                                   ": its loader opens " + basename_of(served) + " instead.",
-			                           written->relative_path));
-	const TextureReader reader = reader_of(load.reader);
-	const TextureHeader *header = header_of(input, served, reader);
-	if (!header) return;
+	// row loads) [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B5C0]: on that file, once. Not a
+	// terrain detail's, which the game reads by its own name too (texture_role_read_by_name).
+	const AssetEntry *written = input.scan.find(basename_of(edge.value));
+	if (written && written->kind == AssetKind::Texture && written->relative_path != served && !texture_role_read_by_name(role) &&
+	    passed_over.insert({written->relative_path, served}).second)
+		out.push_back(make_finding(finding_code(TextureFinding::NotRead), DiagnosticSeverity::Warning,
+		                           "The game never reads " + written->logical_name + " for " + where + ": its loader opens " +
+		                                   basename_of(served) + " instead.",
+		                           written->relative_path));
 	const auto add = [&](F code, DiagnosticSeverity severity, const std::string &message) {
 		out.push_back(on_use(edge, code, severity, message));
 	};
+	// A terrain's detail map is made into its detail coefficient from the name as written, through the TGA
+	// reader for a .tga and the PCX reader for a .pcx, never a .dds [orig: Texture_GenerateNormalMap @
+	// 0x58C116..0x58C159, from PolyTrn_InitTextures @ 0x60B155]: its sizes are that file's.
+	if (role == R::TerrainDetailCoefficient) {
+		const std::string named = strutil::to_lower(utf8_of(path_of(basename_of(edge.value)).extension()));
+		const TextureReader by = named == ".tga" ? TextureReader::Tga : named == ".pcx" ? TextureReader::Pcx : TextureReader::None;
+		const TextureHeader *source = written && by != TextureReader::None ? header_of(input, written->relative_path, by) : nullptr;
+		if (!source || !source->read) {
+			add(F::TextureWrongReader, DiagnosticSeverity::Warning,
+			    basename_of(edge.value) + ", " + where + ", is made into the terrain's detail coefficient by its own name, " +
+			            "through the game's TGA reader for a .tga or its PCX reader for a .pcx: " +
+			            (by == TextureReader::None ? std::string("a name of neither") : !written ? std::string("the project lacks it")
+			                                                                              : "the reader cannot read it") +
+			            ", so the game makes no coefficient of it (its .dds is for the near texture alone).");
+			return;
+		}
+		check_sizes(role, written->logical_name, *source, where, context, add);
+		return;
+	}
+	const TextureReader reader = reader_of(load.reader);
+	const TextureHeader *header = header_of(input, served, reader);
+	if (!header) return;
 	const DiagnosticSeverity reader_severity =
 			texture_arg_gates(edge.loader_arg) ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning;
 	// A file of a format the role's loader does not read (a colour map that is no TGA, a particle graphic

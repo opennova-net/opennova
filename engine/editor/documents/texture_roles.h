@@ -95,7 +95,7 @@ enum class TextureRoleId : uint8_t {
 	ParticleGraphic,
 	ImpactScar,
 	TracerSmoke,
-	ShadowDecal,
+	FaceTexture,
 	SightCard,
 	ViewEffect,
 	// HUD
@@ -166,7 +166,18 @@ io::JsonValue texture_role_json(const TextureRoleRow &row);
 inline constexpr int32_t kTextureRoleArg = 0x100;
 inline constexpr int32_t kTextureArgGates = 0x10000;
 inline constexpr int32_t kTextureArgTileSet = 0x20000;
+// The name's extension made PCX before its loader reads it (an environment's sky maps [orig:
+// TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B, Path_ReplaceOrAppendExtension @ 0x53C780]).
+inline constexpr int32_t kTextureArgPcx = 0x40000;
 int32_t texture_role_arg(TextureRoleId role, int32_t flags = 0);
+// Whether a role's file is read by its own name as well as through its loader: a terrain's detail map,
+// its splat details and its second detail go through STAGE (a .dds beside the name first) for the near
+// texture, and the game reads the name as written through the TGA reader for the terrain's checksum and
+// the far blend, and the detail map's (a .tga or a .pcx) through the TGA or PCX reader into the detail
+// coefficient [orig: PolyTrn_InitTextures @ 0x60AAF4, @ 0x60AB4C, @ 0x60AC76..0x60AD2A, @ 0x60AFC9;
+// Texture_GenerateNormalMap @ 0x58C116..0x58C159, from @ 0x60B155].
+bool texture_role_read_by_name(TextureRoleId role);
+
 // Whether the argument is a model texture row's type.
 inline bool texture_arg_is_row_type(int32_t loader_arg) { return loader_arg >= 0 && loader_arg < kTextureRoleArg; }
 // The role an argument names; false for a row's type or none.

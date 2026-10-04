@@ -52,7 +52,7 @@ bool only_the_site(const std::vector<GraphEdge> &before, const std::vector<Graph
 
 bool native_text_kind(AssetKind kind) {
 	return kind == AssetKind::Terrain || kind == AssetKind::Environment || kind == AssetKind::Particles ||
-	       kind == AssetKind::HudPosDefs;
+	       kind == AssetKind::HudPosDefs || kind == AssetKind::FaceAnimation;
 }
 
 size_t rewrite_native_text(const std::string &file, AssetKind kind, const std::string &game, std::string &text,

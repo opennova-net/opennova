@@ -420,7 +420,7 @@ static int test_native_extractors() {
 	// else the name itself, no other extension. Its edge carries its role (ADR 0046 S18), whose loader
 	// that is.
 	const int32_t sky_loader = texture_loader_arg(opennova::renderer::TextureLoader::ArchiveSelfAlpha);
-	TEST_EXPECT(sky && sky->loader_arg == texture_role_arg(TextureRoleId::SkyCloud));
+	TEST_EXPECT(sky && sky->loader_arg == texture_role_arg(TextureRoleId::SkyCloud, kTextureArgPcx));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a.pcx", "", nullptr, sky_loader) == ReferenceStatus::Missing);
 	TEST_EXPECT(editor_test::write_text(root + "/sky_a.pcx", "x"));
 	editor_test::handle_to_end(session, request::rescan());
@@ -732,28 +732,33 @@ static int test_rename() {
 	            read_text(root + "/main.mnu").find("logo2.tga") != std::string::npos);
 	TEST_EXPECT(view.findings.graph->missing().empty());
 	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
-	// An environment names the texture too: its sky layer is rewritten as text with the menu, every
-	// other byte kept (ADR 0046 S18, graph/native_text_sites.h). (A Rescan keeps an open document whose
-	// file did not change: the same one.)
+	// An environment names a sky map: its line is rewritten as text, every other byte kept (ADR 0046 S18,
+	// graph/native_text_sites.h). A sky map's name is made .pcx as the game parses it, so the environment
+	// naming logo2.tga uses no TGA: the TGA's rename leaves it as it is. (A Rescan keeps an open document
+	// whose file did not change: the same one.)
 	std::string environment;
 	{
 		opennova::env::Config config;
-		config.sky_map1 = "logo2.tga";
+		config.sky_map1 = "cloud.pcx";
+		config.sky_map2 = "logo2.tga";
 		std::ostringstream out;
 		std::string error;
 		TEST_EXPECT(opennova::env::save_env(out, config, error));
 		environment = out.str();
-		TEST_EXPECT(editor_test::write_text(root + "/day.env", environment));
+		TEST_EXPECT(editor_test::write_text(root + "/day.env", environment) && editor_test::write_text(root + "/cloud.pcx", "x"));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(session.document_for("main.mnu") == menu);
 	editor_test::handle_to_end(session, request::rename_asset("logo2.tga", "logo3.tga"));
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(!fs::exists(root + "/logo2.tga") && fs::exists(root + "/logo3.tga"));
+	TEST_EXPECT(read_text(root + "/day.env") == environment);
+	editor_test::handle_to_end(session, request::rename_asset("cloud.pcx", "haze.pcx"));
+	TEST_EXPECT(session.outcome().done() && fs::exists(root + "/haze.pcx"));
 	{
-		const size_t at = environment.find("sky_map1 logo2.tga");
+		const size_t at = environment.find("sky_map1 cloud.pcx");
 		TEST_EXPECT(at != std::string::npos);
-		environment.replace(at, 18, "sky_map1 logo3.tga");
+		environment.replace(at, 18, "sky_map1 haze.pcx");
 		TEST_EXPECT(read_text(root + "/day.env") == environment);
 	}
 	menu = session.document_for("main.mnu"); // reloaded after the rewrite

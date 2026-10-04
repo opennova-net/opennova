@@ -161,6 +161,13 @@ int test_checks() {
 	            editor_test::write_text(root + "/terrains/f.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendw.tga\n"
 	                                                                  "polytrn_foliagemap fol2k.pcx\n")) &&
 	            editor_test::write_text(root + "/terrains/g.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendt.tga\n")) &&
+	            // A splat detail read by STAGE (its .dds) and by its own name through the TGA reader: no "never
+	            // read" on its .tga. A detail map whose .tga the project lacks: no coefficient made of its .dds.
+	            editor_test::write_text(root + "/terrains/h.trn",
+	                                    "polytrn_detailmap cdet.tga\npolytrn_polydata isle.cpt\npolytrn_sectorcount 1\npolytrn_sectors 0\n"
+	                                    "polytrn_colormap colour.tga\npolytrn_detailmap_c1 det.tga\n") &&
+	            editor_test::write_bytes(t + "det.tga", tga(8, 8)) && editor_test::write_bytes(t + "det.dds", tga(8, 8)) &&
+	            editor_test::write_bytes(t + "cdet.dds", tga(8, 8)) &&
 	            editor_test::write_text(root + "/fx.ptl",
 	                                    "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff, dent, ring;\n}\n\n[particledef]\n{\n\tid = "
 	                                    "puff;\n\tgraphic1 = huge.tga, additive;\n}\n\n[particledef]\n{\n\tid = dent;\n"
@@ -235,6 +242,12 @@ int test_checks() {
 		}
 	TEST_EXPECT(too_big == 2);
 	TEST_EXPECT(has("texture.not_read", "textures/wall.tga", S::Warning, false));
+	for (const Found &f : found) TEST_EXPECT(f.asset != "textures/det.tga");
+	TEST_EXPECT(has("texture.wrong_reader", "terrains/h.trn", S::Warning, false));
+	for (const Found &f : found)
+		if (f.code == "texture.wrong_reader" && f.asset == "terrains/h.trn")
+			TEST_EXPECT(f.message.find("made into the terrain's detail coefficient by its own name") != std::string::npos &&
+			            f.message.find("the project lacks it") != std::string::npos);
 	TEST_EXPECT(has("texture.loading_screen_size", "textures/loadscrn.pcx", S::Warning, false));
 	// Nothing of the 1024 x 1024 colour map.
 	for (const Found &f : found) TEST_EXPECT(f.asset != "terrains/e.trn");

@@ -6,9 +6,9 @@
 // ACTIONs find it by), and the record sets of the collections a Record reference names (a
 // model's CTRL registers and MTRX rows, by their index); a text type reads the names its text
 // makes, each at its span (a script's operands, S13 D9); the native kinds (an environment, the
-// avatar table, a particle file) read their parsed structs. The names a native text (a terrain, an
-// environment, a particle file, the HUD layout) writes are rewritable: a rename finds each in the
-// text by reading it again (graph/native_text_sites.h).
+// avatar table, a particle file, a face animation) read their parsed structs. The names a native text (a
+// terrain, an environment, a particle file, the HUD layout, a face animation) writes are rewritable: a
+// rename finds each in the text by reading it again (graph/native_text_sites.h).
 #include <editor/graph/asset_graph.h>
 
 #include <algorithm>
@@ -31,6 +31,7 @@
 #include <formats/def/def.h>
 #include <formats/lwf/lwf.h>
 #include <formats/env/env.h>
+#include <formats/grm/grm.h>
 #include <formats/particle/parser.h>
 #include <formats/trn/trn_io.h>
 #include <runtime/renderer/particle_atlas.h>
@@ -182,10 +183,13 @@ bool extract_environment(const std::string &name, const std::vector<uint8_t> &by
 		out.edges.push_back(edge_of(name, std::string(), field, kind, value, std::string(), true));
 		out.edges.back().loader_arg = loader_arg;
 	};
-	// The cloud layers, through ARCHIVE [orig: Terrain_InitRenderingResources @ 0x578A97].
+	// The cloud layers, through ARCHIVE [orig: Terrain_InitRenderingResources @ 0x578A97], each name's
+	// extension made PCX as the parser stores it [orig: TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B,
+	// sky_map2's @ 0x57CC83..0x57CC8D] (kTextureArgPcx).
 	for (const auto &[field, map] : {std::pair<const char *, const std::string *>{"sky_map1", &config.sky_map1},
 	                                 {"sky_map2", &config.sky_map2}})
-		if (!map->empty()) out.edges.push_back(texture_edge(name, std::string(), field, *map, TextureRoleId::SkyCloud));
+		if (!map->empty())
+			out.edges.push_back(texture_edge(name, std::string(), field, *map, TextureRoleId::SkyCloud, kTextureArgPcx));
 	edge("sun_3di", ReferenceKind::Model, config.sun_3di);
 	edge("moon_3di", ReferenceKind::Model, config.moon_3di);
 	edge("glare_3di", ReferenceKind::Model, config.glare_3di);
@@ -367,6 +371,39 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 	return true;
 }
 
+// A face animation (.grm, ADR 0046 S18): its base texture, the base's .MDT twin and its two eye textures,
+// each by STAGE under its name with its path stripped and its extension (from the last '.') made .TGA, the
+// twin's .MDT [orig: Shadow_DecalLoadTextures @ 0x588040: PathStripPathA, PathRemoveExtensionA, then
+// PathAddExtensionA ".TGA" @ 0x5880EA, ".MDT" @ 0x588117, the eyes @ 0x58814A (+520), @ 0x588180 (+260),
+// each through Texture_LoadByNameWithChannel]. A name the file writes so is a site a rename rewrites; one
+// the loader derives (another extension, the twin) is not.
+bool extract_face_animation(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
+	grm::File file;
+	std::string message;
+	if (!grm::parse(bytes.data(), bytes.size(), file, message)) {
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
+		return false;
+	}
+	const auto loaded = [](const std::string &written, const char *extension) {
+		std::string stem = basename_of(written);
+		const size_t dot = stem.find_last_of('.');
+		if (dot != std::string::npos) stem.erase(dot);
+		return stem + extension;
+	};
+	const auto texture = [&](const std::string &record, const char *field, const std::string &written, const char *extension) {
+		if (written.empty()) return;
+		const std::string opened = loaded(written, extension);
+		const bool as_written = strutil::iequals(opened, written);
+		out.edges.push_back(texture_edge(name, record, field, as_written ? written : opened, TextureRoleId::FaceTexture, 0,
+		                                 as_written));
+	};
+	texture(std::string(), "basetexture", file.base_texture, ".TGA");
+	texture(std::string(), "basetexture.mdt", file.base_texture, ".MDT");
+	texture("eye 1", "eyetexture", file.eye_textures[0], ".TGA");
+	texture("eye 2", "eyetexture", file.eye_textures[1], ".TGA");
+	return true;
+}
+
 // The kinds the graph reads through the engine's own parser, not a document type.
 using NativeExtractor = bool (*)(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out,
                                  Diagnostic &error);
@@ -381,6 +418,7 @@ constexpr NativeKind kNativeKinds[] = {
 	{AssetKind::Environment, extract_environment},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},
+	{AssetKind::FaceAnimation, extract_face_animation},
 };
 
 NativeExtractor native_extractor(AssetKind kind) {

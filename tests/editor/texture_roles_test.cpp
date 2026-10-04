@@ -139,6 +139,9 @@ int test_names() {
 	TEST_EXPECT(load.reader == TextureFileReader::Tga && load.transform == TextureLoadTransform::AlphaOnly);
 	load = texture_load(TextureLoader::Hud, "pip.pcx", files_of({"pip.pcx"}), 0);
 	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::WhiteAlphaFromBlue);
+	// A PCX in the HUD's alpha mode: its blue the alpha, then that alpha alone.
+	load = texture_load(TextureLoader::Hud, "pip.pcx", files_of({"pip.pcx"}), 0, 1);
+	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::BlueAlphaOnly);
 	load = texture_load(TextureLoader::Hud, "gone.tga", files_of({}), 0);
 	TEST_EXPECT(load.reader == TextureFileReader::Tga && !files_of({})(load.file));
 	// FILE: .TGA through the TGA reader, any other name the PCX reader.
@@ -174,6 +177,9 @@ int test_transforms() {
 	// Alpha only: white under the alpha, the form an A8 takes under the HUD's alpha material.
 	out = apply_load_transform(image, TextureLoadTransform::AlphaOnly);
 	TEST_EXPECT(out->levels[0].rgba == std::vector<uint8_t>({255, 255, 255, 255, 255, 255, 255, 255}));
+	// A PCX in the HUD's alpha mode: the blue as the alpha, white.
+	out = apply_load_transform(image, TextureLoadTransform::BlueAlphaOnly);
+	TEST_EXPECT(out->levels[0].rgba == std::vector<uint8_t>({255, 255, 255, 90, 255, 255, 255, 0}));
 	// None: the texels as read.
 	out = apply_load_transform(image, TextureLoadTransform::None);
 	TEST_EXPECT(out->levels[0].rgba == image.levels[0].rgba);
@@ -230,6 +236,10 @@ int test_reference_load() {
 	TEST_EXPECT(texture_reference_load("body.tga", 0, files).file == "body.dds");
 	// A sky map through ARCHIVE: its .dds too; a colour map through the TGA reader: the name alone.
 	TEST_EXPECT(texture_reference_load("cld.pcx", texture_role_arg(TextureRoleId::SkyCloud), files).file == "cld.dds");
+	// A sky map's name made .pcx first, as the environment's parser stores it.
+	const TextureLoad haze =
+			texture_reference_load("haze.tga", texture_role_arg(TextureRoleId::SkyCloud, kTextureArgPcx), files_of({"haze.pcx"}));
+	TEST_EXPECT(haze.file == "haze.pcx" && haze.transform == TextureLoadTransform::LuminanceAlpha);
 	TextureLoad load = texture_reference_load("ground.tga", colour, files);
 	TEST_EXPECT(load.file == "ground.tga" && load.reader == TextureFileReader::Tga);
 	// A mission's tile set: TGA for its extension.
@@ -295,6 +305,18 @@ int test_graph() {
 	}
 	TEST_EXPECT(editor_test::write_text(root + "/envs/sky.env", env) &&
 	            editor_test::write_bytes(root + "/textures/cloud2.png", editor_test::gradient_png(2, 2)));
+	// A sky map's extension made PCX as the game parses it: haze.tga finds haze.pcx; only.tga, which the
+	// project holds as a TGA alone, finds nothing (the game opens only.dds or only.pcx).
+	{
+		std::ostringstream text;
+		opennova::env::Config config;
+		config.sky_map1 = "haze.tga";
+		config.sky_map2 = "only.tga";
+		std::string error;
+		TEST_EXPECT(opennova::env::save_env(text, config, error) && editor_test::write_text(root + "/envs/haze.env", text.str()) &&
+		            editor_test::write_bytes(root + "/textures/haze.pcx", tga_bytes()) &&
+		            editor_test::write_bytes(root + "/textures/only.tga", tga_bytes()));
+	}
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	const AssetGraph *graph = session.view().findings.graph.get();
@@ -314,6 +336,8 @@ int test_graph() {
 	TEST_EXPECT(resolved("terrains/b.trn", "polytrn_colormap") == "textures/bcol.tga");
 	TEST_EXPECT(resolved("envs/sky.env", "sky_map1") == "textures/cloud.dds");
 	TEST_EXPECT(resolved("envs/sky.env", "sky_map2") == "<missing>");
+	TEST_EXPECT(resolved("envs/haze.env", "sky_map1") == "textures/haze.pcx");
+	TEST_EXPECT(resolved("envs/haze.env", "sky_map2") == "<missing>");
 	TEST_EXPECT(resolved("defs/items.def", "hud_image") == "textures/stance.tga");
 	// What refuses a build: the colour map, and each blend map the key names, splat details or none (the key
 	// alone turns the blend on).
@@ -325,21 +349,24 @@ int test_graph() {
 	}
 	TEST_EXPECT(blocking == std::set<std::string>({"terrains/a.trn polytrn_colormap", "terrains/a.trn polytrn_detailblendmap",
 	                                               "terrains/b.trn polytrn_detailblendmap"}));
-	TEST_EXPECT(listed.count("envs/sky.env sky_map2") && listed.count("defs/items.def hud_image"));
-	// Its words say what the game does; a name the project holds but the loader opens no file of its
-	// extension says so (the HUD's loader opens no .dds).
+	TEST_EXPECT(listed.count("envs/sky.env sky_map2") && listed.count("defs/items.def hud_image") &&
+	            listed.count("envs/haze.env sky_map2"));
+	// Its words say what the game does; a name the project holds but the loader opens other files for says
+	// which (the sky map's name made .pcx).
 	size_t worded = 0;
 	for (const Diagnostic &d : session.view().findings.diagnostics) {
 		if (d.code() != "reference.missing") continue;
 		if (d.field == "polytrn_colormap") TEST_EXPECT(d.message.find("the mission aborts") != std::string::npos);
 		if (d.field == "polytrn_detailblendmap") TEST_EXPECT(d.message.find("the key alone turns the blend on") != std::string::npos);
-		if (d.field == "hud_image") {
+		if (d.field == "hud_image" || (d.asset == "envs/haze.env" && d.field == "sky_map2")) {
 			++worded;
-			TEST_EXPECT(d.message.find("which the project has, but the game's loader for it opens no .dds file (it opens .tga, "
-			                           ".pcx)") != std::string::npos);
+			std::printf("  %s\n", d.message.c_str());
+			TEST_EXPECT(d.message.find("which the project has, but the game's loader for it opens ") != std::string::npos);
 		}
+		if (d.asset == "envs/haze.env" && d.field == "sky_map2")
+			TEST_EXPECT(d.message.find("only.dds or only.pcx, which the project does not have") != std::string::npos);
 	}
-	TEST_EXPECT(worded == 1);
+	TEST_EXPECT(worded == 2);
 	std::printf("graph: %zu texture references found missing, %zu of them refusing a build\n", listed.size(), blocking.size());
 	return 0;
 }

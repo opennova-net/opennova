@@ -28,6 +28,7 @@ enum class TextureLoadTransform : uint8_t {
 	WhiteAlphaFromBlue, // HUD, FILE (flag 0x200000), PLAIN's upper-case .PCX: white, alpha = the blue byte
 	AlphaOnly, // HUD alpha mode: an A8 texture of the alpha alone, drawn white by the HUD's alpha material
 	NormalFromHeight, // NORMAL over a .tga: the height in alpha converted to a normal map
+	BlueAlphaOnly, // HUD alpha mode over a PCX: white with the blue as alpha, then that alpha alone (an A8)
 	kCount,
 };
 const char *texture_load_transform_token(TextureLoadTransform transform);

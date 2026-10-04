@@ -197,19 +197,26 @@ int test_split() {
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
+	// Particle files name the graphics (a particle's TGA, read by its name alone).
+	const auto particles = [](const std::string &id, const std::vector<std::string> &graphics) {
+		std::string text = "[particledef]\r\n{\r\n\tid = " + id + ";\r\n";
+		for (size_t i = 0; i < graphics.size(); ++i)
+			text += "\tgraphic" + std::to_string(i + 1) + " = " + graphics[i] + ", blend;\r\n";
+		return text + "}\r\n";
+	};
 	TEST_EXPECT(editor_test::write_bytes(root + "/textures/cloud.tga", tga32(solid(4, 4, 9, 9, 9), 4, 4)) &&
-	            editor_test::write_text(root + "/envs/a.env", "sky_map1 cloud.tga\r\n") &&
-	            editor_test::write_text(root + "/envs/b.env", "sky_map1 cloud.tga\r\nsky_map2 cloud.tga\r\n"));
+	            editor_test::write_text(root + "/fx/a.ptl", particles("a", {"cloud.tga"})) &&
+	            editor_test::write_text(root + "/fx/b.ptl", particles("b", {"cloud.tga", "cloud.tga"})));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
-	// A plain file: copied, b.env's two layers moved to the copy, a.env's left.
-	editor_test::handle_to_end(session, request::split_texture("textures/cloud.tga", "cloud_2.tga", {"envs/b.env"}));
+	// A plain file: copied, b.ptl's two layers moved to the copy, a.ptl's left.
+	editor_test::handle_to_end(session, request::split_texture("textures/cloud.tga", "cloud_2.tga", {"fx/b.ptl"}));
 	TEST_EXPECT(session.outcome().done());
 	session.run_operations();
 	TEST_EXPECT(fs::exists(root + "/textures/cloud.tga") && fs::exists(root + "/textures/cloud_2.tga"));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(root + "/envs/b.env", text, error) && text == "sky_map1 cloud_2.tga\r\nsky_map2 cloud_2.tga\r\n");
-	TEST_EXPECT(read_file_text(root + "/envs/a.env", text, error) && text == "sky_map1 cloud.tga\r\n");
+	TEST_EXPECT(read_file_text(root + "/fx/b.ptl", text, error) && text == particles("b", {"cloud_2.tga", "cloud_2.tga"}));
+	TEST_EXPECT(read_file_text(root + "/fx/a.ptl", text, error) && text == particles("a", {"cloud.tga"}));
 	// An import's output: its source copied beside it, the copy's record naming the new file.
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/haze.png", png(solid(4, 4, 7, 7, 7), 4, 4)));
 	ImportSidecar record;
@@ -218,29 +225,29 @@ int test_split() {
 	record.options = {{"format", "tga"}};
 	Diagnostic saved;
 	TEST_EXPECT(save_import_sidecar(root + "/art/haze.png" + kImportSidecarSuffix, record, saved));
-	TEST_EXPECT(editor_test::write_text(root + "/envs/c.env", "sky_map1 haze.tga\r\n") &&
-	            editor_test::write_text(root + "/envs/d.env", "sky_map1 haze.tga\r\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/fx/c.ptl", particles("c", {"haze.tga"})) &&
+	            editor_test::write_text(root + "/fx/d.ptl", particles("d", {"haze.tga"})));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	TEST_EXPECT(view.project.scan->find("haze.tga") && view.project.scan->find("haze.tga")->imported_from == "art/haze.png");
-	editor_test::handle_to_end(session, request::split_texture("haze.tga", "haze_2.tga", {"envs/d.env"}));
+	editor_test::handle_to_end(session, request::split_texture("haze.tga", "haze_2.tga", {"fx/d.ptl"}));
 	TEST_EXPECT(session.outcome().done());
 	session.run_operations();
 	const AssetEntry *copy = view.project.scan->find("haze_2.tga");
 	TEST_EXPECT(copy && copy->imported_from == "art/haze_2.png" &&
 	            record_of(root, "art/haze_2.png") == ImportOptions({{"format", "tga"}, {"name", "haze_2.tga"}}));
-	TEST_EXPECT(read_file_text(root + "/envs/d.env", text, error) && text == "sky_map1 haze_2.tga\r\n");
-	TEST_EXPECT(read_file_text(root + "/envs/c.env", text, error) && text == "sky_map1 haze.tga\r\n");
+	TEST_EXPECT(read_file_text(root + "/fx/d.ptl", text, error) && text == particles("d", {"haze_2.tga"}));
+	TEST_EXPECT(read_file_text(root + "/fx/c.ptl", text, error) && text == particles("c", {"haze.tga"}));
 	// Refused: no referrer named, one that does not use it, a name taken.
 	session.handle(request::split_texture("textures/cloud.tga", "cloud_3.tga", {}));
 	session.run_operations();
 	TEST_EXPECT(!fs::exists(root + "/textures/cloud_3.tga"));
-	session.handle(request::split_texture("textures/cloud.tga", "cloud_3.tga", {"envs/c.env"}));
+	session.handle(request::split_texture("textures/cloud.tga", "cloud_3.tga", {"fx/c.ptl"}));
 	session.run_operations();
 	TEST_EXPECT(!fs::exists(root + "/textures/cloud_3.tga"));
-	session.handle(request::split_texture("textures/cloud.tga", "haze.tga", {"envs/a.env"}));
+	session.handle(request::split_texture("textures/cloud.tga", "haze.tga", {"fx/a.ptl"}));
 	session.run_operations();
-	TEST_EXPECT(read_file_text(root + "/envs/a.env", text, error) && text == "sky_map1 cloud.tga\r\n");
+	TEST_EXPECT(read_file_text(root + "/fx/a.ptl", text, error) && text == particles("a", {"cloud.tga"}));
 	std::printf("split: a plain file copied, an output's source copied, the uses moved, the refusals\n");
 	return 0;
 }

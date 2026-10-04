@@ -149,7 +149,8 @@ constexpr TextureRoleRow kRows[] = {
 	        .alpha("kept")
 	        .sampling("wrapped, compressed DXT1 at load")
 	        .missing("no splat layer")
-	        .witness("PolyTrn_InitTextures @ 0x60ABEF..0x60AC13")
+	        .witness("PolyTrn_InitTextures @ 0x60ABEF..0x60AC13 (STAGE); by its own name through the TGA reader for the far "
+	                 "blend @ 0x60AC76..0x60AD2A")
 	        .row,
 	Role(R::TerrainFarDetail, "terrain_far_detail", "terrain far detail", G::Terrain, L::Tga, kTextureTga)
 	        .alpha("blended toward the far levels")
@@ -162,12 +163,15 @@ constexpr TextureRoleRow kRows[] = {
 	        .alpha("unused; blue is the coefficient height")
 	        .sampling("wrapped; the conversion wraps neighbours with the side's mask")
 	        .missing("the terrain config is rejected when its key is empty")
-	        .witness("Texture_GenerateNormalMap @ 0x58C070")
+	        .witness("Texture_GenerateNormalMap @ 0x58C070 (by its own name: a .tga through the TGA reader, a .pcx through "
+	                 "the PCX reader, @ 0x58C116..0x58C159) from PolyTrn_InitTextures @ 0x60B155; the near texture by STAGE "
+	                 "@ 0x60ADA0; its checksum by name @ 0x60AAF4")
 	        .row,
 	Role(R::TerrainSecondDetail, "terrain_second_detail", "terrain second detail", G::Terrain, L::Stage,
 	     kTextureTga | kTextureDds)
 	        .missing("no underwater modulation")
-	        .witness("PolyTrn_InitTextures (polytrn_detailmap2)")
+	        .witness("PolyTrn_InitTextures (polytrn_detailmap2, STAGE); by its own name through the TGA reader @ 0x60AB4C, "
+	                 "@ 0x60AFC9")
 	        .row,
 	Role(R::TerrainTileAtlas, "terrain_tile_atlas", "terrain tile atlas", G::Terrain, L::Tga, kTextureTga)
 	        .size(S::MultipleOf, 64)
@@ -233,8 +237,15 @@ constexpr TextureRoleRow kRows[] = {
 	        .alpha("its palette brightness")
 	        .witness("CEffectEmitterPool_CreateShaders @ 0x5DC8F0")
 	        .row,
-	Role(R::ShadowDecal, "shadow_decal", "blob shadow decal", G::Effects, L::Stage, kTextureTga | kTextureMdt)
-	        .witness("Shadow_DecalLoadTextures @ 0x588040")
+	// A character's face animation (.grm): its base texture, the base's .MDT twin and its two eye textures,
+	// each name's extension made .TGA (the base's .MDT) and loaded by STAGE. The loader the IDB calls a shadow
+	// decal's runs only over the GRM slots (sub_57FC00 over sub_57FCE0's).
+	Role(R::FaceTexture, "face_texture", "face animation texture (.grm)", G::Model, L::Stage, kStageFormats)
+	        .alpha("as the face's materials make it (NEEDS-RE: their blend)")
+	        .sampling("as a model's diffuse")
+	        .missing("the grey checkerboard")
+	        .witness("Shadow_DecalLoadTextures @ 0x588040 (the base @ 0x5880EA, its .MDT @ 0x588117, the eyes @ 0x58814A, "
+	                 "@ 0x588180); FaceAnimConfig_ParseProperty @ 0x5886A0")
 	        .row,
 	Role(R::SightCard, "sight_card", "weapon sight card", G::Effects, L::Stage, kStageFormats)
 	        .alpha("by its blend: alpha, add, multiply, each optionally alpha-tested")
@@ -390,8 +401,12 @@ bool texture_role_takes(const TextureRoleRow &row, const std::string &extension)
 	return false;
 }
 
+bool texture_role_read_by_name(TextureRoleId role) {
+	return role == R::TerrainDetailCoefficient || role == R::TerrainSplatDetail || role == R::TerrainSecondDetail;
+}
+
 int32_t texture_role_arg(TextureRoleId role, int32_t flags) {
-	return kTextureRoleArg + int32_t(role) + (flags & (kTextureArgGates | kTextureArgTileSet));
+	return kTextureRoleArg + int32_t(role) + (flags & (kTextureArgGates | kTextureArgTileSet | kTextureArgPcx));
 }
 
 bool texture_arg_role(int32_t loader_arg, TextureRoleId &role) {

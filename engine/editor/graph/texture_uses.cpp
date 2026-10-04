@@ -119,13 +119,19 @@ std::vector<FixedTextureName> collect_fixed() {
 			add(name, R::BoardBox, "for the scoreboard's box", "BoxTexture_LoadAndSetupUVRegions @ 0x56ACD0");
 		else if (lower.rfind("neticon", 0) == 0)
 			add(name, R::NetIcon, "for the connection indicators", "CNetworkIcons_LoadTextures @ 0x4C2CF0");
-		else if (lower == "border3.tga" || lower == "k_tip.tga" || lower == "g_tip.tga")
+		// The tip panel's box through the box loader (the TGA reader, no .dds tried); its two pictures by STAGE.
+		else if (lower == "border3.tga")
+			add(name, R::BoardBox, "for the tip panel's box", "CTipSystem_Init @ 0x5B6970 (BoxTexture_LoadAndSetupUVRegions @ 0x56ACD0)");
+		else if (lower == "k_tip.tga" || lower == "g_tip.tga")
 			add(name, R::TipArt, "for the tip panel", "CTipSystem_Init @ 0x5B6970");
 		else if (map)
 			add(name, R::HudFileArt, "for the HUD's map", "HUD_LoadAllTextures @ 0x59E060..0x59E0F3");
 		else
 			add(name, R::HudColour, "for the HUD", "HUD_LoadAllTextures @ 0x59DDA0", TextureLoader::kCount, 0);
 	}
+	// The scoreboard box's third texture [orig: Game_StartMission @ 0x525AA3, through sub_56AB00 and the box
+	// loader].
+	add("monogram.tga", R::BoardBox, "for the scoreboard's box", "Game_StartMission @ 0x525AA3 (BoxTexture_LoadAndSetupUVRegions @ 0x56ACD0)");
 	add(hud::kHudCargoFlagTexture, R::HudColour, "for the HUD's carried flag", "HUD_LoadAllTextures @ 0x59DE53",
 	    TextureLoader::kCount, 0);
 	add(hud::kHudCargoDocumentTexture, R::HudColour, "for the HUD's carried item", "HUD_LoadAllTextures @ 0x59DE64",
@@ -291,13 +297,21 @@ std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &s
 	std::map<std::string, std::shared_ptr<const Document>> read;
 	for (const GraphEdge *edge : edges) {
 		TextureUse use = edge_use(graph, scan, *edge, models, exists, read);
-		use.reads_file = use.served == file;
+		// A terrain detail is read by its own name too (texture_role_read_by_name): the file of the name
+		// as written is read whatever its loader's .dds.
+		use.reads_file = use.served == file || (texture_role_read_by_name(use.role) &&
+		                                        normalized_logical_name(basename_of(use.name_written)) == key);
 		use.words = use_words(use);
 		out.push_back(std::move(use));
 	}
+	// The names the game opens itself: those of the file's name, and those whose loader opens this file (a
+	// .dds beside the name the game writes).
+	const std::string stem = stem_key(entry->logical_name);
 	for (const FixedTextureName &fixed : fixed_texture_names()) {
-		if (normalized_logical_name(fixed.name) != key) continue;
+		const bool named = normalized_logical_name(fixed.name) == key;
+		if (!named && stem_key(fixed.name) != stem) continue;
 		TextureUse use = fixed_use(scan, fixed, exists);
+		if (!named && use.served != file) continue;
 		use.reads_file = use.served == file;
 		use.words = use_words(use);
 		out.push_back(std::move(use));

@@ -89,15 +89,21 @@ int test_uses() {
 	const ImportResult imported =
 			import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/thing.3di"}));
-	for (const char *name : {"body.tga", "body.dds", "grain.tga", "skin.mdt", "map.tga", "cloud.pcx", "stance.tga", "scopexh.tga"})
+	for (const char *name : {"body.tga", "body.dds", "grain.tga", "skin.mdt", "map.tga", "cloud.pcx", "stance.tga", "scopexh.tga",
+	                         "eraindrp.dds", "monogram.tga", "border3.tga", "face.tga", "face.mdt", "eye1.tga", "eye2.tga",
+	                         "pip.pcx"})
 		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name,
 		                                     std::string(name).find(".dds") != std::string::npos ? dds_bytes() : tga_bytes()));
+	// A face animation: its base written with another extension (the loader makes it .TGA, and opens its .MDT
+	// too), its eyes as .tga.
+	TEST_EXPECT(editor_test::write_text(root + "/chars/face.grm", "basetexture face.bmp\r\neyetexture eye1.tga eye2.tga\r\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
 	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_polydata isle.cpt\n"
 	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n") &&
 	            editor_test::write_text(root + "/defs/items.def",
 	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\n"
-	                                    "shadow shadow1.tga 3.5 5.4 0.0 0.0\nend\n"));
+	                                    "shadow shadow1.tga 3.5 5.4 0.0 0.0\nend\n"
+	                                    "begin \"Pip\"\nid 100301\ntype building\nhud_image pip.pcx\nend\n"));
 	{
 		std::ostringstream text;
 		opennova::env::Config config;
@@ -141,6 +147,28 @@ int test_uses() {
 	const std::vector<TextureUse> &scope = index.uses_of(view, "textures/scopexh.tga");
 	TEST_EXPECT(scope.size() == 1 && scope[0].fixed && scope[0].role == TextureRoleId::HudAlphaOnly &&
 	            scope[0].fixed_for == "for the scope's crosshair" && scope[0].reads_file);
+	// An alpha-only HUD image that is a PCX: its blue the alpha, alone.
+	const std::vector<TextureUse> &pip = index.uses_of(view, "textures/pip.pcx");
+	TEST_EXPECT(pip.size() == 1 && pip[0].load.transform == TextureLoadTransform::BlueAlphaOnly);
+	// A name the game opens itself, served by its .dds: the use is the .dds's (rain's STAGE name).
+	const std::vector<TextureUse> &rain = index.uses_of(view, "textures/eraindrp.dds");
+	TEST_EXPECT(rain.size() == 1 && rain[0].fixed && rain[0].reads_file && rain[0].fixed_for == "for rain");
+	// The scoreboard box's monogram and the tip panel's box, through the box loader.
+	const std::vector<TextureUse> &monogram = index.uses_of(view, "textures/monogram.tga");
+	const std::vector<TextureUse> &border3 = index.uses_of(view, "textures/border3.tga");
+	TEST_EXPECT(monogram.size() == 1 && monogram[0].role == TextureRoleId::BoardBox && border3.size() == 1 &&
+	            border3[0].role == TextureRoleId::BoardBox && border3[0].fixed_for == "for the tip panel's box");
+	// A face animation's textures: the base by its name made .TGA (no site of the file: the file writes
+	// face.bmp), its .MDT twin, each eye.
+	const std::vector<TextureUse> &face = index.uses_of(view, "textures/face.tga");
+	const std::vector<TextureUse> &twin = index.uses_of(view, "textures/face.mdt");
+	const std::vector<TextureUse> &eye = index.uses_of(view, "textures/eye2.tga");
+	TEST_EXPECT(face.size() == 1 && face[0].role == TextureRoleId::FaceTexture && face[0].referrer == "chars/face.grm" &&
+	            face[0].field == "basetexture" && face[0].name_written == "face.TGA" && face[0].reads_file);
+	TEST_EXPECT(twin.size() == 1 && twin[0].field == "basetexture.mdt" && twin[0].reads_file);
+	TEST_EXPECT(eye.size() == 1 && eye[0].record == "eye 2" && eye[0].field == "eyetexture");
+	for (const GraphEdge *edge : view.findings.graph->references_of("chars/face.grm"))
+		TEST_EXPECT(edge->rewritable == (edge->record.rfind("eye", 0) == 0));
 	// Made once while the graph and the documents stand.
 	const uint64_t made = index.made();
 	index.uses_of(view, "textures/body.tga");

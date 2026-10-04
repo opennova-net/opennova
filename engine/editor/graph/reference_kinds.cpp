@@ -45,6 +45,9 @@ std::vector<std::string> texture_files(const std::string &name, int32_t loader_a
 	TextureRoleId role = TextureRoleId::kCount;
 	if (texture_arg_role(loader_arg, role)) {
 		if (loader_arg & kTextureArgTileSet) return texture_files(name, kTileSetTextureArg, exists);
+		// A sky map: its extension made PCX first (kTextureArgPcx).
+		if (loader_arg & kTextureArgPcx)
+			return texture_files(menu::replace_or_append_extension(name, "pcx"), loader_arg & ~kTextureArgPcx, exists);
 		renderer::TextureLoader by;
 		return texture_role_renderer_loader(role, by) ? texture_files(name, texture_loader_arg(by), exists) : one(name);
 	}
@@ -77,23 +80,23 @@ const char *texture_gates(int32_t loader_arg) {
 }
 
 // What the game does without the file, in the role's words (texture_roles.h); where the project holds the
-// name as written, that the loader opens no file of its extension (a HUD name written .dds, a model normal
-// map's .pcx), and which it does open.
+// name as written, that the loader opens other files for it (a HUD name written .dds, a sky map's name made
+// .pcx), and which.
 std::string texture_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	TextureRoleId role = TextureRoleId::kCount;
 	const bool has_role = texture_arg_role(edge.loader_arg, role);
 	const std::string then = has_role && *texture_role_row(role).missing ? ": " + std::string(texture_role_row(role).missing) + "." : ".";
 	const std::string name = basename_of(edge.value);
 	if (!name.empty() && graph.has_file(name)) {
-		const size_t dot = name.find_last_of('.');
-		const std::string extension = dot == std::string::npos ? std::string() : name.substr(dot);
+		// What the loader would open were every name it tries there (a .dds beside the name first), then
+		// were none.
+		std::vector<std::string> tries = texture_files(edge.value, edge.loader_arg, [](const std::string &) { return true; });
+		for (const std::string &each : texture_files(edge.value, edge.loader_arg, [](const std::string &) { return false; }))
+			if (std::find(tries.begin(), tries.end(), each) == tries.end()) tries.push_back(each);
 		std::string opens;
-		if (has_role)
-			for (const std::string &each : texture_role_extensions(texture_role_row(role)))
-				opens += (opens.empty() ? "" : ", ") + each;
-		return ", which the project has, but the game's loader for it opens no " +
-		       (extension.empty() ? std::string("file of no extension") : extension + " file") +
-		       (opens.empty() ? std::string() : " (it opens " + opens + ")") + then;
+		for (const std::string &each : tries) opens += (opens.empty() ? "" : " or ") + basename_of(each);
+		return ", which the project has, but the game's loader for it opens " +
+		       (opens.empty() ? std::string("no file of that name") : opens + ", which the project does not have") + then;
 	}
 	return ", which the project does not have" + then;
 }

@@ -9,7 +9,7 @@
 namespace opennova::editor {
 
 // The sites of the native text kinds (ADR 0046 S18): a terrain (.trn), an environment (.env), a
-// particle file (.ptl) and the HUD layout (hudpos.def) are read by the engine's own parsers
+// particle file (.ptl), the HUD layout (hudpos.def) and a face animation (.grm) are read by the engine's own parsers
 // (graph/extractors.cpp), which keep no places, and have no document type to write them. A name such
 // a file writes is rewritten as text: a whole token spelling the site's value (bounded by the start
 // or end of the text, a space, a line's end, or one of , ; = " ' / \ ( ) [ ] { }) is replaced, and

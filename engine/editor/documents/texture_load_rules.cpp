@@ -4,6 +4,7 @@
 
 #include <base/io/strutil.h>
 #include <formats/trn/trn.h>
+#include <runtime/menu/menu_assets.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -43,7 +44,11 @@ TextureLoad from_renderer(const renderer::TextureLoad &load) {
 		break;
 	case renderer::TextureLoadTransform::None: break;
 	}
-	if (load.alpha_only) out.transform = TextureLoadTransform::AlphaOnly;
+	// The HUD's alpha mode keeps the alpha alone, after the colour transform: a PCX's alpha is its blue
+	// [orig: HUD_LoadImageAsTexture @ 0x59160F..0x59163E, then the A8 copy @ 0x5916AE..0x5916BE].
+	if (load.alpha_only)
+		out.transform = out.transform == TextureLoadTransform::WhiteAlphaFromBlue ? TextureLoadTransform::BlueAlphaOnly
+		                                                                         : TextureLoadTransform::AlphaOnly;
 	return out;
 }
 
@@ -103,6 +108,7 @@ const char *texture_load_transform_token(TextureLoadTransform transform) {
 	case TextureLoadTransform::WhiteAlphaFromBlue: return "white_alpha_from_blue";
 	case TextureLoadTransform::AlphaOnly: return "alpha_only";
 	case TextureLoadTransform::NormalFromHeight: return "normal_from_height";
+	case TextureLoadTransform::BlueAlphaOnly: return "blue_alpha_only";
 	case TextureLoadTransform::kCount: break;
 	}
 	return "none";
@@ -114,6 +120,7 @@ const char *texture_load_transform_words(TextureLoadTransform transform) {
 	case TextureLoadTransform::WhiteAlphaFromBlue: return "white, its alpha its blue";
 	case TextureLoadTransform::AlphaOnly: return "its alpha alone, tinted by the HUD colour";
 	case TextureLoadTransform::NormalFromHeight: return "a normal map made from the height in its alpha";
+	case TextureLoadTransform::BlueAlphaOnly: return "its blue alone as alpha, tinted by the HUD colour";
 	case TextureLoadTransform::None:
 	case TextureLoadTransform::kCount: break;
 	}
@@ -165,6 +172,9 @@ TextureLoad texture_reference_load(std::string_view written, int32_t loader_arg,
 	// appended as, TGA [orig: Terrain_LoadEnvironmentConfig @ 0x6109EE, Path_ReplaceOrAppendExtension @
 	// 0x53C780] (formats/trn).
 	if (loader_arg & kTextureArgTileSet) name = trn_mission_tilestrip(TrnConfig{}, name);
+	// A sky map: its extension made PCX first, the archive loader then trying its .dds and the .pcx
+	// (kTextureArgPcx).
+	if (loader_arg & kTextureArgPcx) name = menu::replace_or_append_extension(name, "pcx");
 	return texture_load(texture_role_row(role).loader, name, exists, 0, -1, role);
 }
 
@@ -189,15 +199,18 @@ std::shared_ptr<const TextureImage> apply_load_transform(const TextureImage &ima
 	}
 	case TextureLoadTransform::WhiteAlphaFromBlue:
 	case TextureLoadTransform::AlphaOnly:
+	case TextureLoadTransform::BlueAlphaOnly: {
 		// As the game's loaders do it (renderer::apply_texture_load_transform): white with the blue as alpha;
-		// the alpha alone, white, the form an A8 texture takes under the HUD's alpha material.
+		// the alpha alone, white, the form an A8 texture takes under the HUD's alpha material; both for a
+		// PCX in the HUD's alpha mode.
+		const bool blue = transform != TextureLoadTransform::AlphaOnly;
+		const bool alone = transform != TextureLoadTransform::WhiteAlphaFromBlue;
 		for (TextureLevel &level : out->levels)
-			renderer::apply_texture_load_transform(transform == TextureLoadTransform::WhiteAlphaFromBlue
-			                                               ? renderer::TextureLoadTransform::WhiteAlphaFromBlue
-			                                               : renderer::TextureLoadTransform::None,
-			                                       transform == TextureLoadTransform::AlphaOnly, level.rgba.data(),
-			                                       level.rgba.size() / 4);
+			renderer::apply_texture_load_transform(blue ? renderer::TextureLoadTransform::WhiteAlphaFromBlue
+			                                            : renderer::TextureLoadTransform::None,
+			                                       alone, level.rgba.data(), level.rgba.size() / 4);
 		break;
+	}
 	case TextureLoadTransform::NormalFromHeight:
 		// [orig: Texture_LoadAsNormalMap @ 0x58C985..0x58CAED] (renderer::normal_map_from_height_rgba,
 		// the height in A, B the output alpha, at the device's scale).
