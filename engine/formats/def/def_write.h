@@ -17,11 +17,18 @@ struct DefWriteResult {
 	bool ok() const { return diagnostics.empty(); }
 };
 
-DefWriteResult def_write_items(const DefItemsFile &file);
-DefWriteResult def_write_weapons(const DefWeaponsFile &file);
-DefWriteResult def_write_ammo(const DefAmmoFile &file);
+struct DefTextNotes;
+
+// A family's file from its records, read back through the family's parser and compared, field by field.
+// Given the notes it was read with (def_notes.h), a record's lines are put down as the file has them while
+// what the writer puts down for them is unchanged, and a changed line keeps its blanks, its comment and its
+// unchanged words; a record's notes the reparse check refuses give way to the writer's own lines, then to
+// the table's order.
+DefWriteResult def_write_items(const DefItemsFile &file, const DefTextNotes *notes = nullptr);
+DefWriteResult def_write_weapons(const DefWeaponsFile &file, const DefTextNotes *notes = nullptr);
+DefWriteResult def_write_ammo(const DefAmmoFile &file, const DefTextNotes *notes = nullptr);
 // powerup.def: each row's `powerup "<name>"` block, its lines, its ammo rows and its written action
 // blocks, read back through the family's parser and compared as the others are.
-DefWriteResult def_write_powerup(const DefPowerupFile &file);
+DefWriteResult def_write_powerup(const DefPowerupFile &file, const DefTextNotes *notes = nullptr);
 
 } // namespace opennova::def

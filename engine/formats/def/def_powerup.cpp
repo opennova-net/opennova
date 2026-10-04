@@ -14,6 +14,7 @@
 //  Game_StartMission loads it @0x5256CD and logs "Unable to load powerup.def"
 //  and continues when it is missing]
 
+#include "def_notes.h"
 #include "def_scan.h"
 
 #include <base/io/ascii_config.h>
@@ -79,7 +80,11 @@ void ignored(DefPowerupFile *out, DefParseReport *report, size_t line, const cha
     authoring_issue(out->unmodeled_count, report, line + 1, record, key, strlen(key));
 }
 
-int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, DefParseReport *report) {
+int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, DefParseReport *report,
+                         DefTextNotes *notes) {
+    DefTextNoter noter(buf, file_len, notes);
+    // A line of the open row (`key`'s step) or of its open action block.
+    const auto noted = [&noter](DefRecordKind kind, const char *key) { noter.property(def_line_step(kind, key, strlen(key))); };
     size_t entries_cap = 0;
     DefPowerupDef current;
     memset(&current, 0, sizeof(current));
@@ -95,8 +100,9 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, 
     //  the tail @0x53D8E9 / @0x53D8EC]; a lone LF is no line break there.
     size_t line_index = (size_t)-1;
     io::for_each_config_line_span(buf, file_len, [&](const io::ConfigTokens &tokens,
-                                                     const io::ConfigLineSpan &) {
+                                                     const io::ConfigLineSpan &span) {
         ++line_index;
+        noter.line(buf + span.begin);
         if (tokens.count == 0 || tokens.tokens[0][0] == '/') return;
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1);
@@ -114,6 +120,7 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, 
                 memcpy(current.name, v, n);
                 current.name[n] = '\0';
                 current.open_line = line_index;
+                current.note = noter.open(DefRecordKind::Powerup);
                 in_block = true;
             }
             return;
@@ -124,10 +131,12 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, 
         if (key_is(key, "end")) {
             if (in_action) {
                 if (in_block && action != nullptr) {
+                    noter.close();
                     in_action = false;
                     action = nullptr;
                 }
             } else if (in_block) {
+                noter.close();
                 current.end_line = line_index;
                 DA_PUSH(out->entries, out->count, entries_cap, current);
                 memset(&current, 0, sizeof(current));
@@ -148,6 +157,7 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, 
         // In-action lines go to the action-line parser [orig: @0x443039..0x44304F].
         if (in_action) {
             if (action != nullptr && !parse_action_line(*action, tokens)) ignored(out, report, line_index, current.name, key);
+            else if (action != nullptr) noted(DefRecordKind::PowerupAction, key);
             return;
         }
 
@@ -162,11 +172,15 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, 
                 ignored(out, report, line_index, current.name, key);
                 return;
             }
+            // A block of the row's name read again replaces it: the earlier block is read for nothing.
+            if (action->present) noter.drop_nested(action->note);
             memset(action, 0, sizeof(*action));
             action->present = 1;
+            action->note = noter.open_nested(DefRecordKind::PowerupAction, DEF_LINE_ORDER_BLOCKS);
             in_action = true;
             return;
         }
+        noted(DefRecordKind::Powerup, key); // a line of the row's (a key it reads none of: read for nothing)
         if (key_is(key, "respawn_time")) {
             current.respawn_time = (int)strtol(v, nullptr, 10); // @0x443103
         } else if (key_is(key, "max_respawns")) {
@@ -192,11 +206,16 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, 
             memset(&row, 0, sizeof(row));
             safe_copy(row.class_name, sizeof(row.class_name), v, vl);
             row.count = (int)strtol(tokens.token(2), nullptr, 10);
+            // A row of the row's, one line (its notes its own).
+            const int row_step = def_line_step(DefRecordKind::PowerupAmmo, key, strlen(key));
+            row.note = noter.open_nested(DefRecordKind::PowerupAmmo, DEF_LINE_ORDER_ROWS, false,
+                                         uint8_t(row_step < 0 ? 0 : row_step));
             DA_PUSH(current.ammo, current.ammo_count, ammo_cap, row);
         } else {
             ignored(out, report, line_index, current.name, key); // "unrecognized token" [orig: @0x44328C]
         }
     });
+    noter.finish();
     // An unterminated tail block is never registered (retail registers only at `end`): a
     // file the typed model cannot carry as written, which an authoring tool refuses to
     // rewrite until it is closed or removed.
@@ -214,20 +233,37 @@ int def_parse_powerup(const char *path, DefPowerupFile *out, DefParseReport *rep
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    const int rc = parse_powerup_buffer(buf, file_len, out, report);
+    const int rc = parse_powerup_buffer(buf, file_len, out, report, nullptr);
     free(buf);
     return rc;
 }
 
-int def_parse_powerup_memory(const uint8_t *data, size_t size, DefPowerupFile *out, DefParseReport *report) {
+namespace {
+
+int parse_powerup_copy(const uint8_t *data, size_t size, DefPowerupFile *out, DefParseReport *report,
+                       DefTextNotes *notes) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
     char *buf = (char *)malloc(size + 1);
     if (!buf) return -1;
     memcpy(buf, data, size);
     buf[size] = '\0';
-    const int rc = parse_powerup_buffer(buf, size, out, report);
+    const int rc = parse_powerup_buffer(buf, size, out, report, notes);
     free(buf);
+    return rc;
+}
+
+} // namespace
+
+int def_parse_powerup_memory(const uint8_t *data, size_t size, DefPowerupFile *out, DefParseReport *report) {
+    return parse_powerup_copy(data, size, out, report, nullptr);
+}
+
+int def_parse_powerup_memory(const uint8_t *data, size_t size, DefPowerupFile *out, DefParseReport *report,
+                             DefTextNotes &notes) {
+    notes = DefTextNotes();
+    const int rc = parse_powerup_copy(data, size, out, report, &notes);
+    def_note_baseline(*out, notes);
     return rc;
 }
 

@@ -6,6 +6,7 @@
 //
 // AMMO.DEF: one record per ammunition type.
 
+#include "def_notes.h"
 #include "def_scan.h"
 
 #include <ctype.h>
@@ -108,7 +109,8 @@ static int parse_age_ticks_n(const char *s, size_t len) {
 
 void def_init_ammo(DefAmmoDef &value) { memset(&value, 0, sizeof(value)); }
 
-static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report);
+static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report,
+                             DefTextNotes *notes);
 
 int def_parse_ammo(const char *path, DefAmmoFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
@@ -116,24 +118,39 @@ int def_parse_ammo(const char *path, DefAmmoFile *out, DefParseReport *report) {
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_ammo_buffer(buf, file_len, out, report);
+    int rc = parse_ammo_buffer(buf, file_len, out, report, nullptr);
     free(buf);
     return rc;
 }
 
-int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report) {
+static int parse_ammo_copy(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report,
+                           DefTextNotes *notes) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
     char *buf = (char *)malloc(size + 1);
     if (!buf) return -1;
     memcpy(buf, data, size);
     buf[size] = '\0';
-    int rc = parse_ammo_buffer(buf, size, out, report);
+    int rc = parse_ammo_buffer(buf, size, out, report, notes);
     free(buf);
     return rc;
 }
 
-static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report) {
+int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report) {
+    return parse_ammo_copy(data, size, out, report, nullptr);
+}
+
+int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report,
+                          DefTextNotes &notes) {
+    notes = DefTextNotes();
+    const int rc = parse_ammo_copy(data, size, out, report, &notes);
+    def_note_baseline(*out, notes);
+    return rc;
+}
+
+static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report,
+                             DefTextNotes *notes) {
+    DefTextNoter noter(buf, file_len, notes);
 
     size_t entries_cap = 0;
     LineIter it = {buf, file_len, 0};
@@ -148,6 +165,7 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefPa
     char lower[1024];
 
     while (next_line(&it, &line, &line_len)) {
+        noter.line(line);
         size_t tlen;
         const char *trimmed = trim_def_line(line, line_len, &tlen);
         if (tlen == 0) continue;
@@ -163,11 +181,13 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefPa
             }
             in_effects = 1;
             def_note_line(DefRecordKind::Ammo, current.line_order, trimmed, tlen); // where its table stands
+            noter.property(DEF_LINE_ORDER_ROWS);
             continue;
         }
         if (in_effects) {
             if (ll == 3 && memcmp(lower, "end", 3) == 0) {
                 in_effects = 0;
+                noter.property(DEF_LINE_ORDER_ROWS); // the table's end, a line of its rows' step
                 continue;
             }
             validate_property(DefRecordKind::Effect, trimmed, tlen, current.unmodeled_count, report, it.line, current.name);
@@ -180,6 +200,8 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefPa
                 safe_copy(e.hit_effect, sizeof(e.hit_effect), tok[1].s, tok[1].len);
                 safe_copy(e.impact_sound, sizeof(e.impact_sound), tok[2].s, tok[2].len);
                 e.value = parse_int_n(tok[3].s, tok[3].len);
+                // A row of the ammo's table, one line (its notes its own).
+                e.note = noter.open_nested(DefRecordKind::Effect, DEF_LINE_ORDER_ROWS, false, 0);
                 DA_PUSH(current.effects_table, current.effects_table_count, eff_cap, e);
             }
             continue;
@@ -193,6 +215,7 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefPa
             const char *nm = trim_span(trimmed + 5, tlen - 5, &nlen);
             safe_copy(current.name, sizeof(current.name), nm, nlen);
             validate_header(trimmed, tlen, 4, sizeof(current.name), DefHeaderName::Bare, current.unmodeled_count, report, it.line, current.name);
+            current.note = noter.open(DefRecordKind::Ammo);
             in_block = 1;
             continue;
         }
@@ -200,6 +223,7 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefPa
         if (!in_block) { authoring_issue(out->unmodeled_count, report, it.line, "", trimmed, tlen); continue; }
 
         if (ll == 3 && memcmp(lower, "end", 3) == 0) {
+            noter.close();
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
             eff_cap = 0;
@@ -500,11 +524,13 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefPa
             // What a writer keeps of the line: its place in the ammo's order, the file's indentation.
             def_note_line(DefRecordKind::Ammo, current.line_order, trimmed, tlen);
             def_note_indent(out->layout, indent_noted, line, line_len);
+            noter.property(def_line_step(DefRecordKind::Ammo, trimmed, tlen));
         }
         if (!parsed) {
             authoring_issue(current.unmodeled_count, report, it.line, current.name, trimmed, tlen);
         }
     }
+    noter.finish();
 
     if (in_block) {
         authoring_issue(out->unmodeled_count, report, it.line, current.name, "end", 3, DefIssueCode::MalformedBlock);

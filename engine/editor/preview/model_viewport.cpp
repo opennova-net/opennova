@@ -440,9 +440,41 @@ OrbitCamera ModelViewport::framed(int width, int height) const {
 	if (!model_) return camera;
 	PreviewVec3 center;
 	float radius = 1.0f;
-	model_preview_sphere(*model_, center, radius);
+	if (!posed_sphere(center, radius)) model_preview_sphere(*model_, center, radius);
 	camera.frame(center, radius, width, height);
 	return camera;
+}
+
+bool ModelViewport::posed_sphere(PreviewVec3 &center, float &radius) const {
+	if (!model_ || !animating_ || !skeleton_ || clip_key_.empty()) return false;
+	const anim::SkeletalClips::LoadedClip *clip = skeleton_->find_clip_variant(clip_key_, clip_variant_);
+	if (!clip) return false;
+	PreviewVec3 rest;
+	float reach = 1.0f;
+	model_preview_sphere(*model_, rest, reach);
+	// Every frame the clip's clock shows (its first tick each), the rest pose's sphere carried by each bone.
+	std::vector<int32_t> ticks;
+	for (const int32_t tick : clip->clip.playback().first_ticks())
+		if (tick >= 0) ticks.push_back(tick);
+	if (ticks.empty()) ticks.push_back(0);
+	std::vector<PreviewVec3> centres;
+	for (const int32_t tick : ticks)
+		for (const PreviewJoint &joint : preview_posed_joints(*skeleton_, clip_key_, clip_variant_, tick))
+			centres.push_back(preview_joint_carry(joint, rest));
+	if (centres.empty()) return false;
+	PreviewVec3 lo = centres.front(), hi = centres.front();
+	for (const PreviewVec3 &at : centres) {
+		lo = PreviewVec3{std::min(lo.x, at.x), std::min(lo.y, at.y), std::min(lo.z, at.z)};
+		hi = PreviewVec3{std::max(hi.x, at.x), std::max(hi.y, at.y), std::max(hi.z, at.z)};
+	}
+	center = PreviewVec3{(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f};
+	float far = 0.0f;
+	for (const PreviewVec3 &at : centres) {
+		const float dx = at.x - center.x, dy = at.y - center.y, dz = at.z - center.z;
+		far = std::max(far, std::sqrt(dx * dx + dy * dy + dz * dz));
+	}
+	radius = far + reach;
+	return true;
 }
 
 OrbitCamera ModelViewport::framed_on(const ModelOverlay &overlay, int width, int height) const {

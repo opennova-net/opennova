@@ -150,6 +150,36 @@ std::string shortest(double number) {
 	return written.ec == std::errc() ? std::string(text, written.ptr) : std::string();
 }
 
+// What a whole number of the line is multiplied by as it is read (the stored word over the line's number):
+// a scaled integer's factor, a degree's 11930464 binary angle units, a half angle's half of that [orig:
+// ItemDef_ParsePhysicsProperty @ 0x49D870, AmmoDef_ParseProperty 'kz_pieslice']; 0 for any other encoding.
+double whole_scale(const DefProperty &property) {
+	switch (property.encoding) {
+	case DefEncoding::ScaledInteger: return property.factor;
+	case DefEncoding::Degrees: return 11930464.0;
+	case DefEncoding::HalfDegrees: return 11930464.0 / 2.0;
+	default: return 0.0;
+	}
+}
+
+// A scaled whole number whose stored word no whole number of the line makes within the parser's 32 bits
+// (an item's climb speed left at the word 1 its allocation gives it [orig: ItemDef_AllocateWithDefaults
+// @0x49E3B0], in no item a whole km/h): what the game holds in the line's units, the quotient, a real
+// (1/293 km/h); the only whole number that reads it goes round the 32-bit product many times, a number
+// nobody writes (-2066861395 for the word 1). A product the 32 bits hold once round is a whole number
+// the file writes (a boresight's 360 degrees, the word -256).
+bool unscaled_real(const DefMember &member, const void *record, DefValue &out) {
+	if (member.authored != DefAuthored::Integer || !member.property) return false;
+	const double scale = whole_scale(*member.property);
+	const auto *word = scale > 0.0 ? std::get_if<int64_t>(&(out = def_get(record, *member.field))) : nullptr;
+	if (!word) return false;
+	const double w = double(*word), round = 4294967296.0;
+	if (std::fmod(w, scale) == 0.0 || std::fmod(w + round, scale) == 0.0 || std::fmod(w - round, scale) == 0.0)
+		return false;
+	out = w / scale;
+	return true;
+}
+
 } // namespace
 
 DefAuthoredParses def_authored_parses() { return g_parses; }
@@ -181,6 +211,7 @@ bool def_authored_get(const DefMember &member, const void *record, DefValue &out
 	std::vector<DefValue> values;
 	if (member.authored == DefAuthored::None || !member.property || !member_values(member, record, values))
 		return false;
+	if (unscaled_real(member, record, out)) return true;
 	// The line's numbers as the writer puts them down, whether it writes the line or not (a
 	// failure, such as a nameless timing outside region 0, still puts its numbers down).
 	DefRecordWriter writer;
@@ -207,9 +238,19 @@ bool def_authored_set(const DefMember &member, void *record, const DefValue &val
 	std::string text;
 	if (type == DefAuthored::Integer) {
 		const auto *number = std::get_if<int64_t>(&value);
+		int64_t whole = 0;
 		if (!number) {
-			error = "This field takes a whole number.";
-			return false;
+			// The real a scaled whole number shows where its word is no multiple of its scale (unscaled_real):
+			// set as it shows, nothing changes; a whole real is its whole number; another, no line writes.
+			DefValue current;
+			if (unscaled_real(member, record, current) && current == value) return true;
+			const auto *real = std::get_if<double>(&value);
+			if (!real || !std::isfinite(*real) || std::trunc(*real) != *real || std::fabs(*real) > 9.0e15) {
+				error = "This field takes a whole number.";
+				return false;
+			}
+			whole = int64_t(*real);
+			number = &whole;
 		}
 		// The parser reads a whole number into a 32-bit word [orig: ItemDef_ParsePhysicsProperty
 		// @ 0x49D870 over j__atol @ 0x76ab1b]: past it, each platform's own narrowing would

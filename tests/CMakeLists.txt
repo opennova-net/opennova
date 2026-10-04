@@ -4475,6 +4475,11 @@ target_link_libraries(def_write_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(def_write COMMAND def_write_test)
 
+add_executable(def_noted_write_test def/def_noted_write_test.cpp)
+target_link_libraries(def_noted_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(def_noted_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(def_noted_write COMMAND def_noted_write_test)
+
 add_executable(editor_catalog_test editor/catalog_document_test.cpp)
 target_link_libraries(editor_catalog_test PRIVATE opennova_editor)
 target_include_directories(editor_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4577,7 +4582,7 @@ add_test(NAME editor_script_assist COMMAND editor_script_assist_test)
 # catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the
 # choice, the labelled field, the record handle and the list ops over a file of each; the cost of a
 # keystroke in a def catalog (one field's row resolved); and (a SKIP-LEG without OPENNOVA_JO_DIR)
-# the game's powerup.def opened as the catalog's rows, written as its canonical writer writes it.
+# the game's powerup.def opened as the catalog's rows, written back as the file was (its notes).
 add_executable(editor_table_shape_test editor/table_shape_test.cpp)
 target_link_libraries(editor_table_shape_test PRIVATE opennova_editor)
 target_include_directories(editor_table_shape_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

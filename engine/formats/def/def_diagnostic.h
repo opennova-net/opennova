@@ -13,12 +13,15 @@ namespace opennova::def {
 // Reinterpreted names a number the witnessed loader reads as another (a weapon's category
 // past 0..11 read as 0 [orig: WeaponDefs_ParseLineCallback @ 0x5439a8], an item's unit_type
 // past a byte read as its low byte [orig: ItemDef_ParseProperty @ 0x49ee47]): the record
-// holds what the game reads, which saving writes; reported, never a blocker.
+// holds what the game reads; a save over the file's notes (def_notes.h) keeps the number as
+// the file spells it while the record holds what it read, the writer's own form writes what
+// the game reads; reported, never a blocker.
 //
 // UnknownProperty names input the witnessed loaders read past without storing
 // anything: an unrecognized key, an `attrib:` token outside the chain, a stray
 // line outside a block. The game ignores it, so the typed model has nothing to
-// carry and saving drops it; it is reported, never a blocker. [orig:
+// carry: a save over the file's notes keeps it as the file has it, the writer's own
+// form leaves it out; it is reported, never a blocker. [orig:
 // ItemDef_ParseProperty @ 0x49EB00 (the key chain ends without a store and the
 // attrib: chain has no else arm), WeaponDef_ParseProperty @ 0x54D730 and
 // AmmoDef_ParseProperty @ 0x40A2D0 return 0 for an unmatched key]. The other

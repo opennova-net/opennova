@@ -231,6 +231,8 @@ JsonValue import_section(const SessionView &view) {
 	out.set("open", boolean(preview.open));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
 	if (preview.all) out.set("all", boolean(true));
+	// Its plan being made: no plan to show yet (the operation's progress is the activity's).
+	if (preview.planning) out.set("planning", boolean(true));
 	if (preview.changed)
 		out.set("changed", boolean(true));
 	size_t rows = 0, not_found = 0;
@@ -467,7 +469,7 @@ constexpr ViewSectionRow kSections[] = {
 			"the build directory), the files it reported missing at boot, and what Play runs (the "
 			"game install, in it or not, the runtime)." },
 	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,
-			"The import dialog in short (open, with_dependencies, its lists' counts; the "
+			"The import dialog in short (open, with_dependencies, planning while its plan is made, its lists' counts; the "
 			"import_preview query pages its plan), the editor's import setting, the project's "
 			"import sources (each with the other files its import read, inputs, and the files it "
 			"made, outputs) and the game install's file count." },
@@ -819,6 +821,8 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, 
 	out.set("open", boolean(preview.open));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
 	if (preview.all) out.set("all", boolean(true));
+	// Its plan being made: no plan to show yet (the operation's progress is the activity's).
+	if (preview.planning) out.set("planning", boolean(true));
 	if (preview.changed)
 		out.set("changed", boolean(true));
 	// The plan's importable rows (the paged list; those of one kind when one is asked) and the

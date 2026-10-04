@@ -46,7 +46,10 @@ struct DialogsView {
 	// install chosen at once (ADR 0046 S14), nothing to choose from and no walk (the closure of
 	// everything is everything; the setting changes nothing of it). Every plan made posts an
 	// ImportPlanned event (view_events.h). `facts`: each choice's kind and size, in the order of
-	// `choices` (the UX round's project lane: the chooser's Kind and Size).
+	// `choices` (the UX round's project lane: the chooser's Kind and Size). `planning`: the plan is being
+	// made (the import plan operation runs; its progress is the activity's operation): `plan` is no plan
+	// yet, and the dialog says so in place of its rows (the demo round's bug 8: "Nothing to import" and
+	// "Import 0 files" while the menu bar said "Planning 975/8144").
 	struct ImportPreview {
 		ImportPreview(); // the plan made, empty
 		bool open = false;
@@ -57,6 +60,7 @@ struct DialogsView {
 		bool all = false;
 		std::shared_ptr<const ImportPlan> plan;
 		bool changed = false;
+		bool planning = false;
 	};
 	ImportPreview import_preview;
 	// What a rename would do (PreviewRename): a name renamed everywhere (`symbol`: its kind, the

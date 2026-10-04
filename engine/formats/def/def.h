@@ -67,6 +67,8 @@ typedef struct DefEffectTableEntry {
     char hit_effect[128];
     char impact_sound[128];
     int value;
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefEffectTableEntry;
 
 /* DefAmmoDef.flags bits — the ammo.def `flag <name>` OR-mask, record dword +0.
@@ -216,6 +218,8 @@ typedef struct DefAmmoDef {
      * Projectile_ProcessExplosionQueue @0x4EB1DA..0x4EB292] */
     char secondary_effect[64];    /* +0x48 */
     char kz_sound[64];            /* +0x4C */
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefAmmoDef;
 
 typedef struct DefAmmoFile {
@@ -245,6 +249,8 @@ typedef struct DefSightEntry {
     int scale;        /* boolean */
     int slide;        /* boolean */
     int slide_frames;
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefSightEntry;
 
 typedef struct DefWeaponAction {
@@ -281,6 +287,8 @@ typedef struct DefWeaponAction {
 	size_t open_line;
 	size_t end_line;
 	DefLineOrder line_order; // the order its lines were read in
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefWeaponAction;
 
 /* DefWeaponDef.flags bits — the weapon.def `flags <name>` OR-mask (dword 1 of the
@@ -629,6 +637,8 @@ typedef struct DefWeaponDef {
        nothing. 1 = the option is on. Appended (layout stability). */
     int gfx1_nocheckdepth;
     int gfx3_nocheckdepth;
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefWeaponDef;
 
 /* One `ammoclass_max_carry <class> <n>` row: the class token and the carry cap,
@@ -641,6 +651,8 @@ typedef struct DefWeaponDef {
 typedef struct DefAmmoClassCarry {
     char name[64];
     int max_carry;
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefAmmoClassCarry;
 
 typedef struct DefWeaponsFile {
@@ -711,6 +723,8 @@ typedef struct DefItemEmplacementAttachment {
     int left_angle;
     int angle_count; /* 0 when limits are absent; packed retail records use 0 or 4 */
     int kind;        /* DefItemEmplacementAttachmentKind */
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefItemEmplacementAttachment;
 
 /* DefItemDef.attrib bits — items.def `attrib:` tokens (ItemDefAttrib, +0x54).
@@ -1102,6 +1116,8 @@ typedef struct DefItemDef {
        Entity_SetupGunnerAttachments (VehicleTraits::attrib_parent). Appended
        (layout stability). [orig: ItemDef_ParseProperty @0x4a0cd6..0x4a0ce2] */
     unsigned char attrib_parent;
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefItemDef;
 
 /* The file-wide vehicle spawn registry's slots: 'pcvehicle_spawnlist' ids take them in
@@ -1351,6 +1367,8 @@ typedef struct DefPowerupAction {
     int delaystart;              /* ActionDef+36 (ticks; `auto` -> -1) */
     int delayend;                /* ActionDef+40 (`delay` aliases it) */
     int action_value;            /* ActionDef+52 */
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefPowerupAction;
 
 /* One `ammo <class> <count>` row; the class name resolves against the weapon
@@ -1360,6 +1378,8 @@ typedef struct DefPowerupAction {
 typedef struct DefPowerupAmmo {
     char class_name[64];
     int count; /* -1 = fill the class, else the amount added */
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefPowerupAmmo;
 
 /* One `powerup "<name>"` block (the 576-byte retail row). Every scalar
@@ -1381,6 +1401,8 @@ typedef struct DefPowerupDef {
     DefPowerupAction respawn; /* row+0x24 */
     size_t open_line;
     size_t end_line;
+    /* What names the record's lines in its file's notes (def_notes.h; 0: none, a record made from nothing or a copy). Appended (layout stability). */
+    uint64_t note;
 } DefPowerupDef;
 
 typedef struct DefPowerupFile {

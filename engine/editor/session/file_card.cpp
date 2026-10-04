@@ -85,6 +85,7 @@ FileCard file_card(const SessionView &view, const std::string &path, const FileC
 		card.sound = known && known->modified != 0 && known->size == entry->size_bytes && known->modified == entry->modified_ticks
 		                     ? *known
 		                     : decode_sound(join_path(view.project.root, entry->relative_path), *entry);
+	card.reading = view.activity.validation.running || !view.activity.validation.read;
 	const AssetGraph *graph = view.findings.graph.get();
 	if (!graph) return card;
 	for (const GraphEdge *edge : graph->references_of(entry->relative_path)) {
@@ -153,6 +154,7 @@ JsonValue file_card_json(const FileCard &card) {
 		users.push(std::move(item));
 	}
 	out.set("named_by", std::move(users));
+	if (card.reading) out.set("reading", JsonValue::make_bool(true));
 	return out;
 }
 

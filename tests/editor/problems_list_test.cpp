@@ -402,17 +402,17 @@ int test_proposals() {
 	SessionView rewrite;
 	rewrite.project.open = true;
 	rewrite.project.root = "C:/mods/Rewrite";
-	rewrite.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "catalog.ignored_input",
-	                               "Delta: a key the game ignores.", "defs/weapon.def"),
-	                       finding(DiagnosticSeverity::Error, "catalog.unserializable",
-	                               "Echo: this cannot be written.", "defs/weapon.def"),
-	                       finding(DiagnosticSeverity::Warning, "catalog.ignored_input",
-	                               "Foxtrot: a key the game ignores.", "defs/ammo.def")};
+	rewrite.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "menu.ignored_input",
+	                               "Delta: a key the game ignores.", "menus/a.mnu"),
+	                       finding(DiagnosticSeverity::Error, "menu.unserializable",
+	                               "Echo: this cannot be written.", "menus/a.mnu"),
+	                       finding(DiagnosticSeverity::Warning, "menu.ignored_input",
+	                               "Foxtrot: a key the game ignores.", "menus/b.mnu")};
 	ProblemsList fixable;
 	fixable.query().grouping = ProblemGrouping::None;
 	fixable.refresh(rewrite);
 	TEST_EXPECT(fixable.fixes(rewrite, 0).empty() && fixable.fixes(rewrite, 2).size() == 1 &&
-	            fixable.fixes(rewrite, 2).front().label == "Rewrite ammo.def");
+	            fixable.fixes(rewrite, 2).front().label == "Rewrite b.mnu");
 	fixable.query().fixable = true;
 	const ProblemAnswer &only = fixable.refresh(rewrite);
 	TEST_EXPECT(only.rows == std::vector<size_t>({2}) && only.total() == 3);
@@ -465,7 +465,7 @@ int test_confirmation() {
 	return 0;
 }
 
-// A thousand findings in fifty catalogs: a refresh, grouped or not, plans no finding's fixes
+// A thousand findings in fifty menus: a refresh, grouped or not, plans no finding's fixes
 // (a group's Fix all reads the bulk ones, unkept); the fixes are planned for the findings asked,
 // each once while what they read stands.
 int test_fixes_lazy() {
@@ -473,14 +473,14 @@ int test_fixes_lazy() {
 	v.project.open = true;
 	v.project.root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
-		const std::string name = "f" + std::to_string(file) + ".def";
+		const std::string name = "f" + std::to_string(file) + ".mnu";
 		editor_test::own(v.project.scan)
-				.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
+				.entries.push_back(file_entry(name, "menus/" + name, AssetKind::Menu));
 	}
 	for (size_t i = 0; i < 1000; ++i) {
-		const std::string message = "Finding " + std::to_string(i) + ": a line the game ignores.";
+		const std::string message = "Finding " + std::to_string(i) + ": input the game ignores.";
 		const std::string &file = v.project.scan->entries[i / 20].relative_path;
-		Diagnostic d = finding(DiagnosticSeverity::Warning, "catalog.ignored_input",
+		Diagnostic d = finding(DiagnosticSeverity::Warning, "menu.ignored_input",
 		                       message.c_str(), file.c_str(), "name");
 		d.row_id = i + 1;
 		d.record_kind = 2;

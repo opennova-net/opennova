@@ -723,12 +723,14 @@ void FilesWindow::close_card() {
 	card_.reset();
 }
 
-// The card (session/file_card.h), made again when the files, the graph or the project move: a window of its
-// own kept in the editor's, as the build result is, until it is closed.
+// The card (session/file_card.h), made again when the files, the graph or the project move, and when the
+// project's references start or end being read: a window of its own kept in the editor's, as the build
+// result is, until it is closed.
 void FilesWindow::draw_card(const SessionView &view) {
 	if (card_path_.empty()) return;
 	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Graph, ViewConcern::Project});
-	if (!card_ || card_key_ != key) {
+	const bool reading = view.activity.validation.running || !view.activity.validation.read;
+	if (!card_ || card_key_ != key || card_->reading != reading) {
 		card_key_ = key;
 		// A wave's sound as it was read, while its file stands (file_card reads it again when it moved).
 		const FileCard::Sound *known = card_ && card_->wave ? &card_->sound : nullptr;
@@ -804,12 +806,15 @@ void FilesWindow::draw_card(const SessionView &view) {
 	if (ImGui::Button("Rename...##card"))
 		if (const AssetEntry *entry = entry_at(view, card.path)) start_rename(*entry);
 	ImGui::EndDisabled();
-	// What it names: a click goes to the file it resolves to; a wave it names plays.
-	const std::string names = "It names (" + grouped(card.names.size()) + ")###names";
+	// What it names: a click goes to the file it resolves to; a wave it names plays. While the project's
+	// references are being read, the counts say so (the lists are the graph's as far as it has read).
+	const auto count = [&card](size_t n) { return card.reading ? std::string("being read") : grouped(n); };
+	const std::string names = "It names (" + count(card.names.size()) + ")###names";
 	// A kind whose files name none (a wave, a texture) says nothing of it.
 	const bool names_any = !card.names.empty() || asset_kind_row(card.kind).names_files;
 	if (names_any && ImGui::CollapsingHeader(names.c_str(), card.names.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
-		if (card.names.empty()) ui_kit::empty_state("No other file or record.");
+		if (card.names.empty())
+			ui_kit::empty_state(card.reading ? "The project's references are still being read." : "No other file or record.");
 		else if (ImGui::BeginTable("names", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 2.0f);
@@ -849,9 +854,11 @@ void FilesWindow::draw_card(const SessionView &view) {
 		}
 	}
 	// Who names it, or what it defines: a click goes to the use.
-	const std::string users = "Named by (" + grouped(card.named_by.size()) + ")###users";
+	const std::string users = "Named by (" + count(card.named_by.size()) + ")###users";
 	if (ImGui::CollapsingHeader(users.c_str(), card.named_by.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
-		if (card.named_by.empty()) ui_kit::empty_state("No file of the project names it or what it defines.");
+		if (card.named_by.empty())
+			ui_kit::empty_state(card.reading ? "The project's references are still being read."
+			                                 : "No file of the project names it or what it defines.");
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(card.named_by.size()));
 		while (clipper.Step())

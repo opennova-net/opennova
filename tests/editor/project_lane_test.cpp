@@ -214,6 +214,24 @@ int test_file_card() {
 	session.run_operations();
 	const FileCard huge = file_card(v, "huge.wav");
 	TEST_EXPECT(huge.found && huge.wave && !huge.sound.decoded && huge.sound.error.find("MB at most") != std::string::npos);
+	// The demo round's bug 9: while the project's references are being read the card says so (its lists
+	// the graph's as far as it has read), on the wire too; once read, it does not.
+	TEST_EXPECT(!wave.reading && !file_card(v, "sounds/tone.wav").reading);
+	session.handle(request::create_file("Extra.mnu", asset_kind_token(AssetKind::Menu)));
+	session.run_operations();
+	const Document *menu = session.document_for("Extra.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (menu) {
+		Edit rename;
+		rename.address = menu->address_at("0/window:0");
+		rename.field = "name";
+		rename.value = std::string("RENAMED");
+		session.handle(request::edit_record(menu->path(), rename)); // the validation it leaves due shows running
+		TEST_EXPECT(v.activity.validation.running && file_card(v, "sounds/tone.wav").reading &&
+		            ask(session, "file_card", object_of({{"path", JsonValue::make_string("tone.wav")}})).get_bool("reading", false));
+		session.run_operations();
+		TEST_EXPECT(!v.activity.validation.running && !file_card(v, "sounds/tone.wav").reading);
+	}
 	const FileCard save = file_card(v, "player.sav");
 	TEST_EXPECT(save.found && save.build.find("left out") != std::string::npos && save.build.find("beside the archives") == std::string::npos);
 	const FileCard archive = file_card(v, "mine.pff");

@@ -6,6 +6,7 @@
 //
 // ITEMS.DEF: one record per world item, the largest of the families.
 
+#include "def_notes.h"
 #include "def_scan.h"
 
 #include <ctype.h>
@@ -109,7 +110,8 @@ void def_init_item(DefItemDef &value) {
 
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
    zeroed `out` first. Lets both the path loader and the VFS/PFF byte loader share one parser. */
-static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, DefParseReport *report) {
+static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, DefParseReport *report,
+                           DefTextNoter &noter) {
     size_t entries_cap = 0;
     DefItemDef current;
     memset(&current, 0, sizeof(current));
@@ -124,6 +126,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
     char lower[1024];
 
     while (next_line(&it, &line, &line_len)) {
+        noter.line(line);
         size_t tlen;
         const char *trimmed = trim_def_line(line, line_len, &tlen);
         if (tlen == 0) continue;
@@ -136,6 +139,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 memset(&current, 0, sizeof(current));
                 def_init_item(current); /* [orig: the begin arm calls
                     ItemDef_AllocateWithDefaults @0x49E3B0 from ItemDef_ParseProperty @0x49EB00] */
+                current.note = noter.open(DefRecordKind::Item);
 
                 emplacement_attachments_cap = 0;
                 powerup_branch = numeric_branch = false;
@@ -153,6 +157,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
             def_init_item(current);
+            noter.close();
 
             emplacement_attachments_cap = 0;
             in_block = 0;
@@ -168,6 +173,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 "rotor_parts", "aux_parts", "door_open_sound_id", "door_close_sound_id"})
             numeric_branch |= lower_match_key(lower, ll, key, strlen(key)) != 0;
         int parsed = 0;
+        bool row_line = false; // a row of its own (an attachment), noted as one
 
         if (lower_match_key(lower, ll, "powerupdef", 10)) {
             // A symbolic powerup definition, not a death/door numeric value: the name
@@ -577,6 +583,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 attachment.item_id = parse_int_n(tok[1].s, tok[1].len);
                 attachment.kind = kind;
                 attachment.angle_count = n >= 6 ? 4 : 0;
+                // A row of the item's, one line (its notes its own).
+                const int row_step = def_line_step(DefRecordKind::Attachment, trimmed, tlen);
+                attachment.note = noter.open_nested(DefRecordKind::Attachment, DEF_LINE_ORDER_ROWS, false,
+                                                    uint8_t(row_step < 0 ? 0 : row_step));
+                row_line = true;
                 if (n >= 6) {
                     constexpr int kBamPerDegree = 11930464;
                     attachment.down_angle =
@@ -1096,11 +1107,13 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
 			// What a writer keeps of the line: its place in the record's order, the file's indentation.
 			def_note_line(DefRecordKind::Item, current.line_order, trimmed, tlen);
 			def_note_indent(out->layout, indent_noted, line, line_len);
+			if (!row_line) noter.property(def_line_step(DefRecordKind::Item, trimmed, tlen));
 		}
 		if (!parsed) {
 			authoring_issue(current.unmodeled_count, report, it.line, current.display_name, trimmed, tlen);
 		}
 	}
+    noter.finish();
 
     if (in_block) {
         authoring_issue(out->unmodeled_count, report, it.line, current.display_name, "end", 3, DefIssueCode::MalformedBlock);
@@ -1114,7 +1127,8 @@ int def_parse_items(const char *path, DefItemsFile *out, DefParseReport *report)
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_items_buf(buf, file_len, out, report);
+    DefTextNoter none(buf, file_len, nullptr);
+    int rc = parse_items_buf(buf, file_len, out, report, none);
     free(buf);
     return rc;
 }
@@ -1122,7 +1136,19 @@ int def_parse_items(const char *path, DefItemsFile *out, DefParseReport *report)
 int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    return parse_items_buf((const char *)data, size, out, report);
+    DefTextNoter none((const char *)data, size, nullptr);
+    return parse_items_buf((const char *)data, size, out, report, none);
+}
+
+int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out, DefParseReport *report,
+                           DefTextNotes &notes) {
+    memset(out, 0, sizeof(*out));
+    notes = DefTextNotes();
+    if (!data) return -1;
+    DefTextNoter noter((const char *)data, size, &notes);
+    const int rc = parse_items_buf((const char *)data, size, out, report, noter);
+    def_note_baseline(*out, notes);
+    return rc;
 }
 
 void def_free_items(DefItemsFile *f) {

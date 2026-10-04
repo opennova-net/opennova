@@ -306,9 +306,35 @@ void ProblemsService::compose_rows(bool keep_reported) {
 		core_.touch(ViewConcern::Findings);
 	}
 	composed_.keep(input, view_.findings.diagnostics.size());
+	lead_scan_ = composed_.scan;
+	lead_requirements_ = composed_.requirements;
 	mark_rows();
 	want_originals();
 	show_validation();
+}
+
+// The rows lead with the scan's findings, then the requirements' (project_findings's order): those the
+// files' landing changed take their place at once, the rest standing until the validation the files
+// left due composes them (the demo round's bug 10: an import's files landed, yet its 27 "required file
+// missing" rows stood until the validation after it ended). The composition is left as it was, so the
+// validation's own composes the rows whatever its counts say.
+void ProblemsService::show_requirements() {
+	if (!composed_.made || !view_.project.scan || !view_.project.requirements) return;
+	std::vector<Diagnostic> &rows = view_.findings.diagnostics;
+	const size_t lead = lead_scan_.size() + lead_requirements_.size();
+	if (lead > rows.size() || !std::equal(lead_scan_.begin(), lead_scan_.end(), rows.begin()) ||
+	    !std::equal(lead_requirements_.begin(), lead_requirements_.end(), rows.begin() + std::ptrdiff_t(lead_scan_.size())))
+		return; // the rows no longer lead with them: the validation composes them
+	const std::vector<Diagnostic> &scan = view_.project.scan->diagnostics;
+	const std::vector<Diagnostic> &requirements = view_.project.requirements->diagnostics;
+	if (scan == lead_scan_ && requirements == lead_requirements_) return;
+	rows.erase(rows.begin(), rows.begin() + std::ptrdiff_t(lead));
+	rows.insert(rows.begin(), requirements.begin(), requirements.end());
+	rows.insert(rows.begin(), scan.begin(), scan.end());
+	lead_scan_ = scan;
+	lead_requirements_ = requirements;
+	core_.touch(ViewConcern::Findings);
+	mark_rows();
 }
 
 bool ProblemsService::Composed::same(const ProjectFindingsInput &input, size_t rows_now) const {
@@ -365,6 +391,8 @@ void ProblemsService::clear() {
 	checks_->clear();
 	validation_cache_ = ValidationCache();
 	composed_ = Composed();
+	lead_scan_.clear();
+	lead_requirements_.clear();
 	gate_size_ = gate_tail_ = trailing_ = 0;
 	reported_.clear();
 	validation_due_ = false;

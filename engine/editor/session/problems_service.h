@@ -96,6 +96,19 @@ public:
 	// A finding a request or a poll reported: a Problems row now, and after the composed rows until
 	// the validation for a change made after it (one due or under way when it was reported keeps it).
 	void add_reported(const Diagnostic &d);
+	// The names an expansion's base game serves (ProjectView::base_files), which the graph's missing
+	// references' words read (AssetGraph::set_base_names): findings worded again leave the validation due,
+	// whose composition the rows follow.
+	void set_base_names(const std::vector<std::string> &names) {
+		if (graph_->set_base_names(names)) {
+			moved_since_composed_ = true;
+			validate_later();
+		}
+	}
+	// The scan's and the requirements' findings as the view holds them now, in place of the rows' first
+	// (those the last composition led with) at once, as files land; the other rows wait for the
+	// validation the change left due.
+	void show_requirements();
 
 	// The project's files as the scan lists them, the open documents standing in (set_open).
 	void set_scan(const std::string &root, const AssetScan &scan, const std::string &game) {
@@ -191,6 +204,9 @@ private:
 	// after those (the reported findings a validation kept, and those reported since).
 	size_t gate_size_ = 0, gate_tail_ = 0, trailing_ = 0;
 	Composed composed_;
+	// The scan's and the requirements' findings the rows lead with (the last composition's, or those
+	// show_requirements put in their place since).
+	std::vector<Diagnostic> lead_scan_, lead_requirements_;
 	size_t compositions_ = 0;
 	// The last build's own findings (those its report adds to the Problems rows it was gated on:
 	// the plan's own, a step that failed), Problems rows until the next build starts or the

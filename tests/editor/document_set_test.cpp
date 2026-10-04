@@ -229,6 +229,13 @@ static int test_selection_over_rows() {
 	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({other}) && v.documents.selection.primary == other);
 	menus.session.handle(request::select_record("main.mnu", stale, SelectMode::Add));
 	TEST_EXPECT(v.documents.selection.records.empty() && !v.documents.selection.primary.row);
+	// The demo round's bug 11: a primary named by its identities alone (no kind, as the wire leaves it out,
+	// or a wrong one) is the document's record of them: selected, as its own address.
+	for (const NodeKind kind : {NodeKind(0), NodeKind(title.kind + 7)}) {
+		menus.session.handle(request::select_record("main.mnu", NodeAddress{title.row, kind, title.child}));
+		TEST_EXPECT(menus.session.outcome().done() && v.documents.selection.primary == title &&
+		            v.documents.selection.records == std::vector<NodeAddress>({title}));
+	}
 
 	// Cut: the menu copies windows of several screens (the polish), so both go in one step and come
 	// back with it.
@@ -408,6 +415,23 @@ static int test_names_in_another_case() {
 	for (const Diagnostic &finding : menus.session.outcome().findings)
 		missing = missing || finding.code() == std::string("document.missing");
 	TEST_EXPECT(!menus.session.outcome().done() && missing);
+	// The demo round's bug 7: a request naming a path the project lacks (an open, a file's card, Files'
+	// show) is refused, its finding the request's outcome, the status line and Output alone: Problems lists
+	// the project's problems, and gets no document.missing row.
+	const auto in_problems = [&] {
+		for (const Diagnostic &row : v.findings.diagnostics)
+			if (row.code() == std::string("document.missing")) return true;
+		return false;
+	};
+	for (const EditorRequest &asked : {request::about_file("sounds/nowhere.wav"), request::show_in_files("sounds/nowhere.wav", false)}) {
+		menus.session.handle(asked);
+		bool refused = false;
+		for (const Diagnostic &finding : menus.session.outcome().findings)
+			refused = refused || finding.code() == std::string("document.missing");
+		TEST_EXPECT(!menus.session.outcome().done() && refused &&
+		            v.activity.status == "The project has no file sounds/nowhere.wav.");
+	}
+	TEST_EXPECT(!in_problems());
 	return 0;
 }
 

@@ -1130,6 +1130,25 @@ static int test_clip_preview() {
 	const PreviewVec3 carried = preview_joint_carry(joints[1], spine_rest);
 	TEST_EXPECT(near(carried.x, joints[1].at.x, 1e-4) && near(carried.y, joints[1].at.y, 1e-4) &&
 	            near(carried.z, joints[1].at.z, 1e-4));
+	// The demo round's bug 4: the camera frames the model as the clip poses it over its frames, never its
+	// rest sphere alone (a first-person clip poses its rig away from it): the bend swings the spine off its rest,
+	// the framed target follows the posed sphere, and every joint of every frame stands within it.
+	{
+		PreviewVec3 posed;
+		float reach = 0.0f;
+		TEST_EXPECT(bend->posed_sphere(posed, reach));
+		const OrbitCamera framed = bend->framed(800, 600);
+		TEST_EXPECT(near(framed.target.x, posed.x, 1e-4) && near(framed.target.y, posed.y, 1e-4) &&
+		            near(framed.target.z, posed.z, 1e-4));
+		for (int frame = 0; frame <= int(bend->clip_frame_count()); ++frame) {
+			PreviewClock at;
+			at.seek_ticks(bend->tick_of_frame_shown(frame));
+			for (const PreviewJoint &joint : bend->joints(at)) {
+				const float dx = joint.at.x - posed.x, dy = joint.at.y - posed.y, dz = joint.at.z - posed.z;
+				TEST_EXPECT(std::sqrt(dx * dx + dy * dy + dz * dz) <= reach);
+			}
+		}
+	}
 	TEST_EXPECT(rig.set(R"({"clock": {"playing": false, "ticks": 0}})"));
 	shown = rig.json();
 	const JsonValue *bones = shown.get("body")->get("animation")->get("bones");

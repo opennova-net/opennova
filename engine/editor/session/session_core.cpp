@@ -174,6 +174,15 @@ void SessionCore::record_outcome(const Diagnostic &d) {
 	if (d.severity == DiagnosticSeverity::Error) outcome_.refused = true;
 }
 
+// A request refused for what it names: its outcome, the status line and an Output line; no row.
+void SessionCore::refuse_request(const Diagnostic &d) {
+	record_outcome(d);
+	if (in_request_) outcome_.refused = true;
+	view_.activity.status = d.message;
+	touch(ViewConcern::Output);
+	note(std::string(diagnostic_severity_label(d.severity)) + ": " + d.message);
+}
+
 // A request that cannot run now (a build is packing the project's files, the document it
 // names is not open): nothing is wrong with the project, so the row is a warning, but the
 // request did nothing and its outcome says so.
@@ -227,9 +236,15 @@ bool SessionCore::cancel_operation(bool asked) {
 		return true;
 	}
 	const std::string noun = operation_kind_row(running->kind()).noun;
+	const bool plan = running->kind() == OperationKind::ImportPlan;
 	if (!operations_.cancel()) {
 		if (asked) refuse_now(CoreFinding::OperationNotCancellable, "This cannot be cancelled now: wait for " + noun + " to finish.");
 		return false;
+	}
+	// An import's plan cancelled: the dialog plans no more (a plan that takes its place says so again).
+	if (plan && view_.dialogs.import_preview.planning) {
+		view_.dialogs.import_preview.planning = false;
+		touch(ViewConcern::Dialogs);
 	}
 	const std::string line = "Cancelled " + noun + ".";
 	if (asked) view_.activity.status = line;
@@ -510,6 +525,7 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			requirements_of(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
+	problems().show_requirements(); // the rows they lead with, at once
 	// A whole refresh (an open, a Rescan, a Reimport) makes a new scan, on which the game's own data's
 	// baseline looks at the install's folder again (S15: a patch over it is validated again).
 	problems().validate_later();
@@ -561,6 +577,7 @@ void SessionCore::absorb_changed(ImportRunResult &imports, const std::vector<std
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			requirements_of(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
+	problems().show_requirements(); // the rows they lead with, at once
 	problems().validate_later();
 	// The open documents of what changed (a PNG its program saved, an output made again) read again; one with
 	// unsaved edits is a conflict, as on a Rescan.
@@ -583,6 +600,7 @@ void SessionCore::update_files(const std::vector<std::string> &paths) {
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			requirements_of(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
+	problems().show_requirements(); // the rows they lead with, at once
 	problems().validate_later();
 }
 
@@ -700,19 +718,21 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		}
 		if (saved) {
 			view_.project.document = std::make_shared<const ProjectDocument>(project);
+			if (expansion_changed) {
+				// The install as the project imports it moved (install_view.h): its names are found again
+				// (the base's first, which the requirements' words read), and what it makes of its own data
+				// once the validation below asks for it (OriginalFiles::want, which validates the install
+				// again for another expansion).
+				imports().refresh_install_files();
+			}
 			if (features_changed || expansion_changed) {
 				// The requirements follow the features and the expansion, over the files as the scan
 				// lists them.
 				view_.project.requirements = std::make_shared<const RequirementReport>(
 						requirements_of(project, *view_.project.scan));
 				touch(ViewConcern::Files);
+				problems().show_requirements(); // the rows they lead with, at once
 				problems().validate_later();
-			}
-			if (expansion_changed) {
-				// The install as the project imports it moved (install_view.h): its names are found again,
-				// and what it makes of its own data once the validation above asks for it (OriginalFiles::
-				// want, which validates the install again for another expansion).
-				imports().refresh_install_files();
 			}
 		} else {
 			project_changed = expansion_changed = features_changed = false;
@@ -845,6 +865,7 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	problems().set_scan(paths_.root, *view_.project.scan, doc.target_game);
 	view_.project.requirements = std::make_shared<const RequirementReport>(requirements_of(doc, *view_.project.scan));
 	touch(ViewConcern::Files);
+	problems().show_requirements(); // the rows they lead with, at once
 	problems().validate_later();
 	for (const Diagnostic &d : result.diagnostics) report(d);
 	if (result.created.empty() && result.unavailable.empty() && result.diagnostics.empty()) {
@@ -1216,7 +1237,8 @@ void SessionCore::read_install_expansions() {
 }
 
 RequirementReport SessionCore::requirements_of(const ProjectDocument &doc, const AssetScan &scan) const {
-	return evaluate_requirements(doc, scan, game_install().empty() ? nullptr : &install_expansion_names_);
+	return evaluate_requirements(doc, scan, game_install().empty() ? nullptr : &install_expansion_names_,
+	                             &view_.project.base_files);
 }
 
 bool SessionCore::rename_expansion_files(const std::string &from, const std::string &to, const ProjectDocument &project,
