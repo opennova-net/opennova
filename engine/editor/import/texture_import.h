@@ -51,11 +51,12 @@ struct ImageImportSettings {
 };
 
 // A source as the import reads it: its texels (RGBA, the top row first) and, for an 8-bit PCX, its
-// indices and palette as the game reads them. A PNG's through the PNG reader; a TGA's as the game's TGA
-// reader decodes it (formats/tga tga_decode_retail: its rows flipped whatever its origin bit says, a
-// 24-bit file opaque); a PCX's as the game's model and menu readers decode it (decode_pcx_game: an 8-bit
-// file's texel the palette entry of its index, opaque; a 24-bit file's colour). False, with `error`, for
-// a file its reader refuses or a name of another extension.
+// indices and palette. A source is the modder's picture, read as an image program reads it, never through
+// the game's readers' faults (ADR 0046 S18): a PNG's through the PNG reader; a TGA's by the format
+// (import/tga_source.h decode_tga_source: its origin honoured, every depth and colour map); a PCX's by the format
+// (formats/pcx decode_pcx_indexed and decode_pcx_rgb: each row's first `width` bytes of its bytes a line,
+// an 8-bit file's texel the palette entry of its index, opaque). The import then writes the file the game
+// reads. False, with `error`, for a file its reader refuses or a name of another extension.
 struct ImageSource {
 	RgbaImage image;
 	bool indexed = false;

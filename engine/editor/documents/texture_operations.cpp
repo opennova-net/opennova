@@ -235,8 +235,9 @@ bool remap_palette(const std::string &name, const std::vector<uint8_t> &bytes, c
 		why = "only an 8-bit PCX holds palette indices";
 		return false;
 	}
-	PcxGameImage game;
-	if (!decode_pcx_game(bytes.data(), bytes.size(), game, why)) return false;
+	RgbaImage colours;
+	PcxIndexed game;
+	if (!decode_pcx_menu_rgba(bytes.data(), bytes.size(), colours, why, &game)) return false;
 	if (!game.indexed) {
 		why = "it is a 24-bit PCX, which holds colours, not indices";
 		return false;
@@ -261,9 +262,9 @@ bool remap_palette(const std::string &name, const std::vector<uint8_t> &bytes, c
 		return false;
 	}
 	IndexedImage8 image;
-	image.width = game.width;
-	image.height = game.height;
-	const size_t texels = size_t(game.width) * size_t(game.height);
+	image.width = colours.width;
+	image.height = colours.height;
+	const size_t texels = size_t(colours.width) * size_t(colours.height);
 	image.indices.assign(game.indices.begin(), game.indices.begin() + std::ptrdiff_t(std::min(texels, game.indices.size())));
 	for (uint8_t &index : image.indices) index = map[index];
 	std::copy(&game.palette[0][0], &game.palette[0][0] + 256 * 3, &image.palette[0][0]);

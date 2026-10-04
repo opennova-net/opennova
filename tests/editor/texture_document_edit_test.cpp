@@ -127,9 +127,10 @@ int test_operations() {
 	TEST_EXPECT(encode_pcx_indexed(indexed, pcx, why));
 	TEST_EXPECT(apply_texture_operation("f.pcx", pcx, op(K::RemapPalette, {{"2", "9"}}), out, words, why) &&
 	            words == "Palette indices 2 to 9");
-	PcxGameImage moved;
-	TEST_EXPECT(decode_pcx_game(out.data(), out.size(), moved, why) && moved.indices.size() >= 4 && moved.indices[0] == 1 &&
-	            moved.indices[1] == 9 && moved.indices[2] == 9 && moved.indices[3] == 3);
+	PcxIndexed moved;
+	RgbaImage colours;
+	TEST_EXPECT(decode_pcx_menu_rgba(out.data(), out.size(), colours, why, &moved) && moved.indices.size() >= 4 &&
+	            moved.indices[0] == 1 && moved.indices[1] == 9 && moved.indices[2] == 9 && moved.indices[3] == 3);
 	TEST_EXPECT(!apply_texture_operation("f.pcx", pcx, op(K::RemapPalette, {{"2", "300"}}), out, words, why));
 	TEST_EXPECT(!apply_texture_operation("a.tga", file, op(K::RemapPalette, {{"2", "9"}}), out, words, why));
 	TextureOperationKind kind;

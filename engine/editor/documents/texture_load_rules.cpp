@@ -186,15 +186,12 @@ std::shared_ptr<const TextureImage> apply_load_transform(const TextureImage &ima
 	case TextureLoadTransform::kCount: break;
 	case TextureLoadTransform::LuminanceAlpha: {
 		// [orig: Texture_LoadFromArchive @ 0x58BC35..0x58BCEE]: per palette entry A = (85 x (r + g + b))
-		// >> 8 of the second PCX's palette, each texel's by its index there (the game's 8-bit read of
-		// it: formats/pcx decode_pcx_luminance_alpha).
+		// >> 8 of the second PCX's palette, each texel's by its index there, as the game's 8-bit read of it
+		// gives them (formats/pcx decode_pcx_luminance_alpha: TextureImage::luminance).
 		const TextureImage &source = alpha_source ? *alpha_source : image;
-		if (source.indices.empty() || source.palette.size() < 768 || out->levels.empty()) break;
-		uint8_t luminance[256];
-		for (size_t i = 0; i < 256; ++i)
-			luminance[i] = uint8_t(uint16_t(85u * (source.palette[i * 3] + source.palette[i * 3 + 1] + source.palette[i * 3 + 2])) >> 8);
+		if (source.luminance.empty() || out->levels.empty()) break;
 		std::vector<uint8_t> &rgba = out->levels.front().rgba;
-		for (size_t i = 0; i < rgba.size() / 4 && i < source.indices.size(); ++i) rgba[i * 4 + 3] = luminance[source.indices[i]];
+		for (size_t i = 0; i < rgba.size() / 4 && i < source.luminance.size(); ++i) rgba[i * 4 + 3] = source.luminance[i];
 		break;
 	}
 	case TextureLoadTransform::WhiteAlphaFromBlue:

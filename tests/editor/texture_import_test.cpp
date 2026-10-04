@@ -208,18 +208,56 @@ int test_formats() {
 
 std::string png_of(const RgbaImage &image);
 
-// A TGA and a PCX as sources (a record makes them one): read as the game reads them; an 8-bit PCX's
-// indices kept by palette indices, refused from a source of colours or at another size; normal height.
+// A TGA and a PCX as sources (a record makes them one): read as an image program reads them, never through
+// the game's readers' faults; an 8-bit PCX's indices kept by palette indices, refused from a source of
+// colours or at another size; normal height.
 int test_sources() {
 	ImageSource source;
 	std::string why;
-	// A TGA read as the game's reader reads it: its first row the bottom one, whatever its origin bit says.
+	// A TGA read by its format: bottom first as its header says, and top first where its origin bit says so
+	// (the game's reader would draw that one upside down).
 	const RgbaImage image = graded(4, 2);
 	std::vector<uint8_t> tga;
 	TEST_EXPECT(tga::tga_write_rgba32(image.pixels.data(), 4, 2, tga, why));
 	TEST_EXPECT(decode_image_source("art/a.tga", tga, source, why) && !source.indexed && source.image.pixels == image.pixels);
 	tga[17] |= 0x20;
-	TEST_EXPECT(decode_image_source("a.TGA", tga, source, why) && source.image.pixels == image.pixels);
+	std::vector<uint8_t> flipped(image.pixels.begin() + 16, image.pixels.end());
+	flipped.insert(flipped.end(), image.pixels.begin(), image.pixels.begin() + 16);
+	TEST_EXPECT(decode_image_source("a.TGA", tga, source, why) && source.image.pixels == flipped);
+	// Imported, the file the game reads holds the picture the source shows: stored bottom first, read so.
+	{
+		const ImportOptions options{{"format", "tga"}, {"name", "made.tga"}};
+		ImportContext context("a.tga", tga, options, ".", ".");
+		ImportProduct product;
+		TEST_EXPECT(run_image_import(context, product) && product.outputs.size() == 1);
+		if (!product.outputs.empty()) {
+			const std::shared_ptr<const TextureImage> made = read_back("made.tga", product.outputs[0].bytes);
+			TEST_EXPECT(made && made->loads && !made->upside_down && made->levels[0].rgba == flipped);
+		}
+	}
+	// A 16-bit TGA's colours (the game's reader zeroes that form).
+	{
+		std::vector<uint8_t> sixteen = {0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 16, 0x20, 0x00, 0x7C};
+		TEST_EXPECT(decode_image_source("red.tga", sixteen, source, why) && source.image.pixels == std::vector<uint8_t>({255, 0, 0, 255}));
+	}
+	// An odd-width 8-bit PCX whose rows carry a pad byte (a paint program's): each row's first `width` bytes,
+	// unsheared (the game's reader would carry each pad into the next row).
+	{
+		std::vector<uint8_t> padded(128, 0);
+		padded[0] = 0x0A;
+		padded[1] = 5;
+		padded[2] = 1;
+		padded[3] = 8;
+		padded[8] = 2; // 3 wide
+		padded[10] = 1; // 2 tall
+		padded[65] = 1;
+		padded[66] = 4; // a pad byte a row
+		padded.insert(padded.end(), {1, 2, 3, 0, 4, 5, 6, 0});
+		padded.push_back(0x0C);
+		for (int i = 0; i < 256; ++i) padded.insert(padded.end(), {uint8_t(i), uint8_t(i), uint8_t(i)});
+		TEST_EXPECT(decode_image_source("odd.pcx", padded, source, why) && source.indexed &&
+		            source.indices.indices == std::vector<uint8_t>({1, 2, 3, 4, 5, 6}));
+	}
 	// An 8-bit PCX: its indices and palette kept, each texel its entry's colour, opaque.
 	IndexedImage8 indexed;
 	indexed.width = 3;
@@ -274,7 +312,8 @@ int test_sources() {
 		TEST_EXPECT(now[3] == uint8_t((85u * (uint32_t(was[0]) + was[1] + was[2])) >> 8) && now[2] == was[3] &&
 		            now[0] == now[3]);
 	}
-	std::printf("sources: a TGA as the game reads it, a PCX's indices kept, refusals, a height map\n");
+	std::printf("sources: a TGA by its format (its origin, 16 bits), an odd PCX unsheared, a PCX's indices kept, refusals, a "
+	            "height map\n");
 	return 0;
 }
 

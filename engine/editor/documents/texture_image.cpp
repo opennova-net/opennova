@@ -203,11 +203,10 @@ void read_tga(TextureImage &image, const std::vector<uint8_t> &stored) {
 void read_pcx(TextureImage &image, const std::vector<uint8_t> &bytes) {
 	fact(image, "format", "File format", "PCX image");
 	fact(image, "reader", "Read by", "the game's PCX reader");
-	PcxGameImage pcx;
+	PcxIndexed pcx;
 	RgbaImage rgba;
 	std::string error;
-	if (!decode_pcx_game(bytes.data(), bytes.size(), pcx, error) ||
-	    !decode_pcx_menu_rgba(bytes.data(), bytes.size(), rgba, error)) {
+	if (!decode_pcx_menu_rgba(bytes.data(), bytes.size(), rgba, error, &pcx)) {
 		image.refusal = error == "PCX is not 8 bits per pixel"
 		                        ? "It is not of 8 bits a plane, the one depth the game's PCX reader takes."
 		                        : error;
@@ -223,6 +222,13 @@ void read_pcx(TextureImage &image, const std::vector<uint8_t> &bytes) {
 		image.palette.resize(256 * 3);
 		for (size_t i = 0; i < 256; ++i)
 			for (size_t c = 0; c < 3; ++c) image.palette[i * 3 + c] = pcx.palette[i][c];
+		// The archive loader's alpha of it: its 8-bit read, each entry's luminance.
+		RgbaImage lit;
+		if (decode_pcx_luminance_alpha(bytes.data(), bytes.size(), lit, error) && lit.width == rgba.width &&
+		    lit.height == rgba.height) {
+			image.luminance.resize(lit.pixels.size() / 4);
+			for (size_t i = 0; i < image.luminance.size(); ++i) image.luminance[i] = lit.pixels[i * 4 + 3];
+		}
 	} else {
 		fact(image, "texels", "Texels", "24 bits: three planes of colour, no alpha");
 	}

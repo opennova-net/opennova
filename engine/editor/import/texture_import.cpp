@@ -10,12 +10,12 @@
 #include <editor/import/png_decode.h>
 #include <editor/import/png_encode.h>
 #include <editor/import/quantize.h>
+#include <editor/import/tga_source.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
-#include <formats/tga/tga_read.h>
 #include <runtime/renderer/texture_dxt.h>
 
 namespace opennova::editor {
@@ -242,35 +242,43 @@ bool decode_image_source(const std::string &name, const std::vector<uint8_t> &by
 	const std::string extension = strutil::to_lower(utf8_of(path_of(name).extension()));
 	if (extension == ".png") return decode_png(bytes, out.image, error);
 	if (extension == ".tga") {
+		// The format's own decode (import/tga_source.h): its origin honoured, every depth and colour map.
 		tga::TgaImage image;
-		if (!tga::tga_decode_retail(bytes.data(), bytes.size(), image, error)) return false;
+		if (!decode_tga_source(bytes.data(), bytes.size(), image, error)) return false;
 		out.image.width = image.width;
 		out.image.height = image.height;
 		out.image.pixels = std::move(image.rgba);
 		return true;
 	}
 	if (extension == ".pcx") {
-		PcxGameImage game;
-		if (!decode_pcx_game(bytes.data(), bytes.size(), game, error)) return false;
-		if (!game.indexed) return decode_pcx_menu_rgba(bytes.data(), bytes.size(), out.image, error);
-		const size_t texels = size_t(game.width) * size_t(game.height);
-		if (game.indices.size() < texels) {
-			error = name + "'s indices are short of its sides";
-			return false;
+		// The format's own decode (formats/pcx: rows of their bytes a line, the first `width` of each kept),
+		// an 8-bit image's indices and palette beside its colours.
+		if (bytes.size() > 65 && bytes[65] == 1) {
+			if (!decode_pcx_indexed(bytes.data(), bytes.size(), out.indices, error)) return false;
+			out.indexed = true;
+			const size_t texels = size_t(out.indices.width) * size_t(out.indices.height);
+			out.image.width = out.indices.width;
+			out.image.height = out.indices.height;
+			out.image.pixels.resize(texels * 4);
+			for (size_t i = 0; i < texels; ++i) {
+				const uint8_t *entry = out.indices.palette[out.indices.indices[i]];
+				out.image.pixels[i * 4] = entry[0];
+				out.image.pixels[i * 4 + 1] = entry[1];
+				out.image.pixels[i * 4 + 2] = entry[2];
+				out.image.pixels[i * 4 + 3] = 255;
+			}
+			return true;
 		}
-		out.indexed = true;
-		out.indices.width = game.width;
-		out.indices.height = game.height;
-		out.indices.indices.assign(game.indices.begin(), game.indices.begin() + std::ptrdiff_t(texels));
-		std::copy(&game.palette[0][0], &game.palette[0][0] + 256 * 3, &out.indices.palette[0][0]);
-		out.image.width = game.width;
-		out.image.height = game.height;
+		RgbImage rgb;
+		if (!decode_pcx_rgb(bytes.data(), bytes.size(), rgb, error)) return false;
+		const size_t texels = size_t(rgb.width) * size_t(rgb.height);
+		out.image.width = rgb.width;
+		out.image.height = rgb.height;
 		out.image.pixels.resize(texels * 4);
 		for (size_t i = 0; i < texels; ++i) {
-			const uint8_t *entry = game.palette[out.indices.indices[i]];
-			out.image.pixels[i * 4] = entry[0];
-			out.image.pixels[i * 4 + 1] = entry[1];
-			out.image.pixels[i * 4 + 2] = entry[2];
+			out.image.pixels[i * 4] = rgb.pixels[i * 3];
+			out.image.pixels[i * 4 + 1] = rgb.pixels[i * 3 + 1];
+			out.image.pixels[i * 4 + 2] = rgb.pixels[i * 3 + 2];
 			out.image.pixels[i * 4 + 3] = 255;
 		}
 		return true;

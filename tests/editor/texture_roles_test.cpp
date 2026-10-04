@@ -29,6 +29,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
+#include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 
 #include <editor/project/project_document.h>
@@ -168,9 +169,33 @@ int test_transforms() {
 	image.palette[16] = 255;
 	image.palette[17] = 0;
 	image.indices = {3, 5};
-	// Luminance: (85 x (30 + 60 + 90)) >> 8 = 59; (85 x 510) >> 8 = 169 (the sum held to 16 bits).
-	std::shared_ptr<const TextureImage> out = apply_load_transform(image, TextureLoadTransform::LuminanceAlpha);
-	TEST_EXPECT(out->levels[0].rgba[3] == 59 && out->levels[0].rgba[7] == 169 && out->levels[0].rgba[0] == 30);
+	// Luminance, from the PCX the archive loader reads: (85 x (30 + 60 + 90)) >> 8 = 59; (85 x 510) >> 8 = 169
+	// (the sum held to 16 bits), each texel's by its index, as decode_pcx_luminance_alpha reads them.
+	{
+		opennova::IndexedImage8 indexed;
+		indexed.width = 2;
+		indexed.height = 1;
+		indexed.indices = {3, 5};
+		for (int i = 0; i < 256; ++i)
+			for (int c = 0; c < 3; ++c) indexed.palette[i][c] = image.palette[size_t(i) * 3 + size_t(c)];
+		std::vector<uint8_t> pcx;
+		std::string error;
+		TEST_EXPECT(opennova::encode_pcx_indexed(indexed, pcx, error));
+		const std::shared_ptr<const TextureImage> decoded = decode_texture("sky.pcx", pcx);
+		TEST_EXPECT(decoded && decoded->luminance == std::vector<uint8_t>({59, 169}));
+		const std::shared_ptr<const TextureImage> lit = apply_load_transform(*decoded, TextureLoadTransform::LuminanceAlpha);
+		TEST_EXPECT(lit->levels[0].rgba[3] == 59 && lit->levels[0].rgba[7] == 169 && lit->levels[0].rgba[0] == 30);
+		// A PCX whose header names more texels than its bytes can describe: refused at once, nothing the
+		// header's size allocated.
+		std::vector<uint8_t> claim = pcx;
+		claim[8] = 0xFE;
+		claim[9] = 0x7F;
+		claim[10] = 0xFE;
+		claim[11] = 0x7F;
+		const std::shared_ptr<const TextureImage> hostile = decode_texture("huge.pcx", claim);
+		TEST_EXPECT(hostile && !hostile->loads && hostile->refusal.find("more pixels") != std::string::npos);
+	}
+	std::shared_ptr<const TextureImage> out;
 	// White, alpha from blue.
 	out = apply_load_transform(image, TextureLoadTransform::WhiteAlphaFromBlue);
 	TEST_EXPECT(out->levels[0].rgba == std::vector<uint8_t>({255, 255, 255, 90, 255, 255, 255, 0}));

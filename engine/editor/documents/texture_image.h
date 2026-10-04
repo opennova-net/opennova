@@ -11,8 +11,9 @@ namespace opennova::editor {
 // A texture as the game reads it (ADR 0046 S18): the file's texels decoded by the reader the game
 // picks for its name (never by its bytes: renderer/material_texture.h), with what it is in a modder's
 // words. The decoders are the game's own (formats/tga tga_decode_retail, the TGA reader; formats/pcx
-// decode_pcx_menu_rgba, the PCX reader, with decode_pcx_game for its indices and palette) and the
-// formats' (formats/dds dds_read, D3DX's DDS loader; the PNG reader of the menus' loader); this is what the
+// decode_pcx_menu_rgba, the PCX reader, its indices and palette beside the colours, and
+// decode_pcx_luminance_alpha, the archive loader's 8-bit read and luminance) and the formats'
+// (formats/dds dds_read, D3DX's DDS loader; the PNG reader of the menus' loader); this is what the
 // texture document, its viewport and the wire read of them.
 
 // The reader a texture file's name picks: a .tga or an .mdt the TGA reader (a model's normal map made
@@ -65,6 +66,9 @@ struct TextureImage {
 	// a texture of true colour.
 	std::vector<uint8_t> palette;
 	std::vector<uint8_t> indices;
+	// An 8-bit PCX's alpha as the archive loader makes it, each first-level texel's (decode_pcx_luminance_alpha:
+	// the 8-bit reader's indices, each palette entry's luminance); empty for any other texture.
+	std::vector<uint8_t> luminance;
 	TextureAlpha alpha = TextureAlpha::None;
 	// The levels the game's device texture has: a DDS's file chain, else the chain the game builds
 	// from the texels (renderer::pixel_texture_mip_levels; 0 its full chain).

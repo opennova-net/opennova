@@ -40,28 +40,20 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 // The header-sized buffer is allocated only when the file's data can describe it (32
 // pixels a byte after the 128-byte header, at most 2^28 pixels); a larger claim fails
 // the decode, as retail's failed allocation fails the load (code 2).
-bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error);
-
-// The same decode keeping what an 8-bit image is made of: the header's facts, and for an image the
-// 8-bit path reads (NPlanes other than 3) each texel's palette index and the palette, the last 768
-// bytes, as the game reads them. The models' reader decodes alike [orig: Texture_LoadPCXFromPFF32 @
-// 0x56EA30: the BPP check returning 3, the palette from Seek(-768, 2), file size - 896 bytes of RLE
-// data from offset 128, each row to BytesPerLine], so a texel's colour is its index's entry in
-// `palette`, opaque, exactly as decode_pcx_menu_rgba gives it. False, with `error`, where
-// decode_pcx_menu_rgba is.
-struct PcxGameImage {
-	int width = 0;
-	int height = 0;
-	int planes = 0;
-	int bits = 0; // the header's bits a plane (byte 3)
-	int bytes_per_line = 0;
-	int version = 0; // byte 1
-	bool rle = false; // byte 2 says run-length (1)
-	bool indexed = false; // the 8-bit path: indices and palette hold the image
-	bool palette_marker = false; // the byte before the last 768 is 0x0C (the format's marker; the game reads none)
+//
+// `indexed`, where the caller asks it: what the 8-bit path (NPlanes other than 3) made the
+// image of, each texel's palette index as the rows wrote it (a row's padding landing on
+// the next row's start, as the colours do) and the palette, the last 768 bytes; the
+// models' reader decodes alike [orig: Texture_LoadPCXFromPFF32 @ 0x56EA30: the BPP check
+// returning 3, the palette from Seek(-768, 2), file size - 896 bytes of RLE data from
+// offset 128, each row to BytesPerLine], so a texel's colour is its index's entry,
+// opaque. An image the 24-bit path reads leaves it not indexed.
+struct PcxIndexed {
+	bool indexed = false;
 	std::vector<uint8_t> indices; // a texel's index, the top row first
 	uint8_t palette[256][3] = {};
 };
-bool decode_pcx_game(const uint8_t *data, size_t size, PcxGameImage &out, std::string &error);
+bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error,
+                          PcxIndexed *indexed = nullptr);
 
 } // namespace opennova

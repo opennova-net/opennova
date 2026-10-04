@@ -284,8 +284,9 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 // [orig: load_pcx_to_argb @ 0x664cc0 — the header read (0x46 bytes), the BPP check
 // (returns 3), width/height from the window, then the 8-bit path (Seek(-768, 2), the
 // 0xFF000000 | rgb palette, the RLE loop to BytesPerLine) or the NPlanes == 3 path]
-bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error) {
+bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error, PcxIndexed *indexed) {
 	out = RgbaImage{};
+	if (indexed) *indexed = PcxIndexed{};
 	if (size < 0x46) {
 		error = "PCX header truncated";
 		return false;
@@ -323,6 +324,19 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 					(static_cast<uint32_t>(byte_at(palette_at + 3u * i + 1u)) << 8) |
 					static_cast<uint32_t>(byte_at(palette_at + 3u * i + 2u));
 		}
+		// The indices beside the colours, where the caller asks them.
+		std::vector<uint8_t> indices;
+		if (indexed) {
+			indexed->indexed = true;
+			for (int i = 0; i < 256; ++i)
+				for (int c = 0; c < 3; ++c) indexed->palette[i][c] = byte_at(palette_at + 3u * i + static_cast<size_t>(c));
+			indices.assign(argb.size(), 0);
+		}
+		const auto put = [&](size_t at, uint8_t index) {
+			if (at >= argb.size()) return;
+			argb[at] = palette[index];
+			if (indexed) indices[at] = index;
+		};
 		const size_t data_end = size >= 896 ? 128 + (size - 896) : 128;
 		size_t pos = 128;
 		const auto next = [&]() -> uint8_t { return pos < data_end ? data[pos++] : (++pos, 0); };
@@ -334,16 +348,16 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 				const uint8_t byte = next();
 				if ((byte & 0xC0) == 0xC0) {
 					const int run = byte & 0x3F;
-					const uint32_t color = palette[next()];
-					for (int n = 0; n < run; ++n, ++col) {
-						const size_t at = row_base + static_cast<size_t>(col);
-						if (at < argb.size()) argb[at] = color;
-					}
+					const uint8_t index = next();
+					for (int n = 0; n < run; ++n, ++col) put(row_base + static_cast<size_t>(col), index);
 				} else {
-					const size_t at = row_base + static_cast<size_t>(col++);
-					if (at < argb.size()) argb[at] = palette[byte];
+					put(row_base + static_cast<size_t>(col++), byte);
 				}
 			} while (col < bytes_per_line);
+		}
+		if (indexed) {
+			indices.resize(pixels);
+			indexed->indices = std::move(indices);
 		}
 	} else {
 		std::vector<uint8_t> scanline(static_cast<size_t>(3 * bytes_per_line) + 64u, 0);
@@ -383,70 +397,6 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 		out.pixels[4 * i + 2] = static_cast<uint8_t>(c);
 		out.pixels[4 * i + 3] = static_cast<uint8_t>(c >> 24);
 	}
-	return true;
-}
-
-// decode_pcx_menu_rgba's 8-bit path, writing each texel's index where it writes the index's colour.
-bool decode_pcx_game(const uint8_t *data, size_t size, PcxGameImage &out, std::string &error) {
-	out = PcxGameImage{};
-	if (size < 0x46) {
-		error = "PCX header truncated";
-		return false;
-	}
-	if (data[3] != 8) {
-		error = "PCX is not 8 bits per pixel";
-		return false;
-	}
-	const int16_t xmin = static_cast<int16_t>(data[4] | (data[5] << 8));
-	const int16_t ymin = static_cast<int16_t>(data[6] | (data[7] << 8));
-	const int16_t xmax = static_cast<int16_t>(data[8] | (data[9] << 8));
-	const int16_t ymax = static_cast<int16_t>(data[10] | (data[11] << 8));
-	const int16_t width = static_cast<int16_t>(xmax - xmin + 1);
-	const int16_t height = static_cast<int16_t>(ymax - ymin + 1);
-	if (width <= 0 || height <= 0) {
-		error = "PCX dimensions out of range";
-		return false;
-	}
-	out.width = width;
-	out.height = height;
-	out.planes = data[0x41];
-	out.bits = data[3];
-	out.bytes_per_line = data[0x42] | (data[0x43] << 8);
-	out.version = data[1];
-	out.rle = data[2] == 1;
-	if (out.planes == 3) return true;
-	out.indexed = true;
-	const size_t palette_at = size >= 768 ? size - 768 : 0;
-	const auto byte_at = [&](size_t offset) -> uint8_t { return offset < size ? data[offset] : 0; };
-	for (int i = 0; i < 256; ++i)
-		for (int c = 0; c < 3; ++c) out.palette[i][c] = byte_at(palette_at + 3u * i + c);
-	out.palette_marker = size >= 769 && data[size - 769] == 0x0C;
-	const size_t pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
-	std::vector<uint8_t> indices(pixels + static_cast<size_t>(out.bytes_per_line) + 64u, 0);
-	const size_t data_end = size >= 896 ? 128 + (size - 896) : 128;
-	size_t pos = 128;
-	const auto next = [&]() -> uint8_t { return pos < data_end ? data[pos++] : (++pos, 0); };
-	for (int row = 0; row < height; ++row) {
-		const size_t row_base = static_cast<size_t>(row) * static_cast<size_t>(width);
-		int col = 0;
-		if (out.bytes_per_line == 0) continue;
-		do {
-			const uint8_t byte = next();
-			if ((byte & 0xC0) == 0xC0) {
-				const int run = byte & 0x3F;
-				const uint8_t index = next();
-				for (int n = 0; n < run; ++n, ++col) {
-					const size_t at = row_base + static_cast<size_t>(col);
-					if (at < indices.size()) indices[at] = index;
-				}
-			} else {
-				const size_t at = row_base + static_cast<size_t>(col++);
-				if (at < indices.size()) indices[at] = byte;
-			}
-		} while (col < out.bytes_per_line);
-	}
-	indices.resize(pixels);
-	out.indices = std::move(indices);
 	return true;
 }
 

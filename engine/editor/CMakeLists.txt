@@ -121,6 +121,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_source.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/tga_source.cpp
     # preview — the viewports (S13 V5): their kinds' table, the session's viewports and the preview
     # clock, the follow every kind shares (the files a picture read, the action its device takes),
     # the base every kind's viewport derives from, the Shell's devices (an LRU of four keyed by

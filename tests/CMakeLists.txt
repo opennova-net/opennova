@@ -4237,6 +4237,13 @@ target_link_libraries(editor_texture_replace_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_replace_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_replace COMMAND editor_texture_replace_test)
 
+# ADR 0046 S18, the TGA an import source is read by (editor/import/tga_source.h), the format's own
+# decode: every origin, depth, colour map and run-length form decoded upright, and what it refuses.
+add_executable(editor_tga_source_test editor/tga_source_test.cpp)
+target_link_libraries(editor_tga_source_test PRIVATE opennova_editor)
+target_include_directories(editor_tga_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_tga_source COMMAND editor_tga_source_test)
+
 # ADR 0046 S18, the external program round trip (edit_externally, refresh_changed_sources): a plain TGA
 # given a source once and opened, a change saved there imported and its document read again, nothing done
 # for nothing changed, an output's own source, a missing name; the Shell's check leaving a refusal's line.
