@@ -712,10 +712,13 @@ static int test_lean_packing() {
 	const BuildReport again = run_build(plan_of(), p.output_root());
 	TEST_EXPECT(again.ok && again.reused_existing && again.build_id == report.build_id && again.base_bytes_read == 0);
 	// An archive written within the settle window (a rewrite of the same size may keep its stamp, git's
-	// racy rule): read again by every build until it settles, the build the same.
+	// racy rule): read again by every build until it settles, the build the same. Its last write a minute
+	// ahead, as a clock that stood still would leave it: stamped now, two builds under a loaded machine's
+	// parallel tests could take the window's two seconds, the second then finding it settled.
 	{
 		std::error_code touched;
-		fs::last_write_time(install.root + "/localres.pff", fs::file_time_type::clock::now(), touched);
+		fs::last_write_time(install.root + "/localres.pff", fs::file_time_type::clock::now() + std::chrono::minutes(1),
+		                    touched);
 		const BuildReport racy = run_build(plan_of(), p.output_root());
 		const BuildReport racy_again = run_build(plan_of(), p.output_root());
 		TEST_EXPECT(racy.ok && racy.base_bytes_read > 0 && racy_again.ok && racy_again.base_bytes_read > 0 &&
