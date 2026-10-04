@@ -7,6 +7,7 @@
 #include <numeric>
 #include <utility>
 
+#include <base/io/log.h>
 #include <base/io/strutil.h>
 
 namespace opennova::renderer {
@@ -306,7 +307,14 @@ ParticleAtlasBuild ParticleAtlasBuilder::build() const {
 				allocate_retail_particle_atlas_rect(working.skyline,
 						side, frame.image.width, frame.image.height);
 		if (!allocation.valid) {
+			// Retail hangs here (ParticleAtlasBuild::oversized_entries, D-PTL-31).
 			++result.rejected_entries;
+			result.oversized_entries.push_back(id);
+			io::logf(io::LogLevel::kWarn,
+					"particle atlas: %s (%dx%d, type %d) fits no empty %dx%d page; "
+					"retail's atlas build hangs on it, OpenNova leaves it undrawn",
+					frame.name.c_str(), frame.image.width, frame.image.height,
+					static_cast<int>(frame.type), side, side);
 			continue;
 		}
 		const std::uint32_t page_index =

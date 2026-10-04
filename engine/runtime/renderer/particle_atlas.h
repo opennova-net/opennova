@@ -81,7 +81,18 @@ struct ParticleAtlasBuild {
 	// vector directly. Pages retain creation order.
 	std::vector<ParticleAtlasEntry> entries;
 	std::vector<ParticleAtlasPage> pages;
+	// Entries left undrawn: an empty image (retail packs only an entry its size probe
+	// found) and every one of oversized_entries.
 	std::size_t rejected_entries = 0;
+	// The graphics no empty page of their type can hold (not narrower than the page's
+	// side, or taller), in placement order. Retail's build never finishes over one: it
+	// counts the miss (@ 0x5E9185), makes a fresh page and passes again (@ 0x5E91BB)
+	// while one missed, and an entry no empty page holds is never cleared, so the game
+	// hangs as the effects load [orig: CParticleManager_BuildTextureAtlases @ 0x5E8DB0].
+	// The port leaves it undrawn and names it on the engine log, a deliberate
+	// divergence (D-PTL-31): no shipped graphic is one, the editor refuses a project
+	// carrying one.
+	std::vector<ParticleAtlasEntryId> oversized_entries;
 };
 
 // Deep module: registration owns the case-insensitive (name,type) catalog and

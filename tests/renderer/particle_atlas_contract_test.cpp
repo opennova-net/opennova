@@ -1,5 +1,7 @@
 #include <runtime/renderer/particle_atlas.h>
 
+#include <base/io/log.h>
+
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -177,18 +179,36 @@ bool allocator_control_flow_contract() {
 			"the minimum skyline value persists across every candidate start");
 }
 
+std::string g_logged;
+void capture_log(opennova::io::LogLevel level, const char *message) {
+	if (level >= opennova::io::LogLevel::kWarn) g_logged += std::string(message) + "\n";
+}
+
 bool strict_page_edge_contract() {
 	r::ParticleAtlasBuilder builder;
 	const auto rejected = builder.register_frame("full", 4,
 			solid_image(256, 1));
 	const auto accepted = builder.register_frame("almost-full", 4,
 			solid_image(255, 1));
+	const auto missing = builder.register_frame("missing", 4, r::ParticleRgbaImage{});
+	g_logged.clear();
+	opennova::io::set_log_sink(capture_log);
 	const r::ParticleAtlasBuild built = builder.build();
+	opennova::io::set_log_sink(nullptr);
+	// A graphic no empty page holds hangs retail's build; the port leaves it undrawn,
+	// lists it and names it on the log (D-PTL-31). An empty image is rejected too,
+	// as retail packs only what its size probe found, but it is no hang.
+	// [orig: CParticleManager_BuildTextureAtlases @ 0x5E8DB0, @ 0x5E9185 / @ 0x5E91BB]
 	return check(!built.entries[rejected].placement.valid &&
 			built.entries[accepted].placement.valid &&
 			built.entries[accepted].placement.x == 0 &&
-			built.rejected_entries == 1,
-			"page packing preserves the allocator's strict right edge");
+			!built.entries[missing].placement.valid &&
+			built.rejected_entries == 2 &&
+			built.oversized_entries.size() == 1 && built.oversized_entries[0] == rejected &&
+			g_logged.find("particle atlas: full (256x1, type 4) fits no empty 256x256 page") !=
+					std::string::npos &&
+			g_logged.find("missing") == std::string::npos,
+			"page packing preserves the allocator's strict right edge; an oversized graphic is named");
 }
 
 bool overlapping_skyline_candidate_contract() {
