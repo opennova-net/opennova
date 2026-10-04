@@ -81,6 +81,18 @@ std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Docum
 // another prefix or one no number forms (STRNAME5, STRNAME0005), which no lookup of the game reads.
 bool text_key_number(const std::string &key, const char *prefix, int64_t &out);
 
+// A place an edge names, in words, its file not opened (the plain-words lane: a find's uses, a file's
+// page, a string's uses, the import plan): the record by its path, its last step in its type's own words
+// where they are not its name (GraphEdge::record_title: "STARTUP/MAIN/BUTTONS/OPTIONS/Go to OPTIONS in
+// options.mnu"), and the field by the label its source's type gives it (DocumentType::fields: "Menu
+// file"), " - " between them; either left out where it is none.
+std::string edge_record_words(const GraphEdge &edge);
+std::string edge_field_words(const GraphEdge &edge, AssetKind source_kind);
+std::string edge_place_words(const GraphEdge &edge, AssetKind source_kind);
+// The same of a finding's place where its file is not open: its field by the label its file's type gives
+// it ("" where the label is the field's id, or the finding names no field of a record).
+std::string field_words(AssetKind kind, NodeKind record_kind, const std::string &field);
+
 // What a definition the picker offers points at, for its tooltip, made only while it shows (cheap
 // enough per hover, not per row): an item's model (the file its graphic loads) and its catalog, a string
 // id's text and table, a record set's record by its own name; "" for nothing more than its name.

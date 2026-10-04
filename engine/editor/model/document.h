@@ -528,6 +528,18 @@ protected:
 		(void)original;
 		(void)rows;
 	}
+
+public:
+	// The names of a kind this document defines that other files of the project name (the graph's
+	// references, handed over by the session before an Add or a Duplicate): a new record's identity keeps
+	// clear of them, so it never quietly becomes what a dangling reference names (the plain-words lane).
+	// The default keeps none.
+	virtual void set_names_used_elsewhere(ReferenceKind kind, const std::vector<std::string> &names) {
+		(void)kind;
+		(void)names;
+	}
+
+protected:
 	// The veto on a batch's step before it commits (S13 D7, which replaced S9's accept_change of
 	// one row): its swaps (a row added, removed, moved or changed in place) and the file-wide state
 	// on both sides, with the rows as the step leaves them (StagedRows::rows), for every batch, the
