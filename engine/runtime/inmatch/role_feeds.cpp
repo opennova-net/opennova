@@ -842,7 +842,16 @@ hud::HudMapGridOrigin hud_map_grid_origin(const RoleView &view) {
 bool joiner_deploy_hold_ready(const RoleView &view) {
 	if (!view.joiner || view.runtime == nullptr) return false;
 	const ClientRuntime &runtime = *view.runtime;
-	return runtime.awaiting_deploy_pick() && runtime.has_self_handle() &&
+	// Held awaiting the post-auth pick, or with initial admission complete while
+	// the host still holds the deploy-map overlay: a stock host's initial S2C
+	// 0x5A grant opens the session and its C2S 0x0C uplinks while the DEATH
+	// screen holds presentation until the first pick (net-re §5.61). Both take
+	// the same C2S 0x0E pick. [orig: Input_HandleActionBinding @0x49AD40,
+	// case 12 @0x49B0C5..0x49B17B]
+	const bool held = runtime.awaiting_deploy_pick() ||
+			(runtime.in_match() && runtime.initial_admission_complete() &&
+			 runtime.state().deploy_overlay_active);
+	return held && runtime.has_self_handle() &&
 			runtime.last_error().empty() && !runtime.session_lost();
 }
 

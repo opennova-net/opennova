@@ -11,6 +11,7 @@
 
 #include "env/weather.h"
 #include "util/string_convert.h"
+#include <runtime/devtools/scripted_input.h> // ScriptPose (the joiner setup pose)
 #include <runtime/environment/environment_state.h>
 #include <base/io/fixed.h>
 #include <base/gameprofile/game_type.h> // game_type::for_mission_attribs
@@ -1025,6 +1026,27 @@ Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 			opennova::world::Vec3{p_mission_pos.x, p_mission_pos.y, p_mission_pos.z},
 			p_yaw_deg, p_pitch_deg);
 	return OK;
+}
+
+// The scenario driver's joiner setup: teleport_local_player is the authority's
+// write (HOST_ONLY in the debug table), while a joiner's own L is client-owned
+// state its C2S 0x0C uplink reports, so the joiner takes the retail bridge's
+// ApplyPose write on L instead. The pose arrives as doubles so the Q16/BAM
+// words match the retail driver's conversion of the same script.
+Error Simulation::debug_apply_local_pose(double p_x, double p_y, double p_z, double p_yaw_deg,
+		double p_pitch_deg) {
+	if (!kernel_ || !is_joiner() || !kernel_->world.cached.local_player.valid()) {
+		return ERR_UNAVAILABLE;
+	}
+	opennova::devtools::ScriptPose pose;
+	std::string error;
+	if (!opennova::devtools::script_pose_from_mission(p_x, p_y, p_z, p_yaw_deg, p_pitch_deg,
+				pose, error)) {
+		return ERR_INVALID_PARAMETER;
+	}
+	return kernel_->local.apply_pose(pose.position_q16, pose.heading_bam, pose.pitch_bam)
+			? OK
+			: ERR_UNAVAILABLE;
 }
 
 // The by-net-id sibling of debug_set_entity_position: the net-id resolve is

@@ -10,7 +10,7 @@
 # novaworld protocol) so the bytes shown are exactly what the shipping libs
 # parse — no parallel re-implementation.
 
-add_executable(nw_pp nw_pp.cpp)
+add_executable(nw_pp nw_pp.cpp scenario_events.cpp)
 
 # The wire group for the decode, and the runtime group for the one HUD policy
 # it prints beside the bytes (the 0x1E feed kind -> STRCND key table,

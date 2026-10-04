@@ -118,6 +118,16 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	if (owner == nullptr) {
 		return frame_input;
 	}
+	const Ref<Simulation> tick_sim = sim();
+	// The scripted input device (devtools/scripted_input.h) steps on the logic
+	// tick this sample is keyed to, ahead of every device read below.
+	const Ref<ScriptedInput> scripted =
+			controls_.is_valid() ? controls_->get_scripted_input() : Ref<ScriptedInput>();
+	Vector2 scripted_look;
+	if (scripted.is_valid()) {
+		if (tick_sim.is_valid()) controls_->advance_scripted_input(tick_sim->get_logic_tick());
+		scripted_look = scripted->take_look();
+	}
 	if (!owner->has_player()) {
 		owner->set_fly_camera_locked(false);
 		release_mouse_capture();
@@ -125,7 +135,6 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		look_delta_ = Vector2();
 		return frame_input;
 	}
-	const Ref<Simulation> tick_sim = sim();
 	// The death screen samples the same device input: the engine's filter
 	// hands it to the free-fly motor or the chase orbit, and the binding scan
 	// admits only the death-screen rows (PlayerActionPoll::death_screen).
@@ -154,6 +163,12 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
     frame_input->set_view_keys(p_gameplay_input_active && pressed("FreeLook"),
         p_gameplay_input_active && pressed("look_up"), p_gameplay_input_active && pressed("look_down"),
         p_gameplay_input_active && pressed("turn_left"), p_gameplay_input_active && pressed("turn_right"));
+	// Scripted look pixels join the frame's mouse motion under the gate real
+	// motion meets on its way in (the shell hands handle_input only live
+	// gameplay with the mouse captured).
+	if (p_gameplay_input_active && input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED) {
+		look_delta_ += scripted_look;
+	}
 	frame_input->set_look_delta(p_gameplay_input_active ? look_delta_ : Vector2());
 	look_delta_ = Vector2();
 	const Ref<Simulation> action_sim = sim();

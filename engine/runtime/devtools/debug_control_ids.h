@@ -74,6 +74,7 @@ inline constexpr const char *kKillGroup = "kill_group";
 inline constexpr const char *kCrewVehicle = "crew_vehicle";
 inline constexpr const char *kCrewLocalPlayer = "crew_local_player";
 inline constexpr const char *kLocalPlayerLook = "local_player_look";
+inline constexpr const char *kApplyLocalPose = "apply_local_pose";
 inline constexpr const char *kLocalSpectator = "local_spectator";
 
 }  // namespace opennova::devtools::control_id

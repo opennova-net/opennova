@@ -25,6 +25,7 @@
 //   nw_pp <capture-path> 0x0d 0x20      # filter to listed S2C tags
 //   nw_pp <capture-path> --sequencing   # packet-level seq/ACK timeline
 //   nw_pp <capture-path> --parity-events # stable packet/event verifier stream
+//   nw_pp <capture-path> --scenario-events # decoded scenario events (scenario_events.h)
 
 #include <formats/def/def.h>
 #include <formats/wac/command.h>
@@ -62,6 +63,8 @@
 #include <vector>
 
 #include <base/io/strutil.h>
+
+#include "scenario_events.h"
 
 using namespace opennova;
 using namespace opennova::def;
@@ -2224,6 +2227,7 @@ int main(int argc, char *argv[]) {
 	bool coverage_mode = false;
 	bool sequencing_mode = false;
 	bool parity_events_mode = false;
+	bool scenario_events_mode = false;
 	long max_frames = 0; // 0 = unlimited
 	long skip_frames = 0;
 	for (int i = 1; i < argc; ++i) {
@@ -2243,6 +2247,9 @@ int main(int argc, char *argv[]) {
 			stream_mode = true;
 		} else if (std::strcmp(a, "--parity-events") == 0) {
 			parity_events_mode = true;
+			stream_mode = true;
+		} else if (std::strcmp(a, "--scenario-events") == 0) {
+			scenario_events_mode = true;
 			stream_mode = true;
 		} else if (std::strcmp(a, "--stream") == 0) {
 			stream_mode = true;
@@ -2266,6 +2273,7 @@ int main(int argc, char *argv[]) {
 		std::fprintf(stderr,
 		             "usage: nw_pp <capture-path> [--items <items.def>] [--stream] "
 		             "[--histogram] [--coverage] [--sequencing] [--parity-events] "
+		             "[--scenario-events] "
 		             "[--max-frames N] [--skip N] "
 		             "[0xNN ...]\n"
 		             "       path is a .pcap / .pcapng (parsed natively)\n"
@@ -2281,6 +2289,9 @@ int main(int argc, char *argv[]) {
 		             "PARITY_EVENT/STATE/ENTITY lines with capture timestamps, "
 		             "ordered raw/LEN/SKIP/fragment record framing, semantic order, "
 		             "decoded gameplay state, and full non-gameplay bodies\n"
+		             "       --scenario-events emits one decoded SCENARIO_EVENT line per "
+		             "death, kill-feed, fire, reload, mount, team and zone-timer "
+		             "message (the network-parity scenario comparator's input)\n"
 		             "       --stream decodes lazily (flat memory) for multi-GB "
 		             "captures; --skip N starts after N datagrams; --max-frames N "
 		             "stops after N (implies --stream)\n"
@@ -2313,6 +2324,7 @@ int main(int argc, char *argv[]) {
 	if (stream_mode && is_pcap_path(path)) {
 		opennova::CaptureDecoder decoder;
 		std::map<int, uint64_t> frame_timestamps;
+		nwpp::ScenarioEventTracker scenario_tracker;
 		long seen = 0, printed_through = 0;
 		bool stopped_early = false;
 		auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
@@ -2342,6 +2354,12 @@ int main(int argc, char *argv[]) {
 					const uint64_t ts_nanos = frame_timestamps[m.frame_index];
 					print_parity_event(m, ts_nanos);
 					print_parity_semantics(m, ts_nanos);
+					continue;
+				}
+				if (scenario_events_mode) {
+					const std::string line = nwpp::format_scenario_event(
+							m, frame_timestamps[m.frame_index], scenario_tracker);
+					if (!line.empty()) std::printf("%s\n", line.c_str());
 					continue;
 				}
 				if (sequencing_mode) continue;

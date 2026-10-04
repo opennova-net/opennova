@@ -1,0 +1,29 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "self_nade",
+  "mission": "01TR.bms",
+  "game_type": 65568,
+  "actor": "joiner",
+  "steps": [
+    {"tick": 0, "press": 205},
+    {"tick": 40, "look_px": [0, 400]},
+    {"tick": 45, "look_px": [0, 400]},
+    {"tick": 80, "down": 149},
+    {"tick": 120, "up": 149},
+    {"tick": 300, "end": true}
+  ],
+  "settle_seconds": 15,
+  "expect": {
+    "sequence": [
+      {"dir": "C", "kind": "fired_round", "shooter": "actor", "target": "0xffff"},
+      {"dir": "C", "kind": "reload_request", "entity": "actor"},
+      {"dir": "S", "kind": "weapon_reload", "entity": "actor"},
+      {"dir": "S", "kind": "entity_death", "entity": "actor"},
+      {"dir": "S", "kind": "tick_seed", "seed": "0"},
+      {"dir": "S", "kind": "death_camera"},
+      {"dir": "S", "kind": "game_event", "type": ["1", "2", "3"], "attacker": "actor", "victim": "0", "aux": "0"}
+    ],
+    "count_kinds": ["fired_round", "entity_death", "game_event"],
+    "mask": {"game_event": ["type"]}
+  }
+}

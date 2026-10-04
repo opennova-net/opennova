@@ -641,6 +641,24 @@ int main() {
 		CHECK(kernel.local.input.look_heading == body->heading);
 	}
 
+	// The scenario driver's ApplyPose write: the exact 16.16 / BAM words
+	// through both position stores and the input-owned look, the air
+	// velocity zeroed.
+	if (w::AiEntity *body = kernel.local.player_ai()) {
+		body->inf.vel[0] = 0x10000;
+		body->inf.vel[2] = -0x8000;
+		const int32_t pos_q16[3] = {819200, -212992, 8437761};
+		CHECK(kernel.local.apply_pose(pos_q16, static_cast<int32_t>(0xC0000000u), -268435456));
+		CHECK(body->pos[0] == 819200 && body->pos[1] == -212992 && body->pos[2] == 8437761);
+		CHECK(near_equal(kernel.local.player_position().x, 12.5f, 0.0001f));
+		CHECK(near_equal(kernel.local.player_position().y, -3.25f, 0.0001f));
+		CHECK(body->heading == static_cast<int32_t>(0xC0000000u) && body->pitch == -268435456);
+		CHECK(body->inf.target_heading == body->heading && body->inf.look_pitch == body->pitch);
+		CHECK(kernel.local.input.look_heading == body->heading &&
+		      kernel.local.input.look_pitch == body->pitch);
+		CHECK(body->inf.vel[0] == 0 && body->inf.vel[1] == 0 && body->inf.vel[2] == 0);
+	}
+
 	// set_entity_position / set_entity_health round-trip the same dual store.
 	kernel.world.commands.set_entity_position(player_h, w::Vec3{50.0f, 60.0f, 2.0f});
 	CHECK(near_equal(kernel.local.player_position().x, 50.0f, 0.001f));

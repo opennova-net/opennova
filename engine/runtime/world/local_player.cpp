@@ -297,6 +297,28 @@ void LocalPlayer::teleport_local_player(const w::Vec3 &mission_pos, double yaw_d
 	p->collide_state = {};
 }
 
+bool LocalPlayer::apply_pose(const int32_t (&position_q16)[3], int32_t heading_bam,
+		int32_t pitch_bam) {
+	w::Entity *e = player();
+	w::AiEntity *p = player_ai();
+	if (e == nullptr || p == nullptr) return false;
+	// The bridge's person writes: Position, Rotation.X/Y, AirVelocity
+	// (onhook/src/debug/debug_bridge.c ApplyPose; GamePerson +0x04 / +0x10 /
+	// +0x98, the organic's InfantryState::vel triple).
+	for (int axis = 0; axis < 3; ++axis) p->pos[axis] = position_q16[axis];
+	p->heading = heading_bam;
+	p->pitch = pitch_bam;
+	p->inf.vel[0] = p->inf.vel[1] = p->inf.vel[2] = 0;
+	e->position = {static_cast<float>(w::from_fixed(p->pos[0])),
+			static_cast<float>(w::from_fixed(p->pos[1])),
+			static_cast<float>(w::from_fixed(p->pos[2]))};
+	p->inf.target_heading = heading_bam;
+	p->inf.look_pitch = pitch_bam;
+	input.look_heading = heading_bam;
+	input.look_pitch = pitch_bam;
+	return true;
+}
+
 void LocalPlayer::set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed) {
 	w::local_weapon_set_input(weapon, view, fire_held, fire_pressed, reload_pressed);
 }

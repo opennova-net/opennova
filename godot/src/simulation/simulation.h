@@ -2063,6 +2063,10 @@ public:
 
 	Error debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
 			float p_pitch_deg);
+	// The joiner's setup pose (devtools; engine LocalPlayer::apply_pose, double-precise words):
+	// ERR_UNAVAILABLE unless a joiner with L; ERR_INVALID_PARAMETER for an unencodable pose.
+	Error debug_apply_local_pose(double p_x, double p_y, double p_z, double p_yaw_deg,
+			double p_pitch_deg);
 	// Round-outcome card: {ended, winner_team, bluekills, greenkills, enemy_kills,
 	// team_kills_by_others, friendly_kills_by_others, enemy_kills_by_others, humans}.
 	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score
