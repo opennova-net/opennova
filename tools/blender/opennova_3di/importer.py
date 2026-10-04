@@ -620,6 +620,7 @@ class Builder(Notes):
             parts.append(ob)
             objs.append(ob)
             if row is not None:
+                self.store_track_parent(ob.o3d, row, lod["parts"], pi, f"LOD {li} part {pi + 1:02d}")
                 self.tracks(ob.o3d, row, f"LOD {li} part {pi + 1:02d}")
         for pi, part in enumerate(lod["parts"]):
             parent = top_parent(lod["parts"], pi)
@@ -688,6 +689,7 @@ class Builder(Notes):
                 continue
             p = self.rig.data.bones[f"BN{pi + 1:02d}"].o3d
             p.frame = self.frame_rotation(row["matrix"])
+            self.store_track_parent(p, row, lod["parts"], pi, f"part {pi + 1:02d}")
             self.tracks(p, row, f"part {pi + 1:02d}")
 
     def rig_lod(self, lod, mats):
@@ -736,6 +738,20 @@ class Builder(Notes):
         ob.modifiers.new("Armature", "ARMATURE").object = self.rig
         objs.append(ob)
         return objs
+
+    def store_track_parent(self, holder, row, parts, pi, what):
+        """A PANM row naming its part itself where the part names another
+        parent: its Track parent setting (rig.Part.panm_parent). Any other row
+        parent that is not the part's is what the scene cannot carry: reported,
+        and export writes the part's."""
+        mine = parts[pi]["parent"]
+        if row["parent"] == mine:
+            return
+        if row["parent"] == pi:
+            holder.track_parent = "SELF"
+        else:
+            self.note(f"{what}: its PANM row names part {row['parent'] + 1:02d} as its parent, not the part's "
+                      f"{mine + 1:02d}; export writes the part's")
 
     def tracks(self, p, row, what):
         """A PANM row's tracks onto a part's animation (an empty's or a bone's

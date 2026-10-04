@@ -229,6 +229,25 @@ def part_parent_prop():
                                     "which a hierarchy cannot say (retail Eturret, Excavatr, Chair03X)")
 
 
+# A part's PANM row names a parent of its own, apart from the part's: with a
+# PANM table the game re-places every part without a track about that row
+# parent's posed pivot, keeping only the part's turn, and a row naming itself
+# carries its own posed row [orig: Model_TransformBoneMatrices @ 0x58E390,
+# @0x58F040..0x58F12E]. A clip-posed model whose tracks give it a table keeps
+# a clip's travel of a part (a magazine, a bolt) only that way.
+TRACK_PARENTS = [
+    ("PART", "As the part", "The part's own parent (its Parent setting)"),
+    ("SELF", "Itself", "The PANM row names the part itself: with a PANM table, a part without a track keeps its "
+                       "clip's whole pose (its travel too), not only its turn about its parent's"),
+]
+
+
+def track_parent_prop():
+    return EnumProperty(name="Track parent", items=TRACK_PARENTS, default="PART",
+                        description="The parent the part's PANM row names: the part's own, or itself, so a clip's "
+                                    "travel of the part survives the part animation table of a model with tracks")
+
+
 class O3DAdmVariant(bpy.types.PropertyGroup):
     action: PointerProperty(name="Clip", type=bpy.types.Action,
                             description="The Action this clip plays. Its file is named after the table and the "
@@ -336,6 +355,7 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                                         "writes what the tracks imply (import never sets it: a stored word the "
                                         "tracks do not imply is reported)")
     part_parent: part_parent_prop()
+    track_parent: track_parent_prop()
     lod_threshold: IntProperty(name="LOD threshold", default=0, min=0,
                                description="On a LOD root: the projected radius in pixels above which this "
                                            "LOD draws (0 = the coarsest; Armry01's run 200, 60, 20, 0)")
@@ -362,6 +382,7 @@ class O3DBoneProps(bpy.types.PropertyGroup):
                                         "writes what the tracks imply (import never sets it: a stored word the "
                                         "tracks do not imply is reported)")
     part_parent: part_parent_prop()
+    track_parent: track_parent_prop()
     frame: FloatVectorProperty(name="Track frame", subtype="MATRIX", size=(3, 3),
                                default=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
                                description="The axes this part's tracks turn about (its PANM MTRX row), as a "
@@ -1644,6 +1665,7 @@ def draw_part_animation(layout, holder, bone):
     if body is not None:
         body.prop(p, "panm_flags")
         body.prop(p, "part_parent")
+        body.prop(p, "track_parent")
     for i, t in enumerate(p.tracks):
         box = layout.box()
         row = box.row()

@@ -384,6 +384,32 @@ def first_person_gun_and_arms_round_trip():
 
 
 @case
+def a_track_parent_names_the_part_itself_in_its_panm_row_alone():
+    # With a PANM table the game re-places a part without a track about its
+    # PANM row's parent, keeping only its turn; a row naming the part itself
+    # keeps a clip's travel of it (a magazine leaving the gun). Track parent
+    # Itself writes that row and leaves the part's own parent, the hierarchy a
+    # clip poses, as it was; import gives it back.
+    gun, arms, arm = gun_and_arms("tp")
+    arm.data.bones["BN05 Bolt"].o3d.track_parent = "SELF"
+    _, lines = export_model(gun)
+    parts = records(lines, "part")
+    assert [p[0] for p in parts] == ["0", "0", "0", "2", "3"], parts
+    rows = {r[0]: r[1] for r in records(lines, "panm")}
+    assert rows["4"] == "4" and rows["3"] == "2", rows
+    export_model(arms)
+    first = export.output_path(gun)
+    back = next(m for m in import_again([first, export.output_path(arms)]) if m.name == "tpgun")
+    bones = {b.name[:4]: b for b in rig.rig_of(back).data.bones}
+    assert bones["BN05"].o3d.track_parent == "SELF", bones["BN05"].o3d.track_parent
+    assert bones["BN05"].o3d.part_parent == "HIERARCHY"
+    assert bones["BN04"].o3d.track_parent == "PART"
+    back.o3d.output_path = os.path.join(OUT, "trackparent", "tpgun.3di").replace("\\", "/")
+    export_model(back)
+    compare(first, export.output_path(back))
+
+
+@case
 def number_parts_follows_the_hierarchy():
     root, lod = model("numbered")
     arm = armature("numbered Rig", lod, {"Hips": ((0, 0, 0), None), "Spine": ((0, 0, 0.3), "Hips"),

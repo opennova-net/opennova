@@ -265,6 +265,9 @@ class Part:
     def __init__(self, index, parent, empty=None, bone=None, rig=None, mesh=None):
         self.index = index
         self.parent = parent
+        holder = empty if empty is not None else bone
+        # The parent its PANM row names (Track parent): the part's own, or itself.
+        self.panm_parent = index if holder is not None and holder.o3d.track_parent == "SELF" else parent
         self.empty = empty
         self.bone = bone
         self.rig = rig
@@ -643,6 +646,7 @@ def make_rig(context, model):
         p, q = ob.o3d, arm.data.bones[names[i]].o3d
         q.panm_flags = p.panm_flags
         q.part_parent = p.part_parent
+        q.track_parent = p.track_parent
         for t in p.tracks:
             u = q.tracks.add()
             for field in ("target", "style", "register", "param", "rate", "start", "end", "axis"):

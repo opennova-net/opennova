@@ -173,8 +173,13 @@ The root part's pivot is the model origin. A part numbered before its parent
 exports with a note (the game reads that parent before posing it; Number
 Parts avoids it). A part's **Parent** (in its closed "Stored as" panel) keeps
 what a hierarchy cannot say, a part that names itself or no part as its
-parent, as some retail models store; only import sets it. Export warns about
-any object it does not use.
+parent, as some retail models store; only import sets it. Its **Track
+parent** (the same panel) is the parent its PANM row names, apart from the
+part's own: a model with part tracks has a PANM table, and with one the game
+re-places every part without a track about that row parent's pose, keeping
+only the part's turn, so a clip's travel of a part (a first-person gun's
+magazine leaving it, its bolt sliding) is lost unless the row names the part
+itself (Itself). Export warns about any object it does not use.
 
 **Add Model** (in the sidebar) makes a model root and its `_LOD0` root at the
 origin. **Add Part from Selection** puts the selected objects on a new `PN##`
@@ -316,7 +321,7 @@ Culling, the Math node, the render method and Emission.
   LOD's 0) and type (`gnrc`, `bldg`, `door`, `veh0`). On a `PN##` part: part
   animation tracks (rotation about the part's up, side or forward axis, scale,
   or translation, driven by an engine register such as `HELO_ROTOR` or by a
-  spin or wave), and in a closed "Stored as" panel its stored Parent and a
+  spin or wave), and in a closed "Stored as" panel its stored Parent, Track parent and a
   PANM flags word to write instead of the one the tracks imply (import never
   sets it: a stored word the tracks do not imply is reported and dropped). On
   any other object of a model: the part it sits on, and on a

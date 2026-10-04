@@ -826,7 +826,7 @@ class Exporter(Notes):
         none."""
         holder = part.empty if part.empty is not None else part.bone
         if holder is None:
-            lines.append(f"panm {part.index} {part.parent}  # {part.name}")
+            lines.append(f"panm {part.index} {part.panm_parent}  # {part.name}")
             return
         p = holder.o3d
         what = part.name if part.empty is not None else f"{part.rig.name} bone {part.name}"
@@ -837,7 +837,7 @@ class Exporter(Notes):
             raise ExportError(f"{what}: {targets.count(twice[0])} {twice[0]} tracks; a part has one track per target")
         frame = self.part_frame(part)
         flags = p.panm_flags if p.panm_flags >= 0 else derived_panm_flags(tracks)
-        line = f"panm {part.index} {part.parent}"
+        line = f"panm {part.index} {part.panm_parent}"
         if p.panm_flags >= 0 or frame:
             line += f" 0x{flags:08x}" + (f" {frame}" if frame else "")
         lines.append(line + f"  # {part.name}")
