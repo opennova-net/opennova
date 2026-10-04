@@ -21,6 +21,8 @@ bool OpenOperation::step(const StepBudget &budget) {
 		// The game install's names first, the project's own install (its local.json, else the one
 		// the editor last chose): the Import fixes read them.
 		install_files_ = list_retail_file_names(local_.game_install, document_);
+		// And an expansion's base game's, which its build's gate reads (ADR 0046 S16).
+		base_files_ = list_base_file_names(local_.game_install, document_);
 		listed_ = true;
 		return false;
 	}

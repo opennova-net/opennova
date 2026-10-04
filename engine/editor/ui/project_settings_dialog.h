@@ -4,13 +4,15 @@
 #include <string>
 
 #include <editor/session/editor_request.h>
+#include <editor/ui/expansion_fields.h>
 #include <editor/ui/view_event_mailbox.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
-// File > Project settings... (ADR 0046 S11d): the project's name and features (missions,
-// multiplayer), then this computer's settings: the game install folder, the OpenNova
+// File > Project settings... (ADR 0046 S11d): the project's name, features (missions,
+// multiplayer) and expansion (S16: what it builds on, whether and as what it builds as an
+// expansion, ExpansionFields), then this computer's settings: the game install folder, the OpenNova
 // runtime Play runs (read-only on a source run, where Play drives the checkout) and whether
 // Play runs the game install instead. The fields are the dialog's until Apply, which raises
 // one ApplyProjectSettings naming every one of them: the session writes what differs from
@@ -49,6 +51,7 @@ private:
 	bool open_requested_ = false;
 	std::string root_;        // the project it is for
 	Fields fields_;
+	ExpansionFields expansion_;
 	PickPurpose pick_ = PickPurpose::None; // the Browse... the shell is answering
 	ViewEventMailbox<> events_;
 	uint64_t serial_ = 0;     // the last Apply's, and whether its answer is still to come

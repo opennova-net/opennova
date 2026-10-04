@@ -901,8 +901,14 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 	// The gate is the Problems rows a validation makes: the one left due or under way runs to its
 	// end first (S13 A3: the polls step it, and no request runs it).
 	core.problems().validate_pending();
-	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements,
-			core.problems().gate_findings());
+	// An expansion's gate reads over its base game's names (ADR 0046 S16).
+	const BaseNames base{&view.project.base_files};
+	const BuildTarget target = core.build_target();
+	const std::vector<Diagnostic> gate = core.problems().gate_findings();
+	// The game's own bytes, packed as stored, gate on no finding that they do not serialize (S16).
+	const ShippedFiles shipped = core.shipped_files();
+	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements, gate, target,
+			&base, &shipped);
 	const std::vector<Diagnostic> blocking = build_blockers(plan);
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
@@ -1421,8 +1427,11 @@ constexpr EditorQueryRow kRows[] = {
 			"check's). A listed code blocks where its subject names the refusal: a reference, missing "
 			"or naming a file of another kind, of a kind whose row cites it (gates_when_missing: a "
 			"mission's terrain), and a required file missing or of another kind whose manifest row "
-			"is the boot's refusal (its fatal rows). The query runs the validation left due to its end first, so "
-			"the rows it reads are the files' as they stand. A build request reads changed files "
+			"is the boot's refusal (its fatal rows). A code that says the file does not serialize "
+			"(blocks_save) blocks nothing over a file that is the game's own bytes with no unsaved edits: "
+			"the build packs it as stored, never through the editor's writer. The query runs the "
+			"validation left due to its end first, and the check of which files are the game's own data, "
+			"so the rows it reads are the files' as they stand. A build request reads changed files "
 			"again first, joins a build that runs and waits on unsaved edits, which the gate does "
 			"not weigh.")
 			.pages("blocking")
@@ -1489,7 +1498,8 @@ constexpr EditorQueryRow kRows[] = {
 			"(gates_build: the build follows retail, so true where the game's refusal is witnessed "
 			"or the editor cannot vouch for what it packs, false for a listed code, whose errors "
 			"still block where their subject names the refusal: a reference of a kind whose row "
-			"cites it, a mission's terrain; a required file whose manifest row is the boot's), "
+			"cites it, a mission's terrain; a required file whose manifest row is the boot's; a "
+			"blocks_save code's errors block nothing over the game's own bytes held unedited), "
 			"where Problems takes it (content or file), the "
 			"group it shows under (its key), where it comes from (source), for a render check's note "
 			"that is a Problems row its severity (problem: info or warning, left out for none) and "
