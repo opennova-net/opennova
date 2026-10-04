@@ -134,6 +134,10 @@ public:
 	// honours as its own rule says (the Preview's: for the document active then).
 	virtual bool stands_aside() const { return false; }
 	virtual void show_anyway() {}
+	// Whether the window takes the focus as it shows (ImGui focuses a window, a docked one too, the frame
+	// it appears): a window that comes and goes beside the one in use (the editor's Preview, back from
+	// standing aside) never takes the keyboard from it.
+	virtual bool focus_on_appearing() const { return true; }
 	// The debug-control rows this window reads through the control board
 	// (control_board.h) while it shows: the embedder pushes their live
 	// states on the board's cadence. The ids are debug_control_ids.h
