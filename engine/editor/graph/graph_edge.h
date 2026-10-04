@@ -16,6 +16,7 @@ namespace opennova::editor {
 struct GraphEdge {
 	std::string source;   // the referencing file, project-relative
 	std::string record;   // the record inside it, every name from the row down ("" = the file itself)
+	std::string record_key; // the record as itself (Document::record_identity), "" for none
 	// A document record's place, stable across a reload (Document::locator); a text's span's,
 	// "line:column" (TextDocument::locator).
 	std::string locator;
@@ -81,6 +82,7 @@ struct GraphSymbol {
 	std::string value;   // a style variable's value; a record set's record by its own name (S13 D8)
 	std::string file;    // the defining file, project-relative
 	std::string record;  // the defining record, every name from the row down ("" = the file itself)
+	std::string record_key; // the record as itself (Document::record_identity), "" for none
 	std::string locator; // a document record's place, stable across a reload (Document::locator)
 	NodeAddress address; // the defining record in the document it was read from
 	std::string field;   // the field that defines it ("" for a native file's)

@@ -115,6 +115,10 @@ public:
 	void touch(ViewConcern concern);
 	// A line in Output.
 	void note(std::string line);
+	// A line of Output with `folded` under it (an import's files, the game's log: OutputLog), its absolute
+	// index; and more folded under it later, its line made `line` (false when Output no longer holds it).
+	uint64_t note_folded(std::string line, std::vector<std::string> folded);
+	bool fold_into_note(uint64_t index, std::string line, std::vector<std::string> more);
 	// A finding: a Problems row (ProblemsService::add_reported, which never validates), the
 	// request's outcome when one is served, and a line in Output.
 	void report(const Diagnostic &d);
