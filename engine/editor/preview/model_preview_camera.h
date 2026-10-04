@@ -19,6 +19,9 @@ struct PreviewVec3 {
 
 // A model-space point (a user point, a light, a pivot) in the preview's space.
 inline PreviewVec3 preview_from_model(const float model[3]) { return PreviewVec3{-model[0], model[1], model[2]}; }
+// A point in mission axes (x forward, y left, z up: the collision block's, the projection sphere's) in the
+// preview's space: model axes are (-y, z, x) of mission (threedi_build_to_model), so (y, z, x).
+inline PreviewVec3 preview_from_mission(float x, float y, float z) { return PreviewVec3{y, z, x}; }
 
 // The model preview's camera (ADR 0046 S10p2): it orbits a target at a distance, yaw about
 // the vertical (0 looks along -z) and pitch the eye's elevation (positive looks down). It

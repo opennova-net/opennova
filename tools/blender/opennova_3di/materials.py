@@ -389,6 +389,78 @@ def face_flags(mat):
             (0x800 if p.face_front_only else 0) | (p.face_other_flags & ~0x901))
 
 
+# A bullet face keeps its material's surface and flags unless its polygon says
+# otherwise: two integer face attributes of the collision LOD's meshes, each
+# holding the polygon's own value plus one, 0 (or none) taking the material's.
+# The +1 is what keeps a polygon Blender makes on its own the material's: a new
+# face, a fill, a mesh joined in without the attribute get 0, and 0 must not
+# read as surface 0 (Object) and no flags. Import writes them where a retail
+# face disagrees with its material's vote (the file keeps a surface and flags
+# per face, so a material's faces may differ), so a re-export keeps each face
+# as it was; the material panel counts them and Make all clears them. The
+# API below speaks in values (-1: the material's); the +1 is the attributes'.
+FACE_SURFACE = "o3d_own_surface"
+FACE_FLAGS = "o3d_own_face_flags"
+# An own value past this does not fit the INT attribute with its +1.
+FACE_VALUE_MAX = 0x7FFFFFFE
+
+
+def face_attribute(mesh, name):
+    """The mesh's per-polygon integer attribute `name`, or None."""
+    attr = mesh.attributes.get(name)
+    return attr if attr is not None and attr.domain == "FACE" and attr.data_type == "INT" else None
+
+
+def face_overrides(mesh, name):
+    """Each polygon's own value of a face attribute (-1: the material's), or
+    None when the mesh has none."""
+    attr = face_attribute(mesh, name)
+    if attr is None:
+        return None
+    stored = [0] * len(mesh.polygons)
+    attr.data.foreach_get("value", stored)
+    return [v - 1 if v > 0 else -1 for v in stored]
+
+
+def set_face_overrides(mesh, name, values):
+    """Write a face attribute's values (-1: the material's); the attribute is
+    made where some polygon holds its own value, and taken off where none
+    does."""
+    attr = face_attribute(mesh, name)
+    if all(v < 0 or v > FACE_VALUE_MAX for v in values):
+        if attr is not None:
+            mesh.attributes.remove(attr)
+        return
+    if attr is None:
+        attr = mesh.attributes.new(name, "INT", "FACE")
+    attr.data.foreach_set("value", [v + 1 if 0 <= v <= FACE_VALUE_MAX else 0 for v in values])
+
+
+def material_face_overrides(meshes, mat):
+    """Over `meshes` (the collision LOD's), the polygons drawn with `mat` that
+    keep a surface or flags of their own: {(mesh object, polygon index):
+    (surface or -1, flags or -1)}, and how many polygons draw with it."""
+    found, drawn = {}, 0
+    for ob in meshes:
+        me = ob.data
+        slots = [i for i, s in enumerate(ob.material_slots) if s.material == mat]
+        if not slots:
+            continue
+        surfaces = face_overrides(me, FACE_SURFACE)
+        flags = face_overrides(me, FACE_FLAGS)
+        index = [0] * len(me.polygons)
+        me.polygons.foreach_get("material_index", index)
+        for pi, slot in enumerate(index):
+            if slot not in slots:
+                continue
+            drawn += 1
+            s = surfaces[pi] if surfaces is not None else -1
+            f = flags[pi] if flags is not None else -1
+            if (s >= 0 and s != mat.o3d.surface) or (f >= 0 and f != face_flags(mat)):
+                found[(ob, pi)] = (s, f)
+    return found, drawn
+
+
 # --- images -----------------------------------------------------------------
 
 def check_image(image, what):
