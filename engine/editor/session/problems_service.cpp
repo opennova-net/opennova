@@ -219,8 +219,15 @@ std::vector<Diagnostic> ProblemsService::gate_rows() const {
 
 void ProblemsService::mark_rows() {
 	blockers_.clear();
-	if (view_.project.open && view_.project.scan && view_.project.requirements && view_.project.document)
-		blockers_ = build_blockers(plan_build(core_.paths(), *view_.project.scan, *view_.project.requirements, gate_rows()));
+	if (view_.project.open && view_.project.scan && view_.project.requirements && view_.project.document) {
+		// The plan a build would make (ADR 0046 S16): the project's target, an expansion's gate over its base
+		// game's names, and the game's own bytes packed as stored.
+		const std::vector<Diagnostic> gate = gate_rows();
+		const BaseNames base{&view_.project.base_files};
+		const ShippedFiles shipped = core_.shipped_files(gate);
+		blockers_ = build_blockers(plan_build(core_.paths(), *view_.project.scan, *view_.project.requirements, gate,
+		                                      core_.build_target(), &base, &shipped));
+	}
 	auto marks = std::make_shared<const FindingMarks>(
 	        mark_findings(view_.findings.diagnostics, view_.findings.originals.get(), &blockers_));
 	if (view_.findings.marks && *view_.findings.marks == *marks) return;

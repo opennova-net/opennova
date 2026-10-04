@@ -91,8 +91,12 @@ std::string served_name(const Diagnostic &d) {
 // a single row's answer).
 bool original_row(const Diagnostic &d, const OriginalData &originals,
                   std::map<std::string, std::map<std::string, size_t>> *left) {
-	// A finding the build gates on stays the modder's to see, whatever file it is in.
-	if (!originals.ready || d.asset.empty() || blocks_build(d)) return false;
+	// A finding the build gates on stays the modder's to see, whatever file it is in. One that the file does
+	// not serialize gates nothing over the game's own bytes, which the build packs as stored (ADR 0046 S16,
+	// ShippedFiles): the original's where the install makes it too, unless the build is refused for it
+	// (mark_findings: a row among the plan's blockers is never the original's).
+	if (!originals.ready || d.asset.empty()) return false;
+	if (blocks_build(d) && !(d.row() && d.row()->blocks_save)) return false;
 	const std::string name = served_name(d);
 	const auto served = originals.findings.find(name);
 	if (served == originals.findings.end()) return false;
@@ -117,12 +121,13 @@ FindingMarks mark_findings(const std::vector<Diagnostic> &rows, const OriginalDa
 	std::map<std::string, std::map<std::string, size_t>> left;
 	for (size_t i = 0; i < rows.size(); ++i) {
 		const Diagnostic &d = rows[i];
-		if (originals && original_row(d, *originals, &left)) marks.original[i] = 1;
 		const bool blocks = blocks_build(d) &&
 		                    (!blockers || std::find(blockers->begin(), blockers->end(), d) != blockers->end());
 		if (blocks) {
 			marks.blocking[i] = 1;
 			++marks.blocking_count;
+		} else if (originals && original_row(d, *originals, &left)) {
+			marks.original[i] = 1;
 		}
 	}
 	return marks;
