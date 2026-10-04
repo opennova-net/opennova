@@ -124,7 +124,7 @@ void usage() {
 	    "usage: nw-lister --listing FILE.json [options]\n"
 	    "  --credentials FILE     KEY=VALUE file with NOVAWORLD_USER / NOVAWORLD_PASS\n"
 	    "  --master-host HOST     gate host (default 127.0.0.1)\n"
-	    "  --master-gate-port N   gate UDP port (default 7597)\n"
+	    "  --master-gate-port N   gate UDP port (default %u)\n"
 	    "  --allow-public         permit non-127.0.0.0/8 destinations (live master)\n"
 	    "  --login auto|always|never  HTTP account login + NWHost HOSTKEY (default auto:\n"
 	    "                         only when credentials are given)\n"
@@ -138,7 +138,8 @@ void usage() {
 	    "  --run-seconds N        stop cleanly after N seconds (testing)\n"
 	    "  --stop-file PATH       stop cleanly when PATH appears (testing)\n"
 	    "  --no-reconnect         exit instead of re-registering after a lost session\n"
-	    "  --verbose              dump every statement tree\n");
+	    "  --verbose              dump every statement tree\n",
+	    static_cast<unsigned>(opennova::GATE_DEFAULT_PORT));
 }
 
 bool parse_args(int argc, char **argv, Options &o) {
