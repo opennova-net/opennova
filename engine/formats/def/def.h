@@ -571,11 +571,6 @@ typedef struct DefWeaponDef {
        [orig: WeaponDefs_ParseLineCallback 'designation_time' @ 0x544895 -> +0x458
         @ 0x5448c5 (n*31*2); consumer the DesignateTarget spawn leg @ 0x4ec264] */
     int designation_ticks;     /* +0x458 */
-    /* 'sameas <name>': strncpy 32 of the first value token -> +0x34 (a name of 32 bytes
-       or more keeps no NUL there; the model holds 31). JO:CA's weapon.def files author
-       none; a mod's line was dropped as ignored before. Appended (layout stability).
-       [orig: WeaponDefs_ParseLineCallback 'sameas' @ 0x544050, strncpy @ 0x544062..0x544072] */
-    char sameas[32];
     /* 'gfx1 <model> [nocheckdepth]' / 'gfx3 ...': the reader loads the first value token
        as the model, and when the second is `nocheckdepth` (compared without case) loads it
        with the load-pass flags 0x300000 instead [orig: WeaponDefs_ParseLineCallback 'gfx1'

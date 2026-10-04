@@ -470,10 +470,6 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 (first ? cw.gfx1_nocheckdepth : cw.gfx3_nocheckdepth) =
                         strutil::iequals(tokens.token(2), "nocheckdepth") ? 1 : 0;
                 parsed = 1;
-            } else if (key_is(key, "sameas")) {
-                /* strncpy 32 of the first value token -> +0x34 [orig: @ 0x544062..0x544072] */
-                safe_copy(cw.sameas, sizeof(cw.sameas), v, vl);
-                parsed = 1;
             } else if (key_is(key, "flags")) {
                 char flag_lower[64];
                 size_t fl = vl < sizeof(flag_lower) - 1 ? vl : sizeof(flag_lower) - 1;
