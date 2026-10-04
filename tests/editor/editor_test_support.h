@@ -29,9 +29,11 @@
 
 #include <base/io/hash.h>
 #include <base/io/os_path.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
 #include <editor/session/finding_codes.h>
+#include <editor/session/original_files.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_operation.h>
@@ -303,6 +305,18 @@ inline opennova::editor::Diagnostic finding_of(opennova::editor::DiagnosticSever
 			std::move(field));
 }
 
+// What the game install makes of the files at `paths`, as its validation keys them (OriginalData, the game's
+// own data's baseline, ready): every finding of `rows` about one of them, by the file's logical name.
+inline opennova::editor::OriginalData originals_of(const std::vector<opennova::editor::Diagnostic> &rows,
+		const std::vector<std::string> &paths) {
+	opennova::editor::OriginalData data;
+	data.ready = true;
+	for (const opennova::editor::Diagnostic &d : rows)
+		if (std::find(paths.begin(), paths.end(), d.asset) != paths.end())
+			++data.findings[opennova::editor::normalized_logical_name(opennova::editor::basename_of(d.asset))]
+			               [opennova::editor::original_finding_key(d)];
+	return data;
+}
 // A finding's subject of the kind a test reads: a finding about anything else stops the test (a
 // check of a member it does not have would pass for nothing).
 [[noreturn]] inline void wrong_subject(const opennova::editor::Diagnostic &d, const char *kind) {
