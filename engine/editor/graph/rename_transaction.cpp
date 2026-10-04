@@ -22,8 +22,10 @@
 #include <editor/graph/native_text_sites.h>
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
+#include <editor/import/sidecar.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
+#include <formats/pff/pff.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace fs = std::filesystem;
@@ -135,6 +137,77 @@ std::string value_text(const Value &value) {
 	return std::to_string(std::get<double>(value));
 }
 
+// Every field naming `target` (the file, or an output or a companion renamed with it), planned as a
+// site that takes `renamed`, or a refusal; the edges of `derived_from` pass (a mission names its
+// companions by its own name, which the rename changes with it); where `only` is given, the fields of
+// the files it lists alone (a split's).
+void plan_sites(RenamePlan &plan, const AssetScan &scan, const AssetGraph &graph, const AssetEntry &target,
+                const std::string &renamed, const std::string &derived_from, const std::vector<std::string> *only) {
+	std::vector<const GraphEdge *> through_styles;
+	for (const GraphEdge *edge : graph.referrers_of_file(target.relative_path)) {
+		if (!derived_from.empty() && edge->source == derived_from) continue;
+		if (only && std::find(only->begin(), only->end(), edge->source) == only->end()) continue;
+		// Of two files of one name, a reference reaches the one the game finds (the scan's
+		// first): renaming the other rewrites none.
+		std::string resolved;
+		graph.resolve(*edge, &resolved);
+		if (resolved != target.relative_path) continue;
+		const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
+		if (is_style_reference(edge->value)) {
+			through_styles.push_back(edge); // after the stylesheets' own sites are planned
+			continue;
+		}
+		if (!edge->rewritable) {
+			// A flipbook's frame is named from its graphic's name, which names every frame
+			// (extractors.cpp): no one name in the file is the frame's.
+			const bool frame = edge->kind == ReferenceKind::Texture && edge->field.find('[') != std::string::npos;
+			plan.refusals.push_back(refusal(CoreFinding::RenameSite,
+			                                frame ? where + " names " + target.logical_name + " as a frame of " + edge->field.substr(0, edge->field.find('[')) +
+			                                                ", whose frames are named from the graphic's name: rename the frames together and change the graphic."
+			                                      : where + " names " + target.logical_name + " and the editor cannot rewrite that file yet.",
+			                                edge->source, edge->field));
+			continue;
+		}
+		RenameSite site;
+		site.file = edge->source;
+		if (const AssetEntry *source = find_asset(scan, edge->source)) site.kind = source->kind;
+		site.record = edge->record;
+		site.locator = edge->locator;
+		site.field = edge->field;
+		site.before = edge->value;
+		site.after = replacement(edge->value, target.logical_name, renamed);
+		// The spelling the site wrote with the new stem, else the new name: one that loads the
+		// renamed file the same way, or the rename is refused.
+		if (!loads_renamed(scan, *edge, site.after, target, renamed)) site.after = renamed;
+		if (!loads_renamed(scan, *edge, site.after, target, renamed)) {
+			plan.refusals.push_back(refusal(CoreFinding::RenameSite, where + " names " + target.logical_name + " as '" + edge->value +
+			                                "', and no spelling of " + renamed + " there would load it the same way.",
+			                                edge->source, edge->field));
+			continue;
+		}
+		site.target = target.relative_path;
+		plan.sites.push_back(std::move(site));
+	}
+	// A field naming the file through a style variable keeps the variable: the site is
+	// the variable's value in the stylesheet the game reads it from, when this rename
+	// rewrites it; otherwise (a value without the extension, a stylesheet it cannot
+	// rewrite) the rename is refused.
+	for (const GraphEdge *edge : through_styles) {
+		const GraphSymbol *binding = graph.style_binding(edge->value);
+		const bool planned = binding && std::any_of(plan.sites.begin(), plan.sites.end(), [&](const RenameSite &site) {
+			return site.file == binding->file && site.record == binding->record && site.field == "value";
+		});
+		if (planned) continue;
+		const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
+		plan.refusals.push_back(refusal(
+		        CoreFinding::RenameStyle,
+		        where + " names " + target.logical_name + " through " + edge->value + ", whose value " +
+		                (binding ? "in " + binding->file + " " : std::string()) +
+		                "this rename cannot rewrite (a name without its extension): change the variable instead.",
+		        edge->source, edge->field));
+	}
+}
+
 } // namespace
 
 std::string companion_path(const RenameOutput &companion) {
@@ -170,74 +243,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 		plan.refusals.push_back(refusal(CoreFinding::RenameExists, "The project already has a file named '" + new_name + "'.",
 		                                taken->relative_path));
 	}
-	// Every field naming `target` (the file, or an output or a companion renamed with it), planned
-	// as a site that takes `renamed`, or a refusal; the edges of `derived_from` pass (a mission names
-	// its companions by its own name, which the rename changes with it).
-	const auto plan_sites = [&](const AssetEntry &target, const std::string &renamed, const std::string &derived_from = std::string()) {
-		std::vector<const GraphEdge *> through_styles;
-		for (const GraphEdge *edge : graph.referrers_of_file(target.relative_path)) {
-			if (!derived_from.empty() && edge->source == derived_from) continue;
-			// Of two files of one name, a reference reaches the one the game finds (the scan's
-			// first): renaming the other rewrites none.
-			std::string resolved;
-			graph.resolve(*edge, &resolved);
-			if (resolved != target.relative_path) continue;
-			const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
-			if (is_style_reference(edge->value)) {
-				through_styles.push_back(edge); // after the stylesheets' own sites are planned
-				continue;
-			}
-			if (!edge->rewritable) {
-				// A flipbook's frame is named from its graphic's name, which names every frame
-				// (extractors.cpp): no one name in the file is the frame's.
-				const bool frame = edge->kind == ReferenceKind::Texture && edge->field.find('[') != std::string::npos;
-				plan.refusals.push_back(refusal(CoreFinding::RenameSite,
-				                                frame ? where + " names " + target.logical_name + " as a frame of " + edge->field.substr(0, edge->field.find('[')) +
-				                                                ", whose frames are named from the graphic's name: rename the frames together and change the graphic."
-				                                      : where + " names " + target.logical_name + " and the editor cannot rewrite that file yet.",
-				                                edge->source, edge->field));
-				continue;
-			}
-			RenameSite site;
-			site.file = edge->source;
-			if (const AssetEntry *source = find_asset(scan, edge->source)) site.kind = source->kind;
-			site.record = edge->record;
-			site.locator = edge->locator;
-			site.field = edge->field;
-			site.before = edge->value;
-			site.after = replacement(edge->value, target.logical_name, renamed);
-			// The spelling the site wrote with the new stem, else the new name: one that loads the
-			// renamed file the same way, or the rename is refused.
-			if (!loads_renamed(scan, *edge, site.after, target, renamed)) site.after = renamed;
-			if (!loads_renamed(scan, *edge, site.after, target, renamed)) {
-				plan.refusals.push_back(refusal(CoreFinding::RenameSite, where + " names " + target.logical_name + " as '" + edge->value +
-				                                "', and no spelling of " + renamed + " there would load it the same way.",
-				                                edge->source, edge->field));
-				continue;
-			}
-			site.target = target.relative_path;
-			plan.sites.push_back(std::move(site));
-		}
-		// A field naming the file through a style variable keeps the variable: the site is
-		// the variable's value in the stylesheet the game reads it from, when this rename
-		// rewrites it; otherwise (a value without the extension, a stylesheet it cannot
-		// rewrite) the rename is refused.
-		for (const GraphEdge *edge : through_styles) {
-			const GraphSymbol *binding = graph.style_binding(edge->value);
-			const bool planned = binding && std::any_of(plan.sites.begin(), plan.sites.end(), [&](const RenameSite &site) {
-				return site.file == binding->file && site.record == binding->record && site.field == "value";
-			});
-			if (planned) continue;
-			const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
-			plan.refusals.push_back(refusal(
-			        CoreFinding::RenameStyle,
-			        where + " names " + target.logical_name + " through " + edge->value + ", whose value " +
-			                (binding ? "in " + binding->file + " " : std::string()) +
-			                "this rename cannot rewrite (a name without its extension): change the variable instead.",
-			        edge->source, edge->field));
-		}
-	};
-	plan_sites(*asset, new_name);
+	plan_sites(plan, scan, graph, *asset, new_name, std::string(), nullptr);
 	// A mission takes the files the game finds by its name that the project has (ADR 0046 S14): each
 	// to the new base name with its own extension, held to the file name rules, its sites planned (its
 	// mission's own, derived from the name, pass). An import's output goes only with its source (the
@@ -261,7 +267,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 				                                                                 why, entry->relative_path));
 				continue;
 			}
-			plan_sites(*entry, member.new_name, asset->relative_path);
+			plan_sites(plan, scan, graph, *entry, member.new_name, asset->relative_path, nullptr);
 			plan.companions.push_back({entry->relative_path, entry->logical_name, member.new_name});
 		}
 		for (const MissionFileSetMember &stale : mission_file_set_members(scan, new_name, new_name)) {
@@ -307,11 +313,81 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 					                                "', the name the import output of " + new_name + " would take.",
 					                                taken->relative_path));
 				}
-				plan_sites(output, renamed.new_name);
+				plan_sites(plan, scan, graph, output, renamed.new_name, std::string(), nullptr);
 			}
 			plan.outputs.push_back(std::move(renamed));
 		}
 	}
+	return plan;
+}
+
+RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
+                      const std::string &new_name, const std::vector<std::string> &referrers) {
+	RenamePlan plan;
+	plan.split = true;
+	plan.new_name = new_name;
+	const AssetEntry *asset = find_asset(scan, file);
+	if (!asset) {
+		plan.refusals.push_back(refusal(CoreFinding::RenameUnknownFile, "The project has no file named '" + file + "'.", file));
+		return plan;
+	}
+	plan.path = asset->relative_path;
+	plan.old_name = asset->logical_name;
+	if (asset->kind == AssetKind::ImportSource) {
+		plan.refusals.push_back(refusal(CoreFinding::TextureSplit, asset->logical_name +
+		                                " is an import's source, the image it reads: split the file it makes.", asset->relative_path));
+		return plan;
+	}
+	const bool output = !asset->imported_from.empty();
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
+	const std::string dir = utf8_of(path_of(asset->relative_path).parent_path());
+	const bool named = output ? check_file_name(new_name, asset->kind, problem, message)
+	                          : check_project_file_name(paths.root, dir, new_name, asset->kind, problem, message);
+	if (!named) {
+		plan.refusals.push_back(refusal(problem == FileNameProblem::Kind ? CoreFinding::RenameKind : CoreFinding::RenameName, message,
+		                                asset->relative_path));
+		return plan;
+	}
+	if (extension_of(new_name) != extension_of(asset->logical_name)) {
+		plan.refusals.push_back(refusal(CoreFinding::RenameKind, "Keep the extension: a copy reads as its file does.", asset->relative_path));
+		return plan;
+	}
+	if (const AssetEntry *taken = scan.find(new_name)) {
+		plan.refusals.push_back(refusal(CoreFinding::RenameExists, "The project already has a file named '" + new_name + "'.",
+		                                taken->relative_path));
+		return plan;
+	}
+	if (output) {
+		// The source copied beside it, under a name of its own the scan has not (an import source's name
+		// binds as its outputs' would: up to 16 characters).
+		const std::string source_dir = utf8_of(path_of(asset->imported_from).parent_path());
+		const std::string source_extension = utf8_of(path_of(asset->imported_from).extension());
+		const std::string stem = stem_of(new_name);
+		for (int n = 0; n < 100 && plan.split_source.empty(); ++n) {
+			const std::string suffix = n == 0 ? std::string() : "_" + std::to_string(n + 1);
+			const size_t room = size_t(pff::PFF_NAME_SIZE) - suffix.size() - source_extension.size();
+			const std::string name = stem.substr(0, std::min(stem.size(), room)) + suffix + source_extension;
+			if (key(name) != key(new_name) && !scan.find(name)) plan.split_source = join_path(source_dir, name);
+		}
+		if (plan.split_source.empty()) {
+			plan.refusals.push_back(refusal(CoreFinding::TextureSplit, "No free name for a copy of " + asset->imported_from + ".",
+			                                asset->relative_path));
+			return plan;
+		}
+		plan.sidecar = plan.split_source + kImportSidecarSuffix;
+		plan.new_sidecar = plan.sidecar;
+	} else {
+		plan.new_path = join_path(dir, new_name);
+	}
+	if (referrers.empty()) {
+		plan.refusals.push_back(refusal(CoreFinding::TextureSplit, "Name the files whose uses the copy takes.", asset->relative_path));
+		return plan;
+	}
+	plan_sites(plan, scan, graph, *asset, new_name, std::string(), &referrers);
+	if (plan.sites.empty() && plan.refusals.empty())
+		plan.refusals.push_back(refusal(CoreFinding::TextureSplit, "None of the files named uses " + asset->logical_name + ".",
+		                                asset->relative_path));
 	return plan;
 }
 
@@ -815,7 +891,8 @@ bool RenameTransaction::step() {
 std::vector<std::string> RenameTransaction::touched() const {
 	std::vector<std::string> paths;
 	if (!symbol_) {
-		for (const std::string *path : {&file_plan_.path, &file_plan_.new_path, &file_plan_.sidecar, &file_plan_.new_sidecar})
+		for (const std::string *path : {&file_plan_.path, &file_plan_.new_path, &file_plan_.sidecar, &file_plan_.new_sidecar,
+		                                 &file_plan_.split_source})
 			if (!path->empty()) paths.push_back(*path);
 		for (const RenameOutput &companion : file_plan_.companions) {
 			paths.push_back(companion.path);
@@ -964,8 +1041,86 @@ void RenameTransaction::stage_native(const AssetEntry &asset, const std::vector<
 void RenameTransaction::commit() {
 	committed_ = true;
 	if (symbol_) commit_symbol_rename();
+	else if (file_plan_.split) commit_split();
 	else commit_file_rename();
 	staged_.clear();
+}
+
+bool RenameTransaction::save_staged() {
+	bool ok = staged_ok_;
+	for (const auto &staged : staged_) {
+		findings_.insert(findings_.end(), staged->findings.begin(), staged->findings.end());
+		if (staged->native) {
+			// A native text written as the sites left it, unless it changed since it was read.
+			if (!staged->rewritten) continue;
+			const std::string absolute = join_path(paths_.root, staged->file);
+			std::vector<uint8_t> now;
+			std::string message;
+			if (!read_file_bytes(absolute, now, message) || std::string(now.begin(), now.end()) != staged->read) {
+				findings_.push_back(refusal(CoreFinding::RenameConflict, staged->file + " changed outside the editor while it was renamed in.",
+				                            staged->file));
+				ok = false;
+			} else if (!write_file_atomic(absolute, staged->text, message)) {
+				findings_.push_back(refusal(CoreFinding::RenameWrite, staged->file + " could not be written: " + message, staged->file));
+				ok = false;
+			}
+			continue;
+		}
+		Diagnostic error;
+		if (staged->document && staged->rewritten && !staged->document->save(error)) {
+			findings_.push_back(error);
+			ok = false;
+		}
+	}
+	return ok;
+}
+
+// A split's commit: the copy made (the file under its new name, dated now; an import's output's source
+// copied, its record making the new name with the output's options), then the sites' files written; the
+// file itself stays, with every use the split did not take. A copy refused writes nothing else.
+void RenameTransaction::commit_split() {
+	const RenamePlan &plan = file_plan_;
+	const auto at = [this](const std::string &relative) { return system_path(join_path(paths_.root, relative)); };
+	std::error_code ec;
+	const std::string copy = plan.split_source.empty() ? plan.new_path : plan.split_source;
+	const AssetEntry *asset = find_asset(scan_, plan.path);
+	const std::string from = plan.split_source.empty() ? plan.path : (asset ? asset->imported_from : std::string());
+	if (from.empty() || fs::exists(at(copy), ec)) {
+		findings_.push_back(refusal(CoreFinding::RenameExists, from.empty() ? "The file's source is gone." : "A file already sits at '" + copy + "'.",
+		                            plan.path));
+		return;
+	}
+	fs::copy_file(at(from), at(copy), ec);
+	std::string dated;
+	if (ec || !refresh_last_write(utf8_of(at(copy)), dated)) {
+		findings_.push_back(refusal(CoreFinding::RenameCopy, "The copy could not be made: " + (ec ? ec.message() : dated), plan.path));
+		std::error_code ignored;
+		fs::remove(at(copy), ignored);
+		return;
+	}
+	if (!plan.split_source.empty()) {
+		ImportSidecar record;
+		Diagnostic error;
+		load_import_sidecar(join_path(paths_.root, from + kImportSidecarSuffix), record, error);
+		ImportSidecar made;
+		made.importer = record.importer;
+		made.version = record.version;
+		made.options = record.options;
+		made.options["name"] = plan.new_name;
+		if (!save_import_sidecar(join_path(paths_.root, plan.sidecar), made, error)) {
+			findings_.push_back(error);
+			std::error_code ignored;
+			fs::remove(at(copy), ignored);
+			return;
+		}
+	}
+	if (!save_staged()) {
+		findings_.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Warning,
+		                                 copy + " is made, and some of the uses it was to take still name " + plan.old_name + ".",
+		                                 plan.path));
+		return;
+	}
+	ok_ = true;
 }
 
 // The file copied under its new name (and an import source's record beside it), each rewritten
@@ -1034,32 +1189,7 @@ void RenameTransaction::commit_file_rename() {
 			copied.push_back(to);
 		}
 	}
-	bool ok = staged_ok_;
-	for (const auto &staged : staged_) {
-		findings_.insert(findings_.end(), staged->findings.begin(), staged->findings.end());
-		if (staged->native) {
-			// A native text written as the sites left it, unless it changed since it was read.
-			if (!staged->rewritten) continue;
-			const std::string absolute = join_path(paths_.root, staged->file);
-			std::vector<uint8_t> now;
-			std::string message;
-			if (!read_file_bytes(absolute, now, message) || std::string(now.begin(), now.end()) != staged->read) {
-				findings_.push_back(refusal(CoreFinding::RenameConflict, staged->file + " changed outside the editor while it was renamed in.",
-				                            staged->file));
-				ok = false;
-			} else if (!write_file_atomic(absolute, staged->text, message)) {
-				findings_.push_back(refusal(CoreFinding::RenameWrite, staged->file + " could not be written: " + message, staged->file));
-				ok = false;
-			}
-			continue;
-		}
-		Diagnostic error;
-		if (staged->document && staged->rewritten && !staged->document->save(error)) {
-			findings_.push_back(error);
-			ok = false;
-		}
-	}
-	if (!ok) {
+	if (!save_staged()) {
 		findings_.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Warning, "Both '" + plan.old_name + "' and '" + plan.new_name +
 		                                            "' are in the project until every reference is rewritten.",
 		                                    plan.path));

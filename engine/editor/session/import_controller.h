@@ -50,6 +50,12 @@ public:
 	// changed, then the refresh that imports it again. Refused, nothing written: a file no import makes, a
 	// key no row has, a value its row does not take (import.option).
 	void set_options(const std::string &path, const std::vector<std::pair<std::string, std::string>> &values);
+	// ReplaceTexture (S18): the texture made from the image the request names (import/texture_source.h's
+	// plan, done: the image an import source in art/, its record, the replaced file set aside), then the
+	// refresh that imports it; the texture's open document, clean, closed. Refused, nothing written
+	// (texture.replace): what the plan refuses, an image that does not read, a texture open with unsaved
+	// edits.
+	void replace_texture(const EditorRequest &request);
 	// The game install's file names, for the Import fixes (problem_fixes.h), and for a project that
 	// builds as an expansion its base game's, for its build's gate (ADR 0046 S16).
 	void refresh_install_files();

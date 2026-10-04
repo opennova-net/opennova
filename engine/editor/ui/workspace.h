@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include <editor/session/editor_request.h>
 
 namespace opennova::editor {
@@ -22,6 +25,13 @@ public:
 	virtual void request(EditorRequest request) = 0;
 	virtual ViewportDeviceSource *devices() const = 0;
 	virtual TextureThumbnailImages *thumbnail_images() const { return nullptr; }
+	// Files the OS dropped on the window, taken by the item whose rectangle (the window's pixels) they
+	// landed in (S18: a texture's tab and a texture field take an image as Replace): the paths, once; false
+	// for none there.
+	virtual bool take_dropped_files(float min_x, float min_y, float max_x, float max_y, std::vector<std::string> &paths) {
+		(void)min_x, (void)min_y, (void)max_x, (void)max_y, (void)paths;
+		return false;
+	}
 };
 
 } // namespace opennova::editor

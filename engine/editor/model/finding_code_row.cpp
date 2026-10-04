@@ -285,6 +285,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::TextureNormalMapHalved, code("texture.normal_map_halved", G::Textures, F::ImportFitsUse) },
 	{ C::TextureOperation, code("texture.operation", G::Textures) },
 	{ C::TextureParticleTooBig, code("texture.particle_too_big", G::Textures, F::ImportFitsUse) },
+	{ C::TextureReplace, code("texture.replace", G::Textures) },
+	{ C::TextureSplit, code("texture.split", G::Textures) },
 	{ C::TextureTileAtlasCells, code("texture.tile_atlas_cells", G::Textures, F::ImportFitsUse) },
 	{ C::TextureWrongReader, code("texture.wrong_reader", G::Textures, F::ImportFitsUse) },
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },

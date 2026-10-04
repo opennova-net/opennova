@@ -143,6 +143,27 @@ inline EditorRequest texture_operation(std::string path, std::string operation,
 	request.open_first = open_first;
 	return request;
 }
+// The texture `path` (a project file, an import's output, or a name the project lacks) made from the image
+// `image` (a PNG, a TGA or a PCX on disk, or a project file), its import's options `values` over the ones
+// that make it as it is stored (S18: import/texture_source.h).
+inline EditorRequest replace_texture(std::string path, std::string image,
+                                     std::vector<std::pair<std::string, std::string>> values = {}) {
+	EditorRequest request = of(EditorRequestKind::ReplaceTexture);
+	request.path = std::move(path);
+	request.paths = {std::move(image)};
+	std::sort(values.begin(), values.end());
+	request.values = std::move(values);
+	return request;
+}
+// The texture `path` copied as `new_name`, the uses in the project files `referrers` moved to the copy
+// (S18: graph/rename_transaction.h plan_split).
+inline EditorRequest split_texture(std::string path, std::string new_name, std::vector<std::string> referrers) {
+	EditorRequest request = of(EditorRequestKind::SplitTexture);
+	request.path = std::move(path);
+	request.new_name = std::move(new_name);
+	request.paths = std::move(referrers);
+	return request;
+}
 // The import dialog on the game install's files: `names` alone, chosen; none, every file listed.
 inline EditorRequest preview_install_import(
 		std::vector<std::string> names = {}, bool with_dependencies = false) {

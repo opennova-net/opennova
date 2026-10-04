@@ -4224,6 +4224,14 @@ target_link_libraries(editor_texture_document_edit_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_document_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_document_edit COMMAND editor_texture_document_edit_test)
 
+# ADR 0046 S18, a texture made from an image (import/texture_source, replace_texture) and split
+# (plan_split, split_texture): the options that reproduce a texture; a plain texture and an import's output
+# replaced, a missing name made, the refusals; a texture split for one referrer; the sources to edit.
+add_executable(editor_texture_replace_test editor/texture_replace_test.cpp)
+target_link_libraries(editor_texture_replace_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_replace_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_replace COMMAND editor_texture_replace_test)
+
 # A file's rename through the native texts (ADR 0046 S18, graph/native_text_sites): a terrain's, an
 # environment's, a particle file's and the HUD layout's names rewritten as text, only the token the game
 # reads at each site; a flipbook's frame refused; a file in the SCR form written back as plain text. The

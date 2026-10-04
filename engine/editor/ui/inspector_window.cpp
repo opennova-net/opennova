@@ -4,6 +4,8 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/project/project_files.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/view/session_view.h>
 #include <editor/assets/asset_kinds.h>
@@ -343,12 +345,26 @@ void reference_tools(Workspace &workspace, ReferencePicker &picker, const Docume
 }
 
 // A Files row dropped on a text reference's value: the file set on every target, when it is one
-// the field's kind loads.
-void drop_target(Workspace &workspace, const Document &document, const Targets &targets, const FieldUse &field) {
+// the field's kind loads. An image the OS dropped on a texture field's value (S18): the texture it names
+// made from it (replace_texture: the name kept, a texture the project lacks made under it).
+void drop_target(Workspace &workspace, const Document &document, const Targets &targets, const FieldUse &field,
+                 const Value &value) {
 	std::string dropped;
 	if (picks_reference(field) && !field.read_only && !document.blocked() &&
 	    ReferencePicker::accept_file(workspace.view(), field, dropped))
 		set(workspace, document, targets, field.schema->id, dropped, false);
+	const std::string *name = std::get_if<std::string>(&value);
+	if (field.reference != ReferenceKind::Texture || !name || name->empty()) return;
+	const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+	std::vector<std::string> paths;
+	if (!workspace.take_dropped_files(min.x, min.y, max.x, max.y, paths)) return;
+	for (const std::string &path : paths) {
+		const std::string extension = strutil::to_lower(utf8_of(path_of(path).extension()));
+		if (extension == ".png" || extension == ".tga" || extension == ".pcx") {
+			workspace.request(request::replace_texture(basename_of(*name), path));
+			return;
+		}
+	}
 }
 
 // A name a field holds, as a rename takes it: a text, or a number (an item's id); "" for none.
@@ -584,7 +600,7 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 		value_control(workspace, controls.typed, document, targets, field, value, false, mixed);
 	}
 	if (about) ui_kit::tooltip(about);
-	if (present) drop_target(workspace, document, targets, field);
+	if (present) drop_target(workspace, document, targets, field, value);
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
 		reference_tools(workspace, controls.picker, document, targets, field, value, false, beside);
@@ -715,7 +731,7 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 	} else {
 		value_control(workspace, controls.typed, document, {address}, field, value, true);
 	}
-	if (present) drop_target(workspace, document, {address}, field);
+	if (present) drop_target(workspace, document, {address}, field, value);
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
 		reference_tools(workspace, controls.picker, document, {address}, field, value, true, true);

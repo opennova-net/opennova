@@ -24,6 +24,9 @@ struct TextureImportNeeds {
 	ImportOptions options;
 	std::vector<std::string> reasons;   // one line an option asked: "format dds: the model diffuse of ..."
 	std::vector<std::string> conflicts; // what no one file serves
+	// Where the format or the size conflicts: the referring files whose uses ask otherwise than the first
+	// use does, which a split gives a copy of their own (split_texture: "Split into two files").
+	std::vector<std::string> split_referrers;
 	size_t uses = 0;
 };
 TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, const std::string &source_name);

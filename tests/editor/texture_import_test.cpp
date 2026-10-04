@@ -459,6 +459,11 @@ int test_needs_conflict() {
 	needs = texture_import_needs({screen, graphic}, "m01.png");
 	TEST_EXPECT(needs.options.empty() && needs.conflicts.size() == 1 &&
 	            needs.conflicts[0].find("No one file serves them all") != std::string::npos);
+	// Split into two files: the uses that ask otherwise than the first, by their files.
+	screen.referrer = "missions/m01.bms";
+	graphic.referrer = "effects/fx.ptl";
+	needs = texture_import_needs({screen, graphic}, "m01.png");
+	TEST_EXPECT(needs.split_referrers == std::vector<std::string>({"effects/fx.ptl"}));
 	// A foliage map's indices: a conflict of its own.
 	TextureUse foliage;
 	foliage.role = TextureRoleId::TerrainFoliageMap;

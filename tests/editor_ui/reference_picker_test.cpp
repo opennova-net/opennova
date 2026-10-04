@@ -568,6 +568,58 @@ void test_texture_import_section() {
 	CHECK(set && set->path == source && set->values == asked, "the one click raises the set_import_options of what its uses ask");
 }
 
+// S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., raise a
+// replace_texture of that texture.
+void test_texture_drop_replaces() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	opennova::RgbaImage image;
+	image.width = image.height = 4;
+	image.pixels.assign(64, 90);
+	std::vector<uint8_t> tga;
+	std::string why;
+	opennova::tga::tga_write_rgba32(image.pixels.data(), 4, 4, tga, why);
+	CHECK(editor_test::write_bytes(view.project.root + "/textures/plain.tga", tga), "a plain texture");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("textures/plain.tga"));
+	Ui ui;
+	ui.pump = [&project] { project.session.poll(); };
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	ImGuiWindow *info = nullptr;
+	for (ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && std::strstr(window->Name, "texture_info")) info = window;
+	CHECK(info != nullptr, "the tab's info column");
+	if (!info) return;
+	// Dropped on the tab.
+	ui.windows.drop_files({"C:/art/new.png"}, info->Pos.x + info->Size.x * 0.5f, info->Pos.y + info->Size.y * 0.5f);
+	ui.frames(1);
+	std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *dropped = only(requests, EditorRequestKind::ReplaceTexture);
+	CHECK(dropped && dropped->path == "textures/plain.tga" && dropped->paths == std::vector<std::string>({"C:/art/new.png"}),
+	      "a drop on the tab replaces the texture");
+	// A drop elsewhere is none's.
+	ui.windows.drop_files({"C:/art/new.png"}, -100.0f, -100.0f);
+	ui.frames(3);
+	CHECK(!only(ui.drain(), EditorRequestKind::ReplaceTexture), "a drop on no item does nothing");
+	// Picked through Replace with image...: the pick asks the Shell, its answer replaces.
+	ui.activate(ImHashStr("Replace with image...", 0, info->ID));
+	requests = ui.drain();
+	const EditorRequest *pick = only(requests, EditorRequestKind::PickFile);
+	CHECK(pick && pick->purpose == PickPurpose::TextureImage, "the button asks the Shell for an image");
+	ui.windows.deliver_pick(PickPurpose::TextureImage, "C:/art/picked.tga");
+	requests = ui.drain();
+	const EditorRequest *picked = only(requests, EditorRequestKind::ReplaceTexture);
+	CHECK(picked && picked->path == "textures/plain.tga" && picked->paths == std::vector<std::string>({"C:/art/picked.tga"}),
+	      "the image picked replaces the texture the button was for");
+}
+
 } // namespace
 
 void run_reference_picker_tests() {
@@ -579,6 +631,7 @@ void run_reference_picker_tests() {
 	test_pick_by_name();
 	test_texture_previews();
 	test_texture_import_section();
+	test_texture_drop_replaces();
 }
 
 } // namespace editor_ui_test

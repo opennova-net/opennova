@@ -137,7 +137,7 @@ static int test_tokens() {
 		TEST_EXPECT(*edit_operation_token(operation) && edit_operation_from_token(edit_operation_token(operation), back) &&
 		            back == operation);
 	}
-	for (int i = 0; i <= static_cast<int>(PickPurpose::BuildFolder); ++i) {
+	for (int i = 0; i <= static_cast<int>(PickPurpose::TextureImage); ++i) {
 		const auto purpose = static_cast<PickPurpose>(i);
 		PickPurpose back = PickPurpose::None;
 		TEST_EXPECT(*pick_purpose_token(purpose) && pick_purpose_from_token(pick_purpose_token(purpose), back) &&

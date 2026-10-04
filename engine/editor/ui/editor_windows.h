@@ -78,6 +78,9 @@ public:
 	// files to import planned in the import dialog (a PreviewImport raised like any window's
 	// request), with the files they need when the editor's setting says so.
 	void deliver_picks(PickPurpose purpose, const std::vector<std::string> &paths);
+	// Files the OS dropped on the editor's window at (x, y) of its pixels (S18): held for the item they land
+	// on to take this frame or the next (take_dropped_files), then let go.
+	void drop_files(std::vector<std::string> paths, float x, float y);
 
 	// The Shell's devices, by document and viewport kind, the viewports' canvases draw through
 	// (null: no picture).
@@ -93,6 +96,7 @@ public:
 	void request(EditorRequest request) override;
 	ViewportDeviceSource *devices() const override { return devices_; }
 	TextureThumbnailImages *thumbnail_images() const override { return thumbnail_images_; }
+	bool take_dropped_files(float min_x, float min_y, float max_x, float max_y, std::vector<std::string> &paths) override;
 
 	// MenuBarContributor
 	void draw_menu_bar(devtools::ImGuiPass &pass) override;
@@ -117,6 +121,15 @@ private:
 	std::deque<EditorRequest> requests_;
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;
+	// The texture a Replace with image... pick is for (S18), and the files the OS dropped, held for the
+	// item they land on (drop_files) for `frames` more end_frames.
+	std::string replace_target_;
+	struct Dropped {
+		std::vector<std::string> paths;
+		float x = 0.0f, y = 0.0f;
+		int frames = 0;
+	};
+	Dropped dropped_;
 	NewProjectForm new_project_;
 	bool open_new_project_ = false;
 	bool build_panel_open_ = false; // the build panel, open from a build's end (BuildEnded) until closed

@@ -8,6 +8,8 @@
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/tcp_server.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -89,6 +91,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_file_selected", "file"), &EditorApp::_on_file_selected);
 	ClassDB::bind_method(D_METHOD("_on_files_selected", "files"), &EditorApp::_on_files_selected);
 	ClassDB::bind_method(D_METHOD("_on_picker_canceled"), &EditorApp::_on_picker_canceled);
+	ClassDB::bind_method(D_METHOD("_on_files_dropped", "files"), &EditorApp::_on_files_dropped);
+	ClassDB::bind_method(D_METHOD("drop_files", "files", "at"), &EditorApp::drop_files);
 }
 
 EditorApp::EditorApp() : platform_(std::make_unique<ChildProcessPlatform>()) {
@@ -178,6 +182,10 @@ void EditorApp::_ready() {
 	} else {
 		UtilityFunctions::print_verbose("OpenNova Editor: editor variant loaded, no ImGui context (headless)");
 	}
+	// Files the OS drops on the editor's own window, for the item they land on (S18: an image on a texture's
+	// tab or a texture field, a Replace).
+	if (get_tree()->get_current_scene() == this && get_window() != nullptr)
+		get_window()->connect("files_dropped", Callable(this, "_on_files_dropped"));
 	const PackedStringArray args = OS::get_singleton()->get_cmdline_user_args();
 	for (int i = 0; i < args.size(); ++i) {
 		if (args[i] == kSmokeFlag) {
@@ -428,6 +436,10 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 		case PickPurpose::BuildFolder:
 			picker_->set_title("Choose a folder to build the game's files into");
 			break;
+		case PickPurpose::TextureImage:
+			picker_->set_title("Replace the texture with an image");
+			filters.push_back("*.png, *.tga, *.pcx ; Images");
+			break;
 		case PickPurpose::None:
 			break;
 	}
@@ -462,6 +474,22 @@ void EditorApp::_on_file_selected(const String &p_file) {
 
 void EditorApp::_on_picker_canceled() {
 	pending_pick_ = PickPurpose::None;
+}
+
+// The OS's drop on the editor's window, where the pointer is: held for the item it lands on.
+void EditorApp::_on_files_dropped(const PackedStringArray &p_files) {
+	drop_files(p_files, get_viewport() != nullptr ? get_viewport()->get_mouse_position() : Vector2());
+}
+
+void EditorApp::drop_files(const PackedStringArray &p_files, const Vector2 &p_at) {
+#if OPENNOVA_EDITOR_UI
+	std::vector<std::string> paths;
+	for (int i = 0; i < p_files.size(); ++i) paths.push_back(opennova::to_std(p_files[i]));
+	windows_->drop_files(std::move(paths), p_at.x, p_at.y);
+#else
+	(void)p_files;
+	(void)p_at;
+#endif
 }
 
 // A free loopback port for the game's MCP endpoint: bind an ephemeral port, read it,

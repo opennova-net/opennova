@@ -12,6 +12,7 @@
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
 #include <editor/import/sidecar.h>
+#include <editor/import/texture_source.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
@@ -169,6 +170,43 @@ void ImportController::set_options(const std::string &path,
 	if (!save_import_sidecar(join_path(view_.project.root, state.record), sidecar, write_error))
 		return core_.refuse_now(CoreFinding::ImportSidecar, write_error.message, state.record);
 	reimport(state.source, false);
+}
+
+void ImportController::replace_texture(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	if (request.paths.size() != 1)
+		return core_.refuse_now(CoreFinding::TextureReplace, "A texture is replaced by one image.", request.path);
+	// The image: a file on disk, or a project file by its path.
+	const std::string &image = request.paths.front();
+	const std::string file = path_of(image).is_absolute() ? image : join_path(view_.project.root, image);
+	std::vector<uint8_t> bytes;
+	std::string message;
+	if (!read_file_bytes(file, bytes, message))
+		return core_.refuse_now(CoreFinding::TextureReplace, basename_of(image) + " could not be read: " + message, request.path);
+	const ImportOptions overrides(request.values.begin(), request.values.end());
+	const TextureSourcePlan plan = plan_texture_replace(paths_, *view_.project.scan, request.path, basename_of(image), bytes, overrides);
+	if (!plan.ok()) {
+		for (size_t i = 0; i + 1 < plan.refusals.size(); ++i) core_.report(plan.refusals[i]);
+		return core_.refuse_now(CoreFinding::TextureReplace, plan.refusals.back().message, plan.refusals.back().asset);
+	}
+	// The file set aside takes its open document with it: one with unsaved edits waits for them.
+	if (!plan.replaced.empty())
+		if (DocumentBase *open = core_.documents().document_for(plan.replaced)) {
+			if (open->dirty())
+				return core_.refuse_now(CoreFinding::TextureReplace,
+				                        plan.texture + " is open with unsaved edits: save or discard them before replacing it.",
+				                        plan.replaced);
+			core_.documents().close_document(plan.replaced);
+		}
+	std::vector<Diagnostic> findings;
+	if (!apply_texture_source(paths_, plan, findings)) {
+		for (size_t i = 0; i + 1 < findings.size(); ++i) core_.report(findings[i]);
+		return core_.refuse_now(CoreFinding::TextureReplace,
+		                        findings.empty() ? std::string("The texture could not be replaced.") : findings.back().message, plan.texture);
+	}
+	core_.note("Replaced " + plan.texture + " with " + basename_of(image) + ": " + plan.source + " makes it now, as its import record says" +
+	           (plan.replaced.empty() ? std::string(".") : "; the file it replaced is kept under .opennova/replaced/."));
+	reimport(plan.source, true);
 }
 
 // The import dialog on `roots` chosen among `choices` (each file once), planned with the

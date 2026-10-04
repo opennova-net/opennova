@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cfloat>
 #include <cstdio>
+#include <cstring>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
@@ -22,6 +24,7 @@
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/reference_picker.h>
 #include <editor/ui/texture_viewport_view.h>
 #include <editor/ui/ui_kit.h>
 
@@ -36,15 +39,48 @@ void TextureView::draw(Workspace &workspace, const DocumentBase &document) {
 	take_events();
 	// The info in a column (about a third of the tab, wide enough to read its sentences, never more
 	// than half of it), the picture beside it. Sized every frame: the tab's width follows the dock.
-	const float avail = ImGui::GetContentRegionAvail().x;
+	const ImVec2 origin = ImGui::GetCursorScreenPos();
+	const ImVec2 size = ImGui::GetContentRegionAvail();
+	const float avail = size.x;
 	const float em = ImGui::GetFontSize();
 	const float column = std::min(std::clamp(avail * 0.36f, em * 18.0f, em * 30.0f), avail * 0.5f);
 	if (ImGui::BeginChild("texture_info", ImVec2(column, 0.0f), ImGuiChildFlags_Borders))
 		draw_info(workspace, document);
 	ImGui::EndChild();
 	ImGui::SameLine();
-	if (ImGui::BeginChild("texture_picture", ImVec2(0.0f, 0.0f))) main_viewport(workspace, document);
+	if (ImGui::BeginChild("texture_picture", ImVec2(0.0f, 0.0f))) {
+		main_viewport(workspace, document);
+		// A project image dragged from Files onto the picture: Replace (S18).
+		const ImGuiID target = ImGui::GetID("##replace_drop");
+		if (ImGui::BeginDragDropTargetCustom(ImRect(ImGui::GetWindowPos(),
+		                                            ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowSize().x,
+		                                                   ImGui::GetWindowPos().y + ImGui::GetWindowSize().y)),
+		                                     target)) {
+			const ImGuiPayload *dragged = ImGui::GetDragDropPayload();
+			if (dragged && dragged->IsDataType(kFileDragPayload) && dragged->Data) {
+				const char *data = static_cast<const char *>(dragged->Data);
+				const std::string path(data, strnlen(data, size_t(dragged->DataSize)));
+				if (replaceable_image(path) && path != document.path() && ImGui::AcceptDragDropPayload(kFileDragPayload))
+					workspace.request(request::replace_texture(document.path(), path));
+			}
+			ImGui::EndDragDropTarget();
+		}
+	}
 	ImGui::EndChild();
+	// An image the OS dropped on the tab: Replace (S18).
+	std::vector<std::string> dropped;
+	if (workspace.take_dropped_files(origin.x, origin.y, origin.x + size.x, origin.y + size.y, dropped)) {
+		for (const std::string &path : dropped)
+			if (replaceable_image(path)) {
+				workspace.request(request::replace_texture(document.path(), path));
+				break;
+			}
+	}
+}
+
+bool TextureView::replaceable_image(const std::string &path) {
+	const std::string extension = strutil::to_lower(utf8_of(path_of(path).extension()));
+	return extension == ".png" || extension == ".tga" || extension == ".pcx";
 }
 
 bool TextureView::main_viewport(Workspace &workspace, const DocumentBase &document) {
@@ -83,6 +119,18 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 		}
 		ImGui::EndTable();
 	}
+	// Made from an image the modder brings (S18): a Replace, which keeps the name every referrer writes.
+	const SessionView &view = workspace.view();
+	ui_kit::WrapRow made;
+	if (ui_kit::tool(made, "Replace with image...", view.allows(EditorRequestKind::ReplaceTexture),
+	                 "Makes " + basename_of(document.path()) +
+	                         " from a PNG, a TGA or a PCX of yours, in the form it is stored in, under the name every file "
+	                         "that uses it writes. The file it replaces is kept under .opennova/replaced/. Dropping an image "
+	                         "on this tab does the same.")) {
+		EditorRequest pick = request::pick_file(PickPurpose::TextureImage);
+		pick.path = document.path();
+		workspace.request(std::move(pick));
+	}
 	if (!image->palette.empty() && ImGui::CollapsingHeader("Palette", ImGuiTreeNodeFlags_DefaultOpen)) draw_palette(image->palette);
 	draw_import(workspace, document);
 	if (!import_.imported) draw_edits(workspace, document, *image);
@@ -91,61 +139,61 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 
 // The whole-image edits of a texture no import makes (ADR 0046 S18, texture_operation): each one undo
 // step, the file made anew through the editor's writers in the form it is stored in, Save writing it.
+// Each group's tools wrap to the column's width.
 void TextureView::draw_edits(Workspace &workspace, const DocumentBase &document, const TextureImage &image) {
 	if (!ImGui::CollapsingHeader("Edit###texture_edit")) return;
 	const SessionView &view = workspace.view();
 	const bool allowed = view.allows(EditorRequestKind::TextureOperation) && image.loads && image.decoded;
 	const std::string &path = document.path();
 	const auto operate = [&](const char *operation, std::vector<std::pair<std::string, std::string>> params) {
-		if (allowed) workspace.request(request::texture_operation(path, operation, std::move(params)));
+		workspace.request(request::texture_operation(path, operation, std::move(params)));
 	};
 	const std::string extension = strutil::to_lower(utf8_of(path_of(path).extension()));
 	const uint32_t w = image.width(), h = image.height();
-	ImGui::BeginDisabled(!allowed);
-	ImGui::PushTextWrapPos(0.0f);
 	// Its rows, where the game draws it upside down.
 	if (image.upside_down) {
-		if (ImGui::Button("Save it bottom first")) operate("reorder_rows", {});
-		ui_kit::tooltip("Its rows are stored top first, and the game reads every TGA bottom up: written bottom first, the "
-		                "game draws it the way up its header meant.");
+		ui_kit::WrapRow rows;
+		if (ui_kit::tool(rows, "Save it bottom first", allowed,
+		                 "Its rows are stored top first, and the game reads every TGA bottom up: written bottom first, the "
+		                 "game draws it the way up its header meant."))
+			operate("reorder_rows", {});
 	}
 	// Its size: halved as the game halves, or its sides to powers of two.
 	ImGui::TextDisabled("Size");
-	if (w > 1 && h > 1) {
-		if (ImGui::Button("Halve")) operate("resize", {{"size", std::to_string(w / 2) + "x" + std::to_string(h / 2)}});
-		ui_kit::tooltip("Each texel the 2 x 2 box of the four under it, as the game halves a texture.");
-		ImGui::SameLine();
-	}
-	if (ImGui::Button("Powers of two")) operate("resize", {{"size", "pow2_down"}});
-	ui_kit::tooltip("Each side down to a power of two.");
+	ui_kit::WrapRow size;
+	if (w > 1 && h > 1 &&
+	    ui_kit::tool(size, "Halve", allowed, "Each texel the 2 x 2 box of the four under it, as the game halves a texture."))
+		operate("resize", {{"size", std::to_string(w / 2) + "x" + std::to_string(h / 2)}});
+	if (ui_kit::tool(size, "Powers of two", allowed, "Each side down to a power of two."))
+		operate("resize", {{"size", "pow2_down"}});
 	// Its alpha (a PCX holds none; a 24-bit TGA's edit says to store it as 32-bit first).
 	if (extension != ".pcx") {
 		ImGui::TextDisabled("Alpha");
-		if (ImGui::Button("Opaque")) operate("alpha", {{"alpha", "opaque"}});
-		ImGui::SameLine();
-		if (ImGui::Button("Invert")) operate("alpha", {{"alpha", "invert"}});
-		ImGui::SameLine();
-		if (ImGui::Button("From brightness")) operate("alpha", {{"alpha", "luminance"}});
-		ui_kit::tooltip("Each texel's alpha its brightness, (85 x (r + g + b)) >> 8, as the game makes a sky PCX's.");
+		ui_kit::WrapRow alpha;
+		if (ui_kit::tool(alpha, "Opaque", allowed, "Every texel opaque.")) operate("alpha", {{"alpha", "opaque"}});
+		if (ui_kit::tool(alpha, "Invert", allowed, "Each texel's alpha turned over: clear where it was solid.")) operate("alpha", {{"alpha", "invert"}});
+		if (ui_kit::tool(alpha, "From brightness", allowed,
+		                 "Each texel's alpha its brightness, (85 x (r + g + b)) >> 8, as the game makes a sky PCX's."))
+			operate("alpha", {{"alpha", "luminance"}});
 	}
 	// Its stored form, within its extension.
-	if (extension == ".tga") {
+	if (extension == ".tga" || extension == ".dds") {
 		ImGui::TextDisabled("Stored as");
-		if (ImGui::Button("32-bit")) operate("format", {{"format", "tga"}});
-		ImGui::SameLine();
-		if (ImGui::Button("24-bit")) operate("format", {{"format", "tga24"}});
-		ui_kit::tooltip("Colour alone: a terrain colour map's form.");
-	} else if (extension == ".dds") {
-		ImGui::TextDisabled("Stored as");
-		if (ImGui::Button("DXT5 with mips")) operate("format", {{"dds", "dxt5"}, {"mips", "full"}});
-		ImGui::SameLine();
-		if (ImGui::Button("DXT1")) operate("format", {{"dds", "dxt1"}, {"mips", "full"}});
-		ImGui::SameLine();
-		if (ImGui::Button("A8R8G8B8")) operate("format", {{"dds", "argb"}});
+		ui_kit::WrapRow form;
+		if (extension == ".tga") {
+			if (ui_kit::tool(form, "32-bit", allowed, "Colour and alpha.")) operate("format", {{"format", "tga"}});
+			if (ui_kit::tool(form, "24-bit", allowed, "Colour alone: a terrain colour map's form.")) operate("format", {{"format", "tga24"}});
+		} else {
+			if (ui_kit::tool(form, "DXT5 with mips", allowed, "The form of the game's own model textures."))
+				operate("format", {{"dds", "dxt5"}, {"mips", "full"}});
+			if (ui_kit::tool(form, "DXT1", allowed, "Half DXT5's size, alpha on or off.")) operate("format", {{"dds", "dxt1"}, {"mips", "full"}});
+			if (ui_kit::tool(form, "A8R8G8B8", allowed, "Uncompressed, one level.")) operate("format", {{"dds", "argb"}});
+		}
 	}
 	// An 8-bit PCX's indices, which a foliage or char map reads as data.
 	if (extension == ".pcx" && !image.palette.empty()) {
 		ImGui::TextDisabled("Move a palette index");
+		ImGui::BeginDisabled(!allowed);
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
 		ImGui::InputInt("##from", &remap_from_, 0);
 		ImGui::SameLine();
@@ -153,14 +201,14 @@ void TextureView::draw_edits(Workspace &workspace, const DocumentBase &document,
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
 		ImGui::InputInt("##to", &remap_to_, 0);
+		ImGui::EndDisabled();
 		remap_from_ = std::clamp(remap_from_, 0, 255);
 		remap_to_ = std::clamp(remap_to_, 0, 255);
-		ImGui::SameLine();
-		if (ImGui::Button("Move")) operate("remap_palette", {{std::to_string(remap_from_), std::to_string(remap_to_)}});
-		ui_kit::tooltip("Every texel of the first index takes the second, the palette as it is: a foliage map's codes.");
+		ui_kit::WrapRow move;
+		if (ui_kit::tool(move, "Move", allowed,
+		                 "Every texel of the first index takes the second, the palette as it is: a foliage map's codes."))
+			operate("remap_palette", {{std::to_string(remap_from_), std::to_string(remap_to_)}});
 	}
-	ImGui::PopTextWrapPos();
-	ImGui::EndDisabled();
 }
 
 // How the texture is made, where an import makes it (ADR 0046 S18): its source; each option of its
@@ -252,8 +300,35 @@ void TextureView::draw_import(Workspace &workspace, const DocumentBase &document
 	}
 	for (const std::string &conflict : needs.conflicts)
 		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "%s", conflict.c_str());
+	// No one file serves them all: the uses that ask otherwise given a copy of their own (split_texture),
+	// each file's import then made as its own uses ask.
+	if (!needs.split_referrers.empty()) {
+		const std::string copy = free_copy_name(view, document.path());
+		std::string files;
+		for (const std::string &file : needs.split_referrers) files += (files.empty() ? "" : ", ") + basename_of(file);
+		ui_kit::WrapRow split;
+		if (ui_kit::tool(split, "Split into two files", !copy.empty() && view.allows(EditorRequestKind::SplitTexture),
+		                 "Makes " + copy + ", a copy of " + basename_of(document.path()) + ", which the uses in " + files +
+		                         " name from then on; each file is then made as its own uses ask. Undo does not take it back."))
+			workspace.request(request::split_texture(document.path(), copy, needs.split_referrers));
+	}
 	ImGui::PopTextWrapPos();
 	ImGui::EndDisabled();
+}
+
+// A name for a copy of `path`: its stem with _2, _3, ... and its extension, one no file of the project has
+// and the archives' 16 characters hold; "" for none.
+std::string TextureView::free_copy_name(const SessionView &view, const std::string &path) {
+	const std::string name = basename_of(path);
+	const std::string extension = utf8_of(path_of(name).extension());
+	const std::string stem = utf8_of(path_of(name).stem());
+	for (int n = 2; n < 100; ++n) {
+		const std::string suffix = "_" + std::to_string(n);
+		const size_t room = 16 - std::min<size_t>(16, suffix.size() + extension.size());
+		const std::string copy = stem.substr(0, std::min(stem.size(), room)) + suffix + extension;
+		if (view.project.scan && !view.project.scan->find(copy)) return copy;
+	}
+	return std::string();
 }
 
 // The palette as swatches, sixteen a row, as wide as the column lets them be.
@@ -319,6 +394,20 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 			target.editable = source && is_editable_kind(source->kind);
 		}
 		if (pressed && !use.fixed) window_requests::go_to(workspace, target);
+		// What else is done at a use: its file given a copy of the texture of its own (S18, split_texture),
+		// where another file uses the texture too.
+		if (!use.fixed && ImGui::BeginPopupContextItem("use_menu")) {
+			const bool others = std::any_of(uses.begin(), uses.end(), [&](const TextureUse &each) {
+				return !each.fixed && each.referrer != use.referrer;
+			});
+			const std::string copy = free_copy_name(view, document.path());
+			if (ImGui::MenuItem(("Give " + basename_of(use.referrer) + " a copy of its own").c_str(), nullptr, false,
+			                    others && !copy.empty() && view.allows(EditorRequestKind::SplitTexture)))
+				workspace.request(request::split_texture(document.path(), copy, {use.referrer}));
+			ui_kit::tooltip("Makes " + copy + ", a copy of " + basename_of(document.path()) + ", which " +
+			                basename_of(use.referrer) + " names from then on; the other uses keep this file.");
+			ImGui::EndPopup();
+		}
 		ui_kit::tooltip_lazy([&] {
 			std::string tip = line + "\nAs written: " + use.name_written;
 			if (!use.load.file.empty()) tip += "\nIts loader opens " + use.load.file;

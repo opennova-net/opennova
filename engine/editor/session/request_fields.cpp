@@ -68,7 +68,8 @@ constexpr RequestField kFields[] = {
 	{ F::Roles, "roles", J::Strings, "Requirements' roles." },
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,
-			"Files on disk to import: a loose file is chosen, an archive's members are listed to "
+			"replace_texture: the image a texture is made from; split_texture: the project files whose uses "
+			"the copy takes. Otherwise files on disk to import: a loose file is chosen, an archive's members are listed to "
 			"choose "
 			"from." },
 	{ F::Imports, "imports", J::Objects,

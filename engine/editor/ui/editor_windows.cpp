@@ -202,6 +202,11 @@ void EditorWindows::set_view(const SessionView *view) {
 void EditorWindows::request(EditorRequest request) {
 	const RequestKindRow &row = request_kind_row(request.kind);
 	if (request.path.empty() && row.names_active) request.path = view().documents.active;
+	// A texture's Replace with image... (S18): the texture it is for kept until the Shell's pick comes back.
+	if (request.kind == EditorRequestKind::PickFile && request.purpose == PickPurpose::TextureImage) {
+		replace_target_ = request.path;
+		request.path.clear();
+	}
 	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
 	else requests_.push_back(std::move(request));
 }
@@ -249,11 +254,25 @@ void EditorWindows::dispatch_events() {
 	}
 }
 
+void EditorWindows::drop_files(std::vector<std::string> paths, float x, float y) {
+	dropped_ = {std::move(paths), x, y, 2};
+}
+
+bool EditorWindows::take_dropped_files(float min_x, float min_y, float max_x, float max_y, std::vector<std::string> &paths) {
+	if (dropped_.paths.empty() || dropped_.x < min_x || dropped_.x >= max_x || dropped_.y < min_y || dropped_.y >= max_y)
+		return false;
+	paths = std::move(dropped_.paths);
+	dropped_ = Dropped();
+	return true;
+}
+
 void EditorWindows::end_frame() {
 	// A viewport's canvas not drawn this frame (another shown, the window closed, collapsed or its
 	// tab hidden): its gesture ends, before what waits on the files as saved.
 	if (preview_window_) preview_window_->end_frame();
 	if (document_window_) document_window_->end_frame();
+	// A drop no item took within two frames is none's (the frame it came in may have drawn before it).
+	if (!dropped_.paths.empty() && --dropped_.frames <= 0) dropped_ = Dropped();
 	in_frame_ = false;
 	for (EditorRequest &request : deferred_) requests_.push_back(std::move(request));
 	deferred_.clear();
@@ -274,6 +293,10 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::RuntimeExecutable:
 	case PickPurpose::GameInstall: settings_.set_picked(purpose, path, view().project.root); break;
 	case PickPurpose::ImportFiles: deliver_picks(purpose, {path}); break;
+	case PickPurpose::TextureImage:
+		if (!replace_target_.empty()) request(request::replace_texture(replace_target_, path));
+		replace_target_.clear();
+		break;
 	case PickPurpose::BuildFolder: {
 		// The modder's pick, kept with the project's local settings (Build > Build to <it>), then built into.
 		ProjectSettingsChange keep;

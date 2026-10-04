@@ -140,6 +140,7 @@ JsonValue texture_import_state_json(const TextureImportState &state) {
 	needs.set("options", options_json(state.needs.options));
 	needs.set("reasons", strings_json(state.needs.reasons));
 	needs.set("conflicts", strings_json(state.needs.conflicts));
+	needs.set("split_referrers", strings_json(state.needs.split_referrers));
 	needs.set("uses", json_number(double(state.needs.uses)));
 	out.set("needs", std::move(needs));
 	return out;

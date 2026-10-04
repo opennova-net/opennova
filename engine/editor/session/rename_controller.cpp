@@ -4,11 +4,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <utility>
 
 #include <base/io/hash.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/problems_service.h>
@@ -40,6 +42,21 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 	if (id == 0) return core_.refuse_busy(file); // the gate let no operation run beside it
 	core_.outcome().operation = id;
 	view_.activity.status = "Renaming " + basename_of(file) + " to " + new_name + "...";
+	core_.touch(ViewConcern::Output);
+}
+
+void RenameController::split_texture(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
+	RenameOperation::FilePlanner planner = [this, request](std::shared_ptr<const AssetScan> &scan) {
+		scan = view_.project.scan;
+		return plan_split(paths_, *scan, core_.problems().graph(), request.path, request.new_name, request.paths);
+	};
+	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
+			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
+	if (id == 0) return core_.refuse_busy(request.path); // the gate let no operation run beside it
+	core_.outcome().operation = id;
+	view_.activity.status = "Splitting " + basename_of(request.path) + " into " + request.new_name + "...";
 	core_.touch(ViewConcern::Output);
 }
 
@@ -77,7 +94,8 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 	std::string active = kept.active;
 	bool keep_selection = std::find(reload.begin(), reload.end(), active) == reload.end();
 	bool files_read = false;
-	if (!operation.symbol() && ok) {
+	const bool split = !operation.symbol() && operation.file_plan().split;
+	if (!operation.symbol() && ok && !split) {
 		const RenamePlan &plan = operation.file_plan();
 		// The renamed file and a mission's companions moved with it (a refused commit leaves them
 		// where they were, their open documents too): each open document closed (the unsaved prompt
@@ -149,6 +167,18 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		view_.activity.status = "Renamed " + plan.old_name + renamed + plan.new_name + (back ? "." : " everywhere.");
 		view_.activity.last_rename = {true, true, plan.file, plan.locator, plan.field, plan.old_name, plan.new_name, plan.kind,
 		                              plan.scope};
+	} else if (ok && split) {
+		// A split: the copy made and the uses moved to it; no way back but a rename of the copy.
+		const RenamePlan &plan = operation.file_plan();
+		std::set<std::string> files;
+		for (const RenameSite &site : plan.sites) files.insert(site.file);
+		std::string named;
+		for (const std::string &file : files) named += (named.empty() ? "" : ", ") + basename_of(file);
+		core_.note("Split " + plan.old_name + ": " + plan.new_name + " is a copy of it, which the " +
+		           counted(plan.sites.size(), "use") + " in " + named + " now name" +
+		           (plan.split_source.empty() ? std::string() : " (made by " + plan.split_source + ", a copy of its source)") +
+		           ". Undo does not take it back.");
+		view_.activity.status = "Split " + plan.old_name + " into " + plan.new_name + ".";
 	} else if (ok) {
 		const RenamePlan &plan = operation.file_plan();
 		std::string companions;
@@ -164,8 +194,8 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		view_.activity.status = "The rename did not finish.";
 	}
 	// What it did, for its way back: the sites as it left them (a text's later sites on a line moved by the
-	// names before them), each file it wrote by its bytes' hash now.
-	if (ok) {
+	// names before them), each file it wrote by its bytes' hash now. A split has none.
+	if (ok && !split) {
 		Done done;
 		done.symbol = operation.symbol();
 		if (done.symbol) {
@@ -364,6 +394,19 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 		return;
 	}
 	case EditorRequestKind::RenameAsset: rename_unsaved(request.path, request.new_name, files); return;
+	case EditorRequestKind::SplitTexture: {
+		// The documents with unsaved edits among the files the split rewrites.
+		if (!view_.project.open || !documents.documents_dirty()) return;
+		if (unsaved_while_due(files)) return;
+		const RenamePlan plan =
+		        plan_split(paths_, *view_.project.scan, core_.problems().graph(), request.path, request.new_name, request.paths);
+		if (!plan.ok()) return;
+		for (const auto &document : documents.documents())
+			if (document->dirty() && std::any_of(plan.sites.begin(), plan.sites.end(),
+			                                     [&](const RenameSite &site) { return site.file == document->path(); }))
+				files.push_back(document->path());
+		return;
+	}
 	case EditorRequestKind::RenameSymbol:
 		// The documents with unsaved edits among the files the plan rewrites, and those whose
 		// saved file names the name (the commit reads the files on disk: an unsaved edit that

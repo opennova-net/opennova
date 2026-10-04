@@ -60,6 +60,12 @@ struct RenamePlan {
 	// has (documents/mission_file_set.h), each renamed with it to the new base name and its own
 	// extension, every site naming one rewritten; the commit moves them together.
 	std::vector<RenameOutput> companions;
+	// A split (ADR 0046 S18, split_texture): the file copied under the new name, not moved, and only the
+	// sites of the files it was asked for rewritten to the copy; an import's output split as its source
+	// copied beside it (`split_source`, project-relative), the copy's record making the new name with the
+	// output's own options (`sidecar` its record, so the import pass runs after the commit).
+	bool split = false;
+	std::string split_source;
 	std::vector<Diagnostic> refusals;
 	bool ok() const { return refusals.empty(); }
 };
@@ -90,6 +96,15 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
                        const std::string &new_name);
 // Where a companion renamed with its mission goes: its own folder, its new name.
 std::string companion_path(const RenameOutput &companion);
+
+// A split (ADR 0046 S18): the file `file` (a texture two uses ask different things of) copied as
+// `new_name`, and the fields of the files `referrers` lists that name it rewritten to the copy, every
+// other use left on the file; an import's output copied as its source (another name beside it, its
+// record the output's options naming `new_name`). Refused, as a rename is, for a name the rules refuse,
+// that changes the extension or is taken, a site the editor cannot rewrite; and with texture.split for
+// an import's source (split the file it makes), no referrer given, or none that names the file.
+RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
+                      const std::string &new_name, const std::vector<std::string> &referrers);
 
 // Commit a plan that is ok, to its end (RenameTransaction below steps it a file at a time): every
 // referencing document is read and rewritten through its type in memory, then the file (and an
@@ -209,6 +224,10 @@ private:
 	void stage_native(const AssetEntry &asset, const std::vector<const RenameSite *> &sites, Staged &staged);
 	void commit();
 	void commit_file_rename();
+	void commit_split();
+	// Each staged file of a file's rename or a split written in its turn, with the findings its staging made;
+	// false when one did not take or did not write.
+	bool save_staged();
 	void commit_symbol_rename();
 
 	const ProjectPaths &paths_;

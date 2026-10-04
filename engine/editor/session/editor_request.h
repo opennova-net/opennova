@@ -66,6 +66,8 @@ enum class EditorRequestKind {
 	Reimport,
 	SetImportOptions,
 	TextureOperation,
+	ReplaceTexture,
+	SplitTexture,
 	PreviewInstallImport,
 	ClearOutput,
 	SetViewport,
@@ -88,7 +90,8 @@ enum class PickPurpose {
 	RuntimeExecutable,
 	GameInstall,
 	ImportFiles,
-	BuildFolder // Build > Build to folder...: where a build for players lands
+	BuildFolder, // Build > Build to folder...: where a build for players lands
+	TextureImage // a texture's Replace with image... (S18): the image it is made from
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited

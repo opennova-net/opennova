@@ -63,6 +63,21 @@ std::string conflict(const std::string &option, const std::vector<Ask> &asks) {
 	return words + " No one file serves them all: make one file for each.";
 }
 
+// The referring files whose uses ask otherwise than the first use's (a split's), once each; none where one
+// of them is also a file the first's value is asked by (a file a split could not part).
+void split_of(TextureImportNeeds &out, const std::vector<Ask> &asks) {
+	if (!out.split_referrers.empty() || asks.empty()) return;
+	const std::string first = strutil::to_lower(asks.front().value);
+	std::set<std::string> keeping, moving;
+	for (const Ask &ask : asks) {
+		if (ask.use->fixed || ask.use->referrer.empty()) return;
+		(strutil::to_lower(ask.value) == first ? keeping : moving).insert(ask.use->referrer);
+	}
+	for (const std::string &file : moving)
+		if (keeping.count(file)) return;
+	out.split_referrers.assign(moving.begin(), moving.end());
+}
+
 // The option set, with the reason of the first use that asked it.
 void choose(TextureImportNeeds &out, const std::string &option, const std::string &value, const std::vector<Ask> &asks) {
 	out.options[option] = value;
@@ -119,6 +134,7 @@ TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, con
 		format = asked.count("tga") ? "tga" : asked.count("tga24") ? "tga24" : "dds";
 	if (format.empty()) {
 		out.conflicts.push_back(conflict("format", formats));
+		split_of(out, formats);
 		return out;
 	}
 	choose(out, "format", format, formats);
@@ -133,7 +149,10 @@ TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, con
 	}
 	if (!sizes.empty()) {
 		if (values_of(sizes).size() == 1) choose(out, "size", sizes.front().value, sizes);
-		else out.conflicts.push_back(conflict("size", sizes));
+		else {
+			out.conflicts.push_back(conflict("size", sizes));
+			split_of(out, sizes);
+		}
 	}
 	if (format == "pcx" && !palettes.empty()) choose(out, "palette", "indices", palettes);
 	if (format == "tga" && !normals.empty()) {

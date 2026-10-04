@@ -153,6 +153,13 @@ private:
 	void _on_file_selected(const String &p_file);
 	void _on_files_selected(const PackedStringArray &p_files);
 	void _on_picker_canceled();
+	void _on_files_dropped(const PackedStringArray &p_files);
+
+public:
+	// Files dropped at `p_at` of the window's pixels, as the OS's drop is taken (a test's, S18).
+	void drop_files(const PackedStringArray &p_files, const Vector2 &p_at);
+
+private:
 	// A free loopback port for the game's MCP endpoint, allocated when the session spawns the game
 	// (the launcher source the session asks, once the build lands).
 	int allocate_mcp_port();

@@ -173,6 +173,12 @@ void serve_set_import_options(SessionCore &core, const EditorRequest &request) {
 void serve_texture_operation(SessionCore &core, const EditorRequest &request) {
 	core.documents().texture_operation(request);
 }
+void serve_replace_texture(SessionCore &core, const EditorRequest &request) {
+	core.imports().replace_texture(request);
+}
+void serve_split_texture(SessionCore &core, const EditorRequest &request) {
+	core.renames().split_texture(request);
+}
 void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
 	core.imports().preview_install(request);
 }
@@ -668,6 +674,33 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::Operation }, { F::Path, F::Values, F::OpenFirst }))
 			.holds(kFiles, kDocuments)
 			.names_active()
+			.row,
+	// A texture made from an image is an import of it (S18): its record written, then the refresh that
+	// imports it, which holds the slot as a reimport does; the texture's open document is closed.
+	Request(K::ReplaceTexture, "replace_texture", serve_replace_texture,
+			"The texture path (a project file, an import's output, or a name the project lacks, as a field "
+			"names it) made from the image in paths (a PNG, a TGA or a PCX: a file on disk, or a project "
+			"file): the image copied into art/ as an import source whose record makes the texture under its "
+			"name, in the form it is stored in (its format and compression; an import's output keeps its "
+			"import's options), values over those; the plain file it replaces set aside under "
+			".opennova/replaced/, never deleted; then imported, a refresh (the outcome names the "
+			"operation). Refused, nothing written (texture.replace): an image the importer does not read, a "
+			"texture that is no texture, an option no row takes, a texture open with unsaved edits.")
+			.takes(request_params({ F::Path, F::Paths }, { F::Values }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.row,
+	Request(K::SplitTexture, "split_texture", serve_split_texture,
+			"The texture path copied as new_name, the uses in the project files paths names moved to the "
+			"copy (their fields rewritten, every other use left on the texture); an import's output split "
+			"as its source copied beside it, the copy's record making new_name with the output's options. "
+			"Refused as rename_asset is, and with texture.split for an import's source, no referrer named "
+			"or none that uses it; not undoable. Committed as an operation (the outcome names it).")
+			.takes(request_params({ F::Path, F::NewName, F::Paths }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.guarded(GuardScope::PlannedWrites, "Split %s", "Save all and split")
+			.acts_on_saved()
 			.row,
 	Request(K::PreviewInstallImport, "preview_install_import", serve_preview_install_import,
 			"The import dialog on the game install's files: the names alone, chosen, or with none "

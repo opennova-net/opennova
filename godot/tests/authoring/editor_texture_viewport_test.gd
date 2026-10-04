@@ -286,3 +286,29 @@ func test_a_texture_edit_redraws() -> void:
 		await get_tree().process_frame
 		state = _viewport("textures/brick.tga")
 	assert_true(bool(state.get("body", {}).get("upside_down", false)), "Undo puts the file's own rows back")
+
+## S18: a texture replaced by an image through the wire: the image an import source in art/, the texture its
+## import's output under its own name, the file it replaced set aside.
+func test_a_texture_replaced_by_an_image() -> void:
+	if _app == null:
+		return
+	var root := _new_project()
+	_write(root.path_join("textures/brick.tga"), _tga(0))
+	var outside := OS.get_cache_dir().path_join("opennova texture image %d" % Time.get_ticks_usec())
+	_dirs.append(outside)
+	assert_eq(DirAccess.make_dir_recursive_absolute(outside), OK)
+	var image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	image.fill(Color8(1, 2, 3, 255))
+	var png := outside.path_join("mine.png")
+	assert_eq(image.save_png(png), OK)
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.settle())
+	assert_true(_seam.done({"kind": "replace_texture", "path": "textures/brick.tga", "paths": [png]}),
+			"replace_texture is served")
+	assert_true(_seam.settle())
+	var made := ""
+	for file in _seam.every("files", "files", {"limit": 200}):
+		if String(file.get("name", "")) == "brick.tga":
+			made = String(file.get("imported_from", ""))
+	assert_eq(made, "art/mine.png", "the texture is the image's import output now")
+	assert_false(FileAccess.file_exists(root.path_join("textures/brick.tga")), "the file it replaced is set aside")
