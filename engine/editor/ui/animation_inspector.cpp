@@ -48,25 +48,40 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 	const auto *map = dynamic_cast<const AnimationMapDocument *>(&document);
 	if (!map) return false;
 	const SessionView &view = workspace.view();
+	const ClipLoads loads = view.project.scan ? project_clip_loads(*view.project.scan) : ClipLoads();
 	// What the game does with the row (or the row of the clip selected).
-	const std::vector<std::string> notes = map_row_notes(*map, record);
+	const std::vector<std::string> notes = map_row_notes(*map, record, loads);
 	for (const std::string &line : notes) note(line);
-	// The reset row: the slots the map leaves out, by their words.
+	// The reset row: the slots the map leaves out, by what the game does with each.
 	const Node *row = document.row(record.row);
 	if (row && !record.child &&
 			animation_key_slot(static_cast<const AnimationMapRow &>(*row).key) == 0) {
-		const std::vector<int> left_out = map_unauthored_slots(*map);
+		const std::vector<int> left_out = map_unauthored_slots(*map, loads);
 		const std::string label = "Slots it leaves out (" + std::to_string(left_out.size()) + ")";
 		const bool open = !left_out.empty() &&
 		                  ImGui::TreeNode("left_out", "%s",
 		                                  ui_kit::fit(label, ImGui::GetContentRegionAvail().x -
 		                                                             ImGui::GetTreeNodeToLabelSpacing())
 		                                          .c_str());
-		if (!left_out.empty()) ui_kit::tooltip("The slots no row of this map names: each plays the reset row's first clip.");
+		if (!left_out.empty())
+			ui_kit::tooltip("The slots no row of this map authors: each serves the reset row's first clip, and what the "
+			                "game does with it is the slot's own rule.");
 		if (open) {
-			std::string words;
-			for (const int slot : left_out) words += (words.empty() ? "" : ", ") + animation_slot_words(slot);
-			ImGui::TextWrapped("%s", words.c_str());
+			const struct {
+				AnimSlotAbsence absence;
+				const char *heading;
+			} groups[] = {{AnimSlotAbsence::PlaysReset, "The game plays the reset clip in:"},
+			              {AnimSlotAbsence::NotPicked, "The game never picks these without a clip:"},
+			              {AnimSlotAbsence::Untraced, "Whether the game picks these without a clip is not traced:"}};
+			for (const auto &group : groups) {
+				std::string words;
+				for (const int slot : left_out)
+					if (animation_slot_absence(slot) == group.absence)
+						words += (words.empty() ? "" : ", ") + animation_slot_words(slot);
+				if (words.empty()) continue;
+				ImGui::TextWrapped("%s", group.heading);
+				note(words);
+			}
 			ImGui::TreePop();
 		}
 	}
@@ -74,13 +89,14 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 	if (view.findings.graph && view.project.scan) {
 		const std::vector<MapPlayer> players = map_players(*view.findings.graph, *view.project.scan, map->path());
 		if (players.empty()) {
-			note("No item or weapon of the project names this map: the game plays it for none.");
+			note(map_unused_words(*view.findings.graph, map->path()));
 		} else {
 			ImGui::Text("Played by (%zu):", players.size());
 			int id = 0;
 			for (const MapPlayer &player : players) {
 				std::string line = player.record + (player.first_person ? " (its first-person view)" : "");
 				if (!player.model.empty()) line += " on " + player.model;
+				if (!player.enemy_model.empty()) line += " (" + player.enemy_model + " as an enemy)";
 				use_line(workspace, player.edge, line + " (" + player.file.substr(player.file.find_last_of('/') + 1) + ")",
 				         id++);
 			}
@@ -106,10 +122,17 @@ bool draw_clip_inspector(Workspace &workspace, const Document &document, const N
 	              ticks > 0 ? ticks / io::kTickHz : 0.0,
 	              loops ? "it loops" : "it plays once and holds its last frame");
 	note(length);
+	// Its frame events: one a frame and the end pose, whose event never fires (animation_end_pose).
+	if (clip->events.size() == size_t(frames) + 1 && frames > 0) {
+		std::snprintf(length, sizeof(length),
+		              "Its %zu frame events are its %u frames (0 to %u) and the end pose (%u), whose event never fires.",
+		              clip->events.size(), frames, frames - 1, frames);
+		note(length);
+	}
 	if (view.findings.graph && view.project.scan) {
 		const std::vector<ClipUse> uses = clip_uses(*view.findings.graph, *view.project.scan, clip_document->path());
 		if (uses.empty()) {
-			note("No map of the project names this clip: the game never plays it.");
+			note(clip_unused_words(*view.findings.graph, clip_document->path()));
 		} else {
 			ImGui::Text("Played by these map rows (%zu):", uses.size());
 			int id = 0;

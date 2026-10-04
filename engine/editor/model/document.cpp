@@ -371,7 +371,7 @@ std::string Document::record_name(const NodeAddress &address) const {
 	if (*at.spec.name_field && get(address, at.spec.name_field, name)) {
 		if (const auto *text = std::get_if<std::string>(&name); text && !text->empty()) return *text;
 	}
-	return std::string(kind_label(at.spec.kind)) + " " + std::to_string(at.index + 1);
+	return std::string(kind_label(at.spec.kind)) + " " + std::to_string(at.index + at.spec.first_number);
 }
 
 std::string Document::record_path(const NodeAddress &address) const {

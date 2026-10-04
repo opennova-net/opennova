@@ -88,12 +88,17 @@ bool is_animation_kind(AssetKind kind);
 
 // A frame event's trigger word in words: each bit the engine reads by what the body does
 // (anim::kAnimEventBits' words: "right footstep, sound 2"), a bit it does not read as
-// "an unread bit (0x400)"; "" for none.
+// "an unread bit (0x10000)"; "" for none.
 std::string animation_trigger_words(uint32_t trigger);
+
+// Whether the clip's record `record` is its end pose: the last of its frame count and one records,
+// which the game blends into but never reads the event of (its trigger never fires).
+bool animation_end_pose(const ClipRow &row, size_t record);
 
 // The clip document type's validator over one clip (DocumentType::validate_file), an open
 // document standing in for its file: a frame rate other than the 30 every retail clip plays at
-// and an event bit the engine does not read are notes; a bone whose parent does not come
+// and an event bit the engine does not read are notes, as is an event set on the end pose (it
+// never fires: animation_end_pose); a bone whose parent does not come
 // before it (bad::bad_parent_in_order, the rule the runtime's rig is FK-safe by) is a
 // warning on its parent.
 std::vector<Diagnostic> validate_animation_file(const DocumentBase &document);
@@ -105,6 +110,7 @@ enum class AnimationFinding {
 	Fps,
 	ParentOrder,
 	TriggerUnknown,
+	EndPoseTrigger,
 	kCount
 };
 const FindingCodeRow &finding_code(AnimationFinding code);

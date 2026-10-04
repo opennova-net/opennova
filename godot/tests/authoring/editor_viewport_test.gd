@@ -994,12 +994,36 @@ func test_a_clip_poses_the_bones_it_reports() -> void:
 	var bones: Array = _state().get("body", {}).get("animation", {}).get("bones", [])
 	assert_eq(bones.size(), skeleton.get_bone_count())
 	var spine: Array = bones[1].get("position", [0, 0, 0]) if bones.size() > 1 else [0, 0, 0]
-	assert_almost_eq(absf(float(spine[0])), 1.0, 0.01, "the spine turned a quarter off the axis")
+	# The sign pinned (S17 review): the pelvis's quarter turn swings the spine to -x in the preview's frame.
+	assert_almost_eq(Vector3(float(spine[0]), float(spine[1]), float(spine[2])), Vector3(-1, 0, 0),
+			Vector3(0.01, 0.01, 0.01), "the spine turned a quarter off the axis")
 	for i in bones.size():
 		var at: Array = bones[i].get("position", [0, 0, 0])
 		var posed: Vector3 = model.global_transform.affine_inverse() * (skeleton.global_transform * skeleton.get_bone_global_pose(i).origin)
 		assert_almost_eq(Vector3(float(at[0]), float(at[1]), float(at[2])), posed, Vector3(0.002, 0.002, 0.002),
 				"bone %d where the device's skeleton puts it" % i)
+	# Where the canvas marks each bone is where the picture draws it: the wire's screen point against
+	# the device camera's projection of the skeleton's bone, in the viewport's own pixels.
+	var camera: Camera3D = _device_node(preview, "Camera3D")
+	assert_not_null(camera)
+	var device: Dictionary = _state().get("device", {})
+	var size := Vector2(float(device.get("width", 0)), float(device.get("height", 0)))
+	assert_true(size.x > 0.0 and size.y > 0.0, "the viewport's size on the wire: %s" % str(device))
+	if camera == null or size.x <= 0.0 or size.y <= 0.0:
+		return
+	var marked := 0
+	var drawn_size := Vector2(camera.get_viewport().size)
+	for i in bones.size():
+		var screen: Variant = bones[i].get("screen")
+		assert_true(screen is Array, "bone %d on the screen" % i)
+		if not (screen is Array):
+			continue
+		var world := skeleton.global_transform * skeleton.get_bone_global_pose(i).origin
+		var drawn := camera.unproject_position(world) / drawn_size * size
+		assert_almost_eq(Vector2(float(screen[0]), float(screen[1])), drawn, Vector2(1.5, 1.5),
+				"bone %d marked where the picture draws it" % i)
+		marked += 1
+	assert_eq(marked, bones.size(), "every bone compared on the screen")
 
 
 ## S13 V5: each open model its own viewport and its own device: the first again keeps its device and

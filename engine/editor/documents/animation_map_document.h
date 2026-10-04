@@ -95,7 +95,8 @@ void animation_map_row_headings(const Document &document, const NameSource *name
 // refuses are errors; a key naming none of the engine's slots is a warning (the game skips
 // the row [orig: AnimMap_ParseConfigLine @ 0x40CB60, the test @0x40CBA4]); a row naming a
 // slot an earlier row names is a note (animation_map.slot_repeated: the game joins their
-// clips into one ring, and keeps only the last reset clip). A clip the project lacks is the
+// clips into one ring; a later reset clip replaces the earlier as the skeleton, the slots left
+// out serving the first). A clip the project lacks is the
 // asset graph's.
 std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document);
 

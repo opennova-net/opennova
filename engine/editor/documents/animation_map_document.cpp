@@ -383,7 +383,8 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 		const std::string earlier = "row " + std::to_string(first.first->second + 1);
 		add(DiagnosticSeverity::Info, AnimationMapFinding::SlotRepeated,
 		    slot == 0 ? "'" + r.key + "' names the reset slot as " + earlier +
-		                        " does: the game keeps only the last reset clip it loads."
+		                        " does: each reset clip replaces the one before, so the skeleton is the last reset "
+		                        "clip it loads, and the slots the map leaves out serve the first."
 		              : "'" + r.key + "' names the slot " + earlier +
 		                        " names: the game joins their clips into one ring, served last to first.");
 	}

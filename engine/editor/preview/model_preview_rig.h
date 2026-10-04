@@ -44,10 +44,16 @@ struct PreviewRig {
 	std::string source; // where the model came from: "chosen", else the record that pairs them
 };
 
+// The model fields of a record that pair with its map field (S17 review): an item's anim_def plays
+// on its graphic, and on its graphic_enemy (the model the other side sees it as, itemdef +0x90); a
+// weapon's animadm on its gfx1, the first-person view model [orig: Player_RenderFirstPersonViewModel
+// @ 0x4DED60]. Empty for any other field.
+std::vector<const char *> preview_model_fields(const std::string &map_field);
+
 // The rig of the animation document `file` (a table or a clip, its file name): a table
-// plays on the model an item pairs with it (its graphic beside its anim_def; a weapon's
-// first-person animadm is not paired here: that rig is the viewmodel's); a clip on the
-// first table that names it, and that table's model. `chosen` (a model's file name) wins.
+// plays on the model a record pairs with it (preview_model_fields, the first that names a model of
+// the project: an item's graphic, else its graphic_enemy; a weapon's gfx1); a clip on the first
+// table that names it, and that table's model. `chosen` (a model's file name) wins.
 PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, const std::string &file, AssetKind kind,
                                const std::string &chosen);
 
@@ -90,9 +96,19 @@ struct PreviewClipEvent {
 // order, read from its file (`clip_file`); a frame the clock never runs on has none.
 std::vector<PreviewClipEvent> preview_clip_events(const anim::SkeletalClips &rig, const std::string &key, int variant,
                                                   const bad::BadFile &clip_file);
+// An event's letter on the timeline by what it does, a shot first ("F", an NPC's), then a footstep
+// ("L", "R"), then a sound ("S"); "" for an event of bits the engine does not read alone, since
+// nothing plays.
+const char *preview_event_letter(uint32_t trigger);
 
-// A bone of the rig as the clip poses it at a tick (ADR 0046 S17): its name (the bind clip's
-// bone, "Part N" past its bones), its parent (-1: a root), where its joint stands in the preview's
+// A joint's name as a modder reads it beside the model's parts (the models lane's BN## for a rig's
+// bone, two digits and 1-based, docs/threedi/scene-naming-contract.md): "BN08" alone where the bind
+// clip names the bone nothing of its own (its MDL<i>, SkeletalClips' made-up name), the clip's name
+// where it begins with that word ("BN01 Hips"), else both ("BN08 RArm").
+std::string preview_joint_name(size_t bone, const std::string &clip_name);
+
+// A bone of the rig as the clip poses it at a tick (ADR 0046 S17): its name (preview_joint_name),
+// its parent (-1: a root), where its joint stands in the preview's
 // space, and the transform that carries a point of the model riding it from the rest pose to the
 // pose (the skin's: the posed global over the rest global's inverse), in the rig's frame, which is
 // the preview's (the X-negated model frame the device's skeleton stands in).

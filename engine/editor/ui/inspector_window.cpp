@@ -924,15 +924,19 @@ bool section_changed(const Document &document, const Targets &targets, const Ins
 void draw_section(Workspace &workspace, Controls &controls, const Document &document, const NodeAddress &record,
                   const NodeAddress &owner, const InspectorSection &section, Reveal *reveal) {
 	if (!section.key.empty()) {
-		std::string heading = section.title;
+		std::string title = section.title;
 		if (!section.has_toggle && section.fields.empty() && section.collections.size() == 1)
-			heading += " (" + std::to_string(section.collections.front().ids.size()) + ")";
-		heading += "###" + section.key;
+			title += " (" + std::to_string(section.collections.front().ids.size()) + ")";
+		// Cut to the room beside the header's arrow (a narrow Inspector, a long list's title), whole in
+		// its tooltip.
+		const float room = ImGui::GetContentRegionAvail().x - ImGui::GetFontSize() - ImGui::GetStyle().FramePadding.x * 2.0f;
+		const std::string shown_title = ui_kit::fit(title, room);
+		const std::string heading = shown_title + "###" + section.key;
 		if (reveal && reveal->scroll && reveal->record == record && holds_field(section, reveal->field))
 			ImGui::SetNextItemOpen(true);
 		const bool shown = section.written || section_changed(document, {record}, section);
 		const bool open = ImGui::CollapsingHeader(heading.c_str(), shown ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-		ui_kit::tooltip(section.key);
+		ui_kit::tooltip(shown_title != title ? title + "\n" + section.key : section.key);
 		if (!open) return;
 	}
 	ImGui::PushID(section.key.c_str());

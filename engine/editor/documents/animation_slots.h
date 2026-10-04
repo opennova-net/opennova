@@ -29,6 +29,23 @@ const AnimSlotFamily &animation_slot_unknown_family();
 // What the game plays slot `slot` for, one sentence ("Walking forward."); "" past the table.
 std::string animation_slot_meaning(int slot);
 
+// What becomes of a slot a map leaves out. A loaded map's every unauthored slot serves the reset
+// row's first clip [orig: AnimMap_RegisterBoneNode @ 0x40C2D0, slot 0's backfill @ 0x40C39A..0x40C3E2;
+// AnimMap_RegisterEntity @ 0x40BB60, @ 0x40BC24..0x40BC81], but whether a body then plays that clip
+// in it is its selector's say: one that tests for the slot's clip (animMap[slot] != animMap[0]) never
+// picks it without one.
+enum class AnimSlotAbsence {
+	PlaysReset, // a selector commits it unchecked: the body plays the reset clip in it
+	NotPicked,  // its selectors pick it only when the map has its clip: the game picks another
+	Untraced,   // whether its selector tests for the clip is not traced
+};
+AnimSlotAbsence animation_slot_absence(int slot);
+// The sentence ("Left out, the game never picks it: the idle plays as it is."); "" past the table.
+std::string animation_slot_when_missing(int slot);
+// For a slot the game never picks without its clip, what it does instead ("the idle plays as it
+// is"); "" where the records say nothing of it, and for the other slots.
+std::string animation_slot_instead(int slot);
+
 // The slot index a row's key names (anim::adm_slot_index: past its first five characters, any
 // case), -1 for none; and the slot's words ("walk forward").
 int animation_key_slot(const std::string &key);

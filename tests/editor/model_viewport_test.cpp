@@ -622,9 +622,13 @@ static int test_animation() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
-	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
-	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
-	                                                        "/fixtures/threedi/o3d/skinned.o3d")));
+	// The skinned fixture with two user points at one place off the bones' axis: on the child bone
+	// (part 1) and on the root (part 0).
+	std::vector<uint8_t> skinned = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
+	                                                  "/fixtures/threedi/o3d/skinned.o3d");
+	const std::string tip = "userpoint tip 0 0.25 1 0 0 1 1\nuserpoint hip 0 0.25 1 0 0 1 0\n";
+	skinned.insert(skinned.end(), tip.begin(), tip.end());
+	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d", skinned));
 	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
@@ -796,9 +800,13 @@ static int test_runtime_clips() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
-	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
-	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
-	                                                        "/fixtures/threedi/o3d/skinned.o3d")));
+	// The skinned fixture with two user points at one place off the bones' axis: on the child bone
+	// (part 1) and on the root (part 0).
+	std::vector<uint8_t> skinned = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
+	                                                  "/fixtures/threedi/o3d/skinned.o3d");
+	const std::string tip = "userpoint tip 0 0.25 1 0 0 1 1\nuserpoint hip 0 0.25 1 0 0 1 0\n";
+	skinned.insert(skinned.end(), tip.begin(), tip.end());
+	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d", skinned));
 	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
 	TEST_EXPECT(editor_test::write_text(source + "/step.o3a", kStepClips));
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
@@ -959,9 +967,13 @@ static int test_clip_preview() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
-	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
-	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
-	                                                        "/fixtures/threedi/o3d/skinned.o3d")));
+	// The skinned fixture with two user points at one place off the bones' axis: on the child bone
+	// (part 1) and on the root (part 0).
+	std::vector<uint8_t> skinned = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
+	                                                  "/fixtures/threedi/o3d/skinned.o3d");
+	const std::string tip = "userpoint tip 0 0.25 1 0 0 1 1\nuserpoint hip 0 0.25 1 0 0 1 0\n";
+	skinned.insert(skinned.end(), tip.begin(), tip.end());
+	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d", skinned));
 	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
 	TEST_EXPECT(editor_test::write_text(source + "/step.o3a", kStepClips));
 	TEST_EXPECT(editor_test::write_text(source + "/bend.o3a", kBendClips));
@@ -1003,6 +1015,17 @@ static int test_clip_preview() {
 	            !players->array[0].get_bool("first_person", true));
 	const JsonValue *notes = animation->get("notes");
 	TEST_EXPECT(notes && !notes->array.empty() && notes->array[0].string == "walk forward (slot 1): Walking forward.");
+	// A slot the game picks only when the map has its clip (an NPC's attack, S17 review): the note says
+	// the game never picks it then and what it does instead, the reset clip shown as what the slot serves.
+	set(session, table->path(), walk, "key", std::string("anim_attack"));
+	session.handle(request::select_record(table->path(), walk));
+	rig.pump();
+	TEST_EXPECT(model->clip_key() == "anim_reset" &&
+	            model->clip_note() == "attack has no clip the game loads (none of its files is in the project): the game "
+	                                  "never picks attack then (the NPC takes another reaction, or closes in). The slot "
+	                                  "serves the reset clip, reset, shown here; a mission's forced animation of it plays "
+	                                  "that.");
+	session.handle(request::undo(table->path()));
 	session.handle(request::undo(table->path()));
 	session.handle(request::select_record(table->path(), walk));
 	rig.pump();
@@ -1024,7 +1047,8 @@ static int test_clip_preview() {
 	// The wire's form of a scrub or a step: a frame, the clock held on the tick that first shows it.
 	TEST_EXPECT(rig.set(R"({"frame": 2})") && rig.clock().ticks() == model->tick_of_frame(2) && !rig.clock().playing());
 	TEST_EXPECT(!rig.set(R"({"frame": -1})") && rig.clock().ticks() == model->tick_of_frame(2));
-	TEST_EXPECT(model->tick_of_frame_shown(99) >= 0);
+	// A frame past the clip's shows its last.
+	TEST_EXPECT(model->tick_of_frame_shown(99) == model->tick_of_frame_shown(int(model->clip_frame_count()) - 1));
 
 	// The clip's own document: the rows that play it.
 	session.handle(request::open_document("anims/walk.bad"));
@@ -1034,8 +1058,25 @@ static int test_clip_preview() {
 	TEST_EXPECT(uses && uses->array.size() == 1 && uses->array[0].get_string("map", "") == "anims/SKIN.adm" &&
 	            uses->array[0].get_string("words", "") == "walk forward");
 
-	// A one-shot repeats from its start after its length and the hold; with Repeat off it holds its end.
+	// "Reading" only until the first validation has read the project's references (S17 review): an
+	// animation no item pairs reads as such, and goes on doing so while a validation runs after an edit.
 	session.handle(request::open_document("anims/step.bad"));
+	rig.pump();
+	TEST_EXPECT(view.activity.validation.read && rig.viewport() &&
+	            rig.viewport()->view_status() == ModelViewStatus::NoRig);
+	{
+		Document *step_clip = session.document_for("anims/step.bad");
+		TEST_EXPECT(step_clip && !step_clip->rows().empty());
+		if (step_clip && !step_clip->rows().empty()) {
+			set(session, step_clip->path(), {step_clip->rows().front()->id, step_clip->rows().front()->kind, 0}, "fps",
+			    int64_t(25));
+			TEST_EXPECT(view.activity.validation.running && view.activity.validation.read);
+			rig.pump();
+			TEST_EXPECT(rig.viewport()->view_status() == ModelViewStatus::NoRig);
+			session.handle(request::undo(step_clip->path()));
+		}
+	}
+	// A one-shot repeats from its start after its length and the hold; with Repeat off it holds its end.
 	TEST_EXPECT(rig.set(R"({"options": {"rig_model": "skinned.3di"}})"));
 	rig.pump();
 	const ModelViewport *step = rig.viewport();
@@ -1061,12 +1102,31 @@ static int test_clip_preview() {
 	TEST_EXPECT(joints.size() == 3 && joints[0].name == "BN01 Pelvis" && joints[1].name == "BN02 Spine" &&
 	            joints[1].parent == 0 && joints[0].parent == -1);
 	if (joints.size() != 3) return 1;
-	TEST_EXPECT(near(joints[1].at.x, 0.0) && near(std::fabs(joints[1].at.y), 1.0) && near(joints[1].at.z, 0.0));
+	// Signs pinned (S17 review: a mirrored rig passes no test): the spine's joint up at rest, and the
+	// quarter turn of the pelvis swinging it to -x in the preview's frame.
+	TEST_EXPECT(near(joints[1].at.x, 0.0) && near(joints[1].at.y, 1.0) && near(joints[1].at.z, 0.0));
 	const PreviewVec3 spine_rest = joints[1].at;
+	// The user points through the viewport's own overlays (the path the picture and the wire take).
+	const auto point_at = [&](const PreviewClock &at, int index) {
+		const std::optional<ModelOverlay> point = find_overlay(bend->overlays(at), ModelOverlayKind::UserPoint, index);
+		return point ? point->at : PreviewVec3{-99.0f, -99.0f, -99.0f};
+	};
+	const PreviewVec3 tip_rest = point_at(clock, 0), hip_rest = point_at(clock, 1);
+	TEST_EXPECT(near(tip_rest.x, 0.25) && near(tip_rest.y, 1.0) && near(tip_rest.z, 0.0) && near(hip_rest.x, 0.25) &&
+	            near(hip_rest.y, 1.0) && near(hip_rest.z, 0.0));
 	clock.seek_ticks(bend->tick_of_frame(1));
 	TEST_EXPECT(bend->tick_of_frame(1) > 0);
 	joints = bend->joints(clock);
-	TEST_EXPECT(joints.size() == 3 && near(std::fabs(joints[1].at.x), 1.0) && near(joints[1].at.y, 0.0) && near(joints[1].at.z, 0.0));
+	TEST_EXPECT(joints.size() == 3 && near(joints[1].at.x, -1.0) && near(joints[1].at.y, 0.0) && near(joints[1].at.z, 0.0));
+	// The point on the pelvis turns with it (the quarter turn: (0.25, 1) to (-1, 0.25)); the one on the
+	// spine, whose own key holds it unturned, rides its joint (the clip's rotations are each bone's in
+	// the model, as the game composes them).
+	const PreviewVec3 tip_bent = point_at(clock, 0), hip_bent = point_at(clock, 1);
+	TEST_EXPECT(near(hip_bent.x, -1.0) && near(hip_bent.y, 0.25) && near(hip_bent.z, 0.0));
+	TEST_EXPECT(near(tip_bent.x, -0.75) && near(tip_bent.y, 0.0) && near(tip_bent.z, 0.0));
+	const PreviewVec3 tip_carried = preview_joint_carry(joints[1], tip_rest);
+	TEST_EXPECT(near(tip_carried.x, tip_bent.x, 1e-4) && near(tip_carried.y, tip_bent.y, 1e-4) &&
+	            near(tip_carried.z, tip_bent.z, 1e-4));
 	const PreviewVec3 carried = preview_joint_carry(joints[1], spine_rest);
 	TEST_EXPECT(near(carried.x, joints[1].at.x, 1e-4) && near(carried.y, joints[1].at.y, 1e-4) &&
 	            near(carried.z, joints[1].at.z, 1e-4));
@@ -1117,6 +1177,32 @@ static int test_clip_preview() {
 	for (const GraphSearchHit &hit : view.findings.graph->search("skinned th"))
 		found = found || (hit.symbol && hit.words == "Skinned Thing" && hit.name == "100200");
 	TEST_EXPECT(found);
+
+	// Pairings beyond the graphic (S17 review): an item's graphic_enemy plays its map on that model too;
+	// an item naming a map the project lacks plays default.adm there.
+	TEST_EXPECT(editor_test::write_text(
+	        view.project.root + "/defs/items.def",
+	        "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n"
+	        "begin \"Bent Enemy\"\nid 100201\ntype building\ngraphicenemy skinned\nanim_def bend\nend\n"
+	        "begin \"Lost Map\"\nid 100202\ntype building\ngraphic skinned\nanim_def nowhere\nend\n"));
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/anims/default.adm", "anim_reset\t\"reset\"\r\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	while (view.activity.validation.running) session.poll();
+	const std::vector<ModelAnimation> played = model_animations(*view.findings.graph, *view.project.scan, "models/skinned.3di");
+	const auto plays = [&](const char *map, const char *record, const char *via) {
+		for (const ModelAnimation &one : played)
+			if (strutil_iequals(one.map, map) && one.record == record && strutil_iequals(one.via, via)) return true;
+		return false;
+	};
+	TEST_EXPECT(played.size() == 3 && plays("anims/SKIN.adm", "Skinned Thing", "") &&
+	            plays("anims/BEND.adm", "Bent Enemy", "as an enemy") &&
+	            plays("anims/default.adm", "Lost Map", "in place of nowhere.adm"));
+	const PreviewRig paired =
+	        resolve_preview_rig(*view.findings.graph, *view.project.scan, "BEND.adm", AssetKind::AnimationMap, std::string());
+	TEST_EXPECT(strutil_iequals(paired.model, "skinned.3di") && paired.source.find("Bent Enemy") != std::string::npos);
+	const std::vector<MapPlayer> enemies = map_players(*view.findings.graph, *view.project.scan, "anims/BEND.adm");
+	TEST_EXPECT(enemies.size() == 1 && strutil_iequals(enemies[0].model, "skinned.3di") && enemies[0].enemy_model.empty());
 	return 0;
 }
 

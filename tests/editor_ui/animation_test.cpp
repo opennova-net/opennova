@@ -9,6 +9,7 @@
 #include <cctype>
 #include <string>
 
+#include <base/io/strutil.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/model_viewport.h>
@@ -111,11 +112,15 @@ void test_timeline() {
 	run.settle(1);
 	CHECK(run.clock().rate() == 0.5, "the speed chosen");
 
-	// The track scrubbed with the mouse to its right end and past it: the clip's last tick, held.
+	// The track scrubbed with the mouse to its right end and past it: a loop's last tick (its wrap tick
+	// shows the first frame again), its last frame shown, held (S17 review).
 	ui.mouse(5000.0f, 10.0f);
 	ui.activate(item_id(scope, {"##track"}));
 	run.settle(1);
-	CHECK(run.clock().ticks() == model->clip_length_ticks() && !run.clock().playing(), "scrubbed to the end, held");
+	CHECK(model->clip_loops() && run.clock().ticks() == model->clip_length_ticks() - 1 && !run.clock().playing(),
+	      "scrubbed to the end, held on the loop's last tick");
+	ui.away();
+	CHECK(lowered(logged_frame(ui)).find("frame 3 of 4") != std::string::npos, "the last frame shown at the end");
 	ui.mouse(-5000.0f, 10.0f);
 	ui.activate(item_id(scope, {"##track"}));
 	run.settle(1);
@@ -162,8 +167,126 @@ void test_timeline() {
 	ui.drain();
 }
 
+// A clip of 60 frames whose frame 30 steps right, on the skinned fixture's three bones.
+std::string long_clip() {
+	std::string text = "o3a 1\nadm LONG.adm\nrow anim_reset \"longrest\"\nrow anim_idle \"long\"\n";
+	const auto clip = [&](const char *name, int frames, int step) {
+		text += std::string("clip ") + name + "\nfps 30\nflags 0x1\nframes " + std::to_string(frames) + "\n";
+		const char *bones[3] = {"bone -1 0 0 0 0.5 \"BN01 Pelvis\"", "bone 0 0 0 1 0.5 \"BN02 Spine\"",
+		                        "bone 0 0 0 -1 0.5 \"BN03 Leg\""};
+		for (const char *bone : bones) {
+			text += std::string(bone) + "\n";
+			for (int k = 0; k <= frames; ++k) text += " k 0 0 0 1\n";
+		}
+		for (int k = 0; k <= frames; ++k) text += k == step ? "event 0 0 0 0x2 0.9 1.7\n" : "event 0 0 0 0x0 0.9 1.7\n";
+	};
+	clip("longrest", 1, -1);
+	clip("long", 60, 30);
+	return text;
+}
+
+// A press on an event's mark holds the clock on the event's own tick while it is held, wherever the
+// mouse goes (S17 review: the scrub took it back to the mouse's tick, a frame off on a long clip).
+void test_event_press() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_clip_event_press");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const std::string source = dir.file("source");
+	CHECK(editor_test::write_text(source + "/long.o3a", long_clip()), "the long clip written");
+	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
+	import.imports = {{source + "/long.o3a", {}}};
+	session.handle(import);
+	session.run_operations();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	ClipRun run{session, devices, ui};
+	const std::string path = "anims/long.bad";
+	session.handle(request::open_document(path));
+	session.handle(request::set_viewport(path, R"({"options": {"rig_model": "skinned.3di"}, "clock": {"playing": false, "ticks": 0}})"));
+	run.settle();
+	const ModelViewport *model = run.model(path);
+	CHECK(model && model->clip_frame_count() == 60 && model->clip_events().size() == 1, "the long clip plays, one event");
+	if (!model || model->clip_events().size() != 1) return;
+	const int32_t event_tick = model->clip_events().front().tick;
+	// The track's line: the Preview's content probed down until the mouse is over the track.
+	const ImGuiID track = item_id(item_id(Ui::window_id("Preview"), {"model", path.c_str()}), {"##track"});
+	ImGuiWindow *preview = ImGui::FindWindowByName("Preview");
+	CHECK(preview != nullptr, "the Preview");
+	if (!preview) return;
+	const float left = preview->WorkRect.Min.x + 6.0f, right = preview->WorkRect.Max.x - 6.0f;
+	const float event_x = left + (right - left) * float(event_tick) / float(model->clip_length_ticks());
+	float track_y = -1.0f;
+	for (float y = preview->Pos.y; y < preview->Pos.y + preview->Size.y && track_y < 0.0f; y += 3.0f) {
+		ui.mouse(event_x, y);
+		if (ImGui::GetCurrentContext()->HoveredId == track) track_y = y;
+	}
+	CHECK(track_y >= 0.0f, "the track found");
+	if (track_y < 0.0f) return;
+	// Pressed 3 px off the mark (within its reach), then held while the mouse moves 3 px the other way.
+	ui.mouse(event_x + 3.0f, track_y);
+	ui.button(true);
+	run.settle(1);
+	CHECK(run.clock().ticks() == event_tick, "the press goes to the event's own tick");
+	ui.mouse(event_x - 3.0f, track_y);
+	run.settle(2);
+	CHECK(run.clock().ticks() == event_tick && !run.clock().playing(), "held there while the press is");
+	ui.button(false);
+	run.settle(1);
+	CHECK(run.clock().ticks() == event_tick, "and there when let go");
+	ui.drain();
+}
+
+// From a model's Animations, a map opened to play on it takes the model alone: the map's viewport keeps
+// its own options (S17 review: the request reset its level, overlays, Repeat and Bones).
+void test_animations_keep_options() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_animations_keep_options");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	CHECK(editor_test::write_text(v.project.root + "/defs/items.def",
+	                              "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n"
+	                              "begin \"Armored\"\nid 100201\ntype building\ngraphic armory\nanim_def skin\nend\n"),
+	      "two items playing SKIN.adm");
+	session.handle(request::rescan());
+	session.run_operations();
+	while (v.activity.validation.running) session.poll();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	ClipRun run{session, devices, ui};
+	const std::string map = "anims/SKIN.adm";
+	session.handle(request::open_document(map));
+	session.handle(request::set_viewport(map, R"({"options": {"repeat": false, "bones": false}})"));
+	run.settle();
+	const std::string model_path = "models/armory.3di";
+	session.handle(request::open_document(model_path));
+	run.settle();
+	const ImGuiID scope = item_id(Ui::window_id("Preview"), {"model", model_path.c_str()});
+	ui.activate(item_id(scope, {"Animations (1)"}));
+	run.settle(1);
+	ui.activate(popup_item(ImHashStr("animations", 0, scope), "SKIN.adm  (Armored)"));
+	run.settle();
+	const ModelViewport *shown = run.model(map);
+	CHECK(v.documents.active == map && shown && opennova::strutil::iequals(shown->options().rig_model, "armory.3di"),
+	      "the map opened to play on the model");
+	CHECK(shown && !shown->options().repeat && !shown->options().bones, "its own options kept");
+	ui.drain();
+}
+
 } // namespace
 
-void run_animation_tests() { test_timeline(); }
+void run_animation_tests() {
+	test_timeline();
+	test_event_press();
+	test_animations_keep_options();
+}
 
 } // namespace editor_ui_test

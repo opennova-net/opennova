@@ -162,17 +162,19 @@ std::string credits_missing(const AssetGraph &, const GraphEdge &) {
 }
 
 // A token whose .bad does not load registers failsafe.bad, else nothing, and a slot none of whose
-// tokens registered plays the reset row's first clip [orig: AnimMap_FindOrLoadBoneFile @ 0x40C030,
+// tokens registered serves the reset row's first clip [orig: AnimMap_FindOrLoadBoneFile @ 0x40C030,
 // the failsafe @ 0x40C25B..0x40C2A1, none @ 0x40C260; AnimMap_RegisterEntity @ 0x40BB60, the backfill
-// @ 0x40BC24, @ 0x40BD2E]. The slot in its words (ADR 0046 S17).
+// @ 0x40BC24, @ 0x40BD2E], which the game plays in it or never picks it then by the slot's own rule
+// (animation_slot_absence). The slot in its words (ADR 0046 S17).
 std::string clip_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	if (graph.has_file(anim::kFailsafeClip))
 		return ", which the project does not have: the game plays failsafe.bad in its place.";
 	const int slot = animation_key_slot(edge.record.substr(0, edge.record.find('/')));
 	const std::string words = slot >= 0 ? animation_slot_words(slot) : std::string("its row");
+	const std::string missing = slot > 0 ? " " + animation_slot_when_missing(slot) : std::string();
 	return ", which the project does not have: the game leaves it out of " + words +
-	       "'s clips, and a slot left with none plays the reset clip (the project has no failsafe.bad to play in "
-	       "its place).";
+	       "'s clips (the project has no failsafe.bad to play in its place); a slot left with none is as one the map "
+	       "leaves out." + missing;
 }
 
 std::string user_point_missing(const AssetGraph &, const GraphEdge &edge) {

@@ -710,9 +710,9 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_key_.clear();
 		clip_events_.clear();
 		clip_note_.clear();
-		// While the first validation reads the project's references, the pairing item may not be read
-		// yet: said so, not that none pairs it.
-		return stop_(view.activity.validation.running ? ModelViewStatus::Reading : ModelViewStatus::NoRig, file, false);
+		// Until the first validation has read the project's references, the pairing item may not be read
+		// yet: said so, not that none pairs it (a validation after an edit reads with the graph built).
+		return stop_(!view.activity.validation.read ? ModelViewStatus::Reading : ModelViewStatus::NoRig, file, false);
 	}
 	const FileSource &files = *view.findings.assets;
 	const uint64_t generation = view.findings.assets->generation();
@@ -1180,7 +1180,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	const AssetScan *scan = input.view.project.scan.get();
 	if (!animating_) {
 		body.set("animation", JsonValue::make_null());
-		// The maps this model plays (S17): each item pairing it with one (its graphic, its anim_def).
+		// The maps this model plays (S17): each record pairing it with one (preview_model_fields), and how.
 		JsonValue maps = JsonValue::make_array();
 		if (graph && scan && input.document)
 			for (const ModelAnimation &played : model_animations(*graph, *scan, input.document->path())) {
@@ -1188,6 +1188,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 				row.set("map", json_string(played.map));
 				row.set("record", json_string(played.record));
 				row.set("file", json_string(played.file));
+				row.set("via", json_string(played.via));
 				maps.push(std::move(row));
 			}
 		body.set("animations", std::move(maps));
@@ -1261,11 +1262,13 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 				row.set("record", json_string(player.record));
 				row.set("file", json_string(player.file));
 				row.set("model", json_string(player.model));
+				row.set("enemy_model", json_string(player.enemy_model));
 				row.set("first_person", JsonValue::make_bool(player.first_person));
 				players.push(std::move(row));
 			}
 		if (input.view.documents.active == map->path())
-			for (const std::string &note : map_row_notes(*map, input.view.documents.selection.primary))
+			for (const std::string &note : map_row_notes(*map, input.view.documents.selection.primary,
+			                                             scan ? project_clip_loads(*scan) : ClipLoads()))
 				notes.push(json_string(note));
 	} else if (document && graph && scan) {
 		for (const ClipUse &use : clip_uses(*graph, *scan, document->path())) {

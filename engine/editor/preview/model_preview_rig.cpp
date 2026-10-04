@@ -1,6 +1,7 @@
 #include <editor/preview/model_preview_rig.h>
 
 #include <algorithm>
+#include <cstdio>
 
 #include <base/io/strutil.h>
 #include <editor/documents/animation_document.h>
@@ -9,6 +10,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/preview/viewport_follow.h>
 #include <formats/adm/adm.h>
+#include <runtime/anim/anim_event_bits.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/world/entity_pose.h>
 
@@ -71,17 +73,25 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 	}
 	if (rig.table.empty()) return rig;
 	for (const GraphEdge *edge : graph.referrers_of_file(path_of(rig.table))) {
-		if (edge->kind != ReferenceKind::AnimationMap || edge->field != "anim_def") continue;
-		for (const GraphEdge *graphic : graph.references_of(edge->source)) {
-			if (graphic->record != edge->record || graphic->kind != ReferenceKind::Model) continue;
-			const std::string model = model_file(scan, graphic->target);
-			if (model.empty()) continue;
-			rig.model = model;
-			rig.source = file_of(edge->source) + ": " + edge->record;
-			return rig;
-		}
+		if (edge->kind != ReferenceKind::AnimationMap) continue;
+		const std::vector<GraphEdge const *> record_edges = graph.references_of(edge->source);
+		for (const char *field : preview_model_fields(edge->field))
+			for (const GraphEdge *graphic : record_edges) {
+				if (graphic->record != edge->record || graphic->kind != ReferenceKind::Model || graphic->field != field) continue;
+				const std::string model = model_file(scan, graphic->target);
+				if (model.empty()) continue;
+				rig.model = model;
+				rig.source = file_of(edge->source) + ": " + edge->record;
+				return rig;
+			}
 	}
 	return rig;
+}
+
+std::vector<const char *> preview_model_fields(const std::string &map_field) {
+	if (map_field == "anim_def") return {"graphic", "graphic_enemy"};
+	if (map_field == "animadm") return {"gfx1"};
+	return {};
 }
 
 std::shared_ptr<const anim::SkeletalClips> load_preview_rig(const PreviewRig &rig, const threedi::Threedi3di3 &model,
@@ -146,18 +156,35 @@ PreviewClipChoice preview_clip_choice(const Document &document, const NodeAddres
 			return out;
 		}
 		// No token of the row registered: the slot is unauthored (unless another row names it), and an
-		// unauthored slot plays the reset row's first clip.
+		// unauthored slot serves the reset row's first clip, which the body plays only where the slot's
+		// selector does not test for its clip (animation_slot_absence).
 		out.variant = 0;
-		if (slot != 0 && clips.has_clip(map_row.key)) {
-			out.key = map_row.key;
+		const std::string slot_key = adm::adm_slot_key(map_row.key);
+		if (slot != 0 && clips.has_clip(slot_key)) {
+			out.key = slot_key;
 			out.note = words + " has no clip the game loads on this row: it plays the clips another row gives the slot.";
 		} else if (slot != 0 && clips.has_clip("anim_reset")) {
 			out.key = "anim_reset";
 			const anim::SkeletalClips::ClipSource *reset = clips.find_clip_source(out.key, 0);
-			out.note = words + " has no clip the game loads (" +
-			           (map_row.clips.empty() ? std::string("the row names none") : "none of its files is in the project") +
-			           "): the game plays the reset clip" + (reset ? ", " + reset->file + "," : std::string()) +
-			           " in its place.";
+			const std::string clip = "the reset clip" + (reset ? ", " + reset->file + "," : std::string());
+			const std::string why = words + " has no clip the game loads (" +
+			                        (map_row.clips.empty() ? std::string("the row names none")
+			                                               : "none of its files is in the project") + "): ";
+			switch (animation_slot_absence(slot)) {
+			case AnimSlotAbsence::PlaysReset:
+				out.note = why + "the game plays " + clip + " in its place.";
+				break;
+			case AnimSlotAbsence::NotPicked: {
+				const std::string instead = animation_slot_instead(slot);
+				out.note = why + "the game never picks " + words + " then" +
+				           (instead.empty() ? std::string() : " (" + instead + ")") + ". The slot serves " + clip +
+				           " shown here; a mission's forced animation of it plays that.";
+				break;
+			}
+			case AnimSlotAbsence::Untraced:
+				out.note = why + "the slot serves " + clip + " shown here; whether the game picks the slot then is not traced.";
+				break;
+			}
 		}
 		return out;
 	}
@@ -170,6 +197,18 @@ PreviewClipChoice preview_clip_choice(const Document &document, const NodeAddres
 			return out;
 		}
 	return out;
+}
+
+std::string preview_joint_name(size_t bone, const std::string &clip_name) {
+	char word[8];
+	std::snprintf(word, sizeof(word), "BN%02u", unsigned(bone + 1));
+	// SkeletalClips names a model-table bone past the bind clip's records MDL<i> (its own rule, no
+	// name the clip gives): the part's name alone then.
+	const bool made = clip_name.size() > 3 && clip_name.compare(0, 3, "MDL") == 0 &&
+	                  clip_name.find_first_not_of("0123456789", 3) == std::string::npos;
+	if (clip_name.empty() || made) return word;
+	if (strutil::starts_with_icase(clip_name, word)) return clip_name;
+	return std::string(word) + " " + clip_name;
 }
 
 std::vector<PreviewJoint> preview_posed_joints(const anim::SkeletalClips &rig, const std::string &key, int variant,
@@ -195,8 +234,7 @@ std::vector<PreviewJoint> preview_posed_joints(const anim::SkeletalClips &rig, c
 		PreviewJoint joint;
 		joint.bone = int(i);
 		joint.parent = parent >= 0 && size_t(parent) < i ? parent : -1;
-		joint.name = i < rig.bones().size() && !rig.bones()[i].name.empty() ? rig.bones()[i].name
-		                                                                    : "Part " + std::to_string(i);
+		joint.name = preview_joint_name(i, i < rig.bones().size() ? rig.bones()[i].name : std::string());
 		joint.at = PreviewVec3{global[i].origin.x, global[i].origin.y, global[i].origin.z};
 		joint.deform = anim::rest_mul(global[i], rest_inverse[i]);
 		out.push_back(std::move(joint));
@@ -215,6 +253,14 @@ PreviewVec3 preview_joint_carry(const PreviewJoint &joint, const PreviewVec3 &po
 		o[2] += joint.deform.origin.z;
 	}
 	return PreviewVec3{o[0], o[1], o[2]};
+}
+
+const char *preview_event_letter(uint32_t trigger) {
+	if (trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary | anim::kAnimEventFireMarker3)) return "F";
+	if (trigger & anim::kAnimEventFootLeft) return "L";
+	if (trigger & anim::kAnimEventFootRight) return "R";
+	constexpr uint32_t kFoley = ((anim::kAnimEventFoley1 << anim::kAnimEventFoleyCount) - 1) & ~(anim::kAnimEventFoley1 - 1);
+	return trigger & kFoley ? "S" : "";
 }
 
 std::vector<PreviewClipEvent> preview_clip_events(const anim::SkeletalClips &rig, const std::string &key, int variant,

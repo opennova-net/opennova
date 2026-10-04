@@ -146,7 +146,21 @@ std::string AnimationDocument::record_title(const NodeAddress &address) const {
 	if (i == SIZE_MAX) return record_name(address);
 	const std::string words =
 			row->version == 0 ? std::string() : animation_trigger_words(static_cast<uint32_t>(row->events[i].trigger));
+	// The last record is the end pose, whose event the game never reads (animation_end_pose).
+	if (animation_end_pose(*row, i))
+		return "Frame " + std::to_string(i) + " (the end pose" +
+		       (words.empty() ? std::string(")") : "): " + words + ", which never fires");
 	return "Frame " + std::to_string(i) + (words.empty() ? std::string() : ": " + words);
+}
+
+// A clip's records are its frame count and one more, the end pose; the game samples a frame by
+// (int)(frames * t) with t below 1 and reads that frame's trigger, so it plays frames 0 to
+// frames - 1 (the end pose reached by the blend of the last frame into it) and never reads the end
+// pose's trigger: a one-shot holds just short of it, a loop wraps before it [orig:
+// AnimChannel_InterpolateKeyframe @ 0x40B230; AnimChannel_AdvancePlayback @ 0x40B140].
+bool animation_end_pose(const ClipRow &row, size_t record) {
+	const size_t frames = row.base ? row.base->frame_count : (row.events.empty() ? 0 : row.events.size() - 1);
+	return frames > 0 && record == frames;
 }
 
 const std::vector<RecordKindRow> &AnimationDocument::kinds() const {
@@ -422,6 +436,7 @@ constexpr FindingCodeEntry<AnimationFinding> kFindingEntries[] = {
 	{ AnimationFinding::Fps, { "animation.fps" } },
 	{ AnimationFinding::ParentOrder, { "animation.parent_order" } },
 	{ AnimationFinding::TriggerUnknown, { "animation.trigger_unknown" } },
+	{ AnimationFinding::EndPoseTrigger, { "animation.end_pose_trigger" } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(AnimationFinding::kCount),
 		"every AnimationFinding has exactly one row");
@@ -471,6 +486,21 @@ std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 		d.record_kind = kBone;
 		d.child_id = row->collections[0][i];
 		d.record = clip_document->record_path({row->id, kBone, d.child_id});
+		findings.push_back(std::move(d));
+	}
+	// A trigger on the end pose: the game never reads it (animation_end_pose).
+	for (size_t i = 0; i < row->events.size(); ++i) {
+		if (!animation_end_pose(*row, i) || row->events[i].trigger == 0) continue;
+		Diagnostic d = make_finding(AnimationFinding::EndPoseTrigger, DiagnosticSeverity::Info,
+		                            "Frame " + std::to_string(i) + " is the clip's end pose: the game plays frames 0 to " +
+		                                    std::to_string(i - 1) + " and never reads the end pose's event, so its " +
+		                                    animation_trigger_words(static_cast<uint32_t>(row->events[i].trigger)) +
+		                                    " never fires. Set it on an earlier frame.",
+		                            document.path(), "trigger");
+		d.row_id = row->id;
+		d.record_kind = kEvent;
+		d.child_id = row->collections[1][i];
+		d.record = clip_document->record_path({row->id, kEvent, d.child_id});
 		findings.push_back(std::move(d));
 	}
 	for (size_t i = 0; i < row->events.size(); ++i) {

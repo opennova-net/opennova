@@ -66,18 +66,18 @@ void set_rate(Workspace &workspace, const ModelViewport &model, double rate) {
 constexpr double kRates[] = {0.1, 0.25, 0.5, 1.0, 2.0};
 constexpr const char *kRateWords[] = {"0.1x", "0.25x", "0.5x", "1x", "2x"};
 
-// An event's mark on the timeline: its colour and letter by what it does, a shot first, then a
-// footstep, then a sound (an event may carry several).
+// An event's mark on the timeline: its letter by what it does (preview_event_letter) and its colour
+// by the letter; one of bits the engine does not read alone is muted, with no letter.
 struct EventMark {
 	ImU32 color;
 	const char *letter;
 };
 EventMark event_mark(uint32_t trigger) {
-	if (trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary | anim::kAnimEventFireMarker3))
-		return {IM_COL32(240, 90, 80, 255), "F"};
-	if (trigger & anim::kAnimEventFootLeft) return {IM_COL32(120, 220, 120, 255), "L"};
-	if (trigger & anim::kAnimEventFootRight) return {IM_COL32(120, 220, 120, 255), "R"};
-	return {kEventColor, "S"};
+	const char *letter = preview_event_letter(trigger);
+	if (*letter == 'F') return {IM_COL32(240, 90, 80, 255), letter};
+	if (*letter == 'L' || *letter == 'R') return {IM_COL32(120, 220, 120, 255), letter};
+	if (*letter == 'S') return {kEventColor, letter};
+	return {IM_COL32(128, 128, 128, 255), letter};
 }
 
 std::string seconds_text(double seconds) {
@@ -93,6 +93,8 @@ struct ModelViewportView::Tools {
 	int snap = 2; // kModelHandleSnaps: 1/16 m
 	// The Plays on choice's filter, and the models items animate, made again when the graph moves.
 	char rig_filter[64] = {};
+	// A press on an event's mark, held: the clock stays on the event's tick until it is let go.
+	bool event_press = false;
 	const AssetGraph *animated_graph = nullptr;
 	uint64_t animated_generation = 0;
 	std::vector<std::string> animated;
@@ -296,12 +298,24 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	const ImVec2 at = ImGui::GetCursorScreenPos();
 	ImGui::InvisibleButton("##track", ImVec2(width, height));
 	const bool hovered = ImGui::IsItemHovered();
+	const bool active = ImGui::IsItemActive();
+	const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
 	const float pad = 6.0f;
 	const float left = at.x + pad, right = at.x + width - pad;
 	const auto x_of = [&](int32_t tick) { return left + (right - left) * float(tick) / float(length); };
-	if (ImGui::IsItemActive()) {
-		const float t = std::clamp((ImGui::GetIO().MousePos.x - left) / std::max(1.0f, right - left), 0.0f, 1.0f);
-		const int32_t to = int32_t(std::lround(t * float(length)));
+	// The event under the mouse, if any (within 4 px of its mark).
+	const float mouse = ImGui::GetIO().MousePos.x;
+	const PreviewClipEvent *under = nullptr;
+	for (const PreviewClipEvent &event : model.clip_events())
+		if (hovered && std::fabs(mouse - x_of(event.tick)) <= 4.0f) under = &event;
+	// A press on an event's mark holds the clock on the event's own tick until it is let go; any other
+	// press scrubs. A loop's right end is its last tick (its wrap tick shows the first frame again).
+	if (clicked) event_press = under != nullptr;
+	if (!active) event_press = false;
+	if (active && !event_press) {
+		const float t = std::clamp((mouse - left) / std::max(1.0f, right - left), 0.0f, 1.0f);
+		int32_t to = int32_t(std::lround(t * float(length)));
+		if (model.clip_loops()) to = std::min(to, length - 1);
 		if (to != ticks || clock.playing()) seek_ticks(workspace, model, to, true);
 	}
 	ImDrawList *paint = ImGui::GetWindowDrawList();
@@ -324,14 +338,11 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		}
 	}
 	// The events: a mark and its letter at the top of the track.
-	const float mouse = ImGui::GetIO().MousePos.x;
-	const PreviewClipEvent *under = nullptr;
 	for (const PreviewClipEvent &event : model.clip_events()) {
 		const float x = x_of(event.tick);
 		const EventMark mark = event_mark(event.trigger);
 		paint->AddRectFilled(ImVec2(x - 1.5f, top + 2.0f), ImVec2(x + 1.5f, top + 9.0f), mark.color);
 		paint->AddText(ImVec2(x + 2.5f, top), mark.color, mark.letter);
-		if (hovered && std::fabs(mouse - x) <= 4.0f) under = &event;
 	}
 	// The playhead.
 	const float head = x_of(shown);
@@ -339,7 +350,7 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	if (under) {
 		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + seconds_text(under->tick / io::kTickHz) +
 		                "): " + animation_trigger_words(under->trigger) + ". Click to go there.");
-		if (ImGui::IsItemClicked()) {
+		if (clicked) {
 			seek_ticks(workspace, model, under->tick, true);
 			// In the clip's own document the event is a record: select it.
 			const SessionView &view = workspace.view();
@@ -498,7 +509,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 			if (ImGui::BeginPopup("animations")) {
 				for (const ModelAnimation &played : maps) {
 					const std::string name = played.map.substr(played.map.find_last_of('/') + 1);
-					const std::string line = name + "  (" + played.record + ")";
+					const std::string line = name + "  (" + played.record + (played.via.empty() ? "" : ", " + played.via) + ")";
 					if (ImGui::Selectable(line.c_str())) {
 						workspace.request(request::open_document(played.map));
 						// On this model: chosen where the map's own pairing takes another item's model.
@@ -506,10 +517,12 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 						const PreviewRig paired = resolve_preview_rig(*view.findings.graph, *view.project.scan, name,
 						                                              AssetKind::AnimationMap, std::string());
 						if (!strutil::iequals(paired.model, here)) {
-							ModelViewportOptions chosen;
-							chosen.rig_model = here;
+							// The model alone: the map's viewport keeps its own options (its level, its overlays,
+							// Repeat, Bones).
+							io::JsonValue chosen = io::JsonValue::make_object();
+							chosen.set("rig_model", io::json_string(here));
 							workspace.request(request::set_viewport(
-									played.map, viewport_change(ViewportKind::Model, "options", model_options_to_json(chosen))));
+									played.map, viewport_change(ViewportKind::Model, "options", std::move(chosen))));
 						}
 					}
 					ui_kit::tooltip(played.record + " in " + played.file + " plays " + played.map + " on this model.");
