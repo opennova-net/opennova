@@ -81,7 +81,7 @@ bool model_handle_from_token(const char *token, ModelHandle &out) {
 }
 
 bool model_handle_edits(const ModelDocument &document, const threedi::Threedi3di3 &model, const ModelOverlay &overlay,
-                        int lod, uint32_t time_ms, const int32_t bus[96], ModelHandle handle, const PreviewVec3 &to,
+                        int lod, uint32_t time_ms, const int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT], ModelHandle handle, const PreviewVec3 &to,
                         float snap, uint64_t gesture, std::vector<Edit> &out) {
 	out.clear();
 	if (overlay.kind == ModelOverlayKind::Pivot) return false;

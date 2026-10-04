@@ -8,6 +8,7 @@
 #include <editor/model/node.h>
 #include <editor/preview/model_preview_camera.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 
 namespace opennova::editor {
 
@@ -58,7 +59,7 @@ struct ModelOverlayOptions {
 
 // The 96-slot CTRL register bus with the held registers written by name (an unknown name
 // is dropped, as the game's catalog drops it).
-void model_preview_ctrl_bus(const std::map<std::string, int64_t> &held, int32_t bus[96]);
+void model_preview_ctrl_bus(const std::map<std::string, int64_t> &held, int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT]);
 
 // Every marker of `model` posed at `time_ms` with the register bus: a user point rides its
 // part's PANM matrix of the first level while that level animates, else it is where it is
@@ -69,13 +70,13 @@ void model_preview_ctrl_bus(const std::map<std::string, int64_t> &held, int32_t 
 // turns about its pivot, so it is the identity at rest: model-space points go through it
 // as they are.
 std::vector<ModelOverlay> model_overlays(const threedi::Threedi3di3 &model, int lod, uint32_t time_ms,
-                                         const int32_t bus[96], const ModelOverlayOptions &options);
+                                         const int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT], const ModelOverlayOptions &options);
 
 // The part matrix a marker rides at `time_ms` (model_overlays' rule: a user point the
 // first level's, a light or a pivot the drawn level's), row-vector (p' = p * M); the
 // identity when it rides none.
 threedi::ThreediMatrix4x4 model_overlay_pose(const threedi::Threedi3di3 &model, const ModelOverlay &overlay, int lod,
-                                             uint32_t time_ms, const int32_t bus[96]);
+                                             uint32_t time_ms, const int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT]);
 
 // The marker a device point picks: the front-most within `slop` pixels of it; -1 none.
 int pick_model_overlay(const std::vector<ModelOverlay> &overlays, const OrbitCamera &camera, int width, int height,

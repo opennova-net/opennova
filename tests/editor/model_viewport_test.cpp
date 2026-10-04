@@ -410,7 +410,7 @@ static int test_handles() {
 	TEST_EXPECT(document && rig.pump() == ViewportAction::Rebuild);
 	TEST_EXPECT(rig.set(R"({"clock": {"time_ms": 250}})"));
 	const ModelViewport *model = rig.viewport();
-	int32_t bus[96];
+	int32_t bus[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT];
 	model_preview_ctrl_bus(model->options().ctrl, bus);
 
 	// The place: where the drag puts it, the part's pose undone and applied again.

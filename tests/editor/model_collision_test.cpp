@@ -131,7 +131,7 @@ int synthetic_shapes() {
 		const CollisionRow *collision = document.collision_row();
 		if (!row || !row->base || !row->base->collision) continue;
 		const Threedi3di3 &model = *row->base;
-		int32_t bus[96] = {};
+		int32_t bus[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT] = {};
 		// A model whose LOD 0 animates is taken posed (a quarter second and more in: its parts turned).
 		const bool live = threedi_panm_lod_has_live(model, 0);
 		const uint32_t at_ms = live ? 700 : 0;
@@ -304,7 +304,7 @@ int a_person_and_a_live_part() {
 	// The person's bones are hit spheres at the game's radius.
 	ModelDocument person;
 	TEST_EXPECT(load(person, synth_dir() + "/person.3di", "person.3di"));
-	int32_t bus[96] = {};
+	int32_t bus[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT] = {};
 	ModelOverlayOptions sections;
 	sections.sections = true;
 	const auto spheres = model_collision_shapes(person.model_row()->base, 0, 0, bus, sections);
@@ -364,7 +364,7 @@ int a_part_no_node_drives() {
 			opennova::assets::parse_model(reinterpret_cast<const uint8_t *>(written.text.data()), written.text.size());
 	TEST_EXPECT(model && model->lods[0].part_animation_count == 4 && threedi_panm_lod_has_live(*model, 0));
 	if (!model) return 1;
-	int32_t bus[96] = {};
+	int32_t bus[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT] = {};
 	ModelOverlayOptions faces;
 	faces.bullet_faces = true;
 	const std::vector<ModelCollisionShape> shapes = model_collision_shapes(model, 0, 700, bus, faces);
@@ -480,7 +480,7 @@ int retail_collision() {
 						            bv.max_z_fp16 / 65536.0);
 				}
 			}
-			int32_t bus[96] = {};
+			int32_t bus[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT] = {};
 			const auto start = std::chrono::steady_clock::now();
 			const auto shapes = model_collision_shapes(row->base, 0, 0, bus, every_layer());
 			seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();

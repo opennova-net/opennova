@@ -100,7 +100,7 @@ struct ModelCollisionPick {
 // adds that record's shape when its layer is off (the selection's). The model's static geometry (each
 // volume's solid, each face's corners) is made once per parsed model and kept while it lives.
 std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &model, int lod, uint32_t time_ms,
-                                                        const int32_t bus[96], const ModelOverlayOptions &options,
+                                                        const int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT], const ModelOverlayOptions &options,
                                                         ModelCollisionPick also = ModelCollisionPick());
 // The legend of `shapes`: each colour drawn, with its words ("Bullet faces", "Volumes: ladder"), in the
 // order first drawn.

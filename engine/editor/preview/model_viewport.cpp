@@ -328,7 +328,7 @@ int ModelViewport::lod() const {
 
 std::vector<ModelOverlay> ModelViewport::overlays(const PreviewClock &clock) const {
 	if (!model_) return {};
-	int32_t bus[96];
+	int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT];
 	model_preview_ctrl_bus(options_.ctrl, bus);
 	std::vector<ModelOverlay> out = model_overlays(*model_, lod(), clock.ms(), bus, options_.overlays);
 	// A clip playing (S17): a user point on a bone rides it as the skin carries the mesh there, as
@@ -366,7 +366,7 @@ ModelCollisionShapesPtr ModelViewport::collision(const PreviewClock &clock, Mode
 	if (cache.shapes && cache.model == model_.get() && cache.lod == level && cache.overlays == options_.overlays &&
 	    cache.ctrl == options_.ctrl && cache.also == also && cache.time_ms == time_ms)
 		return cache.shapes;
-	int32_t bus[96];
+	int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT];
 	model_preview_ctrl_bus(options_.ctrl, bus);
 	cache.shapes = std::make_shared<const std::vector<ModelCollisionShape>>(
 			model_collision_shapes(model_, level, time_ms, bus, options_.overlays, also));
@@ -418,7 +418,7 @@ bool ModelViewport::handle_edits(const ModelDocument &document, const ModelOverl
 	const PreviewVec3 through = handle == ModelHandle::Axis ? axis_tip(overlay) : overlay.at;
 	PreviewVec3 to;
 	if (!camera_.on_view_plane(x, y, width, height, through, to)) return false;
-	int32_t bus[96];
+	int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT];
 	model_preview_ctrl_bus(options_.ctrl, bus);
 	if (!model_handle_edits(document, *model_, overlay, lod(), clock.ms(), bus, handle, to, snap, gesture, out))
 		return false;

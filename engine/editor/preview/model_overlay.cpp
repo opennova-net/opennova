@@ -60,7 +60,7 @@ const char *model_overlay_kind_token(ModelOverlayKind kind) {
 	return "user_point";
 }
 
-void model_preview_ctrl_bus(const std::map<std::string, int64_t> &held, int32_t bus[96]) {
+void model_preview_ctrl_bus(const std::map<std::string, int64_t> &held, int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT]) {
 	std::fill(bus, bus + threedi::THREEDI_CTRL_REGISTER_COUNT, 0);
 	for (const auto &entry : held) {
 		const int ordinal = threedi::threedi_ctrl_register_ordinal(entry.first.c_str());
@@ -69,7 +69,7 @@ void model_preview_ctrl_bus(const std::map<std::string, int64_t> &held, int32_t 
 }
 
 std::vector<ModelOverlay> model_overlays(const threedi::Threedi3di3 &model, int lod, uint32_t time_ms,
-                                         const int32_t bus[96], const ModelOverlayOptions &options) {
+                                         const int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT], const ModelOverlayOptions &options) {
 	std::vector<ModelOverlay> out;
 	// The first level's pose carries the attachments; the drawn level's, its lights and
 	// pivots (the parts the device draws).
@@ -123,7 +123,7 @@ std::vector<ModelOverlay> model_overlays(const threedi::Threedi3di3 &model, int 
 }
 
 threedi::ThreediMatrix4x4 model_overlay_pose(const threedi::Threedi3di3 &model, const ModelOverlay &overlay, int lod,
-                                             uint32_t time_ms, const int32_t bus[96]) {
+                                             uint32_t time_ms, const int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT]) {
 	ThreediMatrix4x4 out;
 	threedi::threedi_mat4_identity(&out);
 	if (overlay.part < 0) return out;

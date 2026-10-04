@@ -332,7 +332,7 @@ size_t model_collision_layer_count(const threedi::Threedi3di3 &model, ModelColli
 }
 
 std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &shown, int lod, uint32_t time_ms,
-                                                        const int32_t bus[96], const ModelOverlayOptions &options,
+                                                        const int32_t bus[threedi::THREEDI_CTRL_REGISTER_COUNT], const ModelOverlayOptions &options,
                                                         ModelCollisionPick also) {
 	std::vector<ModelCollisionShape> out;
 	const bool any = options.bullet_faces || options.volumes || options.sections || options.bounds ||
