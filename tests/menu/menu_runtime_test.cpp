@@ -19,6 +19,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace opennova;
@@ -1005,6 +1006,18 @@ void test_startup_version() {
 	CHECK(framed.open_document(&doc, "main.mnu", "Startup"));
 	CHECK(framed.frame_index(9) == 4);
 	CHECK(frame.texts.size() == 1 && frame.texts.count(4) == 1 && frame.texts[4] == "V1.7.5.7");
+
+	// Each game shows its own binary's text; an unwitnessed one shows none, never JO's
+	// [orig: Game_ParseCommandLineAndInit @0x4a7d5c (JO 1.7.5.7); jodemo.exe @0x48b440
+	//  (1.0.0.9); DFX.EXE @0x4a6b93 (1.7.1.9); dfx2.exe @0x4a7d8c (1.7.5.7)].
+	for (const auto &[code, text] : std::vector<std::pair<std::string, std::string>>{
+				 {"jo", "V1.7.5.7"}, {"", "V1.7.5.7"}, {"JODEMO", "V1.0.0.9"}, {"dfx", "V1.7.1.9"},
+				 {"dfx2", "V1.7.5.7"}, {"bhd", ""}}) {
+		MenuRuntime game;
+		game.set_game_code(code);
+		CHECK(game.open_document(&doc, "main.mnu", "OTHER") && game.show_screen("STARTUP"));
+		CHECK(game.get_widget_text(9) == text);
+	}
 
 	// A STARTUP screen whose VERSION sits only under an unnamed window draws none.
 	mnu::Document bare;

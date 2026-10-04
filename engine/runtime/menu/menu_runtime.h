@@ -247,6 +247,10 @@ public:
 	void set_frame(MenuFrameSeam *frame) { frame_ = frame; }
 	MenuFrameSeam *frame() const { return frame_; }
 	void set_sink(MenuEventSink sink) { sink_ = std::move(sink); }
+	// The mounted game's `/game` code: the STARTUP screen's VERSION label shows that
+	// game's version text (gameprofile_version_text_for_code: JO's for an empty or
+	// unknown code, none for a game whose binary is unwitnessed).
+	void set_game_code(std::string code) { game_code_ = std::move(code); }
 
 	// Bind a parsed document (null unbinds) and show `target_screen` (empty or
 	// unknown = the first screen). Every per-document cache is rebuilt and the
@@ -459,6 +463,7 @@ private:
 	MenuEventSink sink_;
 	MenuDocIndex index_;
 	std::string menu_file_;
+	std::string game_code_; // set_game_code
 	std::string current_screen_;
 	std::vector<std::string> nav_stack_;
 	std::unordered_map<std::string, int> screen_ids_; // upper name -> screen id

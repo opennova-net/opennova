@@ -4,7 +4,7 @@
 
 #include <runtime/menu/menu_runtime.h>
 
-#include <base/gameprofile/build_version.h>
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/options_policy.h>
@@ -252,14 +252,17 @@ bool MenuRuntime::pop_screen() {
 
 void MenuRuntime::on_screen_shown_() {
 	// The activate dispatch's STARTUP leg sets the screen's VERSION label to the
-	// build's version text; the backdrop movies it toggles are menu_video.h's.
+	// build's version text, the game's own (gameprofile::GameProfile::version_text;
+	// none for a game whose binary is unwitnessed); the backdrop movies it toggles
+	// are menu_video.h's.
 	// [orig: UI_DispatchScreenEvent @0x54e6a0 case 5, stricmp(screen, "STARTUP")
 	//  @0x54eeff -> UI_OnStartupScreenActivate @0x5557f0: UI_FindScreenControl(
 	//  g_GameMenu, "STARTUP", "VERSION") @0x555840, then the control's vtable+76
 	//  (CButtonWnd_SetLabel @0x6572f0) with byte_B4C070 @0x555857]
 	if (strutil::iequals(current_screen_, "STARTUP")) {
 		const int version = find_screen_control("STARTUP", "VERSION");
-		if (version >= 0) set_widget_text(version, gameprofile::kBuildVersionText);
+		const char *text = gameprofile::gameprofile_version_text_for_code(game_code_.c_str());
+		if (version >= 0) set_widget_text(version, text != nullptr ? text : "");
 	}
 	MenuEvent changed;
 	changed.kind = MenuEvent::Kind::ScreenChanged;

@@ -85,6 +85,9 @@ public:
 	// C++-side seam (not bound): engine consumers fed by this mounted session
 	// (the mission catalog builder). The index dies with this ResourceRoot.
 	const opennova::ResourceIndex &engine_index() const { return index_; }
+	// C++-side seam (not bound): the `/game` code the live mount was made for ("jo" for
+	// a loose mount, empty when nothing is mounted); the menu's version label reads it.
+	const String &game_code() const { return game_code_; }
 
 private:
 	static bool has_virtual_scheme(const String &path);
@@ -110,6 +113,7 @@ private:
 	                              bool allow_loose_override, const String &game_code);
 
 	String expansion_;
+	String game_code_; // game_code()
 	// The expansion's text-override table the last mount_runtime left (see
 	// get_expansion_override_table).
 	PackedByteArray expansion_override_table_;

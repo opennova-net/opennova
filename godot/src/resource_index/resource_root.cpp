@@ -299,6 +299,7 @@ Error ResourceRoot::mount_with_mode(const String &path, const String &expansion,
 	// must not leave simulation or skeletal loaders reading the previous mount.
 	index_.clear();
 	assets_.invalidate();
+	game_code_ = String();
 	const String clean = normalize_dir(path);
 	if (clean.is_empty()) {
 		root_dir_ = String();
@@ -319,6 +320,7 @@ Error ResourceRoot::mount_with_mode(const String &path, const String &expansion,
 	// Game-aware SCR keying: resolve the chosen game's policy once (gameprofile is the single
 	// source) and apply it for subsequent read_file calls. An empty/unknown code is the JO default.
 	index_.set_scr_policy(gameprofile_scr_policy_for_code(game_code.utf8().get_data()));
+	game_code_ = game_code;
 	last_error_ = String();
 	return OK;
 }
@@ -364,6 +366,7 @@ String ResourceRoot::get_last_error() const {
 void ResourceRoot::clear() {
 	root_dir_ = String();
 	last_error_ = String();
+	game_code_ = String();
 	expansion_ = String();
 	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
