@@ -3619,6 +3619,13 @@ target_link_libraries(npruntime_lan_probe_client_test
     PRIVATE opennova_lan_probe_client opennova_net opennova_app_common)
 add_test(NAME npruntime_lan_probe_client COMMAND npruntime_lan_probe_client_test)
 
+# The remote-admin client codec (net/admin): framing, the challenge, the login the server's own
+# decrypt recovers, and the read-only replies in the server's formats.
+add_executable(admin_protocol_test admin/admin_protocol_test.cpp)
+target_link_libraries(admin_protocol_test PRIVATE opennova_net)
+target_include_directories(admin_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/admin)
+add_test(NAME admin_protocol COMMAND admin_protocol_test)
+
 # nw-lister (apps/nw_lister): the listing JSON + credentials readers, and a
 # --dry-run that builds every gate/session/host statement without a socket.
 add_executable(novaworld_nw_lister_listing_test novaworld/nw_lister_listing_test.cpp)

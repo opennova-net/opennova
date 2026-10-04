@@ -21,7 +21,8 @@
   - `net/` — the retail WIRE (ADRs 0009–0012, 0019; ADR 0043 d4: net means
     wire): novacrypto, napi, npwire (the in-game codec, the NWU session
     framing, capture decode, the LAN discovery codec, the datagram-socket
-    seam) and novaworld (the session/gate legs + the service). Nothing under
+    seam), novaworld (the session/gate legs + the service) and admin (the
+    game server's remote-admin TCP protocol). Nothing under
     `net/` includes `runtime/`; `opennova_net` never links `opennova_runtime`.
   - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/inmatch`
     (ex net/inmatch + net/npruntime: `session.*` owns lifecycle, role policy,
@@ -75,8 +76,8 @@
   leaf directly) — `opennova_formats`
   (every formats/ lib; the mission FORMAT lib's membership here is the fold that keeps
   the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
-  pcapio), `opennova_net` (novacrypto, napi, npwire + novaworld session/gate — the
-  wire), `opennova_runtime` (the rest of runtime/, including `inmatch` and
+  pcapio), `opennova_net` (novacrypto, napi, npwire, admin + novaworld session/gate —
+  the wire), `opennova_runtime` (the rest of runtime/, including `inmatch` and
   `replication`), and `opennova_novaworld_service` (the service alone — the ONLY
   target linking `opennova_sqlite`; the Godot layer (`godot/src`) links
   `opennova_runtime`, which PUBLIC-links `opennova_net`, never the service).
@@ -136,7 +137,8 @@
   turn a parity test green (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
   The full writer-parity gate is writer from scratch + roundtrip test + retail-corpus
   byte sweep where a corpus exists + a ledgered D-entry when output legitimately differs.
-- The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`) and the
+- The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`,
+  `engine/net/admin`) and the
   replication seam (`engine/runtime/replication`) are
   held to wire compatibility: encoders produce bytes a stock client/server accepts,
   decoders read what a stock client/server emits, and opennova↔opennova requires

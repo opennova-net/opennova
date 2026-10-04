@@ -2,8 +2,9 @@
 # target level.
 #
 #   opennova_net — the WIRE: novacrypto, napi, the npwire game wire codec
-#     (+ the LAN discovery codec and the datagram-socket seam), and the
-#     novaworld SESSION and GATE legs (client-side matchmaking). The in-match
+#     (+ the LAN discovery codec and the datagram-socket seam), the admin
+#     remote-admin protocol, and the novaworld SESSION and GATE legs
+#     (client-side matchmaking). The in-match
 #     session and replication moved to engine/runtime (ADR 0043 d4); this
 #     target links nothing above base. The godot/src links opennova_runtime,
 #     which PUBLIC-links this — never the service.
@@ -24,6 +25,8 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/nwu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/pubcrypto.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/epask.cpp
+    # admin — the retail remote-admin TCP protocol (CAdminServer): framing, login, replies
+    ${CMAKE_CURRENT_SOURCE_DIR}/admin/admin_protocol.cpp
     # napi — the NAPI envelope/TLV/session primitives
     ${CMAKE_CURRENT_SOURCE_DIR}/napi/envelope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/napi/literal.cpp
