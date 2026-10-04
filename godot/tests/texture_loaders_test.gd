@@ -150,22 +150,25 @@ func test_alpha_mode_art_draws_twice_the_vertex_colour() -> void:
 		if drawn.size() != 1:
 			continue
 		assert_eq(compiled[0].r8, 80, "the stance tint is the vertex colour")
-		var draws: Array = hud.get_textured_draws()
-		assert_eq(draws.size(), 1)
+		# Both materials draw a white texel at twice 0x50.
+		assert_eq(drawn[0].r8, 160, "0x50 doubles to 0xA0 (%s)" % stance_name)
+		var rows: Array = hud.get_flat_submissions()
+		assert_eq(rows.size(), 1)
+		if rows.size() != 1:
+			continue
 		if stance_name == "stance.tga":
 			assert_true(drawn[0].is_equal_approx(_doubled(compiled[0])),
 					"alpha mode draws twice the vertex colour (%s from %s)" % [drawn[0], compiled[0]])
-			assert_eq(drawn[0].r8, 160, "0x50 doubles to 0xA0")
-			if draws.size() == 1:
-				assert_eq(draws[0].material, "alpha")
+			assert_eq(rows[0].kind, "rect", "the alpha material folds into the submitted colour")
+			assert_eq(rows[0].colors[0].r8, 160)
 		else:
-			# Colour mode: the vertex colour goes to the device, whose 0x651
-			# material runs MODULATE2X(TEXTURE, DIFFUSE) (D-HUD-49).
-			assert_true(drawn[0].is_equal_approx(compiled[0]), "colour mode hands the vertex colour on")
-			if draws.size() == 1:
-				assert_eq(draws[0].material, "modulate2x",
-						"a .FULL name draws under the colour material's MODULATE2X")
-				assert_eq(draws[0].white.r8, 160, "a white texel under 0x50 draws 0xA0")
+			# Colour mode: the raw vertex colour goes to the device, whose 0x651
+			# material runs MODULATE2X(TEXTURE, DIFFUSE) on the flagged command
+			# (D-HUD-49).
+			assert_eq(rows[0].kind, "triangles", "a .FULL name draws a flagged triangle pair")
+			for uv: Vector2 in rows[0].uvs:
+				assert_gte(uv.y, 8.0, "every vertex carries the MODULATE2X flag")
+			assert_eq(rows[0].colors[0].r8, 80, "the device gets the raw vertex colour")
 
 
 # --- 2. Model texture type 1 -----------------------------------------------

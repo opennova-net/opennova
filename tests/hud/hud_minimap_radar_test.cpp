@@ -82,8 +82,6 @@ void test_marks_order_colours_and_geometry() {
 	CHECK(m[1]->color == 0xFF808020u, "an olive-only sector draws the miss diffuse");
 	CHECK(m[2]->color == 0xFFFF2020u, "red beats olive on a shared 24-sector");
 	CHECK(m[3]->color == 0xFF808020u, "the olive 24-sector draws the miss diffuse");
-	for (const HudMapSprite *s : m)
-		CHECK(s->modulate2x, "every mark asks the device for the MODULATE2X stage");
 	// Float centre, base = the half-height under bit 16, quad = base x 1.25.
 	for (const HudMapSprite *s : m) {
 		CHECK(near(s->center_x, 900.0f) && near(s->center_y, 650.0f), "the marks centre on the rect");
@@ -150,9 +148,8 @@ void test_threat_ring_geometry_and_states() {
 	// compring.tga is a colour-mode HUD texture: its sprite runs the 0x651
 	// material's MODULATE2X stage on the device over the white diffuse (D-HUD-49).
 	CHECK(idle.ring_tris_before_sprite < idle.sprites.size() &&
-			idle.sprites[idle.ring_tris_before_sprite].modulate2x &&
 			idle.sprites[idle.ring_tris_before_sprite].color == 0xFFFFFFFFu,
-			"the compass draws its raw white diffuse under the device's MODULATE2X");
+			"the compass draws its raw white diffuse");
 	// Radii at 1024 wide: x' = cx -/+ 100 under bit 16, rho0 = 100 - 4 = 96,
 	// R = 96 - 2 = 94 -> bands {93..94, 94..96, 96..97}.
 	const double c0 = opennova::io::bam_table_cos(opennova::io::bam_table_index(0x0ACAA800u));

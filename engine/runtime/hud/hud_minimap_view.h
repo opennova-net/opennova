@@ -75,7 +75,6 @@ void emit_footprint(const MapView &view, const HudMinimapInput &input,
 
 void marker_uv(const HudMinimapInput &input, uint8_t icon, float &u0,
 		float &v0, float &u1, float &v1);
-uint32_t marker_modulate2x_color(uint32_t argb);
 // The 64-frame colour pulse toward white.
 uint32_t pulse_color(uint32_t argb, int ticks);
 // ((frame - 8) & 0x3F) folded above 0x20 — the pulse phase every leg shares

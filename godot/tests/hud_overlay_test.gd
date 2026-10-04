@@ -202,6 +202,51 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 			"The enlarged map water field clamps at its authored edge.")
 
 
+# Every textured map sprite's material is colour family 0x600 (TSDicon 0x651,
+# compring 0x651): the corner map's top item receives each with the +8 UV.x
+# flag and the raw diffuse, the blip's team colour unfolded (D-HUD-49)
+# [orig: Render_DrawIconStripCell_Debug @0x67bae0; HUD_DrawCompassIndicator
+# @0x59c900].
+func test_map_sprites_submit_their_materials_modulate2x_flag() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"HUDSPINMAPX1 810",
+		"HUDSPINMAPX2 1020",
+		"HUDSPINMAPY1 552",
+		"HUDSPINMAPY2 762",
+	]), PackedStringArray(["TSDicon.tga", "compring.tga"]), {
+		"TSDicon.tga": Vector2i(64, 1920), "compring.tga": Vector2i(32, 32),
+	})
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	# One live marker in a half-bright blue the device doubles.
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, PackedInt32Array([
+		7, 36, 1,
+		0, 0x1001, 64 << 16, 0, 0, 0, 10, 0xFF20407F - 0x100000000, 0, 0, 1984, 1,
+		1, 0, 0, 6, 0,
+		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
+		0, 0,
+		0, 0, 0, 0, 0, 0,
+	]))
+	await get_tree().process_frame
+	var blips := 0
+	var compass := 0
+	for row: Dictionary in hud.get_map_submissions():
+		if row.size != Vector2i(64, 1920) and row.size != Vector2i(32, 32):
+			continue
+		for uv: Vector2 in row.uvs:
+			assert_gte(uv.x, MAP_MODULATE2X_FLAG * 0.5,
+					"a %s sprite vertex carries the MODULATE2X flag" % row.size)
+		if row.size == Vector2i(64, 1920):
+			blips += 1
+			assert_eq(row.colors[0].to_argb32(), 0xFF20407F,
+					"the blip submits the raw marker colour")
+		else:
+			compass += 1
+			assert_eq(row.colors[0], Color.WHITE, "the compass submits its raw white diffuse")
+	assert_eq(blips, 1, "the TSDicon run reaches the top item")
+	assert_eq(compass, 1, "the compass run reaches the top item")
+
+
 func test_hud_color_index_round_trips_and_clamps() -> void:
 	var hud := _make_overlay()
 	assert_eq(hud.get_hud_color_index(), 2,
@@ -299,26 +344,81 @@ func test_crosshair_requires_active_weapon() -> void:
 		"An armed hip stance emits the five tapered regions (14 triangles).")
 
 
-# Colour-mode HUD art (material 0x651) draws under MODULATE2X(TEXTURE,
-# DIFFUSE): twice texel x vertex colour, saturated, whatever element draws it
-# (D-HUD-49) [orig: sub_591750 @0x591750 (0x651 @0x59181a);
-# RenderState_DecodeModeColorStage @0x6814BE..0x6814CA].
-func _modulate2x_white(c: Color) -> Color:
-	return Color8(mini(c.r8 * 2, 255), mini(c.g8 * 2, 255), mini(c.b8 * 2, 255), c.a8)
+# A texture whose material word is colour family 0x600 draws under
+# MODULATE2X(TEXTURE, DIFFUSE), twice texel x vertex colour, saturated, whatever
+# loader read it and whatever element draws it (D-HUD-49): the flat HUD's
+# commands carry the shader's +16 UV.y flag, the map's sprites its +8 UV.x flag,
+# and the vertex colour stays the raw diffuse [orig:
+# RenderState_DecodeModeColorStage @0x681080, `& 0x3F00` @0x68113a].
+const FLAT_MODULATE2X_FLAG := 16.0
+const MAP_MODULATE2X_FLAG := 8.0
 
 
-func _draws_of(hud: HudOverlay, primitive: String, material: String) -> Array:
+# The flat submission rows drawn from the texture of `size`.
+func _flat_rows(hud: HudOverlay, size: Vector2i) -> Array:
 	var out := []
-	for row: Dictionary in hud.get_textured_draws():
-		if row.primitive == primitive and row.material == material:
+	for row: Dictionary in hud.get_flat_submissions():
+		if row.size == size:
 			out.append(row)
 	return out
 
 
-func _check_modulate2x_rows(rows: Array, what: String) -> void:
-	for row: Dictionary in rows:
-		assert_eq(row.white.to_rgba32(), _modulate2x_white(row.color).to_rgba32(),
-				"%s: a white texel draws twice the vertex colour, saturated" % what)
+# A row the flat shader doubles: a triangle array whose every UV carries the flag.
+func _flat_doubled(row: Dictionary) -> bool:
+	if row.kind != "triangles" or row.uvs.is_empty():
+		return false
+	for uv: Vector2 in row.uvs:
+		if uv.y < FLAT_MODULATE2X_FLAG * 0.5:
+			return false
+	return true
+
+
+# The shaders decode exactly the flags the submissions write: the flat shader
+# strips +16 off UV.y at >= 8 and doubles the colour (before any second stage,
+# as the device's stage 0 precedes stage 1), the map shader +8 off UV.x at >= 4.
+func test_shaders_decode_the_submitted_modulate2x_flags() -> void:
+	var flat := HudOverlay.flat_shader_code()
+	assert_true(flat.contains("if (UV.y >= 8.0) {\n\t\tUV.y -= 16.0;\n\t\tmodulate2x_on = 1.0;"),
+			"the flat shader strips the +16 UV.y flag")
+	var fragment := flat.substr(flat.find("void fragment()"))
+	var doubling := fragment.find(
+			"if (modulate2x_on > 0.5) {\n\t\tCOLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));")
+	assert_gt(doubling, 0, "the flagged command's colour doubles, saturated")
+	assert_gt(fragment.find("if (stage1_on > 0.5)"), doubling,
+			"the stage-0 doubling runs before the second stage")
+	var map := HudOverlay.map_shader_code()
+	assert_true(map.contains("if (UV.x >= 4.0) {\n\t\tUV.x -= 8.0;\n\t\tmodulate2x_on = 1.0;"),
+			"the map shader strips the +8 UV.x flag")
+	assert_true(map.contains(
+			"if (modulate2x_on > 0.5) {\n\t\tCOLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));"),
+			"the flagged sprite's colour doubles, saturated")
+
+
+# Every HUD texture draws through its maker's material word, not its loader's:
+# the file loader's capture-point icons and waypoint indicator (0x300631) double
+# like the HUD loader's colour mode (0x651) [orig: HUD_LoadAllTextures @0x59dda0 —
+# TSDicon 0x651 @0x59e042, WPIndctr 0x300631 @0x59e056, JO_LFP / R_LFP / N_LFP
+# 0x300631 @0x59e09e / @0x59e0b7 / @0x59e0d0; BoxTexture_LoadAndSetupUVRegions
+# 0x651 @0x56af2d; CTipSystem_Init 0x651 @0x5b69bc; CNetworkIcons_LoadTextures
+# 0x300451 @0x4c2d53].
+func test_hud_textures_take_their_makers_material_words() -> void:
+	var names := PackedStringArray(["JO_LFP.tga", "R_LFP.tga", "N_LFP.tga", "WPIndctr.tga",
+			"TSDicon.tga", "border.tga", "boxtile.tga", "border3.tga", "k_tip.tga", "g_tip.tga",
+			"neticon1.tga", "neticon2.tga", "neticon3.tga", "compring.tga", "lfp_alf.tga"])
+	var fixture := _load_temp_layout(PackedStringArray(["ALPHAFADE 30 50 3"]), names)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	for name in ["JO_LFP.tga", "R_LFP.tga", "N_LFP.tga", "WPIndctr.tga"]:
+		assert_eq(hud.get_texture_material_word(name), 0x300631,
+				"%s draws through its maker's 0x300631, colour family 0x600" % name)
+	for name in ["TSDicon.tga", "border.tga", "border3.tga", "k_tip.tga", "g_tip.tga",
+			"compring.tga", "lfp_alf.tga"]:
+		assert_eq(hud.get_texture_material_word(name), 0x651, "%s draws through 0x651" % name)
+	for name in ["neticon1.tga", "neticon2.tga", "neticon3.tga"]:
+		assert_eq(hud.get_texture_material_word(name), 0x300451,
+				"%s draws through 0x300451, SELECTARG1(TEXTURE)" % name)
+	assert_eq(hud.get_texture_material_word("boxtile.tga"), 0,
+			"the camo is only ever the combined material's second stage")
 
 
 # The triangle class: the crosshair's tapered regions (cross%02d.tga, colour mode).
@@ -331,13 +431,17 @@ func test_colour_mode_crosshair_draws_under_modulate2x() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, fixture.root)
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
-	var rows := _draws_of(hud, "tri", "modulate2x")
-	assert_eq(rows.size(), 14, "every crosshair triangle takes the colour material")
-	assert_eq(_draws_of(hud, "tri", "plain").size(), 0, "no crosshair triangle draws plain")
-	_check_modulate2x_rows(rows, "crosshair")
+	var rows := _flat_rows(hud, Vector2i(8, 8))
+	assert_eq(rows.size(), 1, "the crosshair's triangles submit as one run")
+	var vertices := 0
+	for row: Dictionary in rows:
+		assert_true(_flat_doubled(row), "every crosshair vertex carries the MODULATE2X flag")
+		vertices += row.uvs.size()
+	assert_eq(vertices, 14 * 3, "the run holds all fourteen triangles")
 
 
-# The quad class: the hudpos STATICFRAME background (colour mode), drawn raw.
+# The quad class: the hudpos STATICFRAME background (colour mode), submitted as
+# a flagged triangle pair at the raw white diffuse.
 func test_colour_mode_static_frame_draws_under_modulate2x() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"STATICFRAME frame.tga 10 20",
@@ -345,9 +449,13 @@ func test_colour_mode_static_frame_draws_under_modulate2x() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, fixture.root)
 	hud.set_player_state(100, 1.0, 0, 80.0)
-	var rows := _draws_of(hud, "quad", "modulate2x")
-	assert_eq(rows.size(), 1, "the static frame quad takes the colour material")
-	_check_modulate2x_rows(rows, "static frame")
+	var rows := _flat_rows(hud, Vector2i(16, 8))
+	assert_eq(rows.size(), 1, "the static frame quad submits once")
+	if rows.size() == 1:
+		assert_true(_flat_doubled(rows[0]), "as a flagged triangle pair")
+		assert_eq(rows[0].colors[0], Color.WHITE, "at the raw white diffuse")
+	assert_eq(hud.get_textured_quad_colors(true)[0], Color.WHITE,
+			"a white texel under white draws white")
 
 
 # The centred-quad class: a capture point's own-zone tile (lfp_dlf.tga, colour
@@ -375,12 +483,14 @@ func test_colour_mode_zone_tile_draws_half_bright_under_modulate2x() -> void:
 			_capture_zone_snapshot(0))
 	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
 	assert_eq(hud.get_draw_list_stats().tris - before.tris, 2, "the own-zone tile compiles")
-	var rows := _draws_of(hud, "tri", "modulate2x")
-	assert_eq(rows.size(), 2, "the zone tile's two triangles take the colour material")
+	var rows := _flat_rows(hud, Vector2i(36, 36))
+	assert_eq(rows.size(), 1, "the zone tile's two triangles submit as one run")
 	for row: Dictionary in rows:
-		assert_true(row.color.r8 <= 127 and row.color.g8 <= 127 and row.color.b8 <= 127,
-				"the tile's diffuse is the raw half-bright point colour")
-	_check_modulate2x_rows(rows, "zone tile")
+		assert_eq(row.uvs.size(), 6)
+		assert_true(_flat_doubled(row), "both triangles carry the MODULATE2X flag")
+		for c: Color in row.colors:
+			assert_true(c.r8 <= 127 and c.g8 <= 127 and c.b8 <= 127,
+					"the tile's diffuse is the raw half-bright point colour")
 
 
 # The alpha class stays its own: stance art (alpha mode, material 0xA51).
@@ -399,8 +509,16 @@ func test_alpha_mode_stance_keeps_the_alpha_material() -> void:
 	hud.configure(fixture.layout, fixture.root)
 	hud.set_player_state(100, 1.0, 2, 80.0)
 	assert_eq(hud.get_draw_list_stats().quads, 1, "one stance frame quad")
-	assert_eq(_draws_of(hud, "quad", "alpha").size(), 1, "the stance quad keeps the alpha material")
-	assert_eq(_draws_of(hud, "quad", "modulate2x").size(), 0)
+	var rows := hud.get_flat_submissions()
+	assert_eq(rows.size(), 1, "the stance quad submits once")
+	if rows.size() == 1:
+		assert_eq(rows[0].kind, "rect", "an unflagged texture rect: no MODULATE2X stage")
+		var compiled: Color = hud.get_textured_quad_colors(false)[0]
+		var doubled := Color8(mini(compiled.r8 * 2, 255), mini(compiled.g8 * 2, 255),
+				mini(compiled.b8 * 2, 255), compiled.a8)
+		assert_eq(rows[0].colors[0].to_rgba32(), doubled.to_rgba32(),
+				"the alpha material's ADD(DIFFUSE, DIFFUSE) rides the submitted colour")
+		assert_eq(hud.get_textured_quad_colors(true)[0].to_rgba32(), doubled.to_rgba32())
 
 
 func test_crosshair_missing_texture_draws_nothing() -> void:
@@ -816,6 +934,22 @@ func test_stdbox_pieces_carry_the_camo_stage() -> void:
 	assert_eq(stats.quads_stage2, 8,
 			"The untitled box's eight border pieces carry the camo stage.")
 	assert_gt(stats.quads_textured, 8, "The wrap-tiled fill draws beside them.")
+	# Every box quad draws through the box material 0x651 at retail's raw
+	# alpha<<24 | 0x7F7F7F: stage 0 doubles it on the device (the UV.y flag),
+	# the pieces' camo stage rides the UV.x flag [orig: Render_HUDBoxOverlay
+	# @0x56b700, the diffuse @0x56b70e..0x56b713; BoxTexture_LoadAndSetupUVRegions
+	# 0x651 @0x56ae78 / @0x56af2d].
+	var pieces := 0
+	var fills := 0
+	for row: Dictionary in _flat_rows(hud, Vector2i(128, 128)):
+		assert_true(_flat_doubled(row), "a box quad carries the MODULATE2X flag")
+		assert_eq(row.colors[0].to_argb32(), 0xFF7F7F7F, "at the raw half-bright diffuse")
+		if row.uvs[0].x >= 4.0:
+			pieces += 1
+		else:
+			fills += 1
+	assert_eq(pieces, 8, "the eight pieces add the camo stage")
+	assert_gt(fills, 0, "the fill tiles draw the stage-0 doubling alone")
 	await get_tree().process_frame
 	assert_true(is_instance_valid(hud), "The two-stage pieces render safely.")
 	hud.set_message_log_shown(false)

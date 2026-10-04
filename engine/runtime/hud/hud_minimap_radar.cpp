@@ -98,7 +98,6 @@ void emit_marks(const HudMinimapInput &input, const uint8_t *red, const uint8_t 
 		// the pass [orig: HUD_LoadAllTextures @0x59de25..0x59de42;
 		// GfxShader_ApplyPassChecked(tex, 0x1300000) @0x59c484 / @0x59c634].
 		mark.color = red[k] != 0 ? kMarkHit : kMarkMiss;
-		mark.modulate2x = true;
 		mark.texture = texture;
 		mark.layer = 5;
 		out.sprites.push_back(mark);

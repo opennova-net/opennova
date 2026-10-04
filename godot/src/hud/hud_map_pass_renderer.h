@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/transform2d.hpp>
 
@@ -8,18 +9,22 @@
 #include <runtime/hud/hud_map_view.h>
 #include <runtime/hud/hud_minimap.h>
 
+#include <cstdint>
 #include <vector>
 
 namespace godot {
 
 // The textures one map pass samples: the colormap atlas, the depthspin water
 // mask, the texture-slot table the sprites index (kHudTexMapIcons + the
-// sprite's texture offset) and the font page table the map glyphs index.
+// sprite's texture offset), per slot whether its texture's material word runs
+// MODULATE2X(TEXTURE, DIFFUSE) (colour family 0x600; null: none does), and the
+// font page table the map glyphs index.
 struct HudMapPassTextures {
 	Ref<Texture2D> terrain;
 	Ref<Texture2D> water;
 	const Ref<Texture2D> *slots = nullptr;
 	int slot_count = 0;
+	const uint8_t *slot_modulate2x = nullptr;
 	const Ref<Texture2D> *pages = nullptr;
 	size_t page_count = 0;
 };
@@ -40,11 +45,11 @@ struct HudMapSegmentsView {
 // retail decal stage's x4 output split across two 1x items), the depthspin
 // water cutout, and the top item (grid rules, footprints, sprites, lines,
 // glyphs, then any over-lines). The top item draws under the owner's map
-// material, where a MODULATE2X sprite (HudMapSprite::modulate2x: the colour-mode
-// radar marks and compass ring) carries a +8 flag on its UV.x that selects the
-// colour stage per command, so every sprite keeps its place in the retail draw
-// order. The corner spinmap, the M-cycle big map and the DEATH MAP window each
-// own one; the materials stay their owner's.
+// material, where a sprite whose slot runs MODULATE2X
+// (HudMapPassTextures::slot_modulate2x) carries a +8 flag on its UV.x that
+// selects the colour stage per command, so every sprite keeps its place in the
+// retail draw order. The corner spinmap, the M-cycle big map and the DEATH MAP
+// window each own one; the materials stay their owner's.
 class HudMapPassRenderer {
 public:
 	HudMapPassRenderer() = default;
@@ -74,8 +79,13 @@ public:
 
 	bool water_sampling_configured() const { return water_sampling_configured_; }
 	bool top_sampling_configured() const { return top_sampling_configured_; }
+	// While set, render also appends each sprite submission to `record` as
+	// {texture: slot (-1 untextured), size, uvs, colors}, exactly as the top item
+	// receives it (the owner's test seam).
+	void set_record(Array *record) { record_ = record; }
 
 private:
+	Array *record_ = nullptr;
 	RID base_item_;
 	RID add_item_;
 	RID water_item_;

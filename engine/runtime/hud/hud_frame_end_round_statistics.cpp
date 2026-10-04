@@ -41,8 +41,8 @@ void HudFrameCompiler::element_end_round_statistics(const HudFrameState &state,
 		if (title_gap > kBoxTitleTrim * s) title_gap -= kBoxTitleTrim * s;
 	}
 	emit_stdbox(sx(static_cast<float>(kEndRoundStatsBoxX1), w), sy(top, h),
-			sx(static_cast<float>(kEndRoundStatsBoxX2), w), sy(box_y2, h), w,
-			0xFFFFFFFFu, title_gap);
+			sx(static_cast<float>(kEndRoundStatsBoxX2), w), sy(box_y2, h), w, 0xFFu,
+			title_gap);
 	// The title just inside the box corner, white [orig: HUD_DrawLabelBox's
 	// (x + 15, y + 2) @0x51efe1/@0x51efe8].
 	if (!st.title.empty()) {

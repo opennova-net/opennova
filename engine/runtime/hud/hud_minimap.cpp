@@ -400,21 +400,6 @@ void marker_uv(const HudMinimapInput &input, uint8_t icon, float &u0,
 	v1 = (static_cast<float>(cell + 1) * cell_px + 0.5f) / strip_h;
 }
 
-// Ordinary TSDicon blips submit the raw team color to the strip renderer,
-// whose texture stage is MODULATE2X. Canvas modulates only once, so fold the
-// missing output stage into the diffuse RGB. Alpha is not doubled.
-// [orig: Minimap_DrawBlip @0x597f48..0x597f73 ->
-//  Render_DrawIconStripCell_Debug @0x67bae0; TSS MODULATE2X]
-uint32_t marker_modulate2x_color(uint32_t argb) {
-	const auto doubled = [](uint32_t channel) {
-		return std::min(channel * 2u, 255u);
-	};
-	return (argb & 0xFF000000u) |
-			(doubled((argb >> 16) & 0xFFu) << 16) |
-			(doubled((argb >> 8) & 0xFFu) << 8) |
-			doubled(argb & 0xFFu);
-}
-
 // Clip a segment to the viewport rect (Liang-Barsky). The line legs draw
 // through ztest-always passes (0x200000 / 0x300000), so only the rect
 // viewport crops them, never the disc mask. Returns false when fully outside.
@@ -530,10 +515,6 @@ using namespace minimap_detail;
 void hud_icon_strip_cell_uv(const HudMinimapInput &input, uint8_t icon,
 		float &u0, float &v0, float &u1, float &v1) {
 	marker_uv(input, icon, u0, v0, u1, v1);
-}
-
-uint32_t hud_icon_strip_modulate2x_color(uint32_t argb) {
-	return marker_modulate2x_color(argb);
 }
 
 int32_t spinmap_zoom_step(int32_t zoom_q16, int direction) {
@@ -979,10 +960,14 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		draw_waypoint_pointer(c, waypoint_state_color);
 
 	// Altitude nub: the WPIndctr frame drawn just above the rect top edge,
-	// nudged -8/+8 design px for above/below, in the raw state color.
+	// nudged -8/+8 design px for above/below, in the raw state color. The
+	// half-bright state colours are the diffuse retail passes: the strip's
+	// material 0x300631 (colour family 0x600) doubles them on the device,
+	// tile by tile (hud_texture_materials.h kWpIndicatorMaterialWord).
 	// [orig: bit20 leg @0x5a79b1..0x5a7a10 — y_base = y1 - rect_h/32, half
 	//  10 & shift 8 through Viewport_ScaleToVirtualCoords,
-	//  CEffect_Begin_Debug(WPIndctr handle, rect, g_WaypointAltitudeColor, extra)]
+	//  CEffect_Begin_Debug(WPIndctr handle, rect, g_WaypointAltitudeColor, extra)
+	//  -> Render_DrawTiledTextureStrip @0x67aed0]
 	if (input.waypoint_present && (flags & 0x100000u)) {
 		const float sx = view.rect_w > 0.0f ? view.rect_w /
 				std::max(1.0f, input.rect_x2 - input.rect_x1) : 1.0f;
@@ -1083,7 +1068,6 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		// (renderer::hud_color_material_argb; D-HUD-49)
 		// [orig: HUD_LoadAllTextures @0x59DDA0 — compring through sub_591750 in
 		//  colour mode; RenderState_DecodeModeColorStage @0x6814BE..0x6814CA].
-		compass.modulate2x = true;
 		out.sprites.push_back(compass);
 	}
 }

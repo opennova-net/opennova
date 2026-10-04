@@ -279,8 +279,9 @@ void test_draw(const fnt::fnt_font_t *font) {
 					box[0].v1 == 0.5f);
 			// The fill insets one 32-px cell (scale 1024/1024) from the rect.
 			CHECK(box[0].x0 == 8.0f + 32.0f && box[0].y0 == 100.0f + 32.0f);
-			// alpha 255, the 0x7F7F7F diffuse under MODULATE2X.
-			CHECK(box[0].color == 0xFFFEFEFEu);
+			// alpha 255, the raw 0x7F7F7F diffuse the box material's
+			// MODULATE2X doubles on the device (D-HUD-49).
+			CHECK(box[0].color == 0xFF7F7F7Fu);
 			// The top-left piece sits at the slot origin.
 			CHECK(box[1].x0 == 8.0f && box[1].y0 == 100.0f);
 		}
@@ -290,7 +291,8 @@ void test_draw(const fnt::fnt_font_t *font) {
 			const auto near = [](float a, float b) { return a > b - 0.01f && a < b + 0.01f; };
 			CHECK(near(icon[0].x0, 36.0f) && near(icon[0].y0, 132.0f) &&
 					near(icon[0].x1, 84.0f) && near(icon[0].y1, 180.0f));
-			CHECK(icon[0].color == 0xFFFFFFFFu); // grey 0x80 doubled, clamped
+			// The raw grey 0x80 the icon's material 0x651 doubles on the device.
+			CHECK(icon[0].color == 0xFF808080u);
 		}
 		CHECK(quads_with(list, kHudTexTipGameplay).empty());
 		// The header at (88, 142) orange, the body at (36, 192) white (the

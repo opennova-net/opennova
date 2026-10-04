@@ -360,11 +360,16 @@ void test_objectives_panel(const fnt_font_t *font) {
 		// (no row-3 cell).
 		float right = 0.0f;
 		bool titled = false;
+		bool raw_diffuse = true;
 		for (const HudQuad &q : list.quads) {
 			if (q.texture != kHudTexBoxBorder) continue;
 			if (q.x1 > right) right = q.x1;
 			if (q.v0 >= 0.75f && q.u0 < 0.75f) titled = true;
+			if (q.color != 0xFF7F7F7Fu) raw_diffuse = false;
 		}
+		// Every box quad carries retail's alpha<<24 | 0x7F7F7F, the raw diffuse
+		// the box material's MODULATE2X doubles on the device (D-HUD-49).
+		CHECK(raw_diffuse);
 		GameFont measure;
 		measure.set_font(font);
 		int hw = 0;

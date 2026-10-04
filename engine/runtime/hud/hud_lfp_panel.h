@@ -93,9 +93,12 @@ inline constexpr int kLfpStatusTextDx = -4;
 
 // The icon quad's constant modulate [orig: CEffect_Begin_Debug @0x67BB50, a
 // thunk to Render_DrawTiledTextureStrip @0x67AED0 (effect, rect[4], colour, frame);
-// the colour push 0xFF7F7F7F @0x598975, the call @0x59898B]. The three LFP
+// the colour push 0xFF7F7F7F @0x598971, the call @0x59898B]. The three LFP
 // textures already carry their own team colours, so this is a flat BRIGHTNESS
 // term, not a tint — replacing it with the team colour would double-apply it.
+// It is the raw diffuse: each tile's material 0x300631 (colour family 0x600,
+// hud_texture_materials.h kLfpIconMaterialWord) doubles it on the device, so
+// the icon lands at its texels' own brightness (D-HUD-49).
 inline constexpr uint32_t kLfpIconModulate = 0xFF7F7F7Fu;
 
 // The icon textures are VERTICAL FRAME ATLASES (retail ships 64x256 = four

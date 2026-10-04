@@ -2,11 +2,13 @@
 #include "util/color_convert.h"
 
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 
 #include <runtime/hud/hud_frame.h> // kHudTexMapIcons
 
@@ -124,7 +126,7 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 	// glyphs); a MODULATE2X sprite flags its own vertices.
 	const RID top_item = top_item_;
 	// The UV.x flag the top material reads as the MODULATE2X colour stage
-	// (HudOverlay's kMapModulate2xShader); map UVs stay inside [0, 1].
+	// (HudOverlay::map_shader_code); map UVs stay inside [0, 1].
 	constexpr float kModulate2xUvFlag = 8.0f;
 
 	// One triangle-array submission per (item, texture) group: the per-frame
@@ -273,10 +275,23 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 		flush_tris(top_item, empty_texture);
 	};
 
+	// One sprite run onto the top item, and its copy into the owner's record.
+	const auto flush_sprites = [&](int slot, const Ref<Texture2D> &tex) {
+		if (record_ != nullptr && !indices.is_empty()) {
+			Dictionary row;
+			row["texture"] = slot;
+			row["size"] = tex.is_valid() ? Vector2i(tex->get_width(), tex->get_height()) : Vector2i();
+			row["uvs"] = uvs;
+			row["colors"] = colors;
+			record_->push_back(row);
+		}
+		flush_tris(top_item, tex);
+	};
+
 	// Sprites batch by consecutive texture slot (insertion order is the
 	// compiler layer order, so only same-texture runs may merge). `with_ring`
-	// submits the pass's ring strips at their split. A MODULATE2X sprite's
-	// vertices carry the top material's UV flag.
+	// submits the pass's ring strips at their split. A sprite whose texture's
+	// material runs MODULATE2X carries the top material's UV flag.
 	const auto submit_sprites = [&](const opennova::hud::HudMapPass &pass, size_t begin,
 			size_t end, bool with_ring) {
 		int run_texture_slot = -1;
@@ -285,7 +300,7 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 			const opennova::hud::HudMapSprite &sprite = pass.sprites[sprite_index];
 			if (with_ring && sprite_index == pass.ring_tris_before_sprite &&
 					!pass.ring_tris.empty()) {
-				flush_tris(top_item, run_texture);
+				flush_sprites(run_texture_slot, run_texture);
 				run_texture_slot = -2;
 				submit_ring();
 			}
@@ -293,15 +308,17 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 			const int texture_slot = sprite.texture == opennova::hud::kHudMapTextureNone
 					? -1
 					: opennova::hud::kHudTexMapIcons + sprite.texture;
+			const bool slot_valid = texture_slot >= 0 && texture_slot < p_textures.slot_count;
 			if (texture_slot != run_texture_slot) {
-				flush_tris(top_item, run_texture);
+				flush_sprites(run_texture_slot, run_texture);
 				run_texture_slot = texture_slot;
-				run_texture = texture_slot >= 0 && texture_slot < p_textures.slot_count &&
-								p_textures.slots != nullptr
+				run_texture = slot_valid && p_textures.slots != nullptr
 						? p_textures.slots[texture_slot]
 						: Ref<Texture2D>();
 			}
-			const float u_flag = sprite.modulate2x ? kModulate2xUvFlag : 0.0f;
+			const bool modulate2x = slot_valid && p_textures.slot_modulate2x != nullptr &&
+					p_textures.slot_modulate2x[texture_slot] != 0;
+			const float u_flag = modulate2x ? kModulate2xUvFlag : 0.0f;
 			if (sprite.geom_count != 0) {
 				// The compiler's cropped/banded triangle list replaces the quad.
 				const size_t geom_end = std::min<size_t>(pass.geom.size(),
@@ -338,7 +355,7 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 			};
 			push_quad(corners, quad_uvs, sprite.color);
 		}
-		flush_tris(top_item, run_texture);
+		flush_sprites(run_texture_slot, run_texture);
 		if (with_ring && pass.ring_tris_before_sprite >= end && !pass.ring_tris.empty())
 			submit_ring();
 	};

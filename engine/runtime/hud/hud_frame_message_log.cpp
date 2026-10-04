@@ -54,7 +54,7 @@ void HudFrameCompiler::element_message_log(const HudFrameState &state, float w,
 		if (title_gap > kBoxTitleTrim * s) title_gap -= kBoxTitleTrim * s;
 	}
 	emit_stdbox(sx(kMessageLogBoxX1, w), sy(box_y1, h), sx(kMessageLogBoxX2, w),
-			sy(box_y2, h), w, 0xFFFFFFFFu, title_gap);
+			sy(box_y2, h), w, 0xFFu, title_gap);
 	// The title just inside the box corner, white [orig: HUD_DrawLabelBox's
 	// (x + 15, y + 2) @0x51efe1/@0x51efe8].
 	if (!state.message_log_title.empty()) {

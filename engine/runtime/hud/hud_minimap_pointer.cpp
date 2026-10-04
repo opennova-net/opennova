@@ -71,11 +71,25 @@ void emit_tip_cell(MapCompile &c, float x, float y, float half, float dir_x,
 	tip.half_w = half;
 	tip.half_h = half;
 	tip.rotation_rad = std::atan2(dir_y, dir_x) + static_cast<float>(io::kPi * 0.5);
-	tip.color = marker_modulate2x_color(argb);
+	// The raw diffuse: the strip's material 0x651 runs its MODULATE2X stage on
+	// the device.
+	tip.color = argb;
 	marker_uv(c.input, cell, tip.u0, tip.v0, tip.u1, tip.v1);
 	tip.texture = 0;
 	tip.layer = 4;
 	emit_cropped_sprite(c, tip, false);
+}
+
+// The line's colour, made on the CPU: each RGB byte below 0x80 doubled, any
+// other 0xFF, the alpha 0xFF [orig: HUD_DrawMapTargetPointer @0x599220 —
+// `cmp al, 80h; add al, al` / `mov cl, 0FFh` @0x5993b9..0x5993f8, the alpha
+// @0x599400].
+uint32_t line_color_doubled(uint32_t argb) {
+	const auto doubled = [&](int shift) -> uint32_t {
+		const uint32_t c = (argb >> shift) & 0xFFu;
+		return (c < 0x80u ? c * 2u : 0xFFu) << shift;
+	};
+	return 0xFF000000u | doubled(16) | doubled(8) | doubled(0);
 }
 
 void emit_line(MapCompile &c, float x0, float y0, float x1, float y1,
@@ -153,9 +167,7 @@ void draw_map_target_pointer(MapCompile &c, int32_t target_x, int32_t target_y,
 		if ((static_cast<uint32_t>(input.ticks) & 0x20u) != 0)
 			light = (color & 0xFF000000u) + ((color >> 1) & 0x7F7F7Fu);
 	}
-	if (line)
-		emit_line(c, cx, cy, tip_x, tip_y,
-				marker_modulate2x_color(light) | 0xFF000000u);
+	if (line) emit_line(c, cx, cy, tip_x, tip_y, line_color_doubled(light));
 	if (!(cell == 7 ? chevron_outside : dot_inside)) return;
 	emit_tip_cell(c, tip_x, tip_y, half, dir_x, dir_y, cell,
 			light | 0xFF000000u);

@@ -93,7 +93,7 @@ void slot_blip(MapCompile &c, const HudMinimapMarker &marker, uint8_t layer) {
 		sprite.center_y = my;
 		sprite.half_w = kSpecialIconHalfPx;
 		sprite.half_h = kSpecialIconHalfPx;
-		sprite.color = marker_modulate2x_color(marker.color | 0xFF000000u);
+		sprite.color = marker.color | 0xFF000000u;
 		sprite.layer = layer;
 		marker_uv(input, marker.icon, sprite.u0, sprite.v0, sprite.u1,
 				sprite.v1);
@@ -309,9 +309,10 @@ void draw_blip(MapCompile &c, const HudMinimapMarker &marker, uint32_t color,
 	// HIWORD(angle) x 2pi/65536 [orig: @0x597E9D].
 	sprite.rotation_rad = static_cast<float>(
 			static_cast<double>(io::bam_sar(quad_angle, 16)) * kBam16ToRadians);
-	// The strip renderer's MODULATE2X stage folded into the diffuse.
-	// [orig: Render_DrawIconStripCell_Debug @0x67bae0 via @0x597F6B]
-	sprite.color = marker_modulate2x_color(argb);
+	// The raw diffuse: the strip's material 0x651 runs its MODULATE2X stage
+	// on the device [orig: Minimap_DrawBlip @0x597f48..0x597f73 ->
+	// Render_DrawIconStripCell_Debug @0x67bae0 via @0x597F6B].
+	sprite.color = argb;
 	sprite.layer = layer;
 	marker_uv(input, draw_cell, sprite.u0, sprite.v0, sprite.u1, sprite.v1);
 	emit_cropped_sprite(c, sprite, c.disc_crop);
