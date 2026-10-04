@@ -2,6 +2,7 @@
 # running the game. Protocol and crypto come from the net group; the app owns
 # its sockets, the HTTP transport, timing and logging.
 add_library(opennova_nw_lister_core STATIC
+    admin_feed.cpp
     listing.cpp
     log.cpp
     udp.cpp

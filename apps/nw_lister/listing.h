@@ -21,12 +21,17 @@ struct Listing {
 // Parse the listing JSON. On failure returns false and sets `error`.
 bool load_listing(const std::string &path, Listing &out, std::string &error);
 
-// KEY=VALUE credentials (NOVAWORLD_USER / NOVAWORLD_PASS). Values are never
-// logged; callers register them with log_add_secret().
+// KEY=VALUE credentials: NOVAWORLD_USER / NOVAWORLD_PASS for the account
+// login, ADMIN_USER / ADMIN_PASS for the game server's remote-admin port
+// (--admin). Values are never logged; callers register them with
+// log_add_secret().
 struct Credentials {
 	std::string user;
 	std::string pass;
+	std::string admin_user;
+	std::string admin_pass;
 	bool present() const { return !user.empty() && !pass.empty(); }
+	bool admin_present() const { return !admin_user.empty() && !admin_pass.empty(); }
 };
 bool load_credentials(const std::string &path, Credentials &out, std::string &error);
 

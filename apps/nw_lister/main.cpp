@@ -18,6 +18,7 @@
 // Protocol/crypto come from OpenNova (engine/net); this file owns sockets,
 // timing, the HTTP transport and logging.
 
+#include "admin_feed.h"
 #include "http_client.h"
 #include "listing.h"
 #include "log.h"
@@ -116,6 +117,9 @@ struct Options {
 	bool reconnect = true;
 	bool verbose = false;
 	bool send_status_blob = true;
+	std::string admin_host;       // --admin: live players/map from the server's admin port
+	uint16_t admin_port = 4000;
+	int admin_poll_s = 15;
 };
 
 void usage() {
@@ -134,6 +138,10 @@ void usage() {
 	    "  --update-mode full|delta  full Host/PlayerList each refresh (default) or retail dirty delta\n"
 	    "  --json-poll-ms N       listing re-read interval for roster changes (default 2000)\n"
 	    "  --no-status-blob       skip the plaintext POSTIPPORT heartbeat\n"
+	    "  --admin HOST[:PORT]    take players, map and time left from the game server's\n"
+	    "                         remote-admin port (default port 4000); needs ADMIN_USER /\n"
+	    "                         ADMIN_PASS in --credentials\n"
+	    "  --admin-poll-seconds S admin poll interval (default 15)\n"
 	    "  --bind-ip IP --bind-port N  local address for the session socket\n"
 	    "  --run-seconds N        stop cleanly after N seconds (testing)\n"
 	    "  --stop-file PATH       stop cleanly when PATH appears (testing)\n"
@@ -168,6 +176,14 @@ bool parse_args(int argc, char **argv, Options &o) {
 		else if (a == "--stop-file") { if (!next(o.stop_file)) return false; }
 		else if (a == "--no-reconnect") o.reconnect = false;
 		else if (a == "--no-status-blob") o.send_status_blob = false;
+		else if (a == "--admin") {
+			if (!next(v)) return false;
+			const size_t colon = v.rfind(':');
+			o.admin_host = v.substr(0, colon);
+			if (colon != std::string::npos) o.admin_port = static_cast<uint16_t>(std::atoi(v.c_str() + colon + 1));
+			if (o.admin_host.empty() || o.admin_port == 0) return false;
+		}
+		else if (a == "--admin-poll-seconds") { if (!next(v)) return false; o.admin_poll_s = std::atoi(v.c_str()); }
 		else if (a == "--verbose" || a == "-v") o.verbose = true;
 		else if (a == "--help" || a == "-h") return false;
 		else {
@@ -350,6 +366,8 @@ private:
 	enum class Outcome { Stopped, Lost, Fatal };
 
 	bool load_listing_now(bool initial);
+	bool refresh_listing();
+	void apply_admin(const AdminSnapshot &snap);
 	Outcome session_once();
 	bool gate_probe();
 	bool handshake();
@@ -383,6 +401,9 @@ private:
 	Listing listing_;
 	std::filesystem::file_time_type listing_mtime_{};
 	std::string listing_raw_;
+	AdminFeed admin_;
+	bool admin_on_ = false;
+	uint64_t admin_seq_ = 0; // the snapshot last folded into listing_
 
 	UdpSocket gate_sock_, nw_sock_;
 	Addr gate_addr_, nw_addr_, post_addr_;
@@ -436,6 +457,48 @@ bool Lister::load_listing_now(bool initial) {
 	     listing_.reg.game_type.c_str(), listing_.players.size(), listing_.reg.max_players, names.c_str(),
 	     listing_.reg.expansion.c_str(), listing_.reg.password ? 1 : 0);
 	return true;
+}
+
+// The listing file, then (with --admin) the server's live roster, map and time
+// left over it. True when anything the master sees may have changed.
+bool Lister::refresh_listing() {
+	const bool reloaded = load_listing_now(false);
+	if (!admin_on_) return reloaded;
+	const AdminSnapshot snap = admin_.snapshot();
+	if (snap.seq == 0) return reloaded; // no answer yet: the file's values stand
+	if (!reloaded && snap.seq == admin_seq_) return false;
+	const bool news = snap.seq != admin_seq_;
+	admin_seq_ = snap.seq;
+	apply_admin(snap);
+	if (news) {
+		std::string names;
+		for (const auto &p : listing_.players) names += (names.empty() ? "" : ", ") + p.player_name;
+		if (snap.ok)
+			logf("[admin] live: map='%s' players=%zu [%s] time_left=%d", listing_.reg.mission_name.c_str(),
+			     listing_.players.size(), names.c_str(), snap.time_left_minutes);
+		else
+			logf("[admin] server not answering (%s): listing 0 players", snap.status.c_str());
+	}
+	return true;
+}
+
+// A server that does not answer is listed empty rather than with a roster
+// that may have left; its last map stays.
+void Lister::apply_admin(const AdminSnapshot &snap) {
+	listing_.players.clear();
+	listing_.player_count_override = -1;
+	if (!snap.ok) return;
+	for (const auto &p : snap.players) {
+		HostPlayerSlot s;
+		s.slot = p.slot;
+		s.player_name = p.name;
+		s.team = p.team;
+		s.type = "0";
+		listing_.players.push_back(std::move(s));
+	}
+	if (!snap.mission.empty()) listing_.reg.mission_name = snap.mission;
+	const int tl = snap.time_left_minutes;
+	listing_.reg.round_time_remaining_ticks = tl < 0 ? -1 : tl * 3720 + 3719; // as listing.cpp
 }
 
 std::vector<std::pair<std::string, std::string>> Lister::identity_vars() const {
@@ -1043,11 +1106,14 @@ Lister::Outcome Lister::hosting_loop() {
 		if (now_ms() - last_poll >= static_cast<uint32_t>(opt_.json_poll_ms)) {
 			last_poll = now_ms();
 			const auto before = roster();
-			if (load_listing_now(false)) sync_roster(before, roster());
+			if (refresh_listing()) sync_roster(before, roster());
 		}
 		if (now_ms() - last_refresh >= refresh_ms) {
 			last_refresh = now_ms();
-			load_listing_now(false);
+			{
+				const auto before = roster();
+				if (refresh_listing()) sync_roster(before, roster());
+			}
 			pcid_ring_.advance(tick_count(), static_cast<int>(rng_() & 0x7FFF));
 			send_host_update(/*full=*/false);
 			send_status_blob();
@@ -1096,6 +1162,7 @@ Lister::Outcome Lister::session_once() {
 			logf("[http] account login skipped (--login %s%s)", opt_.login.c_str(),
 			     creds_.present() ? "" : ", no credentials");
 		}
+		refresh_listing();
 		if (!host_request()) break;
 		logf("[host] REGISTERED: listing is live (refresh every %.2f s, update mode %s)", opt_.refresh_s,
 		     opt_.update_mode.c_str());
@@ -1177,6 +1244,14 @@ int Lister::run() {
 		     creds_.pass.empty() ? "MISSING" : "present (masked)");
 	}
 	want_login_ = opt_.login == "always" || (opt_.login == "auto" && creds_.present());
+	if (!opt_.admin_host.empty()) {
+		if (!creds_.admin_present()) {
+			logf("[creds] --admin needs ADMIN_USER and ADMIN_PASS in the --credentials file");
+			return 2;
+		}
+		log_add_secret(creds_.admin_user);
+		log_add_secret(creds_.admin_pass);
+	}
 	if (opt_.login == "always" && !creds_.present()) {
 		logf("[creds] --login always needs NOVAWORLD_USER and NOVAWORLD_PASS");
 		return 2;
@@ -1188,6 +1263,12 @@ int Lister::run() {
 	net_set_allow_public(opt_.allow_public);
 	logf("[net] destination policy: %s", opt_.allow_public ? "PUBLIC ALLOWED (--allow-public)" : "loopback only");
 	if (!net_startup()) return 3;
+	if (!opt_.admin_host.empty()) {
+		admin_on_ = true;
+		admin_.start(opt_.admin_host, opt_.admin_port, creds_.admin_user, creds_.admin_pass, opt_.admin_poll_s);
+		logf("[admin] polling %s:%u every %d s for players, map and time left", opt_.admin_host.c_str(),
+		     opt_.admin_port, opt_.admin_poll_s);
+	}
 	int rc = 0;
 	int backoff_s = 15;
 	while (!should_stop()) {
@@ -1202,6 +1283,7 @@ int Lister::run() {
 		backoff_s = backoff_s < 240 ? backoff_s * 2 : 240;
 	}
 	logf("[main] stopped (rc=%d)", rc);
+	admin_.stop();
 	net_shutdown();
 	return rc;
 }

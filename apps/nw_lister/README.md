@@ -10,7 +10,8 @@ from `engine/net`. The app owns the sockets, the HTTP transport, timing and
 logging.
 
 What it lists comes from a JSON file that is re-read while it runs, so another
-program can keep the map, player count and names current. The row points at
+program can keep the map, player count and names current. With `--admin` the
+lister keeps them current itself from the game server's remote-admin port. The row points at
 the machine running the lister: it advertises a server, it does not route joins
 to one.
 
@@ -28,6 +29,13 @@ nw-lister --listing listing.json --credentials creds.txt \
   and name lookups are off until then. Run it against a local
   `opennova-novaworld` first. A live master is a shared service: use it
   sparingly.
+- `--admin HOST[:PORT]` reads the game server's remote-admin port (TCP, 4000
+  by default) every 15 s (`--admin-poll-seconds`): `PLAYER LIST`, `MISSION
+  LIST` and `GET GAMESETTINGS`, nothing that changes the server. The names,
+  current map and time left replace the file's; the admin port does not give
+  the game mode, so `game_type` stays the file's. A server that stops answering
+  is listed with 0 players. The login is `ADMIN_USER=` and `ADMIN_PASS=` in
+  the credentials file.
 - `--dry-run` builds and prints every statement and sends nothing.
 - Stop it with Ctrl+C, by closing its console window (Windows), with SIGTERM,
   or with `--stop-file PATH`. All of them deregister before exiting.

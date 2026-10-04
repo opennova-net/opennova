@@ -297,6 +297,8 @@ bool load_credentials(const std::string &path, Credentials &out, std::string &er
 			value = value.substr(1, value.size() - 2);
 		if (key == "NOVAWORLD_USER") c.user = value;
 		else if (key == "NOVAWORLD_PASS") c.pass = value;
+		else if (key == "ADMIN_USER") c.admin_user = value;
+		else if (key == "ADMIN_PASS") c.admin_pass = value;
 	}
 	out = c;
 	return true;
