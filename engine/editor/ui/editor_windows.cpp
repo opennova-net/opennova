@@ -249,7 +249,8 @@ void EditorWindows::dispatch_events() {
 		// Rename everywhere and Rename back open over the workspace's (the session opens them with the ask).
 		case ViewEventKind::AskRename: break;
 		case ViewEventKind::SettingsApplied: settings_.receive(event); break;
-		case ViewEventKind::ImportPlanned: import_.receive(event); break;
+		// The import dialog takes a plan's checks from the workspace (the session takes them anew).
+		case ViewEventKind::ImportPlanned: break;
 		// The build panel's opening is the workspace's (the session opens it as a build ends).
 		case ViewEventKind::BuildEnded: break;
 		case ViewEventKind::OpenExternally: break; // the Shell's (EditorApp opens the file)

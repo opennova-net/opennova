@@ -15,6 +15,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/import/import_plan.h>
 #include <editor/model/document.h>
 #include <editor/project/project_document.h>
 #include <editor/session/preferences_store.h>
@@ -410,6 +411,64 @@ int test_document_views() {
 	return 0;
 }
 
+// The import dialog's own: refused with no preview open; a plan made takes its checks (the plan's own);
+// an uncheck by the row's index the workspace's (its serial moved, the import_preview query's row saying
+// so), and import_files planned takes the checked rows alone; the filters and kinds set (a kind no file has
+// refused, an index past the plan refused); Cancel forgets it.
+int test_import_dialog() {
+	FilesProject project;
+	TEST_EXPECT(project.open());
+	ProjectSession &session = project.session;
+	const SessionView &v = session.view();
+	const WorkspaceView::Import &import = v.workspace.import;
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"filter": "a"}})")) &&
+	            refused_with(session, "workspace.refused") && import.filter.empty());
+	const std::string source = project.dir.file("source");
+	TEST_EXPECT(editor_test::write_text(source + "/extra.mnu", "<SCREEN>\r\n<NAME>EXTRA</NAME>\r\n</SCREEN>\r\n") &&
+	            editor_test::write_text(source + "/notes.txt", "notes"));
+	TEST_EXPECT(session.handle(request::preview_import({ source + "/extra.mnu", source + "/notes.txt" }, false)));
+	session.run_operations();
+	const DialogsView::ImportPreview &preview = v.dialogs.import_preview;
+	TEST_EXPECT(preview.open && preview.plan && preview.plan->rows.size() == 2 && import.checked.size() == 2 &&
+	            import.checked[0] && import.checked[1]);
+	if (!preview.plan || preview.plan->rows.size() != 2) return 1;
+	size_t menu_row = 0;
+	for (size_t i = 0; i < preview.plan->rows.size(); ++i)
+		if (preview.plan->rows[i].name == "extra.mnu") menu_row = i;
+	const uint64_t serial = import.serial;
+	TEST_EXPECT(session.handle(request::set_workspace("{\"import\": {\"uncheck\": [\"" + std::to_string(menu_row) + "\"]}}")) &&
+	            session.outcome().done() && !import.checked[menu_row] && import.serial == serial + 1);
+	std::string error;
+	const JsonValue rows = session.query("import_preview", JsonValue::make_object(), error);
+	bool said = false;
+	for (const JsonValue &row : rows.get("rows") ? rows.get("rows")->array : std::vector<JsonValue>())
+		if (row.get_number("index", -1) == double(menu_row)) said = !row.get_bool("checked", true);
+	TEST_EXPECT(said);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"check": ["9"]}})")) &&
+	            refused_with(session, "workspace.refused") && !import.checked[menu_row]);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"filter": "ext", "kind_shown": "menu", "rows_filter": "e"}})")) &&
+	            import.filter == "ext" && import.kind_shown == AssetKind::Menu && import.rows_filter == "e");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"choice_kind": "nothing"}})")) &&
+	            refused_with(session, "workspace.refused") && import.choice_kind == AssetKind::kCount);
+	const JsonValue shown = section(session);
+	TEST_EXPECT(shown.get("import") && shown.get("import")->get_number("checked", -1) == 1.0 &&
+	            shown.get("import")->get_string("kind_shown", "") == "menu");
+	// Import takes the checked rows alone: the notes, not the menu.
+	EditorRequest planned = request::of(EditorRequestKind::ImportFiles);
+	planned.planned = true;
+	TEST_EXPECT(session.handle(planned));
+	session.run_operations();
+	TEST_EXPECT(v.project.scan->find("notes.txt") != nullptr && v.project.scan->find("extra.mnu") == nullptr);
+	TEST_EXPECT(!preview.open && import.checked.empty() && import.filter.empty());
+	// A new preview starts afresh; Cancel forgets it.
+	TEST_EXPECT(session.handle(request::preview_import({ source + "/extra.mnu" }, false)));
+	session.run_operations();
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"replace_existing": true, "filter": "x"}})")) &&
+	            import.replace_existing && import.filter == "x");
+	TEST_EXPECT(session.handle(request::cancel_import()) && !import.replace_existing && import.filter.empty());
+	return 0;
+}
+
 // The problems query names each row's finding by its index (what a confirmation of its fix names).
 int test_problems_index() {
 	FilesProject project;
@@ -440,6 +499,7 @@ int main() {
 	failed += test_problems();
 	failed += test_document_views();
 	failed += test_problems_index();
+	failed += test_import_dialog();
 	if (failed == 0) std::printf("editor_workspace_parts: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

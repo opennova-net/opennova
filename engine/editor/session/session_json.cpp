@@ -613,15 +613,16 @@ JsonValue command_to_json(const ViewportCommand &command) {
 		at.push(json_number(command.at_y));
 		out.set("at", std::move(at));
 	}
+	if (command.mode != SelectMode::Replace) out.set("mode", json_string(select_mode_token(command.mode)));
 	return out;
 }
 
 bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"command\" must be an object {name, ids, kind, by, at}.";
+		error = "\"command\" must be an object {name, ids, kind, by, at, mode}.";
 		return false;
 	}
-	if (!members_known(json, {"name", "ids", "kind", "by", "at"}, "command", error)) return false;
+	if (!members_known(json, {"name", "ids", "kind", "by", "at", "mode"}, "command", error)) return false;
 	ViewportCommand command;
 	const JsonValue *name = json.get("name");
 	if (!name || !name->is_string() || name->string.empty()) {
@@ -662,6 +663,12 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 			return false;
 		}
 		command.has_at = true;
+	}
+	if (const JsonValue *mode = json.get("mode")) {
+		if (!mode->is_string() || !select_mode_from_token(mode->string, command.mode)) {
+			error = "\"command.mode\" is replace, add or toggle (a click's).";
+			return false;
+		}
 	}
 	out = std::move(command);
 	return true;

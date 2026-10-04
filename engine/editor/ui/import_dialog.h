@@ -10,7 +10,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/import/import_plan_groups.h>
 #include <editor/session/view/dialogs_view.h>
-#include <editor/ui/view_event_mailbox.h>
+#include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
@@ -37,12 +37,12 @@ namespace opennova::editor {
 // Import raises ImportFiles with the checked rows' sources; the session asks to save a file
 // with unsaved edits it would write over, and while that prompt is open the dialog gives way
 // to it, coming back as it was (its checks, filter and Replace existing files) while the
-// preview stays open. The workspace draws it every frame, whichever window asked for it, and
-// each plan made (an ImportPlanned view event) has its checks taken again.
+// preview stays open. The workspace draws it every frame, whichever window asked for it. Its
+// filters, its kinds, Replace existing files and its checks are the workspace's (the MCP gaps lane:
+// workspace.import; each plan made takes the checks anew, the session's doing), each change the
+// person makes sent to it.
 class ImportDialog {
 public:
-	// An ImportPlanned view event, held until the dialog draws (every frame).
-	void receive(const ViewEvent &event) { events_.post(event); }
 	void draw(Workspace &workspace);
 
 private:
@@ -54,7 +54,9 @@ private:
 		bool also = false; // a row listed under another file that names it too (ImportPlanGroup::also)
 	};
 
-	void take(const DialogsView::ImportPreview &preview);
+	void take(const SessionView &view, const DialogsView::ImportPreview &preview);
+	void follow(const SessionView &view);
+	void send(Workspace &workspace, const DialogsView::ImportPreview &preview);
 	void draw_choices(Workspace &workspace, const DialogsView::ImportPreview &preview, float height);
 	void draw_plan(Workspace &workspace, const DialogsView::ImportPreview &preview);
 	void draw_notes(const DialogsView::ImportPreview &preview);
@@ -69,19 +71,28 @@ private:
 	bool needed_outside(const ImportPlan &plan, size_t row, const std::set<size_t> &excluded) const;
 	bool takes_together(const ImportPlan &plan, size_t row) const;
 
-	ViewEventMailbox<> events_;
-	bool retake_ = true;        // a plan made since the checks were taken: they are taken again
+	bool retake_ = true;        // the workspace's checks moved since they were taken: they are taken again
 	std::vector<bool> checked_; // per plan row: taken by the import
 	// Per plan row: why the import cannot take it ("" when it can), found once per plan.
 	std::vector<std::string> why_not_;
 	std::vector<bool> chosen_;  // per choice: among the files chosen
-	char filter_[128]{};
+	ui_kit::HeldText<128> filter_;
 	AssetKind choice_kind_ = AssetKind::kCount; // the choices of one kind alone (kCount: every kind)
 	// The plan's rows shown: those of one kind (kCount: every kind) whose names hold the text.
 	AssetKind kind_shown_ = AssetKind::kCount;
-	char rows_filter_[128]{};
+	ui_kit::HeldText<128> rows_filter_;
 	bool replace_existing_ = false;
-	bool previewing_ = false; // the view previewed an import last frame: its state is this one's
+	// The workspace's, as last taken; what was last sent of it (each change sent once).
+	ui_kit::Held<AssetKind> choice_kind_held_, kind_shown_held_;
+	ui_kit::Held<bool> replace_held_;
+	ui_kit::Held<uint64_t> checks_held_;
+	struct Sent {
+		std::string filter, rows_filter;
+		AssetKind choice_kind = AssetKind::kCount, kind_shown = AssetKind::kCount;
+		bool replace_existing = false;
+		std::vector<bool> checked;
+	};
+	Sent sent_;
 	// The plan's tree: the plan it was made of, its groups (import_plan_groups), which are open, each
 	// group's rows and those of its groups in `order_` ([first, last)), and the lines it shows (made
 	// again when a group opens or closes: `laid_out_` false).

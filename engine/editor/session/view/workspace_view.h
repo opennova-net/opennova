@@ -148,6 +148,22 @@ struct WorkspaceView {
 	};
 	Files files;
 
+	// The import dialog's own, over the preview the dialogs view holds (DialogsView::import_preview): the
+	// filter of the files to choose from and the kind it lists alone, the filter of the plan's rows and the
+	// kind they show alone (kCount: every kind), Replace existing files, and which of the plan's rows are
+	// checked (each plan made takes them anew, import_default_checks; Import takes the checked ones), with a
+	// serial that moves with each change of the checks. A new preview starts it afresh; its close ends it.
+	struct Import {
+		std::string filter;
+		AssetKind choice_kind = AssetKind::kCount;
+		std::string rows_filter;
+		AssetKind kind_shown = AssetKind::kCount;
+		bool replace_existing = false;
+		std::vector<bool> checked;
+		uint64_t serial = 0;
+	};
+	Import import;
+
 	// Problems' filters, as the problems query takes them: the severities shown, a text, the scope, Only
 	// fixable, how it groups (by kind until one is picked), and Blocks the build (only what a build is refused
 	// for, every one: turned on, the filters before it are kept and the others shown whole; turned off, they

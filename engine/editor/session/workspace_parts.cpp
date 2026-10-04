@@ -10,6 +10,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/import/import_plan.h>
 #include <editor/model/document.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/project/project_document.h>
@@ -108,6 +109,21 @@ constexpr WorkspaceMember kFiles[] = {
 			"listed flat; the files query with text lists the same." },
 	{ "kind", J::String, "The kind Files lists alone, an asset kind's token (\"\" every kind)." },
 };
+constexpr WorkspaceMember kImport[] = {
+	{ "filter", J::String,
+			"The import dialog's filter of the files to choose from (a name, a folder, or a kind's word), with an "
+			"import preview open." },
+	{ "choice_kind", J::String, "The kind of the files to choose from it lists alone, an asset kind's token (\"\" every kind)." },
+	{ "rows_filter", J::String, "Its filter of the plan's rows (a filter or a kind shown lists them flat)." },
+	{ "kind_shown", J::String, "The kind of the plan's rows it shows alone, an asset kind's token (\"\" every kind)." },
+	{ "replace_existing", J::Boolean,
+			"Replace existing files: every file the project holds already checked (each can be unchecked alone), "
+			"or unchecked again." },
+	{ "check", J::Strings,
+			"The plan's rows checked, by their index (the import_preview query's index); a converter's outputs come "
+			"together: check one, check them all." },
+	{ "uncheck", J::Strings, "The plan's rows unchecked, by their index." },
+};
 constexpr WorkspaceMember kProblems[] = {
 	{ "severities", J::Strings, "The severities shown, of error, warning and info." },
 	{ "text", J::String, "Only the problems whose message, file, record, field or code holds it." },
@@ -149,6 +165,7 @@ constexpr WorkspacePartRow kParts[] = {
 	{ "find", kFind, std::size(kFind), "The Document window's find bar." },
 	{ "project_find", kProjectFind, std::size(kProjectFind), "Find in project." },
 	{ "files", kFiles, std::size(kFiles), "Files' filter and kind." },
+	{ "import", kImport, std::size(kImport), "The import dialog's filters, Replace existing files and its checks." },
 	{ "problems", kProblems, std::size(kProblems), "Problems' filters and its confirmation." },
 	{ "document", kDocument, std::size(kDocument), "What a document's views show of it: filters, kinds, order, a menu's and a texture's fields." },
 };
@@ -494,6 +511,59 @@ bool set_files(Change &change, const JsonValue &part) {
 	return true;
 }
 
+// The import dialog's own: refused with no import preview open. Replace existing files sets the check of
+// every file the project holds that the import can take; check and uncheck name rows by index, a
+// converter's outputs coming together.
+bool set_import(Change &change, const JsonValue &part) {
+	const DialogsView::ImportPreview &preview = change.view.dialogs.import_preview;
+	if (!preview.open || !preview.plan) return change.closed("The import dialog", "preview an import first");
+	WorkspaceView::Import import = change.workspace().import;
+	if (const JsonValue *filter = part.get("filter")) import.filter = filter->string;
+	if (const JsonValue *filter = part.get("rows_filter")) import.rows_filter = filter->string;
+	for (const char *member : { "choice_kind", "kind_shown" }) {
+		const JsonValue *kind = part.get(member);
+		if (kind && !kind_named(kind->string, std::string(member) == "choice_kind" ? import.choice_kind : import.kind_shown))
+			return change.refuse("No kind of file is \"" + kind->string + "\".");
+	}
+	const ImportPlan &plan = *preview.plan;
+	if (import.checked.size() != plan.rows.size()) import.checked = import_default_checks(plan, import.replace_existing);
+	bool checks = false;
+	if (const JsonValue *replace = part.get("replace_existing"); replace && replace->boolean != import.replace_existing) {
+		import.replace_existing = replace->boolean;
+		for (size_t i = 0; i < plan.rows.size(); ++i)
+			if (plan.rows[i].held && import_row_refusal(plan, i).empty()) import.checked[i] = import.replace_existing;
+		checks = true;
+	}
+	for (const char *member : { "check", "uncheck" }) {
+		const JsonValue *rows = part.get(member);
+		if (!rows) continue;
+		const bool on = std::string(member) == "check";
+		for (const JsonValue &token : rows->array) {
+			const std::optional<unsigned long> index = strutil::parse_ulong(token.string);
+			if (!index || *index >= plan.rows.size())
+				return change.refuse("import." + std::string(member) + " names the plan's rows by their index (0 to " +
+				                     std::to_string(plan.rows.size()) + "), not \"" + token.string + "\".");
+			const ImportPlanRow &row = plan.rows[*index];
+			// A row the project cannot take is not checked (a chosen one can only be unchecked).
+			if (on && !import_row_refusal(plan, *index).empty())
+				return change.refuse("import.check: " + row.name + " cannot be imported: " + import_row_refusal(plan, *index));
+			// The files one converter source makes come together.
+			for (size_t i = 0; i < plan.rows.size(); ++i)
+				if (i == *index || (!row.made_from.empty() && plan.rows[i].made_from == row.made_from &&
+				                    plan.rows[i].source == row.source))
+					import.checked[i] = on;
+			checks = true;
+		}
+	}
+	WorkspaceView::Import &held = change.workspace().import;
+	if (checks && import.checked != held.checked) ++import.serial;
+	const bool moved = import.filter != held.filter || import.choice_kind != held.choice_kind ||
+	                   import.rows_filter != held.rows_filter || import.kind_shown != held.kind_shown ||
+	                   import.replace_existing != held.replace_existing || import.serial != held.serial;
+	held = std::move(import);
+	return moved;
+}
+
 bool same_problems(const WorkspaceView::Problems &a, const WorkspaceView::Problems &b) {
 	return a.errors == b.errors && a.warnings == b.warnings && a.infos == b.infos && a.text == b.text &&
 	       a.scope == b.scope && a.fixable == b.fixable && a.grouping == b.grouping && a.blocking == b.blocking &&
@@ -766,6 +836,7 @@ bool apply_workspace_change(SessionView &view, const std::string &json, std::vec
 		{ "find", set_find },
 		{ "project_find", set_project_find },
 		{ "files", set_files },
+		{ "import", set_import },
 		{ "problems", set_problems },
 		{ "document", set_document },
 	};
@@ -939,6 +1010,19 @@ JsonValue workspace_to_json(const SessionView &view) {
 	files.set("filter", text(workspace.files.filter));
 	files.set("kind", kind_json(workspace.files.kind));
 	out.set("files", std::move(files));
+	// The import dialog's, with the checks counted (the import_preview query pages each row's).
+	const WorkspaceView::Import &import = workspace.import;
+	JsonValue dialog_import = JsonValue::make_object();
+	dialog_import.set("filter", text(import.filter));
+	dialog_import.set("choice_kind", kind_json(import.choice_kind));
+	dialog_import.set("rows_filter", text(import.rows_filter));
+	dialog_import.set("kind_shown", kind_json(import.kind_shown));
+	dialog_import.set("replace_existing", flag(import.replace_existing));
+	size_t checked = 0;
+	for (const bool on : import.checked) checked += on ? 1 : 0;
+	dialog_import.set("checked", JsonValue::make_number(double(checked)));
+	dialog_import.set("serial", JsonValue::make_number(double(import.serial)));
+	out.set("import", std::move(dialog_import));
 	const WorkspaceView::Problems &problems = workspace.problems;
 	JsonValue filters = JsonValue::make_object();
 	JsonValue severities = JsonValue::make_array();
@@ -1006,6 +1090,17 @@ bool report_sound(WorkspaceView &workspace, uint64_t serial, WorkspaceView::Soun
 }
 
 bool forget_document_workspace(WorkspaceView &workspace, const std::string &path) { return workspace.documents.erase(path) != 0; }
+
+void take_import_checks(WorkspaceView &workspace, const ImportPlan &plan) {
+	workspace.import.checked = import_default_checks(plan, workspace.import.replace_existing);
+	++workspace.import.serial;
+}
+
+void forget_import_workspace(WorkspaceView &workspace) {
+	const uint64_t serial = workspace.import.serial;
+	workspace.import = WorkspaceView::Import();
+	workspace.import.serial = serial + 1;
+}
 
 void forget_project_workspace(WorkspaceView &workspace) {
 	workspace.card = WorkspaceView::Card();

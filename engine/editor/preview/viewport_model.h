@@ -213,8 +213,16 @@ public:
 	// A command whole (session/editor_request.h's ViewportCommand: its name and records, and what it
 	// takes beside them, ADR 0046 S15: `by` a way, `at` a point of the picture), planned into requests:
 	// by default the command of its name over its records, refusing a `by` or an `at` the kind does not
-	// read (a mission's duplicate reads `by`, its paste `at`).
+	// read (a mission's duplicate reads `by`, its paste `at`); "click" (the MCP gaps lane) at its `at`,
+	// joined as its `mode` says, is click's, whatever the kind.
 	virtual bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const;
+	// A click of the picture at (x, y) in its units, planned as the kind's canvas plans its click (a
+	// press and a release with no drag between): the selection it makes, joined to the selection as
+	// `mode` says (a Shift or a Ctrl click's), a select_record; a click on nothing what the canvas makes
+	// of it (a mission's empties the selection; a menu's and a model's change nothing). False, with why,
+	// for a kind with no canvas (the default) or a picture that is not its document's own now.
+	virtual bool click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
 			std::string &error) const;
 	// A drop on the picture (S14, EditInViewport: session/editor_request.h's ViewportDrop: a project
 	// file or a reference kind's name let go at a point of it) planned into requests: what it makes

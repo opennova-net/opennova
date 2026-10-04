@@ -85,7 +85,7 @@ bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b
 	for (const Flag &flag : kMarks)
 		if (a.*flag.member != b.*flag.member) return false;
 	return a.mark_range == b.mark_range && a.stick == b.stick && a.time == b.time && a.tool == b.tool &&
-			a.item == b.item && a.path == b.path;
+			a.item == b.item && a.path == b.path && a.snap == b.snap && a.turn == b.turn && a.palette == b.palette;
 }
 
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
@@ -98,6 +98,9 @@ io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
 	out.set("tool", io::json_string(mission_tool_token(options.tool)));
 	out.set("item", io::json_number(double(options.item)));
 	out.set("path", io::json_number(double(options.path)));
+	out.set("snap", io::json_number(double(options.snap)));
+	out.set("turn", io::json_number(double(options.turn)));
+	out.set("palette", io::json_string(options.palette));
 	return out;
 }
 
@@ -153,9 +156,24 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 				return false;
 			}
 			read.path = int(value.number);
+		} else if (member.key == "snap" || member.key == "turn") {
+			float step = 0.0f;
+			const float most = member.key == "snap" ? 1000.0f : 360.0f;
+			if (!io::json_float(value, step) || step < 0.0f || step > most) {
+				error = member.key == "snap" ? "options.snap is the grid a move snaps to, metres from 0 (free) to 1000."
+				                             : "options.turn is the step a heading snaps to, degrees from 0 (whole degrees) to 360.";
+				return false;
+			}
+			(member.key == "snap" ? read.snap : read.turn) = step;
+		} else if (member.key == "palette") {
+			if (!value.is_string()) {
+				error = "options.palette is the Place palette's search text.";
+				return false;
+			}
+			read.palette = value.string;
 		} else {
 			error = "Unknown options member \"" + member.key +
-					"\" (it takes show, marks, mark_range, stick, time, tool, item, path).";
+					"\" (it takes show, marks, mark_range, stick, time, tool, item, path, snap, turn, palette).";
 			return false;
 		}
 	}

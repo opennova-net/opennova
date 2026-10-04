@@ -113,6 +113,10 @@ public:
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
 	std::vector<ViewportHit> box(const ViewportContext &context, float x0, float y0, float x1,
 			float y1) const override;
+	// A click: the mark it takes (as a click picks, pick_mission_mark) selected as the canvas's click
+	// selects it, joined as `mode` says; on nothing, a click that replaces empties the selection.
+	bool click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+			std::string &error) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
 	// A drag of an entity's or an area's handle (mission_handle_edit.h): `move` on the ground (the

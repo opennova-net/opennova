@@ -39,6 +39,7 @@ as usual.
     python scripts/mcp/editor_mcp.py viewport --op hit --x 400 --y 300          # what lies under a point
     python scripts/mcp/editor_mcp.py viewport --op drag --id 5 --handle move --by=-8,4 --snap 1   # one undo step
     python scripts/mcp/editor_mcp.py viewport --op command --name align_left --ids 5,7,9          # one request
+    python scripts/mcp/editor_mcp.py viewport --op command --name click --at 400,300 --mode add   # a Shift click
     python scripts/mcp/editor_mcp.py viewport --op seek --clock '{"playing": false, "time_ms": 250}'  # no document named
     python scripts/mcp/editor_mcp.py build                # waits on the build's operation, its progress on stderr
     python scripts/mcp/editor_mcp.py build --out-dir "C:/builds/My Game"   # each build a directory under it
@@ -381,9 +382,11 @@ def viewport_of(args: argparse.Namespace) -> dict:
             command["by"] = parse_pair(args.by, "--by")
         if args.at is not None:
             command["at"] = parse_pair(args.at, "--at")
+        if args.mode is not None:
+            command["mode"] = args.mode
         request["command"] = command
-    elif command:
-        raise GameMcpError(EXIT_NOT_READ, "--name and --ids are op command's (--name also op drop's)")
+    elif command or args.mode is not None:
+        raise GameMcpError(EXIT_NOT_READ, "--name, --ids and --mode are op command's (--name also op drop's)")
     if args.op == "drag":
         request["drag"] = drag
     elif drag:
@@ -816,15 +819,19 @@ def build_parser() -> argparse.ArgumentParser:
                           help="drag: false keeps the gesture open for the next sample (10 s with none ends it)")
     viewport.add_argument("--name", default=None, help="command: an arrange op (align_left, ..., send_to_back) or frame; "
                                                        "a mission's frame, top, ground (the entities set down on the "
-                                                       "ground under them), select_same, duplicate or paste; drop: the "
-                                                       "name --reference names (an item's id, a path's number)")
+                                                       "ground under them), select_same, duplicate or paste; any "
+                                                       "canvas's click (--at X,Y, --mode): the selection its canvas's "
+                                                       "click makes there; drop: the name --reference names (an item's "
+                                                       "id, a path's number)")
+    viewport.add_argument("--mode", choices=("replace", "add", "toggle"), default=None,
+                          help="command click: how it joins the selection (a Shift or Ctrl click's: add, toggle)")
     viewport.add_argument("--file", default=None,
                           help="drop: a project file by its logical name (a model: the item that draws it)")
     viewport.add_argument("--reference", default=None,
                           help="drop: a reference kind's token whose name --name gives (item: an item by its id; "
                                "path: a path's next stop; area, with --to and no --name: an area over the box)")
     viewport.add_argument("--at", default=None, help="drop: X,Y, the point of the picture it is let go at; command: "
-                                                     "a mission's paste's point")
+                                                     "a mission's paste's point, a click's")
     viewport.add_argument("--ids", default=None, help="command: the records, comma-separated (the first the one the "
                                                       "others follow)")
     viewport.add_argument("--timeout", type=float, default=120.0)

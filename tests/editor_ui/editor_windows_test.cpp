@@ -1043,6 +1043,15 @@ void test_preview_canvas_smoke() {
 	ui.activate(item_id(ImHashStr("##Combo_00"), {"100%"}));
 	ui.frames(2);
 	CHECK(fake.width == 800 && fake.height == 600, "100%");
+	// The zoom is the viewport's (the MCP gaps lane): the toolbar's pick a SetViewport of its options, and
+	// one set over the wire the canvas's.
+	CHECK(menu.show().zoom == MenuZoom::Scale && menu.show().scale == 1.0f, "the zoom picked, the viewport's");
+	preview.shell.set(v, document->path(), R"({"kind": "menu", "options": {"zoom": "scale", "scale": 2}})");
+	ui.frames(3);
+	CHECK(fake.width == 1600 && fake.height == 1200, "200% set over the wire: the canvas follows");
+	preview.shell.set(v, document->path(), R"({"kind": "menu", "options": {"zoom": "scale", "scale": 1}})");
+	ui.frames(3);
+	CHECK(fake.width == 800 && fake.height == 600 && ui.windows.pending_requests() == 0, "100% again, nothing raised back");
 	ui.drain();
 	const NodeAddress box = named(*document, "BOX"), other = named(*document, "OTHER");
 	auto at = [&](float x, float y) { return preview.at(x, y); };

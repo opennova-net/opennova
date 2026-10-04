@@ -372,11 +372,15 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	MissionViewportOptions options = options_;
 	if (const JsonValue *member = json.get("options");
 			member && mission_options_from_json(*member, options, error) && options != options_) {
-		// The tool, its item and its path are the canvas's alone: no Update of the device.
+		// The tool, its item and its path, the snaps and the palette's search are the canvas's alone: no
+		// Update of the device.
 		MissionViewportOptions drawn = options;
 		drawn.tool = options_.tool;
 		drawn.item = options_.item;
 		drawn.path = options_.path;
+		drawn.snap = options_.snap;
+		drawn.turn = options_.turn;
+		drawn.palette = options_.palette;
 		if (drawn != options_) options_moved_ = true;
 		options_ = options;
 	}
@@ -452,6 +456,21 @@ std::vector<ViewportHit> MissionViewport::box(const ViewportContext &context, fl
 		out.push_back(std::move(hit));
 	}
 	return out;
+}
+
+bool MissionViewport::click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+		std::string &error) const {
+	const Document *document = planned_(context, error);
+	if (!document) return false;
+	// As MissionCanvas::release_ makes a click: the mark a click picks, joined as the keys say; on nothing,
+	// nothing selected (a click that replaces), while anything is.
+	const std::vector<MissionMark> shown = marks(context.width, context.height, context.device);
+	const int index = pick_mission_mark(shown, camera_, context.width, context.height, x, y, context.device, MissionPick::Click);
+	if (index >= 0)
+		out.request(request::select_record(document->path(), shown[size_t(index)].record, mode));
+	else if (mode == SelectMode::Replace && !context.input.view.documents.selection.records.empty())
+		out.request(request::select_record(document->path(), NodeAddress()));
+	return true;
 }
 
 const Document *MissionViewport::planned_(const ViewportContext &context, std::string &error) const {

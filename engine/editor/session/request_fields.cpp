@@ -126,7 +126,10 @@ constexpr RequestField kFields[] = {
 			"on the document, another gesture, or 10 s with no sample ends it; a token no gesture of "
 			"the document's holds is refused." },
 	{ F::Command, "command", J::Object,
-			"A command in a viewport, {name, ids?, kind?, by?, at?}: a menu's arrange of the windows ids, "
+			"A command in a viewport, {name, ids?, kind?, by?, at?, mode?}: any canvas's click (at its point, "
+			"mode replace, add or toggle: a Shift or Ctrl click's), the selection its canvas's click makes there "
+			"(a menu's window, a mission's mark, a model's marker or collision shape; on nothing, a mission's "
+			"empties the selection), a menu's arrange of the windows ids, "
 			"the first the one the others follow (align_left, align_right, align_top, align_bottom, "
 			"align_horizontal_centers, align_vertical_centers; distribute_horizontally and "
 			"distribute_vertically, three or more; bring_to_front, bring_forward, send_backward, "
@@ -175,9 +178,9 @@ constexpr RequestField kFields[] = {
 			"beside them: the music banks, the videos, the NovaWorld table), with no walk: the closure "
 			"of everything is everything." },
 	{ F::Planned, "planned", J::Boolean,
-			"An import takes the open import preview's rows as its plan has them (each the project can "
-			"take, once per source) in place of imports, so a client need not echo thousands of rows "
-			"back; refused with no preview open." },
+			"An import takes the open import preview's checked rows (the workspace's import checks: a new plan's "
+			"own, then what was checked and unchecked; each the project can take, once per source) in place of "
+			"imports, so a client need not echo thousands of rows back; refused with no preview open." },
 	{ F::Behind, "behind", J::Boolean,
 			"Play's game window starts behind every other window and never takes the foreground (shown without "
 			"activation, kept at the bottom while it starts): a client driving the editor while a person works "

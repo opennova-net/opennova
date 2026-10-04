@@ -302,4 +302,12 @@ ImportPlan plan_import(const std::vector<ImportChoice> &sources, bool with_depen
 // file first, where else it was found and the findings do not decide what is written.
 bool same_import(const ImportPlan &a, const ImportPlan &b);
 
+// Why the import cannot take the plan's row `index`: its file's problem, or that of another file its
+// converter source makes (the files of one source come together or not at all); "" when it can.
+std::string import_row_refusal(const ImportPlan &plan, size_t index);
+// The checks of a new plan (the import dialog's, held by the session's workspace): each row the plan takes
+// (a chosen file whatever its problem, the import waiting until it is unchecked; a dependency only when the
+// project can take it), and with `replace_existing` each file the project holds that it can take.
+std::vector<bool> import_default_checks(const ImportPlan &plan, bool replace_existing);
+
 } // namespace opennova::editor

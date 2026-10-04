@@ -98,11 +98,11 @@ bool pastes_here(const SessionView &view) {
 
 } // namespace
 
-// What the view keeps of its own: the snaps; the palette; where the right-click menu was opened. The
-// tool, its item and its path are the viewport's options (the wire sets them too).
+// What the view keeps of its own: the palette's list; where the right-click menu was opened. The tool,
+// its item and its path, the snaps and the palette's search are the viewport's options (the wire sets
+// them too).
 struct MissionViewportView::Tools {
-	int snap = 2; // kMissionSnaps: 1 m
-	int turn = 2; // kMissionTurns: 15 degrees
+	float snap = 1.0f; // the options' snap, as the frame began
 	MissionPaletteView palette;
 	CanvasPoint menu_at;
 	NodeAddress menu_record;
@@ -121,7 +121,7 @@ struct MissionViewportView::Tools {
 			const MissionCanvas &canvas);
 	void events_using(Workspace &workspace, const MissionViewport &mission, const SessionView &view);
 	void notes(const MissionViewport &mission);
-	float snap_metres() const { return kMissionSnaps[std::clamp(snap, 0, 4)]; }
+	float snap_metres() const { return snap; }
 };
 
 MissionViewportView::MissionViewportView() : ViewportView(ViewportKind::Mission), tools_(std::make_unique<Tools>()) {}
@@ -140,11 +140,12 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	// An Esc while a press is down is the canvas's (it cancels the press, the tool kept).
 	const bool stop = tool != MissionTool::Select && focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
 					  !(canvas && canvas->gesture().pressed());
+	tools.snap = mission.options().snap;
 	tools.toolbar(workspace, mission, context);
 	snap = tools.snap_metres();
 	context.snap = snap;
 	tools.numbers(workspace, mission, context);
-	if (canvas) canvas->set_turn(kMissionTurns[std::clamp(tools.turn, 0, 4)]);
+	if (canvas) canvas->set_turn(mission.options().turn);
 	// The clipboard's keys while the view has the keyboard and no press is down: Copy, Cut, and Paste at
 	// the pointer over the picture (else as the session's rule puts it).
 	const bool pressed = canvas && canvas->gesture().pressed();
@@ -232,8 +233,15 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		if (ImGui::BeginChild("##tool_list", ImVec2(panel, height))) {
 			if (tool == MissionTool::Place) {
 				const AssetGraph *graph = view.findings.graph.get();
+				// The search typed is the viewport's (its options' palette).
+				std::string typed = mission.options().palette;
 				const int64_t picked = tools.palette.draw(graph, graph ? graph->generation() : 0, view.project.recent_items,
-						mission.options().item);
+						mission.options().item, mission.options().palette, &typed);
+				if (typed != mission.options().palette) {
+					MissionViewportOptions options = mission.options();
+					options.palette = typed;
+					set_options(workspace, mission, options);
+				}
 				if (picked != 0) set_tool(workspace, mission, MissionTool::Place, picked);
 			} else {
 				tools.path_list(workspace, mission);
@@ -279,22 +287,34 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	if (tool_button(row, "Area", tool == MissionTool::Area, edits,
 				edits ? "Drag a box on the ground to make an area trigger over it. Esc stops." : held))
 		pick(MissionTool::Area);
-	const auto combo = [&](const char *label, int &index, const char *const *names, int count, const char *tip) {
+	// A step of the options (the snap, the turn) picked from its list; one the wire set off the list shown as
+	// its value.
+	const auto combo = [&](const char *label, float &value, const float *steps, const char *const *names, int count,
+	                       const char *unit_word, const char *tip) {
 		const float least = unit * 3.0f;
 		const bool labelled = ui_kit::field_width(least, label) <= line;
 		const float width = std::max(least, std::min(unit * 5.0f, labelled ? line - ui_kit::field_width(0.0f, label) : line));
 		const std::string id = labelled ? std::string(label) : "##" + std::string(label);
 		row.next(labelled ? ui_kit::field_width(width, label) : width);
 		ImGui::SetNextItemWidth(width);
-		ImGui::Combo(id.c_str(), &index, names, count);
+		int index = -1;
+		for (int i = 0; i < count; ++i)
+			if (steps[i] == value) index = i;
+		char shown[32];
+		std::snprintf(shown, sizeof(shown), "%g %s", double(value), unit_word);
+		if (ImGui::BeginCombo(id.c_str(), index >= 0 ? names[index] : shown)) {
+			for (int i = 0; i < count; ++i)
+				if (ImGui::Selectable(names[i], i == index)) value = steps[i];
+			ImGui::EndCombo();
+		}
 		ui_kit::tooltip(labelled ? std::string(tip) : std::string(label) + ": " + tip);
 	};
 	static const char *const kSnapNames[] = { "Free", "1/4 m", "1 m", "5 m", "10 m" };
-	combo("Snap", snap, kSnapNames, IM_ARRAYSIZE(kSnapNames),
+	combo("Snap", options.snap, kMissionSnaps, kSnapNames, IM_ARRAYSIZE(kSnapNames), "m",
 			"What a move, a placed record and an area's edge snap to on the file's axes, and how far the arrows "
 			"nudge (Shift: a tenth of it) and Ctrl+D's copy goes. Hold Ctrl while dragging to move freely.");
 	static const char *const kTurnNames[] = { "1 deg", "5 deg", "15 deg", "45 deg", "90 deg" };
-	combo("Turn", turn, kTurnNames, IM_ARRAYSIZE(kTurnNames),
+	combo("Turn", options.turn, kMissionTurns, kTurnNames, IM_ARRAYSIZE(kTurnNames), "deg",
 			"What a turned entity's heading snaps to. Hold Ctrl while turning to turn freely.");
 	row.next(ui_kit::checkbox_width("Stick"));
 	ImGui::Checkbox("Stick", &options.stick);

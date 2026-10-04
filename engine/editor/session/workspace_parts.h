@@ -12,6 +12,7 @@
 namespace opennova::editor {
 
 class SessionCore;
+struct ImportPlan;
 struct SessionView;
 
 // What the windows show of their own, on the wire (ADR 0046, the MCP gaps lane; session/view/
@@ -96,6 +97,10 @@ bool report_sound(WorkspaceView &workspace, uint64_t serial, WorkspaceView::Soun
 
 // A document closing: what its views showed of it goes with it. True when the workspace held any.
 bool forget_document_workspace(WorkspaceView &workspace, const std::string &path);
+// The import dialog's checks taken anew for a plan made (import_default_checks, with its Replace existing
+// files), its serial moved; and the dialog's own forgotten (a new preview's start, its close).
+void take_import_checks(WorkspaceView &workspace, const ImportPlan &plan);
+void forget_import_workspace(WorkspaceView &workspace);
 // The project closing: what its windows showed of it goes with it (its card, its build's panel, its dialogs
 // and prompts, a confirmation, its documents' views, Files' filter, the sound it played); the find bars close,
 // keeping their text.

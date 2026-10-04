@@ -55,9 +55,12 @@ struct ModelViewportOptions {
 	// bones drawn over the picture, each named.
 	bool repeat = true;
 	bool bones = true;
+	// The grid a canvas's drag of a marker's place snaps to on each of the file's axes (metres; 0 free: the
+	// toolbar's Snap, kModelHandleSnaps; the MCP gaps lane), the canvas's alone: no picture changes.
+	float snap = 1.0f / 16.0f;
 	bool operator==(const ModelViewportOptions &other) const {
 		return lod == other.lod && ctrl == other.ctrl && overlays == other.overlays &&
-				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones;
+				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones && snap == other.snap;
 	}
 	bool operator!=(const ModelViewportOptions &other) const { return !(*this == other); }
 };
@@ -66,7 +69,7 @@ struct ModelViewportOptions {
 // pitch and distance): what an orbit, a pan, a dolly or a framing on its canvas sends.
 std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
-// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones}.
+// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones, snap}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
 
 // How long a repeated one-shot holds its last frame before it plays again, in game ticks (half a
@@ -205,6 +208,10 @@ public:
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
+	// A click: the marker there, else the collision shape the pixel is on, its record selected as the
+	// canvas's click selects it (joined as `mode` says); on nothing, nothing changes.
+	bool click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+			std::string &error) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,

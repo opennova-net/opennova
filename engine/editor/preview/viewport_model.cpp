@@ -205,6 +205,17 @@ std::string ViewportModel::picture_message() const {
 
 bool ViewportModel::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
+	if (command.name == "click") {
+		if (!command.has_at || !command.ids.empty() || !command.by.empty()) {
+			error = "A click takes the point of the picture it is at, \"at\": [x, y], and no ids or by.";
+			return false;
+		}
+		return click(context, command.at_x, command.at_y, command.mode, out, error);
+	}
+	if (command.mode != SelectMode::Replace) {
+		error = "\"mode\" is a click's: the command \"" + command.name + "\" takes none.";
+		return false;
+	}
 	if (!command.by.empty() || command.has_at) {
 		error = std::string("A ") + viewport_kind_token(kind_) + " viewport's command \"" + command.name +
 				"\" takes no " + (command.by.empty() ? "\"at\"" : "\"by\"") + ".";
@@ -217,6 +228,11 @@ io::JsonValue ViewportModel::palette_json(const SessionView &, const std::string
 		std::string &error) const {
 	error = std::string("a ") + viewport_kind_token(kind_) + " viewport places nothing: it has no palette.";
 	return io::JsonValue::make_null();
+}
+
+bool ViewportModel::click(const ViewportContext &, float, float, SelectMode, CanvasRequests &, std::string &error) const {
+	error = std::string("A ") + viewport_kind_token(kind_) + " viewport has no canvas to click.";
+	return false;
 }
 
 bool ViewportModel::drop(const ViewportContext &, const ViewportDrop &, CanvasRequests &, std::string &error) const {

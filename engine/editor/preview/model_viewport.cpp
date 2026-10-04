@@ -168,8 +168,16 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 				return false;
 			}
 			(key == "repeat" ? options.repeat : options.bones) = value.boolean;
+		} else if (key == "snap") {
+			float snap = 0.0f;
+			if (!io::json_float(value, snap) || snap < 0.0f || snap > 100.0f) {
+				error = "options.snap is the grid a dragged marker snaps to, metres from 0 (free) to 100.";
+				return false;
+			}
+			options.snap = snap;
 		} else {
-			error = "Unknown model option \"" + key + "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones).";
+			error = "Unknown model option \"" + key +
+			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap).";
 			return false;
 		}
 	}
@@ -286,6 +294,7 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 	options.set("rig_model", json_string(held.rig_model));
 	options.set("repeat", JsonValue::make_bool(held.repeat));
 	options.set("bones", JsonValue::make_bool(held.bones));
+	options.set("snap", json_number(held.snap));
 	return options;
 }
 
@@ -864,8 +873,11 @@ void ModelViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 	ModelViewportOptions options = options_;
 	if (const JsonValue *member = json.get("options"); member && read_options(*member, options, error) &&
 			options != options_) {
+		// The snap is the canvas's alone: no picture changes with it.
+		ModelViewportOptions drawn = options;
+		drawn.snap = options_.snap;
+		if (drawn != options_) options_moved_ = true;
 		options_ = options;
-		options_moved_ = true;
 	}
 	bool frame = false;
 	if (const JsonValue *member = json.get("camera")) read_camera(*member, camera_, frame, error);
@@ -954,6 +966,30 @@ ViewportHit ModelViewport::hit(const ViewportContext &context, float x, float y)
 	out.name = hit.name;
 	out.kind = model_overlay_kind_token(hit.kind);
 	return out;
+}
+
+bool ModelViewport::click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+		std::string &error) const {
+	const auto *document =
+			dynamic_cast<const ModelDocument *>(context.input.document ? records_of(*context.input.document) : nullptr);
+	if (status() != ViewportStatus::Ready || !model_ || !document || !current(context.input)) {
+		const std::string why = message();
+		error = "The viewport shows no picture of the model as it is now" + (why.empty() ? std::string(".") : ": " + why);
+		return false;
+	}
+	// As ModelCanvas makes a click: the marker under it, else the collision shape the pixel is on.
+	const std::vector<ModelOverlay> marks = overlays(context.input.clock);
+	const int at = pick_model_overlay(marks, camera_, context.width, context.height, x, y);
+	NodeAddress record;
+	if (at >= 0) {
+		record = record_of(context.input, marks[size_t(at)]);
+	} else {
+		const ModelCollisionShapesPtr shapes = collision(context.input.clock, selected_collision(context.input));
+		const int shape = pick_model_collision(*shapes, camera_, context.width, context.height, x, y);
+		if (shape >= 0) record = model_collision_record(*document, (*shapes)[size_t(shape)]);
+	}
+	if (record.row) out.request(request::select_record(document->path(), record, mode));
+	return true;
 }
 
 bool ModelViewport::dragged_marker_(const ViewportContext &context, NodeId id, const std::string &token,

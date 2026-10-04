@@ -352,6 +352,35 @@ func test_the_device_helps_with_the_script() -> void:
 			"the click went where the word is defined")
 
 
+## The help shown over the wire (the MCP gaps lane: the script viewport's assist option): the completion list
+## at a place (the effects after "FX_"), a word's words at a place (a command's), and none again, each as a
+## set_viewport of the script's viewport the device takes.
+func test_the_wire_shows_the_help() -> void:
+	var edit := await _open_script()
+	if edit == null:
+		return
+	var assist := func(op: String, line := 0, column := 0) -> bool:
+		var asked := {"op": op}
+		if op != "none":
+			asked["line"] = line
+			asked["column"] = column
+		return _seam.done({"kind": "set_viewport", "path": SCRIPT,
+				"viewport": {"kind": "script", "options": {"assist": asked}}})
+	assert_true(assist.call("complete", 3, 12), "the list asked at \"\\tfxrain FX_|\"")
+	await _frames()
+	var inserts: Array[String] = []
+	for option: Dictionary in edit.get_code_completion_options():
+		inserts.append(String(option.get("insert_text", "")))
+	assert_true(inserts.has("FX_Buildup"), "the list shown: " + str(inserts))
+	assert_true(assist.call("hover", 3, 4), "a word's words asked at fxrain")
+	await _frames()
+	assert_true(String(edit.call("get_hover_note")).contains("fxrain"), String(edit.call("get_hover_note")))
+	assert_true(edit.get_code_completion_options().is_empty(), "the list gave way to the words")
+	assert_true(assist.call("none"), "none asked")
+	await _frames()
+	assert_eq(String(edit.call("get_hover_note")), "", "nothing shown")
+
+
 ## The control alone (no device clearing its history) keeps the history Godot gives it, and Ctrl+Z
 ## through the GUI still never undoes in it: the editor's shortcut is the only undo.
 func test_the_control_takes_no_ctrl_z() -> void:

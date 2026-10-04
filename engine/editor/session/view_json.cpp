@@ -881,9 +881,15 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, 
 	}
 	out.set("groups", std::move(groups));
 	JsonValue planned = JsonValue::make_array();
+	// Each row's index in the plan (what the workspace's import check and uncheck name) and whether the
+	// dialog's checks take it (the workspace's: what Import, and import_files planned, take).
+	const std::vector<bool> &checked = view.workspace.import.checked;
 	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i) {
 		JsonValue row = plan_row_to_json(*rows[i]);
 		if (const auto in = group_of.find(rows[i]); in != group_of.end()) row.set("group", json_number(double(in->second)));
+		const size_t index = size_t(rows[i] - plan.rows.data());
+		row.set("index", json_number(double(index)));
+		if (checked.size() == plan.rows.size()) row.set("checked", boolean(checked[index]));
 		planned.push(std::move(row));
 	}
 	out.set("rows", std::move(planned));

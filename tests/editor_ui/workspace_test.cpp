@@ -3058,9 +3058,12 @@ void test_view_event_mailboxes() {
 	ui.drain();
 	CHECK(!modal_open("Rename everywhere") && !v.workspace.rename.open, "cancelled: the workspace's closed, it stays closed");
 
-	// The import dialog takes a plan's checks again on each ImportPlanned, once.
+	// The import dialog's checks are the workspace's: each plan made takes them anew (the session's
+	// take_import_checks, here by hand), and an uncheck is the workspace's too.
 	v.dialogs.import_preview = planned_import("C:/assets");
+	take_import_checks(v.workspace, *v.dialogs.import_preview.plan);
 	v.revisions.touch(ViewConcern::Dialogs);
+	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(4);
 	ImGui::SetWindowSize("Import files", ImVec2(1700.0f, 1000.0f));
 	ui.frames(2);
@@ -3069,11 +3072,13 @@ void test_view_event_mailboxes() {
 			"the dialog opens, five rows checked");
 	ui.activate(import_table_item("import_plan", 5, "##take"));
 	ui.away();
-	CHECK(import_count(ui) == 4, "a row unchecked");
+	CHECK(import_count(ui) == 4 && std::count(v.workspace.import.checked.begin(), v.workspace.import.checked.end(), true) == 4,
+	      "a row unchecked, the workspace's");
 	ui.frames(4);
 	ui.away();
-	CHECK(import_count(ui) == 4, "no event: the checks kept");
-	post_event(v, ViewEventKind::ImportPlanned);
+	CHECK(import_count(ui) == 4, "no plan made: the checks kept");
+	take_import_checks(v.workspace, *v.dialogs.import_preview.plan);
+	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(3);
 	ui.away();
 	CHECK(import_count(ui) == 5, "a plan made: its checks taken again");

@@ -28,6 +28,7 @@
 #include <editor/session/session_core.h>
 #include <editor/session/texture_import_state.h>
 #include <editor/session/view/view_events.h>
+#include <editor/session/workspace_parts.h>
 
 namespace opennova::editor {
 
@@ -130,7 +131,9 @@ void ImportController::preview_install(const EditorRequest &request) {
 
 void ImportController::cancel() {
 	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	forget_import_workspace(view_.workspace);
 	core_.touch(ViewConcern::Dialogs);
+	core_.touch(ViewConcern::Workspace);
 }
 
 // The refresh with the import pass forced over one source (or all), as an operation
@@ -364,6 +367,12 @@ void ImportController::refresh_changed_sources() {
 void ImportController::preview(std::vector<ImportChoice> choices, std::vector<ImportChoiceFacts> facts,
                                std::vector<ImportChoice> roots, bool with_dependencies, bool all) {
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	// A new preview starts the dialog's own afresh (its filters, Replace existing files); one open already
+	// keeps them (a choice planned again, an Import that found the files changed).
+	if (!preview.open) {
+		forget_import_workspace(view_.workspace);
+		core_.touch(ViewConcern::Workspace);
+	}
 	preview.choices = std::move(choices);
 	preview.facts = std::move(facts);
 	preview.facts.resize(preview.choices.size());
@@ -419,6 +428,9 @@ void ImportController::show_plan(std::shared_ptr<const ImportPlan> plan, const I
 	planned.kind = ViewEventKind::ImportPlanned;
 	planned.flag = preview.changed;
 	view_.events.post(std::move(planned));
+	// Its checks taken anew, the workspace's (what Import takes).
+	take_import_checks(view_.workspace, *preview.plan);
+	core_.touch(ViewConcern::Workspace);
 	if (preview.open) {
 		size_t files = 0, found = 0, missing = 0, held = 0;
 		for (const ImportPlanRow &row : preview.plan->rows) {
@@ -520,12 +532,17 @@ bool ImportController::sources_of(const EditorRequest &request, std::vector<Impo
 		core_.touch(ViewConcern::Output);
 		return false;
 	}
-	// The rows the plan takes (the dialog's checks of a new plan): each source once, a converter's
-	// outputs sharing theirs; a row the project cannot take is left out, as the command line leaves
-	// it; a file the project holds is left as it is unless the request replaces (review F2).
+	// The rows the dialog's checks take (the workspace's: a new plan's are the plan's own, then what the
+	// person or a client checked and unchecked; the MCP gaps lane): each source once, a converter's outputs
+	// sharing theirs; a row the project cannot take is left out, as the command line leaves it; a file the
+	// project holds is left as it is unless it is checked or the request replaces (review F2).
+	const std::vector<bool> &checked = view_.workspace.import.checked;
+	const bool held_checks = checked.size() == preview.plan->rows.size();
 	std::set<std::string> taken;
-	for (const ImportPlanRow &row : preview.plan->rows) {
-		if (row.state == ImportPlanRow::State::NotFound || !(row.selected || (row.held && request.replace)) ||
+	for (size_t i = 0; i < preview.plan->rows.size(); ++i) {
+		const ImportPlanRow &row = preview.plan->rows[i];
+		const bool checked_row = held_checks ? bool(checked[i]) : row.selected;
+		if (row.state == ImportPlanRow::State::NotFound || !(checked_row || (row.held && request.replace)) ||
 		    !row.problem.empty())
 			continue;
 		const std::string key = row.source.path + '\n' + row.source.entry + '\n' + (row.source.install ? '1' : '0') +
@@ -554,6 +571,8 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 		if (!operation.refusals().empty()) return refused(operation.refusals().front());
 	}
 	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	forget_import_workspace(view_.workspace);
+	core_.touch(ViewConcern::Workspace);
 	if (operation.imports().empty()) {
 		view_.activity.status = "Nothing to import.";
 		core_.touch(ViewConcern::Dialogs);
@@ -646,6 +665,7 @@ void ImportController::unsaved_files(const EditorRequest &request, std::vector<s
 
 void ImportController::clear() {
 	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	forget_import_workspace(view_.workspace);
 	view_.project.imports = std::make_shared<const std::vector<ImportedSource>>();
 	view_.project.retail_files.clear();
 	view_.project.base_files.clear();

@@ -1656,14 +1656,16 @@ constexpr EditorQueryRow kRows[] = {
 			.chooses(kViewportChoices)
 			.row,
 	Query(K::ImportPreview, "import_preview", answer_import_preview, kImportPreviewParams,
-			concern_set({ C::Dialogs, C::Preferences, C::Files }),
+			concern_set({ C::Dialogs, C::Preferences, C::Files, C::Workspace }),
 			"The import dialog's preview: open, with_dependencies, all (every file of the game "
 			"install chosen, with no walk), a page of its plan's rows in "
 			"its order, the chosen files first (state, name, kind, source, destination, size, "
 			"made_from, needed_by (with its words: the record and the field as the file's type "
 			"words them), found_in, selected, held (a chosen file the project has, kept unless the "
 			"import replaces) and held_same (whether the project's holds the same bytes, where the "
-			"plan compared them), problem, rivals, group; those of one kind alone "
+			"plan compared them), problem, rivals, group, index (its place in the plan, what the "
+			"workspace's import check and uncheck name) and checked (the dialog's check, the "
+			"workspace's: what Import and import_files planned take); those of one kind alone "
 			"with kind, count theirs), total_bytes (what the whole plan copies), summary (the "
 			"whole plan's files by kind, the largest first: kind, files, bytes) and groups (its rows "
 			"by what they come for: each chosen file, the kinds of the files it brings under it: "
