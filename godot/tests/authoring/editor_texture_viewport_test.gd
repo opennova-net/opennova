@@ -332,7 +332,8 @@ func test_an_os_drop_is_held_where_the_cursor_let_go() -> void:
 
 ## S18: a texture opened in its program through the wire: edit_externally's open_externally event taken by
 ## the Shell at the next pump (kept, not opened, with open_externally off); what the program saves comes
-## back through refresh_changed_sources, the texture made from it again.
+## back of the Shell's own: the window gaining the focus checks at once (a file written just now waits,
+## never read half-written), then once a second while it has the focus, the texture made from it again.
 func test_a_texture_edited_in_its_program() -> void:
 	if _app == null:
 		return
@@ -347,14 +348,6 @@ func test_a_texture_edited_in_its_program() -> void:
 	var source := root.path_join("art/brick_src.tga")
 	assert_eq(String(_app.get_last_external_open()).replace("\\", "/"), source.replace("\\", "/"),
 			"the Shell takes the source it names")
-	# The program saves the source: the import makes the texture from it again.
-	var saved := _tga(0)
-	saved[18] = 0
-	saved[19] = 0
-	saved[20] = 255
-	_write(source, saved)
-	assert_true(_seam.done({"kind": "refresh_changed_sources"}), "refresh_changed_sources is served")
-	assert_true(_seam.settle())
 	var output := ""
 	for file in _seam.every("files", "files", {"limit": 200}):
 		if String(file.get("name", "")) == "brick.tga":
@@ -365,5 +358,23 @@ func test_a_texture_edited_in_its_program() -> void:
 	assert_not_null(material, str(state))
 	if material == null:
 		return
+	var builds := int(state.get("builds", 0))
+	# The program saves the source; the window gains the focus at once: written just now, it waits.
+	var saved := _tga(0)
+	saved[18] = 0
+	saved[19] = 0
+	saved[20] = 255
+	_write(source, saved)
+	_app.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	assert_true(_seam.settle())
+	_app.pump()
+	assert_eq(int(_viewport(output).get("builds", 0)), builds, "a file written just now is not read yet")
+	# Settled, the once-a-second check while the window has the focus imports it again.
+	var deadline := Time.get_ticks_msec() + 10000
+	while Time.get_ticks_msec() < deadline and int(_viewport(output).get("builds", 0)) == builds:
+		_app.pump()
+		await get_tree().create_timer(0.1).timeout
+	state = await _await_ready(output)
 	var texture := material.get_shader_parameter("level_nearest") as Texture2D
 	assert_eq(texture.get_image().get_pixel(0, 1), Color8(255, 0, 0, 50), "the texel the program saved")
+	_app.notification(NOTIFICATION_APPLICATION_FOCUS_OUT)

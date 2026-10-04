@@ -4,6 +4,7 @@
 #include <cassert>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <utility>
 
 #include <base/io/json.h>
@@ -470,6 +471,54 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	// a program saved the source of) read again; one with unsaved edits is a conflict, as on a Rescan.
 	documents().reload_changed();
 	return imports;
+}
+
+bool SessionCore::start_changed_refresh(ExternalChanges changes) {
+	const uint64_t id =
+			start_operation(std::make_unique<ChangedSourcesOperation>(paths_, *view_.project.document, std::move(changes)));
+	if (id == 0) {
+		refuse_busy(std::string());
+		return false;
+	}
+	outcome_.operation = id;
+	return true;
+}
+
+void SessionCore::absorb_changed(ImportRunResult &imports, const std::vector<std::string> &files) {
+	std::vector<ImportedSource> sources = view_.project.imports ? *view_.project.imports : std::vector<ImportedSource>();
+	std::vector<std::string> paths = files;
+	std::set<std::string> refreshed;
+	for (ImportedSource &source : imports.sources) {
+		refreshed.insert(source.source);
+		refreshed.insert(source.sidecar);
+		paths.push_back(source.source); // its visit lists its outputs, the old and the new
+		if (source.reimported)
+			note("Imported " + source.source + " (" + std::to_string(source.outputs.size()) + " file" +
+			     (source.outputs.size() == 1 ? "" : "s") + ")");
+		const auto known = std::find_if(sources.begin(), sources.end(),
+		                                [&](const ImportedSource &each) { return each.source == source.source; });
+		if (known != sources.end()) *known = std::move(source);
+		else sources.push_back(std::move(source));
+	}
+	std::sort(sources.begin(), sources.end(), [](const ImportedSource &a, const ImportedSource &b) { return a.source < b.source; });
+	view_.project.imports = std::make_shared<const std::vector<ImportedSource>>(std::move(sources));
+	// The pass's findings on those sources in place of the ones the last pass made of them.
+	AssetScan scan = *view_.project.scan;
+	std::vector<Diagnostic> findings;
+	for (const Diagnostic &d : scan.import_findings())
+		if (!refreshed.count(d.asset)) findings.push_back(d);
+	findings.insert(findings.end(), imports.diagnostics.begin(), imports.diagnostics.end());
+	scan.set_import_findings(std::move(findings));
+	files_scanned_ = scan.update(paths_, *view_.project.document, paths);
+	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
+	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	view_.project.requirements = std::make_shared<const RequirementReport>(
+			requirements_of(*view_.project.document, *view_.project.scan));
+	touch(ViewConcern::Files);
+	problems().validate_later();
+	// The open documents of what changed (a PNG its program saved, an output made again) read again; one with
+	// unsaved edits is a conflict, as on a Rescan.
+	documents().reload_changed();
 }
 
 void SessionCore::refresh_now() {

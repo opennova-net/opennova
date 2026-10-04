@@ -1,10 +1,13 @@
 // ADR 0046 S18, the external program round trip (edit_externally, refresh_changed_sources): a plain TGA
 // given a source once (a copy in art/ under a name of its own, its record reproducing it, the TGA set
 // aside) and opened (the open_externally view event naming the source on disk); an import's output's own
-// source opened, nothing made; a change a program saves there imported by refresh_changed_sources, the
-// open texture document of the output read again; nothing changed, nothing done; the tab's open of a
+// source opened, nothing made; a change a program saves there imported by refresh_changed_sources once
+// it settles (never read while it may be half-written), that source alone, the scan read again for it
+// alone, the open texture document of the output read again, the import cache keeping the other
+// sources; nothing changed, nothing done; a file an import read moving its source; the tab's open of a
 // source (open_texture_source: an output's opened, a plain texture's refused until one is made, a PNG with
-// unsaved edits refused); a name the project lacks refused.
+// unsaved edits refused); a PNG edited in place by its program read again; a file that is no texture
+// refused; a name the project lacks refused.
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -12,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include <base/io/file_time.h>
 #include <editor/documents/texture_document.h>
 #include <editor/import/import_run.h>
 #include <editor/import/png_encode.h>
@@ -65,10 +69,16 @@ int test_round_trip() {
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/rock.tga", tga32(200, 0, 0)));
+	TEST_EXPECT(editor_test::write_bytes(root + "/textures/rock.tga", tga32(200, 0, 0)) &&
+	            editor_test::write_bytes(root + "/textures/moss.tga", tga32(0, 0, 200)));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	editor_test::handle_to_end(session, request::open_document("textures/rock.tga"));
+	const auto changes = [&] {
+		return external_changes(ProjectPaths::for_root(root), *view.project.scan,
+		                        view.project.imports ? *view.project.imports : std::vector<ImportedSource>(),
+		                        io::file_clock_now_ticks());
+	};
 
 	// A plain TGA: its source made once, the TGA set aside (its clean document closed), the source opened.
 	editor_test::handle_to_end(session, request::edit_externally("textures/rock.tga"));
@@ -83,21 +93,56 @@ int test_round_trip() {
 	editor_test::handle_to_end(session, request::open_document(output));
 	TEST_EXPECT(first_texel(session.document_base_for(output)) == std::vector<uint8_t>({200, 0, 0, 255}));
 
+	// A second texture given its source: two sources, of which the program saves one.
+	editor_test::handle_to_end(session, request::edit_externally("textures/moss.tga"));
+	TEST_EXPECT(session.outcome().done());
+	session.run_operations();
+
 	// Nothing changed: nothing done.
 	editor_test::handle_to_end(session, request::refresh_changed_sources());
 	TEST_EXPECT(session.outcome().done() && session.outcome().operation == 0);
-	TEST_EXPECT(changed_import_sources(ProjectPaths::for_root(root), *view.project.scan).empty());
+	TEST_EXPECT(changes().empty());
 
-	// Its program saves the source: the stamp moved, the import makes the texture again, its document read again.
-	std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	// Its program is saving the source: written just now, it waits, never read half-written.
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/rock_src.tga", tga32(0, 200, 0)));
-	TEST_EXPECT(changed_import_sources(ProjectPaths::for_root(root), *view.project.scan) ==
-	            std::vector<std::string>({"art/rock_src.tga"}));
+	const ExternalChanges waiting = changes();
+	TEST_EXPECT(waiting.empty() && waiting.unsettled == 1);
+	editor_test::handle_to_end(session, request::refresh_changed_sources());
+	TEST_EXPECT(session.outcome().done() && session.outcome().operation == 0);
+	// Settled (its last write a while back): that source alone imported again, the scan read again for it
+	// alone (no walk of the project), its output's open document read again.
+	TEST_EXPECT(editor_test::backdate(root + "/art/rock_src.tga", std::chrono::seconds(60)));
+	TEST_EXPECT(changes().sources == std::vector<std::string>({"art/rock_src.tga"}) &&
+	            changes().files == std::vector<std::string>({"art/rock_src.tga"}));
 	editor_test::handle_to_end(session, request::refresh_changed_sources());
 	TEST_EXPECT(session.outcome().done() && session.outcome().operation != 0);
 	session.run_operations();
 	TEST_EXPECT(first_texel(session.document_base_for(output)) == std::vector<uint8_t>({0, 200, 0, 255}));
-	TEST_EXPECT(changed_import_sources(ProjectPaths::for_root(root), *view.project.scan).empty());
+	TEST_EXPECT(session.files_scanned() <= 2 && changes().empty());
+	// The import cache kept what it knew of the other source: a whole Rescan imports nothing again.
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	size_t imported_again = 0;
+	for (const ImportedSource &source : *view.project.imports) imported_again += source.reimported ? 1 : 0;
+	TEST_EXPECT(view.project.imports->size() == 2 && imported_again == 0);
+
+	// A file an import read (an input) moved: its source imported again.
+	{
+		TEST_EXPECT(editor_test::write_bytes(root + "/textures/grain.tga", tga32(1, 1, 1)));
+		editor_test::handle_to_end(session, request::rescan());
+		session.run_operations();
+		std::vector<uint8_t> bigger = tga32(2, 2, 2);
+		bigger.push_back(0);
+		TEST_EXPECT(editor_test::write_bytes(root + "/textures/grain.tga", bigger) &&
+		            editor_test::backdate(root + "/textures/grain.tga", std::chrono::seconds(60)));
+		ImportedSource reads;
+		reads.source = "art/moss_src.tga";
+		reads.inputs = {"textures/grain.tga"};
+		const ExternalChanges input = external_changes(ProjectPaths::for_root(root), *view.project.scan, {reads},
+		                                               io::file_clock_now_ticks());
+		TEST_EXPECT(input.sources == std::vector<std::string>({"art/moss_src.tga"}) &&
+		            input.files == std::vector<std::string>({"textures/grain.tga"}));
+	}
 
 	// An output's own source opened, nothing made.
 	const size_t entries = view.project.scan->entries.size();
@@ -136,6 +181,29 @@ int test_round_trip() {
 		editor_test::handle_to_end(session, request::save("textures/pic.png"));
 		editor_test::handle_to_end(session, request::open_texture_source("textures/pic.png"));
 		TEST_EXPECT(session.outcome().done() && opened(view) == root + "/textures/pic.png");
+		// Its program saves it: watched as any source is, the scan read again for it alone, its open document
+		// read again.
+		std::vector<uint8_t> red;
+		for (int i = 0; i < 16; ++i) red.insert(red.end(), {220, 10, 10, 255});
+		const std::vector<uint8_t> saved = encode_png_rgba(red.data(), 4, 4);
+		TEST_EXPECT(editor_test::write_bytes(root + "/textures/pic.png", saved) &&
+		            editor_test::backdate(root + "/textures/pic.png", std::chrono::seconds(60)));
+		TEST_EXPECT(changes().files == std::vector<std::string>({"textures/pic.png"}) && changes().sources.empty());
+		editor_test::handle_to_end(session, request::refresh_changed_sources());
+		TEST_EXPECT(session.outcome().done() && session.outcome().operation != 0);
+		session.run_operations();
+		TEST_EXPECT(first_texel(session.document_base_for("textures/pic.png")) == std::vector<uint8_t>({220, 10, 10, 255}) &&
+		            session.files_scanned() == 1 && changes().empty());
+	}
+	// A file that is no texture (an item table): its program is no paint program, refused.
+	{
+		TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Brick\"\nid 100300\ntype building\nend\n"));
+		editor_test::handle_to_end(session, request::rescan());
+		session.run_operations();
+		session.handle(request::edit_externally("defs/items.def"));
+		TEST_EXPECT(session.outcome().refused && session.outcome().findings.back().message.find("no texture") != std::string::npos);
+		session.handle(request::open_texture_source("defs/items.def"));
+		TEST_EXPECT(session.outcome().refused);
 	}
 
 	// A name the project lacks: refused.

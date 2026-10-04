@@ -740,11 +740,13 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.row,
 	Request(K::RefreshChangedSources, "refresh_changed_sources", serve_refresh_changed_sources,
-			"When an import source's size or last write moved since the scan (a program saved it), a refresh "
-			"(the outcome names the operation), which imports it again and reads again the open documents "
-			"whose files changed; nothing otherwise, no operation started. The Shell sends it when its "
-			"window gains the focus and once a second while it has it, of its own: the status line a "
-			"refused request left stays.")
+			"When a watched file's size or last write moved since the scan (a program saved it: an import "
+			"source, a file an import read, a PNG the game reads as it is), a refresh of what moved alone (the "
+			"outcome names the operation): the sources it touches imported again, the scan updated for them "
+			"and those files, the open documents of them read again. A file written within the last two "
+			"seconds waits for a later check, never read half-written. Nothing otherwise, no operation "
+			"started. The Shell sends it when its window gains the focus and once a second while it has it, "
+			"of its own: the status line a refused request left stays.")
 			.holds(kFiles, kFiles | kSlot)
 			.background()
 			.row,

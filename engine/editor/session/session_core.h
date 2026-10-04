@@ -187,6 +187,14 @@ public:
 	// imports, scan and requirements are the view's, an Output line for each source it imported,
 	// the validation left due. What its import pass came to.
 	ImportRunResult absorb_refresh(ProjectRefresh &refresh);
+	// What a program changed of the watched files (S18's external round trip, ExternalChanges) refreshed
+	// alone, as an operation (ChangedSourcesOperation): the sources it names imported (the pass over them
+	// alone), then the scan updated for those sources and the files; false, refused, while another runs.
+	bool start_changed_refresh(ExternalChanges changes);
+	// Its finish: the sources' imports and findings the view's in place of what they were, the scan updated
+	// for them and the files that moved, the open documents of those files read again, the validation left
+	// due.
+	void absorb_changed(ImportRunResult &imports, const std::vector<std::string> &files);
 	// The refresh run to its end now and the project validated (the build's, before it plans).
 	void refresh_now();
 	// The project files at `paths` read again alone (AssetScan::update: a Save's, a create's, a

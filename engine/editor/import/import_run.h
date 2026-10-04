@@ -63,9 +63,19 @@ bool import_source_named(const std::string &only, const std::string &source_rela
 // source's project-relative path (lower-cased), so it is stable across imports.
 std::string import_output_dir(const ProjectPaths &paths, const std::string &source_relative_path);
 
-// The import sources of `scan` whose file's size or last write moved since the scan read it (a program
-// saved it: ADR 0046 S18's external round trip), project-relative, in the scan's order; a source gone is
-// none (the next scan says so). What refresh_changed_sources asks before it refreshes: a stat a source.
-std::vector<std::string> changed_import_sources(const ProjectPaths &paths, const AssetScan &scan);
+// What a program changed of the files the editor watches for its external round trip (ADR 0046 S18): the
+// import sources, the files their imports read (`imports`' inputs), and the PNG textures the game reads as
+// they are (edited in place); each against the size and last write the scan took of it. A file whose last
+// write lies too near `now` (io::file_clock_now_ticks; io::file_stamp_settled) may still be being written:
+// it waits for a later check, never read half-written. What refresh_changed_sources asks before it
+// refreshes: a stat a file.
+struct ExternalChanges {
+	std::vector<std::string> sources; // the import sources to import again: their file or an input moved
+	std::vector<std::string> files;   // every watched file that moved and settled (a PNG gone too)
+	size_t unsettled = 0;             // the files that moved too recently to read yet
+	bool empty() const { return sources.empty() && files.empty(); }
+};
+ExternalChanges external_changes(const ProjectPaths &paths, const AssetScan &scan,
+                                 const std::vector<ImportedSource> &imports, int64_t now);
 
 } // namespace opennova::editor

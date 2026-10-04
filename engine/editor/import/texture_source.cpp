@@ -157,6 +157,10 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 	ImportOptions options;
 	std::vector<uint8_t> current;
 	std::string current_name;
+	if (entry && !entry->imported_from.empty() && entry->kind != AssetKind::Texture) {
+		plan.refusals.push_back(refused(entry->logical_name + " is no texture: an image cannot make it.", entry->relative_path));
+		return plan;
+	}
 	if (entry && !entry->imported_from.empty()) {
 		// An import's output: its import's own options, its source set aside where the new one is another file.
 		plan.texture = entry->logical_name;
@@ -260,21 +264,28 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 		return plan;
 	}
 	plan.texture = entry->logical_name;
+	// A texture's source: one the image importer reads (an .o3d's is a model's, which no paint program edits).
+	const auto image_source = [&](const std::string &source, const std::string &asset) {
+		ImportSidecar record;
+		Diagnostic error;
+		if (load_import_sidecar(join_path(paths.root, source + kImportSidecarSuffix), record, error) && record.importer == "image")
+			return true;
+		plan.refusals.push_back(refused(basename_of(source) + " is no texture's source: its import is " +
+		                                        (record.importer.empty() ? std::string("none it reads") : record.importer + "'s") + ".",
+		                                asset));
+		return false;
+	};
 	if (!entry->imported_from.empty()) {
+		if (entry->kind != AssetKind::Texture) {
+			plan.refusals.push_back(refused(entry->logical_name + " is no texture: its program is not a paint program.", entry->relative_path));
+			return plan;
+		}
+		if (!image_source(entry->imported_from, entry->relative_path)) return plan;
 		plan.source = entry->imported_from; // its own source, as it is
 		return plan;
 	}
 	if (entry->kind == AssetKind::ImportSource) {
-		// A texture's source: one the image importer reads (an .o3d's is a model's).
-		ImportSidecar record;
-		Diagnostic error;
-		if (!load_import_sidecar(join_path(paths.root, entry->relative_path + kImportSidecarSuffix), record, error) ||
-		    record.importer != "image") {
-			plan.refusals.push_back(refused(entry->logical_name + " is no texture's source: its import is " +
-			                                        (record.importer.empty() ? std::string("none it reads") : record.importer + "'s") + ".",
-			                                entry->relative_path));
-			return plan;
-		}
+		if (!image_source(entry->relative_path, entry->relative_path)) return plan;
 		plan.source = entry->relative_path;
 		return plan;
 	}

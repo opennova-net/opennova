@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 
+#include <base/io/file_time.h>
 #include <base/io/strutil.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
@@ -333,10 +334,17 @@ void ImportController::edit_externally(const EditorRequest &request) {
 	post_open_externally(plan.source);
 }
 
+// What a program saved of the watched files, refreshed alone (the sources imported again, the scan updated
+// for them and the files that moved); a file written too recently waits for a later check, never read
+// half-written.
 void ImportController::refresh_changed_sources() {
 	if (!view_.project.open || !view_.project.scan) return;
-	if (changed_import_sources(paths_, *view_.project.scan).empty()) return;
-	if (core_.start_refresh()) view_.activity.status = "Importing what its program saved...";
+	ExternalChanges changes = external_changes(paths_, *view_.project.scan,
+	                                           view_.project.imports ? *view_.project.imports : std::vector<ImportedSource>(),
+	                                           io::file_clock_now_ticks());
+	if (changes.empty()) return;
+	if (core_.start_changed_refresh(std::move(changes)))
+		view_.activity.status = "Reading what its program saved...";
 	core_.touch(ViewConcern::Output);
 }
 

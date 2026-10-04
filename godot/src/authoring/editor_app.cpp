@@ -192,6 +192,9 @@ void EditorApp::_ready() {
 	// tab or a texture field, a Replace).
 	if (get_tree()->get_current_scene() == this && get_window() != nullptr)
 		get_window()->connect("files_dropped", Callable(this, "_on_files_dropped"));
+	// A window that starts with the focus gets no focus-in: the sources a program edits are checked from the
+	// first pump (S18).
+	focused_ = get_window() != nullptr && get_window()->has_focus();
 	const PackedStringArray args = OS::get_singleton()->get_cmdline_user_args();
 	for (int i = 0; i < args.size(); ++i) {
 		if (args[i] == kSmokeFlag) {
