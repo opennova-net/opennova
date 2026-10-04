@@ -103,4 +103,11 @@ bool logical_name_fits_archive(std::string_view name);
 // must be current.
 AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &doc);
 
+// The files a filter matches (the UX round's project lane: Files' filter and the files query), as indices
+// into `scan.entries` in the scan's order: those of `kind` (kCount: any) whose project-relative path holds
+// `text` as normalized names compare; then, where the text names a kind (asset_kind_named_by: "texture",
+// "waves") and `kind` is any, the files of that kind not listed yet, so "texture" lists every texture; for
+// "kind:<k>" the files of that kind alone. An empty text matches every file of `kind`.
+std::vector<size_t> match_files(const AssetScan &scan, const std::string &text, AssetKind kind = AssetKind::kCount);
+
 } // namespace opennova::editor

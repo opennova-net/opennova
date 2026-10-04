@@ -492,6 +492,26 @@ a save, a configuration or a score). Play in the game install runs a build there
 _Avoid_: retail directory, retail root, retail files (the names before ADR 0046 S13 A4), resource
 dir (the runtime's `--resource-dir`, which may be a build)
 
+**Install check**:
+What a folder holds as a game install, read as an import mounts one (the boot archives, no `/d`):
+whether they mount, how many files they serve, the expansions, whether the game's program is beside
+them; said in a line under every field that names an install (New project, Project settings, the
+welcome page), so a wrong folder is said at once (`assets/install_check.h`, the `check_install`
+request).
+_Avoid_: install validation (nothing is validated: the folder is read)
+
+**Welcome page**:
+The editor with no project open: the Document window across the whole workspace (the other windows
+stand aside, as the Preview does for a document it has nothing of), with the recent projects (each by
+its title, its game and its expansion), Open, and the New project form with its game install.
+_Avoid_: start screen, home, launcher (ADR 0048 retired the launcher)
+
+**File card**:
+Files' page for one project file: what a file of its kind is to the game, where a build puts it, where
+it came from, what it names and who names it, a wave's sound with Play; what a double click opens for a
+file the editor has no document of (`session/file_card.h`, the `file_card` query).
+_Avoid_: properties, details, info panel, References (the card's two lists replaced it)
+
 **Project expansion**:
 What a project builds as and on (ADR 0046 S16, `project.opennova`'s `expansion`): its **expansion
 name**, the folder `expansion\<name>\` its build is, played with `/exp <name>`, and the installed
