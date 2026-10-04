@@ -108,8 +108,10 @@ static int test_classification() {
 	TEST_EXPECT(asset_name_fits_kind("field.nq8", AssetKind::MaterialChunk) && !asset_name_fits_kind("field.nq8", AssetKind::Texture) &&
 	            !asset_name_fits_kind("field.nq8", AssetKind::Model));
 	TEST_EXPECT(classify_asset("main.mnu", &chunk) == AssetKind::Menu); // a typed name keeps its kind
+	// A PNG, and a TGA or a PCX a record makes a source (S18), fit an import source's kind; a DDS never.
 	TEST_EXPECT(classify_asset("logo.png", nullptr) == AssetKind::Texture && asset_name_fits_kind("logo.png", AssetKind::Texture) &&
-	            asset_name_fits_kind("logo.png", AssetKind::ImportSource) && !asset_name_fits_kind("logo.tga", AssetKind::ImportSource));
+	            asset_name_fits_kind("logo.png", AssetKind::ImportSource) && asset_name_fits_kind("logo.tga", AssetKind::ImportSource) &&
+	            !asset_name_fits_kind("logo.dds", AssetKind::ImportSource));
 
 	TEST_EXPECT(expected_asset_kind_for_required_name("gametext.bin") == AssetKind::Strings);
 	TEST_EXPECT(expected_asset_kind_for_required_name("menutxt.bin") == AssetKind::Strings);
