@@ -22,8 +22,11 @@
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 
+#include <formats/tga/tga.h>
+
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/menu_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -90,6 +93,26 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		break;
 	}
 	case EditorRequestKind::RenameAsset: request.new_name = "renamed.mnu"; break;
+	case EditorRequestKind::SplitTexture: {
+		// A texture extra.mnu's window shows (that edit unsaved too, validated into the graph): a split of it for
+		// extra.mnu rewrites extra.mnu.
+		const std::vector<uint8_t> rgba(16, 200);
+		std::vector<uint8_t> tga;
+		std::string why;
+		opennova::tga::tga_write_rgba32(rgba.data(), 2, 2, tga, why);
+		editor_test::write_bytes(dirty.view().project.root + "/textures/tex.tga", tga);
+		dirty.session.handle(request::rescan());
+		dirty.session.run_operations();
+		Document *document = dirty.session.document_for(dirty.extra);
+		if (!document) break;
+		editor_test::handle_to_end(dirty.session, request::edit_record(dirty.extra, menu_test::image_edits(
+				*document, document->address_at("0/window:0"), "tex.tga")));
+		dirty.session.run_operations();
+		request.path = "textures/tex.tga";
+		request.new_name = "tex_2.tga";
+		request.paths = {dirty.extra};
+		break;
+	}
 	case EditorRequestKind::AssignRequirement: {
 		// main.mnu gone from the project: extra.mnu is a menu that can be it.
 		const RequirementRow *row = requirement_of(dirty.view(), "main.mnu");
@@ -169,7 +192,8 @@ static int test_guard_column_is_the_prompt() {
 		const std::string named = !request.dir.empty() ? request.dir : request.path;
 		TEST_EXPECT(prompt.target == (row.guard == GuardScope::Document ? dirty.extra : named));
 	}
-	TEST_EXPECT(prompted == 14 && went_ahead == kEditorRequestKindCount - 14); // Export (S16) guards as Build does
+	// Export (S16) guards as Build does; a texture's split (S18) as a rename does.
+	TEST_EXPECT(prompted == 15 && went_ahead == kEditorRequestKindCount - 15);
 	return 0;
 }
 

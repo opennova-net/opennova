@@ -8,6 +8,7 @@
 #include <base/io/json.h>
 #include <editor/documents/name_source.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
 #include <editor/model/document_search.h>
@@ -142,8 +143,8 @@ io::JsonValue document_to_json(const DocumentBase &document, const JsonPage *row
 // the saved baseline (unchanged, changed, added), its owner and index there, every field of its kind
 // as it applies to this record (Document::field_on) with the value and, where the value names
 // something, its words (`display`; `dangling` where it names nothing; `display_source`), the
-// choices, whether an optional field is present, a reference's status against the view's tables,
-// and for a field changed since the saved baseline `changed` with what the saved file holds
+// choices, whether an optional field is present, a reference's status against the view's tables
+// (a texture's `texture` too: texture_reference_json), and for a field changed since the saved baseline `changed` with what the saved file holds
 // (`saved`, null when the file lacks the record; `saved_present` for an optional field), then the
 // collections it holds. Null for a stale or wrong-kind address.
 io::JsonValue record_to_json(const Document &document, const NodeAddress &address, const SessionView &view);
@@ -151,10 +152,16 @@ io::JsonValue record_to_json(const Document &document, const NodeAddress &addres
 io::JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge);
 io::JsonValue graph_edges_to_json(const AssetGraph &graph, const std::vector<const GraphEdge *> &edges);
 io::JsonValue graph_symbol_to_json(const GraphSymbol &symbol);
+// What a texture reference loads (ADR 0046 S18, reference_queries' texture_reference): {name, status,
+// and where its loader opens a project file: file, transform, and what the file is (the thumbnails'
+// facts: loads, refusal, width, height, levels, format, texels, alpha)}. A texture field's record JSON
+// carries it as `texture`, and so does each choice of its picker.
+io::JsonValue texture_reference_json(const SessionView &view, const TextureReferenceLoad &load);
 // A reference field of a record, as it applies to it (Document::field_on): the names its
 // picker offers (reference_choices): {field, reference (its kind token), scope,
 // count, choices: [{name, kind, file, record, label (what the name names in words, ADR 0046 S15:
-// word_choices), status, inert, reason}]}; and where its Go to
+// word_choices), status, inert, reason, served (the file a texture reference set to it loads),
+// texture (texture_reference_json, a texture's)}]}; and where its Go to
 // leads with the value it holds (reference_targets): {field, reference, value,
 // count, targets: [{label, file, locator, field, editable}]}. A field that is no reference
 // has none. Null for a record the document does not hold or a field it does not have.

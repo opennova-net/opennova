@@ -56,8 +56,9 @@ using RequestHandler = void (*)(SessionCore &core, const EditorRequest &request)
 // plan reads the graph); what it reads and writes of the session's resources (Holds) and what it
 // asks of the busy gate (a request conflicts with the running operation when it writes what the
 // operation reads or writes, or reads what the operation writes); the prompt's words for what waits
-// on it ("Close %s", the %s the file) and its Save button; and what it does. Every row is
-// static_asserted into place (request_kinds.cpp).
+// on it ("Close %s", the %s the file) and its Save button; whether the Shell sends it of its own (a
+// timer's, the window's focus: no person's, so the status line a refused request left stays, S18);
+// and what it does. Every row is static_asserted into place (request_kinds.cpp).
 struct RequestKindRow {
 	EditorRequestKind kind = EditorRequestKind::kCount;
 	const char *token = "";
@@ -69,6 +70,7 @@ struct RequestKindRow {
 	bool acts_on_saved = false;
 	bool names_active = false;
 	bool ends_edit_groups = false;
+	bool background = false;
 	Holds reads = HoldsNothing;
 	Holds writes = HoldsNothing;
 	OnBusy on_busy = OnBusy::Refuse;
