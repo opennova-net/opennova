@@ -38,6 +38,9 @@ enum class ViewEventKind : uint8_t {
 	// switch, an Import planning again first): `flag` an Import found the files changed since the
 	// plan it was shown and wrote nothing. The dialog takes the plan's checks again.
 	ImportPlanned,
+	// A build ended (the UX round's problems lane): `flag` it landed, `tag` 1 when a Play waits on it.
+	// The build panel comes forward with what it came to (unless the game follows it).
+	BuildEnded,
 	kCount,
 };
 
@@ -56,6 +59,7 @@ inline constexpr ViewEventKindRow kViewEventKindRows[] = {
 	{ViewEventKind::AskRename, "ask_rename"},
 	{ViewEventKind::SettingsApplied, "settings_applied"},
 	{ViewEventKind::ImportPlanned, "import_planned"},
+	{ViewEventKind::BuildEnded, "build_ended"},
 };
 
 static_assert(std::size(kViewEventKindRows) == kViewEventKindCount,
