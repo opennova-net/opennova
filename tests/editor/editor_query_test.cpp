@@ -34,6 +34,7 @@
 #include <editor/project_build/build_run.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/finding_codes.h>
+#include <editor/session/original_bytes.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
@@ -473,6 +474,78 @@ static int test_build_gate() {
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);
+	return 0;
+}
+
+// ADR 0046 S16: a finding that a file does not serialize (a blocks_save row's) gates the build only
+// where the build must write the file. A fake install ships an items.def the catalog's reader refuses a
+// value of (catalog.invalid_input, a blocks_save error); the project holds it byte for byte, the game's
+// own data, which the build packs as stored: the row is listed and the gate is open. Changed by a byte
+// on disk, the file is the modder's and the row gates; as shipped again, it does not. The rule itself,
+// for a document with unsaved edits (whose Save the build asks first must write it): it gates.
+static int test_build_gate_shipped() {
+	editor_test::TempProjectDir dir("opennova_editor_query_build_gate_shipped");
+	const std::string shipped = "begin \"Shipped\"\r\nid 100001\r\nhp twelve\r\nend\r\n";
+	const std::string install = dir.file("install");
+	const opennova::pff::PffWriteEntry entries[] = {
+		{ "items.def", reinterpret_cast<const uint8_t *>(shipped.data()), uint32_t(shipped.size()), 0, 0, 0 },
+	};
+	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
+						entries, 1) == opennova::pff::PFF_WRITE_OK);
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Shipped"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const AssetEntry *items = session.view().project.scan->find("items.def");
+	TEST_EXPECT(items != nullptr);
+	if (!items) return 1;
+	const std::string relative = items->relative_path;
+	const std::string file = dir.file("project") + "/" + relative;
+	TEST_EXPECT(editor_test::write_text(file, shipped));
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::rescan());
+	const auto invalid_rows = [&session, &relative] {
+		size_t rows = 0;
+		for (const Diagnostic &d : session.view().findings.diagnostics)
+			rows += d.code() == "catalog.invalid_input" && d.asset == relative && d.severity == DiagnosticSeverity::Error;
+		return rows;
+	};
+	JsonValue gate = ask(session, "build_gate");
+	// The game's own bytes (session/original_bytes.h): the file is what the install serves, byte for byte.
+	OriginalBytes bytes;
+	const std::set<std::string> original =
+			bytes.identical(install, *session.view().project.document, dir.file("project"), { relative });
+	TEST_EXPECT(invalid_rows() == 1 && original.count(relative) == 1 && bytes.reads() == 1);
+	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0);
+	// Changed by a byte: the modder's file, which a blocks_save row gates.
+	TEST_EXPECT(editor_test::write_text(file, shipped + "\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	gate = ask(session, "build_gate");
+	TEST_EXPECT(invalid_rows() == 1 && gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
+			gate.get("blocking")->array[0].get_string("code", "") == "catalog.invalid_input");
+	session.handle(request::build());
+	session.run_operations();
+	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);
+	// As shipped again: listed, and the build lands.
+	TEST_EXPECT(editor_test::write_text(file, shipped));
+	editor_test::handle_to_end(session, request::rescan());
+	gate = ask(session, "build_gate");
+	TEST_EXPECT(invalid_rows() == 1 && !gate.get_bool("blocked", true));
+	session.handle(request::build());
+	session.run_operations();
+	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Done && session.view().activity.last_build->ok);
+	// The same row over the same file held with unsaved edits, or with no shipped files known: it gates.
+	Diagnostic row;
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		if (d.code() == "catalog.invalid_input" && d.asset == relative) row = d;
+	ShippedFiles files;
+	files.original = original;
+	TEST_EXPECT(!blocks_build(row, nullptr, &files) && blocks_build(row, nullptr, nullptr));
+	files.unsaved.insert(relative);
+	TEST_EXPECT(blocks_build(row, nullptr, &files));
 	return 0;
 }
 
@@ -1666,6 +1739,7 @@ int main() {
 	failures += test_paging();
 	failures += test_refusals();
 	failures += test_build_gate();
+	failures += test_build_gate_shipped();
 	failures += test_problems_params();
 	failures += test_state_since();
 	failures += test_catalog();
