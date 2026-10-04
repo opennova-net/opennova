@@ -15,6 +15,7 @@
 #include <editor/documents/mns_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/texture_checks.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/def/def.h>
@@ -47,8 +48,8 @@ Diagnostic on_definition(const GraphSymbol &symbol, DiagnosticSeverity severity,
 // defines too; and on the one the game reads of all the shell's stylesheets (the graph's binding),
 // through the menus' uses of it, a name no menu uses, a value used as a colour that is not one,
 // and a value used as more than one of a colour, a font and an image.
-void check_style_uses(
-		const AssetGraph &graph, const ValidationCache &files, std::vector<Diagnostic> &out) {
+void check_style_uses(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &,
+		std::vector<Diagnostic> &out) {
 	const std::vector<const GraphSymbol *> symbols = graph.symbols_of_kind(ReferenceKind::StyleVar);
 	for (size_t begin = 0, end = 0; begin < symbols.size(); begin = end) {
 		const std::string &path = symbols[begin]->file;
@@ -167,7 +168,8 @@ void pool_findings(const AssetGraph &graph, const std::string &path, std::vector
 // stands, every edge and symbol is where it was), not at every composition of the rows (the editor
 // composes them after every edit that validates a file); a composition takes those of each mission
 // whose records its validation checked.
-void check_mission_pools(const AssetGraph &graph, const ValidationCache &files, std::vector<Diagnostic> &out) {
+void check_mission_pools(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &,
+		std::vector<Diagnostic> &out) {
 	struct Made {
 		std::mutex mutex;
 		uint64_t generation = 0; // no graph's (the counter starts at 1)
@@ -193,6 +195,7 @@ void check_mission_pools(const AssetGraph &graph, const ValidationCache &files, 
 
 // The cross-file checks, one row per asset kind, in AssetKind's order.
 constexpr UseCheckRow kUseChecks[] = {
+	{ AssetKind::Texture, check_texture_uses },
 	{ AssetKind::Mission, check_mission_pools },
 	{ AssetKind::MenuStyle, check_style_uses },
 };
@@ -219,10 +222,10 @@ const UseCheckRow *use_check(AssetKind kind) {
 	return nullptr;
 }
 
-void run_use_checks(
-		const AssetGraph &graph, const ValidationCache &files, std::vector<Diagnostic> &out) {
+void run_use_checks(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
+		std::vector<Diagnostic> &out) {
 	for (const UseCheckRow &row : kUseChecks)
-		row.check(graph, files, out);
+		row.check(graph, files, input, out);
 }
 
 } // namespace opennova::editor
