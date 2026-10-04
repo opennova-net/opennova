@@ -1083,6 +1083,10 @@ foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_win
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
 
+# The NORMAL-pass coverage table checked against the object pipeline manifest's coverage_source.
+target_compile_definitions(renderer_material_classify_test PRIVATE
+    OBJECT_PIPELINE_MANIFEST="${CMAKE_SOURCE_DIR}/godot/shaders/object/pipeline_manifest.json")
+
 # The REN-1 T1 parity instrument reads its committed golden from the source
 # tree (dump mode rewrites it there — ADR 0023).
 target_compile_definitions(renderer_state_vectors_test PRIVATE
@@ -1123,6 +1127,19 @@ add_executable(dds_write_test dds/dds_write_test.cpp)
 target_link_libraries(dds_write_test PRIVATE opennova_formats)
 target_include_directories(dds_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME dds_write COMMAND dds_write_test)
+
+# What the game's readers make of a texture file (ADR 0046 S18, the texture document; the TGA reader's
+# is tga_read): D3DX's DDS loader (its pixel-format table, the levels, what it refuses) and the PCX
+# reader's indices and palette, each over files minted by our writers or here.
+add_executable(dds_read_test dds/dds_read_test.cpp)
+target_link_libraries(dds_read_test PRIVATE opennova_formats)
+target_include_directories(dds_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dds_read COMMAND dds_read_test)
+
+add_executable(pcx_game_decode_test pcx/pcx_game_decode_test.cpp)
+target_link_libraries(pcx_game_decode_test PRIVATE opennova_formats)
+target_include_directories(pcx_game_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pcx_game_decode COMMAND pcx_game_decode_test)
 
 add_executable(til_roundtrip_test til/til_roundtrip_test.cpp)
 target_link_libraries(til_roundtrip_test PRIVATE opennova_formats)

@@ -11,11 +11,20 @@
 #include <base/io/strutil.h>
 
 namespace opennova::renderer {
+
+int particle_atlas_page_side(std::uint8_t type) {
+	return unsigned(type) - 3u <= 4u ? 256 : 1024;
+}
+
+bool particle_atlas_fits(std::uint8_t type, int width, int height) {
+	const int side = particle_atlas_page_side(type);
+	return side - height >= 0 && side - width > 0;
+}
+
 namespace {
 
-
 int atlas_page_size(std::uint8_t type) {
-	return type <= 2 ? 1024 : 256;
+	return particle_atlas_page_side(type);
 }
 
 bool atlas_types_compatible(std::uint8_t page_type, std::uint8_t entry_type) {

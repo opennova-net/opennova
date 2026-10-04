@@ -169,6 +169,57 @@ const char *object_projected_shadow_coverage_name(
 	return "no_pass";
 }
 
+// The NORMAL pass's coverage per technique (object_shader_template.h carries the
+// witness; the pipeline manifest's coverage_source names the same table).
+ObjectCoverageSource object_coverage_source(ObjectShaderTechnique technique) noexcept {
+	switch (technique) {
+		case ObjectShaderTechnique::SelfLit:
+		case ObjectShaderTechnique::SelfLitDetail:
+		case ObjectShaderTechnique::GlassFixed:
+			return ObjectCoverageSource::Zero;
+		case ObjectShaderTechnique::PhongObjectSpecularPhongMap:
+			return ObjectCoverageSource::VertexDiffuseAlpha;
+		case ObjectShaderTechnique::Dot3Tangent:
+		case ObjectShaderTechnique::Dot3TangentDetail:
+			return ObjectCoverageSource::NormalAlpha;
+		case ObjectShaderTechnique::EnvironmentMirror:
+		case ObjectShaderTechnique::EnvironmentMirrorTextured:
+		case ObjectShaderTechnique::GlassSkinned:
+			return ObjectCoverageSource::ReflectAlpha;
+		case ObjectShaderTechnique::Unsupported:
+		case ObjectShaderTechnique::Fixed:
+		case ObjectShaderTechnique::FixedSkinned:
+		case ObjectShaderTechnique::FixedDetail:
+		case ObjectShaderTechnique::Tracer:
+		case ObjectShaderTechnique::Flag:
+		case ObjectShaderTechnique::PhongTangentDiffuse:
+		case ObjectShaderTechnique::PhongTangentDiffuseSkinned:
+		case ObjectShaderTechnique::PhongTangentSpecular:
+		case ObjectShaderTechnique::PhongTangentSpecularSkinned:
+		case ObjectShaderTechnique::PhongObjectDiffuse:
+		case ObjectShaderTechnique::PhongObjectDiffuseSkinned:
+		case ObjectShaderTechnique::PhongObjectSpecular:
+		case ObjectShaderTechnique::Dot3TangentSkinned:
+		case ObjectShaderTechnique::Dot3TangentDetailSkinned:
+		case ObjectShaderTechnique::Dot3Object:
+		case ObjectShaderTechnique::Dot3ObjectDetail:
+		case ObjectShaderTechnique::EnvironmentPhong:
+			return ObjectCoverageSource::DiffuseAlpha;
+	}
+	return ObjectCoverageSource::DiffuseAlpha;
+}
+
+const char *object_coverage_source_name(ObjectCoverageSource source) noexcept {
+	switch (source) {
+		case ObjectCoverageSource::DiffuseAlpha: return "diffuse_alpha";
+		case ObjectCoverageSource::NormalAlpha: return "normal_alpha";
+		case ObjectCoverageSource::VertexDiffuseAlpha: return "vertex_diffuse_alpha";
+		case ObjectCoverageSource::ReflectAlpha: return "reflect_alpha";
+		case ObjectCoverageSource::Zero: return "zero";
+	}
+	return "diffuse_alpha";
+}
+
 // The retail skinned effects' skinnormal argument per technique: SkBasic and
 // SkGlass blend the normal, every lit bump effect lights the first palette
 // entry's frame (object_shader_template.h carries the witness).

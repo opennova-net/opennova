@@ -48,6 +48,19 @@ struct ParticleAtlasAllocation {
 ParticleAtlasAllocation allocate_retail_particle_atlas_rect(
 		std::vector<int> &skyline, int side, int width, int height);
 
+// The side of the atlas page an entry of `type` (its graphic's blend mode,
+// formats/particle BlendMode) is packed on: 1024 for blend, additive and
+// premult, 256 for bump, mod, mod2x, bumpadd and distort
+// [orig: CParticleManager_BuildTextureAtlases @ 0x5e8f19..0x5e8f20].
+int particle_atlas_page_side(std::uint8_t type);
+// Whether a graphic of width x height fits an empty page of `type`: narrower
+// than the page and no taller [orig: CParticleAtlas_TryPlaceEntry @ 0x5e2c30
+// (height), @ 0x5e2c57 (width)]. One that does not is never cleared from the
+// build's list, and every pass makes a new page for it, so retail's atlas
+// build never ends [orig: CParticleManager_BuildTextureAtlases @ 0x5e9185
+// (the miss counted), @ 0x5e91bb (another pass while one missed)].
+bool particle_atlas_fits(std::uint8_t type, int width, int height);
+
 struct ParticleAtlasPlacement {
 	bool valid = false;
 	std::uint32_t page = 0;

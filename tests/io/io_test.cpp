@@ -3,9 +3,11 @@
 // FNV-1a hash with its hex spelling, and the checked cp1252 encoder.
 
 #include <atomic>
+#include <chrono>
 #include <climits>
 #include <clocale>
 #include <cmath>
+#include <filesystem>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -21,6 +23,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/log.h>
 #include <base/io/log_ring.h>
+#include <base/io/file_time.h>
 #include <base/io/fixed.h>
 #include <base/io/hash.h>
 #include <base/io/le.h>
@@ -599,11 +602,29 @@ static int test_cp1252_checked()
     return 0;
 }
 
+// The racy rule's edge (git's, ADR 0046 S13 A8): a last write kFileStampSettle or more before the
+// pass is settled, one a tick less is not, a future one is not, and an unknown stamp (0) never is.
+static int test_file_stamp_settled()
+{
+    using Ticks = std::filesystem::file_time_type::duration;
+    const int64_t settle = int64_t(std::chrono::duration_cast<Ticks>(io::kFileStampSettle).count());
+    const int64_t began = io::file_clock_now_ticks();
+    TEST_EXPECT(settle > 0 && std::chrono::duration_cast<std::chrono::milliseconds>(Ticks(settle)).count() == 2000);
+    TEST_EXPECT(io::file_stamp_settled(began - settle, began));
+    TEST_EXPECT(io::file_stamp_settled(began - settle - 1, began));
+    TEST_EXPECT(!io::file_stamp_settled(began - settle + 1, began));
+    TEST_EXPECT(!io::file_stamp_settled(began, began));
+    TEST_EXPECT(!io::file_stamp_settled(began + settle, began));
+    TEST_EXPECT(!io::file_stamp_settled(0, began));
+    return 0;
+}
+
 int main()
 {
     if (test_retail_atol_saturates()) return 1;
     if (test_retail_atof_ignores_the_locale()) return 1;
     if (test_le_primitives()) return 1;
+    if (test_file_stamp_settled()) return 1;
     if (test_cp1252_checked()) return 1;
     if (test_fnv1a64()) return 1;
     if (test_bam_wrap_arithmetic()) return 1;
