@@ -35,6 +35,14 @@ param(
 
     [switch] $ExerciseInput,
 
+    # A network-parity scenario (scripts/net/scenarios/*.json,
+    # opennova.scenario.v1; ADR 0050 R5). At the steady-window start its
+    # actor takes the setup pose and plays the scripted steps -- a retail
+    # joiner through onHook's virtual keyboard, an OpenNova joiner through
+    # the scenario_play probe -- then the run settles for the scenario's
+    # settle_seconds. The summary records every step's applied logic tick.
+    [string] $Scenario = "",
+
     [ValidatePattern('^[1-9][0-9]{2,4}x[1-9][0-9]{2,4}$')]
     [string] $Resolution = "1920x1080",
 
@@ -103,6 +111,77 @@ if ($ReadinessMode -eq "deploy_hold" -and ($AutoDeploy -or $ExerciseInput)) {
 }
 if ($WireOnly -and $Topology -ne "OR") {
     throw "WireOnly is an OR-only diagnostic mode."
+}
+# ConvertFrom-Json yields Int32/Int64 for integers and Double (pwsh) or
+# Decimal (Windows PowerShell) for the rest.
+function Test-JsonInteger {
+    param($Value)
+    return $Value -is [int] -or $Value -is [long]
+}
+
+function Test-JsonNumber {
+    param($Value)
+    return (Test-JsonInteger $Value) -or $Value -is [double] -or $Value -is [decimal]
+}
+
+# opennova.scenario.v1: the case it is written for (mission, numeric game
+# type, actor), an optional setup pose, the steps both drivers consume
+# verbatim, and the settle after the last one. The drivers validate each step;
+# this binds the scenario to the run's case.
+function Read-ParityScenario {
+    param([Parameter(Mandatory = $true)] [string] $Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Scenario file is missing: $Path"
+    }
+    $spec = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    $expected = @("schema", "name", "mission", "game_type", "actor", "setup",
+        "steps", "settle_seconds", "expect")
+    $extra = @($spec.PSObject.Properties.Name | Where-Object { $_ -notin $expected })
+    if ($extra.Count -gt 0) {
+        throw "Scenario $Path has unknown fields: $($extra -join ', ')"
+    }
+    if ([string] $spec.schema -cne "opennova.scenario.v1" -or
+            [string]::IsNullOrWhiteSpace([string] $spec.name)) {
+        throw "Scenario $Path is not a named opennova.scenario.v1 document"
+    }
+    $missionStem = [IO.Path]::GetFileNameWithoutExtension($Mission)
+    $specStem = [IO.Path]::GetFileNameWithoutExtension([string] $spec.mission)
+    if ($specStem -ine $missionStem) {
+        throw "Scenario $($spec.name) is written for mission $($spec.mission), not $Mission"
+    }
+    if ([string] $spec.game_type -cne $GameType) {
+        throw "Scenario $($spec.name) is written for game type $($spec.game_type), not $GameType"
+    }
+    if ([string] $spec.actor -cne "joiner") {
+        throw "Scenario $($spec.name): only the joiner actor is supported (actor '$($spec.actor)')"
+    }
+    $steps = @($spec.steps)
+    if ($steps.Count -lt 1 -or -not ($steps[-1].PSObject.Properties.Name -contains "end")) {
+        throw "Scenario $($spec.name) must end with an end step"
+    }
+    $settle = $spec.settle_seconds
+    if (-not (Test-JsonInteger $settle) -or $settle -lt 0 -or $settle -gt 300) {
+        throw "Scenario $($spec.name): settle_seconds must be an integer from 0 to 300"
+    }
+    if ($spec.PSObject.Properties.Name -contains "setup" -and $null -ne $spec.setup) {
+        $pose = $spec.setup.pose
+        $position = @($pose.position_bms)
+        if ($position.Count -ne 3 -or
+                @($position | Where-Object { -not (Test-JsonNumber $_) }).Count -gt 0 -or
+                -not (Test-JsonNumber $pose.yaw) -or -not (Test-JsonNumber $pose.pitch)) {
+            throw "Scenario $($spec.name): setup.pose needs position_bms [x, y, z], yaw and pitch numbers"
+        }
+    }
+    return $spec
+}
+
+$script:ScenarioSpec = $null
+$script:ScenarioWitness = $null
+if ($Scenario) {
+    if ($ExerciseInput -or $WireOnly -or $ReadinessMode -ne "in_match") {
+        throw "A scenario plays on an in_match run with neither ExerciseInput nor WireOnly."
+    }
+    $script:ScenarioSpec = Read-ParityScenario -Path $Scenario
 }
 if ($HostMcpPort -eq $JoinerMcpPort) {
     throw "HostMcpPort and JoinerMcpPort must differ."
@@ -632,6 +711,114 @@ function Wait-UntilSteadyDeadline {
     while ([DateTime]::UtcNow -lt $deadline) {
         $remainingMs = [int][Math]::Ceiling(($deadline - [DateTime]::UtcNow).TotalMilliseconds)
         Start-Sleep -Milliseconds ([Math]::Min(250, [Math]::Max(1, $remainingMs)))
+    }
+}
+
+# Plays -Scenario on its actor right after the steady window starts: the setup
+# pose, then the steps, then the settle. A retail joiner takes the pose through
+# onhook_load_debug_snapshot and the steps through onhook_play_input (retail's
+# own key and mouse handlers at the Input_ProcessFrame seam); an OpenNova
+# joiner takes both through the scenario_play probe (ScriptedInput at the
+# ControlsModel device seam). Both report each step's applied logic tick.
+function Invoke-ScenarioIfRequested {
+    param([string] $RetailJoinerInstanceId = "")
+    if (-not $script:ScenarioSpec) { return }
+    if (-not $script:SteadyStartedUtc -or $script:SteadyCompletedUtc) {
+        throw "Scenario play must follow the steady-window start"
+    }
+    if ($script:ScenarioWitness) {
+        throw "Scenario was already played in run $RunId"
+    }
+    $spec = $script:ScenarioSpec
+    $hasPose = $spec.PSObject.Properties.Name -contains "setup" -and
+        $null -ne $spec.setup -and $null -ne $spec.setup.pose
+    # Generous: two retail windows on one machine tick well below 62 Hz.
+    $timeoutSeconds = [int] (@($spec.steps)[-1].tick / 10.0 + 60)
+    $startedUtc = [DateTime]::UtcNow.ToString("o")
+    $setup = $null
+    if ($Topology -in @("RR", "OR")) {
+        if (-not $RetailJoinerInstanceId) {
+            throw "Scenario play on $Topology needs the retail joiner's instance id"
+        }
+        if ($hasPose) {
+            $pose = $spec.setup.pose
+            $position = @($pose.position_bms)
+            $snapshotPath = Join-Path $RunRoot "scenario-setup.debug_snapshot.json"
+            if (Test-Path -LiteralPath $snapshotPath) {
+                throw "Scenario setup snapshot must be create-new: $snapshotPath"
+            }
+            [pscustomobject]@{
+                schema = "opennova.debug_snapshot.v1"
+                player = [pscustomobject]@{
+                    position_bms = [pscustomobject]@{
+                        x = $position[0]; y = $position[1]; z = $position[2]
+                    }
+                    orientation_mission_deg = [pscustomobject]@{
+                        yaw = $pose.yaw; pitch = $pose.pitch
+                    }
+                }
+            } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $snapshotPath -Encoding ASCII
+            $setup = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_load_debug_snapshot" -Arguments @{
+                instance_id = $RetailJoinerInstanceId
+                path = $snapshotPath
+            })
+        }
+        $played = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_play_input" -Arguments @{
+            instance_id = $RetailJoinerInstanceId
+            steps = @($spec.steps)
+            wait = $true
+            timeout_ms = $timeoutSeconds * 1000
+        })
+        # Retail skips the input seam while its local player is dead
+        # (sub_54B970 @0x52660D); a run that dies before its end step expires
+        # rather than finishing. Every step before the end must still apply.
+        $unapplied = @($played.steps | Where-Object {
+            [string] $_.kind -ne "end" -and $null -eq $_.applied_logic_tick
+        })
+        if ([string] $played.state -notin @("done", "expired") -or $unapplied.Count -gt 0) {
+            throw "Retail scenario $($spec.name) did not play: state=$($played.state) result=$($played.result) unapplied=$($unapplied.Count)"
+        }
+        $driver = "onhook_play_input"
+        $record = $played
+    }
+    else {
+        $status = Invoke-GameProbe -Port $JoinerMcpPort -Name "scenario_play" -Process $script:OpenNovaJoiner `
+            -TimeoutSeconds $timeoutSeconds -PollMs 500 -Arguments @{
+                scenario = $spec
+                wait = $true
+            }
+        if ([string] $status.state -ne "passed" -or -not $status.verdict -or
+                -not [bool] $status.verdict.ok) {
+            $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+            throw "OpenNova scenario $($spec.name) did not play: state=$($status.state) $why"
+        }
+        $driver = "scenario_play"
+        $record = $status.verdict.data
+        $setup = $record.setup
+    }
+    $playedUtc = [DateTime]::UtcNow.ToString("o")
+    Start-Sleep -Seconds ([int] $spec.settle_seconds)
+    # The run keeps the exact script it played; the comparator checks every
+    # run played the same steps and reads the expectations from the source.
+    $playedCopy = Join-Path $RunRoot "scenario.json"
+    if (Test-Path -LiteralPath $playedCopy) {
+        throw "Played scenario copy must be create-new: $playedCopy"
+    }
+    Copy-Item -LiteralPath $Scenario -Destination $playedCopy
+    $script:ScenarioWitness = [pscustomobject]@{
+        schema = "opennova.parity-scenario.v1"
+        name = [string] $spec.name
+        source = (Resolve-Path -LiteralPath $Scenario).Path
+        path = $playedCopy
+        sha256 = (Get-FileHash -LiteralPath $playedCopy -Algorithm SHA256).Hash.ToLowerInvariant()
+        actor = [string] $spec.actor
+        driver = $driver
+        started_utc = $startedUtc
+        played_utc = $playedUtc
+        settled_utc = [DateTime]::UtcNow.ToString("o")
+        settle_seconds = [int] $spec.settle_seconds
+        setup = $setup
+        record = $record
     }
 }
 
@@ -1379,7 +1566,7 @@ try {
                     wire_ready = $script:WireReadyWitness
                 }
                 Begin-SteadyWindow
-                Wait-UntilSteadyDeadline
+                                Wait-UntilSteadyDeadline
                 $hostInstance = Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailHostProcess.Id -Role host
                 $joinerInstance = Wait-RetailProcessForPeer `
@@ -1446,6 +1633,7 @@ try {
             $script:Acceptance | Add-Member -NotePropertyName wire_ready `
                 -NotePropertyValue $script:WireReadyWitness -Force
             Begin-SteadyWindow
+            Invoke-ScenarioIfRequested -RetailJoinerInstanceId ([string] $pair.joiner.instance_id)
             if ($ExerciseInput) {
                 Invoke-RetailInputExercise -ProcessId ([int] $pair.joiner.pid)
             }
@@ -1564,6 +1752,7 @@ try {
             $script:Acceptance | Add-Member -NotePropertyName wire_ready `
                 -NotePropertyValue $script:WireReadyWitness -Force
             Begin-SteadyWindow
+            Invoke-ScenarioIfRequested
             if ($ExerciseInput) {
                 Publish-MotionGate
             }
@@ -1681,6 +1870,7 @@ try {
                 }
                 $null = Wait-ParityWireReady
                 Begin-SteadyWindow
+                Invoke-ScenarioIfRequested -RetailJoinerInstanceId $script:RetailInstanceId
                 if ($ExerciseInput) {
                     Invoke-RetailInputExercise -ProcessId $script:RetailProcess.Id
                 }
@@ -1736,6 +1926,7 @@ try {
             $script:EvidenceRole = "external"
             $null = Wait-ParityWireReady
             Begin-SteadyWindow
+            Invoke-ScenarioIfRequested
             if ($ExerciseInput) {
                 Publish-MotionGate
             }
@@ -2011,6 +2202,7 @@ $summary = [pscustomobject]@{
     stop_evidence = $script:StopEvidence
     retail_input_witness = $script:InputWitness
     motion_gate_witness = $script:MotionGateWitness
+    scenario_witness = $script:ScenarioWitness
     wire_ready_witness = $script:WireReadyWitness
     effective_retail_configs = @($script:EffectiveRetailConfigs.ToArray())
 }

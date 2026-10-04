@@ -3152,6 +3152,17 @@ target_include_directories(nwmsg_codec_parity_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_definitions(nwmsg_codec_parity_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
 opennova_add_mixed_test(nwmsg_codec_parity COMMAND nwmsg_codec_parity_test)
 
+# nw_pp --scenario-events: the decoded event lines the network-parity scenario
+# comparator (scripts/net/compare_scenario.py) consumes.
+add_executable(nw_pp_scenario_events_test
+    novaworld/nw_pp_scenario_events_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/nw_pp/scenario_events.cpp)
+target_link_libraries(nw_pp_scenario_events_test PRIVATE opennova_net opennova_base)
+target_include_directories(nw_pp_scenario_events_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/nw_pp)
+add_test(NAME nw_pp_scenario_events COMMAND nw_pp_scenario_events_test)
+
 # Host-row staleness backstop sweep (prune_stale_hosts).
 add_executable(host_prune_test novaworld/host_prune_test.cpp)
 target_link_libraries(host_prune_test PRIVATE opennova_novaworld_service)

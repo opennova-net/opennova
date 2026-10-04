@@ -1,0 +1,31 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "drive",
+  "mission": "01TR.bms",
+  "game_type": 65568,
+  "actor": "joiner",
+  "setup": {"pose": {"position_bms": [-1271.16, 741.13, 42.87], "yaw": 130, "pitch": 0}},
+  "steps": [
+    {"tick": 30, "press": 177},
+    {"tick": 150, "press": 177},
+    {"tick": 270, "press": 177},
+    {"tick": 390, "down": 152},
+    {"tick": 510, "down": 156},
+    {"tick": 570, "up": 156},
+    {"tick": 630, "up": 152},
+    {"tick": 750, "press": 177},
+    {"tick": 870, "end": true}
+  ],
+  "settle_seconds": 5,
+  "expect": {
+    "sequence": [
+      {"dir": "C", "kind": "vehicle_attach", "sender": "actor", "vehicle": "0x102e", "bone": "6"},
+      {"dir": "C", "kind": "carrier", "handle": "actor", "carrier": "0x102e"},
+      {"dir": "C", "kind": "vehicle_detach", "entity": "actor", "vehicle": "0x102e"},
+      {"dir": "C", "kind": "carrier", "handle": "actor", "carrier": "0x1002"},
+      {"dir": "C", "kind": "vehicle_attach", "sender": "actor", "vehicle": "0x1002", "bone": "4"},
+      {"dir": "C", "kind": "vehicle_detach", "entity": "actor", "vehicle": "0x1002"}
+    ],
+    "count_kinds": ["vehicle_attach", "vehicle_detach"]
+  }
+}

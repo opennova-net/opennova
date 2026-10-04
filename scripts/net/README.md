@@ -23,7 +23,8 @@ hash-bound parity verdict.
 | `host_opennova.ps1` | Start an OpenNova LAN host on launch flags, await LAN discovery and its MCP endpoint. |
 | `join_opennova.ps1` | Start an OpenNova LAN joiner on launch flags with its MCP endpoint. |
 | `run_lan_pair.ps1` | Start a local OpenNova host/joiner pair (MCP ports 8975/8976). |
-| `run_parity_topology.ps1` | Run one explicitly configured live topology. |
+| `run_parity_topology.ps1` | Run one explicitly configured live topology, optionally playing a scenario (`-Scenario`). |
+| `compare_scenario.py` | Check scenario runs against their expectations and against the RR reference. |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
 
 Shared process and path helpers live in `lib.ps1` (which dot-sources the
@@ -109,3 +110,33 @@ row means we send none), the header field value-sets, and per-record-class field
 population (a field golden always fills but we leave zero is an under-send). The
 golden's parsed profile caches to `<golden>.0a.json`, so iterating on our encoder
 only re-decodes our own capture; pass `--refresh` after a decoder change.
+
+## Scenario parity (ADR 0050 R5)
+
+A scenario (`scenarios/*.json`, `opennova.scenario.v1`) is one scripted play in
+retail's action vocabulary: a setup pose, then steps on logic ticks relative to
+its start (`down`/`up`/`press` an action code, `look_px` raw mouse pixels,
+`end`), then a settle. `run_parity_topology.ps1 -Scenario <file>` plays it on
+the joiner right after the steady window starts. A retail joiner plays it
+through onHook's virtual keyboard (`onhook_play_input`, bridge protocol 1.9),
+and an OpenNova joiner through the `scenario_play` probe. The summary's
+`scenario_witness` records each step's applied logic tick, and the run root
+keeps the exact script it played.
+
+```powershell
+pwsh -File scripts\net\run_parity_topology.ps1 -Topology RR ... -Scenario scripts\net\scenarios\self_nade.json
+python scripts/net/compare_scenario.py .scratch/runs/<rr>/run-summary.json .scratch/runs/<ro>/run-summary.json ...
+```
+
+`compare_scenario.py` decodes each evidence capture with
+`nw_pp --scenario-events`, keeps the scenario's window, and names the actor
+from the capture's first C2S 0x0C uplink. Each run must match the scenario's
+`expect.sequence` in order. Each run's matched fields and `expect.count_kinds`
+counts must also equal the reference (RR when given). Capture-local fields
+(frame, time, session, positions) and the scenario's `expect.mask` fields are
+excluded.
+
+| Scenario | Mission / mode | Play | Notes |
+| --- | --- | --- | --- |
+| `self_nade` | 01TR co-op | select the frag, look down, 40-tick throw at the feet | `game_event.type` is masked: retail draws the suicide message type 1..3 from its PRNG (`GameEvent_PlayerDeath @0x5170ed`). Reload requests are sequence-only: a retail client repeats C2S 0x25 until the 0x49 echo refills the slot, so the count follows the round trip. |
+| `drive` | 01TR co-op | posed beside the spawn buggy: USE, drive, USE | |
