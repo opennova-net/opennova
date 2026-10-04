@@ -59,8 +59,12 @@ static int weapon_userpoint_slot(const char *key) {
    third value only when the line carries more than 3 tokens (argc > 3, key
    included); extra tokens beyond those are ignored. `with_secondary` is 0 for
    particlefx/particlefxw3/particlefxw4, which never read a third token. A token
-   past the line's count reads as "".
-   [orig: ItemDef_ParseProperty @ 0x49eb00, particlefx chain @ 0x4a13ad..0x4a15eb] */
+   past the line's count reads as "": the tokenizer resets the first three tokens
+   to "" for every line, so a missing one stores an empty name over what an
+   earlier line of the slot left (jox01's `particlefx fx_Mosquitos_2m_L`: no
+   userpoint).
+   [orig: ItemDef_ParseProperty @ 0x49eb00, particlefx chain @ 0x4a13ad..0x4a15eb,
+   the copies @ 0x4a13bf..0x4a13fc; Terrain_TokenizeConfigLine @ 0x53cb71..0x53cb81] */
 static void parse_item_particle_slot(const io::ConfigTokens &tokens, DefItemParticleFx *slot,
                                      int with_secondary) {
     copy_token(slot->effect, sizeof(slot->effect), tokens, 1);

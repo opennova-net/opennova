@@ -382,6 +382,10 @@ struct Emit {
 
 /* ---- Variable-name resolution ---- */
 
+/* A number in a variable's name stops accumulating past this (no int overflow; any
+   such number is past every one-byte operand, which the callers refuse). */
+static constexpr int kNameNumberMax = 0xFFFF;
+
 /* Var00..Var15 -> byte offsets 0..60. Returns -1 if not a Var-prefixed name. */
 static int parse_var_offset(const char *name) {
     if (strncmp(name, "Var", 3) == 0 && name[3] != 0) {
@@ -389,10 +393,10 @@ static int parse_var_offset(const char *name) {
         int n = 0;
         while (*p) {
             if (*p < '0' || *p > '9') return -1;
-            n = n * 10 + (*p - '0');
+            if (n <= kNameNumberMax) n = n * 10 + (*p - '0');
             ++p;
         }
-        return n * 4;   /* MDEdit pre-defined slot */
+        return n * 4;   /* MDEdit pre-defined slot (no operand reaches past a byte) */
     }
     return -1;
 }
@@ -403,7 +407,7 @@ static int parse_g_offset(const char *name) {
         int n = 0;
         while (*p) {
             if (*p < '0' || *p > '9') return -1;
-            n = n * 10 + (*p - '0');
+            if (n <= kNameNumberMax) n = n * 10 + (*p - '0');
             ++p;
         }
         return n;
@@ -417,7 +421,7 @@ static int parse_l_index(const char *name) {
         int n = 0;
         while (*p) {
             if (*p < '0' || *p > '9') return -1;
-            n = n * 10 + (*p - '0');
+            if (n <= kNameNumberMax) n = n * 10 + (*p - '0');
             ++p;
         }
         return n;
@@ -425,27 +429,63 @@ static int parse_l_index(const char *name) {
     return -1;
 }
 
-/* Parse 'sound_<N>' -> N. Returns -1 on miss. */
+/* No play index past a word: the widest play reads 16 bits [orig: AudioVM_Op_PlayWait
+   @ 0x672C90]. */
+static constexpr int kSoundIndexMax = 0xFFFF;
+static constexpr int kSoundIndexOutOfRange = -2;
+
+/* Parse 'sound_<N>' -> N. Returns -1 on miss, kSoundIndexOutOfRange past
+   kSoundIndexMax (it stops accumulating there, so no number wraps to a valid index). */
 static int parse_sound_index(const char *name) {
     if (strncmp(name, "sound_", 6) == 0 && name[6] != 0) {
         const char *p = name + 6;
         int n = 0;
+        bool past = false;
         while (*p) {
             if (*p < '0' || *p > '9') return -1;
-            n = n * 10 + (*p - '0');
+            if (!past) {
+                n = n * 10 + (*p - '0');
+                past = n > kSoundIndexMax;
+            }
             ++p;
         }
-        return n;
+        return past ? kSoundIndexOutOfRange : n;
     }
     return -1;
 }
 
 /* ---- Compiler ---- */
 
+/* How deep ifs may nest (the decompiler's bound, mus_decompile.cpp) and how deep an
+   expression may: parse_stmt and parse_expr recurse, so a text past these would
+   otherwise run the stack out. */
+static constexpr int kMaxNesting = 64;
+static constexpr int kMaxExpressionNesting = 256;
+
+/* One level of a recursion counted while it runs. */
+struct Depth {
+    int &count;
+    explicit Depth(int &c) : count(c) { ++count; }
+    ~Depth() { --count; }
+    Depth(const Depth &) = delete;
+    Depth &operator=(const Depth &) = delete;
+};
+
+/* The most targets an `on (...)` table holds: its count is one byte and the
+   compiler's own bound (the skip byte bounds it further). */
+static constexpr int kMaxTableTargets = 64;
+
 struct Compiler {
     Lexer        lex;
     MusScript    out;
     Emit         emit;
+
+    int          if_nesting = 0;
+    int          expr_nesting = 0;
+    /* An `on` table's targets as parsed, kept here rather than in parse_stmt's
+       frame, which every nested if repeats (an `on` statement nests nothing). */
+    char         on_targets[kMaxTableTargets][MUS_SECTION_NAME_SIZE];
+    int          on_play_index[kMaxTableTargets];
 
     /* Section table accumulator */
     SectionDef  *sections;
@@ -527,7 +567,7 @@ struct Compiler {
        `sound_N` first, else a bound name (`bind sound_N "Name"`), else -1. */
     int resolve_play_target(const char *name) {
         int idx = parse_sound_index(name);
-        if (idx >= 0) return idx;
+        if (idx >= 0 || idx == kSoundIndexOutOfRange) return idx;
         for (size_t i = 0; i < bind_count; ++i) {
             if (strcmp(binds[i].name, name) == 0) return binds[i].index;
         }
@@ -555,6 +595,30 @@ struct Compiler {
         }
         variable_find_or_create(name, off);
         return (int)off;
+    }
+
+    /* A global's byte offset as an operand: one byte [orig: AudioVM_Op_PushGlobal
+       @ 0x6727B0 `movzx` of one byte], so an offset past 255 is refused rather than
+       wrapped to another global. -1 with `err` set. */
+    /* A local's index as an operand: one byte, as a global's [orig:
+       AudioVM_Op_PushLocal @ 0x6727D0]. -1 when `name` is no local; -2 with `err`
+       set when it is one past 255. */
+    int local_operand(const char *name, const char **err) {
+        const int l = parse_l_index(name);
+        if (l > 255) {
+            *err = "local variable out of range (indices 0..255)";
+            return -2;
+        }
+        return l;
+    }
+
+    int global_operand(const char *name, const char **err) {
+        const int g = resolve_global_offset(name);
+        if (g < 0 || g > 255) {
+            *err = "global variable out of range (byte offsets 0..255)";
+            return -1;
+        }
+        return g;
     }
 
     /* ---- Emit helpers ---- */
@@ -689,6 +753,12 @@ struct Compiler {
 };
 
 int Compiler::parse_expr(const char **err) {
+    /* An expression recurses per operator and parenthesis: bounded as the ifs are. */
+    Depth depth(expr_nesting);
+    if (expr_nesting > kMaxExpressionNesting) {
+        *err = "expression nested too deep";
+        return -1;
+    }
     /* Unary prefix */
     if (lex.cur_kind == Tok::Bang) {
         lex.advance();
@@ -766,18 +836,16 @@ int Compiler::parse_expr(const char **err) {
             return parse_method_call(name, err);
         }
         /* Variable reference: emit push_g / push_l. */
-        int li = parse_l_index(name);
+        int li = local_operand(name, err);
+        if (li == -2) return -1;
         if (li >= 0) {
             emit_push_l(li);
             return 0;
         }
-        int gi = resolve_global_offset(name);
-        if (gi >= 0) {
-            emit_push_g(gi);
-            return 0;
-        }
-        *err = "unrecognised identifier in expression";
-        return -1;
+        int gi = global_operand(name, err);
+        if (gi < 0) return -1;
+        emit_push_g(gi);
+        return 0;
     }
 
     *err = "unexpected token in expression";
@@ -793,19 +861,29 @@ int Compiler::parse_stmt(const char **err) {
             return -1;
         }
         int idx = resolve_play_target(lex.cur_text);
+        /* The engine has two play opcodes that differ only in the index's width:
+           0x3E reads a byte, 0x3D a 16-bit word, and both start the sound
+           [orig: AudioVM_Op_Play @ 0x672CB0 `movzx eax, byte ptr [esi]`,
+           AudioVM_Op_PlayWait @ 0x672C90 `movzx eax, word ptr [esi]`]. Retail's
+           compiler writes the byte form up to 255 and the word form past it
+           (jox01's MJox01.bin: 823 plays of 0..255, 61 wide plays of 256..316, no
+           wide play below 256), so this does too; past a word is no index. */
+        if (idx == kSoundIndexOutOfRange || idx > kSoundIndexMax) {
+            *err = "play target index out of range (max 65535)";
+            return -1;
+        }
         if (idx < 0) {
             *err = "unknown play target (expected 'sound_N' or a bound name)";
             return -1;
         }
-        /* The play opcode operand is a single byte; a larger index would silently
-           wrap to a different sound. Reject it so the editor can never emit a
-           valid-but-wrong play (the original engine reads only a u8 here too). */
         if (idx > 255) {
-            *err = "play target index out of range (max 255)";
-            return -1;
+            emit.byte((uint8_t)MUS_OP_PLAYW);
+            emit.byte((uint8_t)(idx & 0xFF));
+            emit.byte((uint8_t)(idx >> 8));
+        } else {
+            emit.byte((uint8_t)MUS_OP_PLAY);
+            emit.byte((uint8_t)idx);
         }
-        emit.byte((uint8_t)MUS_OP_PLAY);
-        emit.byte((uint8_t)idx);
         lex.advance();
         return 0;
     }
@@ -883,6 +961,14 @@ int Compiler::parse_stmt(const char **err) {
 
     /* if (expr) { body } [else { body }] */
     if (lex.cur_kind == Tok::KwIf) {
+        /* parse_stmt recurses per nested if: past kMaxNesting the text is refused
+           (the decompiler's bound too, mus_decompile.cpp), so no text overflows the
+           stack. */
+        Depth depth(if_nesting);
+        if (if_nesting > kMaxNesting) {
+            *err = "if statements nested too deep (max 64)";
+            return -1;
+        }
         lex.advance();
         if (lex.cur_kind != Tok::LParen) {
             *err = "expected '(' after 'if'";
@@ -969,10 +1055,11 @@ int Compiler::parse_stmt(const char **err) {
            target as a quoted string when the SBF entry name isn't a bare
            identifier, so accept String here too (cur_text holds the unquoted
            bytes). enter/goto targets are always bare section idents. */
-        char targets[64][MUS_SECTION_NAME_SIZE];
+        char (&targets)[kMaxTableTargets][MUS_SECTION_NAME_SIZE] = on_targets;
+        int (&play_index)[kMaxTableTargets] = on_play_index;
         int  ntargets = 0;
         while ((lex.cur_kind == Tok::Ident || lex.cur_kind == Tok::String)
-               && ntargets < 64) {
+               && ntargets < kMaxTableTargets) {
             strncpy(targets[ntargets], lex.cur_text, MUS_SECTION_NAME_SIZE - 1);
             targets[ntargets][MUS_SECTION_NAME_SIZE - 1] = 0;
             ++ntargets;
@@ -984,6 +1071,34 @@ int Compiler::parse_stmt(const char **err) {
         if (lex.cur_kind == Tok::Ident || lex.cur_kind == Tok::String) {
             *err = "too many targets in on(...) table (max 64)";
             return -1;
+        }
+        /* `null` is the entry whose opcode byte is 0, which the VM takes as "skip the
+           table" [orig: AudioVM_Op_TableExec @ 0x672BE5..0x672BFA]; the decompiler
+           prints such an entry as `null`, so it compiles back to zeros (a section
+           named `null` cannot be a table's target). */
+        auto is_null = [&](int t) { return strcmp(targets[t], "null") == 0; };
+        /* A play table holding an index past a byte takes the word-wide play in every
+           entry: the table executes its entry through the opcode table, so the entry
+           [0x3D lo hi] reads its index as the plain statement does [orig:
+           AudioVM_Op_TableExec @ 0x672BFB..0x672C03 dispatching the entry's opcode;
+           AudioVM_Op_PlayWait @ 0x672C90]. The uniform word-wide table is OpenNova's
+           own encoding: valid for the VM, but no retail program has a play table, so
+           MDEdit's is unwitnessed (a mixed one it might write reads back the same,
+           the decompiler reading each entry by its own opcode). */
+        if (inner_op == MUS_OP_PLAY) {
+            for (int t = 0; t < ntargets; ++t) {
+                if (is_null(t)) { play_index[t] = 0; continue; }
+                play_index[t] = resolve_play_target(targets[t]);
+                if (play_index[t] == kSoundIndexOutOfRange || play_index[t] > kSoundIndexMax) {
+                    *err = "play target index out of range in on(...) table (max 65535)";
+                    return -1;
+                }
+                if (play_index[t] < 0) {
+                    *err = "unknown play target in on(...) play table";
+                    return -1;
+                }
+                if (play_index[t] > 255) { inner_op = (uint8_t)MUS_OP_PLAYW; entry_size = 3; }
+            }
         }
         /* Emit tablexec opcode + 4 header bytes: count, inner_op, entry_size,
            skip_size. skip_size is the TOTAL encoded instruction length
@@ -1006,8 +1121,16 @@ int Compiler::parse_stmt(const char **err) {
         emit.byte((uint8_t)entry_size);
         emit.byte((uint8_t)total_size);
         for (int t = 0; t < ntargets; ++t) {
+            if (is_null(t)) {
+                for (int b = 0; b < entry_size; ++b) emit.byte(0);
+                continue;
+            }
             emit.byte(inner_op);
-            if (entry_size == 2) {
+            if (inner_op == MUS_OP_PLAYW) {
+                /* wide play: entry[1..2] = sound idx (16-bit LE) */
+                emit.byte((uint8_t)(play_index[t] & 0xFF));
+                emit.byte((uint8_t)(play_index[t] >> 8));
+            } else if (entry_size == 2) {
                 /* enter or play: entry[1] = section/sound idx (1 byte) */
                 if (inner_op == MUS_OP_SETSTATE) {
                     int sidx = section_find_or_create(targets[t]);
@@ -1018,16 +1141,7 @@ int Compiler::parse_stmt(const char **err) {
                     emit.byte((uint8_t)sidx);
                 } else {
                     /* play: target is sound_N or a bound name */
-                    int sidx = resolve_play_target(targets[t]);
-                    if (sidx < 0) {
-                        *err = "unknown play target in on(...) play table";
-                        return -1;
-                    }
-                    if (sidx > 255) {
-                        *err = "play target index out of range in on(...) table (max 255)";
-                        return -1;
-                    }
-                    emit.byte((uint8_t)sidx);
+                    emit.byte((uint8_t)play_index[t]);
                 }
             } else {
                 /* goto: entry[1..4] = absolute target offset (4 LE bytes) */
@@ -1048,20 +1162,24 @@ int Compiler::parse_stmt(const char **err) {
         Lexer save = lex;
         lex.advance();
         if (lex.cur_kind == Tok::PlusPlus) {
-            int li = parse_l_index(name);
+            int li = local_operand(name, err);
+            if (li == -2) return -1;
             if (li >= 0) emit_inc_l(li);
             else {
-                int g = resolve_global_offset(name);
+                int g = global_operand(name, err);
+                if (g < 0) return -1;
                 emit_inc_g(g);
             }
             lex.advance();
             return 0;
         }
         if (lex.cur_kind == Tok::MinusMinus) {
-            int li = parse_l_index(name);
+            int li = local_operand(name, err);
+            if (li == -2) return -1;
             if (li >= 0) emit_dec_l(li);
             else {
-                int g = resolve_global_offset(name);
+                int g = global_operand(name, err);
+                if (g < 0) return -1;
                 emit_dec_g(g);
             }
             lex.advance();
@@ -1071,11 +1189,13 @@ int Compiler::parse_stmt(const char **err) {
             lex.advance();
             int rc = parse_expr(err);
             if (rc != 0) return rc;
-            int li = parse_l_index(name);
+            int li = local_operand(name, err);
+            if (li == -2) return -1;
             if (li >= 0) {
                 emit_pop_l(li);
             } else {
-                int g = resolve_global_offset(name);
+                int g = global_operand(name, err);
+                if (g < 0) return -1;
                 emit_pop_g(g);
             }
             return 0;
