@@ -102,7 +102,9 @@ std::vector<InspectorSection> plan_inspector(const Document &document, const Nod
 			out.emplace_back();
 			section = &out.back();
 			section->key = token;
-			section->title = spec.label;
+			// The owner's list beside a record that holds none says whose it is ("Collision: Volumes"), so it
+			// does not read as the record's own.
+			section->title = own ? spec.label : document.record_title(collections_owner) + ": " + spec.label;
 		}
 		section->collections.push_back(collection);
 		section->written = section->written || !collection.ids.empty();
