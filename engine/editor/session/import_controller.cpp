@@ -7,9 +7,12 @@
 #include <string>
 #include <utility>
 
+#include <cstdio>
+
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/field_text.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_operation.h>
@@ -22,6 +25,36 @@
 namespace opennova::editor {
 
 ImportController::ImportController(SessionCore &core) : core_(core), view_(core.view()), paths_(core.paths()) {}
+
+// An import's one Output line (the UX round's problems lane): how many files, how many bytes, and how many
+// of each kind, the most first ("Imported 2,237 files (233.4 MB): Texture 1,093, Model 592, Wave 300 and 9
+// more kinds."), each file as the scan lists it now (an import's files are read into it before this).
+std::string ImportController::import_words(const std::vector<std::string> &paths) const {
+	std::map<AssetKind, size_t> kinds;
+	uint64_t bytes = 0;
+	for (const std::string &path : paths)
+		if (const AssetEntry *entry = view_.project.scan ? view_.project.scan->at_path(path) : nullptr) {
+			++kinds[entry->kind];
+			bytes += entry->size_bytes;
+		}
+	const auto grouped = [](size_t n) {
+		std::string digits = std::to_string(n), out;
+		for (size_t i = 0; i < digits.size(); ++i) out += (i && (digits.size() - i) % 3 == 0 ? "," : "") + std::string(1, digits[i]);
+		return out;
+	};
+	char size[32];
+	if (bytes < (uint64_t(1) << 20)) std::snprintf(size, sizeof(size), "%.1f KB", double(bytes) / 1024.0);
+	else std::snprintf(size, sizeof(size), "%.1f MB", double(bytes) / double(uint64_t(1) << 20));
+	std::string out = "Imported " + grouped(paths.size()) + (paths.size() == 1 ? " file" : " files") + " (" + size + ")";
+	std::vector<std::pair<size_t, AssetKind>> most;
+	for (const auto &[kind, count] : kinds) most.emplace_back(count, kind);
+	std::sort(most.begin(), most.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+	constexpr size_t kNamed = 4;
+	for (size_t i = 0; i < most.size() && i < kNamed; ++i)
+		out += (i == 0 ? ": " : ", ") + std::string(asset_kind_label(most[i].second)) + " " + grouped(most[i].first);
+	if (most.size() > kNamed) out += " and " + counted(most.size() - kNamed, "more kind");
+	return out + ". Its files are folded under this line.";
+}
 
 void ImportController::preview_files(const EditorRequest &request) {
 	if (!view_.project.open) return;
@@ -304,8 +337,15 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 		core_.documents().reload_changed();
 		core_.absorb_refresh(operation.refresh());
 	}
-	for (const auto &path : imported.imported) core_.note("Imported " + path);
-	for (const auto &path : imported.not_imported) core_.note("Not imported " + path);
+	// One line for the import, its files folded under it (the UX round's problems lane: a large import's
+	// lines no longer push everything else out of Output).
+	std::vector<std::string> each;
+	for (const auto &path : imported.imported) each.push_back("Imported " + path);
+	for (const auto &path : imported.not_imported) each.push_back("Not imported " + path);
+	core_.note_folded(import_words(imported.imported), std::move(each));
+	if (!imported.not_imported.empty())
+		core_.note("Not imported: " + counted(imported.not_imported.size(), "file") + " (the import stopped at " +
+		           imported.not_imported.front() + ").");
 	// What the import reported is what it came to: an error failed it (refused before anything was
 	// written, or stopped part way, its not_imported files said).
 	for (const auto &d : imported.diagnostics) {
@@ -318,7 +358,7 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 	view_.activity.status = !imported.not_imported.empty()
 	                       ? std::to_string(done) + " of " + std::to_string(done + imported.not_imported.size()) +
 	                                 " files imported: the import stopped at " + imported.not_imported.front() + "."
-	                       : std::to_string(done) + " file(s) imported.";
+	                       : counted(done, "file") + " imported.";
 	core_.touch(ViewConcern::Dialogs); // the preview closed
 	core_.touch(ViewConcern::Output);
 	return outcome;

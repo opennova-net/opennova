@@ -129,6 +129,8 @@ constexpr QueryParam kProblemsParams[] = {
 			"Matched without case against the message, file, record, field and code." },
 	{ "scope", J::String, false, "project", "Whose findings: project, active_file or open_files." },
 	{ "fixable", J::Boolean, false, "false", "Only the findings with a fix." },
+	{ "blocking", J::Boolean, false, "false",
+			"Only the findings a build is refused for (each row's blocks_build: the gate's refusals)." },
 	{ "group", J::String, false, "none",
 			"How the rows are grouped: none, file or kind (the code's family)." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
@@ -224,6 +226,14 @@ constexpr QueryParam kViewportParams[] = {
 constexpr QueryParam kCursorParams[] = {
 	{ "cursor", J::Integer, false, "0", kCursorDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+constexpr QueryParam kOutputParams[] = {
+	{ "cursor", J::Integer, false, "0", kCursorDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+	{ "unfold", J::Integer, false, nullptr,
+			"A line's absolute index: the lines folded under it instead (an import's files, the game's log), "
+			"a page of them from cursor (here their own index, 0 the first)." },
 };
 
 constexpr QueryParam kImportPreviewParams[] = {
@@ -504,6 +514,7 @@ JsonValue answer_problems(const QueryContext &context, const QueryArgs &args, st
 	}
 	query.text = args.text("text");
 	query.fixable = args.boolean("fixable");
+	query.blocking = args.boolean("blocking");
 	const std::string scope = args.text("scope"), group = args.text("group");
 	if (!problem_scope_from_token(scope, query.scope)) {
 		error = "no scope \"" + scope + "\" (project, active_file, open_files).";
@@ -858,8 +869,16 @@ JsonValue answer_import_preview(const QueryContext &context, const QueryArgs &ar
 	return import_preview_to_json(context.core.view(), page_of(args), kind);
 }
 
-JsonValue answer_output(const QueryContext &context, const QueryArgs &args, std::string &) {
-	return output_page_to_json(context.core.view().activity.output, args.cursor(), args.limit());
+JsonValue answer_output(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const OutputLog &output = context.core.view().activity.output;
+	if (!args.has("unfold")) return output_page_to_json(output, args.cursor(), args.limit());
+	const int64_t at = args.integer("unfold");
+	if (at < 0 || uint64_t(at) < output.first_index() || uint64_t(at) >= output.next_index()) {
+		error = "no line " + std::to_string(at) + " is held (the lines held are " + std::to_string(output.first_index()) +
+		        " to " + std::to_string(int64_t(output.next_index()) - 1) + ").";
+		return JsonValue::make_null();
+	}
+	return output_folded_to_json(output, uint64_t(at), args.cursor(), args.limit());
 }
 
 JsonValue answer_operation(const QueryContext &context, const QueryArgs &, std::string &) {
@@ -884,17 +903,19 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 	core.problems().validate_pending();
 	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements,
 			core.problems().gate_findings());
-	std::vector<const Diagnostic *> blocking;
-	for (const Diagnostic &d : plan.diagnostics)
-		if (blocks_build(d))
-			blocking.push_back(&d);
+	const std::vector<Diagnostic> blocking = build_blockers(plan);
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
 	out.set("blocked", JsonValue::make_bool(!plan.ok));
+	// The line a build would be refused with (the UX round's problems lane), each refusal with its why.
+	if (!plan.ok) out.set("refusal", JsonValue::make_string(refusal_words(blocking)));
 	set_page(out, page, blocking.size());
 	JsonValue list = JsonValue::make_array();
-	for (size_t i = page.first(blocking.size()); i < page.last(blocking.size()); ++i)
-		list.push(diagnostic_to_json(*blocking[i]));
+	for (size_t i = page.first(blocking.size()); i < page.last(blocking.size()); ++i) {
+		JsonValue row = diagnostic_to_json(blocking[i]);
+		row.set("because", JsonValue::make_string(blocker_reason(blocking[i])));
+		list.push(std::move(row));
+	}
 	out.set("blocking", std::move(list));
 	return out;
 }
@@ -1273,9 +1294,10 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::Problems, "problems", answer_problems, kProblemsParams, kProblemsReads,
 			"The Problems rows as the Problems window shows them: errors, then warnings, then "
-			"notes; total, shown (the rows matching), counts by severity, a page of the rows, "
-			"each with what it is about and its fixes ({label, detail, bulk, request}: the "
-			"request an editor_request passes back as it is), and grouped, the page's groups.")
+			"notes; total, shown (the rows matching), counts by severity (and blocking, the rows a "
+			"build is refused for), a page of the rows, each with what it is about, blocks_build "
+			"and why where a build is refused for it, and its fixes ({label, detail, bulk, request}: "
+			"the request an editor_request passes back as it is), and grouped, the page's groups.")
 			.pages("problems")
 			.row,
 	Query(K::References, "references", answer_references, kReferencesParams, kGraphReads,
@@ -1369,11 +1391,13 @@ constexpr EditorQueryRow kRows[] = {
 			"project has defines, its own being kept (shadowed), truncated and the plan's findings.")
 			.pages("rows")
 			.row,
-	Query(K::Output, "output", answer_output, kCursorParams, concern_set({ C::Output }),
+	Query(K::Output, "output", answer_output, kOutputParams, concern_set({ C::Output }),
 			"A page of the output lines by absolute index: first (the oldest held), next (one "
 			"past the newest), cursor (the page's first) and next_cursor. Paging by next_cursor "
 			"repeats no line; the log keeps its last 2000, so a client more than 2000 lines behind "
-			"misses the lines dropped, the cursor coming back larger than it asked.")
+			"misses the lines dropped, the cursor coming back larger than it asked. A line with others "
+			"folded under it (an import's files, the game's log) is listed in folded ({at, count}); "
+			"unfold pages them.")
 			.pages("lines")
 			.row,
 	Query(K::Operation, "operation", answer_operation, concern_set({ C::Operation }),
