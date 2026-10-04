@@ -4,6 +4,7 @@
 #include <cstring>
 #include <utility>
 
+#include <base/io/cp1252.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/diagnostic.h>
 
@@ -65,13 +66,20 @@ size_t rewrite_native_text(const std::string &file, AssetKind kind, const std::s
 	size_t rewritten = 0;
 	for (size_t i = 0; i < sites.size(); ++i) {
 		const NativeTextSite &site = sites[i];
+		// The names are UTF-8 (the graph's, extract_from_bytes), the text the game's code page: each looked
+		// for and written in the text's own bytes; a name the code page cannot hold is missed.
+		std::string before, after;
+		if (!utf8_to_cp1252(site.before, before) || !utf8_to_cp1252(site.after, after)) {
+			missed.push_back(i);
+			continue;
+		}
 		bool found = false;
-		for (size_t at = site.before.empty() ? std::string::npos : text.find(site.before); at != std::string::npos && !found;
-		     at = text.find(site.before, at + 1)) {
-			const size_t end = at + site.before.size();
+		for (size_t at = before.empty() ? std::string::npos : text.find(before); at != std::string::npos && !found;
+		     at = text.find(before, at + 1)) {
+			const size_t end = at + before.size();
 			if ((at > 0 && !delimits(text[at - 1])) || (end < text.size() && !delimits(text[end]))) continue;
 			std::string candidate = text;
-			candidate.replace(at, site.before.size(), site.after);
+			candidate.replace(at, before.size(), after);
 			std::vector<GraphEdge> now;
 			if (!edges_of(file, kind, game, candidate, now) || !only_the_site(edges, now, site)) continue;
 			text = std::move(candidate);
