@@ -40,6 +40,11 @@ struct ValidationInput {
 	std::shared_ptr<const DocumentBase> open_document(const AssetEntry &asset) const;
 };
 
+// A file of a validation's scan loaded into document: from the project's folder, or through the paths'
+// source by its logical name (ProjectPaths::files: the game install's files as the game is served them).
+bool load_listed(DocumentBase &document, const ProjectPaths &paths, const AssetEntry &asset, const std::string &game,
+                 Diagnostic &error);
+
 // Each file's own findings (ADR 0046 d9, S9e, S13 D4), kept from one validation to the next: its
 // document type's validate_file over its document (documents/document_types.h), or why the file
 // did not load. They are made again only when what they were made from moved: an open

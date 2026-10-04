@@ -11,7 +11,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <map>
 #include <sstream>
+#include <utility>
 #include <variant>
 
 #include <base/gameprofile/gameprofile.h>
@@ -93,11 +95,12 @@ std::string value_name(ReferenceKind kind, const Value &value) {
 // nothing of the schema (an animation table key's 252 choices stay in the type's table).
 void extract_record(const Document &document, const NodeAddress &address, Extracted &out) {
 	if (!document.present(address, std::string())) return;
-	std::string record, locator;
+	std::string record, locator, identity;
 	const auto place = [&] {
 		if (!locator.empty()) return;
 		record = document.record_path(address);
 		locator = document.locator(address);
+		identity = document.record_identity(address);
 	};
 	for (const FieldSchema &schema : document.fields(address.kind)) {
 		const FieldUse field = document.field_on(address, schema);
@@ -112,6 +115,7 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 			place();
 			GraphSymbol symbol = symbol_of(field.defines, defined, document.path(), record, field.scope);
 			symbol.locator = locator;
+			symbol.record_key = identity;
 			symbol.address = address;
 			symbol.field = schema.id;
 			SymbolFacts facts;
@@ -128,6 +132,7 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 		place();
 		GraphEdge edge = edge_of(document.path(), record, schema.id, kind, name, scope, !field.read_only);
 		edge.locator = locator;
+		edge.record_key = identity;
 		edge.address = address;
 		edge.loader_arg = field.loader_arg;
 		// A text that is one %NAME% stands for the variable's value: a use of the variable alone
@@ -141,6 +146,7 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 			GraphEdge var = edge_of(document.path(), record, schema.id, ReferenceKind::StyleVar, name, std::string(),
 			                        !field.read_only);
 			var.locator = locator;
+			var.record_key = identity;
 			var.address = address;
 			var.through = field.reference; // what the variable's value must name here
 			out.edges.push_back(std::move(var));
@@ -446,6 +452,18 @@ void extract_from_document(const Document &document, Extracted &out) {
 			symbol.value = document.own_name(address);
 			out.symbols.push_back(std::move(symbol));
 		}
+	// What the type's own references and the record sets name their records by as themselves too (the
+	// fields' edges have theirs): each record's identity worked out once.
+	std::map<std::pair<NodeId, NodeId>, std::string> identities;
+	const auto identity_of = [&](const NodeAddress &address) -> const std::string & {
+		const auto found = identities.find({address.row, address.child});
+		if (found != identities.end()) return found->second;
+		return identities[{address.row, address.child}] = document.record_identity(address);
+	};
+	for (GraphEdge &edge : out.edges)
+		if (edge.address.row && edge.record_key.empty()) edge.record_key = identity_of(edge.address);
+	for (GraphSymbol &symbol : out.symbols)
+		if (symbol.address.row && symbol.record_key.empty()) symbol.record_key = identity_of(symbol.address);
 }
 
 bool graph_reads_kind(AssetKind kind) {
@@ -491,7 +509,11 @@ bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &projec
                         Extracted &out, Diagnostic &error) {
 	std::vector<uint8_t> bytes;
 	std::string message;
-	if (!read_file_bytes(join_path(paths.root, asset.relative_path), bytes, message)) {
+	// A project's files from its folder; a source's (the game install's) by their logical names.
+	const bool read = paths.files ? paths.files->read(asset.logical_name, bytes)
+	                              : read_file_bytes(join_path(paths.root, asset.relative_path), bytes, message);
+	if (!read) {
+		if (message.empty()) message = asset.logical_name + " could not be read.";
 		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, asset.relative_path);
 		return false;
 	}

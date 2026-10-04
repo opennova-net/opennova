@@ -10,6 +10,7 @@
 #include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/project/project_document.h>
+#include <editor/requirements/requirement_words.h>
 #include <editor/requirements/requirements.h>
 
 #include "common/test_expect.h"
@@ -54,7 +55,10 @@ static int test_row_set_follows_the_manifest_and_features() {
 		// What each is about is the row's, and no file of the project is at fault.
 		const RequirementRow *row = row_named(menu_only, subject_target(d).c_str());
 		TEST_EXPECT(row && row->role == editor_test::requirement_of(d).role && d.asset.empty());
-		TEST_EXPECT(d.message.find("Without it: ") != std::string::npos);
+		// In plain words: what the game does without it (the editor's table over the manifest's row), never
+		// the manifest's record of it.
+		TEST_EXPECT(row && d.message.find(requirement_without(row->role)) != std::string::npos &&
+		            d.message.find("Without it: ") == std::string::npos && d.message.find("->") == std::string::npos);
 	}
 	TEST_EXPECT(errors == expected_required && notes == expected_rows - expected_required);
 	TEST_EXPECT(static_cast<int>(menu_only.diagnostics.size()) == expected_rows);
@@ -162,8 +166,34 @@ static int test_files_satisfy_rows_by_name_and_kind() {
 	return 0;
 }
 
+// The plain words (requirements/requirement_words.h): a row for every row the checklist can list, in the
+// manifest's order, none for a row it never lists; each a sentence; the manifest row's own record of it
+// (its failure and citation) the witness detail.
+static int test_words_cover_the_manifest() {
+	size_t next = 0;
+	for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
+		const RequiredResource *r = gameprofile_required_resource_at(i);
+		const bool listed = !(r->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE));
+		const RequirementWords *words = requirement_words(r->role);
+		TEST_EXPECT(listed == (words != nullptr));
+		if (!listed || !words) continue;
+		TEST_EXPECT(next < requirement_words_count() && std::string(requirement_words_at(next).role) == r->role);
+		++next;
+		TEST_EXPECT(!requirement_without(r->role).empty() && requirement_without(r->role).back() == '.');
+		const std::string witness = requirement_witness(r->role);
+		TEST_EXPECT(witness.find(r->failure) == 0 && witness.find("[orig:") != std::string::npos);
+	}
+	TEST_EXPECT(next == requirement_words_count());
+	TEST_EXPECT(requirement_without("keyhelp") == "The game shows \"Unable to load keyboard map strings\" and exits.");
+	// fgn2.bin's presence picks the effects set (the review's L2): the German .ptg with it, the .ptu without.
+	TEST_EXPECT(requirement_without("fgn2_bin").find(".ptu") != std::string::npos && requirement_without("fgn2_bin").find(".ptg") != std::string::npos);
+	TEST_EXPECT(requirement_without("no_such_role").empty() && requirement_witness("no_such_role").empty());
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_words_cover_the_manifest();
 	failures += test_row_set_follows_the_manifest_and_features();
 	failures += test_files_satisfy_rows_by_name_and_kind();
 	if (failures == 0) std::printf("editor_requirements: all tests passed\n");
