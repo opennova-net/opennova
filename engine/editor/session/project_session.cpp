@@ -234,6 +234,10 @@ void ProjectSession::set_poll_budget(const PollBudget &budget) {
 	impl_->core.set_poll_budget(budget);
 }
 
+void ProjectSession::set_workspace_kept(bool kept) {
+	impl_->core.set_workspace_kept(kept);
+}
+
 void ProjectSession::run_operations() {
 	while (impl_->core.operations().running()) {
 		impl_->core.operations().run_to_end();
