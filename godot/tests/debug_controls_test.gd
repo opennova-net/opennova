@@ -226,9 +226,11 @@ func test_actions_validate_typed_arguments_before_the_engine() -> void:
 	assert_eq(int(killed.error), OK)
 	assert_eq(int(killed.result), 0,
 			"the engine's kill count passes through as the action result")
+	# The engine's verdict: the host's own client queues the pick on its
+	# loopback like a joiner's (case 12 has no authority test; D-NET-339).
 	var picked := _controls.invoke(&"deploy_pick", [0], true)
 	assert_eq(int(picked.error), OK)
-	assert_eq(picked.result, false,
+	assert_eq(picked.result, true,
 			"in-domain arguments reach the engine's own verdict")
 
 	# Over the real runtime the local player exists, so the seat refusal is the
