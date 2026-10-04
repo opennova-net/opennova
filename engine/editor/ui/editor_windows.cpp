@@ -22,6 +22,7 @@
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 namespace opennova::editor {
 namespace {
@@ -266,6 +267,14 @@ void EditorWindows::drop_files(std::vector<std::string> paths, float x, float y)
 bool EditorWindows::take_dropped_files(float min_x, float min_y, float max_x, float max_y, std::vector<std::string> &paths) {
 	if (dropped_.paths.empty() || dropped_.x < min_x || dropped_.x >= max_x || dropped_.y < min_y || dropped_.y >= max_y)
 		return false;
+	// The window under the drop is the item's own (or a child of it), never one drawn over it; with a modal
+	// open, only the modal's items take one.
+	const ImGuiWindow *current = ImGui::GetCurrentWindowRead();
+	ImGuiWindow *under = nullptr, *under_moving = nullptr;
+	ImGui::FindHoveredWindowEx(ImVec2(dropped_.x, dropped_.y), true, &under, &under_moving);
+	if (!current || !under || under->RootWindow != current->RootWindow) return false;
+	if (const ImGuiWindow *modal = ImGui::GetTopMostAndVisiblePopupModal())
+		if (modal->RootWindow != current->RootWindow) return false;
 	paths = std::move(dropped_.paths);
 	dropped_ = Dropped();
 	return true;

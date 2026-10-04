@@ -79,8 +79,10 @@ public:
 	// files to import planned in the import dialog (a PreviewImport raised like any window's
 	// request), with the files they need when the editor's setting says so.
 	void deliver_picks(PickPurpose purpose, const std::vector<std::string> &paths);
-	// Files the OS dropped on the editor's window at (x, y) of its pixels (S18): held for the item they land
-	// on to take this frame or the next (take_dropped_files), then let go.
+	// Files the OS dropped on the editor's window at (x, y) of its pixels (S18; the drop's own point, which
+	// the Shell reads from the OS cursor when the drop arrives): held for the item they land on to take
+	// this frame or the next (take_dropped_files: the point in the item's rect and its window the one under
+	// the point, no window drawn over it, no modal open over it), then let go.
 	void drop_files(std::vector<std::string> paths, float x, float y);
 
 	// The Shell's devices, by document and viewport kind, the viewports' canvases draw through

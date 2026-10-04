@@ -165,6 +165,13 @@ private:
 public:
 	// Files dropped at `p_at` of the window's pixels, as the OS's drop is taken (a test's, S18).
 	void drop_files(const PackedStringArray &p_files, const Vector2 &p_at);
+	// Files the OS dropped with its cursor at `p_screen` (screen pixels): the point in the window's viewport
+	// (its client area's position taken off, its stretch undone), as drop_files takes it. The OS drop
+	// arrives with the cursor where it let go; the viewport's own mouse position is the last mouse event's,
+	// which a drag from another program over the window never moves.
+	void drop_files_at_screen(const PackedStringArray &p_files, const Vector2 &p_screen);
+	// The point the last drop was held at, in the window's viewport (for the tests).
+	Vector2 get_last_drop_at() const { return last_drop_at_; }
 
 private:
 	// A free loopback port for the game's MCP endpoint, allocated when the session spawns the game
@@ -219,6 +226,7 @@ private:
 	uint64_t external_seq_ = 0;
 	bool open_externally_ = true;
 	String last_external_open_;
+	Vector2 last_drop_at_;
 };
 
 } // namespace godot

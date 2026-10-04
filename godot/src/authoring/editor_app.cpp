@@ -97,6 +97,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_picker_canceled"), &EditorApp::_on_picker_canceled);
 	ClassDB::bind_method(D_METHOD("_on_files_dropped", "files"), &EditorApp::_on_files_dropped);
 	ClassDB::bind_method(D_METHOD("drop_files", "files", "at"), &EditorApp::drop_files);
+	ClassDB::bind_method(D_METHOD("drop_files_at_screen", "files", "screen"), &EditorApp::drop_files_at_screen);
+	ClassDB::bind_method(D_METHOD("get_last_drop_at"), &EditorApp::get_last_drop_at);
 }
 
 EditorApp::EditorApp() : platform_(std::make_unique<ChildProcessPlatform>()) {
@@ -510,12 +512,20 @@ void EditorApp::_on_picker_canceled() {
 	pending_pick_ = PickPurpose::None;
 }
 
-// The OS's drop on the editor's window, where the pointer is: held for the item it lands on.
+// The OS's drop on the editor's window, where the OS's cursor let go: held for the item it lands on.
 void EditorApp::_on_files_dropped(const PackedStringArray &p_files) {
-	drop_files(p_files, get_viewport() != nullptr ? get_viewport()->get_mouse_position() : Vector2());
+	drop_files_at_screen(p_files, Vector2(DisplayServer::get_singleton()->mouse_get_position()));
+}
+
+void EditorApp::drop_files_at_screen(const PackedStringArray &p_files, const Vector2 &p_screen) {
+	Window *window = get_window();
+	if (window == nullptr) return;
+	const Vector2 client = p_screen - Vector2(window->get_position());
+	drop_files(p_files, window->get_final_transform().affine_inverse().xform(client));
 }
 
 void EditorApp::drop_files(const PackedStringArray &p_files, const Vector2 &p_at) {
+	last_drop_at_ = p_at;
 #if OPENNOVA_EDITOR_UI
 	std::vector<std::string> paths;
 	for (int i = 0; i < p_files.size(); ++i) paths.push_back(opennova::to_std(p_files[i]));

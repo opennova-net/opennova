@@ -314,6 +314,22 @@ func test_a_texture_replaced_by_an_image() -> void:
 	assert_false(FileAccess.file_exists(root.path_join("textures/brick.tga")), "the file it replaced is set aside")
 
 
+## S18: the OS's drop held where its cursor let go: a screen point taken into the window's viewport (its
+## client area's position off, its stretch undone), never the viewport's last mouse event, which a drag from
+## another program over the window never moves.
+func test_an_os_drop_is_held_where_the_cursor_let_go() -> void:
+	if _app == null:
+		return
+	var window: Window = _app.get_window()
+	var inside := Vector2(300, 200)
+	var screen := Vector2(window.position) + window.get_final_transform() * inside
+	_app.drop_files_at_screen(PackedStringArray(["C:/art/new.png"]), screen)
+	var held: Vector2 = _app.get_last_drop_at()
+	assert_almost_eq(held.x, inside.x, 0.01, "the drop's own point, across")
+	assert_almost_eq(held.y, inside.y, 0.01, "and down")
+	assert_ne(window.get_mouse_position(), inside, "not the viewport's last mouse position")
+
+
 ## S18: a texture opened in its program through the wire: edit_externally's open_externally event taken by
 ## the Shell at the next pump (kept, not opened, with open_externally off); what the program saves comes
 ## back through refresh_changed_sources, the texture made from it again.

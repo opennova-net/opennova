@@ -611,6 +611,25 @@ void test_texture_drop_replaces() {
 	ui.windows.drop_files({"C:/art/new.png"}, -100.0f, -100.0f);
 	ui.frames(3);
 	CHECK(!only(ui.drain(), EditorRequestKind::PreviewTextureSource), "a drop on no item does nothing");
+	// A drop on the tab where another window is drawn over it is that window's: the tab takes none.
+	const ImVec2 middle(info->Pos.x + info->Size.x * 0.5f, info->Pos.y + info->Size.y * 0.5f);
+	const auto covered_frame = [&] {
+		ImGui::NewFrame();
+		ui.windows.draw_frame(++ui.index);
+		ImGui::SetNextWindowPos(ImVec2(middle.x - 40.0f, middle.y - 40.0f));
+		ImGui::SetNextWindowSize(ImVec2(80.0f, 80.0f));
+		ImGui::Begin("Cover", nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings);
+		ImGui::End();
+		ImGui::Render();
+	};
+	covered_frame();
+	covered_frame();
+	ui.windows.drop_files({"C:/art/new.png"}, middle.x, middle.y);
+	covered_frame();
+	covered_frame();
+	CHECK(!only(ui.drain(), EditorRequestKind::PreviewTextureSource), "a drop on a window drawn over the tab is not the tab's");
+	ui.frames(2);
+	ui.drain();
 	// Picked through Replace with image...: the pick asks the Shell, its answer asks to replace.
 	ui.activate(ImHashStr("Replace with image...", 0, info->ID));
 	requests = ui.drain();
@@ -643,6 +662,10 @@ void test_texture_drop_replaces() {
 	              text.find("Then") != std::string::npos,
 	      "it says what it replaces with what, before and after");
 	ui.drain();
+	// With the dialog open, a drop on the tab behind it is none's.
+	ui.windows.drop_files({"C:/art/other.png"}, middle.x, middle.y);
+	ui.frames(3);
+	CHECK(!only(ui.drain(), EditorRequestKind::PreviewTextureSource), "a drop behind the open dialog is none's");
 	ui.activate(ImHashStr("Replace", 0, dialog->ID));
 	requests = ui.drain();
 	const EditorRequest *replace = only(requests, EditorRequestKind::ReplaceTexture);
@@ -664,8 +687,20 @@ void test_texture_drop_replaces() {
 	ui.focus("Inspector");
 	ui.away();
 	ui.drain();
-	const ImVec2 hud = centre_of(ui, field_item(project, "hud_image", "##value"));
-	CHECK(hud.x > 0.0f && hud.y > 0.0f, "the HUD image's value is on the screen");
+	ImVec2 hud = centre_of(ui, field_item(project, "hud_image", "##value"));
+	ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
+	CHECK(inspector != nullptr, "the Inspector");
+	if (!inspector) return;
+	// Below the Inspector's fold: a drop there lands on no window (the field does not show), so none's.
+	if (hud.y >= inspector->OuterRectClipped.Max.y) {
+		ui.windows.drop_files({"C:/art/hud.png"}, hud.x, hud.y);
+		ui.frames(3);
+		CHECK(!only(ui.drain(), EditorRequestKind::PreviewTextureSource), "a drop on a field scrolled out of sight is none's");
+		ImGui::SetScrollY(inspector, inspector->Scroll.y + hud.y - (inspector->Pos.y + inspector->Size.y * 0.5f));
+		ui.frames(3);
+		hud = centre_of(ui, field_item(project, "hud_image", "##value"));
+	}
+	CHECK(hud.y > inspector->OuterRectClipped.Min.y && hud.y < inspector->OuterRectClipped.Max.y, "the HUD image's value shows");
 	ui.windows.drop_files({"C:/art/hud.png"}, hud.x, hud.y);
 	ui.frames(1);
 	requests = ui.drain();
