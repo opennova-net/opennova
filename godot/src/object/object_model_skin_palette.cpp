@@ -7,12 +7,16 @@
 // (renderer::ObjectSkinNormal carries the witness). The palette is the
 // skeleton's settled pose: one texture row per bone, republished whenever the
 // Skeleton3D settles a pose, and the matrices the render-slot capture skins
-// its silhouettes with.
+// its silhouettes with. The skin's binds also carry the clip-posed parts'
+// PANM layer (apply_skeletal_panm below).
 
 #include "object/object_model.h"
 
+#include <formats/threedi/threedi_panm_pose.h>
+
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/core/math.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -207,6 +211,81 @@ void ObjectModel::apply_skin_palette_bounds() {
 				twin_level[static_cast<std::size_t>(twin.surface)].skin_palette) {
 			rs->instance_set_custom_aabb(twin.instance, skin_posed_bounds_);
 		}
+	}
+}
+
+// A clip-posed model's part tracks, composed over the bone matrices its clip
+// built exactly as retail's submit composes a static model's over its entity
+// matrix (threedi_panm_pose_parts_over carries the witness: the first-person
+// gun and its arms, rigid and per-vertex skinned alike). Godot skins bone i as
+// its global pose times the skin's bind i, so the composed part matrix lands
+// as that bind, G_i^-1 x out_i: a bind takes any affine matrix (a part scaled
+// to nothing included) where a bone pose keeps only position, rotation and
+// scale, and the bones keep the clip's pose for everything else that reads
+// them. Bone i is part i, as the fake skinning binds a rigid part
+// (renderer::prepare_model_mesh). The skin palette follows the same binds.
+void ObjectModel::apply_skeletal_panm() {
+	if (!skeletal_scene_ || skeleton_ == nullptr || skeleton_skin_.is_null() ||
+			object_data_.is_null() || !object_data_->has_document()) {
+		return;
+	}
+	const opennova::threedi::Threedi3di3 &model = object_data_->native_model();
+	if (active_lod_ < 0 || static_cast<std::size_t>(active_lod_) >= model.lod_count ||
+			model.lods == nullptr) {
+		return;
+	}
+	const std::size_t part_count = model.lods[active_lod_].render_object_count;
+	const int bone_count = std::min({skeleton_->get_bone_count(),
+			static_cast<int>(skeleton_skin_->get_bind_count()),
+			static_cast<int>(skin_rest_binds_.size())});
+	if (part_count == 0 || bone_count <= 0) {
+		return;
+	}
+	// Each part's posed frame: its bone's global pose times the rest bind (a
+	// part past the rig rides the last bone, like its fake-skinned vertices).
+	std::vector<Transform3D> globals(static_cast<std::size_t>(bone_count));
+	for (int bone = 0; bone < bone_count; ++bone) {
+		globals[static_cast<std::size_t>(bone)] = skeleton_->get_bone_global_pose(bone);
+	}
+	std::vector<opennova::threedi::ThreediMatrix4x4> inputs(part_count);
+	for (std::size_t part = 0; part < part_count; ++part) {
+		const std::size_t bone = std::min(part, static_cast<std::size_t>(bone_count - 1));
+		inputs[part] = ObjectData::panm_matrix(globals[bone] * skin_rest_binds_[bone]);
+	}
+	std::vector<opennova::threedi::ThreediMatrix4x4> posed;
+	std::vector<uint8_t> driven;
+	const bool layered = opennova::threedi::threedi_panm_pose_parts_over(model, active_lod_,
+			opennova::threedi::threedi_panm_runtime_time_ms(anim_time_ms_),
+			runtime_ctrl_values().data(), inputs, posed, &driven);
+	if (!layered && !skin_binds_layered_) {
+		return;
+	}
+	bool changed = false;
+	const std::size_t binds = std::min(part_count, static_cast<std::size_t>(bone_count));
+	for (std::size_t bone = 0; bone < binds; ++bone) {
+		Transform3D bind = skin_rest_binds_[bone];
+		// A bone posed to nothing (the collapsed right hand) has no inverse;
+		// its part keeps the clip's collapse.
+		if (layered && driven[bone] != 0 &&
+				!Math::is_zero_approx(globals[bone].basis.determinant())) {
+			const Transform3D composed =
+					globals[bone].affine_inverse() * ObjectData::panm_transform(posed[bone]);
+			if (!composed.is_equal_approx(bind)) {
+				bind = composed;
+			}
+		}
+		const int index = static_cast<int>(bone);
+		if (skeleton_skin_->get_bind_pose(index) != bind) {
+			skeleton_skin_->set_bind_pose(index, bind);
+			changed = true;
+		}
+		if (bone < skin_bind_poses_.size()) {
+			skin_bind_poses_[bone] = bind;
+		}
+	}
+	skin_binds_layered_ = layered;
+	if (changed) {
+		publish_skin_palette();
 	}
 }
 

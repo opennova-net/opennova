@@ -275,6 +275,10 @@ public:
 			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
 			const Array &p_nodes, int64_t p_applied_revision) const;
 	static void weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing);
+	// A PANM matrix (native row-vector frame) as a Godot transform and back:
+	// the mesh carries the (-x, y, z) conversion, so both flip X.
+	static Transform3D panm_transform(const opennova::threedi::ThreediMatrix4x4 &p_matrix);
+	static opennova::threedi::ThreediMatrix4x4 panm_matrix(const Transform3D &p_transform);
 	int64_t get_panm_evaluation_serial() const;
 	Array evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 };

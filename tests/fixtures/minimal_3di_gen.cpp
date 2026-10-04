@@ -684,6 +684,19 @@ const std::vector<Recipe> &recipes() {
 			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AD_LUM");
 			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
 		}},
+		// --- the clip-posed PANM layer (object_model_skeletal_panm_test.gd): the
+		// left upper arm (part 9) scales 1 -> 0 from CTRL 0 `WPN_TRIGGER` ---
+		{"person_part9_trigger_scale", make_person, [](Model &m) {
+			m.add_control_register("WPN_TRIGGER");
+			ThreediPartAnimation &row = m.lods[0].panm[9];
+			row.flags = threedi_panm_pack_flags(1, threedi_panm_rotation_type(row.flags),
+					static_cast<uint8_t>(threedi_panm_rotation_reversed(row.flags)),
+					threedi_panm_translate_type(row.flags));
+			row.scale_x.control = THREEDI_PANM_STYLE_CONTROL_REGISTER;
+			row.scale_x.control_param = 0;
+			row.scale_x.start = THREEDI_PANM_VALUE_ONE;
+			row.scale_x.end = 0;
+		}},
 		{"armory_lght0_colorgen113_flicker", make_armory, [](Model &m) {
 			ThreediLight &l = m.lights[0];
 			l.flags = static_cast<uint8_t>(l.flags & ~THREEDI_LIGHT_FLAG_DISABLE_OBJECTS);

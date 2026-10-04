@@ -49,8 +49,10 @@ GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
 	return controls.runtime_values(g_weather_ctrl_flicker, g_weather_ctrl_swing);
 }
 
-Transform3D panm_matrix_to_transform(const ThreediMatrix4x4 &m) {
-	const float *r = m.m;
+} // namespace
+
+Transform3D ObjectData::panm_transform(const ThreediMatrix4x4 &p_matrix) {
+	const float *r = p_matrix.m;
 	Transform3D t;
 	t.basis[0] = Vector3(r[0], -r[4], -r[8]);
 	t.basis[1] = Vector3(-r[1], r[5], r[9]);
@@ -59,7 +61,23 @@ Transform3D panm_matrix_to_transform(const ThreediMatrix4x4 &m) {
 	return t;
 }
 
-} // namespace
+ThreediMatrix4x4 ObjectData::panm_matrix(const Transform3D &p_transform) {
+	// The inverse of panm_transform: basis row i, column j is the native
+	// element (j, i) with X flipped on both sides.
+	static const float kFlip[3] = {-1.0f, 1.0f, 1.0f};
+	ThreediMatrix4x4 m;
+	threedi_mat4_identity(&m);
+	for (int i = 0; i < 3; ++i) {
+		for (int j = 0; j < 3; ++j) {
+			m.m[j * 4 + i] = kFlip[i] * kFlip[j] *
+					static_cast<float>(p_transform.basis.rows[i][j]);
+		}
+	}
+	m.m[12] = -static_cast<float>(p_transform.origin.x);
+	m.m[13] = static_cast<float>(p_transform.origin.y);
+	m.m[14] = static_cast<float>(p_transform.origin.z);
+	return m;
+}
 
 void ObjectData::weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing) {
 	r_flicker = g_weather_ctrl_flicker;
@@ -204,7 +222,7 @@ Dictionary ObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, const D
 	if (threedi_panm_pose_parts(native_model(), p_lod_index,
 			threedi_panm_runtime_time_ms(p_time_ms), controls.data(), matrices, nullptr)) {
 		for (size_t i = 0; i < matrices.size(); ++i)
-			out[static_cast<int>(i)] = panm_matrix_to_transform(matrices[i]);
+			out[static_cast<int>(i)] = panm_transform(matrices[i]);
 	}
 	return out;
 }
@@ -228,7 +246,7 @@ int64_t ObjectData::apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms
 		const auto *matrix = pose->changed_part(i, p_applied_revision);
 		if (matrix == nullptr) continue;
 		Node3D *node = Object::cast_to<Node3D>(static_cast<Object *>(p_nodes[static_cast<int64_t>(i)]));
-		if (node != nullptr) node->set_transform(panm_matrix_to_transform(*matrix));
+		if (node != nullptr) node->set_transform(panm_transform(*matrix));
 	}
 	return static_cast<int64_t>(pose->revision());
 }

@@ -788,6 +788,12 @@ private:
 	void apply_skin_palette_bounds();
 	// The current palette (pose x bind per bone), empty without a rig.
 	void compute_skin_palette(std::vector<Transform3D> &r_palette) const;
+	// The clip-posed parts' PANM layer: each bone's rest bind (the skin as
+	// built), and the pass that lands the part tracks composed over the clip
+	// pose as the skin's binds (threedi_panm_pose_parts_over).
+	std::vector<Transform3D> skin_rest_binds_;
+	bool skin_binds_layered_ = false;
+	void apply_skeletal_panm();
 
 	// --- retained-scene construction (object_model_scene.cpp) ---
 	void rebuild_scene();
