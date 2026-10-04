@@ -251,7 +251,10 @@ TextureUse edge_use(const AssetGraph &graph, const AssetScan &scan, const GraphE
 	use.field = edge.field;
 	use.name_written = edge.value;
 	use.role = texture_role_of_edge(edge, model.get(), use.context);
-	if (edge.kind == ReferenceKind::Texture) use.load = texture_reference_load(edge.value, edge.loader_arg, exists);
+	if (edge.kind == ReferenceKind::Texture) {
+		use.loader_arg = edge.loader_arg;
+		use.load = texture_reference_load(edge.value, edge.loader_arg, exists);
+	}
 	std::string served;
 	if (graph.resolve(edge, &served) == ReferenceStatus::Present) use.served = served;
 	return use;
@@ -267,6 +270,7 @@ TextureUse fixed_use(const AssetScan &scan, const FixedTextureName &fixed, const
 	use.name_written = fixed.name;
 	use.context.hud_mode = fixed.hud_mode;
 	const TextureLoader loader = fixed.loader != TextureLoader::kCount ? fixed.loader : texture_role_row(fixed.role).loader;
+	use.loader = loader;
 	use.load = texture_load(loader, fixed.name, exists, 0, fixed.hud_mode, fixed.role);
 	if (const AssetEntry *opened = use.load.file.empty() ? nullptr : scan.find(basename_of(use.load.file)))
 		use.served = opened->relative_path;
@@ -317,6 +321,22 @@ std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &s
 		out.push_back(std::move(use));
 	}
 	return out;
+}
+
+bool texture_use_opens(const TextureUse &use, const std::string &file) {
+	const std::string wanted = normalized_logical_name(basename_of(file));
+	if (wanted.empty() || use.name_written.empty()) return false;
+	const TextureNameTest only = [&wanted](const std::string &name) { return normalized_logical_name(basename_of(name)) == wanted; };
+	TextureLoad load;
+	if (use.loader != TextureLoader::kCount)
+		load = texture_load(use.loader, use.name_written, only, 0, use.context.hud_mode, use.role);
+	else if (use.loader_arg >= 0)
+		load = texture_reference_load(use.name_written, use.loader_arg, only);
+	else if (use.known())
+		load = texture_load(texture_role_row(use.role).loader, use.name_written, only, 0, use.context.hud_mode, use.role);
+	else
+		return normalized_logical_name(basename_of(use.name_written)) == wanted;
+	return !load.file.empty() && normalized_logical_name(basename_of(load.file)) == wanted;
 }
 
 std::vector<TextureUse> texture_uses_named(const AssetGraph &graph, const AssetScan &scan, const std::string &stem,

@@ -186,6 +186,16 @@ void plan_sites(RenamePlan &plan, const AssetScan &scan, const AssetGraph &graph
 			continue;
 		}
 		site.target = target.relative_path;
+		// A native text is the game's code page (Windows-1252): a name it has no character of cannot be written
+		// there (stage_native writes the new name in it).
+		std::string stored;
+		if (native_text_kind(site.kind) && !utf8_to_cp1252(site.after, stored)) {
+			plan.refusals.push_back(refusal(CoreFinding::RenameName,
+			                                edge->source + " is written in the game's code page (Windows-1252), which has no "
+			                                               "character of '" + site.after + "' there.",
+			                                edge->source, edge->field));
+			continue;
+		}
 		plan.sites.push_back(std::move(site));
 	}
 	// A field naming the file through a style variable keeps the variable: the site is
@@ -322,7 +332,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 }
 
 RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
-                      const std::string &new_name, const std::vector<std::string> &referrers) {
+                      const std::string &new_name, const std::vector<std::string> &referrers, const BaseNames *base) {
 	RenamePlan plan;
 	plan.split = true;
 	plan.new_name = new_name;
@@ -356,6 +366,13 @@ RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const As
 	if (const AssetEntry *taken = scan.find(new_name)) {
 		plan.refusals.push_back(refusal(CoreFinding::RenameExists, "The project already has a file named '" + new_name + "'.",
 		                                taken->relative_path));
+		return plan;
+	}
+	if (base && base->has(new_name)) {
+		plan.refusals.push_back(refusal(CoreFinding::RenameExists,
+		                                "The base game has a file named '" + new_name +
+		                                        "': a copy of that name would stand in for it for every use. Choose another name.",
+		                                asset->relative_path));
 		return plan;
 	}
 	if (output) {
@@ -1014,7 +1031,10 @@ void RenameTransaction::stage_native(const AssetEntry &asset, const std::vector<
 			return edge.rewritable && edge.record == site->record && edge.field == site->field && edge.value == site->before &&
 			       graph_.resolve(edge, &resolved) == ReferenceStatus::Present && resolved == site->target;
 		});
-		if (there) wanted.push_back({site->record, site->field, site->before, site->after});
+		// The new name in the text's code page (its old one is the text's own bytes, as read); one it cannot
+		// hold was refused as the rename was planned.
+		std::string after;
+		if (there && utf8_to_cp1252(site->after, after)) wanted.push_back({site->record, site->field, site->before, after});
 	}
 	std::vector<size_t> missed;
 	staged.rewritten = rewrite_native_text(asset.relative_path, asset.kind, project_.target_game, staged.text, wanted, missed);

@@ -66,11 +66,12 @@ std::shared_ptr<TextureThumbnail> make_texture_thumbnail(const std::string &file
 	auto out = std::make_shared<TextureThumbnail>();
 	out->file = file;
 	out->transform = transform;
-	std::shared_ptr<const TextureImage> image = decode_texture(file, bytes);
+	// The first level alone decoded (a DDS chain's others left coded: the picture is made from the top).
+	std::shared_ptr<const TextureImage> image = decode_texture(file, bytes, true);
 	out->format = fact_words(*image, "format");
 	out->texels = fact_words(*image, "texels");
 	out->alpha = fact_words(*image, "alpha");
-	out->levels = image->levels.size();
+	out->levels = image->reader == TextureReader::Dds ? size_t(image->game_levels) : image->levels.size();
 	out->source_width = image->width();
 	out->source_height = image->height();
 	if (!image->loads || !image->decoded || image->levels.empty()) {
@@ -79,11 +80,7 @@ std::shared_ptr<TextureThumbnail> make_texture_thumbnail(const std::string &file
 		return out;
 	}
 	if (transform != TextureLoadTransform::None) image = apply_load_transform(*image, transform);
-	// The smallest level no smaller than the picture (a DDS's chain saves the averaging).
-	size_t level = 0;
-	while (level + 1 < image->levels.size() && image->levels[level + 1].width >= side && image->levels[level + 1].height >= side)
-		++level;
-	const TextureLevel &source = image->levels[level];
+	const TextureLevel &source = image->levels.front();
 	fit(source.width, source.height, std::max<uint32_t>(side, 1), out->width, out->height);
 	out->rgba = shrink(source, out->width, out->height);
 	uint64_t sum[4] = {};
@@ -158,10 +155,11 @@ std::shared_ptr<const TextureThumbnail> TextureThumbnails::picture_of(const std:
 	return picture;
 }
 
-bool TextureThumbnails::step(const SessionView &view, size_t bytes) {
+bool TextureThumbnails::step(const SessionView &view, size_t bytes, const std::function<int64_t()> &clock, int64_t until) {
 	bool made = false;
 	size_t read = 0;
-	while (!queue_.empty() && (!made || read < bytes)) {
+	const auto in_time = [&] { return !clock || clock() < until; };
+	while (!queue_.empty() && (!made || (read < bytes && in_time()))) {
 		const Key key = queue_.front();
 		queue_.erase(queue_.begin());
 		made = make_(view, key, &read) != nullptr || made;

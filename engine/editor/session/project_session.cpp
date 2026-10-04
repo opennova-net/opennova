@@ -221,10 +221,13 @@ void ProjectSession::poll() {
 	if (session.core.operations().done()) session.core.finish_operation();
 	session.core.save_recent_items();
 	// The texture thumbnails the windows asked for and the cache lacks (ADR 0046 S18), at least one a
-	// poll, until kThumbnailPollBytes of files are read: a list of hundreds of textures fills a few at a
-	// frame.
+	// poll, then within what is left of the poll's milliseconds and until kThumbnailPollBytes of files are
+	// read: a list of hundreds of textures fills a few at a frame.
 	const SessionView &view = session.core.view();
-	if (view.project.open && view.documents.thumbnails) view.documents.thumbnails->step(view, kThumbnailPollBytes);
+	if (view.project.open && view.documents.thumbnails) {
+		const std::function<int64_t()> clock = budget.ms > 0 ? std::function<int64_t()>(steady_clock_ms) : std::function<int64_t()>();
+		view.documents.thumbnails->step(view, kThumbnailPollBytes, clock, started + budget.ms);
+	}
 }
 
 void ProjectSession::set_poll_budget(const PollBudget &budget) {

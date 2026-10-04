@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -69,8 +70,9 @@ public:
 	// The picture of bytes the project holds no file of yet (S18: what a Replace would make), named `name`,
 	// made now, never kept, with a serial of the cache's own (a device uploads each picture once).
 	std::shared_ptr<const TextureThumbnail> picture_of(const std::string &name, const std::vector<uint8_t> &bytes);
-	// Makes the queued pictures, one at least, until `bytes` of files are read: true when one was made.
-	bool step(const SessionView &view, size_t bytes);
+	// Makes the queued pictures, one at least, until `bytes` of files are read or `clock` (when given) passes
+	// `until` (the poll's budget): true when one was made.
+	bool step(const SessionView &view, size_t bytes, const std::function<int64_t()> &clock = {}, int64_t until = 0);
 	bool pending() const { return !queue_.empty(); }
 	size_t held_bytes() const { return held_; }
 	size_t held() const { return entries_.size(); }

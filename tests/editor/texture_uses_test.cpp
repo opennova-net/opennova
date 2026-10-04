@@ -294,8 +294,11 @@ int test_show_use() {
 	                                    "strip 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	TEST_EXPECT(import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false)
 	                    .imported == std::vector<std::string>({"models/thing.3di"}));
-	for (const char *name : {"body.tga", "map.tga", "grain.tga", "logo.tga", "stance.tga", "scopexh.tga"})
+	for (const char *name : {"body.tga", "map.tga", "grain.tga", "logo.tga", "stance.tga", "scopexh.tga", "puff.tga"})
 		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name, tga_bytes()));
+	TEST_EXPECT(editor_test::write_text(root + "/effects/fx.ptl",
+	                                    "[particledef]\r\n{\r\n\tid = a;\r\n\tgraphic1 = puff.tga, additive;\r\n}\r\n"
+	                                    "[particledef]\r\n{\r\n\tid = b;\r\n\tgraphic1 = puff.tga, blend;\r\n}\r\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
 	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_polydata isle.cpt\n"
 	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n") &&
@@ -362,11 +365,25 @@ int test_show_use() {
 	const auto *stance =
 			static_cast<const TextureViewport *>(session.viewports().find("textures/stance.tga", ViewportKind::Texture));
 	TEST_EXPECT(view.documents.active == "textures/stance.tga" && stance && stance->options().as_used == 0);
-	// A file that does not use it; a name the game opens itself.
+	// Two particles of one file naming it in the same field, told apart by their records (a native text's use
+	// has no locator): each shown as its own mode draws it.
+	{
+		const std::vector<TextureUse> &puffs = view.documents.texture_uses->uses_of(view, "textures/puff.tga");
+		TEST_EXPECT(puffs.size() == 2 && puffs[0].field == puffs[1].field && puffs[0].locator.empty() &&
+		            puffs[0].record != puffs[1].record);
+		if (puffs.size() == 2) {
+			const std::string second = puffs[1].record;
+			editor_test::handle_to_end(session, request::show_use("textures/puff.tga", "effects/fx.ptl", second, "graphic1"));
+			const auto *puff =
+					static_cast<const TextureViewport *>(session.viewports().find("textures/puff.tga", ViewportKind::Texture));
+			TEST_EXPECT(session.outcome().done() && puff && puff->options().as_used == 1);
+		}
+	}
+	// A file that does not use it; a name the game opens itself, no referrer named.
 	TEST_EXPECT(refused(request::show_use("textures/stance.tga", "models/thing.3di"), "models/thing.3di does not use stance.tga"));
-	TEST_EXPECT(refused(request::show_use("textures/scopexh.tga", ""), "does not use scopexh.tga"));
+	TEST_EXPECT(refused(request::show_use("textures/scopexh.tga", ""), "The game opens scopexh.tga by its name itself"));
 	std::printf("show_use: on a model and in a menu (the Preview forward), a terrain's map in its mission's view, a HUD "
-	            "image as it draws it; the refusals; over the wire\n");
+	            "image as it draws it, two particles of one field apart; the refusals; over the wire\n");
 	return 0;
 }
 

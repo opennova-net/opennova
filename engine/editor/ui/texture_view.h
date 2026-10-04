@@ -43,7 +43,6 @@ private:
 	void draw_import(Workspace &workspace, const DocumentBase &document);
 	void draw_edits(Workspace &workspace, const DocumentBase &document, const TextureImage &image);
 	static bool replaceable_image(const std::string &path);
-	static std::string free_copy_name(const SessionView &view, const std::string &path);
 
 	std::unique_ptr<TextureViewportView> viewport_;
 	// A palette index move as typed.

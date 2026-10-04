@@ -50,8 +50,18 @@ struct TextureUse {
 	// A name the game opens itself (no referrer): what for, and the witness.
 	bool fixed = false;
 	std::string fixed_for, fixed_witness;
+	// How its loader is asked again (texture_use_opens): a texture reference's loader argument (texture_roles.h;
+	// -1 for a menu's or a mission's, which its role's loader takes), a fixed name's loader.
+	int32_t loader_arg = -1;
+	TextureLoader loader = TextureLoader::kCount;
 	bool known() const { return role != TextureRoleId::kCount; }
 };
+
+// Whether the use's loader would open the file named `file` (by its logical name) were that the one file of
+// its names the project held: a model row naming body.tga opens body.dds (the .dds beside it first) and
+// body.tga, never body.mdt, which is another file. What a file's uses are, never a stem's
+// (session/texture_import_state: the uses an import's output serves).
+bool texture_use_opens(const TextureUse &use, const std::string &file);
 
 // A name the game opens itself, its role and what for (the HUD's art, the scars, the weather, the view
 // effects, the screens): the fixed-names table, from the runtime's own name constants where it has them.

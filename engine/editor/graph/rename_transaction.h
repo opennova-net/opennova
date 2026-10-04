@@ -9,6 +9,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
 #include <editor/project/project_document.h>
@@ -102,9 +103,12 @@ std::string companion_path(const RenameOutput &companion);
 // other use left on the file; an import's output copied as its source (another name beside it, its
 // record the output's options naming `new_name`). Refused, as a rename is, for a name the rules refuse,
 // that changes the extension or is taken, a site the editor cannot rewrite; and with texture.split for
-// an import's source (split the file it makes), no referrer given, or none that names the file.
+// an import's source (split the file it makes), no referrer given, or none that names the file. In an
+// expansion (`base`, ADR 0046 S16), a name the base game serves is taken too: a copy of it would stand in
+// for the base's file for every use.
 RenamePlan plan_split(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
-                      const std::string &new_name, const std::vector<std::string> &referrers);
+                      const std::string &new_name, const std::vector<std::string> &referrers,
+                      const BaseNames *base = nullptr);
 
 // Commit a plan that is ok, to its end (RenameTransaction below steps it a file at a time): every
 // referencing document is read and rewritten through its type in memory, then the file (and an

@@ -89,7 +89,8 @@ int test_pictures() {
 	// What the use's loader makes of it: the HUD's alpha alone.
 	picture = make_texture_thumbnail("hud.tga", tga_of(solid(4, 4, 200, 100, 50, 60), 4, 4), TextureLoadTransform::AlphaOnly);
 	TEST_EXPECT(picture->rgba[0] == 255 && picture->rgba[1] == 255 && picture->rgba[3] == 60 && picture->transform == TextureLoadTransform::AlphaOnly);
-	// A DXT5 chain: the level nearest above the picture (32 for a side of 32), its texels the codec's.
+	// A DXT5 chain: its first level alone decoded (the others left coded), shrunk to the picture, its texels
+	// the codec's; the facts still the whole chain's.
 	const std::vector<uint8_t> source = solid(128, 128, 0, 255, 0, 255);
 	const std::vector<renderer::DxtSurface> levels =
 			renderer::build_dxt_texture_levels(source.data(), 128, 128, renderer::TextureDxtFormat::Dxt5, 8);
@@ -101,6 +102,13 @@ int test_pictures() {
 	picture = make_texture_thumbnail("grass.dds", dds, TextureLoadTransform::None, 32);
 	TEST_EXPECT(picture->state == TextureThumbnail::State::Ready && picture->width == 32 && picture->levels == levels.size() &&
 	            picture->rgba[1] > 240 && picture->rgba[0] < 16);
+	{
+		const std::shared_ptr<const TextureImage> top = decode_texture("grass.dds", dds, true);
+		const std::shared_ptr<const TextureImage> all = decode_texture("grass.dds", dds);
+		TEST_EXPECT(top->levels.size() == 1 && all->levels.size() == levels.size() && top->game_levels == levels.size() &&
+		            top->fact("mips") && all->fact("mips") && top->fact("mips")->words == all->fact("mips")->words &&
+		            top->levels[0].rgba == all->levels[0].rgba);
+	}
 	// Cut short: the game cannot load it, and why.
 	dds.resize(dds.size() - 4);
 	picture = make_texture_thumbnail("cut.dds", dds, TextureLoadTransform::None);
@@ -155,6 +163,15 @@ int test_session() {
 	TEST_EXPECT(!thumbnails.get(rig.view(), "textures/none.tga", TextureLoadTransform::None));
 	rig.session.poll();
 	TEST_EXPECT(thumbnails.made() == 2);
+	// Within the poll's time: with its milliseconds spent, a step makes one picture, never the whole queue.
+	{
+		TEST_EXPECT(!thumbnails.get(rig.view(), "textures/other.tga", TextureLoadTransform::None) &&
+		            !thumbnails.get(rig.view(), "textures/other.tga", TextureLoadTransform::AlphaOnly));
+		const uint64_t before = thumbnails.made();
+		const std::function<int64_t()> spent = [] { return int64_t(100); };
+		TEST_EXPECT(thumbnails.step(rig.view(), size_t(1) << 30, spent, 50) && thumbnails.made() == before + 1 && thumbnails.pending());
+		TEST_EXPECT(thumbnails.step(rig.view(), size_t(1) << 30) && !thumbnails.pending());
+	}
 	// The file changed (its stamp moved): the last picture answers until a poll makes the new one.
 	TEST_EXPECT(editor_test::write_bytes(rig.root() + "/textures/stance.tga", tga_of(solid(16, 16, 9, 9, 9, 255), 16, 16)));
 	editor_test::handle_to_end(rig.session, request::rescan());
@@ -162,7 +179,7 @@ int test_session() {
 	TEST_EXPECT(thumbnails.get(rig.view(), "textures/stance.tga", TextureLoadTransform::None) == made && thumbnails.pending());
 	rig.session.poll();
 	made = thumbnails.get(rig.view(), "textures/stance.tga", TextureLoadTransform::None);
-	TEST_EXPECT(made && made->width == 16 && made->serial == 3);
+	TEST_EXPECT(made && made->width == 16 && made->serial == 5);
 
 	// The wire: the query's facts and its PNG.
 	std::string error;

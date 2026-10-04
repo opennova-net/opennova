@@ -288,6 +288,32 @@ bool decode_image_source(const std::string &name, const std::vector<uint8_t> &by
 	return false;
 }
 
+bool image_source_has_alpha(const std::string &name, const std::vector<uint8_t> &head) {
+	const std::string extension = strutil::to_lower(utf8_of(path_of(name).extension()));
+	if (extension == ".png") {
+		static const uint8_t kSignature[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+		if (head.size() < 33 || !std::equal(kSignature, kSignature + 8, head.begin())) return false;
+		const uint8_t colour = head[25]; // IHDR's colour type
+		if (colour == 4 || colour == 6) return true;
+		// A transparency chunk before the image data.
+		size_t at = 8;
+		while (at + 8 <= head.size()) {
+			const uint32_t length = (uint32_t(head[at]) << 24) | (uint32_t(head[at + 1]) << 16) | (uint32_t(head[at + 2]) << 8) | head[at + 3];
+			const std::string type(head.begin() + std::ptrdiff_t(at + 4), head.begin() + std::ptrdiff_t(at + 8));
+			if (type == "tRNS") return true;
+			if (type == "IDAT" || type == "IEND") return false;
+			at += 12 + size_t(length);
+		}
+		return false;
+	}
+	if (extension == ".tga") {
+		if (head.size() < 18) return false;
+		const uint8_t map_bits = head[7], bits = head[16], alpha_bits = head[17] & 0x0F;
+		return alpha_bits > 0 || bits == 32 || (head[1] == 1 && map_bits == 32);
+	}
+	return false;
+}
+
 void height_into_alpha(RgbaImage &image) {
 	uint8_t *p = image.pixels.data();
 	for (size_t i = 0; i + 3 < image.pixels.size(); i += 4) {

@@ -50,7 +50,8 @@ void RenameController::split_texture(const EditorRequest &request) {
 	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
 	RenameOperation::FilePlanner planner = [this, request](std::shared_ptr<const AssetScan> &scan) {
 		scan = view_.project.scan;
-		return plan_split(paths_, *scan, core_.problems().graph(), request.path, request.new_name, request.paths);
+		const BaseNames base{&view_.project.base_files};
+		return plan_split(paths_, *scan, core_.problems().graph(), request.path, request.new_name, request.paths, &base);
 	};
 	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
 			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
@@ -398,8 +399,9 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 		// The documents with unsaved edits among the files the split rewrites.
 		if (!view_.project.open || !documents.documents_dirty()) return;
 		if (unsaved_while_due(files)) return;
-		const RenamePlan plan =
-		        plan_split(paths_, *view_.project.scan, core_.problems().graph(), request.path, request.new_name, request.paths);
+		const BaseNames base{&view_.project.base_files};
+		const RenamePlan plan = plan_split(paths_, *view_.project.scan, core_.problems().graph(), request.path, request.new_name,
+		                                   request.paths, &base);
 		if (!plan.ok()) return;
 		for (const auto &document : documents.documents())
 			if (document->dirty() && std::any_of(plan.sites.begin(), plan.sites.end(),

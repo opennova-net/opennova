@@ -64,6 +64,10 @@ struct ImageSource {
 };
 bool decode_image_source(const std::string &name, const std::vector<uint8_t> &bytes, ImageSource &out,
                          std::string &error);
+// Whether a source holds an alpha, by its first bytes alone (`head`: its header, a PNG's chunks up to its
+// first image data): a PNG of grey or colour with alpha, or with a transparency chunk; a TGA with alpha bits
+// or a colour map of 32 bits; never a PCX. What a use's needs weigh without decoding it (a sky's clouds).
+bool image_source_has_alpha(const std::string &name, const std::vector<uint8_t> &head);
 // `normal height` applied: each texel's brightness into its alpha, its alpha into its blue.
 void height_into_alpha(RgbaImage &image);
 ImageImportSettings image_import_settings(const ImportOptions &options);

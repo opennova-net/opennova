@@ -1,10 +1,16 @@
 #include <editor/session/texture_import_state.h>
 
+#include <algorithm>
+#include <cstdio>
+#include <map>
 #include <set>
 #include <tuple>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/graph/reference_kinds.h>
+#include <editor/import/texture_import.h>
 #include <editor/project/project_files.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
@@ -65,20 +71,71 @@ bool texture_import_state(const SessionView &view, const std::string &path, Text
 	}
 	for (const AssetEntry &each : scan.entries)
 		if (each.imported_from == out.source) out.outputs.push_back(each.relative_path);
-	// The uses of what it makes and of every name of its stem, each once.
+	// The uses of the file it makes, never of its stem (a model's body.tga diffuse and its body.mdt normal map
+	// are two files, and an import makes one): those of its outputs, and those of a name of its stem whose
+	// loader would open one of them (a missing .tga a row writes, whose .dds the import makes), each once.
+	// Before any use reads what it makes, those of the name most of its stem's uses write: the file its uses
+	// ask it to become.
 	std::vector<TextureUse> uses;
 	if (view.documents.texture_uses) {
 		std::set<std::tuple<std::string, std::string, std::string, std::string, std::string>> seen;
-		const auto take = [&](const std::vector<TextureUse> &list) {
-			for (const TextureUse &use : list)
-				if (seen.insert({use.referrer, use.locator, use.field, strutil::to_lower(use.name_written), use.fixed_for}).second)
-					uses.push_back(use);
+		const auto take = [&](const TextureUse &use) {
+			if (seen.insert({use.referrer, use.locator, use.field, strutil::to_lower(use.name_written), use.fixed_for}).second)
+				uses.push_back(use);
 		};
-		for (const std::string &output : out.outputs) take(view.documents.texture_uses->uses_of(view, output));
-		take(view.documents.texture_uses->uses_named(view, utf8_of(path_of(basename_of(out.source)).stem())));
+		for (const std::string &output : out.outputs)
+			for (const TextureUse &use : view.documents.texture_uses->uses_of(view, output)) take(use);
+		const std::vector<TextureUse> &named =
+				view.documents.texture_uses->uses_named(view, utf8_of(path_of(basename_of(out.source)).stem()));
+		for (const TextureUse &use : named)
+			for (const std::string &output : out.outputs)
+				if (texture_use_opens(use, output)) take(use);
+		if (uses.empty() && !named.empty()) {
+			std::map<std::string, size_t> writes;
+			for (const TextureUse &use : named) ++writes[normalized_logical_name(basename_of(use.name_written))];
+			std::string most;
+			size_t count = 0;
+			for (const TextureUse &use : named) {
+				const std::string name = normalized_logical_name(basename_of(use.name_written));
+				if (writes[name] > count) {
+					most = name;
+					count = writes[name];
+				}
+			}
+			for (const TextureUse &use : named)
+				if (normalized_logical_name(basename_of(use.name_written)) == most) take(use);
+		}
 	}
-	out.needs = texture_import_needs(uses, basename_of(out.source));
+	// Whether the source holds an alpha, read from its header alone, where a use weighs it (a sky's clouds).
+	bool alpha = false;
+	if (std::any_of(uses.begin(), uses.end(), [](const TextureUse &use) { return use.role == TextureRoleId::SkyCloud; })) {
+		std::vector<uint8_t> head(4096);
+		if (std::FILE *file = io::fopen_utf8(join_path(view.project.root, out.source).c_str(), "rb")) {
+			head.resize(std::fread(head.data(), 1, head.size(), file));
+			std::fclose(file);
+			alpha = image_source_has_alpha(out.source, head);
+		}
+	}
+	out.needs = texture_import_needs(uses, basename_of(out.source), alpha);
 	return true;
+}
+
+std::string free_texture_copy_name(const AssetScan &scan, const BaseNames &base, const std::string &path) {
+	const std::string name = basename_of(path);
+	const std::string extension = utf8_of(path_of(name).extension());
+	const std::string stem = utf8_of(path_of(name).stem());
+	for (int n = 2; n < 100; ++n) {
+		const std::string suffix = "_" + std::to_string(n);
+		const size_t room = 16 - std::min<size_t>(16, suffix.size() + extension.size());
+		const std::string copy = stem.substr(0, std::min(stem.size(), room)) + suffix + extension;
+		if (!scan.find(copy) && !base.has(copy)) return copy;
+	}
+	return std::string();
+}
+
+std::string free_texture_copy_name(const SessionView &view, const std::string &path) {
+	if (!view.project.scan) return std::string();
+	return free_texture_copy_name(*view.project.scan, BaseNames{&view.project.base_files}, path);
 }
 
 TextureUseAsks texture_use_asks(const SessionView &view, const std::string &path) {
@@ -90,9 +147,9 @@ TextureUseAsks texture_use_asks(const SessionView &view, const std::string &path
 	if (entry) {
 		uses = view.documents.texture_uses->uses_of(view, entry->relative_path);
 	} else {
-		// A name the project lacks: the uses writing it.
+		// A name the project lacks: the uses whose loader would open it (a row writing body.tga opens body.dds).
 		for (const TextureUse &use : view.documents.texture_uses->uses_named(view, utf8_of(path_of(basename_of(path)).stem())))
-			if (normalized_logical_name(basename_of(use.name_written)) == normalized_logical_name(basename_of(path))) uses.push_back(use);
+			if (texture_use_opens(use, path)) uses.push_back(use);
 	}
 	std::set<std::string> sizes;
 	for (const TextureUse &use : uses) {

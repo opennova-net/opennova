@@ -320,7 +320,7 @@ void TextureView::draw_import(Workspace &workspace, const DocumentBase &document
 	// No one file serves them all: the uses that ask otherwise given a copy of their own (split_texture),
 	// each file's import then made as its own uses ask.
 	if (!needs.split_referrers.empty()) {
-		const std::string copy = free_copy_name(view, document.path());
+		const std::string copy = free_texture_copy_name(view, document.path());
 		std::string files;
 		for (const std::string &file : needs.split_referrers) files += (files.empty() ? "" : ", ") + basename_of(file);
 		ui_kit::WrapRow split;
@@ -331,21 +331,6 @@ void TextureView::draw_import(Workspace &workspace, const DocumentBase &document
 	}
 	ImGui::PopTextWrapPos();
 	ImGui::EndDisabled();
-}
-
-// A name for a copy of `path`: its stem with _2, _3, ... and its extension, one no file of the project has
-// and the archives' 16 characters hold; "" for none.
-std::string TextureView::free_copy_name(const SessionView &view, const std::string &path) {
-	const std::string name = basename_of(path);
-	const std::string extension = utf8_of(path_of(name).extension());
-	const std::string stem = utf8_of(path_of(name).stem());
-	for (int n = 2; n < 100; ++n) {
-		const std::string suffix = "_" + std::to_string(n);
-		const size_t room = 16 - std::min<size_t>(16, suffix.size() + extension.size());
-		const std::string copy = stem.substr(0, std::min(stem.size(), room)) + suffix + extension;
-		if (view.project.scan && !view.project.scan->find(copy)) return copy;
-	}
-	return std::string();
 }
 
 // The palette as swatches, sixteen a row, as wide as the column lets them be.
@@ -420,7 +405,8 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 			const bool placed = texture_use_place(view, document.path(), use, int(i), place, why);
 			if (ImGui::MenuItem(placed ? place.label.c_str() : "Show where the game draws it", nullptr, false,
 			                    placed && view.allows(EditorRequestKind::ShowUse)))
-				workspace.request(request::show_use(document.path(), use.referrer, use.locator, use.field));
+				workspace.request(request::show_use(document.path(), use.referrer, use.locator.empty() ? use.record : use.locator,
+				                                    use.field));
 			ui_kit::tooltip(placed ? place.picture == UsePicture::AsUsed
 			                                 ? "Nothing in the editor draws " + basename_of(use.referrer) +
 			                                           "'s picture: this texture's view shows it as that use makes it."
@@ -429,7 +415,7 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 			const bool others = std::any_of(uses.begin(), uses.end(), [&](const TextureUse &each) {
 				return !each.fixed && each.referrer != use.referrer;
 			});
-			const std::string copy = free_copy_name(view, document.path());
+			const std::string copy = free_texture_copy_name(view, document.path());
 			if (ImGui::MenuItem(("Give " + basename_of(use.referrer) + " a copy of its own").c_str(), nullptr, false,
 			                    others && !copy.empty() && view.allows(EditorRequestKind::SplitTexture)))
 				workspace.request(request::split_texture(document.path(), copy, {use.referrer}));

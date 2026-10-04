@@ -17,7 +17,9 @@ namespace opennova::editor {
 // said and left out (a loading screen and a particle graphic of one name: no one file serves both). A
 // foliage or char map's indices are data the game reads: from an 8-bit PCX source a PCX keeping them
 // (palette indices), from any other a conflict (an import from colours cannot keep them). A model's
-// normal row naming a .tga asks the height in the alpha (normal height). No use asks nothing.
+// normal row naming a .tga asks the height in the alpha (normal height). A sky's cloud layer from a
+// source with an alpha (`source_alpha`) asks the .dds its loader reads before the .pcx it names, the one
+// form that keeps the alpha as the cloud's density. No use asks nothing.
 // `source_name` is the import's source (its stem the output's name unless a use names another; its
 // extension whether it holds indices).
 struct TextureImportNeeds {
@@ -29,6 +31,7 @@ struct TextureImportNeeds {
 	std::vector<std::string> split_referrers;
 	size_t uses = 0;
 };
-TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, const std::string &source_name);
+TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, const std::string &source_name,
+                                        bool source_alpha = false);
 
 } // namespace opennova::editor

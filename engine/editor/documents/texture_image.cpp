@@ -260,7 +260,7 @@ void read_png(TextureImage &image, const std::vector<uint8_t> &bytes, const char
 	built_chain(image);
 }
 
-void read_dds(TextureImage &image, const std::vector<uint8_t> &bytes) {
+void read_dds(TextureImage &image, const std::vector<uint8_t> &bytes, bool first_level_only) {
 	constexpr const char *kD3dx = "D3DX, which reads the bytes by their content";
 	// D3DX takes the first of its formats whose test the bytes pass (renderer::dds_reader_format).
 	const renderer::DdsReaderFormat content = renderer::dds_reader_format(bytes.data(), bytes.size());
@@ -320,6 +320,7 @@ void read_dds(TextureImage &image, const std::vector<uint8_t> &bytes) {
 	const bool dxt1 = format.d3d == dds::dds_fourcc('D', 'X', 'T', '1');
 	const bool dxt5 = format.d3d == dds::dds_fourcc('D', 'X', 'T', '4') || format.d3d == dds::dds_fourcc('D', 'X', 'T', '5');
 	for (dds::DdsLevel &level : dds.levels) {
+		if (first_level_only && !image.levels.empty()) break; // a thumbnail's: the chain's other levels left coded
 		if (dxt1 || dxt5) {
 			renderer::DxtSurface surface;
 			surface.format = dxt1 ? renderer::TextureDxtFormat::Dxt1 : renderer::TextureDxtFormat::Dxt5;
@@ -336,8 +337,8 @@ void read_dds(TextureImage &image, const std::vector<uint8_t> &bytes) {
 	if (!image.decoded) image.undecoded = std::string("its ") + format.name + " texels, which the editor does not decode yet";
 	size_fact(image);
 	fact(image, "loads", "In the game", "loads it");
-	const uint32_t count = uint32_t(image.levels.size());
-	const TextureLevel &smallest = image.levels.back();
+	const uint32_t count = uint32_t(dds.levels.size());
+	const dds::DdsLevel &smallest = dds.levels.back();
 	fact(image, "mips", "Mip levels",
 	     count == 1 ? "1 in the file: no level past the texture"
 	                : std::to_string(count) + " in the file, down to " + sides(smallest.width, smallest.height));
@@ -392,13 +393,14 @@ const TextureFact *TextureImage::fact(const std::string &key) const {
 	return nullptr;
 }
 
-std::shared_ptr<const TextureImage> decode_texture(const std::string &name, const std::vector<uint8_t> &bytes) {
+std::shared_ptr<const TextureImage> decode_texture(const std::string &name, const std::vector<uint8_t> &bytes,
+                                                   bool first_level_only) {
 	auto image = std::make_shared<TextureImage>();
 	image->reader = texture_reader_for(name);
 	switch (image->reader) {
 	case TextureReader::Tga: read_tga(*image, bytes); break;
 	case TextureReader::Pcx: read_pcx(*image, bytes); break;
-	case TextureReader::Dds: read_dds(*image, bytes); break;
+	case TextureReader::Dds: read_dds(*image, bytes, first_level_only); break;
 	case TextureReader::Png: read_png(*image, bytes); break;
 	case TextureReader::None: image->refusal = "No texture reader of the game takes a file of this name."; break;
 	}

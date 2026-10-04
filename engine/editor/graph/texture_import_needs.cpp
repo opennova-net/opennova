@@ -25,10 +25,18 @@ bool model_row(R role) { return role == R::ModelDiffuse || role == R::ModelDetai
 std::string extension_of(const std::string &name) { return strutil::to_lower(utf8_of(path_of(name).extension())); }
 std::string stem_of(const std::string &name) { return utf8_of(path_of(basename_of(name)).stem()); }
 
-// The format a use asks of its file: the one its name's extension says, a .tga by its role.
-std::string format_for(const TextureUse &use, std::string &why) {
+// The format a use asks of its file: the one its name's extension says, a .tga by its role; a sky's cloud
+// layer from a source with an alpha, the .dds its loader reads first.
+std::string format_for(const TextureUse &use, bool source_alpha, std::string &why) {
 	const std::string extension = extension_of(use.name_written);
 	const std::string name = basename_of(use.name_written);
+	if (use.role == R::SkyCloud && source_alpha) {
+		// [orig: Texture_LoadFromArchive @ 0x58BA1B..0x58BA50: the .dds beside the name before it, its alpha
+		//  as it is; a PCX's alpha is its palette's luminance @ 0x58BC21..0x58BCFB]
+		why = "its loader reads " + stem_of(name) + ".dds before " + name +
+		      ", and only a DDS keeps the source's alpha as the cloud's density (a PCX's is its colours' brightness)";
+		return "dds";
+	}
 	if (extension == ".pcx" || extension == ".png" || extension == ".mdt" || extension == ".dds") {
 		why = "it names " + name;
 		return extension.substr(1);
@@ -91,14 +99,14 @@ void choose(TextureImportNeeds &out, const std::string &option, const std::strin
 
 } // namespace
 
-TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, const std::string &source_name) {
+TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, const std::string &source_name, bool source_alpha) {
 	TextureImportNeeds out;
 	std::vector<Ask> formats, stems, sizes, palettes, normals;
 	const bool indexed_source = extension_of(source_name) == ".pcx";
 	for (const TextureUse &use : uses) {
 		++out.uses;
 		std::string why;
-		std::string format = format_for(use, why);
+		std::string format = format_for(use, source_alpha, why);
 		if (use.role == R::TerrainFoliageMap || use.role == R::TerrainCharMap) {
 			// Its palette indices are data the game reads: kept as they are from an 8-bit PCX source.
 			if (!indexed_source) {

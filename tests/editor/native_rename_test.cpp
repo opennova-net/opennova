@@ -142,6 +142,17 @@ int test_rename_in_native_texts() {
 	editor_test::handle_to_end(session, request::rename_back());
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(read_text(root + "/hud/hudpos.def") == hud);
+	// A text is the game's code page (Windows-1252): a new name written in it as such (an e acute one byte),
+	// never as UTF-8; one the code page has no character of refused as the rename is planned.
+	editor_test::handle_to_end(session, request::rename_asset("textures/grain.tga", "caf\xC3\xA9.tga"));
+	TEST_EXPECT(session.outcome().done());
+	TEST_EXPECT(read_text(root + "/terrains/isle.trn").find("polytrn_detailmap caf\xE9.tga\r\n") != std::string::npos);
+	{
+		const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "textures/fire.tga",
+		                                    "\xE6\x97\xA5.tga");
+		TEST_EXPECT(!plan.ok() && plan.refusals.front().code() == "rename.name" &&
+		            plan.refusals.front().message.find("Windows-1252") != std::string::npos);
+	}
 	// A flipbook's frame is named from its graphic's name: no one token is the frame's, so the rename is
 	// refused and says why.
 	{

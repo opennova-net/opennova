@@ -15,6 +15,9 @@
 #include <vector>
 
 #include <editor/documents/texture_image.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_kinds.h>
+#include <editor/graph/rename_transaction.h>
 #include <editor/import/png_encode.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/texture_import.h>
@@ -397,7 +400,22 @@ int test_split() {
 	session.handle(request::split_texture("textures/cloud.tga", "haze.tga", {"fx/a.ptl"}));
 	session.run_operations();
 	TEST_EXPECT(read_file_text(root + "/fx/a.ptl", text, error) && text == particles("a", {"cloud.tga"}));
-	std::printf("split: a plain file copied, an output's source copied, the uses moved, the refusals\n");
+	// In an expansion, a name the base game serves is taken too (a copy of it would stand in for the base's
+	// file for every use): refused, and the copy's name the editor offers passes over it.
+	const std::vector<std::string> base_files = {"CLOUD_3.TGA"};
+	const BaseNames base{&base_files};
+	TEST_EXPECT(view.findings.graph != nullptr);
+	if (view.findings.graph) {
+		const RenamePlan in_base = plan_split(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "textures/cloud.tga",
+		                                      "cloud_3.tga", {"fx/a.ptl"}, &base);
+		TEST_EXPECT(!in_base.ok() && in_base.refusals.back().message.find("base game") != std::string::npos);
+		TEST_EXPECT(plan_split(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "textures/cloud.tga", "cloud_3.tga",
+		                       {"fx/a.ptl"})
+		                    .ok());
+	}
+	TEST_EXPECT(free_texture_copy_name(view, "textures/cloud.tga") == "cloud_3.tga"); // cloud_2.tga is the project's
+	TEST_EXPECT(free_texture_copy_name(*view.project.scan, base, "textures/cloud.tga") == "cloud_4.tga");
+	std::printf("split: a plain file copied, an output's source copied, the uses moved, the refusals, a base game's name\n");
 	return 0;
 }
 

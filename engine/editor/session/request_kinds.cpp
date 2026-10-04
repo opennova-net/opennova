@@ -752,7 +752,8 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::ShowUse, "show_use", serve_show_use,
 			"The texture path's use in the project file paths names (at locator and field, when given: the "
-			"use there; else its first) shown where the game draws it: a model's or a menu's opened at the "
+			"use there, a native text's use, which has no locator, by its record; else its first) shown "
+			"where the game draws it: a model's or a menu's opened at the "
 			"use, the Preview window brought forward (a reveal_preview view event); a terrain's or an "
 			"environment's, the view of a mission that names it (one open, else the first); any other "
 			"referrer's, the texture opened with its viewport's as_used set to the use. Refused, nothing "

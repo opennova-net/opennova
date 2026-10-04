@@ -11,6 +11,7 @@
 // import_options query.
 #include <cstdio>
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,7 @@
 #include <editor/session/texture_import_state.h>
 #include <editor/session/view/session_view.h>
 #include <formats/dds/dds.h>
+#include <formats/env/env.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 #include <runtime/renderer/texture_dxt.h>
@@ -360,11 +362,31 @@ int test_project() {
 	                                             {art + "/logo.png", {}}},
 	                                            paths, *view.project.document, false);
 	TEST_EXPECT(imported.diagnostics.empty() && imported.imported.size() == 4);
+	// The model's diffuse names body.tga, its normal map body.mdt: two files of one stem, as the game's own
+	// models pair them, which ask nothing of each other.
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
-	                                    "o3d 1\nmodel THING\nmaterial VS_SKBASIC\ntexture body.tga 1 0\nlod 0\npart 0 0 0 0\n"
+	                                    "o3d 1\nmodel THING\nmaterial VS_SKBASIC\ntexture body.tga 1 0\nmaterial FF_ST_OP\n"
+	                                    "texture body.mdt 3 4\nlod 0\npart 0 0 0 0\n"
 	                                    "strip 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	TEST_EXPECT(import_assets({{scene + "/thing.o3d", {}}}, paths, *view.project.document, false).imported.size() == 1);
+	{
+		std::vector<uint8_t> mdt;
+		std::string why;
+		const RgbaImage bump = graded(4, 4);
+		TEST_EXPECT(tga::tga_write_rgba32(bump.pixels.data(), 4, 4, mdt, why) && editor_test::write_bytes(root + "/textures/body.mdt", mdt));
+	}
+	// A sky's clouds from a source with an alpha (its density): the .dds its loader reads before the .pcx it
+	// names, the one form that keeps it.
+	TEST_EXPECT(editor_test::write_text(art + "/cloud.png", png_of(graded(16, 8))));
+	TEST_EXPECT(import_assets({{art + "/cloud.png", {}}}, paths, *view.project.document, false).imported.size() == 1);
+	{
+		std::ostringstream text;
+		env::Config config;
+		config.sky_map1 = "cloud.pcx";
+		std::string error;
+		TEST_EXPECT(env::save_env(text, config, error) && editor_test::write_text(root + "/envs/day.env", text.str()));
+	}
 	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
 	                                    "polytrn_colormap isle_c.tga\npolytrn_detailmap logo.tga\npolytrn_polydata isle.cpt\n"
 	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n"));
@@ -411,13 +433,16 @@ int test_project() {
 		TEST_EXPECT(source && source->kind == AssetKind::ImportSource && made && made->logical_name == "plain.pcx");
 	}
 
-	// What the uses ask: the model row's body.tga, DXT5 beside it; the colour map, a 24-bit 1024 x 1024 TGA;
-	// the coefficient detail, a TGA whose sides are powers of two.
+	// What the uses ask: the model row's body.tga, DXT5 beside it (the normal map's body.mdt another file,
+	// asking nothing of this one); the colour map, a 24-bit 1024 x 1024 TGA; the coefficient detail, a TGA
+	// whose sides are powers of two; the sky's clouds, a DDS.
 	TextureImportState state;
 	std::string error;
 	TEST_EXPECT(texture_import_state(view, body_source, state, error));
-	TEST_EXPECT(state.needs.options == ImportOptions({{"format", "dds"}}) && state.needs.conflicts.empty() &&
+	TEST_EXPECT(state.needs.options == ImportOptions({{"format", "dds"}}) && state.needs.conflicts.empty() && state.needs.uses == 1 &&
 	            state.needs.reasons.size() == 1 && state.needs.reasons[0].find("reads body.dds before body.tga") != std::string::npos);
+	TEST_EXPECT(texture_import_state(view, "cloud.tga", state, error) && state.needs.options == ImportOptions({{"format", "dds"}}) &&
+	            state.needs.reasons.size() == 1 && state.needs.reasons[0].find("density") != std::string::npos);
 	TEST_EXPECT(texture_import_state(view, "isle_c.tga", state, error) && state.source == isle_source);
 	TEST_EXPECT(state.needs.options == ImportOptions({{"format", "tga24"}, {"size", "1024x1024"}}));
 	TEST_EXPECT(texture_import_state(view, logo_source, state, error) &&
@@ -536,8 +561,91 @@ int test_needs_conflict() {
 	// A name of another stem asks for it.
 	needs = texture_import_needs({screen}, "screen.png");
 	TEST_EXPECT(needs.options.count("name") && needs.options["name"] == "m01.pcx");
+	// A sky's clouds: the PCX it names from an opaque source; from one with an alpha, the .dds its loader
+	// reads first.
+	TextureUse cloud;
+	cloud.role = TextureRoleId::SkyCloud;
+	cloud.name_written = "cloud.pcx";
+	cloud.words = "Sky cloud layer: day.env (sky_map1)";
+	needs = texture_import_needs({cloud}, "cloud.png");
+	TEST_EXPECT(needs.options == ImportOptions({{"format", "pcx"}}));
+	needs = texture_import_needs({cloud}, "cloud.png", true);
+	TEST_EXPECT(needs.options == ImportOptions({{"format", "dds"}}));
+	// A source's alpha by its header: a PNG with one, a PNG without, a 32-bit TGA, a PCX.
+	const std::string with_alpha = png_of(graded(2, 2));
+	TEST_EXPECT(image_source_has_alpha("a.png", std::vector<uint8_t>(with_alpha.begin(), with_alpha.end())));
+	const RgbaImage opaque = graded(2, 2);
+	// Its header saying a colour PNG (type 2): the alpha-less form.
+	std::vector<uint8_t> rgb_png(with_alpha.begin(), with_alpha.end());
+	rgb_png[25] = 2;
+	TEST_EXPECT(!image_source_has_alpha("a.png", rgb_png));
+	std::vector<uint8_t> tga;
+	std::string why;
+	TEST_EXPECT(tga::tga_write_rgba32(opaque.pixels.data(), 2, 2, tga, why) && image_source_has_alpha("a.tga", tga));
+	TEST_EXPECT(tga::tga_write_rgb24(opaque.pixels.data(), 2, 2, tga, why) && !image_source_has_alpha("a.tga", tga));
+	TEST_EXPECT(!image_source_has_alpha("a.pcx", tga));
 	std::printf("needs: a loading screen's PCX, two uses no one file serves, a foliage map from colours and from a "
-	            "PCX, a height map, another stem\n");
+	            "PCX, a height map, another stem, a sky's clouds by the source's alpha\n");
+	return 0;
+}
+
+// The Problems fix "Make <file>'s import fit ..." weighs every use of the file, never the one use alone: an
+// alpha-tested model row over a 24-bit TGA asks its alpha, which a DDS keeps; with a HUD image naming the same
+// TGA (its loader reads no .dds) the fix makes a 32-bit TGA, which serves both, the name kept. Without the
+// HUD's use it makes the DDS and says the file becomes another.
+int test_fit_weighs_every_use() {
+	editor_test::TempProjectDir dir{"opennova_editor_texture_fit"};
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Fit"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const std::string art = dir.file("art");
+	TEST_EXPECT(editor_test::write_text(art + "/skin.png", png_of(graded(16, 16))));
+	ImportChoice skin;
+	skin.path = art + "/skin.png";
+	TEST_EXPECT(import_assets({skin}, paths, *view.project.document, false).imported.size() == 1);
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(editor_test::write_text(scene + "/cut.o3d",
+	                                    "o3d 1\nmodel CUT\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\ntexture skin.tga 1 0\n"
+	                                    "lod 0\npart 0 0 0 0\nstrip 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\n"
+	                                    "t 0 1 2\n"));
+	ImportChoice model;
+	model.path = scene + "/cut.o3d";
+	TEST_EXPECT(import_assets({model}, paths, *view.project.document, false).imported.size() == 1);
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	std::string source;
+	for (const AssetEntry &entry : view.project.scan->entries)
+		if (entry.kind == AssetKind::ImportSource && basename_of(entry.relative_path) == "skin.png") source = entry.relative_path;
+	TEST_EXPECT(!source.empty());
+	// Made a 24-bit TGA: the alpha the cut-out tests is gone.
+	editor_test::handle_to_end(session, request::set_import_options(source, {{"format", "tga24"}}));
+	session.run_operations();
+	const auto fit_fix = [&]() -> ProblemFix {
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "texture.alpha_not_loaded" && d.asset == "models/cut.3di")
+				for (const ProblemFix &fix : fixes_for(d, view))
+					if (fix.request.kind == EditorRequestKind::SetImportOptions || fix.request.kind == EditorRequestKind::SplitTexture)
+						return fix;
+		return ProblemFix();
+	};
+	// The model row alone: the DDS, the file said to become skin.dds.
+	ProblemFix fix = fit_fix();
+	TEST_EXPECT(fix.request == request::set_import_options(source, {{"format", "dds"}}) &&
+	            fix.detail.find("makes skin.dds in place of skin.tga") != std::string::npos);
+	// A HUD image naming skin.tga too: a 32-bit TGA serves both, the name kept.
+	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Brick\"\nid 100300\ntype building\nhud_image skin.tga\nend\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	fix = fit_fix();
+	TEST_EXPECT(fix.label == "Make skin.tga's import fit its uses" &&
+	            fix.request == request::set_import_options(source, {{"format", "tga"}}) &&
+	            fix.detail.find("makes skin.tga anew") != std::string::npos);
+	std::printf("fit: every use weighed, a TGA serving a cut-out row and a HUD image, the DDS and its new name alone\n");
 	return 0;
 }
 
@@ -551,6 +659,7 @@ int main() {
 	failures += test_sources();
 	failures += test_needs_conflict();
 	failures += test_project();
+	failures += test_fit_weighs_every_use();
 	if (failures == 0) std::printf("editor_texture_import: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

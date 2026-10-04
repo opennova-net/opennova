@@ -99,8 +99,11 @@ void show_texture_use(SessionCore &core, const EditorRequest &request) {
 	const std::vector<TextureUse> &uses = view.documents.texture_uses->uses_of(view, texture);
 	for (size_t i = 0; i < uses.size() && index < 0; ++i) {
 		const TextureUse &each = uses[i];
-		if (each.fixed || each.referrer != referrer) continue;
-		if (!request.locator.empty() && each.locator != request.locator) continue;
+		// No referrer named: a name the game opens itself (texture_use_place says where it shows).
+		if (each.fixed != referrer.empty() || each.referrer != referrer) continue;
+		// A use in a native text has no locator: its record tells it from another of the same field (two
+		// particles' graphic1).
+		if (!request.locator.empty() && (each.locator.empty() ? each.record : each.locator) != request.locator) continue;
 		if (!request.field.empty() && each.field != request.field) continue;
 		use = each;
 		index = int(i);

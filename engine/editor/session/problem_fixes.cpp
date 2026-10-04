@@ -18,6 +18,7 @@
 #include <editor/graph/texture_import_needs.h>
 #include <editor/graph/texture_uses.h>
 #include <editor/import/importer.h>
+#include <editor/import/texture_import.h>
 #include <editor/session/texture_import_state.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/model/field_text.h>
@@ -324,10 +325,13 @@ void reference_fixes(const ReferenceSubject &missing, const SessionView &view, s
 		               request::create_file(name, asset_kind_token(kind)), false});
 }
 
-// What a use asks of a texture an import makes (ADR 0046 S18): the import made as that one use asks
-// (graph/texture_import_needs over it), where the import's options ask otherwise now: the finding's
-// subject is the use's reference, which reaches the file; the use is the referrer's field naming it. None
-// for a file no import makes, a use the needs ask nothing of, or one already made as it asks.
+// What a use asks of a texture an import makes (ADR 0046 S18), weighed with every other use of the file
+// (texture_import_state's needs, never the one use alone: another use may read what this one would
+// change): the import made as they all ask, where they agree and its options ask otherwise now, the words
+// naming the file it makes and saying when that is another name; where they ask what no one file serves,
+// the split that gives the uses that ask otherwise a copy of their own. The finding's subject is the use's
+// reference, which reaches the file; the use is the referrer's field naming it. None for a file no import
+// makes, a use not among its uses, or one already made as they ask.
 void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<ProblemFix> &out) {
 	const ReferenceSubject *reference = reference_subject(d);
 	if (!reference || !view.findings.graph || !view.documents.texture_uses) return;
@@ -342,21 +346,42 @@ void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<Pr
 	for (const TextureUse &each : view.documents.texture_uses->uses_of(view, served))
 		if (!each.fixed && each.referrer == d.asset && each.field == d.field && each.record == d.record) use = &each;
 	if (!use) return;
-	const TextureImportNeeds needs = texture_import_needs({*use}, state.source);
+	const TextureImportNeeds &needs = state.needs;
+	const std::string file = basename_of(served);
+	if (!needs.conflicts.empty()) {
+		// No one file serves its uses: the ones that ask otherwise given a copy of their own.
+		const std::string copy = free_texture_copy_name(view, served);
+		if (needs.split_referrers.empty() || copy.empty()) return;
+		std::string files;
+		for (const std::string &referrer : needs.split_referrers) files += (files.empty() ? "" : ", ") + basename_of(referrer);
+		out.push_back({"Split " + file + " into two files",
+		               "Its uses ask what no one file serves (" + needs.conflicts.front() + ") Makes " + copy + ", a copy of " +
+		                       file + ", which the uses in " + files +
+		                       " name from then on; each file is then made as its own uses ask." + kNotUndoable,
+		               request::split_texture(served, copy, needs.split_referrers), false});
+		return;
+	}
 	std::vector<std::pair<std::string, std::string>> changes;
 	std::string words;
+	ImportOptions after = state.sidecar.options;
 	for (const auto &[option, value] : needs.options) {
 		const ImportOptionRow *row = import_option_row(state.importer->options, option);
 		if (!row || strutil::to_lower(import_option_value(state, *row)) == strutil::to_lower(value)) continue;
 		changes.emplace_back(option, value);
+		after[option] = value;
 		words += (words.empty() ? "" : ", ") + option + " " + value;
 	}
 	if (changes.empty()) return;
 	std::string reasons;
 	for (const std::string &reason : needs.reasons) reasons += (reasons.empty() ? "" : "; ") + reason;
-	out.push_back({"Make " + basename_of(served) + "'s import fit this use",
-	               "Sets the import of " + state.source + " to " + words + " (" + reasons +
-	                       "), then imports it again, which makes " + basename_of(served) + " anew." + kNotUndoable,
+	// The file it makes then, by the format's extension and the name option.
+	const std::string made = image_import_output_name(state.source, image_import_settings(after));
+	const bool renamed = normalized_logical_name(made) != normalized_logical_name(file);
+	out.push_back({"Make " + file + "'s import fit " + (needs.uses > 1 ? "its uses" : "this use"),
+	               "Sets the import of " + state.source + " to " + words + " (" + reasons + "), then imports it again, which makes " +
+	                       (renamed ? made + " in place of " + file + ": every use of it reads " + made + " from then on."
+	                                : file + " anew.") +
+	                       kNotUndoable,
 	               request::set_import_options(state.source, std::move(changes)), false});
 }
 

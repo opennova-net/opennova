@@ -87,8 +87,10 @@ struct TextureImage {
 	const TextureFact *fact(const std::string &key) const;
 };
 
-// The file `name` holds `bytes` (as stored): what the game reads of it.
-std::shared_ptr<const TextureImage> decode_texture(const std::string &name, const std::vector<uint8_t> &bytes);
+// The file `name` holds `bytes` (as stored): what the game reads of it. `first_level_only` (a thumbnail's):
+// a DDS chain's first level decoded alone, its facts still the whole chain's (game_levels its count).
+std::shared_ptr<const TextureImage> decode_texture(const std::string &name, const std::vector<uint8_t> &bytes,
+                                                   bool first_level_only = false);
 
 // The texel at (x, y) of `level`, R, G, B, A; false off the level.
 bool texture_texel(const TextureImage &image, size_t level, uint32_t x, uint32_t y, uint8_t rgba[4]);
