@@ -253,8 +253,12 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 				const float sy = float(in.height) / float(menu::kMenuDesignHeight);
 				tools_->mouse_on_picture = in.hovered && in.mouse.x >= 0.0f && in.mouse.y >= 0.0f &&
 						in.mouse.x < float(in.width) && in.mouse.y < float(in.height);
-				tools_->mouse_x = int(std::floor(in.mouse.x / sx));
-				tools_->mouse_y = int(std::floor(in.mouse.y / sy));
+				// Read only on the picture: ImGui's position off it may be its "no position" (-FLT_MAX),
+				// which no int holds.
+				if (tools_->mouse_on_picture) {
+					tools_->mouse_x = int(std::floor(in.mouse.x / sx));
+					tools_->mouse_y = int(std::floor(in.mouse.y / sy));
+				}
 				// The right button: the window under it selected unless it already is, and the menu
 				// of what the selection can do.
 				if (canvas_ui().right_clicked() && !(half() && half()->gesture().pressed())) {
