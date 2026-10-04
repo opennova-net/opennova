@@ -4,6 +4,7 @@
 #include <cassert>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <utility>
 
 #include <base/io/json.h>
@@ -18,6 +19,8 @@
 #include <editor/project/expansion_files.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>
+#include <editor/preview/texture_thumbnails.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_refresh.h>
@@ -66,6 +69,14 @@ bool inside(const fs::path &path, const fs::path &dir) {
 SessionCore::SessionCore(ProcessPlatform &platform, EditorPreferences &preferences) :
 		platform_(platform), preferences_(preferences), viewports_(std::make_shared<Viewports>()) {
 	view_.documents.viewports = viewports_;
+	view_.documents.thumbnails = std::make_shared<TextureThumbnails>();
+	// A closed model a texture's uses read is read as a document opens it (DocumentSet::load).
+	texture_uses_ = std::make_shared<TextureUseIndex>([this](const std::string &path) -> std::shared_ptr<DocumentBase> {
+		const AssetEntry *entry = view_.project.scan ? view_.project.scan->at_path(path) : nullptr;
+		Diagnostic error;
+		return entry ? documents().load(path, entry->kind, error) : nullptr;
+	});
+	view_.documents.texture_uses = texture_uses_;
 	// What a viewport's follow derives (a menu's held window, a model framed, a clip's clock sought)
 	// moves the Viewports concern as a SetViewport does; the follow runs at the Shell's pump, outside
 	// any request, so the counter alone moves (nothing is tracked again).
@@ -98,7 +109,8 @@ void SessionCore::start() {
 	touch(ViewConcern::Output);
 }
 
-SessionCore::RequestScope::RequestScope(SessionCore &core) : core_(core), outermost_(!core.in_request_) {
+SessionCore::RequestScope::RequestScope(SessionCore &core, bool background)
+	: core_(core), outermost_(!core.in_request_), background_(background) {
 	assert(outermost_ && "a request entered the session while another was served");
 	if (!outermost_) return;
 	core_.outcome_ = ActionOutcome();
@@ -110,10 +122,10 @@ SessionCore::RequestScope::~RequestScope() {
 	if (!outermost_) return;
 	// A refused request's line is its own: kept until a request is served, which said its own line
 	// or, having said nothing, leaves none (ADR 0046 S15). A refusal that said nothing on the line
-	// claims none.
+	// claims none. One the Shell sent of its own (S18: a timer's) leaves it.
 	if (core_.outcome_.refused) {
 		if (core_.view_.activity.status != status_before_) core_.refusal_status_ = core_.view_.activity.status;
-	} else if (!core_.refusal_status_.empty()) {
+	} else if (!background_ && !core_.refusal_status_.empty()) {
 		if (core_.view_.activity.status == core_.refusal_status_) {
 			core_.view_.activity.status.clear();
 			core_.touch(ViewConcern::Output);
@@ -392,6 +404,8 @@ bool SessionCore::close_project() {
 	documents().update_view();
 	view_.project.open = false;
 	imports().clear();
+	view_.documents.thumbnails->clear();
+	texture_uses_->clear();
 	view_.project.root.clear();
 	view_.project.document = std::make_shared<const ProjectDocument>();
 	view_.project.scan = std::make_shared<const AssetScan>();
@@ -453,7 +467,58 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	// A whole refresh (an open, a Rescan, a Reimport) makes a new scan, on which the game's own data's
 	// baseline looks at the install's folder again (S15: a patch over it is validated again).
 	problems().validate_later();
+	// The open documents whose files the refresh changed (an import's outputs made again: S18, a texture
+	// a program saved the source of) read again; one with unsaved edits is a conflict, as on a Rescan.
+	documents().reload_changed();
 	return imports;
+}
+
+bool SessionCore::start_changed_refresh(ExternalChanges changes) {
+	const uint64_t id =
+			start_operation(std::make_unique<ChangedSourcesOperation>(paths_, *view_.project.document, std::move(changes)));
+	if (id == 0) {
+		refuse_busy(std::string());
+		return false;
+	}
+	outcome_.operation = id;
+	return true;
+}
+
+void SessionCore::absorb_changed(ImportRunResult &imports, const std::vector<std::string> &files) {
+	std::vector<ImportedSource> sources = view_.project.imports ? *view_.project.imports : std::vector<ImportedSource>();
+	std::vector<std::string> paths = files;
+	std::set<std::string> refreshed;
+	for (ImportedSource &source : imports.sources) {
+		refreshed.insert(source.source);
+		refreshed.insert(source.sidecar);
+		paths.push_back(source.source); // its visit lists its outputs, the old and the new
+		if (source.reimported)
+			note("Imported " + source.source + " (" + std::to_string(source.outputs.size()) + " file" +
+			     (source.outputs.size() == 1 ? "" : "s") + ")");
+		const auto known = std::find_if(sources.begin(), sources.end(),
+		                                [&](const ImportedSource &each) { return each.source == source.source; });
+		if (known != sources.end()) *known = std::move(source);
+		else sources.push_back(std::move(source));
+	}
+	std::sort(sources.begin(), sources.end(), [](const ImportedSource &a, const ImportedSource &b) { return a.source < b.source; });
+	view_.project.imports = std::make_shared<const std::vector<ImportedSource>>(std::move(sources));
+	// The pass's findings on those sources in place of the ones the last pass made of them.
+	AssetScan scan = *view_.project.scan;
+	std::vector<Diagnostic> findings;
+	for (const Diagnostic &d : scan.import_findings())
+		if (!refreshed.count(d.asset)) findings.push_back(d);
+	findings.insert(findings.end(), imports.diagnostics.begin(), imports.diagnostics.end());
+	scan.set_import_findings(std::move(findings));
+	files_scanned_ = scan.update(paths_, *view_.project.document, paths);
+	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
+	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	view_.project.requirements = std::make_shared<const RequirementReport>(
+			requirements_of(*view_.project.document, *view_.project.scan));
+	touch(ViewConcern::Files);
+	problems().validate_later();
+	// The open documents of what changed (a PNG its program saved, an output made again) read again; one with
+	// unsaved edits is a conflict, as on a Rescan.
+	documents().reload_changed();
 }
 
 void SessionCore::refresh_now() {
