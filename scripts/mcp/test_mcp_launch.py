@@ -256,6 +256,18 @@ class LaunchersTest(unittest.TestCase):
         self.assertEqual(front.popen_kwargs(), {})
         self.assertFalse(BehindLaunch(False, windows=False).active)
 
+    def test_the_mission_e2e_launches_with_every_flag(self):
+        # The e2e's launch arguments are the launch parser's (S17 review: a hand-made Namespace lacked
+        # --front and cmd_launch failed before it started the editor).
+        import argparse
+        import editor_mission_e2e
+        launch = editor_mission_e2e.launch_namespace(
+            argparse.Namespace(port=8990, editor=None, godot=None, windowed=False), Path("editor.pid"))
+        wanted = vars(editor_mcp.build_parser().parse_args(["launch"]))
+        self.assertTrue(set(wanted) <= set(vars(launch)))
+        self.assertFalse(launch.front)
+        self.assertTrue(launch.headless and launch.port == 8990)
+
     def test_the_launch_takes_front(self):
         self.assertTrue(game_mcp.build_parser().parse_args(["launch", "--front"]).front)
         self.assertFalse(game_mcp.build_parser().parse_args(["launch"]).front)
