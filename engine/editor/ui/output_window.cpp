@@ -8,6 +8,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/welcome_view.h>
 
 #include <imgui.h>
 
@@ -40,6 +41,8 @@ std::vector<std::pair<uint64_t, int64_t>> OutputWindow::rows(const OutputLog &ou
 	}
 	return out;
 }
+
+bool OutputWindow::stands_aside() const { return aside_for_welcome(workspace_.view(), welcome_asked_); }
 
 void OutputWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &v = workspace_.view();

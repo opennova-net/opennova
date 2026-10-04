@@ -74,6 +74,9 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
                            const std::string &run_dir, const std::string &copy_cache, Diagnostic &error,
                            const FileLink &link = link_file);
 
+// The game install's own program, which Play in the game install starts (and the install check looks for).
+inline constexpr const char *kInstallExecutable = "Jointops.exe";
+
 // The historical Jointops.exe /w /d /FRISK launch in `run_dir`: the game install's game opens its
 // archives and, under /d, its loose files from its working directory [orig: PFF_OpenAllArchives @
 // 0x4a4310, CWD-relative _lopen; docs/vfs/vfs-pff-mount-re.md] and writes there (game.cfg, its

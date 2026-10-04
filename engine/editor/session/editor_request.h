@@ -25,6 +25,7 @@ enum class EditorRequestKind {
 	OpenProject,
 	CloseProject,
 	ForgetRecent,
+	CheckInstall,
 	Rescan,
 	ApplyProjectSettings,
 	PreviewImport,
@@ -41,6 +42,7 @@ enum class EditorRequestKind {
 	CreateFile,
 	OpenDocument,
 	ShowInFiles,
+	AboutFile,
 	SelectFile,
 	ReloadDocument,
 	CloseDocument,
@@ -83,6 +85,8 @@ enum class EditorRequestKind {
 	PickDirectory,
 	PickFile,
 	RevealPath,
+	PlaySound,
+	StopSound,
 	kCount,
 };
 
@@ -97,6 +101,7 @@ enum class PickPurpose {
 	GameInstall,
 	ImportFiles,
 	BuildFolder, // Build > Build to folder...: where a build for players lands
+	NewProjectInstall, // the New project form's game install
 	TextureImage // a texture's Replace with image... (S18): the image it is made from
 };
 
