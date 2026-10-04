@@ -393,9 +393,13 @@ inline constexpr uint32_t kTouchFlagGrounded = 0x800;
 
 // Collision-face flag bits [orig: face tests @0x4e5073-family]; the F3 hitbox
 // report (godot/src/simulation/hitbox_debug_report.h) carries them per face.
+// Every ray takes a face from either side but a 0x800 face, which it takes
+// only entering from its front; flag 1 takes even that one from either side
+// [orig: Physics_RaycastAgainstBoneCollision @ 0x4e5115..0x4e5139, every caller
+// passing the back-face argument 1].
 inline constexpr uint32_t kFaceFlagBothSides = 0x1;
 inline constexpr uint32_t kFaceFlagNeverHit = 0x100;
-inline constexpr uint32_t kFaceFlagDoubleSided = 0x800;
+inline constexpr uint32_t kFaceFlagFrontOnly = 0x800;
 
 // A test point (stride-4 record, xyz + spare — faithful to the caller layout).
 struct CollisionPoint {
@@ -498,8 +502,8 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
 // transform of the segment, face AABB reject, flags & 0x100 skip, the
 // material-17 foliage skip when the ammo carries flag 0x4000000, the
 // plane-straddle test ((v.n >> 14) + dist on both endpoints), the direction
-// rule (face flag 1 = both sides; 0x800 = double-sided via the witnessed
-// nonzero stack-residue arg; else enter-front d0>0 && d1<=0), the distance
+// rule (either side, the back-face argument every caller pushes being 1; a
+// 0x800 face enter-front d0>0 && d1<=0 alone, unless flag 1), the distance
 // split |d0| * len / (|d0| + |d1|) with the "Rounds Divide Error"
 // 0x40000000 clamp, accept at <= best, and the odd-even point-in-triangle on
 // the normal's projection plane (Math_PointInTriangle2D @ 0x414050, Q8

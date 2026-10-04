@@ -455,7 +455,7 @@ public:
 	enum FaceFlag {
 		FACE_FLAG_BOTH_SIDES = opennova::world::kFaceFlagBothSides,
 		FACE_FLAG_NEVER_HIT = opennova::world::kFaceFlagNeverHit,
-		FACE_FLAG_DOUBLE_SIDED = opennova::world::kFaceFlagDoubleSided,
+		FACE_FLAG_FRONT_ONLY = opennova::world::kFaceFlagFrontOnly,
 	};
 
 	// Bounding-volume type codes (world/collision.h bvol_type carries the
