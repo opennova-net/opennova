@@ -122,6 +122,85 @@ inline EditorRequest reimport(std::string path = std::string(), bool force = fal
 	request.force = force;
 	return request;
 }
+// The import record of the source `path` names (or of the import a file of that path or name comes
+// from) given `values`, each an option's key and value ("" its default), then imported again (S18).
+inline EditorRequest set_import_options(std::string path, std::vector<std::pair<std::string, std::string>> values) {
+	EditorRequest request = of(EditorRequestKind::SetImportOptions);
+	request.path = std::move(path);
+	std::sort(values.begin(), values.end());
+	request.values = std::move(values);
+	return request;
+}
+// The texture document at `path` edited as a whole image (S18: documents/texture_operations.h): the
+// operation `operation` with its `params`, one undo step; `open_first`: the document opened first (a fix).
+inline EditorRequest texture_operation(std::string path, std::string operation,
+                                       std::vector<std::pair<std::string, std::string>> params = {}, bool open_first = false) {
+	EditorRequest request = of(EditorRequestKind::TextureOperation);
+	request.path = std::move(path);
+	request.operation = std::move(operation);
+	std::sort(params.begin(), params.end());
+	request.values = std::move(params);
+	request.open_first = open_first;
+	return request;
+}
+// The texture `path` (a project file, an import's output, or a name the project lacks) made from the image
+// `image` (a PNG, a TGA or a PCX on disk, or a project file), its import's options `values` over the ones
+// that make it as it is stored (S18: import/texture_source.h).
+inline EditorRequest replace_texture(std::string path, std::string image,
+                                     std::vector<std::pair<std::string, std::string>> values = {}) {
+	EditorRequest request = of(EditorRequestKind::ReplaceTexture);
+	request.path = std::move(path);
+	request.paths = {std::move(image)};
+	std::sort(values.begin(), values.end());
+	request.values = std::move(values);
+	return request;
+}
+// The texture `path` copied as `new_name`, the uses in the project files `referrers` moved to the copy
+// (S18: graph/rename_transaction.h plan_split).
+inline EditorRequest split_texture(std::string path, std::string new_name, std::vector<std::string> referrers) {
+	EditorRequest request = of(EditorRequestKind::SplitTexture);
+	request.path = std::move(path);
+	request.new_name = std::move(new_name);
+	request.paths = std::move(referrers);
+	return request;
+}
+// The texture `path`'s source opened in its program (S18: made once for a plain texture).
+inline EditorRequest edit_externally(std::string path) {
+	EditorRequest request = of(EditorRequestKind::EditExternally);
+	request.path = std::move(path);
+	return request;
+}
+// What changed on disk among the import sources imported again (S18: the Shell's on its window's focus).
+inline EditorRequest refresh_changed_sources() { return of(EditorRequestKind::RefreshChangedSources); }
+// What a Replace of the texture `path` by the image `image` (none: an Edit externally) would do, asked in
+// the dialog before it is done (S18), `values` the options asked over the ones reproducing its form.
+inline EditorRequest preview_texture_source(std::string path, std::string image = std::string(),
+                                            std::vector<std::pair<std::string, std::string>> values = {}) {
+	EditorRequest request = of(EditorRequestKind::PreviewTextureSource);
+	request.path = std::move(path);
+	if (!image.empty()) request.paths = {std::move(image)};
+	std::sort(values.begin(), values.end());
+	request.values = std::move(values);
+	return request;
+}
+inline EditorRequest cancel_texture_source() { return of(EditorRequestKind::CancelTextureSource); }
+// The texture `path`'s existing source opened in its program, nothing written (S18).
+inline EditorRequest open_texture_source(std::string path) {
+	EditorRequest request = of(EditorRequestKind::OpenTextureSource);
+	request.path = std::move(path);
+	return request;
+}
+// The texture `path`'s use in the project file `referrer` (at `locator` and `field`, when it has several)
+// shown where the game draws it (S18: session/texture_show_use.h).
+inline EditorRequest show_use(std::string path, std::string referrer, std::string locator = std::string(),
+                              std::string field = std::string()) {
+	EditorRequest request = of(EditorRequestKind::ShowUse);
+	request.path = std::move(path);
+	request.paths = {std::move(referrer)};
+	request.locator = std::move(locator);
+	request.field = std::move(field);
+	return request;
+}
 // The import dialog on the game install's files: `names` alone, chosen; none, every file listed.
 inline EditorRequest preview_install_import(
 		std::vector<std::string> names = {}, bool with_dependencies = false) {
@@ -210,6 +289,12 @@ inline EditorRequest show_in_files(std::string path, bool ask_name = false) {
 	EditorRequest request = of(EditorRequestKind::ShowInFiles);
 	request.path = std::move(path);
 	request.ask_name = ask_name;
+	return request;
+}
+// The project file `path` selected in Files ("" none, ADR 0046 S18).
+inline EditorRequest select_file(std::string path) {
+	EditorRequest request = of(EditorRequestKind::SelectFile);
+	request.path = std::move(path);
 	return request;
 }
 inline EditorRequest reload_document(std::string path = std::string()) {

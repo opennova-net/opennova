@@ -245,7 +245,8 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 # the lists (comma-separated), the objects (JSON) and the switches. The kind's row says which it
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
 REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install", "path", "locator", "field",
-                 "new_name", "role", "file_kind", "out_dir", "export_dir", "mission", "mode", "choice", "purpose")
+                 "new_name", "role", "file_kind", "out_dir", "export_dir", "mission", "operation", "mode", "choice",
+                 "purpose")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
                     "planned")
@@ -270,7 +271,7 @@ def request_of(args: argparse.Namespace) -> dict:
         request["edits"] = parse_list(args.edits, "--edits", "edit")
     if args.records:
         request["records"] = parse_list(args.records, "--records", "{row, kind, child}")
-    for field in ("address", "paste_at", "settings", "viewport", "drag", "command"):
+    for field in ("address", "paste_at", "settings", "viewport", "drag", "command", "values"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
     return request
@@ -679,6 +680,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "export folder; replaced only when missing, empty or an export of this project)")
     request.add_argument("--mission", default=None,
                          help="play: a mission of the project by its logical name, the one the game starts in")
+    request.add_argument("--operation", default=None,
+                         help="texture_operation: resize, alpha, format, reorder_rows or remap_palette (its params "
+                              "in --values)")
     request.add_argument("--roles", default=None, help="comma-separated: create_missing's requirement roles")
     request.add_argument("--names", default=None, help="comma-separated: preview_install_import's files")
     request.add_argument("--paths", action="append", default=None,
@@ -712,6 +716,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "kind}")
     request.add_argument("--command", default=None,
                          help="edit_in_viewport: a command as a JSON object {name, ids, kind}")
+    request.add_argument("--values", default=None,
+                         help="named values as a JSON object of strings: create_file's starting values, "
+                              "set_import_options' options, texture_operation's params")
     switch = ("true", "false")
     request.add_argument("--with-dependencies", dest="with_dependencies", choices=switch, default=None,
                          help="preview_import, plan_import, preview_install_import: with the files they need; "
