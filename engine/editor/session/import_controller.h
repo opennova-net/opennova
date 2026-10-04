@@ -75,6 +75,8 @@ private:
 	// A plan made for the dialog, shown: its rows, whether it is not `shown` (the plan an Import was
 	// shown), the ImportPlanned event on which the dialog takes its checks again, the status line.
 	void show_plan(std::shared_ptr<const ImportPlan> plan, const ImportPlan *shown);
+	// An import's one Output line: its files, bytes and kinds (its files folded under it).
+	std::string import_words(const std::vector<std::string> &paths) const;
 
 	SessionCore &core_;
 	SessionView &view_;
