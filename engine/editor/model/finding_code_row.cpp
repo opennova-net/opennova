@@ -218,6 +218,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ProjectFieldInvalid, code("project.field.invalid", G::Project) },
 	{ C::ProjectFileMissing, code("project.file.missing", G::Project) },
 	{ C::ProjectFileUnreadable, code("project.file.unreadable", G::Project) },
+	{ C::ProjectInstallInvalid, code("project.install.invalid", G::Project) },
 	{ C::ProjectJson, code("project.json", G::Project) },
 	{ C::ProjectMissionFeatureOff, code("project.mission.feature_off", G::Project) },
 	{ C::ProjectNone, code("project.none", G::Project) },
