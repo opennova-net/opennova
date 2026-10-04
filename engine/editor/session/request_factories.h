@@ -172,6 +172,17 @@ inline EditorRequest edit_externally(std::string path) {
 }
 // What changed on disk among the import sources imported again (S18: the Shell's on its window's focus).
 inline EditorRequest refresh_changed_sources() { return of(EditorRequestKind::RefreshChangedSources); }
+// The texture `path`'s use in the project file `referrer` (at `locator` and `field`, when it has several)
+// shown where the game draws it (S18: session/texture_show_use.h).
+inline EditorRequest show_use(std::string path, std::string referrer, std::string locator = std::string(),
+                              std::string field = std::string()) {
+	EditorRequest request = of(EditorRequestKind::ShowUse);
+	request.path = std::move(path);
+	request.paths = {std::move(referrer)};
+	request.locator = std::move(locator);
+	request.field = std::move(field);
+	return request;
+}
 // The import dialog on the game install's files: `names` alone, chosen; none, every file listed.
 inline EditorRequest preview_install_import(
 		std::vector<std::string> names = {}, bool with_dependencies = false) {

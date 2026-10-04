@@ -13,6 +13,7 @@
 #include <editor/session/problems_service.h>
 #include <editor/session/rename_controller.h>
 #include <editor/session/session_core.h>
+#include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
 
 namespace opennova::editor {
@@ -184,6 +185,9 @@ void serve_edit_externally(SessionCore &core, const EditorRequest &request) {
 }
 void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &) {
 	core.imports().refresh_changed_sources();
+}
+void serve_show_use(SessionCore &core, const EditorRequest &request) {
+	show_texture_use(core, request);
 }
 void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
 	core.imports().preview_install(request);
@@ -734,6 +738,17 @@ constexpr RequestKindRow kRows[] = {
 			"refused request left stays.")
 			.holds(kFiles, kFiles | kSlot)
 			.background()
+			.row,
+	Request(K::ShowUse, "show_use", serve_show_use,
+			"The texture path's use in the project file paths names (at locator and field, when given: the "
+			"use there; else its first) shown where the game draws it: a model's or a menu's opened at the "
+			"use, the Preview window brought forward (a reveal_preview view event); a terrain's or an "
+			"environment's, the view of a mission that names it (one open, else the first); any other "
+			"referrer's, the texture opened with its viewport's as_used set to the use. Refused, nothing "
+			"opened (texture.show_use): the references not read yet, a file that does not use it, a name "
+			"the game opens itself, a terrain or an environment no mission names.")
+			.takes(request_params({ F::Path, F::Paths }, { F::Locator, F::Field }))
+			.holds(kFiles, kDocuments)
 			.row,
 	Request(K::PreviewInstallImport, "preview_install_import", serve_preview_install_import,
 			"The import dialog on the game install's files: the names alone, chosen, or with none "

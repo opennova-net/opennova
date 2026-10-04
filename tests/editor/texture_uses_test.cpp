@@ -5,7 +5,7 @@
 // colour map, a sky's cloud layer, an item's HUD image (alpha only), and a name the game opens itself
 // (the scope's crosshair); the index made once while what it reads stands and again after an edit of a
 // referrer; a texture's viewport showing it as a use draws it (a cut-out's test, the HUD's alpha alone)
-// and as the file again; the texture_uses query.
+// and as the file again; the texture_uses query; a use shown where the game draws it (show_use).
 #include <cstdio>
 #include <memory>
 #include <sstream>
@@ -56,6 +56,13 @@ std::vector<uint8_t> dds_bytes() {
 	return out;
 }
 
+// A loose file on disk to import.
+ImportChoice loose(std::string path) {
+	ImportChoice choice;
+	choice.path = std::move(path);
+	return choice;
+}
+
 const TextureUse *use_of(const std::vector<TextureUse> &uses, TextureRoleId role) {
 	for (const TextureUse &use : uses)
 		if (use.role == role) return &use;
@@ -80,7 +87,7 @@ int test_uses() {
 	                                    "texture skin.mdt 3 4\nlod 0\npart 0 0 0 0\nstrip 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	const ImportResult imported =
-			import_assets({{scene + "/thing.o3d", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
+			import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/thing.3di"}));
 	for (const char *name : {"body.tga", "body.dds", "grain.tga", "skin.mdt", "map.tga", "cloud.pcx", "stance.tga", "scopexh.tga"})
 		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name,
@@ -226,10 +233,106 @@ int test_uses() {
 	return 0;
 }
 
+// A use shown where the game draws it (show_use): a model's row on its model and a menu window's image in
+// its menu, each opened at the use with the Preview window brought forward; a terrain's map in the view of
+// the mission that names the terrain (refused while none does); an item's HUD image as its loader makes
+// it, the texture's viewport naming the use; a file that does not use it, and a name the game opens
+// itself, refused; the request over the wire.
+int test_show_use() {
+	editor_test::TempProjectDir dir{"opennova_editor_texture_show_use"};
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Show"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
+	                                    "o3d 1\nmodel THING\nmaterial FF_ST_OP\ntexture body.tga 1 0\nlod 0\npart 0 0 0 0\n"
+	                                    "strip 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	TEST_EXPECT(import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false)
+	                    .imported == std::vector<std::string>({"models/thing.3di"}));
+	for (const char *name : {"body.tga", "map.tga", "grain.tga", "logo.tga", "stance.tga", "scopexh.tga"})
+		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name, tga_bytes()));
+	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
+	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_polydata isle.cpt\n"
+	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n") &&
+	            editor_test::write_text(root + "/menus/extra.mnu",
+	                                    "<SCREEN>\r\n<NAME>EXTRA</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"PICTURE\">\r\n"
+	                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n"
+	                                    "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">logo.tga</APPEARANCE>\r\n</WINDOW>\r\n"
+	                                    "</SCREEN>\r\n") &&
+	            editor_test::write_text(root + "/defs/items.def",
+	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\nend\n"));
+	{
+		std::ostringstream text;
+		opennova::env::Config config;
+		std::string error;
+		TEST_EXPECT(opennova::env::save_env(text, config, error) && editor_test::write_text(root + "/envs/day.env", text.str()));
+	}
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const auto last_event = [&](ViewEventKind kind) -> const ViewEvent * {
+		const ViewEvent *found = nullptr;
+		for (const ViewEvent &event : view.events.held())
+			if (event.kind == kind) found = &event;
+		return found;
+	};
+	const auto refused = [&](const EditorRequest &request, const std::string &words) {
+		session.handle(request);
+		const bool ok = session.outcome().refused && !session.outcome().findings.empty() &&
+		                session.outcome().findings.back().code() == "texture.show_use" &&
+		                session.outcome().findings.back().message.find(words) != std::string::npos;
+		if (!ok) std::printf("  show_use not refused with '%s': %s\n", words.c_str(), view.activity.status.c_str());
+		return ok;
+	};
+
+	// On its model: the model opened at the row, the Preview window brought forward.
+	editor_test::handle_to_end(session, request::show_use("textures/body.tga", "models/thing.3di"));
+	const ViewEvent *preview = last_event(ViewEventKind::RevealPreview);
+	TEST_EXPECT(session.outcome().done() && view.documents.active == "models/thing.3di" && preview &&
+	            preview->path == "models/thing.3di" && view.documents.selection.primary.row != 0);
+	TEST_EXPECT(view.activity.status == "Showing body.tga on thing.3di.");
+	// In its menu: the menu opened with the window that names it selected.
+	const uint64_t before = preview ? preview->seq : 0;
+	editor_test::handle_to_end(session, request::show_use("textures/logo.tga", "menus/extra.mnu"));
+	preview = last_event(ViewEventKind::RevealPreview);
+	TEST_EXPECT(view.documents.active == "menus/extra.mnu" && preview && preview->seq > before &&
+	            preview->path == "menus/extra.mnu" && view.documents.selection.primary.row != 0);
+	// On its terrain: refused while no mission names it, then the mission's view.
+	TEST_EXPECT(refused(request::show_use("textures/map.tga", "terrains/isle.trn"), "No mission of the project names isle.trn"));
+	editor_test::handle_to_end(session, request::create_file("first.bms", "", {{"terrain", "isle"}, {"environment", "day"}}));
+	session.run_operations();
+	const AssetEntry *first = view.project.scan->find("first.bms");
+	TEST_EXPECT(first != nullptr);
+	if (!first) return 1;
+	const std::string mission = first->relative_path;
+	JsonValue wire;
+	std::string error;
+	TEST_EXPECT(opennova::io::json_parse(
+			R"({"kind": "show_use", "path": "textures/map.tga", "paths": ["terrains/isle.trn"]})", wire, error));
+	const JsonValue answer = session.handle_json(wire, nullptr);
+	session.run_operations();
+	TEST_EXPECT(answer.get_bool("ok", false) && view.documents.active == mission &&
+	            view.activity.status == "Showing map.tga in first.bms's view.");
+	// As an item's HUD draws it: the texture opened, its viewport's as_used the use.
+	editor_test::handle_to_end(session, request::show_use("textures/stance.tga", "defs/items.def"));
+	const auto *stance =
+			static_cast<const TextureViewport *>(session.viewports().find("textures/stance.tga", ViewportKind::Texture));
+	TEST_EXPECT(view.documents.active == "textures/stance.tga" && stance && stance->options().as_used == 0);
+	// A file that does not use it; a name the game opens itself.
+	TEST_EXPECT(refused(request::show_use("textures/stance.tga", "models/thing.3di"), "models/thing.3di does not use stance.tga"));
+	TEST_EXPECT(refused(request::show_use("textures/scopexh.tga", ""), "does not use scopexh.tga"));
+	std::printf("show_use: on a model and in a menu (the Preview forward), a terrain's map in its mission's view, a HUD "
+	            "image as it draws it; the refusals; over the wire\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
-	const int failures = test_uses();
+	const int failures = test_uses() + test_show_use();
 	if (failures == 0) std::printf("editor_texture_uses: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

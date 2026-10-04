@@ -250,6 +250,10 @@ void EditorWindows::dispatch_events() {
 			if (!(event.flag && event.tag == 1)) build_panel_open_ = true;
 			break;
 		case ViewEventKind::OpenExternally: break; // the Shell's (EditorApp opens the file)
+		// A use shown on its model or in its menu (S18): the Preview window that draws it comes forward.
+		case ViewEventKind::RevealPreview:
+			if (preview_window_) preview_window_->request_focus();
+			break;
 		case ViewEventKind::kCount: break;
 		}
 	}

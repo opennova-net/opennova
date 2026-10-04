@@ -403,6 +403,7 @@ enum class CoreFinding {
 	TextureOperation,
 	TextureParticleTooBig,
 	TextureReplace,
+	TextureShowUse,
 	TextureSplit,
 	TextureTileAtlasCells,
 	TextureWrongReader,

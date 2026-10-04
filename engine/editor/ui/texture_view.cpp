@@ -21,6 +21,7 @@
 #include <editor/import/texture_import.h>
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/texture_show_use.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -403,9 +404,21 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 			target.editable = source && is_editable_kind(source->kind);
 		}
 		if (pressed && !use.fixed) window_requests::go_to(workspace, target);
-		// What else is done at a use: its file given a copy of the texture of its own (S18, split_texture),
-		// where another file uses the texture too.
+		// What else is done at a use: shown where the game draws it (S18, show_use: on its model, in its
+		// menu, on a mission's terrain, else as it draws it); its file given a copy of the texture of its own
+		// (split_texture), where another file uses the texture too.
 		if (!use.fixed && ImGui::BeginPopupContextItem("use_menu")) {
+			UsePlace place;
+			std::string why;
+			const bool placed = texture_use_place(view, document.path(), use, int(i), place, why);
+			if (ImGui::MenuItem(placed ? place.label.c_str() : "Show where the game draws it", nullptr, false,
+			                    placed && view.allows(EditorRequestKind::ShowUse)))
+				workspace.request(request::show_use(document.path(), use.referrer, use.locator, use.field));
+			ui_kit::tooltip(placed ? place.picture == UsePicture::AsUsed
+			                                 ? "Nothing in the editor draws " + basename_of(use.referrer) +
+			                                           "'s picture: this texture's view shows it as that use makes it."
+			                                 : "Opens " + basename_of(place.open) + " where it draws this texture."
+			                       : why);
 			const bool others = std::any_of(uses.begin(), uses.end(), [&](const TextureUse &each) {
 				return !each.fixed && each.referrer != use.referrer;
 			});
