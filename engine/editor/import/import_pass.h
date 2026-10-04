@@ -20,7 +20,10 @@ namespace opennova::editor {
 // (each directory entry kWalkEntryCost, assets/project_scan.h), the import sources among them
 // kept; then each source, in the order of their paths, is taken as run_imports takes it (kWalkEntry
 // Cost, and the bytes it reads to hash or import it and the bytes its outputs write); then the
-// machine-local import cache is written when it changed. A pass stepped at any budget comes to what
+// machine-local import cache is written when it changed. What a source's import reported (a PNG's
+// alpha a PCX drops) is kept in the cache with what its outputs were made from, and said again by
+// every pass that finds the source current (the UX round's project lane: a reopened project keeps the
+// reason its texture has no alpha). A pass stepped at any budget comes to what
 // one run in a call comes to. Dropped before it is done, it has imported the sources it reached
 // (their outputs and records written, as a pass that stopped there would) and left the cache as it
 // was, so the next pass looks at those again. Single-threaded, like the session that steps it.
@@ -66,6 +69,8 @@ private:
 	struct Made {
 		uint64_t record = 0;          // import_sidecar_fingerprint of the record
 		std::vector<uint64_t> inputs; // each input's content hash, as the record lists them
+		// What the import that made them reported, each finding of the editor's own codes.
+		std::vector<Diagnostic> findings;
 	};
 	struct Cache {
 		std::map<std::string, FileSeen> files; // by project-relative path

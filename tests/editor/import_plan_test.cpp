@@ -108,7 +108,7 @@ static int test_plan_folder() {
 	            arial->needed_by.field == "font.name" && arial->needed_by.reference == ReferenceKind::Font &&
 	            arial->needed_by.name == "arial99" && arial->rivals.empty() && arial->problem.empty());
 	const ImportPlanRow *logo = row_named(plan, "LOGO.TGA");
-	TEST_EXPECT(logo && logo->state == State::Found && logo->kind == AssetKind::Texture && logo->destination == "LOGO.TGA" &&
+	TEST_EXPECT(logo && logo->state == State::Found && logo->kind == AssetKind::Texture && logo->destination == "textures/LOGO.TGA" &&
 	            logo->needed_by.reference == ReferenceKind::MenuTexture && logo->needed_by.name == "logo.tga");
 	TEST_EXPECT(!row_named(plan, "have.fnt") && !row_named(plan, "unused.pcx"));
 	// The font selected too: it is the selection's, no dependency row.

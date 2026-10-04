@@ -96,6 +96,10 @@ public:
 	// How much a poll steps (kDefaultPollBudget; a test's ms 0 is one step of the validation and one
 	// of the running operation per poll).
 	void set_poll_budget(const PollBudget &budget);
+	// Whether an Open reopens the documents a project was left with and a close or a quit keeps them in its
+	// local settings (the editor's, true by default); a command line's run sets it false, its verbs then
+	// neither loading the documents local.json lists nor writing them.
+	void set_workspace_kept(bool kept);
 	// The running operation, and those its finish starts, run to their end and finished, then the
 	// validation they left due run to its end, and the check of which files its rows are about are the
 	// game's own data (S15) (a test, a command line).
