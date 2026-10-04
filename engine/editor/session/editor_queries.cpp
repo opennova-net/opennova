@@ -38,6 +38,7 @@
 #include <editor/project_build/build_plan.h>
 #include <editor/session/document_set.h>
 #include <editor/session/file_card.h>
+#include <editor/session/file_page.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/mission_logic_json.h>
 #include <editor/session/model_json.h>
@@ -155,6 +156,11 @@ constexpr QueryParam kProblemsParams[] = {
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
 
+constexpr QueryParam kFilePageParams[] = {
+	{ "path", J::String, false, nullptr,
+			"A project file, as references takes it; left out, the file whose page the Document window "
+			"shows." },
+};
 constexpr QueryParam kReferencesParams[] = {
 	{ "path", J::String, true, nullptr,
 			"A project file: the file at that project-relative path, else, for a name with no "
@@ -568,6 +574,45 @@ JsonValue answer_references(const QueryContext &context, const QueryArgs &args, 
 			graph ? graph->references_of(path) : std::vector<const GraphEdge *>();
 	JsonValue out = edges_page(graph, edges, page_of(args), edges.size());
 	out.set("path", json_string(path));
+	return out;
+}
+
+// A file's page (session/file_page.h): what it is, what reads it, where a build puts it, who names it and
+// what it names, in words.
+JsonValue answer_file_page(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path").empty() ? view.documents.page : args.text("path");
+	const FilePage page = file_page(view, path);
+	if (!page.found) {
+		error = path.empty() ? std::string("name the file with \"path\" (no page shows).") : "no project file " + path + ".";
+		return JsonValue::make_null();
+	}
+	JsonValue out = JsonValue::make_object();
+	out.set("path", json_string(page.path));
+	out.set("name", json_string(page.name));
+	out.set("kind", json_string(page.kind));
+	out.set("size", json_number(double(page.size)));
+	out.set("what", json_string(page.what));
+	out.set("read_by", json_string(page.read_by));
+	out.set("cite", json_string(page.cite));
+	out.set("build", json_string(page.build));
+	out.set("editor", json_string(page.editor));
+	out.set("errors", json_number(double(page.errors)));
+	out.set("warnings", json_number(double(page.warnings)));
+	const auto lines = [](const std::vector<FilePageLine> &from) {
+		JsonValue list = JsonValue::make_array();
+		for (const FilePageLine &line : from) {
+			JsonValue entry = JsonValue::make_object();
+			entry.set("text", json_string(line.text));
+			if (line.missing) entry.set("missing", JsonValue::make_bool(true));
+			if (!line.target.file.empty()) entry.set("file", json_string(line.target.file));
+			if (!line.target.locator.empty()) entry.set("locator", json_string(line.target.locator));
+			list.push(std::move(entry));
+		}
+		return list;
+	};
+	out.set("used_by", lines(page.used_by));
+	out.set("names", lines(page.names));
 	return out;
 }
 
@@ -1438,6 +1483,9 @@ constexpr ConcernSet kMenuReads =
 constexpr ConcernSet kProblemsReads = concern_set({ C::Findings, C::ActiveDocument, C::DocumentSet,
 		C::Project, C::Files, C::Graph, C::Preferences });
 constexpr ConcernSet kGraphReads = concern_set({ C::Graph });
+// A file's page: the graph (who names it, what it names), the files (its kind and size), the findings (its
+// rows) and the page showing (the active document's concern).
+constexpr ConcernSet kFilePageReads = concern_set({ C::Graph, C::Files, C::Findings, C::ActiveDocument });
 // A viewport's answer: its state and the clock, its document and the selection in it, the documents
 // open and the active one (a pathless read's), the files its picture read, the graph (a rig's model),
 // the project, and the render check's findings (render's screen).
@@ -1463,7 +1511,8 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::Documents, "documents", answer_documents, kPageParams, kDocumentReads,
 			"The active document and a page of the open documents, each's lifecycle state: path, "
-			"kind, dirty, blocked, revision, can_undo, can_redo, ignored_lines and its source "
+			"kind, dirty, blocked, revision, can_undo, can_redo, ignored_lines, save_words (what a save "
+			"changes beyond the edits, in words, where it changes anything) and its source "
 			"issues; a record document's also file_state_changed, row_count, last_added and the "
 			"kinds of row its outline adds (top_kinds); a text document's its line_count.")
 			.pages("documents")
@@ -1551,6 +1600,14 @@ constexpr EditorQueryRow kRows[] = {
 			"A page of the files whose names and the symbols whose names hold the text, without "
 			"case, files first, each with its usages; an item also by its catalog's name (its words).")
 			.pages("hits")
+			.row,
+	// The plain-words lane (the audit's 4.6).
+	Query(K::FilePage, "file_page", answer_file_page, kFilePageParams, kFilePageReads,
+			"A file's page as the Document window shows it for a kind the editor has no editor for (path "
+			"left out: the page showing, the documents section's page): its name, kind and size, what it "
+			"holds and what in the game reads it (cite: the witness), where a build puts it, what the "
+			"editor does with it, its Problems rows' errors and warnings, who names it (used_by) and what "
+			"it names (names), each {text, missing?, file?, locator?}.")
 			.row,
 	Query(K::MenuTree, "menu_tree", answer_menu_tree, kMenuTreeParams, kMenuReads,
 			"A menu's screens (id, name, the render check's status and whether it is current) and "

@@ -5,6 +5,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include <editor/documents/name_source.h>
@@ -12,6 +13,8 @@
 #include <editor/session/editor_request.h>
 
 namespace opennova::editor {
+
+class AssetGraph;
 
 // How an outline lists a document's records (ADR 0046 S13 V3): as a tree (every row, each
 // collection a record holds and the records in it, a level at a time: a model, a clip, an
@@ -204,6 +207,12 @@ public:
 	NodeKind detail_kind() const { return detail_kind_; }
 	const char *detail_label() const { return detail_label_; }
 	const std::vector<const FieldSchema *> &columns() const { return columns_; }
+	// Master and detail: the column whose field defines the name a record is found by (a string's key;
+	// null for none), and how many references of the project's files name a record by it (the graph's
+	// users of the symbol it defines, AssetGraph::users_of), kept while the graph's generation and the
+	// document's revision stand: a string table's Uses column (the plain-words lane, the audit's 5.2).
+	const FieldSchema *defining_column() const;
+	size_t uses(const AssetGraph &graph, const Document &document, const NodeAddress &record);
 	// Which line among lines() is the record `address` (SIZE_MAX: none).
 	size_t line_of(const NodeAddress &address) const;
 	// What a click on the record line `clicked` of lines() selects, `primary` the selection's primary
@@ -322,6 +331,9 @@ private:
 	NodeKind detail_kind_ = 0;
 	const char *detail_label_ = "";
 	std::vector<const FieldSchema *> columns_;
+	// uses(): each record's count, and the graph's generation and the document's revision they were made at.
+	std::unordered_map<NodeId, size_t> uses_;
+	uint64_t uses_graph_ = 0, uses_document_ = 0, uses_revision_ = 0;
 	size_t lines_made_ = 0;
 	size_t rows_made_ = 0;
 };

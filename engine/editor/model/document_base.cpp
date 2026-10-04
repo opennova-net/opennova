@@ -115,6 +115,13 @@ size_t DocumentBase::ignored_lines() const {
 	return count;
 }
 
+std::string DocumentBase::save_words() const {
+	const size_t ignored = ignored_lines();
+	if (!ignored) return std::string();
+	return "Saving leaves out " + std::to_string(ignored) + (ignored == 1 ? " thing" : " things") +
+	       " in the file the game skips (Problems lists each); the game reads the rest as before.";
+}
+
 bool DocumentBase::decode_and_read(std::vector<uint8_t> bytes, bool adopt,
                                    std::vector<SourceIssue> &issues, Diagnostic &error) {
 	// A kind whose loader takes the SCR form under its own key (a shader) is read by its type from
@@ -184,6 +191,7 @@ bool DocumentBase::save(Diagnostic &error) {
 	if (!write_file_atomic(absolute_path_, output.text, message)) return fail(error, path(), CoreFinding::DocumentWrite, message);
 	file_fingerprint_ = fingerprint(output.text);
 	wrote_file_ = true;
+	save_notes_ = output.notes;
 	on_saved();
 	// The source is now the text just written, read the way a reload would: its findings
 	// replace the ones of the text it was loaded from, so what the rewrite dropped (the lines
