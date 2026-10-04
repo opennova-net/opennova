@@ -5,6 +5,7 @@
 #include <editor/session/problem_fixes.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
@@ -272,9 +273,15 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 			ui_kit::tooltip("Written as typed: no name the project has is this value.");
 		}
 	}
-	const float line = ImGui::GetTextLineHeightWithSpacing();
-	ImGui::BeginChild("names", ImVec2(width, line * float(std::clamp<size_t>(shown.size(), 3, 14)) + line * 0.5f),
+	// A texture's names (ADR 0046 S18) each with its thumbnail, the file the reference set to it loads, two
+	// lines high; the highlighted or hovered one larger in a panel beside the list.
+	const bool textures = is_texture_reference(popup.field.reference);
+	const float thumb = textures ? ImGui::GetTextLineHeight() * 2.0f : 0.0f;
+	const float line = textures ? thumb + ImGui::GetStyle().ItemSpacing.y : ImGui::GetTextLineHeightWithSpacing();
+	const size_t rows = std::clamp<size_t>(shown.size(), 3, textures ? 8 : 14);
+	ImGui::BeginChild("names", ImVec2(width, line * float(rows) + ImGui::GetTextLineHeightWithSpacing() * 0.5f),
 	                  ImGuiChildFlags_Borders);
+	int hovered = -1;
 	// Only the names that show draw (a project's thousands of textures), and the highlighted one
 	// when the keys moved it, to scroll to.
 	ImGuiListClipper clipper;
@@ -286,16 +293,25 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 			const ReferenceChoice &choice = *shown[i];
 			ImGui::PushID(row);
 			const float x = ImGui::GetCursorPosX();
-			if (ImGui::Selectable("##choice", i == popup.cursor, ImGuiSelectableFlags_AllowOverlap)) {
+			if (ImGui::Selectable("##choice", i == popup.cursor, ImGuiSelectableFlags_AllowOverlap, ImVec2(0.0f, thumb))) {
 				picked = choice.name;
 				chosen = true;
 			}
+			if (ImGui::IsItemHovered()) hovered = row;
 			if (i == popup.cursor && popup.moved) ImGui::SetScrollHereY(0.5f);
 			ui_kit::tooltip_lazy([&] {
 				return choice_tip(choice, popup.view ? popup.view->findings.graph.get() : nullptr, popup.field.scope);
 			});
 			ImGui::SameLine(0.0f, 0.0f);
 			ImGui::SetCursorPosX(x);
+			if (textures) {
+				// Its thumbnail (none for a name its loader opens no file of), then its words centred on it.
+				const float top = ImGui::GetCursorPosY();
+				if (!choice.served.empty()) texture_preview::picture(workspace, choice.served, TextureLoadTransform::None, thumb);
+				else ImGui::Dummy(ImVec2(thumb, thumb));
+				ImGui::SameLine();
+				ImGui::SetCursorPosY(top + (thumb - ImGui::GetTextLineHeight()) * 0.5f);
+			}
 			// The words, the name muted where it is not them, then where it is defined in what is left,
 			// then what it would be when not found.
 			const bool found = choice.status == ReferenceStatus::Present || choice.status == ReferenceStatus::Unverified;
@@ -322,6 +338,27 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 	if (popup.choices.empty()) ui_kit::empty_state("The project has no names of this kind yet.");
 	else if (shown.empty()) ui_kit::empty_state(popup.filter[0] ? "Nothing matches the filter." : "Every name is unreachable.");
 	ImGui::EndChild();
+	// The hovered texture's (else the highlighted one's) picture, larger, with what it is, as the
+	// field's loader would load it.
+	const size_t previewed = hovered >= 0 ? size_t(hovered) : popup.cursor;
+	if (textures && previewed < shown.size() && popup.view && popup.view->findings.graph) {
+		const ReferenceChoice &choice = *shown[previewed];
+		ImGui::SameLine();
+		ImGui::BeginGroup();
+		const float side = ImGui::GetFontSize() * 12.0f;
+		if (choice.served.empty()) {
+			ImGui::Dummy(ImVec2(side, side));
+			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + side);
+			ImGui::TextDisabled("The game loads no file of the project for %s.", choice.name.c_str());
+			ImGui::PopTextWrapPos();
+		} else {
+			const TextureReferenceLoad load = texture_reference(*popup.view->findings.graph, popup.field.reference, choice.name,
+			                                                    popup.field.scope, popup.field.loader_arg);
+			texture_preview::picture(workspace, choice.served, load.transform, side);
+			texture_preview::facts_block(workspace, choice.served, load.transform, side);
+		}
+		ImGui::EndGroup();
+	}
 	// The value's own fixes while it is missing, as Problems offers them.
 	if (popup.missing) {
 		ImGui::Separator();

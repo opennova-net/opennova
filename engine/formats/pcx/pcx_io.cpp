@@ -284,8 +284,9 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 // [orig: load_pcx_to_argb @ 0x664cc0 — the header read (0x46 bytes), the BPP check
 // (returns 3), width/height from the window, then the 8-bit path (Seek(-768, 2), the
 // 0xFF000000 | rgb palette, the RLE loop to BytesPerLine) or the NPlanes == 3 path]
-bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error) {
+bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error, PcxIndexed *indexed) {
 	out = RgbaImage{};
+	if (indexed) *indexed = PcxIndexed{};
 	if (size < 0x46) {
 		error = "PCX header truncated";
 		return false;
@@ -323,6 +324,19 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 					(static_cast<uint32_t>(byte_at(palette_at + 3u * i + 1u)) << 8) |
 					static_cast<uint32_t>(byte_at(palette_at + 3u * i + 2u));
 		}
+		// The indices beside the colours, where the caller asks them.
+		std::vector<uint8_t> indices;
+		if (indexed) {
+			indexed->indexed = true;
+			for (int i = 0; i < 256; ++i)
+				for (int c = 0; c < 3; ++c) indexed->palette[i][c] = byte_at(palette_at + 3u * i + static_cast<size_t>(c));
+			indices.assign(argb.size(), 0);
+		}
+		const auto put = [&](size_t at, uint8_t index) {
+			if (at >= argb.size()) return;
+			argb[at] = palette[index];
+			if (indexed) indices[at] = index;
+		};
 		const size_t data_end = size >= 896 ? 128 + (size - 896) : 128;
 		size_t pos = 128;
 		const auto next = [&]() -> uint8_t { return pos < data_end ? data[pos++] : (++pos, 0); };
@@ -334,16 +348,16 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 				const uint8_t byte = next();
 				if ((byte & 0xC0) == 0xC0) {
 					const int run = byte & 0x3F;
-					const uint32_t color = palette[next()];
-					for (int n = 0; n < run; ++n, ++col) {
-						const size_t at = row_base + static_cast<size_t>(col);
-						if (at < argb.size()) argb[at] = color;
-					}
+					const uint8_t index = next();
+					for (int n = 0; n < run; ++n, ++col) put(row_base + static_cast<size_t>(col), index);
 				} else {
-					const size_t at = row_base + static_cast<size_t>(col++);
-					if (at < argb.size()) argb[at] = palette[byte];
+					put(row_base + static_cast<size_t>(col++), byte);
 				}
 			} while (col < bytes_per_line);
+		}
+		if (indexed) {
+			indices.resize(pixels);
+			indexed->indices = std::move(indices);
 		}
 	} else {
 		std::vector<uint8_t> scanline(static_cast<size_t>(3 * bytes_per_line) + 64u, 0);
@@ -386,6 +400,66 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 	return true;
 }
 
+namespace {
+
+// One plane's row, run-length coded as the readers decode it: a run of 2 to 63 equal bytes, or a byte with
+// its top two bits set, a count byte (0xC0 | n) and the byte; any other a byte alone.
+void append_rle_row(const uint8_t *row, int length, std::vector<uint8_t> &out) {
+	int pos = 0;
+	while (pos < length) {
+		const uint8_t value = row[pos];
+		int run = 1;
+		while (pos + run < length && run < 63 && row[pos + run] == value) ++run;
+		if (run > 1 || (value & 0xC0) == 0xC0) {
+			out.push_back(static_cast<uint8_t>(0xC0 | run));
+			out.push_back(value);
+		} else {
+			out.push_back(value);
+		}
+		pos += run;
+	}
+}
+
+} // namespace
+
+// [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31 — the 24-bit path, 3 * BytesPerLine RLE bytes a row, the
+// planes `width` apart; load_pcx_to_argb @ 0x664cc0 likewise]
+bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::string &error) {
+	out.clear();
+	if (image.width <= 0 || image.height <= 0 || image.width > 0xFFFF || image.height > 0xFFFF) {
+		error = "Invalid PCX dimensions";
+		return false;
+	}
+	if (image.pixels.size() < static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 3u) {
+		error = "PCX colour payload too small";
+		return false;
+	}
+	uint8_t header[128] = {};
+	header[0] = 0x0A;
+	header[1] = 5;
+	header[2] = 1;
+	header[3] = 8;
+	header[8] = static_cast<uint8_t>((image.width - 1) & 0xFF);
+	header[9] = static_cast<uint8_t>(((image.width - 1) >> 8) & 0xFF);
+	header[10] = static_cast<uint8_t>((image.height - 1) & 0xFF);
+	header[11] = static_cast<uint8_t>(((image.height - 1) >> 8) & 0xFF);
+	header[12] = 72;
+	header[14] = 72;
+	header[65] = 3;
+	header[66] = static_cast<uint8_t>(image.width & 0xFF);
+	header[67] = static_cast<uint8_t>((image.width >> 8) & 0xFF);
+	header[68] = 1;
+	out.insert(out.end(), header, header + 128);
+	std::vector<uint8_t> plane(static_cast<size_t>(image.width));
+	for (int y = 0; y < image.height; ++y)
+		for (int p = 0; p < 3; ++p) {
+			for (int x = 0; x < image.width; ++x)
+				plane[static_cast<size_t>(x)] = image.pixels[(static_cast<size_t>(y) * static_cast<size_t>(image.width) + static_cast<size_t>(x)) * 3u + static_cast<size_t>(p)];
+			append_rle_row(plane.data(), image.width, out);
+		}
+	return true;
+}
+
 bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, std::string &error) {
 	out.clear();
 
@@ -398,7 +472,11 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 		return false;
 	}
 
-	const int bytes_per_line = image.width + (image.width & 1);
+	// A row of exactly the image's width, odd or even: the game's readers decode BytesPerLine bytes a row at
+	// a stride of the width, so a padded odd row spills into the next and the last past the buffer [orig:
+	// Texture_LoadPCXFromPFF32 @ 0x56ED70..0x56EDFC; load_pcx_to_argb @ 0x664cc0], and every PCX the game
+	// ships holds rows of its width.
+	const int bytes_per_line = image.width;
 	out.reserve(static_cast<size_t>(128 + image.height * bytes_per_line + 769));
 
 	uint8_t header[128] = {};
@@ -423,9 +501,6 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 	for (int y = 0; y < image.height; ++y) {
 		for (int x = 0; x < image.width; ++x) {
 			row[static_cast<size_t>(x)] = image.indices[static_cast<size_t>(y * image.width + x)];
-		}
-		if (bytes_per_line > image.width) {
-			row[static_cast<size_t>(image.width)] = 0;
 		}
 
 		int pos = 0;
