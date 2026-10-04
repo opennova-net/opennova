@@ -23,6 +23,8 @@ Models, clips and textures ride Git LFS; everything else is a plain git blob.
 | `on_ar15_{rst,i,f,rc,r,e,ei,swt,swf,swr}.bad` | The clips: reset, idle, fire, recoil, reload, empty, empty idle, switch to, switch from and switch rank. |
 | `on_ar15_{0,1,2}.tga`, `on_ar15_{0,1,2}n.mdt` | The carbine's diffuse textures and normal maps. |
 | `on_arms_{0,1}.tga`, `on_arms_{0,1}n.mdt` | The arms' diffuse textures and normal maps. |
+| `on_person.3di` | The player's third-person body (the KINEMATION Operator) on retail's 19 person bones in retail's bind, then 36 of ours (fingers, toes, forearm twists), so retail's person clips play on it. Exported from `art/on_player/on_player.blend`, with the textures below. No clip set ships with it yet. |
+| `on_perso_{0..11}.tga` | The person's diffuse textures. |
 
 Nothing references the `on_ar15` or `on_arms` files yet. Re-export them with
 the add-on installed: Export Model on `on_arms` in `art/on_player/`, and
