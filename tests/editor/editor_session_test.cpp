@@ -4146,6 +4146,7 @@ static int test_prompt_words_from_the_table() {
 		{EditorRequestKind::ImportFiles, "Import", "Save all and import"},
 		{EditorRequestKind::Build, "Build", "Save all and build"},
 		{EditorRequestKind::Play, "Play", "Save all and play"},
+		{EditorRequestKind::Export, "Export", "Save all and export"},
 		{EditorRequestKind::ReloadDocument, "Reload main.mnu", "Save"},
 		{EditorRequestKind::CloseDocument, "Close main.mnu", "Save"},
 		{EditorRequestKind::RenameAsset, "Rename main.mnu", "Save all and rename"},
@@ -4242,7 +4243,7 @@ static int test_no_request_validates() {
 	      EditorRequestKind::Reimport, EditorRequestKind::PreviewImport, EditorRequestKind::PlanImport,
 	      EditorRequestKind::PreviewInstallImport, EditorRequestKind::ImportFiles, EditorRequestKind::RenameAsset,
 	      EditorRequestKind::AssignRequirement, EditorRequestKind::RenameSymbol, EditorRequestKind::Build,
-	      EditorRequestKind::Play})
+	      EditorRequestKind::Play, EditorRequestKind::Export})
 		TEST_EXPECT(request_kind_row(kind).ends_edit_groups);
 	return 0;
 }

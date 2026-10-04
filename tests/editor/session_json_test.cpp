@@ -452,6 +452,17 @@ static int test_request_round_trip() {
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"import_files\",\"imports\":[{\"path\":\"x\",\"retail\":true}]}", back).find("retail") !=
 	            std::string::npos);
+	// S16: an install's file under the project's own name (the expansion's: jox01.bin as jxm.bin), its
+	// `as`; one only an install's file has.
+	ImportChoice renamed = install;
+	renamed.entry = "jox01.bin";
+	renamed.as = "jxm.bin";
+	const EditorRequest as_import = request::import_files({renamed}, false);
+	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(as_import)).c_str(), parsed));
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back == as_import && back.imports[0].name() == "jxm.bin" &&
+	            parsed.get("imports")->array[0].get_string("as", "") == "jxm.bin");
+	TEST_EXPECT(request_error("{\"kind\":\"import_files\",\"imports\":[{\"path\":\"x\",\"entry\":\"a.bin\",\"as\":\"b.bin\"}]}",
+	                          back).find("install's file") != std::string::npos);
 
 	const EditorRequest pick = request::pick_file(PickPurpose::RuntimeExecutable);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(pick)).c_str(), parsed));
@@ -547,7 +558,7 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back) ==
 			"Unknown request member \"unsaved_choice\" (resolve_unsaved takes choice).");
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
-			"Unknown request member \"text\" (new_project takes dir, title, game, import_pass).");
+			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
 			"Unknown request member \"flagg\" (build takes out_dir, rehash).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash).");
@@ -576,6 +587,26 @@ static int test_request_round_trip() {
 	                    .find("game_install") != std::string::npos);
 	TEST_EXPECT(editor_request_to_json(request::new_project("C:/x", "T", "dfx")).get_string("game", "") == "dfx" &&
 	            editor_request_to_json(request::build("C:/out")).get_string("out_dir", "") == "C:/out");
+	// An expansion project (S16): its name and the expansion it builds on ride the request; a
+	// standalone project writes neither.
+	{
+		const EditorRequest expansion = request::new_expansion_project("C:/x", "T", "jxm", "jox01");
+		JsonValue written;
+		TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(expansion)).c_str(), written));
+		TEST_EXPECT(written.get_string("expansion", "") == "jxm" && written.get_string("builds_on", "") == "jox01");
+		EditorRequest round;
+		std::string round_error;
+		TEST_EXPECT(editor_request_from_json(written, round, round_error) && round == expansion &&
+		            round.expansion == "jxm" && round.builds_on == "jox01");
+		TEST_EXPECT(!editor_request_to_json(request::new_project("C:/x", "T")).get("expansion") &&
+		            !editor_request_to_json(request::new_project("C:/x", "T")).get("builds_on"));
+		TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"dir\":\"C:/x\",\"expansion\":\"jxm\"}", read).empty() &&
+		            read.expansion == "jxm" && read.builds_on.empty());
+		TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"dir\":\"C:/x\",\"expansion\":3}", read)
+		                    .find("expansion") != std::string::npos);
+		TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"dir\":\"C:/x\",\"builds_on\":\"jox01\"}", read)
+		                    .find("builds_on") != std::string::npos);
+	}
 	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"a.mnu\"}", back).find("needs \"new_name\"") !=
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"save\",\"path\":3}", back).find("path") != std::string::npos);
@@ -659,6 +690,8 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Dir: out.dir = "C:/mods/Sample"; break;
 		case F::Title: out.title = "Sample"; break;
 		case F::Game: out.game = "dfx"; break;
+		case F::Expansion: out.expansion = "jxm"; break;
+		case F::BuildsOn: out.builds_on = "jox01"; break;
 		case F::GameInstall: out.game_install = "C:/games/JO2"; break;
 		case F::Path: out.path = "menus/main.mnu"; break;
 		case F::Locator: out.locator = "0/window:1"; break;
@@ -667,6 +700,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Role: out.role = "main_menu"; break;
 		case F::FileKind: out.file_kind = "menu"; break;
 		case F::OutDir: out.out_dir = "C:/builds/sample"; break;
+		case F::ExportDir: out.export_dir = "C:/shipped/sample"; break;
 		case F::Mission: out.mission = "04TR.bms"; break;
 		// In its keys' order, as the wire keeps an object's members.
 		// Given in the New file prompt's order, through the factory, which sorts them as the wire reads
@@ -918,7 +952,18 @@ static int test_settings_json() {
 	            read.runtime_executable == std::optional<std::string>("") && read.play_in_install == std::optional<bool>(true));
 	const JsonValue *written = parsed.get("settings");
 	TEST_EXPECT(written && written->get("game_install") && written->get("play_in_install") &&
-	            !written->get("retail_directory") && !written->get("play_retail"));
+	            !written->get("retail_directory") && !written->get("play_retail") && !written->get("expansion") &&
+	            !written->get("builds_on") && !read.expansion && !read.builds_on);
+	// The project's expansion (S16): an empty name makes the project standalone, so it is set, not unset.
+	ProjectSettingsChange expansion;
+	expansion.expansion = "jxm";
+	expansion.builds_on = "";
+	EditorRequest expansion_back;
+	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(request::apply_project_settings(expansion))).c_str(),
+	                  parsed) &&
+	            editor_request_from_json(parsed, expansion_back, error) &&
+	            expansion_back.settings.expansion == std::optional<std::string>("jxm") &&
+	            expansion_back.settings.builds_on == std::optional<std::string>("") && !expansion_back.settings.title);
 	// One setting named: the others are not set.
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_in_install\":false}}", back).empty());
 	TEST_EXPECT(back.settings.play_in_install == std::optional<bool>(false) && back.settings.serial == 0 && !back.settings.title &&
