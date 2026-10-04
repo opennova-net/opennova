@@ -34,13 +34,6 @@ rig.
 | BN39-BN46 | Bolt, Charger, Magazine, Trigger, Safety, Cartridge, Dustcover, MagRelease |
 | BN47 Follower, BN48-BN50 Round1-3 | The magazine's follower and its top three rounds |
 
-BN38 to BN46 store themselves as their parent (Bone properties, Stored as).
-The mag-feed tracks give the model a part animation table, and with one the
-game re-places every part that has no track about its table parent, keeping
-only the clip's turn; a part naming itself keeps its whole posed row, so the
-magazine, bolt and charger move as the clips move them. The follower and the
-rounds keep the magazine as their parent and ride it.
-
 ## The clips
 
 The `on_ar15_*` Actions are what the rows name. They are baked keys on
