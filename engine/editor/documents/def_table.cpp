@@ -21,18 +21,30 @@ namespace {
 
 // --- the kinds ---------------------------------------------------------------------------------------
 
-// A new item is a marker with an id no item of its file has, from 100000 on (an item's id is its
-// type_id, which a mission names it by).
+// An id no item of the file has, from 100000 on (an item's id is its type_id, which a mission names it
+// by).
+int free_item_id(const std::vector<const void *> &others) {
+	int id = 100000;
+	for (;;) {
+		bool used = false;
+		for (const void *other : others) used = used || static_cast<const DefItemDef *>(other)->id == id;
+		if (!used) return id;
+		++id;
+	}
+}
+
+// A new item is a marker with an id of its own.
 void made_item(void *record, const std::vector<const void *> &others) {
 	auto &item = *static_cast<DefItemDef *>(record);
 	item.type = DEF_ITEM_TYPE_MARKER;
-	item.id = 100000;
-	for (;;) {
-		bool used = false;
-		for (const void *other : others) used = used || static_cast<const DefItemDef *>(other)->id == item.id;
-		if (!used) break;
-		++item.id;
-	}
+	item.id = free_item_id(others);
+}
+
+// A copy of an item takes an id of its own as a new one does: the game's lookup by id finds the
+// first item of an id [orig: ItemList_FindIndexByTypeId @ 0x49e100], so a copy keeping its
+// original's would never be the one a mission places.
+void duplicated_item(void *record, const std::vector<const void *> &others) {
+	static_cast<DefItemDef *>(record)->id = free_item_id(others);
 }
 
 // An item's attachment slots: the 1-based place of its last G and C attachment (zero: none).
@@ -48,16 +60,22 @@ void attachment_slots(void *record) {
 
 using C = CatalogKind;
 using R = DefRecordKind;
+using N = CopyName;
+// The characters of a name the game keeps: an item's 45 [orig: ItemDef_ParseProperty @ 0x49eb00, the
+// begin arm's `cmp ecx, 2Eh` @0x49ebd9, its terminator @0x49ebfb], a weapon's 31 of its 0x20-byte
+// strncpy [orig: WeaponDefs_ParseLineCallback @ 0x543680, @0x543737], an ammo's 31 [orig:
+// AmmoDef_AllocateSlot @ 0x409a20, @0x409afc]; 0 for the field's own width.
 constexpr CatalogKindRow kKinds[] = {
-	{C::Item, R::Item, "item", "Item", "Add record", true, "display_name", made_item, attachment_slots},
-	{C::Weapon, R::Weapon, "weapon", "Weapon", "Add record", true, "weapon_name"},
-	{C::Ammo, R::Ammo, "ammo", "Ammo", "Add record", true, "name"},
+	{C::Item, R::Item, "item", "Item", "Add record", true, "display_name", made_item, attachment_slots, duplicated_item,
+	 N::Words, 45},
+	{C::Weapon, R::Weapon, "weapon", "Weapon", "Add record", true, "weapon_name", nullptr, nullptr, nullptr, N::Token, 31},
+	{C::Ammo, R::Ammo, "ammo", "Ammo", "Add record", true, "name", nullptr, nullptr, nullptr, N::Token, 31},
 	{C::Action, R::Action, "action", "Action", "", false, "name"},
 	{C::Sight, R::Sight, "sight", "Sight", "", false, "texture"},
 	{C::Attachment, R::Attachment, "attachment", "Attachment", "", false, "userpoint"},
 	{C::Effect, R::Effect, "effect", "Effect", "", false, "surface_type"},
-	{C::Carry, R::Carry, "carry", "Carry limit", "Add carry limit", true, "name"},
-	{C::Powerup, R::Powerup, "powerup", "Powerup", "Add record", true, "name"},
+	{C::Carry, R::Carry, "carry", "Carry limit", "Add carry limit", true, "name", nullptr, nullptr, nullptr, N::Token},
+	{C::Powerup, R::Powerup, "powerup", "Powerup", "Add record", true, "name", nullptr, nullptr, nullptr, N::Token},
 	{C::PowerupAmmo, R::PowerupAmmo, "powerup_ammo", "Ammo", "", false, "class_name"},
 	{C::Pickup, R::PowerupAction, "pickup", "Pickup", "", false, ""},
 	{C::Respawn, R::PowerupAction, "respawn", "Respawn", "", false, ""},
@@ -613,6 +631,21 @@ const CatalogFamily *catalog_family(AssetKind kind) {
 	for (const CatalogFamily &family : kFamilies)
 		if (family.asset == kind) return &family;
 	return nullptr;
+}
+
+std::string copy_name(const std::string &name, CopyName how, size_t limit, const std::vector<std::string> &taken) {
+	if (how == CopyName::None || name.empty()) return name;
+	const auto free = [&taken](const std::string &candidate) {
+		return std::find(taken.begin(), taken.end(), strutil::to_upper(candidate)) == taken.end();
+	};
+	for (int n = 1;; ++n) {
+		const std::string suffix = how == CopyName::Words ? (n == 1 ? std::string(" (copy)") : " (copy " + std::to_string(n) + ")")
+		                                                  : "_" + std::to_string(n + 1);
+		std::string stem = name;
+		if (limit && stem.size() + suffix.size() > limit) stem.resize(limit > suffix.size() ? limit - suffix.size() : 0);
+		const std::string candidate = stem + suffix;
+		if (free(candidate)) return candidate;
+	}
 }
 
 // --- the native record of a row ------------------------------------------------------------------------

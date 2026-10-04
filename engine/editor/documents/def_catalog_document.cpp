@@ -158,6 +158,31 @@ std::shared_ptr<Node> DefCatalogDocument::make_node(
 	return row;
 }
 
+void DefCatalogDocument::prepare_duplicate(Node &copy, const Node &,
+                                           const std::vector<std::shared_ptr<const Node>> &rows) const {
+	auto &row = static_cast<CatalogRow &>(copy);
+	const CatalogKindRow &rules = catalog_kind_row(row.kind);
+	// The rows of its kind beside it (its original among them), whose ids and names it keeps apart from.
+	std::vector<const void *> others;
+	std::vector<std::string> names;
+	for (const auto &other : rows) {
+		if (other->kind != row.kind) continue;
+		const auto &held = static_cast<const CatalogRow &>(*other);
+		others.push_back(held.native.data());
+		names.push_back(strutil::to_upper(held.name()));
+	}
+	if (rules.duplicated) rules.duplicated(row.native.data(), others);
+	// A name of its own: the game's lookups by name find the first row of a name (an item, an ammo), and a
+	// weapon block of a name the table has replaces that weapon (itemdef-re.md, "Repeated names and ids").
+	const TableKind &own = *catalog_table().kind(row.kind);
+	const size_t place = own.find(catalog_name_field(row.kind));
+	if (place == TableKind::npos || rules.copy_name == CopyName::None) return;
+	const FieldSchema &schema = own.fields()[place];
+	const size_t limit = rules.name_chars ? rules.name_chars : schema.width ? schema.width - 1 : 0;
+	std::string ignored;
+	own.value(place).set(row.record(), copy_name(row.name(), rules.copy_name, limit, names), ignored);
+}
+
 bool DefCatalogDocument::set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) {
 	const CatalogFamily *own = family();
 	std::string message;

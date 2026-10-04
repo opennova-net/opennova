@@ -551,8 +551,47 @@ static int powerup_weapon() {
 	return 0;
 }
 
+// A Duplicate gives the copy an identity of its own, as an Add does (the UX audit's 4.4): an item a
+// free id and its name with " (copy)", a weapon its token with "_2", each within the characters of a
+// name the game keeps, never one a row of its kind has; nested records keep theirs.
+static int duplicates_apart() {
+	editor_test::TempProjectDir dir("opennova_catalog_duplicates_apart");
+	const std::string long_name(44, 'L');
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	                                    "begin \"Dune Buggy\"\nid 100000\ntype vehicle\nhp 10\nend\nbegin \"Dune Buggy (copy)\"\n"
+	                                    "id 100001\ntype vehicle\nend\nbegin \"" + long_name + "\"\nid 100003\ntype marker\nend\n"));
+	DefCatalogDocument items; Diagnostic error;
+	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	const NodeKind item = node_kind(DefRecordKind::Item);
+	Edit duplicate; duplicate.operation = EditOperation::Duplicate; duplicate.address = {items.rows()[0]->id, item, 0};
+	TEST_EXPECT(items.apply(duplicate, error));
+	const auto &copy = static_cast<const CatalogRow &>(*items.row(items.last_added())).native.as<DefItemDef>();
+	TEST_EXPECT(copy.id == 100002 && std::string(copy.display_name) == "Dune Buggy (copy 2)" && copy.hp == 10 &&
+	            copy.type == DEF_ITEM_TYPE_VEHICLE);
+	duplicate.address = {items.rows()[3]->id, item, 0}; // the long name's row, after the copy
+	TEST_EXPECT(std::string(row_at(items, 3).native.as<DefItemDef>().display_name) == long_name);
+	TEST_EXPECT(items.apply(duplicate, error));
+	const auto &cut = static_cast<const CatalogRow &>(*items.row(items.last_added())).native.as<DefItemDef>();
+	TEST_EXPECT(cut.id == 100004 && std::string(cut.display_name) == std::string(38, 'L') + " (copy)");
+	for (const Diagnostic &d : validate_catalog_file(items))
+		TEST_EXPECT(d.code() != "catalog.name_duplicate" && d.code() != "catalog.item_identity");
+	items.undo(); items.undo(); TEST_EXPECT(!items.dirty());
+
+	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), "weapon \"WPN_M16\"\naction \"FIRE\"\nend\nend\n"));
+	DefCatalogDocument weapons;
+	TEST_EXPECT(weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
+	duplicate.address = {weapons.rows()[0]->id, node_kind(DefRecordKind::Weapon), 0};
+	TEST_EXPECT(weapons.apply(duplicate, error) && weapons.apply(duplicate, error));
+	TEST_EXPECT(weapons.rows().size() == 3 && std::string(row_at(weapons, 1).native.as<DefWeaponDef>().weapon_name) == "WPN_M16_3" &&
+	            std::string(row_at(weapons, 2).native.as<DefWeaponDef>().weapon_name) == "WPN_M16_2");
+	const DefWeaponDef &gun = row_at(weapons, 2).native.as<DefWeaponDef>();
+	TEST_EXPECT(gun.actions_count == 1 && std::string(gun.actions[0].name) == "FIRE");
+	TEST_EXPECT(copy_name("WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ0", CopyName::Token, 31, {}) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXY_2");
+	return 0;
+}
+
 int main() {
 	return history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
-	       witnessed_enums() || powerup_weapon();
+	       witnessed_enums() || powerup_weapon() || duplicates_apart();
 }

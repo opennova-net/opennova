@@ -74,6 +74,11 @@ protected:
 	                                const std::vector<std::shared_ptr<const Node>> &rows,
 	                                std::string &error) override;
 	bool set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) override;
+	// A copy a Duplicate made of a row: an identity of its own, as an Add gives one (an item's free id, the
+	// kind's `duplicated`), and a name no row of its kind has (copy_name: "Dune Buggy (copy)", "WPN_M16_2"),
+	// within the characters of a name the game keeps.
+	void prepare_duplicate(Node &copy, const Node &original,
+	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
 	std::shared_ptr<const FileState> state_after_remove(const std::shared_ptr<const FileState> &state,
 	                                                    size_t remaining) const override;
 	// What the record's kind derives after any edit (an item's attachment slots).
