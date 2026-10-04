@@ -1,0 +1,246 @@
+{
+  "_comment": "The OpenNova editor demo's storyboard (scripts/demo/README.md): the scenes in cut order, each with its caption and the marks its frames are cut between, the takes that record them, and the GIF's ranges. A cut piece runs from one mark to another ('label', or 'label+N' / 'label-N' frames), sped up to 'seconds' when given, its last frame held 'hold' seconds; a 'still' piece shows a PNG of the take for 'seconds'. 'shows' and 'mcp' document the scene as recorded. Captions take no em dashes.",
+  "title": "OpenNova editor demo",
+  "size": [1600, 900],
+  "fps": 30,
+  "crf": 20,
+  "mp4": "opennova-editor-demo.mp4",
+  "project": {
+    "dir": "nightfall",
+    "title": "Operation Nightfall",
+    "expansion": "nightfall",
+    "builds_on": "jox01"
+  },
+  "recents": [
+    {"dir": "desert-patrol", "title": "Desert Patrol"},
+    {"dir": "river-run", "title": "River Run", "expansion": "riverrun", "builds_on": "jox01"}
+  ],
+  "takes": {
+    "a": {
+      "about": "Welcome page, new project on jox01, import a mission's closure",
+      "port": 8994,
+      "parts": ["project"]
+    },
+    "b": {
+      "about": "The imported project: Files, the mission editor, definitions, menus, models and animation, textures, build and Play, the file card (last: the card has no close request)",
+      "port": 8995,
+      "parts": ["files", "mission", "defs", "menus", "models", "textures", "build", "card"]
+    }
+  },
+  "scenes": [
+    {
+      "id": "welcome", "take": "a", "part": "project",
+      "caption": "Welcome page: recent projects, and the game install checked",
+      "shows": "Welcome page: recents (River Run on jox01, Desert Patrol), the New project form's install field checked green (9,300 files, jox01)",
+      "mcp": "(launch, no project)",
+      "cut": [{"from": "welcome", "to": "new_project+6", "hold": 0.6}]
+    },
+    {
+      "id": "new_project", "take": "a", "part": "project",
+      "caption": "New project: Operation Nightfall, an expansion building on jox01",
+      "shows": "The new project opens on Bring in the game's files; Problems lists the required files",
+      "mcp": "new_project {dir, title, expansion: nightfall, builds_on: jox01, game_install}; apply_project_settings {mission: true}",
+      "cut": [{"from": "new_project+6", "to": "chooser"}]
+    },
+    {
+      "id": "chooser", "take": "a", "part": "project",
+      "caption": "Import: choose from the game's own files",
+      "shows": "The chooser: every file of the game data (10,778)",
+      "mcp": "preview_install_import {}",
+      "cut": [{"from": "chooser", "to": "plan", "hold": 0.4}]
+    },
+    {
+      "id": "plan", "take": "a", "part": "project",
+      "caption": "One mission's plan: what it brings, grouped, with Needed by in words",
+      "shows": "CP10's plan: 8,953 files by kind, grouped by what brings them, Needed by in words, Found in (base game or jox01)",
+      "mcp": "preview_install_import {names: [CP10.bms], with_dependencies: true}",
+      "cut": [{"from": "plan", "to": "plan_shown", "seconds": 0.8},
+              {"from": "plan_shown", "to": "import_start", "hold": 1.0}]
+    },
+    {
+      "id": "import", "take": "a", "part": "project",
+      "caption": "Importing 8,953 files (sped up)",
+      "shows": "Importing (sped up)",
+      "mcp": "import_files {planned: true}",
+      "cut": [{"from": "import_start", "to": "import_end", "seconds": 3.0}]
+    },
+    {
+      "id": "files", "take": "b", "part": "files",
+      "caption": "The files land in folders by kind",
+      "shows": "Files in folders by kind (ai, anims, ...)",
+      "mcp": "(take B's start: the project opened)",
+      "cut": [{"from": "start", "to": "files_by_kind"}]
+    },
+    {
+      "id": "card", "take": "b", "part": "card",
+      "caption": "A file card: what it is, where the build puts it, and its sound playing",
+      "shows": "The card of sounds/cmpv503.wav: Wave, packed into expansion/nightfall/nightfall.pff, named by nightfallL.lwf, mono 22,050 Hz 1.2 s; the wave plays (audio in the MP4)",
+      "mcp": "about_file, play_sound",
+      "cut": [{"from": "card", "to": "card_end"}]
+    },
+    {
+      "id": "mission", "take": "b", "part": "mission",
+      "caption": "Mission editor: a retail mission in 3D, from the project's own files",
+      "shows": "CP10 opens in 3D: the device builds (progress), the night picture",
+      "mcp": "open_document missions/CP10.bms",
+      "cut": [{"from": "mission_open", "to": "mission_ready", "seconds": 1.6},
+              {"from": "mission_ready", "to": "daylight"}]
+    },
+    {
+      "id": "daylight", "take": "b", "part": "mission",
+      "caption": "Daylight, then into the village",
+      "shows": "Daylight, the camera glides to the village's trucks",
+      "mcp": "viewport options {time: 11, marks}, viewport camera x50",
+      "cut": [{"from": "glided-24", "to": "pick"}]
+    },
+    {
+      "id": "pick", "take": "b", "part": "mission",
+      "caption": "Pick a vehicle: named, not numbered",
+      "shows": "Drivable Transport Truck #108 picked: its label, the outline row, the Inspector by name",
+      "mcp": "viewport hit, select_record",
+      "cut": [{"from": "pick", "to": "drag", "hold": 0.5}]
+    },
+    {
+      "id": "drag", "take": "b", "part": "mission",
+      "caption": "Move it: one drag, one undo step",
+      "shows": "The truck moves on the ground",
+      "mcp": "viewport drag {handle: move} x18 samples, one gesture",
+      "cut": [{"from": "drag", "to": "event", "hold": 0.4}]
+    },
+    {
+      "id": "event", "take": "b", "part": "mission",
+      "caption": "Events in words: change the delay, the sentence follows",
+      "shows": "Event 6 in words; its delay 3 to 10 steps, the sentence now \"after 10.2 s\"",
+      "mcp": "select_record, edit_record {delay}",
+      "cut": [{"from": "event", "to": "script", "hold": 0.6}]
+    },
+    {
+      "id": "script", "take": "b", "part": "mission",
+      "caption": "Scripts: type a line, notes in plain words",
+      "shows": "CP10.wac: three lines typed; the missing wave said in words after the line",
+      "mcp": "open_document, edit_record text.span x20 (coalesced)",
+      "cut": [{"from": "script", "to": "blocks", "hold": 0.8}]
+    },
+    {
+      "id": "blocks", "take": "b", "part": "mission",
+      "caption": "Problems names what blocks a build, and why",
+      "shows": "The terrain set to a name nothing serves: Problems' \"Blocks the build\" row and filter",
+      "mcp": "edit_record {terrain: nightisle}, then undo",
+      "cut": [{"from": "blocks", "to": "mission_end-8", "hold": 1.0}]
+    },
+    {
+      "id": "item", "take": "b", "part": "defs",
+      "caption": "Definitions in words: an item, its fields in sections",
+      "shows": "ITEMS.DEF: Drivable Transport Truck, its fields in sections",
+      "mcp": "open_document, select_record",
+      "cut": [{"from": "defs", "to": "item_selected", "hold": 0.6}]
+    },
+    {
+      "id": "weapons", "take": "b", "part": "defs",
+      "caption": "Weapons listed by their game text, a thumbnail in the icon field",
+      "shows": "weapon.def by game text (M4 - Auto, M16/M203 - Grenade); the loadout icon field's thumbnail",
+      "mcp": "open_document, select_record",
+      "cut": [{"from": "item_selected", "to": "weapons", "hold": 1.0}]
+    },
+    {
+      "id": "duplicate", "take": "b", "part": "defs",
+      "caption": "Duplicate an item, rename it, save",
+      "shows": "Duplicate, rename to Drivable Desert Truck, save",
+      "mcp": "duplicate, edit_record {display_name}, save",
+      "cut": [{"from": "weapons", "to": "saved", "hold": 0.5}]
+    },
+    {
+      "id": "menus", "take": "b", "part": "menus",
+      "caption": "Menus on the canvas, style variables resolved",
+      "shows": "options.mnu on the canvas; BACK selected, its colours as %DEF_TEXT_FG% = FFFFFFFF with swatches",
+      "mcp": "open_document, select_record",
+      "cut": [{"from": "menus", "to": "set_string_text", "hold": 0.6}]
+    },
+    {
+      "id": "menu_label", "take": "b", "part": "menus",
+      "caption": "Edit a label's words: the menu updates live",
+      "shows": "BACK's words typed as RETURN, the menu updating each letter",
+      "mcp": "set_string_text x6",
+      "cut": [{"from": "set_string_text", "to": "menu_typed", "hold": 0.6}]
+    },
+    {
+      "id": "model", "take": "b", "part": "models",
+      "caption": "Models: the Blackhawk, a surface per material",
+      "shows": "The Blackhawk orbiting; material 1: 827 bullet faces, Metal",
+      "mcp": "open_document, viewport camera, select_record",
+      "cut": [{"from": "model", "to": "material"}]
+    },
+    {
+      "id": "collision", "take": "b", "part": "models",
+      "caption": "Its collision layers, in the game's own terms",
+      "shows": "Volumes and sections with their legend",
+      "mcp": "viewport options {overlays}",
+      "cut": [{"from": "material", "to": "collision", "hold": 0.6}]
+    },
+    {
+      "id": "animation", "take": "b", "part": "models",
+      "caption": "Animation: a clip playing, its footstep events on the timeline",
+      "shows": "FSldr01.adm: run forward playing on Friendly Soldier #1, bones, the timeline's L/R footsteps",
+      "mcp": "open_document, select_record",
+      "cut": [{"from": "collision", "to": "animation"}]
+    },
+    {
+      "id": "thumbnail", "take": "b", "part": "textures",
+      "caption": "Textures: a thumbnail in the field",
+      "shows": "mveg4b.3di's texture row: the field's thumbnail",
+      "mcp": "select_record",
+      "cut": [{"from": "textures", "to": "thumbnail", "hold": 0.3}]
+    },
+    {
+      "id": "texture", "take": "b", "part": "textures",
+      "caption": "Opened as the game reads it, with what it is used as",
+      "shows": "mveg4.dds as the game reads it, its facts, Used as",
+      "mcp": "open_document, viewport camera",
+      "cut": [{"from": "thumbnail", "to": "zoomed"}]
+    },
+    {
+      "id": "as_drawn", "take": "b", "part": "textures",
+      "caption": "As drawn: the material's cut-out applied",
+      "shows": "As drawn: the material's cut-out above 128",
+      "mcp": "viewport options {as_used: 0}",
+      "cut": [{"from": "zoomed", "to": "as_drawn", "hold": 0.8}]
+    },
+    {
+      "id": "build", "take": "b", "part": "build",
+      "caption": "Build: the expansion's archives (sped up; recording slows it)",
+      "shows": "Build (sped up)",
+      "mcp": "save_all, build",
+      "cut": [{"from": "build", "to": "built", "seconds": 2.0}]
+    },
+    {
+      "id": "built", "take": "b", "part": "build",
+      "caption": "Built: the archives written, the warnings listed in Problems",
+      "shows": "The Build result: nightfall.pff and nightfallL.pff written; Problems' Build warnings",
+      "mcp": "(the build's result)",
+      "cut": [{"from": "built", "to": "built+100", "hold": 0.4}]
+    },
+    {
+      "id": "play", "take": "b", "part": "build",
+      "caption": "Play: the game starts in the built mission",
+      "shows": "The game in CP10's briefing (the game's own game_screenshot)",
+      "mcp": "play {mission: CP10.bms}, game MCP",
+      "cut": [{"still": "game.png", "seconds": 3.0}]
+    }
+  ],
+  "audio": {"scene": "card", "mark": "play_sound", "lead": 0.3, "seconds": 2.5},
+  "gif": {
+    "file": "opennova-editor-demo.gif",
+    "width": 960,
+    "fps": 15,
+    "colors": 192,
+    "ranges": [
+      {"from": "plan", "skip": 0.8, "seconds": 3.0},
+      {"from": "daylight", "to": "drag"},
+      {"from": "blocks", "seconds": 3.8},
+      {"from": "menu_label"},
+      {"from": "collision", "to": "animation"},
+      {"from": "as_drawn"},
+      {"from": "play", "skip": 0.2}
+    ]
+  }
+}
