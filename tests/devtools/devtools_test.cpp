@@ -30,6 +30,7 @@
 #include <imgui_internal.h>
 
 #include <cstdio>
+#include <functional>
 #include <cstring>
 #include <utility>
 
@@ -790,7 +791,115 @@ struct PlacedWindow : opennova::devtools::Window {
 
 bool near(float a, float b) { return a - b <= 4.0f && b - a <= 4.0f; }
 
+// A window with a button and a list that scrolls, reporting what the mouse did to them.
+struct HoverWindow : opennova::devtools::Window {
+	HoverWindow() { open = true; }
+	const char *title() const override { return "Hover"; }
+	void draw(opennova::devtools::ImGuiPass &, uint64_t) override {
+		if (ImGui::Button("target", ImVec2(200.0f, 100.0f))) ++clicks;
+		hovered = ImGui::IsItemHovered();
+		active = ImGui::IsItemActive();
+		at = ImGui::GetItemRectMin();
+		ImGui::BeginChild("list", ImVec2(200.0f, 120.0f));
+		for (int line = 0; line < 100; ++line) ImGui::Text("line %d", line);
+		scroll = ImGui::GetScrollY();
+		ImGui::EndChild();
+		list_at = ImGui::GetItemRectMin();
+	}
+	InitialDockPlacement initial_dock_placement() const override { return InitialDockPlacement::Center; }
+	bool hovered = false;
+	bool active = false;
+	int clicks = 0;
+	float scroll = 0.0f;
+	ImVec2 at{}, list_at{};
+};
+
 }  // namespace
+
+// The mouse is the pass's by the OS's place (ImGuiPass::set_mouse_place) and the frame's events, fed
+// in the bridge's order: the events Godot dispatched (a button, the wheel) first, then the global
+// cursor just before NewFrame (imgui-godot's Input.Update), which ImGui's trickle queue takes a frame
+// after a button. The position is never taken back, so the first click into a window not yet focused
+// lands where the cursor is; hover is the pass's only with the focus and the cursor over its window
+// (a window behind another takes no highlight or tooltip); a press is the pass's with the cursor
+// over its window and is then held as taken (a drag carried out keeps its mouse), one elsewhere is
+// dropped; the wheel is the pass's with the cursor over its window, lists and canvases alike.
+void test_the_mouse_is_the_pass_only_in_its_window_in_use() {
+	NullBackend backend;
+	opennova::devtools::ImGuiPass pass;
+	auto *window = static_cast<HoverWindow *>(&pass.register_window(std::make_unique<HoverWindow>()));
+	pass.attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	pass.set_open(true);
+	CHECK(pass.mouse_focused() && pass.mouse_over(), "until the shell says, the mouse is the pass's");
+	ImGuiIO &io = ImGui::GetIO();
+	uint64_t frame = 0;
+	ImVec2 cursor;
+	const auto on_button = [&] { cursor = ImVec2(window->at.x + 20.0f, window->at.y + 20.0f); };
+	const auto on_list = [&] { cursor = ImVec2(window->list_at.x + 20.0f, window->list_at.y + 20.0f); };
+	// A frame as the bridge feeds it: `events` (Godot's dispatch) queued, then the cursor.
+	const auto draw = [&](int frames, const std::function<void()> &events = {}) {
+		for (int i = 0; i < frames; ++i) {
+			if (events && i == 0) events();
+			io.AddMousePosEvent(cursor.x, cursor.y);
+			ImGui::NewFrame();
+			pass.draw_frame(++frame);
+			ImGui::Render();
+		}
+	};
+	const auto press = [&] { io.AddMouseButtonEvent(ImGuiMouseButton_Left, true); };
+	const auto release = [&] { io.AddMouseButtonEvent(ImGuiMouseButton_Left, false); };
+	const auto wheel = [&] { io.AddMouseWheelEvent(0.0f, -1.0f); };
+	draw(2);
+	on_button();
+	draw(3);
+	CHECK(window->hovered, "focused and over its window: the button under the cursor is hovered");
+
+	// Another application in use, the cursor over the editor (nothing covering it): no hover, however
+	// long it rests, so no tooltip; the position stays the bridge's.
+	pass.set_mouse_place(false, true);
+	draw(30);
+	CHECK(!window->hovered && ImGui::IsMousePosValid() && io.MousePos.x == cursor.x,
+	      "not focused: nothing hovered, the position kept");
+	// The click that focuses the window lands: the press (queued before the frame's cursor) is taken
+	// with the place still unfocused, the release with the window focused.
+	draw(1, press);
+	CHECK(window->active, "the first click into the window presses the button");
+	pass.set_mouse_place(true, true);
+	draw(1, release);
+	CHECK(window->clicks == 1, "and clicks it");
+
+	// Covered by another window: a press is not the pass's; the wheel neither.
+	pass.set_mouse_place(false, false);
+	draw(1, press);
+	CHECK(!window->active && !window->hovered, "a press with the cursor elsewhere is dropped");
+	draw(1, release);
+	CHECK(window->clicks == 1, "and clicks nothing");
+	on_list();
+	draw(2);
+	const float scrolled = window->scroll;
+	draw(2, wheel);
+	CHECK(window->scroll == scrolled, "the wheel with the cursor elsewhere scrolls nothing");
+	// Not focused, the cursor over it: the wheel scrolls the list under it, as the OS sends it there.
+	pass.set_mouse_place(false, true);
+	draw(2, wheel);
+	CHECK(window->scroll > scrolled, "the wheel over the window scrolls its list, focused or not");
+	const float again = window->scroll;
+	pass.set_mouse_place(true, true);
+	draw(2, wheel);
+	CHECK(window->scroll > again, "and over the window in use");
+
+	// A press taken keeps its mouse while held, wherever the cursor goes; let go, the place rules.
+	on_button();
+	draw(1);
+	draw(1, press);
+	pass.set_mouse_place(false, false);
+	draw(2);
+	CHECK(window->active && window->hovered, "a press held keeps its mouse");
+	draw(1, release);
+	draw(1);
+	CHECK(!window->hovered && window->clicks == 2, "let go: the click, then the place rules again");
+	pass.detach_imgui();
+}
 
 // The default docked layout is the host's say (DockLayout). The game's F3 workspace keeps
 // the defaults: its dockspace id, the right column 30% of the width, no bottom strip and
@@ -2106,6 +2215,7 @@ int main() {
 	test_external_feed_drives_the_window_without_draining();
 	test_layout_reset_brings_windows_home();
 	test_dock_layout_defaults_and_a_host_layout();
+	test_the_mouse_is_the_pass_only_in_its_window_in_use();
 	test_entities_window_formats_the_pushed_directory();
 	test_entities_control_request_queue_and_gating();
 	test_entities_window_selects_the_picked_handle();

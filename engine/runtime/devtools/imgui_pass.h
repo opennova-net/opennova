@@ -202,6 +202,31 @@ public:
 	void set_user_layout(bool keep) { user_layout_ = keep; }
 	bool user_layout() const { return user_layout_; }
 
+	// Where the mouse is, as the OS has it: whether one of the shell's windows has the focus,
+	// and whether the cursor is over one of them with nothing covering it. The shell's say each
+	// frame, before draw_frame (until it says, both true). ImGui's bridge feeds it the global
+	// cursor whatever covers the window, so a window behind another, or not the one in use,
+	// would otherwise take hovers through the window in front: highlights, tooltips.
+	//
+	// The position always stays the bridge's (a press is placed where the cursor is, the first
+	// one into a window not yet focused included). What draw_frame takes of the mouse, by the
+	// frame's events:
+	// - a press: the pass's when the cursor is over its window (the click that focuses the
+	//   window lands); one with the cursor elsewhere is dropped;
+	// - a press it took, held or let go: the pass's whatever the place (a drag carried out of
+	//   the window keeps its mouse);
+	// - the wheel: the pass's when the cursor is over its window (the OS scrolls the window
+	//   under the cursor, focused or not), dropped otherwise (lists and canvases alike);
+	// - else hover: the pass's only with the focus and the cursor over its window.
+	// What is not the pass's is taken back before anything draws: nothing hovered, no
+	// scroll, no press.
+	void set_mouse_place(bool focused, bool over) {
+		mouse_focused_ = focused;
+		mouse_over_ = over;
+	}
+	bool mouse_focused() const { return mouse_focused_; }
+	bool mouse_over() const { return mouse_over_; }
+
 	// The whole surface: closed = nothing drawn, no capture, no input.
 	void set_open(bool open);
 	bool is_open() const { return open_; }
@@ -275,6 +300,8 @@ private:
 	};
 
 	void sync_visibility();
+	// What of the frame's mouse is the pass's (set_mouse_place), the rest taken back.
+	void gate_mouse();
 	void draw_menu_bar();
 	void draw_overlays_menu();
 	void draw_status();
@@ -292,6 +319,9 @@ private:
 	bool layout_focus_armed_ = false;
 	bool attached_ = false;
 	bool platform_windows_enabled_ = true;
+	bool mouse_focused_ = true;
+	bool mouse_over_ = true;
+	bool press_taken_ = false; // the press held is one the pass took
 	bool user_layout_ = true;
 	bool open_ = false;
 	bool layout_reset_pending_ = false;

@@ -156,6 +156,10 @@ public:
 		// kind it holds.
 		const NodeKind *kinds = nullptr;
 		size_t kind_count = 0;
+		// The number the Inspector gives its first record, the rest counting on: 1, or 0 where the
+		// records are the game's array as it indexes it and the editor names them so (a clip's
+		// frame events titled by their frame from 0, as the timeline counts; its bones by index).
+		size_t first_number = 1;
 		bool holds(NodeKind of) const {
 			if (!kinds) return of == kind;
 			for (size_t i = 0; i < kind_count; ++i)
@@ -326,7 +330,8 @@ public:
 	// it once, a move of several windows moves it once).
 	std::vector<NodeAddress> outermost(const std::vector<NodeAddress> &records) const;
 	// The name a record shows: a row's name, or a nested record's name field, else its
-	// kind and its place ("Action 2"); "" when the record is gone.
+	// kind and its place, counted from its list's first number ("Action 2", a clip's
+	// "Frame event 0"); "" when the record is gone.
 	std::string record_name(const NodeAddress &address) const;
 	// The name the windows show for a record (the outline, the breadcrumb, the Inspector's
 	// lists): record_name, unless the type words the token a record is named by (an

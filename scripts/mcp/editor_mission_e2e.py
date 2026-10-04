@@ -206,12 +206,20 @@ def terminate(pid: int, what: str) -> None:
             pass
 
 
+def launch_namespace(args: argparse.Namespace, pid_file: Path) -> argparse.Namespace:
+    """editor_mcp's launch arguments for this run: the launch parser's defaults (every flag cmd_launch
+    reads, --front among them), then this run's."""
+    launch = editor_mcp.build_parser().parse_args(["launch"])
+    for name, value in dict(port=args.port, editor=args.editor, godot=args.godot, project_dir=str(editor_mcp.PROJECT_DIR),
+                            headless=not args.windowed, windowed=args.windowed, pid_file=str(pid_file),
+                            timeout=240.0).items():
+        setattr(launch, name, value)
+    return launch
+
+
 def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: dict) -> None:
     install = str(Path(args.install).resolve())
-    launch = argparse.Namespace(
-        port=args.port, editor=args.editor, godot=args.godot, project_dir=str(editor_mcp.PROJECT_DIR),
-        headless=not args.windowed, windowed=args.windowed, resolution=None, log_file=None, open=None,
-        stdout_log=None, pid_file=str(pid_file), timeout=240.0)
+    launch = launch_namespace(args, pid_file)
     say("1. launching the editor")
     try:
         code = editor_mcp.cmd_launch(launch)
