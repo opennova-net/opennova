@@ -23,7 +23,10 @@ void BuildOperation::join(const EditorRequest &request) {
 }
 
 OperationOutcome BuildOperation::finish(SessionCore &core) {
-	return core.absorb_build(run_.report(), gate_, play_);
+	// How long it took, start to finish: what the build panel says (the UX round's problems lane).
+	BuildReport report = run_.report();
+	report.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
+	return core.absorb_build(report, gate_, play_);
 }
 
 } // namespace opennova::editor

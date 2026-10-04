@@ -48,6 +48,7 @@
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/file_preferences_store.h>
+#include <editor/session/original_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -1123,7 +1124,8 @@ void test_files_window() {
 	CHECK(text.find("Kind") == std::string::npos && text.find("Item defin") == std::string::npos, "the kind hidden");
 	// ADR 0046 S15: a file that is the game's own data has its findings counted apart, as Problems
 	// counts them: none after its name (its tooltip says them); the modder's again once it is not.
-	v.findings.original_files = std::make_shared<const std::set<std::string>>(std::set<std::string>{"defs/items.def"});
+	const OriginalData shipped = editor_test::originals_of(v.findings.diagnostics, {"defs/items.def"});
+	v.findings.originals = std::make_shared<const OriginalData>(shipped);
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	text = files_text();
@@ -1131,7 +1133,7 @@ void test_files_window() {
 	CHECK(items_at != std::string::npos && size_at != std::string::npos && size_at > items_at &&
 	              text.substr(items_at + 9, size_at - items_at - 9).find_first_of("0123456789") == std::string::npos,
 	      "the game's own data: no counts after its name");
-	v.findings.original_files.reset();
+	v.findings.originals.reset();
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	text = files_text();
