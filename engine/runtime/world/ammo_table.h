@@ -31,6 +31,15 @@ inline const char *const kImpactEffectTagNames[kImpactEffectTagCount] = {
     "metal", "glass", "cloth", "foliage", "hmetal", "flesh", "bodyarmor", "uwaterdeep",
     "uwatershallow", "uwatersurface",
 };
+// The tags in a modder's words, for the tools that name a bullet face's surface by its row (a face
+// byte b plays row b + 4: the editor's surface picker, `opennova-3di catalog`'s surface lines, the
+// Blender add-on through it). Tooling words, not the game's: the game reads the tags above.
+inline const char *const kImpactEffectTagWords[kImpactEffectTagCount] = {
+    "None", "Move", "Player", "Zip", "Object", "Dirt", "Grass", "Snow", "Cement", "Sand",
+    "Packed dirt", "Water", "Railroad", "Mud", "Ice", "Quicksand", "Stone", "Wood",
+    "Metal", "Glass", "Cloth", "Foliage", "Heavy metal", "Flesh", "Body armor", "Deep water",
+    "Shallow water", "Water surface",
+};
 
 // Case-insensitive tag lookup, matching the original's scan from index 1
 // [orig: @ 0x40a46a..0x40a48e]; -1 = unknown tag.

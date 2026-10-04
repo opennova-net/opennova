@@ -7,6 +7,7 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cstring>
 
 // The engine's ImGui copy must be the commit the imgui-godot addon bundles
@@ -86,6 +87,38 @@ void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport, 
 		}
 	}
 	ImGui::DockBuilderFinish(dockspace_id);
+}
+
+// The frame's hover taken back after NewFrame: no window hovered, so no item is and no tooltip
+// starts. The position stays the bridge's.
+void drop_hover() {
+	ImGuiContext &g = *ImGui::GetCurrentContext();
+	g.HoveredWindow = nullptr;
+	g.HoveredWindowUnderMovingWindow = nullptr;
+	g.HoveredWindowBeforeClear = nullptr;
+}
+
+// The frame's wheel taken back: NewFrame set the scroll target of the window it wheels (applied as
+// the window begins), and the canvases read io.MouseWheel.
+void drop_wheel() {
+	ImGuiContext &g = *ImGui::GetCurrentContext();
+	g.IO.MouseWheel = 0.0f;
+	g.IO.MouseWheelH = 0.0f;
+	if (g.WheelingWindow && g.WheelingWindowScrolledFrame == g.FrameCount)
+		g.WheelingWindow->ScrollTarget = ImVec2(FLT_MAX, FLT_MAX);
+	g.WheelingWindow = nullptr;
+	g.WheelingWindowReleaseTimer = 0.0f;
+}
+
+// The frame's presses taken back: the buttons read up.
+void drop_presses() {
+	ImGuiIO &io = ImGui::GetIO();
+	for (int button = 0; button < ImGuiMouseButton_COUNT; ++button) {
+		if (!io.MouseClicked[button]) continue;
+		io.MouseDown[button] = false;
+		io.MouseClicked[button] = false;
+		io.MouseDownDuration[button] = -1.0f;
+	}
 }
 
 }  // namespace
@@ -281,10 +314,35 @@ void ImGuiPass::sync_visibility() {
 	}
 }
 
+void ImGuiPass::gate_mouse() {
+	const ImGuiIO &io = ImGui::GetIO();
+	bool pressed = false, down = false, released = false;
+	for (int button = 0; button < ImGuiMouseButton_COUNT; ++button) {
+		pressed = pressed || io.MouseClicked[button];
+		down = down || io.MouseDown[button];
+		released = released || io.MouseReleased[button];
+	}
+	const bool wheel = io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f;
+	// A press is the pass's with the cursor over its window; then it is held or let go as it was taken.
+	if (pressed && !press_taken_) {
+		press_taken_ = mouse_over_;
+		if (!press_taken_) drop_presses();
+	}
+	const bool press = press_taken_ && (down || released);
+	if (!down) press_taken_ = false;
+	if (wheel && !mouse_over_ && !press) drop_wheel();
+	const bool hover = (mouse_focused_ && mouse_over_) || press || (wheel && mouse_over_);
+	if (!hover) drop_hover();
+}
+
 bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	if (!attached_ || !open_) {
 		return false;
 	}
+
+	// What of the frame's mouse is the pass's (set_mouse_place), after the bridge's NewFrame
+	// took the events and before anything draws.
+	gate_mouse();
 
 	// A reset requested last frame (the menu item, a probe) rebuilds the
 	// default layout below and expands every window this frame.

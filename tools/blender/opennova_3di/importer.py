@@ -181,8 +181,12 @@ def read_o3d(path):
             elif k == "cv":
                 cobj["verts"].append(tuple(num(x) for x in a[:3]))
             elif k == "cf":
-                cobj["faces"].append((int(a[0]), int(a[1]), int(a[2]), int(a[3]) if len(a) > 3 else 1,
-                                      int(a[4]) if len(a) > 4 else 0))
+                face = (int(a[0]), int(a[1]), int(a[2]), int(a[3]) if len(a) > 3 else 1,
+                        int(a[4], 0) if len(a) > 4 else 0)
+                if len(a) > 7:
+                    # The normal a face the 8.8 grid collapses keeps.
+                    face += (tuple(num(x) for x in a[5:8]),)
+                cobj["faces"].append(face)
             elif k in ("cvolume", "cvol"):
                 box = [num(x) for x in a[2:8]]
                 volume = {"type": int(a[0]), "flags": int(a[1]), "planes": []}
@@ -351,6 +355,7 @@ class Builder(Notes):
         self.roots = []          # LOD roots
         self.rig = None          # the model's rig
         self.part_empties = {}   # LOD -> {part: its PN## empty}
+        self.part_meshes = {}    # (LOD, part) -> a rigid part's mesh object, a polygon per triangle
         self.mesh_part = None    # a skinned model's mesh part
 
     def discard(self):
@@ -638,7 +643,9 @@ class Builder(Notes):
             pivot = self.blender(part["pivot"])
             if part["strips"]:
                 me, _ = self.mesh(f"{pi + 1:02d} Mesh", part["strips"], pivot, mats, False)
-                objs.append(self.put(bpy.data.objects.new(me.name, me), li, pi, Matrix.Translation(pivot)))
+                ob = self.put(bpy.data.objects.new(me.name, me), li, pi, Matrix.Translation(pivot))
+                self.part_meshes[(li, pi)] = ob
+                objs.append(ob)
             elif part["centre"] is not None:
                 objs.append(self.centre_helper(li, pi, part["centre"]))
         return objs
@@ -1077,13 +1084,23 @@ class Builder(Notes):
                 # models: Baricd02's two-sided wire stores its faces one-sided).
                 p.face_both_sides = "YES" if flags & 1 else "NO"
         if outvoted:
-            self.note(f"{outvoted} bullet faces take their material's most common surface and flags, not their own "
-                      "(a material carries one set)")
+            # Each such face keeps its own on its polygon (a rigid LOD's part
+            # meshes: a skinned model's meshes are laid out otherwise).
+            hits = []
+            self.face_votes(chosen, hits)
+            kept = self.keep_face_values(chosen, hits, mats)
+            self.note(f"{outvoted} bullet faces carry another surface or flags than their material's most common; "
+                      f"{kept} of them keep their own on their polygon (the {materials.FACE_SURFACE} and "
+                      f"{materials.FACE_FLAGS} face attributes; the material panel counts them and Make all gives "
+                      "them the material's)")
 
-    def face_votes(self, li):
+    def face_votes(self, li, hits=None):
         """Each material's votes for the (surface, flags) of the bullet faces
         LOD li's triangles meet (by centroid, within its section), and how many
-        they meet."""
+        they meet. `hits`, a list, gets each met triangle as (part, its index
+        among the part's triangles, material, (surface, flags)): the part
+        mesh's polygon of that index (mesh() makes a polygon per triangle, in
+        order)."""
         votes = {}
         met = 0
         lod = self.sc["lods"][li]
@@ -1092,18 +1109,137 @@ class Builder(Notes):
             for s in part["strips"]:
                 for tri in s["tris"]:
                     section_tris.setdefault(pi, []).append((s["material"], [s["verts"][x]["p"] for x in tri]))
+        # Each triangle takes a face whose middle lies within 1/64 m of its
+        # own, looked for in a grid of 1/64 m cells and their neighbours: the
+        # face made from it where one is there (its corners truncated to the
+        # 8.8 grid are the face's, as the exporter made them, and the face is
+        # wound with it: a sheet stored in both windings, each side its own
+        # material and surface, puts two such triangles at one face's corners,
+        # and each side keeps its own face), else the face whose corners lie
+        # nearest its own, wound with it before against. One triangle to a
+        # face, so a coincident pair's two faces go to its two triangles; a
+        # triangle stored twice shares the face made from it, and a triangle
+        # whose every face another took takes its best one anyway.
+        # A face's winding is its given normal where the scene carries one (a
+        # face the grid collapses), else its corners'. "With" is the model's
+        # own relation of its faces' windings to its triangles' (what most
+        # triangles with one face about them show). The editor's rule
+        # (documents/model_surfaces).
+        near = 1.0 / 64.0
+
+        def cell(m):
+            return tuple(int(math.floor(x * 64.0)) for x in m)
+
+        def middle_normal(p):
+            m = tuple(sum(q[k] for q in p) / 3.0 for k in range(3))
+            e1 = [p[1][k] - p[0][k] for k in range(3)]
+            e2 = [p[2][k] - p[0][k] for k in range(3)]
+            return m, (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+
+        def on_grid(x):
+            # threedi_q8f_trunc: x * 256 truncated to a signed 16-bit word.
+            q = (int(x * 256.0) + 32768) % 65536 - 32768
+            return q / 256.0
+
+        def corner_distance(face_corners, tri_grid):
+            return sum(min(sum((g[k] - c[k]) ** 2 for k in range(3)) for g in tri_grid) for c in face_corners)
+
         for si, c in enumerate(self.sc["cobjs"]):
-            by_centre = {}
-            for a, b, cc, poly, flags in c["faces"]:
-                p = [c["verts"][x] for x in (a, b, cc)]
-                by_centre[tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))] = (poly, flags)
-            for material, p in section_tris.get(si, []):
-                key = tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))
-                if key in by_centre:
-                    votes.setdefault(material, {}).setdefault(by_centre[key], 0)
-                    votes[material][by_centre[key]] += 1
-                    met += 1
+            grid, faces = {}, []
+            for face in c["faces"]:
+                a, b, cc, poly, flags = face[:5]
+                corners = [c["verts"][x] for x in (a, b, cc)]
+                m, n = middle_normal(corners)
+                if len(face) > 5:
+                    n = face[5]
+                grid.setdefault(cell(m), []).append(len(faces))
+                faces.append((m, n, (poly, flags), corners))
+            tris = section_tris.get(si, [])
+            near_faces = []
+            agree = 0
+            for material, p in tris:
+                m, n = middle_normal(p)
+                tri_grid = [tuple(on_grid(x) for x in q) for q in p]
+                at = cell(m)
+                found = []
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        for dz in (-1, 0, 1):
+                            for fi in grid.get((at[0] + dx, at[1] + dy, at[2] + dz), ()):
+                                d = sum((faces[fi][0][k] - m[k]) ** 2 for k in range(3))
+                                if d <= near * near:
+                                    found.append((fi, corner_distance(faces[fi][3], tri_grid),
+                                                  sum(n[k] * faces[fi][1][k] for k in range(3))))
+                if len(found) == 1:
+                    agree += 1 if found[0][2] >= 0 else -1
+                near_faces.append(found)
+            with_ = 1.0 if agree >= 0 else -1.0
+
+            def rank(d, w):
+                wound = with_ * w > 0
+                return (0 if wound else 1) if d == 0.0 else (2 if wound else 3)
+
+            pairs = sorted((rank(d, w), d, ti, fi) for ti, found in enumerate(near_faces) for fi, d, w in found)
+            taken, chosen, best = set(), {}, {}
+
+            def share():
+                # A triangle a face was made from keeps the first such face
+                # though triangles it was made from took them all (a triangle
+                # stored twice), before any takes a face not made from it.
+                for ti, (r, fi) in best.items():
+                    if ti not in chosen and r == 0:
+                        chosen[ti] = fi
+                        taken.add(fi)
+
+            shared = False
+            for r, _, ti, fi in pairs:
+                if not shared and r != 0:
+                    share()
+                    shared = True
+                best.setdefault(ti, (r, fi))
+                if ti in chosen or fi in taken:
+                    continue
+                chosen[ti] = fi
+                taken.add(fi)
+            if not shared:
+                share()
+            for ti, found in enumerate(near_faces):
+                if ti not in chosen and found:
+                    # More triangles than faces at a place: the best face anyway.
+                    chosen[ti] = min(found, key=lambda e: (rank(e[1], e[2]), e[1]))[0]
+            for ti, fi in sorted(chosen.items()):
+                material, value = tris[ti][0], faces[fi][2]
+                votes.setdefault(material, {}).setdefault(value, 0)
+                votes[material][value] += 1
+                met += 1
+                if hits is not None:
+                    hits.append((si, ti, material, value))
         return votes, met
+
+    def keep_face_values(self, li, hits, mats):
+        """The faces whose (surface, flags) is not their material's vote keep
+        their own on the polygon (materials.FACE_SURFACE and FACE_FLAGS), so a
+        re-export writes each face as the file held it; how many."""
+        kept = 0
+        by_mesh = {}
+        for pi, ti, mi, (surface, flags) in hits:
+            ob = self.part_meshes.get((li, pi))
+            if ob is None or not 0 <= mi < len(mats):
+                continue
+            mat = mats[mi]
+            own_surface = surface if surface != mat.o3d.surface else -1
+            own_flags = flags if flags != materials.face_flags(mat) else -1
+            if own_surface < 0 and own_flags < 0:
+                continue
+            values = by_mesh.setdefault(ob.name, (ob, [-1] * len(ob.data.polygons), [-1] * len(ob.data.polygons)))
+            if ti < len(values[1]):
+                values[1][ti] = own_surface
+                values[2][ti] = own_flags
+                kept += 1
+        for ob, surfaces, flags in by_mesh.values():
+            materials.set_face_overrides(ob.data, materials.FACE_SURFACE, surfaces)
+            materials.set_face_overrides(ob.data, materials.FACE_FLAGS, flags)
+        return kept
 
 
 def solve_planes(a, b, c):
