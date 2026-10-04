@@ -75,6 +75,10 @@ io::JsonValue view_event_to_json(const ViewEvent &event);
 // moved up to it), next_cursor, lines}: a client paging by next_cursor neither skips nor repeats
 // a line while the log drops its oldest past 2000.
 io::JsonValue output_page_to_json(const OutputLog &output, uint64_t cursor, size_t limit);
+// The lines folded under the output line at absolute `at` (OutputLog: an import's files, the game's log),
+// a page by their own index from `cursor`: {at, line (its text), dropped (those past the log's hold),
+// first, next, count, cursor, next_cursor, lines}.
+io::JsonValue output_folded_to_json(const OutputLog &output, uint64_t at, uint64_t cursor, size_t limit);
 // A page of the view's events by seq (ViewEvents): {first, next, count, cursor, next_cursor, items
 // (view_event_to_json's)}, paged as the output lines are.
 io::JsonValue events_page_to_json(const ViewEvents &events, uint64_t cursor, size_t limit);
