@@ -168,6 +168,9 @@ struct SourceIssue {
 struct SerializeResult {
 	std::string text;
 	std::vector<SourceIssue> issues;
+	// What a save of the text says beyond writing it, a sentence each (a record written in the table's
+	// order: its own would read back otherwise); never a refusal.
+	std::vector<std::string> notes;
 	bool ok() const { return issues.empty(); }
 };
 
