@@ -197,7 +197,11 @@ is reached; large meshes need no manual splitting.
 To reuse retail animations, match the retail rig, since animations pair with
 parts by index: JO's people share one rig of 19 bones (plus the mesh part);
 the first-person arms (`ArmsG`) are 37 arm bones (plus the mesh part), the
-first 37 parts of every stock first-person gun.
+first 37 parts of every stock first-person gun. A person of your own may add
+bones after the 19 (fingers, toes, twist bones; a clip poses 64 at most):
+OpenNova poses each with the part it hangs from, so a finger aims and holds
+with its hand, where retail's executable poses every bone past 19 with the
+body (ADR 0047 decision 16). A retail clip leaves the added bones at rest.
 
 A rotated `PN##` empty is a rotation frame: its animation tracks turn about
 the empty's own axes (Dblkhwk1's tail rotor is canted this way). A bone keeps

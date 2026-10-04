@@ -243,6 +243,20 @@ bool SkeletalClips::load_clips(
 				weapon_mask_[i] = 1;
 				any_weapon_mask_ = true;
 			}
+			// A BN## part past the person rig's 19 follows the part it hangs
+			// from: its parent's overlay class and weapon-channel membership,
+			// so a finger below a hand aims and holds with that hand. Retail's
+			// switch and mask stop at bone 18 and give every later bone the
+			// body matrix and the primary channel [orig: the bone-index switch
+			// @ 0x4b1f3a, the mask @ 0x4b14db]; no retail third-person rig
+			// carries such a bone, so the rule reaches OpenNova's own bodies
+			// alone (on_person's fingers, toes and forearm twists). A
+			// deliberate divergence: ADR 0047 decision 16.
+			if (model_index >= anim::kPersonRigBoneCount && parent >= 0 &&
+					bad_parent_in_order(parent, i)) {
+				classes_[i] = classes_[static_cast<size_t>(parent)];
+				weapon_mask_[i] = weapon_mask_[static_cast<size_t>(parent)];
+			}
 			// The FK/rest accumulation assumes topological parent order — the
 			// same validation the binding's collision consumer applied (the
 			// format's rule, which the editor's clip validator shares).

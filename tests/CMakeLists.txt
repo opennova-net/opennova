@@ -336,6 +336,14 @@ target_include_directories(anim_skeletal_pose_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_features(anim_skeletal_pose_test PRIVATE cxx_std_17)
 add_test(NAME anim_skeletal_pose COMMAND anim_skeletal_pose_test)
 
+# ANIM finger bones (ADR 0047 d16): a BN## part past the person rig's 19 takes
+# its parent's overlay class and weapon channel, over a rig minted in the test.
+add_executable(anim_skeletal_clips_finger_test anim/skeletal_clips_finger_test.cpp)
+target_link_libraries(anim_skeletal_clips_finger_test PRIVATE opennova_runtime)
+target_include_directories(anim_skeletal_clips_finger_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_skeletal_clips_finger_test PRIVATE cxx_std_17)
+add_test(NAME anim_skeletal_clips_finger COMMAND anim_skeletal_clips_finger_test)
+
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
 target_link_libraries(def_comment_strip_test PRIVATE opennova_formats)

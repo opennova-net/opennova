@@ -42,7 +42,8 @@ enum OverlayClass : uint8_t {
 // Model bone index (== BN## - 1, the .bad file order) -> overlay class.
 // [orig: the bone-index switch @ 0x4b1f3a; map witnessed in section 14.2. Bones >= 19
 // (helmet/gear accessories) take kOverlayBody, matching the default case.]
-inline constexpr uint8_t kOverlayClassByBoneIndex[19] = {
+inline constexpr int kPersonRigBoneCount = 19;
+inline constexpr uint8_t kOverlayClassByBoneIndex[kPersonRigBoneCount] = {
     kOverlayBody,        // 0  BN01 Hips (default case)
     kOverlaySpine,       // 1  BN02 Lower Spine
     kOverlayUpperSpine,  // 2  BN03 Upper Spine
