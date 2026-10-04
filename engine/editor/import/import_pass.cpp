@@ -76,16 +76,37 @@ ImportPass::Cache ImportPass::load_cache(const std::string &path, std::string &t
 	return cache;
 }
 
+void ImportPass::limit_to(std::vector<std::string> sources) {
+	if (phase_ != Phase::Start) return;
+	limited_ = true;
+	listed_.clear();
+	std::sort(sources.begin(), sources.end());
+	sources.erase(std::unique(sources.begin(), sources.end()), sources.end());
+	for (std::string &relative : sources) {
+		fs::path path = system_path(join_path(paths_.root, relative));
+		listed_.emplace_back(std::move(relative), std::move(path));
+	}
+}
+
 // Written only when it changed: a pass over an untouched project writes nothing, and a
 // project with no import sources and no cache yet (a clone opened for `status`) gets none. A file
 // whose last write lies too near the pass (io::file_stamp_settled) is left out, read again next
-// time: a rewrite of the same size inside its timestamp tick is never taken for the bytes read.
+// time: a rewrite of the same size inside its timestamp tick is never taken for the bytes read. A
+// pass over some sources (limit_to) keeps what the cache knew of everything else.
 void ImportPass::save_cache() const {
-	if (seen_.files.empty() && seen_.records.empty() && cache_text_.empty()) return;
+	Cache kept = limited_ ? cache_ : Cache();
+	for (const auto &[file, seen] : seen_.files) kept.files[file] = seen;
+	if (limited_)
+		for (const auto &[source, path] : listed_) {
+			(void)path;
+			kept.records.erase(source);
+		}
+	for (const auto &[source, made] : seen_.records) kept.records[source] = made;
+	if (kept.files.empty() && kept.records.empty() && cache_text_.empty()) return;
 	io::JsonValue json = io::JsonValue::make_object();
 	json.set("schema_version", io::JsonValue::make_number(kImportCacheSchemaVersion));
 	io::JsonValue files = io::JsonValue::make_array();
-	for (const auto &[file, seen] : seen_.files) {
+	for (const auto &[file, seen] : kept.files) {
 		if (!io::file_stamp_settled(seen.modified, pass_began_)) continue;
 		io::JsonValue item = io::JsonValue::make_object();
 		item.set("path", io::JsonValue::make_string(file));
@@ -96,7 +117,7 @@ void ImportPass::save_cache() const {
 	}
 	json.set("files", std::move(files));
 	io::JsonValue records = io::JsonValue::make_array();
-	for (const auto &[source, made] : seen_.records) {
+	for (const auto &[source, made] : kept.records) {
 		io::JsonValue item = io::JsonValue::make_object();
 		item.set("source", io::JsonValue::make_string(source));
 		item.set("record", io::JsonValue::make_string(io::hex64(made.record)));
@@ -121,6 +142,11 @@ bool ImportPass::step(uint64_t budget) {
 		case Phase::Start: {
 			pass_began_ = io::file_clock_now_ticks();
 			cache_ = load_cache(paths_.import_cache_file, cache_text_);
+			if (limited_) {
+				// The sources named: no walk.
+				phase_ = Phase::Importing;
+				break;
+			}
 			std::error_code ec;
 			// Through the system's paths (project_files.h): a source past MAX_PATH is found and read.
 			walk_ = fs::recursive_directory_iterator(system_path(utf8_of(root_)),
@@ -254,6 +280,17 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 			return false;
 		}
 		spent += bytes.size();
+		// Its size or last write moved while it was read: a program is writing it still, and what was read
+		// may be half of it. Nothing is made of it now; the next pass reads it again.
+		std::error_code moved;
+		if (uint64_t(fs::file_size(path, moved)) != now.size || moved || io::file_modified_ticks(path) != now.modified) {
+			result_.diagnostics.push_back(make_finding(CoreFinding::ImportRead, DiagnosticSeverity::Warning,
+			                                           source.source + " changed while it was read: it is imported once its "
+			                                                           "program has finished writing it.",
+			                                           source.source));
+			bytes.clear();
+			return false;
+		}
 		have_bytes = true;
 		return true;
 	};
