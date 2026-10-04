@@ -49,6 +49,11 @@ const BlankFactory k_factories[] = {
 	{ "font_impac38b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	// Mission: the rows the factories can already fill (the rest wait for their writers).
 	{ "ammo_def", AssetKind::AmmoDefs, make_blank_ammo_def, "an ammo table holding only the null round", true },
+	// An expansion's own (ADR 0046 S16): its text table, naming it in the Mods list, and its version text.
+	{ "expansion_table", AssetKind::Strings, make_blank_expansion_table,
+	  "the expansion's text table: its name in the Mods list (the project's title) and an empty description", false },
+	{ "expansion_version", AssetKind::Text, make_blank_expansion_version,
+	  "the expansion's version text (the project's title), whose checksum a joiner must match", false },
 	// Free-form: a new file of a kind whose required files are all specific (Create
 	// menu, Create table, a font of another name, a missing texture's placeholder).
 	{ "", AssetKind::Strings, make_blank_empty_strings, "an empty string table", true },

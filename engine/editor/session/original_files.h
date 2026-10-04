@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_document.h>
 
 namespace opennova::editor {
 
@@ -43,15 +44,16 @@ struct OriginalData {
 // make of a name the install's files make too. So an edit never makes the original's findings of a
 // file the modder's, and the modder's own effects on files they never touched are theirs.
 //
-// The install is listed as the game serves it (mount_retail: its archives' files, the loose files the
-// game ships beside them), each file by its logical name and read through the mount (ProjectPaths::
-// files), then validated as the session validates the project (ProjectValidation, then the document
+// The install is listed as the project imports it (assets/install_view.h: its archives' files and the
+// loose files the game reads beside them, with `/exp` for a project that builds on an installed
+// expansion and under the project's names for one that builds as an expansion, ADR 0046 S16), each file
+// by its logical name and read through the view (ProjectPaths::files), then validated as the session validates the project (ProjectValidation, then the document
 // types' project checks over the install's files: a menu's screens compiled as the game draws them),
 // every step within a budget of bytes, its own graph, cache and checks let go once the findings are
 // keyed (nothing of the session's is copied or read). It never depends on the project: an edit, a
 // save, an import or a build validates nothing again. A Refresh (a new scan) looks at the install's
 // folder again, and an install that moved there (a patch) is validated again; another install or game
-// forgets it.
+// forgets it, as does another expansion of the project's (the view moves with it).
 class OriginalFiles {
 public:
 	OriginalFiles();
@@ -90,6 +92,7 @@ private:
 	std::string install_;
 	std::shared_ptr<const ProjectDocument> document_;
 	std::string game_;
+	ProjectExpansion expansion_; // the project's, which the install's view follows (install_spec)
 	std::string folder_; // the install folder's state when it was validated (folder_state)
 	const void *scan_ = nullptr;
 	Phase phase_ = Phase::Idle;
