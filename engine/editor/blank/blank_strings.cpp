@@ -87,4 +87,33 @@ bool make_blank_mission_text(const BlankRequest &request, std::vector<uint8_t> &
 	return write_table(table, request, out, error);
 }
 
+// An expansion's text table (<n>.bin, ADR 0046 S16): the two keys the Mods list reads of it, its name
+// and its description [orig: Expansion_ScanAndRegister: TextResource_FindEntryBySectionAndKey
+// ("exp_info", "EXP_NAME") @ 0x4a4578, ("exp_info", "EXP_DESC") @ 0x4a45ef], the name the project's
+// title, the description empty. The game's table overrides its strings by section and key too: the
+// modder adds those sections here.
+bool make_blank_expansion_table(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+	File table;
+	std::string title = request.project_title.empty() ? request.logical_name : request.project_title;
+	// The Mods list copies EXP_NAME into a 64-byte name with no bound, a longer one running over the
+	// record's directory [orig: Expansion_ScanAndRegister @ 0x4a4598]: the title is cut to 63 bytes, at a
+	// character's start, so the table made is one the build takes (build.expansion.exp_name).
+	if (title.size() > 63) {
+		size_t cut = 63;
+		while (cut > 0 && (static_cast<unsigned char>(title[cut]) & 0xC0) == 0x80) --cut;
+		title.resize(cut);
+	}
+	add_section(table, "exp_info", {{"EXP_NAME", title}, {"EXP_DESC", std::string()}});
+	return write_table(table, request, out, error);
+}
+
+// An expansion's version text (version.txt): its only reader takes the checksum of its bytes
+// [orig: Expansion_LoadAssets @ 0x4a4858..0x4a4885]; the project's title on one line, as the shipped
+// one names its expansion.
+bool make_blank_expansion_version(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &) {
+	const std::string title = request.project_title.empty() ? request.logical_name : request.project_title;
+	blank_text_to_bytes(title + "\n", out);
+	return true;
+}
+
 } // namespace opennova::editor
