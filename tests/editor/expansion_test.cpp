@@ -31,6 +31,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/view_json.h>
 #include <formats/pff/pff.h>
+#include <formats/rtxt/rtxt.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -307,34 +308,45 @@ static int test_install_view() {
 	return 0;
 }
 
-// The fold of the game's own data (S15) compares a project's file with the install's copy as the
-// project imports it, under the project's name, and forgets what it found when the project's expansion
-// moves.
+// The game's own data's baseline (S15) validates the install as the project imports it, its files under
+// the project's names (x1's table as jxm.bin), and validates it again when the project's expansion moves
+// (the base game holds no jxm.bin).
 static int test_fold_follows_the_view() {
 	editor_test::TempProjectDir dir("opennova_editor_expansion_fold");
 	const std::string install = dir.file("install");
 	TEST_EXPECT(make_install(install));
+	// x1's table with a section of no name: a finding the install makes of its own file
+	// (strings.section_empty).
+	opennova::rtxt::File table;
+	table.sections.push_back({ "", 1 });
+	opennova::rtxt::Entry entry;
+	entry.key = "KEY";
+	entry.text = "text";
+	table.entries.push_back(entry);
+	std::vector<uint8_t> bytes;
+	std::string written;
+	TEST_EXPECT(opennova::rtxt::write(table, bytes, written));
+	TEST_EXPECT(write_archive(install + "/expansion/x1/x1L.pff", { { "Mx1.bin", "x1 menu script" }, { "x1L.lwf", "x1 bank" },
+	                                                              { "x1.bin", std::string(bytes.begin(), bytes.end()) } }));
 	const std::string root = dir.file("project");
 	ProjectDocument created;
 	Diagnostic error;
 	TEST_EXPECT(create_project(root, "Mod", "jo", created, error, ProjectExpansion{ "jxm", "x1" }));
-	TEST_EXPECT(editor_test::write_text(root + "/jxm.bin", "x1 table"));
-	const ProjectPaths paths = ProjectPaths::for_root(root);
-	const AssetScan scan = scan_project_assets(paths, created);
-	const std::vector<Diagnostic> findings{ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Warning,
-	                                                     "about jxm.bin", "jxm.bin") };
 	OriginalFiles fold;
+	const int scan = 0; // the session's scan stands in: the same one throughout
 	const auto settle = [&](const std::shared_ptr<const ProjectDocument> &document) {
-		fold.want(install, document, root, scan, findings);
+		fold.want(install, document, &scan);
 		while (!fold.step(1 << 20)) {
 		}
-		return fold.files()->count("jxm.bin") == 1;
+		const OriginalData &data = *fold.data();
+		const auto found = data.findings.find(normalized_logical_name("jxm.bin"));
+		return data.ready && found != data.findings.end() && !found->second.empty();
 	};
 	TEST_EXPECT(settle(std::make_shared<const ProjectDocument>(created)));
-	// The base game holds no jxm.bin of its own: what it knew is forgotten and the file is the modder's.
+	const size_t validated = fold.validations();
 	ProjectDocument on_base = created;
 	on_base.expansion = { "jxm", "" };
-	TEST_EXPECT(!settle(std::make_shared<const ProjectDocument>(on_base)));
+	TEST_EXPECT(!settle(std::make_shared<const ProjectDocument>(on_base)) && fold.validations() == validated + 1);
 	return 0;
 }
 

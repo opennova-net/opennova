@@ -286,6 +286,8 @@ public:
 	// them: of the files a gate row says do not serialize, those that are the game install's bytes
 	// (OriginalBytes, asked here), less the open documents with unsaved edits.
 	ShippedFiles shipped_files();
+	// The same over the gate rows `gate` (the Problems rows' marking asks it without composing them).
+	ShippedFiles shipped_files(const std::vector<Diagnostic> &gate);
 
 private:
 	// The path of the document a viewport request names (its path or logical name; "" the active

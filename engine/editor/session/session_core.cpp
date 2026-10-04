@@ -598,10 +598,10 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 				problems().validate_later();
 			}
 			if (expansion_changed) {
-				// The install as the project imports it moved (install_view.h): its names, and which
-				// files are its own data, are found again.
+				// The install as the project imports it moved (install_view.h): its names are found again,
+				// and what it makes of its own data once the validation above asks for it (OriginalFiles::
+				// want, which validates the install again for another expansion).
 				imports().refresh_install_files();
-				problems().forget_originals();
 			}
 		} else {
 			project_changed = expansion_changed = features_changed = false;
@@ -1129,7 +1129,9 @@ BuildTarget SessionCore::build_target() const {
 	return target;
 }
 
-ShippedFiles SessionCore::shipped_files() {
+ShippedFiles SessionCore::shipped_files() { return shipped_files(problems().gate_findings()); }
+
+ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 	ShippedFiles shipped;
 	for (const auto &open : view_.documents.open)
 		if (open && open->dirty()) shipped.unsaved.insert(open->path());
@@ -1137,7 +1139,7 @@ ShippedFiles SessionCore::shipped_files() {
 	// Only the files a gate row says do not serialize are asked of the install (a few, each read once while
 	// it stands).
 	std::vector<std::string> asked;
-	for (const Diagnostic &d : problems().gate_findings())
+	for (const Diagnostic &d : gate)
 		if (d.severity == DiagnosticSeverity::Error && d.row() && d.row()->blocks_save && !d.asset.empty() &&
 		    !shipped.unsaved.count(d.asset))
 			asked.push_back(d.asset);

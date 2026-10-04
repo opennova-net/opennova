@@ -51,8 +51,9 @@ Placement place(const AssetEntry &asset, const BuildTarget &target) {
 // The plan's own finding about a file of the scan, false for one it packs or leaves out without a word: an
 // archive (the build packs the project's files itself); the player's or this machine's own file (a save, a
 // configuration, the stored credentials, what the game writes: never packed, ADR 0046 S14,
-// assets/player_files.h); a file an archive packs whose name no archive can store (where `target` places it:
-// the standalone game's archives, or an expansion's, ADR 0046 S16).
+// assets/player_files.h); a NovaWorld screen of a name no archive holds, which the game never reads (left
+// out); a file an archive packs whose name no archive can store (where `target` places it: the standalone
+// game's archives, or an expansion's, ADR 0046 S16).
 bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic &out) {
 	if (asset.kind == AssetKind::Archive) {
 		out = make_finding(CoreFinding::BuildArchiveInProject, DiagnosticSeverity::Error,
@@ -65,6 +66,18 @@ bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic 
 		out = make_finding(CoreFinding::BuildPlayerFile, DiagnosticSeverity::Warning,
 		                   asset.logical_name + " is " + player_file_words(asset.logical_name) +
 		                           ": a build never packs the player's own files, so it is left out.",
+		                   asset.relative_path);
+		return true;
+	}
+	// A NovaWorld screen is read through the archives alone (unless /d) by its name: nw_startup.mnx and
+	// nw_error.mnx [orig: UI_EnterNovaWorldMenu @ 0x558937; UI_ShowNovaWorldErrorMessage @ 0x558449], and
+	// the page an ACTION of type MNX names [orig: CUIWidget_HandleScriptedAction @ 0x649bb2]. A name no
+	// archive can store is one the game never reads: such a page (a template, a backup) is left out and
+	// said, never gating the build as an archived kind's name would (ADR 0046 S16).
+	if (asset.kind == AssetKind::NovaWorldScreen && !logical_name_fits_archive(asset.logical_name)) {
+		out = make_finding(CoreFinding::BuildUnread, DiagnosticSeverity::Warning,
+		                   "The game reads a NovaWorld screen through its archives alone, and no archive can hold the "
+		                   "name " + asset.logical_name + " (it is too long): the build leaves it out.",
 		                   asset.relative_path);
 		return true;
 	}
@@ -205,19 +218,6 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		// An import source (its outputs, named after it, are in the scan) and a file of no kind the
 		// game knows, which the game never asks for (S13 A8), are left out.
 		if (!asset_kind_packed(asset.kind)) continue;
-		// A NovaWorld screen is read through the archives alone (unless /d) by its name: nw_startup.mnx and
-		// nw_error.mnx [orig: UI_EnterNovaWorldMenu @ 0x558937; UI_ShowNovaWorldErrorMessage @ 0x558449], and
-		// the page an ACTION of type MNX names [orig: CUIWidget_HandleScriptedAction @ 0x649bb2]. A name no
-		// archive can store is one the game never reads: such a page (a template, a backup) is left out and
-		// said, never gating the build as an archived kind's name would (ADR 0046 S16).
-		if (asset.kind == AssetKind::NovaWorldScreen && !logical_name_fits_archive(asset.logical_name)) {
-			plan.diagnostics.push_back(make_finding(
-			        CoreFinding::BuildUnread, DiagnosticSeverity::Warning,
-			        "The game reads a NovaWorld screen through its archives alone, and no archive can hold the name " +
-			                asset.logical_name + " (it is too long): the build leaves it out.",
-			        asset.relative_path));
-			continue;
-		}
 		const Placement placement = place(asset, target);
 		BuildEntry entry;
 		entry.logical_name = asset.logical_name;
