@@ -13,6 +13,10 @@ bool make_blank_empty_strings(const BlankRequest &, std::vector<uint8_t> &out, D
 bool make_blank_gametext(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_menutxt(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_mission_text(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+// An expansion's text table: [exp_info] EXP_NAME (the project's title) and EXP_DESC, empty.
+bool make_blank_expansion_table(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+// An expansion's version text (blank_strings.cpp beside its table): the project's title, one CRLF line.
+bool make_blank_expansion_version(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // bms and wac (blank_mission.cpp): a mission on the terrain and under the environment the request
 // names, holding its header alone; an empty script

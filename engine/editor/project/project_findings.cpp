@@ -100,7 +100,7 @@ ProjectFindings collect_project_findings(const ProjectFindingsInput &input, cons
 	rows.insert(rows.end(), input.open_findings.begin(), input.open_findings.end());
 	// The build's own word on the files (an archive in the project, a name no archive stores, a player's
 	// file left out): rows of the gate, so a build is refused only for what Problems shows and marks.
-	const std::vector<Diagnostic> plan = plan_scan_findings(input.scan);
+	const std::vector<Diagnostic> plan = plan_scan_findings(input.scan, input.project.expansion.name);
 	rows.insert(rows.end(), plan.begin(), plan.end());
 	out.gate_end = rows.size();
 	checks.append_findings(rows);

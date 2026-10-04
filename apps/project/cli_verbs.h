@@ -7,7 +7,7 @@
 // its end, then its query (the query table, editor_queries.h), whose answer it prints, as text or,
 // with --json, as the Shell's query_json gives it.
 //
-//   opennova-project new <dir> [--title <text>] [--game <code>]
+//   opennova-project new <dir> [--title <text>] [--game <code>] [--expansion <name>] [--builds-on <expansion>]
 //   opennova-project status <dir>
 //   opennova-project validate <dir>
 //   opennova-project create-missing <dir> [--role <token>]
@@ -56,6 +56,7 @@ enum class CliVerb : uint8_t {
 	Import,
 	Reimport,
 	Build,
+	Export,
 	Request,
 	Query,
 	kCount,
