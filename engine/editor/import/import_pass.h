@@ -31,6 +31,11 @@ public:
 	ImportPass(const ProjectPaths &paths, const ProjectDocument &project, bool force = false,
 			std::string only = std::string(), const std::vector<Importer> &table = importers());
 
+	// The pass over `sources` alone (project-relative; S18's external round trip: the sources a program
+	// changed), before its first step: no walk of the project, each taken as any pass takes it, and the
+	// cache keeps what it knew of every other file and source.
+	void limit_to(std::vector<std::string> sources);
+
 	// One step: files listed or sources taken until `budget` bytes are spent (at least one,
 	// whatever the budget); true once the pass is done (take() then hands its result over).
 	bool step(uint64_t budget);
@@ -96,6 +101,7 @@ private:
 	Cache seen_; // the files this pass looked at: a gone source or input leaves the cache
 	ImportRunResult result_;
 	Phase phase_ = Phase::Start;
+	bool limited_ = false; // limit_to: the sources listed, no walk; the cache merged, not replaced
 };
 
 } // namespace opennova::editor

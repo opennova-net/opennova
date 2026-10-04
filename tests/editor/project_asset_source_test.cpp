@@ -106,7 +106,9 @@ static int test_names_decode_and_rescan() {
 	ImportSidecar sidecar;
 	sidecar.importer = importer->id;
 	sidecar.version = importer->version;
-	sidecar.options = importer->default_options;
+	// A PCX, the 8-bit indexed file these sources make (the image importer's format option; its default
+	// is a 32-bit TGA).
+	sidecar.options = {{"format", "pcx"}};
 	Diagnostic error;
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", sidecar, error));
 	// A PNG with no .import record is a texture the build packs as it is.

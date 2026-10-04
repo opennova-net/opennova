@@ -48,6 +48,7 @@
 #include <editor/ui/script_view.h>
 #include <editor/ui/text_view.h>
 #include <formats/rtxt/rtxt.h>
+#include <formats/tga/tga.h>
 #include "../editor/pool_document.h"
 #include "editor_ui_test_support.h"
 
@@ -77,6 +78,16 @@ struct Fixture {
 };
 
 std::vector<uint8_t> text_bytes(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
+
+// A 4 x 4 TGA of graded alpha, as the writer makes it.
+std::vector<uint8_t> minted_tga() {
+	std::vector<uint8_t> rgba;
+	for (int i = 0; i < 64; ++i) rgba.push_back(uint8_t(i * 4));
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::tga::tga_write_rgba32(rgba.data(), 4, 4, out, error);
+	return out;
+}
 
 // A file of each type's kinds: the repo's fixtures, and the three catalogs written here (an item
 // table with a vehicle spawn registry, a weapon table with an action and a carry limit, an ammo
@@ -108,6 +119,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Credits, "nlist.kda", file("cbin/synth_nlist.kda")},
 	        {AssetKind::Shader, "glass.fx", text_bytes("// glass\r\nfloat4 main() : COLOR { return 0; }\r\n")},
 	        {AssetKind::Config, "game.cfg", text_bytes("\r\n[Game]\r\nname = Views\r\n")},
+	        // A texture (S18): a TGA our writer mints, its picture the tab's main view beside its facts.
+	        {AssetKind::Texture, "brick.tga", minted_tga()},
 	};
 }
 
@@ -159,6 +172,8 @@ void draw_frames(TestWorkspace &workspace, DocumentView &view, const DocumentBas
 // items, a stylesheet's variables rather than its comments): what its view shows first; a text's
 // first line that is not blank.
 std::string first_title(const DocumentBase &document) {
+	// An image (S18): its file's name, which heads its facts.
+	if (document.holds_image()) return document.path().substr(document.path().find_last_of('/') + 1);
 	if (const TextDocument *text = text_of(document)) {
 		for (size_t line = 1; line <= text->line_count(); ++line)
 			if (text->line(line).find_first_not_of(" \t") != std::string_view::npos) return std::string(text->line(line));
@@ -231,7 +246,9 @@ void test_every_view() {
 			// it (the workspace here has none); the frame it is asked in draws nothing. A row of an
 			// outline beside a Main-role viewport (the mission's, S14) draws its viewport's view in that
 			// frame: with no viewport kept for the document, its kind's message, raising nothing.
-			const bool main_beside_outline = row->role == DocumentViewRole::MainViewport && row->outline;
+			// An image's view (S18, a texture's) draws its viewport's view beside its facts alike.
+			const bool main_beside_outline =
+					row->role == DocumentViewRole::MainViewport && (row->outline || document->holds_image());
 			ImGui::NewFrame();
 			CHECK(view->main_viewport(workspace, *document) == main_beside_outline,
 			      (where + (main_beside_outline ? ": the main viewport drawn beside the outline" : ": no main viewport drawn")).c_str());
@@ -268,8 +285,9 @@ void test_every_view() {
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	CHECK(main_rows == 6 && scripts == 5,
-	      "every text type's row the Main role's, its view the script view, and the mission's row the Main role's too");
+	CHECK(main_rows == 7 && scripts == 5,
+	      "every text type's row the Main role's, its view the script view, and the mission's and the texture's rows "
+	      "the Main role's too");
 	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
 	            frames, scripts);
 }

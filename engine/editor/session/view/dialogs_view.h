@@ -14,6 +14,7 @@ namespace opennova::editor {
 
 struct ImportPlan;
 struct RenameSite;
+struct TextureThumbnail;
 
 // What waits on the author, as the view shows it (ADR 0046 S13 V4; the Dialogs concern and
 // Project's quit_requested): the unsaved-changes prompt, the import dialog's preview, the last
@@ -81,6 +82,26 @@ struct DialogsView {
 		std::vector<Diagnostic> refusals;
 	};
 	RenamePreview rename_preview;
+	// What a Replace or an Edit externally would do to a texture (S18: PreviewTextureSource), open while
+	// the dialog asks before anything is written: the texture, the image a Replace makes it from ("" for an
+	// Edit externally), the options asked over the ones reproducing its stored form (`values`), the stored
+	// forms the texture's extension offers and the one the plan writes, the changes in words, the texture
+	// before and after (in words, and pictures: its thumbnail and the file the import would make), or why it
+	// would be refused. Every preview bumps `serial`.
+	struct TextureSourcePreview {
+		bool open = false;
+		uint64_t serial = 0;
+		std::string texture;
+		std::string image;
+		std::vector<std::pair<std::string, std::string>> values;
+		std::vector<std::string> forms;
+		std::string form;
+		std::vector<std::string> changes;
+		std::string before_words, after_words;
+		std::shared_ptr<const TextureThumbnail> before, after;
+		std::string refusal;
+	};
+	TextureSourcePreview texture_source;
 	bool quit_requested = false;
 };
 

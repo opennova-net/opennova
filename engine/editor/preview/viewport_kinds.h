@@ -57,6 +57,10 @@ struct ViewportKindRow {
 	std::unique_ptr<ViewportModel> (*make)(const std::string &path) = nullptr;
 	bool canvas = true;
 	size_t devices = 0;
+	// It draws a file Files selects whether or not its document is open (S18: a texture's, which the
+	// Preview window shows as the file is selected; its viewport reads the project's file while no
+	// document is open at its path): the Preview window shows it for that selection, whatever its role.
+	bool files = false;
 };
 
 // A kind's row; Menu's for a value past the last kind.
@@ -79,16 +83,24 @@ ViewportKind default_viewport_kind(DocumentTypeId type);
 // animation map"): what a refusal of a document that shows in none names.
 std::string viewport_shown_types();
 
-// The Preview-role kind the Preview window shows over `documents`' targets: the active document's
-// (the kind its type shows in or feeds, preview_kind_of), else `last` (the one it showed; kCount
-// before it showed one). When that kind has no target (its document never opened, or closed), the
-// first kind that has one; kCount when none has.
+// The kind that draws a file Files selects of `type` (ViewportKindRow::files, S18: a texture's);
+// kCount for none.
+ViewportKind file_preview_kind(DocumentTypeId type);
+
+// The kind the Preview window shows over `documents`' targets: while Files leads (a file selected
+// there since the active document last changed, DocumentsView::files_lead) the kind that draws the
+// selected file, unless that file is the active document, which its tab shows; else the active
+// document's (the kind its type shows in or feeds, preview_kind_of), else `last` (the one it showed;
+// kCount before it showed one). When that kind has no target (its document never opened, or closed),
+// the first Preview-role kind that has one; kCount when none has.
 ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last);
 // What the Preview window follows after a change of the view (the session's touch, before its
 // viewports are tracked): of each Preview-role kind, the active document when the kind shows its
 // type, a kind that shows a row of it the row the selection lands in, keeping the one it had while
 // none is selected; a target whose document closed, or whose row went, cleared; a Main-role kind's
-// empty. Then the kind it shows (DocumentsView::preview_shown, preview_kind over the one before).
+// empty but a files kind's, which is the file Files selects where the kind draws its type. Files
+// stops leading once another document is made active. Then the kind it shows
+// (DocumentsView::preview_shown, preview_kind over the one before).
 void update_preview_targets(DocumentsView &documents);
 
 } // namespace opennova::editor
