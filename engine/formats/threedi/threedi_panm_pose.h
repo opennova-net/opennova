@@ -62,5 +62,27 @@ bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
                              std::vector<ThreediMatrix4x4> &r_matrices,
                              std::vector<uint8_t> *r_animated);
 
+// Layer one LOD's PANM over POSED per-part frames: the clip-driven submit.
+// Retail hands every submitted model's bone matrices to the one builder that
+// poses a static model, on the rigid and the per-vertex skinned paths alike;
+// the first-person gun goes in with the matrices its clip built, and its arms
+// with the gun's same array, each composed through its own PANM
+// [orig: Player_RenderFirstPersonViewModel @ 0x4DED60 (the gun's submit
+//  @ 0x4DF043 / @ 0x4DEFCF, the arms' @ 0x4DF088); Render_SubmitEntity
+//  @ 0x5DAD80; Render_CollectRenderObjectsForBatch @ 0x5D8F3B;
+//  Render_CollectRenderBatchesForEntity @ 0x5D94F5;
+//  Model_TransformBoneMatrices @ 0x58E390].
+// inputs: one model-space frame per render object, the part's skinning matrix
+// (its posed bone times its rest inverse), native row-vector frame; a part
+// past the array is identity. r_matrices: one per render object, a part no
+// node drives keeping its input. r_animated (optional) marks the node-driven
+// parts. Returns false, r_matrices then equal to the inputs, when the LOD has
+// no render objects or no effective node.
+bool threedi_panm_pose_parts_over(const Threedi3di3 &model, int lod_index,
+                                  uint32_t time_ms, const int32_t *ctrl_values,
+                                  const std::vector<ThreediMatrix4x4> &inputs,
+                                  std::vector<ThreediMatrix4x4> &r_matrices,
+                                  std::vector<uint8_t> *r_animated);
+
 
 } // namespace opennova::threedi

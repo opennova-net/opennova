@@ -95,8 +95,9 @@ const ModelPanmPose *ModelPanmCache::evaluate(const threedi::Threedi3di3 &model,
         bool built = true;
         if (!c.anims.empty())
             built = threedi_panm_build_node_matrices(c.anims.data(), c.anims.size(), c.pivots.data(),
-                    &model.mtrx, nullptr, c.base_transforms.data(), nullptr, threedi_panm_runtime_time_ms(time_ms),
-                    controls.data(), c.node_matrices.data()) == 0;
+                    &model.mtrx, nullptr, c.base_transforms.data(), ThreediPanmInputs::kRestFrames,
+                    nullptr, threedi_panm_runtime_time_ms(time_ms), controls.data(),
+                    c.node_matrices.data()) == 0;
         bool any_changed = false;
         const uint64_t next_revision = c.pose.revision_ + 1;
         for (size_t i = 0; i < c.pose.matrices_.size(); ++i) {

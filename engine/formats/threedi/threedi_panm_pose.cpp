@@ -190,6 +190,7 @@ bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
                 &model.mtrx,
                 nullptr,
                 base_transforms.data(),
+                ThreediPanmInputs::kRestFrames,
                 nullptr,
                 time_ms,
                 ctrl_values,
@@ -212,6 +213,62 @@ bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
                 static_cast<size_t>(node_index) < panm_matrices.size();
         r_matrices[i] = animated ? panm_matrices[node_index] : base_transforms[i];
         if (r_animated != nullptr && animated) (*r_animated)[i] = 1;
+    }
+    return true;
+}
+
+bool threedi_panm_pose_parts_over(const Threedi3di3 &model, int lod_index,
+                                  uint32_t time_ms, const int32_t *ctrl_values,
+                                  const std::vector<ThreediMatrix4x4> &inputs,
+                                  std::vector<ThreediMatrix4x4> &r_matrices,
+                                  std::vector<uint8_t> *r_animated) {
+    r_matrices = inputs;
+    if (r_animated != nullptr) r_animated->clear();
+    if (model.lods == nullptr || lod_index < 0 ||
+            static_cast<size_t>(lod_index) >= model.lod_count)
+        return false;
+    const ThreediLod &lod = model.lods[lod_index];
+    if (lod.render_object_count == 0 || lod.render_objects == nullptr)
+        return false;
+    ThreediMatrix4x4 identity;
+    threedi_mat4_identity(&identity);
+    r_matrices.resize(lod.render_object_count, identity);
+    if (r_animated != nullptr) r_animated->assign(lod.render_object_count, 0);
+
+    std::vector<ThreediPartAnimation> anims;
+    if (!threedi_panm_effective_for_lod(model, lod_index, anims)) return false;
+    threedi_panm_resolve_registers(model, anims);
+
+    static const int32_t kZeroCtrl[THREEDI_CTRL_REGISTER_COUNT] = {};
+    if (ctrl_values == nullptr) ctrl_values = kZeroCtrl;
+
+    size_t input_count = std::max(lod.render_object_count, anims.size());
+    for (const ThreediPartAnimation &anim : anims) {
+        input_count = std::max(input_count, static_cast<size_t>(anim.subobject_index) + 1);
+        input_count = std::max(input_count, static_cast<size_t>(anim.parent_subobject) + 1);
+    }
+    // The posed frame of every part, and each part's model-space pivot (the
+    // ROBJ abs retail's loader stores at the part row's +36; GPM_LoadRenderModel
+    // @ 0x5B5000, read @ 0x58F015..0x58F034).
+    std::vector<ThreediMatrix4x4> frames(input_count, identity);
+    std::vector<ThreediVec3> pivots(input_count, ThreediVec3{0, 0, 0});
+    for (size_t i = 0; i < input_count && i < inputs.size(); ++i) frames[i] = inputs[i];
+    for (size_t i = 0; i < lod.render_object_count; ++i) {
+        const ThreediRenderObject &part = lod.render_objects[i];
+        pivots[i] = ThreediVec3{part.abs[0], part.abs[1], part.abs[2]};
+    }
+
+    std::vector<ThreediMatrix4x4> built(anims.size());
+    if (threedi_panm_build_node_matrices(anims.data(), anims.size(), pivots.data(), &model.mtrx,
+                nullptr, frames.data(), ThreediPanmInputs::kPosedFrames, nullptr, time_ms,
+                ctrl_values, built.data()) != 0)
+        return false;
+    // The last node naming a part drives it, as threedi_panm_pose_parts maps.
+    for (size_t i = 0; i < anims.size(); ++i) {
+        const uint8_t sub = anims[i].subobject_index;
+        if (sub >= lod.render_object_count) continue;
+        r_matrices[sub] = built[i];
+        if (r_animated != nullptr) (*r_animated)[sub] = 1;
     }
     return true;
 }

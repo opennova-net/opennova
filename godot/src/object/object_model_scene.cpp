@@ -56,6 +56,8 @@ void ObjectModel::rebuild_scene() {
 	skeletal_scene_ = false;
 	skeleton_ = nullptr;
 	skeleton_skin_.unref();
+	skin_rest_binds_.clear();
+	skin_binds_layered_ = false;
 	clear_skin_palette();
 	muzzle_bone_ = -1;
 	surface_material_indices_.clear();
@@ -549,6 +551,11 @@ void ObjectModel::build_skeleton() {
 		skeleton_->reset_bone_pose(i);
 	}
 	skeleton_skin_ = skeleton_->create_skin_from_rest_transforms();
+	// The binds the PANM layer composes over and falls back to
+	// (ObjectModel::apply_skeletal_panm).
+	for (int bind = 0; bind < skeleton_skin_->get_bind_count(); ++bind) {
+		skin_rest_binds_.push_back(skeleton_skin_->get_bind_pose(bind));
+	}
 	// Every pose writer ends in the skeleton's deferred update, where Godot
 	// uploads the skeleton's own skins: the bone palette republishes there.
 	skeleton_->connect("skeleton_updated",
