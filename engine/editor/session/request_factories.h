@@ -60,6 +60,12 @@ inline EditorRequest forget_recent(std::string dir) {
 	request.dir = std::move(dir);
 	return request;
 }
+// The folder `game_install` read as a game install ("" the editor's last chosen): the view's install_check.
+inline EditorRequest check_install(std::string game_install = std::string()) {
+	EditorRequest request = of(EditorRequestKind::CheckInstall);
+	request.game_install = std::move(game_install);
+	return request;
+}
 inline EditorRequest rescan() {
 	return of(EditorRequestKind::Rescan);
 }
@@ -290,6 +296,21 @@ inline EditorRequest show_in_files(std::string path, bool ask_name = false) {
 	request.path = std::move(path);
 	request.ask_name = ask_name;
 	return request;
+}
+// Files' card of the project file `path` (the UX round's project lane).
+inline EditorRequest about_file(std::string path) {
+	EditorRequest request = of(EditorRequestKind::AboutFile);
+	request.path = std::move(path);
+	return request;
+}
+// The project's wave at `path` played by the Shell, and stopped.
+inline EditorRequest play_sound(std::string path) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	return request;
+}
+inline EditorRequest stop_sound() {
+	return of(EditorRequestKind::StopSound);
 }
 // The project file `path` selected in Files ("" none, ADR 0046 S18).
 inline EditorRequest select_file(std::string path) {

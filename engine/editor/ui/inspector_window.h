@@ -1,6 +1,8 @@
 #pragma once
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -48,6 +50,11 @@ public:
 	const char *title() const override { return "Inspector"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override { return devtools::InitialDockPlacement::Right; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
+	// With no project open it stands aside for the welcome page (aside_for_welcome).
+	bool stands_aside() const override;
+	void show_anyway() override { welcome_asked_ = true; }
+	// Coming back (a project opened over the welcome page) it leaves the keyboard where it is.
+	bool focus_on_appearing() const override { return false; }
 	void draw(devtools::ImGuiPass &, uint64_t) override;
 	// A RevealRecord held until the Inspector draws, with what it was sent against: the
 	// selection's revision and the identity of the document it names (Document::identity).
@@ -75,6 +82,7 @@ private:
 	void referenced_by(const Document &document, const NodeAddress &record, bool others_only = false);
 
 	Workspace &workspace_;
+	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	ReferencePicker picker_;
 	std::string typed_; // what an open list of choices' box holds (field_widgets: one open at a time)
 	// "Referenced by": each use of what the selected record defines, its edge and its line, and
@@ -100,7 +108,14 @@ private:
 	UsersKey users_key_;
 	size_t users_made_ = 0;
 	FindingsIndex findings_; // the record's Problems rows, found without a scan of every finding
-	char filter_[128]{};
+	// The filter over the fields, one per open document (the UX round's project lane: a filter typed on
+	// a menu's window never hides an item's fields), by the document's path; a closed document's goes.
+	static constexpr size_t kFilterSize = 128;
+	std::map<std::string, std::array<char, kFilterSize>> filters_;
+	// The active document's filter (made empty the first time it is asked for).
+	char *filter_of(const std::string &path);
+	// The filter's empty state: what matched nothing, and Clear.
+	void nothing_matches(char *filter, const char *what);
 	// The RevealRecord events held until it draws, then the field the last one asked to show, on
 	// its record and in the document it was in (the selection moving off either lets it go);
 	// whether the form still has to scroll to it, and when it was asked (its row's light fades

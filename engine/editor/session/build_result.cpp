@@ -30,16 +30,6 @@ std::string duration_words(double seconds) {
 	return std::to_string(total / 60) + " min " + std::to_string(total % 60) + " s";
 }
 
-// A count with thousands set apart: "2,301".
-std::string grouped(size_t n) {
-	std::string digits = std::to_string(n), out;
-	for (size_t i = 0; i < digits.size(); ++i) {
-		if (i && (digits.size() - i) % 3 == 0) out += ',';
-		out += digits[i];
-	}
-	return out;
-}
-
 } // namespace
 
 BuildResult build_result(const BuildReport &report, bool in_project) {
