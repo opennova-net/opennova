@@ -30,7 +30,8 @@ namespace fs = std::filesystem;
 namespace opennova::editor {
 
 std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &paths,
-                                             std::vector<Diagnostic> &diagnostics) {
+                                             std::vector<Diagnostic> &diagnostics,
+                                             std::vector<ImportChoiceFacts> *facts) {
 	std::vector<ImportChoice> sources;
 	for (const std::string &path : paths) {
 		std::error_code ec;
@@ -44,9 +45,20 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 				                                  "Could not open archive: " + path));
 				continue;
 			}
-			for (const auto &file : archive.list_files()) sources.push_back({path, file.logical_name});
+			for (const auto &file : archive.list_files()) {
+				sources.push_back({path, file.logical_name});
+				if (!facts) continue;
+				uint64_t stored = 0;
+				facts->push_back({expected_asset_kind_for_required_name(file.logical_name),
+				                  archive.file_size(file.logical_name, stored) ? stored : 0});
+			}
 		} else {
 			sources.push_back({path, {}});
+			if (!facts) continue;
+			std::error_code size_error;
+			const auto bytes = fs::file_size(system_path(path), size_error);
+			facts->push_back({expected_asset_kind_for_required_name(utf8_of(path_of(path).filename())),
+			                  size_error ? 0 : uint64_t(bytes)});
 		}
 	}
 	return sources;
@@ -87,7 +99,8 @@ std::vector<std::string> list_install_loose_files(const std::string &retail_root
 }
 
 std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
-                                                    std::vector<Diagnostic> &diagnostics) {
+                                                    std::vector<Diagnostic> &diagnostics,
+                                                    std::vector<ImportChoiceFacts> *facts) {
 	std::vector<ImportChoice> sources;
 	if (retail_root.empty()) {
 		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error,
@@ -101,7 +114,10 @@ std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_r
 		return sources;
 	}
 	sources.reserve(view.files().size());
-	for (const InstallFile &file : view.files()) sources.push_back(install_choice(retail_root, file));
+	for (const InstallFile &file : view.files()) {
+		sources.push_back(install_choice(retail_root, file));
+		if (facts) facts->push_back({expected_asset_kind_for_required_name(file.name), view.size(file)});
+	}
 	return sources;
 }
 
@@ -135,7 +151,9 @@ std::vector<std::string> list_base_file_names(const std::string &retail_root, co
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {
 	if (const AssetEntry *prior = existing.find(name)) return prior->relative_path;
-	return join_path(asset_kind_row(kind).folder, name);
+	// An import source sits with the files of the kind its name gives (a PNG with the textures it makes).
+	const AssetKind placed = kind == AssetKind::ImportSource ? asset_kind_for_name(name) : kind;
+	return join_path(asset_kind_row(placed).folder, name);
 }
 
 namespace {

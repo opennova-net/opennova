@@ -421,6 +421,9 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		if (!window.is_scrollable()) {
 			flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 		}
+		if (!window.focus_on_appearing()) {
+			flags |= ImGuiWindowFlags_NoFocusOnAppearing;
+		}
 		const WindowSizeHint hint = window.preferred_size();
 		if (!reset_layout && hint.width > 0.0f && hint.height > 0.0f) {
 			ImGui::SetNextWindowSize(ImVec2(hint.width, hint.height), ImGuiCond_FirstUseEver);
