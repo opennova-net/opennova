@@ -238,7 +238,8 @@ bool decode_credits(const std::string &, const std::vector<uint8_t> &stored, std
 	if (!render(config, text, why)) {
 		issues.push_back({true, 0, std::string(), std::string(),
 				"This credits file's CBIN form holds what its text form cannot carry (" + why +
-						"): the editor shows the rest and does not save it."});
+						"): the editor shows the rest read only and cannot save this file yet (the game keeps "
+						"showing it as it is)."});
 		encoding = std::move(kept);
 		return true;
 	}
@@ -251,7 +252,7 @@ bool decode_credits(const std::string &, const std::vector<uint8_t> &stored, std
 		issues.push_back({true, 0, std::string(), std::string(),
 				"This credits file's CBIN form would not be written back as it is from its text "
 				"(its string table holds a text twice, or what reads back differs): the editor "
-				"shows it and does not save it."});
+				"shows it read only and cannot save this file yet (the game keeps showing it as it is)."});
 	encoding = std::move(kept);
 	return true;
 }
