@@ -334,13 +334,16 @@ Culling, the Math node, the render method and Emission.
   order, what Blender's settings give (two-sided, the alpha test, the alpha
   pass, the glow), the bullet faces' surface picked by name (Metal, Glass,
   Wood: the effects row a round that hits them plays, the engine's own table
-  through `opennova-3di catalog`) and flags (both sides, bullets pass, front
-  only: a bullet from behind passes), set once for every face the material
-  makes; a model whose faces carry their own (an imported retail model's that
-  disagree with their material's) says so there, "Mixed: 3 of its 120 faces
-  keep their own (3 Glass)", with **Make all** and **Select them** (the faces
-  keep theirs on their polygons' `o3d_surface` and `o3d_face_flags`
-  attributes, -1 the material's, which export writes as they are), the other
+  through `opennova-3di catalog`; Water, Glass, Cloth, Foliage and Flesh let
+  rounds go on through at a cost of their energy) and flags (both sides,
+  bullets pass, front only: a round from behind passes), set once for every
+  face the material makes; a model whose faces carry their own (an imported
+  retail model's that disagree with their material's) says so there, "Mixed: 3
+  of its 120 faces keep their own (3 Glass)", with **Make all** and **Select
+  them** (the faces keep theirs on their polygons' `o3d_own_surface` and
+  `o3d_own_face_flags` attributes, each the value plus one, 0 the material's,
+  so a polygon Blender makes itself, a new face or a mesh joined in, takes the
+  material's; export writes them as they are), the other
   flag bits, the reflection colour, the texture rows the
   nodes cannot give, and the RGB / alpha / UV generators and texture
   flipbook. A flipbook with frames on anim type 1 reads a register, which it

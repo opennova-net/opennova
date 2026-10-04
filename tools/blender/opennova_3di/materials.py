@@ -390,13 +390,19 @@ def face_flags(mat):
 
 
 # A bullet face keeps its material's surface and flags unless its polygon says
-# otherwise: two integer face attributes of the collision LOD's meshes, -1 (or
-# none) taking the material's. Import writes them where a retail face disagrees
-# with its material's vote (the file keeps a surface and flags per face, so a
-# material's faces may differ), so a re-export keeps each face as it was; the
-# material panel counts them and Make all clears them.
-FACE_SURFACE = "o3d_surface"
-FACE_FLAGS = "o3d_face_flags"
+# otherwise: two integer face attributes of the collision LOD's meshes, each
+# holding the polygon's own value plus one, 0 (or none) taking the material's.
+# The +1 is what keeps a polygon Blender makes on its own the material's: a new
+# face, a fill, a mesh joined in without the attribute get 0, and 0 must not
+# read as surface 0 (Object) and no flags. Import writes them where a retail
+# face disagrees with its material's vote (the file keeps a surface and flags
+# per face, so a material's faces may differ), so a re-export keeps each face
+# as it was; the material panel counts them and Make all clears them. The
+# API below speaks in values (-1: the material's); the +1 is the attributes'.
+FACE_SURFACE = "o3d_own_surface"
+FACE_FLAGS = "o3d_own_face_flags"
+# An own value past this does not fit the INT attribute with its +1.
+FACE_VALUE_MAX = 0x7FFFFFFE
 
 
 def face_attribute(mesh, name):
@@ -411,9 +417,9 @@ def face_overrides(mesh, name):
     attr = face_attribute(mesh, name)
     if attr is None:
         return None
-    values = [0] * len(mesh.polygons)
-    attr.data.foreach_get("value", values)
-    return values
+    stored = [0] * len(mesh.polygons)
+    attr.data.foreach_get("value", stored)
+    return [v - 1 if v > 0 else -1 for v in stored]
 
 
 def set_face_overrides(mesh, name, values):
@@ -421,13 +427,13 @@ def set_face_overrides(mesh, name, values):
     made where some polygon holds its own value, and taken off where none
     does."""
     attr = face_attribute(mesh, name)
-    if all(v < 0 for v in values):
+    if all(v < 0 or v > FACE_VALUE_MAX for v in values):
         if attr is not None:
             mesh.attributes.remove(attr)
         return
     if attr is None:
         attr = mesh.attributes.new(name, "INT", "FACE")
-    attr.data.foreach_set("value", values)
+    attr.data.foreach_set("value", [v + 1 if 0 <= v <= FACE_VALUE_MAX else 0 for v in values])
 
 
 def material_face_overrides(meshes, mat):
