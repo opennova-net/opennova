@@ -181,9 +181,13 @@ struct PinnedRows {
 // records in the table shape's one order (RecordIds: a LOD's part animations right after the LOD,
 // where the model numbered every list first), which moved the fixtures' model rows' child ids and
 // nothing else (the same rows with the model's former order give the former digest, 57832e00).
+// S17 names a model's material by its place ("armory/Material 1/armry.tga", where its shader tag
+// stood), which moved the fixtures' model texture rows' paths and nothing else (c276a18f before). S17's
+// review adds one note: the fixture walk.bad's footstep on its end pose, which the game never reads
+// (animation.end_pose_trigger; the rows before it gave 54904de7).
 static int test_rows_as_before() {
 	const PinnedRows pinned[] = {
-		{ "fixtures", fixture_files, false, 238, 0xc276a18f5cad4241ull },
+		{ "fixtures", fixture_files, false, 239, 0x80169f08d3629feaull },
 		{ "styles", style_files, false, 14, 0x8a3d7521d4f40d63ull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
 		{ "open", style_and_item_files, true, 18, 0x626d6c867164ff5aull },

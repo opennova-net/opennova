@@ -4123,11 +4123,14 @@ void test_face_raycast() {
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_graze, e_graze, 0, fh) ==
           CollisionWorld::FaceRaycast::kMiss);
 
-    // Enter-front only: from below, the +z-facing quad is a backface -> miss.
+    // From below the +z-facing quad is hit as well: every caller passes the
+    // back-face argument 1, which takes a face from either side unless it is
+    // a 0x800 (front only) face [orig: @ 0x4e5115..0x4e5139; Projectile_UpdatePhysics
+    // pushes 1 @ 0x4ea4ee].
     const int32_t s_up[3] = {fx(10.0), fx(10.0), fx(-1.0)};
     const int32_t e_up[3] = {fx(10.0), fx(10.0), fx(3.0)};
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_up, e_up, 0, fh) ==
-          CollisionWorld::FaceRaycast::kMiss);
+          CollisionWorld::FaceRaycast::kHit);
 
     // No instance on the soldier -> the sphere stand-in verdict.
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.soldier, s_hit, e_hit, 0, fh) ==
@@ -4158,8 +4161,16 @@ void test_face_raycast_flags_and_materials() {
         CHECK(fh.material == 17);
     }
     {
-        // 0x800 double-sided accepts the from-below ray; flag 1 does too.
-        Rig rig(face_quad_model(14, 0x800));
+        // 0x800 front only: the from-below ray passes, the from-above one hits.
+        Rig rig(face_quad_model(14, kFaceFlagFrontOnly));
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_up, e_up, 0, fh) ==
+              CollisionWorld::FaceRaycast::kMiss);
+        CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
+              CollisionWorld::FaceRaycast::kHit);
+    }
+    {
+        // Flag 1 takes even a 0x800 face from either side.
+        Rig rig(face_quad_model(14, kFaceFlagBothSides | kFaceFlagFrontOnly));
         CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_up, e_up, 0, fh) ==
               CollisionWorld::FaceRaycast::kHit);
     }

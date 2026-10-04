@@ -56,11 +56,13 @@ public:
 		shape.points[1] = max;
 		shape.thickness = thickness;
 	}
-	void line(CanvasPoint from, CanvasPoint to, uint32_t rgb, float thickness) {
-		OverlayShape &shape = add(OverlayKind::Line, OverlayRole::Normal, rgb);
+	void line(CanvasPoint from, CanvasPoint to, uint32_t rgb, float thickness, OverlayRole role = OverlayRole::Normal,
+			uint8_t alpha = 255) {
+		OverlayShape &shape = add(OverlayKind::Line, role, rgb);
 		shape.points[0] = from;
 		shape.points[1] = to;
 		shape.thickness = thickness;
+		shape.alpha = alpha;
 	}
 	// A circle's outline.
 	void ring(CanvasPoint centre, float radius, OverlayRole role, float thickness,
@@ -78,14 +80,15 @@ public:
 		shape.size = radius;
 		shape.filled = true;
 	}
-	// A filled quad in its own colour.
-	void quad(CanvasPoint a, CanvasPoint b, CanvasPoint c, CanvasPoint d, uint32_t rgb) {
+	// A filled quad in its own colour (a triangle: its last corner twice).
+	void quad(CanvasPoint a, CanvasPoint b, CanvasPoint c, CanvasPoint d, uint32_t rgb, uint8_t alpha = 255) {
 		OverlayShape &shape = add(OverlayKind::Quad, OverlayRole::Normal, rgb);
 		shape.points[0] = a;
 		shape.points[1] = b;
 		shape.points[2] = c;
 		shape.points[3] = d;
 		shape.filled = true;
+		shape.alpha = alpha;
 	}
 	void marker(CanvasPoint at, OverlayGlyph glyph, float size, OverlayRole role,
 			uint32_t rgb = 0xFFFFFF, float thickness = 1.0f) {

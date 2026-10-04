@@ -35,13 +35,23 @@ struct ModelOverlay {
 	std::string name;
 };
 
-// Which kinds the preview marks.
+// Which kinds the preview marks, and the collision layers it draws (ADR 0046 S17,
+// preview/model_collision: each off until the modder shows it).
 struct ModelOverlayOptions {
 	bool user_points = true;
 	bool lights = true;
 	bool pivots = false;
+	bool bullet_faces = false;
+	bool volumes = false;
+	bool sections = false;
+	bool bounds = false;
+	bool probe_boxes = false;
+	bool occlusion = false;
+	bool part_spheres = false;
 	bool operator==(const ModelOverlayOptions &o) const {
-		return user_points == o.user_points && lights == o.lights && pivots == o.pivots;
+		return user_points == o.user_points && lights == o.lights && pivots == o.pivots &&
+		       bullet_faces == o.bullet_faces && volumes == o.volumes && sections == o.sections && bounds == o.bounds &&
+		       probe_boxes == o.probe_boxes && occlusion == o.occlusion && part_spheres == o.part_spheres;
 	}
 	bool operator!=(const ModelOverlayOptions &o) const { return !(*this == o); }
 };

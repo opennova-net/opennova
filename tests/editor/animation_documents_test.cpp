@@ -13,9 +13,13 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/animation_slots.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
+#include <editor/graph/graph_layer.h>
+#include <editor/preview/animation_uses.h>
+#include <editor/preview/model_preview_rig.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
@@ -152,7 +156,39 @@ int clips() {
 	TEST_EXPECT(document.apply(set(event, "velocity.x", 0.25), error));
 	TEST_EXPECT(document.get(event, "velocity.x", value) && std::get<double>(value) == 0.25);
 	TEST_EXPECT(document.apply(set(event, "bottom", 1.0), error));
-	if (clip->version == 1) TEST_EXPECT(document.apply(set(event, "trigger", int64_t(1)), error));
+	if (clip->version == 1) {
+		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(1)), error));
+		// S17: a frame event by its frame from 0, as the timeline counts it, and what it fires in words.
+		TEST_EXPECT(document.record_title(event) == "Frame 0: left footstep");
+		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(0x2 | 0x40 | 0x10000)), error));
+		TEST_EXPECT(document.record_title(event) == "Frame 0: right footstep, sound 2, an unread bit (0x10000)");
+		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(0)), error) && document.record_title(event) == "Frame 0");
+		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(1)), error));
+	}
+	const NodeAddress second{clip->id, kEvent, clip->collections[1][1]};
+	// The record's own name counts from 0 too (what the MCP's batches name it by).
+	TEST_EXPECT(document.record_title(second).rfind("Frame 1", 0) == 0 && document.record_name(second) == "Frame event 1");
+	// The last record is the end pose: its event never fires, which its title and a finding say.
+	const size_t last = clip->events.size() - 1;
+	const NodeAddress end_pose{clip->id, kEvent, clip->collections[1][last]};
+	TEST_EXPECT(clip->base && last == clip->base->frame_count && animation_end_pose(*clip, last) &&
+	            !animation_end_pose(*clip, last - 1));
+	TEST_EXPECT(document.record_title(end_pose).rfind("Frame " + std::to_string(last) + " (the end pose", 0) == 0);
+	const auto end_pose_findings = [&] {
+		size_t n = 0;
+		for (const Diagnostic &d : validate_animation_file(document))
+			n += d.row() == &finding_code(AnimationFinding::EndPoseTrigger) && d.child_id == end_pose.child ? 1 : 0;
+		return n;
+	};
+	if (clip->version == 1) {
+		TEST_EXPECT(document.apply(set(end_pose, "trigger", int64_t(0)), error) && end_pose_findings() == 0);
+		TEST_EXPECT(document.apply(set(end_pose, "trigger", int64_t(2)), error));
+		TEST_EXPECT(document.record_title(end_pose) ==
+		            "Frame " + std::to_string(last) + " (the end pose): right footstep, which never fires");
+		TEST_EXPECT(end_pose_findings() == 1);
+		TEST_EXPECT(document.apply(set(end_pose, "trigger", int64_t(0)), error) && end_pose_findings() == 0);
+	}
+	TEST_EXPECT(document.record_title(bone) == document.record_name(bone));
 	// The motion's: the translation flag, the keys, the structure.
 	const int64_t flags = int64_t(document.clip()->flags);
 	TEST_EXPECT(!document.apply(set(row, "flags", flags ^ int64_t(bad::BAD_FLAG_TRANSLATION)), error));
@@ -197,15 +233,74 @@ int tables() {
 	for (const FieldChoice &choice : document.fields(kRow).front().choices)
 		walk_forward = walk_forward || (choice.name == "anim_walk_forward" && choice.label == "walk forward");
 	TEST_EXPECT(walk_forward);
-	// The windows name a row by those words (the key, as the game compares it, kept for the
-	// graph, Problems and the MCP); a key naming no slot as it is; a clip by its file.
+	// The windows name a row by those words and the clips it plays (S17; the key, as the game compares
+	// it, kept for the graph, Problems and the MCP); a key naming no slot as it is; a clip by its file.
 	const NodeAddress first{document.rows()[0]->id, kRow, 0};
-	TEST_EXPECT(document.record_title(first) == "reset" && document.record_name(first) == "anim_reset");
+	TEST_EXPECT(document.record_title(first) == "reset: idle.bad" && document.record_name(first) == "anim_reset");
 	TEST_EXPECT(animation_key_title("ANIM_WALK_FORWARD") == "walk forward");
 	TEST_EXPECT(animation_key_title("anim_no_such_slot") == "anim_no_such_slot" && animation_key_title("") == "");
 	const Document::Collection clips = document.collections_of(first).front();
 	TEST_EXPECT(!clips.ids.empty() && document.record_title({first.row, kMapClip, clips.ids.front()}) ==
 	                                          document.record_name({first.row, kMapClip, clips.ids.front()}));
+	// The rows under their slots' families, in the families' order (S17).
+	std::vector<std::vector<RowHeading>> headings;
+	animation_map_row_headings(document, nullptr, headings);
+	TEST_EXPECT(headings.size() == document.rows().size());
+	TEST_EXPECT(headings[0].size() == 1 && headings[0][0].text == "Reset (the rest pose)");
+	TEST_EXPECT(headings[1][0].text == "Standing still" && headings[3][0].text == "Walking and running");
+	TEST_EXPECT(headings[0][0].key < headings[3][0].key && headings[3][0].key < headings[1][0].key);
+	// What the game does with a row, in words: the walk's meaning, the reset row's rules and the body
+	// slots the map leaves out (233 of 239: it names six besides the reset).
+	const NodeAddress walk_row{document.rows()[3]->id, kRow, 0};
+	const std::vector<std::string> walk_notes = map_row_notes(document, walk_row);
+	TEST_EXPECT(walk_notes.size() == 1 && walk_notes[0] == "walk forward (slot 1): Walking forward.");
+	TEST_EXPECT(map_unauthored_slots(document).size() == 233);
+	// The slots left out by what the game does with each (S17 review: most are never picked without
+	// a clip, not played as the reset clip).
+	const std::vector<std::string> reset_notes = map_row_notes(document, first);
+	TEST_EXPECT(reset_notes.size() == 3 && reset_notes[0].find("The rest pose") != std::string::npos);
+	TEST_EXPECT(reset_notes.size() == 3 &&
+	            reset_notes[1].rfind("This map leaves out 233 slots, each serving this row's first clip: the game plays it in ", 0) == 0 &&
+	            reset_notes[1].find(", never picks ") != std::string::npos &&
+	            reset_notes[1].find(" whether it picks them then is not traced. A mission's forced animation of any of them plays "
+	                                "this row's first clip.") != std::string::npos);
+	TEST_EXPECT(reset_notes.size() == 3 && reset_notes[2].find("crashes the game as it loads") != std::string::npos);
+	// A row none of whose clips loads authors nothing: the walk, its file not in the project.
+	const ClipLoads no_walk = [](const std::string &clip) { return clip != "walk.bad"; };
+	TEST_EXPECT(map_unauthored_slots(document, no_walk).size() == 236);
+	const std::vector<std::string> lost = map_row_notes(document, walk_row, no_walk);
+	TEST_EXPECT(lost.size() == 2 && lost[1] == "None of its clips loads. Left out, the body plays the reset clip in it.");
+	// Every slot has a meaning and a family; a slot past the table has neither.
+	for (int slot = 0; slot < 252; ++slot)
+		TEST_EXPECT(!animation_slot_meaning(slot).empty() && animation_slot_family(slot) >= 0);
+	TEST_EXPECT(animation_slot_meaning(252).empty() && animation_slot_family(-1) < 0);
+	TEST_EXPECT(animation_slot_meaning(232) == "Shot dead in the right foot, from the front: the bone the round hit "
+	                                           "picks the part, its heading the side.");
+	// S17 review: what the records witness, and "not traced" only where they do not. Head tracking's
+	// look idles stand among the still; pre attack, out of ground and the guard's look are witnessed.
+	for (const int slot : {125, 126, 141, 152, 153, 165, 166})
+		TEST_EXPECT(animation_slot_meaning(slot).find("not traced") == std::string::npos);
+	TEST_EXPECT(std::string(animation_slot_family_row(animation_slot_family(125)).heading) == "Standing still" &&
+	            std::string(animation_slot_family_row(animation_slot_family(126)).heading) == "Standing still");
+	TEST_EXPECT(animation_slot_meaning(153) == "Out of the ground: an NPC reset or respawned plays it when the map has "
+	                                           "it, else idle 2.");
+	for (const int slot : {159, 160, 161, 162, 163, 164, 240})
+		TEST_EXPECT(animation_slot_meaning(slot).find("not traced") != std::string::npos);
+	// The emplaced gunner: phrase_set N plays slot 67 + N (phrase_set 4 plays emplaced 5).
+	TEST_EXPECT(animation_slot_words(71) == "emplaced 5" && animation_slot_meaning(71).find("phrase_set is 4") != std::string::npos);
+	// What a slot left out comes to: the reset clip where its selector does not test for the clip, never
+	// picked where it does, and not traced elsewhere.
+	for (const int slot : {1, 44, 49, 50, 64, 67, 200, 241})
+		TEST_EXPECT(animation_slot_absence(slot) == AnimSlotAbsence::PlaysReset);
+	for (const int slot : {9, 10, 27, 36, 47, 68, 75, 115, 125, 140, 141, 147, 148, 151, 153, 155, 165, 167, 168})
+		TEST_EXPECT(animation_slot_absence(slot) == AnimSlotAbsence::NotPicked);
+	for (const int slot : {2, 11, 43, 62, 76, 130, 159, 163, 240})
+		TEST_EXPECT(animation_slot_absence(slot) == AnimSlotAbsence::Untraced);
+	TEST_EXPECT(animation_slot_when_missing(147) == "Left out, the game never picks it: the NPC stands in the default idle instead.");
+	TEST_EXPECT(animation_slot_when_missing(1) == "Left out, the body plays the reset clip in it.");
+	TEST_EXPECT(animation_slot_when_missing(241) == "Left out, an action that plays it plays the reset clip in it.");
+	TEST_EXPECT(animation_slot_when_missing(2).find("not traced") != std::string::npos);
+	TEST_EXPECT(animation_slot_when_missing(0).empty());
 	// The canonical form reads back the rows it was read from.
 	{
 		const std::vector<uint8_t> bytes = serialized(document);
@@ -263,6 +358,56 @@ int tables() {
 // input the game ignores: source findings on their lines (the second on its row) that the
 // toolbar counts and Save drops; the save's text reports none. A row naming ten clips blocks
 // the file: no edit, no save.
+// S17 review: a map's slots left out are its own kind's. A weapon's map (only first-person slots
+// past its reset) leaves out first-person slots, wpn_reset among them; a body's map that names a
+// first-person slot too stays a body's.
+int maps_by_kind() {
+	editor_test::TempProjectDir dir("opennova_animation_map_kinds_test");
+	const auto load = [&](const char *name, const std::string &text, AnimationMapDocument &document) -> int {
+		TEST_EXPECT(editor_test::write_text(dir.file(name), text));
+		Diagnostic error;
+		TEST_EXPECT(document.load(dir.file(name), name, AssetKind::AnimationMap, "jo", error));
+		return 0;
+	};
+	AnimationMapDocument weapon;
+	if (load("wpn.adm", "anim_reset\t\"wpn.bad\"\r\nanim_wpn_idle\t\"wpn.bad\"\r\nanim_wpn_fire\t\"wpn.bad\"\r\n", weapon)) return 1;
+	const std::vector<int> left_out = map_unauthored_slots(weapon);
+	TEST_EXPECT(left_out.size() == 10 && left_out.front() == 240 && left_out.back() == 251);
+	TEST_EXPECT(std::find(left_out.begin(), left_out.end(), 241) == left_out.end() &&
+	            std::find(left_out.begin(), left_out.end(), 243) == left_out.end());
+	AnimationMapDocument body;
+	if (load("body.adm", "anim_reset\t\"r.bad\"\r\nanim_walk_forward\t\"w.bad\"\r\nanim_wpn_idle\t\"x.bad\"\r\nanim_idle\r\n", body))
+		return 1;
+	const std::vector<int> body_out = map_unauthored_slots(body);
+	TEST_EXPECT(body_out.size() == 238 && body_out.front() == 2 && body_out.back() == 239);
+	return 0;
+}
+
+// S17 review: a clip no map names, or a map no item names, says what the game makes of it: the
+// files the game names itself are played without one naming them; with a base layer mounted, whose
+// files make no edges, it says only that no file of the project names it. And the timeline's
+// letters: a shot (an NPC's), a footstep, a sound, none for bits the engine does not read alone.
+int unused_files_and_letters() {
+	AssetGraph graph;
+	TEST_EXPECT(clip_unused_words(graph, "anims/walk.bad") == "No map of the project names this clip: the game never plays it.");
+	TEST_EXPECT(clip_unused_words(graph, "anims/FailSafe.BAD").find("in place of any clip") != std::string::npos);
+	TEST_EXPECT(clip_unused_words(graph, "anims/dt1rst.bad").find("player preview binds its skeleton") != std::string::npos);
+	TEST_EXPECT(clip_unused_words(graph, "PI_Idle.bad").find("player preview plays it") != std::string::npos);
+	TEST_EXPECT(map_unused_words(graph, "anims/Default.adm").find("any whose map it lacks") != std::string::npos);
+	TEST_EXPECT(map_unused_words(graph, "anims/x.adm") == "No item or weapon of the project names this map: the game plays it for none.");
+	graph.set_base(GraphLayer::build({}, "jo"));
+	TEST_EXPECT(clip_unused_words(graph, "anims/walk.bad").find("base layer") != std::string::npos &&
+	            clip_unused_words(graph, "anims/walk.bad").find("never plays") == std::string::npos);
+	TEST_EXPECT(map_unused_words(graph, "anims/x.adm").find("base layer") != std::string::npos);
+	TEST_EXPECT(std::string(preview_event_letter(0x4 | 0x1)) == "F" && std::string(preview_event_letter(0x1)) == "L" &&
+	            std::string(preview_event_letter(0x2 | 0x40)) == "R" && std::string(preview_event_letter(0x400)) == "S" &&
+	            std::string(preview_event_letter(0x10000)).empty());
+	// A joint by the model's part name (BN##, 1-based), the bind clip's own name kept beside it.
+	TEST_EXPECT(preview_joint_name(0, "BN01 Hips") == "BN01 Hips" && preview_joint_name(7, "RArm") == "BN08 RArm" &&
+	            preview_joint_name(3, "MDL3") == "BN04" && preview_joint_name(11, "") == "BN12");
+	return 0;
+}
+
 int table_lines() {
 	editor_test::TempProjectDir dir("opennova_animation_map_lines_test");
 	TEST_EXPECT(editor_test::write_text(dir.file("notes.adm"),
@@ -474,6 +619,8 @@ int main(int argc, char **argv) {
 	if (clips() != 0) return 1;
 	if (bone_parents() != 0) return 1;
 	if (tables() != 0) return 1;
+	if (maps_by_kind() != 0) return 1;
+	if (unused_files_and_letters() != 0) return 1;
 	if (table_lines() != 0) return 1;
 	if (findings_follow_rows() != 0) return 1;
 	if (changes_since_save() != 0) return 1;

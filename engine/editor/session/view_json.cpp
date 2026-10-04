@@ -610,6 +610,7 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 	validation.set("running", boolean(activity.validation.running));
 	validation.set("done", json_number(double(activity.validation.done)));
 	validation.set("total", json_number(double(activity.validation.total)));
+	validation.set("read", boolean(activity.validation.read));
 	out.set("validation", std::move(validation));
 	JsonValue build = JsonValue::make_object();
 	build.set("has_build", boolean(activity.has_build));
