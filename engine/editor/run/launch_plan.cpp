@@ -414,7 +414,7 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 	fs::path bink = retail / "binkw32_.dll";
 	if (!fs::is_regular_file(system_path(utf8_of(bink)), ec)) bink = retail / "binkw32.dll";
 	const std::pair<fs::path, const char *> staged[] = {
-		{retail / "Jointops.exe", "Jointops.exe"}, {bink, "binkw32.dll"}, {config, "game.cfg"}};
+		{retail / kInstallExecutable, kInstallExecutable}, {bink, "binkw32.dll"}, {config, "game.cfg"}};
 	// Every source checked before anything is copied, so a missing file launches nothing.
 	for (const auto &[source, name] : staged) {
 		if (fs::is_regular_file(system_path(utf8_of(source)), ec)) continue;
@@ -470,7 +470,7 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 		                     "Could not stage " + utf8_of(retail / save) + ": " + reason);
 		return false;
 	}
-	out.executable = utf8_of(run / "Jointops.exe");
+	out.executable = utf8_of(run / kInstallExecutable);
 	out.build_dir = utf8_of(build);
 	out.working_dir = utf8_of(run);
 	out.resource_dir = out.working_dir; // the game opens what it mounts from its working directory
