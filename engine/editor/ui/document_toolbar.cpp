@@ -25,8 +25,10 @@ void draw_document_toolbar(Workspace &workspace, const DocumentBase &document, c
 		ImGui::TextWrapped("%s", blocked_notice ? blocked_notice
 		                                        : "This file has unsupported or malformed input. See Problems, correct "
 		                                          "the source, then Reload.");
-	else if (const size_t ignored = document.ignored_lines())
-		ImGui::TextWrapped("%zu line(s) the game ignores will be dropped when this file is saved. See Problems.", ignored);
+	// What a save changes beyond the edits, said before it (while there are edits to save, or what the
+	// game skips to leave out).
+	else if (const std::string words = document.save_words(); !words.empty() && (document.dirty() || document.ignored_lines()))
+		ImGui::TextWrapped("%s", words.c_str());
 }
 
 } // namespace opennova::editor

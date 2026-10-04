@@ -11,6 +11,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kinds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kind_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_choice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_check.cpp
@@ -48,10 +49,13 @@ add_library(opennova_editor STATIC
     # per type that has one, kept between validations
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_catalog_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_words.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_labels.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/strings_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_clipboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/menu_labels.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_clipboard.cpp
@@ -218,6 +222,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/file_page.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
@@ -274,6 +279,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_toolbar.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/file_page_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp

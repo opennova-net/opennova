@@ -111,6 +111,16 @@ std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::str
 // the build refuses or leaves out with a word (Files' card says it as the build would), false for one it
 // packs or copies, or leaves out without one.
 bool plan_file_finding(const AssetEntry &asset, const std::string &expansion, Diagnostic &out);
+// Where a build of the project (as the expansion `expansion`, "" for the standalone game) puts a file, in a
+// sentence, from the decision the plan makes: its own finding on the file (plan_file_finding: an archive it
+// refuses, a player's file it leaves out, a name no archive stores), else its placement (the archive it
+// packs it into, the expansion's archive, the path it copies it to loose), else why it leaves it out. The
+// one rule Files' card and a file's page say it by; `packed`, whether a build packs or copies it.
+struct BuildPlaceWords {
+	std::string words;
+	bool packed = false;
+};
+BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &expansion = std::string());
 // The findings a plan is refused for (its diagnostics that block_build): what Problems marks "Blocks the
 // build", what the build_gate query lists and what a refused build names, in the plan's order.
 std::vector<Diagnostic> build_blockers(const BuildPlan &plan);

@@ -13,6 +13,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/file_page_view.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/welcome_view.h>
 
@@ -89,10 +90,11 @@ DocumentView *DocumentWindow::view_of(const std::string &path) {
 void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
 	prune(view);
-	if (!view.project.open || view.documents.open.empty()) {
+	if (!view.project.open || (view.documents.open.empty() && view.documents.page.empty())) {
 		// No tab bar: the next one follows the active document from its first frame.
 		followed_.clear();
 		raised_.clear();
+		page_followed_.clear();
 		if (!view.project.open) draw_welcome(workspace_, form_);
 		else draw_first_steps(view);
 		return;
@@ -178,6 +180,22 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 			}
 		}
 		ImGui::EndTabItem();
+	}
+	// The page of a file the editor has no editor for (the plain-words lane), after the documents: shown
+	// when it is opened, closed with its tab.
+	if (!view.documents.page.empty()) {
+		const bool select = view.documents.page != page_followed_;
+		page_followed_ = view.documents.page;
+		bool open = true;
+		const std::string label = "About " + basename_of(view.documents.page) + "###page";
+		if (ImGui::BeginTabItem(label.c_str(), &open, select ? ImGuiTabItemFlags_SetSelected : 0)) {
+			draw_file_page(workspace_, view.documents.page, page_cache_);
+			ImGui::EndTabItem();
+		}
+		ui_kit::tooltip("What " + view.documents.page + " is and who uses it: the editor has no editor for its kind yet.");
+		if (!open) workspace_.request(request::close_document(view.documents.page));
+	} else {
+		page_followed_.clear();
 	}
 	ImGui::EndTabBar();
 	if (shown == view.documents.active) {

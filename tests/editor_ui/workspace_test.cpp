@@ -306,7 +306,7 @@ void test_workspace_layout() {
 	for (uint64_t i = 9; i < 15; ++i) frame(windows, i);
 	CHECK(ImGui::GetDrawData()->TotalVtxCount > 0, "the project layout draws");
 	const std::string text = logged_frame(windows, 15);
-	CHECK(in_order(text, {"items.def", "Reload", "line(s) the game ignores", "Marker"}), "the catalog's tab: its toolbar, notice and records");
+	CHECK(in_order(text, {"items.def", "Reload", "the game skips", "Marker"}), "the catalog's tab: its toolbar, notice and records");
 	CHECK(windows.pending_requests() == 0, "drawing raises no request by itself");
 	v.dialogs.import_preview = planned_import("C:/assets");
 	v.revisions.touch(ViewConcern::Dialogs);
