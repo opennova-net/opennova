@@ -224,6 +224,25 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 		}
 		default: break;
 		}
+		// A particle slot with no userpoint before its secondary: no one line holds it, the
+		// retail tokenizer making no token of `""` (and items.def's reader a literal one). Two
+		// lines read back to it: the full line, its userpoint any name, then the effect-only
+		// line, which copies the effect and an empty userpoint and leaves the secondary alone
+		// (read only past three tokens) [orig: ItemDef_ParseProperty @ 0x4A140B..0x4A1488
+		// particlefxs, the secondary under count > 3 @ 0x4A145E; w1 @ 0x4A14DE, w2 @ 0x4A155E;
+		// Terrain_TokenizeConfigLine @ 0x53CB71..0x53CB81 resetting tokens 1 and 2].
+		if (property.encoding == DefEncoding::ParticleSlot && values.size() >= 3) {
+			const std::string &effect = std::get<std::string>(values[0]);
+			const std::string &userpoint = std::get<std::string>(values[1]);
+			const std::string &secondary = std::get<std::string>(values[2]);
+			if (userpoint.empty() && !secondary.empty()) {
+				const std::string placeholder = effect.empty() ? secondary : effect;
+				line(property.key, {placeholder, placeholder, secondary});
+				if (effect.empty()) line(property.key, {});
+				else line(property.key, {effect});
+				continue;
+			}
+		}
 		std::string written_key;
 		std::vector<std::string> args;
 		if (!property_args(kind, property, value, values, name, written_key, args)) continue;
@@ -340,6 +359,11 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 		if (sight.slide) { args.push_back("slide"); args.push_back(std::to_string(sight.slide_frames)); }
 		break;
 	}
+	case DefEncoding::ModelOption:
+		// The model, then the loader's one option [orig: WeaponDefs_ParseLineCallback @ 0x544F92].
+		args.push_back(word(values[0]));
+		if (n(1)) args.push_back("nocheckdepth");
+		break;
 	case DefEncoding::Attachment: {
 		const auto &attachment = *static_cast<const DefItemEmplacementAttachment *>(value);
 		key = attachment.kind == DEF_ITEM_EMPLACEMENT_ADDEWEAP_G ? "addeweapg" : attachment.kind == DEF_ITEM_EMPLACEMENT_ADDEWEAP_C ? "addeweapc" : "addeweap";

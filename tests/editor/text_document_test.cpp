@@ -42,6 +42,7 @@
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/install_view.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/music_script_type.h>
@@ -1188,8 +1189,10 @@ static int test_retail() {
 	}
 	ProjectDocument project;
 	project.target_game = "jo";
-	opennova::Vfs mount;
-	TEST_EXPECT(mount_retail(mount, install, project));
+	InstallView view;
+	std::string view_error;
+	TEST_EXPECT(view.open(install_spec(install, project), view_error));
+	const opennova::Vfs &mount = view.vfs();
 	size_t scripts = 0, compiled = 0, findings = 0, references = 0, music = 0, credits = 0, shaders = 0;
 	size_t witnessed = 0, alone = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {

@@ -8,6 +8,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;
@@ -40,13 +41,20 @@ ProjectPaths ProjectPaths::for_root(const std::string &root) {
 	p.build_cache_file = join(p.cache_dir, kBuildCacheFileName);
 	p.run_dir = join(p.cache_dir, "run");
 	p.staging_dir = join(p.cache_dir, "staging");
+	p.install_copy_dir = join(p.cache_dir, "install_copy");
 	return p;
+}
+
+std::string without_trailing_separator(const std::string &dir) {
+	std::string out = dir;
+	while (out.size() > 1 && (out.back() == '/' || out.back() == '\\') && out[out.size() - 2] != ':') out.pop_back();
+	return out;
 }
 
 std::string ProjectPaths::export_dir(const ProjectDocument &doc) const {
 	const fs::path output = path_of(doc.export_settings.output);
-	if (output.is_absolute()) return utf8_of(output);
-	return utf8_of((path_of(root) / output).lexically_normal());
+	if (output.is_absolute()) return without_trailing_separator(utf8_of(output.lexically_normal()));
+	return without_trailing_separator(utf8_of((path_of(root) / output).lexically_normal()));
 }
 
 bool ensure_project_cache_dir(const ProjectPaths &paths, std::string &error) {
@@ -73,6 +81,13 @@ io::JsonValue project_document_to_json(const ProjectDocument &doc) {
 	export_settings.set("include_runtime",
 	                    io::JsonValue::make_bool(doc.export_settings.include_runtime));
 	json.set("export", std::move(export_settings));
+	// A standalone project has none: the object's absence is what says so.
+	if (!doc.expansion.standalone()) {
+		io::JsonValue expansion = io::JsonValue::make_object();
+		expansion.set("name", io::JsonValue::make_string(doc.expansion.name));
+		expansion.set("builds_on", io::JsonValue::make_string(doc.expansion.builds_on));
+		json.set("expansion", std::move(expansion));
+	}
 	return json;
 }
 
@@ -84,7 +99,12 @@ bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out,
 		std::snprintf(buf, sizeof(buf),
 		              "This project file uses schema version %d; this editor reads version %d only.",
 		              version, kProjectSchemaVersion);
-		return fail(error, CoreFinding::ProjectSchemaVersionUnsupported, buf);
+		std::string message = buf;
+		// No reader for an older file (pre-1.0): what changed, so its author can bring it over.
+		if (version == 1)
+			message += " Schema 2 added the optional \"expansion\" object and changed nothing else: set "
+			           "\"schema_version\" to 2 to open it.";
+		return fail(error, CoreFinding::ProjectSchemaVersionUnsupported, message);
 	}
 	ProjectDocument doc;
 	doc.schema_version = version;
@@ -111,6 +131,24 @@ bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out,
 		if (!exp->is_object()) return fail(error, CoreFinding::ProjectFieldInvalid, "\"export\" must be an object.");
 		doc.export_settings.output = exp->get_string("output", kDefaultExportOutput);
 		doc.export_settings.include_runtime = exp->get_bool("include_runtime", false);
+	}
+	if (const io::JsonValue *expansion = json.get("expansion")) {
+		if (!expansion->is_object())
+			return fail(error, CoreFinding::ProjectFieldInvalid, "\"expansion\" must be an object.");
+		for (const char *key : { "name", "builds_on" }) {
+			const io::JsonValue *value = expansion->get(key);
+			if (value && !value->is_string())
+				return fail(error, CoreFinding::ProjectFieldInvalid,
+				            std::string("\"expansion\".\"") + key + "\" must be a string.");
+		}
+		doc.expansion.name = expansion->get_string("name", "");
+		doc.expansion.builds_on = expansion->get_string("builds_on", "");
+		// An object naming nothing is no expansion's: the object's absence says standalone.
+		if (doc.expansion.standalone() && doc.expansion.builds_on.empty())
+			return fail(error, CoreFinding::ProjectFieldInvalid,
+			            "\"expansion\" names no expansion: give it a \"name\", or leave the object out for a "
+			            "standalone project.");
+		if (!check_project_expansion(doc.target_game, doc.expansion, error)) return false;
 	}
 	out = std::move(doc);
 	return true;
@@ -155,10 +193,12 @@ std::string make_project_id() {
 	return buf;
 }
 
-bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error) {
+bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error,
+                        const ProjectExpansion &expansion) {
 	const std::string code = strutil::to_lower(target_game);
 	if (gameprofile::gameprofile_by_code(code.c_str()) == nullptr)
 		return fail(error, CoreFinding::ProjectTargetGameUnknown, "Unknown target game \"" + target_game + "\".");
+	if (!check_project_expansion(code, expansion, error)) return false;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	std::error_code ec;
 	if (fs::exists(system_path(paths.project_file), ec)) // a project past MAX_PATH too
@@ -167,8 +207,8 @@ bool can_create_project(const std::string &root, const std::string &target_game,
 }
 
 bool create_project(const std::string &root, const std::string &title, const std::string &target_game,
-                    ProjectDocument &out, Diagnostic &error) {
-	if (!can_create_project(root, target_game, error)) return false;
+                    ProjectDocument &out, Diagnostic &error, const ProjectExpansion &expansion) {
+	if (!can_create_project(root, target_game, error, expansion)) return false;
 	const std::string code = strutil::to_lower(target_game);
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	std::string io_error;
@@ -178,6 +218,7 @@ bool create_project(const std::string &root, const std::string &title, const std
 	doc.project_id = make_project_id();
 	doc.title = title.empty() ? utf8_of(path_of(paths.root).filename()) : title;
 	doc.target_game = code;
+	doc.expansion = expansion;
 	if (!save_project_document(paths.project_file, doc, error)) return false;
 	out = std::move(doc);
 	return true;

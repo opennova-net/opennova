@@ -31,8 +31,10 @@ typedef enum MusOpcode {
     MUS_OP_ENTER    = 0x38,  /* frame setup, does NOT move the IP
                                 [orig: AudioVM_Op_Enter @ 0x672C20] */
     MUS_OP_SETSTATE = 0x3B,  /* section transition [orig: AudioVM_Op_SetState @ 0x672C70] */
-    MUS_OP_PLAYW    = 0x3D,  /* play-and-wait [orig: AudioVM_Op_PlayWait @ 0x672C90] */
-    MUS_OP_PLAY     = 0x3E,  /* play [orig: AudioVM_Op_Play @ 0x672CB0] */
+    MUS_OP_PLAYW    = 0x3D,  /* play, a 16-bit sound index (no wait: the handler is the
+                                byte form's but for the width; the compiler writes it past
+                                index 255) [orig: AudioVM_Op_PlayWait @ 0x672C90] */
+    MUS_OP_PLAY     = 0x3E,  /* play, an 8-bit sound index [orig: AudioVM_Op_Play @ 0x672CB0] */
     MUS_OP_DONE     = 0x3F   /* section terminator */
 } MusOpcode;
 
@@ -187,7 +189,12 @@ const MusSection *mus_find_section(const MusScript *s, const char *name);
    without `done` leaks code into the next section's outer scope), the leading
    "// Decompiled from <path>" line is dropped (we have no filename context),
    and `bind sound_N "sound_N"` is synthesised aesthetic since the runtime
-   carries no bind table. */
+   carries no bind table.
+
+   A malformed program does not decompile (negative): an instruction cut short by
+   the code's end, a branch (goto, brfalse, brtrue, callv) into an instruction or past
+   the end, or ifs nested more than 64 deep. A brfalse to its own offset or before it
+   is no if; it prints as its `// if !(...) goto` comment. */
 int mus_decompile(const MusScript *script, char *out_text, size_t out_capacity);
 
 /* Names-aware variant. When `sbf_names` is non-NULL and the play index falls

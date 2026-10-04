@@ -48,13 +48,17 @@ static int item_type_from_string(const char *s, size_t len) {
    third token only when the line carries more than 3 tokens (argc > 3, key
    included); extra tokens beyond those are ignored. `with_secondary` is 0 for
    particlefx/particlefxw3/particlefxw4, which never read a third token.
-   [orig: ItemDef_ParseProperty @ 0x49eb00, particlefx chain @ 0x4a13ad..0x4a15eb] */
+   [orig: ItemDef_ParseProperty @ 0x49eb00, particlefx chain @ 0x4a13ad..0x4a15eb]
+   argv[1] and argv[2] are copied whatever the count: the tokenizer resets the first
+   three tokens to "" for every line, so a missing one stores an empty name over what
+   an earlier line of the slot left (jox01's `particlefx fx_Mosquitos_2m_L`: no
+   userpoint) [orig: @ 0x4a13bf..0x4a13fc; Terrain_TokenizeConfigLine @ 0x53cb71..0x53cb81]. */
 static void parse_item_particle_slot(const char *v, size_t vl, DefItemParticleFx *slot,
                                      int with_secondary) {
     Token tok[MAX_TOKENS];
     int n = tokenize(v, vl, tok, MAX_TOKENS);
-    if (n >= 1) safe_copy(slot->effect, sizeof(slot->effect), tok[0].s, tok[0].len);
-    if (n >= 2) safe_copy(slot->userpoint, sizeof(slot->userpoint), tok[1].s, tok[1].len);
+    safe_copy(slot->effect, sizeof(slot->effect), n >= 1 ? tok[0].s : "", n >= 1 ? tok[0].len : 0);
+    safe_copy(slot->userpoint, sizeof(slot->userpoint), n >= 2 ? tok[1].s : "", n >= 2 ? tok[1].len : 0);
     if (with_secondary && n >= 3)
         safe_copy(slot->secondary_effect, sizeof(slot->secondary_effect), tok[2].s, tok[2].len);
 }
