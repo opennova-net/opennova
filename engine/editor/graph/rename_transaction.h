@@ -70,8 +70,10 @@ struct RenamePlan {
 // no kind the game knows (which the build packs too), changes the extension (the kind
 // comes from it), or is taken; when an import source's output would take a name that
 // does not fit an archive or is taken; when a site (of the file, or of an output renamed
-// with it) sits in a file the editor cannot rewrite (an environment, the avatar table, a
-// particle file, a mission). The plan reads the graph, in which an open document stands
+// with it) sits in a file the editor cannot rewrite (the avatar table, a sound bank, a mission) or
+// names a particle flipbook's frame (named from its graphic's name). A site in a terrain, an
+// environment, a particle file or the HUD layout is rewritten in its text (native_text_sites.h; one
+// stored in the SCR form is written back as plain text). The plan reads the graph, in which an open document stands
 // in for its file; a site in an open document with unsaved edits, or the file itself open
 // with them, is planned like any other: the session asks to save them before the commit
 // (which reads the files on disk) runs. A site keeps the spelling it wrote with the file's
@@ -204,6 +206,7 @@ private:
 	struct Staged;
 
 	void stage_file(const std::string &file, const std::vector<const RenameSite *> &sites);
+	void stage_native(const AssetEntry &asset, const std::vector<const RenameSite *> &sites, Staged &staged);
 	void commit();
 	void commit_file_rename();
 	void commit_symbol_rename();

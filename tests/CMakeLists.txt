@@ -4209,6 +4209,15 @@ target_link_libraries(editor_texture_import_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_import COMMAND editor_texture_import_test)
 
+# A file's rename through the native texts (ADR 0046 S18, graph/native_text_sites): a terrain's, an
+# environment's, a particle file's and the HUD layout's names rewritten as text, only the token the game
+# reads at each site; a flipbook's frame refused; a file in the SCR form written back as plain text. The
+# retail leg (OPENNOVA_JO_DIR): every name the install's native texts write found as its one token.
+add_executable(editor_native_rename_test editor/native_rename_test.cpp)
+target_link_libraries(editor_native_rename_test PRIVATE opennova_editor)
+target_include_directories(editor_native_rename_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_native_rename COMMAND editor_native_rename_test)
+
 add_executable(editor_document_contract_test editor/editor_document_contract_test.cpp)
 target_link_libraries(editor_document_contract_test PRIVATE opennova_editor)
 target_include_directories(editor_document_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

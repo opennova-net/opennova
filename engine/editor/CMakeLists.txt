@@ -90,6 +90,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_layer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/native_text_sites.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/project_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_queries.cpp

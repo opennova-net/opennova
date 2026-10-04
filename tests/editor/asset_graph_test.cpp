@@ -413,7 +413,7 @@ static int test_native_extractors() {
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetGraph &graph = *session.view().findings.graph;
 	const GraphEdge *sky = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
-	TEST_EXPECT(sky && !sky->rewritable && sky->field == "sky_map1");
+	TEST_EXPECT(sky && sky->rewritable && sky->field == "sky_map1"); // a name its text writes (native_text_sites.h)
 	TEST_EXPECT(edge_to(graph, "day.env", ReferenceKind::Model, "sun.3di"));
 	// A sky map loads through the archive loader naming the file twice: its .dds sibling first,
 	// else the name itself, no other extension. Its edge carries its role (ADR 0046 S18), whose loader
@@ -731,23 +731,32 @@ static int test_rename() {
 	            read_text(root + "/main.mnu").find("logo2.tga") != std::string::npos);
 	TEST_EXPECT(view.findings.graph->missing().empty());
 	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
-	// A site the editor cannot rewrite refuses the whole rename: an environment names
-	// the texture too.
+	// An environment names the texture too: its sky layer is rewritten as text with the menu, every
+	// other byte kept (ADR 0046 S18, graph/native_text_sites.h). (A Rescan keeps an open document whose
+	// file did not change: the same one.)
+	std::string environment;
 	{
 		opennova::env::Config config;
 		config.sky_map1 = "logo2.tga";
 		std::ostringstream out;
 		std::string error;
 		TEST_EXPECT(opennova::env::save_env(out, config, error));
-		TEST_EXPECT(editor_test::write_text(root + "/day.env", out.str()));
+		environment = out.str();
+		TEST_EXPECT(editor_test::write_text(root + "/day.env", environment));
 	}
 	editor_test::handle_to_end(session, request::rescan());
-	editor_test::handle_to_end(session, request::rename_asset("logo2.tga", "logo3.tga"));
-	TEST_EXPECT(view.findings.diagnostics.back().code() == "rename.site" || view.findings.diagnostics.back().code() == "rename.refused");
-	TEST_EXPECT(fs::exists(root + "/logo2.tga") && !fs::exists(root + "/logo3.tga"));
-	// Through a style variable: the variable's value is the site. (A Rescan keeps an open
-	// document whose file did not change: the same one.)
 	TEST_EXPECT(session.document_for("main.mnu") == menu);
+	editor_test::handle_to_end(session, request::rename_asset("logo2.tga", "logo3.tga"));
+	TEST_EXPECT(session.outcome().done());
+	TEST_EXPECT(!fs::exists(root + "/logo2.tga") && fs::exists(root + "/logo3.tga"));
+	{
+		const size_t at = environment.find("sky_map1 logo2.tga");
+		TEST_EXPECT(at != std::string::npos);
+		environment.replace(at, 18, "sky_map1 logo3.tga");
+		TEST_EXPECT(read_text(root + "/day.env") == environment);
+	}
+	menu = session.document_for("main.mnu"); // reloaded after the rewrite
+	// Through a style variable: the variable's value is the site.
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	edit_window(session, *menu, menu_test::child_of(*menu, exit, "appearance"), "value", std::string("%DEF_FONTNAME_LG%"));
 	editor_test::handle_to_end(session, request::save_all());
@@ -1753,7 +1762,7 @@ static int test_terrain_and_bank_extractors() {
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetGraph &graph = *session.view().findings.graph;
 	const GraphEdge *heights = edge_to(graph, "isle.trn", ReferenceKind::TerrainData, "isle.cpt");
-	TEST_EXPECT(heights && heights->field == "polytrn_polydata" && !heights->rewritable);
+	TEST_EXPECT(heights && heights->field == "polytrn_polydata" && heights->rewritable);
 	for (const char *map : {"isle_c.tga", "det.tga", "tiles.tga", "isle_m.pcx"})
 		TEST_EXPECT(edge_to(graph, "isle.trn", ReferenceKind::Texture, map));
 	// Each map by its role (ADR 0046 S18) and so its game loader: the colour map and the atlas through

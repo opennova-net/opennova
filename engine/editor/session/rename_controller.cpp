@@ -443,8 +443,12 @@ void RenameController::keep_written(std::vector<RenameSite> &sites, std::vector<
 			                                        " the rename wrote can no longer be told. Rename it everywhere instead, "
 			                                        "or put the file back as the rename left it.",
 			                                file));
+	// A native text's sites have no place in the file but their record (graph/native_text_sites.h), which
+	// tells them apart; any other site's record may be what was renamed (a screen's NAME).
 	const auto same = [](const RenameSite &a, const RenameSite &b) {
-		return a.file == b.file && a.locator == b.locator && a.field == b.field && a.span.line == b.span.line &&
+		const bool placed = !a.locator.empty() || a.span.line;
+		return a.file == b.file && (placed || a.record == b.record) && a.locator == b.locator && a.field == b.field &&
+		       a.span.line == b.span.line &&
 		       (!a.span.line || a.span.column == b.span.column);
 	};
 	std::vector<RenameSite> kept;

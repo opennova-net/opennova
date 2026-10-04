@@ -6,7 +6,9 @@
 // ACTIONs find it by), and the record sets of the collections a Record reference names (a
 // model's CTRL registers and MTRX rows, by their index); a text type reads the names its text
 // makes, each at its span (a script's operands, S13 D9); the native kinds (an environment, the
-// avatar table, a particle file) read their parsed structs.
+// avatar table, a particle file) read their parsed structs. The names a native text (a terrain, an
+// environment, a particle file, the HUD layout) writes are rewritable: a rename finds each in the
+// text by reading it again (graph/native_text_sites.h).
 #include <editor/graph/asset_graph.h>
 
 #include <algorithm>
@@ -55,10 +57,12 @@ GraphEdge edge_of(const std::string &source, const std::string &record, const st
 }
 
 // A texture a native file names, used as `role` (ADR 0046 S18, texture_roles.h): its loader picks the
-// file (GraphEdge::loader_arg), `flags` what the file's own content says of the use (it gates).
+// file (GraphEdge::loader_arg), `flags` what the file's own content says of the use (it gates). A name
+// the file writes is a site a rename rewrites in its text (graph/native_text_sites.h); one it derives
+// (a flipbook's frame) is not.
 GraphEdge texture_edge(const std::string &source, const std::string &record, const std::string &field,
-                       const std::string &value, TextureRoleId role, int32_t flags = 0) {
-	GraphEdge edge = edge_of(source, record, field, ReferenceKind::Texture, value);
+                       const std::string &value, TextureRoleId role, int32_t flags = 0, bool written = true) {
+	GraphEdge edge = edge_of(source, record, field, ReferenceKind::Texture, value, std::string(), written);
 	edge.loader_arg = texture_role_arg(role, flags);
 	return edge;
 }
@@ -175,7 +179,7 @@ bool extract_environment(const std::string &name, const std::vector<uint8_t> &by
 	}
 	auto edge = [&](const char *field, ReferenceKind kind, const std::string &value, int32_t loader_arg = -1) {
 		if (value.empty()) return;
-		out.edges.push_back(edge_of(name, std::string(), field, kind, value));
+		out.edges.push_back(edge_of(name, std::string(), field, kind, value, std::string(), true));
 		out.edges.back().loader_arg = loader_arg;
 	};
 	// The cloud layers, through ARCHIVE [orig: Terrain_InitRenderingResources @ 0x578A97].
@@ -203,7 +207,7 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 	auto edge = [&](const std::string &record, const char *field, ReferenceKind kind, const char *value,
 	                int32_t loader_arg = -1) {
 		if (!value || !*value) return;
-		out.edges.push_back(edge_of(name, record, field, kind, value));
+		out.edges.push_back(edge_of(name, record, field, kind, value, std::string(), true));
 		out.edges.back().loader_arg = loader_arg;
 	};
 	// A texture through the HUD's loader, in the mode its keyword loads it in (ADR 0046 S18): a stance's
@@ -259,7 +263,7 @@ bool extract_terrain(const std::string &name, const std::vector<uint8_t> &bytes,
 	auto edge = [&](const std::string &record, const char *field, ReferenceKind kind, const std::string &value,
 	                int32_t loader_arg = -1) {
 		if (value.empty()) return;
-		out.edges.push_back(edge_of(name, record, field, kind, value));
+		out.edges.push_back(edge_of(name, record, field, kind, value, std::string(), true));
 		out.edges.back().loader_arg = loader_arg;
 	};
 	edge(std::string(), "polytrn_polydata", ReferenceKind::TerrainData, config.polydata);
@@ -351,7 +355,7 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 			for (int frame = 1; frame <= frames; ++frame)
 				out.edges.push_back(texture_edge(name, definition.id, field + "[" + std::to_string(frame) + "]",
 				                                 renderer::retail_particle_frame_name(layer.texture, frames, frame),
-				                                 TextureRoleId::ParticleGraphic));
+				                                 TextureRoleId::ParticleGraphic, 0, false));
 		}
 	}
 	return true;
