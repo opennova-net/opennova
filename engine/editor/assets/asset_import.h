@@ -23,9 +23,11 @@ struct ImportResult {
 	std::vector<Diagnostic> diagnostics;
 };
 
-// Expand selected PFFs into selectable members; loose files stay single choices.
+// Expand selected PFFs into selectable members; loose files stay single choices. `facts`, when given,
+// gets each choice's kind and size (ImportChoiceFacts), in the order of the choices.
 std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &paths,
-                                             std::vector<Diagnostic> &diagnostics);
+                                             std::vector<Diagnostic> &diagnostics,
+                                             std::vector<ImportChoiceFacts> *facts = nullptr);
 // A file of a mounted install or archive as its game loader is served it (S13 D9): decoded as the
 // game's text readers decode a stored file (Vfs::read_file), or, for a kind whose loader takes the
 // SCR form under a key of its own and unwraps it itself (a shader: AssetKindRow::scr, ScrForm::Shader),
@@ -41,9 +43,11 @@ bool install_loose_kind(AssetKind kind);
 // their normalized names; none for a root that cannot be listed.
 std::vector<std::string> list_install_loose_files(const std::string &retail_root);
 // Every file of a game install as the project imports it (assets/install_view.h, the project's view:
-// install_spec), each a choice of the install: the "Import from game data" list.
+// install_spec), each a choice of the install: the "Import from game data" list. `facts`, when given,
+// gets each one's kind and size (ImportChoiceFacts), in the same order.
 std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
-                                                    std::vector<Diagnostic> &diagnostics);
+                                                    std::vector<Diagnostic> &diagnostics,
+                                                    std::vector<ImportChoiceFacts> *facts = nullptr);
 // The names the project gets of a game install's files (the same view), sorted by their normalized
 // form (the Problems Import fixes).
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document);

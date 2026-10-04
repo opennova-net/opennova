@@ -128,7 +128,8 @@ static int test_registry_shape() {
 	// New lists (its free-form factory has no role) offers a new file's name, and no other kind
 	// does.
 	TEST_EXPECT(std::string(asset_kind_row(AssetKind::Menu).folder) == "menus");
-	TEST_EXPECT(std::string(asset_kind_row(AssetKind::Texture).folder).empty());
+	TEST_EXPECT(std::string(asset_kind_row(AssetKind::Texture).folder) == "textures");
+	TEST_EXPECT(std::string(asset_kind_row(AssetKind::Config).folder).empty());
 	for (size_t k = 0; k < kAssetKindCount; ++k) {
 		const AssetKind kind = static_cast<AssetKind>(k);
 		const BlankFactory *f = find_blank_factory_for_kind(kind);

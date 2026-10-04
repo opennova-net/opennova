@@ -822,7 +822,7 @@ void test_shortcuts() {
 	ui.frames(2);
 	// A file selected with a click, then F2: the rename popup, with its name.
 	const ImGuiWindow *window = ImGui::FindWindowByName("Files");
-	const ImGuiID row = item_id(files, {"files", "readme.txt", "##row"});
+	const ImGuiID row = item_id(files, {"project_files", "readme.txt", "##row"});
 	bool selected = false;
 	for (float y = window->Pos.y; y < window->Pos.y + window->Size.y && !selected; y += 2.0f) {
 		ui.mouse(window->Pos.x + window->Size.x * 0.3f, y);
