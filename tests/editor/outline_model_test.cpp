@@ -38,10 +38,18 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/rtxt/rtxt.h>
 
+#include <editor/graph/asset_graph.h>
+#include <editor/session/preferences_store.h>
+#include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
+
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/editor_test_support.h"
 #include "editor/pool_document.h"
+#include "editor/test_platform.h"
 
 using namespace opennova::editor;
 
@@ -795,10 +803,57 @@ int test_mission_headings() {
 	return 0;
 }
 
+// A string table's Uses column (the plain-words lane, the audit's 5.2): each string by how many references
+// of the project's files name it (the graph's users of the key it defines), made again when the graph moves.
+int test_uses() {
+	editor_test::TempProjectDir dir("opennova_outline_uses");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Uses"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const AssetEntry *weapons = view.project.scan->find("weapon.def");
+	const AssetEntry *gametext = view.project.scan->find("gametext.bin");
+	TEST_EXPECT(weapons && gametext);
+	if (!weapons || !gametext) return 1;
+	// The paths kept (a rescan makes the scan again).
+	const std::string table_path = gametext->relative_path, weapons_path = weapons->relative_path;
+	opennova::rtxt::File table;
+	table.sections = {{"WepDes", 2}};
+	table.entries = {{"WPN_ONE", "The first weapon", {}, 0}, {"WPN_TWO", "The second weapon", {}, 0}};
+	std::vector<uint8_t> bytes;
+	std::string error;
+	TEST_EXPECT(opennova::rtxt::write(table, bytes, error) &&
+	            editor_test::write_bytes(view.project.root + "/" + table_path, bytes) &&
+	            editor_test::write_text(view.project.root + "/" + weapons_path,
+	                                    "weapon \"Gun\"\nloadout_menu_textid WPN_ONE\nend\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document(table_path));
+	const Document *strings = session.document_for(table_path);
+	TEST_EXPECT(strings && view.findings.graph);
+	if (!strings || !view.findings.graph) return 1;
+	OutlineModel outline(OutlineMode::MasterDetail);
+	const std::vector<OutlineLine> lines = outline.lines(*strings, strings->rows()[0]->id);
+	TEST_EXPECT(lines.size() == 2 && outline.defining_column() && outline.defining_column()->id == "key");
+	if (lines.size() != 2) return 1;
+	TEST_EXPECT(outline.uses(*view.findings.graph, *strings, lines[0].address) == 1);
+	TEST_EXPECT(outline.uses(*view.findings.graph, *strings, lines[1].address) == 0);
+	// The weapon names the second one instead: the counts follow the graph.
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/" + weapons_path,
+	                                    "weapon \"Gun\"\nloadout_menu_textid WPN_TWO\nend\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(outline.uses(*view.findings.graph, *strings, lines[0].address) == 0 &&
+	            outline.uses(*view.findings.graph, *strings, lines[1].address) == 1);
+	std::printf("test_uses passed\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
+	failures += test_uses();
 	failures += test_mission_headings();
 	failures += test_kinds_and_listed_rows();
 	failures += test_clicks();

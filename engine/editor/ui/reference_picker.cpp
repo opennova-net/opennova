@@ -316,19 +316,24 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 			// then what it would be when not found.
 			const bool found = choice.status == ReferenceStatus::Present || choice.status == ReferenceStatus::Unverified;
 			const char *word = found ? "" : ui_kit::reference_word(choice.status);
-			const float room = ImGui::GetContentRegionAvail().x - (found ? 0.0f : ui_kit::text_width(word));
+			const float room = ImGui::GetContentRegionAvail().x -
+			                   (found ? 0.0f : ui_kit::text_width(word) + ImGui::GetStyle().ItemSpacing.x);
 			const std::string name = ui_kit::fit(words_of(choice), room * 0.6f);
 			if (choice.inert) ImGui::TextDisabled("%s", name.c_str());
 			else ImGui::TextUnformatted(name.c_str());
 			float used = ui_kit::text_width(name.c_str());
 			if (!choice.label.empty()) {
 				ImGui::SameLine();
-				ImGui::TextDisabled("%s", choice.name.c_str());
-				used += ui_kit::text_width(choice.name.c_str()) + ImGui::GetStyle().ItemSpacing.x;
+				const float spacing = ImGui::GetStyle().ItemSpacing.x;
+				const std::string muted = ui_kit::fit(choice.name, room - used - spacing);
+				ImGui::TextDisabled("%s", muted.c_str());
+				used += ui_kit::text_width(muted.c_str()) + spacing;
 			}
-			ImGui::SameLine();
-			const std::string where = ui_kit::fit(where_of(choice), room - used - ImGui::GetStyle().ItemSpacing.x * 2.0f);
-			ImGui::TextDisabled("%s", where.c_str());
+			const std::string where = ui_kit::fit(where_of(choice), room - used - ImGui::GetStyle().ItemSpacing.x);
+			if (!where.empty()) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("%s", where.c_str());
+			}
 			if (!found) {
 				ImGui::SameLine();
 				ImGui::TextColored(ui_kit::reference_color(choice.status), "%s", word);
