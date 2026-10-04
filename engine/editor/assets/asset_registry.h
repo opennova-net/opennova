@@ -37,6 +37,12 @@ struct AssetScan {
 	const AssetEntry *find(std::string_view logical_name) const;
 	// The entry at a project-relative path, or nullptr: a binary search of the path index.
 	const AssetEntry *at_path(std::string_view relative_path) const;
+	// The entry a request names, its case aside (names are the game's, case-insensitive in its
+	// archives and in the project): the one at that path, else that path in another case, else, for
+	// a name alone, find()'s. A path names its folder: the file of its name in another folder is not
+	// it. Null for none, and when two files answer to the path in another case (a file system that
+	// keeps case may hold both): `ambiguous` then true.
+	const AssetEntry *named(std::string_view file, bool *ambiguous = nullptr) const;
 	// Keys each entry, sorts the entries by key then path, and indexes their paths: what
 	// scan_project_assets does with the files it found. A scan made by hand calls it before it
 	// is read, and again after its entries change; until it does, the two lookups walk the

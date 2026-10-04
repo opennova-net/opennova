@@ -17,7 +17,8 @@ extends GutTest
 ## puts it; a user point's edit builds nothing, a light's builds the scene again; the options hold a
 ## level and a CTRL register; a part's marker rides the part the device draws at the clock the two
 ## share, a hit at its pixel names its record and a drag lands it on the pixel, one undo step; a table
-## plays its clip on the rig at the preview clock's tick; two models on devices of their own; the
+## plays its clip on the rig at the preview clock's tick, its bones on the wire where the device's
+## skeleton stands them (S17); two models on devices of their own; the
 ## device cache holds four, the least recently used given up and made again at the camera it kept.
 ## S13 V6: a device builds its picture over the frames after the pump that takes the Rebuild (a
 ## model's textures, meshes, scene and pose; a menu screen's textures not decoded yet, then its
@@ -87,6 +88,48 @@ event 0 0 0 0x1 0.9 1.7
 event 0 0 0 0x0 0.9 1.7
 event 0 0 0 0x2 0.9 1.7
 event 0 0 0 0x2 0.9 1.7
+"""
+
+## S17: a set whose idle turns the pelvis a quarter about x from its frame 1, swinging the spine and the
+## leg off the axis (the bones the wire reports against the device's skeleton).
+const BEND_CLIPS := """o3a 1
+adm BEND.adm
+row anim_reset "rest"
+row anim_idle "bend"
+clip rest
+fps 30
+flags 0x1
+frames 1
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+clip bend
+fps 30
+flags 0x1
+frames 2
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0.7071068 0 0 0.7071068
+ k 0.7071068 0 0 0.7071068
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
 """
 
 ## A screen with a TABLE (the table layer the menu frame compiles since the trunk's third master
@@ -913,6 +956,74 @@ func test_a_table_plays_on_its_rig() -> void:
 	assert_gt(at_rest.angle_to(turned), 0.05, "the clip poses the skeleton at the clip clock")
 	assert_eq(int(_state().get("body", {}).get("animation", {}).get("ticks", -1)), 8)
 	assert_eq(int(_state().get("clock", {}).get("ticks", -1)), 8, "the preview clock's ticks")
+
+
+## S17: the bones the wire reports (and the canvas draws) stand where the device's skeleton puts its
+## joints, the clip turning the spine a quarter off the axis.
+func test_a_clip_poses_the_bones_it_reports() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor viewport bones %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir.path_join("project"), "Bones Game"))
+	var source := dir.path_join("source")
+	_write(source.path_join("skinned.o3d"),
+			FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)).to_utf8_buffer())
+	_write(source.path_join("bend.o3a"), BEND_CLIPS.to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
+		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("bend.o3a")}]}))
+	_write(dir.path_join("project/defs/items.def"),
+			TestFs.crlf("begin \"Bent Thing\"\nid 100201\ntype building\ngraphic skinned\nanim_def bend\nend\n").to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	assert_true(_seam.open_document("anims/BEND.adm"))
+	var idle: int = _seam.find_record("anim_idle")
+	assert_gt(idle, 0)
+	assert_true(_seam.select_record(idle))
+	var preview := await _await_ready()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	# The clock held at a tick past the clip's frame 1 (the clip newly chosen sought it to 0).
+	assert_true(_change({"clock": {"playing": false, "ticks": 4}}))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var model: ObjectModel = _device_node(preview, "ObjectModel")
+	assert_not_null(model)
+	if model == null:
+		return
+	var skeleton := model.get_skeleton()
+	var bones: Array = _state().get("body", {}).get("animation", {}).get("bones", [])
+	assert_eq(bones.size(), skeleton.get_bone_count())
+	var spine: Array = bones[1].get("position", [0, 0, 0]) if bones.size() > 1 else [0, 0, 0]
+	# The sign pinned (S17 review): the pelvis's quarter turn swings the spine to -x in the preview's frame.
+	assert_almost_eq(Vector3(float(spine[0]), float(spine[1]), float(spine[2])), Vector3(-1, 0, 0),
+			Vector3(0.01, 0.01, 0.01), "the spine turned a quarter off the axis")
+	for i in bones.size():
+		var at: Array = bones[i].get("position", [0, 0, 0])
+		var posed: Vector3 = model.global_transform.affine_inverse() * (skeleton.global_transform * skeleton.get_bone_global_pose(i).origin)
+		assert_almost_eq(Vector3(float(at[0]), float(at[1]), float(at[2])), posed, Vector3(0.002, 0.002, 0.002),
+				"bone %d where the device's skeleton puts it" % i)
+	# Where the canvas marks each bone is where the picture draws it: the wire's screen point against
+	# the device camera's projection of the skeleton's bone, in the viewport's own pixels.
+	var camera: Camera3D = _device_node(preview, "Camera3D")
+	assert_not_null(camera)
+	var device: Dictionary = _state().get("device", {})
+	var size := Vector2(float(device.get("width", 0)), float(device.get("height", 0)))
+	assert_true(size.x > 0.0 and size.y > 0.0, "the viewport's size on the wire: %s" % str(device))
+	if camera == null or size.x <= 0.0 or size.y <= 0.0:
+		return
+	var marked := 0
+	var drawn_size := Vector2(camera.get_viewport().size)
+	for i in bones.size():
+		var screen: Variant = bones[i].get("screen")
+		assert_true(screen is Array, "bone %d on the screen" % i)
+		if not (screen is Array):
+			continue
+		var world := skeleton.global_transform * skeleton.get_bone_global_pose(i).origin
+		var drawn := camera.unproject_position(world) / drawn_size * size
+		assert_almost_eq(Vector2(float(screen[0]), float(screen[1])), drawn, Vector2(1.5, 1.5),
+				"bone %d marked where the picture draws it" % i)
+		marked += 1
+	assert_eq(marked, bones.size(), "every bone compared on the screen")
 
 
 ## S13 V5: each open model its own viewport and its own device: the first again keeps its device and

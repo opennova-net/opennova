@@ -178,6 +178,7 @@ private:
 
 	SessionCore &core_;
 	SessionView &view_;
+	bool read_once_ = false; // a validation has ended since the project opened (ValidationStatus::read)
 	std::shared_ptr<AssetGraph> graph_ = std::make_shared<AssetGraph>();
 	std::shared_ptr<ProjectAssetSource> assets_ = std::make_shared<ProjectAssetSource>();
 	// The document types' project checks, one per type that has one (S13 V9): what each keeps
