@@ -89,6 +89,7 @@ bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnost
 	LocalSettings settings;
 	settings.runtime_executable = json.get_string("runtime_executable", "");
 	settings.game_install = json.get_string("game_install", "");
+	settings.build_folder = json.get_string("build_folder", "");
 	out = std::move(settings);
 	return true;
 }
@@ -98,6 +99,7 @@ bool save_local_settings(const ProjectPaths &paths, const LocalSettings &setting
 	json.set("schema_version", io::JsonValue::make_number(kLocalSettingsSchemaVersion));
 	json.set("runtime_executable", io::JsonValue::make_string(settings.runtime_executable));
 	json.set("game_install", io::JsonValue::make_string(settings.game_install));
+	if (!settings.build_folder.empty()) json.set("build_folder", io::JsonValue::make_string(settings.build_folder));
 	std::string io_error;
 	if (!ensure_project_cache_dir(paths, io_error) ||
 	    !write_file_atomic(paths.local_settings_file, io::json_write(json), io_error)) {

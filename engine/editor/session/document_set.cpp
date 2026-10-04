@@ -531,10 +531,18 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 	}
 	const uint64_t before = document->revision(), generation = document->load_generation();
 	const uint64_t serial = view_.documents.selection.serial;
-	if (request.kind == EditorRequestKind::Undo) document->undo(); else document->redo();
+	const bool undo = request.kind == EditorRequestKind::Undo;
+	// What the step did, said as it is taken back or made again (the UX round's problems lane).
+	const std::string words = undo ? document->undo_words() : document->redo_words();
+	if (undo) document->undo(); else document->redo();
 	if (document->revision() != before)
 		repair_selection(*document, generation, before, NodeAddress());
 	if (view_.documents.selection.serial != serial) core_.touch(ViewConcern::Selection);
+	const std::string file = basename_of(document->path());
+	view_.activity.status = document->revision() == before
+	                                ? std::string(undo ? "Nothing to undo in " : "Nothing to redo in ") + file + "."
+	                                : std::string(undo ? "Undid: " : "Redid: ") + (words.empty() ? "an edit of " + file : words) + ".";
+	core_.touch(ViewConcern::Output);
 	update_view();
 	// An undo or a redo ends the document's gesture: the validation its edits left waiting runs now.
 	if (document->revision() != before) core_.problems().validate_later();
@@ -609,7 +617,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	core_.update_files(written);
 	// Reported after the scan's update, which leaves the validation that rebuilds the rows due.
 	for (const Diagnostic &d : failures) core_.report(d);
-	view_.activity.status = "Saved " + std::to_string(saved) + " file(s)" +
+	view_.activity.status = "Saved " + counted(saved, "file") +
 	               (failures.empty() ? "." : "; " + std::to_string(failures.size()) + " could not be saved: see Problems.");
 	core_.touch(ViewConcern::Output);
 	return failures.empty();
@@ -641,7 +649,7 @@ void DocumentSet::rewrite_file(const std::string &path) {
 	}
 	core_.note("Saved " + relative);
 	core_.update_files({relative});
-	view_.activity.status = "Saved 1 file(s).";
+	view_.activity.status = "Saved " + relative + ".";
 	core_.touch(ViewConcern::Output);
 }
 
@@ -758,6 +766,15 @@ bool sets_one_field(const std::vector<Edit> &edits) {
 	return !edits.empty();
 }
 
+// A batch of Sets of one record (a drag's sides of one window).
+bool sets_one_record(const std::vector<Edit> &edits) {
+	for (const Edit &edit : edits)
+		if (edit.operation != EditOperation::Set || edit.field.empty() || !(edit.address == edits.front().address) ||
+		    is_batch_made(edit.address.row) || is_batch_made(edit.address.child))
+			return false;
+	return !edits.empty();
+}
+
 } // namespace
 
 // One EditRecord: a single edit or a batch over any rows, then the selection follows (what
@@ -795,8 +812,9 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 	// The records a removal takes or a set changes, in words as they read before the edit (the status
 	// line's, ADR 0046 S15: a set of an entity's item renames it).
 	const bool removal = records && removes_only(requested);
-	const std::string named =
-	        records && (removal || sets_one_field(requested)) ? records_words(*records, requested) : std::string();
+	const std::string named = records && (removal || sets_one_field(requested) || sets_one_record(requested))
+	                                  ? records_words(*records, requested)
+	                                  : std::string();
 	// A record's new name is its own edit: its uses keep the old name until Rename everywhere
 	// (RenameSymbol) rewrites them.
 	if (!document.apply(*edits, error)) {
@@ -834,8 +852,18 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 	}
 	view_.activity.status = removal ? "Removed " + named + "." : records ? edit_words(*records, *edits, named) : std::string();
 	if (view_.activity.status.empty()) view_.activity.status = "Edited " + document.path() + ".";
+	// The step is named with the same words, what Undo and Redo say and the Edit menu names.
+	if (document.revision() != before) name_step(document);
 	core_.touch(ViewConcern::Output);
 	return true;
+}
+
+// The step the last edit made named with the status line's words (DocumentBase::name_step), its full
+// stop dropped: "Undid: <words>." puts it back.
+void DocumentSet::name_step(DocumentBase &document) const {
+	std::string words = view_.activity.status;
+	while (!words.empty() && words.back() == '.') words.pop_back();
+	document.name_step(std::move(words));
 }
 
 // The records of edits in words (ADR 0046 S15: record_display with the graph's names): one by its
@@ -874,8 +902,27 @@ std::string DocumentSet::edit_words(const Document &document, const std::vector<
 		const std::string shown = words.text.empty() ? shown_value(*schema, document.choices_on(first.address, use, own), value) : words.text;
 		return "Set " + field_title(use) + " of " + named + " to " + shown + ".";
 	}
+	// Several fields of one record (a drag's left, top, right and bottom; the UX round's problems lane):
+	// the fields by name, on the record by its title as it read before.
+	if (!named.empty() && edits.size() > 1 && document.row(first.address.row)) {
+		std::vector<std::string> titles;
+		for (const Edit &edit : edits) {
+			if (edit.operation != EditOperation::Set || !(edit.address == first.address)) return std::string();
+			std::string title = edit.field;
+			for (const FieldSchema &field : document.fields(edit.address.kind))
+				if (field.id == edit.field) title = field_title(document.field_on(edit.address, field));
+			if (std::find(titles.begin(), titles.end(), title) == titles.end()) titles.push_back(title);
+		}
+		std::string joined;
+		for (size_t i = 0; i < titles.size(); ++i)
+			joined += (i == 0 ? "" : i + 1 == titles.size() ? " and " : ", ") + titles[i];
+		return "Set " + joined + " of " + named + ".";
+	}
 	if (edits.size() == 1 && first.operation == EditOperation::Add && document.last_added())
 		return "Added " + record_display(document, document.address_of(document.last_added()), source) + ".";
+	if (std::all_of(edits.begin(), edits.end(), [](const Edit &edit) { return edit.operation == EditOperation::Duplicate; }))
+		return edits.size() == 1 ? "Duplicated " + record_display(document, first.address, source) + "."
+		                         : "Duplicated " + counted(edits.size(), "record") + ".";
 	return std::string();
 }
 
@@ -894,7 +941,7 @@ void DocumentSet::copy_records(Document &document, bool cut) {
 		view_.documents.clipboard = std::move(payload);
 		core_.touch(ViewConcern::Selection);
 		last_edit_ok_ = true;
-		view_.activity.status = "Copied " + std::to_string(records.size()) + " record(s).";
+		view_.activity.status = "Copied " + counted(records.size(), "record") + ".";
 		core_.touch(ViewConcern::Output);
 		return;
 	}
@@ -910,7 +957,8 @@ void DocumentSet::copy_records(Document &document, bool cut) {
 	if (!apply_edits(document, removes)) return;
 	view_.documents.clipboard = std::move(payload);
 	core_.touch(ViewConcern::Selection);
-	view_.activity.status = "Cut " + std::to_string(records.size()) + " record(s).";
+	view_.activity.status = "Cut " + counted(records.size(), "record") + ".";
+	name_step(document);
 }
 
 void DocumentSet::paste_records(Document &document, const PasteAt &target) {
@@ -984,9 +1032,9 @@ void DocumentSet::duplicate_records(Document &document) {
 		view_.documents.selection.make_primary(document.address_of(made[primary_edit]));
 		core_.touch(ViewConcern::Selection);
 	}
-	view_.activity.status = edits.size() == 1
-	                                ? std::string("Duplicated a record.")
-	                                : "Duplicated " + std::to_string(edits.size()) + " record(s).";
+	view_.activity.status = edits.size() == 1 ? "Duplicated " + records_words(document, edits) + "."
+	                                          : "Duplicated " + counted(edits.size(), "record") + ".";
+	name_step(document);
 }
 
 } // namespace opennova::editor
