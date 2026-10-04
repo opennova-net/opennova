@@ -133,7 +133,8 @@ func _doubled(c: Color) -> Color:
 func test_alpha_mode_art_draws_twice_the_vertex_colour() -> void:
 	# The stance art loads in alpha mode, whose material 0xA51 draws ADD(DIFFUSE,
 	# DIFFUSE): twice the vertex colour, saturated, the texture's colour unread. A
-	# ".FULL" name loads it in colour mode, drawn at the vertex colour.
+	# ".FULL" name loads it in colour mode, drawn under 0x651's MODULATE2X(TEXTURE,
+	# DIFFUSE): twice texel x vertex colour.
 	for stance_name in ["stance.tga", "stance.tga.full"]:
 		var dir := _root_dir("hud_alpha_draw")
 		TestFs.write_bytes(self, dir.path_join("stance.tga"), TestFs.tga_bytes(Vector2i(2, 2), Color8(10, 20, 30, 255)))
@@ -149,12 +150,22 @@ func test_alpha_mode_art_draws_twice_the_vertex_colour() -> void:
 		if drawn.size() != 1:
 			continue
 		assert_eq(compiled[0].r8, 80, "the stance tint is the vertex colour")
+		var draws: Array = hud.get_textured_draws()
+		assert_eq(draws.size(), 1)
 		if stance_name == "stance.tga":
 			assert_true(drawn[0].is_equal_approx(_doubled(compiled[0])),
 					"alpha mode draws twice the vertex colour (%s from %s)" % [drawn[0], compiled[0]])
 			assert_eq(drawn[0].r8, 160, "0x50 doubles to 0xA0")
+			if draws.size() == 1:
+				assert_eq(draws[0].material, "alpha")
 		else:
-			assert_true(drawn[0].is_equal_approx(compiled[0]), "colour mode draws the vertex colour")
+			# Colour mode: the vertex colour goes to the device, whose 0x651
+			# material runs MODULATE2X(TEXTURE, DIFFUSE) (D-HUD-49).
+			assert_true(drawn[0].is_equal_approx(compiled[0]), "colour mode hands the vertex colour on")
+			if draws.size() == 1:
+				assert_eq(draws[0].material, "modulate2x",
+						"a .FULL name draws under the colour material's MODULATE2X")
+				assert_eq(draws[0].white.r8, 160, "a white texel under 0x50 draws 0xA0")
 
 
 # --- 2. Model texture type 1 -----------------------------------------------

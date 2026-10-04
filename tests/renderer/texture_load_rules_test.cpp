@@ -236,6 +236,19 @@ void test_hud_alpha_material() {
 	CHECK(hud_alpha_material_argb(0x80102030u) == 0x80204060u, "twice each channel, alpha kept");
 }
 
+// The colour material 0x651: MODULATE2X(TEXTURE, DIFFUSE) colour, MODULATE alpha
+// (D-HUD-49) [orig: RenderState_DecodeModeColorStage @ 0x6814BE..0x6814CA].
+void test_hud_color_material() {
+	CHECK(hud_color_material_argb(0xFFFFFFFFu, 0xFF7F7F7Fu) == 0xFFFEFEFEu,
+			"a half-bright diffuse over a white texel lands at full brightness");
+	CHECK(hud_color_material_argb(0xFFFFFFFFu, 0xFFFFFFFFu) == 0xFFFFFFFFu, "white stays white");
+	CHECK(hud_color_material_argb(0xFF808080u, 0xFFFFFFFFu) == 0xFFFFFFFFu,
+			"a mid texel under a white diffuse doubles and saturates");
+	CHECK(hud_color_material_argb(0x80404040u, 0x80FFFFFFu) == 0x40808080u,
+			"twice texel x diffuse per colour channel; the alpha only modulates");
+	CHECK(hud_color_material_argb(0xFF102030u, 0xFF000000u) == 0xFF000000u, "a black diffuse draws black");
+}
+
 void test_side_caps() {
 	CHECK(material_texture_side_cap(4) == 512 && material_texture_side_cap(5) == 512, "normal maps");
 	CHECK(material_texture_side_cap(7) == 512, "the occlusion producer");
@@ -307,6 +320,7 @@ int main() {
 	test_masks_follow_the_name();
 	test_particle_attempts();
 	test_hud_alpha_material();
+	test_hud_color_material();
 	test_side_caps();
 	test_dds_codec_order();
 	test_pcx_more();

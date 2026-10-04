@@ -21,12 +21,12 @@ HudMapPassRenderer::~HudMapPassRenderer() {
 
 bool HudMapPassRenderer::is_ready() const {
 	return base_item_.is_valid() && add_item_.is_valid() && water_item_.is_valid() &&
-			top_item_.is_valid() && modulate2x_item_.is_valid() && post_item_.is_valid();
+			top_item_.is_valid();
 }
 
 void HudMapPassRenderer::ensure(const RID &parent, int first_draw_index, bool behind_parent,
 		const RID &additive_material, const RID &water_material,
-		const RID &modulate2x_material) {
+		const RID &top_material) {
 	if (is_ready()) return;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs == nullptr) return;
@@ -72,33 +72,17 @@ void HudMapPassRenderer::ensure(const RID &parent, int first_draw_index, bool be
 				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS);
 		rs->canvas_item_set_default_texture_repeat(top_item_,
 				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+		// A MODULATE2X sprite selects its colour stage through the material's
+		// UV flag, in its own place in the order (see render).
+		rs->canvas_item_set_material(top_item_, top_material);
 		top_sampling_configured_ = true;
 	}
-	// The top item's two children draw after its own commands, in index
-	// order, and inherit its transform: the MODULATE2X sprites, then the
-	// post-mark content (see render).
-	const auto configure_child = [&](RID &item, int index) {
-		if (item.is_valid()) return;
-		item = rs->canvas_item_create();
-		rs->canvas_item_set_parent(item, top_item_);
-		rs->canvas_item_set_draw_index(item, index);
-		rs->canvas_item_set_default_texture_filter(item,
-				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS);
-		rs->canvas_item_set_default_texture_repeat(item,
-				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
-	};
-	if (!modulate2x_item_.is_valid()) {
-		configure_child(modulate2x_item_, 0);
-		rs->canvas_item_set_material(modulate2x_item_, modulate2x_material);
-	}
-	configure_child(post_item_, 1);
 }
 
 void HudMapPassRenderer::clear() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs == nullptr) return;
-	for (const RID &item : {base_item_, add_item_, water_item_, top_item_, modulate2x_item_,
-				 post_item_}) {
+	for (const RID &item : {base_item_, add_item_, water_item_, top_item_}) {
 		if (item.is_valid()) rs->canvas_item_clear(item);
 	}
 }
@@ -106,9 +90,7 @@ void HudMapPassRenderer::clear() {
 void HudMapPassRenderer::release() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs != nullptr) {
-		// Children first: they hang off the top item.
-		for (const RID &item : {modulate2x_item_, post_item_, base_item_, add_item_,
-					 water_item_, top_item_}) {
+		for (const RID &item : {base_item_, add_item_, water_item_, top_item_}) {
 			if (item.is_valid()) rs->free_rid(item);
 		}
 	}
@@ -116,8 +98,6 @@ void HudMapPassRenderer::release() {
 	add_item_ = RID();
 	water_item_ = RID();
 	top_item_ = RID();
-	modulate2x_item_ = RID();
-	post_item_ = RID();
 	water_sampling_configured_ = false;
 	top_sampling_configured_ = false;
 }
@@ -140,10 +120,12 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 	const RID base_item = base_item_;
 	const RID add_item = add_item_;
 	const RID water_item = water_item_;
-	// The top-layer target: the top item until the first MODULATE2X sprite,
-	// then the post item, so the marks' own item sits between them in the
-	// retail order (sprites, marks, ring, compass, lines, glyphs).
-	RID top_item = top_item_;
+	// The top layer, in the retail order (sprites, marks, ring, compass, lines,
+	// glyphs); a MODULATE2X sprite flags its own vertices.
+	const RID top_item = top_item_;
+	// The UV.x flag the top material reads as the MODULATE2X colour stage
+	// (HudOverlay's kMapModulate2xShader); map UVs stay inside [0, 1].
+	constexpr float kModulate2xUvFlag = 8.0f;
 
 	// One triangle-array submission per (item, texture) group: the per-frame
 	// map redraw must not request one RenderingServer polygon per triangle
@@ -293,42 +275,33 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 
 	// Sprites batch by consecutive texture slot (insertion order is the
 	// compiler layer order, so only same-texture runs may merge). `with_ring`
-	// submits the pass's ring strips at their split. A MODULATE2X sprite rides
-	// its own item; the first one moves every later top-layer submission onto
-	// the post item.
+	// submits the pass's ring strips at their split. A MODULATE2X sprite's
+	// vertices carry the top material's UV flag.
 	const auto submit_sprites = [&](const opennova::hud::HudMapPass &pass, size_t begin,
 			size_t end, bool with_ring) {
 		int run_texture_slot = -1;
 		Ref<Texture2D> run_texture;
-		RID run_item = top_item;
 		for (size_t sprite_index = begin; sprite_index < end; ++sprite_index) {
 			const opennova::hud::HudMapSprite &sprite = pass.sprites[sprite_index];
 			if (with_ring && sprite_index == pass.ring_tris_before_sprite &&
 					!pass.ring_tris.empty()) {
-				flush_tris(run_item, run_texture);
+				flush_tris(top_item, run_texture);
 				run_texture_slot = -2;
-				run_item = top_item;
 				submit_ring();
 			}
 			// kHudMapTextureNone draws untextured (the ring bands).
 			const int texture_slot = sprite.texture == opennova::hud::kHudMapTextureNone
 					? -1
 					: opennova::hud::kHudTexMapIcons + sprite.texture;
-			const RID sprite_item = sprite.modulate2x ? modulate2x_item_ : top_item;
-			if (sprite.modulate2x && top_item != post_item_) {
+			if (texture_slot != run_texture_slot) {
 				flush_tris(top_item, run_texture);
-				run_texture_slot = -2;
-				top_item = post_item_;
-			}
-			if (texture_slot != run_texture_slot || sprite_item != run_item) {
-				flush_tris(run_item, run_texture);
-				run_item = sprite_item;
 				run_texture_slot = texture_slot;
 				run_texture = texture_slot >= 0 && texture_slot < p_textures.slot_count &&
 								p_textures.slots != nullptr
 						? p_textures.slots[texture_slot]
 						: Ref<Texture2D>();
 			}
+			const float u_flag = sprite.modulate2x ? kModulate2xUvFlag : 0.0f;
 			if (sprite.geom_count != 0) {
 				// The compiler's cropped/banded triangle list replaces the quad.
 				const size_t geom_end = std::min<size_t>(pass.geom.size(),
@@ -338,7 +311,7 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 					for (size_t k = 0; k < 3; ++k) {
 						const opennova::hud::HudMapGeomVertex &v = pass.geom[gi + k];
 						points.push_back(Vector2(v.x, v.y));
-						uvs.push_back(Vector2(v.u, v.v));
+						uvs.push_back(Vector2(v.u + u_flag, v.v));
 						colors.push_back(opennova::color_from_argb(v.color));
 						indices.push_back(base + static_cast<int>(k));
 					}
@@ -358,14 +331,14 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 				corner(-sprite.half_w, sprite.half_h),
 			};
 			const Vector2 quad_uvs[4] = {
-				Vector2(sprite.u0, sprite.v0),
-				Vector2(sprite.u1, sprite.v0),
-				Vector2(sprite.u1, sprite.v1),
-				Vector2(sprite.u0, sprite.v1),
+				Vector2(sprite.u0 + u_flag, sprite.v0),
+				Vector2(sprite.u1 + u_flag, sprite.v0),
+				Vector2(sprite.u1 + u_flag, sprite.v1),
+				Vector2(sprite.u0 + u_flag, sprite.v1),
 			};
 			push_quad(corners, quad_uvs, sprite.color);
 		}
-		flush_tris(run_item, run_texture);
+		flush_tris(top_item, run_texture);
 		if (with_ring && pass.ring_tris_before_sprite >= end && !pass.ring_tris.empty())
 			submit_ring();
 	};

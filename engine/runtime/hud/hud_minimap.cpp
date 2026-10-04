@@ -1078,6 +1078,12 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		compass.color = 0xFFFFFFFFu;
 		compass.texture = 1;
 		compass.layer = 5;
+		// compring.tga is a colour-mode HUD texture: its material 0x651 runs
+		// MODULATE2X(TEXTURE, DIFFUSE) on the device over the white diffuse
+		// (renderer::hud_color_material_argb; D-HUD-49)
+		// [orig: HUD_LoadAllTextures @0x59DDA0 — compring through sub_591750 in
+		//  colour mode; RenderState_DecodeModeColorStage @0x6814BE..0x6814CA].
+		compass.modulate2x = true;
 		out.sprites.push_back(compass);
 	}
 }

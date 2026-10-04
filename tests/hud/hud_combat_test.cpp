@@ -712,12 +712,13 @@ static void vehicle_bay_logos() {
 	CHECK(d.tris[t0].a.x == 512.0f && d.tris[t0].a.y == 276.0f &&
 			d.tris[t0].a.color == 0x3F000000u);
 	CHECK(d.tris[t0 + 1].a.color == 0x3F000000u && d.tris[t0 + 1].c.color == 0xFF80A0FFu);
-	// The logo: 256 x 128 about (512, 276), half-bright under MODULATE2X at
-	// full alpha, UVs inset half a design texel and widened one pixel.
+	// The logo: 256 x 128 about (512, 276), the half-bright diffuse at full
+	// alpha, raw (the colour-mode texture's MODULATE2X runs on the device,
+	// D-HUD-49), UVs inset half a design texel and widened one pixel.
 	const HudTri &q = d.tris[t1 - 2];
 	CHECK(q.texture == kHudTexLogoHelo && d.tris[t1 - 1].texture == kHudTexLogoHelo);
 	CHECK(q.a.x == 384.0f && q.a.y == 212.0f && q.c.x == 640.0f && q.c.y == 340.0f);
-	CHECK(q.a.color == 0xFF80A0FEu);
+	CHECK(q.a.color == 0xFF40507Fu);
 	CHECK(near(q.a.u, 0.5f / 256) && near(q.a.v, 0.5f / 128));
 	CHECK(near(q.c.u, 1 - 0.5f / 256 + 1.0f / 256) && near(q.c.v, 1 - 0.5f / 128 + 1.0f / 128));
 	// The 40-px stem from the integral projected pixel, in the ring colour.
@@ -753,7 +754,7 @@ static void vehicle_bay_logos() {
 	const HudDrawList &faded = compiler.compile(state, 1024, 768);
 	const HudTri &fan = faded.tris[faded.order_breaks[0].tris];
 	CHECK(fan.a.color == 0x2A000000u && fan.b.color == 0x2A000000u);
-	CHECK(faded.tris[faded.order_breaks[1].tris - 1].a.color == 0xFF00FE00u);
+	CHECK(faded.tris[faded.order_breaks[1].tris - 1].a.color == 0xFF007F00u);
 }
 
 int main() {

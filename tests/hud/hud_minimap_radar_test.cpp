@@ -147,9 +147,12 @@ void test_threat_ring_geometry_and_states() {
 	CHECK(idle.ring_tris_before_sprite < idle.sprites.size() &&
 			idle.sprites[idle.ring_tris_before_sprite].texture == 1,
 			"the ring draws right before the compass sprite");
+	// compring.tga is a colour-mode HUD texture: its sprite runs the 0x651
+	// material's MODULATE2X stage on the device over the white diffuse (D-HUD-49).
 	CHECK(idle.ring_tris_before_sprite < idle.sprites.size() &&
-			!idle.sprites[idle.ring_tris_before_sprite].modulate2x,
-			"the compass keeps its compile-side fold (a white diffuse)");
+			idle.sprites[idle.ring_tris_before_sprite].modulate2x &&
+			idle.sprites[idle.ring_tris_before_sprite].color == 0xFFFFFFFFu,
+			"the compass draws its raw white diffuse under the device's MODULATE2X");
 	// Radii at 1024 wide: x' = cx -/+ 100 under bit 16, rho0 = 100 - 4 = 96,
 	// R = 96 - 2 = 94 -> bands {93..94, 94..96, 96..97}.
 	const double c0 = opennova::io::bam_table_cos(opennova::io::bam_table_index(0x0ACAA800u));

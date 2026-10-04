@@ -299,6 +299,110 @@ func test_crosshair_requires_active_weapon() -> void:
 		"An armed hip stance emits the five tapered regions (14 triangles).")
 
 
+# Colour-mode HUD art (material 0x651) draws under MODULATE2X(TEXTURE,
+# DIFFUSE): twice texel x vertex colour, saturated, whatever element draws it
+# (D-HUD-49) [orig: sub_591750 @0x591750 (0x651 @0x59181a);
+# RenderState_DecodeModeColorStage @0x6814BE..0x6814CA].
+func _modulate2x_white(c: Color) -> Color:
+	return Color8(mini(c.r8 * 2, 255), mini(c.g8 * 2, 255), mini(c.b8 * 2, 255), c.a8)
+
+
+func _draws_of(hud: HudOverlay, primitive: String, material: String) -> Array:
+	var out := []
+	for row: Dictionary in hud.get_textured_draws():
+		if row.primitive == primitive and row.material == material:
+			out.append(row)
+	return out
+
+
+func _check_modulate2x_rows(rows: Array, what: String) -> void:
+	for row: Dictionary in rows:
+		assert_eq(row.white.to_rgba32(), _modulate2x_white(row.color).to_rgba32(),
+				"%s: a white texel draws twice the vertex colour, saturated" % what)
+
+
+# The triangle class: the crosshair's tapered regions (cross%02d.tga, colour mode).
+func test_colour_mode_crosshair_draws_under_modulate2x() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), PackedStringArray(["cross01.tga"]), {
+		"cross01.tga": Vector2i(8, 8),
+	})
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
+	var rows := _draws_of(hud, "tri", "modulate2x")
+	assert_eq(rows.size(), 14, "every crosshair triangle takes the colour material")
+	assert_eq(_draws_of(hud, "tri", "plain").size(), 0, "no crosshair triangle draws plain")
+	_check_modulate2x_rows(rows, "crosshair")
+
+
+# The quad class: the hudpos STATICFRAME background (colour mode), drawn raw.
+func test_colour_mode_static_frame_draws_under_modulate2x() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"STATICFRAME frame.tga 10 20",
+	]), PackedStringArray(["frame.tga"]), {"frame.tga": Vector2i(16, 8)})
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	hud.set_player_state(100, 1.0, 0, 80.0)
+	var rows := _draws_of(hud, "quad", "modulate2x")
+	assert_eq(rows.size(), 1, "the static frame quad takes the colour material")
+	_check_modulate2x_rows(rows, "static frame")
+
+
+# The centred-quad class: a capture point's own-zone tile (lfp_dlf.tga, colour
+# mode) carries the raw half-bright diffuse; the device doubles it, as
+# HUD_DrawTexturedQuadCentered's material does (no compile-side fold).
+func test_colour_mode_zone_tile_draws_half_bright_under_modulate2x() -> void:
+	var fixture := _load_temp_layout(PackedStringArray(["fonthud1_hi Gunpl22b.fnt"]),
+			PackedStringArray(["lfp_alf.tga", "lfp_dlf.tga"]),
+			{"lfp_alf.tga": Vector2i(36, 36), "lfp_dlf.tga": Vector2i(36, 36)})
+	_copy_font_into(fixture.dir)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	var sim := Simulation.new()
+	sim.build_demo_mission()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var view := sim.get_local_player_view()
+	var projection := Projection.create_perspective(80.0, 4.0 / 3.0, 0.1, 1000.0)
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
+			PackedInt32Array([7, 36, 0]))
+	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
+	var before := hud.get_draw_list_stats()
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
+			_capture_zone_snapshot(0))
+	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
+	assert_eq(hud.get_draw_list_stats().tris - before.tris, 2, "the own-zone tile compiles")
+	var rows := _draws_of(hud, "tri", "modulate2x")
+	assert_eq(rows.size(), 2, "the zone tile's two triangles take the colour material")
+	for row: Dictionary in rows:
+		assert_true(row.color.r8 <= 127 and row.color.g8 <= 127 and row.color.b8 <= 127,
+				"the tile's diffuse is the raw half-bright point colour")
+	_check_modulate2x_rows(rows, "zone tile")
+
+
+# The alpha class stays its own: stance art (alpha mode, material 0xA51).
+func test_alpha_mode_stance_keeps_the_alpha_material() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"HUDSTANCEPOS 21 630",
+		"ALPHAFADE 30 50 3",
+		"HUDSTANCE 0 10 11 s1.tga STAND",
+		"HUDSTANCE 1 12 13 s2.tga CROUCH",
+		"HUDSTANCE 2 22 23 s3.tga PRONE",
+		"HUDSTANCE 3 30 31 s4.tga SITTING",
+		"HUDSTANCE 4 40 41 s5.tga EMPLACED",
+		"HUDSTANCE 5 50 51 s6.tga PARACHUTE",
+	]), PackedStringArray(["s1.tga", "s2.tga", "s3.tga", "s4.tga", "s5.tga", "s6.tga"]))
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	hud.set_player_state(100, 1.0, 2, 80.0)
+	assert_eq(hud.get_draw_list_stats().quads, 1, "one stance frame quad")
+	assert_eq(_draws_of(hud, "quad", "alpha").size(), 1, "the stance quad keeps the alpha material")
+	assert_eq(_draws_of(hud, "quad", "modulate2x").size(), 0)
+
+
 func test_crosshair_missing_texture_draws_nothing() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"ALPHAFADE 30 50 3",

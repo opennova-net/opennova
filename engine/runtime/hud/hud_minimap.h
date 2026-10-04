@@ -499,9 +499,10 @@ struct HudMapSprite {
 	uint32_t geom_count = 0;
 	// The device applies the pass's own MODULATE2X(TEXTURE, DIFFUSE) colour
 	// stage (saturate(2 * texel * diffuse), alpha MODULATE) to this sprite,
-	// so `color` carries the raw diffuse. Set by the radar marks, whose
-	// material is mode word 0x651 (blend 1, alpha 0x50, colour 0x600); the
-	// other sprites fold the stage into the diffuse at compile.
+	// so `color` carries the raw diffuse. Set by the colour-mode HUD textures,
+	// whose material is mode word 0x651 (blend 1, alpha 0x50, colour 0x600):
+	// the radar marks and the compass ring (D-HUD-49); the icon-strip sprites
+	// fold their own strip's stage into the diffuse at compile.
 	// [orig: HUD_LoadAllTextures @0x59de25..0x59de42 (flags 1617);
 	//  RenderState_DecodeModeColorStage @0x681080 (0x600)]
 	bool modulate2x = false;

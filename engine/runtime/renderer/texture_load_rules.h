@@ -165,6 +165,14 @@ void apply_texture_load_transform(TextureLoadTransform transform, bool alpha_onl
 // modulating draw multiplies by the texture's. `argb` is the quad's vertex colour.
 uint32_t hud_alpha_material_argb(uint32_t argb);
 
+// The colour the HUD's colour material 0x651 draws a texel with: colour op
+// MODULATE2X(TEXTURE, DIFFUSE) on a device that reports modulate-2x, so twice the
+// texel times the vertex colour, saturated per channel; alpha MODULATE(TEXTURE,
+// DIFFUSE). Every texture the HUD loader makes in colour mode draws with it, whatever
+// element draws it (the embedder runs the stage on the device, the texel unknown
+// until then); `texel` and `diffuse` are A8R8G8B8.
+uint32_t hud_color_material_argb(uint32_t texel, uint32_t diffuse);
+
 // GTexture_DownsampleToLimits's cap halving: while either side exceeds `cap`, both
 // sides halve with a 2x2 box. `rgba` holds width x height RGBA8 pixels; width and
 // height are updated.

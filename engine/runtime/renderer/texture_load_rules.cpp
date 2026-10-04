@@ -246,6 +246,22 @@ uint32_t hud_alpha_material_argb(uint32_t argb) {
 	return (argb & 0xFF000000u) | doubled(16) | doubled(8) | doubled(0);
 }
 
+// [orig: sub_591750 @ 0x591750 — a colour-mode texture's material mode 0x651 (1617)
+//  @ 0x59181a; RenderState_DecodeModeColorStage @ 0x681080 — mode family 0x600's stage
+//  0: colour op tex_blend_op over TEXTURE (2) and DIFFUSE (0) @ 0x6814BE..0x6814CA,
+//  tex_blend_op = 4 + supportsModulate2X @ 0x6810FF, so 5, MODULATE2X, on every device
+//  that reports it (GfxDevice_Modulate2XEnabled is always set); alpha op 0x50
+//  MODULATE(TEXTURE, DIFFUSE); RenderState_ApplyToDevice @ 0x681920 sets the stage]
+uint32_t hud_color_material_argb(uint32_t texel, uint32_t diffuse) {
+	const auto channel = [&](int shift, bool doubled) -> uint32_t {
+		const uint32_t product = ((texel >> shift) & 0xFFu) * ((diffuse >> shift) & 0xFFu);
+		// D3D's modulate on 8-bit channels: t * d / 255, then the stage's 2x, saturated.
+		const uint32_t value = doubled ? (2u * product + 127u) / 255u : (product + 127u) / 255u;
+		return (value > 0xFFu ? 0xFFu : value) << shift;
+	};
+	return channel(24, false) | channel(16, true) | channel(8, true) | channel(0, true);
+}
+
 // [orig: Material_LoadStageTexture @ 0x5B16F0 — flag 0x1000 ORed in for types 4/5
 //  @ 0x5B1782, 6 @ 0x5B17A4 and 7 @ 0x5B17C1; type 7's sub_58CE10 @ 0x58CE10 hands it to
 //  GTexture_FindOrCreateFromData, whose GTexture_DownsampleToLimits @ 0x687170 caps the

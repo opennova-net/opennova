@@ -376,6 +376,11 @@ public:
 	// vertex colour or (`p_drawn`) the colour the device draws it with, which an
 	// alpha-mode texture's material doubles (renderer::hud_alpha_material_argb).
 	PackedColorArray get_textured_quad_colors(bool p_drawn);
+	// Debug/test accessor: every textured quad and triangle of the compiled HUD in
+	// draw order, each {primitive: "quad" | "tri", texture: slot, color: the compiled
+	// vertex colour, material: "plain" | "alpha" | "modulate2x" (the loader mode's
+	// material), white: the colour that material draws a white texel with}.
+	Array get_textured_draws();
 
 	// F3 Stats seam: _draw() runs inside Godot's deferred flush (outside every
 	// Node callback), so its compile + canvas-emit cost is timed here and
@@ -401,9 +406,12 @@ public:
 	HudMapPassTextures map_pass_textures() const;
 	RID map_additive_material();
 	RID map_water_material();
-	// The fixed-function MODULATE2X(TEXTURE, DIFFUSE) colour stage with the
-	// MODULATE alpha stage under SRCALPHA/INVSRCALPHA, for the map sprites
-	// flagged HudMapSprite::modulate2x (the bit-10 radar marks).
+	// The map pass's top-layer material: every command draws texel x vertex
+	// colour, and one whose UV.x carries the +8 flag (a sprite flagged
+	// HudMapSprite::modulate2x: the colour-mode radar marks and compass ring) runs
+	// the fixed-function MODULATE2X(TEXTURE, DIFFUSE) colour stage with the
+	// MODULATE alpha stage under SRCALPHA/INVSRCALPHA, in its own place in the
+	// pass's order.
 	RID map_modulate2x_material();
 
 protected:
@@ -526,9 +534,6 @@ private:
 	// ResourceRoot::TextureLoader), uploaded with no mips unless asked.
 	Ref<Texture2D> load_hud_texture_(const String &p_name, ResourceRoot::TextureLoader p_loader,
 			bool p_generate_mipmaps = false) const;
-	// MODULATE2X equivalence for a white-modulated static sprite: RGB x2
-	// saturated, alpha unchanged (the compass ring's pipeline).
-	Ref<Texture2D> double_saturate_texture_(const Ref<Texture2D> &p_texture) const;
 	void load_crosshair_texture_();
 	// The combat sprites' loads (the anchors are the engine fill's).
 	void configure_combat_(const opennova::hud::HudLayoutAssets &assets);
@@ -539,6 +544,13 @@ private:
 	// The textures the HUD loader made in alpha mode (by instance id): their quads
 	// draw with the alpha material's colour (renderer::hud_alpha_material_argb).
 	mutable std::unordered_set<uint64_t> alpha_mode_textures_;
+	// The textures the HUD loader made in colour mode (by instance id): their quads
+	// and triangles draw under the colour material's MODULATE2X stage, which the flat
+	// shader runs on the device (renderer::hud_color_material_argb).
+	mutable std::unordered_set<uint64_t> color_mode_textures_;
+	// The material a textured draw takes from its texture's loader mode.
+	enum class HudMaterial { kPlain = 0, kAlpha = 1, kColorModulate2x = 2 };
+	HudMaterial texture_material_(const Ref<Texture2D> &p_texture) const;
 	// The colour a textured command draws with: the alpha material's for an
 	// alpha-mode texture, else the vertex colour.
 	Color texture_draw_color_(const Ref<Texture2D> &p_texture, uint32_t p_argb) const;

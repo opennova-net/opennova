@@ -59,24 +59,34 @@ using opennova::hud::HudRectRecord;
 
 constexpr int kMinimapFootprintFeedVersion = 1;
 
-// The map sprites' MODULATE2X(TEXTURE, DIFFUSE) colour stage, saturated per
-// channel, with the MODULATE(TEXTURE, DIFFUSE) alpha stage and the
-// SRCALPHA/INVSRCALPHA blend: the radar marks' material word 0x651 (blend 1,
-// alpha 0x50, colour 0x600; the witness rides HudMapSprite::modulate2x in
-// engine/runtime/hud/hud_minimap.h).
+// The map pass's top-layer shader. A sprite flagged HudMapSprite::modulate2x
+// arrives with a +8 flag on UV.x (map UVs stay inside [0, 1]); its vertex() strips
+// the flag and fragment() runs the MODULATE2X(TEXTURE, DIFFUSE) colour stage,
+// saturated per channel, over COLOR (the texel times the vertex colour), the alpha
+// stage MODULATE(TEXTURE, DIFFUSE) left as COLOR has it, under the
+// SRCALPHA/INVSRCALPHA blend: the colour-mode material word 0x651 (blend 1, alpha
+// 0x50, colour 0x600; the witness rides HudMapSprite::modulate2x in
+// engine/runtime/hud/hud_minimap.h and renderer::hud_color_material_argb). Every
+// other command draws texel x vertex colour, so the flagged sprites keep their
+// place in the pass's order.
 constexpr const char *kMapModulate2xShader = R"(
 shader_type canvas_item;
 render_mode unshaded, blend_mix;
 
-varying vec4 diffuse;
+varying flat float modulate2x_on;
 
 void vertex() {
-	diffuse = COLOR;
+	modulate2x_on = 0.0;
+	if (UV.x >= 4.0) {
+		UV.x -= 8.0;
+		modulate2x_on = 1.0;
+	}
 }
 
 void fragment() {
-	vec4 texel = texture(TEXTURE, UV);
-	COLOR = vec4(min(texel.rgb * diffuse.rgb * 2.0, vec3(1.0)), texel.a * diffuse.a);
+	if (modulate2x_on > 0.5) {
+		COLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));
+	}
 }
 )";
 
@@ -125,9 +135,13 @@ void fragment() {
 // D3D9 raster, whose pixel centres sit on the integers; here pixel centres
 // sit at +0.5, so px / stage dims samples the same texel -- and fragment()
 // applies MODULATE2X(CURRENT, TEXTURE1) to the colour and MODULATE(CURRENT,
-// TEXTURE1) to the alpha, the stage-1 texture wrap-addressed. Every other
-// command keeps the default COLOR (vertex colour x TEXTURE). The witness
-// rides the engine's HudQuad::texture2 (runtime/hud/hud_frame.h).
+// TEXTURE1) to the alpha, the stage-1 texture wrap-addressed. A command whose
+// UV.y carries a +16 flag draws a colour-mode HUD texture: its vertex() strips the
+// flag and fragment() runs the colour material 0x651's MODULATE2X(TEXTURE,
+// DIFFUSE) stage over COLOR, saturated per channel, the alpha MODULATE as COLOR
+// has it (renderer::hud_color_material_argb owns the witness; D-HUD-49). Every
+// other command keeps the default COLOR (vertex colour x TEXTURE). The stage-1
+// witness rides the engine's HudQuad::texture2 (runtime/hud/hud_frame.h).
 constexpr const char *kHudFlatShader = R"(
 shader_type canvas_item;
 render_mode unshaded, blend_mix;
@@ -136,15 +150,21 @@ uniform sampler2D stage1_texture : repeat_enable, filter_nearest;
 uniform vec2 stage1_inv_size = vec2(0.0);
 
 varying flat float stage1_on;
+varying flat float modulate2x_on;
 varying vec2 stage1_uv;
 
 void vertex() {
 	stage1_on = 0.0;
+	modulate2x_on = 0.0;
 	stage1_uv = vec2(0.0);
 	if (UV.x >= 4.0) {
 		UV.x -= 8.0;
 		stage1_on = 1.0;
 		stage1_uv = VERTEX * stage1_inv_size;
+	}
+	if (UV.y >= 8.0) {
+		UV.y -= 16.0;
+		modulate2x_on = 1.0;
 	}
 }
 
@@ -154,11 +174,16 @@ void fragment() {
 		COLOR.rgb = min(COLOR.rgb * camo.rgb * 2.0, vec3(1.0));
 		COLOR.a *= camo.a;
 	}
+	if (modulate2x_on > 0.5) {
+		COLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));
+	}
 }
 )";
 
 // The +8 UV flag a second-stage quad's vertices carry into kHudFlatShader.
 constexpr float kStage1UvFlag = 8.0f;
+// The +16 UV.y flag a colour-mode texture's vertices carry into kHudFlatShader.
+constexpr float kModulate2xUvFlag = 16.0f;
 
 } // namespace
 
@@ -343,6 +368,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_radar_frame_gates);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"), &HudOverlay::get_draw_list_stats);
 	ClassDB::bind_method(D_METHOD("get_textured_quad_colors", "drawn"), &HudOverlay::get_textured_quad_colors);
+	ClassDB::bind_method(D_METHOD("get_textured_draws"), &HudOverlay::get_textured_draws);
 	ClassDB::bind_method(D_METHOD("set_draw_timing_enabled", "enabled"),
 			&HudOverlay::set_draw_timing_enabled);
 	ClassDB::bind_method(D_METHOD("consume_draw_timing_us"),
@@ -513,33 +539,6 @@ void HudOverlay::push_label_fonts_(const opennova::hud::HudLabelFontChoice &p_ch
 			label_font_impact38_valid_ ? &label_font_impact38_ : nullptr);
 }
 
-Ref<Texture2D> HudOverlay::double_saturate_texture_(
-		const Ref<Texture2D> &p_texture) const {
-	if (p_texture.is_null()) {
-		return p_texture;
-	}
-	Ref<Image> image = p_texture->get_image();
-	if (image.is_null()) {
-		return p_texture;
-	}
-	if (image->is_compressed()) {
-		image->decompress();
-	}
-	image->convert(Image::FORMAT_RGBA8);
-	PackedByteArray data = image->get_data();
-	uint8_t *bytes = data.ptrw();
-	const int64_t size = data.size();
-	for (int64_t i = 0; i + 3 < size; i += 4) {
-		for (int c = 0; c < 3; ++c) {
-			const int v = bytes[i + c] * 2;
-			bytes[i + c] = static_cast<uint8_t>(v > 255 ? 255 : v);
-		}
-	}
-	const Ref<Image> doubled = Image::create_from_data(image->get_width(),
-			image->get_height(), false, Image::FORMAT_RGBA8, data);
-	return ImageTexture::create_from_image(doubled);
-}
-
 Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name, ResourceRoot::TextureLoader p_loader,
 		bool p_generate_mipmaps) const {
 	// Loaded by flat name through the mounted VFS, decoded the retail way
@@ -557,18 +556,77 @@ Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name, ResourceRoot:
 		return Ref<Texture2D>();
 	}
 	const Ref<Texture2D> texture = ImageTexture::create_from_image(image);
-	// The HUD loader's resolved mode picks the material the quads draw with.
-	if (texture.is_valid() && alpha_mode) {
-		alpha_mode_textures_.insert(texture->get_instance_id());
+	// The HUD loader's resolved mode picks the material the quads draw with: the
+	// alpha material for alpha mode, the colour material for colour mode. The
+	// other loaders' textures keep their own callers' materials.
+	const bool hud_loader = p_loader == ResourceRoot::TEXTURE_LOADER_HUD_COLOR ||
+			p_loader == ResourceRoot::TEXTURE_LOADER_HUD_ALPHA;
+	if (texture.is_valid() && hud_loader) {
+		(alpha_mode ? alpha_mode_textures_ : color_mode_textures_).insert(texture->get_instance_id());
 	}
 	return texture;
 }
 
+HudOverlay::HudMaterial HudOverlay::texture_material_(const Ref<Texture2D> &p_texture) const {
+	if (p_texture.is_null()) {
+		return HudMaterial::kPlain;
+	}
+	const uint64_t id = p_texture->get_instance_id();
+	if (alpha_mode_textures_.count(id) != 0) {
+		return HudMaterial::kAlpha;
+	}
+	return color_mode_textures_.count(id) != 0 ? HudMaterial::kColorModulate2x : HudMaterial::kPlain;
+}
+
 Color HudOverlay::texture_draw_color_(const Ref<Texture2D> &p_texture, uint32_t p_argb) const {
-	if (p_texture.is_valid() && alpha_mode_textures_.count(p_texture->get_instance_id()) != 0) {
+	if (texture_material_(p_texture) == HudMaterial::kAlpha) {
 		return opennova::color_from_argb(opennova::renderer::hud_alpha_material_argb(p_argb));
 	}
 	return opennova::color_from_argb(p_argb);
+}
+
+Array HudOverlay::get_textured_draws() {
+	Array out;
+	if (!configured_) {
+		return out;
+	}
+	const Vector2 surface = draw_surface_();
+	ensure_label_fonts_(surface.x);
+	const HudDrawList &list = compiler_.compile(state_, surface.x, surface.y);
+	const auto report = [&](const char *primitive, int32_t slot, uint32_t argb) {
+		const Ref<Texture2D> tex = textures_[static_cast<size_t>(slot)];
+		const HudMaterial material = texture_material_(tex);
+		uint32_t white = argb;
+		const char *name = "plain";
+		if (material == HudMaterial::kAlpha) {
+			white = opennova::renderer::hud_alpha_material_argb(argb);
+			name = "alpha";
+		} else if (material == HudMaterial::kColorModulate2x) {
+			white = opennova::renderer::hud_color_material_argb(0xFFFFFFFFu, argb);
+			name = "modulate2x";
+		}
+		Dictionary row;
+		row["primitive"] = primitive;
+		row["texture"] = slot;
+		row["color"] = opennova::color_from_argb(argb);
+		row["material"] = name;
+		row["white"] = opennova::color_from_argb(white);
+		out.push_back(row);
+	};
+	for (const opennova::hud::HudQuad &quad : list.quads) {
+		if (quad.filled && quad.texture >= 0 && quad.texture < kTextureSlots &&
+				textures_[static_cast<size_t>(quad.texture)].is_valid()) {
+			report("quad", quad.texture, quad.color);
+		}
+	}
+	for (const opennova::hud::HudTri &tri : list.tris) {
+		if (tri.texture >= 0 && tri.texture < kTextureSlots &&
+				textures_[static_cast<size_t>(tri.texture)].is_valid()) {
+			const Color diffuse = opennova::color_from_argb(tri.color) * opennova::color_from_argb(tri.a.color);
+			report("tri", tri.texture, static_cast<uint32_t>(diffuse.to_argb32()));
+		}
+	}
+	return out;
 }
 
 PackedColorArray HudOverlay::get_textured_quad_colors(bool p_drawn) {
@@ -608,6 +666,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	combat_texture_names_ = {};
 	combat_texture_loaders_ = {};
 	alpha_mode_textures_.clear();
+	color_mode_textures_.clear();
 	clear_font_();
 	// The freed label pair must leave the compiler too; the first draw's
 	// ensure_label_fonts_ reloads it for the fresh root.
@@ -778,16 +837,13 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		state_.minimap.icon_strip_h_px =
 				opennova::hud::HudMinimapInput{}.icon_strip_h_px;
 	}
-	// The compass ring draws white-modulated through the fixed-function HUD
-	// pipeline, whose output stage is MODULATE2X — for a static sprite that
-	// is exactly a pre-doubled texture (the retail capture's band/letters
-	// read ~2x ours before this). RGB doubles with saturation; alpha stays.
-	textures_[opennova::hud::kHudTexMapCompass] =
-			double_saturate_texture_(load_hud_texture_("compring.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR));
-	// The radar sector-slice marks load like the compass ring; their
-	// MODULATE2X stage runs on the device (map_modulate2x_material), so the
-	// textures stay raw. The marks draw only while both loaded
+	// The compass ring and the radar sector-slice marks are colour-mode HUD
+	// textures: their sprites carry HudMapSprite::modulate2x and the colour
+	// material's MODULATE2X stage runs on the device (map_modulate2x_material),
+	// so the textures stay raw. The marks draw only while both loaded
 	// (HudMinimapInput::radar_slices_loaded carries the witness).
+	textures_[opennova::hud::kHudTexMapCompass] =
+			load_hud_texture_("compring.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_("dmgslice.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_("dmgslc_n.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	state_.minimap.radar_slices_loaded =
@@ -2223,6 +2279,28 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 					PackedInt32Array(), PackedFloat32Array(), tex->get_rid());
 			continue;
 		}
+		if (tex.is_valid() && texture_material_(tex) == HudMaterial::kColorModulate2x) {
+			// A colour-mode texture's MODULATE2X stage: a triangle pair whose UV.y
+			// carries kHudFlatShader's +16 flag, in its place in the run.
+			const Vector2 corners[4] = { Vector2(quad.x0, quad.y0), Vector2(quad.x1, quad.y0),
+				Vector2(quad.x1, quad.y1), Vector2(quad.x0, quad.y1) };
+			const Vector2 uvs[4] = { Vector2(quad.u0, quad.v0 + kModulate2xUvFlag),
+				Vector2(quad.u1, quad.v0 + kModulate2xUvFlag),
+				Vector2(quad.u1, quad.v1 + kModulate2xUvFlag),
+				Vector2(quad.u0, quad.v1 + kModulate2xUvFlag) };
+			PackedVector2Array points, uv;
+			PackedColorArray colors;
+			PackedInt32Array indices;
+			for (int corner = 0; corner < 4; ++corner) {
+				points.push_back(corners[corner]);
+				uv.push_back(uvs[corner]);
+				colors.push_back(color);
+			}
+			for (int index : { 0, 1, 2, 0, 2, 3 }) indices.push_back(index);
+			rs->canvas_item_add_triangle_array(p_item, indices, points, colors, uv,
+					PackedInt32Array(), PackedFloat32Array(), tex->get_rid());
+			continue;
+		}
 		if (quad.additive) {
 			// Per-command blend modes do not exist on a CanvasItem: additive
 			// rows ride the child item carrying the add material.
@@ -2259,7 +2337,10 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 		while (end < p_range.tris_end && p_list.tris[end].texture == texture) ++end;
 		Ref<Texture2D> tex;
 		if (texture >= 0 && texture < kTextureSlots) tex = textures_[static_cast<size_t>(texture)];
-		const bool alpha_mode = tex.is_valid() && alpha_mode_textures_.count(tex->get_instance_id()) != 0;
+		const HudMaterial material = texture_material_(tex);
+		const bool alpha_mode = material == HudMaterial::kAlpha;
+		// A colour-mode texture's MODULATE2X stage rides kHudFlatShader's UV.y flag.
+		const float v_flag = material == HudMaterial::kColorModulate2x ? kModulate2xUvFlag : 0.0f;
 		const int count = static_cast<int>((end - first) * 3);
 		PackedVector2Array points, uvs;
 		PackedColorArray colors;
@@ -2277,7 +2358,7 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 			const Color modulation = opennova::color_from_argb(tri.color);
 			for (const auto *vertex : { &tri.a, &tri.b, &tri.c }) {
 				point[vertex_index] = Vector2(vertex->x, vertex->y);
-				uv[vertex_index] = Vector2(vertex->u, vertex->v);
+				uv[vertex_index] = Vector2(vertex->u, vertex->v + v_flag);
 				const Color diffuse = modulation * opennova::color_from_argb(vertex->color);
 				color[vertex_index] = alpha_mode
 						? opennova::color_from_argb(opennova::renderer::hud_alpha_material_argb(
