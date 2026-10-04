@@ -298,6 +298,12 @@ int main() {
 		jv.joiner = true;
 		CHECK(!joiner_deploy_hold_ready(jv)); // no pick owed, no self handle
 		CHECK(!joiner_in_match_ready(jv, false)); // no local player, not in match
+		// The DEATH trigger reads the entity's dead bit, not the health word: a
+		// session joiner with no bound self record and no frame yet (health 0)
+		// is not dead. [orig: Render_ProcessMainSceneFrame @0x5CAB54]
+		kernel.world.rules.mp_session = true;
+		CHECK(runtime.state().local_health <= 0 && !death_menu_triggered(jv));
+		kernel.world.rules.mp_session = false;
 	}
 
 	// The DEATH screen's zone rows: a joiner's feed over the zones its minimap

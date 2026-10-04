@@ -36,6 +36,24 @@ bool local_player_dead(const RoleView &view) {
 	return view.kernel != nullptr && view.kernel->local.local_player_dead();
 }
 
+bool death_menu_triggered(const RoleView &view) {
+	if (view.runtime == nullptr || view.kernel == nullptr) return false;
+	if (view.runtime->state().deploy_overlay_active) return true;
+	const world::World &w = view.kernel->world;
+	const bool respawns = w.rules.mp_session ||
+			(w.tables.mission_attrib_flags & world::MissionTables::kMissionAttribSinglePlayerRespawn) != 0;
+	if (!respawns) return false;
+	// The entity's dead bit itself, not the health word: a joiner's replica
+	// reads its own record's state flags once its self handle is bound.
+	if (view.joiner) {
+		const ClientRuntime &runtime = *view.runtime;
+		if (!runtime.has_self_handle()) return false;
+		const replication::ClientEntityState *self = runtime.state().find(runtime.self_handle());
+		return self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
+	}
+	return view.kernel->local.local_player_dead();
+}
+
 int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones, int vk) {
 	if (view.kernel == nullptr) return -1;
 	const world::World &w = view.kernel->world;

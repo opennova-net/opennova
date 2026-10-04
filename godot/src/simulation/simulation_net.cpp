@@ -984,18 +984,24 @@ bool Simulation::is_join_in_match_ready(bool p_auto_deploy) const {
 	return opennova::inmatch::joiner_in_match_ready(role_view(), p_auto_deploy);
 }
 
-bool Simulation::is_join_deploy_overlay_active() const {
+bool Simulation::is_deploy_overlay_active() const {
 	// The deploy-map overlay (retail g_DeployScreenActive): armed by the S2C
 	// 0x0F game_flags bit0, then host-maintained per frame from the 0x0A flags1
-	// bit1. A UI signal only — it never gates the spawn. [orig: the folds
-	// @0x42e2f8/@0x42ff82]
-	return is_joiner() && runtime_ && runtime_->state().deploy_overlay_active;
+	// bit1, on the listen host's own loopback client too. A UI signal only —
+	// it never gates the spawn. [orig: the folds @0x42e2f8/@0x42ff82]
+	return runtime_ && runtime_->state().deploy_overlay_active;
 }
 
-bool Simulation::take_join_deploy_overlay_open() {
-	// The open latch and its clear are ClientState's (client_state.h
-	// deploy_overlay_open_latch); this is the typed seam for the shell's frame.
-	return is_joiner() && runtime_ && runtime_->state().take_deploy_overlay_open();
+bool Simulation::take_death_menu_open(bool p_menu_open) {
+	// The triggers are the engine's (inmatch::death_menu_triggered) and the
+	// open latch with its clear is ClientState's (client_state.h
+	// death_menu_open_latch); this is the typed seam for the shell's frame.
+	return runtime_ && runtime_->state().take_death_menu_open(
+			opennova::inmatch::death_menu_triggered(role_view()), p_menu_open);
+}
+
+bool Simulation::is_death_menu_held() const {
+	return opennova::inmatch::death_menu_triggered(role_view()) || is_join_deploy_pick_pending();
 }
 
 int Simulation::get_join_assigned_team() const {
@@ -1052,7 +1058,8 @@ bool Simulation::send_deployment_pick(int p_param) {
 	// [orig: Input_HandleActionBinding case 12 @0x49b0c5-0x49b17b — param 0 -> 0xFFFF,
 	// 65534 -> 0xFFFE, else SpawnZoneList_GetByIndex(param-1) -> the entity handle;
 	// an index that resolves no entity falls through to 0xFFFF @0x49b17b LABEL_70]
-	if (!is_joiner() || !runtime_) return false;
+	// The listen host's own client sends the same pick over its loopback.
+	if (!runtime_) return false;
 	uint16_t wire = opennova::world::kDeployPickNone;
 	if (p_param == 65534) {
 		wire = opennova::world::kDeployPickAutoTeam;

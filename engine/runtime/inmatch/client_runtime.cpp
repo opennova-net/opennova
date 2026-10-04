@@ -519,6 +519,28 @@ bool ClientRuntime::queue_host_message(uint8_t tag, std::vector<uint8_t> body) {
 	return true;
 }
 
+bool ClientRuntime::queue_deployment_pick(uint16_t wire_value) {
+	// Case 12 has no authority test: the listen host's own client queues the
+	// same [i16] pick on its local connection, and its server dispatches it
+	// like a joiner's. [orig: Input_HandleActionBinding @0x49AD40, case 12
+	// @0x49B0C5..0x49B17B -> CNapiNetwork_QueueReliableMessage(0x0E) @0x49b17b]
+	if (queue_host_message(c2s::RESPAWN_REQUEST,
+			{static_cast<uint8_t>(wire_value & 0xFFu), static_cast<uint8_t>(wire_value >> 8)}))
+		return true;
+	if (!joiner_) return false;
+	// Initial admission may finish while the authority still holds the
+	// deploy-map overlay. Its selection sends the same request as a death
+	// re-pick, even though the player is alive and no pick is in flight yet.
+	const bool initial_overlay = joiner_->in_match() &&
+			joiner_->initial_admission_complete() && view_.state().deploy_overlay_active;
+	if (!joiner_->deployment_pick_pending() && !initial_overlay) return false;
+	ProtocolMessage pick;
+	if (!joiner_->prepare_deployment_pick(wire_value, pick)) return false;
+	send_queue_.push_back(std::move(pick));
+	deployed_ = false;
+	return true;
+}
+
 bool ClientRuntime::queue_medic_request() {
 	// The retail gate is is_in_session, not the deploy gate: a dead player is
 	// back in the deploy flow (Driving) and the call still ships. It rides the

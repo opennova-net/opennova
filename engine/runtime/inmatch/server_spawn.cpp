@@ -359,9 +359,19 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// the sole clear is the deploy leg of Server_ProcessPlayerDeath @0x517791]. The
 	// pending entity is HIDDEN (state_flags bit0 — the golden pre-deploy record
 	// byte13 = 0x01) [orig: NetPacket_WritePlayerState @0x4ff7dd ORs entity+36 bit0
-	// each frame while pending]. The host's OWN loopback player skips the hold — it
-	// deploys through the local flow, not the wire. (D-NET-156)
-	if (!is_host_own && world.zones.has_spawn_zone()) {
+	// each frame while pending]. The host's OWN loopback player is held too: its
+	// client joins with the same C2S 0x0B over the loopback (the single-player and
+	// listen-host connection mode 3 sets is_mp_session_peer), and the join has no
+	// host exemption, so it deploys through its own C2S 0x0E pick like any joiner.
+	// [orig: Game_StartMission @0x526189 (is_mp_session_peer gate) -> C2S 0x0B
+	//  @0x52624B -> NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> Server_OnPlayerJoin
+	//  @0x51a6a3..0x51a6c7 (slot gates only)] (D-NET-339)
+	// Out of a session (single player, world.rules.mp_session being our stand-in
+	// for retail's is_in_session) the hold shows nothing: its hidden bit and its
+	// overlay bit both ride the per-frame 0x0A writer, which only a session runs
+	// [orig: g_NapiNPCtx.is_in_session (+0x58) gates Server_TickUpdate's
+	// replication loop], so the single player is never held.
+	if (world.zones.has_spawn_zone() && (!is_host_own || world.rules.mp_session)) {
 		conn.link.respawn_pending = true;
 		if (!conn.link.spectator) {
 			if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;

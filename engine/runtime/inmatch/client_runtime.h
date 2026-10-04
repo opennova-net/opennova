@@ -557,22 +557,9 @@ public:
 	// spawn-target handle). Input case 12 closes retail's gameplay dword and queues
 	// the 0x0E now [orig: @0x49b17b]; framing waits for the next open send boundary,
 	// in queue order. Re-picks while awaiting the release are allowed. False means
-	// the deployment UI/state cannot accept a pick.
-	bool queue_deployment_pick(uint16_t wire_value) {
-		if (!joiner_) return false;
-		// Initial admission may finish while the authority still holds the
-		// deploy-map overlay. Its selection sends the same request as a death
-		// re-pick, even though the player is alive and no pick is in flight yet.
-		// [orig: Input_HandleActionBinding @0x49AD40, case 12 @0x49B0C5..0x49B17B]
-		const bool initial_overlay = joiner_->in_match() &&
-				joiner_->initial_admission_complete() && view_.state().deploy_overlay_active;
-		if (!joiner_->deployment_pick_pending() && !initial_overlay) return false;
-		ProtocolMessage pick;
-		if (!joiner_->prepare_deployment_pick(wire_value, pick)) return false;
-		send_queue_.push_back(std::move(pick));
-		deployed_ = false;
-		return true;
-	}
+	// the deployment UI/state cannot accept a pick. The listen host's own client
+	// sends the same request over its loopback to its own server.
+	bool queue_deployment_pick(uint16_t wire_value);
 
 	// Pre-load join seam. Handshake and admission traffic continue through terminal S2C 0x11 while
 	// false; only C2S 0x0A and the resulting world/deployment stream are held.

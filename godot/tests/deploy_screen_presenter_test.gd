@@ -66,8 +66,11 @@ func _spawn_zone_mission() -> MissionData:
 
 # A real loopback join completes admission without forcing a pick. The
 # spawn-zone host retains its pending hold until a user selects a spawn.
-# Returns {host, joiner}; both are autofreed Simulations.
-func _join_pair_in_match() -> Dictionary:
+# `host_traits_first` installs the host's item table ahead of its boot, as
+# the game's load does, so the spawn zone exists when the host's own player
+# joins and holds it too. Returns {host, joiner}; both are autofreed
+# Simulations.
+func _join_pair_in_match(host_traits_first := false) -> Dictionary:
 	var mission := _spawn_zone_mission()
 	var item_db := _spawn_zone_item_db()
 	assert_not_null(item_db)
@@ -78,6 +81,8 @@ func _join_pair_in_match() -> Dictionary:
 	host_options.game_type = 0x30020
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0), "host bound an OS-assigned UDP port")
+	if host_traits_first:
+		host.resolve_item_traits(item_db)
 	assert_true(host.load_from_mission_data(mission))
 	assert_true(host.spawn_local_player(Vector3(5, 0, 5), 0.0, 1))
 	var host_anim := PresenterFixture.anim_root(self)
@@ -310,7 +315,7 @@ func _assert_deployment_released(pair: Dictionary) -> void:
 		pair.joiner.step()
 		if pair.joiner.is_joined_in_match() \
 				and not pair.joiner.is_join_deploy_pick_pending() \
-				and not pair.joiner.is_join_deploy_overlay_active():
+				and not pair.joiner.is_deploy_overlay_active():
 			released = true
 			break
 		OS.delay_msec(2)
@@ -327,7 +332,7 @@ func test_initial_overlay_row_selection_releases_authority_deployment() -> void:
 	for _i in range(240):
 		pair.host.step()
 		pair.joiner.step()
-		if pair.joiner.is_join_deploy_overlay_active():
+		if pair.joiner.is_deploy_overlay_active():
 			overlay = true
 			break
 		OS.delay_msec(2)
@@ -378,7 +383,7 @@ func test_initial_overlay_space_sends_default_spawn_selection() -> void:
 	for _i in range(240):
 		pair2.host.step()
 		pair2.joiner.step()
-		if pair2.joiner.is_join_deploy_overlay_active():
+		if pair2.joiner.is_deploy_overlay_active():
 			overlay = true
 			break
 		OS.delay_msec(2)
@@ -597,3 +602,88 @@ func test_instruction_widgets_follow_retained_death_text() -> void:
 	if status.replace_instruction:
 		assert_eq(driver.get_widget_text(first), "DeployJoiner was killed.",
 				"the hidden instruction retains the expired kill message")
+
+
+# The listen host's own player holds on the same deploy map as a joiner
+# (D-NET-339): its own client folds the per-frame overlay bit, the frame loop
+# opens DEATH once off it, and its SPACE pick rides its loopback as the C2S
+# 0x0E its server releases. A later death re-arms the screen through the
+# frame loop's dead-bit trigger; the X re-pick keeps the screen up until that
+# release, and nothing redeploys the host on its own.
+# [orig: Server_OnPlayerJoin @0x51a6f2 (no host exemption); Input_HandleActionBinding
+#  case 12 @0x49b17b; Render_ProcessMainSceneFrame @0x5CAB39..0x5CAB8B]
+func test_the_listen_host_deploys_its_own_player_through_the_deploy_map() -> void:
+	var pair := _join_pair_in_match(true)
+	var host: Simulation = pair.host
+	var overlay := false
+	for _i in range(240):
+		host.step()
+		pair.joiner.step()
+		if host.is_deploy_overlay_active():
+			overlay = true
+			break
+		OS.delay_msec(2)
+	assert_true(overlay, "the host's own client folds its held overlay")
+	assert_true(host.is_death_menu_held(), "the overlay holds the host's screen")
+	assert_false(host.take_death_menu_open(true), "another screen holds the open off")
+	assert_true(host.take_death_menu_open(false), "the frame loop opens the screen once")
+	assert_false(host.take_death_menu_open(false), "the open latch holds")
+	var presenter := _make_presenter(host)
+	assert_true(presenter.open(), "the overlay opens the host's deploy screen")
+	var space := InputEventKey.new()
+	space.keycode = KEY_SPACE
+	space.pressed = true
+	presenter.get_viewport().push_input(space)
+	await get_tree().process_frame
+	assert_false(presenter.is_open(), "SPACE sends the auto pick and closes the overlay")
+	var released := false
+	for _i in range(240):
+		host.step()
+		pair.joiner.step()
+		if not host.is_deploy_overlay_active() and not host.is_death_menu_held():
+			released = true
+			break
+		OS.delay_msec(2)
+	assert_true(released, "the host's own looped-back 0x0E releases its hold")
+	assert_false(host.take_death_menu_open(false), "the cleared triggers re-arm nothing")
+
+	# A death past the 620-tick spawn window: the pick penalty is the stock
+	# three-second floor.
+	for _i in range(640):
+		host.step()
+		pair.joiner.step()
+	assert_eq(host.debug_kill_player_entity(host.get_local_player_wire_handle()), OK,
+			"the host queued its own player's death")
+	var dead := false
+	for _i in range(120):
+		host.step()
+		pair.joiner.step()
+		if host.is_local_player_dead():
+			dead = true
+			break
+		OS.delay_msec(2)
+	assert_true(dead, "the host's own player died")
+	assert_true(host.is_death_menu_held(), "the in-session death holds the screen")
+	assert_true(host.take_death_menu_open(false), "the dead bit re-arms the open")
+	# Past the pick penalty, still dead: nothing redeploys the host by itself.
+	for _i in range(260):
+		host.step()
+		pair.joiner.step()
+	assert_true(host.is_local_player_dead(), "the expired hold redeploys nothing")
+	var death_presenter := _make_presenter(host)
+	assert_true(death_presenter.open(), "the death opens the host's deploy screen")
+	var x_key := InputEventKey.new()
+	x_key.keycode = KEY_X
+	x_key.pressed = true
+	death_presenter.get_viewport().push_input(x_key)
+	await get_tree().process_frame
+	assert_true(death_presenter.is_open(), "a death re-pick keeps the screen until the release")
+	var respawned := false
+	for _i in range(240):
+		host.step()
+		pair.joiner.step()
+		await get_tree().process_frame
+		if not host.is_local_player_dead() and not death_presenter.is_open():
+			respawned = true
+			break
+	assert_true(respawned, "the host's X pick redeploys it and the release closes the screen")

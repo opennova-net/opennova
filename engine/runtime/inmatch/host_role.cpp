@@ -206,6 +206,11 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// waypoint / punt sender is a bare QueueReliableMessage on the local
 		// client's connection, and the server handlers read the host
 		// context (server_squad.h).
+		// So does its deploy pick: the deploy keys and the DEATH screen's list
+		// queue the C2S 0x0E with no authority test, and the server's
+		// respawn handler deploys the host's own player like a joiner
+		// [orig: Input_HandleActionBinding case 12 @0x49b17b;
+		//  Server_ProcessClientRequestRespawn @0x519AF0].
 		// So does its stance key's 0x1D: the handler latches the host's own
 		// player on the frame after the press, ahead of that frame's body
 		// update. Retail's pack runs before it and is overwritten by it; here
@@ -230,7 +235,8 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE &&
 				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
 				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST &&
-				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE) {
+				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE &&
+				dg.tag != c2s::RESPAWN_REQUEST) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}

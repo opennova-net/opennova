@@ -349,7 +349,6 @@ bool run_death_feed_classifier_matrix() {
 		v->cause_flags = 0;
 		v->mounted_child = w::EntityHandle{};
 		roster[1].link.respawn_pending = false;
-		roster[1].link.respawn_hold_armed = false;
 		roster[1].link.respawn_delay_seconds = 0;
 		roster[1].link.spawn_target_hold_seconds = 0;
 		roster[1].link.downed_revive_seconds = 0;
@@ -2039,13 +2038,22 @@ int main() {
 		host_ae->inf.stance = w::InfantryState::Stance::kProne;
 		advance_second_boundaries(2);
 		if (!expect(roster[0].link.respawn_delay_seconds == 1 && host->health == 0,
-		            "local fallback remains held through two second boundaries"))
+		            "the host's own player stays held through two second boundaries"))
 			return 1;
 		advance_second_boundaries(1);
 		if (!expect(roster[0].link.respawn_delay_seconds == 0 && host->health == 0,
 		            "expiry and deployment remain distinct retail phases"))
 			return 1;
 		inmatch::Server_TickUpdate(ctx);
+		host = world.registry.get(ha);
+		if (!expect(host->health == 0,
+		            "the host's own player waits for its pick: nothing deploys it on expiry"))
+			return 1;
+		// Its Default Spawn pick rides its loopback as the ordinary C2S 0x0E
+		// [orig: Input_HandleActionBinding case 12 @0x49b17b, no authority test].
+		(void)inmatch::dispatch_session_replies(
+				ctx.config, roster[0], {make_protocol_message(c2s::RESPAWN_REQUEST, {0xFF, 0xFF})},
+				world.logic_tick, roster, &world);
 		host = world.registry.get(ha);
 		if (!expect(host->health == 150, "respawn restores template health")) return 1;
 		if (!expect(std::fabs(host->position.x - 60.0f) < 0.01f,

@@ -313,7 +313,7 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	for _tick in range(240):
 		host.step()
 		joiner.step()
-		if joiner.is_join_deploy_overlay_active():
+		if joiner.is_deploy_overlay_active():
 			overlay = true
 			break
 		OS.delay_msec(2)
@@ -329,7 +329,7 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 		host.step()
 		joiner.step()
 		if not joiner.is_join_deploy_pick_pending() \
-				and not joiner.is_join_deploy_overlay_active() \
+				and not joiner.is_deploy_overlay_active() \
 				and absf(joiner.get_local_player_position().x - 12.0) < 1.0:
 			deployed = true
 			break

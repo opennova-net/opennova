@@ -1165,21 +1165,27 @@ struct ClientState {
 	bool deploy_overlay_active = false;
 	// The death.mnu DEATH screen's open latch (retail g_DeathMenuOpenLatch
 	// @0x24C1894): the frame loop opens the screen once per arming and stamps
-	// the latch result-blind; only the trigger falling clears it (the
+	// the latch result-blind; only the triggers falling clear it (the
 	// close-on-clear leg -> Game_CloseInGameScreens), never the player's own
-	// dismiss, so a host that keeps the bit set all session shows the screen
-	// once and a host that clears and re-arms it shows it again. The
-	// no-active-menu gate (sub_54B970 != 0) and the spawn-success gate stay
-	// the shell's / unmodeled. [orig: Render_ProcessMainSceneFrame
+	// dismiss, so a trigger held all session shows the screen once and one
+	// that clears and re-arms shows it again. The triggers are the deploy-map
+	// overlay above and the in-session local death (inmatch::death_menu_triggered).
+	// The spawn-success gate stays unmodeled. [orig: Render_ProcessMainSceneFrame
 	// @0x5cab5e..0x5cab8b (gate, latch test @0x5cab70, stamp @0x5cab8b);
 	// Game_CloseInGameScreens @0x54b940 zero @0x54b954, called when the
 	// triggers clear @0x5cac8e..0x5cac9c]
-	bool deploy_overlay_open_latch = false;
-	// The frame loop's open decision: true exactly once per arming, and the
-	// latch is stamped whether or not the shell's open succeeds.
-	bool take_deploy_overlay_open() {
-		if (!deploy_overlay_active || deploy_overlay_open_latch) return false;
-		deploy_overlay_open_latch = true;
+	bool death_menu_open_latch = false;
+	// The frame loop's open decision, once per frame: true exactly once per
+	// arming while no other menu is up (sub_54B970 @0x5cab67), the latch
+	// stamped whether or not the shell's open succeeds; untriggered, the latch
+	// clears.
+	bool take_death_menu_open(bool triggered, bool menu_open) {
+		if (!triggered) {
+			death_menu_open_latch = false;
+			return false;
+		}
+		if (menu_open || death_menu_open_latch) return false;
+		death_menu_open_latch = true;
 		return true;
 	}
 	std::uint8_t respawn_penalty_seconds = 0;

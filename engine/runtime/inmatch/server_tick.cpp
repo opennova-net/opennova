@@ -497,31 +497,6 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	return true;
 }
 
-// The listen host has no socket-side death picker in the current presentation,
-// so expiry supplies the Default Spawn command locally. It still enters the ONE
-// deployment transaction used by C2S 0x0E and spawn-wave releases; there is no
-// second entity-reset implementation. Remote players remain dead until a pick.
-void release_expired_local_respawns(NapiNPServerCtx &ctx, world::World &world) {
-	if (world.match.outcome().ended) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.link.mode != replication::TransportMode::Loopback ||
-				!conn.link.respawn_hold_armed ||
-				conn.link.respawn_delay_seconds != 0 ||
-				!conn.link.owned_entity.valid())
-			continue;
-		const world::Entity *player = world.registry.get(conn.link.owned_entity);
-		if (player == nullptr || (player->flags & 2u) == 0) continue;
-		std::vector<ProtocolMessage> deployment =
-				Server_ReleasePlayerDeployment(
-						ctx.config, conn, world, world::EntityHandle{});
-		if (conn.link.transport == nullptr) continue;
-		for (ProtocolMessage &message : deployment)
-			conn.link.transport->host_send(
-					message.tag, std::move(message.payload), message.reliable,
-					message.flags.raw, message.capacity_exempt, message.retention_flushes);
-	}
-}
-
 // The original stores seconds, not tick deadlines. The per-slot decrements sit
 // inside the same g_PeriodicSecondTimer block as the win check and the
 // capture transaction, so they ride Match's countdown, not a second phase.
@@ -1133,7 +1108,6 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		link.spawn_target_hold_seconds = world.zones.has_spawn_zone()
 				? std::max(link.spawn_target_hold_seconds, hold)
 				: 0u;
-		link.respawn_hold_armed = true;
 	}
 }
 
@@ -1803,7 +1777,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	route_script_remote_commands(ctx, world);
 	route_round_deaths(ctx, world);
 	route_match_gameplay_events(ctx, world);
-	release_expired_local_respawns(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic
 	// win-condition pass. WAC/BMS can end the round during the world tick above,
 	// so those script-driven outcomes consume this tick; automatic MP outcomes found

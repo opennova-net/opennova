@@ -111,9 +111,6 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			state_.deploy_check_secured_spawn = (wsl.game_flags & 2u) != 0;
 			state_.deploy_overlay_active =
 					(wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active;
-			// The trigger falling is what clears the open latch
-			// [orig: the close-on-clear leg @0x5cac8e -> @0x54b954].
-			if (!state_.deploy_overlay_active) state_.deploy_overlay_open_latch = false;
 			// The authoritative local-player pose and (waypoint gametype only)
 			// the route list, retained for the joiner frame's once-per-revision
 			// landing on L — retail writes them onto g_LocalPlayerEntity and

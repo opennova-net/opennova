@@ -1006,7 +1006,6 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	world.match.set_player_respawn_pending(player->handle, false);
 	conn.link.respawn_delay_seconds = 0;
 	conn.link.spawn_target_hold_seconds = 0;
-	conn.link.respawn_hold_armed = false;
 	conn.link.downed_revive_seconds = 0;
 	conn.link.medic_request_active = false;
 	conn.link.death_cause_revivable = false;

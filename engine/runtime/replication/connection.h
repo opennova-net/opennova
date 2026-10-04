@@ -147,7 +147,6 @@ struct Connection {
 	// NetPacket_WritePlayerState @0x4ff81b]
 	uint32_t respawn_delay_seconds = 0;      // playerSlot+360
 	uint32_t spawn_target_hold_seconds = 0; // playerSlot+364
-	bool respawn_hold_armed = false;
 
 	// The armory-reuse cooldown (whole seconds) and the pre-round loadout latch.
 	// A nonzero-class C2S 0x2F is accepted only while the cooldown has expired
