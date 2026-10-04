@@ -6,6 +6,7 @@
 #include <editor/ui/mission_viewport_view.h>
 #include <editor/ui/model_viewport_view.h>
 #include <editor/ui/script_viewport_view.h>
+#include <editor/ui/texture_viewport_view.h>
 
 namespace opennova::editor {
 
@@ -15,12 +16,14 @@ std::unique_ptr<ViewportView> make_menu_view() { return std::make_unique<MenuVie
 std::unique_ptr<ViewportView> make_model_view() { return std::make_unique<ModelViewportView>(); }
 std::unique_ptr<ViewportView> make_script_view() { return std::make_unique<ScriptViewportView>(); }
 std::unique_ptr<ViewportView> make_mission_view() { return std::make_unique<MissionViewportView>(); }
+std::unique_ptr<ViewportView> make_texture_viewport_view() { return std::make_unique<TextureViewportView>(); }
 
 constexpr ViewportViewRow kViews[] = {
 	{ ViewportKind::Menu, make_menu_view },
 	{ ViewportKind::Model, make_model_view },
 	{ ViewportKind::Script, make_script_view },
 	{ ViewportKind::Mission, make_mission_view },
+	{ ViewportKind::Texture, make_texture_viewport_view },
 };
 
 constexpr bool views_in_order() {

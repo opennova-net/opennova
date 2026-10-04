@@ -117,7 +117,8 @@ static int test_tokens_unique() {
 	std::set<std::string> fixes;
 	for (const FindingFix fix : { FindingFix::None, FindingFix::Requirement, FindingFix::WrongKind, FindingFix::Rename,
 	                              FindingFix::ResetRow, FindingFix::Reference, FindingFix::UnimportedTexture,
-	                              FindingFix::Reload, FindingFix::Reimport, FindingFix::Rewrite })
+	                              FindingFix::Reload, FindingFix::Reimport, FindingFix::Rewrite, FindingFix::TextureRows,
+	                              FindingFix::ImportFitsUse })
 		TEST_EXPECT(fixes.insert(finding_fix_token(fix)).second && !std::string(finding_fix_token(fix)).empty());
 	TEST_EXPECT(std::string(finding_place_token(FindingPlace::Content)) == "content" &&
 	            std::string(finding_place_token(FindingPlace::File)) == "file");
@@ -269,6 +270,13 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::UnimportedTexture) == Tokens({ "import.texture_not_imported" }));
 	TEST_EXPECT(fixed_by(FindingFix::Reload) == Tokens({ "document.conflict" }));
 	TEST_EXPECT(fixed_by(FindingFix::Reimport) == Tokens({ "import.output_missing" }));
+	// S18: an upside-down TGA's rows; every use's finding where an import makes the file it reads.
+	TEST_EXPECT(fixed_by(FindingFix::TextureRows) == Tokens({ "texture.tga_upside_down" }));
+	TEST_EXPECT(fixed_by(FindingFix::ImportFitsUse) ==
+	            Tokens({ "texture.alpha_not_loaded", "texture.blend_map_size", "texture.colormap_size", "texture.foliage_map_overrun",
+	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size",
+	                     "texture.mfd_not_pow2", "texture.normal_map_halved", "texture.particle_too_big",
+	                     "texture.tile_atlas_cells", "texture.wrong_reader" }));
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
 	            Tokens({ "animation_map.ignored_input", "catalog.ignored_input", "credits.line_ending",
 	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",

@@ -16,6 +16,7 @@
 #include <editor/documents/script_type.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/text_types.h>
+#include <editor/documents/texture_document.h>
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
 // screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
 #include <editor/preview/make_menu_render_check.h>
@@ -74,6 +75,11 @@ constexpr DocumentType kTypes[] = {
 			shader_finding_codes },
 	{ DocumentTypeId::Text, "text", make_text_document, validate_text_file, text_fields,
 			text_finding_codes },
+	// The texture (S18): its texels as the game reads them, read only for now; no findings yet (what
+	// the game makes of a texture is its role's), its content on the wire.
+	{ DocumentTypeId::Texture, "texture", make_texture_document, validate_texture_file, texture_fields,
+			texture_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			texture_content_json },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
@@ -112,7 +118,8 @@ DocumentContent content_made(const DocumentType &type) {
 	if (!type.make) return DocumentContent::Other;
 	const std::unique_ptr<DocumentBase> made = type.make();
 	if (records_of(*made)) return DocumentContent::Records;
-	return text_of(*made) ? DocumentContent::Text : DocumentContent::Other;
+	if (text_of(*made)) return DocumentContent::Text;
+	return made->holds_image() ? DocumentContent::Image : DocumentContent::Other;
 }
 
 } // namespace
@@ -145,6 +152,10 @@ DocumentContent document_content(const DocumentType &type) {
 		return out;
 	}();
 	return answers[index - 1];
+}
+
+bool validates_files(const DocumentType &type) {
+	return document_content(type) != DocumentContent::Image || (type.findings && type.findings().count > 0);
 }
 
 DocumentTypeStandIn::DocumentTypeStandIn(const DocumentType &type) { g_stand_in.store(&type); }

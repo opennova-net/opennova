@@ -49,9 +49,14 @@ struct FieldUse {
 	// mission trigger's parameter: "Zone", "Waypoint list"); null: the schema's label (field_title).
 	const char *label = nullptr;
 	// What the reference's loader picks the file by, as its kind's row reads it (a model's
-	// texture row: the row's type, reference_file_candidates; another texture: the game's loader
-	// of it, texture_loader_arg); -1 for none.
+	// texture row: the row's type, reference_file_candidates; another texture: its role,
+	// documents/texture_roles.h texture_role_arg, or the game's loader of it alone,
+	// texture_loader_arg); -1 for none.
 	int32_t loader_arg = -1;
+	// What the record says of the use its reference makes beyond what its loader picks the file by (a
+	// model's texture row: its slot, its flags, its material's flags and alpha-test reference,
+	// documents/texture_roles.h's pack_texture_row_context); 0 for none.
+	uint32_t use_context = 0;
 	FieldColor color = FieldColor::None;
 	// Never less than the schema's: the base puts the schema's back after the type's refinement.
 	bool read_only = false;

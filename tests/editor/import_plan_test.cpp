@@ -394,14 +394,14 @@ static int test_plan_not_followed() {
 			row_named(text_plan, "m.mis")->kind == AssetKind::MissionText);
 	for (const Diagnostic &d : text_plan.diagnostics)
 		TEST_EXPECT(d.code() != "import.unreadable");
-	// A face names its textures, which nothing reads yet: taken, listed; a wave names nothing.
-	TEST_EXPECT(editor_test::write_text(art + "/head.grm", "BASE_TEXTURE face.tga\r\n") &&
-	            editor_test::write_text(art + "/boom.wav", "RIFF"));
+	// A face names its textures (S18: read by the graph), followed: its base texture found beside it; a wave
+	// names nothing.
+	TEST_EXPECT(editor_test::write_text(art + "/head.grm", "basetexture face.tga\r\n") &&
+	            editor_test::write_text(art + "/face.tga", "tga") && editor_test::write_text(art + "/boom.wav", "RIFF"));
 	const ImportPlan face_plan = project.plan({{art + "/head.grm", {}}, {art + "/boom.wav", {}}});
-	const ImportNotFollowed *face =
-	        not_followed(face_plan, ReferenceKind::None, AssetKind::FaceAnimation);
-	TEST_EXPECT(face && face->count == 1 && face->first == "head.grm");
-	TEST_EXPECT(face_plan.not_followed.size() == 1 && row_named(face_plan, "head.grm"));
+	TEST_EXPECT(!not_followed(face_plan, ReferenceKind::None, AssetKind::FaceAnimation) && row_named(face_plan, "head.grm"));
+	const ImportPlanRow *base = row_named(face_plan, "face.tga");
+	TEST_EXPECT(base && base->state == State::Found && base->needed_by.file == "head.grm");
 	const ImportPlanRow *wave = row_named(face_plan, "boom.wav");
 	TEST_EXPECT(wave && wave->kind == AssetKind::Wave && wave->problem.empty());
 	// A script is followed whole (S14): the script its RUN names (by the name written, the kind's
@@ -423,16 +423,17 @@ static int test_plan_not_followed() {
 // unread when its kind names files (AssetKindRow::names_files) and the graph does not read the
 // kind (graph_reads_kind). Those are the kinds the hand-written list named (a dialog bank, the def
 // tables beyond the catalogs and the avatar table; S14 reads a terrain and a sound bank, and a
-// music bank holds its own audio and names no file) and the ones S13 D5 added that name files (a
-// face, a map project); a mission text, the original editor's .mis, a kind of its own since S14
+// music bank holds its own audio and names no file) and the one S13 D5 added that names files (a map
+// project); a mission text, the original editor's .mis, a kind of its own since S14
 // (the graph reads the .bms the game loads). A script the graph reads since S13 D9 (its operands'
 // names) and, since S14, its RUN and its waves: it left the list. powerup.def left the list when
 // the catalog opened it (S13 D10): the graph reads it through the catalog's records. hudpos.def
-// left it with its extractor (S14): the HUD's fonts and textures are followed.
+// left it with its extractor (S14): the HUD's fonts and textures are followed. A face left it with
+// its extractor (S18): its textures are followed.
 static int test_references_unread() {
 	const std::set<AssetKind> unread = {AssetKind::DialogBank, AssetKind::MissionText,
 	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
-	        AssetKind::OtherDefs, AssetKind::FaceAnimation, AssetKind::MapProject};
+	        AssetKind::OtherDefs, AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
 		const AssetKindRow &row = asset_kind_row(kind);

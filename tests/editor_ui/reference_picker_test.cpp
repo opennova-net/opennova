@@ -4,14 +4,20 @@
 // and the first keeps what was typed when it opens again, Escape keeping it too; the arrows move
 // through the list, Enter picks, a pick is the field's Set. A Files row
 // dropped on a reference's value sets the file there when the field's kind loads it, and
-// nothing when it does not. A missing value's picker offers the fixes Problems offers for it.
+// nothing when it does not. A missing value's picker offers the fixes Problems offers for it. S18: a texture
+// field's picture and its picker's; a texture an import makes shows how it is made in its tab.
 #include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <editor/assets/asset_import.h>
 #include <editor/documents/mission_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/import/png_encode.h>
+#include <editor/preview/texture_thumbnails.h>
+#include <formats/pcx/pcx.h>
+#include <formats/tga/tga.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
@@ -461,6 +467,248 @@ void test_pick_by_name() {
 	CHECK(pick("123456") == 123456, "an id no name is, typed: set as typed");
 }
 
+// S18: a texture field shows the texture its loader opens under it (the session's thumbnails, made by
+// its poll): a name the project has no file for says so; one it has shows the file, its size and
+// what the use's loader makes of it (an item's HUD image: its alpha alone); its picker previews the
+// highlighted texture beside the list. No thumbnail device here: a framed box stands in for each.
+void test_texture_previews() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const std::string root = project.session.view().project.root;
+	const std::vector<uint8_t> rgba(16, 200);
+	std::vector<uint8_t> tga;
+	std::string error;
+	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 2, 2, tga, error) &&
+	              editor_test::write_bytes(root + "/textures/present.tga", tga),
+	      "a texture of the project");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	Ui ui;
+	ui.pump = [&project] { project.session.poll(); };
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Not found") != std::string::npos &&
+	              text.find("The project has no file the game loads for gone.tga.") != std::string::npos,
+	      "a texture the project lacks says so under its field");
+	Edit set;
+	set.address = project.item;
+	set.field = "hud_image";
+	set.value = std::string("present.tga");
+	project.session.handle(request::edit_record(project.items->path(), set));
+	ui.frames(4);
+	text = logged_frame(ui);
+	CHECK(text.find("present.tga") != std::string::npos && text.find("2 x 2, TGA image") != std::string::npos &&
+	              text.find("As this use loads it: its alpha alone, tinted by the HUD colour") != std::string::npos,
+	      "a texture the project has shows its file, its size and what the HUD makes of it");
+	const TextureThumbnails *thumbnails = project.session.view().documents.thumbnails.get();
+	CHECK(thumbnails && thumbnails->made() == 1 && !thumbnails->pending(), "its thumbnail made once, by a poll");
+	open_picker(ui, project, "hud_image");
+	text = logged_frame(ui);
+	CHECK(text.find("2 x 2, TGA image") != std::string::npos, "the picker previews the highlighted texture");
+	ImGui::ClosePopupsExceptModals();
+	ui.frames(2);
+}
+
+// S18: a texture an import makes shows, in its tab, how it is made: its source, the options that apply,
+// what its uses ask (the item's HUD image names gone.tga, so the PCX the record asks for is not what it
+// reads) and the one click that raises the set_import_options of what they ask.
+void test_texture_import_section() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	opennova::RgbaImage image;
+	image.width = image.height = 4;
+	image.pixels.assign(64, 180);
+	const std::vector<uint8_t> png = encode_png_rgba(image.pixels.data(), 4, 4);
+	const std::string art = project.dir.file("art");
+	CHECK(editor_test::write_bytes(art + "/gone.png", png), "a PNG outside the project");
+	const ImportResult imported =
+	        import_assets({{art + "/gone.png", {}}}, ProjectPaths::for_root(view.project.root), *view.project.document, false);
+	CHECK(imported.imported.size() == 1, "imported as a modder imports it");
+	if (imported.imported.size() != 1) return;
+	const std::string source = imported.imported[0];
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::set_import_options(source, {{"format", "pcx"}}));
+	project.session.run_operations();
+	const AssetEntry *output = view.project.scan ? view.project.scan->find("gone.pcx") : nullptr;
+	CHECK(output && output->imported_from == source, "made a PCX, as its record asks");
+	if (!output) return;
+	project.session.handle(request::open_document(output->relative_path));
+	Ui ui;
+	ui.pump = [&project] { project.session.poll(); };
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Made from gone.png") != std::string::npos && text.find("change how it is made here") != std::string::npos,
+	      "its tab says what it is made from");
+	CHECK(text.find("Its uses ask for:") != std::string::npos && text.find("format tga") != std::string::npos,
+	      "what its uses ask, with why");
+	CHECK(text.find("DXT5: the retail model textures' form") == std::string::npos &&
+	              text.find("the source's colours when 256 or fewer") != std::string::npos,
+	      "the options that apply to a PCX, the DDS's left out");
+	ImGuiWindow *info = nullptr;
+	for (ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && std::strstr(window->Name, "texture_info")) info = window;
+	CHECK(info != nullptr, "the tab's info column");
+	if (!info) return;
+	ui.activate(ImHashStr("Make it as its uses ask", 0, info->ID));
+	const std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *set = only(requests, EditorRequestKind::SetImportOptions);
+	const std::vector<std::pair<std::string, std::string>> asked = {{"format", "tga"}};
+	CHECK(set && set->path == source && set->values == asked, "the one click raises the set_import_options of what its uses ask");
+}
+
+// S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., ask first
+// (preview_texture_source of that texture); the dialog the preview opens shows the texture before and after
+// and replaces only on its Replace, Cancel closing it; an image dropped on a texture field's value asks for
+// the file the field's loader opens.
+void test_texture_drop_replaces() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	opennova::RgbaImage image;
+	image.width = image.height = 4;
+	image.pixels.assign(64, 90);
+	std::vector<uint8_t> tga;
+	std::string why;
+	opennova::tga::tga_write_rgba32(image.pixels.data(), 4, 4, tga, why);
+	CHECK(editor_test::write_bytes(view.project.root + "/textures/plain.tga", tga), "a plain texture");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("textures/plain.tga"));
+	Ui ui;
+	ui.pump = [&project] { project.session.poll(); };
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	ImGuiWindow *info = nullptr;
+	for (ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && std::strstr(window->Name, "texture_info")) info = window;
+	CHECK(info != nullptr, "the tab's info column");
+	if (!info) return;
+	// Dropped on the tab.
+	ui.windows.drop_files({"C:/art/new.png"}, info->Pos.x + info->Size.x * 0.5f, info->Pos.y + info->Size.y * 0.5f);
+	ui.frames(1);
+	std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *dropped = only(requests, EditorRequestKind::PreviewTextureSource);
+	CHECK(dropped && dropped->path == "textures/plain.tga" && dropped->paths == std::vector<std::string>({"C:/art/new.png"}),
+	      "a drop on the tab asks to replace the texture");
+	CHECK(!only(requests, EditorRequestKind::ReplaceTexture), "a drop replaces nothing before it is asked");
+	// A drop elsewhere is none's.
+	ui.windows.drop_files({"C:/art/new.png"}, -100.0f, -100.0f);
+	ui.frames(3);
+	CHECK(!only(ui.drain(), EditorRequestKind::PreviewTextureSource), "a drop on no item does nothing");
+	// A drop on the tab where another window is drawn over it is that window's: the tab takes none.
+	const ImVec2 middle(info->Pos.x + info->Size.x * 0.5f, info->Pos.y + info->Size.y * 0.5f);
+	const auto covered_frame = [&] {
+		ImGui::NewFrame();
+		ui.windows.draw_frame(++ui.index);
+		ImGui::SetNextWindowPos(ImVec2(middle.x - 40.0f, middle.y - 40.0f));
+		ImGui::SetNextWindowSize(ImVec2(80.0f, 80.0f));
+		ImGui::Begin("Cover", nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings);
+		ImGui::End();
+		ImGui::Render();
+	};
+	covered_frame();
+	covered_frame();
+	ui.windows.drop_files({"C:/art/new.png"}, middle.x, middle.y);
+	covered_frame();
+	covered_frame();
+	CHECK(!only(ui.drain(), EditorRequestKind::PreviewTextureSource), "a drop on a window drawn over the tab is not the tab's");
+	ui.frames(2);
+	ui.drain();
+	// Picked through Replace with image...: the pick asks the Shell, its answer asks to replace.
+	ui.activate(ImHashStr("Replace with image...", 0, info->ID));
+	requests = ui.drain();
+	const EditorRequest *pick = only(requests, EditorRequestKind::PickFile);
+	CHECK(pick && pick->purpose == PickPurpose::TextureImage, "the button asks the Shell for an image");
+	ui.windows.deliver_pick(PickPurpose::TextureImage, "C:/art/picked.tga");
+	requests = ui.drain();
+	const EditorRequest *picked = only(requests, EditorRequestKind::PreviewTextureSource);
+	CHECK(picked && picked->path == "textures/plain.tga" && picked->paths == std::vector<std::string>({"C:/art/picked.tga"}),
+	      "the image picked asks to replace the texture the button was for");
+
+	// The dialog over a real image: what it shows, Replace raising the replace, Cancel closing it.
+	opennova::RgbaImage other;
+	other.width = other.height = 4;
+	other.pixels.assign(64, 30);
+	std::vector<uint8_t> other_tga;
+	opennova::tga::tga_write_rgba32(other.pixels.data(), 4, 4, other_tga, why);
+	const std::string picture = project.dir.file("new.tga");
+	CHECK(editor_test::write_bytes(picture, other_tga), "an image outside the project");
+	project.session.handle(request::preview_texture_source("textures/plain.tga", picture));
+	CHECK(view.dialogs.texture_source.open && view.dialogs.texture_source.refusal.empty() &&
+	              view.dialogs.texture_source.before && view.dialogs.texture_source.after,
+	      "the preview opens with the texture before and after");
+	ui.frames(3);
+	ImGuiWindow *dialog = ImGui::FindWindowByName("Make a texture from an image###texture_source");
+	CHECK(dialog && dialog->Active, "the dialog shows");
+	if (!dialog) return;
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Replace plain.tga with new.tga?") != std::string::npos && text.find("Now") != std::string::npos &&
+	              text.find("Then") != std::string::npos,
+	      "it says what it replaces with what, before and after");
+	ui.drain();
+	// With the dialog open, a drop on the tab behind it is none's.
+	ui.windows.drop_files({"C:/art/other.png"}, middle.x, middle.y);
+	ui.frames(3);
+	CHECK(!only(ui.drain(), EditorRequestKind::PreviewTextureSource), "a drop behind the open dialog is none's");
+	ui.activate(ImHashStr("Replace", 0, dialog->ID));
+	requests = ui.drain();
+	const EditorRequest *replace = only(requests, EditorRequestKind::ReplaceTexture);
+	CHECK(replace && replace->path == "textures/plain.tga" && replace->paths == std::vector<std::string>({picture}),
+	      "its Replace replaces the texture with the image");
+	ui.activate(ImHashStr("Cancel", 0, dialog->ID));
+	requests = ui.drain();
+	CHECK(only(requests, EditorRequestKind::CancelTextureSource) != nullptr, "its Cancel closes it");
+	project.session.handle(request::cancel_texture_source());
+	ui.frames(3);
+	CHECK(!view.dialogs.texture_source.open && !GImGui->OpenPopupStack.Size, "closed, the dialog goes");
+
+	// Dropped on a texture field's value (the item's HUD image, which names gone.tga): the file the field's
+	// loader opens.
+	project.session.handle(request::open_document("defs/items.def"));
+	EditorRequest select = request::select_record(project.items->path(), project.item);
+	project.session.handle(select);
+	ui.frames(3);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	ImVec2 hud = centre_of(ui, field_item(project, "hud_image", "##value"));
+	ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
+	CHECK(inspector != nullptr, "the Inspector");
+	if (!inspector) return;
+	// Below the Inspector's fold: a drop there lands on no window (the field does not show), so none's.
+	if (hud.y >= inspector->OuterRectClipped.Max.y) {
+		ui.windows.drop_files({"C:/art/hud.png"}, hud.x, hud.y);
+		ui.frames(3);
+		CHECK(!only(ui.drain(), EditorRequestKind::PreviewTextureSource), "a drop on a field scrolled out of sight is none's");
+		ImGui::SetScrollY(inspector, inspector->Scroll.y + hud.y - (inspector->Pos.y + inspector->Size.y * 0.5f));
+		ui.frames(3);
+		hud = centre_of(ui, field_item(project, "hud_image", "##value"));
+	}
+	CHECK(hud.y > inspector->OuterRectClipped.Min.y && hud.y < inspector->OuterRectClipped.Max.y, "the HUD image's value shows");
+	ui.windows.drop_files({"C:/art/hud.png"}, hud.x, hud.y);
+	ui.frames(1);
+	requests = ui.drain();
+	const EditorRequest *field = only(requests, EditorRequestKind::PreviewTextureSource);
+	CHECK(field && field->path == "gone.tga" && field->paths == std::vector<std::string>({"C:/art/hud.png"}),
+	      "an image dropped on a texture field asks to make the file its loader opens");
+}
+
 } // namespace
 
 void run_reference_picker_tests() {
@@ -470,6 +718,9 @@ void run_reference_picker_tests() {
 	test_list_kept();
 	test_lists_let_go();
 	test_pick_by_name();
+	test_texture_previews();
+	test_texture_import_section();
+	test_texture_drop_replaces();
 }
 
 } // namespace editor_ui_test

@@ -11,11 +11,13 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <base/io/cp1252.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/requirements/requirement_words.h>
@@ -64,6 +66,7 @@ constexpr Token<PickPurpose> kPurposeTokens[] = {
 	{PickPurpose::GameInstall, "game_install"},
 	{PickPurpose::ImportFiles, "import_files"},
 	{PickPurpose::BuildFolder, "build_folder"},
+	{PickPurpose::TextureImage, "texture_image"},
 };
 
 constexpr Token<UnsavedChoice> kChoiceTokens[] = {
@@ -156,7 +159,38 @@ const char *reference_status_token(ReferenceStatus status) {
 
 JsonValue boolean(bool value) { return JsonValue::make_bool(value); }
 
+// A texture reference's use, by the role its loader argument names (ADR 0046 S18, texture_roles.h):
+// texture_role its token, texture_gates whether the game refuses the mission without it.
+void set_texture_role(JsonValue &out, ReferenceKind kind, int32_t loader_arg) {
+	TextureRoleId role = TextureRoleId::kCount;
+	if (kind != ReferenceKind::Texture || !texture_arg_role(loader_arg, role)) return;
+	out.set("texture_role", json_string(texture_role_row(role).token));
+	if (texture_arg_gates(loader_arg)) out.set("texture_gates", boolean(true));
+}
+
 } // namespace
+
+JsonValue texture_reference_json(const SessionView &view, const TextureReferenceLoad &load) {
+	JsonValue out = JsonValue::make_object();
+	out.set("name", json_string(load.name));
+	out.set("status", json_string(reference_status_token(load.status)));
+	if (load.file.empty()) return out;
+	out.set("file", json_string(load.file));
+	out.set("transform", json_string(texture_load_transform_token(load.transform)));
+	const std::shared_ptr<const TextureThumbnail> thumbnail =
+			view.documents.thumbnails ? view.documents.thumbnails->make_now(view, load.file, load.transform) : nullptr;
+	if (!thumbnail) return out;
+	const bool loads = thumbnail->state == TextureThumbnail::State::Ready;
+	out.set("loads", boolean(loads));
+	if (!loads) out.set("refusal", json_string(thumbnail->refusal));
+	out.set("width", json_number(double(thumbnail->source_width)));
+	out.set("height", json_number(double(thumbnail->source_height)));
+	out.set("levels", json_number(double(thumbnail->levels)));
+	out.set("format", json_string(thumbnail->format));
+	out.set("texels", json_string(thumbnail->texels));
+	out.set("alpha", json_string(thumbnail->alpha));
+	return out;
+}
 
 JsonValue address_to_json(const NodeAddress &address) {
 	JsonValue out = JsonValue::make_object();
@@ -754,6 +788,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::OutDir: return text_of(json, token, request.out_dir, error);
 	case F::ExportDir: return text_of(json, token, request.export_dir, error);
 	case F::Mission: return text_of(json, token, request.mission, error);
+	case F::Operation: return text_of(json, token, request.operation, error);
 	case F::Values: {
 		// An object of strings, sorted by key: the writer emits an object's keys sorted, so the order
 		// is the keys', and request::create_file sorts them the same way (review F10).
@@ -876,6 +911,7 @@ bool field_to_json(
 	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
 	case F::ExportDir: out = json_string(request.export_dir); return !request.export_dir.empty();
 	case F::Mission: out = json_string(request.mission); return !request.mission.empty();
+	case F::Operation: out = json_string(request.operation); return !request.operation.empty();
 	case F::Values:
 		out = JsonValue::make_object();
 		for (const auto &entry : request.values) out.set(entry.first, json_string(entry.second));
@@ -1128,6 +1164,7 @@ JsonValue diagnostic_to_json(const Diagnostic &d) {
 			out.set("reference", json_string(reference_row(reference->kind).token));
 		if (!reference->scope.empty()) out.set("scope", json_string(reference->scope));
 		if (reference->loader_arg >= 0) out.set("loader_arg", json_number(double(reference->loader_arg)));
+		set_texture_role(out, reference->kind, reference->loader_arg);
 	}
 	return out;
 }
@@ -1259,6 +1296,11 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page, const
 		issues.push(std::move(entry));
 	}
 	out.set("issues", std::move(issues));
+	// What a document of another content holds, by its type's name (S18: a texture's facts).
+	if (const DocumentType *type = document_type_for(base.kind()); type && type->content_json) {
+		JsonValue content = type->content_json(base);
+		if (!content.is_null()) out.set(type->name, std::move(content));
+	}
 	if (text && page) {
 		// A page of its lines, each its number and its text (in the game's code page, as UTF-8).
 		const size_t total = text->line_count();
@@ -1425,6 +1467,9 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 					? reference_target_file(*view.findings.graph, field, value)
 					: std::string();
 			if (!target.empty()) entry.set("reference_file", json_string(target));
+			// A texture's: the file its loader opens and what that file is (ADR 0046 S18).
+			if (view.findings.graph && is_texture_reference(field.reference))
+				entry.set("texture", texture_reference_json(view, texture_reference(*view.findings.graph, field, value)));
 		}
 		if (field.defines != ReferenceKind::None) entry.set("defines", json_string(reference_row(field.defines).token));
 		fields.push(std::move(entry));
@@ -1468,6 +1513,7 @@ JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	out.set("rewritable", boolean(graph.rewrites(edge)));
 	if (edge.through != ReferenceKind::None) out.set("through", json_string(reference_row(edge.through).token));
 	if (edge.loader_arg >= 0) out.set("loader_arg", json_number(double(edge.loader_arg)));
+	set_texture_role(out, edge.kind, edge.loader_arg);
 	std::string file;
 	const ReferenceStatus status = edge.target.empty() ? ReferenceStatus::NotAReference : graph.resolve(edge, &file);
 	out.set("status", json_string(reference_status_token(status)));
@@ -1526,6 +1572,11 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 			entry.set("inert", boolean(true));
 			entry.set("reason", json_string(choice.reason));
 		}
+		// A texture's: the file the reference set to it loads, and what it is (ADR 0046 S18).
+		if (!choice.served.empty()) entry.set("served", json_string(choice.served));
+		if (view.findings.graph && is_texture_reference(field.reference) && is_texture_reference(choice.kind))
+			entry.set("texture", texture_reference_json(view, texture_reference(*view.findings.graph, field.reference, choice.name,
+			                                                                     field.scope, field.loader_arg)));
 		list.push(std::move(entry));
 	}
 	JsonValue out = JsonValue::make_object();
