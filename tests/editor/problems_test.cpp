@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -29,7 +30,10 @@
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/project_build/build_run.h>
+#include <editor/session/build_result.h>
 #include <editor/session/finding_codes.h>
+#include <editor/session/original_files.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
@@ -284,19 +288,24 @@ static int test_fixes() {
 	            fixes[1].request.role == "gameerr" && fixes[1].request.path == "strings/other.bin");
 	TEST_EXPECT(fixes[1].detail == "Renames other.bin to gameerr.bin; nothing refers to it. It cannot be undone with Undo.");
 	TEST_EXPECT(has_fixes(*gameerr, v));
-	// With the game data it has, Import from it too (the import dialog on that one file, planned
-	// with the files it needs as the editor's setting says).
+	// With the game data it has, the game's own copy comes first (the import dialog on that one file,
+	// planned with the files it needs as the editor's setting says): Fix all and the summary take a
+	// finding's first fix, and a placeholder makes a game that starts empty. The placeholder is the
+	// second, said as such.
 	editor_test::set_game_install(session, install);
 	gameerr = requirement_finding(v, "requirement.missing", "gameerr");
 	TEST_EXPECT(gameerr != nullptr);
 	if (!gameerr) return 1;
 	fixes = fixes_for(*gameerr, v);
-	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Create gameerr.bin", "Import gameerr.bin from the game data...",
+	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Import gameerr.bin from the game data...",
+	                                                          "Create a placeholder gameerr.bin",
 	                                                          "Use other.bin as gameerr.bin", "Use spare.bin as gameerr.bin"}));
 	if (fixes.size() != 4) return 1;
-	TEST_EXPECT(fixes[1].bulk && fixes[1].request.kind == EditorRequestKind::PreviewInstallImport &&
-	            fixes[1].request.names == std::vector<std::string>({"gameerr.bin"}) && fixes[1].request.with_dependencies);
-	TEST_EXPECT(fixes[1].detail.find(kNotUndoable) != std::string::npos);
+	TEST_EXPECT(fixes[0].bulk && fixes[0].request.kind == EditorRequestKind::PreviewInstallImport &&
+	            fixes[0].request.names == std::vector<std::string>({"gameerr.bin"}) && fixes[0].request.with_dependencies);
+	TEST_EXPECT(fixes[0].detail.find(kNotUndoable) != std::string::npos);
+	TEST_EXPECT(fixes[1].bulk && fixes[1].request.kind == EditorRequestKind::CreateMissing &&
+	            fixes[1].detail.rfind("Instead of the game's own: ", 0) == 0);
 	// A required file without a factory (missions on: cmap.mnu): no Create; each menu to use
 	// says what its rename rewrites (b.mnu: the ACTION of a.mnu that names it).
 	editor_test::set_missions(session, true);
@@ -315,7 +324,7 @@ static int test_fixes() {
 	TEST_EXPECT(brand != nullptr && brand->severity == DiagnosticSeverity::Info);
 	if (!brand) return 1;
 	TEST_EXPECT(labels_of(fixes_for(*brand, v)) ==
-	            std::vector<std::string>({"Create brand.mns", "Import brand.mns from the game data..."}));
+	            std::vector<std::string>({"Import brand.mns from the game data...", "Create a placeholder brand.mns"}));
 	// S11e: an optional file is made or imported, never taken from another file: no Use for
 	// loading.pcx though the project has a splash.pcx (and no factory or game data has one).
 	const Diagnostic *loading = requirement_finding(v, "requirement.optional_missing", "loading_pcx");
@@ -549,10 +558,11 @@ static int test_merge() {
 	TEST_EXPECT(merged[0].kind == EditorRequestKind::Save && merged[0].path == "defs/items.def");
 	TEST_EXPECT(merged[1].kind == EditorRequestKind::CreateMissing &&
 	            merged[1].roles == std::vector<std::string>({"main_menu", "gametext"}));
-	TEST_EXPECT(merged[2].kind == EditorRequestKind::PreviewInstallImport &&
-	            merged[2].names == std::vector<std::string>({"MAIN.MNU", "Arial14b.fnt"}));
-	TEST_EXPECT(merged[3].kind == EditorRequestKind::Reimport && merged[3].path == "art/logo.png" && merged[3].force);
-	TEST_EXPECT(merged[4].kind == EditorRequestKind::Save && merged[4].path == "menus/menu_style.mns");
+	// The import's preview last: an operation over the project's files, which a request after it would find busy.
+	TEST_EXPECT(merged[2].kind == EditorRequestKind::Reimport && merged[2].path == "art/logo.png" && merged[2].force);
+	TEST_EXPECT(merged[3].kind == EditorRequestKind::Save && merged[3].path == "menus/menu_style.mns");
+	TEST_EXPECT(merged[4].kind == EditorRequestKind::PreviewInstallImport &&
+	            merged[4].names == std::vector<std::string>({"MAIN.MNU", "Arial14b.fnt"}));
 	TEST_EXPECT(merge_fixes({}).empty() && merge_fixes({fix(menu, false)}).empty());
 	return 0;
 }
@@ -1147,14 +1157,16 @@ static int test_findings_index() {
 	return 0;
 }
 
-// ADR 0046 S15: the findings about the game's own data apart. A fake install serving a menu that names
-// a texture the project lacks; the project holds that menu byte for byte, and a menu of its own naming
-// the same texture. After the validation the session checks the files its findings are about against
-// the install's copies (session/original_files.h): the install's menu is the original's, the modder's
-// is not. The answer lists the modder's finding first (ungrouped: a group with no header) and the
-// install's menu's under the game's own data's group, last, counting them apart; grouped by file, the
-// same group last. The install's menu changed by a byte is the modder's again; with no install, none is
-// the original's.
+// ADR 0046 S15, decided per finding against the install as a whole (the UX round's problems lane). A fake
+// install serving a menu whose window's appearance names a texture the install lacks; the project holds
+// that menu byte for byte, and a menu of its own naming the same texture. Once the install is validated
+// (session/original_files.h), the shipped menu's finding is the game's own and the modder's menu's is not;
+// the answer lists the modder's first and the game's own under their group, last, counted apart. The
+// shipped menu edited: a move of its window, an appearance inserted above the logo's, removed, the logo's
+// moved among its siblings, the window renamed, saved, a byte changed on disk: the logo's finding stays
+// the game's own, keyed on the record as itself; another texture named is the modder's. The install
+// patched to serve the texture (its folder moved: validated again at the next rescan): the project's
+// finding is the modder's (the install resolves it). With no install, none is the game's own.
 static int test_original_data() {
 	editor_test::TempProjectDir dir("opennova_editor_problems_original");
 	const auto menu = [](const char *name) {
@@ -1164,12 +1176,15 @@ static int test_original_data() {
 	};
 	const std::string shipped = menu("SHIPPED");
 	const std::string install = dir.file("install");
-	const opennova::pff::PffWriteEntry entries[] = {
-		{"shipped.mnu", reinterpret_cast<const uint8_t *>(shipped.data()), uint32_t(shipped.size()), 0, 0, 0},
+	const auto write_install = [&install](const std::vector<std::pair<std::string, std::string>> &files) {
+		std::vector<opennova::pff::PffWriteEntry> entries;
+		for (const auto &[name, bytes] : files)
+			entries.push_back({name.c_str(), reinterpret_cast<const uint8_t *>(bytes.data()), uint32_t(bytes.size()), 0, 0, 0});
+		return opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries.data(),
+		                                        uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK;
 	};
 	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
-	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
-	            opennova::pff::PFF_WRITE_OK);
+	TEST_EXPECT(write_install({{"shipped.mnu", shipped}}));
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1190,9 +1205,13 @@ static int test_original_data() {
 	const size_t theirs = logo_in("menus/shipped.mnu"), mine = logo_in("menus/mine.mnu");
 	TEST_EXPECT(theirs != SIZE_MAX && mine != SIZE_MAX);
 	if (theirs == SIZE_MAX || mine == SIZE_MAX) return 1;
-	TEST_EXPECT(v.findings.original_files && v.findings.original_files->count("menus/shipped.mnu") == 1 &&
-	            v.findings.original_files->count("menus/mine.mnu") == 0);
-	TEST_EXPECT(in_original_data(v.findings.diagnostics[theirs], v) && !in_original_data(v.findings.diagnostics[mine], v));
+	TEST_EXPECT(v.findings.originals && v.findings.originals->ready && v.findings.originals->findings.count(normalized_logical_name("shipped.mnu")) == 1 &&
+	            v.findings.originals->findings.count(normalized_logical_name("mine.mnu")) == 0);
+	TEST_EXPECT(!v.findings.diagnostics[theirs].record_key.empty());
+	TEST_EXPECT(in_original_data(theirs, v) && !in_original_data(mine, v));
+	const OriginalFiles &baseline = session.originals();
+	const size_t validated = baseline.validations();
+	TEST_EXPECT(validated == 1 && baseline.files() >= 1);
 	const auto group_of = [](const ProblemAnswer &answer, size_t finding) {
 		for (size_t g = 0; g < answer.groups.size(); ++g)
 			if (std::find(answer.groups[g].rows.begin(), answer.groups[g].rows.end(), finding) != answer.groups[g].rows.end())
@@ -1213,58 +1232,342 @@ static int test_original_data() {
 	ProblemCounts counts = count_problems(v);
 	TEST_EXPECT(counts.original_errors + counts.original_warnings + counts.original_infos == answer.original() &&
 	            counts.errors == answer.errors && counts.warnings == answer.warnings);
-	// Open with an unsaved edit, the shipped menu is judged by what it holds: the modder's, never folded;
-	// saved as it was again (an undo), the game's own data's again.
+	// Edits of the shipped menu: the logo's finding stays the game's own through each.
 	editor_test::handle_to_end(session, request::open_document("menus/shipped.mnu"));
 	const Document *opened = records_of(*session.document_for("menus/shipped.mnu"));
 	TEST_EXPECT(opened != nullptr);
 	if (!opened) return 1;
+	const Diagnostic logo = v.findings.diagnostics[logo_in("menus/shipped.mnu")];
+	const NodeAddress appearance{logo.row_id, logo.record_kind, logo.child_id};
+	const std::vector<NodeAddress> owners = opened->ancestors(appearance);
+	TEST_EXPECT(!owners.empty() && !logo.field.empty());
+	if (owners.empty()) return 1;
+	const NodeAddress window = owners.back();
+	const auto still_theirs = [&](const char *after) {
+		const size_t row = logo_in("menus/shipped.mnu");
+		const bool ok = row != SIZE_MAX && in_original_data(row, v);
+		if (!ok) std::fprintf(stderr, "the logo's finding is not the game's own after %s\n", after);
+		return ok;
+	};
+	// Its window moved.
+	Edit moved;
+	moved.address = window;
+	moved.field = "position.left";
+	moved.value = int64_t(10);
+	editor_test::handle_to_end(session, request::edit_record("menus/shipped.mnu", moved));
+	TEST_EXPECT(opened->dirty() && still_theirs("a move of its window"));
+	// An appearance inserted above the logo's (its place among its siblings moves), then removed.
+	Edit inserted;
+	inserted.operation = EditOperation::Add;
+	inserted.address = {appearance.row, appearance.kind, 0};
+	inserted.parent = window.child;
+	inserted.position = 0;
+	editor_test::handle_to_end(session, request::edit_record("menus/shipped.mnu", inserted));
+	NodeId added = 0;
+	for (const Document::Collection &collection : opened->collections_of(window))
+		if (collection.spec.kind == appearance.kind && collection.ids.size() == 2) added = collection.ids[0];
+	TEST_EXPECT(added != 0 && added != appearance.child && still_theirs("an appearance inserted above it"));
+	Edit removed;
+	removed.operation = EditOperation::Remove;
+	removed.address = {appearance.row, appearance.kind, added};
+	editor_test::handle_to_end(session, request::edit_record("menus/shipped.mnu", removed));
+	TEST_EXPECT(still_theirs("an appearance removed above it"));
+	// The logo's moved among its siblings (to the end, after the one left).
+	Edit reordered;
+	reordered.operation = EditOperation::Move;
+	reordered.address = appearance;
+	reordered.position = SIZE_MAX;
+	editor_test::handle_to_end(session, request::edit_record("menus/shipped.mnu", reordered));
+	TEST_EXPECT(still_theirs("a move among its siblings"));
+	// Its window renamed: an owner's name is no part of it.
+	Edit renamed_window;
+	renamed_window.address = window;
+	renamed_window.field = "name";
+	renamed_window.value = std::string("BACKDROP");
+	editor_test::handle_to_end(session, request::edit_record("menus/shipped.mnu", renamed_window));
+	TEST_EXPECT(still_theirs("its window renamed"));
+	// The image changed to another the project lacks: that finding is the modder's, and the logo's is gone
+	// with the name; Undo brings the logo's back as the game's own.
 	Edit renamed;
-	for (const auto &row : opened->rows()) {
-		if (!row) continue;
-		for (const FieldSchema &field : opened->fields(row->kind))
-			if (field.type == FieldType::Text && !field.read_only && renamed.field.empty()) {
-				renamed.address = {row->id, row->kind, 0};
-				renamed.field = field.id;
-			}
-		if (!renamed.field.empty()) break;
-	}
-	renamed.value = std::string("RENAMED");
-	TEST_EXPECT(!renamed.field.empty());
+	renamed.address = appearance;
+	renamed.field = logo.field;
+	renamed.value = std::string("other.tga");
 	editor_test::handle_to_end(session, request::edit_record("menus/shipped.mnu", renamed));
-	const size_t edited = logo_in("menus/shipped.mnu");
-	TEST_EXPECT(opened->dirty() && edited != SIZE_MAX && !in_original_data(v.findings.diagnostics[edited], v));
-	counts = count_problems(v);
-	TEST_EXPECT(counts.original_errors + counts.original_warnings + counts.original_infos == 0);
+	const auto other_in = [&v]() {
+		for (size_t i = 0; i < v.findings.diagnostics.size(); ++i)
+			if (v.findings.diagnostics[i].code() == "reference.missing" && subject_target(v.findings.diagnostics[i]) == "other.tga")
+				return i;
+		return SIZE_MAX;
+	};
+	const size_t other = other_in();
+	TEST_EXPECT(other != SIZE_MAX && !in_original_data(other, v) && logo_in("menus/shipped.mnu") == SIZE_MAX);
 	editor_test::handle_to_end(session, request::undo("menus/shipped.mnu"));
-	const size_t undone = logo_in("menus/shipped.mnu");
-	TEST_EXPECT(!opened->dirty() && undone != SIZE_MAX && in_original_data(v.findings.diagnostics[undone], v));
-	// Changed by a byte on disk: the modder's again.
+	TEST_EXPECT(other_in() == SIZE_MAX && still_theirs("an undo"));
+	// Saved: the file differs from the install's on disk, and the logo is still the game's own (the audit's
+	// case: one saved field made every original finding of the file the modder's).
+	editor_test::handle_to_end(session, request::save("menus/shipped.mnu"));
+	TEST_EXPECT(!opened->dirty() && still_theirs("a save"));
+	editor_test::handle_to_end(session, request::close_document("menus/shipped.mnu"));
+	// Changed by a byte on disk: the same; the modder's menu's is the modder's. The install was validated
+	// once: nothing of the project's moves it.
 	TEST_EXPECT(editor_test::write_text(root + "/menus/shipped.mnu", shipped + " "));
 	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(v.findings.original_files && v.findings.original_files->empty());
+	TEST_EXPECT(still_theirs("a byte changed on disk") && !in_original_data(logo_in("menus/mine.mnu"), v));
+	TEST_EXPECT(baseline.validations() == validated);
 	answer = answer_problems(ProblemQuery(), v);
-	TEST_EXPECT(!answer.grouped && answer.original() == 0);
-	// The install changed under the same folder (its copy now the project's bytes): a rescan finds it
-	// the original's again.
-	const std::string patched = shipped + " ";
-	const opennova::pff::PffWriteEntry patched_entries[] = {
-		{"shipped.mnu", reinterpret_cast<const uint8_t *>(patched.data()), uint32_t(patched.size()), 0, 0, 0},
-	};
-	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
-	                                             patched_entries, 1) == opennova::pff::PFF_WRITE_OK);
+	TEST_EXPECT(answer.grouped && answer.original() >= 1);
+	counts = count_problems(v);
+	TEST_EXPECT(counts.original_errors + counts.original_warnings + counts.original_infos == answer.original());
+	// The install patched to serve the texture: its folder moved, so the next rescan validates it again, and
+	// the project's missing logo is the modder's own (the install has it; the modder's project lacks it).
+	const std::string texture(18, '\0');
+	TEST_EXPECT(write_install({{"shipped.mnu", shipped}, {"logo.tga", texture}}));
 	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(v.findings.original_files && v.findings.original_files->count("menus/shipped.mnu") == 1);
+	TEST_EXPECT(baseline.validations() == validated + 1);
+	TEST_EXPECT(logo_in("menus/shipped.mnu") != SIZE_MAX && !in_original_data(logo_in("menus/shipped.mnu"), v));
 	// With no install, none is the original's.
 	editor_test::set_game_install(session, std::string());
 	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(v.findings.original_files && v.findings.original_files->empty());
-	std::printf("original data: the install's own files' findings apart\n");
+	TEST_EXPECT(v.findings.originals && v.findings.originals->findings.empty());
+	TEST_EXPECT(!in_original_data(logo_in("menus/shipped.mnu"), v));
+	std::printf("original data: per finding, against the install as a whole\n");
+	return 0;
+}
+
+// The rows' marks over the install's findings by hand (the UX round's problems lane): each of the install's
+// findings of a file taken by one row (an item and its duplicate name the same missing shadow, the install
+// has it once: the first row's is the game's own, the duplicate's the modder's); a finding the install
+// lacks is the modder's; a finding whose code gates never folds; nothing before the install is validated.
+// The key: the record as itself over its path, the line left out, a record's or a message's numbers left
+// out where it has no key. What blocks the build: the plan's refusals, else (no plan) the gating codes.
+static int test_original_marks() {
+	const auto shadow = [](const char *record) {
+		Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Error, "reference.missing", "No shadow.", "defs/items.def",
+		                                       "shadow_texture");
+		d.record = record;
+		d.record_key = std::string("item:") + record;
+		d.subject = ReferenceSubject{ReferenceKind::Texture, "shadow1.tga", std::string(), -1};
+		return d;
+	};
+	std::vector<Diagnostic> rows = {shadow("Drivable Dune Buggy"), shadow("Drivable Dune Buggy")};
+	Diagnostic identity = editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.item_identity", "Same id.",
+	                                              "defs/items.def", "id");
+	identity.record = "Drivable Dune Buggy";
+	identity.record_key = "item:Drivable Dune Buggy";
+	rows.push_back(identity);
+	Diagnostic logo = editor_test::finding_of(DiagnosticSeverity::Error, "reference.missing", "No logo.", "menus/shipped.mnu", "value");
+	logo.subject = ReferenceSubject{ReferenceKind::MenuTexture, "logo.tga", std::string(), -1};
+	rows.push_back(logo);
+	rows.push_back(editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "Unreadable.", "menus/shipped.mnu"));
+	OriginalData originals;
+	originals.ready = true;
+	originals.findings[normalized_logical_name("items.def")][original_finding_key(rows[0])] = 1;
+	originals.findings[normalized_logical_name("shipped.mnu")][original_finding_key(rows[3])] = 1;
+	originals.findings[normalized_logical_name("shipped.mnu")][original_finding_key(rows[4])] = 1;
+	FindingMarks marks = mark_findings(rows, &originals, nullptr);
+	TEST_EXPECT(marks.rows == rows.size() && marks.original == std::vector<uint8_t>({1, 0, 0, 1, 0}));
+	TEST_EXPECT(marks.blocking == std::vector<uint8_t>({0, 0, 0, 0, 1}) && marks.blocking_count == 1);
+	// Not validated yet: none is the game's own.
+	OriginalData waiting = originals;
+	waiting.ready = false;
+	TEST_EXPECT(mark_findings(rows, &waiting, nullptr).original == std::vector<uint8_t>(rows.size(), 0));
+	// The record as itself over its path: the same record anywhere (its owner renamed, a sibling inserted
+	// before it) is the same key; another record is another.
+	Diagnostic elsewhere = rows[0];
+	elsewhere.record = "Vehicles/Drivable Dune Buggy";
+	TEST_EXPECT(original_finding_key(elsewhere) == original_finding_key(rows[0]));
+	elsewhere.record_key = "item:Drivable ATV";
+	TEST_EXPECT(original_finding_key(elsewhere) != original_finding_key(rows[0]));
+	// A line moved: the same key (an edit above a finding moves its line).
+	Diagnostic moved = rows[0];
+	moved.line = 40;
+	TEST_EXPECT(original_finding_key(moved) == original_finding_key(rows[0]));
+	// No key: the record's path, its numbers left out (an event's place among its siblings); a finding of no
+	// record by its words, its numbers left out (a count, a place).
+	Diagnostic event = editor_test::finding_of(DiagnosticSeverity::Warning, "reference.missing", "No sound.", "m.bms", "param1");
+	event.record = "Event 3/Action 2";
+	Diagnostic later = event;
+	later.record = "Event 4/Action 1";
+	TEST_EXPECT(original_finding_key(event) == original_finding_key(later));
+	Diagnostic ends = editor_test::finding_of(DiagnosticSeverity::Warning, "document.parse", "3 line ends are so.", "a.wac");
+	ends.line = 2;
+	Diagnostic more = ends;
+	more.message = "14 line ends are so.";
+	more.line = 9;
+	TEST_EXPECT(original_finding_key(ends) == original_finding_key(more));
+	more.message = "14 line ends are not so.";
+	TEST_EXPECT(original_finding_key(ends) != original_finding_key(more));
+	// The plan's refusals alone block: a gating code the plan does not read (a project check's) blocks nothing.
+	const std::vector<Diagnostic> blockers;
+	marks = mark_findings(rows, &originals, &blockers);
+	TEST_EXPECT(marks.blocking_count == 0 && marks.original[4] == 0);
+	const std::vector<Diagnostic> refused = {rows[4]};
+	marks = mark_findings(rows, &originals, &refused);
+	TEST_EXPECT(marks.blocking_count == 1 && marks.blocking[4] == 1);
+	// A view no session made works the marks out from what it holds; the session's are read while they are
+	// the rows'.
+	SessionView v;
+	v.findings.diagnostics = rows;
+	v.findings.originals = std::make_shared<const OriginalData>(originals);
+	TEST_EXPECT(in_original_data(0, v) && in_original_data(3, v) && !in_original_data(2, v) && blocks_the_build(4, v));
+	const ProblemCounts counts = count_problems(v);
+	TEST_EXPECT(counts.original_errors == 2 && counts.errors == 2 && counts.warnings == 1 && counts.blocking == 1);
+	FindingMarks session = mark_findings(rows, &originals, &blockers);
+	v.findings.marks = std::make_shared<const FindingMarks>(session);
+	TEST_EXPECT(!blocks_the_build(4, v) && count_problems(v).blocking == 0);
+	std::printf("original marks: per finding, each of the install's taken once\n");
+	return 0;
+}
+
+// What blocks the build (the UX round's problems lane): on a new project every required file is missing;
+// the rows the gate refuses (the string tables the boot exits without, the main menu it dead-ends
+// without) are marked, the rest are not; the query shows them alone; the refused build names them, its
+// status line the first, each refusal said with why (the manifest's citation).
+static int test_blocking() {
+	editor_test::TempProjectDir dir("opennova_editor_problems_blocking");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Blocking"));
+	const SessionView &v = session.view();
+	std::set<std::string> blocking;
+	for (size_t i = 0; i < v.findings.diagnostics.size(); ++i)
+		if (blocks_the_build(i, v)) blocking.insert(subject_target(v.findings.diagnostics[i]));
+	TEST_EXPECT(blocking == std::set<std::string>({"gametext.bin", "vmacros.bin", "keyhelp.bin", "main.mnu"}));
+	TEST_EXPECT(count_problems(v).blocking == 4);
+	ProblemQuery only;
+	only.blocking = true;
+	const ProblemAnswer answer = answer_problems(only, v);
+	TEST_EXPECT(answer.rows.size() == 4 && answer.blocking == 4 && answer.total() == v.findings.diagnostics.size());
+	for (const size_t row : answer.rows) {
+		const Diagnostic &d = v.findings.diagnostics[row];
+		TEST_EXPECT(blocker_reason(d).rfind("The game stops here as the original does: ", 0) == 0 &&
+		            blocker_reason(d).find("[orig:") != std::string::npos);
+	}
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && v.activity.last_build->refused);
+	TEST_EXPECT(v.activity.status ==
+	            "Build refused: gametext.bin is missing: the game shows \"Unable to load game strings\" and exits (and 3 more). "
+	            "See Problems.");
+	const Diagnostic *refusal = nullptr;
+	for (const Diagnostic &d : v.findings.diagnostics)
+		if (d.code() == "build.blocked") refusal = &d;
+	TEST_EXPECT(refusal && refusal->message.rfind("The build was refused: 4 problems stop it: gametext.bin is missing: ", 0) == 0 &&
+	            refusal->message.find("; and 1 more. Problems marks them \"Blocks the build\".") != std::string::npos);
+	std::printf("blocking: what a build is refused for, marked and named\n");
+	return 0;
+}
+
+// A Fix all over the required files served whole (the review's M4): where the game install has some (here
+// keyhelp.bin) and lacks the rest, the group's first fixes are an import of the one and placeholders of the
+// others. Raised in one frame, as the Problems window's drain raises them: the placeholders first (made at
+// once), then the import's preview (an operation over the project's files); neither is refused as busy.
+static int test_fix_all_served_whole() {
+	editor_test::TempProjectDir dir("opennova_editor_problems_fix_all");
+	const std::string install = dir.file("install");
+	const std::string table = "a table";
+	const opennova::pff::PffWriteEntry entries[] = {
+		{"keyhelp.bin", reinterpret_cast<const uint8_t *>(table.data()), uint32_t(table.size()), 0, 0, 0},
+	};
+	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Fix all"));
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::rescan());
+	const SessionView &v = session.view();
+	std::vector<ProblemFix> firsts;
+	for (const Diagnostic &d : v.findings.diagnostics) {
+		if (d.code() != "requirement.missing") continue;
+		const std::vector<ProblemFix> fixes = bulk_fixes_for(d, v);
+		if (!fixes.empty()) firsts.push_back(fixes.front());
+	}
+	const std::vector<EditorRequest> merged = merge_fixes(firsts);
+	TEST_EXPECT(merged.size() == 2);
+	if (merged.size() != 2) return 1;
+	TEST_EXPECT(merged[0].kind == EditorRequestKind::CreateMissing && merged[1].kind == EditorRequestKind::PreviewInstallImport &&
+	            merged[1].names == std::vector<std::string>({"keyhelp.bin"}));
+	// Raised in one frame: each served before any poll.
+	session.handle(merged[0]);
+	TEST_EXPECT(session.outcome().done());
+	session.handle(merged[1]);
+	TEST_EXPECT(session.outcome().operation != 0);
+	session.run_operations();
+	TEST_EXPECT(v.project.scan->find("gametext.bin") && v.project.scan->find("vmacros.bin") && !v.project.scan->find("keyhelp.bin"));
+	TEST_EXPECT(v.dialogs.import_preview.open && v.dialogs.import_preview.plan);
+	std::printf("fix all: placeholders made, then the import's preview\n");
+	return 0;
+}
+
+// What only the build's plan refuses (the review's M3): an archive in the project is a Problems row before
+// any build, marked "Blocks the build" like the gate's; the refusal's count, the rows' blocking count and
+// Show them agree; a refused build adds no second row of it; the headline says whose refusals they are.
+static int test_plan_refusals_are_rows() {
+	editor_test::TempProjectDir dir("opennova_editor_problems_plan_rows");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Plan rows"));
+	const SessionView &v = session.view();
+	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", reinterpret_cast<const uint8_t *>("x"), 1, 0, 0, 0}};
+	TEST_EXPECT(opennova::pff::pff_write_archive((v.project.root + "/extra.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	editor_test::handle_to_end(session, request::rescan());
+	const auto archive_rows = [&v]() {
+		std::vector<size_t> rows;
+		for (size_t i = 0; i < v.findings.diagnostics.size(); ++i)
+			if (v.findings.diagnostics[i].code() == "build.archive_in_project") rows.push_back(i);
+		return rows;
+	};
+	std::vector<size_t> rows = archive_rows();
+	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v));
+	TEST_EXPECT(count_problems(v).blocking == 5); // the four required files the boot stops without, and the archive
+	ProblemQuery only;
+	only.blocking = true;
+	TEST_EXPECT(answer_problems(only, v).rows.size() == 5);
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->refused);
+	rows = archive_rows();
+	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v) && count_problems(v).blocking == 5);
+	const Diagnostic *refusal = nullptr;
+	for (const Diagnostic &d : v.findings.diagnostics)
+		if (d.code() == "build.blocked") refusal = &d;
+	TEST_EXPECT(refusal && refusal->message.rfind("The build was refused: 5 problems stop it: ", 0) == 0);
+	const BuildResult result = build_result(*v.activity.last_build, true);
+	TEST_EXPECT(result.refusals.size() == 5 &&
+	            result.headline == "Build refused: 5 problems stop it: the game would stop for some, and the editor does not pack the others.");
+	TEST_EXPECT(std::find(result.refusals.begin(), result.refusals.end(),
+	                      "extra.pff is an archive in the project: the build packs the project's files itself") != result.refusals.end());
+	// The menu bar's words, from the build's own report whatever the status line says since (the review's L5).
+	TEST_EXPECT(refused_words(*v.activity.last_build) ==
+	            "Refused: " + result.refusals.front() + " (and 4 more).");
+	// A name keeps its case in a refusal's words; a sentence's opener is lowered (the review's L6).
+	Diagnostic upper = editor_test::finding_of(DiagnosticSeverity::Error, "build.archive_in_project", "x", "RESOURCE.PFF");
+	TEST_EXPECT(blocker_words(upper) == "RESOURCE.PFF is an archive in the project: the build packs the project's files itself");
+	Diagnostic named = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "MAIN.MNU cannot be read.", "main.mnu");
+	TEST_EXPECT(blocker_words(named) == "MAIN.MNU cannot be read");
+	named.message = "The file cannot be read.";
+	TEST_EXPECT(blocker_words(named) == "the file cannot be read");
+	// A fatal table of another kind: read without a check, not refused with a message (the review's L1).
+	Diagnostic wrong = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.wrong_kind", "x", "strings/gametext.bin");
+	wrong.subject = RequirementSubject{"gametext", "gametext.bin"};
+	TEST_EXPECT(blocker_words(wrong) == "gametext.bin is not the kind of file the game reads there: the game reads it as one "
+	                                   "without checking it, so it may crash or show garbage");
+	TEST_EXPECT(blocker_reason(wrong).find("TextResource_FixupPointers @ 0x75d050") != std::string::npos &&
+	            blocker_reason(wrong).find("Unable to load") == std::string::npos);
+	std::printf("plan refusals: rows before any build, marked and counted alike\n");
 	return 0;
 }
 
 int main() {
 	int failures = 0;
+	failures += test_original_marks();
+	failures += test_blocking();
+	failures += test_fix_all_served_whole();
+	failures += test_plan_refusals_are_rows();
 	failures += test_findings_index();
 	failures += test_locations_and_fixes();
 	failures += test_query();

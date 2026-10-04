@@ -75,6 +75,9 @@ struct Diagnostic {
 	size_t column = 0; // in a text document, the character on `line` (1-based); 0 for none
 	NodeId row_id = 0, child_id = 0;
 	NodeKind record_kind = 0;
+	// The record as itself (Document::record_identity: its kind and own name, else a digest of what it
+	// holds), what the game's own data's fold keys the finding on; "" where it names no record.
+	std::string record_key;
 	FindingSubject subject;
 
 	// The row the finding was made from; null for a Diagnostic no finding was made into (an error
@@ -137,7 +140,7 @@ inline bool operator==(const Diagnostic &a, const Diagnostic &b) {
 	return a.severity == b.severity && a.row() == b.row() && a.message == b.message &&
 			a.asset == b.asset && a.field == b.field && a.record == b.record && a.line == b.line &&
 			a.column == b.column && a.row_id == b.row_id && a.child_id == b.child_id && a.record_kind == b.record_kind &&
-			a.subject == b.subject;
+			a.record_key == b.record_key && a.subject == b.subject;
 }
 inline bool operator!=(const Diagnostic &a, const Diagnostic &b) { return !(a == b); }
 
