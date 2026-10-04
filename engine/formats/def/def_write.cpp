@@ -1,4 +1,5 @@
 #include "def_write_record.h"
+#include "def_scan.h"
 
 #include <algorithm>
 #include <array>
@@ -76,7 +77,13 @@ DefWriteResult def_write_items(const DefItemsFile &file) {
 		if (i == 0 && file.vehicle_spawn_id_count > 0 && file.vehicle_spawn_id_count <= DEF_VEHICLE_SPAWN_SLOTS) {
 			std::vector<std::string> ids;
 			for (int j = 0; j < file.vehicle_spawn_id_count; ++j) ids.push_back(std::to_string(file.vehicle_spawn_ids[j]));
-			writer.line("pcvehicle_spawnlist", ids);
+			// A line holds no more ids than the tokenizer keeps after the key (29, the last
+			// running on to the line's end [orig: Terrain_TokenizeConfigLine @0x53CB60, the
+			// 30-token cap @0x53CC8C..0x53CC93]); the next line registers the rest in order.
+			for (size_t from = 0; from < ids.size(); from += size_t(defscan::kMaxValueTokens))
+				writer.line("pcvehicle_spawnlist",
+				            std::vector<std::string>(ids.begin() + std::ptrdiff_t(from),
+				                                     ids.begin() + std::ptrdiff_t(std::min(ids.size(), from + size_t(defscan::kMaxValueTokens)))));
 			if (!item.vehicle_spawn_mask) writer.line("pcvehicle_spawnlist", {});
 		}
 		writer.record(DefRecordKind::Item, &item, item.display_name);

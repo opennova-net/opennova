@@ -352,7 +352,9 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
     const DefProperty *property = nullptr;
     for (const auto &p : def_properties(property_kind))
         if (p.key == key || (property_kind == DefRecordKind::Attachment && p.key == "addeweap") ||
-            (kind == DefRecordKind::Action && key == "delay" && p.key == "delayend")) { property = &p; break; }
+            (kind == DefRecordKind::Action && key == "delay" && p.key == "delayend") ||
+            // `animcal` fills the one anim-map buffer `animadm` does [orig: @ 0x543D77 / 0x543D47]
+            (kind == DefRecordKind::Weapon && key == "animcal" && p.key == "animadm")) { property = &p; break; }
     const bool alias = kind == DefRecordKind::Item &&
         (key == "sqb_rate" || key == "sqb_distance" || key == "sqb_error" || key == "num_doors" ||
          key == "first_door" || key == "first_subobject" || key == "door_dir" || key == "rotor_parts" ||
@@ -388,12 +390,27 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
         // retail's own items.def carries `exp1`, `Good`, `Evil`, `forceasset`,
         // `neutral`, `PilotOnly`, `Train`, `NoCTool`, `LFP`, `fo`, `pfoil`.
         // [orig: ItemDef_ParseProperty @ 0x49EB00, the attrib: chain has no else arm]
-        if (!count) invalid();
+        // A bare `attrib:` (jox01's items.def has 199) is a line the game reads and
+        // returns from at once, setting nothing [orig: ItemDef_ParseProperty @ 0x4A06A8
+        // `cmp [count],1; jle` -> the plain return @ 0x4A1CA6]: ignored, not invalid.
+        if (!count) invalid(DefIssueCode::UnknownProperty);
         for (int i = 0; i < count; ++i) {
             const auto text = word(i);
             if (!lookup_item_attrib(text.data(), text.size()) && !lookup_item_attrib2(text.data(), text.size()) && text != "parent")
                 authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::UnknownProperty, text.c_str());
         }
+        return;
+    }
+    if (encoding == DefEncoding::ModelOption) {
+        // The model by its first token; the reader compares the second with `nocheckdepth`
+        // and reads nothing else, so any other token is ignored input [orig:
+        // WeaponDefs_ParseLineCallback @ 0x544F85..0x544FBB, tokens[2] @ 0x544F92].
+        const auto *field = def_field(property_kind, property->fields.front());
+        if (count >= 1 && field && tokens[0].len >= field->width) invalid();
+        for (int i = 1; i < count; ++i)
+            if (i > 1 || word(i) != "nocheckdepth")
+                authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::UnknownProperty,
+                                std::string(tokens[i].s, tokens[i].len).c_str());
         return;
     }
     if (encoding == DefEncoding::AmmoFlags || encoding == DefEncoding::WeaponFlags || encoding == DefEncoding::AmmoKillZone) {
@@ -462,8 +479,13 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
                  word(0) != "rifleman" && word(0) != "engineer") invalid();
         return;
     }
+    // A particle slot takes its effect alone: the arm copies the line's second and third
+    // tokens whatever the count, and the tokenizer resets the first three to "" for every
+    // line, so a missing userpoint reads as none (jox01's `particlefx fx_Mosquitos_2m_L`)
+    // [orig: ItemDef_ParseProperty @ 0x4A13BF..0x4A13FC; Terrain_TokenizeConfigLine
+    // @ 0x53CB71..0x53CB81].
     const int minimum = kind == DefRecordKind::Effect ? 4 : kind == DefRecordKind::Carry ? 2 : encoding == DefEncoding::Pose ? 6 : encoding == DefEncoding::Sight ? 5 :
-        encoding == DefEncoding::Attachment || encoding == DefEncoding::ParticleSlot ? 2 : 1;
+        encoding == DefEncoding::Attachment ? 2 : 1;
     if (count < minimum) {
         // An empty string remains a serializable draft; semantic validation can
         // require a symbol. Missing numbers are malformed input.
@@ -503,7 +525,19 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
                             std::string(tokens[i].s, tokens[i].len).c_str());
     }
     if (encoding == DefEncoding::Pose && count != 6) invalid();
-    if (encoding == DefEncoding::Attachment && count != 2 && count != 6) invalid();
+    // The addeweap arm reads the userpoint and the id, and the four angles only when the
+    // line has more than three tokens, key included; nothing past the sixth argument is
+    // read, so a trailing token (jox01's `<down angle> <up angle> ...` placeholders) is
+    // ignored. One to three angles read the slots an earlier line left (the tokenizer
+    // resets only the first three), a value no file states: invalid. [orig:
+    // ItemDef_ParseProperty @ 0x4A1B42..0x4A1C9F, count > 3 @ 0x4A1BB4; Terrain_TokenizeConfigLine
+    // @ 0x53CB71..0x53CB81]
+    if (encoding == DefEncoding::Attachment) {
+        if (count > 2 && count < 6) invalid();
+        for (int i = 6; i < count; ++i)
+            authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::UnknownProperty,
+                            std::string(tokens[i].s, tokens[i].len).c_str());
+    }
     size_t columns = property->fields.size();
     if (encoding == DefEncoding::FloatFixed) columns /= 2;
     if (encoding == DefEncoding::Attachment) columns = 6;
@@ -520,7 +554,13 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
                                     std::string(tokens[i].s, field->width - 1).c_str());
                 else invalid();
             }
-        } else if (!numeric(int(i)) && !(encoding == DefEncoding::Delay && word(int(i)) == "auto")) invalid();
+        } else if (!numeric(int(i)) && !(encoding == DefEncoding::Delay && word(int(i)) == "auto")) {
+            // An attachment's angle the reader atol's: a word reads as 0 [orig:
+            // ItemDef_ParseProperty @ 0x4A1BB4..0x4A1C49], reported as such, written as 0.
+            if (encoding == DefEncoding::Attachment && i >= 2)
+                authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::Reinterpreted, "0");
+            else invalid();
+        }
     }
 }
 
