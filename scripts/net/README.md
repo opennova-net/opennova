@@ -139,4 +139,5 @@ excluded.
 | Scenario | Mission / mode | Play | Notes |
 | --- | --- | --- | --- |
 | `self_nade` | 01TR co-op | select the frag, look down, 40-tick throw at the feet | `game_event.type` is masked: retail draws the suicide message type 1..3 from its PRNG (`GameEvent_PlayerDeath @0x5170ed`). Reload requests are sequence-only: a retail client repeats C2S 0x25 until the 0x49 echo refills the slot, so the count follows the round trip. |
-| `drive` | 01TR co-op | posed beside the spawn buggy: USE, drive, USE | |
+| `drive` | 01TR co-op | facing the spawn buggy: USE takes its 50cal, USE drops onto the deck, USE takes the driver seat, drive, USE | The setup pose sets only the heading: retail left a posed joiner at the spawn point it shares with the host in every probe (the cause is not walked). Seat swaps are held-USE digit keys, not action codes, so the seats come from retail's nearest-seat scan. |
+| `frag_kill` | 01TR deathmatch | the `self_nade` play with the host on the shared spawn | The frag kills the host (a kill, 0x1E type 4..6 from the PRNG, `GameEvent_PlayerDeath @0x517237`), then the thrower (a suicide). `game_event.type` is masked. |
