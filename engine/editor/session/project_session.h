@@ -13,6 +13,7 @@ namespace opennova::editor {
 
 class Document;
 class DocumentBase;
+class OriginalFiles;
 class PreferencesStore;
 class SessionOperation;
 class Viewports;
@@ -117,6 +118,9 @@ public:
 	// How many times the Problems rows were composed: a validation that finds nothing they are
 	// made of moved composes none (for the tests).
 	size_t problems_compositions() const;
+	// The game's own data's baseline (S15, session/original_files.h): the install validated once (for the
+	// tests and the measure).
+	const OriginalFiles &originals() const;
 	// How many project files the last scan read: every one by a refresh (an Open, a Rescan), those
 	// a Save, a create or a rename's commit touched by its update (for the tests).
 	size_t files_scanned() const;

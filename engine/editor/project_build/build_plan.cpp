@@ -2,13 +2,58 @@
 
 #include <algorithm>
 
+#include <base/gameprofile/required_resources.h>
 #include <editor/assets/player_files.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
+#include <editor/requirements/requirement_words.h>
 
 
 namespace opennova::editor {
+
+namespace {
+
+// The plan's own finding about a file of the scan, false for one it packs or leaves out without a word: an
+// archive (the build packs the project's files itself); the player's or this machine's own file (a save, a
+// configuration, the stored credentials, what the game writes: never packed, ADR 0046 S14,
+// assets/player_files.h); a file an archive packs whose name no archive can store.
+bool own_finding(const AssetEntry &asset, Diagnostic &out) {
+	if (asset.kind == AssetKind::Archive) {
+		out = make_finding(CoreFinding::BuildArchiveInProject, DiagnosticSeverity::Error,
+		                   asset.logical_name + " is an archive; the build packs the project's files itself, so "
+		                                        "unpack it into the project or remove it.",
+		                   asset.relative_path);
+		return true;
+	}
+	if (is_player_file(asset.logical_name)) {
+		out = make_finding(CoreFinding::BuildPlayerFile, DiagnosticSeverity::Warning,
+		                   asset.logical_name + " is " + player_file_words(asset.logical_name) +
+		                           ": a build never packs the player's own files, so it is left out.",
+		                   asset.relative_path);
+		return true;
+	}
+	if (asset_kind_packed(asset.kind) && route_asset(asset) != ArchiveSlot::Loose &&
+	    !logical_name_fits_archive(asset.logical_name)) {
+		out = make_finding(CoreFinding::BuildNameUnstorable, DiagnosticSeverity::Error,
+		                   "The game cannot store " + asset.logical_name + " in an archive (the name is too long).",
+		                   asset.relative_path);
+		return true;
+	}
+	return false;
+}
+
+} // namespace
+
+std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan) {
+	std::vector<Diagnostic> out;
+	for (const AssetEntry &asset : scan.entries) {
+		Diagnostic own;
+		if (own_finding(asset, own)) out.push_back(std::move(own));
+	}
+	return out;
+}
 
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings) {
@@ -36,23 +81,12 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		if (d.severity == DiagnosticSeverity::Error) plan.diagnostics.push_back(d);
 
 	for (const AssetEntry &asset : scan.entries) {
-		if (asset.kind == AssetKind::Archive) {
-			plan.diagnostics.push_back(make_finding(
-			        CoreFinding::BuildArchiveInProject, DiagnosticSeverity::Error,
-			        asset.logical_name + " is an archive; the build packs the project's files itself, so "
-			                             "unpack it into the project or remove it.",
-			        asset.relative_path));
-			continue;
-		}
-		// The player's or this machine's own file (a save, a configuration, the stored credentials,
-		// what the game writes) is never packed: said, and left out (ADR 0046 S14,
-		// assets/player_files.h).
-		if (is_player_file(asset.logical_name)) {
-			plan.diagnostics.push_back(make_finding(
-			        CoreFinding::BuildPlayerFile, DiagnosticSeverity::Warning,
-			        asset.logical_name + " is " + player_file_words(asset.logical_name) +
-			                ": a build never packs the player's own files, so it is left out.",
-			        asset.relative_path));
+		// The plan's own word on the file (an archive, a player's file, a name no archive stores), once: the
+		// gate holds it already when the Problems rows were composed over this scan.
+		Diagnostic own;
+		if (own_finding(asset, own)) {
+			if (std::find(document_findings.begin(), document_findings.end(), own) == document_findings.end())
+				plan.diagnostics.push_back(std::move(own));
 			continue;
 		}
 		// An import source (its outputs, named after it, are in the scan) and a file of no kind the
@@ -65,13 +99,6 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		const ArchiveSlot slot = route_asset(asset);
 		if (slot == ArchiveSlot::Loose) {
 			plan.loose.push_back(std::move(entry));
-			continue;
-		}
-		if (!logical_name_fits_archive(asset.logical_name)) {
-			plan.diagnostics.push_back(make_finding(
-			        CoreFinding::BuildNameUnstorable, DiagnosticSeverity::Error,
-			        "The game cannot store " + asset.logical_name + " in an archive (the name is too long).",
-			        asset.relative_path));
 			continue;
 		}
 		for (BuildArchive &archive : plan.archives) {
@@ -87,6 +114,85 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 	// among the plan's findings and refuses nothing (ADR 0046 S14).
 	plan.ok = !diagnostics_block_build(plan.diagnostics);
 	return plan;
+}
+
+std::vector<Diagnostic> build_blockers(const BuildPlan &plan) {
+	std::vector<Diagnostic> out;
+	for (const Diagnostic &d : plan.diagnostics)
+		if (blocks_build(d)) out.push_back(d);
+	return out;
+}
+
+namespace {
+
+// A sentence as the tail of another, its full stop dropped: its first letter lowered only where its first
+// word is a word a sentence starts with ("The", "A", "This"), never a name ("RESOURCE.PFF is ...").
+std::string clause(std::string sentence) {
+	static const char *const kOpeners[] = {"The", "A", "An", "This", "These", "That", "It", "Its",
+	                                       "No", "One", "Every", "Some", "Nothing", "Without"};
+	const std::string first = sentence.substr(0, sentence.find(' '));
+	for (const char *opener : kOpeners)
+		if (first == opener) {
+			sentence.front() = static_cast<char>(sentence.front() - 'A' + 'a');
+			break;
+		}
+	while (!sentence.empty() && (sentence.back() == '.' || sentence.back() == ' ')) sentence.pop_back();
+	return sentence;
+}
+
+bool wrong_kind(const Diagnostic &d) { return d.row() == &finding_code(CoreFinding::RequirementWrongKind); }
+
+} // namespace
+
+std::string blocker_words(const Diagnostic &d) {
+	if (const RequirementSubject *requirement = requirement_subject(d)) {
+		// A file of another kind under a fatal row's name is read as one without a check: no message, no exit.
+		if (wrong_kind(d))
+			return requirement->target + " is not the kind of file the game reads there: the game reads it as one "
+			                             "without checking it, so it may crash or show garbage";
+		const std::string without = requirement_without(requirement->role);
+		const std::string what = requirement->target + " is missing";
+		return without.empty() ? what : what + ": " + clause(without);
+	}
+	// The plan's own refusals, in its words: what the file is and why it does not pack.
+	const size_t slash = d.asset.find_last_of('/');
+	const std::string name = slash == std::string::npos ? d.asset : d.asset.substr(slash + 1);
+	if (d.row() == &finding_code(CoreFinding::BuildArchiveInProject))
+		return name + " is an archive in the project: the build packs the project's files itself";
+	if (d.row() == &finding_code(CoreFinding::BuildNameUnstorable))
+		return name + "'s name is too long for an archive";
+	return clause(d.message);
+}
+
+bool blocker_is_the_games(const Diagnostic &d) {
+	if (requirement_subject(d)) return true;
+	if (const ReferenceSubject *reference = reference_subject(d)) return reference_row(reference->kind).gates_when_missing;
+	return false;
+}
+
+std::string blocker_reason(const Diagnostic &d) {
+	if (const RequirementSubject *requirement = requirement_subject(d)) {
+		if (wrong_kind(d))
+			return "The game reads it without a check, as the original does: its header's offsets are taken as they "
+			       "are [orig: TextResource_FixupPointers @ 0x75d050], so a file of another kind may crash it or show "
+			       "garbage.";
+		const gameprofile::RequiredResource *row = gameprofile::gameprofile_required_resource_by_role(requirement->role.c_str());
+		const std::string without = requirement_without(requirement->role);
+		return "The game stops here as the original does: " + (without.empty() ? std::string("it cannot start") : clause(without)) +
+		       (row && row->orig ? std::string(" ") + row->orig : std::string()) + ".";
+	}
+	if (const ReferenceSubject *reference = reference_subject(d))
+		if (const char *orig = reference_row(reference->kind).gates_when_missing)
+			return std::string("The game refuses to go on without it, as the original does ") + orig + ".";
+	return "The editor does not pack what it cannot vouch for: it cannot read, write or store this as it is.";
+}
+std::string refusal_words(const std::vector<Diagnostic> &blockers) {
+	constexpr size_t kNamed = 3;
+	std::string out = "The build was refused: " + counted(blockers.size(), "problem") +
+	                  (blockers.size() == 1 ? " stops" : " stop") + " it";
+	for (size_t i = 0; i < blockers.size() && i < kNamed; ++i) out += (i == 0 ? ": " : "; ") + blocker_words(blockers[i]);
+	if (blockers.size() > kNamed) out += "; and " + std::to_string(blockers.size() - kNamed) + " more";
+	return out + ". Problems marks them \"Blocks the build\".";
 }
 
 } // namespace opennova::editor
