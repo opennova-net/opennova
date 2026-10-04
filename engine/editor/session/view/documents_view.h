@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/model/value.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/selection.h>
@@ -15,6 +16,8 @@
 namespace opennova::editor {
 
 class DocumentBase;
+class TextureThumbnails;
+class TextureUseIndex;
 class Viewports;
 
 // What the Preview window shows of a viewport kind (ADR 0046 S13 V5; the kinds are
@@ -49,7 +52,16 @@ struct OpenGesture {
 	bool wire() const { return open() && sampled_ms >= 0; }
 };
 
-// One target per ViewportKind (a Main-role kind's stays empty: its view is the Document tab's).
+// The file Files selects (ADR 0046 S18, the SelectFile request): its project-relative path ("" none)
+// and the document type that opens its kind (None for a kind the editor does not open), which picks
+// the kind that previews it (a texture's).
+struct FileSelection {
+	std::string path;
+	DocumentTypeId type = DocumentTypeId::None;
+};
+
+// One target per ViewportKind (a Main-role kind's stays empty: its view is the Document tab's; a kind
+// that previews files holds the file Files selects).
 struct PreviewTargets {
 	std::array<PreviewTarget, kViewportKindCount> targets;
 	PreviewTarget &operator[](ViewportKind kind) { return targets[static_cast<size_t>(kind)]; }
@@ -90,9 +102,16 @@ struct DocumentsView {
 	// when a record of the menu is selected). A target stays while another document is active (the
 	// stylesheet the menu's screen draws with), and clears when its document closes or its row goes.
 	PreviewTargets previews;
-	// The Preview-role kind the Preview window shows (S13 V5; preview/viewport_kinds' preview_kind):
-	// the active document's (the kind its type shows in or feeds), else the one it showed before;
-	// when that kind has no target, the first kind that has one; kCount when none has.
+	// The file Files selects (S18), and whether it leads what the Preview window shows: set as a file
+	// is selected, cleared once another document is made active (`previews_active` the active document
+	// when the targets were last updated).
+	FileSelection file_selected;
+	bool files_lead = false;
+	std::string previews_active;
+	// The kind the Preview window shows (S13 V5; preview/viewport_kinds' preview_kind): the file Files
+	// selects while Files leads, else the active document's (the kind its type shows in or feeds), else
+	// the one it showed before; when that kind has no target, the first kind that has one; kCount when
+	// none has.
 	ViewportKind preview_shown = ViewportKind::kCount;
 	// The session's viewports (preview/viewports.h), each a document's picture with its state, and
 	// the preview clock: shared const, the windows reading what a viewport shows and changing it
@@ -101,6 +120,13 @@ struct DocumentsView {
 	// at every change of the view (preview/viewport_kinds' update_preview_targets, the session's
 	// touch).
 	std::shared_ptr<const Viewports> viewports;
+	// The project's texture thumbnails (preview/texture_thumbnails.h, ADR 0046 S18): a cache the windows
+	// ask as they draw (a picture not made is queued, and the session's poll makes it within its budget)
+	// and the wire makes a picture in at once. Made with the session (null only in a view no session made).
+	std::shared_ptr<TextureThumbnails> thumbnails;
+	// What uses each texture (session/texture_use_index.h, ADR 0046 S18), kept while the graph, the files
+	// and the open documents stand: the texture view's Used as and the texture_uses query read it.
+	std::shared_ptr<const TextureUseIndex> texture_uses;
 };
 
 } // namespace opennova::editor

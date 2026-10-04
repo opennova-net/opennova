@@ -13,6 +13,7 @@
 #include <editor/documents/mission_file_set.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
@@ -541,6 +542,11 @@ bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, 
 void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	TableDocument::refine_field(address, use);
 	const std::string &id = use.schema->id;
+	// The header's tile set: the terrain's tile atlas, loaded as its name with the extension replaced by
+	// .TGA through the TGA reader (ADR 0046 S18, kTextureArgTileSet [orig: Terrain_LoadEnvironmentConfig @
+	// 0x6109C8..0x6109EE; Terrain_LoadTileSetAtlas @ 0x604A90]).
+	if (use.reference == ReferenceKind::Texture && id == "terrain_tile")
+		use.loader_arg = texture_role_arg(TextureRoleId::TerrainTileAtlas, kTextureArgTileSet);
 	if (address.kind == k(K::Trigger) && id == "sub_type") use.own_choices = true;
 	if (address.kind == k(K::Action) && id == "action_sub_type") use.own_choices = true;
 	const int slot = param_slot(id);
@@ -576,9 +582,6 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 		return kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone;
 	};
 	if (by_id(use.defines) || by_id(use.reference) || by_id(use.picks)) use.scope = mission_scope(*this);
-	// The tile set names the terrain's atlas, loaded as its name with the extension replaced by
-	// .TGA through the TGA reader (kTileSetTextureArg).
-	if (use.reference == ReferenceKind::Texture && id == "terrain_tile") use.loader_arg = kTileSetTextureArg;
 	// A number that forms a text key (mission_text_edges' forms): picked by the strings of the section
 	// the game looks its key up in, the number written (FieldUse::key_prefix): an entity's name index,
 	// STRNAME%03i in PeopleNames [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a], and a win slot,

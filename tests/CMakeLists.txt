@@ -1076,6 +1076,10 @@ foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_win
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
 
+# The NORMAL-pass coverage table checked against the object pipeline manifest's coverage_source.
+target_compile_definitions(renderer_material_classify_test PRIVATE
+    OBJECT_PIPELINE_MANIFEST="${CMAKE_SOURCE_DIR}/godot/shaders/object/pipeline_manifest.json")
+
 # The REN-1 T1 parity instrument reads its committed golden from the source
 # tree (dump mode rewrites it there — ADR 0023).
 target_compile_definitions(renderer_state_vectors_test PRIVATE
@@ -1116,6 +1120,19 @@ add_executable(dds_write_test dds/dds_write_test.cpp)
 target_link_libraries(dds_write_test PRIVATE opennova_formats)
 target_include_directories(dds_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME dds_write COMMAND dds_write_test)
+
+# What the game's readers make of a texture file (ADR 0046 S18, the texture document; the TGA reader's
+# is tga_read): D3DX's DDS loader (its pixel-format table, the levels, what it refuses) and the PCX
+# reader's indices and palette, each over files minted by our writers or here.
+add_executable(dds_read_test dds/dds_read_test.cpp)
+target_link_libraries(dds_read_test PRIVATE opennova_formats)
+target_include_directories(dds_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dds_read COMMAND dds_read_test)
+
+add_executable(pcx_game_decode_test pcx/pcx_game_decode_test.cpp)
+target_link_libraries(pcx_game_decode_test PRIVATE opennova_formats)
+target_include_directories(pcx_game_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pcx_game_decode COMMAND pcx_game_decode_test)
 
 add_executable(til_roundtrip_test til/til_roundtrip_test.cpp)
 target_link_libraries(til_roundtrip_test PRIVATE opennova_formats)
@@ -4293,6 +4310,99 @@ add_test(NAME editor_symbol_rename COMMAND editor_symbol_rename_test)
 # type over a file of its kinds loads, serializes stably, labels its fields, keeps field_on's
 # read-only, sets a field to its own value with no byte changed, and defines each name as a symbol
 # find resolves, every reference kind with its reference_kinds row.
+# The texture viewer (ADR 0046 S18): a texture file as the game's readers read it, its facts in words
+# (documents/texture_image), the texture document, and its viewport through a session (Files'
+# selection previewed from its file, the viewport query and SetViewport, the texture opened, the item
+# using it); the retail leg (OPENNOVA_JO_DIR) a sample of the install's textures of each extension.
+add_executable(editor_texture_document_test editor/texture_document_test.cpp)
+target_link_libraries(editor_texture_document_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_texture_document COMMAND editor_texture_document_test)
+
+# ADR 0046 S18, the texture roles: the catalog (documents/texture_roles: every way the game uses a
+# texture, its loader, formats, size rule and witness) and the loaders' name rules and transforms
+# (documents/texture_load_rules), against vectors worked by hand; the texture_roles query; the graph
+# resolving each texture reference by its loader, a terrain's colour map and blend map refusing a
+# build; the retail leg (OPENNOVA_JO_DIR) the install's texture references by role, none refusing one.
+add_executable(editor_texture_roles_test editor/texture_roles_test.cpp)
+target_link_libraries(editor_texture_roles_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_roles_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_texture_roles COMMAND editor_texture_roles_test)
+
+# ADR 0046 S18, the texture thumbnails (preview/texture_thumbnails): a texture as a small picture, the
+# PNG writer, the session's cache made by its poll, the texture_thumbnail query and a texture field's
+# record and choices naming the file its loader opens.
+add_executable(editor_texture_thumbnails_test editor/texture_thumbnails_test.cpp)
+target_link_libraries(editor_texture_thumbnails_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_thumbnails_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_thumbnails COMMAND editor_texture_thumbnails_test)
+
+# ADR 0046 S18, the texture uses (graph/texture_uses, session/texture_use_index): each texture's uses by
+# role over a minted project, a model row by its material, a .tga beside the .dds its loader opens, a
+# terrain's, a sky's, a HUD image's, a name the game opens itself; the texture_uses query; a use shown
+# where the game draws it (session/texture_show_use: on its model, in its menu, in a mission's view, as used).
+add_executable(editor_texture_uses_test editor/texture_uses_test.cpp)
+target_link_libraries(editor_texture_uses_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_uses_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_uses COMMAND editor_texture_uses_test)
+
+# ADR 0046 S18, the texture checks: a texture file's own findings from its header and its uses' (the
+# texture use check, graph/texture_checks) over a minted project, which refuse a build; the retail leg
+# (OPENNOVA_JO_DIR) every shipped texture's own findings and every terrain's colour map, none refusing one.
+add_executable(editor_texture_checks_test editor/texture_checks_test.cpp)
+target_link_libraries(editor_texture_checks_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_checks_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_texture_checks COMMAND editor_texture_checks_test)
+
+# ADR 0046 S18, a texture's import (import/texture_import, graph/texture_import_needs,
+# session/texture_import_state): the image importer's option rows, its pieces, every format written and
+# read back by the reader the game picks, what a minted project's uses ask of an import, set_import_options
+# and the import_options query.
+add_executable(editor_texture_import_test editor/texture_import_test.cpp)
+target_link_libraries(editor_texture_import_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_import COMMAND editor_texture_import_test)
+
+# ADR 0046 S18, the texture document's edits (documents/texture_operations, texture_operation): each
+# whole-image operation one undo step written through the editor's writers, Undo, Redo and Save; an
+# import's output and an operation it cannot do refused; the Problems fix of an upside-down TGA's rows.
+add_executable(editor_texture_document_edit_test editor/texture_document_edit_test.cpp)
+target_link_libraries(editor_texture_document_edit_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_document_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_document_edit COMMAND editor_texture_document_edit_test)
+
+# ADR 0046 S18, a texture made from an image (import/texture_source, replace_texture) and split
+# (plan_split, split_texture): the options that reproduce a texture; a plain texture and an import's output
+# replaced, a missing name made, the refusals; a texture split for one referrer; the sources to edit.
+add_executable(editor_texture_replace_test editor/texture_replace_test.cpp)
+target_link_libraries(editor_texture_replace_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_replace_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_replace COMMAND editor_texture_replace_test)
+
+# ADR 0046 S18, the TGA an import source is read by (editor/import/tga_source.h), the format's own
+# decode: every origin, depth, colour map and run-length form decoded upright, and what it refuses.
+add_executable(editor_tga_source_test editor/tga_source_test.cpp)
+target_link_libraries(editor_tga_source_test PRIVATE opennova_editor)
+target_include_directories(editor_tga_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_tga_source COMMAND editor_tga_source_test)
+
+# ADR 0046 S18, the external program round trip (edit_externally, refresh_changed_sources): a plain TGA
+# given a source once and opened, a change saved there imported and its document read again, nothing done
+# for nothing changed, an output's own source, a missing name; the Shell's check leaving a refusal's line.
+add_executable(editor_texture_external_test editor/texture_external_test.cpp)
+target_link_libraries(editor_texture_external_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_external_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_external COMMAND editor_texture_external_test)
+
+# A file's rename through the native texts (ADR 0046 S18, graph/native_text_sites): a terrain's, an
+# environment's, a particle file's and the HUD layout's names rewritten as text, only the token the game
+# reads at each site; a flipbook's frame refused; a file in the SCR form written back as plain text. The
+# retail leg (OPENNOVA_JO_DIR): every name the install's native texts write found as its one token.
+add_executable(editor_native_rename_test editor/native_rename_test.cpp)
+target_link_libraries(editor_native_rename_test PRIVATE opennova_editor)
+target_include_directories(editor_native_rename_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_native_rename COMMAND editor_native_rename_test)
+
 add_executable(editor_document_contract_test editor/editor_document_contract_test.cpp)
 target_link_libraries(editor_document_contract_test PRIVATE opennova_editor)
 target_include_directories(editor_document_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

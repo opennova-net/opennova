@@ -73,6 +73,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_slots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_load_rules.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_operations.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_roles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/credits_type.cpp
@@ -91,13 +96,17 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_layer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/native_text_sites.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/project_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/rename_transaction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/style_value_use.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_checks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_import_needs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
-    # import — the importers (a PNG to the game's PCX or TGA) and what they read (the import
+    # import — the importers (a PNG to the texture file its uses read, S18) and what they read (the import
     # context), the sidecars, the import pass, and the plan of an import with the files it needs
     ${CMAKE_CURRENT_SOURCE_DIR}/import/converter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_context.cpp
@@ -107,8 +116,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_run.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/mission_fixed_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/png_decode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/png_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/quantize.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_import.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_source.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/tga_source.cpp
     # preview — the viewports (S13 V5): their kinds' table, the session's viewports and the preview
     # clock, the follow every kind shares (the files a picture read, the action its device takes),
     # the base every kind's viewport derives from, the Shell's devices (an LRU of four keyed by
@@ -156,7 +169,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/script_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/shown_text.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/text_burst.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_header.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_thumbnails.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_device_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_follow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_json.cpp
@@ -229,6 +245,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_import_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_show_use.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_use_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/unsaved_guard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
@@ -285,6 +304,10 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_preview.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_source_dialog.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_view.cpp
@@ -305,8 +328,9 @@ target_include_directories(opennova_editor
 
 # The chain: editor -> runtime -> net -> base -> formats -> io (all PUBLIC).
 target_link_libraries(opennova_editor PUBLIC opennova_runtime)
-# The image importer inflates PNG data through the vendored miniz (private: no
-# consumer of the editor sees miniz.h).
+# The image importer inflates PNG data, and the PNG writer (the thumbnails' wire
+# form) deflates it, through the vendored miniz (private: no consumer of the
+# editor sees miniz.h).
 target_link_libraries(opennova_editor PRIVATE opennova_miniz)
 
 target_compile_features(opennova_editor PUBLIC cxx_std_17)
