@@ -25,11 +25,16 @@ struct ImportChoice {
 	// the texture a menu names): a file the import plan found beside the file that names it.
 	// A loose file picked from the disk is the author's source otherwise.
 	bool native = false;
+	// An install's file the project gets under a name of its own (ADR 0046 S16, assets/install_view.h:
+	// a file the game reads by an expansion's name, under the project's expansion's): that name, "" for
+	// the member's own.
+	std::string as;
+	// The name the project gets: `as`, else the member's, else the loose file's.
 	std::string name() const;
 };
 
 inline bool operator==(const ImportChoice &a, const ImportChoice &b) {
-	return a.path == b.path && a.entry == b.entry && a.install == b.install && a.native == b.native;
+	return a.path == b.path && a.entry == b.entry && a.install == b.install && a.native == b.native && a.as == b.as;
 }
 inline bool operator!=(const ImportChoice &a, const ImportChoice &b) { return !(a == b); }
 // An order over the same members, so a set of choices looks one up in log time (a whole install's
@@ -38,7 +43,8 @@ inline bool operator<(const ImportChoice &a, const ImportChoice &b) {
 	if (a.path != b.path) return a.path < b.path;
 	if (a.entry != b.entry) return a.entry < b.entry;
 	if (a.install != b.install) return b.install;
-	return !a.native && b.native;
+	if (a.native != b.native) return b.native;
+	return a.as < b.as;
 }
 
 } // namespace opennova::editor

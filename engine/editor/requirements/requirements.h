@@ -47,7 +47,16 @@ struct RequirementReport {
 bool requirement_phase_enabled(const ProjectDocument &doc, int phase);
 const char *requirement_phase_label(int phase);
 
-RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetScan &scan);
+// Beside the rows, a project's expansion (ADR 0046 S16): weighed against `install_expansions` (the
+// game install's, vfs_list_expansions; null when no install is set) as listed warnings
+// (expansion_install_findings: a name the install has, one to build on it lacks); and the project's
+// files the game never reads for its expansion setting (`expansion.file.unread`, a warning on the
+// file, its fix a Rename): a music bank by any name but the pair's the game streams (M<n>.sbf and
+// G<n>.sbf for an expansion, MENUMUS.SBF and GAMEMUS.SBF for the base game [orig: Expansion_LoadAssets
+// @ 0x4a4798/@ 0x4a4906..0x4a4936]), and an expansion's base music scripts, MENUMUS.BIN and GAMEMUS.BIN,
+// which the game reads M<n>.bin and G<n>.bin in place of under /exp [orig: @ 0x4a491d, @ 0x4a494a].
+RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetScan &scan,
+                                        const std::vector<std::string> *install_expansions = nullptr);
 
 // The roles of the Required rows the project does not meet (missing, or of the wrong
 // kind), in manifest order: what "create every missing required file" names (the command
