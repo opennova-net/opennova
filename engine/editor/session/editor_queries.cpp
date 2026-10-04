@@ -23,12 +23,14 @@
 #include <editor/documents/mission_uses.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_surfaces.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document_search.h>
 #include <editor/preview/menu_report.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
@@ -44,6 +46,8 @@
 #include <editor/session/script_assist.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
+#include <editor/session/texture_import_state.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/session/view_json.h>
 
 namespace opennova::editor {
@@ -199,10 +203,10 @@ constexpr QueryParam kMenuRenderParams[] = {
 
 constexpr QueryParam kViewportParams[] = {
 	{ "path", J::String, false, nullptr,
-			"An open document by its project-relative path or its logical name; left out, the active "
-			"one." },
+			"An open document by its project-relative path or its logical name, or the texture Files "
+			"selects (S18); left out, the active one." },
 	{ "kind", J::String, false, nullptr,
-			"The viewport's kind (menu, model, script, mission); left out, the one the document shows "
+			"The viewport's kind (menu, model, script, mission, texture); left out, the one the document shows "
 			"in: the Preview's kind that shows it (a menu's; a model's, over a model, a clip or an "
 			"animation table), else its Main view." },
 	{ "op", J::String, true, nullptr,
@@ -386,6 +390,8 @@ JsonValue answer_files(const QueryContext &context, const QueryArgs &args, std::
 		file.set("name", json_string(entry.logical_name));
 		file.set("kind", json_string(asset_kind_token(entry.kind)));
 		file.set("editable", JsonValue::make_bool(is_editable_kind(entry.kind)));
+		// The import that makes it (S18).
+		if (!entry.imported_from.empty()) file.set("imported_from", json_string(entry.imported_from));
 		files.push(std::move(file));
 	}
 	out.set("files", std::move(files));
@@ -854,8 +860,20 @@ JsonValue answer_viewport(const QueryContext &context, const QueryArgs &args, st
 	ViewportKind kind = ViewportKind::kCount;
 	if (args.has("kind")) viewport_kind_from_token(args.text("kind"), kind);
 	const DocumentBase *document = open_document_of(context, args, error);
-	const ViewportModel *model =
-			document ? core.viewports().resolve(core.view(), document->path(), kind, error) : nullptr;
+	std::string at = document ? document->path() : std::string();
+	// A file Files selects that a kind draws open or not (S18: a texture), by its path or its name.
+	if (!document && args.has("path") && core.view().project.open) {
+		const AssetScan &scan = *core.view().project.scan;
+		const AssetEntry *entry = scan.at_path(args.text("path"));
+		if (!entry) entry = scan.find(args.text("path"));
+		for (size_t i = 0; entry && i < kViewportKindCount; ++i)
+			if ((kind == ViewportKind::kCount || kind == static_cast<ViewportKind>(i)) &&
+			    draws_selected_file(core.view(), entry->relative_path, static_cast<ViewportKind>(i))) {
+				at = entry->relative_path;
+				error.clear();
+			}
+	}
+	const ViewportModel *model = at.empty() ? nullptr : core.viewports().resolve(core.view(), at, kind, error);
 	if (!model) return JsonValue::make_null();
 	return read->answer(ViewportReadContext{ core.view(), *model, args, page_of(args) }, error);
 }
@@ -1235,6 +1253,98 @@ JsonValue answer_script_assist(const QueryContext &context, const QueryArgs &arg
 	return out;
 }
 
+// Every way the game uses a texture (ADR 0046 S18, documents/texture_roles), in the catalog's order.
+JsonValue answer_texture_roles(const QueryContext &, const QueryArgs &args, std::string &) {
+	const JsonPage page = page_of(args);
+	JsonValue out = JsonValue::make_object();
+	set_page(out, page, kTextureRoleCount);
+	JsonValue roles = JsonValue::make_array();
+	for (size_t i = page.first(kTextureRoleCount); i < page.last(kTextureRoleCount); ++i)
+		roles.push(texture_role_json(texture_role_row(static_cast<TextureRoleId>(i))));
+	out.set("roles", std::move(roles));
+	return out;
+}
+
+const char *transform_choice(size_t index) {
+	return index < size_t(TextureLoadTransform::kCount) ? texture_load_transform_token(static_cast<TextureLoadTransform>(index))
+	                                                    : nullptr;
+}
+
+constexpr QueryParam kThumbnailParams[] = {
+	{ "path", J::String, true, nullptr,
+			"A texture file of the project, by its project-relative path or its logical name." },
+	{ "transform", J::String, false, "\"none\"",
+			"What the use's loader makes of the texels first (a texture reference's texture.transform): none, "
+			"luminance_alpha, white_alpha_from_blue, alpha_only or normal_from_height." },
+};
+constexpr QueryChoices kThumbnailChoices[] = { { "transform", transform_choice } };
+
+// A texture file as a small picture (ADR 0046 S18, preview/texture_thumbnails), made now when the cache
+// lacks it: its facts and the picture as a PNG.
+JsonValue answer_texture_thumbnail(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path");
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path) : nullptr;
+	if (!entry && view.project.scan) entry = view.project.scan->find(path);
+	if (!entry || entry->kind != AssetKind::Texture) {
+		error = "no texture file " + path + " in the project.";
+		return JsonValue::make_null();
+	}
+	TextureLoadTransform transform = TextureLoadTransform::None;
+	for (size_t i = 0; i < size_t(TextureLoadTransform::kCount); ++i)
+		if (args.text("transform") == transform_choice(i)) transform = static_cast<TextureLoadTransform>(i);
+	const std::shared_ptr<const TextureThumbnail> thumbnail =
+			view.documents.thumbnails ? view.documents.thumbnails->make_now(view, entry->relative_path, transform) : nullptr;
+	if (!thumbnail) {
+		error = entry->relative_path + " did not read.";
+		return JsonValue::make_null();
+	}
+	return texture_thumbnail_json(*thumbnail, true);
+}
+
+constexpr QueryParam kTextureUsesParams[] = {
+	{ "path", J::String, true, nullptr,
+			"A texture file of the project, by its project-relative path or its logical name." },
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+// What uses a texture (ADR 0046 S18, graph/texture_uses over the session's index).
+JsonValue answer_texture_uses(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path");
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path) : nullptr;
+	if (!entry && view.project.scan) entry = view.project.scan->find(path);
+	if (!entry || entry->kind != AssetKind::Texture) {
+		error = "no texture file " + path + " in the project.";
+		return JsonValue::make_null();
+	}
+	static const std::vector<TextureUse> kNone;
+	const std::vector<TextureUse> &uses =
+			view.documents.texture_uses ? view.documents.texture_uses->uses_of(view, entry->relative_path) : kNone;
+	const JsonPage page = page_of(args);
+	JsonValue out = JsonValue::make_object();
+	out.set("file", json_string(entry->relative_path));
+	set_page(out, page, uses.size());
+	JsonValue list = JsonValue::make_array();
+	for (size_t i = page.first(uses.size()); i < page.last(uses.size()); ++i) list.push(texture_use_json(uses[i]));
+	out.set("uses", std::move(list));
+	return out;
+}
+
+constexpr QueryParam kImportOptionsParams[] = {
+	{ "path", J::String, true, nullptr,
+			"An import source of the project (a file holding its .import record), or a file an import "
+			"makes, by its project-relative path or its logical name." },
+};
+
+// An import's options and what its uses ask of it (ADR 0046 S18, session/texture_import_state).
+JsonValue answer_import_options(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	TextureImportState state;
+	if (!texture_import_state(context.core.view(), args.text("path"), state, error)) return JsonValue::make_null();
+	return texture_import_state_json(state);
+}
+
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
 
 // --- the table -----------------------------------------------------------------------------------
@@ -1313,7 +1423,8 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::Files, "files", answer_files, kPageParams, concern_set({ C::Files }),
 			"A page of the files the project's scan lists, in its order: each file's path, name, "
-			"kind (its asset kind's token) and editable, whether the editor opens it.")
+			"kind (its asset kind's token) and editable, whether the editor opens it; imported_from, the "
+			"source of the import that makes it (S18).")
 			.pages("files")
 			.row,
 	Query(K::Documents, "documents", answer_documents, kPageParams, kDocumentReads,
@@ -1330,7 +1441,9 @@ constexpr EditorQueryRow kRows[] = {
 			"as the outline shows them, the project's names read: a mission's entity by its item's "
 			"name and its SSN), change since the save (unchanged, changed, added) and the "
 			"collections it holds, their records at every depth; for a text document, by the same "
-			"offset and limit, a page of its lines (each its line, from 1, and its text).")
+			"offset and limit, a page of its lines (each its line, from 1, and its text); for a texture, "
+			"texture: its reader, whether the game loads it and why not, its sides, levels, palette "
+			"size, alpha and facts in words.")
 			.pages("rows, or a text document's lines")
 			.row,
 	Query(K::Record, "record", answer_record, kRecordParams, kRecordReads,
@@ -1495,7 +1608,8 @@ constexpr EditorQueryRow kRows[] = {
 			"as does a Problems row the build does not gate on (a project check's: the render "
 			"check's). A listed code blocks where its subject names the refusal: a reference, missing "
 			"or naming a file of another kind, of a kind whose row cites it (gates_when_missing: a "
-			"mission's terrain), and a required file missing or of another kind whose manifest row "
+			"mission's terrain; by its role, a terrain's colour map and its blend map), and a required "
+			"file missing or of another kind whose manifest row "
 			"is the boot's refusal (its fatal rows). A code that says the file does not serialize "
 			"(blocks_save) blocks nothing over a file that is the game's own bytes with no unsaved edits: "
 			"the build packs it as stored, never through the editor's writer. The query runs the "
@@ -1552,6 +1666,46 @@ constexpr EditorQueryRow kRows[] = {
 			"mission's name finds (name, path where the project holds it, held, create_at beside the mission).")
 			.pages("items")
 			.chooses(kScriptChoices)
+			.row,
+	// The roles are compiled in: no concern moves what it answers, Project the one it is stamped by.
+	Query(K::TextureRoles, "texture_roles", answer_texture_roles, kPageParams, concern_set({ C::Project }),
+			"Every way the game uses a texture (ADR 0046 S18), a page of the roles in the catalog's order: each "
+			"its role token, words, group, loader (the name rule that picks the file and its reader: stage, "
+			"plain, normal, producer, chunk, archive, hud, file, menu, ptl, tga, pcx, pcx8, cube), the "
+			"extensions it takes (formats), its size rule {rule, words, width, height}, what its alpha means, "
+			"whether its loader reads the alpha at all, how it is sampled, what the game does when the file is "
+			"missing or wrong, and the witness.")
+			.pages("roles")
+			.row,
+	Query(K::TextureThumbnail, "texture_thumbnail", answer_texture_thumbnail, kThumbnailParams,
+			concern_set({ C::Files, C::Project }),
+			"A texture file as the windows' thumbnails show it (ADR 0046 S18): read by the reader its name "
+			"picks, what the use's loader makes of its texels applied (transform), shrunk to fit 128 pixels a "
+			"side by averaging; made now when the cache lacks it for the file as the scan last read it. file, "
+			"state (ready, or unloadable: refusal says why the game cannot load it), transform, width and "
+			"height (the picture's), source_width, source_height, levels, format, texels and alpha in words, "
+			"and png, the picture as a base64 PNG.")
+			.chooses(kThumbnailChoices)
+			.row,
+	Query(K::TextureUses, "texture_uses", answer_texture_uses, kTextureUsesParams,
+			concern_set({ C::Graph, C::Files, C::Documents, C::DocumentSet }),
+			"What uses a texture file (ADR 0046 S18): a page of its uses, the graph's references whose loader "
+			"names it (those that load it and those whose name is the file's though the loader opens another, "
+			"a .tga beside the .dds the game takes: reads_file false) and the names the game opens itself; each "
+			"its role token, words (the role and where: a model's material and its shader and cut-out, a "
+			"terrain's key, a HUD keyword), referrer, record, locator and field (none for a fixed name: fixed, "
+			"fixed_for, witness), name_written, load {file, reader, transform}, served (the project file the "
+			"loader opens) and context (a model row's material, slot, type, row_flags, shader, alpha_test, "
+			"alpha_ref; key; hud_mode).")
+			.pages("uses")
+			.row,
+	Query(K::ImportOptions, "import_options", answer_import_options, kImportOptionsParams,
+			concern_set({ C::Files, C::Graph, C::Documents, C::DocumentSet }),
+			"An import's options and what its uses ask of it (ADR 0046 S18): its source, record, "
+			"importer and version; the record's options and every option's value in effect; its option "
+			"rows (key, label, words, values {token, words}, forms, fallback, applies {option, values}, "
+			"applies_now); the files it makes; and needs, what the uses of those files and of every "
+			"name of the source's stem ask of it (options, reasons, conflicts, uses).")
 			.row,
 	Query(K::ModelSurfaces, "model_surfaces", answer_model_surfaces, kModelSurfacesParams, kRecordReads,
 			"A model's bullet-face surfaces on its materials (ADR 0046 S17), by op. materials: the surfaces a face "

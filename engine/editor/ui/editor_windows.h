@@ -13,6 +13,7 @@
 #include <editor/ui/project_find.h>
 #include <editor/ui/project_settings_dialog.h>
 #include <editor/ui/rename_dialog.h>
+#include <editor/ui/texture_source_dialog.h>
 #include <editor/ui/welcome_view.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -22,6 +23,7 @@ class DocumentWindow;
 class InspectorWindow;
 class PreviewWindow;
 class ProblemsWindow;
+class TextureThumbnailImages;
 class ViewportDeviceSource;
 
 // The OpenNova Editor's workspace (ADR 0046 d10, S11d): the ImGui pass with the editor's
@@ -77,10 +79,17 @@ public:
 	// files to import planned in the import dialog (a PreviewImport raised like any window's
 	// request), with the files they need when the editor's setting says so.
 	void deliver_picks(PickPurpose purpose, const std::vector<std::string> &paths);
+	// Files the OS dropped on the editor's window at (x, y) of its pixels (S18; the drop's own point, which
+	// the Shell reads from the OS cursor when the drop arrives): held for the item they land on to take
+	// this frame or the next (take_dropped_files: the point in the item's rect and its window the one under
+	// the point, no window drawn over it, no modal open over it), then let go.
+	void drop_files(std::vector<std::string> paths, float x, float y);
 
 	// The Shell's devices, by document and viewport kind, the viewports' canvases draw through
 	// (null: no picture).
 	void set_devices(ViewportDeviceSource *devices) { devices_ = devices; }
+	// The Shell's thumbnail device the texture previews draw through (null: framed boxes, S18).
+	void set_thumbnail_images(TextureThumbnailImages *images) { thumbnail_images_ = images; }
 
 	// The new-project form (the welcome view's and File > New project...'s), for a test.
 	const NewProjectForm &new_project_form() const { return new_project_; }
@@ -89,6 +98,8 @@ public:
 	const SessionView &view() const override;
 	void request(EditorRequest request) override;
 	ViewportDeviceSource *devices() const override { return devices_; }
+	TextureThumbnailImages *thumbnail_images() const override { return thumbnail_images_; }
+	bool take_dropped_files(float min_x, float min_y, float max_x, float max_y, std::vector<std::string> &paths) override;
 
 	// MenuBarContributor
 	void draw_menu_bar(devtools::ImGuiPass &pass) override;
@@ -109,9 +120,19 @@ private:
 	SessionView empty_;
 	uint64_t dispatched_ = 0; // the seq of the last view event sent to a window
 	ViewportDeviceSource *devices_ = nullptr; // the Shell's (set_devices)
+	TextureThumbnailImages *thumbnail_images_ = nullptr; // the Shell's (set_thumbnail_images)
 	std::deque<EditorRequest> requests_;
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;
+	// The texture a Replace with image... pick is for (S18), and the files the OS dropped, held for the
+	// item they land on (drop_files) for `frames` more end_frames.
+	std::string replace_target_;
+	struct Dropped {
+		std::vector<std::string> paths;
+		float x = 0.0f, y = 0.0f;
+		int frames = 0;
+	};
+	Dropped dropped_;
 	NewProjectForm new_project_;
 	bool open_new_project_ = false;
 	bool build_panel_open_ = false; // the build panel, open from a build's end (BuildEnded) until closed
@@ -120,6 +141,7 @@ private:
 	NewFilePrompt new_file_;
 	ProjectFind find_;
 	RenameDialog rename_;
+	TextureSourceDialog texture_source_;
 	FilesWindow *files_window_ = nullptr; // owned by the pass
 	DocumentWindow *document_window_ = nullptr; // owned by the pass
 	InspectorWindow *inspector_window_ = nullptr; // owned by the pass
