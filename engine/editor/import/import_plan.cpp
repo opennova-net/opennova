@@ -22,6 +22,7 @@
 #include <editor/import/importer.h>
 #include <editor/import/mission_fixed_files.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
 #include <formats/mns/mns.h>
@@ -62,24 +63,21 @@ bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocumen
 		}
 		return true;
 	}
-	if (kind == Kind::Archive) {
-		vfs_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(document.target_game.c_str()));
-		if (!vfs_.set_primary_archive(path)) {
-			error = "Could not open archive: " + path;
-			return false;
-		}
-	} else if (!mount_retail(vfs_, path, document)) {
-		error = "No game archives found under " + path + ".";
+	if (kind == Kind::GameInstall) {
+		// The install as the project imports it (assets/install_view.h): each file by the name the
+		// project gets.
+		if (!install_.open(install_spec(path, document), error)) return false;
+		for (const InstallFile &file : install_.files()) names_.emplace(normalized_logical_name(file.name), file.name);
+		return true;
+	}
+	vfs_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(document.target_game.c_str()));
+	if (!vfs_.set_primary_archive(path)) {
+		error = "Could not open archive: " + path;
 		return false;
 	}
 	for (const VfsFileLocation &file : vfs_.list_files())
 		if (!strutil::ends_with_icase(file.logical_name, ".pff")) // the archives themselves
 			names_.emplace(normalized_logical_name(file.logical_name), file.logical_name);
-	// The loose files the game ships beside its archives and reads from there (a music bank, a
-	// video, the NovaWorld table), where no archive has the name.
-	if (kind == Kind::GameInstall)
-		for (const std::string &loose : list_install_loose_files(path))
-			names_.emplace(normalized_logical_name(loose), loose);
 	return true;
 }
 
@@ -89,7 +87,10 @@ std::string ImportOrigin::find(const std::string &name) const {
 }
 
 bool ImportOrigin::read(const std::string &name, std::vector<uint8_t> &out) const {
-	if (kind_ == Kind::GameInstall) return read_install_file(vfs_, path_, name, out);
+	if (kind_ == Kind::GameInstall) {
+		const InstallFile *file = install_.find(name);
+		return file && install_.read(*file, out);
+	}
 	if (kind_ == Kind::Archive) return read_served(vfs_, name, out);
 	std::string error;
 	return read_file_bytes(join_path(path_, name), out, error);
@@ -98,11 +99,13 @@ bool ImportOrigin::read(const std::string &name, std::vector<uint8_t> &out) cons
 uint64_t ImportOrigin::size(const std::string &name) const {
 	const std::string spelling = find(name);
 	if (spelling.empty()) return 0;
-	if (kind_ != Kind::Folder) {
+	if (kind_ == Kind::GameInstall) {
+		const InstallFile *file = install_.find(spelling);
+		return file ? install_.size(*file) : 0;
+	}
+	if (kind_ == Kind::Archive) {
 		uint64_t stored = 0;
-		if (vfs_.file_size(spelling, stored)) return stored;
-		if (kind_ == Kind::Archive) return 0;
-		// The install's loose file: on the disk, as a folder's.
+		return vfs_.file_size(spelling, stored) ? stored : 0;
 	}
 	std::error_code ec;
 	const auto on_disk = fs::file_size(system_path(join_path(path_, spelling)), ec);
@@ -136,19 +139,27 @@ ImportChoice ImportOrigin::source(const std::string &name) const {
 	if (kind_ == Kind::Folder) {
 		out.path = join_path(path_, name);
 		out.native = true;
+	} else if (kind_ == Kind::GameInstall) {
+		const InstallFile *file = install_.find(name);
+		out = file ? install_choice(path_, *file) : ImportChoice{ path_, name, true };
 	} else {
 		out.path = path_;
 		out.entry = name;
-		out.install = kind_ == Kind::GameInstall;
 	}
 	return out;
 }
 
-std::string ImportOrigin::words() const {
+std::string ImportOrigin::words(const std::string &name) const {
 	switch (kind_) {
 	case Kind::Folder: return "the folder " + path_;
 	case Kind::Archive: return "the archive " + path_;
-	case Kind::GameInstall: return "the game install";
+	case Kind::GameInstall: {
+		// The layer the file comes from (ADR 0046 S16): the expansion `/exp` serves it from, or the base.
+		const InstallFile *file = name.empty() ? nullptr : install_.find(name);
+		if (file && file->layer == InstallFile::Layer::Expansion)
+			return "the game install's expansion " + install_.spec().expansion;
+		return install_.spec().expansion.empty() || !file ? "the game install" : "the game install's base game";
+	}
 	}
 	return path_;
 }
@@ -355,14 +366,15 @@ private:
 				fail(source.install ? CoreFinding::ImportInstall : CoreFinding::ImportArchive, error);
 				return;
 			}
-			if (from->find(source.entry).empty() || (converter && !from->read(source.entry, bytes))) {
+			// By the name the project gets (an install's file under the project's expansion's name: `as`).
+			if (from->find(name).empty() || (converter && !from->read(name, bytes))) {
 				fail(CoreFinding::ImportRead, source.install ? "The game data has no file named " + name + "."
 				                                  : "Could not read " + name + " from " + source.path);
 				return;
 			}
 			loaded = converter != nullptr;
 			cost_ += bytes.size();
-			found_in = from->words();
+			found_in = from->words(name);
 		} else {
 			std::string io_error;
 			if (!read_file_bytes(source.path, bytes, io_error)) {
@@ -423,8 +435,8 @@ private:
 			const bool authored = !source.install && source.entry.empty() && !source.native;
 			row.kind = authored && importer_for(output.name) ? AssetKind::ImportSource
 			           : loaded                              ? classify_asset(output.name, &output.bytes)
-			                                                 : from->file_kind(source.entry);
-			row.size = loaded ? output.bytes.size() : from->size(source.entry);
+			                                                 : from->file_kind(name);
+			row.size = loaded ? output.bytes.size() : from->size(name);
 			row.made_from = converter ? name : std::string();
 			row.found_in = found_in;
 			const bool first = !provided_.count(key(output.name));
@@ -486,7 +498,7 @@ private:
 		row.name = spelling;
 		row.kind = from->file_kind(spelling);
 		row.size = from->size(spelling);
-		row.found_in = from->words();
+		row.found_in = from->words(spelling);
 		row.needed_by = need;
 		place(row);
 		row.selected = row.problem.empty();
@@ -515,6 +527,20 @@ private:
 			const int count = gameprofile_required_resource_count();
 			for (int i = 0; i < count; ++i) {
 				const RequiredResource *resource = gameprofile_required_resource_at(i);
+				// An expansion's own file, for a project that builds as one (ADR 0046 S16): by the name
+				// its expansion forms, the install's copy of it listed under that name (install_view.h);
+				// every row optional, the version text the build's own.
+				if (resource->flags & RES_F_EXPANSION) {
+					const ExpansionFileRow *expansion_file = document_.expansion.standalone()
+					        ? nullptr : expansion_file_row_for_manifest_role(resource->role);
+					if (!expansion_file || expansion_file->fixed) continue;
+					const std::string name = expansion_file_name(*expansion_file, document_.expansion.name);
+					bring(own, name, ImportNeed{file, std::string(),
+					                            std::string("the game, ") + requirement_phase_label(resource->phase),
+					                            ReferenceKind::None, name, -1});
+					if (plan_.truncated) return;
+					continue;
+				}
 				// A pattern, a boot archive, or the player's own file (a save, a configuration, the
 				// stored credentials: never a resource the game is made of, and in a game's folder
 				// beside the missions found loose there) is never brought.
@@ -780,7 +806,7 @@ private:
 		} else {
 			const ImportOrigin *from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive,
 			                                  source.path, error);
-			read = from && from->read(source.entry, out);
+			read = from && from->read(source.name(), out);
 		}
 		if (read) cost_ += out.size();
 		return read;
@@ -860,7 +886,7 @@ private:
 			if (same_file(rival.source, source)) return;
 		ImportRival rival;
 		rival.name = spelling;
-		rival.found_in = origin->words();
+		rival.found_in = origin->words(spelling);
 		rival.source = source;
 		std::vector<uint8_t> planned, other;
 		rival.differs = !read_row(row, planned) || !origin->read(spelling, other) || other != planned;
@@ -961,7 +987,7 @@ private:
 		row.name = spelling;
 		row.kind = from->file_kind(spelling);
 		row.size = from->size(spelling);
-		row.found_in = from->words();
+		row.found_in = from->words(spelling);
 		row.needed_by = need;
 		place(row);
 		row.selected = row.problem.empty(); // one the project cannot take is listed, not taken
