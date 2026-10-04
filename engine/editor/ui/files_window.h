@@ -152,6 +152,9 @@ private:
 	ViewEventMailbox<> events_;
 	std::string scroll_to_;
 	std::string open_to_;
+	// The session's file selection as Files last showed it (S18: select_file, from a row's click or
+	// from the wire): a selection the session changed is the row selected here.
+	std::string followed_;
 };
 
 } // namespace opennova::editor
