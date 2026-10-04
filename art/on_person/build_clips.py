@@ -98,6 +98,11 @@ for _s in "lr":
         AIM[f"{_f}_02_{_s}"] = f"{_f}_03_{_s}"
         if _f != "thumb":
             AIM[f"{_f}_metacarpal_{_s}"] = f"{_f}_01_{_s}"
+# The arms a rifle hold replaces: everything below the clavicles.
+ARM_ROOTS = ("clavicle_l", "clavicle_r")
+# The bones a hold steadies toward its own (forward, level) head.
+HEAD = ("neck_01", "neck_02", "head")
+CHEST = "spine_05"
 # The forearm twist bones the hand's roll is shared out to.
 TWISTS = [(f"lowerarm_twist_0{i}_{s}", f"lowerarm_{s}", f"hand_{s}") for s in "lr" for i in (1, 2)]
 
@@ -329,6 +334,44 @@ def mirrored(k, T):
     return out
 
 
+def hold_turns(key, frame, ctx):
+    """A rifle hold's KINE turns: the source's pose at `frame`, cached."""
+    cache = ctx.setdefault("holds", {})
+    if (key, frame) not in cache:
+        src = Source(key, ctx["index"])
+        try:
+            A, rest_s = calibrate(src, ctx["k"])
+            src.at(frame)
+            cache[(key, frame)] = source_turns(src, ctx["k"], A, rest_s)
+        finally:
+            src.close()
+    return cache[(key, frame)]
+
+
+def arm_bones(k):
+    """The clavicles and every KINE bone below them."""
+    out = set(ARM_ROOTS)
+    for name in k.order:
+        if k.parent[name] in out:
+            out.add(name)
+    return out
+
+
+def layered(k, T, hold, arms, steady):
+    """The turns with the arms the hold's, carried by the chest (each arm
+    bone keeps its turn from the chest as the hold has it), and the neck and
+    head steadied `steady` of the way toward the hold's."""
+    T = dict(T)
+    chest = T[CHEST] @ hold[CHEST].transposed()
+    for name in k.order:
+        if name in arms:
+            T[name] = chest @ hold[name]
+    if steady > 0.0:
+        for name in HEAD:
+            T[name] = T[name].to_quaternion().slerp(hold[name].to_quaternion(), steady).to_matrix()
+    return T
+
+
 def absolute(src):
     """The KINE bones whose turn comes from the source (the others ride)."""
     return set(src.map) | set(BETWEEN) | {t[0] for t in TWISTS}
@@ -484,6 +527,11 @@ def key_slot(action, rig, frames, bones, with_location):
 def build(name, entry, ctx):
     k, kine, person, a = ctx["k"], ctx["kine"], ctx["person"], ctx["addon"]
     spec = ctx["clips"][entry["retail"].lower()]
+    hold, arms = None, None
+    arms_key = entry.get("arms", ctx["arms"])
+    if arms_key:
+        hold = hold_turns(arms_key, ctx["index"][arms_key]["start"], ctx)
+        arms = arm_bones(k)
     src = Source(entry["source"], ctx["index"])
     try:
         first, last = entry.get("range", (src.start, src.end))
@@ -519,6 +567,8 @@ def build(name, entry, ctx):
         for i in range(count + 1):
             src.at(first + (last - first) * i / count)
             T = source_turns(src, k, A, rest_s)
+            if hold is not None:
+                T = layered(k, T, hold, arms, entry.get("steady", ctx["steady"]))
             h = src.world(hips_s).translation.copy()
             az = [src.world(n).translation.z for n in ankles]
             if entry.get("mirror"):
@@ -652,6 +702,7 @@ def run(reference, names=()):
             c.enabled = False
     ctx = {
         "k": Kine(kine), "kine": kine, "person": person, "addon": a, "index": index, "clips": clips,
+        "arms": entries.get("_arms", {}).get("source"), "steady": entries.get("_arms", {}).get("steady", 0.0),
         "sockets": {p: (r, kb) for p, r, kb in socket_pairs(kine, person)},
         "person_scale": person.matrix_world.to_scale()[0],
         "head": next(b.name for b in person.data.bones if b.name.startswith("BN15")),

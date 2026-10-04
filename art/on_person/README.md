@@ -37,13 +37,20 @@ holds, for now).
   first-person eye is the head bone, so this keeps the eye where retail's
   stands in every stance; a holding pose (the weapon channel takes only its
   arms and head) and the prone clips are left as they are (`"eye": false`).
+- A rifle's third-person arms are the body clip's own: its weapon channel
+  plays the body's state (`special_hold` 0), so every standing, crouched and
+  airborne clip takes one rifle hold (`_arms` in `clips.json`, Infima's
+  `A_TFA_TP_AR_Idle_Pose`, whose hands meet the third-person M4): each arm
+  bone keeps its turn from the chest as the hold has it, so the arms ride the
+  torso, and the neck and head are steadied half way toward the hold's
+  level, forward head. The prone, death, hold, reload and grenade clips keep
+  their own arms (`"arms": ""`).
 - `"mirror": true` plays the source left for right, so a left heading can
   be its right one's mirror.
 
 | Rows | Source |
 |---|---|
-| Sprints (`run_2`, `run_3`) | KINEMATION Shared, `A_Locomotion_Stand_Sprint_Loop_IP` |
-| Standing run forward, back, left, right | MocapOnline `W2_Run_F_Loop`, `W2_Jog_B/L/R_Loop` |
+| Standing run forward and the sprints (`run_2`, `run_3`, the plain forward run in multiplayer), back, left, right | MocapOnline `W2_Run_F_Loop`, `W2_Jog_B/L/R_Loop` |
 | Standing run, the four diagonals | Kubold Rifle Animset Pro strafe runs (the left ones the right ones mirrored) |
 | Crouched, eight headings; prone; standing idle; jump loop; dive to prone | Kubold Rifle Animset Pro |
 | Crouched idle, jump start | KINEMATION Shared |

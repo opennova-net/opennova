@@ -1,4 +1,8 @@
 {
+ "_arms": {
+  "source": "infima/A_TFA_TP_AR_Idle_Pose",
+  "steady": 0.5
+ },
  "run_f": {
   "source": "motus/W2_Run_F_Loop",
   "retail": "Dt1RunF"
@@ -36,11 +40,11 @@
   "retail": "Dt1RunB"
  },
  "sprint_2": {
-  "source": "kine/A_Locomotion_Stand_Sprint_Loop_IP",
+  "source": "motus/W2_Run_F_Loop",
   "retail": "RunFastK"
  },
  "sprint_3": {
-  "source": "kine/A_Locomotion_Stand_Sprint_Loop_IP",
+  "source": "motus/W2_Run_F_Loop",
   "retail": "RunFastW"
  },
  "crouch_f": {
@@ -83,23 +87,27 @@
   "source": "kubold/Rifle_Prone_WalkFwd",
   "retail": "Dt1PrF",
   "rate_max": 1.6,
-  "eye": false
+  "eye": false,
+  "arms": ""
  },
  "prone_b": {
   "source": "kubold/Rifle_Prone_WalkBwd",
   "retail": "Dt1PrB",
   "rate_max": 1.6,
-  "eye": false
+  "eye": false,
+  "arms": ""
  },
  "prone_r": {
   "source": "kubold/Rifle_Prone",
   "retail": "Dt1PrR",
-  "eye": false
+  "eye": false,
+  "arms": ""
  },
  "prone_l": {
   "source": "kubold/Rifle_Prone",
   "retail": "Dt1PrL",
-  "eye": false
+  "eye": false,
+  "arms": ""
  },
  "idle": {
   "source": "kubold/Rifle_Idle",
@@ -107,7 +115,8 @@
  },
  "idle_2": {
   "source": "infima/A_TFA_TP_AR_Idle_Loop",
-  "retail": "Dt1idlA2"
+  "retail": "Dt1idlA2",
+  "arms": ""
  },
  "idle_3": {
   "source": "motus/W2_Stand_Aim_Idle_v2",
@@ -120,7 +129,8 @@
  "idle_prone": {
   "source": "kubold/Rifle_Prone",
   "retail": "Dt1Prone",
-  "eye": false
+  "eye": false,
+  "arms": ""
  },
  "jump_start": {
   "source": "kine/A_Locomotion_Stand_Jog_Jump_Start_IP",
@@ -138,7 +148,8 @@
  },
  "run2prone": {
   "source": "kubold/Rifle_Idle2Prone",
-  "retail": "dive2pro"
+  "retail": "dive2pro",
+  "arms": ""
  },
  "hold_rifle": {
   "source": "infima/A_TFA_TP_AR_Idle_Pose",
@@ -147,7 +158,8 @@
    1,
    1
   ],
-  "frames": 60
+  "frames": 60,
+  "arms": ""
  },
  "hold_rifle_s": {
   "source": "infima/A_TFA_TP_AR_Aim_Pose",
@@ -156,7 +168,8 @@
    1,
    1
   ],
-  "frames": 60
+  "frames": 60,
+  "arms": ""
  },
  "hold_smg": {
   "source": "infima/A_TFA_TP_AR_Idle_Pose_Grip_Angled",
@@ -165,7 +178,8 @@
    1,
    1
   ],
-  "frames": 60
+  "frames": 60,
+  "arms": ""
  },
  "hold_smg_s": {
   "source": "infima/A_TFA_TP_AR_Aim_Pose_Grip_Angled",
@@ -174,139 +188,160 @@
    1,
    1
   ],
-  "frames": 60
+  "frames": 60,
+  "arms": ""
  },
  "reload": {
   "source": "infima/A_TFA_TP_AR_Reload_Quick",
-  "retail": "IDL_RLD"
+  "retail": "IDL_RLD",
+  "arms": ""
  },
  "hold_grenade": {
   "source": "kubold/Rifle_Grenade_Throw_Loop",
-  "retail": "IDL_GND"
+  "retail": "IDL_GND",
+  "arms": ""
  },
  "throw_grenade": {
   "source": "kubold/Rifle_Grenade_Throw_Close",
   "retail": "ATT_GND",
   "fit": "natural",
-  "rate": 1.4
+  "rate": 1.4,
+  "arms": ""
  },
  "death_hip_f": {
   "source": "motus/W2_Stand_Relaxed_Death_B",
   "retail": "Dt1DeaTF",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_hip_s": {
   "source": "motus/W2_Stand_Relaxed_Death_R",
   "retail": "Dt1Death",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_hip_b": {
   "source": "motus/W2_Stand_Relaxed_Death_F",
   "retail": "Dt1DeaTB",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_torso_f": {
   "source": "kubold/Rifle_Death_L",
   "retail": "Dt2DeTFC",
   "rate": 1.2,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_torso_r": {
   "source": "motus/W2_Stand_Relaxed_Death_L",
   "retail": "Dt1DeaTR",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_head": {
   "source": "kubold/Rifle_Death_3",
   "retail": "Dt1DeaHF",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_limb_rs": {
   "source": "kubold/Rifle_Death_R",
   "retail": "Dt1DeRSD",
   "rate": 1.2,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_limb_ls": {
   "source": "kubold/Rifle_Death_L",
   "retail": "Dt1DeLSD",
   "rate": 1.2,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_limb_rt": {
   "source": "motus/W2_Stand_Relaxed_Death_R",
   "retail": "Dt1DeRTD",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_limb_lt": {
   "source": "motus/W2_Stand_Relaxed_Death_L",
   "retail": "Dt1DeLTD",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_knee": {
   "source": "kubold/Rifle_Death_3",
   "retail": "DeadKnee",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_gren_f": {
   "source": "motus/W2_Stand_Relaxed_Death_B",
   "retail": "Dt1DeaGF",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_gren_r": {
   "source": "kubold/Rifle_Death_L",
   "retail": "Dt1DeaGR",
   "rate": 1.2,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_gren_b": {
   "source": "motus/W2_Stand_Relaxed_Death_F",
   "retail": "Dt1DeaGB",
   "rate": 1.3,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_gren_l": {
   "source": "kubold/Rifle_Death_R",
   "retail": "Dt1DeaGL",
   "rate": 1.2,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_fire": {
   "source": "motus/W2_Stand_Relaxed_Death_F",
   "retail": "OnFire",
   "rate": 1.0,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  },
  "death_pungi": {
   "source": "kubold/Rifle_Death_3",
   "retail": "KnifeDea",
   "rate": 1.0,
   "fit": "natural",
-  "own_travel": true
+  "own_travel": true,
+  "arms": ""
  }
 }
