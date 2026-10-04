@@ -341,6 +341,52 @@ func test_dds_reader_decodes_by_content() -> void:
 				"the authored level 1 survives")
 
 
+# The rest of D3DX's content sniff: a PPM, a PFM and a headerless DIB under a
+# .dds name decode too (D-RMAT-17; the codecs' witnesses ride
+# renderer/d3dx_image_codecs.h, ctest renderer_d3dx_image_codecs).
+# [orig: D3DXTex::CImage::Load @ 0x6DF1DC, the codec order @ 0x6DF212..0x6DF242]
+func test_dds_reader_decodes_ppm_pfm_and_dib() -> void:
+	var dir := _root_dir("dds_codecs")
+	var ppm := "P6\n2 1\n255\n".to_ascii_buffer()
+	ppm.append_array(PackedByteArray([255, 0, 0, 0, 0, 255]))
+	# A grey PFM, little-endian by its negative scale: one texel of 0.5.
+	var pfm := "Pf\n1 1\n-1.0\n".to_ascii_buffer()
+	var texel := PackedByteArray()
+	texel.resize(4)
+	texel.encode_float(0, 0.5)
+	pfm.append_array(texel)
+	# A 1 x 1 24-bit BITMAPINFOHEADER with no file header: one green pixel (B, G, R)
+	# and the row's pad byte.
+	var dib := PackedByteArray()
+	dib.resize(40)
+	dib.encode_u32(0, 40)
+	dib.encode_s32(4, 1)
+	dib.encode_s32(8, 1)
+	dib.encode_u16(12, 1)
+	dib.encode_u16(14, 24)
+	dib.append_array(PackedByteArray([0, 255, 0, 0]))
+	var root := _packed(dir, [
+		{"name": "ppm.dds", "bytes": ppm},
+		{"name": "pfm.dds", "bytes": pfm},
+		{"name": "dib.dds", "bytes": dib},
+	])
+	var stage := ResourceRoot.TEXTURE_LOADER_STAGE
+	var ppm_texture := root.load_texture("ppm.dds", stage)
+	assert_not_null(ppm_texture, "a P6 PPM under a .dds name decodes")
+	if ppm_texture != null:
+		assert_eq(_pixel(ppm_texture, 0, 0), Color.RED)
+		assert_eq(_pixel(ppm_texture, 1, 0), Color.BLUE)
+	var pfm_texture := root.load_texture("pfm.dds", stage)
+	assert_not_null(pfm_texture, "a grey PFM under a .dds name decodes")
+	if pfm_texture != null:
+		assert_eq(_pixel(pfm_texture), Color8(128, 128, 128),
+				"0.5 through D3DX's 8-bit encode: trunc(127.5 + 0.5)")
+	var dib_texture := root.load_texture("dib.dds", stage)
+	assert_not_null(dib_texture, "a headerless DIB under a .dds name decodes")
+	if dib_texture != null:
+		assert_eq(_pixel(dib_texture), Color.GREEN)
+
+
 func test_names_differing_in_case_stay_apart() -> void:
 	# ".MDT" is tested as written, so "x.mdt" takes the .dds sibling and "x.MDT" the
 	# TGA reader: two textures, whichever loads first.

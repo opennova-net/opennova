@@ -1,5 +1,6 @@
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga_read.h>
+#include <runtime/renderer/d3dx_image_codecs.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_load_rules.h>
 #include "util/texture_path_resolver.h"
@@ -128,18 +129,62 @@ bool looks_like_tga(const godot::PackedByteArray &bytes) {
 	return map_type <= 1 && type_ok && depth_ok;
 }
 
+godot::PackedByteArray packed_bytes(const std::vector<uint8_t> &bytes) {
+	godot::PackedByteArray packed;
+	packed.resize(static_cast<int64_t>(bytes.size()));
+	if (!bytes.empty()) {
+		std::memcpy(packed.ptrw(), bytes.data(), bytes.size());
+	}
+	return packed;
+}
+
 // The "DDS" reader: D3DX decodes the bytes by their content, its codecs tried in turn
-// (renderer::dds_reader_codec_order). Godot decodes BMP, DDS, JPEG, PNG and TGA; its
-// TGA decoder honours the origin bit as D3DX's codec does.
+// (renderer::dds_reader_codec_order). Godot decodes DDS, JPEG, PNG and TGA (its TGA
+// decoder honours the origin bit as D3DX's codec does) and the BMP and DIB pixels,
+// each BMP re-headed with the pixel offset D3DX's BMP core reads; the PPM, PFM and
+// HDR codecs are the engine's ports (renderer/d3dx_image_codecs.h).
 godot::Ref<godot::Image> read_dds_by_content(const godot::PackedByteArray &bytes) {
+	const uint8_t *data = bytes.ptr();
+	const size_t size = static_cast<size_t>(bytes.size());
 	for (const renderer::DdsCodec codec : renderer::dds_reader_codec_order()) {
 		godot::Ref<godot::Image> image;
 		image.instantiate();
 		godot::Error err = godot::ERR_FILE_UNRECOGNIZED;
+		std::string error;
 		switch (codec) {
-			case renderer::DdsCodec::Bmp:
-				if (starts_with(bytes, { 'B', 'M' })) err = image->load_bmp_from_buffer(bytes);
+			case renderer::DdsCodec::Bmp: {
+				std::vector<uint8_t> bmp;
+				if (renderer::d3dx_bmp_rehead(data, size, bmp, error)) {
+					err = image->load_bmp_from_buffer(packed_bytes(bmp));
+				}
 				break;
+			}
+			case renderer::DdsCodec::Dib: {
+				std::vector<uint8_t> bmp;
+				if (renderer::d3dx_dib_to_bmp(data, size, bmp, error)) {
+					err = image->load_bmp_from_buffer(packed_bytes(bmp));
+				}
+				break;
+			}
+			case renderer::DdsCodec::Ppm:
+			case renderer::DdsCodec::Pfm:
+			case renderer::DdsCodec::Hdr: {
+				RgbaImage decoded;
+				const bool ok = codec == renderer::DdsCodec::Ppm
+						? renderer::decode_d3dx_ppm(data, size, decoded, error)
+						: codec == renderer::DdsCodec::Pfm
+						? renderer::decode_d3dx_pfm(data, size, decoded, error)
+						: renderer::decode_d3dx_hdr(data, size, decoded, error);
+				if (ok) {
+					const godot::Ref<godot::Image> rgba =
+							rgba_image(decoded.width, decoded.height, decoded.pixels.data(), decoded.pixels.size());
+					if (rgba.is_valid()) {
+						image = rgba;
+						err = godot::OK;
+					}
+				}
+				break;
+			}
 			case renderer::DdsCodec::Dds:
 				if (godot::bytes_look_like_dds(bytes)) err = image->load_dds_from_buffer(bytes);
 				break;
@@ -153,11 +198,6 @@ godot::Ref<godot::Image> read_dds_by_content(const godot::PackedByteArray &bytes
 				break;
 			case renderer::DdsCodec::Tga:
 				if (looks_like_tga(bytes)) err = image->load_tga_from_buffer(bytes);
-				break;
-			case renderer::DdsCodec::Ppm:
-			case renderer::DdsCodec::Pfm:
-			case renderer::DdsCodec::Hdr:
-			case renderer::DdsCodec::Dib:
 				break;
 		}
 		if (err == godot::OK && !image->is_empty()) {

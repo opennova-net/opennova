@@ -177,9 +177,9 @@ void halve_rgba_to_cap(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &he
 uint32_t material_texture_side_cap(uint8_t runtime_type);
 
 // The codecs D3DXCreateTextureFromFileInMemoryEx tries on a "DDS" file's bytes, in
-// order, the first that decodes wins. The port decodes BMP, DDS, JPEG, PNG and TGA
-// (D3DX's TGA honours the origin bit); PPM, PFM, HDR and a headerless DIB are not
-// decoded.
+// order, the first that decodes wins. The embedder decodes DDS, JPEG, PNG and TGA
+// (D3DX's TGA honours the origin bit) and the BMP and DIB pixels; PPM, PFM, HDR and
+// the BMP core's header rules are renderer/d3dx_image_codecs.h's ports.
 enum class DdsCodec : uint8_t { Bmp, Ppm, Dds, Jpeg, Png, Pfm, Hdr, Tga, Dib };
 const std::vector<DdsCodec> &dds_reader_codec_order();
 
