@@ -67,21 +67,35 @@ std::vector<std::string> texture_files(const std::string &name, int32_t loader_a
 	return out;
 }
 
-// A texture the game cannot do without (a terrain's colour map; its blend map once splat details are
-// authored): the reference's role says so (texture_arg_gates).
+// A texture the game cannot do without (a terrain's colour map; its blend map, whenever its key names
+// one): the reference's role says so (texture_arg_gates).
 const char *texture_gates(int32_t loader_arg) {
 	if (!texture_arg_gates(loader_arg)) return nullptr;
-	return "[orig: PolyTrn_InitTextures @ 0x60B389 (\"colormap\") and @ 0x60B19A (\"blendermap\") logging the error "
-	       "Game_StartMission @ 0x525AD8 shows as \"Polytrn: Critical file not found\" before it aborts the mission, "
-	       "sub_520AA0 @ 0x520B4E..0x520B64]";
+	return "[orig: PolyTrn_InitTextures @ 0x60B389 (\"colormap\") and @ 0x60B19A (\"blendermap\", the blend on by its "
+	       "key alone, Terrain_ParseConfigCallback @ 0x60F7D0) logging the error Game_StartMission @ 0x525AD8 shows as "
+	       "\"Polytrn: Critical file not found\" before it aborts the mission, sub_520AA0 @ 0x520B4E..0x520B64]";
 }
 
-// What the game does without the file, in the role's words (texture_roles.h).
-std::string texture_missing(const AssetGraph &, const GraphEdge &edge) {
+// What the game does without the file, in the role's words (texture_roles.h); where the project holds the
+// name as written, that the loader opens no file of its extension (a HUD name written .dds, a model normal
+// map's .pcx), and which it does open.
+std::string texture_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	TextureRoleId role = TextureRoleId::kCount;
-	if (texture_arg_role(edge.loader_arg, role) && *texture_role_row(role).missing)
-		return ", which the project does not have: " + std::string(texture_role_row(role).missing) + ".";
-	return ", which the project does not have.";
+	const bool has_role = texture_arg_role(edge.loader_arg, role);
+	const std::string then = has_role && *texture_role_row(role).missing ? ": " + std::string(texture_role_row(role).missing) + "." : ".";
+	const std::string name = basename_of(edge.value);
+	if (!name.empty() && graph.has_file(name)) {
+		const size_t dot = name.find_last_of('.');
+		const std::string extension = dot == std::string::npos ? std::string() : name.substr(dot);
+		std::string opens;
+		if (has_role)
+			for (const std::string &each : texture_role_extensions(texture_role_row(role)))
+				opens += (opens.empty() ? "" : ", ") + each;
+		return ", which the project has, but the game's loader for it opens no " +
+		       (extension.empty() ? std::string("file of no extension") : extension + " file") +
+		       (opens.empty() ? std::string() : " (it opens " + opens + ")") + then;
+	}
+	return ", which the project does not have" + then;
 }
 
 // The name's extension decides, and a .tga the files lack loads its .dds [orig: the dispatch
@@ -369,8 +383,8 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::Ammo, "ammo", "the ammo", "ammo").symbol(NameCase::FileName, AssetKind::AmmoDefs).row,
 	Row(ReferenceKind::Weapon, "weapon", "the weapon", "weapon").symbol(NameCase::FileName, AssetKind::WeaponDefs).row,
 	Row(ReferenceKind::Item, "item", "the item id", "item id").symbol(NameCase::Exact, AssetKind::ItemDefs).row,
-	// Each by its loader (ADR 0046 S18): the terrain's colour map, and its blend map with splat details,
-	// abort the mission when they load nothing (texture_gates).
+	// Each by its loader (ADR 0046 S18): the terrain's colour map and its blend map abort the mission when
+	// they load nothing (texture_gates).
 	Row(ReferenceKind::Texture, "texture", "the texture", "texture")
 	        .loads(AssetKind::Texture, nullptr, texture_files)
 	        .fatal_for(texture_gates, texture_missing)

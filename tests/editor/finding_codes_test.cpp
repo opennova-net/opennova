@@ -273,7 +273,7 @@ static int test_columns() {
 	// S18: an upside-down TGA's rows; every use's finding where an import makes the file it reads.
 	TEST_EXPECT(fixed_by(FindingFix::TextureRows) == Tokens({ "texture.tga_upside_down" }));
 	TEST_EXPECT(fixed_by(FindingFix::ImportFitsUse) ==
-	            Tokens({ "texture.alpha_not_loaded", "texture.colormap_size", "texture.foliage_map_overrun",
+	            Tokens({ "texture.alpha_not_loaded", "texture.blend_map_size", "texture.colormap_size", "texture.foliage_map_overrun",
 	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size",
 	                     "texture.mfd_not_pow2", "texture.normal_map_halved", "texture.particle_too_big",
 	                     "texture.tile_atlas_cells", "texture.wrong_reader" }));

@@ -92,6 +92,11 @@ int test_catalog() {
 	TEST_EXPECT(texture_role_takes(texture_role_row(TextureRoleId::MenuImage), ".png") &&
 	            !texture_role_takes(texture_role_row(TextureRoleId::ModelDiffuse), ".png"));
 	TEST_EXPECT(texture_role_row(TextureRoleId::HudMfd).size == TextureSizeRule::PowerOfTwo);
+	// The quadrant split's rule, and the particle atlas's pages by the graphic's mode.
+	TEST_EXPECT(texture_role_row(TextureRoleId::TerrainBlendMap).size == TextureSizeRule::QuadrantSplit);
+	const TextureRoleRow &particle = texture_role_row(TextureRoleId::ParticleGraphic);
+	TEST_EXPECT(particle.size == TextureSizeRule::AtlasPage && particle.width == 1024 && particle.height == 256 &&
+	            texture_size_words(particle).find("256 for a bump, mod, mod2x, bumpadd or distort graphic") != std::string::npos);
 	std::printf("catalog: %zu roles, each with a token, words, a loader, formats and a witness\n", kTextureRoleCount);
 	return 0;
 }
@@ -250,8 +255,9 @@ std::vector<uint8_t> tga_bytes() {
 
 // The graph resolves each texture reference by its loader (ADR 0046 S18) over a project: a terrain's
 // colour map read by the TGA reader alone, missing where only a PNG of its stem is (an alternate no
-// loader reads), which refuses a build; its splat detail's .dds read for its .tga; its blend map
-// missing refusing a build only once splat details are authored; a sky map's .dds; an item's HUD image.
+// loader reads), which refuses a build; its splat detail's .dds read for its .tga; its blend map missing
+// refusing a build whenever its key names one; a sky map's .dds; an item's HUD image, and one written .dds
+// the HUD's loader opens no file of.
 int test_graph() {
 	editor_test::TempProjectDir dir{"opennova_editor_texture_roles"};
 	editor_test::NoProcess platform;
@@ -273,8 +279,10 @@ int test_graph() {
 	            editor_test::write_bytes(root + "/textures/splat.dds", tga_bytes()) &&
 	            editor_test::write_bytes(root + "/textures/cloud.dds", tga_bytes()) &&
 	            editor_test::write_bytes(root + "/textures/stance.tga", tga_bytes()) &&
+	            editor_test::write_bytes(root + "/textures/stance2.dds", tga_bytes()) &&
 	            editor_test::write_text(root + "/defs/items.def",
-	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\nend\n"));
+	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\nend\n"
+	                                    "begin \"Pebble\"\nid 100301\ntype building\nhud_image stance2.dds\nend\n"));
 	std::string env;
 	{
 		std::ostringstream text;
@@ -307,19 +315,31 @@ int test_graph() {
 	TEST_EXPECT(resolved("envs/sky.env", "sky_map1") == "textures/cloud.dds");
 	TEST_EXPECT(resolved("envs/sky.env", "sky_map2") == "<missing>");
 	TEST_EXPECT(resolved("defs/items.def", "hud_image") == "textures/stance.tga");
-	// What refuses a build: the colour map, and a's blend map (its splat detail authored); not b's.
+	// What refuses a build: the colour map, and each blend map the key names, splat details or none (the key
+	// alone turns the blend on).
 	std::set<std::string> blocking, listed;
 	for (const Diagnostic &d : session.view().findings.diagnostics) {
 		if (d.code() != "reference.missing") continue;
 		listed.insert(d.asset + " " + d.field);
 		if (blocks_build(d)) blocking.insert(d.asset + " " + d.field);
 	}
-	TEST_EXPECT(blocking == std::set<std::string>({"terrains/a.trn polytrn_colormap", "terrains/a.trn polytrn_detailblendmap"}));
-	TEST_EXPECT(listed.count("terrains/b.trn polytrn_detailblendmap") && listed.count("envs/sky.env sky_map2"));
-	// Its words say what the game does.
-	for (const Diagnostic &d : session.view().findings.diagnostics)
-		if (d.code() == "reference.missing" && d.field == "polytrn_colormap")
-			TEST_EXPECT(d.message.find("the mission aborts") != std::string::npos);
+	TEST_EXPECT(blocking == std::set<std::string>({"terrains/a.trn polytrn_colormap", "terrains/a.trn polytrn_detailblendmap",
+	                                               "terrains/b.trn polytrn_detailblendmap"}));
+	TEST_EXPECT(listed.count("envs/sky.env sky_map2") && listed.count("defs/items.def hud_image"));
+	// Its words say what the game does; a name the project holds but the loader opens no file of its
+	// extension says so (the HUD's loader opens no .dds).
+	size_t worded = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics) {
+		if (d.code() != "reference.missing") continue;
+		if (d.field == "polytrn_colormap") TEST_EXPECT(d.message.find("the mission aborts") != std::string::npos);
+		if (d.field == "polytrn_detailblendmap") TEST_EXPECT(d.message.find("the key alone turns the blend on") != std::string::npos);
+		if (d.field == "hud_image") {
+			++worded;
+			TEST_EXPECT(d.message.find("which the project has, but the game's loader for it opens no .dds file (it opens .tga, "
+			                           ".pcx)") != std::string::npos);
+		}
+	}
+	TEST_EXPECT(worded == 1);
 	std::printf("graph: %zu texture references found missing, %zu of them refusing a build\n", listed.size(), blocking.size());
 	return 0;
 }
@@ -328,7 +348,7 @@ int test_graph() {
 // particle files, HUD layout, catalogs, menus and missions) and every texture it ships, by name (an
 // empty file each: what a reference resolves to is a name), in a project: every texture reference
 // resolved by its loader, counted by role; none the game would abort the mission over (every shipped
-// terrain's colour map, and its blend map where splat details are authored, is there).
+// terrain's colour map, and every blend map a terrain's key names, is there).
 int test_retail() {
 	const std::string install = retail::install();
 	if (install.empty()) {

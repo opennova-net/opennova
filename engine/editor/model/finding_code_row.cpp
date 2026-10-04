@@ -276,6 +276,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// What a use asks of the file its loader opens: where an import makes that file, the import made as the
 	// use asks.
 	{ C::TextureAlphaNotLoaded, code("texture.alpha_not_loaded", G::Textures, F::ImportFitsUse) },
+	{ C::TextureBlendMapSize, code("texture.blend_map_size", G::Textures, F::ImportFitsUse) },
 	{ C::TextureColourMapSize, code("texture.colormap_size", G::Textures, F::ImportFitsUse) },
 	{ C::TextureExternal, code("texture.external", G::Textures) },
 	{ C::TextureFoliageMapOverrun, code("texture.foliage_map_overrun", G::Textures, F::ImportFitsUse) },

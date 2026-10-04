@@ -133,7 +133,10 @@ TextureShownUse texture_shown_use(const TextureUse &use, int index) {
 	out.transform = use.load.transform;
 	// A material that cuts out by alpha keeps a texel above its reference, or at or below it inverted
 	// [orig: CRenderBatchQueue_FlushBatches @ 0x5DA3A9..0x5DA401].
-	if ((use.role == TextureRoleId::ModelDiffuse || use.role == TextureRoleId::ModelFlipFrame) && use.context.alpha_test()) {
+	// The row the material's technique cuts out by (TextureRowContext: a diffuse's, or the normal map's).
+	if ((use.role == TextureRoleId::ModelDiffuse || use.role == TextureRoleId::ModelFlipFrame ||
+	     use.role == TextureRoleId::ModelNormalMap) &&
+	    use.context.alpha_test()) {
 		out.cutout = use.context.alpha_ref;
 		out.inverted = use.context.alpha_test_inverted();
 	}

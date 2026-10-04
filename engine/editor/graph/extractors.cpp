@@ -268,13 +268,14 @@ bool extract_terrain(const std::string &name, const std::vector<uint8_t> &bytes,
 	};
 	edge(std::string(), "polytrn_polydata", ReferenceKind::TerrainData, config.polydata);
 	// Each map by its role's loader (ADR 0046 S18, the terrain's keys [orig: PolyTrn_InitTextures @
-	// 0x60AAA0]). Without its colour map the game logs "colormap" @ 0x60B389, and without its blend map
-	// once a splat detail is authored "blendermap" @ 0x60B19A: either aborts the mission
-	// (Game_StartMission @ 0x525AD8), so either missing refuses a build.
+	// 0x60AAA0]). Without its colour map the game logs "colormap" @ 0x60B389; without its blend map, once
+	// the key names one at all (the key alone sets the blend on [orig: Terrain_ParseConfigCallback @
+	// 0x60F7D0], and every card with pixel shaders takes it, PolyTrn_InitTextures @ 0x60B15D..0x60B176),
+	// "blendermap" @ 0x60B19A. Either error aborts the mission [orig: sub_520AA0 @ 0x520B4E], so either
+	// missing refuses a build.
 	auto texture = [&](const char *field, TextureRoleId role, const std::string &value, int32_t flags = 0) {
 		if (!value.empty()) out.edges.push_back(texture_edge(name, std::string(), field, value, role, flags));
 	};
-	const bool splats = !config.detailmap_c1.empty() || !config.detailmap_c2.empty() || !config.detailmap_c3.empty();
 	texture("polytrn_colormap", TextureRoleId::TerrainColourMap, config.colormap, kTextureArgGates);
 	texture("polytrn_detailmap", TextureRoleId::TerrainDetailCoefficient, config.detailmap);
 	texture("polytrn_detailmap_c1", TextureRoleId::TerrainSplatDetail, config.detailmap_c1);
@@ -283,7 +284,7 @@ bool extract_terrain(const std::string &name, const std::vector<uint8_t> &bytes,
 	texture("polytrn_detailmap2", TextureRoleId::TerrainSecondDetail, config.detailmap2);
 	texture("polytrn_detailmapdist", TextureRoleId::TerrainFarDetail, config.detailmapdist);
 	texture("polytrn_detailmapdist2", TextureRoleId::TerrainFarDetail, config.detailmapdist2);
-	texture("polytrn_detailblendmap", TextureRoleId::TerrainBlendMap, config.detailblendmap, splats ? kTextureArgGates : 0);
+	texture("polytrn_detailblendmap", TextureRoleId::TerrainBlendMap, config.detailblendmap, kTextureArgGates);
 	texture("polytrn_tilestrip", TextureRoleId::TerrainTileAtlas, config.tilestrip);
 	texture("polytrn_charmap", TextureRoleId::TerrainCharMap, config.charmap);
 	texture("polytrn_foliagemap", TextureRoleId::TerrainFoliageMap, config.foliagemap);
@@ -347,15 +348,20 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 			// frame is a reference of its own (ADR 0046 S14).
 			const int frames = std::clamp(layer.flip_frames, 1, particle::kMaxParticleFlipFrames);
 			// Each is packed into the particle atlas, a TGA alone (ADR 0046 S18 [orig:
-			// CParticleTextureEntry_ProbeSizeFromDisk @ 0x5DFAA0]).
+			// CParticleTextureEntry_ProbeSizeFromDisk @ 0x5DFAA0]), on a page whose side its graphic's mode
+			// picks (the edge carries the mode, GraphEdge::use_context: renderer::particle_atlas_page_side).
+			const uint32_t mode = uint32_t(layer.blend_mode);
 			if (frames <= 1) {
 				out.edges.push_back(texture_edge(name, definition.id, field, layer.texture, TextureRoleId::ParticleGraphic));
+				out.edges.back().use_context = mode;
 				continue;
 			}
-			for (int frame = 1; frame <= frames; ++frame)
+			for (int frame = 1; frame <= frames; ++frame) {
 				out.edges.push_back(texture_edge(name, definition.id, field + "[" + std::to_string(frame) + "]",
 				                                 renderer::retail_particle_frame_name(layer.texture, frames, frame),
 				                                 TextureRoleId::ParticleGraphic, 0, false));
+				out.edges.back().use_context = mode;
+			}
 		}
 	}
 	return true;

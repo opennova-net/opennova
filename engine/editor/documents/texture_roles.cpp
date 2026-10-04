@@ -3,6 +3,10 @@
 #include <iterator>
 
 #include <base/io/strutil.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <runtime/renderer/material_classify.h>
+#include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/object_shader_template.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 namespace opennova::editor {
@@ -133,11 +137,12 @@ constexpr TextureRoleRow kRows[] = {
 	        .witness("PolyTrn_InitTextures @ 0x60B389, @ 0x60B3BE; Game_StartMission @ 0x525AD8")
 	        .row,
 	Role(R::TerrainBlendMap, "terrain_blend_map", "terrain detail blend map", G::Terrain, L::Tga, kTextureTga)
-	        .size(S::Even)
+	        .size(S::QuadrantSplit)
 	        .alpha("kept; red, green and blue weigh the three splat details")
 	        .sampling("clamped")
-	        .missing("with splat details authored, the mission aborts (\"blendermap\")")
-	        .witness("PolyTrn_InitTextures @ 0x60B19A, @ 0x60B1B8")
+	        .missing("the mission aborts (\"blendermap\"): the key alone turns the blend on, on any card with pixel shaders")
+	        .witness("Terrain_ParseConfigCallback @ 0x60F7D0; PolyTrn_InitTextures @ 0x60B15D..0x60B1A6, @ 0x60B1B8, the "
+	                 "split @ 0x60B2C1; sub_520AA0 @ 0x520B4E")
 	        .row,
 	Role(R::TerrainSplatDetail, "terrain_splat_detail", "terrain splat detail", G::Terrain, L::Stage,
 	     kTextureTga | kTextureDds)
@@ -212,11 +217,12 @@ constexpr TextureRoleRow kRows[] = {
 	        .row,
 	// --- Effects --------------------------------------------------------------------------------------
 	Role(R::ParticleGraphic, "particle_graphic", "particle graphic", G::Effects, L::Ptl, kTextureTga)
-	        .size(S::AtMost, 1024)
+	        .size(S::AtlasPage, 1024, 256)
 	        .alpha("by the graphic's mode: a blend, cleared for additive, premultiplied, or a bump from blue")
 	        .sampling("packed into an atlas page with a 2.5-pixel inset")
-	        .missing("never packed: draws nothing")
-	        .witness("CParticleTextureEntry_ProbeSizeFromDisk @ 0x5DFAA0; CParticleAtlas_TryPlaceEntry @ 0x5E2C30")
+	        .missing("never packed: draws nothing (one no page holds hangs the game)")
+	        .witness("CParticleTextureEntry_ProbeSizeFromDisk @ 0x5DFAA0; CParticleManager_BuildTextureAtlases @ 0x5E8F19 (the "
+	                 "page), @ 0x5E9185, @ 0x5E91BB (the passes); CParticleAtlas_TryPlaceEntry @ 0x5E2C30, @ 0x5E2C57")
 	        .row,
 	Role(R::ImpactScar, "impact_scar", "impact scar", G::Effects, L::Archive, kArchiveFormats)
 	        .alpha("blended by its alpha; bhole1 also alpha-tested")
@@ -429,6 +435,26 @@ bool texture_role_renderer_loader(TextureRoleId role, renderer::TextureLoader &o
 	}
 	return false;
 }
+uint8_t texture_row_material_flags(const std::string &shader, uint8_t material_flags, uint8_t row_type, uint8_t slot) {
+	constexpr uint8_t kTestBits = uint8_t(threedi::THREEDI_MATERIAL_FLAG_ALPHA_TEST | threedi::THREEDI_MATERIAL_FLAG_ALPHA_INVERT);
+	if ((material_flags & threedi::THREEDI_MATERIAL_FLAG_ALPHA_TEST) == 0) return material_flags;
+	const renderer::ObjectShaderPipelineDescriptor pipeline = renderer::describe_object_shader_pipeline(
+			renderer::build_object_shader_key(renderer::classify_object_material(shader, material_flags, 0, 0, 0)));
+	// The row's runtime type as the dispatcher reads it [orig: Material_LoadStageTexture @ 0x5B1737].
+	const uint8_t runtime = renderer::material_texture_runtime_type(row_type);
+	const bool diffuse = (runtime == 0 || runtime == 2 || runtime == 8) && slot != 2;
+	const bool normal = runtime == 4 || runtime == 5;
+	bool tested = false;
+	switch (renderer::object_coverage_source(pipeline.technique)) {
+	case renderer::ObjectCoverageSource::DiffuseAlpha: tested = diffuse; break;
+	case renderer::ObjectCoverageSource::NormalAlpha: tested = normal; break;
+	case renderer::ObjectCoverageSource::VertexDiffuseAlpha:
+	case renderer::ObjectCoverageSource::ReflectAlpha:
+	case renderer::ObjectCoverageSource::Zero: break;
+	}
+	return tested ? material_flags : uint8_t(material_flags & ~kTestBits);
+}
+
 std::vector<std::string> texture_role_extensions(const TextureRoleRow &row) {
 	std::vector<std::string> out;
 	if (row.formats & kTextureTga) out.push_back(".tga");
@@ -447,7 +473,8 @@ const char *texture_size_rule_token(TextureSizeRule rule) {
 	case S::SquarePowerOfTwoAtMost: return "square_power_of_two_at_most";
 	case S::MultipleOf: return "multiple_of";
 	case S::AtMost: return "at_most";
-	case S::Even: return "even";
+	case S::QuadrantSplit: return "quadrant_split";
+	case S::AtlasPage: return "atlas_page";
 	case S::Unknown: return "unknown";
 	}
 	return "any";
@@ -486,7 +513,10 @@ std::string texture_size_words(const TextureRoleRow &row) {
 	case S::SquarePowerOfTwoAtMost: return "square, a power of two, at most " + std::to_string(row.width);
 	case S::MultipleOf: return std::to_string(row.width) + "-pixel cells";
 	case S::AtMost: return "at most " + std::to_string(row.width) + " a side (halved to fit)";
-	case S::Even: return "even sides (split in quadrants)";
+	case S::QuadrantSplit: return "at least as tall as it is wide (split in quadrants at its width)";
+	case S::AtlasPage:
+		return "narrower than its atlas page and no taller: " + std::to_string(row.width) + ", or " + std::to_string(row.height) +
+		       " for a bump, mod, mod2x, bumpadd or distort graphic";
 	case S::Unknown: return "unknown (NEEDS-RE)";
 	}
 	return "";

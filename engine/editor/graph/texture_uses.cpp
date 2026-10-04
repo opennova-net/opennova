@@ -12,6 +12,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/model/document.h>
 #include <editor/project/project_files.h>
+#include <formats/particle/particle.h>
 #include <runtime/hud/hud_texture_names.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/precipitation_frame.h>
@@ -62,7 +63,9 @@ TextureRoleId model_role(const GraphEdge &edge, const Document *model, TextureUs
 		Document::Placement at;
 		if (row.row && model->placement(row, at) && at.owner.row) {
 			if (model->get(at.owner, "shader", value)) context.shader = text(value);
-			if (model->get(at.owner, "flags", value)) context.material_flags = uint8_t(whole(value));
+			// The alpha test as it falls on this row (texture_roles.h texture_row_material_flags).
+			if (model->get(at.owner, "flags", value))
+				context.material_flags = texture_row_material_flags(context.shader, uint8_t(whole(value)), context.type, context.slot);
 			if (model->get(at.owner, "alpha_test", value)) context.alpha_ref = uint8_t(whole(value));
 			Document::Placement material;
 			if (model->placement(at.owner, material)) context.material = int(material.index);
@@ -166,7 +169,7 @@ std::vector<FixedTextureName> collect_fixed() {
 std::string model_words(const TextureUse &use) {
 	const TextureUseContext &c = use.context;
 	std::string out = c.shader;
-	if ((use.role == R::ModelDiffuse || use.role == R::ModelFlipFrame) && c.alpha_test()) {
+	if ((use.role == R::ModelDiffuse || use.role == R::ModelFlipFrame || use.role == R::ModelNormalMap) && c.alpha_test()) {
 		const std::string test = std::string(c.alpha_test_inverted() ? "cut-out at or below " : "cut-out above ") +
 		                         std::to_string(c.alpha_ref);
 		out = out.empty() ? test : out + ", " + test;
@@ -209,6 +212,8 @@ TextureRoleId texture_role_of_edge(const GraphEdge &edge, const Document *model,
 	if (texture_arg_role(edge.loader_arg, role)) {
 		if (role == R::HudAlphaOnly) context.hud_mode = 1;
 		else if (role == R::HudColour) context.hud_mode = 0;
+		// The graphic's mode, which the particle file's edge carries (graph/extractors.cpp).
+		else if (role == R::ParticleGraphic) context.blend_mode = int(edge.use_context & 0xFF);
 		return role;
 	}
 	if (texture_arg_is_row_type(edge.loader_arg)) return model_role(edge, model, context);
@@ -358,6 +363,8 @@ JsonValue texture_use_json(const TextureUse &use) {
 	}
 	if (!use.context.key.empty()) context.set("key", json_string(use.context.key));
 	if (use.context.hud_mode >= 0) context.set("hud_mode", json_number(use.context.hud_mode));
+	if (use.context.blend_mode >= 0)
+		context.set("blend_mode", json_string(particle::blend_mode_name(particle::BlendMode(use.context.blend_mode))));
 	out.set("context", std::move(context));
 	return out;
 }

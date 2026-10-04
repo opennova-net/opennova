@@ -121,31 +121,62 @@ int test_checks() {
 	std::vector<uint8_t> rgb = pcx(5, 4, 6);
 	rgb[65] = 3;
 	TEST_EXPECT(editor_test::write_bytes(t + "four.pcx", four) && editor_test::write_bytes(t + "rgb.pcx", rgb));
+	// A TGA whose file ends before its texels do, as raw true colour and as run-length packets; a PCX whose
+	// rows are shorter than its width.
+	std::vector<uint8_t> cut = tga(4, 4);
+	cut.resize(18 + 10);
+	std::vector<uint8_t> cut_rle = tga_header(10, 32, 0);
+	cut_rle.resize(18);
+	cut_rle.insert(cut_rle.end(), {0x81, 1, 2, 3, 4});
+	TEST_EXPECT(editor_test::write_bytes(t + "cut.tga", cut) && editor_test::write_bytes(t + "cutrle.tga", cut_rle) &&
+	            editor_test::write_bytes(t + "short.pcx", pcx(6, 4, 4)));
 	// The uses': terrains, a model, a particle file, the default loading screen.
 	TEST_EXPECT(editor_test::write_bytes(t + "detail.tga", tga(8, 8)) && editor_test::write_bytes(t + "small.tga", tga(512, 512)) &&
 	            editor_test::write_bytes(t + "wide.tga", tga(2048, 512)) && editor_test::write_bytes(t + "tall.tga", tga(512, 2048)) &&
 	            editor_test::write_bytes(t + "colour.tga", tga(1024, 1024)) && editor_test::write_bytes(t + "map.pcx", pcx(8, 8, 8)) &&
 	            editor_test::write_bytes(t + "fol.pcx", pcx(64, 32, 64)) && editor_test::write_bytes(t + "fol48.pcx", pcx(48, 48, 48)) &&
+	            editor_test::write_bytes(t + "fol2k.pcx", pcx(2048, 1024, 2048)) &&
+	            editor_test::write_bytes(t + "blendw.tga", tga(64, 32)) && editor_test::write_bytes(t + "blendt.tga", tga(32, 64)) &&
 	            editor_test::write_bytes(t + "tiles.tga", tga(100, 64)) && editor_test::write_bytes(t + "skin.pcx", pcx(8, 8, 8)) &&
 	            editor_test::write_bytes(t + "big.mdt", tga(1024, 16)) && editor_test::write_bytes(t + "bump.tga", tga(100, 64)) &&
 	            editor_test::write_bytes(t + "wall.tga", tga(8, 8)) && editor_test::write_bytes(t + "wall.dds", tga(8, 8)) &&
-	            editor_test::write_bytes(t + "huge.tga", tga(1024, 8)) && editor_test::write_bytes(t + "loadscrn.pcx", pcx(640, 480, 640)));
+	            editor_test::write_bytes(t + "huge.tga", tga(1024, 8)) && editor_test::write_bytes(t + "page.tga", tga(256, 16)) &&
+	            editor_test::write_bytes(t + "fits.tga", tga(255, 256)) &&
+	            editor_test::write_bytes(t + "loadscrn.pcx", pcx(640, 480, 640)));
+	// A VS_DOT3DIFF2 material cuts out by its normal map's alpha: its PCX diffuse is no finding, its 24-bit
+	// normal map is.
+	{
+		const std::vector<uint8_t> rgba(16 * 4, 200);
+		std::vector<uint8_t> rgb;
+		std::string error;
+		opennova::tga::tga_write_rgb24(rgba.data(), 4, 4, rgb, error);
+		TEST_EXPECT(editor_test::write_bytes(t + "dotskin.pcx", pcx(8, 8, 8)) && editor_test::write_bytes(t + "dotdet.tga", tga(8, 8)) &&
+		            editor_test::write_bytes(t + "dotnorm.mdt", rgb));
+	}
 	TEST_EXPECT(editor_test::write_text(root + "/terrains/a.trn", trn("polytrn_colormap small.tga\n")) &&
 	            editor_test::write_text(root + "/terrains/b.trn", trn("polytrn_colormap wide.tga\npolytrn_foliagemap fol.pcx\n")) &&
 	            editor_test::write_text(root + "/terrains/c.trn", trn("polytrn_colormap tall.tga\npolytrn_foliagemap fol48.pcx\n")) &&
 	            editor_test::write_text(root + "/terrains/d.trn", trn("polytrn_colormap map.pcx\npolytrn_tilestrip tiles.tga\n")) &&
 	            editor_test::write_text(root + "/terrains/e.trn", trn("polytrn_colormap colour.tga\n")) &&
+	            editor_test::write_text(root + "/terrains/f.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendw.tga\n"
+	                                                                  "polytrn_foliagemap fol2k.pcx\n")) &&
+	            editor_test::write_text(root + "/terrains/g.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendt.tga\n")) &&
 	            editor_test::write_text(root + "/fx.ptl",
-	                                    "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n"
-	                                    "\tgraphic1 = huge.tga, additive;\n}\n"));
+	                                    "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff, dent, ring;\n}\n\n[particledef]\n{\n\tid = "
+	                                    "puff;\n\tgraphic1 = huge.tga, additive;\n}\n\n[particledef]\n{\n\tid = dent;\n"
+	                                    "\tgraphic1 = page.tga, bump;\n}\n\n[particledef]\n{\n\tid = ring;\n"
+	                                    "\tgraphic1 = fits.tga, distort;\n}\n"));
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
 	                                    "o3d 1\nmodel THING\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\n"
 	                                    "texture skin.pcx 1 0\ntexture wall.tga 2 0\nmaterial FF_ST_OP\ntexture big.mdt 3 4\n"
-	                                    "texture bump.tga 3 5\nlod 0\npart 0 0 0 0\nstrip 0 0\n"
+	                                    "texture bump.tga 3 5\nmaterial VS_DOT3DIFF2\nmatflags 1\nalphatest 64\n"
+	                                    "texture dotskin.pcx 1 0\ntexture dotdet.tga 2 0\ntexture dotnorm.mdt 3 4\n"
+	                                    "lod 0\npart 0 0 0 0\nstrip 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
-	const ImportResult imported =
-			import_assets({{scene + "/thing.o3d", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
+	ImportChoice model;
+	model.path = scene + "/thing.o3d";
+	const ImportResult imported = import_assets({model}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/thing.3di"}));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
@@ -165,29 +196,69 @@ int test_checks() {
 	TEST_EXPECT(has("texture.tga_zeroed", "textures/rle16.tga", S::Warning, false));
 	TEST_EXPECT(has("texture.tga_colour_map_skipped", "textures/mapped.tga", S::Warning, false));
 	TEST_EXPECT(has("texture.pcx_overrun", "textures/odd.pcx", S::Error, true));
+	TEST_EXPECT(has("texture.pcx_short_rows", "textures/short.pcx", S::Warning, false));
+	TEST_EXPECT(has("texture.tga_truncated", "textures/cut.tga", S::Error, true));
+	TEST_EXPECT(has("texture.tga_truncated", "textures/cutrle.tga", S::Error, true));
 	TEST_EXPECT(has("texture.unloadable", "textures/four.pcx", S::Warning, false));
 	for (const Found &f : found) TEST_EXPECT(f.asset != "textures/rgb.pcx");
-	// The uses'.
+	// The odd width's words say how many bytes spill, not that the width is odd.
+	for (const Found &f : found)
+		if (f.code == "texture.pcx_overrun") TEST_EXPECT(f.message.find("each row's 1 extra byte") != std::string::npos);
+	// The uses'. A colour map: read short (512 x 512), wider than tall (the quadrant split overruns it and its
+	// buffer), taller than wide (neither: only its first rows matter).
 	TEST_EXPECT(has("texture.colormap_size", "terrains/a.trn", S::Error, true));
-	TEST_EXPECT(has("texture.colormap_size", "terrains/b.trn", S::Warning, false));
-	TEST_EXPECT(has("texture.colormap_size", "terrains/c.trn", S::Error, true));
+	TEST_EXPECT(has("texture.colormap_size", "terrains/b.trn", S::Error, true));
+	TEST_EXPECT(has("texture.colormap_size", "terrains/c.trn", S::Warning, false));
 	TEST_EXPECT(has("texture.wrong_reader", "terrains/d.trn", S::Error, true));
 	TEST_EXPECT(has("texture.foliage_map_overrun", "terrains/b.trn", S::Error, true));
 	TEST_EXPECT(has("texture.foliage_map_shape", "terrains/c.trn", S::Warning, false));
+	// A foliage map wider than 1024 reads its first texel everywhere: its shape, no overrun.
+	TEST_EXPECT(has("texture.foliage_map_shape", "terrains/f.trn", S::Warning, false));
+	// A blend map wider than tall overruns the split; a taller one does not.
+	TEST_EXPECT(has("texture.blend_map_size", "terrains/f.trn", S::Error, true));
+	for (const Found &f : found)
+		TEST_EXPECT(f.code != "texture.foliage_map_overrun" || f.asset != "terrains/f.trn");
+	for (const Found &f : found) TEST_EXPECT(f.asset != "terrains/g.trn");
 	TEST_EXPECT(has("texture.tile_atlas_cells", "terrains/d.trn", S::Warning, false));
 	TEST_EXPECT(has("texture.alpha_not_loaded", "models/thing.3di", S::Warning, false));
 	TEST_EXPECT(has("texture.normal_map_halved", "models/thing.3di", S::Info, false));
 	TEST_EXPECT(has("texture.height_wrap", "models/thing.3di", S::Warning, false));
-	TEST_EXPECT(has("texture.particle_too_big", "fx.ptl", S::Warning, false));
+	// Particle graphics no atlas page holds hang the game: 1024 wide for an additive one, 256 for a bump;
+	// a distort 255 x 256 fits its page.
+	TEST_EXPECT(has("texture.particle_too_big", "fx.ptl", S::Error, true));
+	size_t too_big = 0;
+	for (const Found &f : found)
+		if (f.code == "texture.particle_too_big") {
+			++too_big;
+			TEST_EXPECT(f.message.find("it hangs loading the effects") != std::string::npos);
+			TEST_EXPECT(f.message.find("fits.tga") == std::string::npos);
+		}
+	TEST_EXPECT(too_big == 2);
 	TEST_EXPECT(has("texture.not_read", "textures/wall.tga", S::Warning, false));
 	TEST_EXPECT(has("texture.loading_screen_size", "textures/loadscrn.pcx", S::Warning, false));
 	// Nothing of the 1024 x 1024 colour map.
 	for (const Found &f : found) TEST_EXPECT(f.asset != "terrains/e.trn");
 	// A use's finding sits on its field, in the game's words.
-	for (const Found &f : found)
+	for (const Found &f : found) {
 		if (f.code == "texture.colormap_size" && f.asset == "terrains/a.trn")
 			TEST_EXPECT(f.field == "polytrn_colormap" &&
 			            f.message.find("the game reads 1024 x 1024 texels (4 MB) from it") != std::string::npos);
+		if (f.code == "texture.colormap_size" && f.asset == "terrains/b.trn")
+			TEST_EXPECT(f.message.find("copying 2048 x 2048 texels out of it") != std::string::npos);
+	}
+	// The cut-out: the alpha-tested VS_SKBASIC's PCX diffuse keeps every texel; the VS_DOT3DIFF2 material cuts
+	// out by its normal map's alpha, which its 24-bit .mdt lacks, never by its PCX diffuse.
+	size_t cut_outs = 0;
+	for (const Found &f : found)
+		if (f.code == "texture.alpha_not_loaded") {
+			++cut_outs;
+			TEST_EXPECT(f.message.find("dotskin.pcx") == std::string::npos);
+			TEST_EXPECT(f.message.find("every texel is kept, and nothing is cut out") != std::string::npos);
+		}
+	TEST_EXPECT(cut_outs == 2);
+	bool normal_cut = false;
+	for (const Found &f : found) normal_cut = normal_cut || (f.code == "texture.alpha_not_loaded" && f.message.find("dotnorm.mdt") != std::string::npos);
+	TEST_EXPECT(normal_cut);
 	std::printf("checks: %zu texture findings, %zu of them refusing a build\n", found.size(),
 	            size_t(std::count_if(found.begin(), found.end(), [](const Found &f) { return f.blocks; })));
 	return 0;

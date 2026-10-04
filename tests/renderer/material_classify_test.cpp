@@ -9,13 +9,22 @@
 #include <runtime/renderer/material_descriptor.h>
 #include <formats/threedi/threedi_3di3.h>
 
+#include <base/io/json.h>
+
 #include "renderer/material_info_oracle.h"
 
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 
 using namespace opennova::threedi;
+
+// The object pipeline manifest (tests/CMakeLists.txt defines its path in the source tree).
+#ifndef OBJECT_PIPELINE_MANIFEST
+#define OBJECT_PIPELINE_MANIFEST "godot/shaders/object/pipeline_manifest.json"
+#endif
 
 namespace {
 
@@ -607,6 +616,66 @@ int main() {
 		               std::string(object_skin_normal_name(ObjectSkinNormal::FirstBone)) ==
 		               "first_bone",
 		       "the skin-normal names are the manifest tokens");
+	}
+
+	// 16. The NORMAL pass's coverage source per technique, the object pipeline
+	// manifest's coverage_source for every technique it lists (by its
+	// engine_enum): the editor's cut-out checks read it (ADR 0046 S18).
+	{
+		struct Named {
+			const char *name;
+			ObjectShaderTechnique technique;
+		};
+		const Named techniques[] = {
+			{"Fixed", ObjectShaderTechnique::Fixed},
+			{"FixedSkinned", ObjectShaderTechnique::FixedSkinned},
+			{"FixedDetail", ObjectShaderTechnique::FixedDetail},
+			{"SelfLit", ObjectShaderTechnique::SelfLit},
+			{"SelfLitDetail", ObjectShaderTechnique::SelfLitDetail},
+			{"Tracer", ObjectShaderTechnique::Tracer},
+			{"Flag", ObjectShaderTechnique::Flag},
+			{"PhongTangentDiffuse", ObjectShaderTechnique::PhongTangentDiffuse},
+			{"PhongTangentDiffuseSkinned", ObjectShaderTechnique::PhongTangentDiffuseSkinned},
+			{"PhongTangentSpecular", ObjectShaderTechnique::PhongTangentSpecular},
+			{"PhongTangentSpecularSkinned", ObjectShaderTechnique::PhongTangentSpecularSkinned},
+			{"PhongObjectDiffuse", ObjectShaderTechnique::PhongObjectDiffuse},
+			{"PhongObjectDiffuseSkinned", ObjectShaderTechnique::PhongObjectDiffuseSkinned},
+			{"PhongObjectSpecular", ObjectShaderTechnique::PhongObjectSpecular},
+			{"PhongObjectSpecularPhongMap", ObjectShaderTechnique::PhongObjectSpecularPhongMap},
+			{"Dot3Tangent", ObjectShaderTechnique::Dot3Tangent},
+			{"Dot3TangentDetail", ObjectShaderTechnique::Dot3TangentDetail},
+			{"Dot3TangentSkinned", ObjectShaderTechnique::Dot3TangentSkinned},
+			{"Dot3TangentDetailSkinned", ObjectShaderTechnique::Dot3TangentDetailSkinned},
+			{"Dot3Object", ObjectShaderTechnique::Dot3Object},
+			{"Dot3ObjectDetail", ObjectShaderTechnique::Dot3ObjectDetail},
+			{"EnvironmentMirror", ObjectShaderTechnique::EnvironmentMirror},
+			{"EnvironmentMirrorTextured", ObjectShaderTechnique::EnvironmentMirrorTextured},
+			{"EnvironmentPhong", ObjectShaderTechnique::EnvironmentPhong},
+			{"GlassFixed", ObjectShaderTechnique::GlassFixed},
+			{"GlassSkinned", ObjectShaderTechnique::GlassSkinned},
+		};
+		std::ifstream file(OBJECT_PIPELINE_MANIFEST, std::ios::binary);
+		const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+		opennova::io::JsonValue manifest;
+		std::string error;
+		expect(opennova::io::json_parse(text, manifest, error), "the object pipeline manifest reads: " + error);
+		const opennova::io::JsonValue *listed = manifest.get("techniques");
+		expect(listed && listed->array.size() == std::size(techniques), "the manifest lists every technique");
+		for (const opennova::io::JsonValue &entry : listed->array) {
+			const std::string name = entry.get_string("engine_enum", "");
+			const Named *named = nullptr;
+			for (const Named &each : techniques)
+				if (name == each.name) named = &each;
+			expect(named != nullptr, "a manifest technique the table names: " + name);
+			expect(object_coverage_source_name(object_coverage_source(named->technique)) ==
+			               entry.get_string("coverage_source", ""),
+			       "the coverage source of " + name + " is the manifest's");
+		}
+		// VS_DOT3DIFF2 (BDiffT2, the tangent DOT3 with a detail) tests the normal map's alpha.
+		const auto pipeline = describe_object_shader_pipeline(
+				build_object_shader_key(classify_object_material("VS_DOT3DIFF2", 0x01, 0, 0, 128)));
+		expect(object_coverage_source(pipeline.technique) == ObjectCoverageSource::NormalAlpha,
+		       "VS_DOT3DIFF2 cuts out by its normal map's alpha");
 	}
 
 	std::cerr << "renderer_material_classify_test ok\n";

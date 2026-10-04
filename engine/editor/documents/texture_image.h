@@ -104,6 +104,9 @@ struct TextureHeader {
 	// TGA (reader Tga)
 	uint8_t tga_type = 0, tga_bits = 0, tga_descriptor = 0, tga_map_type = 0, tga_map_entry_bits = 0;
 	uint16_t tga_map_length = 0;
+	// The file ends before the texels the game's reader copies or decodes (its 24- and 32-bit true colour,
+	// 8-bit grey, 24-bit-mapped indices, or run-length packets), which it reads past the end.
+	bool tga_short = false;
 	// PCX (reader Pcx)
 	uint8_t pcx_bits = 0, pcx_planes = 0;
 	uint16_t pcx_bytes_per_line = 0;

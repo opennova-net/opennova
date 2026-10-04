@@ -96,8 +96,10 @@ enum class TextureFinding {
 	TgaZeroed,           // texture.tga_zeroed: a TGA form the reader zeroes
 	TgaUpsideDown,       // texture.tga_upside_down: rows top first, the reader takes them bottom up
 	TgaColourMapSkipped, // texture.tga_colour_map_skipped: a true-colour TGA's colour map read as texels
-	PcxOverrun,          // texture.pcx_overrun (an error): an odd-width 8-bit PCX's rows overrun
+	PcxOverrun,          // texture.pcx_overrun (an error): an 8-bit PCX whose rows are longer than its width
 	NotRead,             // texture.not_read: a file its loader passes over for another of the name
+	TgaTruncated,        // texture.tga_truncated (an error): the file ends before the texels the reader copies
+	PcxShortRows,        // texture.pcx_short_rows: an 8-bit PCX whose rows are shorter than its width
 	kCount,
 };
 const FindingCodeRow &finding_code(TextureFinding code);

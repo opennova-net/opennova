@@ -20,7 +20,7 @@ struct GraphEdge;
 
 // What a use says of itself beyond its role (ADR 0046 S18): a model row's slot, type and flags and its
 // material's shader, flags and alpha-test reference; the referrer's key (a .trn's, an .env's, a def's
-// member, a hudpos keyword); a HUD caller's alpha mode.
+// member, a hudpos keyword); a HUD caller's alpha mode; a particle graphic's mode.
 struct TextureUseContext {
 	int material = -1; // the model row's material, by its place among the model's materials
 	uint8_t slot = 0, type = 0, row_flags = 0;
@@ -28,6 +28,7 @@ struct TextureUseContext {
 	uint8_t material_flags = 0, alpha_ref = 0;
 	std::string key;
 	int hud_mode = -1; // 0 colour, 1 alpha only; -1 not a HUD use
+	int blend_mode = -1; // a particle graphic's mode (formats/particle BlendMode); -1 not a particle's
 	bool alpha_test() const { return (material_flags & 0x01) != 0; }
 	bool alpha_test_inverted() const { return (material_flags & 0x02) != 0; }
 };

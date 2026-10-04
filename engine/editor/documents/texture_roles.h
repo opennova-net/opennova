@@ -56,7 +56,8 @@ enum class TextureSizeRule : uint8_t {
 	SquarePowerOfTwoAtMost, // square, a power of two, at most `width`
 	MultipleOf, // each side a multiple of `width`
 	AtMost, // halved to fit `width` a side (no finding: a fact)
-	Even, // each side even (a quadrant split)
+	QuadrantSplit, // at least as tall as wide: split in quadrants at its width, past it otherwise
+	AtlasPage, // narrower than its atlas page and no taller: `width` (1024), or `height` (256) by its mode
 	Unknown, // NEEDS-RE
 };
 
@@ -159,8 +160,8 @@ io::JsonValue texture_role_json(const TextureRoleRow &row);
 // FieldUse::loader_arg, reference_file_candidates): a model texture row its row's type (0 to 255,
 // renderer::material_texture_source picks by it); a use of another referrer its role, from
 // kTextureRoleArg up, with what the referrer's own content says of it in the bits above: the game
-// refuses the mission without the file (kTextureArgGates: a terrain's colour map, its blend map once
-// splat details are authored), or the name is a mission's tile set, whose extension the game makes TGA
+// refuses the mission without the file (kTextureArgGates: a terrain's colour map, its blend map), or the
+// name is a mission's tile set, whose extension the game makes TGA
 // (kTextureArgTileSet). -1: a use whose loader is not witnessed yet, the name as written.
 inline constexpr int32_t kTextureRoleArg = 0x100;
 inline constexpr int32_t kTextureArgGates = 0x10000;
@@ -194,5 +195,13 @@ inline uint32_t pack_texture_row_context(const TextureRowContext &row) {
 inline TextureRowContext unpack_texture_row_context(uint32_t packed) {
 	return {uint8_t(packed), uint8_t(packed >> 8), uint8_t(packed >> 16), uint8_t(packed >> 24)};
 }
+
+// The material's flags as they fall on one of its texture rows (`row_type` its authored type, `slot` its
+// slot): the alpha test's bits (cut out, inverted) kept on the row whose alpha the technique its shader
+// selects tests (renderer::object_coverage_source: a diffuse row's for most, the normal map's for the
+// unskinned tangent DOT3 effects), cleared on every other row, and on every row of a technique that tests
+// no texture's alpha (a mirror's ReflectColor, the vertex alpha, SELFLUM's none). What TextureRowContext
+// carries, so a cut-out check or picture never reads a texture the game does not cut out by.
+uint8_t texture_row_material_flags(const std::string &shader, uint8_t material_flags, uint8_t row_type, uint8_t slot);
 
 } // namespace opennova::editor

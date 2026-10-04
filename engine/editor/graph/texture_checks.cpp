@@ -1,5 +1,6 @@
 #include <editor/graph/texture_checks.h>
 
+#include <algorithm>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -18,6 +19,8 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/texture_uses.h>
 #include <editor/project/project_files.h>
+#include <formats/particle/particle.h>
+#include <runtime/renderer/particle_atlas.h>
 
 namespace opennova::editor {
 
@@ -106,34 +109,63 @@ Diagnostic on_use(const GraphEdge &edge, F code, DiagnosticSeverity severity, co
 	return d;
 }
 
+// Whether the quadrant split of a map `w` wide and `h` tall reads and writes past it: the game splits a
+// map at its width, copying (w & ~1) x (w & ~1) texels from rows of `w` into a buffer of w x h [orig:
+// Terrain_SplitTileIntoQuadrants @ 0x604E60, called with the width], so a map wider than tall overruns
+// both.
+bool split_overruns(uint32_t w, uint32_t h) { return h < (w & ~1u); }
+
 // What a role asks of the file its use's loader opens, by its header: the findings on the use (`at`),
-// or, for a name the game opens itself (no edge), on the file.
+// or, for a name the game opens itself (no edge), on the file. `context` what the use says of itself (a
+// particle graphic's mode).
 void check_sizes(R role, const std::string &file, const TextureHeader &header, const std::string &where,
-                 const std::function<void(F, DiagnosticSeverity, const std::string &)> &add) {
+                 const TextureUseContext &context, const std::function<void(F, DiagnosticSeverity, const std::string &)> &add) {
 	const uint32_t w = header.width, h = header.height;
 	const std::string is = file + ", " + where + ", is " + sides(w, h);
 	switch (role) {
-	case R::TerrainColourMap:
-		// Checksummed and premultiplied over exactly 0x400000 bytes, its quadrants split at its own width
-		// [orig: PolyTrn_InitTextures @ 0x60B3BE, @ 0x60B5A9..0x60B6FD, the split @ 0x60B510..0x60B587].
+	case R::TerrainColourMap: {
+		// Checksummed and premultiplied over exactly 0x400000 bytes [orig: PolyTrn_InitTextures @ 0x60B3BE,
+		// @ 0x60B5A9..0x60B6FD], its quadrants split at its own width into a buffer of its texels [orig: the
+		// split @ 0x60B510].
 		if (w == 1024 && h == 1024) break;
-		if (uint64_t(w) * h < uint64_t(1024) * 1024 || h > w)
+		const bool short_read = uint64_t(w) * h < uint64_t(1024) * 1024;
+		const bool split = split_overruns(w, h);
+		if (short_read || split)
 			add(F::TextureColourMapSize, DiagnosticSeverity::Error,
-			    is + ": the game reads 1024 x 1024 texels (4 MB) from it" +
-			            (h > w ? " and splits it in quadrants at its width" : "") + ", past the end of its texels.");
+			    is + ": " + (short_read ? "the game reads 1024 x 1024 texels (4 MB) from it" : std::string()) +
+			            (short_read && split ? ", and " : "") +
+			            (split ? "the game splits it in quadrants of half its width, copying " + sides(w & ~1u, w & ~1u) +
+			                             " texels out of it and into a buffer of its own size"
+			                   : std::string()) +
+			            ": past the end of its texels" + (split ? " and of that buffer" : "") + ". Make it 1024 x 1024.");
 		else
 			add(F::TextureColourMapSize, DiagnosticSeverity::Warning,
 			    is + ": the far terrain and the foliage colours take only its first 1024 x 1024 texels (4 MB), in "
 			         "the wrong rows. Make it 1024 x 1024.");
 		break;
+	}
+	case R::TerrainBlendMap:
+		// Loaded whole, then split at its width into a buffer of its texels [orig: PolyTrn_InitTextures @
+		// 0x60B1B8 (the load), @ 0x60B29C (the buffer), @ 0x60B2C1 (the split)].
+		if (split_overruns(w, h))
+			add(F::TextureBlendMapSize, DiagnosticSeverity::Error,
+			    is + ": the game splits it in quadrants of half its width, copying " + sides(w & ~1u, w & ~1u) +
+			            " texels out of it and into a buffer of its own size: past the end of both. Make it at least as "
+			            "tall as it is wide.");
+		break;
 	case R::TerrainFoliageMap: {
 		// Sampled at (c & 1023) >> (10 - log2(width)) on both axes [orig: Terrain_GetSurfaceTypeAtFixedPoint @
-		// 0x6066D0, the log2 @ 0x605B4B..0x605B5B].
+		// 0x6066D0, the log2 @ 0x605B4B..0x605B5B]. Past 1024 the shift is negative, which the processor takes
+		// modulo 32, so every sample reads the first texel [orig: Foliage_SampleFoliageMapMask @ 0x606620].
 		const uint32_t side = power_of_two_floor(w);
-		if (h < side)
+		if (w <= 1024 && h < side)
 			add(F::TextureFoliageMapOverrun, DiagnosticSeverity::Error,
 			    is + ": the game's foliage lookup reads " + std::to_string(side) + " rows of it, past its last.");
-		else if (w != h || !power_of_two(w) || w > 1024)
+		else if (w > 1024)
+			add(F::TextureFoliageMapShape, DiagnosticSeverity::Warning,
+			    is + ": the game's foliage lookup reads its first texel everywhere once it is wider than 1024, so one "
+			         "code covers the whole map. Make it a square whose side is a power of two, at most 1024.");
+		else if (w != h || !power_of_two(w))
 			add(F::TextureFoliageMapShape, DiagnosticSeverity::Warning,
 			    is + ": the game's foliage lookup takes it as a square whose side is a power of two, at most 1024, so "
 			         "its codes land on the wrong ground.");
@@ -165,13 +197,21 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 			         "[orig: Texture_GenerateNormalMap @ 0x58C070], which is wrong at the edges of a side that is no "
 			         "power of two.");
 		break;
-	case R::ParticleGraphic:
-		// Placed in the atlas's 1024-texel pages [orig: CParticleAtlas_TryPlaceEntry @ 0x5E2C30].
-		if (w >= 1024 || h > 1024)
-			add(F::TextureParticleTooBig, DiagnosticSeverity::Warning,
-			    is + ": the particle atlas's 1024-texel pages cannot place it, so the game never packs it (what it "
-			         "draws then is not known yet).");
+	case R::ParticleGraphic: {
+		// Packed on an atlas page of the side its mode picks; a graphic no page can hold is never placed, and
+		// the build makes a page for it on every pass, forever: the game hangs as the effects load
+		// (renderer::particle_atlas_fits, its witnesses).
+		const uint8_t mode = uint8_t(context.blend_mode < 0 ? 0 : context.blend_mode);
+		if (!renderer::particle_atlas_fits(mode, int(std::min<uint32_t>(w, 0x7FFFFFFF)), int(std::min<uint32_t>(h, 0x7FFFFFFF)))) {
+			const int page = renderer::particle_atlas_page_side(mode);
+			add(F::TextureParticleTooBig, DiagnosticSeverity::Error,
+			    is + ": a " + particle::blend_mode_name(particle::BlendMode(mode)) + " graphic is packed on the particle "
+			            "atlas's " + std::to_string(page) + "-texel pages, which hold one narrower than " + std::to_string(page) +
+			            " and at most " + std::to_string(page) + " tall. No page holds this one, and the game makes a new "
+			            "page for it again and again: it hangs loading the effects. Make it smaller.");
+		}
 		break;
+	}
 	case R::HudMfd:
 		if (!power_of_two(w) || !power_of_two(h))
 			add(F::TextureMfdNotPowerOfTwo, DiagnosticSeverity::Warning,
@@ -242,25 +282,30 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 		            (*row.missing ? " Without it: " + std::string(row.missing) + "." : std::string()));
 		return;
 	}
-	check_sizes(role, basename_of(served), *header, where, add);
-	// A material that cuts out by alpha over a texture of none (a PCX the game loads with every texel opaque
-	// [orig: Texture_LoadPCXFromPFF32 @ 0x56EC98..0x56ECF3]).
-	if ((role == R::ModelDiffuse || role == R::ModelFlipFrame) && context.alpha_test()) {
+	check_sizes(role, basename_of(served), *header, where, context, add);
+	// A material that cuts out by this texture's alpha (the row its technique tests, TextureRowContext) over a
+	// texture of none: a PCX the game loads with every texel opaque [orig: Texture_LoadPCXFromPFF32 @
+	// 0x56EC98..0x56ECF3], or a file of no alpha, read as 255. The test keeps a texel whose alpha is above the
+	// reference, or with the inverted test at or below it (render-material-re D-RMAT-1), so every texel is
+	// kept, or none is.
+	if ((role == R::ModelDiffuse || role == R::ModelFlipFrame || role == R::ModelNormalMap) && context.alpha_test()) {
 		const bool opaque_pcx = reader == TextureReader::Pcx && load.transform == TextureLoadTransform::None;
-		if (opaque_pcx || !header->alpha)
+		if (opaque_pcx || !header->alpha) {
+			const bool inverted = context.alpha_test_inverted();
 			add(F::TextureAlphaNotLoaded, DiagnosticSeverity::Warning,
-			    basename_of(served) + ", " + where + ", is cut out where its alpha is " +
-			            (context.alpha_test_inverted() ? "at or below " : "above ") + std::to_string(context.alpha_ref) +
-			            ", but " + (opaque_pcx ? "the game loads a PCX fully opaque" : "it holds no alpha") +
-			            ": nothing is cut out.");
+			    basename_of(served) + ", " + where + ", is cut out by its alpha: the game keeps the texels whose alpha is " +
+			            (inverted ? "at or below " : "above ") + std::to_string(context.alpha_ref) + ", but " +
+			            (opaque_pcx ? "it loads a PCX fully opaque" : "this file holds no alpha, which reads as 255") +
+			            (inverted ? ": no texel is kept, and the material draws nothing." : ": every texel is kept, and nothing is cut out."));
+		}
 	}
 }
 
 } // namespace
 
 void check_texture_role(TextureRoleId role, const std::string &file, const TextureHeader &header, const std::string &where,
-                        const TextureFindingSink &add) {
-	check_sizes(role, file, header, where, add);
+                        const TextureFindingSink &add, const TextureUseContext &context) {
+	check_sizes(role, file, header, where, context, add);
 }
 
 void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
@@ -281,7 +326,7 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
 		const TextureHeader *header = header_of(input, entry->relative_path, TextureReader::Pcx);
 		if (!header || !header->read) continue;
 		check_sizes(fixed.role, entry->logical_name, *header, std::string("which the game opens by name ") + fixed.what,
-		            [&](F code, DiagnosticSeverity severity, const std::string &message) {
+		            TextureUseContext(), [&](F code, DiagnosticSeverity severity, const std::string &message) {
 			            out.push_back(make_finding(finding_code(code), severity, message, entry->relative_path));
 		            });
 	}

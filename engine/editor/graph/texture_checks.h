@@ -7,6 +7,7 @@
 #include <editor/documents/texture_document.h>
 #include <editor/documents/texture_image.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/graph/texture_uses.h>
 #include <editor/model/diagnostic.h>
 
 namespace opennova::editor {
@@ -30,11 +31,11 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
                         std::vector<Diagnostic> &out);
 
 // What a role asks of a file's sides, by its header as the role's loader reads it (`file` its name,
-// `where` the use in words: "the terrain colour map of isle.trn"): each finding handed to `add`, the
-// code, its severity and its words. The check above makes one finding of each; a test or a retail leg
-// asks it of a file directly.
+// `where` the use in words: "the terrain colour map of isle.trn", `context` what the use says of itself:
+// a particle graphic's mode): each finding handed to `add`, the code, its severity and its words. The
+// check above makes one finding of each; a test or a retail leg asks it of a file directly.
 using TextureFindingSink = std::function<void(CoreFinding, DiagnosticSeverity, const std::string &message)>;
 void check_texture_role(TextureRoleId role, const std::string &file, const TextureHeader &header, const std::string &where,
-                        const TextureFindingSink &add);
+                        const TextureFindingSink &add, const TextureUseContext &context = TextureUseContext());
 
 } // namespace opennova::editor

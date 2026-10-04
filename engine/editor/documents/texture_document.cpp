@@ -27,6 +27,8 @@ constexpr FindingCodeEntry<F> kFindingEntries[] = {
 	{F::TgaColourMapSkipped, code("texture.tga_colour_map_skipped")},
 	{F::PcxOverrun, code("texture.pcx_overrun")},
 	{F::NotRead, code("texture.not_read")},
+	{F::TgaTruncated, code("texture.tga_truncated")},
+	{F::PcxShortRows, code("texture.pcx_short_rows")},
 };
 static_assert(std::size(kFindingEntries) == size_t(F::kCount), "a row per texture finding");
 static_assert(finding_entries_well_formed(kFindingEntries), "the texture findings in their enum's order, a token each");
@@ -183,6 +185,14 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 			    "It carries a colour map of " + std::to_string(header.tga_map_length) +
 			            " entries, which the game's TGA reader does not skip: it reads the texels from the map's start, "
 			            "shifted. Save it without a colour map.");
+		// The reader copies every texel its header names with no bound on the file [orig: the 32-bit copy @
+		// 0x56E796..0x56E7A5, the 24-bit expansion @ 0x56E74F, the run-length decode @ 0x56E7FB, @ 0x56E8B6].
+		if (header.tga_short)
+			add(F::TgaTruncated, DiagnosticSeverity::Error,
+			    std::string("It ends before its texels do: the game's TGA reader ") +
+			            (type == 10 ? "decodes its run-length packets" : "copies its " + std::to_string(header.width) + " x " +
+			                                                               std::to_string(header.height) + " texels") +
+			            " past the end of the file, into whatever memory follows it. Save it again whole.");
 		break;
 	}
 	case TextureReader::Pcx:
@@ -194,11 +204,20 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 			add(F::Unloadable, DiagnosticSeverity::Warning,
 			    "The game cannot load it: its PCX reader takes 8 bits a plane alone (this one is " +
 			            std::to_string(header.pcx_bits) + " bits a plane).");
-		} else if (header.pcx_planes != 3 && header.pcx_bytes_per_line != header.width) {
+		} else if (header.pcx_planes != 3 && header.pcx_bytes_per_line > header.width) {
+			const uint32_t extra = header.pcx_bytes_per_line - header.width;
 			add(F::PcxOverrun, DiagnosticSeverity::Error,
 			    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +
-			            " texels (an odd width): the game's PCX reader writes each row's extra byte into the next row and "
-			            "the last past its buffer. Make its width even.");
+			            " texels: the game's PCX reader writes each row's " + std::to_string(extra) +
+			            (extra == 1 ? " extra byte" : " extra bytes") +
+			            " into the next row and the last row's past its buffer. Save it with rows of exactly its width (its "
+			            "bytes a line " + std::to_string(header.width) + ").");
+		} else if (header.pcx_planes != 3 && header.pcx_bytes_per_line < header.width) {
+			add(F::PcxShortRows, DiagnosticSeverity::Warning,
+			    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +
+			            " texels: the game's PCX reader writes " + std::to_string(header.pcx_bytes_per_line) +
+			            " texels a row and leaves the last " + std::to_string(header.width - header.pcx_bytes_per_line) +
+			            " of each as its buffer held them. Save it with rows of exactly its width.");
 		}
 		break;
 	case TextureReader::Dds:

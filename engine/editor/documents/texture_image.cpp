@@ -89,6 +89,36 @@ void size_fact(TextureImage &image) {
 	     sides(w, h) + (power_of_two(w) && power_of_two(h) ? " (sides are powers of two)" : " (a side is no power of two)"));
 }
 
+// Whether the file ends before the texels the game's TGA reader copies: the forms it reads (formats/tga
+// tga_read.cpp, its witnesses), from the byte after the header and the image ID; a form it zeroes or
+// leaves unset reads nothing.
+bool tga_ends_short(const tga::TgaHeader &h, const std::vector<uint8_t> &bytes) {
+	const uint64_t pixels = uint64_t(h.width) * h.height;
+	const uint64_t start = 18u + h.id_length;
+	const auto beyond = [&](uint64_t need) { return start + need > bytes.size(); };
+	switch (h.image_type) {
+	case 1: return h.map_entry_bits == 24 && beyond(3ull * h.map_length + pixels);
+	case 2: return (h.bits == 24 || h.bits == 32) && beyond(pixels * (h.bits / 8u));
+	case 3: return h.bits == 8 && beyond(pixels);
+	case 10: {
+		if (h.bits != 24 && h.bits != 32) return false;
+		const uint64_t per = h.bits / 8u;
+		uint64_t at = start, pixel = 0;
+		while (pixel < pixels) {
+			if (at >= bytes.size()) return true;
+			const uint8_t packet = bytes[size_t(at++)];
+			// A raw packet's copy stops at the image's end; a run reads one pixel.
+			const uint64_t count = std::min<uint64_t>((packet & 0x7Fu) + 1u, pixels - pixel);
+			at += (packet & 0x80u) ? per : per * count;
+			pixel += count;
+			if (at > bytes.size()) return true;
+		}
+		return false;
+	}
+	default: return false;
+	}
+}
+
 void read_tga(TextureImage &image, const std::vector<uint8_t> &stored) {
 	fact(image, "format", "File format", "TGA image");
 	fact(image, "reader", "Read by", "the game's TGA reader");
@@ -424,6 +454,7 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 		out.tga_map_length = header.map_length;
 		out.tga_map_entry_bits = header.map_entry_bits;
 		out.alpha = (header.image_type == 2 || header.image_type == 10) && header.bits == 32;
+		out.tga_short = tga_ends_short(header, *data);
 		return out;
 	}
 	case TextureReader::Pcx:

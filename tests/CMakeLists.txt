@@ -1068,6 +1068,10 @@ foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_win
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
 
+# The NORMAL-pass coverage table checked against the object pipeline manifest's coverage_source.
+target_compile_definitions(renderer_material_classify_test PRIVATE
+    OBJECT_PIPELINE_MANIFEST="${CMAKE_SOURCE_DIR}/godot/shaders/object/pipeline_manifest.json")
+
 # The REN-1 T1 parity instrument reads its committed golden from the source
 # tree (dump mode rewrites it there — ADR 0023).
 target_compile_definitions(renderer_state_vectors_test PRIVATE
