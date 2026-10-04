@@ -91,13 +91,18 @@ struct AssetKindRow {
 	// (import_plan's references_unread: those of a kind the graph does not read are not followed).
 	bool names_files = false;
 	// Where a file of the kind the editor makes goes inside the project tree, created or imported
-	// ("menus", "fonts"; "" for the root): organization only, the engine sees the flat name.
+	// ("menus", "fonts"; "" for the root): organization only, the engine sees the flat name (a loose
+	// kind's build copy takes the name alone too). The kinds the game reads from its own folder by a
+	// fixed name (a configuration, the score table, a text) stay at the root, as the install keeps them.
 	const char *folder = "";
 	// The name Files offers a new file of the kind (New > Menu...: "newmenu.mnu"); "" for a kind
 	// no New makes (its free-form blank factory's, blank_factory.cpp).
 	const char *new_name = "";
 	// How its loader takes the SCR form (ScrForm).
 	ScrForm scr = ScrForm::Optional;
+	// What a file of the kind is to the game, in a modder's words, a sentence (Files' card for a file,
+	// the UX round's project lane): what reads it and how it is found, as the row's own witnesses say.
+	const char *about = "";
 };
 
 // A kind's row (asset_kinds.cpp holds one per kind, in the enum's order; static_asserts there
@@ -112,6 +117,11 @@ AssetKind asset_kind_for_name(const std::string &logical_name);
 // Whether a build puts a file of the kind in the build (in an archive, or loose): false for an
 // archive, an import source and a file of no kind the game knows.
 bool asset_kind_packed(AssetKind kind);
+// The kind a text names as a modder writes it in a filter (the UX round's project lane: Files, the files
+// query): a kind's label or its token, in any case, singular or plural ("texture", "Textures",
+// "sound bank", "sound_bank", "waves"), or either after "kind:"; kCount for none. `only`, when given, says
+// whether the text was "kind:..." (the files of the kind alone, no name matched by the text).
+AssetKind asset_kind_named_by(const std::string &text, bool *only = nullptr);
 // Whether the archives' name limit binds a file of the kind: a kind the build packs into an
 // archive, and an import source (its importer names its outputs after it). Not a loose one (a
 // video, a music bank, a config), which the build copies beside the archives under any name, nor
