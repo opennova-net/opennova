@@ -150,7 +150,7 @@ void HudFrameCompiler::emit_label_box(float x1, float y1, float x2, float y2,
 		const float s = w / kBoxScaleRef;
 		if (title_gap > kBoxTitleTrim * s) title_gap -= kBoxTitleTrim * s;
 	}
-	emit_stdbox(sx(x1, w), sy(y1, h), sx(x2, w), sy(y2, h), w, 0xFFFFFFFFu, title_gap);
+	emit_stdbox(sx(x1, w), sy(y1, h), sx(x2, w), sy(y2, h), w, 0xFFu, title_gap);
 	if (!title.empty()) {
 		emit_slot_text(label_font_bold_, label_scale_, title.c_str(), sx(x1 + 15.0f, w),
 				sy(y1 + 2.0f, h), half_bright_argb(title_color), 0u);
@@ -374,12 +374,12 @@ void HudFrameCompiler::element_map_legend(const HudFrameState &state, float w, f
 				emit_rect(q.x0, q.y0, q.x1, q.y1, q.color, true);
 		} else {
 			// The rotated strip cell: the recent-speaker icon turns a quarter
-			// [orig: @0x49771e..0x49772a], the colour forced opaque and folded
-			// through the strip's MODULATE2X stage [orig:
+			// [orig: @0x49771e..0x49772a], the colour forced opaque, the raw
+			// diffuse the strip's material 0x651 doubles on the device [orig:
 			// HUD_DrawRotatedTexturedQuad @0x497390 -> Render_DrawIconStripCell_Debug
 			// @0x67bae0, `color | 0xFF000000`].
-			const uint32_t color = hud_icon_strip_modulate2x_color(
-					legend_icon_color(icon.name, icon.color, ml.frame_counter) | 0xFF000000u);
+			const uint32_t color =
+					legend_icon_color(icon.name, icon.color, ml.frame_counter) | 0xFF000000u;
 			const int angle_fp =
 					std::strcmp(icon.name, "hud_icon_recentspeaker") == 0 ? 0x40000000 : 0;
 			// [orig: @0x497390 — angle (fp >> 16) * 0.000095873802, the four

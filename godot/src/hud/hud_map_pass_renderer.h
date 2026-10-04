@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/transform2d.hpp>
 
@@ -8,18 +9,22 @@
 #include <runtime/hud/hud_map_view.h>
 #include <runtime/hud/hud_minimap.h>
 
+#include <cstdint>
 #include <vector>
 
 namespace godot {
 
 // The textures one map pass samples: the colormap atlas, the depthspin water
 // mask, the texture-slot table the sprites index (kHudTexMapIcons + the
-// sprite's texture offset) and the font page table the map glyphs index.
+// sprite's texture offset), per slot whether its texture's material word runs
+// MODULATE2X(TEXTURE, DIFFUSE) (colour family 0x600; null: none does), and the
+// font page table the map glyphs index.
 struct HudMapPassTextures {
 	Ref<Texture2D> terrain;
 	Ref<Texture2D> water;
 	const Ref<Texture2D> *slots = nullptr;
 	int slot_count = 0;
+	const uint8_t *slot_modulate2x = nullptr;
 	const Ref<Texture2D> *pages = nullptr;
 	size_t page_count = 0;
 };
@@ -39,13 +44,12 @@ struct HudMapSegmentsView {
 // the base (a pass's rect clear + terrain), the additive terrain resubmission (the
 // retail decal stage's x4 output split across two 1x items), the depthspin
 // water cutout, and the top item (grid rules, footprints, sprites, lines,
-// glyphs, then any over-lines). A pass carrying MODULATE2X sprites (the bit-10
-// radar marks) splits the top item's content across two ordered children of
-// it: the MODULATE2X item (those sprites, under the owner's modulate-2x
-// material) and the post item (everything after them: the threat ring, the
-// compass, the lines, the glyphs), so the retail draw order holds while the
-// marks run their own colour stage. The corner spinmap, the M-cycle big map
-// and the DEATH MAP window each own one; the materials stay their owner's.
+// glyphs, then any over-lines). The top item draws under the owner's map
+// material, where a sprite whose slot runs MODULATE2X
+// (HudMapPassTextures::slot_modulate2x) carries a +8 flag on its UV.x that
+// selects the colour stage per command, so every sprite keeps its place in the
+// retail draw order. The corner spinmap, the M-cycle big map and the DEATH MAP
+// window each own one; the materials stay their owner's.
 class HudMapPassRenderer {
 public:
 	HudMapPassRenderer() = default;
@@ -54,11 +58,11 @@ public:
 	HudMapPassRenderer &operator=(const HudMapPassRenderer &) = delete;
 
 	// Create the four items under `parent` (idempotent) at draw indices
-	// first_draw_index..+3, optionally behind the parent's own commands, plus
-	// the top item's two ordered children.
+	// first_draw_index..+3, optionally behind the parent's own commands; the top
+	// item takes `top_material` (the flag-selected MODULATE2X stage).
 	void ensure(const RID &parent, int first_draw_index, bool behind_parent,
 			const RID &additive_material, const RID &water_material,
-			const RID &modulate2x_material);
+			const RID &top_material);
 	bool is_ready() const;
 	// Clear every item's commands (the owner's per-draw reset).
 	void clear();
@@ -75,14 +79,17 @@ public:
 
 	bool water_sampling_configured() const { return water_sampling_configured_; }
 	bool top_sampling_configured() const { return top_sampling_configured_; }
+	// While set, render also appends each sprite submission to `record` as
+	// {texture: slot (-1 untextured), size, uvs, colors}, exactly as the top item
+	// receives it (the owner's test seam).
+	void set_record(Array *record) { record_ = record; }
 
 private:
+	Array *record_ = nullptr;
 	RID base_item_;
 	RID add_item_;
 	RID water_item_;
 	RID top_item_;
-	RID modulate2x_item_; // child of top_item_, first
-	RID post_item_;       // child of top_item_, after the MODULATE2X item
 	bool water_sampling_configured_ = false;
 	bool top_sampling_configured_ = false;
 };

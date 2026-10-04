@@ -250,7 +250,16 @@ bool resolve_model_mounted_pose_from_parts(
 		return false;
 	const ThreediUserPoint &up =
 			model.user_points[static_cast<size_t>(userpoint_index)];
-	const int part_index = up.subobject_index;
+	// The attachment's part, compared signed: ANY negative and an index past the
+	// part count both mean part 0, the root; the count itself reads past the posed
+	// rows in retail (the stale row of the shared pose buffer), which resolves no
+	// pose here (D-3DI-8).
+	// [orig: Bone_BuildAttachmentMatrix @ 0x56C630 — `test ebp, ebp; jl`
+	//  @ 0x56C672..0x56C674, `cmp ebp, [ecx+34h]; jle` @ 0x56C680..0x56C683,
+	//  `xor ebp, ebp` @ 0x56C685]
+	const int part_count = static_cast<int>(std::min(rest_parts.size(), live_parts.size()));
+	int part_index = up.subobject_index;
+	if (part_index < 0 || part_index > part_count) part_index = 0;
 	// The decode swizzle + render X-mirror: authored 16.16 -> the model world
 	// frame the PANM evaluator poses (the binding's get_user_point_info space).
 	const V3 authored_model_position{
@@ -261,11 +270,9 @@ bool resolve_model_mounted_pose_from_parts(
 			static_cast<double>(up.rot_y) / 65536.0,
 			static_cast<double>(up.rot_z) / 65536.0,
 			static_cast<double>(up.rot_x) / 65536.0};
-	if (part_index < 0 || !v3_finite(authored_model_position)) return false;
+	if (!v3_finite(authored_model_position)) return false;
 
-	if (static_cast<size_t>(part_index) >= rest_parts.size() ||
-			static_cast<size_t>(part_index) >= live_parts.size())
-		return false;
+	if (part_index >= part_count) return false;
 	const Affine rest_part = affine_from_panm_matrix(
 			rest_parts[static_cast<size_t>(part_index)]);
 	const Affine live_part = affine_from_panm_matrix(

@@ -177,6 +177,7 @@ add_library(${TARGET_NAME} SHARED
     hud/hud_draw_list_stats.cpp
     hud/hud_overlay.cpp
     hud/hud_overlay_combat.cpp
+    hud/hud_overlay_flat.cpp
     hud/hud_overlay_windows.cpp
     hud/hud_map_pass_renderer.cpp
     hud/map_view_window.cpp

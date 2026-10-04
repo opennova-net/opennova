@@ -44,6 +44,10 @@ typedef struct GameProfile {
     uint32_t    container_key;  /* ROL7 XOR seed for PFF_FLAG_ENCRYPTED entries (all = 0x0312A4CE
                                    today; verified vs PFF_LoadFileToMemory @ 0x768920)            */
     int         scr_policy;     /* ScrPolicy                                                     */
+    const char *version_text;   /* the version text the profile's binary prints at startup, its
+                                   build's four numbers through sprintf("V%i.%i.%i.%i") (the
+                                   STARTUP screen's VERSION label, the joiner's VERSIONSTRING);
+                                   NULL where no binary of the profile has been read            */
 } GameProfile;
 
 /* Number of profiles in the table. */
@@ -62,5 +66,10 @@ const GameProfile *gameprofile_by_code(const char *code);
    NULL/unknown code, so a missing or bad `/game` value safely behaves like the JO default.
    This is the engine's single game-to-policy seam. */
 int gameprofile_scr_policy_for_code(const char *code);
+
+/* The version text (GameProfile::version_text) for a game `code`: JO's for a NULL/unknown code,
+   as gameprofile_scr_policy_for_code defaults; NULL for a profile whose binary is unwitnessed,
+   which then shows no version rather than another game's. */
+const char *gameprofile_version_text_for_code(const char *code);
 
 } // namespace opennova::gameprofile

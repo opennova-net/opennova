@@ -10,6 +10,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/novacrypto/crc32.h>
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/vfs/vfs.h>
@@ -321,8 +322,10 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// SOPD==180 (DC=8) — any client of this patch must send exactly these; do not "unpin" them.
 	// BT is the account ban state (1/2 reject, DC=6/7; 0 for LAN). The rest are stored/display
 	// only (@0x4c7260 SetVersionString/SetCountryCode/TZB). VERSIONSTRING is the binary's own
-	// sprintf("V%i.%i.%i.%i", 1, 7, 5, 7) [orig: Game_ParseCommandLineAndInit @0x4a7d81 into
-	// byte_B4C0B0, copied @0x569b5c]; COUNTRYCODE is the install's CC.BIN, omitted when empty
+	// sprintf("V%i.%i.%i.%i", 1, 7, 5, 7), the JO profile's version text, as every pinned
+	// constant here is that binary's [orig:
+	// Game_ParseCommandLineAndInit @0x4a7d81 into byte_B4C0B0, copied @0x569b5c]; COUNTRYCODE
+	// is the install's CC.BIN, omitted when empty
 	// [orig: @0x569b70; the strlen gate @0x4c385a] (D-NET-296).
 	// [wire: retail-lan-host-join-session ClientAuth; orig: NapiNetConfig_LoadFromConnTags
 	// @0x4c7260 -> Server_ValidatePlayerJoinRequest @0x512100]
@@ -342,7 +345,8 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			std::pair<const char *, const char *>{"DB", "0"},
 			std::pair<const char *, const char *>{"MBN", "20042002"},
 			std::pair<const char *, const char *>{"SOPD", "180"},
-			std::pair<const char *, const char *>{"VERSIONSTRING", "V1.7.5.7"},
+			std::pair<const char *, const char *>{"VERSIONSTRING",
+					gameprofile::gameprofile_by_id(gameprofile::GAME_JO)->version_text},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
 	}

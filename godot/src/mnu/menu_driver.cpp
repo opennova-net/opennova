@@ -339,6 +339,8 @@ bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<Resource
 	style_ = p_style;
 	text_ = p_text;
 	text_rsrc_cache_.clear();
+	// The mounted game picks the version text the STARTUP label shows.
+	runtime_.set_game_code(p_root.is_valid() ? to_std(p_root->game_code()) : std::string());
 	return runtime_.open_document(doc_.is_valid() ? &doc_->get_native() : nullptr,
 			to_std(p_menu_file), to_std(p_target_screen));
 }

@@ -8,6 +8,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <base/resource_index/resource_index.h>
+#include <formats/pff/pff.h>
 
 namespace {
 
@@ -29,6 +30,9 @@ void append_u32_le(std::vector<uint8_t> &bytes, uint32_t value) {
 struct PffFixtureEntry {
 	std::string name;
 	std::string bytes;
+	// +12 written 0, as a third-party packer may; else the writers' stamp
+	// (pff::PFF_NEW_ENTRY_TIMESTAMP, D-VFS-12).
+	bool unstamped = false;
 };
 
 void write_pff(const fs::path &path, const std::vector<PffFixtureEntry> &entries) {
@@ -51,7 +55,7 @@ void write_pff(const fs::path &path, const std::vector<PffFixtureEntry> &entries
 		append_u32_le(bytes, 0);
 		append_u32_le(bytes, next_payload_offset);
 		append_u32_le(bytes, static_cast<uint32_t>(entry.bytes.size()));
-		append_u32_le(bytes, 0);
+		append_u32_le(bytes, entry.unstamped ? 0u : opennova::pff::PFF_NEW_ENTRY_TIMESTAMP);
 		for (size_t i = 0; i < 16; ++i) {
 			bytes.push_back(i < entry.name.size() ? static_cast<uint8_t>(entry.name[i]) : 0);
 		}
@@ -369,6 +373,62 @@ int main() {
 
 		gore_index.clear();
 		fs::remove_all(gore);
+	}
+
+	// The effect walk skips a zero-stamped archive entry (D-VFS-13): retail's loader
+	// walks every mounted archive's directory and parses an admitted entry by name, so
+	// a file every entry of which is stamped 0 is never read and one stamped entry is
+	// enough; a loose file no archive carries keeps OpenNova's loose leg.
+	// [orig: CEffectSystem_Init @ 0x5f6070 — slots 0..5 @ 0x5f6485, the skip
+	//  @ 0x5f64c0, the extension test @ 0x5f64cd..0x5f64f3]
+	{
+		const fs::path stamps = fs::temp_directory_path() / test_paths_unique("opennova_effect_stamp_test");
+		fs::remove_all(stamps);
+		write_pff(stamps / "localres.pff", {
+				{"stamped.ptl", "ptl"},
+				{"unstamped.ptl", "ptl", true},
+				{"shared.ptl", "ptl", true},
+				{"us_blood.ptu", "ptu", true},
+				{"gore_ok.ptu", "ptu"},
+				{"plain.txt", "x", true},
+		});
+		write_pff(stamps / "resource.pff", {{"shared.ptl", "ptl"}});
+		write_file(stamps / "loose.ptl", "ptl");
+
+		opennova::ResourceIndex stamp_index;
+		TEST_EXPECT(stamp_index.scan(stamps.string(), "", opennova::VfsMountMode::PackedWithLooseOverride,
+		                             opennova::VfsArchiveDiscovery::RetailTable));
+		TEST_EXPECT(stamp_index.effect_files() ==
+		            (std::vector<std::string>{"loose.ptl", "shared.ptl", "stamped.ptl", "gore_ok.ptu"}));
+		// Only the walk skips: the file still reads by name.
+		std::vector<uint8_t> unstamped;
+		TEST_EXPECT(stamp_index.read_file("unstamped.ptl", unstamped) && as_string(unstamped) == "ptl");
+
+		// The retail slots: localres.pff is slot 3, its entries carry their stamps in
+		// the table's (name-sorted) order; the expansion and language slots are empty.
+		const std::vector<opennova::VfsArchiveEntry> localres =
+		        stamp_index.archive_slot_entries(opennova::kArchiveSlotLocalres);
+		TEST_EXPECT(localres.size() == 6u);
+		bool zero_seen = false, stamp_seen = false;
+		for (const opennova::VfsArchiveEntry &entry : localres) {
+			if (entry.name == "unstamped.ptl") zero_seen = entry.timestamp == 0u;
+			if (entry.name == "stamped.ptl")
+				stamp_seen = entry.timestamp == opennova::pff::PFF_NEW_ENTRY_TIMESTAMP;
+		}
+		TEST_EXPECT(zero_seen && stamp_seen);
+		TEST_EXPECT(stamp_index.archive_slot_entries(opennova::kArchiveSlotLanguage).empty());
+		TEST_EXPECT(stamp_index.archive_slot_entries(opennova::kArchiveSlotExpansion).empty());
+		TEST_EXPECT(stamp_index.archive_slot_has_file(opennova::kArchiveSlotResource, "SHARED.PTL"));
+		TEST_EXPECT(!stamp_index.archive_slot_has_file(opennova::kArchiveSlotResource, "stamped.ptl"));
+		TEST_EXPECT(!stamp_index.archive_slot_has_file(opennova::kArchiveSlotCount, "shared.ptl"));
+
+		// ScanAll mounts the same archives into no slot (the walk still skips by stamp).
+		TEST_EXPECT(stamp_index.scan(stamps.string()));
+		TEST_EXPECT(stamp_index.archive_slot_entries(opennova::kArchiveSlotLocalres).empty());
+		TEST_EXPECT(stamp_index.effect_files() ==
+		            (std::vector<std::string>{"loose.ptl", "shared.ptl", "stamped.ptl", "gore_ok.ptu"}));
+		stamp_index.clear();
+		fs::remove_all(stamps);
 	}
 
 	// Release mounted .pff handles before deleting the directory: the VFS keeps archives

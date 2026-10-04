@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -25,13 +26,14 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_layout_from_hudpos.h> // HudLayoutAssets (the names the fill hands back)
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass seam
+#include <runtime/renderer/texture_load_rules.h> // MaterialColorStage
 
 #include "hud/hud_map_pass_renderer.h"
 #include "resource_index/resource_root.h"
 
 #include <array>
 #include <cstdint>
-#include <unordered_set>
+#include <unordered_map>
 
 namespace godot {
 
@@ -373,9 +375,31 @@ public:
 	// draw list's element counts.
 	Ref<HudDrawListStats> get_draw_list_stats();
 	// Debug/test accessor: each textured quad's colour in draw order, the compiled
-	// vertex colour or (`p_drawn`) the colour the device draws it with, which an
-	// alpha-mode texture's material doubles (renderer::hud_alpha_material_argb).
+	// vertex colour or (`p_drawn`) the colour the device draws a white texel with
+	// under the texture's material: doubled by the alpha material
+	// (renderer::hud_alpha_material_argb) and by a colour-family-0x600 material's
+	// MODULATE2X stage (renderer::hud_color_material_argb).
 	PackedColorArray get_textured_quad_colors(bool p_drawn);
+	// Debug/test accessor: the flat HUD's textured canvas commands exactly as the
+	// draw submits them, in submission order: each {texture: slot, size: the
+	// texture's pixel size, kind:
+	// "triangles" (uvs and colors as handed to canvas_item_add_triangle_array,
+	// their stage flags included) | "rect" (a texture rect; colors holds its one
+	// modulate, uvs is empty)}. The commands land on this control's own item and
+	// are replaced by the next draw, which this queues.
+	Array get_flat_submissions();
+	// Debug/test accessor: the corner map's sprite submissions exactly as its top
+	// item receives them: each {texture: slot (-1 untextured), size: the
+	// texture's pixel size, uvs, colors}.
+	Array get_map_submissions();
+	// The flat HUD shader and the map top-item shader, for the tests that hold
+	// their stage decode to the flags the submissions write.
+	static String flat_shader_code();
+	static String map_shader_code();
+	// Debug/test accessor: the material word the draws of the named texture
+	// combine through (its last load by that file name; -1 when nothing loaded
+	// it, 0 for a texture with no material word).
+	int64_t get_texture_material_word(const String &p_name) const;
 
 	// F3 Stats seam: _draw() runs inside Godot's deferred flush (outside every
 	// Node callback), so its compile + canvas-emit cost is timed here and
@@ -401,9 +425,12 @@ public:
 	HudMapPassTextures map_pass_textures() const;
 	RID map_additive_material();
 	RID map_water_material();
-	// The fixed-function MODULATE2X(TEXTURE, DIFFUSE) colour stage with the
-	// MODULATE alpha stage under SRCALPHA/INVSRCALPHA, for the map sprites
-	// flagged HudMapSprite::modulate2x (the bit-10 radar marks).
+	// The map pass's top-layer material: every command draws texel x vertex
+	// colour, and one whose UV.x carries the +8 flag (a sprite whose texture's
+	// material word is colour family 0x600: every textured map sprite) runs the
+	// fixed-function MODULATE2X(TEXTURE, DIFFUSE) colour stage with the MODULATE
+	// alpha stage under SRCALPHA/INVSRCALPHA, in its own place in the pass's
+	// order.
 	RID map_modulate2x_material();
 
 protected:
@@ -523,12 +550,12 @@ private:
 	void apply_declutter_();
 	// One HUD texture through the retail loader its role uses (the HUD loader in
 	// colour or alpha mode, the file loader, the stage loader, the TGA reader:
-	// ResourceRoot::TextureLoader), uploaded with no mips unless asked.
+	// ResourceRoot::TextureLoader), uploaded with no mips unless asked. The
+	// texture's material word is recorded: the HUD loader's own by its resolved
+	// mode (renderer::hud_loader_material_word), else `p_material_word`, the word
+	// the texture's retail maker gives it (runtime/hud/hud_texture_materials.h).
 	Ref<Texture2D> load_hud_texture_(const String &p_name, ResourceRoot::TextureLoader p_loader,
-			bool p_generate_mipmaps = false) const;
-	// MODULATE2X equivalence for a white-modulated static sprite: RGB x2
-	// saturated, alpha unchanged (the compass ring's pipeline).
-	Ref<Texture2D> double_saturate_texture_(const Ref<Texture2D> &p_texture) const;
+			bool p_generate_mipmaps = false, uint32_t p_material_word = 0) const;
 	void load_crosshair_texture_();
 	// The combat sprites' loads (the anchors are the engine fill's).
 	void configure_combat_(const opennova::hud::HudLayoutAssets &assets);
@@ -536,12 +563,25 @@ private:
 			opennova::hud::HudSprite &sprite);
 	std::array<String, kTextureSlots> combat_texture_names_;
 	std::array<int, kTextureSlots> combat_texture_loaders_{};
-	// The textures the HUD loader made in alpha mode (by instance id): their quads
-	// draw with the alpha material's colour (renderer::hud_alpha_material_argb).
-	mutable std::unordered_set<uint64_t> alpha_mode_textures_;
-	// The colour a textured command draws with: the alpha material's for an
-	// alpha-mode texture, else the vertex colour.
+	// Each loaded texture's material word (by instance id). A textured draw
+	// combines texel and vertex colour through its word's colour stage
+	// (renderer::material_color_stage): family 0xA00's ADD(DIFFUSE, DIFFUSE) folds
+	// into the vertex colour (renderer::hud_alpha_material_argb), family 0x600's
+	// MODULATE2X(TEXTURE, DIFFUSE) runs on the device through the flat and map
+	// shaders' flags (renderer::hud_color_material_argb).
+	mutable std::unordered_map<uint64_t, uint32_t> texture_material_words_;
+	// The same words by the loaded file name, lower case (the
+	// get_texture_material_word seam).
+	mutable std::unordered_map<std::string, uint32_t> named_material_words_;
+	opennova::renderer::MaterialColorStage texture_stage_(const Ref<Texture2D> &p_texture) const;
+	// The colour a textured command's vertices carry: the alpha material's
+	// fold for a family-0xA00 texture, else the vertex colour.
 	Color texture_draw_color_(const Ref<Texture2D> &p_texture, uint32_t p_argb) const;
+	// Per texture slot, whether the map top item flags its sprites MODULATE2X
+	// (refreshed by map_pass_textures for the pass renderers).
+	mutable std::array<uint8_t, kTextureSlots> slot_modulate2x_{};
+	// Set while get_flat_submissions records render_flat_'s textured commands.
+	Array *flat_record_ = nullptr;
 	// Stamp the cached colour/spread options into layout_.
 	void apply_crosshair_options_();
 	void clear_font_();

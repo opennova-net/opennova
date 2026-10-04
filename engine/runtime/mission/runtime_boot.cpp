@@ -16,12 +16,14 @@ BootFileSource boot_files_from_index(const ResourceIndex &index) {
     files.read_file = [&index](const std::string &name, std::vector<uint8_t> &out) {
         return index.read_file(name, out);
     };
+    // The effect files, less the names retail's archive walk skips for a zero stamp
+    // (ResourceIndex::effect_files, D-VFS-13).
     files.list_files = [&index](const std::string &extension) {
         std::vector<std::string> result;
-        for (const auto &entry : index.resource_files("particle")) {
-            const auto dot = entry.logical_name.find_last_of('.');
-            if (dot != std::string::npos && strutil::to_lower(entry.logical_name.substr(dot)) == extension)
-                result.push_back(entry.logical_name);
+        for (const std::string &name : index.effect_files()) {
+            const auto dot = name.find_last_of('.');
+            if (dot != std::string::npos && strutil::to_lower(name.substr(dot)) == extension)
+                result.push_back(name);
         }
         return result;
     };

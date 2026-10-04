@@ -3,6 +3,7 @@
 // loaders make, the normal-map cap's halving, and the PCX reader every loader uses.
 
 #include <formats/pcx/pcx_io.h>
+#include <runtime/hud/hud_texture_materials.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include <cctype>
@@ -236,6 +237,51 @@ void test_hud_alpha_material() {
 	CHECK(hud_alpha_material_argb(0x80102030u) == 0x80204060u, "twice each channel, alpha kept");
 }
 
+// The colour material 0x651: MODULATE2X(TEXTURE, DIFFUSE) colour, MODULATE alpha
+// (D-HUD-49) [orig: RenderState_DecodeModeColorStage @ 0x6814BE..0x6814CA].
+void test_hud_color_material() {
+	CHECK(hud_color_material_argb(0xFFFFFFFFu, 0xFF7F7F7Fu) == 0xFFFEFEFEu,
+			"a half-bright diffuse over a white texel lands at full brightness");
+	CHECK(hud_color_material_argb(0xFFFFFFFFu, 0xFFFFFFFFu) == 0xFFFFFFFFu, "white stays white");
+	CHECK(hud_color_material_argb(0xFF808080u, 0xFFFFFFFFu) == 0xFFFFFFFFu,
+			"a mid texel under a white diffuse doubles and saturates");
+	CHECK(hud_color_material_argb(0x80404040u, 0x80FFFFFFu) == 0x40808080u,
+			"twice texel x diffuse per colour channel; the alpha only modulates");
+	CHECK(hud_color_material_argb(0xFF102030u, 0xFF000000u) == 0xFF000000u, "a black diffuse draws black");
+}
+
+// The stage a material word selects is its colour family, whatever loader made
+// the texture: the file-loader textures whose words are family 0x600 double
+// like the HUD loader's colour mode (D-HUD-49) [orig: RenderState_DecodeModeColorStage
+// @ 0x681080, `opcode & 0x3F00` @ 0x68113a].
+void test_material_color_stage() {
+	using opennova::hud::kBoxMaterialWord;
+	using opennova::hud::kLfpIconMaterialWord;
+	using opennova::hud::kNetIconMaterialWord;
+	using opennova::hud::kTipIconMaterialWord;
+	using opennova::hud::kTsdIconMaterialWord;
+	using opennova::hud::kWpIndicatorMaterialWord;
+	CHECK(hud_loader_material_word(false) == 0x651u && hud_loader_material_word(true) == 0xA51u,
+			"the HUD loader's colour and alpha words");
+	CHECK(material_color_stage(hud_loader_material_word(false)) == MaterialColorStage::Modulate2x,
+			"the HUD loader's colour mode doubles");
+	CHECK(material_color_stage(hud_loader_material_word(true)) == MaterialColorStage::AddDiffuse,
+			"the HUD loader's alpha mode adds the diffuse to itself");
+	CHECK(material_color_stage(kLfpIconMaterialWord) == MaterialColorStage::Modulate2x,
+			"the capture-point icons' 0x300631 doubles");
+	CHECK(material_color_stage(kWpIndicatorMaterialWord) == MaterialColorStage::Modulate2x,
+			"the waypoint indicator's 0x300631 doubles");
+	CHECK(material_color_stage(kTsdIconMaterialWord) == MaterialColorStage::Modulate2x &&
+					material_color_stage(kBoxMaterialWord) == MaterialColorStage::Modulate2x &&
+					material_color_stage(kTipIconMaterialWord) == MaterialColorStage::Modulate2x,
+			"the icon strip, the box styles and the tip icons double");
+	CHECK(material_color_stage(kNetIconMaterialWord) == MaterialColorStage::Other,
+			"the network icons' 0x300451 is SELECTARG1(TEXTURE)");
+	CHECK(material_color_stage(0x300402u) == MaterialColorStage::Other,
+			"the binocular digits' 0x300402 is family 0x400");
+	CHECK(material_color_stage(0u) == MaterialColorStage::Other, "no material draws plain");
+}
+
 void test_side_caps() {
 	CHECK(material_texture_side_cap(4) == 512 && material_texture_side_cap(5) == 512, "normal maps");
 	CHECK(material_texture_side_cap(7) == 512, "the occlusion producer");
@@ -307,6 +353,8 @@ int main() {
 	test_masks_follow_the_name();
 	test_particle_attempts();
 	test_hud_alpha_material();
+	test_hud_color_material();
+	test_material_color_stage();
 	test_side_caps();
 	test_dds_codec_order();
 	test_pcx_more();

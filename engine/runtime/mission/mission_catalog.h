@@ -37,18 +37,24 @@ struct Row {
 	bool loose = false; // loose-scanned, not archived [orig: entry+4380]
 };
 
-// Build the catalog from the mounted install. Retail scans the working
-// directory (FindFirstFile *.bms) and then each archive volume in
-// localres/language pairs; the mount stack serves the same population, with
-// each row's loose flag taken from the serving mount and the sibling
-// <mission>.bin resolved through the stack rather than the paired volume
-// (identical on retail data, where the mission .bins live in the language
-// archives). The title is the .bin's [Info] TITLE; when NO .bin exists the
-// BMS header's embedded mission_name stands in; either miss leaves it empty
-// [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 title/briefing arm].
-// The .npj/.npz map-project legs are not ported (D-MIS-7: the shipped
-// localres.pff carries ASP_G7.npz and the JOX jox01.pff nine more, which
-// retail lists and OpenNova does not).
+// Build the catalog from the mounted install, in retail's walk: the loose
+// `.bms` files first (flagged loose, titled only from a `.bin` loose in the
+// install's root), then two archive pairs, each `.bms` entry of the mission
+// archive titled only when the pair's own text archive holds its `.bin`: the
+// expansion's <n>.pff with <n>L.pff, then localres.pff with language.pff.
+// resource.pff is never walked, a `.bms` in <n>L.pff is never listed, and a
+// name both pairs carry lists twice (no dedupe anywhere downstream either).
+// The title is the table's [Info] TITLE (empty when the table lacks one);
+// with no table the BMS header's embedded mission_name stands in. The pairs
+// read the archive slots mount_game fills under RetailTable discovery
+// (vfs.h kArchiveSlotCount), so a loose-only or ScanAll mount lists its loose
+// files alone.
+// [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 — the loose walk, then
+//  Mission_BuildMapListFromPFF @ 0x562910 over (slot 1, slot 0) and (slot 3,
+//  slot 2) @ 0x5635a5..0x5635d8, the qsort @ 0x5635f0]
+// The .npj/.npz map-project legs are not ported (D-MNU-25, D-MIS-7: the
+// shipped localres.pff carries ASP_G7.npz and the JOX jox01.pff nine more,
+// which retail lists and OpenNova cannot load).
 std::vector<Row> build(const ResourceIndex &index);
 
 // The SP screen's row filter — (code_word & 0xFFFDFFFF) == 0x10020, i.e. the

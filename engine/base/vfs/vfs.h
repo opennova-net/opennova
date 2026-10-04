@@ -56,6 +56,34 @@ struct VfsFileLocation {
     int precedence = 0;                       // 0 = highest priority; grows down the stack
 };
 
+// The secondary-archive slot table mount_game fills under RetailTable discovery
+// [orig: PFF_OpenAllArchives @ 0x4a4310 over the name table @ 0x829f90, whose count
+// g_PffArchiveNameCount @ 0x82a5a8 is 6, -> FileSystem_SetSecondaryArchive; read back by
+// FS_GetSecondaryArchiveByIndex @ 0x75ad60]: slot 0 <n>L.pff and slot 1 <n>.pff
+// (Expansion_LoadAssets @ 0x4a48ed / @ 0x4a48d6), then the boot table; slot 5 is never
+// written. Slot order is the order retail's archive walks visit them.
+inline constexpr int kArchiveSlotCount = 6;
+inline constexpr int kArchiveSlotExpansionText = 0; // <n>L.pff
+inline constexpr int kArchiveSlotExpansion = 1;     // <n>.pff
+inline constexpr int kArchiveSlotLanguage = 2;      // language.pff
+inline constexpr int kArchiveSlotLocalres = 3;      // localres.pff
+inline constexpr int kArchiveSlotResource = 4;      // resource.pff
+
+// One directory entry of a mounted archive, as its table stores it.
+struct VfsArchiveEntry {
+    std::string name;       // entry name, original case
+    uint32_t timestamp = 0; // the +12 word: a Unix time in every retail entry
+};
+
+// How the mounted archives stamp a name's directory entries. The game's two effect loaders
+// walk each archive's directory and skip an entry whose +12 word is 0
+// [orig: CEffectSystem_Init @ 0x5f64c0; HLSLEffect_LoadAllFromPFFArchive @ 0x5aff26].
+enum class VfsArchiveStamp {
+    NotArchived, // no mounted archive carries the name
+    Unstamped,   // every mounted entry of the name is stamped 0
+    Stamped,     // at least one mounted entry of the name carries a nonzero stamp
+};
+
 // Engine-faithful virtual file system. The flat overloads provide a basename,
 // case-insensitive index where mounted loose paths shadow the
 // primary archive and then ordered secondaries. The policy overloads mirror retail
@@ -126,6 +154,18 @@ public:
 
     // Every resolvable logical name with its winning source, sorted by name.
     std::vector<VfsFileLocation> list_files() const;
+
+    // The directory of the archive in retail slot `slot` (kArchiveSlotCount), in the
+    // archive's table order (sorted by upper-cased name at open, as PFF_Open sorts it);
+    // empty when the slot holds no archive. Only mount_game's RetailTable discovery fills
+    // slots: ScanAll and the general mount API leave every slot empty.
+    std::vector<VfsArchiveEntry> archive_slot_entries(int slot) const;
+    // Whether the archive in `slot` holds `name`, matched as the archive lookup matches it
+    // [orig: PFF_FileExists @ 0x768680 -> PFF_FindEntry @ 0x7685d0]; false for an empty slot.
+    bool archive_slot_has_file(int slot, const std::string &name) const;
+    // How the mounted archives (every one, slotted or not) stamp `name`'s entries, matched
+    // by the flat case-insensitive name.
+    VfsArchiveStamp archive_stamp(const std::string &name) const;
 
     const std::string &game_root() const;     // root passed to mount_game ("" if unset)
     // The expansion whose layers ACTUALLY mounted, not the one that was requested. Because

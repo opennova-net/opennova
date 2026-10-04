@@ -85,6 +85,9 @@ public:
 	// C++-side seam (not bound): engine consumers fed by this mounted session
 	// (the mission catalog builder). The index dies with this ResourceRoot.
 	const opennova::ResourceIndex &engine_index() const { return index_; }
+	// C++-side seam (not bound): the `/game` code the live mount was made for ("jo" for
+	// a loose mount, empty when nothing is mounted); the menu's version label reads it.
+	const String &game_code() const { return game_code_; }
 
 private:
 	static bool has_virtual_scheme(const String &path);
@@ -110,6 +113,7 @@ private:
 	                              bool allow_loose_override, const String &game_code);
 
 	String expansion_;
+	String game_code_; // game_code()
 	// The expansion's text-override table the last mount_runtime left (see
 	// get_expansion_override_table).
 	PackedByteArray expansion_override_table_;
@@ -183,6 +187,9 @@ public:
 	// mount — ".ptg" when `fgn2.bin` is present, else ".ptu" (engine/base
 	// ResourceIndex::particle_extension owns the witness).
 	String particle_extension() const;
+	// The effect catalog's files in parse order, less the names the archives carry only
+	// stamped 0 (engine ResourceIndex::effect_files owns the witness, D-VFS-13).
+	PackedStringArray effect_files() const;
 	// Runtime roots honor the retail per-call source policy. Loose roots resolve
 	// only flat loose files for every policy value.
 	bool has_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;

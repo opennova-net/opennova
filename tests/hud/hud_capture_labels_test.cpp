@@ -176,12 +176,13 @@ void element() {
 	CHECK(stem.x0 == 500.0f && stem.y0 == 400.0f && stem.x1 == 500.0f && stem.y1 == 384.0f);
 	CHECK(stem.color == 0xFF80A0FFu);
 	// The own-zone tile: 32 x 32 design units centred 16 above the stem's
-	// top, the half-bright colour under MODULATE2X.
+	// top, the half-bright colour raw (the colour-mode tile's MODULATE2X runs
+	// on the device, D-HUD-49).
 	CHECK(b2.tris - b1.tris == 2);
 	const HudTri &tile = d.tris[b1.tris];
 	CHECK(tile.texture == kHudTexLfpTileOwn);
 	CHECK(tile.a.x == 484.0f && tile.a.y == 352.0f && tile.c.x == 516.0f && tile.c.y == 384.0f);
-	CHECK(tile.a.color == 0xFF80A0FEu);
+	CHECK(tile.a.color == 0xFF40507Fu);
 	// The letter only (no binoculars, no name): one glyph, half-bright.
 	CHECK(count_page_glyphs(d, b1.glyphs, b2.glyphs) == 1);
 	CHECK(d.glyphs[b1.glyphs].color == 0xFF40507Fu);
@@ -215,7 +216,7 @@ void element() {
 	state.ticks = 32;
 	const HudDrawList &lit = compiler.compile(state, 1024, 768);
 	CHECK(lit.lines[lit.order_breaks[0].lines].color == 0xFFFFFF00u);
-	CHECK(lit.tris[lit.order_breaks[1].tris].a.color == 0xFFFEFE00u);
+	CHECK(lit.tris[lit.order_breaks[1].tris].a.color == 0xFF7F7F00u);
 	CHECK(lit.glyphs[lit.order_breaks[1].glyphs].color == 0xFF7F7F00u);
 	CHECK(lit.quads[lit.order_breaks[2].quads].color == 0xFFFF5050u);
 

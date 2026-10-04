@@ -159,11 +159,44 @@ TextureLoad hud_texture_load(std::string_view name, bool alpha_mode);
 void apply_texture_load_transform(TextureLoadTransform transform, bool alpha_only, uint8_t *rgba,
 		size_t pixels);
 
+// The stage-0 colour op a material word selects, by its colour family (the word's
+// bits 8..13). A texture draws with its own material's stage whatever loader read
+// its pixels, so the word, not the loader, decides how a draw combines texel and
+// vertex colour.
+enum class MaterialColorStage : uint8_t {
+	// Family 0x600: MODULATE2X(TEXTURE, DIFFUSE), saturated (hud_color_material_argb).
+	Modulate2x,
+	// Family 0xA00: ADD(DIFFUSE, DIFFUSE), the texture's colour never an argument
+	// (hud_alpha_material_argb).
+	AddDiffuse,
+	// Every other family, and no material (word 0). The embedder draws these as texel
+	// times vertex colour; the HUD's one other family, 0x400 SELECTARG1(TEXTURE) (the
+	// network icons, the binocular digits), draws the same under the white diffuse its
+	// callers pass.
+	Other,
+};
+MaterialColorStage material_color_stage(uint32_t word);
+
+// The material words the HUD loader makes its textures with: the colour mode's and
+// the alpha mode's (hud_loader_material_word picks one).
+inline constexpr uint32_t kHudColorMaterialWord = 0x651u;
+inline constexpr uint32_t kHudAlphaMaterialWord = 0xA51u;
+uint32_t hud_loader_material_word(bool alpha_mode);
+
 // The vertex colour the HUD's alpha material 0xA51 draws an A8 texture with: colour
 // op ADD(DIFFUSE, DIFFUSE), saturated, so twice the vertex colour (the texture's colour
 // is never an argument); alpha MODULATE(TEXTURE, DIFFUSE), the vertex alpha the
 // modulating draw multiplies by the texture's. `argb` is the quad's vertex colour.
 uint32_t hud_alpha_material_argb(uint32_t argb);
+
+// The colour a colour-family-0x600 material (the HUD loader's colour mode 0x651, the
+// map icon strip, the waypoint indicator, the capture-point icons, the box styles,
+// the tip icons) draws a texel with: colour op MODULATE2X(TEXTURE, DIFFUSE) on a
+// device that reports modulate-2x, so twice the texel times the vertex colour,
+// saturated per channel; alpha MODULATE(TEXTURE, DIFFUSE). The embedder runs the
+// stage on the device, the texel unknown until then; `texel` and `diffuse` are
+// A8R8G8B8.
+uint32_t hud_color_material_argb(uint32_t texel, uint32_t diffuse);
 
 // GTexture_DownsampleToLimits's cap halving: while either side exceeds `cap`, both
 // sides halve with a 2x2 box. `rgba` holds width x height RGBA8 pixels; width and
@@ -177,9 +210,9 @@ void halve_rgba_to_cap(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &he
 uint32_t material_texture_side_cap(uint8_t runtime_type);
 
 // The codecs D3DXCreateTextureFromFileInMemoryEx tries on a "DDS" file's bytes, in
-// order, the first that decodes wins. The port decodes BMP, DDS, JPEG, PNG and TGA
-// (D3DX's TGA honours the origin bit); PPM, PFM, HDR and a headerless DIB are not
-// decoded.
+// order, the first that decodes wins. The embedder decodes DDS, JPEG, PNG and TGA
+// (D3DX's TGA honours the origin bit) and the BMP and DIB pixels; PPM, PFM, HDR and
+// the BMP core's header rules are renderer/d3dx_image_codecs.h's ports.
 enum class DdsCodec : uint8_t { Bmp, Ppm, Dds, Jpeg, Png, Pfm, Hdr, Tga, Dib };
 const std::vector<DdsCodec> &dds_reader_codec_order();
 

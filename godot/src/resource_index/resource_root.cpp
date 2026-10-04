@@ -83,6 +83,7 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("list_files", "suffix"), &ResourceRoot::list_files, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("list_file_entries", "suffix"), &ResourceRoot::list_file_entries, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("particle_extension"), &ResourceRoot::particle_extension);
+	ClassDB::bind_method(D_METHOD("effect_files"), &ResourceRoot::effect_files);
 	ClassDB::bind_method(D_METHOD("has_file", "name", "policy"), &ResourceRoot::has_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("read_file", "name", "policy"), &ResourceRoot::read_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("load_texture", "name", "loader", "policy"), &ResourceRoot::load_texture,
@@ -298,6 +299,7 @@ Error ResourceRoot::mount_with_mode(const String &path, const String &expansion,
 	// must not leave simulation or skeletal loaders reading the previous mount.
 	index_.clear();
 	assets_.invalidate();
+	game_code_ = String();
 	const String clean = normalize_dir(path);
 	if (clean.is_empty()) {
 		root_dir_ = String();
@@ -318,6 +320,7 @@ Error ResourceRoot::mount_with_mode(const String &path, const String &expansion,
 	// Game-aware SCR keying: resolve the chosen game's policy once (gameprofile is the single
 	// source) and apply it for subsequent read_file calls. An empty/unknown code is the JO default.
 	index_.set_scr_policy(gameprofile_scr_policy_for_code(game_code.utf8().get_data()));
+	game_code_ = game_code;
 	last_error_ = String();
 	return OK;
 }
@@ -363,6 +366,7 @@ String ResourceRoot::get_last_error() const {
 void ResourceRoot::clear() {
 	root_dir_ = String();
 	last_error_ = String();
+	game_code_ = String();
 	expansion_ = String();
 	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
@@ -481,6 +485,17 @@ Array ResourceRoot::list_file_entries(const String &suffix) const {
 	});
 	for (const opennova::ResourceFileEntry &entry : entries) {
 		out.push_back(file_entry_to_dictionary(entry));
+	}
+	return out;
+}
+
+PackedStringArray ResourceRoot::effect_files() const {
+	PackedStringArray out;
+	if (root_dir_.is_empty()) {
+		return out;
+	}
+	for (const std::string &name : index_.effect_files()) {
+		out.push_back(String::utf8(name.c_str()));
 	}
 	return out;
 }

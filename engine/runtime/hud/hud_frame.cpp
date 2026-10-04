@@ -1765,9 +1765,9 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state) {
 		// `cmp var_DC, 0; jz` @0x5a415a..0x5a4163 (tick), @0x5a4270..0x5a427d
 		// (text), @0x5a43a0..0x5a43a9 (bar)]: the TSDicon cell 0x17 in table[3]
 		// light blue at forced full alpha, half-size fontH*0.5 centered on
-		// (cx, cy) [orig: HUD_DrawRotatedIconQuad @0x599630]. The strip
-		// renderer's MODULATE2X stage folds into the diffuse as for the map
-		// blips [orig: Render_DrawIconStripCell_Debug @0x67bae0].
+		// (cx, cy) [orig: HUD_DrawRotatedIconQuad @0x599630]. The raw diffuse,
+		// as for the map blips: the strip's material 0x651 runs its MODULATE2X
+		// stage on the device [orig: Render_DrawIconStripCell_Debug @0x67bae0].
 		const bool request_icon = tag.radio_request && state.radio_request_icon_viewer;
 		const float half_h = font_h * 0.5f;
 		auto emit_request_icon = [&](float cx, float cy) {
@@ -1778,8 +1778,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state) {
 			icon.y1 = cy + half_h;
 			hud_icon_strip_cell_uv(state.minimap, kFriendlyTagRadioRequestIcon,
 					icon.u0, icon.v0, icon.u1, icon.v1);
-			icon.color = hud_icon_strip_modulate2x_color(
-					0xFF000000u | (kFriendlyTagDownedLightBlue & 0xFFFFFFu));
+			icon.color = 0xFF000000u | (kFriendlyTagDownedLightBlue & 0xFFFFFFu);
 			icon.texture = kHudTexMapIcons;
 			draw_list_.quads.push_back(icon);
 		};
@@ -1905,8 +1904,7 @@ void HudFrameCompiler::element_end_round_overlay(const HudFrameState &state,
 	const HudEndRoundOverlayState &er = state.end_round;
 	if (!er.shown) return;
 	emit_stdbox(sx(8.0f, w), sy(static_cast<float>(er.top + 8), h),
-			sx(1015.0f, w), sy(static_cast<float>(er.bottom - 8), h), w,
-			0xFFFFFFFFu, 0.0f);
+			sx(1015.0f, w), sy(static_cast<float>(er.bottom - 8), h), w, 0xFFu, 0.0f);
 	// The Impact38 slot falls back to the large slot, then the bold label
 	// slot, then the hudpos font at scale 1 when the files are absent
 	// (layout-only embedders keep drawing, like the other label elements).
@@ -2070,9 +2068,9 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 //
 // Every retail quad's diffuse is alpha<<24 | 0x7F7F7F — half-bright under the
 // device's MODULATE2X stage, so 0.5 x 2 = 1 and the material lands at full
-// texture brightness [orig: the shl/lea prologue @0x56b70e-0x56b713]. A host
-// without that stage reproduces it with a neutral white diffuse, which is
-// what the caller passes.
+// texture brightness [orig: the shl/lea prologue @0x56b70e-0x56b713]. The
+// quads carry that raw diffuse; the box material 0x651 runs the stage on the
+// device (hud_texture_materials.h kBoxMaterialWord).
 //
 // The monogram watermark pass is deliberately NOT drawn: its material carries
 // flag word 0x622, whose LOW NIBBLE selects ONE/ONE — pure additive
@@ -2111,9 +2109,12 @@ void HudFrameCompiler::emit_stdbox_piece(float x0, float y0, float x1, float y1,
 }
 
 void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,
-		float surface_w, uint32_t color, float title_gap_w) {
+		float surface_w, uint32_t alpha, float title_gap_w) {
 	if (!layout_.box_texture_valid) return;
 	if (x1 - x0 < 2.0f || y1 - y0 < 2.0f) return;
+	// [orig: Render_HUDBoxOverlay @0x56b700 — alpha<<24 | 0x7F7F7F
+	//  @0x56b70e..0x56b713]
+	const uint32_t color = ((alpha & 0xFFu) << 24) | 0x7F7F7Fu;
 	constexpr float kCell = 1.0f / 4.0f;   // the 4x4 atlas step in UV
 	// One source cell is a quarter of the atlas (32 px for the shipped 128 px
 	// border.tga) [orig: quarterW/H = dims >> 2 @0x56adb6/@0x56adbd].

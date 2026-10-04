@@ -986,7 +986,8 @@ add_test(NAME mission_seat_spec_extract COMMAND mission_seat_spec_extract_test)
 foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
         particle_atlas_contract particle_frame_compiler_contract render_order
         frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
-        scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules)
+        scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
+        d3dx_image_codecs)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2300,6 +2301,7 @@ add_test(NAME local_player_targeting COMMAND local_player_targeting_test)
 
 add_executable(special_weapon_parity_test world/special_weapon_parity_test.cpp)
 target_link_libraries(special_weapon_parity_test PRIVATE opennova_runtime)
+target_include_directories(special_weapon_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(special_weapon_parity_test PRIVATE cxx_std_17)
 add_test(NAME special_weapon_parity COMMAND special_weapon_parity_test)
 

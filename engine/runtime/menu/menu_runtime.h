@@ -247,6 +247,10 @@ public:
 	void set_frame(MenuFrameSeam *frame) { frame_ = frame; }
 	MenuFrameSeam *frame() const { return frame_; }
 	void set_sink(MenuEventSink sink) { sink_ = std::move(sink); }
+	// The mounted game's `/game` code: the STARTUP screen's VERSION label shows that
+	// game's version text (gameprofile_version_text_for_code: JO's for an empty or
+	// unknown code, none for a game whose binary is unwitnessed).
+	void set_game_code(std::string code) { game_code_ = std::move(code); }
 
 	// Bind a parsed document (null unbinds) and show `target_screen` (empty or
 	// unknown = the first screen). Every per-document cache is rebuilt and the
@@ -279,6 +283,14 @@ public:
 	std::string widget_name_of(int id) const;
 	int widget_kind_of(int id) const; // mnu::WindowType as int, -1 unknown id
 	std::string widget_screen_of(int id) const;
+	// A named screen's control the way retail finds one: the first screen of that name
+	// (case-insensitive), then a pre-order search of its windows, each window before its
+	// children, names compared case-insensitively; an UNNAMED window ends the search of
+	// its own subtree. -1 when absent.
+	// [orig: UI_FindScreenControl @0x63ae80 (the section by stricmp, then its root
+	//  windows); CWnd_FindChildByName @0x646850 (`!name || !window->name` returns 0
+	//  before the children are searched)]
+	int find_screen_control(const std::string &screen, const std::string &name) const;
 	// The current screen's pre-order index of a doc id; -1 off-screen or frameless.
 	int frame_index(int id) const;
 	int id_at_index(int index) const;
@@ -451,6 +463,7 @@ private:
 	MenuEventSink sink_;
 	MenuDocIndex index_;
 	std::string menu_file_;
+	std::string game_code_; // set_game_code
 	std::string current_screen_;
 	std::vector<std::string> nav_stack_;
 	std::unordered_map<std::string, int> screen_ids_; // upper name -> screen id

@@ -44,6 +44,7 @@ using namespace godot;
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
 #include <runtime/hud/hud_game_text.h> // hud_session_text (the session lines' strings)
 #include <runtime/hud/hud_layout_from_hudpos.h> // the hudpos.def parse applied to the layout
+#include <runtime/hud/hud_texture_materials.h> // the non-HUD-loader textures' material words
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the seat/armory label scan)
 
@@ -58,27 +59,6 @@ using opennova::hud::HudPosRecord;
 using opennova::hud::HudRectRecord;
 
 constexpr int kMinimapFootprintFeedVersion = 1;
-
-// The map sprites' MODULATE2X(TEXTURE, DIFFUSE) colour stage, saturated per
-// channel, with the MODULATE(TEXTURE, DIFFUSE) alpha stage and the
-// SRCALPHA/INVSRCALPHA blend: the radar marks' material word 0x651 (blend 1,
-// alpha 0x50, colour 0x600; the witness rides HudMapSprite::modulate2x in
-// engine/runtime/hud/hud_minimap.h).
-constexpr const char *kMapModulate2xShader = R"(
-shader_type canvas_item;
-render_mode unshaded, blend_mix;
-
-varying vec4 diffuse;
-
-void vertex() {
-	diffuse = COLOR;
-}
-
-void fragment() {
-	vec4 texel = texture(TEXTURE, UV);
-	COLOR = vec4(min(texel.rgb * diffuse.rgb * 2.0, vec3(1.0)), texel.a * diffuse.a);
-}
-)";
 
 constexpr const char *kMinimapWaterShader = R"(
 shader_type canvas_item;
@@ -117,48 +97,6 @@ void fragment() {
 	COLOR = map_color;
 }
 )";
-
-// The flat HUD items' shader. A quad with a second texture stage arrives as a
-// triangle pair whose UV.x carries a +8 flag (flat HUD UVs stay inside
-// [0, ~1.01]); its vertex() strips the flag and derives the stage-1 UV from
-// the surface position -- UV1 = (screen_px + 0.5) / stage dims in retail's
-// D3D9 raster, whose pixel centres sit on the integers; here pixel centres
-// sit at +0.5, so px / stage dims samples the same texel -- and fragment()
-// applies MODULATE2X(CURRENT, TEXTURE1) to the colour and MODULATE(CURRENT,
-// TEXTURE1) to the alpha, the stage-1 texture wrap-addressed. Every other
-// command keeps the default COLOR (vertex colour x TEXTURE). The witness
-// rides the engine's HudQuad::texture2 (runtime/hud/hud_frame.h).
-constexpr const char *kHudFlatShader = R"(
-shader_type canvas_item;
-render_mode unshaded, blend_mix;
-
-uniform sampler2D stage1_texture : repeat_enable, filter_nearest;
-uniform vec2 stage1_inv_size = vec2(0.0);
-
-varying flat float stage1_on;
-varying vec2 stage1_uv;
-
-void vertex() {
-	stage1_on = 0.0;
-	stage1_uv = vec2(0.0);
-	if (UV.x >= 4.0) {
-		UV.x -= 8.0;
-		stage1_on = 1.0;
-		stage1_uv = VERTEX * stage1_inv_size;
-	}
-}
-
-void fragment() {
-	if (stage1_on > 0.5) {
-		vec4 camo = texture(stage1_texture, stage1_uv);
-		COLOR.rgb = min(COLOR.rgb * camo.rgb * 2.0, vec3(1.0));
-		COLOR.a *= camo.a;
-	}
-}
-)";
-
-// The +8 UV flag a second-stage quad's vertices carry into kHudFlatShader.
-constexpr float kStage1UvFlag = 8.0f;
 
 } // namespace
 
@@ -343,6 +281,14 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_radar_frame_gates);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"), &HudOverlay::get_draw_list_stats);
 	ClassDB::bind_method(D_METHOD("get_textured_quad_colors", "drawn"), &HudOverlay::get_textured_quad_colors);
+	ClassDB::bind_method(D_METHOD("get_flat_submissions"), &HudOverlay::get_flat_submissions);
+	ClassDB::bind_method(D_METHOD("get_map_submissions"), &HudOverlay::get_map_submissions);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("flat_shader_code"),
+			&HudOverlay::flat_shader_code);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("map_shader_code"),
+			&HudOverlay::map_shader_code);
+	ClassDB::bind_method(D_METHOD("get_texture_material_word", "name"),
+			&HudOverlay::get_texture_material_word);
 	ClassDB::bind_method(D_METHOD("set_draw_timing_enabled", "enabled"),
 			&HudOverlay::set_draw_timing_enabled);
 	ClassDB::bind_method(D_METHOD("consume_draw_timing_us"),
@@ -513,35 +459,8 @@ void HudOverlay::push_label_fonts_(const opennova::hud::HudLabelFontChoice &p_ch
 			label_font_impact38_valid_ ? &label_font_impact38_ : nullptr);
 }
 
-Ref<Texture2D> HudOverlay::double_saturate_texture_(
-		const Ref<Texture2D> &p_texture) const {
-	if (p_texture.is_null()) {
-		return p_texture;
-	}
-	Ref<Image> image = p_texture->get_image();
-	if (image.is_null()) {
-		return p_texture;
-	}
-	if (image->is_compressed()) {
-		image->decompress();
-	}
-	image->convert(Image::FORMAT_RGBA8);
-	PackedByteArray data = image->get_data();
-	uint8_t *bytes = data.ptrw();
-	const int64_t size = data.size();
-	for (int64_t i = 0; i + 3 < size; i += 4) {
-		for (int c = 0; c < 3; ++c) {
-			const int v = bytes[i + c] * 2;
-			bytes[i + c] = static_cast<uint8_t>(v > 255 ? 255 : v);
-		}
-	}
-	const Ref<Image> doubled = Image::create_from_data(image->get_width(),
-			image->get_height(), false, Image::FORMAT_RGBA8, data);
-	return ImageTexture::create_from_image(doubled);
-}
-
 Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name, ResourceRoot::TextureLoader p_loader,
-		bool p_generate_mipmaps) const {
+		bool p_generate_mipmaps, uint32_t p_material_word) const {
 	// Loaded by flat name through the mounted VFS, decoded the retail way
 	// (renderer::texture_load_attempts names the file, reader and transform).
 	if (root_.is_null() || p_name.is_empty()) {
@@ -557,36 +476,19 @@ Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name, ResourceRoot:
 		return Ref<Texture2D>();
 	}
 	const Ref<Texture2D> texture = ImageTexture::create_from_image(image);
-	// The HUD loader's resolved mode picks the material the quads draw with.
-	if (texture.is_valid() && alpha_mode) {
-		alpha_mode_textures_.insert(texture->get_instance_id());
+	// The material word the draws take: the HUD loader's by its resolved mode,
+	// the caller's maker word for every other loader.
+	const bool hud_loader = p_loader == ResourceRoot::TEXTURE_LOADER_HUD_COLOR ||
+			p_loader == ResourceRoot::TEXTURE_LOADER_HUD_ALPHA;
+	const uint32_t word = hud_loader ? opennova::renderer::hud_loader_material_word(alpha_mode)
+									 : p_material_word;
+	if (texture.is_valid() && word != 0) {
+		texture_material_words_[texture->get_instance_id()] = word;
+	}
+	if (texture.is_valid()) {
+		named_material_words_[opennova::to_std(p_name.get_file().to_lower())] = word;
 	}
 	return texture;
-}
-
-Color HudOverlay::texture_draw_color_(const Ref<Texture2D> &p_texture, uint32_t p_argb) const {
-	if (p_texture.is_valid() && alpha_mode_textures_.count(p_texture->get_instance_id()) != 0) {
-		return opennova::color_from_argb(opennova::renderer::hud_alpha_material_argb(p_argb));
-	}
-	return opennova::color_from_argb(p_argb);
-}
-
-PackedColorArray HudOverlay::get_textured_quad_colors(bool p_drawn) {
-	PackedColorArray out;
-	if (!configured_) {
-		return out;
-	}
-	const Vector2 surface = draw_surface_();
-	ensure_label_fonts_(surface.x);
-	const HudDrawList &list = compiler_.compile(state_, surface.x, surface.y);
-	for (const opennova::hud::HudQuad &quad : list.quads) {
-		if (quad.texture < 0 || quad.texture >= kTextureSlots) {
-			continue;
-		}
-		const Ref<Texture2D> tex = textures_[static_cast<size_t>(quad.texture)];
-		out.push_back(p_drawn ? texture_draw_color_(tex, quad.color) : opennova::color_from_argb(quad.color));
-	}
-	return out;
 }
 
 void HudOverlay::load_crosshair_texture_() {
@@ -607,7 +509,8 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	textures_ = {};
 	combat_texture_names_ = {};
 	combat_texture_loaders_ = {};
-	alpha_mode_textures_.clear();
+	texture_material_words_.clear();
+	named_material_words_.clear();
 	clear_font_();
 	// The freed label pair must leave the compiler too; the first draw's
 	// ensure_label_fonts_ reloads it for the fresh root.
@@ -648,7 +551,9 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// network icons through the TGA reader alone, the tip icons through the
 	// stage loader, the map strip, waypoint indicator and flag-point icons
 	// through the file loader, the rest through the HUD loader, the stance
-	// art in alpha mode and the fixed art in colour mode.
+	// art in alpha mode and the fixed art in colour mode. Each non-HUD-loader
+	// load names the material word its retail maker gives the texture
+	// (runtime/hud/hud_texture_materials.h); the draws combine through it.
 	// The static HUD frame background the engine picked (the last authored
 	// StaticFrame line, hud_static_frame_index); absent, nothing is loaded.
 	if (layout_.frame_pos.present) {
@@ -668,13 +573,15 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// secondary texture (the combined material rec+0x30 gates the whole
 		// drawer) [orig: the combine @0x56af3c, the null gate @0x56b71f,
 		// see docs/interface/hud-re.md].
-		const Ref<Texture2D> border = load_hud_texture_("border.tga", ResourceRoot::TEXTURE_LOADER_TGA);
+		const Ref<Texture2D> border = load_hud_texture_("border.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+				opennova::hud::kBoxMaterialWord);
 		const Ref<Texture2D> brush = load_hud_texture_("boxtile.tga", ResourceRoot::TEXTURE_LOADER_TGA);
 		// The camo's own dims divide the pieces' screen-anchored second UV
 		// (HudLayout::box_tile_w/h carries the witness).
 		layout_.box_tile_w = brush.is_valid() ? brush->get_width() : 0;
 		layout_.box_tile_h = brush.is_valid() ? brush->get_height() : 0;
-		const Ref<Texture2D> icon = load_hud_texture_("neticon2.tga", ResourceRoot::TEXTURE_LOADER_TGA);
+		const Ref<Texture2D> icon = load_hud_texture_("neticon2.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+				opennova::hud::kNetIconMaterialWord);
 		textures_[opennova::hud::kHudTexBoxBorder] = border;
 		textures_[opennova::hud::kHudTexBoxTile] = brush;
 		textures_[opennova::hud::kHudTexNetIcon] = icon;
@@ -686,16 +593,21 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// The connection indicators' other two atlases: the T/R link-error
 		// pair and the NovaWorld N (hud_frame.h kHudTexNetLinkIcon carries the
 		// load witness). Absent files leave that icon undrawn.
-		const Ref<Texture2D> link_icon = load_hud_texture_("neticon1.tga", ResourceRoot::TEXTURE_LOADER_TGA);
-		const Ref<Texture2D> novaworld_icon = load_hud_texture_("neticon3.tga", ResourceRoot::TEXTURE_LOADER_TGA);
+		const Ref<Texture2D> link_icon = load_hud_texture_("neticon1.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+				opennova::hud::kNetIconMaterialWord);
+		const Ref<Texture2D> novaworld_icon = load_hud_texture_("neticon3.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+				opennova::hud::kNetIconMaterialWord);
 		textures_[opennova::hud::kHudTexNetLinkIcon] = link_icon;
 		textures_[opennova::hud::kHudTexNetNovaWorldIcon] = novaworld_icon;
 		layout_.net_link_icon_texture_valid = link_icon.is_valid();
 		layout_.net_novaworld_icon_texture_valid = novaworld_icon.is_valid();
 		// The tip panel's own box atlas (no second stage) and its two icons.
-		const Ref<Texture2D> tip_box = load_hud_texture_("border3.tga", ResourceRoot::TEXTURE_LOADER_TGA);
-		const Ref<Texture2D> tip_keyboard = load_hud_texture_("k_tip.tga", ResourceRoot::TEXTURE_LOADER_STAGE);
-		const Ref<Texture2D> tip_gameplay = load_hud_texture_("g_tip.tga", ResourceRoot::TEXTURE_LOADER_STAGE);
+		const Ref<Texture2D> tip_box = load_hud_texture_("border3.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+				opennova::hud::kBoxMaterialWord);
+		const Ref<Texture2D> tip_keyboard = load_hud_texture_("k_tip.tga", ResourceRoot::TEXTURE_LOADER_STAGE, false,
+				opennova::hud::kTipIconMaterialWord);
+		const Ref<Texture2D> tip_gameplay = load_hud_texture_("g_tip.tga", ResourceRoot::TEXTURE_LOADER_STAGE, false,
+				opennova::hud::kTipIconMaterialWord);
 		textures_[opennova::hud::kHudTexTipBox] = tip_box;
 		textures_[opennova::hud::kHudTexTipKeyboard] = tip_keyboard;
 		textures_[opennova::hud::kHudTexTipGameplay] = tip_gameplay;
@@ -711,9 +623,12 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// everyone else's zones -> 0x27239C0 @0x59e104/@0x59e10e, lfp_dlf.tga
 		// the tile for the viewer's OWN zones -> 0x27239D0 (textureId +4 =
 		// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md].
-		const Ref<Texture2D> team1 = load_hud_texture_("JO_LFP.tga", ResourceRoot::TEXTURE_LOADER_FILE);
-		const Ref<Texture2D> team2 = load_hud_texture_("R_LFP.tga", ResourceRoot::TEXTURE_LOADER_FILE);
-		const Ref<Texture2D> neutral = load_hud_texture_("N_LFP.tga", ResourceRoot::TEXTURE_LOADER_FILE);
+		const Ref<Texture2D> team1 = load_hud_texture_("JO_LFP.tga", ResourceRoot::TEXTURE_LOADER_FILE, false,
+				opennova::hud::kLfpIconMaterialWord);
+		const Ref<Texture2D> team2 = load_hud_texture_("R_LFP.tga", ResourceRoot::TEXTURE_LOADER_FILE, false,
+				opennova::hud::kLfpIconMaterialWord);
+		const Ref<Texture2D> neutral = load_hud_texture_("N_LFP.tga", ResourceRoot::TEXTURE_LOADER_FILE, false,
+				opennova::hud::kLfpIconMaterialWord);
 		const Ref<Texture2D> tile_own = load_hud_texture_("lfp_dlf.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 		const Ref<Texture2D> tile_other = load_hud_texture_("lfp_alf.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 		textures_[opennova::hud::kHudTexLfpTeam1] = team1;
@@ -765,7 +680,8 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// armory "A". The compiler's half-texel cell insets ride the PHYSICAL
 	// dimensions of whatever strip this install mounts (stock 16x480,
 	// RevX02 64x1920), so stamp the measured size.
-	const Ref<Texture2D> map_icons = load_hud_texture_("TSDicon.tga", ResourceRoot::TEXTURE_LOADER_FILE, true);
+	const Ref<Texture2D> map_icons = load_hud_texture_("TSDicon.tga", ResourceRoot::TEXTURE_LOADER_FILE, true,
+			opennova::hud::kTsdIconMaterialWord);
 	textures_[opennova::hud::kHudTexMapIcons] = map_icons;
 	if (map_icons.is_valid()) {
 		state_.minimap.icon_strip_w_px =
@@ -778,23 +694,21 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		state_.minimap.icon_strip_h_px =
 				opennova::hud::HudMinimapInput{}.icon_strip_h_px;
 	}
-	// The compass ring draws white-modulated through the fixed-function HUD
-	// pipeline, whose output stage is MODULATE2X — for a static sprite that
-	// is exactly a pre-doubled texture (the retail capture's band/letters
-	// read ~2x ours before this). RGB doubles with saturation; alpha stays.
-	textures_[opennova::hud::kHudTexMapCompass] =
-			double_saturate_texture_(load_hud_texture_("compring.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR));
-	// The radar sector-slice marks load like the compass ring; their
-	// MODULATE2X stage runs on the device (map_modulate2x_material), so the
-	// textures stay raw. The marks draw only while both loaded
+	// The compass ring and the radar sector-slice marks are colour-mode HUD
+	// textures: like every textured map sprite their material is colour family
+	// 0x600, whose MODULATE2X stage runs on the device (map_modulate2x_material),
+	// so the textures stay raw. The marks draw only while both loaded
 	// (HudMinimapInput::radar_slices_loaded carries the witness).
+	textures_[opennova::hud::kHudTexMapCompass] =
+			load_hud_texture_("compring.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_("dmgslice.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_("dmgslc_n.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	state_.minimap.radar_slices_loaded =
 			textures_[opennova::hud::kHudTexMapRadar].is_valid() &&
 			textures_[opennova::hud::kHudTexMapRadarNarrow].is_valid();
 	textures_[opennova::hud::kHudTexMapWpIndicator] =
-			load_hud_texture_("WPIndctr.tga", ResourceRoot::TEXTURE_LOADER_FILE);
+			load_hud_texture_("WPIndctr.tga", ResourceRoot::TEXTURE_LOADER_FILE, false,
+					opennova::hud::kWpIndicatorMaterialWord);
 
 	// The two hudpos font names; the width pick and the load ride
 	// ensure_label_fonts_, which runs on the first draw and on every width-tier
@@ -1916,20 +1830,6 @@ void HudOverlay::ensure_minimap_water_material_() {
 	minimap_water_material_->set_shader(minimap_water_shader_);
 }
 
-void HudOverlay::ensure_map_materials_() {
-	if (additive_material_.is_null()) {
-		additive_material_.instantiate();
-		additive_material_->set_blend_mode(CanvasItemMaterial::BLEND_MODE_ADD);
-	}
-	ensure_minimap_water_material_();
-	if (map_modulate2x_material_.is_null()) {
-		map_modulate2x_shader_.instantiate();
-		map_modulate2x_shader_->set_code(kMapModulate2xShader);
-		map_modulate2x_material_.instantiate();
-		map_modulate2x_material_->set_shader(map_modulate2x_shader_);
-	}
-}
-
 RID HudOverlay::map_additive_material() {
 	ensure_map_materials_();
 	return additive_material_->get_rid();
@@ -1951,6 +1851,15 @@ HudMapPassTextures HudOverlay::map_pass_textures() const {
 	out.water = textures_[opennova::hud::kHudTexMapWater];
 	out.slots = textures_.data();
 	out.slot_count = kTextureSlots;
+	// A sprite takes its texture's material: family 0x600 runs MODULATE2X.
+	for (int slot = 0; slot < kTextureSlots; ++slot) {
+		slot_modulate2x_[static_cast<size_t>(slot)] =
+				texture_stage_(textures_[static_cast<size_t>(slot)]) ==
+								opennova::renderer::MaterialColorStage::Modulate2x
+						? 1
+						: 0;
+	}
+	out.slot_modulate2x = slot_modulate2x_.data();
 	out.pages = page_textures_.data();
 	out.page_count = page_textures_.size();
 	return out;
@@ -2133,216 +2042,6 @@ void HudOverlay::ensure_page_item_() {
 	rs->canvas_item_set_z_index(page_item_, RenderingServer::CANVAS_ITEM_Z_MAX);
 	ensure_flat_material_();
 	rs->canvas_item_set_material(page_item_, flat_material_->get_rid());
-}
-
-void HudOverlay::ensure_flat_material_() {
-	if (flat_material_.is_valid()) return;
-	flat_shader_.instantiate();
-	flat_shader_->set_code(kHudFlatShader);
-	flat_material_.instantiate();
-	flat_material_->set_shader(flat_shader_);
-}
-
-void HudOverlay::render_flat_runs_(const RID &p_item, const HudDrawList &p_list,
-		const FlatRange &p_range) {
-	FlatRange run = p_range;
-	for (const HudDrawList::TopBegin &mark : p_list.order_breaks) {
-		run.quads_end = std::clamp(mark.quads, run.quads_begin, p_range.quads_end);
-		run.tris_end = std::clamp(mark.tris, run.tris_begin, p_range.tris_end);
-		run.lines_end = std::clamp(mark.lines, run.lines_begin, p_range.lines_end);
-		run.glyphs_end = std::clamp(mark.glyphs, run.glyphs_begin, p_range.glyphs_end);
-		run.underlines_end =
-				std::clamp(mark.underlines, run.underlines_begin, p_range.underlines_end);
-		render_flat_(p_item, p_list, run);
-		run.quads_begin = run.quads_end;
-		run.tris_begin = run.tris_end;
-		run.lines_begin = run.lines_end;
-		run.glyphs_begin = run.glyphs_end;
-		run.underlines_begin = run.underlines_end;
-	}
-	run.quads_end = p_range.quads_end;
-	run.tris_end = p_range.tris_end;
-	run.lines_end = p_range.lines_end;
-	run.glyphs_end = p_range.glyphs_end;
-	run.underlines_end = p_range.underlines_end;
-	render_flat_(p_item, p_list, run);
-}
-
-void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, const FlatRange &p_range) {
-	RenderingServer *rs = RenderingServer::get_singleton();
-	// Kind-grouped submission preserves the compiler's per-kind insertion
-	// order and keeps every glyph above the quads (retail draws its text
-	// elements over the bars/frames the same walk emitted).
-	for (size_t i = p_range.quads_begin; i < p_range.quads_end; ++i) {
-		const opennova::hud::HudQuad &quad = p_list.quads[i];
-		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
-		if (!quad.filled) {
-			PackedVector2Array outline;
-			outline.push_back(Vector2(quad.x0, quad.y0));
-			outline.push_back(Vector2(quad.x1, quad.y0));
-			outline.push_back(Vector2(quad.x1, quad.y1));
-			outline.push_back(Vector2(quad.x0, quad.y1));
-			outline.push_back(Vector2(quad.x0, quad.y0));
-			PackedColorArray outline_color;
-			outline_color.push_back(opennova::color_from_argb(quad.color));
-			rs->canvas_item_add_polyline(p_item, outline, outline_color, -1.0f);
-			continue;
-		}
-		Ref<Texture2D> tex;
-		if (quad.texture >= 0 && quad.texture < kTextureSlots) {
-			tex = textures_[static_cast<size_t>(quad.texture)];
-		}
-		// An alpha-mode texture draws with its material's colour.
-		const Color color = texture_draw_color_(tex, quad.color);
-		// A second texture stage: the flagged triangle pair kHudFlatShader
-		// combines, the stage-1 texture and its divisors bound on the item's
-		// material (every such quad names the same stage, the boxtile camo).
-		if (quad.texture2 >= 0 && quad.texture2 < kTextureSlots && tex.is_valid() &&
-				quad.stage2_w > 0.0f && quad.stage2_h > 0.0f &&
-				textures_[static_cast<size_t>(quad.texture2)].is_valid()) {
-			ensure_flat_material_();
-			flat_material_->set_shader_parameter("stage1_texture",
-					textures_[static_cast<size_t>(quad.texture2)]);
-			flat_material_->set_shader_parameter("stage1_inv_size",
-					Vector2(1.0f / quad.stage2_w, 1.0f / quad.stage2_h));
-			const Vector2 corners[4] = { Vector2(quad.x0, quad.y0), Vector2(quad.x1, quad.y0),
-				Vector2(quad.x1, quad.y1), Vector2(quad.x0, quad.y1) };
-			const Vector2 uvs[4] = { Vector2(quad.u0 + kStage1UvFlag, quad.v0),
-				Vector2(quad.u1 + kStage1UvFlag, quad.v0), Vector2(quad.u1 + kStage1UvFlag, quad.v1),
-				Vector2(quad.u0 + kStage1UvFlag, quad.v1) };
-			PackedVector2Array points, uv;
-			PackedColorArray colors;
-			PackedInt32Array indices;
-			for (int corner = 0; corner < 4; ++corner) {
-				points.push_back(corners[corner]);
-				uv.push_back(uvs[corner]);
-				colors.push_back(color);
-			}
-			for (int index : { 0, 1, 2, 0, 2, 3 }) indices.push_back(index);
-			rs->canvas_item_add_triangle_array(p_item, indices, points, colors, uv,
-					PackedInt32Array(), PackedFloat32Array(), tex->get_rid());
-			continue;
-		}
-		if (quad.additive) {
-			// Per-command blend modes do not exist on a CanvasItem: additive
-			// rows ride the child item carrying the add material.
-			ensure_additive_item_();
-			if (tex.is_valid()) {
-				rs->canvas_item_add_texture_rect(additive_item_, rect, tex->get_rid(),
-						false, color);
-			} else {
-				rs->canvas_item_add_rect(additive_item_, rect, color);
-			}
-			continue;
-		}
-		if (tex.is_valid()) {
-			if (quad.u0 != 0.0f || quad.v0 != 0.0f || quad.u1 != 1.0f || quad.v1 != 1.0f) {
-				const Vector2 tex_size = tex->get_size();
-				rs->canvas_item_add_texture_rect_region(p_item, rect, tex->get_rid(),
-						Rect2(quad.u0 * tex_size.x, quad.v0 * tex_size.y,
-								(quad.u1 - quad.u0) * tex_size.x,
-								(quad.v1 - quad.v0) * tex_size.y),
-						color);
-			} else {
-				rs->canvas_item_add_texture_rect(p_item, rect, tex->get_rid(), false, color);
-			}
-		} else {
-			rs->canvas_item_add_rect(p_item, rect, color);
-		}
-	}
-	// Consecutive texture runs preserve primitive order and per-vertex color.
-	// Device submission follows the font batch witness in docs/fonts/fnt-re.md;
-	// the compiler still owns all crosshair and glyph geometry.
-	for (size_t first = p_range.tris_begin; first < p_range.tris_end;) {
-		const int texture = p_list.tris[first].texture;
-		size_t end = first + 1;
-		while (end < p_range.tris_end && p_list.tris[end].texture == texture) ++end;
-		Ref<Texture2D> tex;
-		if (texture >= 0 && texture < kTextureSlots) tex = textures_[static_cast<size_t>(texture)];
-		const bool alpha_mode = tex.is_valid() && alpha_mode_textures_.count(tex->get_instance_id()) != 0;
-		const int count = static_cast<int>((end - first) * 3);
-		PackedVector2Array points, uvs;
-		PackedColorArray colors;
-		PackedInt32Array indices;
-		points.resize(count);
-		uvs.resize(count);
-		colors.resize(count);
-		indices.resize(count);
-		Vector2 *point = points.ptrw(), *uv = uvs.ptrw();
-		Color *color = colors.ptrw();
-		int32_t *index = indices.ptrw();
-		int vertex_index = 0;
-		for (size_t i = first; i < end; ++i) {
-			const auto &tri = p_list.tris[i];
-			const Color modulation = opennova::color_from_argb(tri.color);
-			for (const auto *vertex : { &tri.a, &tri.b, &tri.c }) {
-				point[vertex_index] = Vector2(vertex->x, vertex->y);
-				uv[vertex_index] = Vector2(vertex->u, vertex->v);
-				const Color diffuse = modulation * opennova::color_from_argb(vertex->color);
-				color[vertex_index] = alpha_mode
-						? opennova::color_from_argb(opennova::renderer::hud_alpha_material_argb(
-								  static_cast<uint32_t>(diffuse.to_argb32())))
-						: diffuse;
-				index[vertex_index] = vertex_index;
-				++vertex_index;
-			}
-		}
-		rs->canvas_item_add_triangle_array(p_item, indices, points, colors, uvs,
-				PackedInt32Array(), PackedFloat32Array(), tex.is_valid() ? tex->get_rid() : RID());
-		first = end;
-	}
-	for (size_t i = p_range.lines_begin; i < p_range.lines_end; ++i) {
-		const opennova::hud::HudLine &line = p_list.lines[i];
-		rs->canvas_item_add_line(p_item, Vector2(line.x0, line.y0), Vector2(line.x1, line.y1),
-				opennova::color_from_argb(line.color), line.width);
-	}
-	// Keep the existing kind order, page order, italic corners, half-pixel
-	// offsets and underline layer. Never sort text by texture across runs.
-	for (size_t first = p_range.glyphs_begin; first < p_range.glyphs_end;) {
-		const uint32_t page = p_list.glyphs[first].page;
-		size_t end = first + 1;
-		while (end < p_range.glyphs_end && p_list.glyphs[end].page == page) ++end;
-		if (page >= page_textures_.size() || page_textures_[page].is_null()) {
-			first = end;
-			continue;
-		}
-		const int count = static_cast<int>(end - first);
-		PackedVector2Array points, uvs;
-		PackedColorArray colors;
-		PackedInt32Array indices;
-		points.resize(count * 4);
-		uvs.resize(count * 4);
-		colors.resize(count * 4);
-		indices.resize(count * 6);
-		Vector2 *point = points.ptrw(), *uv = uvs.ptrw();
-		Color *color = colors.ptrw();
-		int32_t *index = indices.ptrw();
-		for (int i = 0; i < count; ++i) {
-			const auto &glyph = p_list.glyphs[first + static_cast<size_t>(i)];
-			const int base = i * 4;
-			point[base] = Vector2(glyph.x_top_left, glyph.y_top);
-			point[base + 1] = Vector2(glyph.x_top_right, glyph.y_top);
-			point[base + 2] = Vector2(glyph.x_bottom_right, glyph.y_bottom);
-			point[base + 3] = Vector2(glyph.x_bottom_left, glyph.y_bottom);
-			uv[base] = Vector2(glyph.u0, glyph.v0);
-			uv[base + 1] = Vector2(glyph.u1, glyph.v0);
-			uv[base + 2] = Vector2(glyph.u1, glyph.v1);
-			uv[base + 3] = Vector2(glyph.u0, glyph.v1);
-			const Color modulation = opennova::color_from_argb(glyph.color);
-			for (int corner = 0; corner < 4; ++corner) color[base + corner] = modulation;
-			static constexpr int corners[] = {0, 1, 2, 0, 2, 3};
-			for (int corner = 0; corner < 6; ++corner) index[i * 6 + corner] = base + corners[corner];
-		}
-		rs->canvas_item_add_triangle_array(p_item, indices, points, colors, uvs,
-				PackedInt32Array(), PackedFloat32Array(), page_textures_[page]->get_rid());
-		first = end;
-	}
-	for (size_t i = p_range.underlines_begin; i < p_range.underlines_end; ++i) {
-		const opennova::hud::GameFontUnderline &underline = p_list.underlines[i];
-		rs->canvas_item_add_line(p_item, Vector2(underline.x0, underline.y),
-				Vector2(underline.x1, underline.y), opennova::color_from_argb(underline.color),
-				1.0f);
-	}
 }
 
 void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,

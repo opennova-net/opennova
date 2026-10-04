@@ -15,6 +15,9 @@ typedef struct PffTestEntry {
     const uint8_t *data;    /* payload bytes */
     uint32_t size;          /* payload length */
     int encrypted;          /* modern only: store XOR-encrypted + set the encrypted flag */
+    int unstamped = 0;      /* modern only: +12 written 0, as a third-party packer may, which
+                               the effect loaders skip (D-VFS-13); else the writers' stamp,
+                               PFF_NEW_ENTRY_TIMESTAMP, as every retail entry is stamped */
 } PffTestEntry;
 
 /* Stateful ROL7 XOR keystream (PFF_LoadFileToMemory @ 0x768920). XOR is its own inverse, so
@@ -70,12 +73,14 @@ static inline int pff_test_write_modern(const char *path, const PffTestEntry *en
     for (i = 0; i < n; ++i) {
         uint8_t rec[opennova::pff::PFF_ENTRY_SIZE];
         uint32_t flags = entries[i].encrypted ? opennova::pff::PFF_FLAG_ENCRYPTED : 0u;
+        uint32_t stamp = entries[i].unstamped ? 0u : opennova::pff::PFF_NEW_ENTRY_TIMESTAMP;
         size_t nl = strlen(entries[i].name);
         if (nl > opennova::pff::PFF_NAME_SIZE) nl = opennova::pff::PFF_NAME_SIZE;
         memset(rec, 0, sizeof(rec));
         memcpy(rec + 0, &flags, 4);
         memcpy(rec + 4, &offs[i], 4);
         memcpy(rec + 8, &entries[i].size, 4);
+        memcpy(rec + 12, &stamp, 4);
         memcpy(rec + 16, entries[i].name, nl);  /* name field, zero-padded */
         fwrite(rec, 1, sizeof(rec), f);
     }

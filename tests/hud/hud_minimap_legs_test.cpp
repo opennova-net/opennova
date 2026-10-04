@@ -346,12 +346,40 @@ void test_farp_chevron() {
 	in.overlay_color = 0xFF40A040u;
 	HudMinimapCompiler compiler;
 	const HudMapPass &p = compiler.compile(in);
+	// The chevron's diffuse is the raw active colour: the TSDicon strip's
+	// material 0x651 doubles it on the device (D-HUD-49).
 	int tips = 0;
 	for (const HudMapSprite &s : p.sprites)
-		if (s.layer == 4 && s.color == 0xFF80FF80u) ++tips;
-	CHECK(tips == 1 && p.lines.empty(), "one chevron, no line");
+		if (s.layer == 4 && s.color == 0xFF40A040u) ++tips;
+	CHECK(tips == 1 && p.lines.empty(), "one chevron in the raw colour, no line");
 	in.item_flash[14] = 0x20;
 	CHECK(compiler.compile(in).sprites.size() == 1, "a dark timer-14 phase hides it (compass remains)");
+}
+
+// bit20 — the WPIndctr altitude nub passes the raw half-bright state colour
+// (blue below, orange above, green level): the strip's material 0x300631
+// doubles it on the device, so the compile never folds it (D-HUD-49).
+// [orig: HUD_UpdateWaypointAltitudeColor @0x590970; the bit20 leg
+//  @0x5a79b1..0x5a7a10]
+void test_waypoint_nub_raw_state_colour() {
+	struct Case {
+		int32_t dz;
+		uint32_t color;
+	};
+	for (const Case c : {Case{-(3 << 16), 0xFF20407Fu}, Case{3 << 16, 0xFF7F5000u},
+				 Case{0, 0xFF007000u}}) {
+		HudMinimapInput in = corner();
+		in.flags |= 0x100000u;
+		in.waypoint_present = true;
+		in.waypoint_x = 300 << 16;
+		in.waypoint_z = c.dz;
+		HudMinimapCompiler compiler;
+		const HudMapSprite *nub = nullptr;
+		for (const HudMapSprite &s : compiler.compile(in).sprites)
+			if (s.texture == 3) nub = &s;
+		CHECK(nub != nullptr && nub->color == c.color,
+				"the nub passes the raw state colour");
+	}
 }
 
 // bit3 — the zone letter, twice at the anchor less (scaleX(8)/2,
@@ -595,6 +623,7 @@ int main() {
 	test_blip_flash_gates();
 	test_objective_tethers();
 	test_farp_chevron();
+	test_waypoint_nub_raw_state_colour();
 	test_zone_letters();
 	test_zone_waypoint_labels();
 	test_pool3_walk();

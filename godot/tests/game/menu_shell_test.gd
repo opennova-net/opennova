@@ -76,6 +76,12 @@ func _fixture_bytes(source: String) -> PackedByteArray:
 		body = MenuDriverFixture.wnd("list", "MISSION_LIST", 20)
 		body += MenuDriverFixture.wnd("button", "ACCEPT", 50)
 		body += MenuDriverFixture.wnd("button", "EXIT", 80)
+		# retail's main.mnu: an empty right-justified VERSION static, then the
+		# copyright line under the same name.
+		body += MenuDriverFixture.wnd("static", "VERSION", 110,
+				'<STRING justify="RIGHT"></STRING>')
+		body += MenuDriverFixture.wnd("static", "VERSION", 140,
+				'<STRING justify="LEFT">(c) 2009, NovaLogic, Inc.</STRING>')
 	elif source == SP_FIXTURE:
 		screen = "LOADOUT"
 	var xml := MenuDriverFixture.screen_xml(screen, body)
@@ -120,6 +126,26 @@ func test_boots_into_main_menu_startup() -> void:
 	assert_not_null(driver, "the interaction driver is built")
 	assert_not_null(shell.get_frame(), "the compiled frame surface is built")
 	assert_eq(driver.get_current_screen(), "STARTUP", "STARTUP screen shown")
+	_cleanup(dir)
+
+
+# The STARTUP screen's activate draws the build's version in its first VERSION
+# static; the copyright line under the same name keeps its text.
+# [orig: UI_OnStartupScreenActivate @0x5557f0 -> UI_FindScreenControl @0x63ae80]
+func test_startup_screen_shows_the_version() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable in this environment")
+		_cleanup(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	var version := driver.widget_id("VERSION")
+	assert_gt(version, 0, "the VERSION static exists")
+	assert_eq(driver.get_widget_text(version), "V1.7.5.7",
+			"the first VERSION static shows the build's version")
+	assert_eq(driver.get_widget_text(version + 1), "(c) 2009, NovaLogic, Inc.",
+			"the second keeps its authored text")
 	_cleanup(dir)
 
 

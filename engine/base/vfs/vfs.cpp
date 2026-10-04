@@ -6,6 +6,7 @@
 #include <formats/rtxt/rtxt.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstring>
 #include <filesystem>
@@ -231,6 +232,10 @@ struct Vfs::Impl {
     std::vector<std::string> retail_loose_probe_paths;
     std::unique_ptr<ArchiveMount> primary;
     std::vector<std::unique_ptr<ArchiveMount>> secondaries; // add order
+    // The retail slot each mounted archive fills (vfs.h kArchiveSlotCount): views into
+    // primary/secondaries, null for a slot no archive fills. mount_game's RetailTable
+    // discovery alone writes them.
+    std::array<ArchiveMount *, kArchiveSlotCount> slots{};
     std::string game_root;
     // The expansion whose layers actually mounted (empty after the silent base fallback).
     std::string mounted_expansion;
@@ -241,6 +246,9 @@ struct Vfs::Impl {
     mutable bool index_valid = false;
     mutable std::unordered_map<std::string, ResolvedEntry> index;
     mutable std::vector<const ResolvedEntry *> ordered;     // stable enumeration order
+    // flat key -> whether any mounted archive's entry of that name carries a nonzero +12
+    // stamp; a key absent from the map is carried by no archive. Built with the index.
+    mutable std::unordered_map<std::string, bool> archive_stamped;
 
     void invalidate() { index_valid = false; }
 
@@ -294,15 +302,29 @@ struct Vfs::Impl {
         }
     }
 
+    void note_archive_stamps(const ArchiveMount *mount) const {
+        if (!mount) return;
+        for (uint32_t i = 0; i < mount->ar.entry_count; ++i) {
+            const PffEntry &pe = mount->ar.entries[i];
+            const std::string key = to_lower(pff_entry_name(pe));
+            if (key.empty()) continue;
+            bool &stamped = archive_stamped[key]; // inserted false
+            stamped = stamped || pe.timestamp != 0;
+        }
+    }
+
     void ensure_index() const {
         if (index_valid) return;
         index.clear();
         ordered.clear();
+        archive_stamped.clear();
 
         int precedence = 0;
         for (const std::string &dir : search_paths) scan_loose(dir, precedence++);
         if (primary) scan_archive(primary.get(), precedence++);
         for (const std::unique_ptr<ArchiveMount> &sec : secondaries) scan_archive(sec.get(), precedence++);
+        note_archive_stamps(primary.get());
+        for (const std::unique_ptr<ArchiveMount> &sec : secondaries) note_archive_stamps(sec.get());
 
         ordered.reserve(index.size());
         for (const auto &kv : index) ordered.push_back(&kv.second);
@@ -415,6 +437,9 @@ bool Vfs::add_search_path(const std::string &dir) {
 bool Vfs::set_primary_archive(const std::string &pff_path) {
     std::unique_ptr<ArchiveMount> m = impl_->open_archive(pff_path);
     if (!m) return false;
+    // A replaced primary leaves the slot it filled.
+    for (ArchiveMount *&slot : impl_->slots)
+        if (slot != nullptr && slot == impl_->primary.get()) slot = nullptr;
     impl_->primary = std::move(m);
     impl_->invalidate();
     return true;
@@ -469,8 +494,12 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
         retain_loose_probe(game_root);                  // engine CWD probe: base loose files
         if (mount_archives) {
             const std::string local = io::utf8_join(exp_dir, expansion + "L.pff");
-            if (fs::exists(io::os_path(local), ec)) set_primary_archive(local);
-            add_secondary_archive(io::utf8_join(exp_dir, expansion + ".pff"));
+            if (fs::exists(io::os_path(local), ec) && set_primary_archive(local) &&
+                discovery == VfsArchiveDiscovery::RetailTable)
+                impl_->slots[kArchiveSlotExpansionText] = impl_->primary.get();
+            if (add_secondary_archive(io::utf8_join(exp_dir, expansion + ".pff")) &&
+                discovery == VfsArchiveDiscovery::RetailTable)
+                impl_->slots[kArchiveSlotExpansion] = impl_->secondaries.back().get();
         }
     } else {
         retain_loose_probe(game_root);
@@ -504,10 +533,15 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
     // opens via _lopen on a case-insensitive filesystem); a missing archive
     // just leaves its slot empty — only the all-missing case is fatal at the
     // caller (required-resources.md).
+    int slot = kArchiveSlotLanguage;
     for (const char *slot_name : kBootArchiveTable) {
+        const auto mount_slot = [&](const std::string &path) {
+            if (add_secondary_archive(path)) impl_->slots[slot] = impl_->secondaries.back().get();
+        };
         const std::string direct = io::utf8_join(game_root, slot_name);
         if (fs::exists(io::os_path(direct), ec)) {
-            add_secondary_archive(direct);
+            mount_slot(direct);
+            ++slot;
             continue;
         }
         // Case-insensitive probe for case-sensitive filesystems.
@@ -516,10 +550,11 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
             if (ec) break;
             const std::string name = io::utf8_path(de.path().filename());
             if (de.is_regular_file(ec) && to_lower(name) == slot_name) {
-                add_secondary_archive(io::utf8_join(game_root, name));
+                mount_slot(io::utf8_join(game_root, name));
                 break;
             }
         }
+        ++slot;
     }
 
     return true;
@@ -530,12 +565,14 @@ void Vfs::clear() {
     impl_->retail_loose_probe_paths.clear();
     impl_->primary.reset();
     impl_->secondaries.clear();
+    impl_->slots.fill(nullptr);
     impl_->game_root.clear();
     impl_->mounted_expansion.clear();
     impl_->last_error.clear();
     impl_->session_mount_mode = VfsMountMode::PackedWithLooseOverride;
     impl_->index.clear();
     impl_->ordered.clear();
+    impl_->archive_stamped.clear();
     impl_->index_valid = false;
 }
 
@@ -661,6 +698,37 @@ std::vector<VfsFileLocation> Vfs::list_files() const {
         out.push_back(std::move(loc));
     }
     return out;
+}
+
+std::vector<VfsArchiveEntry> Vfs::archive_slot_entries(int slot) const {
+    std::vector<VfsArchiveEntry> out;
+    if (slot < 0 || slot >= kArchiveSlotCount) return out;
+    const ArchiveMount *mount = impl_->slots[static_cast<size_t>(slot)];
+    if (mount == nullptr) return out;
+    out.reserve(mount->ar.entry_count);
+    for (uint32_t i = 0; i < mount->ar.entry_count; ++i) {
+        const PffEntry &pe = mount->ar.entries[i];
+        VfsArchiveEntry entry;
+        entry.name = pff_entry_name(pe);
+        entry.timestamp = pe.timestamp;
+        out.push_back(std::move(entry));
+    }
+    return out;
+}
+
+bool Vfs::archive_slot_has_file(int slot, const std::string &name) const {
+    if (slot < 0 || slot >= kArchiveSlotCount) return false;
+    const ArchiveMount *mount = impl_->slots[static_cast<size_t>(slot)];
+    std::string key;
+    if (mount == nullptr || !retail_archive_query_key(name, key)) return false;
+    return mount->retail_entries.count(key) != 0;
+}
+
+VfsArchiveStamp Vfs::archive_stamp(const std::string &name) const {
+    impl_->ensure_index();
+    const auto found = impl_->archive_stamped.find(flat_key(name));
+    if (found == impl_->archive_stamped.end()) return VfsArchiveStamp::NotArchived;
+    return found->second ? VfsArchiveStamp::Stamped : VfsArchiveStamp::Unstamped;
 }
 
 const std::string &Vfs::game_root() const { return impl_->game_root; }

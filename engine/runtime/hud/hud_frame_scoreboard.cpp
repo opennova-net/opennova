@@ -70,7 +70,7 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	emit_stdbox(sx(static_cast<float>(kBoardX1), w),
 			sy(static_cast<float>(kBoardY1), h),
 			sx(static_cast<float>(kBoardX2), w),
-			sy(static_cast<float>(kBoardY2), h), w, 0xFFFFFFFFu, title_gap);
+			sy(static_cast<float>(kBoardY2), h), w, 0xFFu, title_gap);
 	// The title just inside the panel's top-left corner, white, left-aligned
 	// [orig: (x+15, y+2) @0x51f002/@0x51f006; the caller's -1 @0x423a90].
 	text(sb.title.c_str(), static_cast<float>(kBoardX1 + kTitleDx),

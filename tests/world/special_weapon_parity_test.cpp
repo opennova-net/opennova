@@ -1,6 +1,7 @@
 // Retail gameplay seams: 0x4DFA40, 0x4E0EC3, 0x4DC750, 0x445DB0,
 // 0x446060 and 0x488AB0. The jo-c guided vectors cover the separate motor.
 #include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_panm_pose.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_pose.h>
 #include <runtime/world/hud_combat_feed.h>
@@ -10,9 +11,11 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_motor_detail.h>
 #include <runtime/world/world.h>
+#include "common/test_paths.h"
 #include <algorithm>
 #include <cstdio>
 #include <memory>
+#include <string>
 using namespace opennova::world;
 using namespace opennova::def;
 static int failures = 0;
@@ -371,6 +374,51 @@ void pose_provider_turns_the_euler_by_the_point_direction() {
     CHECK(turn > 0x40000000 - 0x10000 && turn < 0x40000000 + 0x10000);
     CHECK(!provider.resolve_userpoint_frame(world, handle, &model, 2, plain, nullptr));
 }
+// The point's part bound, signed: -1 and an index past the part count ride part 0,
+// the root, posed by its PANM; the count itself (one past the parts) reads past the
+// posed rows in retail and stays in the entity frame here (D-3DI-8). The fixture's
+// one part swings on a free-running rotation-x sine, so part 0's frame differs from
+// the entity's.
+// [orig: Userpoint_ComputeWorldTransform @0x56C474..0x56C489]
+void pose_provider_maps_the_userpoint_part_as_retail() {
+    opennova::threedi::Threedi3di3 model{};
+    const std::string path = std::string(test_paths_repo_root(__FILE__)) +
+            "/fixtures/threedi/synth/house_lod0_sine_rotx.3di";
+    CHECK(opennova::threedi::threedi_3di3_read(path.c_str(), &model) == 0);
+    if (model.lods == nullptr || model.lod_count == 0) return;
+    auto storage = std::make_unique<World>();
+    World &world = *storage;
+    world.registry.configure_pool(1, 2);
+    Entity seed;
+    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.yaw = 0;
+    const auto handle = world.registry.spawn(1, seed);
+    // One point per part index: the root (0), -1, the count (1), past it (2), -2.
+    opennova::threedi::ThreediUserPoint points[5] = {};
+    const int parts[5] = {0, -1, 1, 2, -2};
+    for (int i = 0; i < 5; ++i) {
+        points[i].x = 3 * 65536; points[i].y = 65536; points[i].subobject_index = parts[i];
+    }
+    opennova::threedi::ThreediUserPoint *saved_points = model.user_points;
+    const uint32_t saved_count = model.user_point_count;
+    model.user_points = points;
+    model.user_point_count = 5;
+    EntityPoseProvider provider;
+    provider.panm_time_override_ms = 250; // the sine's swing away from rest (zero at 750)
+    int32_t at[5][6] = {};
+    for (int i = 0; i < 5; ++i)
+        CHECK(provider.resolve_userpoint_frame(world, handle, &model, i + 1, at[i], nullptr));
+    CHECK(opennova::threedi::threedi_panm_lod_has_live(model, 0) && model.lods[0].render_object_count == 1);
+    const auto same = [&](int a, int b) {
+        return at[a][0] == at[b][0] && at[a][1] == at[b][1] && at[a][2] == at[b][2];
+    };
+    CHECK(same(1, 0));   // -1 is the root
+    CHECK(same(3, 0));   // past the count is the root
+    CHECK(!same(2, 0));  // the count itself is not the posed root...
+    CHECK(same(2, 4));   // ...and lands in the entity frame like -2
+    model.user_points = saved_points;
+    model.user_point_count = saved_count;
+    opennova::threedi::threedi_3di3_free(&model);
+}
 // ctank input does not translate lean keys into bike jump/brake flags.
 // [orig: Entity_UpdateTankVehiclePhysics @0x489675..0x4896A7]
 void tank_input_preserves_non_input_flags() {
@@ -474,6 +522,7 @@ int main() {
     controller_fire_asks_for_the_point_direction();
     commander_line_starts_at_the_gun_launch_point();
     pose_provider_turns_the_euler_by_the_point_direction();
+    pose_provider_maps_the_userpoint_part_as_retail();
     guided_rounds_track_the_target_aim_origin();
     tank_input_preserves_non_input_flags();
     if (!failures) std::puts("special_weapon_parity: all checks passed");

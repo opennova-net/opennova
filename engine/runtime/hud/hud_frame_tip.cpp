@@ -29,15 +29,6 @@ int to_virtual(int v, int surface, int extent) {
 			surface);
 }
 
-// A MODULATE2X material's diffuse folded into the quad colour: each channel
-// doubled, clamped (the icon and the box ride flag word 0x651, colour op
-// MOD2X(TEXTURE, DIFFUSE), alpha op MODULATE(TEXTURE, DIFFUSE)).
-uint32_t fold_modulate2x(uint32_t argb) {
-	const auto doubled = [](uint32_t c) { return std::min(c * 2u, 255u); };
-	return (argb & 0xFF000000u) | (doubled((argb >> 16) & 0xFFu) << 16) |
-			(doubled((argb >> 8) & 0xFFu) << 8) | doubled(argb & 0xFFu);
-}
-
 } // namespace
 
 void HudFrameCompiler::element_tip(const HudFrameState &state, bool alternate, float w,
@@ -89,7 +80,9 @@ void HudFrameCompiler::element_tip(const HudFrameState &state, bool alternate, f
 	const int y1 = text_h + slot[1] + slot[3];
 
 	// The box: the rect scaled with rounding, the box scale W/1024, the
-	// diffuse alpha<<24 | 0x7F7F7F [orig: Viewport_ScaleRectByDimensions
+	// diffuse alpha<<24 | 0x7F7F7F, raw: the box material 0x651 doubles it on
+	// the device (hud_texture_materials.h kBoxMaterialWord)
+	// [orig: Viewport_ScaleRectByDimensions
 	// @0x5b6fae, Viewport_ScaleOptionalXY(1.0) @0x5b6fbf, Render_HUDBoxOverlay
 	// @0x5b6fdf; the diffuse @0x56b70e..0x56b713]. The MrClippy style takes
 	// the rec+0x3C != 0 arm: ONE fill quad of atlas cell (1,1) inset a cell
@@ -102,14 +95,15 @@ void HudFrameCompiler::element_tip(const HudFrameState &state, bool alternate, f
 		const float by1 = static_cast<float>(to_screen(y1, sh, 768));
 		const float box_scale = static_cast<float>(static_cast<double>(sw) * 1.0 * 0.0009765625);
 		const float cell = static_cast<float>(layout_.tip_box_tex_w >> 2) * box_scale;
-		const uint32_t box_color = fold_modulate2x(a24 | 0x7F7F7Fu);
+		const uint32_t box_color = a24 | 0x7F7F7Fu;
 		emit_stdbox_piece(bx0 + cell, by0 + cell, bx1 - cell, by1 - cell, 1, 1, false, box_color,
 				kHudTexTipBox);
 		emit_box_pieces(bx0, by0, bx1, by1, cell, cell, box_color, 0.0f, kHudTexTipBox);
 	}
 
 	// The icon: 48 design px square at (x + 28, y + 32), the whole texture,
-	// the grey diffuse under the icon's MODULATE2X material [orig:
+	// the raw grey diffuse under the icon's MODULATE2X material 0x651
+	// (hud_texture_materials.h kTipIconMaterialWord) [orig:
 	// @0x5b6fe6..0x5b7088 — Viewport_ScaleRectToScreen, GfxShader_ApplyPassChecked
 	// (k_tip +0x24 / g_tip +0x28), CGfxDevice_SetQuadDiffuse(grey)].
 	const bool icon_valid = keys.gameplay ? layout_.tip_gameplay_texture_valid
@@ -122,7 +116,7 @@ void HudFrameCompiler::element_tip(const HudFrameState &state, bool alternate, f
 				static_cast<float>(static_cast<double>(sh) * iy * ky),
 				static_cast<float>(kx * (static_cast<double>(sw) * (ix + 48.0f))),
 				static_cast<float>(ky * (static_cast<double>(sh) * (iy + 48.0f))), 0.0f, 0.0f,
-				1.0f, 1.0f, fold_modulate2x(grey),
+				1.0f, 1.0f, grey,
 				keys.gameplay ? kHudTexTipGameplay : kHudTexTipKeyboard);
 	}
 

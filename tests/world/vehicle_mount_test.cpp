@@ -3239,6 +3239,23 @@ void test_seat_and_emplacement_keep_subdegree_carrier_pose() {
     CHECK(std::abs(mission_yaw_deg_from_bam_heading(pose.heading) - 0.25) < 0.001);
     CHECK(std::abs(pose.pitch * kDegreesPerBam - 0.25) < 0.001);
     CHECK(std::abs(pose.roll * kDegreesPerBam + 0.25) < 0.001);
+    // The attachment's part bound, signed: any negative and an index past the part
+    // count ride part 0; the count itself reads past the posed rows in retail and
+    // resolves nothing here (D-3DI-8). [orig: Bone_BuildAttachmentMatrix
+    // @ 0x56C672..0x56C685]
+    const MountedPose root_pose = pose;
+    for (const int32_t mapped : {-1, -7, 2}) {
+        point.subobject_index = mapped;
+        MountedPose remapped;
+        CHECK(resolve_model_mounted_pose(model, carrier, anchor, nullptr, 0, remapped));
+        CHECK(std::abs(remapped.position.x - root_pose.position.x) < 0.0001 &&
+                std::abs(remapped.position.y - root_pose.position.y) < 0.0001 &&
+                std::abs(remapped.position.z - root_pose.position.z) < 0.0001);
+    }
+    point.subobject_index = 1;
+    MountedPose past;
+    CHECK(!resolve_model_mounted_pose(model, carrier, anchor, nullptr, 0, past));
+    point.subobject_index = 0;
 
     World w;
     w.registry.configure_pool(0, 4);

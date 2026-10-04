@@ -133,7 +133,8 @@ func _doubled(c: Color) -> Color:
 func test_alpha_mode_art_draws_twice_the_vertex_colour() -> void:
 	# The stance art loads in alpha mode, whose material 0xA51 draws ADD(DIFFUSE,
 	# DIFFUSE): twice the vertex colour, saturated, the texture's colour unread. A
-	# ".FULL" name loads it in colour mode, drawn at the vertex colour.
+	# ".FULL" name loads it in colour mode, drawn under 0x651's MODULATE2X(TEXTURE,
+	# DIFFUSE): twice texel x vertex colour.
 	for stance_name in ["stance.tga", "stance.tga.full"]:
 		var dir := _root_dir("hud_alpha_draw")
 		TestFs.write_bytes(self, dir.path_join("stance.tga"), TestFs.tga_bytes(Vector2i(2, 2), Color8(10, 20, 30, 255)))
@@ -149,12 +150,25 @@ func test_alpha_mode_art_draws_twice_the_vertex_colour() -> void:
 		if drawn.size() != 1:
 			continue
 		assert_eq(compiled[0].r8, 80, "the stance tint is the vertex colour")
+		# Both materials draw a white texel at twice 0x50.
+		assert_eq(drawn[0].r8, 160, "0x50 doubles to 0xA0 (%s)" % stance_name)
+		var rows: Array = hud.get_flat_submissions()
+		assert_eq(rows.size(), 1)
+		if rows.size() != 1:
+			continue
 		if stance_name == "stance.tga":
 			assert_true(drawn[0].is_equal_approx(_doubled(compiled[0])),
 					"alpha mode draws twice the vertex colour (%s from %s)" % [drawn[0], compiled[0]])
-			assert_eq(drawn[0].r8, 160, "0x50 doubles to 0xA0")
+			assert_eq(rows[0].kind, "rect", "the alpha material folds into the submitted colour")
+			assert_eq(rows[0].colors[0].r8, 160)
 		else:
-			assert_true(drawn[0].is_equal_approx(compiled[0]), "colour mode draws the vertex colour")
+			# Colour mode: the raw vertex colour goes to the device, whose 0x651
+			# material runs MODULATE2X(TEXTURE, DIFFUSE) on the flagged command
+			# (D-HUD-49).
+			assert_eq(rows[0].kind, "triangles", "a .FULL name draws a flagged triangle pair")
+			for uv: Vector2 in rows[0].uvs:
+				assert_gte(uv.y, 8.0, "every vertex carries the MODULATE2X flag")
+			assert_eq(rows[0].colors[0].r8, 80, "the device gets the raw vertex colour")
 
 
 # --- 2. Model texture type 1 -----------------------------------------------
@@ -339,6 +353,81 @@ func test_dds_reader_decodes_by_content() -> void:
 		var data := image.get_data()
 		assert_eq(Color8(data[level1], data[level1 + 1], data[level1 + 2]), Color8(0, 255, 0),
 				"the authored level 1 survives")
+
+
+# The rest of D3DX's content sniff: a PPM, a PFM and a headerless DIB under a
+# .dds name decode too (D-RMAT-17; the codecs' witnesses ride
+# renderer/d3dx_image_codecs.h, ctest renderer_d3dx_image_codecs).
+# [orig: D3DXTex::CImage::Load @ 0x6DF1DC, the codec order @ 0x6DF212..0x6DF242]
+func test_dds_reader_decodes_ppm_pfm_and_dib() -> void:
+	var dir := _root_dir("dds_codecs")
+	var ppm := "P6\n2 1\n255\n".to_ascii_buffer()
+	ppm.append_array(PackedByteArray([255, 0, 0, 0, 0, 255]))
+	# A grey PFM, little-endian by its negative scale: one texel of 0.5.
+	var pfm := "Pf\n1 1\n-1.0\n".to_ascii_buffer()
+	var texel := PackedByteArray()
+	texel.resize(4)
+	texel.encode_float(0, 0.5)
+	pfm.append_array(texel)
+	# A 1 x 1 24-bit BITMAPINFOHEADER with no file header: one green pixel (B, G, R)
+	# and the row's pad byte.
+	var dib := PackedByteArray()
+	dib.resize(40)
+	dib.encode_u32(0, 40)
+	dib.encode_s32(4, 1)
+	dib.encode_s32(8, 1)
+	dib.encode_u16(12, 1)
+	dib.encode_u16(14, 24)
+	dib.append_array(PackedByteArray([0, 255, 0, 0]))
+	var root := _packed(dir, [
+		{"name": "ppm.dds", "bytes": ppm},
+		{"name": "pfm.dds", "bytes": pfm},
+		{"name": "dib.dds", "bytes": dib},
+	])
+	var stage := ResourceRoot.TEXTURE_LOADER_STAGE
+	var ppm_texture := root.load_texture("ppm.dds", stage)
+	assert_not_null(ppm_texture, "a P6 PPM under a .dds name decodes")
+	if ppm_texture != null:
+		assert_eq(_pixel(ppm_texture, 0, 0), Color.RED)
+		assert_eq(_pixel(ppm_texture, 1, 0), Color.BLUE)
+	var pfm_texture := root.load_texture("pfm.dds", stage)
+	assert_not_null(pfm_texture, "a grey PFM under a .dds name decodes")
+	if pfm_texture != null:
+		assert_eq(_pixel(pfm_texture), Color8(128, 128, 128),
+				"0.5 through D3DX's 8-bit encode: trunc(127.5 + 0.5)")
+	var dib_texture := root.load_texture("dib.dds", stage)
+	assert_not_null(dib_texture, "a headerless DIB under a .dds name decodes")
+	if dib_texture != null:
+		assert_eq(_pixel(dib_texture), Color.GREEN)
+
+
+# D3DX's HDR codec under a .dds name: decoded straight into the image's one buffer,
+# made only once the scanlines describe the image. A 16384 x 16384 header over 64 KiB
+# of bare words fails its size step, before any buffer, and reads as no texture
+# [orig: D3DXTex_LoadHDRFromMemory @0x6DEA53; the flat scanline @0x6DEF26..0x6DF00A].
+func test_dds_reader_decodes_hdr_into_one_buffer() -> void:
+	var dir := _root_dir("dds_hdr")
+	var hdr := "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 3\n".to_ascii_buffer()
+	hdr.append_array(PackedByteArray([10, 20, 30, 128, 40, 50, 60, 128, 70, 80, 90, 128]))
+	var huge := "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 16384 +X 16384\n".to_ascii_buffer()
+	var words := PackedByteArray()
+	words.resize(16384 * 4)
+	words.fill(0x10)
+	huge.append_array(words)
+	var root := _packed(dir, [
+		{"name": "flat.dds", "bytes": hdr},
+		{"name": "huge.dds", "bytes": huge},
+	])
+	var stage := ResourceRoot.TEXTURE_LOADER_STAGE
+	var flat := root.load_texture("flat.dds", stage)
+	assert_not_null(flat, "a flat HDR under a .dds name decodes")
+	if flat != null:
+		assert_eq(flat.get_width(), 3)
+		# (byte + 0.5) * 2^(128 - 136) through D3DX's 8-bit encode: 40 -> 40.
+		assert_eq(_pixel(flat, 0, 0), Color8(40, 50, 60), "the first word is held, never written")
+		assert_eq(_pixel(flat, 2, 0), Color8(0, 0, 0), "the last pixel stays unwritten")
+	assert_null(root.load_texture("huge.dds", stage),
+			"a header its data cannot describe is no texture, and no 1 GiB buffer")
 
 
 func test_names_differing_in_case_stay_apart() -> void:

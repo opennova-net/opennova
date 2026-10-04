@@ -1308,12 +1308,13 @@ private:
 	void emit_rect_uv(float x0, float y0, float x1, float y1, float u0, float v0,
 			float u1, float v1, uint32_t color, int32_t texture);
 	// The retail stdbox panel and the per-row connection icon. The box takes
-	// the surface width because its pieces and fill inset scale with it.
+	// the surface width because its pieces and fill inset scale with it, and
+	// the box's alpha (0..255), which its diffuse alpha<<24 | 0x7F7F7F carries.
 	// title_gap_w > 0 draws the TITLED top row: the row-3 stub / title-bar /
 	// end-cap cells around a gap of that many output pixels
 	// [orig: the outTechnique arm @0x56b937, cells rec+0x108/0x120/0x138].
 	void emit_stdbox(float x0, float y0, float x1, float y1, float surface_w,
-			uint32_t color, float title_gap_w);
+			uint32_t alpha, float title_gap_w);
 	void emit_stdbox_piece(float x0, float y0, float x1, float y1, int col,
 			int row, bool crop_bottom, uint32_t color, int32_t texture = kHudTexBoxBorder);
 	// The eight border pieces of a box style over its atlas `texture`, each

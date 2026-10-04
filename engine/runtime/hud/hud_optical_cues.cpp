@@ -141,23 +141,21 @@ void HudFrameCompiler::element_optical_cues(const HudFrameState &s, float w, flo
 				float(layout_.combat.impact_y), w, h, half_bright_argb(active_color(s)), 0);
 	}
 }
-// HUD_DrawTexturedQuadCentered over a shader loaded alpha mode 0 by
-// sub_591750 (flag word 0x651: colour op 0x600 = MODULATE2X(TEXTURE, DIFFUSE),
-// alpha op 0x50 = MODULATE(TEXTURE, DIFFUSE)), which the fold below bakes into
-// the diffuse. The corners are the design centre +- the extent / 2 (C
-// division) scaled onto the surface by the integer
-// Viewport_ScaleToVirtualCoords; the UVs inset half a texel of the DESIGN
-// extent and widen by one output pixel. Two textured triangles, so the quad
-// keeps its place inside a kind-grouped run.
+// HUD_DrawTexturedQuadCentered: the caller's diffuse on every corner, raw. The
+// texture's material decides the colour (a colour-mode texture's 0x651 doubles it
+// on the device, renderer::hud_color_material_argb; D-HUD-49), so nothing is folded
+// here. The corners are the design centre +- the extent / 2 (C division) scaled
+// onto the surface by the integer Viewport_ScaleToVirtualCoords; the UVs inset half
+// a texel of the DESIGN extent and widen by one output pixel. Two textured
+// triangles, so the quad keeps its place inside a kind-grouped run.
 // [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- the corners
 //  @0x590a14..0x590a33, Viewport_ScaleToVirtualCoords @0x590b04 / @0x590b18,
-//  the UVs @0x590ba6..0x590be4; flags 1617 = 0x651 sub_591750 @0x59181a]
+//  the UVs @0x590ba6..0x590be4]
 void HudFrameCompiler::emit_textured_quad_centered(int32_t cx, int32_t cy, int32_t qw,
 		int32_t qh, int32_t texture, uint32_t diffuse, float w, float h) {
 	if (qw <= 0 || qh <= 0)
 		return;
 	const int32_t surface_w = int32_t(w), surface_h = int32_t(h);
-	const uint32_t folded = (diffuse & 0xFF000000u) | ((diffuse & 0x7F7F7Fu) << 1);
 	const float x0 = float(design_to_screen_x(cx - qw / 2, surface_w));
 	const float x1 = float(design_to_screen_x(qw / 2 + cx, surface_w));
 	const float y0 = float(design_to_screen_y(cy - qh / 2, surface_h));
@@ -169,12 +167,12 @@ void HudFrameCompiler::emit_textured_quad_centered(int32_t cx, int32_t cy, int32
 	const float v1 = y1 > y0 ? float(1.0 - dv + 1.0 / (double(y1) - double(y0))) : 1.0f;
 	HudTri first, second;
 	first.texture = second.texture = texture;
-	first.a = { x0, y0, u0, v0, folded };
-	first.b = { x1, y0, u1, v0, folded };
-	first.c = { x1, y1, u1, v1, folded };
-	second.a = { x0, y0, u0, v0, folded };
-	second.b = { x1, y1, u1, v1, folded };
-	second.c = { x0, y1, u0, v1, folded };
+	first.a = { x0, y0, u0, v0, diffuse };
+	first.b = { x1, y0, u1, v0, diffuse };
+	first.c = { x1, y1, u1, v1, diffuse };
+	second.a = { x0, y0, u0, v0, diffuse };
+	second.b = { x1, y1, u1, v1, diffuse };
+	second.c = { x0, y1, u0, v1, diffuse };
 	draw_list_.tris.push_back(first);
 	draw_list_.tris.push_back(second);
 }

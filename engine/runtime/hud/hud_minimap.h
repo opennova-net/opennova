@@ -481,6 +481,11 @@ struct HudMapSprite {
 	float v0 = 0.0f;
 	float u1 = 1.0f;
 	float v1 = 1.0f;
+	// The raw diffuse the sprite's draw passes. The texture's own material
+	// combines it with the texel on the device: every textured map sprite's
+	// material is colour family 0x600, MODULATE2X(TEXTURE, DIFFUSE)
+	// (renderer::hud_color_material_argb; hud_texture_materials.h carries the
+	// words), so nothing is folded here (D-HUD-49).
 	uint32_t color = 0xFFFFFFFFu;
 	// Offset from the icon-strip slot: 0 TSDicon, 1 compass ring,
 	// 2 radar slice (dmgslice.tga, the 12-ring), 3 WPIndctr strip,
@@ -497,14 +502,6 @@ struct HudMapSprite {
 	// disc/rect crop of a straddling quad, or a ring band.
 	uint32_t geom_first = 0;
 	uint32_t geom_count = 0;
-	// The device applies the pass's own MODULATE2X(TEXTURE, DIFFUSE) colour
-	// stage (saturate(2 * texel * diffuse), alpha MODULATE) to this sprite,
-	// so `color` carries the raw diffuse. Set by the radar marks, whose
-	// material is mode word 0x651 (blend 1, alpha 0x50, colour 0x600); the
-	// other sprites fold the stage into the diffuse at compile.
-	// [orig: HUD_LoadAllTextures @0x59de25..0x59de42 (flags 1617);
-	//  RenderState_DecodeModeColorStage @0x681080 (0x600)]
-	bool modulate2x = false;
 };
 
 inline constexpr uint8_t kHudMapTextureNone = 0xFF;
@@ -629,14 +626,14 @@ struct HudMapPass {
 int32_t spinmap_zoom_step(int32_t zoom_q16, int direction);
 
 // One TSDicon strip cell's UV rect (30 square cells, half-texel insets from
-// the loaded strip's physical size) and the MODULATE2X diffuse fold the strip
-// renderer's texture stage implies -- shared by the map blips and the
+// the loaded strip's physical size) -- shared by the map blips and the
 // friendly-tag radio-request icon, which both submit through
-// Render_DrawIconStripCell_Debug [orig: Render_TiledImageStrip @0x67b540;
-// Render_DrawIconStripCell_Debug @0x67bae0].
+// Render_DrawIconStripCell_Debug with the raw diffuse; the strip's own
+// material 0x651 runs its MODULATE2X stage on the device
+// [orig: Render_TiledImageStrip @0x67b540; Render_DrawIconStripCell_Debug
+// @0x67bae0].
 void hud_icon_strip_cell_uv(const HudMinimapInput &input, uint8_t icon,
 		float &u0, float &v0, float &u1, float &v1);
-uint32_t hud_icon_strip_modulate2x_color(uint32_t argb);
 
 // The bearing every radar leg quantises: atan2(dx, dy) times `scale`, chopped
 // to 64 bits under the x87 control word with the low word kept. The add uses

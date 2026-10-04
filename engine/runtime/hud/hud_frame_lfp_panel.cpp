@@ -126,7 +126,8 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 		const LfpFrame frame = lfp_frame(attacked, ready, z.in_cylinder, phase_a);
 
 		// 1. The icon: one 102x102 frame of the team's vertical atlas at the
-		// flat half-bright modulate [orig: @0x59886f..0x59898b].
+		// flat half-bright modulate, the raw diffuse its material's MODULATE2X
+		// doubles on the device [orig: @0x59886f..0x59898b].
 		{
 			const int team_slot = z.team == 1 ? 0 : (z.team == 2 ? 1 : 2);
 			if (layout_.lfp_icon_texture_valid[static_cast<size_t>(team_slot)]) {

@@ -777,11 +777,13 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 			"two live markers, the waypoint tip cell, and the compass ring");
 	CHECK(list.map.sprites[0].layer <= list.map.sprites[1].layer,
 			"marker sprites retain four-layer ordering");
-	CHECK(list.map.sprites[0].color == 0xFF6080FFu &&
-			list.map.sprites[1].color == 0xFF6080FFu,
-			"ordinary TSDicon markers bake the saturating MODULATE2X RGB stage");
-	CHECK(list.map.sprites[2].color == 0xFFFEA000u,
-			"the clamped chevron submits 2c-saturated (the outside branch never halves)");
+	// The TSDicon cells pass the raw diffuse: the strip's material 0x651 runs
+	// its MODULATE2X stage on the device (D-HUD-49).
+	CHECK(list.map.sprites[0].color == 0xFF304080u &&
+			list.map.sprites[1].color == 0xFF304080u,
+			"ordinary TSDicon markers pass the raw marker colour");
+	CHECK(list.map.sprites[2].color == 0xFF7F5000u,
+			"the clamped chevron passes the raw tricolor (the outside branch never halves)");
 	CHECK(list.map.sprites.back().texture == 1,
 			"the compass ring rides texture slot 1");
 	const auto &compass = list.map.sprites.back();
@@ -1195,10 +1197,10 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 		CHECK(icon.x0 == 127.0f && icon.x1 == 143.0f && icon.y0 == 84.0f &&
 						icon.y1 == 100.0f,
 				"the icon centers a fontH/2 left of the shifted x at the text top");
-		CHECK(icon.color == opennova::hud::hud_icon_strip_modulate2x_color(
-								  0xFF000000u |
-								  (opennova::hud::kFriendlyTagDownedLightBlue & 0xFFFFFFu)),
-				"table[3] light blue at forced full alpha through the strip fold");
+		CHECK(icon.color ==
+						(0xFF000000u | (opennova::hud::kFriendlyTagDownedLightBlue & 0xFFFFFFu)),
+				"table[3] light blue at forced full alpha, the raw diffuse the strip's "
+				"material doubles on the device");
 		float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
 		opennova::hud::hud_icon_strip_cell_uv(state.minimap,
 				opennova::hud::kFriendlyTagRadioRequestIcon, u0, v0, u1, v1);
