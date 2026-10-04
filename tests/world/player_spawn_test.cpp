@@ -141,6 +141,19 @@ int main() {
         CHECK(ae->health == 150);
         CHECK(ae->inf.max_health == 150);
     }
+    // A solo-mode spawn is BERSERK (AiSlot[1] 0x200), everyone's enemy; a team-mode one is not.
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C53C..0x43C54F]
+    {
+        World w;
+        AiSystem &ai = w.ai;
+        w.registry.configure_pool(0, 8);
+        PlayerSpawn solo;
+        solo.berserk = true;
+        spawn_remote_player(w, solo);
+        spawn_remote_player(w, PlayerSpawn{});
+        CHECK((ai.at(0)->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0);
+        CHECK((ai.at(1)->slot.f[AiSlot::kBehaviorFlags] & 0x200) == 0);
+    }
     // Public template carriers stay int32_t, but the retail Player ItemDef fields are
     // signed words. Oversized API inputs wrap/sign-extend at the spawn stamp rather
     // than leaking wider values into Entity or the int16 infantry mirror.

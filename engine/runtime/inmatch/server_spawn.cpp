@@ -332,6 +332,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
 	}
 
+	// Outside the team game types every player spawns BERSERK, everyone's enemy.
+	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C53C..0x43C54F]
+	spawn.berserk = (ctx.config.game_type & 0x10000u) == 0;
 	const world::EntityHandle h =
 			is_host_own ? world::spawn_player(world, spawn) : world::spawn_remote_player(world, spawn);
 	if (!h.valid()) return h;

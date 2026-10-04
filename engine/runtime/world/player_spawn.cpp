@@ -114,6 +114,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // already — this pins both call sites to ONE field list).
     ae.inf.reset_for_spawn(ae.heading);
     ae.inf.max_health = static_cast<int16_t>(hp);
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C54F]
+    if (spawn.berserk) ae.slot.f[AiSlot::kBehaviorFlags] |= 0x200;
 
     // Publish the local-player handle ONLY for the host's own player — the net anchor + present
     // resolve it. A remote peer never becomes the local player. [ADR 0012]
