@@ -129,9 +129,11 @@ int main(void) {
     memcpy(&spinner.rotation_y.control, &coefficient, sizeof(coefficient));
     threedi_mat4_identity(&input);
     ok &= expect_eq("spinner_t0_rc", threedi_panm_build_node_matrices(
-        &spinner, 1, &pivot, NULL, NULL, &input, NULL, 0, NULL, &at_zero), 0);
+        &spinner, 1, &pivot, NULL, NULL, &input, ThreediPanmInputs::kRestFrames, NULL, 0,
+        NULL, &at_zero), 0);
     ok &= expect_eq("spinner_t250_rc", threedi_panm_build_node_matrices(
-        &spinner, 1, &pivot, NULL, NULL, &input, NULL, 250, NULL, &at_quarter), 0);
+        &spinner, 1, &pivot, NULL, NULL, &input, ThreediPanmInputs::kRestFrames, NULL, 250,
+        NULL, &at_quarter), 0);
     ok &= expect_near("spinner_t0_m0", at_zero.m[0], 1.0f);
     ok &= expect_near("spinner_t0_m1", at_zero.m[1], 0.0f);
     ok &= expect_near("spinner_t250_m0", at_quarter.m[0], 0.0f);
@@ -165,13 +167,15 @@ int main(void) {
     memset(ctrl, 0, sizeof(ctrl));
     ctrl[7] = 0x10000;
     ok &= expect_eq("pole_full_rc", threedi_panm_build_node_matrices(
-        pole, 2, pole_pivots, NULL, NULL, pole_in, NULL, 0, ctrl, pole_out), 0);
+        pole, 2, pole_pivots, NULL, NULL, pole_in, ThreediPanmInputs::kRestFrames, NULL, 0,
+        ctrl, pole_out), 0);
     ok &= expect_near("pole_full_sy", pole_out[0].m[5], 1.0f);
     ok &= expect_near("pole_full_ty", pole_out[0].m[13], 0.0f);
     ok &= expect_near("flag_full_ty", pole_out[1].m[13], 0.0f);
     ctrl[7] = 0;
     ok &= expect_eq("pole_down_rc", threedi_panm_build_node_matrices(
-        pole, 2, pole_pivots, NULL, NULL, pole_in, NULL, 0, ctrl, pole_out), 0);
+        pole, 2, pole_pivots, NULL, NULL, pole_in, ThreediPanmInputs::kRestFrames, NULL, 0,
+        ctrl, pole_out), 0);
     ok &= expect_near("pole_down_sy", pole_out[0].m[5], 0.0f);
     ok &= expect_near("pole_down_ty", pole_out[0].m[13], 11.5f);
     ok &= expect_near("flag_down_ty", pole_out[1].m[13], 11.5f - 15.3f);

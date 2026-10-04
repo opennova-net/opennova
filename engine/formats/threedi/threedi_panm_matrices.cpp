@@ -364,12 +364,20 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
                                      const ThreediMatrixTable *animation_frames,
                                      const ThreediMatrix4x4 *view_inverse,
                                      const ThreediMatrix4x4 *in_matrices,
+                                     ThreediPanmInputs inputs,
                                      const ThreediMatrix4x4 *mul_override,
                                      uint32_t time_ms,
                                      const int32_t *ctrl_values,
                                      ThreediMatrix4x4 *out_matrices) {
     if (!nodes || !pivots || !in_matrices || !out_matrices) {
         return -1;
+    }
+    const bool posed_inputs = inputs == ThreediPanmInputs::kPosedFrames;
+    // A posed slot past the node being built is read as a parent before its
+    // own copy lands; it starts from that part's posed input
+    // (ThreediPanmInputs::kPosedFrames).
+    if (posed_inputs) {
+        for (size_t i = 0; i < node_count; ++i) out_matrices[i] = in_matrices[i];
     }
 
     const float time_radians = (float)time_ms * 0.0062831854f; // 2*pi/1000 * tick
@@ -389,12 +397,13 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
         // Output slot i receives input i before node i is built, so a node
         // that names ITSELF as its parent (the PSP flagpole's scale part)
         // carries its pivot through its own input, not an unwritten slot. The
-        // retail input is the entity's world matrix; this model-local frame
-        // keeps only the input's orientation, as every builder here does.
+        // retail input is the entity's world matrix; a rest frame keeps only
+        // the input's orientation, as every builder here does, while a posed
+        // frame (a clip's) is copied whole, translation included.
         // [orig: Model_TransformBoneMatrices @0x58e451..0x58e46b — `rep movsd`
         //  of the 16 input dwords into flt_2720160[i] ahead of the parent carry]
         *dst = in_matrices[i];
-        threedi_mat4_zero_translation(dst);
+        if (!posed_inputs) threedi_mat4_zero_translation(dst);
 
         const ThreediMatrix4x4 *in_sub = &in_matrices[n->subobject_index];
         const ThreediVec3 *pivot_sub = &pivots[n->subobject_index];

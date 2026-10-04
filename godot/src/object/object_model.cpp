@@ -1572,6 +1572,11 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	if (has_live_panm_ || bounds_dirty_) {
 		robj_changed = apply_robj_transforms();
 	}
+	// A clip-posed model's parts take the same tracks over the bone matrices
+	// its clip built (apply_skeletal_panm), after this frame's pose write.
+	if (skeletal_scene_ && (has_live_panm_ || skin_binds_layered_)) {
+		apply_skeletal_panm();
+	}
 	if (focal_sway_active_) {
 		apply_focal_sway();
 		robj_changed = true;

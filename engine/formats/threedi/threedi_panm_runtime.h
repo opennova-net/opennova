@@ -25,7 +25,26 @@ int32_t threedi_panm_sample_track_raw(const ThreediTransform *track,
                                       uint32_t time_ms,
                                       const int32_t *ctrl_values);
 
+// What the builder seeds output slot i with before node i is built. Retail
+// copies the whole input row there, so a node naming ITSELF as its parent
+// carries its pivot through its own posed input
+// [orig: Model_TransformBoneMatrices @ 0x58E451..0x58E46B].
+enum class ThreediPanmInputs : uint8_t {
+    // Model-space rest frames whose translation is each part's abs pivot (the
+    // model-level callers' base pose). Retail's input there is the entity
+    // matrix, identity in model space, so the seed keeps the orientation only.
+    kRestFrames,
+    // Posed per-part frames: a clip's skinning matrices, the input of every
+    // clip-driven submit (the first-person gun and arms). The seed is the
+    // whole input row, and every slot starts from its own part's input, so a
+    // parent numbered after its child reads that parent's posed frame where
+    // retail reads what the previous model left in the shared array
+    // (docs/anim/adm-bad-format-re.md, "A parent numbered after its child").
+    kPosedFrames,
+};
+
 // Build PANM node matrices (approximate port of PANM_BuildNodeMatrices).
+// - inputs: how in_matrices are framed (ThreediPanmInputs above).
 // - nodes: every style >0x70 must already have its control_param rewritten from
 //   the file-local CTRL index to the retail global catalog ordinal. Runtime
 //   sampling reads that slot only for style 113; styles 114..117 use the
@@ -43,6 +62,7 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
                                      const ThreediMatrixTable *animation_frames,
                                      const ThreediMatrix4x4 *view_inverse,
                                      const ThreediMatrix4x4 *in_matrices,
+                                     ThreediPanmInputs inputs,
                                      const ThreediMatrix4x4 *mul_override,
                                      uint32_t time_ms,
                                      const int32_t *ctrl_values,

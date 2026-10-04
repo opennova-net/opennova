@@ -192,6 +192,99 @@ int main() {
     CHECK(near(mats[0].m[12], -15.0f) && near(mats[0].m[13], -10.0f / 3.0f));
     CHECK(near(mats[0].m[14], 0.0f));
 
+    // ---- the clip-driven submit: PANM layered over posed part frames ----
+    // A first-person gun's clip builds one matrix per part and retail composes
+    // the part tracks over them in the builder that poses a static model
+    // [orig: Player_RenderFirstPersonViewModel @ 0x4DF043 -> Render_SubmitEntity
+    // @ 0x5DAD80 -> Render_CollectRenderObjectsForBatch @ 0x5D8F3B ->
+    // Model_TransformBoneMatrices @ 0x58E390]. Part 0 is the receiver (a node
+    // naming itself as its parent), part 1 the trigger, turned about its
+    // pivot by WPN_TRIGGER (style 113, 0 -> a quarter turn about Z), part 2 a
+    // part no node names. The clip put the whole gun at a 30-degree yaw and
+    // moved it by (5, 1, 2).
+    {
+        ThreediRenderObject fp_parts[3];
+        std::memset(fp_parts, 0, sizeof(fp_parts));
+        fp_parts[1].abs[1] = 2.0f;
+        fp_parts[2].abs[2] = 1.0f;
+        ThreediPartAnimation fp_nodes[2];
+        std::memset(fp_nodes, 0, sizeof(fp_nodes));
+        fp_nodes[0].subobject_index = 0;
+        fp_nodes[0].parent_subobject = 0;
+        fp_nodes[1].subobject_index = 1;
+        fp_nodes[1].parent_subobject = 0;
+        fp_nodes[1].flags = 2u << 8; // Euler
+        fp_nodes[1].rotation_z.control = 113;
+        fp_nodes[1].rotation_z.control_param = 0; // CTRL row 0
+        fp_nodes[1].rotation_z.end = 4096;        // a quarter of 16384
+        ThreediControlRegister fp_registers[1];
+        std::memset(fp_registers, 0, sizeof(fp_registers));
+        std::strcpy(fp_registers[0].name, "WPN_TRIGGER");
+        ThreediLod fp_lod;
+        std::memset(&fp_lod, 0, sizeof(fp_lod));
+        fp_lod.render_objects = fp_parts;
+        fp_lod.render_object_count = 3;
+        fp_lod.part_animations = fp_nodes;
+        fp_lod.part_animation_count = 2;
+        Threedi3di3 fp_gun;
+        std::memset(&fp_gun, 0, sizeof(fp_gun));
+        fp_gun.lods = &fp_lod;
+        fp_gun.lod_count = 1;
+        fp_gun.ctrl.registers = fp_registers;
+        fp_gun.ctrl.count = 1;
+
+        ThreediMatrix4x4 clip;
+        threedi_mat4_make_rot_y(&clip, 0.52359878f);
+        threedi_mat4_set_translation(&clip, 5.0f, 1.0f, 2.0f);
+        const std::vector<ThreediMatrix4x4> clip_frames(3, clip);
+        const float trigger_pivot[3] = {0.0f, 2.0f, 0.0f};
+        const float trigger_tip[3] = {1.0f, 2.0f, 0.0f}; // a unit off the pivot
+        float at[3];
+        float expect[3];
+
+        int32_t fp_bus[THREEDI_CTRL_REGISTER_COUNT]{};
+        std::vector<ThreediMatrix4x4> posed;
+        std::vector<uint8_t> driven;
+        CHECK(threedi_panm_pose_parts_over(fp_gun, 0, 0, fp_bus, clip_frames, posed, &driven));
+        CHECK(posed.size() == 3 && driven.size() == 3);
+        CHECK(driven[0] && driven[1] && !driven[2]);
+        // At rest every part is exactly where its clip put it: the receiver's
+        // own slot is its whole posed input (translation and all), and the
+        // trigger is placed through it.
+        for (int part = 0; part < 3; ++part)
+            for (int k = 0; k < 16; ++k) CHECK(near(posed[part].m[k], clip.m[k]));
+
+        // The trigger pulled: it turns a quarter about its own pivot, then
+        // rides the clip; the receiver and the unnamed part do not move.
+        fp_bus[THREEDI_CTRL_WPN_TRIGGER] = 0x10000;
+        CHECK(threedi_panm_pose_parts_over(fp_gun, 0, 0, fp_bus, clip_frames, posed, &driven));
+        ThreediMatrix4x4 quarter;
+        threedi_mat4_make_rot_z(&quarter, 1.5707964f);
+        const float offset[3] = {1.0f, 0.0f, 0.0f};
+        float turned[3];
+        threedi_mat4_apply_vec3(&quarter, offset, turned);
+        const float turned_tip[3] = {trigger_pivot[0] + turned[0],
+                trigger_pivot[1] + turned[1], trigger_pivot[2] + turned[2]};
+        threedi_mat4_apply_point(&clip, turned_tip, expect);
+        threedi_mat4_apply_point(&posed[1], trigger_tip, at);
+        CHECK(near(at[0], expect[0]) && near(at[1], expect[1]) && near(at[2], expect[2]));
+        threedi_mat4_apply_point(&clip, trigger_tip, expect);
+        CHECK(!near(at[0], expect[0]) || !near(at[1], expect[1])); // it moved
+        threedi_mat4_apply_point(&posed[1], trigger_pivot, at);
+        threedi_mat4_apply_point(&clip, trigger_pivot, expect);
+        CHECK(near(at[0], expect[0]) && near(at[1], expect[1]) && near(at[2], expect[2]));
+        for (int k = 0; k < 16; ++k) {
+            CHECK(near(posed[0].m[k], clip.m[k]));
+            CHECK(near(posed[2].m[k], clip.m[k]));
+        }
+
+        // A model without nodes leaves the clip's frames as they are.
+        fp_lod.part_animation_count = 0;
+        CHECK(!threedi_panm_pose_parts_over(fp_gun, 0, 0, fp_bus, clip_frames, posed, &driven));
+        CHECK(posed.size() == 3 && !driven[1]);
+        for (int k = 0; k < 16; ++k) CHECK(near(posed[1].m[k], clip.m[k]));
+    }
+
     if (failures == 0) std::printf("threedi_panm_pose: OK\n");
     return failures == 0 ? 0 : 1;
 }
