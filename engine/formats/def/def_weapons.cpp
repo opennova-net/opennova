@@ -396,7 +396,13 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "loadout_menu_icon")) {
                 safe_copy(cw.loadout_menu_icon, sizeof(cw.loadout_menu_icon), v, vl);
                 parsed = 1;
-            } else if (key_is(key, "animadm")) {
+            } else if (key_is(key, "animadm") || key_is(key, "animcal")) {
+                /* Both keys copy the first value token into the one buffer the weapon's
+                   `end` loads its anim map from and clears [orig: 'animadm' @ 0x543D47 and
+                   'animcal' @ 0x543D77, each strcpy into byte_252DB98 @ 0x543D5C /
+                   0x543D8C; Anim_InitActions @ 0x541FA0 loads it, WeaponDefs_ResetParseState
+                   @ 0x53FF90 clears it, both from the `end` arm @ 0x5437D0 / 0x5437DC]:
+                   `animcal` is `animadm` by another name, the later line winning. */
                 safe_copy(cw.animadm, sizeof(cw.animadm), v, vl);
                 parsed = 1;
             } else if (key_is(key, "launchuserpoint")) {
@@ -455,11 +461,14 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "gfx1b")) {
                 safe_copy(cw.gfx1b, sizeof(cw.gfx1b), v, vl);
                 parsed = 1;
-            } else if (key_is(key, "gfx1")) {
-                safe_copy(cw.gfx1, sizeof(cw.gfx1), v, vl);
-                parsed = 1;
-            } else if (key_is(key, "gfx3")) {
-                safe_copy(cw.gfx3, sizeof(cw.gfx3), v, vl);
+            } else if (key_is(key, "gfx1") || key_is(key, "gfx3")) {
+                /* The model by the first value token; `nocheckdepth` second loads it with
+                   the depth check off [orig: @ 0x544F85..0x544FBB, stricmp of tokens[2]
+                   @ 0x544F92]. */
+                const bool first = key_is(key, "gfx1");
+                safe_copy(first ? cw.gfx1 : cw.gfx3, sizeof(cw.gfx1), v, vl);
+                (first ? cw.gfx1_nocheckdepth : cw.gfx3_nocheckdepth) =
+                        strutil::iequals(tokens.token(2), "nocheckdepth") ? 1 : 0;
                 parsed = 1;
             } else if (key_is(key, "flags")) {
                 char flag_lower[64];
@@ -592,6 +601,20 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             } else if (key_is(key, "emplacedstance")) {
                 cw.emplacedstance = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (key_is(key, "farpinfo")) {
+                /* The FARP rearm's rounds and interval, each atol'd; a token the line
+                   lacks reads as the tokenizer's "" (0). [orig: @ 0x544da3 -> +0xE8
+                   @ 0x544dc4, +0xEC @ 0x544ddf] */
+                Token fv[MAX_TOKENS];
+                const int fn = value_tokens(tokens, fv, MAX_TOKENS);
+                cw.farp_rounds = fn >= 1 ? parse_int_n(fv[0].s, fv[0].len) : 0;
+                cw.farp_interval = fn >= 2 ? parse_int_n(fv[1].s, fv[1].len) : 0;
+                parsed = 1;
+            } else if (key_is(key, "designation_time")) {
+                /* Seconds, atol x 62 (n*31*2, wrapping as the 32-bit imul does).
+                   [orig: @ 0x544895 -> +0x458 @ 0x5448c5] */
+                cw.designation_ticks = static_cast<int>(static_cast<uint32_t>(parse_int_n(v, vl)) * 62u);
                 parsed = 1;
             } else if (key_is(key, "special_hold")) {
                 /* 3P hold-pose kind, atol [orig: weapon.def key 'special_hold' ->

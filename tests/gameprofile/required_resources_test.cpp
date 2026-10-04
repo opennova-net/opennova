@@ -128,6 +128,21 @@ static int test_known_row_lookups(void) {
     CHECK((gameprofile_required_resource_find("CC.BIN")->flags & RES_F_PLAYER_FILE) == 0 &&
               (gameprofile_required_resource_find("items.def")->flags & RES_F_PLAYER_FILE) == 0,
           "a resource the game ships is not");
+    /* An expansion's own files (ADR 0046 S16): eight pattern rows, every one optional, named
+       with <n>; no other row is an expansion's. */
+    static const char *const expansion_roles[] = {"expansion_table", "expansion_version", "expansion_menumus_sbf",
+                                                  "expansion_menumus_bin", "expansion_locl_lwf", "expansion_lwf",
+                                                  "expansion_gamemus_sbf", "expansion_gamemus_bin"};
+    int expansions = 0;
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i)
+        expansions += (gameprofile_required_resource_at(i)->flags & RES_F_EXPANSION) != 0;
+    CHECK(expansions == 8, "exactly the eight expansion rows");
+    for (const char *role : expansion_roles) {
+        const RequiredResource *row = gameprofile_required_resource_by_role(role);
+        CHECK(row != NULL && (row->flags & RES_F_EXPANSION) && (row->flags & RES_F_PATTERN) &&
+                  row->severity == RES_OPTIONAL && strstr(row->name, "<n>") != NULL,
+              "an expansion row is an optional pattern naming <n>");
+    }
     return 1;
 }
 

@@ -61,6 +61,7 @@ enum class DefEncoding {
 	            // name is what `particletesttime` authors
 	Switch,     // a key alone, its member 1 (powerup.def's `allammo`): written while it is not 0
 	PowerupWeapon, // powerup.def's `weapon <name>` or `weapon all`: a name, then the all flag
+	ModelOption,   // weapon.def's `gfx1`/`gfx3 <model> [nocheckdepth]`: a name, then the option's flag
 };
 
 // A property describes one authored line (possibly repeated for flags/lists).

@@ -45,7 +45,14 @@ enum {
        the stored NovaWorld credentials, the high-score table. Never a resource
        a game is made of: the editor never imports one nor packs one into a
        build (ADR 0046 S14), and its checklist does not list one. */
-    RES_F_PLAYER_FILE = 1 << 2
+    RES_F_PLAYER_FILE = 1 << 2,
+    /* A file an expansion's own name forms, which the game opens only under
+       `/exp <n>` [orig: Expansion_LoadAssets @ 0x4a4730, the expansion arm
+       @ 0x4a4858..0x4a49de]: `name` spells it with `<n>` (with RES_F_PATTERN,
+       so no reader takes it as a literal). The editor's checklist forms it for
+       a project that builds as an expansion (ADR 0046 S16,
+       editor/project/expansion_files). */
+    RES_F_EXPANSION = 1 << 3
 };
 
 typedef struct RequiredResource {

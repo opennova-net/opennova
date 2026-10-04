@@ -155,14 +155,27 @@ func get_mcp_game_state() -> Variant:
 		player["class"] = sim.get_local_player_class()
 		player["weapon"] = sim.get_local_player_weapon_name()
 		player["weapon_state"] = sim.get_local_player_weapon_state().to_json_value()
+	var mission_file := String(world.get_loaded_mission_file()) if world != null else ""
+	var root := _resource_root()
 	return {
 		"shell": {
 			"state": _shell.shell_state_name() if _shell != null else "",
 			"world_loading": _is_world_loading(),
 			"world_loaded": world != null and world.is_loaded(),
-			"mission_file": world.get_loaded_mission_file() \
-					if world != null else "",
+			"mission_file": mission_file,
 			"dev_tools_open": _shell != null and _shell.is_dev_tools_open(),
+			# The expansion the game data mounted with (/exp; "" for the base game), and whether
+			# OpenNova's mission catalog over it holds the loaded mission (ADR 0046 S16: an
+			# editor's expansion build, played). The catalog reads a mission's text through the
+			# mount stack, not retail's archive pairs (runtime/mission/mission_catalog.h), so this
+			# says nothing of the pair rule; the build says that (build.expansion.mission_*).
+			"expansion": String(root.get_expansion()) if root != null else "",
+			"mission_in_catalog": _mission_in_catalog(root, mission_file),
+			# What the game's string lookup answers for the expansion's Mods-list name ([exp_info]
+			# EXP_NAME), the override table consulted first: the expansion's loose <n>.bin, the only
+			# file that serves it (Strings.track_expansion_override); "" with no expansion mounted.
+			"expansion_title": (Strings.lookup(Strings.TABLE_GAMETEXT, "exp_info", "EXP_NAME")
+					if root != null and not String(root.get_expansion()).is_empty() else ""),
 		},
 		"session": _session_facts(sim),
 		"runtime": runtime_state,
@@ -373,6 +386,22 @@ func _hud_hidden_capture_witness_json() -> Dictionary:
 
 func _menu_shell() -> MenuShell:
 	return _shell.get_menu_shell() if _shell != null else null
+
+
+func _resource_root() -> ResourceRoot:
+	var menu := _menu_shell()
+	return menu.get_resource_root() if menu != null else null
+
+
+## Whether OpenNova's mission catalog over `root` holds `mission` (compared as the game compares
+## names).
+static func _mission_in_catalog(root: ResourceRoot, mission: String) -> bool:
+	if root == null or mission.is_empty():
+		return false
+	for name in MissionCatalog.mission_names(root):
+		if String(name).to_lower() == mission.to_lower():
+			return true
+	return false
 
 
 func mcp_game_menu(args: Dictionary) -> Variant:

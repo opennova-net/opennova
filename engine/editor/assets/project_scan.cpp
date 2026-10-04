@@ -34,6 +34,19 @@ bool same_path(const fs::path &a, const fs::path &b) {
 	return ca == cb;
 }
 
+// The export folder, or the staging or set-aside folder an export keeps beside it (ADR 0046 S16): no
+// file of the project's, whatever an export cut short or a removal refused left in it.
+bool export_folder(const fs::path &dir, const fs::path &export_dir) {
+	if (same_path(dir, export_dir)) return true;
+	const fs::path name = export_dir.filename();
+	for (const char *suffix : {kExportStagingSuffix, kExportPreviousSuffix}) {
+		fs::path beside = export_dir;
+		beside.replace_filename(fs::path(name).concat(suffix));
+		if (same_path(dir, beside)) return true;
+	}
+	return false;
+}
+
 // Whether the walk from `root` reaches the file at `path`: it descends into no dot-directory and
 // not into the export output directory, and passes the project file by.
 bool walk_reaches(const fs::path &root, const fs::path &export_dir, const fs::path &path) {
@@ -46,7 +59,7 @@ bool walk_reaches(const fs::path &root, const fs::path &export_dir, const fs::pa
 		if (std::next(it) == relative.end()) break; // the file itself
 		if (*it == "..") return false;
 		dir /= *it;
-		if (is_dot_directory(dir) || same_path(dir, export_dir)) return false;
+		if (is_dot_directory(dir) || export_folder(dir, export_dir)) return false;
 	}
 	return true;
 }
@@ -205,7 +218,7 @@ bool ProjectScan::step(uint64_t budget) {
 			const fs::directory_entry &entry = *walk_;
 			const fs::path path = entry.path();
 			if (entry.is_directory(ec)) {
-				if (is_dot_directory(path) || same_path(path, export_dir_)) walk_.disable_recursion_pending();
+				if (is_dot_directory(path) || export_folder(path, export_dir_)) walk_.disable_recursion_pending();
 			} else if (entry.is_regular_file(ec) &&
 					!(path.parent_path() == root_ && path.filename() == kProjectFileName)) {
 				listed_.emplace_back(listed_key(root_, path), path);

@@ -39,6 +39,7 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
+#include <editor/assets/install_view.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/mns_document.h>
@@ -3263,8 +3264,9 @@ static int test_retail_incremental() {
 	ImportOrigin origin;
 	std::string error;
 	TEST_EXPECT(origin.open(ImportOrigin::Kind::GameInstall, install, project.document, error));
-	opennova::Vfs mount;
-	TEST_EXPECT(mount_retail(mount, install, project.document));
+	InstallView view;
+	TEST_EXPECT(view.open(install_spec(install, project.document), error));
+	const opennova::Vfs &mount = view.vfs();
 	size_t exported = 0;
 	std::string model_name;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
@@ -3364,8 +3366,9 @@ static int test_retail_base_layer() {
 	ImportOrigin origin;
 	std::string error;
 	TEST_EXPECT(origin.open(ImportOrigin::Kind::GameInstall, install, project.document, error));
-	opennova::Vfs mount;
-	TEST_EXPECT(mount_retail(mount, install, project.document));
+	InstallView view;
+	TEST_EXPECT(view.open(install_spec(install, project.document), error));
+	const opennova::Vfs &mount = view.vfs();
 	std::vector<LayerFile> files;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		if (opennova::strutil::ends_with_icase(location.logical_name, ".pff")) continue;

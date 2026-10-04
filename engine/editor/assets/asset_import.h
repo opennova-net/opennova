@@ -26,12 +26,6 @@ struct ImportResult {
 // Expand selected PFFs into selectable members; loose files stay single choices.
 std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &paths,
                                              std::vector<Diagnostic> &diagnostics);
-// A game install mounted into `game` as a stock launch of the project's game mounts it
-// (mount_install with no /d and no expansion: the witnessed archive table, read alone
-// while one of its archives is mounted), its payloads decoded with that game's key: the
-// one mount behind the retail listings, a retail source's import and the import plan.
-// False when the folder holds none of the game's archives.
-bool mount_retail(Vfs &game, const std::string &retail_root, const ProjectDocument &document);
 // A file of a mounted install or archive as its game loader is served it (S13 D9): decoded as the
 // game's text readers decode a stored file (Vfs::read_file), or, for a kind whose loader takes the
 // SCR form under a key of its own and unwraps it itself (a shader: AssetKindRow::scr, ScrForm::Shader),
@@ -46,19 +40,17 @@ bool install_loose_kind(AssetKind kind);
 // The loose files of those kinds in a game install's root, each as the disk spells it, sorted by
 // their normalized names; none for a root that cannot be listed.
 std::vector<std::string> list_install_loose_files(const std::string &retail_root);
-// A file of a game install as the game is served it: its archives' member decoded (read_served),
-// else, for a name of a kind the game ships loose (install_loose_kind), the root's loose file of
-// that name (compared without case, as the game compares names). False for any other name.
-bool read_install_file(const Vfs &game, const std::string &retail_root, const std::string &name,
-                       std::vector<uint8_t> &out);
-// Every effective file of a game install, mounted as a stock launch mounts it (mount_retail),
-// and the loose files the game ships beside its archives (list_install_loose_files) where no
-// archive has the name: the "Import from game data" list.
+// Every file of a game install as the project imports it (assets/install_view.h, the project's view:
+// install_spec), each a choice of the install: the "Import from game data" list.
 std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
                                                     std::vector<Diagnostic> &diagnostics);
-// The logical names a game install resolves, its loose files included, sorted by their normalized
+// The names the project gets of a game install's files (the same view), sorted by their normalized
 // form (the Problems Import fixes).
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document);
+// For a project that builds as an expansion (ADR 0046 S16), the names its base game serves
+// (base_install_spec's view: no expansion, no renames), sorted likewise, which its build's gate reads
+// (BaseNames); none for a standalone project, and when the install does not mount.
+std::vector<std::string> list_base_file_names(const std::string &retail_root, const ProjectDocument &document);
 // Where an import writes a file of `kind` (project-relative): over the project's file of
 // the name when it has one (a replace keeps its place), else in the kind's folder
 // (AssetKindRow::folder).

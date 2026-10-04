@@ -109,6 +109,7 @@ public:
     // (they share ordinals). Defaults to version-detect; persists across mounts. The game-aware
     // caller sets this so demo-vs-retail keying is correct.
     void set_scr_policy(int scr_policy);
+    int scr_policy() const; // how read_file keys SCR payloads (VfsScrPolicy)
 
     // --- Flat resolution (case-insensitive filename) ---
     bool has_file(const std::string &name) const;
