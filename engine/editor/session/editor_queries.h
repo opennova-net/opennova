@@ -52,6 +52,7 @@ enum class EditorQueryKind : uint8_t {
 	ImportOptions,
 	ModelSurfaces,
 	Catalog,
+	FileCard,
 	kCount,
 };
 

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <iterator>
+#include <map>
 
 #include <base/io/cp1252.h>
 #include <editor/assets/asset_kind.h>
@@ -11,6 +12,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_plan.h>
+#include <editor/import/import_plan_groups.h>
 #include <editor/import/import_run.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
@@ -81,6 +83,32 @@ JsonValue project_section(const SessionView &view) {
 	out.set("install_expansions", listed(view.project.install_expansions));
 	// The install a new project opens with (the editor's last chosen): what New project offers.
 	out.set("new_project_expansions", listed(view.project.new_project_expansions));
+	// The last install checked (the UX round's project lane): what it holds, in a line.
+	const InstallCheck &check = view.project.install_check;
+	JsonValue checked = JsonValue::make_object();
+	checked.set("root", json_string(check.root));
+	checked.set("game", json_string(check.game));
+	checked.set("exists", boolean(check.exists));
+	checked.set("ok", boolean(check.ok()));
+	checked.set("files", json_number(double(check.files)));
+	checked.set("executable", boolean(check.executable));
+	JsonValue check_expansions = JsonValue::make_array();
+	for (const InstallCheck::Expansion &each : check.expansions) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("name", json_string(each.name));
+		entry.set("title", json_string(each.title));
+		check_expansions.push(std::move(entry));
+	}
+	checked.set("expansions", std::move(check_expansions));
+	JsonValue missing_archives = JsonValue::make_array();
+	for (const std::string &name : check.missing_archives) missing_archives.push(json_string(name));
+	checked.set("missing_archives", std::move(missing_archives));
+	if (check.build) checked.set("build", boolean(true));
+	checked.set("words", json_string(check.words()));
+	out.set("install_check", std::move(checked));
+	// Why the last New project or Open was refused (the welcome page's line), and the editor's own install.
+	out.set("refused", json_string(view.project.refused));
+	out.set("editor_install", json_string(view.project.editor_install));
 	if (!view.project.open)
 		return out;
 	const ProjectDocument &document = *view.project.document;
@@ -354,7 +382,22 @@ JsonValue graph_counts_section(const SessionView &view) {
 // The editor's settings the windows read.
 JsonValue preferences_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
-	out.set("recent_projects", strings_to_json(view.project.recent_projects));
+	// Each recent project with what its project file says (the UX round's project lane).
+	JsonValue recent = JsonValue::make_array();
+	for (size_t i = 0; i < view.project.recent_projects.size(); ++i) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("root", json_string(view.project.recent_projects[i]));
+		if (i < view.project.recent_details.size() && view.project.recent_details[i].root == view.project.recent_projects[i]) {
+			const ProjectView::RecentProject &details = view.project.recent_details[i];
+			entry.set("found", boolean(details.found));
+			entry.set("title", json_string(details.title));
+			entry.set("game", json_string(details.game));
+			entry.set("expansion", json_string(details.expansion));
+			entry.set("builds_on", json_string(details.builds_on));
+		}
+		recent.push(std::move(entry));
+	}
+	out.set("recent_projects", std::move(recent));
 	out.set("game_install", json_string(view.project.retail_directory));
 	out.set("play_in_install", boolean(view.project.play_retail));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
@@ -395,8 +438,12 @@ constexpr ViewSectionRow kSections[] = {
 			"builds_on} (S16: \"\" a standalone project, \"\" the base game), file_count (the files query "
 			"pages the files), and quit_requested; open or not, install_expansions, the game install's "
 			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
-			"description), and new_project_expansions, the same of the install a new project opens with "
-			"(the one last chosen)." },
+			"description), new_project_expansions, the same of the install a new project opens with "
+			"(the one last chosen), install_check, the last install checked (check_install, new_project's): its "
+			"root, game, exists, ok (the boot table's three archives there and mounting, and no build of a "
+			"project's), files, executable, expansions [{name, title}], missing_archives, build and words; "
+			"refused, why the last new_project or open_project was refused (\"\" since one started or went "
+			"through), and editor_install, the editor's own game install (a new project's)." },
 	{ S::Requirements, "requirements", concern_set({ C::Files, C::Run }), requirements_section,
 			"The required files: total, missing, wrong_kind, and every row with its role, name, "
 			"state and expected kind (boot_missing where the last game reported it missing)." },
@@ -436,8 +483,8 @@ constexpr ViewSectionRow kSections[] = {
 			"What the asset graph holds: files, edges, symbols and missing (the references that "
 			"resolve to nothing)." },
 	{ S::Preferences, "preferences", concern_set({ C::Preferences }), preferences_section,
-			"The editor's settings: the recent projects, the game install, Play in it, the "
-			"runtime, the import setting." },
+			"The editor's settings: the recent projects [{root, found, title, game, expansion, builds_on}], "
+			"the game install, Play in it, the runtime, the import setting." },
 	{ S::Output, "output", concern_set({ C::Output }), output_section,
 			"The output lines held, first and next by absolute index (the output query pages "
 			"them)." },
@@ -497,17 +544,16 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 		need.set("file", json_string(row.needed_by.file));
 		need.set("record", json_string(row.needed_by.record));
 		need.set("field", json_string(row.needed_by.field));
-		// The record and the field in words (the plain-words lane), where they are not the bare ones.
-		if (!row.needed_by.record_title.empty() && row.needed_by.record_title != row.needed_by.record)
-			need.set("record_title", json_string(row.needed_by.record_title));
-		if (!row.needed_by.field_title.empty() && row.needed_by.field_title != row.needed_by.field)
-			need.set("field_title", json_string(row.needed_by.field_title));
 		need.set("reference", json_string(reference_row(row.needed_by.reference).token));
 		need.set("name", json_string(row.needed_by.name));
 		if (row.needed_by.loader_arg >= 0)
 			need.set("loader_arg", json_number(double(row.needed_by.loader_arg)));
+		// What wanted it in words (the UX round's project lane): the dialog's Needed by.
+		need.set("words", json_string(import_need_text(row.needed_by)));
 		entry.set("needed_by", std::move(need));
 	}
+	// Every planned file that names it, where more than the first does.
+	if (row.wanted_by.size() > 1) entry.set("wanted_by", strings_to_json(row.wanted_by));
 	if (!found)
 		return entry;
 	entry.set("source", source_to_json(row.source));
@@ -519,6 +565,9 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 	entry.set("selected", boolean(row.selected));
 	if (row.held)
 		entry.set("held", boolean(true));
+	// Whether the project's file of the name holds the same bytes, where the plan compared them.
+	if (row.held && row.held_as != ImportPlanRow::Held::Unknown)
+		entry.set("held_same", boolean(row.held_as == ImportPlanRow::Held::Same));
 	if (!row.problem.empty())
 		entry.set("problem", json_string(row.problem));
 	if (!row.rivals.empty()) {
@@ -795,9 +844,31 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, 
 		summary.push(std::move(line));
 	}
 	out.set("summary", std::move(summary));
+	// The rows by what they come for (import_plan_groups: each chosen file, the kinds of the files it
+	// brings under it), every group whatever the page; each row says its group.
+	const std::vector<ImportPlanGroup> grouped_rows = import_plan_groups(plan);
+	std::map<const ImportPlanRow *, size_t> group_of;
+	JsonValue groups = JsonValue::make_array();
+	for (size_t g = 0; g < grouped_rows.size(); ++g) {
+		const ImportPlanGroup &group = grouped_rows[g];
+		for (const size_t row : group.rows) group_of.emplace(&plan.rows[row], g);
+		JsonValue line = JsonValue::make_object();
+		line.set("depth", json_number(double(group.depth)));
+		if (group.parent != ImportPlanGroup::kNone) line.set("parent", json_number(double(group.parent)));
+		if (group.chosen()) line.set("chosen", json_string(plan.rows[group.root].name));
+		line.set("kind", json_string(asset_kind_token(group.kind)));
+		line.set("files", json_number(double(group.files)));
+		line.set("bytes", json_number(double(group.bytes)));
+		if (!group.also.empty()) line.set("also", json_number(double(group.also.size())));
+		groups.push(std::move(line));
+	}
+	out.set("groups", std::move(groups));
 	JsonValue planned = JsonValue::make_array();
-	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i)
-		planned.push(plan_row_to_json(*rows[i]));
+	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i) {
+		JsonValue row = plan_row_to_json(*rows[i]);
+		if (const auto in = group_of.find(rows[i]); in != group_of.end()) row.set("group", json_number(double(in->second)));
+		planned.push(std::move(row));
+	}
 	out.set("rows", std::move(planned));
 	const auto sources_page = [&page](const std::vector<ImportChoice> &sources) {
 		JsonValue list = JsonValue::make_array();
@@ -806,7 +877,17 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, 
 		return list;
 	};
 	out.set("choice_count", json_number(double(preview.choices.size())));
-	out.set("choices", sources_page(preview.choices));
+	// Each choice with its kind by its name and its size as stored (the chooser's columns).
+	JsonValue choices = JsonValue::make_array();
+	for (size_t i = page.first(preview.choices.size()); i < page.last(preview.choices.size()); ++i) {
+		JsonValue choice = import_choice_to_json(preview.choices[i]);
+		if (i < preview.facts.size()) {
+			choice.set("kind", json_string(asset_kind_token(preview.facts[i].kind)));
+			choice.set("size", json_number(double(preview.facts[i].size)));
+		}
+		choices.push(std::move(choice));
+	}
+	out.set("choices", std::move(choices));
 	out.set("root_count", json_number(double(preview.roots.size())));
 	out.set("roots", sources_page(preview.roots));
 	JsonValue missing = JsonValue::make_array();

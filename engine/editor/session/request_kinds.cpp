@@ -33,7 +33,10 @@ constexpr Holds kSlot = HoldsSlot;
 
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
 	core.new_project(request.dir, request.title, request.game, request.import_pass,
-	                 ProjectExpansion{ request.expansion, request.builds_on });
+	                 ProjectExpansion{ request.expansion, request.builds_on }, request.game_install);
+}
+void serve_check_install(SessionCore &core, const EditorRequest &request) {
+	core.check_install(request.game_install);
 }
 void serve_open_project(SessionCore &core, const EditorRequest &request) {
 	core.open_project(request.dir, request.import_pass, request.game_install);
@@ -298,8 +301,11 @@ constexpr RequestKindRow kRows[] = {
 			"the base game, its text table), then opened as open_project opens it (import_pass false: "
 			"no source the folder holds imported); refused, the open project kept, where dir holds a "
 			"project already, game names no game, or the expansion is one the game cannot take or the "
-			"install refuses (a name it has, one it lacks to build on).")
-			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::ImportPass }))
+			"install refuses (a name it has, one it lacks to build on). game_install (the UX round's "
+			"project lane): the game install it imports from and plays in, checked first (check_install: "
+			"refused, project.install.invalid, where the folder holds none of the game's archives) and "
+			"then the editor's install, which the project's local.json takes as it opens.")
+			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::ImportPass, F::GameInstall }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
@@ -328,6 +334,14 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::ForgetRecent, "forget_recent", serve_forget_recent,
 			"The recent project in dir dropped from the editor's list.")
 			.takes(request_params({ F::Dir }))
+			.row,
+	// A read of a folder, never of the project: it runs beside any operation.
+	Request(K::CheckInstall, "check_install", serve_check_install,
+			"The folder game_install (left out: the editor's last chosen) read as an install of the open "
+			"project's game (else jo), as an import mounts one: whether it is there, whether its archives "
+			"mount, how many files it serves, its expansions and whether the game's program is beside them; "
+			"the project section's install_check, with its words in a line.")
+			.takes(request_params({}, { F::GameInstall }))
 			.row,
 	// It reads again the clean documents whose files changed, then starts the refresh.
 	Request(K::Rescan, "rescan", serve_rescan,
@@ -483,6 +497,12 @@ constexpr RequestKindRow kRows[] = {
 			"file the editor does not open included; ask_name: and asks its new name "
 			"(Rename...).")
 			.takes(request_params({ F::Path }, { F::AskName }))
+			.row,
+	Request(K::AboutFile, "about_file", serve_show_in_files,
+			"Files selects the project file path and opens its card (a RevealFile view event, tag 1): what it "
+			"is, where a build puts it, what it names and who names it, a wave's sound; the file_card query "
+			"reads the same.")
+			.takes(request_params({ F::Path }))
 			.row,
 	Request(K::SelectFile, "select_file", serve_select_file,
 			"The project file path selected in Files (left out, none): a file a viewport draws whether "
@@ -870,6 +890,15 @@ constexpr RequestKindRow kRows[] = {
 			"The file or folder path shown in the OS file manager.")
 			.served_by(ServedBy::Shell)
 			.takes(request_params({ F::Path }))
+			.row,
+	Request(K::PlaySound, "play_sound", nullptr,
+			"The project's wave at path (a project-relative path or a logical name) played by the editor as "
+			"the game decodes it, once, in place of any sound it plays.")
+			.served_by(ServedBy::Shell)
+			.takes(request_params({ F::Path }))
+			.row,
+	Request(K::StopSound, "stop_sound", nullptr, "The sound the editor plays stopped.")
+			.served_by(ServedBy::Shell)
 			.row,
 };
 

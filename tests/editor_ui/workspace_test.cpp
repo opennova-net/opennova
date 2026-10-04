@@ -39,6 +39,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/model/field_text.h>
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_canvas.h>
@@ -230,6 +231,12 @@ void test_workspace_layout() {
 
 	CHECK(!frame(windows, 1), "no draw before attach");
 	CHECK(windows.pass().attach_imgui(backend.context, test_alloc, test_free, nullptr), "attach");
+	// A project open with nothing in it: every window draws (with none open, every window but Document
+	// stands aside for the welcome page, below).
+	SessionView opened;
+	opened.project.open = true;
+	opened.project.root = "C:/mods/Layout";
+	windows.set_view(&opened);
 	for (uint64_t i = 2; i < 8; ++i) frame(windows, i);
 	CHECK(ImGui::GetDrawData() != nullptr && ImGui::GetDrawData()->TotalVtxCount > 0, "the home layout draws");
 	ImGuiWindow *files = ImGui::FindWindowByName("Files");
@@ -262,10 +269,21 @@ void test_workspace_layout() {
 	CHECK(GImGui->NavWindow == document, "Document has the focus");
 	CHECK(problems->DockNode && problems->DockNode->TabBar && problems->DockNode->TabBar->SelectedTabId == problems->TabId,
 	      "Problems is the bottom's tab");
-	const std::string home = logged_frame(windows, 8);
-	CHECK(home.find("New project") != std::string::npos, "no project: the welcome view");
-	CHECK(home.find("Open a menu, a model or an animation to preview it, or select a texture in Files.") != std::string::npos,
+	CHECK(logged_frame(windows, 8).find("Open a menu, a model or an animation to preview it, or select a texture in Files.") != std::string::npos,
 	      "nothing to preview yet");
+	// No project open (the UX round's project lane): the welcome page, the workspace's whole; the other windows
+	// stand aside, open in the Windows menu.
+	SessionView none;
+	windows.set_view(&none);
+	for (uint64_t i = 100; i < 104; ++i) frame(windows, i);
+	const std::string home = logged_frame(windows, 104);
+	CHECK(home.find("New project") != std::string::npos && home.find("OpenNova Editor") != std::string::npos,
+	      "no project: the welcome page");
+	CHECK(!files->Active && !preview->Active && !inspector->Active && !problems->Active && !output->Active &&
+	              find_window(pass, "Files")->open,
+	      "the other windows stand aside, still open");
+	CHECK(near(document->Size.x, size.x, 2.0f * ImGui::GetStyle().DockingSeparatorSize + 1.0f),
+	      "the welcome page the whole width");
 
 	// A seeded project with a catalog open: a missing model reference and a line the game
 	// ignores draw the inspector's Missing badge and the catalog's dropped-lines notice.
@@ -302,6 +320,10 @@ void test_workspace_layout() {
 // minimized and restored (S17: the Document dock was left a 20 px strip after a maximize and a restore).
 void test_dock_survives_resizes() {
 	Ui ui;
+	SessionView opened; // a project open: every window docked shows
+	opened.project.open = true;
+	opened.project.root = "C:/mods/Resizes";
+	ui.windows.set_view(&opened);
 	ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 900.0f);
 	ui.frames(6);
 	const char *const titles[] = {"Files", "Document", "Preview", "Inspector", "Problems"};
@@ -632,22 +654,29 @@ void test_thirty_tabs() {
 	      "the last tab, chosen from the list, opens");
 }
 
-// No project: the Document window is the welcome view (new, open, recent, what happened).
-// Create waits for a folder, the shell's pick fills it, Create raises NewProject; File > New
-// project... shows the same form in a modal; File > Open recent opens one.
+// No project: the Document window is the welcome page, the workspace's whole (the UX round's project
+// lane): open (a folder, the recent projects by their titles, their games and their folders, one whose
+// folder holds no project said so), new, what happened. Create waits for a folder, the shell's pick fills
+// it, Create raises NewProject; File > New project... shows the same form in a modal; File > Open recent
+// opens one.
 void test_welcome_view() {
 	SessionView v;
-	v.project.recent_projects = {"C:/mods/Armory", "C:/mods/Other"};
+	v.project.recent_projects = {"C:/mods/Armory", "C:/mods/Other", "C:/mods/Gone"};
+	v.project.recent_details = {{"C:/mods/Armory", true, "Armory Mod", "Joint Operations", "jxm", "jox01"},
+	                            {"C:/mods/Other", true, "Other", "Joint Operations", "", ""},
+	                            {"C:/mods/Gone", false, "", "", "", ""}};
 	v.activity.status = "No project open.";
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
 	ui.away();
 	ui.drain();
-	CHECK(in_order(logged_frame(ui), {"New project", "Create project", "Open project", "Open a project folder...", "Recent",
-	                                  "C:/mods/Armory", "C:/mods/Other", "No project open."}),
-	      "the welcome view");
-	const ImGuiID document = Ui::window_id("Document");
+	CHECK(in_order(logged_frame(ui), {"OpenNova Editor", "Open a project", "Open a project folder...", "Armory Mod",
+	                                  "Joint Operations, as the expansion jxm on jox01", "C:/mods/Armory", "Other",
+	                                  "No project here now", "C:/mods/Gone", "New project", "Name", "Folder", "Game install",
+	                                  "No game install chosen", "Create project", "No project open."}),
+	      "the welcome page");
+	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
 	ui.activate(item_id(document, {"Create project"}));
 	CHECK(ui.drain().empty(), "no folder yet: nothing to create");
 	ui.activate(item_id(document, {"Browse...##folder"}));
@@ -671,7 +700,7 @@ void test_welcome_view() {
 	ui.frames(2);
 	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && !modal_open("New project"),
 	      "its Create, and the modal closes");
-	requests = choose(ui, "File", {"Open recent", "C:/mods/Other"});
+	requests = choose(ui, "File", {"Open recent", "###C:/mods/Other"});
 	CHECK(one(requests, EditorRequestKind::OpenProject) && requests[0].dir == "C:/mods/Other", "File > Open recent");
 }
 
@@ -1174,7 +1203,7 @@ void test_files_window() {
 	CHECK(window != nullptr, "the Files window");
 	if (!window) return;
 	const ImGuiID files = Ui::window_id("Files");
-	const ImGuiID table = item_id(files, {"files"});
+	const ImGuiID table = item_id(files, {"project_files"});
 	// (Files draws first; Document's tab, with its Reload, after.)
 	const auto files_text = [&ui]() {
 		const std::string text = logged_frame(ui);
@@ -1186,7 +1215,8 @@ void test_files_window() {
 			"defs", "items.def", "2", "1", "3.0 KB", "menus", "sub", "options.mnu", "main.mnu",
 			"readme.txt"}),
 	      "the file count; the folders sorted, each over its files; an import beside its source; the counts after a name");
-	CHECK(text.find("Kind") == std::string::npos && text.find("Item defin") == std::string::npos, "the kind hidden");
+	// The UX round's project lane: the kind shown, a column of its own.
+	CHECK(in_order(text, {"Name", "Kind", "Size", "items.def", "Item def", "3.0 KB"}), "the kind shown");
 	// ADR 0046 S15: a file that is the game's own data has its findings counted apart, as Problems
 	// counts them: none after its name (its tooltip says them); the modder's again once it is not.
 	const OriginalData shipped = editor_test::originals_of(v.findings.diagnostics, {"defs/items.def"});
@@ -1203,12 +1233,12 @@ void test_files_window() {
 	ui.frames(2);
 	text = files_text();
 	ImGuiTable *files_table = ImGui::TableFindByID(table);
-	CHECK(files_table && files_table->ColumnsCount == 3 && !files_table->Columns[1].IsEnabled &&
+	CHECK(files_table && files_table->ColumnsCount == 3 && files_table->Columns[1].IsEnabled &&
 	              files_table->Columns[0].WidthGiven > 2.0f * files_table->Columns[2].WidthGiven &&
 	              files_table->Columns[2].WidthGiven >= ImGui::CalcTextSize("999.9 KB").x - 1.0f,
 	      "the name has most of the width; the size is as wide as 999.9 KB");
 	if (!files_table) return;
-	// The kind shown through the header's menu (a right click on a header).
+	// The kind hidden through the header's menu (a right click on a header).
 	const ImGuiTableColumn &size_column = files_table->Columns[2];
 	ui.mouse((size_column.MinX + size_column.MaxX) * 0.5f, files_table->OuterRect.Min.y + ImGui::GetFontSize() * 0.5f + 1.0f);
 	ui.button(true, 1);
@@ -1218,8 +1248,8 @@ void test_files_window() {
 	ui.away();
 	ui.frames(2);
 	text = files_text();
-	CHECK(files_table->Columns[1].IsEnabled && in_order(text, {"Name", "Kind", "Size", "items.def", "Item defin", "3.0 KB"}),
-	      "the kind shown from the header's menu");
+	CHECK(!files_table->Columns[1].IsEnabled && text.find("Item def") == std::string::npos,
+	      "the kind hidden from the header's menu");
 
 	// A filter: its matches, flat.
 	type_into(ui, item_id(files, {"##filter"}), "mnu");
@@ -1255,8 +1285,8 @@ void test_files_window() {
 	ui.button(false);
 	std::vector<EditorRequest> requests = without_selects(ui.drain());
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == "menus/main.mnu", "a double click opens it");
-	// A text opens too (S13 D9: a text document); an image source, which no document type opens, opens
-	// its page (what it is, who reads it; the plain-words lane).
+	// A text opens too (S13 D9: a text document); an image source, which no document type opens, is
+	// selected, not opened.
 	CHECK(hover_find(ui, item_id(table, {"readme.txt", "##row"}), x, top, bottom, row), "readme.txt's row");
 	ui.button(true);
 	ui.button(false);
@@ -1269,9 +1299,7 @@ void test_files_window() {
 	ui.button(false);
 	ui.button(true);
 	ui.button(false);
-	requests = without_selects(ui.drain());
-	CHECK(window->selected() == "art/logo.png" && one(requests, EditorRequestKind::OpenDocument) && requests[0].path == "art/logo.png",
-	      "an image source opens its page");
+	CHECK(window->selected() == "art/logo.png" && without_selects(ui.drain()).empty(), "an image source is selected, not opened");
 
 	// New: weapon.def made at once; items.def, which the project has, not offered; a menu's
 	// name asked first, checked as it is typed.
@@ -1417,6 +1445,106 @@ bool same_line(const std::string &text, const char *first, const char *second) {
 // unchecked. The check box raises the setting's request. A listing's choices raise PlanImport
 // with the files chosen; a changed plan says so; a file with unsaved edits holds nothing, and
 // the unsaved prompt an Import raises takes the dialog's place until it is answered (S12).
+// The import dialog's group checks (the review of the project lane, M2, L7, L8, L9). A plan of 22 chosen
+// textures and none found goes by kind: its Texture line's check leaves out every file, the chosen one the
+// project cannot take too (L8), and takes back the files it can, never the one the project has already,
+// whose replace no one asked for (M2: Import sends no replace). A tree of two chosen menus naming one font:
+// the font listed under both, leaving out a.mnu's Font keeps it while b.mnu, checked, names it (L7); Uncheck
+// shown leaves the rows of a closed line as they are (L9).
+void test_import_dialog_groups() {
+	using State = ImportPlanRow::State;
+	const auto row = [](State state, const std::string &name, AssetKind kind) {
+		ImportPlanRow out;
+		out.state = state;
+		out.selected = true;
+		out.source = {"C:/art/" + name, "", false, state == State::Found};
+		out.name = name;
+		out.kind = kind;
+		out.destination = "textures/" + name;
+		out.found_in = "the folder C:/art";
+		return out;
+	};
+	{
+		SessionView v = seeded_view();
+		DialogsView::ImportPreview &preview = v.dialogs.import_preview;
+		preview.open = true;
+		ImportPlan plan;
+		for (int i = 0; i < 22; ++i) plan.rows.push_back(row(State::Selected, "t" + std::to_string(10 + i) + ".tga", AssetKind::Texture));
+		plan.rows[20].held = true;
+		plan.rows[20].selected = false;
+		plan.rows[20].held_as = ImportPlanRow::Held::Differs;
+		plan.rows[21].problem = "t31.tga cannot be stored.";
+		plan.rows[21].selected = false;
+		for (const ImportPlanRow &each : plan.rows) preview.roots.push_back(each.source);
+		preview.plan = std::make_shared<const ImportPlan>(std::move(plan));
+		Ui ui;
+		ui.windows.set_view(&v);
+		ui.frames(6);
+		ui.away();
+		ui.drain();
+		ImGui::SetWindowSize("Import files", ImVec2(1700.0f, 1000.0f));
+		ui.frames(2);
+		const ImGuiID textures = item_id(pushed(item_id(import_body_id(), {"import_plan"}), 22 + 0), {"##group"});
+		CHECK(logged_frame(ui).find("Texture (22 files)") != std::string::npos, "by kind: one Texture line");
+		ui.activate(textures);
+		ui.away();
+		CHECK(logged_frame(ui).find("Import 0 files") != std::string::npos,
+		      "the line's uncheck: every file left out, the chosen one the project cannot take too (L8)");
+		ui.activate(textures);
+		ui.away();
+		CHECK(logged_frame(ui).find("Import 20 files") != std::string::npos,
+		      "its check: the files the project can take, not the one it has already (M2)");
+		ui.activate(item_id(ImHashStr("Import files"), {"###import"}));
+		const std::vector<EditorRequest> requests = ui.drain();
+		const EditorRequest *import = only(requests, EditorRequestKind::ImportFiles);
+		CHECK(import && !import->replace && import->imports.size() == 20, "Import: no replace asked, the held file not sent");
+	}
+	SessionView v = seeded_view();
+	DialogsView::ImportPreview &preview = v.dialogs.import_preview;
+	preview.open = true;
+	preview.with_dependencies = true;
+	ImportPlan plan;
+	plan.rows.push_back(row(State::Selected, "a.mnu", AssetKind::Menu));
+	plan.rows.push_back(row(State::Selected, "b.mnu", AssetKind::Menu));
+	ImportPlanRow font = row(State::Found, "shared.fnt", AssetKind::Font);
+	font.needed_by = {"a.mnu", "MAIN/TITLE", "font.name", ReferenceKind::Font, "shared", -1};
+	font.wanted_by = {"a.mnu", "b.mnu"};
+	plan.rows.push_back(font);
+	ImportPlanRow logo = row(State::Found, "logo.tga", AssetKind::Texture);
+	logo.needed_by = {"a.mnu", "MAIN/LOGO/Appearance 1", "value", ReferenceKind::MenuTexture, "logo.tga", -1};
+	logo.wanted_by = {"a.mnu"};
+	plan.rows.push_back(logo);
+	preview.roots = {plan.rows[0].source, plan.rows[1].source};
+	preview.plan = std::make_shared<const ImportPlan>(std::move(plan));
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	ui.drain();
+	ImGui::SetWindowSize("Import files", ImVec2(1700.0f, 1000.0f));
+	ui.frames(2);
+	std::string text = logged_frame(ui);
+	CHECK(in_order(text, {"a.mnu", "Font (1 file)", "shared.fnt", "Texture (1 file)", "logo.tga", "b.mnu",
+	                      "Font (0 files, 1 more another file brings)", "shared.fnt", "named here too; it comes with a.mnu"}),
+	      "the font b.mnu names too, under b.mnu as well (L7)");
+	const auto group_item = [](size_t group, const char *label) {
+		return item_id(pushed(item_id(import_body_id(), {"import_plan"}), int(4 + group)), {label});
+	};
+	ui.activate(group_item(2, "##group"));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 4 files") != std::string::npos, "a.mnu's Font left out: the font kept, b.mnu names it");
+	ui.activate(import_table_item("import_plan", 1, "##take"));
+	ui.activate(group_item(2, "##group"));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "b.mnu left out too: the font goes with the line");
+	// a.mnu's Texture line closed: Uncheck shown leaves its logo as it is (L9).
+	ui.activate(group_item(3, "##open"));
+	ui.away();
+	ui.activate(item_id(import_body_id(), {"Uncheck shown"}));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos, "Uncheck shown: the rows shown alone, the closed line's logo kept");
+}
+
 void test_import_dialog() {
 	SessionView v = seeded_view();
 	v.dialogs.import_preview = planned_import("C:/assets");
@@ -1430,13 +1558,15 @@ void test_import_dialog() {
 	ImGui::SetWindowSize("Import files", ImVec2(1700.0f, 1000.0f));
 	ui.frames(2);
 	std::string text = logged_frame(ui);
-	const std::string stopped = "The plan stopped at " + std::to_string(kImportPlanFileCap) + " files";
+	const std::string stopped = "The plan stopped at " + grouped(kImportPlanFileCap) + " files";
 	// S14: the plan in short first, its files and bytes, then each kind with its count and size, the
-	// largest first (alike: by token), each a toggle; then the rows, each with its size.
+	// largest first (alike: by token), each a toggle; then the rows, each with its size, by what they
+	// come for (the UX round's project lane): each chosen file, the kinds of the files it brings under it.
 	CHECK(in_order(text, {"Include the files these need (3 found)", "6 files, 0 B:", "Texture 2 (0 B)", "Animation 1 (0 B)",
 	                      "Animation map 1 (0 B)", "Font 1 (0 B)", "Menu 1 (0 B)", "Check shown", "Uncheck shown",
-	                      "menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "Font", "0 B",
-	                      "menu.mnu: MAIN/TITLE font.name", "the folder assets", "logo.tga", "a_long_texture_name.tga",
+	                      "menu.mnu", "chosen; it brings 3 files", "Font (1 file)", "what menu.mnu names", "arial99.fnt",
+	                      "Font", "0 B", "menu.mnu: MAIN/TITLE font.name", "the folder assets", "Texture (2 files)", "logo.tga",
+	                      "a_long_texture_name.tga", "CHECK.adm", "walk.bad",
 	                      "Not found (1)", "gone.tga", "menu.mnu: MAIN/KEEP/Appearance 1 value",
 	                      "arial99.fnt: found in both the folder C:/assets and the game install; using the folder C:/assets",
 	                      "The files these kinds name are not looked for yet: Terrain.",
@@ -1446,6 +1576,24 @@ void test_import_dialog() {
 	      "the plan: the summary, the rows, then what is not found, found twice, not followed, the cap, the finding");
 	CHECK(same_line(text, "menu.mnu", "chosen") && same_line(text, "CHECK.adm", "made from walk.o3a, the folder assets"),
 	      "a chosen file says so; a converter's output, what it is made from");
+	// A kind's line: one check for its files (the one the project cannot take left as it is), a click
+	// on its arrow closing it.
+	const ImGuiID textures = item_id(pushed(item_id(import_body_id(), {"import_plan"}), 7 + 4), {"##group"});
+	ui.activate(textures);
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 4 files") != std::string::npos, "the Texture line's check: its file left out");
+	ui.activate(textures);
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 5 files") != std::string::npos, "and back");
+	ui.activate(item_id(pushed(item_id(import_body_id(), {"import_plan"}), 7 + 4), {"##open"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Texture (2 files)", "CHECK.adm"}) && text.find("logo.tga") == std::string::npos,
+	      "the Texture line closed: its rows hidden");
+	ui.activate(item_id(pushed(item_id(import_body_id(), {"import_plan"}), 7 + 4), {"##open"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Texture (2 files)", "logo.tga", "CHECK.adm"}), "open again");
 	const ImGuiID dialog = ImHashStr("Import files");
 	// A kind's toggle shows its rows alone; Uncheck shown and Check shown take the shown rows
 	// together (one the project cannot take never); the toggle again shows every kind.
@@ -1464,7 +1612,7 @@ void test_import_dialog() {
 	ui.activate(item_id(import_body_id(), {"###kind_texture"}));
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "logo.tga"}), "the toggle again: every kind");
+	CHECK(in_order(text, {"menu.mnu", "arial99.fnt", "logo.tga", "CHECK.adm", "walk.bad"}), "the toggle again: every kind");
 	const auto sources = [](const EditorRequest &request) {
 		std::vector<std::string> out;
 		for (const ImportChoice &source : request.imports) out.push_back(source.path);
@@ -1502,13 +1650,28 @@ void test_import_dialog() {
 	// An archive's members to choose from: a choice checked plans the chosen files again.
 	v.dialogs.import_preview.choices = { { "C:/assets/data.pff", "main.mnu", false, false },
 		{ "C:/assets/data.pff", "stat.mnu", false, false } };
+	v.dialogs.import_preview.facts = { { AssetKind::Menu, 2048 }, { AssetKind::Menu, 512 } };
 	post_event(v, ViewEventKind::ImportPlanned);
 	ui.frames(3);
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"Choose the files to import from the archive data.pff:", "main.mnu", "stat.mnu",
-	                      "Include the files these need"}),
-	      "the list to choose from above the plan");
+	CHECK(in_order(text, {"Choose the files to import from the archive data.pff (2 files):", "2 files shown, 0 chosen", "File",
+	                      "Kind", "Size", "main.mnu", "Menu", "stat.mnu", "Include the files these need"}) &&
+	              text.find("Source") == std::string::npos,
+	      "the list to choose from above the plan, each file with its kind and size; no Source where every file "
+	      "comes from one place");
+	// The filter: a part of a name, or a kind's name.
+	type_into(ui, item_id(import_body_id(), {"##filter"}), "stat");
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("1 of 2 files shown") != std::string::npos && text.find("[ ] main.mnu") == std::string::npos &&
+	              text.find("[ ] stat.mnu") != std::string::npos,
+	      "a part of a name: the files holding it");
+	type_into(ui, item_id(import_body_id(), {"##filter"}), "menus");
+	ui.away();
+	CHECK(logged_frame(ui).find("2 files shown") != std::string::npos, "a kind's name: the files of the kind");
+	type_into(ui, item_id(import_body_id(), {"##filter"}), "");
+	ui.drain();
 	ui.activate(import_table_item("import_choices", 1, "###pick"));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::PlanImport) && requests[0].with_dependencies &&
@@ -1779,13 +1942,20 @@ void test_preview_follows() {
 	      "the table: the model pane, the table on the model it plays on");
 	text = run.open("anims/walk.bad");
 	CHECK(text.find("walk.bad on skinned.3di") != std::string::npos, "a lone clip: on the model its table plays on");
-	text = run.open("menu_style.mns");
-	CHECK(text.find("main.mnu - startup") != std::string::npos, "the stylesheet: the screen it styles");
-	text = run.open("gametext.bin");
-	CHECK(text.find("main.mnu - startup") != std::string::npos, "a string table: the menu pane too");
+	// What the pane holds while a document it has nothing of to show is active (the UX round's project lane:
+	// the pane steps aside then, project_test.cpp's; at this width a table that feeds it too, lacking the
+	// room): the kind the view keeps, shown again as such a document goes.
+	const DocumentBase *shown_menu = session.document_base_for("main.mnu");
+	run.open("menu_style.mns");
+	CHECK(v.documents.preview_shown == ViewportKind::Menu && shown_menu &&
+	              v.documents.previews[ViewportKind::Menu].path == shown_menu->path(),
+	      "the stylesheet: the screen it styles");
+	run.open("gametext.bin");
+	CHECK(v.documents.preview_shown == ViewportKind::Menu, "a string table: the menu pane too");
 	run.open("anims/SKIN.adm");
-	text = run.open("items.def");
-	CHECK(text.find("skin.adm on skinned.3di") != std::string::npos, "a catalog keeps the pane shown");
+	run.open("items.def");
+	CHECK(v.documents.preview_shown == ViewportKind::Model && v.documents.previews[ViewportKind::Model].path == "anims/SKIN.adm",
+	      "a catalog keeps the pane shown");
 	CHECK(preview_kind(v.documents, ViewportKind::kCount) == ViewportKind::Menu &&
 	              v.documents.preview_shown == ViewportKind::Model,
 	      "before it showed anything, with both: the menu's; after the table, still the table's");
@@ -1793,7 +1963,7 @@ void test_preview_follows() {
 	// A family with nothing to show gives way to the other.
 	session.handle(request::close_document("anims/SKIN.adm"));
 	run.settle();
-	CHECK(lowered(logged_frame(ui)).find("main.mnu - startup") != std::string::npos, "the table closed: the menu's pane");
+	CHECK(v.documents.preview_shown == ViewportKind::Menu, "the table closed: the menu's pane");
 	run.open("anims/walk.bad");
 	run.open("main.mnu");
 	run.open("items.def");
@@ -1802,12 +1972,18 @@ void test_preview_follows() {
 	if (!main_menu) return;
 	session.handle(request::close_document(main_menu->path()));
 	run.settle();
-	CHECK(lowered(logged_frame(ui)).find("walk.bad on skinned.3di") != std::string::npos, "the menu closed: the clip's pane");
-	text = run.open("gametext.bin");
-	CHECK(text.find("walk.bad on skinned.3di") != std::string::npos, "a string table with no menu open: the clip's pane");
+	CHECK(v.documents.preview_shown == ViewportKind::Model && v.documents.previews[ViewportKind::Model].path == "anims/walk.bad",
+	      "the menu closed: the clip's pane");
+	run.open("gametext.bin");
+	CHECK(v.documents.preview_shown == ViewportKind::Model, "a string table with no menu open: the clip's pane");
 	session.handle(request::close_document("anims/walk.bad"));
 	run.settle();
-	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "neither: what to open");
+	CHECK(v.documents.preview_shown == ViewportKind::kCount, "neither: nothing to show");
+	session.handle(request::close_document("gametext.bin"));
+	session.handle(request::close_document("items.def"));
+	session.handle(request::close_document("menu_style.mns"));
+	run.settle();
+	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "nothing open: what to open");
 
 	// A model opened while Document has the focus: the model pane shows, the focus stays.
 	ui.focus("Document");
@@ -2376,8 +2552,8 @@ void test_mission_view_placing() {
 // nothing open, Preview draws beside Document (what to open); the mission made active with nothing
 // to preview, Preview is not drawn (its Windows item still open), its node hides and Document takes
 // the whole centre, the mission's picture the main view; a menu opened, Preview is back in the node
-// it left and Document has its share again; the mission active again, Preview stays beside it,
-// showing the menu it has to show.
+// it left and Document has its share again; the mission active again, Preview steps aside again (the
+// UX round's project lane), though it has the menu to show.
 void test_preview_steps_aside() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_steps_aside");
 	NoProcess platform;
@@ -2426,10 +2602,12 @@ void test_preview_steps_aside() {
 	ui.frames(3);
 	CHECK(preview->Active && preview->DockId == node && document->Size.x < centre() * 0.5f,
 	      "a menu opened: Preview back in its node, Document its share");
+	// The UX round's project lane: the Preview steps aside for a document it has nothing of to show, whatever
+	// else it could show (S15 kept the menu beside the mission).
 	run.open("missions/synth_logic.bms");
 	ui.frames(3);
-	CHECK(!preview_stands_aside(v) && preview->Active && v.documents.preview_shown == ViewportKind::Menu,
-	      "the mission again: Preview stays beside it, the menu its to show");
+	CHECK(preview_stands_aside(v) && !preview->Active && v.documents.preview_shown == ViewportKind::Menu,
+	      "the mission again: Preview steps aside, though it has the menu to show");
 	// The author's ask (S15 review): the menu closed, the Preview steps aside for the mission again;
 	// ticked in the Windows menu (show_anyway), it shows beside that mission until another document is
 	// made active.
@@ -2872,6 +3050,7 @@ void run_workspace_tests() {
 	test_menu_bar_status();
 	test_files_window();
 	test_import_dialog();
+	test_import_dialog_groups();
 	test_import_dialog_problem_root();
 	test_import_dialog_held_rows();
 	test_preview_follows();

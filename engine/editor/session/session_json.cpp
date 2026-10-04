@@ -66,6 +66,7 @@ constexpr Token<PickPurpose> kPurposeTokens[] = {
 	{PickPurpose::GameInstall, "game_install"},
 	{PickPurpose::ImportFiles, "import_files"},
 	{PickPurpose::BuildFolder, "build_folder"},
+	{PickPurpose::NewProjectInstall, "new_project_install"},
 	{PickPurpose::TextureImage, "texture_image"},
 };
 

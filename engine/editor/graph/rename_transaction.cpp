@@ -25,6 +25,7 @@
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <formats/pff/pff.h>
 #include <runtime/renderer/material_texture.h>
@@ -709,7 +710,7 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 		findings.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Error,
 		                                file + " would still name '" + old_name + "' in " +
 		                                        std::to_string(sites.size() - found.size()) + " of its " +
-		                                        std::to_string(sites.size()) + " planned place(s).",
+		                                        counted(sites.size(), "planned place") + ".",
 		                                file));
 		ok = false;
 	}
@@ -819,7 +820,7 @@ bool stage_symbol_file(const ProjectPaths &paths, const ProjectDocument &project
 	if (rewritten < sites.size()) {
 		findings.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Error, file + " would still name '" + plan.old_name + "' in " +
 		                                           std::to_string(sites.size() - rewritten) + " of its " +
-		                                           std::to_string(sites.size()) + " planned place(s).",
+		                                           counted(sites.size(), "planned place") + ".",
 		                                   file));
 		ok = false;
 	}
@@ -1012,7 +1013,7 @@ void RenameTransaction::stage_file(const std::string &file, const std::vector<co
 		std::string names;
 		for (const std::string &name : left) names += (names.empty() ? "'" : ", '") + name + "'";
 		found.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Error, file + " still names " + names + " in " + std::to_string(sites.size() - staged->rewritten) +
-		                                        " of its " + std::to_string(sites.size()) + " planned place(s).",
+		                                        " of its " + counted(sites.size(), "planned place") + ".",
 		                                file));
 		staged_ok_ = false;
 	}
@@ -1072,7 +1073,7 @@ void RenameTransaction::stage_native(const AssetEntry &asset, const std::vector<
 		staged.findings.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Error,
 		                                       asset.relative_path + " still names " + names + " in " +
 		                                               std::to_string(sites.size() - staged.rewritten) + " of its " +
-		                                               std::to_string(sites.size()) + " planned place(s).",
+		                                               counted(sites.size(), "planned place") + ".",
 		                                       asset.relative_path));
 		staged_ok_ = false;
 	}

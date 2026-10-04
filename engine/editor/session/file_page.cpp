@@ -31,8 +31,10 @@ FilePage file_page(const SessionView &view, const std::string &path) {
 	page.cite = words.cite;
 	// Where a build puts it, from the decision the build plan makes (a player's file, an archive, a name no
 	// archive stores among them), and what the editor does with it.
-	page.build = build_place_words(*entry, view.project.document ? view.project.document->expansion.name : std::string());
-	const bool packed = page.build.rfind("A build packs", 0) == 0 || page.build.rfind("A build copies", 0) == 0;
+	const BuildPlaceWords place =
+	        build_place_words(*entry, view.project.document ? view.project.document->expansion.name : std::string());
+	page.build = place.words;
+	const bool packed = place.packed;
 	page.editor = entry->kind == AssetKind::ImportSource
 	                      ? "The editor imports it: its outputs are the project's files, opened as their kinds are."
 	              : is_editable_kind(entry->kind) ? "The editor opens it as a document."

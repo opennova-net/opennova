@@ -1,21 +1,24 @@
 #include <editor/ui/files_window.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <map>
+#include <memory>
 
 #include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
-#include <editor/graph/display_names.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
+#include <editor/model/field_text.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
+#include <editor/session/file_card.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -24,6 +27,7 @@
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/welcome_view.h>
 
 #include <imgui.h>
 
@@ -54,18 +58,10 @@ const DocumentBase *open_document(const SessionView &view, const std::string &pa
 	return nullptr;
 }
 
-// What the window's caches read of the view: the tree and each file's counts, the files and the
-// findings (and which documents are open); a file's
-// References..., the graph (its edges name their files by path and their
-// fields by the kind the scan gives: the graph moves when either does).
-struct CacheKey {
-	RevisionKey tree;
-	RevisionKey references;
-};
-CacheKey cache_key(const SessionView &view) {
-	return {revision_key(view.revisions,
-	                     {ViewConcern::Files, ViewConcern::Findings, ViewConcern::DocumentSet}),
-	        revision_key(view.revisions, {ViewConcern::Graph})};
+// What the tree and each file's counts read of the view: the files and the findings (and which
+// documents are open).
+RevisionKey tree_key(const SessionView &view) {
+	return revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Findings, ViewConcern::DocumentSet});
 }
 
 } // namespace
@@ -158,14 +154,13 @@ void NewFilePrompt::draw(Workspace &workspace) {
 
 // The tree of the scan's folders and each file's findings, made again when what they read moves.
 void FilesWindow::refresh(const SessionView &view) {
-	const RevisionKey key = cache_key(view).tree;
+	const RevisionKey key = tree_key(view);
 	if (view_ == &view && key_ == key && !folders_.empty()) return;
 	view_ = &view;
 	key_ = key;
 	++rebuilds_;
 	folders_.assign(1, Folder());
-	compared_.clear(); // made again by matching(), once a filter is set
-	matches_made_ = false;
+	matches_made_ = false; // made again by matching(), once a filter is set
 	std::map<std::string, size_t> index;
 	for (size_t i = 0; i < view.project.scan->entries.size(); ++i) {
 		const AssetEntry &entry = view.project.scan->entries[i];
@@ -205,35 +200,28 @@ void FilesWindow::refresh(const SessionView &view) {
 }
 
 const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
-	if (filter_[0] == '\0') {
+	if (filter_[0] == '\0' && kind_shown_ == AssetKind::kCount) {
 		matches_.clear();
 		matches_made_ = false;
 		return matches_;
 	}
 	const uint64_t generation = view.findings.graph ? view.findings.graph->generation() : 0;
-	if (matches_made_ && matched_ == filter_ && matched_generation_ == generation) return matches_;
+	const std::string asked = std::string(filter_) + '\n' + std::to_string(static_cast<int>(kind_shown_));
+	if (matches_made_ && matched_ == asked && matched_generation_ == generation) return matches_;
 	matches_made_ = true;
-	matched_ = filter_;
+	matched_ = asked;
 	matched_generation_ = generation;
-	matches_.clear();
 	via_.clear();
-	if (compared_.size() != view.project.scan->entries.size()) {
-		compared_.clear();
-		for (const AssetEntry &entry : view.project.scan->entries)
-			compared_.push_back(normalized_logical_name(entry.relative_path));
-	}
-	const std::string wanted = normalized_logical_name(filter_);
-	std::vector<bool> listed(compared_.size(), false);
-	for (size_t i = 0; i < compared_.size(); ++i)
-		if (compared_[i].find(wanted) != std::string::npos) {
-			matches_.push_back(i);
-			listed[i] = true;
-		}
+	// The paths holding the text, then the files of a kind it names ("texture" lists the textures), each of
+	// the kind chosen (match_files, the files query's own rule).
+	matches_ = match_files(*view.project.scan, filter_, kind_shown_);
+	std::vector<bool> listed(view.project.scan->entries.size(), false);
+	for (const size_t i : matches_) listed[i] = true;
 	// Then the files a record naming them is found by, after them: a model by the item whose graphic it
 	// is (lack finds Dblkhwk1.3di through Flyable Blackhawk), from three letters on.
 	// Each once: a file its folder's name already lists is not listed again (the graph's search finds by
 	// record from three letters on).
-	if (view.findings.graph) {
+	if (view.findings.graph && filter_[0] != '\0') {
 		std::unordered_map<std::string, size_t> at;
 		for (const GraphSearchHit &hit : view.findings.graph->search(filter_)) {
 			if (hit.symbol || hit.via.empty()) continue;
@@ -241,6 +229,7 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 				for (size_t i = 0; i < view.project.scan->entries.size(); ++i) at.emplace(view.project.scan->entries[i].relative_path, i);
 			const auto found = at.find(hit.file);
 			if (found == at.end() || found->second >= listed.size() || listed[found->second]) continue;
+			if (kind_shown_ != AssetKind::kCount && view.project.scan->entries[found->second].kind != kind_shown_) continue;
 			listed[found->second] = true;
 			matches_.push_back(found->second);
 			via_[hit.file] = hit.via;
@@ -249,9 +238,13 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 	return matches_;
 }
 
+bool FilesWindow::stands_aside() const { return aside_for_welcome(workspace_.view(), welcome_asked_); }
+
 void FilesWindow::receive(const ViewEvent &event) {
 	events_.post(event);
 	request_focus();
+	// An AboutFile's card opens now, Files drawn or not.
+	if (event.kind == ViewEventKind::RevealFile && event.tag == 1) open_card(event.path);
 }
 
 // The file an ask names, selected; a filter that hides it cleared; the folders on its way
@@ -260,9 +253,15 @@ void FilesWindow::show_revealed(const SessionView &view, const ViewEvent &event)
 	const AssetEntry *entry = entry_at(view, event.path);
 	if (!entry) return;
 	selected_ = entry->relative_path;
-	if (filter_[0] != '\0' &&
-	    normalized_logical_name(entry->relative_path).find(normalized_logical_name(filter_)) == std::string::npos)
+	// A filter or a kind that hides it cleared.
+	const std::vector<size_t> &shown = matching(view);
+	const bool hidden = (filter_[0] != '\0' || kind_shown_ != AssetKind::kCount) &&
+	                    std::none_of(shown.begin(), shown.end(),
+	                                 [&](size_t i) { return view.project.scan->entries[i].relative_path == entry->relative_path; });
+	if (hidden) {
 		filter_[0] = '\0';
+		kind_shown_ = AssetKind::kCount;
+	}
 	scroll_to_ = entry->relative_path;
 	open_to_ = entry->imported_from.empty() ? entry->relative_path : entry->imported_from;
 	if (event.flag) start_rename(*entry);
@@ -279,6 +278,13 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ui_kit::empty_state("No project open.", "Make one or open one in the Document window.");
 		return;
 	}
+	// Another project: its own filter, kind and selection (none yet).
+	if (v.project.root != shown_root_) {
+		shown_root_ = v.project.root;
+		filter_[0] = '\0';
+		kind_shown_ = AssetKind::kCount;
+		selected_.clear();
+	}
 	refresh(v);
 	const auto newest = std::find_if(reveals.rbegin(), reveals.rend(),
 			[](const ViewEvent &event) { return event.kind == ViewEventKind::RevealFile; });
@@ -294,16 +300,24 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		}
 	}
 	draw_toolbar(v);
-	// The filter, and beside it how many files the project has (under it in a narrow dock).
-	const size_t count = v.project.scan->entries.size();
-	const std::string files = std::to_string(count) + (count == 1 ? " file" : " files");
+	// The filter and the kind beside it, then how many files the list shows (under them in a narrow dock).
+	const std::vector<size_t> &matches = matching(v);
+	const bool narrowed = filter_[0] != '\0' || kind_shown_ != AssetKind::kCount;
+	const size_t count = narrowed ? matches.size() : v.project.scan->entries.size();
+	const std::string files = (narrowed ? grouped(count) + " of " + grouped(v.project.scan->entries.size()) : grouped(count)) +
+	                          (v.project.scan->entries.size() == 1 ? " file" : " files");
 	{
 		const float spacing = ImGui::GetStyle().ItemSpacing.x;
+		const float kind = ImGui::GetFontSize() * 8.0f;
 		const float field = std::max(ImGui::GetFontSize() * 8.0f,
-		                             ImGui::GetContentRegionAvail().x - ui_kit::text_width(files.c_str()) - spacing);
+		                             ImGui::GetContentRegionAvail().x - kind - ui_kit::text_width(files.c_str()) - spacing * 2.0f);
 		ui_kit::WrapRow row;
 		row.next(field);
-		ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter files", field);
+		ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter files", field,
+		                   "A name, a folder, or a kind (texture, wave, model...): the files of the kind follow those "
+		                   "whose names hold the text.");
+		row.next(kind);
+		draw_kind_filter(v, kind);
 		row.next(ui_kit::text_width(files.c_str()));
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextDisabled("%s", files.c_str());
@@ -312,33 +326,78 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	// rename).
 	if (!selected_.empty() && v.allows(EditorRequestKind::RenameAsset) && ImGui::Shortcut(ImGuiKey_F2))
 		if (const AssetEntry *entry = entry_at(v, selected_)) start_rename(*entry);
-	// A filter lists the files it matches flat.
-	const std::vector<size_t> &matches = matching(v);
+	// A filter or a kind lists the files it matches flat.
 	if (v.project.scan->entries.empty()) {
 		ui_kit::empty_state("The project has no files yet.", "Import files, or make one with New.");
-	} else if (filter_[0] != '\0' && matches.empty()) {
-		ui_kit::empty_state("No file matches the filter.");
-	} else if (ImGui::BeginTable("files", 3,
+	} else if (narrowed && matches.empty()) {
+		ui_kit::empty_state(kind_shown_ != AssetKind::kCount && filter_[0] == '\0' ? "The project has no file of this kind."
+		                                                                         : "No file matches the filter.");
+	} else if (const bool kind_fits = ImGui::GetContentRegionAvail().x >= ImGui::GetFontSize() * kKindRoomEm;
+	           // "project_files": a table id of its own since the Kind column shows by default, so a layout an
+	           // earlier editor saved with it hidden (its default then) does not hide it (the UX round's project lane).
+	           ImGui::BeginTable("project_files", 3,
 	                             ImGuiTableFlags_Resizable | ImGuiTableFlags_Hideable | ImGuiTableFlags_RowBg |
 	                                     ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY)) {
-		// The name takes what the others leave. The kind is hidden until the header's menu (a
-		// right click) shows it: the folders group the files by kind, and a row's tooltip says
-		// it. The size is as wide as "999.9 KB".
+		// The name takes what the others leave; the kind as wide as "Animation map" (a longer label cut,
+		// whole in its tooltip), hidden from the header's menu (a right click), and giving way to the name
+		// in a narrow dock (as the dock crosses the width, the author's choice standing in between); the
+		// size as wide as "999.9 KB".
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoHide);
-		ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultHide,
-		                        ui_kit::text_width("Item definitions"));
+		ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("Animation map"));
 		ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("999.9 KB"));
+		if (kind_fits != kind_fitted_) {
+			kind_fitted_ = kind_fits;
+			ImGui::TableSetColumnEnabled(1, kind_fits);
+		}
 		ImGui::TableHeadersRow();
-		if (filter_[0] != '\0') {
-			for (const size_t i : matches) draw_file(v, v.project.scan->entries[i], false);
+		if (narrowed) {
+			// Many rows (every texture of a game): only those that show are drawn.
+			ImGuiListClipper clipper;
+			clipper.Begin(static_cast<int>(matches.size()));
+			if (!scroll_to_.empty())
+				for (size_t i = 0; i < matches.size(); ++i)
+					if (v.project.scan->entries[matches[i]].relative_path == scroll_to_) clipper.IncludeItemByIndex(int(i));
+			while (clipper.Step())
+				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+					draw_file(v, v.project.scan->entries[matches[size_t(i)]], false);
 		} else {
 			draw_folder(v, folders_.front());
 		}
 		ImGui::EndTable();
 	}
 	draw_rename(v);
-	draw_references(v);
+}
+
+void FilesWindow::draw_card_window() {
+	const SessionView &v = workspace_.view();
+	// The card is its project's: closed with it, and when another opens.
+	if (!v.project.open || (!card_path_.empty() && v.project.root != card_root_)) {
+		close_card();
+		return;
+	}
+	draw_card(v);
+}
+
+void FilesWindow::draw_kind_filter(const SessionView &view, float width) {
+	// The kinds the project has files of, each with how many, in the rows' order.
+	std::vector<size_t> counts(kAssetKindCount, 0);
+	for (const AssetEntry &entry : view.project.scan->entries)
+		if (static_cast<size_t>(entry.kind) < kAssetKindCount) ++counts[static_cast<size_t>(entry.kind)];
+	const std::string shown = kind_shown_ == AssetKind::kCount ? std::string("Every kind")
+	                          : std::string(asset_kind_label(kind_shown_));
+	ImGui::SetNextItemWidth(width);
+	if (ImGui::BeginCombo("##kind", shown.c_str(), ImGuiComboFlags_HeightLarge)) {
+		if (ImGui::Selectable("Every kind", kind_shown_ == AssetKind::kCount)) kind_shown_ = AssetKind::kCount;
+		for (size_t i = 0; i < kAssetKindCount; ++i) {
+			if (!counts[i]) continue;
+			const AssetKind kind = static_cast<AssetKind>(i);
+			const std::string label = std::string(asset_kind_label(kind)) + " (" + grouped(counts[i]) + ")###" + asset_kind_token(kind);
+			if (ImGui::Selectable(label.c_str(), kind_shown_ == kind)) kind_shown_ = kind;
+		}
+		ImGui::EndCombo();
+	}
+	ui_kit::tooltip(kind_shown_ == AssetKind::kCount ? "Only the files of one kind." : "Only the " + shown + " files: Every kind shows them all.");
 }
 
 // Import, New and Refresh, wrapping in a narrow dock; each item enabled while the busy gate takes
@@ -476,9 +535,12 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		if (view.allows(EditorRequestKind::SelectFile) &&
 		    (view.documents.file_selected.path != entry.relative_path || (previews && !view.documents.files_lead)))
 			workspace_.request(request::select_file(entry.relative_path));
-		// Opened: a document, or for a kind the editor has no editor for its page (the plain-words lane).
-		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && view.allows(EditorRequestKind::OpenDocument))
-			workspace_.request(request::open_document(entry.relative_path));
+		// A double click opens what the editor opens, and says what any other file is (its card: the UX
+		// round's project lane).
+		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+			if (!is_editable_kind(entry.kind)) open_card(entry.relative_path);
+			else if (view.allows(EditorRequestKind::OpenDocument)) workspace_.request(request::open_document(entry.relative_path));
+		}
 	}
 	// Dragged onto a reference field whose kind loads it, the file becomes its value
 	// (ReferencePicker::accept_file).
@@ -556,16 +618,13 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entry) {
 	if (!ImGui::BeginPopupContextItem("file_menu")) return;
 	selected_ = entry.relative_path;
-	const bool opens = view.allows(EditorRequestKind::OpenDocument);
-	if (ImGui::MenuItem(is_editable_kind(entry.kind) ? "Open" : "About this file", nullptr, false, opens) && opens)
+	const bool opens = is_editable_kind(entry.kind) && view.allows(EditorRequestKind::OpenDocument);
+	if (ImGui::MenuItem("Open", nullptr, false, opens) && opens)
 		workspace_.request(request::open_document(entry.relative_path));
 	const bool renames = view.allows(EditorRequestKind::RenameAsset);
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
-	if (ImGui::MenuItem("References...", nullptr, false, view.findings.graph != nullptr) &&
-			view.findings.graph) {
-		references_ = entry.relative_path;
-		open_references_ = true;
-	}
+	if (ImGui::MenuItem("About this file...")) open_card(entry.relative_path);
+	ui_kit::tooltip("What it is, where a build puts it, what it names and who names it.");
 	const bool reveals = view.allows(EditorRequestKind::RevealPath);
 	if (ImGui::MenuItem("Show in folder", nullptr, false, reveals) && reveals)
 		workspace_.request(request::reveal_path(join_path(view.project.root, entry.relative_path)));
@@ -648,68 +707,166 @@ void FilesWindow::draw_rename(const SessionView &view) {
 	ImGui::EndPopup();
 }
 
-// References...: what the file names and who uses it (the asset graph: who names it, and who
-// names what it defines, a string table's ids or a catalog's names); a use a click away.
-void FilesWindow::draw_references(const SessionView &view) {
-	if (open_references_) {
-		open_references_ = false;
-		ImGui::OpenPopup("References");
+void FilesWindow::open_card(const std::string &path) {
+	if (card_path_ != path) close_card();
+	card_path_ = path;
+	card_root_ = workspace_.view().project.root;
+	card_.reset();
+	card_focus_ = true;
+}
+
+// The card closed: a sound its Play started stops with it.
+void FilesWindow::close_card() {
+	if (card_played_ && workspace_.view().allows(EditorRequestKind::StopSound)) workspace_.request(request::stop_sound());
+	card_played_ = false;
+	card_path_.clear();
+	card_.reset();
+}
+
+// The card (session/file_card.h), made again when the files, the graph or the project move: a window of its
+// own kept in the editor's, as the build result is, until it is closed.
+void FilesWindow::draw_card(const SessionView &view) {
+	if (card_path_.empty()) return;
+	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Graph, ViewConcern::Project});
+	if (!card_ || card_key_ != key) {
+		card_key_ = key;
+		// A wave's sound as it was read, while its file stands (file_card reads it again when it moved).
+		const FileCard::Sound *known = card_ && card_->wave ? &card_->sound : nullptr;
+		card_ = std::make_shared<const FileCard>(file_card(view, card_path_, known));
 	}
-	ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, ImGui::GetTextLineHeightWithSpacing() * 24.0f));
-	if (!ImGui::BeginPopup("References")) return;
-	const AssetEntry *entry = entry_at(view, references_);
-	if (!entry || !view.findings.graph) {
-		ImGui::CloseCurrentPopup();
-		ImGui::EndPopup();
+	const FileCard &card = *card_;
+	if (!card.found) {
+		close_card();
 		return;
 	}
-	ImGui::TextUnformatted(entry->logical_name.c_str());
-	// Both ways, asked of the graph once per file while it stands (its edges stay where they are).
-	const RevisionKey key = cache_key(view).references;
-	if (listed_.view != &view || listed_.key != key || listed_.file != entry->relative_path) {
-		listed_.view = &view;
-		listed_.key = key;
-		listed_.file = entry->relative_path;
-		listed_.references = view.findings.graph->references_of(entry->relative_path);
-		listed_.users = view.findings.graph->usages_of(entry->relative_path);
+	const ImGuiViewport *viewport = ImGui::GetMainViewport();
+	ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+	ImGui::SetNextWindowViewport(viewport->ID);
+	ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 36.0f, std::max(viewport->WorkSize.y * 0.6f, ImGui::GetFontSize() * 20.0f)),
+	                         ImGuiCond_Appearing);
+	ImGui::SetNextWindowSizeConstraints(ImVec2(ImGui::GetFontSize() * 20.0f, 0.0f),
+	                                    ImVec2(FLT_MAX, std::max(viewport->WorkSize.y * 0.8f, ImGui::GetFontSize() * 20.0f)));
+	if (card_focus_) {
+		ImGui::SetNextWindowFocus();
+		card_focus_ = false;
 	}
-	const std::vector<const GraphEdge *> &references = listed_.references;
-	const std::vector<const GraphEdge *> &users = listed_.users;
-	// Each line names a field by the name the inspector shows (its id in the tooltip).
-	if (ImGui::TreeNodeEx("references", ImGuiTreeNodeFlags_DefaultOpen, "References (%zu)", references.size())) {
-		if (references.empty()) ui_kit::empty_state("It names no other file or record.");
-		for (const GraphEdge *edge : references) {
-			std::string file;
-			const ReferenceStatus status = edge->target.empty() ? ReferenceStatus::NotAReference : view.findings.graph->resolve(*edge, &file);
-			const std::string field = edge_field_title(view, *edge);
-			const std::string record = edge_record_words(*edge);
-			ImGui::BulletText("%s%s = %s", record.empty() ? "" : (record + " - ").c_str(), field.c_str(), edge->value.c_str());
-			ui_kit::tooltip(edge->field);
-			if (status == ReferenceStatus::NotAReference) continue;
+	bool open = true;
+	const std::string title = "About " + card.name + "###file_card";
+	if (!ImGui::Begin(title.c_str(), &open, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
+	                                             ImGuiWindowFlags_NoCollapse)) {
+		ImGui::End();
+		if (!open) close_card();
+		return;
+	}
+	ImGui::PushTextWrapPos(0.0f);
+	ImGui::Text("%s, %s", card.kind_label.c_str(), size_text(card.size).c_str());
+	ImGui::TextDisabled("%s", card.path.c_str());
+	ImGui::Spacing();
+	ImGui::TextWrapped("%s", card.about.c_str());
+	ImGui::TextWrapped("%s", card.build.c_str());
+	if (!card.imported_from.empty()) ImGui::TextWrapped("Made from %s by its import.", card.imported_from.c_str());
+	ImGui::PopTextWrapPos();
+	// A wave's sound, as the game decodes it, played by the editor.
+	if (card.wave) {
+		ImGui::Spacing();
+		if (card.sound.decoded) {
+			char words[96];
+			std::snprintf(words, sizeof(words), "%s, %s Hz, %.1f s", card.sound.channels == 1 ? "Mono" : "Stereo",
+			              grouped(card.sound.rate).c_str(), card.sound.seconds);
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(words);
 			ImGui::SameLine();
-			ImGui::TextColored(ui_kit::reference_color(status), "%s", ui_kit::reference_word(status));
-		}
-		ImGui::TreePop();
-	}
-	if (ImGui::TreeNodeEx("referrers", ImGuiTreeNodeFlags_DefaultOpen, "Referenced by (%zu)", users.size())) {
-		if (users.empty()) ui_kit::empty_state("No file of the project names it or what it defines.");
-		for (size_t i = 0; i < users.size(); ++i) {
-			const GraphEdge &edge = *users[i];
-			ImGui::PushID(static_cast<int>(i));
-			const std::string record = edge_record_words(edge);
-			const std::string line = edge.source + ": " + (record.empty() ? "" : record + " - ") + edge_field_title(view, edge);
-			const bool pressed = ImGui::Selectable((line + "###use").c_str());
-			if (pressed || ImGui::IsItemHovered()) {
-				const ReferenceTarget target = usage_target(*view.project.scan, edge);
-				if (pressed) window_requests::go_to(workspace_, target);
-				ui_kit::tooltip(edge.field + "\n" +
-				                (target.editable ? "Open " + target.file + " at it." : "Show " + target.file + " in Files."));
+			if (ImGui::Button("Play##card")) {
+				workspace_.request(request::play_sound(card.path));
+				card_played_ = true;
 			}
-			ImGui::PopID();
+			ui_kit::tooltip("Play it as the game decodes it.");
+			ImGui::SameLine();
+			if (ImGui::Button("Stop##card")) workspace_.request(request::stop_sound());
+		} else {
+			ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);
+			ImGui::TextWrapped("The game cannot play it: %s", card.sound.error.c_str());
+			ImGui::PopStyleColor();
 		}
-		ImGui::TreePop();
 	}
-	ImGui::EndPopup();
+	ImGui::Spacing();
+	if (card.opens) {
+		ImGui::BeginDisabled(!view.allows(EditorRequestKind::OpenDocument));
+		if (ImGui::Button("Open##card")) workspace_.request(request::open_document(card.path));
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+	}
+	ImGui::BeginDisabled(!view.allows(EditorRequestKind::RevealPath));
+	if (ImGui::Button("Show in folder##card")) workspace_.request(request::reveal_path(join_path(view.project.root, card.path)));
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!view.allows(EditorRequestKind::RenameAsset));
+	if (ImGui::Button("Rename...##card"))
+		if (const AssetEntry *entry = entry_at(view, card.path)) start_rename(*entry);
+	ImGui::EndDisabled();
+	// What it names: a click goes to the file it resolves to; a wave it names plays.
+	const std::string names = "It names (" + grouped(card.names.size()) + ")###names";
+	// A kind whose files name none (a wave, a texture) says nothing of it.
+	const bool names_any = !card.names.empty() || asset_kind_row(card.kind).names_files;
+	if (names_any && ImGui::CollapsingHeader(names.c_str(), card.names.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+		if (card.names.empty()) ui_kit::empty_state("No other file or record.");
+		else if (ImGui::BeginTable("names", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+			ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+			ImGui::TableSetupColumn("##state", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+			ImGuiListClipper clipper;
+			clipper.Begin(static_cast<int>(card.names.size()));
+			while (clipper.Step())
+				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+					const FileCard::Named &named = card.names[size_t(i)];
+					ImGui::PushID(i);
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+					const std::string what = named.record.empty() ? named.field : named.record + " - " + named.field;
+					ui_kit::clipped_text(what);
+					ImGui::TableNextColumn();
+					const bool goes = !named.target.file.empty();
+					if (goes) {
+						if (ImGui::Selectable((ui_kit::fit(named.value, ImGui::GetContentRegionAvail().x) + "###go").c_str()))
+							window_requests::go_to(workspace_, named.target);
+						ui_kit::tooltip(named.target.editable ? "Open " + named.file + " at it." : "Show " + named.file + " in Files.");
+					} else {
+						ui_kit::clipped_text(named.value);
+					}
+					ImGui::TableNextColumn();
+					if (named.wave) {
+						if (ImGui::SmallButton("Play")) {
+							workspace_.request(request::play_sound(named.file));
+							card_played_ = true;
+						}
+						ui_kit::tooltip("Play " + named.file + ".");
+					} else if (named.status != ReferenceStatus::NotAReference) {
+						ImGui::TextColored(ui_kit::reference_color(named.status), "%s", reference_status_words(named.status));
+					}
+					ImGui::PopID();
+				}
+			ImGui::EndTable();
+		}
+	}
+	// Who names it, or what it defines: a click goes to the use.
+	const std::string users = "Named by (" + grouped(card.named_by.size()) + ")###users";
+	if (ImGui::CollapsingHeader(users.c_str(), card.named_by.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+		if (card.named_by.empty()) ui_kit::empty_state("No file of the project names it or what it defines.");
+		ImGuiListClipper clipper;
+		clipper.Begin(static_cast<int>(card.named_by.size()));
+		while (clipper.Step())
+			for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+				const FileCard::User &user = card.named_by[size_t(i)];
+				ImGui::PushID(i);
+				const std::string line = user.file + ": " + (user.record.empty() ? "" : user.record + " - ") + user.field;
+				if (ImGui::Selectable((ui_kit::fit(line, ImGui::GetContentRegionAvail().x) + "###use").c_str()))
+					window_requests::go_to(workspace_, user.target);
+				ui_kit::tooltip(line + "\n" + (user.target.editable ? "Open " + user.target.file + " at it." : "Show " + user.target.file + " in Files."));
+				ImGui::PopID();
+			}
+	}
+	ImGui::End();
+	if (!open) close_card();
 }
 
 } // namespace opennova::editor

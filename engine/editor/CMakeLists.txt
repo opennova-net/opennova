@@ -14,6 +14,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kind_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_choice.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/player_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
@@ -117,6 +118,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/importers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_pass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_plan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/import_plan_groups.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_run.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/mission_fixed_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/png_decode.cpp
@@ -222,6 +224,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_page.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/file_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_operation.cpp

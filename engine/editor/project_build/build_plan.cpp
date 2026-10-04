@@ -136,39 +136,60 @@ void check_expansion_table(const ProjectPaths &paths, const AssetScan &scan, con
 
 std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::string &expansion) {
 	std::vector<Diagnostic> out;
-	BuildTarget target;
-	target.expansion = expansion;
 	for (const AssetEntry &asset : scan.entries) {
 		Diagnostic own;
-		if (own_finding(asset, target, own)) out.push_back(std::move(own));
+		if (plan_file_finding(asset, expansion, own)) out.push_back(std::move(own));
 	}
 	return out;
 }
 
-std::string build_place_words(const AssetEntry &asset, const std::string &expansion) {
+bool plan_file_finding(const AssetEntry &asset, const std::string &expansion, Diagnostic &out) {
 	BuildTarget target;
 	target.expansion = expansion;
+	return own_finding(asset, target, out);
+}
+
+BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &expansion) {
+	BuildPlaceWords out;
 	Diagnostic own;
-	if (own_finding(asset, target, own)) return own.message;
-	if (!asset_kind_packed(asset.kind))
-		return asset.kind == AssetKind::ImportSource
-		               ? "A build leaves it out: the files its import makes are packed in its place."
-		               : "A build leaves it out: the game never asks for a file of its kind.";
+	if (plan_file_finding(asset, expansion, own)) {
+		out.words = own.severity == DiagnosticSeverity::Error ? "A build refuses it: " + own.message : own.message;
+		return out;
+	}
+	if (asset.kind == AssetKind::ImportSource) {
+		out.words = "The build packs what it makes, not the file itself.";
+		return out;
+	}
+	if (!asset_kind_packed(asset.kind)) {
+		out.words = "Left out of the build: the game never reads it.";
+		return out;
+	}
+	BuildTarget target;
+	target.expansion = expansion;
 	const Placement placement = place(asset, target);
-	if (placement.root_only)
-		return "A build of the expansion leaves it out: the game reads it from the install's own folder alone.";
+	if (placement.root_only) {
+		out.words = "Left out of the build: the game reads it from the install's own folder, which an expansion cannot change.";
+		return out;
+	}
 	switch (placement.slot) {
 	case ArchiveSlot::Language:
 	case ArchiveSlot::Localres:
 	case ArchiveSlot::Resource:
-		return "A build packs it into " +
-		       (target.is_expansion() ? expansion_archive_path(expansion, placement.slot == ArchiveSlot::Language)
-		                              : std::string(archive_slot_file_name(placement.slot))) +
-		       ".";
-	case ArchiveSlot::Loose: return "A build copies it to " + placement.loose_path + ", where the game reads it loose.";
+		out.words = "Packed into " +
+		            (target.is_expansion() ? expansion_archive_path(expansion, placement.slot == ArchiveSlot::Language)
+		                                   : std::string(archive_slot_file_name(placement.slot))) +
+		            ".";
+		out.packed = true;
+		return out;
+	case ArchiveSlot::Loose:
+		out.words = target.is_expansion() ? "Copied loose into " + placement.loose_path + "."
+		                                  : "Copied beside the archives, where the game reads it by its name.";
+		out.packed = true;
+		return out;
 	case ArchiveSlot::None: break;
 	}
-	return "A build leaves it out: the game never asks for a file of its kind.";
+	out.words = "Left out of the build: the game never reads it.";
+	return out;
 }
 
 bool lists_as_mission(const std::string &name) {

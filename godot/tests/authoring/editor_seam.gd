@@ -217,8 +217,12 @@ func get_output_lines() -> PackedStringArray:
 	return lines
 
 
+## The recent projects' folders, most recent first (each entry {root, found, title, game, ...}).
 func get_recent_projects() -> PackedStringArray:
-	return PackedStringArray(state(["preferences"]).get("preferences", {}).get("recent_projects", []))
+	var roots := PackedStringArray()
+	for entry: Variant in state(["preferences"]).get("preferences", {}).get("recent_projects", []):
+		roots.append(String((entry as Dictionary).get("root", "")))
+	return roots
 
 
 func has_unsaved_prompt() -> bool:
