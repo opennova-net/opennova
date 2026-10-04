@@ -48,8 +48,7 @@ void NwuHostRole::stop() {
 	opennova::ClientSession *session = lobby_.session();
 	if (phase_ != Phase::Idle && session != nullptr && lobby_.sockets_open()) {
 		// CGameSession_StopHosting: states 5/6 back to 4 + the statement.
-		const std::vector<uint8_t> dg = session->build_stop_hosting();
-		if (!dg.empty()) lobby_.send(dg);
+		session->stop_hosting();
 	}
 	phase_ = Phase::Idle;
 	players_.clear();
@@ -110,7 +109,7 @@ bool NwuHostRole::handle_notice(const opennova::ClientSession::Notice &notice) {
 			send_host_update(/*full=*/true);
 			if (session != nullptr) {
 				for (const auto &entry : players_) {
-					lobby_.send(session->build_host_player_added(entry.second));
+					session->send_host_player_added(entry.second);
 				}
 			}
 			UtilityFunctions::print_verbose(String("[NovaWorld] hosting '") +
@@ -171,7 +170,7 @@ void NwuHostRole::set_player_slot(const opennova::HostPlayerSlot &slot) {
 	// ClientHostPlayerAdded fires immediately while hosting is established (state 6).
 	opennova::ClientSession *session = lobby_.session();
 	if (phase_ == Phase::Hosting && session != nullptr) {
-		lobby_.send(session->build_host_player_added(slot));
+		session->send_host_player_added(slot);
 	}
 }
 
@@ -181,7 +180,7 @@ void NwuHostRole::clear_player_slot(int slot) {
 	// ClientHostPlayerRemoved fires immediately while hosting is established (state 6).
 	opennova::ClientSession *session = lobby_.session();
 	if (phase_ == Phase::Hosting && session != nullptr) {
-		lobby_.send(session->build_host_player_removed(slot));
+		session->send_host_player_removed(slot);
 	}
 }
 
@@ -200,9 +199,7 @@ void NwuHostRole::request_player_enter(uint32_t connection_id, uint32_t ip_addre
 		const std::string &join_ticket) {
 	opennova::ClientSession *session = lobby_.session();
 	if (session == nullptr) return;
-	const std::vector<uint8_t> dg =
-			session->build_player_enter_request(connection_id, ip_address, port, join_ticket);
-	if (!dg.empty()) lobby_.send(dg);
+	session->send_player_enter_request(connection_id, ip_address, port, join_ticket);
 }
 
 void NwuHostRole::send_status_blob() {
@@ -258,9 +255,7 @@ std::vector<opennova::ClientVar> NwuHostRole::player_list_vars() const {
 void NwuHostRole::send_host_request(uint32_t currently_hosting) {
 	opennova::ClientSession *session = lobby_.session();
 	if (session == nullptr || !session->is_verified()) return;
-	const std::vector<uint8_t> dg = session->build_host_request(host_cfg(), currently_hosting);
-	if (dg.empty()) return;
-	lobby_.send(dg);
+	if (!session->request_hosting(host_cfg(), currently_hosting)) return;
 	register_started_ms_ = lobby_.clock_ms();
 	phase_ = Phase::Requested;
 }
@@ -279,7 +274,7 @@ void NwuHostRole::send_host_update(bool full) {
 	const std::vector<opennova::ClientVar> dirty_players =
 			full ? players : opennova::dirty_client_vars(last_sent_players_, players);
 	if (dirty_host.empty() && dirty_players.empty()) return;
-	lobby_.send(session->build_host_update(dirty_host, dirty_players));
+	session->send_host_update(dirty_host, dirty_players);
 	last_sent_host_ = host;
 	last_sent_players_ = players;
 }

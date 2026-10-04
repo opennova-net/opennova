@@ -102,7 +102,7 @@ struct NapiNPProtocol {
 	// (CS field 0) and outbound pool bound (CS field 11) every server-side node is created with
 	// and the host's 0x82 advertises. CNapiNetwork_Init seeds 120000 / 1200 and a loose
 	// `_NSTMOUT.TXT` overrides both (session_timeout_config.h); start_host_session installs it.
-	SessionTimeoutConfig connection_template{};
+	CsConfig connection_template{};
 
 	// [orig +0xEBC] connection_list — the NapiListHead SendFiltered / timeouts walk. Modeled as a
 	// vector of nodes (faithful structural translation of the intrusive list).
@@ -406,7 +406,7 @@ struct NapiNPServerCtx {
 	SessionIdRing cookie_key_table;
 	// One ClientPlayerEnterRequest: the joiner's connection id, its UDP source
 	// and the JOINTICKET its JOIN carried. The shell binds the hook to its
-	// NovaWorld host session (ClientSession::build_player_enter_request); an
+	// NovaWorld host session (ClientSession::send_player_enter_request); an
 	// unbound hook drops the request, and the joiner then reaps on the ticket
 	// deadline exactly as a service that never answered.
 	// [orig: CNapiGameSession_SendPlayEnterRequest @0x4D02A0 — ConnectionId

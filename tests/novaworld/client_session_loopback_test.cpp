@@ -6,6 +6,10 @@
 //   2. ClientConnected waits for the retail session-periodic boundary.
 //   3. The 0x83 ServerProtocolMessage handler decodes the lobby stream and
 //      runs the verify handshake to ServerVerifyResult -> Verified.
+//   4. The lobby connection is a type-2 NAPI connection: statements queue and
+//      build on the send pump (split at CS field 13, retained until ACK), the
+//      ordered receive gate asks for a gap with a 0x44, and a 0x84 is answered
+//      from the retained records.
 //
 // The "server" here is a minimal responder using the real library functions
 // (parse_client_hello/auth, build_server_hello/auth, LobbySession dispatch,
@@ -116,6 +120,34 @@ bool decode_client_containers(const std::vector<uint8_t> &raw,
 	return true;
 }
 
+// Decode a run of client 0x43 datagrams into their lobby containers, folding
+// FIRST/MID/FINAL records into one statement the way the service does.
+bool decode_client_statements(const std::vector<std::vector<uint8_t>> &datagrams,
+                              const std::string &client_scrk,
+                              std::vector<NapiMessage> &out) {
+	ProtocolReassemblyState reassembly;
+	for (const auto &raw : datagrams) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!server_decode_inbound(raw, opcode, body)) return false;
+		if (opcode != SESSION_OPCODE_PROTOCOL_MESSAGE) return false;
+		ProtocolPacketHeader hdr;
+		std::vector<ProtocolMessage> msgs;
+		if (!decode_protocol_packet_plaintext(body.data(), body.size(), client_scrk, hdr, msgs))
+			return false;
+		for (const auto &pm : msgs) {
+			if (pm.flags.settings_update || pm.full_tag != 0) continue;
+			std::vector<uint8_t> payload;
+			if (!reassemble_protocol_payload(reassembly, pm, payload) || payload.empty()) continue;
+			size_t consumed = 0;
+			std::vector<NapiMessage> cs;
+			if (napi_stream_decode(payload.data(), payload.size(), cs, &consumed) != 0) continue;
+			for (auto &c : cs) out.push_back(std::move(c));
+		}
+	}
+	return true;
+}
+
 // A tiny stateful server: enough of nw_udp_listener.cpp to answer one
 // client's handshake. Returns the reply datagram (or empty for none).
 struct MiniServer {
@@ -137,6 +169,8 @@ struct MiniServer {
 	uint32_t last_client_seq = 0;          // the ack a server-initiated 0x83 carries
 	LobbyState lobby;
 	LobbySession session;
+	// FIRST/MID/FINAL records fold into one statement (nw_udp_listener.cpp's reassembly).
+	ProtocolReassemblyState reassembly;
 
 	MiniServer() {
 		session.set_sess_id_generator([] { return std::string("deadbeefcafef00d1122334455667788"); });
@@ -240,6 +274,7 @@ struct MiniServer {
 			// Every ClientAuth is a fresh server connection: its own sequencing.
 			next_seq = 1;
 			last_client_seq = 0;
+			reassembly = ProtocolReassemblyState{};
 			ServerAuth reply = build_server_auth(auth, 0x7F000001u, 5000,
 			                                     server_sk, server_scrk,
 			                                     "NWServer", "http://127.0.0.1:8080",
@@ -260,9 +295,11 @@ struct MiniServer {
 			std::vector<ProtocolMessage> replies;
 			for (const auto &pm : messages) {
 				if (pm.flags.settings_update || pm.full_tag != 0) continue;
+				std::vector<uint8_t> payload;
+				if (!reassemble_protocol_payload(reassembly, pm, payload) || payload.empty()) continue;
 				std::vector<NapiMessage> containers;
 				size_t consumed = 0;
-				if (napi_stream_decode(pm.payload.data(), pm.payload.size(),
+				if (napi_stream_decode(payload.data(), payload.size(),
 				                       containers, &consumed) != 0) continue;
 				for (const auto &outer : containers) {
 					auto result = session.dispatch(outer, lobby, "127.0.0.1", 5000);
@@ -289,8 +326,41 @@ NapiField str_field(const std::string &name, const std::string &value) {
 	return f;
 }
 
+// The owner's tick after a receive batch, as the drivers run it: the receive pump's
+// missing-sequence tail, then the connection's send pump (the queued statements and a
+// pending ACK).
+std::vector<std::vector<uint8_t>> pump_client(ClientSession &client) {
+	std::vector<std::vector<uint8_t>> out;
+	client.finish_receive_batch(out);
+	client.pump(out);
+	return out;
+}
+
+// What a statement verb put on the wire: the next pump's datagrams when it queued, else none.
+std::vector<std::vector<uint8_t>> sent(ClientSession &client, bool queued) {
+	if (!queued) return {};
+	return pump_client(client);
+}
+
+// The last non-empty server reply to a run of client datagrams.
+std::vector<uint8_t> respond_all(MiniServer &server, const std::vector<std::vector<uint8_t>> &in) {
+	std::vector<uint8_t> last;
+	for (const auto &dg : in) {
+		auto reply = server.respond(dg);
+		if (!reply.empty()) last = std::move(reply);
+	}
+	return last;
+}
+
+// The periodic update's statements on the wire: it queues (ClientConnected, the GLSVSS
+// poll), the next send pump builds them.
+void periodic(ClientSession &client, std::vector<std::vector<uint8_t>> &out) {
+	client.process_periodic_update();
+	client.pump(out);
+}
+
 // Run one fresh ClientSession through the whole lobby handshake against `server`
-// (ClientHello .. ServerVerifyResult); true when it reached Verified.
+// (ClientHello .. ServerVerifyResult and its ACK); true when it reached Verified.
 bool bring_up(MiniServer &server, ClientSession &client) {
 	std::vector<std::vector<uint8_t>> out;
 	const auto s_hello = server.respond(client.start());
@@ -298,14 +368,18 @@ bool bring_up(MiniServer &server, ClientSession &client) {
 	const auto s_auth = server.respond(out[0]);
 	out.clear();
 	if (!client.handle_datagram(s_auth.data(), s_auth.size(), out) || !out.empty()) return false;
-	client.process_periodic_update(out);
+	periodic(client, out);
 	if (out.size() != 1) return false;
 	const auto s_start = server.respond(out[0]);
 	out.clear();
-	if (!client.handle_datagram(s_start.data(), s_start.size(), out) || out.size() != 1) return false;
-	const auto s_result = server.respond(out[0]);
+	if (!client.handle_datagram(s_start.data(), s_start.size(), out) || !out.empty()) return false;
+	out = pump_client(client);
+	if (out.empty()) return false;
+	const auto s_result = respond_all(server, out); // a cookie-heavy verify request splits
 	out.clear();
 	if (!client.handle_datagram(s_result.data(), s_result.size(), out)) return false;
+	// The verify result's ACK leaves on the next pump (retail's p#4).
+	for (const auto &dg : pump_client(client)) server.respond(dg);
 	return client.is_verified();
 }
 
@@ -428,19 +502,19 @@ void test_send_interval_pump() {
 	if (!expect(bring_up(server, client), "pump leg: session reaches Verified")) return;
 
 	// The 0x82 CS overlay: the service template (240 s reap, 60 s idle, 1 s active, no queue leg).
-	const ClientSession::ConnectionSettings &cs = client.connection_settings();
+	const CsConfig &cs = client.connection_settings();
 	expect(cs.timeout_ms == 240000 && cs.idle_send_interval_ms == 60000 &&
 	               cs.active_send_interval_ms == 1000 && cs.packet_queue_interval_ms == -1,
 	       "ServerAuth CS block overlays the client-direction template");
 
 	std::vector<std::vector<uint8_t>> pumped;
-	client.pump_send_intervals(pumped);
+	client.pump(pumped);
 	expect(pumped.empty(), "nothing to send right after the handshake");
 	client.set_clock_ms(static_cast<uint32_t>(cs.idle_send_interval_ms));
-	client.pump_send_intervals(pumped);
+	client.pump(pumped);
 	expect(pumped.empty(), "the keepalive waits until elapsed > idle_send_interval_ms");
 	client.set_clock_ms(static_cast<uint32_t>(cs.idle_send_interval_ms) + 1);
-	client.pump_send_intervals(pumped);
+	client.pump(pumped);
 	if (expect(pumped.size() == 1, "one keepalive once the idle interval passed")) {
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;
@@ -455,14 +529,14 @@ void test_send_interval_pump() {
 		expect(server.respond(pumped[0]).empty(), "the keepalive draws no reply");
 	}
 	pumped.clear();
-	client.pump_send_intervals(pumped);
+	client.pump(pumped);
 	expect(pumped.empty(), "the keepalive refreshed the send clock: no second one at the same tick");
 	expect(client.is_verified(), "keepalives leave the session Verified");
 
 	// Receive silence past timeout_ms: the reap latches CLNTTMOUT and closes locally.
 	client.set_clock_ms(static_cast<uint32_t>(cs.timeout_ms) + 1);
 	pumped.clear();
-	client.pump_send_intervals(pumped);
+	client.pump(pumped);
 	expect(client.state() == ClientSession::State::Closed && !client.disconnected_by_peer(),
 	       "the reap closes the session as a LOCAL disconnect");
 	expect(client.last_error() == "NP.C:PT:CLNTTMOUT", "the reap tag is NP.C:PT:CLNTTMOUT");
@@ -541,10 +615,10 @@ void test_session_words() {
 	if (!expect(bring_up(server, client), "words: session reaches Verified")) return;
 	expect(client.session_flags() == 0x1Au && client.session_role() == ClientSession::kSessionRoleVerified,
 	       "verified: state 4 holds 0x1A (bits 2 and 8), the word 1");
-	const auto d_play = client.build_play_request(
-			make_play_setup_vars("OpenNova Host", "127.0.0.1", "32768", "28", 0));
+	const auto d_play = sent(client, client.request_playing(
+			make_play_setup_vars("OpenNova Host", "127.0.0.1", "32768", "28", 0)));
 	expect(client.session_flags() == 0x9Au, "the play request: state 7 holds 0x9A");
-	const auto s_play = server.respond(d_play);
+	const auto s_play = respond_all(server, d_play);
 	std::vector<std::vector<uint8_t>> out;
 	expect(client.handle_datagram(s_play.data(), s_play.size(), out) &&
 	               client.session_flags() == 0x10Au &&
@@ -744,8 +818,8 @@ void test_play_uses_current_http_cookies() {
 	if (!expect(joined.kind == JoinResult::Kind::Resolved, "cookie refresh: NWJoin resolves")) return;
 	const auto setup = make_play_setup_vars("Host", joined.host_ip,
 			std::to_string(joined.host_port), joined.app_id, joined.ln);
-	const auto request = client.build_play_request(setup);
-	expect(!server.respond(request).empty(), "cookie refresh: service decodes the play request");
+	const auto request = sent(client, client.request_playing(setup));
+	expect(!respond_all(server, request).empty(), "cookie refresh: service decodes the play request");
 	const auto &cookies = server.lobby.play_state["Cookie"];
 	expect(var_value(cookies, "NWPF") == "28", "play carries NWJoin NWPF instead of provoking NWEC09");
 	expect(var_value(cookies, "NWPF2") == "0", "play carries NWJoin NWPF2");
@@ -756,14 +830,14 @@ void test_play_uses_current_http_cookies() {
 
 	// A retry can replace existing cookies; neither the initial snapshot nor
 	// the first successful NWJoin is a valid source for this request.
-	server.respond(client.build_stop_playing());
+	respond_all(server, sent(client, client.stop_playing()));
 	flow.join(778);
 	flow.on_join_response(true, 200, {"Set-Cookie: NWJOINSESSIONTAG=retry"}, {});
 	flow.on_join_response(true, 200,
 			{"Set-Cookie: NWPF=38", "Set-Cookie: NWPF2=1", "Set-Cookie: PUBJOINTICKET=ticket-2",
 			 "Set-Cookie: NWCDKIID=issued", "Set-Cookie: CountryName=remote"},
 			std::vector<uint8_t>(joi.begin(), joi.end()));
-	server.respond(client.build_play_request(setup));
+	respond_all(server, sent(client, client.request_playing(setup)));
 	const auto &retry_cookies = server.lobby.play_state["Cookie"];
 	expect(var_value(retry_cookies, "NWPF") == "38" && var_value(retry_cookies, "NWPF2") == "1",
 	       "retry uses updated product cookies without hardcoding a product id");
@@ -777,9 +851,9 @@ void test_play_uses_current_http_cookies() {
 	for (const auto &entry : retry_cookies) if (entry.name == "NWCDKIID") ++cdkiid_count;
 	expect(cdkiid_count == 1, "the refreshed Cookie list contains no duplicate identity entry");
 
-	server.respond(client.build_stop_playing());
+	respond_all(server, sent(client, client.stop_playing()));
 	flow.reset();
-	server.respond(client.build_play_request(setup));
+	respond_all(server, sent(client, client.request_playing(setup)));
 	const auto &reset_cookies = server.lobby.play_state["Cookie"];
 	expect(!var_has(reset_cookies, "NWPF") && !var_has(reset_cookies, "PUBJOINTICKET") &&
 	               !var_has(reset_cookies, "PCID"), "cleared HTTP cookies cannot leak into another play request");
@@ -793,7 +867,8 @@ std::string field_of(const NapiMessage &m, const char *name) {
 }
 
 // Feed every datagram of `in` to the server and every reply back to the client; the client's
-// replies to those land in `out`.
+// replies to those land in `out`: what the receive pump sends at once, then the send pump's
+// packets (the queued answers and the ACK).
 void exchange(MiniServer &server, ClientSession &client,
               const std::vector<std::vector<uint8_t>> &in,
               std::vector<std::vector<uint8_t>> &out) {
@@ -801,6 +876,7 @@ void exchange(MiniServer &server, ClientSession &client,
 		const auto reply = server.respond(dg);
 		if (!reply.empty()) client.handle_datagram(reply.data(), reply.size(), out);
 	}
+	for (auto &dg : pump_client(client)) out.push_back(std::move(dg));
 }
 
 // Deterministic re-join keys for the reconnect tests.
@@ -848,7 +924,7 @@ uint32_t pump_until_probe(ClientSession &client, uint32_t from, uint32_t limit,
 	for (uint32_t t = from; t < from + limit; ++t) {
 		client.set_clock_ms(t);
 		std::vector<std::vector<uint8_t>> pumped;
-		client.pump_send_intervals(pumped);
+		client.pump(pumped);
 		if (count_opcode(pumped, SESSION_OPCODE_CLIENT_HELLO) != 0) {
 			out = std::move(pumped);
 			return t;
@@ -876,7 +952,7 @@ void test_reconnect_schedule() {
 	const uint32_t t0 = 240001;
 	client.set_clock_ms(t0);
 	std::vector<std::vector<uint8_t>> out;
-	client.pump_send_intervals(out);
+	client.pump(out);
 	expect(client.reconnecting() && client.disconnect_count() == 1, "the reap starts the reconnect");
 	expect(client.retransmit_stage_datagram().empty(),
 	       "the owner's stage retransmit stands down while reconnecting");
@@ -888,7 +964,7 @@ void test_reconnect_schedule() {
 	for (uint32_t t = t0 + 1; t <= t0 + span; ++t) {
 		client.set_clock_ms(t);
 		out.clear();
-		client.pump_send_intervals(out);
+		client.pump(out);
 		if (out.empty()) continue;
 		if (count_opcode(out, SESSION_OPCODE_CLIENT_HELLO) == 1 && out.size() == 1) probes.push_back(t);
 		else ++stray;
@@ -951,7 +1027,7 @@ void test_reconnect_replay() {
 	if (!expect(bring_up(server, client), "replay: session reaches Verified")) return;
 	const auto setup = make_play_setup_vars("OpenNova Host", "127.0.0.1", "32768", "28", 0);
 	std::vector<std::vector<uint8_t>> out;
-	exchange(server, client, {client.build_play_request(setup)}, out);
+	exchange(server, client, sent(client, client.request_playing(setup)), out);
 	expect(client.session_role() == ClientSession::kSessionRolePlaying, "replay: playing (word 3)");
 	expect(!client.server_nwuid().empty() && client.server_web_domain() != "???",
 	       "replay: the 0x82 fed the NWUID and the web domain");
@@ -985,7 +1061,7 @@ void test_reconnect_replay() {
 	       "replay: the 0x82 brings the connection up and its RCNT (1) is kept");
 	expect(client.server_nwuid() == server.nwuid, "replay: the reconnect's 0x82 re-supplies the NWUID");
 	up.clear();
-	client.process_periodic_update(up);
+	periodic(client, up);
 	std::vector<std::vector<uint8_t>> verify;
 	exchange(server, client, up, verify);                      // ClientConnected -> StartVerify
 	std::vector<std::vector<uint8_t>> replay;
@@ -1030,9 +1106,9 @@ void test_reconnect_rehost() {
 	HostRegistration reg;
 	reg.server_name = "Rehost Srv";
 	reg.app_id = 2468;
-	const auto request = client.build_host_request(reg, 0);
+	const auto request = sent(client, client.request_hosting(reg, 0));
 	std::vector<NapiMessage> containers;
-	if (expect(decode_client_containers(request, client.client_scrk(), containers) && containers.size() == 1,
+	if (expect(decode_client_statements(request, client.client_scrk(), containers) && containers.size() == 1,
 	           "rehost: the fresh host request decodes")) {
 		const NapiMessage &setup = containers[0].children[1];
 		expect(!setup.children.empty() &&
@@ -1041,7 +1117,7 @@ void test_reconnect_rehost() {
 		       "rehost: a fresh HostSetup ends with ReconnectCounter 0");
 	}
 	std::vector<std::vector<uint8_t>> out;
-	exchange(server, client, {request}, out);
+	exchange(server, client, request, out);
 	const std::string gsid = client.host_gsid();
 	expect(!gsid.empty() && client.session_role() == ClientSession::kSessionRoleHosting,
 	       "rehost: registered (word 2) with a GSID");
@@ -1051,14 +1127,15 @@ void test_reconnect_rehost() {
 	joiner.ip_and_port = "10.0.0.9:32768";
 	joiner.team = "1";
 	joiner.type = "8";
-	exchange(server, client, {client.build_host_player_added(joiner)}, out);
-	exchange(server, client, {client.build_host_update({{0, "Players", "2"}, {0, "MissionName", "ASH_G11A"}}, {})},
+	exchange(server, client, sent(client, client.send_host_player_added(joiner)), out);
+	exchange(server, client,
+	         sent(client, client.send_host_update({{0, "Players", "2"}, {0, "MissionName", "ASH_G11A"}}, {})),
 	         out);
 
 	// The connection drops (the reap); the GSID the in-match SUS1 publishes clears with it.
 	client.set_clock_ms(240001);
 	out.clear();
-	client.pump_send_intervals(out);
+	client.pump(out);
 	expect(client.host_gsid().empty() && client.session_role() == ClientSession::kSessionRoleHosting &&
 	               client.host_state() == ClientSession::HostState::Idle,
 	       "rehost: the drop clears the GSID and the host leg, the hosting word stays");
@@ -1068,13 +1145,14 @@ void test_reconnect_rehost() {
 	exchange(server, client, joined, up);
 	expect(server.last_dcnt == 1, "rehost: the re-join counts the disconnect");
 	up.clear();
-	client.process_periodic_update(up);
+	periodic(client, up);
 	exchange(server, client, up, verify);
 	exchange(server, client, verify, rehost);
 	expect(client.host_reconnect_counter() == 1 && client.host_state() == ClientSession::HostState::Requested,
 	       "rehost: the re-verify counts ReconnectCounter up and re-requests hosting");
 	containers.clear();
-	if (expect(rehost.size() == 1 && decode_client_containers(rehost[0], client.client_scrk(), containers) &&
+	// The full lists outgrow one packet: the re-host leaves as FIRST/FINAL records.
+	if (expect(!rehost.empty() && decode_client_statements(rehost, client.client_scrk(), containers) &&
 	                   containers.size() == 1 && containers[0].name == "ClientHostRequest",
 	           "rehost: one ClientHostRequest goes out")) {
 		const NapiMessage &req = containers[0];
@@ -1126,7 +1204,7 @@ void test_reconnect_join_timeout() {
 	for (uint32_t t = probe_at + 1; t <= probe_at + 25000; ++t) {
 		client.set_clock_ms(t);
 		std::vector<std::vector<uint8_t>> pumped;
-		client.pump_send_intervals(pumped);
+		client.pump(pumped);
 		if (count_opcode(pumped, SESSION_OPCODE_CLIENT_AUTH) != 0) resends.push_back(t);
 		if (reprobe_at == 0 && count_opcode(pumped, SESSION_OPCODE_CLIENT_HELLO) != 0) reprobe_at = t;
 		if (closed_at == 0 && client.state() == ClientSession::State::Closed) closed_at = t;
@@ -1158,7 +1236,7 @@ void test_reconnect_verified_word() {
 	exchange(server, client, out, joined);
 	exchange(server, client, joined, up);
 	up.clear();
-	client.process_periodic_update(up);
+	periodic(client, up);
 	exchange(server, client, up, verify);
 	exchange(server, client, verify, after);
 	expect(client.is_verified() && client.session_role() == ClientSession::kSessionRoleVerified &&
@@ -1185,18 +1263,18 @@ void test_stop_hosting_while_reconnecting() {
 	reg.server_name = "Down Srv";
 	reg.app_id = 1357;
 	std::vector<std::vector<uint8_t>> out;
-	exchange(server, client, {client.build_host_request(reg, 0)}, out);
+	exchange(server, client, sent(client, client.request_hosting(reg, 0)), out);
 	if (!expect(client.session_role() == ClientSession::kSessionRoleHosting,
 	            "stop while down: hosting (word 2)"))
 		return;
 	client.set_clock_ms(240001);
 	out.clear();
-	client.pump_send_intervals(out);
+	client.pump(out);
 	if (!expect(client.reconnecting(), "stop while down: the reap leaves it reconnecting")) return;
-	expect(client.build_stop_hosting().empty(), "stop while down: no statement from state 0");
+	expect(!client.stop_hosting(), "stop while down: no statement from state 0");
 	expect(client.session_role() == ClientSession::kSessionRoleVerified && client.reconnect_armed(),
 	       "stop while down: the word steps back to verified, the reconnect stays armed");
-	expect(client.build_stop_playing().empty() &&
+	expect(!client.stop_playing() &&
 	               client.session_role() == ClientSession::kSessionRoleVerified,
 	       "stop while down: a stop-playing leaves a verified word alone");
 }
@@ -1225,9 +1303,213 @@ void test_host_leg_gates() {
 	       "host leg: MaxPlayers clamps to 1..64 / 1..65 dedicated");
 }
 
+// One decoded client 0x43: its header and records.
+bool decode_client_packet(const std::vector<uint8_t> &raw, const std::string &client_scrk,
+                          ProtocolPacketHeader &hdr, std::vector<ProtocolMessage> &records) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	return server_decode_inbound(raw, opcode, body) && opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+	       decode_protocol_packet_plaintext(body.data(), body.size(), client_scrk, hdr, records);
+}
+
+// An H:0x00 CS_CONFIG_UPDATE record for cs_dir0: [dir=1][mask][one dword per set bit].
+ProtocolMessage cs_update_record(const std::vector<std::pair<uint32_t, uint32_t>> &slots) {
+	uint32_t mask = 0;
+	for (const auto &slot : slots) mask |= 1u << slot.first;
+	std::vector<uint8_t> body{1};
+	for (int i = 0; i < 4; ++i) body.push_back(static_cast<uint8_t>(mask >> (8 * i)));
+	for (uint32_t bit = 0; bit < 32; ++bit) {
+		if ((mask & (1u << bit)) == 0) continue;
+		for (const auto &slot : slots) {
+			if (slot.first != bit) continue;
+			for (int i = 0; i < 4; ++i) body.push_back(static_cast<uint8_t>(slot.second >> (8 * i)));
+		}
+	}
+	return make_protocol_message(hightag::CS_CONFIG_UPDATE, std::move(body),
+	                             static_cast<uint8_t>(0x80u | PROTOCOL_MSG_FLAG_LEN8));
+}
+
+// A cookie jar long enough that the host request outgrows one 1300-byte packet.
+ClientSession::Config cookie_heavy_config(uint32_t ci, uint32_t ck) {
+	ClientSession::Config cfg;
+	cfg.client_index = ci;
+	cfg.client_key = ck;
+	cfg.cookie_vars = []() {
+		std::vector<std::pair<std::string, std::string>> jar{{"NWUID", ""}};
+		for (int i = 0; i < 40; ++i)
+			jar.emplace_back("COOKIE" + std::to_string(i), std::string(72, static_cast<char>('A' + i % 26)));
+		return jar;
+	};
+	return cfg;
+}
+
+// The lobby connection is a type-2 NAPI connection: a statement longer than CS field 13 leaves
+// as FIRST/MID/FINAL records, each packet within the ceiling, retained until the server's ACK;
+// a 0x84 is answered from the retained records; a later packet is held behind a gap until the
+// receive tail asks for it with a 0x44; a full pool tears the connection down with MSGCRE.
+// [orig: CNapiGameSession_SendHostRequest @0x4d3834 -> CNapiNPConnection_QueueMessage @0x628640;
+//  BuildOutgoingPackets @0x628430; NapiNPMessage_SplitAtLength @0x628350;
+//  NapiNP_HandleResendList @0x623800; NapiNPProtocol_PumpRecvQueues @0x6269bb..0x6269d6;
+//  NapiNPMessage_Create @0x628099..0x628112]
+void test_lobby_np_connection() {
+	// A cookie-heavy ClientHostRequest splits under field 13 and registers.
+	{
+		MiniServer server;
+		ClientSession client(cookie_heavy_config(0x00000041u, 0x41414141u));
+		if (!expect(bring_up(server, client), "split: session reaches Verified")) return;
+		HostRegistration reg;
+		reg.server_name = "Split Srv";
+		reg.app_id = 4242;
+		const auto request = sent(client, client.request_hosting(reg, 0));
+		expect(request.size() >= 3, "split: the cookie-heavy host request takes several packets");
+		uint32_t previous_seq = 0;
+		bool fits = true, flags_ok = true, consecutive = true;
+		for (size_t i = 0; i < request.size(); ++i) {
+			ProtocolPacketHeader hdr;
+			std::vector<ProtocolMessage> records;
+			if (request[i].size() > 1300) fits = false;
+			if (!decode_client_packet(request[i], server.client_scrk, hdr, records) || records.size() != 1) {
+				flags_ok = false;
+				continue;
+			}
+			const bool first = i == 0, last = i + 1 == request.size();
+			if (records[0].flags.frag_cont != !last || records[0].flags.frag_end != !first) flags_ok = false;
+			if (i > 0 && hdr.seq_num != previous_seq + 1) consecutive = false;
+			previous_seq = hdr.seq_num;
+		}
+		expect(fits, "split: every datagram fits the 1300-byte field-13 ceiling");
+		expect(flags_ok, "split: FIRST 0x04, MID 0x06, FINAL 0x02, one record a packet");
+		expect(consecutive, "split: the pieces ride consecutive sequences");
+		expect(client.retained_record_count() == request.size(), "split: every piece is retained");
+		std::vector<NapiMessage> containers;
+		expect(decode_client_statements(request, server.client_scrk, containers) && containers.size() == 1 &&
+		               containers[0].name == "ClientHostRequest",
+		       "split: the pieces fold back into one ClientHostRequest");
+		std::vector<std::vector<uint8_t>> out;
+		exchange(server, client, request, out);
+		expect(server.lobby.hosting && client.host_state() == ClientSession::HostState::Established,
+		       "split: the service registers the reassembled request");
+		expect(client.retained_record_count() == 0, "split: the ServerHostResult's ACK retires the pieces");
+	}
+	// A field-13 overlay narrows the ceiling.
+	{
+		MiniServer server;
+		ClientSession client(cookie_heavy_config(0x00000042u, 0x42424242u));
+		if (!expect(bring_up(server, client), "overlay: session reaches Verified")) return;
+		const auto update = server.wrap({cs_update_record({{13, 600u}})});
+		std::vector<std::vector<uint8_t>> out;
+		client.handle_datagram(update.data(), update.size(), out);
+		expect(client.connection_settings().max_packet_bytes == 600, "overlay: H:0x00 stores field 13");
+		pump_client(client);
+		HostRegistration reg;
+		const auto request = sent(client, client.request_hosting(reg, 0));
+		bool fits = !request.empty();
+		for (const auto &dg : request) if (dg.size() > 600) fits = false;
+		expect(fits && request.size() >= 6, "overlay: the request splits under the 600-byte ceiling");
+	}
+	// The 0x84: a listed sequence is rebuilt from its retained records; 0 is a fresh empty one;
+	// a list keyed to another connection draws nothing.
+	{
+		MiniServer server;
+		ClientSession::Config cfg;
+		cfg.client_index = 0x00000043u;
+		cfg.client_key = 0x43434343u;
+		ClientSession client(cfg);
+		if (!expect(bring_up(server, client), "0x84: session reaches Verified")) return;
+		const auto update = sent(client, client.queue_statement(make_client_host_update({{0, "Players", "3"}}, {})));
+		ProtocolPacketHeader sent_hdr;
+		std::vector<ProtocolMessage> sent_records;
+		if (!expect(update.size() == 1 && decode_client_packet(update[0], server.client_scrk, sent_hdr, sent_records),
+		            "0x84: the update leaves in one packet")) return;
+		std::vector<uint8_t> body;
+		encode_session_resend_list(cfg.client_key, {sent_hdr.seq_num, 0}, body);
+		const auto resend = server_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, body);
+		std::vector<std::vector<uint8_t>> out;
+		expect(client.handle_datagram(resend.data(), resend.size(), out) && out.size() == 2,
+		       "0x84: two listed sequences, two packets sent at once");
+		ProtocolPacketHeader again_hdr, fresh_hdr;
+		std::vector<ProtocolMessage> again_records, fresh_records;
+		expect(out.size() == 2 && decode_client_packet(out[0], server.client_scrk, again_hdr, again_records) &&
+		               again_hdr.seq_num == sent_hdr.seq_num && again_records.size() == 1 &&
+		               again_records[0].payload == sent_records[0].payload,
+		       "0x84: the listed sequence is rebuilt with its retained record");
+		expect(out.size() == 2 && decode_client_packet(out[1], server.client_scrk, fresh_hdr, fresh_records) &&
+		               fresh_hdr.seq_num == sent_hdr.seq_num + 1 && fresh_records.empty(),
+		       "0x84: sequence 0 asks for the next one, an empty packet");
+		std::vector<uint8_t> foreign_body;
+		encode_session_resend_list(cfg.client_key ^ 1u, {sent_hdr.seq_num}, foreign_body);
+		const auto foreign = server_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, foreign_body);
+		out.clear();
+		expect(client.handle_datagram(foreign.data(), foreign.size(), out) && out.empty(),
+		       "0x84: a list keyed to another connection draws nothing");
+	}
+	// The ordered gate: a packet past a gap is held, the receive tail asks for the gap with a
+	// 0x44 carrying the server's key, and the gap's arrival releases both in order.
+	{
+		MiniServer server;
+		ClientSession::Config cfg;
+		cfg.client_index = 0x00000044u;
+		cfg.client_key = 0x44444444u;
+		ClientSession client(cfg);
+		if (!expect(bring_up(server, client), "gate: session reaches Verified")) return;
+		NapiMessage first;
+		first.name = "ServerCommand";
+		first.fields.push_back(str_field("Cmd", "SetServerName First"));
+		NapiMessage second;
+		second.name = "ServerCommand";
+		second.fields.push_back(str_field("Cmd", "SetServerName Second"));
+		const auto d_first = server.push(first);
+		const auto d_second = server.push(second);
+		std::vector<std::vector<uint8_t>> out;
+		expect(client.handle_datagram(d_second.data(), d_second.size(), out) && out.empty() &&
+		               client.take_notices().empty(),
+		       "gate: the packet past the gap is held, not dispatched");
+		out.clear();
+		client.finish_receive_batch(out);
+		std::vector<uint32_t> missing;
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		expect(out.size() == 1 && server_decode_inbound(out[0], opcode, body) &&
+		               opcode == SESSION_OPCODE_CLIENT_RESEND_LIST &&
+		               decode_session_resend_list(body.data(), body.size(), server.server_sk, missing) &&
+		               !missing.empty() && missing[0] == server.next_seq - 2,
+		       "gate: the receive tail asks for the missing sequence with a 0x44");
+		out.clear();
+		client.handle_datagram(d_first.data(), d_first.size(), out);
+		const auto notices = client.take_notices();
+		expect(notices.size() == 2 && notices[0].command.args.size() == 1 && notices[0].command.args[0] == "First" &&
+		               notices[1].command.args.size() == 1 && notices[1].command.args[0] == "Second",
+		       "gate: the gap's arrival releases both packets in order");
+	}
+	// A full pool: the field-11 bound refuses a node and the connection tears down with MSGCRE.
+	{
+		MiniServer server;
+		ClientSession::Config cfg;
+		cfg.client_index = 0x00000045u;
+		cfg.client_key = 0x45454545u;
+		ClientSession client(cfg);
+		if (!expect(bring_up(server, client), "pool: session reaches Verified")) return;
+		const auto update = server.wrap({cs_update_record({{11, 2u}})});
+		std::vector<std::vector<uint8_t>> out;
+		client.handle_datagram(update.data(), update.size(), out);
+		pump_client(client);
+		for (int i = 0; i < 3; ++i)
+			client.queue_statement(make_client_host_update({{0, "Players", std::to_string(i)}}, {}));
+		out = pump_client(client);
+		expect(client.state() == ClientSession::State::Closed && client.last_error() == "NP.C:MSGCRE",
+		       "pool: the third node overflows a two-node pool and tears the connection down");
+		expect(client.disconnect_event().ds == 2 && client.disconnect_event().dc == 4 &&
+		               client.disconnect_event().dp1 == 3 && client.disconnect_event().dp2 == 2,
+		       "pool: the record is {2, 4, count 3, max 2}");
+		expect(is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk, client.disconnect_event())),
+		       "pool: nothing of the boundary is built; the 0x46 burst echoes MSGCRE");
+	}
+}
+
 } // namespace
 
 int main() {
+	test_lobby_np_connection();
 	test_host_leg_gates();
 	test_stop_hosting_while_reconnecting();
 	test_play_uses_current_http_cookies();
@@ -1297,11 +1579,11 @@ int main() {
 	expect(client.server_key() == server.server_sk, "client learned server SK");
 	expect(client.server_scrk() == server.server_scrk, "client learned server SCRK");
 	if (!expect(out.empty(), "ServerAuth has no synchronous ClientConnected reply")) return 1;
-	client.process_periodic_update(out);
-	if (!expect(out.size() == 1, "next periodic update emits ClientConnected")) return 1;
+	periodic(client, out);
+	if (!expect(out.size() == 1, "next periodic update queues ClientConnected; the pump builds it")) return 1;
 	auto d_connected = out[0];
 	std::vector<std::vector<uint8_t>> duplicate_periodic;
-	client.process_periodic_update(duplicate_periodic);
+	periodic(client, duplicate_periodic);
 	expect(duplicate_periodic.empty(), "later periodic updates do not repeat ClientConnected");
 
 	// 5) ServerStartVerify -> client emits ClientRequestVerifyResult.
@@ -1333,29 +1615,31 @@ int main() {
 		std::vector<std::vector<uint8_t>> rejected_out;
 		expect(client.handle_datagram(
 			               wrong_session.data(), wrong_session.size(), rejected_out) &&
-		               rejected_out.empty() &&
+		               rejected_out.empty() && pump_client(client).empty() &&
 		               client.state() == ClientSession::State::Verifying,
-		       "wrong inbound lobby session_id is rejected without dispatch");
-
-		const auto ack_probe = client.build_heartbeat();
-		uint8_t probe_opcode = 0;
-		std::vector<uint8_t> probe_body;
-		ProtocolPacketHeader probe_header;
-		std::vector<ProtocolMessage> probe_messages;
-		expect(server_decode_inbound(ack_probe, probe_opcode, probe_body) &&
-		               probe_opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
-		               decode_protocol_packet_plaintext(
-				               probe_body.data(), probe_body.size(),
-				               server.client_scrk, probe_header, probe_messages) &&
-		               probe_header.ack_count == 0,
-		       "wrong inbound lobby session_id cannot advance receive sequence");
+		       "wrong inbound lobby session_id is rejected without dispatch or ACK");
 	}
 	out.clear();
 	expect(client.handle_datagram(s_start_verify.data(), s_start_verify.size(), out),
 	       "client handles ServerStartVerify");
 	expect(client.state() == ClientSession::State::Verifying, "client still Verifying after ServerStartVerify");
-	if (!expect(out.size() == 1, "ServerStartVerify yields one reply (ClientRequestVerifyResult)")) return 1;
+	expect(out.empty(), "ServerStartVerify's answer is queued, not sent from the receive pump");
+	out = pump_client(client);
+	if (!expect(out.size() == 1, "ServerStartVerify draws one packet on the next pump (ClientRequestVerifyResult)")) return 1;
 	auto d_verify_req = out[0];
+	{
+		// The verify request's packet ACKs the server's first packet: the wrong-session copy
+		// before it did not advance the receive sequence.
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		expect(server_decode_inbound(d_verify_req, opcode, body) &&
+		               decode_protocol_packet_plaintext(body.data(), body.size(), server.client_scrk,
+		                                                header, messages) &&
+		               header.ack_count == 1,
+		       "wrong inbound lobby session_id cannot advance receive sequence");
+	}
 
 	// NW-S5 parity — the verify request carries SessIdString + a "Cookie"
 	// var-list of ClientVar{VarFNum,VarName,VarValue}, with NWUID echoed from the
@@ -1408,14 +1692,24 @@ int main() {
 	expect(client.sess_id_string() == "deadbeefcafef00d1122334455667788",
 	       "client captured SessIdString from ServerVerifyResult");
 
-	expect(client.build_player_enter_request(42, 0x0100007fu, 32768, "ticket").empty(),
+	expect(!client.send_player_enter_request(42, 0x0100007fu, 32768, "ticket"),
 	       "a verified non-host cannot announce a player entry");
 
-	// 7) Heartbeat is a well-formed (header-only) 0x43 the server accepts.
-	auto hb = client.build_heartbeat();
-	expect(!hb.empty(), "heartbeat datagram non-empty");
-	auto hb_reply = server.respond(hb);
-	expect(hb_reply.empty(), "heartbeat draws no reply (ack-only) and doesn't error");
+	// 7) The verify result's ACK is a well-formed header-only 0x43 the server accepts.
+	{
+		const auto acks = pump_client(client);
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		expect(acks.size() == 1 && server_decode_inbound(acks[0], opcode, body) &&
+		               decode_protocol_packet_plaintext(body.data(), body.size(), server.client_scrk,
+		                                                header, messages) &&
+		               messages.empty(),
+		       "the verify result's ACK is a header-only packet on the next pump");
+		expect(!acks.empty() && server.respond(acks[0]).empty(), "the ACK draws no reply and doesn't error");
+		expect(pump_client(client).empty(), "nothing further once the ACK went out");
+	}
 
 	// 8) Host registration (F1) — a Verified session sends ClientHostRequest; the
 	// gate registers the host (ServerHostResult) and its lobby state reflects the
@@ -1431,9 +1725,9 @@ int main() {
 		    /*Host*/      {{0, "ServerName", "OpenNova Host"}, {0, "Port", "32768"},
 		                   {0, "Players", "1"}, {0, "Region", "us"}},
 		    /*PlayerList*/{{0, "PlayerName", "Host"}});
-		auto d_host = client.build_lobby_message(host_req);
+		auto d_host = sent(client, client.queue_statement(host_req));
 		expect(!d_host.empty(), "host-request datagram non-empty (session Verified)");
-		auto s_host = server.respond(d_host);
+		auto s_host = respond_all(server, d_host);
 		expect(!s_host.empty(), "ServerHostResult datagram non-empty");
 		expect(server.lobby.hosting, "gate marks lobby hosting");
 		expect(server.lobby.server_name == "OpenNova Host", "gate stored ServerName");
@@ -1459,9 +1753,9 @@ int main() {
 		auto host_upd = make_client_host_update(
 		    /*Host*/      {{0, "Players", "2"}, {0, "ServerName", "OpenNova Host 2"}},
 		    /*PlayerList*/{{0, "PlayerName", "Host"}, {1, "PlayerName", "Joiner"}});
-		auto d_upd = client.build_lobby_message(host_upd);
+		auto d_upd = sent(client, client.queue_statement(host_upd));
 		expect(!d_upd.empty(), "host-update datagram non-empty");
-		auto s_upd = server.respond(d_upd);
+		auto s_upd = respond_all(server, d_upd);
 		expect(s_upd.empty(), "ClientHostUpdate draws no reply (ack-only)");
 		expect(server.lobby.player_count == 2, "gate update refreshed player count");
 		expect(server.lobby.server_name == "OpenNova Host 2", "gate update refreshed ServerName");
@@ -1500,21 +1794,21 @@ int main() {
 		joiner.team = "1";
 		joiner.type = "0";
 		const int before = server.lobby.player_count;
-		const auto d_added = client.build_host_player_added(joiner);
+		const auto d_added = sent(client, client.send_host_player_added(joiner));
 		expect(!d_added.empty(), "ClientHostPlayerAdded builds while Established");
-		expect(server.respond(d_added).empty(), "ClientHostPlayerAdded draws no reply");
+		expect(respond_all(server, d_added).empty(), "ClientHostPlayerAdded draws no reply");
 		expect(server.lobby.player_count == before + 1, "the service counted the added player");
-		const auto d_removed = client.build_host_player_removed(2);
+		const auto d_removed = sent(client, client.send_host_player_removed(2));
 		expect(!d_removed.empty(), "ClientHostPlayerRemoved builds while Established");
-		expect(server.respond(d_removed).empty(), "ClientHostPlayerRemoved draws no reply");
+		expect(respond_all(server, d_removed).empty(), "ClientHostPlayerRemoved draws no reply");
 		expect(server.lobby.player_count == before, "the service counted the removed player");
 	}
 
 	// Entry requests use the same Established gate as roster changes.
 	{
-		const auto entry = client.build_player_enter_request(42, 0x0100007fu, 32768, "ticket");
+		const auto entry = sent(client, client.send_player_enter_request(42, 0x0100007fu, 32768, "ticket"));
 		std::vector<NapiMessage> containers;
-		if (expect(decode_client_containers(entry, server.client_scrk, containers) &&
+		if (expect(decode_client_statements(entry, server.client_scrk, containers) &&
 		               containers.size() == 1 && containers[0].name == "ClientPlayerEnterRequest",
 		           "an established host emits the player entry request")) {
 			std::string ticket;
@@ -1523,7 +1817,7 @@ int main() {
 			}
 			expect(ticket == "ticket", "the framed entry request preserves the join ticket");
 		}
-		const auto reply = server.respond(entry);
+		const auto reply = respond_all(server, entry);
 		std::vector<std::vector<uint8_t>> entry_out;
 		expect(!reply.empty() && client.handle_datagram(reply.data(), reply.size(), entry_out),
 		       "the host handles the service's player entry result");
@@ -1553,8 +1847,10 @@ int main() {
 		const auto d_again = server.push(again);
 		std::vector<std::vector<uint8_t>> verify_out;
 		expect(client.handle_datagram(d_again.data(), d_again.size(), verify_out) &&
-		               verify_out.size() == 1,
-		       "a second ServerStartVerify draws one reply");
+		               verify_out.empty(),
+		       "a second ServerStartVerify's answer is queued");
+		verify_out = pump_client(client);
+		expect(verify_out.size() == 1, "a second ServerStartVerify draws one packet");
 		std::vector<NapiMessage> vcs;
 		expect(!verify_out.empty() && decode_client_containers(verify_out[0], server.client_scrk, vcs) &&
 		               vcs.size() == 1 && vcs[0].name == "ClientRequestVerifyResult",
@@ -1571,8 +1867,9 @@ int main() {
 		cmd.fields.push_back(str_field("Cmd", "PuntPlayerByName \"Some Guy\" 42"));
 		const auto d_cmd = server.push(cmd);
 		std::vector<std::vector<uint8_t>> cmd_out;
-		expect(client.handle_datagram(d_cmd.data(), d_cmd.size(), cmd_out) && cmd_out.size() == 1,
-		       "ServerCommand is acked (header-only)");
+		expect(client.handle_datagram(d_cmd.data(), d_cmd.size(), cmd_out) && cmd_out.empty() &&
+		               pump_client(client).size() == 1,
+		       "ServerCommand is acked (header-only) on the next pump");
 		const auto notices = client.take_notices();
 		if (expect(notices.size() == 1 && notices[0].kind == ClientSession::Notice::Kind::Command,
 		           "one Command notice")) {
@@ -1604,8 +1901,9 @@ int main() {
 		stop.fields.push_back(str_field("MsgParam2", "0"));
 		const auto d_stop = server.push(stop);
 		std::vector<std::vector<uint8_t>> stop_out;
-		expect(client.handle_datagram(d_stop.data(), d_stop.size(), stop_out) && stop_out.size() == 1,
-		       "ServerStopHosting is acked (header-only)");
+		expect(client.handle_datagram(d_stop.data(), d_stop.size(), stop_out) &&
+		               pump_client(client).size() == 1,
+		       "ServerStopHosting is acked (header-only) on the next pump");
 		expect(client.host_state() == ClientSession::HostState::Idle,
 		       "ServerStopHosting returns the host leg to Idle");
 		expect(client.session_role() == ClientSession::kSessionRoleVerified &&
@@ -1618,10 +1916,10 @@ int main() {
 			               notices[0].msg_key == "NWUSERVERMSGCODE_FEATURENOTIMPLEMENTEDYET",
 			       "MsgCode 3 -> its NWUSERVERMSGCODE_* key");
 		}
-		expect(client.build_host_player_added(HostPlayerSlot{}).empty(),
+		expect(!client.send_host_player_added(HostPlayerSlot{}),
 		       "no roster notifications once hosting stopped");
-		expect(client.build_stop_hosting().empty(), "ClientStopHosting builds only from states 5/6");
-		expect(client.build_player_enter_request(42, 0x0100007fu, 32768, "").empty(),
+		expect(!client.stop_hosting(), "ClientStopHosting queues only from states 5/6");
+		expect(!client.send_player_enter_request(42, 0x0100007fu, 32768, ""),
 		       "player entry requests stop when hosting stops");
 	}
 
@@ -1629,15 +1927,15 @@ int main() {
 	// ServerPlayResult Success -> Playing (state 8), ClientStopPlaying -> back to 4.
 	// [orig: StartPlayingSession @0x4d45e0; HandleVerifyResponse @0x4d1e00; StopPlaying @0x4d0ec0]
 	{
-		expect(client.build_stop_playing().empty(), "ClientStopPlaying builds only from states 7/8");
+		expect(!client.stop_playing(), "ClientStopPlaying queues only from states 7/8");
 		const std::vector<ClientVar> play_setup =
 				make_play_setup_vars("OpenNova Host", "127.0.0.1", "32768", "28", 3);
-		const auto d_play = client.build_play_request(play_setup);
+		const auto d_play = sent(client, client.request_playing(play_setup));
 		expect(!d_play.empty(), "ClientPlayRequest builds from a Verified idle session");
 		expect(client.play_state() == ClientSession::PlayState::Requested, "play leg Requested");
-		expect(client.build_play_request(play_setup).empty(), "no second ClientPlayRequest while Requested");
+		expect(!client.request_playing(play_setup), "no second ClientPlayRequest while Requested");
 		std::vector<NapiMessage> pcs;
-		if (expect(decode_client_containers(d_play, server.client_scrk, pcs) && pcs.size() == 1 &&
+		if (expect(decode_client_statements(d_play, server.client_scrk, pcs) && pcs.size() == 1 &&
 		                   pcs[0].name == "ClientPlayRequest",
 		           "the play request container is ClientPlayRequest")) {
 			bool has_flag = false;
@@ -1651,7 +1949,7 @@ int main() {
 			}
 			expect(lists == "Cookie PlaySetup ", "the Cookie list precedes the PlaySetup list");
 		}
-		const auto s_play = server.respond(d_play);
+		const auto s_play = respond_all(server, d_play);
 		expect(!s_play.empty(), "ServerPlayResult datagram non-empty");
 		std::vector<std::vector<uint8_t>> play_out;
 		expect(client.handle_datagram(s_play.data(), s_play.size(), play_out),
@@ -1662,21 +1960,21 @@ int main() {
 		const auto notices = client.take_notices();
 		expect(notices.size() == 1 && notices[0].kind == ClientSession::Notice::Kind::PlayResult,
 		       "one PlayResult notice");
-		const auto d_stop_play = client.build_stop_playing();
+		const auto d_stop_play = sent(client, client.stop_playing());
 		expect(!d_stop_play.empty() && client.play_state() == ClientSession::PlayState::Idle,
 		       "ClientStopPlaying returns the play leg to Idle");
 		expect(client.session_role() == ClientSession::kSessionRoleVerified,
 		       "ClientStopPlaying steps the playing word back to 1");
-		expect(server.respond(d_stop_play).empty(), "ClientStopPlaying draws no reply");
+		expect(respond_all(server, d_stop_play).empty(), "ClientStopPlaying draws no reply");
 		expect(client.mission_exit_reason() == 0, "a local stop sets no exit reason");
 	}
 
 	// 17) ServerStopPlaying: the triple, the play leg Idle, exit reason 12.
 	// [orig: HandleServerDisconnectMsg @0x4d1fa0]
 	{
-		const auto d_play = client.build_play_request(
-				make_play_setup_vars("OpenNova Host", "127.0.0.1", "32768", "28", 0));
-		const auto s_play = server.respond(d_play);
+		const auto d_play = sent(client, client.request_playing(
+				make_play_setup_vars("OpenNova Host", "127.0.0.1", "32768", "28", 0)));
+		const auto s_play = respond_all(server, d_play);
 		std::vector<std::vector<uint8_t>> play_out;
 		expect(client.handle_datagram(s_play.data(), s_play.size(), play_out) &&
 		               client.play_state() == ClientSession::PlayState::Playing,
@@ -1688,8 +1986,9 @@ int main() {
 		stop.fields.push_back(str_field("MsgCode", "2001"));
 		const auto d_stop = server.push(stop);
 		play_out.clear();
-		expect(client.handle_datagram(d_stop.data(), d_stop.size(), play_out) && play_out.size() == 1,
-		       "ServerStopPlaying is acked (header-only)");
+		expect(client.handle_datagram(d_stop.data(), d_stop.size(), play_out) &&
+		               pump_client(client).size() == 1,
+		       "ServerStopPlaying is acked (header-only) on the next pump");
 		expect(client.play_state() == ClientSession::PlayState::Idle &&
 		               client.mission_exit_reason() == 12,
 		       "ServerStopPlaying: play leg Idle, exit reason 12");
@@ -1723,11 +2022,12 @@ int main() {
 		expect(client2.handle_datagram(sa2.data(), sa2.size(), o2),
 		       "D-NET-20 flow: ServerAuth handled");
 		expect(o2.empty(), "D-NET-20 flow: ServerAuth has no synchronous reply");
-		client2.process_periodic_update(o2);
+		periodic(client2, o2);
 		auto sv2 = server2.respond(o2[0]);
 		o2.clear();
 		expect(client2.handle_datagram(sv2.data(), sv2.size(), o2),
 		       "D-NET-20 flow: ServerStartVerify handled");
+		o2 = pump_client(client2);
 		if (expect(o2.size() == 1, "D-NET-20 flow: one verify request emitted")) {
 			std::vector<NapiMessage> vcs;
 			expect(decode_client_containers(o2[0], server2.client_scrk, vcs),

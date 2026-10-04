@@ -39,6 +39,8 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/emote_wire.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/squad_messages.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/session_hello.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/cs_config.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/outgoing_packets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/nw_session_framing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/protocol_message.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/replay/wire_capture.cpp

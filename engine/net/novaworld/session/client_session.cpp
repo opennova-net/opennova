@@ -7,6 +7,7 @@
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h> // decode_cs_config_update
 #include <net/npwire/session_keys.h>
 
@@ -147,7 +148,7 @@ std::vector<uint8_t> ClientSession::start() {
 	server_web_domain_.clear();
 	sess_id_string_.clear();
 	last_error_.clear();
-	cs_ = ConnectionSettings{};
+	cs_ = novaworld_service_cs_config(cfg_.max_packet_size);
 	host_result_ = ServerResultFields{};
 	play_result_ = ServerResultFields{};
 	host_gsid_.clear();
@@ -165,7 +166,12 @@ std::vector<uint8_t> ClientSession::start() {
 	// client's first protocol packet is seq=1 (capture frame 9739). Starting at
 	// 0 makes ack=0 ambiguous with "acked nothing" in the peer's reliable-delivery
 	// layer, which stalls the verify exchange against live NW (NW-S5).
-	seq_ = SessionSequencing{1, 0};
+	reset_sequencing();
+	// A fresh connection object: an empty outgoing queue and no pending ACK
+	// [orig: CNapiGameSession_InitNPConnection @0x4d3f70 -> CNapiNPConnection_Create @0x62acb0].
+	send_queue_.clear();
+	ack_pending_ = false;
+	last_recv_activity_ms_ = 0;
 	sent_client_connected_ = false;
 	reassembly_ = ProtocolReassemblyState{};
 	// A fresh connection: no counted disconnects and no reconnect pending
@@ -182,7 +188,7 @@ std::vector<uint8_t> ClientSession::start() {
 }
 
 std::vector<uint8_t> ClientSession::retransmit_stage_datagram() {
-	// A reconnect's 0x41 / 0x42 ride the session's own pump (pump_send_intervals).
+	// A reconnect's 0x41 / 0x42 ride the session's own pump (pump()).
 	if (reconnecting()) return {};
 	switch (state_) {
 	case State::Hello: return build_client_hello();
@@ -260,45 +266,38 @@ std::vector<uint8_t> ClientSession::build_client_auth() {
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 }
 
-std::vector<uint8_t> ClientSession::build_lobby_packet(const NapiMessage &container) {
+// QueueMessage for one lobby statement: the serialized container is one layer-4 record (tag 0 /
+// full_tag 0, LEN8/LEN16 by size) on the connection's outgoing queue. Both expiry parameters are
+// 0, so the record is retained until the peer ACKs the packet that carries it; a statement longer
+// than CS field 13 leaves as SplitAtLength FRAG records at the next build.
+// [orig: CNapiGameSession_SendHostRequest @0x4d3834 (and every lobby Send*) ->
+//  CNapiNPConnection_QueueMessage(conn, 0, 0, 0, 0, 0, payload, len, 1300) @0x628640 — state 1
+//  or 5, else -1; flags & 8 clear -> NapiNPMessage_Create @0x627fc0 (the 1300 chunk is
+//  DataTransfer's)]
+bool ClientSession::queue_lobby_record(const NapiMessage &container) {
+	if (!receive_clock_armed_ || (state_ != State::Verifying && state_ != State::Verified))
+		return false;
 	std::vector<NapiMessage> stream{container};
 	std::vector<uint8_t> stream_bytes(napi_stream_size(stream));
 	size_t stream_size = 0;
 	if (napi_stream_encode(stream, stream_bytes.data(), stream_bytes.size(),
 	                       &stream_size) != 0) {
-		return {};
+		return false;
 	}
 	stream_bytes.resize(stream_size);
-
-	// One inner message, layer-4 lobby (tag 0 / full_tag 0), LEN8/LEN16 by size.
-	ProtocolMessage pm;
-	pm.flags.raw   = (stream_size > 0xFFu) ? 0x40u : 0x20u;
-	pm.flags.len16 = stream_size > 0xFFu;
-	pm.flags.len8  = stream_size <= 0xFFu;
-	pm.tag = 0;
-	pm.full_tag = 0;
-	pm.length = static_cast<uint32_t>(stream_size);
-	pm.payload = std::move(stream_bytes);
-
-	// Lobby C2S direction: encrypt with our client_scrk, stamp session_id = the server's SK (the peer's
-	// local_key, advertised in ServerAuth — mirror of the server setting session_id = client's CK on its
-	// 0x83). Shared seq/ack framing (ADR 0013).
-	std::vector<uint8_t> body_out;
-	if (!frame_session_packet(seq_, SessionCrypto{client_scrk_, {}, server_sk_}, {pm}, body_out)) {
-		return {};
-	}
-	last_framed_send_ms_ = clock_ms_;
-	return nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE,
-	                               std::move(body_out));
+	ProtocolMessage record = make_protocol_message(0, std::move(stream_bytes));
+	record.reliable = true;
+	record.retention_flushes = 0;
+	send_queue_.push_back(std::move(record));
+	return true;
 }
 
-std::vector<uint8_t> ClientSession::build_lobby_message(const NapiMessage &container) {
-	// Host registration (and any post-verify lobby traffic) rides the same 0x43
-	// envelope the verify exchange used. Gate it on Verified so a caller can't
-	// emit a lobby container before the SCRK/session_id are established (which
-	// would encrypt under a zero key the server rejects).
-	if (state_ != State::Verified) return {};
-	return build_lobby_packet(container);
+bool ClientSession::queue_statement(const NapiMessage &container) {
+	// Host registration (and any post-verify lobby traffic) rides the same connection the
+	// verify exchange used. Gate it on Verified so a caller can't queue a lobby container
+	// before the session is lobby-ready.
+	if (state_ != State::Verified) return false;
+	return queue_lobby_record(container);
 }
 
 std::vector<ClientVar> ClientSession::cookie_vars() const {
@@ -315,7 +314,7 @@ std::vector<ClientVar> ClientSession::cookie_vars() const {
 	return cookie;
 }
 
-std::vector<uint8_t> ClientSession::build_verify_request() {
+bool ClientSession::queue_verify_request() {
 	// ClientRequestVerifyResult: SessIdString (empty on the first pass) + the
 	// "Cookie" var-list. Witnessed in the genuine .204 capture (frame 10166): a
 	// ClientVarList(VarList="Cookie") child whose ClientVar children each carry
@@ -330,11 +329,11 @@ std::vector<uint8_t> ClientSession::build_verify_request() {
 	// D-NET-20). [orig: CNapiGameSession_SendVerifyRequest @ 0x4d3620 ->
 	// NapiStatement_SerializeVarList @ 0x4d0660]
 	req.children.push_back(make_client_var_list("Cookie", cookie_vars()));
-	return build_lobby_packet(req);
+	return queue_lobby_record(req);
 }
 
-std::vector<uint8_t> ClientSession::build_glsvss_request() {
-	return build_lobby_packet(make_client_glsvss_request(cfg_.glsvss_request, cookie_vars()));
+bool ClientSession::queue_glsvss_request() {
+	return queue_lobby_record(make_client_glsvss_request(cfg_.glsvss_request, cookie_vars()));
 }
 
 bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
@@ -369,6 +368,9 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 	case SESSION_OPCODE_SERVER_GOODBYE:
 		if (state_ == State::Verifying || state_ == State::Verified) on_server_goodbye(body, out);
 		break;
+	case SESSION_OPCODE_SERVER_RESEND_LIST:
+		if (state_ == State::Verifying || state_ == State::Verified) on_server_resend_list(body, out);
+		break;
 	default:
 		// Unexpected opcode for a client — ignore (server-only opcodes never
 		// arrive here; truly unknown ones are not fatal).
@@ -401,7 +403,7 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 		server_hk_ = sh.hk;
 		server_sk_ = 0;
 		server_scrk_.clear();
-		cs_ = ConnectionSettings{};
+		cs_ = novaworld_service_cs_config(cfg_.max_packet_size);
 		state_ = State::Auth;
 		reconnect_.join_started_ms = clock_ms_;
 		reconnect_.join_last_send_ms = clock_ms_;
@@ -445,20 +447,13 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 		else if (kv.first == "NovaworldWebDomainNameAndPortNumber")
 			server_web_domain_ = kv.second;
 	}
-	// The host's CS block overlays this connection's client-direction template (cs_dir0):
-	// CLIENT-direction (byte 1) entries land on the reap window and the three send intervals;
-	// fields the 0x82 omits keep the template. [orig: NapiNP_HandleServerJoinResponse
-	//  @0x629840 — the template seed @0x6299ae, the CS overlay @0x629b4c..0x629b75]
-	for (const CsField &field : sa.client_cs) {
-		switch (field.field_index) {
-		case 0: cs_.timeout_ms = static_cast<int32_t>(field.value); break;
-		case 1: cs_.recv_max_per_tick = static_cast<int32_t>(field.value); break;
-		case 4: cs_.idle_send_interval_ms = static_cast<int32_t>(field.value); break;
-		case 5: cs_.active_send_interval_ms = static_cast<int32_t>(field.value); break;
-		case 6: cs_.packet_queue_interval_ms = static_cast<int32_t>(field.value); break;
-		default: break;
-		}
-	}
+	// The host's CS block overlays this connection's client-direction template (cs_dir0): each
+	// CLIENT-direction (byte 1) entry stores its slot raw (the reap window, the send intervals,
+	// the queue and pool bounds, the packet ceiling and budget); fields the 0x82 omits keep the
+	// template. [orig: NapiNP_HandleServerJoinResponse @0x629840 — the template seed @0x6299ae,
+	//  the CS overlay @0x629b4c..0x629b75]
+	for (const CsField &field : sa.client_cs)
+		apply_cs_field(cs_, field.field_index, static_cast<int32_t>(field.value));
 	// State-5 entry initializes the reap clock: the timeout_ms window runs from the accepted
 	// 0x82 onward and every admitted datagram refreshes it. [orig: @0x629eac conn_state = 5 ->
 	//  CNapiNPConnection_OnStateChange @0x626060, the conn+0x5E8 store @0x62612f]
@@ -473,7 +468,9 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	disconnect_event_ = DisconnectEvent{};
 	disconnect_latched_ = false;
 	disconnected_by_peer_ = false;
-	seq_ = SessionSequencing{1, 0};
+	reset_sequencing();
+	ack_pending_ = false;
+	last_recv_activity_ms_ = clock_ms_;
 	reassembly_ = ProtocolReassemblyState{};
 	reconnect_.was_connected = false;
 	reconnect_.next_ms = 0;
@@ -521,11 +518,6 @@ void ClientSession::teardown_connection(std::vector<std::vector<uint8_t>> &out) 
 		reconnect_.next_ms = clock_ms_ + SESSION_RECONNECT_FIRST_DELAY_MS;
 	}
 	receive_clock_armed_ = false;
-}
-
-size_t ClientSession::disconnect_burst_count() const {
-	const int32_t n = cs_.recv_max_per_tick < 0 ? 0 : (cs_.recv_max_per_tick > 32 ? 32 : cs_.recv_max_per_tick);
-	return n < 1 ? 1u : static_cast<size_t>(n);
 }
 
 bool ClientSession::reconnecting() const {
@@ -596,25 +588,24 @@ void ClientSession::set_lobby_state(int state) {
 	glsvss_deadline_ms_ = clock_ms_ + static_cast<uint32_t>(interval);
 }
 
-void ClientSession::process_periodic_update(
-		std::vector<std::vector<uint8_t>> &out) {
+void ClientSession::process_periodic_update() {
 	if (state_ == State::Verifying && !sent_client_connected_) {
-		// Emit the lobby verify handshake's bare ClientConnected
+		// Queue the lobby verify handshake's bare ClientConnected
 		// (CNapiGameSession_SendClientConnected @ 0x4cfe30 — a "ClientConnected"
-		// statement with zero fields; capture frame 9778). Retail emits this from its
-		// periodic-update tick after conn_state==5 && session==2; this method owns
-		// that boundary after the SessionInit handler completes. The one-shot flag
-		// prevents subsequent periodic updates from repeating the statement.
+		// statement with zero fields; capture frame 9778). Retail queues this from its
+		// periodic-update tick after conn_state==5 && session==2, after that tick's protocol
+		// pump, so it builds on the next one. The one-shot flag prevents subsequent periodic
+		// updates from repeating the statement.
 		NapiMessage connected;
 		connected.name = "ClientConnected";
-		out.push_back(build_lobby_packet(connected));
+		queue_lobby_record(connected);
 		sent_client_connected_ = true;
 		set_lobby_state(3);
 		return;
 	}
 	// The GLSVSS poll: NP connection up (state 5) and the session in state 4, at most once per
 	// SESSION_GLSVSS_POLL_MS; a passed deadline re-arms from GLSVSSRIMS (or disarms when the
-	// interval is <= 0), rebuilds the Cookie and sends the request.
+	// interval is <= 0), rebuilds the Cookie and queues the request.
 	// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4d4400 @0x4d44cb..0x4d4532]
 	if (state_ != State::Verified || lobby_state_ != 4) return;
 	if (glsvss_poll_ms_ != 0 && clock_ms_ - glsvss_poll_ms_ <= SESSION_GLSVSS_POLL_MS) return;
@@ -623,19 +614,27 @@ void ClientSession::process_periodic_update(
 	if (clock_ms_ <= glsvss_deadline_ms_) return;
 	glsvss_deadline_ms_ = cfg_.glsvss_rims_ms > 0
 	                      ? clock_ms_ + static_cast<uint32_t>(cfg_.glsvss_rims_ms) : 0;
-	out.push_back(build_glsvss_request());
+	queue_glsvss_request();
 }
 
-// [orig: CNapiNPConnection_PumpStateMachine @0x6292e0 case 5 (the CLNTTMOUT reap over
-//  cs_dir0.timeout_ms since the last admitted datagram, then PumpSendIntervals);
-//  CNapiNPConnection_PumpSendIntervals @0x628fd0 — the empty leg @0x629041..0x629067:
-//  idle_send_interval_ms >= 0, nothing queued, nothing retained, elapsed since the last
-//  send > the interval -> one forced (header-only) packet]
-void ClientSession::pump_send_intervals(std::vector<std::vector<uint8_t>> &out) {
+// The lobby connection's PumpFlags pass (the periodic update pumps with every flag): the send
+// leg, then the state machine's case 5 (the CLNTTMOUT reap, then PumpSendIntervals), then the
+// flush counter.
+// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4d442e (NapiNPProtocol_Pump(proto, -1, 250));
+//  CNapiNPConnection_PumpFlags @0x629780 — 0x20 @0x6297b7, 0x40 @0x6297c3, 0x80 @0x6297d5;
+//  PumpStateMachine @0x6292e0 case 5 @0x6295a2..0x62961c]
+void ClientSession::pump(std::vector<std::vector<uint8_t>> &out) {
 	if (!receive_clock_armed_ || (state_ != State::Verifying && state_ != State::Verified)) {
 		pump_reconnect(out);
 		return;
 	}
+	// The send leg: with the NOVAWORLDUDP template's zero holdoff and zero send interval, the
+	// queue and a pending ACK build on every pump.
+	// [orig: PumpEnumeratorAndSend @0x629279..0x6292bb — conn_state 5, holdoff @0x62927b, the
+	//  send interval @0x629298, `queued > 0 || has_pending_out` @0x6292a9 ->
+	//  BuildOutgoingPackets @0x6292b4 + PrunePacketQueue @0x6292bb]
+	build_outgoing_packets(out);
+	if (!receive_clock_armed_) return; // a full pool tore the connection down
 	if (cs_.timeout_ms >= 0) {
 		const uint32_t elapsed = clock_ms_ - last_receive_ms_;
 		if (elapsed > static_cast<uint32_t>(cs_.timeout_ms)) {
@@ -646,11 +645,126 @@ void ClientSession::pump_send_intervals(std::vector<std::vector<uint8_t>> &out) 
 			return;
 		}
 	}
-	// The lobby ClientSession queues nothing between pumps and retains no reliable nodes
-	// (D-NET-164), so the empty leg's two queue guards always hold here.
-	if (cs_.idle_send_interval_ms < 0) return;
-	if (clock_ms_ - last_framed_send_ms_ <= static_cast<uint32_t>(cs_.idle_send_interval_ms)) return;
-	out.push_back(build_heartbeat());
+	// PumpSendIntervals. ACTIVE: records still retained and more than active_send_interval_ms
+	// since the last packet -> a build with the pending flag set (a header-only packet when the
+	// queue is empty, whose fresh sequence makes the peer ask for what it lost). Timed
+	// MISSING-SEQUENCE: packet_queue_interval_ms set (the template's -1 leaves it off), packets
+	// held and more than that since the last admitted packet -> the 0x44. EMPTY: nothing
+	// retained or held and more than idle_send_interval_ms since the last packet -> the forced
+	// header-only keepalive.
+	// [orig: CNapiNPConnection_PumpSendIntervals @0x628fd0 — the active leg @0x628ff1..0x629017,
+	//  the timed leg @0x628fe9..0x629034, the empty leg @0x629041..0x629067, the build
+	//  @0x62906f..0x629089, SendMissingSeqList @0x629091 + the clock @0x62909f]
+	const bool retained = seq_.retained_outbound_message_count > 0;
+	const bool held = !seq_.queued_inbound.empty();
+	bool build = cs_.active_send_interval_ms >= 0 && retained &&
+	             clock_ms_ - last_framed_send_ms_ > static_cast<uint32_t>(cs_.active_send_interval_ms);
+	const bool missing = cs_.packet_queue_interval_ms >= 0 && held &&
+	                     clock_ms_ - last_recv_activity_ms_ >
+	                             static_cast<uint32_t>(cs_.packet_queue_interval_ms);
+	if (!build && !missing && cs_.idle_send_interval_ms >= 0 && !retained && !held &&
+	    clock_ms_ - last_framed_send_ms_ > static_cast<uint32_t>(cs_.idle_send_interval_ms)) {
+		build = true;
+	}
+	if (build) {
+		ack_pending_ = true;
+		build_outgoing_packets(out);
+		if (!receive_clock_armed_) return;
+	}
+	if (missing) {
+		send_missing_sequence_list(out);
+		last_recv_activity_ms_ = clock_ms_;
+	}
+	advance_session_send_flush_counter(seq_);
+}
+
+// [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430 — the ACK-only packet when the
+//  queue is empty and has_pending_out is set @0x62847e..0x62848c, the per-packet send stamp
+//  @0x628605, has_pending_out cleared once the queue count is zero @0x62861f..0x628629;
+//  PrunePacketQueue @0x6292bb; a full pool: NapiNPMessage_Create @0x628099..0x628112 ->
+//  CNapiNPConnection_RequestDisconnect @0x61e0f0, a client-side connection's SetState(6)
+//  @0x61e0fa]
+void ClientSession::build_outgoing_packets(std::vector<std::vector<uint8_t>> &out) {
+	if (send_queue_.empty() && !ack_pending_) return;
+	OutgoingPacketPlan plan = plan_outgoing_packets(seq_, send_queue_,
+			packet_ceiling_bytes(cs_.max_packet_bytes),
+			max_packets_per_build(cs_.max_packets_per_tick), OutgoingOverflow::StopBuild);
+	if (plan.overflow) {
+		latch_disconnect(make_disconnect_event(2, 4, plan.overflow_count,
+				static_cast<uint32_t>(seq_.outbound_message_limit), "", 0, "NP.C:MSGCRE"));
+		send_queue_.clear();
+		ack_pending_ = false;
+		teardown_connection(out);
+		return;
+	}
+	if (plan.encode_failed) {
+		io::logf(io::LogLevel::kWarn, "lobby: a queued statement failed to encode; %zu record(s) dropped",
+		         plan.unbuilt.size());
+		plan.unbuilt.clear();
+	}
+	send_queue_ = std::move(plan.unbuilt);
+	if (plan.packets.empty()) plan.packets.emplace_back();
+	for (const std::vector<ProtocolMessage> &packet : plan.packets) {
+		std::vector<uint8_t> body_out;
+		// Lobby C2S direction: encrypt with our client_scrk, stamp session_id = the server's SK
+		// (the peer's local_key, advertised in ServerAuth). Shared seq/ack framing (ADR 0013).
+		if (!frame_session_packet(seq_, SessionCrypto{client_scrk_, {}, server_sk_}, packet,
+		                          body_out)) {
+			break;
+		}
+		last_framed_send_ms_ = clock_ms_;
+		out.push_back(nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body_out)));
+	}
+	if (send_queue_.empty()) ack_pending_ = false;
+	prune_session_send_boundary(seq_);
+}
+
+// Each requested sequence is rebuilt from its retained records under that old sequence (with
+// the current ACK) and sent at once, inside the receive pump; 0 asks for the next one. A packet
+// whose records the ACK already retired goes out header-only.
+// [orig: NapiNP_HandleResendList @0x623800 — the receiver's key @0x623870, the walk
+//  @0x623980..0x6239da -> CNapiNPConnection_SendSessionPacket @0x6239b6]
+void ClientSession::on_server_resend_list(const std::vector<uint8_t> &body,
+                                          std::vector<std::vector<uint8_t>> &out) {
+	std::vector<uint32_t> requested;
+	if (!decode_session_resend_list(body.data(), body.size(), cfg_.client_key, requested)) return;
+	for (uint32_t requested_sequence : requested) {
+		const uint32_t sequence = requested_sequence == 0 ? seq_.next_outbound_seq : requested_sequence;
+		std::vector<uint8_t> body_out;
+		if (!frame_session_packet_for_sequence(seq_, SessionCrypto{client_scrk_, {}, server_sk_},
+		                                       sequence, body_out)) {
+			continue;
+		}
+		out.push_back(nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body_out)));
+	}
+}
+
+void ClientSession::finish_receive_batch(std::vector<std::vector<uint8_t>> &out) {
+	if (!receive_clock_armed_ || (state_ != State::Verifying && state_ != State::Verified)) return;
+	if (!seq_.missing_request_pending) return;
+	seq_.missing_request_pending = false;
+	if (seq_.queued_inbound.empty()) return;
+	send_missing_sequence_list(out);
+}
+
+// [orig: CNapiNPConnection_SendMissingSeqList @0x623560 — the peer's key, then up to sixteen
+//  sequences from BuildMissingSeqList @0x6234b0]
+void ClientSession::send_missing_sequence_list(std::vector<std::vector<uint8_t>> &out) {
+	const std::vector<uint32_t> missing = build_session_missing_sequence_list(seq_, false);
+	std::vector<uint8_t> body;
+	if (!encode_session_resend_list(server_sk_, missing, body)) return;
+	out.push_back(nw_encode_outbound(SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(body)));
+}
+
+// A fresh NP connection's sequencing: the counters start over at the state-5 entry and the
+// connection runs the ordered receive gate with its template's queue and pool bounds.
+// [orig: CNapiNPConnection_OnStateChange @0x626060 — the counters @0x62609d..0x6260b5;
+//  NapiNPProtocol_HandleSessionPacket @0x626be0..0x626c3a (the gate); NapiNPMessage_Create
+//  @0x628048 (the pool)]
+void ClientSession::reset_sequencing() {
+	seq_ = SessionSequencing{1, 0};
+	seq_.ordered_recovery_enabled = true;
+	sync_session_sequencing_limits(seq_, cs_);
 }
 
 // The reconnect, in the connection pump's order: the enumerator's re-announce first, then the
@@ -714,87 +828,92 @@ void ClientSession::grow_reconnect_gap() {
 			: (grown > SESSION_RECONNECT_GAP_MAX_MS ? SESSION_RECONNECT_GAP_MAX_MS : grown));
 }
 
-// The lobby keeps the cs_dir0 slots it runs on: CS field 0 (the reap timeout), field 1 (the
-// teardown burst) and fields 4/5/6 (the send-interval legs), each only when the update stored it.
-// [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940 — a nonzero direction
-//  byte stores into cs_dir0 @0x6219C8]
+// A nonzero direction byte stores each written slot into cs_dir0, raw; the sequencing bounds
+// follow the block. [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940 — a nonzero
+//  direction byte stores into cs_dir0 @0x6219C8]
 void ClientSession::apply_cs_config_update(const ProtocolMessage &pm) {
 	const CsConfigUpdate update = decode_cs_config_update(pm.payload.data(), pm.payload.size());
 	if (!update.to_dir0) return;
-	const auto apply = [&](int slot, int32_t &field) {
-		if ((update.written & (1u << slot)) != 0) field = update.value[static_cast<size_t>(slot)];
-	};
-	apply(0, cs_.timeout_ms);
-	apply(1, cs_.recv_max_per_tick);
-	apply(4, cs_.idle_send_interval_ms);
-	apply(5, cs_.active_send_interval_ms);
-	apply(6, cs_.packet_queue_interval_ms);
+	for (uint32_t slot = 0; slot < static_cast<uint32_t>(kCsConfigSlots); ++slot) {
+		if ((update.written & (1u << slot)) != 0)
+			apply_cs_field(cs_, slot, update.value[slot]);
+	}
+	sync_session_sequencing_limits(seq_, cs_);
 }
 
 void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
                                                std::vector<std::vector<uint8_t>> &out) {
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
-	// Lobby recv: decrypt inbound 0x83 with the server's SCRK; deframe latches seq_.last_inbound_seq.
+	SessionDeframeAdmission admission;
+	// Lobby recv: decrypt inbound 0x83 with the server's SCRK. The ordered gate admits only the
+	// next sequence: a later packet is held (and latches the missing-sequence request for the
+	// receive tail), and the packets a closing gap releases drain in order.
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626a00 — the receiver key @0x626b72, the gate
+	//  and queue @0x626be0..0x626c3a]
 	if (!deframe_session_packet(seq_, SessionCrypto{{}, server_scrk_, 0, cfg_.client_key},
-	                            body.data(), body.size(), hdr,
-	                            messages)) {
+	                            body.data(), body.size(), hdr, messages, &admission)) {
 		fail("bad 0x83 protocol packet");
 		return;
 	}
-	// Every admitted session packet refreshes the reap clock [orig: ParseMessages @0x625d54].
+	if (!admission.admitted) return;
+	// The admitted packets' ACKs retire the records they cover, and each refreshes the reap
+	// clock. [orig: CNapiNPConnection_ParseMessages @0x625d54 (the clocks),
+	//  @0x625d6b..0x625db2 (the retained-record prune)]
+	acknowledge_session_packets(seq_, admission.max_ack_count);
 	last_receive_ms_ = clock_ms_;
+	last_recv_activity_ms_ = clock_ms_;
 
-	const size_t out_before = out.size();
-	const bool had_messages = !messages.empty();
-	for (const auto &pm : messages) {
-		// The ONE settings-flagged record that is not connection tuning: the connection
-		// description the peer sends to close the session. An active connection records it and
-		// moves to state 6 (teardown) whatever the body parsed to.
-		// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 @0x621d53..0x621d6b]
-		if (pm.flags.settings_update && pm.full_tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {
-			DisconnectEvent event;
-			parse_disconnect_event(pm.payload.data(), pm.payload.size(), event);
-			latch_disconnect(event);
-			disconnected_by_peer_ = true;
-			teardown_connection(out);
-			return;
-		}
-		if (pm.flags.settings_update) {
-			if (pm.full_tag == (PROTOCOL_FULL_TAG_HIGH_BASE | hightag::CS_CONFIG_UPDATE))
-				apply_cs_config_update(pm);
-			continue;
-		}
-		if (pm.full_tag != 0) continue;           // only layer-4 lobby containers
+	bool had_messages = false;
+	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
+		if (!packet.messages.empty()) had_messages = true;
+		for (const ProtocolMessage &pm : packet.messages) {
+			// The ONE settings-flagged record that is not connection tuning: the connection
+			// description the peer sends to close the session. An active connection records it
+			// and moves to state 6 (teardown) whatever the body parsed to.
+			// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 @0x621d53..0x621d6b]
+			if (pm.flags.settings_update && pm.full_tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {
+				DisconnectEvent event;
+				parse_disconnect_event(pm.payload.data(), pm.payload.size(), event);
+				latch_disconnect(event);
+				disconnected_by_peer_ = true;
+				teardown_connection(out);
+				return;
+			}
+			if (pm.flags.settings_update) {
+				if (pm.full_tag == (PROTOCOL_FULL_TAG_HIGH_BASE | hightag::CS_CONFIG_UPDATE))
+					apply_cs_config_update(pm);
+				continue;
+			}
+			if (pm.full_tag != 0) continue;           // only layer-4 lobby containers
 
-		// Fragment reassembly (verify replies are single-fragment today, but
-		// retail can split ConnectCommands; mirror the server's handling).
-		std::vector<uint8_t> assembled;
-		if (!reassemble_protocol_payload(reassembly_, pm, assembled)) continue;
-		if (assembled.empty()) continue;          // ack-only
+			// FIRST/MID/FINAL records fold into one statement before dispatch (a long
+			// ClientRequestVerifyResult reply spans several packets).
+			// [orig: CNapiNPConnection_DispatchMessage @0x622570]
+			std::vector<uint8_t> assembled;
+			if (!reassemble_protocol_payload(reassembly_, pm, assembled)) continue;
+			if (assembled.empty()) continue;          // ack-only
 
-		std::vector<NapiMessage> containers;
-		size_t consumed = 0;
-		if (napi_stream_decode(assembled.data(), assembled.size(),
-		                       containers, &consumed) != 0) {
-			continue;
-		}
-		for (const auto &container : containers) {
-			dispatch_server_container(container, out);
-			if (state_ == State::Closed || state_ == State::Error) return;
+			std::vector<NapiMessage> containers;
+			size_t consumed = 0;
+			if (napi_stream_decode(assembled.data(), assembled.size(),
+			                       containers, &consumed) != 0) {
+				continue;
+			}
+			for (const auto &container : containers) {
+				dispatch_server_container(container, out);
+				if (state_ == State::Closed || state_ == State::Error) return;
+			}
 		}
 	}
 
-	// Acknowledge inbound data packets the genuine NovaWorld way: its reliable
-	// layer expects a 0x43 carrying ack == the seq it just sent. When a packet
-	// delivered content but drew no substantive reply (the settings-update
-	// packet, capture frame 9730; or the terminal ServerVerifyResult, frame
-	// 10620), emit a header-only ack so the peer advances — retail's p#1 and p#4.
-	// A packet that already produced a reply (ServerStartVerify -> the verify
-	// request) carries the ack itself, so no extra ack is sent.
-	if (had_messages && out.size() == out_before) {
-		out.push_back(build_heartbeat());
-	}
+	// A packet that carried records sets the pending-ACK flag: the next send build carries the
+	// ACK, on a packet of queued statements (ServerStartVerify -> the verify request) or alone as
+	// a header-only packet (the settings-update packet, capture frame 9730; the terminal
+	// ServerVerifyResult, frame 10620). A header-only packet draws no ACK.
+	// [orig: CNapiNPConnection_ParseMessages @0x625dff (has_pending_out per record);
+	//  BuildOutgoingPackets @0x62847e..0x62848c]
+	if (had_messages) ack_pending_ = true;
 }
 
 // The client msginfo dispatch table [orig: the 14-entry {name, handler} table @0x82c0c8]:
@@ -814,7 +933,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 	if (strutil::iequals(name, "ServerStartVerify")) {
 		// Every challenge is answered: the handler is a bare ReadLocaleInfo (the Cookie
 		// rebuild) + SendVerifyRequest with no guard. [orig: SendLocaleAndVerify @0x4d57e0]
-		out.push_back(build_verify_request());
+		queue_verify_request();
 		return;
 	}
 	if (strutil::iequals(name, "ServerVerifyResult")) {
@@ -842,14 +961,12 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			} else if (session_role_ == kSessionRoleHosting) {
 				++reconnect_counter_;
 				set_or_create_var(host_setup_, {0, "ReconnectCounter", std::to_string(reconnect_counter_)});
-				const std::vector<uint8_t> request = send_host_request(1);
-				if (!request.empty()) out.push_back(request);
+				send_host_request(1);
 				Notice notice;
 				notice.kind = Notice::Kind::Rehost;
 				notices_.push_back(std::move(notice));
 			} else if (session_role_ == kSessionRolePlaying) {
-				const std::vector<uint8_t> request = send_play_request(1);
-				if (!request.empty()) out.push_back(request);
+				send_play_request(1);
 				Notice notice;
 				notice.kind = Notice::Kind::Replay;
 				notices_.push_back(std::move(notice));
@@ -1015,10 +1132,9 @@ std::vector<ClientSession::Notice> ClientSession::take_notices() {
 // ReconnectCounter zeroed, the Host list's first run, an empty PlayerList) and the request goes.
 // [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50 (ReconnectCounter = 0 @0x4d0b7b) ->
 //  StartHostingSession(0) @0x4d5113]
-std::vector<uint8_t> ClientSession::build_host_request(const HostRegistration &cfg,
-                                                       int currently_hosting) {
+bool ClientSession::request_hosting(const HostRegistration &cfg, int currently_hosting) {
 	if (state_ != State::Verified || (host_state_ != HostState::Idle && host_state_ != HostState::Failed))
-		return {};
+		return false;
 	reconnect_counter_ = 0;
 	HostRegistration setup = cfg;
 	setup.reconnect_counter = reconnect_counter_;
@@ -1028,116 +1144,117 @@ std::vector<uint8_t> ClientSession::build_host_request(const HostRegistration &c
 	return send_host_request(currently_hosting);
 }
 
-// [orig: CNapiGameSession_StartHostingSession @0x4d4540 — state 4 -> 5, else -1;
-//  SendHostRequest @0x4d3700 — CurrentlyHosting, VarCheck, Cookie, HostSetup, Host, PlayerList]
-std::vector<uint8_t> ClientSession::send_host_request(int currently_hosting) {
+// [orig: CNapiGameSession_StartHostingSession @0x4d4540 — state 4 -> 5 @0x4d4561, then
+//  SendHostRequest @0x4d3700 (CurrentlyHosting, VarCheck, Cookie, HostSetup, Host, PlayerList);
+//  a refused queue drops back to state 4 and fails @0x4d4574..0x4d4583]
+bool ClientSession::send_host_request(int currently_hosting) {
 	if (state_ != State::Verified || (host_state_ != HostState::Idle && host_state_ != HostState::Failed))
-		return {};
+		return false;
+	const HostState previous = host_state_;
 	host_state_ = HostState::Requested;
 	host_result_ = ServerResultFields{};
 	set_lobby_state(5);
-	return build_lobby_packet(make_client_host_request(currently_hosting, cookie_vars(), host_setup_,
-	                                                   host_list_, player_list_));
+	if (queue_lobby_record(make_client_host_request(currently_hosting, cookie_vars(), host_setup_,
+	                                                host_list_, player_list_))) {
+		return true;
+	}
+	host_state_ = previous;
+	set_lobby_state(4);
+	return false;
 }
 
 // The Host and PlayerList vars land in the session's lists (SetOrCreate) and the update
 // carries them. [orig: Lobby_UpdateServerInfo @0x4fe8c0 (the SetOrCreates) ->
 //  CNapiGameSession_SendHostUpdate @0x4d3860]
-std::vector<uint8_t> ClientSession::build_host_update(const std::vector<ClientVar> &host,
-                                                      const std::vector<ClientVar> &player_list) {
+bool ClientSession::send_host_update(const std::vector<ClientVar> &host,
+                                     const std::vector<ClientVar> &player_list) {
 	for (const ClientVar &v : host) set_or_create_var(host_list_, v);
 	for (const ClientVar &v : player_list) set_or_create_var(player_list_, v);
-	return build_lobby_message(make_client_host_update(host, player_list));
+	return queue_statement(make_client_host_update(host, player_list));
 }
 
 // The slot's five vars replace whatever it held, then the statement goes only in state 6.
 // [orig: Server_PlayerAdd @0x51d421..0x51d4aa (RemoveByUserData + the five SetOrCreates) ->
 //  the state-6 wrapper @0x4d0e20]
-std::vector<uint8_t> ClientSession::build_host_player_added(const HostPlayerSlot &player) {
+bool ClientSession::send_host_player_added(const HostPlayerSlot &player) {
 	remove_slot_vars(player_list_, player.slot);
 	for (const ClientVar &v : make_player_list({player})) player_list_.push_back(v);
-	if (host_state_ != HostState::Established) return {};
-	return build_lobby_message(make_client_host_player_added(
+	if (host_state_ != HostState::Established) return false;
+	return queue_statement(make_client_host_player_added(
 			player.slot, player.player_name, player.ip_and_port, player.pcid, player.team,
 			player.type));
 }
 
 // [orig: the slot's vars dropped (NapiLinkedList_RemoveByUserData @0x630810), then the
 //  state-6 wrapper @0x4d0e40]
-std::vector<uint8_t> ClientSession::build_host_player_removed(int player_number) {
+bool ClientSession::send_host_player_removed(int player_number) {
 	remove_slot_vars(player_list_, player_number);
-	if (host_state_ != HostState::Established) return {};
-	return build_lobby_message(make_client_host_player_removed(player_number));
+	if (host_state_ != HostState::Established) return false;
+	return queue_statement(make_client_host_player_removed(player_number));
 }
 
-std::vector<uint8_t> ClientSession::build_player_enter_request(uint32_t connection_id,
-                                                               uint32_t ip_address,
-                                                               uint32_t port_number,
-                                                               const std::string &join_ticket) {
-	if (host_state_ != HostState::Established) return {};
-	return build_lobby_message(
+bool ClientSession::send_player_enter_request(uint32_t connection_id, uint32_t ip_address,
+                                              uint32_t port_number,
+                                              const std::string &join_ticket) {
+	if (host_state_ != HostState::Established) return false;
+	return queue_statement(
 			make_client_player_enter_request(connection_id, ip_address, port_number, join_ticket));
 }
 
-std::vector<uint8_t> ClientSession::build_stop_hosting() {
+bool ClientSession::stop_hosting() {
 	// [orig: CGameSession_StopHosting @0x4d0e60 — states 5/6 back to 4 + the statement
 	//  @0x4d0e63..0x4d0e86]
-	std::vector<uint8_t> out;
+	bool queued = false;
 	if (host_state_ == HostState::Requested || host_state_ == HostState::Established) {
 		host_state_ = HostState::Idle;
 		set_lobby_state(4);
-		out = build_lobby_message(make_client_stop_hosting());
+		queued = queue_statement(make_client_stop_hosting());
 	}
 	// A hosting word steps back to verified whatever the state, so a session torn down
 	// mid-hosting stops its reconnect's re-host too [orig: @0x4d0e89..0x4d0e9e].
 	if (session_role_ == kSessionRoleHosting) session_role_ = kSessionRoleVerified;
-	return out;
+	return queued;
 }
 
 // ConnectOrHost rebuilds the PlaySetup list, then StartPlayingSession sends it.
 // [orig: ConnectOrHost @0x4d53bb..0x4d542b (g_SessionConnectVarList) -> StartPlayingSession(0)
 //  @0x4d5449]
-std::vector<uint8_t> ClientSession::build_play_request(const std::vector<ClientVar> &play_setup,
-                                                       int currently_playing) {
+bool ClientSession::request_playing(const std::vector<ClientVar> &play_setup,
+                                    int currently_playing) {
 	play_setup_ = play_setup;
 	return send_play_request(currently_playing);
 }
 
 // [orig: CNapiGameSession_StartPlayingSession @0x4d45e0 — state 4 -> 7 and the MsgCode
-//  cleared, else -1; SendPlayRequest @0x4d3920 — CurrentlyPlaying, Cookie, PlaySetup]
-std::vector<uint8_t> ClientSession::send_play_request(int currently_playing) {
+//  cleared, else -1; SendPlayRequest @0x4d3920 — CurrentlyPlaying, Cookie, PlaySetup; a
+//  refused queue drops back to state 4]
+bool ClientSession::send_play_request(int currently_playing) {
 	if (state_ != State::Verified || (play_state_ != PlayState::Idle && play_state_ != PlayState::Failed))
-		return {};
+		return false;
+	const PlayState previous = play_state_;
 	play_state_ = PlayState::Requested;
 	play_result_ = ServerResultFields{};
 	set_lobby_state(7);
-	return build_lobby_packet(make_client_play_request(currently_playing, cookie_vars(), play_setup_));
+	if (queue_lobby_record(make_client_play_request(currently_playing, cookie_vars(), play_setup_)))
+		return true;
+	play_state_ = previous;
+	set_lobby_state(4);
+	return false;
 }
 
-std::vector<uint8_t> ClientSession::build_stop_playing() {
+bool ClientSession::stop_playing() {
 	// [orig: CGameSession_StopPlaying @0x4d0ec0 — states 7/8 back to 4 + the statement; the
 	//  NovaWorld menu re-entered after a match runs it, UI_ProcessLANSessionStateMachine @0x558e80]
-	std::vector<uint8_t> out;
+	bool queued = false;
 	if (play_state_ == PlayState::Requested || play_state_ == PlayState::Playing) {
 		play_state_ = PlayState::Idle;
 		set_lobby_state(4);
-		out = build_lobby_message(make_client_stop_playing());
+		queued = queue_statement(make_client_stop_playing());
 	}
 	// A playing word steps back to verified whatever the state, so a session torn down
 	// mid-play stops its reconnect's re-play too [orig: @0x4d0ee9..0x4d0efe].
 	if (session_role_ == kSessionRolePlaying) session_role_ = kSessionRoleVerified;
-	return out;
-}
-
-std::vector<uint8_t> ClientSession::build_heartbeat() {
-	// Heartbeat: a header-only (empty inner) 0x43 in the lobby C2S direction. Shared framing (ADR 0013).
-	std::vector<uint8_t> body_out;
-	if (!frame_session_packet(seq_, SessionCrypto{client_scrk_, {}, server_sk_}, {}, body_out)) {
-		return {};
-	}
-	last_framed_send_ms_ = clock_ms_;
-	return nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE,
-	                               std::move(body_out));
+	return queued;
 }
 
 std::vector<uint8_t> ClientSession::build_goodbye() {

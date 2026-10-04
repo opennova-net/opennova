@@ -5,11 +5,13 @@
 #include <runtime/inmatch/server_session.h> // set_connection_mode / set_transport_mode / create_session / ...
 #include <runtime/inmatch/server_spawn.h>   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
 #include <runtime/inmatch/server_tick.h>    // Server_TickUpdate
+#include <runtime/inmatch/session_timeout_config.h> // load_session_timeout_config (_NSTMOUT.TXT)
 
 #include <runtime/replication/connection_fan.h> // set_entity_send_budget (the BANDWIDTH cap)
 #include <net/npwire/ingame_decode.h> // OrganicSpawnBatch / OrganicSpawnRecord
 #include <net/npwire/ingame_encode.h> // encode_organic_spawn_batch
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // parse_disconnect_event (the staged H:0x03 record)
 #include <net/npwire/session_keys.h>
@@ -71,66 +73,34 @@ std::vector<ProtocolMessage> send_session_batches(
 		NapiNPConnection &connection, std::vector<ProtocolMessage> messages,
 		std::size_t max_packets) {
 	if (max_packets == 0) return messages;
-	std::vector<ProtocolMessage> batch;
-	std::vector<uint8_t> encoded_messages;
-	std::size_t packets_built = 0;
-
-	auto flush = [&] {
-		if (batch.empty()) return true;
-		std::vector<uint8_t> datagram;
-		if (!frame_in_match_s2c_batch(
-					owner.ctx, connection.peer, batch, datagram))
-			return false;
-		sock.send_to(connection.peer, datagram.data(), datagram.size());
-		connection.last_session_send_tick = owner.now_tick;
-		++packets_built;
-		batch.clear();
-		encoded_messages.clear();
-		return true;
-	};
-
-	// Admission is per physical node, in queue order, exactly NapiNPMessage_Create's per-node
-	// check: every record — a whole message or one SplitAtLength piece, which also goes through
-	// Create — is admitted while `retained + transient + admitted-so-far + 1 <= msg_out_max`, and
-	// a capacity-exempt (flag 0x10) record bypasses the check. The FIRST non-exempt node that does
-	// not fit is DROPPED and the connection is asked to disconnect: the MSGCRE record
-	// {1, 4, count, max, "", 0, "NP.C:MSGCRE"} latches (first cause wins) and pending_disconnect
-	// marks the node for the next protocol pump, which sends the 0x86 burst and destroys it. Every
-	// later non-exempt node in this boundary fails the same way (the count never shrinks inside
-	// one boundary), exempt ones still ship. Retail never defers a fragment group for capacity: a
-	// FIRST that fit is built and sent while its over-cap MID fails and tears the connection down.
-	// [orig: NapiNPMessage_Create @0x627FC0 — flag-0x10 exemption @0x628031, `msg_out_max >= 0`
-	//  @0x628048, count @0x628062..0x62806b, the record @0x628099..0x6280eb, latch-if-invalid
-	//  @0x6280f9..0x62810a, RequestDisconnect @0x628112 (state 1 -> pending_disconnect @0x61e107),
-	//  NULL return either way; SplitAtLength @0x62838f pieces go through Create too; the
-	//  destroy is NapiNPProtocol_Pump @0x62a6fd after the per-connection send pump @0x62a6f8]
-	std::vector<ProtocolMessage> enveloped;
-	std::size_t available_nodes = session_outbound_message_prefix_count(
-			connection.seq, std::numeric_limits<std::size_t>::max());
-	const std::size_t occupied_nodes =
-			connection.seq.retained_outbound_message_count +
-			connection.seq.transient_outbound_message_count;
-	std::size_t admitted_nodes = 0;
-	bool ordinary_tail_rejected = false;
-	std::size_t planned_packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
-	// The connection's packet ceiling: cs_dir0 field 13, the host's mpmaxpacketsize as the
-	// new-connection callback negotiated it against the joiner's MPS (D-NET-234), floored at 26.
-	// [orig: BuildOutgoingPackets @0x628436, floor @0x628446; HandleNewConnection @0x4c81ca]
-	const std::size_t max_packet_bytes = connection.timeouts.max_packet_bytes < 26
-			? std::size_t{26}
-			: static_cast<std::size_t>(connection.timeouts.max_packet_bytes);
-	for (ProtocolMessage &message : messages) {
-		// A staged H:0x03 connection description is retail's SendChatMessage: the
-		// record is stored on the connection (only while none is latched) and THEN
-		// queued through Create with the 0x10 exemption, so in queue order it sits
-		// after every earlier node's overflow. This port defers Create to the send
-		// boundary, so the latch rides the record's admission here and keeps that
-		// first-cause-wins order; the 0x46 that answers the punt then makes the
-		// 0x86 burst echo this record. [orig: CNapiNPConnection_SendChatMessage
-		//  @0x4C7EF0 — the record @0x4c7f8e..0x4c7fe4, latch-if-!valid
-		//  @0x4c7ff2..0x4c8004, TrySendSessionInit @0x4c800c ->
-		//  NapiNPDataTransfer_SendDescription @0x628C80 serializes
-		//  conn->disconnect_event and Creates it with flag 0x10 @0x628e42]
+	// The shared BuildOutgoingPackets planner admits and packs the queue under the connection's
+	// ceiling: cs_dir0 field 13, the host's mpmaxpacketsize as the new-connection callback
+	// negotiated it against the joiner's MPS (D-NET-234), floored at 26. A server-side
+	// connection's refused node is DROPPED: the MSGCRE record {1, 4, count, max, "", 0,
+	// "NP.C:MSGCRE"} latches (first cause wins) and pending_disconnect marks the node for the
+	// next protocol pump, which sends the 0x86 burst and destroys it; every later non-exempt
+	// node in this boundary fails the same way, exempt ones still ship. Retail never defers a
+	// fragment group for capacity: a FIRST that fit is built and sent while its over-cap MID
+	// fails and tears the connection down.
+	// [orig: BuildOutgoingPackets @0x628436, floor @0x628446; HandleNewConnection @0x4c81ca;
+	//  NapiNPMessage_Create @0x627FC0 — RequestDisconnect @0x628112 (state 1 ->
+	//  pending_disconnect @0x61e107); the destroy is NapiNPProtocol_Pump @0x62a6fd after the
+	//  per-connection send pump @0x62a6f8]
+	OutgoingPacketPlan plan = plan_outgoing_packets(connection.seq, messages,
+			packet_ceiling_bytes(connection.timeouts.max_packet_bytes), max_packets,
+			OutgoingOverflow::DropRefused);
+	// The latches, in queue order. A staged H:0x03 connection description is retail's
+	// SendChatMessage: the record is stored on the connection (only while none is latched) and
+	// THEN queued through Create with the 0x10 exemption, so in queue order it sits after every
+	// earlier node's overflow. This port defers Create to the send boundary, so the latch rides
+	// the record's place in the queue and keeps that first-cause-wins order; the 0x46 that
+	// answers the punt then makes the 0x86 burst echo this record. [orig:
+	//  CNapiNPConnection_SendChatMessage @0x4C7EF0 — the record @0x4c7f8e..0x4c7fe4,
+	//  latch-if-!valid @0x4c7ff2..0x4c8004, TrySendSessionInit @0x4c800c ->
+	//  NapiNPDataTransfer_SendDescription @0x628C80 serializes conn->disconnect_event and Creates
+	//  it with flag 0x10 @0x628e42; NapiNPMessage_Create's latch @0x6280f9..0x62810a]
+	for (std::size_t m = 0; m < messages.size(); ++m) {
+		const ProtocolMessage &message = messages[m];
 		if (message.capacity_exempt &&
 		    message.full_tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {
 			DisconnectEvent description;
@@ -138,62 +108,30 @@ std::vector<ProtocolMessage> send_session_batches(
 			                           description))
 				latch_disconnect_event(connection, description);
 		}
-		std::size_t message_packet_bytes = planned_packet_bytes;
-		std::vector<ProtocolMessage> pieces = split_protocol_message_to_fill(
-				message, max_packet_bytes, message_packet_bytes);
-		bool piece_rejected = false;
-		for (ProtocolMessage &piece : pieces) {
-			if (!piece.capacity_exempt) {
-				if (ordinary_tail_rejected || available_nodes == 0) {
-					if (!ordinary_tail_rejected) {
-						latch_disconnect_event(connection, make_disconnect_event(
-								1, 4,
-								static_cast<uint32_t>(occupied_nodes + admitted_nodes + 1),
-								static_cast<uint32_t>(connection.seq.outbound_message_limit),
-								"", 0, "NP.C:MSGCRE"));
-						connection.pending_disconnect = true;
-						ordinary_tail_rejected = true;
-					}
-					piece_rejected = true;
-					continue; // the node is dropped
-				}
-				--available_nodes;
-				++admitted_nodes;
-			}
-			enveloped.push_back(std::move(piece));
+		if (plan.overflow && m == plan.overflow_message) {
+			latch_disconnect_event(connection, make_disconnect_event(
+					1, 4, plan.overflow_count,
+					static_cast<uint32_t>(connection.seq.outbound_message_limit),
+					"", 0, "NP.C:MSGCRE"));
+			connection.pending_disconnect = true;
 		}
-		// The fill planner only advances over nodes that were actually queued.
-		if (!piece_rejected) planned_packet_bytes = message_packet_bytes;
 	}
-	for (std::size_t i = 0; i < enveloped.size(); ++i) {
-		const ProtocolMessage &message = enveloped[i];
-		std::vector<uint8_t> candidate = encoded_messages;
-		if (!append_protocol_message(candidate, message)) {
-			if (!flush()) {
-				batch.insert(batch.end(), enveloped.begin() + i, enveloped.end());
-				return batch;
-			}
-			return std::vector<ProtocolMessage>(enveloped.begin() + i, enveloped.end());
+	for (std::size_t p = 0; p < plan.packets.size(); ++p) {
+		std::vector<uint8_t> datagram;
+		if (!frame_in_match_s2c_batch(owner.ctx, connection.peer, plan.packets[p], datagram)) {
+			// A packet that fails to frame keeps its records, and everything after them, queued.
+			std::vector<ProtocolMessage> rest;
+			for (std::size_t q = p; q < plan.packets.size(); ++q)
+				for (ProtocolMessage &record : plan.packets[q]) rest.push_back(std::move(record));
+			for (ProtocolMessage &record : plan.unbuilt) rest.push_back(std::move(record));
+			return rest;
 		}
-		if (PROTOCOL_DATAGRAM_OVERHEAD + candidate.size() > max_packet_bytes) {
-			if (!flush()) {
-				batch.insert(batch.end(), enveloped.begin() + i, enveloped.end());
-				return batch;
-			}
-			// The build stops once its packet budget went out; the rest waits for the
-			// next build. [orig: BuildOutgoingPackets @0x62860b..0x628619]
-			if (packets_built >= max_packets)
-				return std::vector<ProtocolMessage>(enveloped.begin() + i, enveloped.end());
-			candidate.clear();
-			if (!append_protocol_message(candidate, message)) {
-				return std::vector<ProtocolMessage>(enveloped.begin() + i, enveloped.end());
-			}
-		}
-		batch.push_back(message);
-		encoded_messages = std::move(candidate);
+		sock.send_to(connection.peer, datagram.data(), datagram.size());
+		connection.last_session_send_tick = owner.now_tick;
 	}
-	if (!flush()) return batch;
-	return {};
+	// The build stops once its packet budget went out; the rest waits for the next build.
+	// [orig: BuildOutgoingPackets @0x62860b..0x628619]
+	return std::move(plan.unbuilt);
 }
 
 bool is_established_s2c_datagram(const std::vector<uint8_t> &datagram) {

@@ -265,7 +265,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	host_disconnect_reason_.clear();
 	last_disconnect_event_ = DisconnectEvent{};
 	disconnect_event_set_ = false;
-	conn_.timeouts = SessionTimeoutConfig{}; // the template; the accepted 0x82 overlays it
+	conn_.timeouts = CsConfig{}; // the template; the accepted 0x82 overlays it
 	silence_timeout_latched_ = false;
 	// Arm the receive clock at connect: the reap window is measured from the moment
 	// this connection started expecting traffic, not from the first reply.
@@ -629,7 +629,7 @@ void JoinerConnection::on_server_auth(
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 — the template seed @0x6299ae, the
 	//  CS overlay @0x629b4c..0x629b75, the copy onto the connection @0x629d72/@0x629d89]
 	for (const CsField &field : sa.client_cs)
-		apply_session_cs_field(conn_.timeouts, field.field_index,
+		apply_cs_field(conn_.timeouts, field.field_index,
 				static_cast<int32_t>(field.value));
 	sync_session_sequencing_limits(conn_.seq, conn_.timeouts);
 	phase_ = Phase::Driving;
@@ -921,7 +921,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				}
 				for (uint32_t slot = 0; slot < static_cast<uint32_t>(kCsConfigSlots); ++slot) {
 					if ((settings.written & (1u << slot)) != 0)
-						apply_session_cs_field(conn_.timeouts, slot, settings.value[slot]);
+						apply_cs_field(conn_.timeouts, slot, settings.value[slot]);
 				}
 				sync_session_sequencing_limits(conn_.seq, conn_.timeouts);
 			}

@@ -8,6 +8,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
 
@@ -113,89 +114,37 @@ JoinerConnection::FrameMessagesResult JoinerConnection::frame_messages_detailed(
 	if (session_lost() || phase_ == Phase::Error) return result;
 	if (max_packet_bytes <= PROTOCOL_DATAGRAM_OVERHEAD) { result.frame_failed = true; return result; }
 	max_packet_bytes = std::max<std::size_t>(26, max_packet_bytes);
-	std::size_t available = session_outbound_message_prefix_count(conn_.seq,
-			std::numeric_limits<std::size_t>::max());
-	std::vector<ProtocolMessage> packet;
-	std::size_t packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
-	std::size_t completed_in_packet = 0;
-	std::size_t packets_built = 0;
-	auto flush = [&] {
-		if (packet.empty()) return true;
-		std::vector<uint8_t> datagram = frame_session(packet);
-		if (datagram.empty()) return false;
-		++packets_built;
-		result.framed_count += completed_in_packet;
+	// The shared BuildOutgoingPackets planner admits and packs the queue. The FIRST non-exempt
+	// node that does not fit the pool is the overflow: {2, 4, count, max, "", 0, "NP.C:MSGCRE"}
+	// latches (first cause wins) and RequestDisconnect on a client-side (state 5) connection
+	// tears it down INLINE — SetState(6) sends the 0x46 burst carrying that record and the
+	// session is terminal, so nothing queued this boundary (admitted or not) is built. An
+	// encoding failure leaves the admitted suffix with its caller.
+	// [orig: NapiNPMessage_Create @0x627FC0 — RequestDisconnect @0x628112 -> @0x61e0fa
+	//  SetState(6) -> TeardownActiveConnection @0x62549e..0x6254d3]
+	OutgoingPacketPlan plan = plan_outgoing_packets(conn_.seq, messages, max_packet_bytes,
+			max_packets, OutgoingOverflow::StopBuild);
+	result.admitted_count = plan.admitted_messages;
+	if (plan.overflow) {
+		latch_disconnect_event(make_disconnect_event(2, 4, plan.overflow_count,
+				static_cast<uint32_t>(conn_.seq.outbound_message_limit),
+				"", 0, "NP.C:MSGCRE"), 2);
+		result.datagrams = disconnect();
+		result.framed_count = 0;
+		fail("NP.C:MSGCRE");
+		return result;
+	}
+	for (std::size_t p = 0; p < plan.packets.size(); ++p) {
+		std::vector<uint8_t> datagram = frame_session(plan.packets[p]);
+		if (datagram.empty()) { result.frame_failed = true; return result; }
+		result.framed_count += plan.completed_messages[p];
 		result.datagrams.push_back(std::move(datagram));
-		packet.clear(); completed_in_packet = 0;
-		packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
-		return true;
-	};
-	// Plan/admit the nodes before framing, per physical node in queue order like
-	// NapiNPMessage_Create (a SplitAtLength piece goes through Create too). An
-	// encoding failure must leave the entire admitted suffix with its caller,
-	// including later nodes. The FIRST non-exempt node that does not fit is the
-	// pool overflow: the node is dropped, {2, 4, count, max, "", 0, "NP.C:MSGCRE"}
-	// latches (first cause wins) and RequestDisconnect on a client-side (state 5)
-	// connection tears it down INLINE — SetState(6) sends the 0x46 burst carrying
-	// that record and the session is terminal, so nothing queued this boundary
-	// (admitted or not) is built.
-	// [orig: NapiNPMessage_Create @0x627FC0 — exemption @0x628031, `msg_out_max >= 0`
-	//  @0x628048, count @0x628062..0x62806b, the record @0x628099..0x6280eb,
-	//  latch @0x6280f9..0x62810a, RequestDisconnect @0x628112 -> @0x61e0fa
-	//  SetState(6) -> TeardownActiveConnection @0x62549e..0x6254d3;
-	//  SplitAtLength @0x62838f]
-	std::vector<std::vector<ProtocolMessage>> planned;
-	std::size_t planned_packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
-	const std::size_t occupied = conn_.seq.retained_outbound_message_count +
-			conn_.seq.transient_outbound_message_count;
-	std::size_t admitted_nodes = 0;
-	for (const ProtocolMessage &message : messages) {
-		auto pieces = split_protocol_message_to_fill(message, max_packet_bytes, planned_packet_bytes);
-		for (const ProtocolMessage &piece : pieces) {
-			if (piece.capacity_exempt) continue;
-			if (available == 0) {
-				latch_disconnect_event(make_disconnect_event(2, 4,
-						static_cast<uint32_t>(occupied + admitted_nodes + 1),
-						static_cast<uint32_t>(conn_.seq.outbound_message_limit),
-						"", 0, "NP.C:MSGCRE"), 2);
-				result.datagrams = disconnect();
-				result.framed_count = 0;
-				fail("NP.C:MSGCRE");
-				return result;
-			}
-			--available;
-			++admitted_nodes;
-		}
-		++result.admitted_count;
-		planned.push_back(std::move(pieces));
 	}
-	for (std::size_t k = 0; k < planned.size(); ++k) {
-		std::vector<ProtocolMessage> &pieces = planned[k];
-		for (std::size_t i = 0; i < pieces.size(); ++i) {
-			std::vector<uint8_t> encoded;
-			if (!append_protocol_message(encoded, pieces[i])) {
-				(void)flush(); result.frame_failed = true; return result;
-			}
-			if (packet_bytes + encoded.size() > max_packet_bytes) {
-				if (!flush()) { result.frame_failed = true; return result; }
-				// The build stops once its packet budget went out (cs_dir0 field 14); the
-				// rest of the queue, this message's remaining pieces first, waits for the
-				// next build. [orig: BuildOutgoingPackets @0x62860b..0x628619]
-				if (packets_built >= max_packets) {
-					for (std::size_t j = i; j < pieces.size(); ++j)
-						result.unbuilt.push_back(std::move(pieces[j]));
-					for (std::size_t later = k + 1; later < planned.size(); ++later)
-						for (ProtocolMessage &piece : planned[later])
-							result.unbuilt.push_back(std::move(piece));
-					return result;
-				}
-			}
-			packet.push_back(std::move(pieces[i]));
-			packet_bytes += encoded.size();
-			if (i + 1 == pieces.size()) ++completed_in_packet;
-		}
-	}
-	if (!flush()) result.frame_failed = true;
+	if (plan.encode_failed) { result.frame_failed = true; return result; }
+	// The build stops once its packet budget (cs_dir0 field 14) went out; the rest of the
+	// queue, the split message's remaining pieces first, waits for the next build.
+	// [orig: BuildOutgoingPackets @0x62860b..0x628619]
+	result.unbuilt = std::move(plan.unbuilt);
 	return result;
 }
 

@@ -64,7 +64,6 @@ bool check_timing_constants() {
 	using namespace opennova;
 	if (!expect(SESSION_CONNECT_TIMEOUT_MS == 60000u, "connect/host poll timeout 60s (0xEA60)")) return false;
 	if (!expect(SESSION_PERIODIC_UPDATE_TIMEOUT_MS == 20000u, "periodic-update timeout 20s (0x4E20)")) return false;
-	if (!expect(SESSION_MESSAGE_CHUNK_BYTES == 1300u, "message chunk size 1300 bytes")) return false;
 	if (!expect(SESSION_APPID_RANDOM_MIN == 1000u, "session AppId random min")) return false;
 	if (!expect(SESSION_APPID_RANDOM_MAX == 9999u, "session AppId random max")) return false;
 	// (tick + rand) % 0x2328 + 1000 [orig: CNapiNetwork_RandomizeTimeout @0x4c4d80]

@@ -3,6 +3,7 @@
 #include <net/napi/session.h>       // ClientVar / ServerCommand / the NWEC maps
 #include <net/napi/tlv.h>           // NapiMessage (lobby container shape)
 #include <net/novaworld/lobby_vars.h> // HostRegistration / HostPlayerSlot
+#include <net/npwire/cs_config.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 
@@ -27,21 +28,31 @@ namespace opennova {
 //   <- ServerHello (0x81)            : learn host key `hk`
 //   ClientAuth (0x42)                : hk echoed, ck = client key, client scrk
 //   <- ServerAuth (0x82)             : learn server key `sk` + server scrk (cr==1) + the CS block
-//   process_periodic_update() -> ClientConnected (0x43): begin lobby verification
+//   process_periodic_update() queues ClientConnected: begin lobby verification
 //   <- ServerStartVerify (0x83)
-//   ClientRequestVerifyResult (0x43)
+//   ClientRequestVerifyResult (queued)
 //   <- ServerVerifyResult (0x83)     : Success=1 -> Verified (lobby-ready, retail state 4)
-//   build_host_request() / build_play_request() -> the host (5->6) / play (7->8) legs
+//   request_hosting() / request_playing() -> the host (5->6) / play (7->8) legs
 //   <- ServerHostResult / ServerPlayResult / ServerPlayerEnterResult / ServerGLSVSSResults
 //   <- ServerStopHosting / ServerStopPlaying / ServerLeaveNovaWorld / ServerCommand (notices)
 //   <- ServerGoodBye (0x86) / the H:0x03 description record : the peer's disconnect
 //
+// The lobby connection is an ordinary type-2 NAPI connection: every statement is queued on it
+// (QueueMessage, retained until the peer ACKs its packet), and the send pump builds the queue
+// into packets no larger than CS field 13, splitting a long statement into FRAG records; the
+// receive side admits only the next in-order packet, holds later ones and asks for the gap with
+// a 0x44, and answers the peer's 0x84 from the retained records.
+// [orig: every CNapiGameSession_Send* -> CNapiNPConnection_QueueMessage(conn, 0, 0, 0, 0, 0,
+//  payload, len, 1300) @0x628640 (e.g. SendHostRequest @0x4d3834, SendHostUpdate @0x4d3902) ->
+//  NapiNPMessage_Create @0x627fc0; CNapiGameSession_ProcessPeriodicUpdate @0x4d4400 ->
+//  NapiNPProtocol_Pump(proto, -1, 250) @0x4d442e; CNapiGameSession_InitNPConnection @0x4d3be0]
+//
 // No socket I/O lives here (engine convention: portable C++ in engine/, Godot
-// wrapper in godot/). The caller owns the UDP socket and pumps bytes: send
-// what start()/handle_datagram()/pump_send_intervals() return, feed every
-// received datagram back into handle_datagram(), and set the wall clock
-// (set_clock_ms) before each pump — the negotiated intervals and the
-// receive-silence reap are millisecond windows. Each leg is unit-testable via
+// wrapper in godot/). The caller owns the UDP socket and pumps bytes, once per tick in
+// retail's order: feed every received datagram into handle_datagram() (sending what it returns
+// at once), then finish_receive_batch(), then pump(), then process_periodic_update(); set the
+// wall clock (set_clock_ms) first — the negotiated intervals and the receive-silence reap are
+// millisecond windows. Each leg is unit-testable via
 // in-process loopback against apps/novaworld_server's own parsers/builders —
 // see docs/adr/0010-novaworld-client-completion.md.
 //
@@ -147,6 +158,12 @@ public:
 		int32_t glsvss_rims_ms = 0;
 		int32_t glsvss_agrms_ms = 0;
 
+		// The configured game.cfg `mpmaxpacketsize` (0 -> 1300): the lobby template's CS field 13,
+		// the ceiling every built packet fits, until the peer's 0x82 overlays it. The 0x42's
+		// MaxPacketSize CU carries the same configured value (NovaWorldJoinCu::max_packet_size).
+		// [orig: CNapiGameSession_InitNPConnection @0x4d3df4..0x4d3eb8]
+		int32_t max_packet_size = 0;
+
 		// The fresh CK and SCRK a reconnect's re-join mints. Unset, the engine's own random
 		// draws (make_random_session_u32 / make_dev_scrk) stand; the owner injects its
 		// generator, a test a deterministic one.
@@ -161,22 +178,6 @@ public:
 		// CO/AP/BDAT/PN/PG/PV1/PV2 identity is the retail CNapiNetwork_Init
 		// @ 0x4ca4a0 block, independently witnessed in the LAN ClientAuth capture.
 		static Config jointoperations();
-	};
-
-	// The NOVAWORLDUDP service connection template (the client direction, cs_dir0): the
-	// receive-silence reap window and the three send intervals. Overlaid by the 0x82 CS block
-	// and later H:0x00 CS_CONFIG_UPDATE records. [orig: CNapiGameSession_InitNPConnection
-	//  @0x4d3be0 @0x4d3e1f (240000 / 60000 / 1000 / -1); NapiNP_HandleServerJoinResponse
-	//  @0x629840 (the overlay); CNapiNPConnection_HandleCSConfigUpdate @0x621940]
-	struct ConnectionSettings {
-		int32_t timeout_ms = 240000;           // CS field 0
-		// CS field 1: the teardown's disconnect-packet burst size (clamped 0..32, the first
-		// send always goes) [orig: InitNPConnection @0x4d3e2c (4); TeardownActiveConnection
-		//  @0x6253ef..0x625424]
-		int32_t recv_max_per_tick = 4;
-		int32_t idle_send_interval_ms = 60000; // CS field 4 — the empty keepalive leg
-		int32_t active_send_interval_ms = 1000;// CS field 5 — the queued-payload leg
-		int32_t packet_queue_interval_ms = -1; // CS field 6 — the missing-seq leg (off)
 	};
 
 	// A server notification the owner acts on (state changes are already applied).
@@ -219,8 +220,8 @@ public:
 	explicit ClientSession(Config config);
 
 	// The owner's wall clock in milliseconds (GetTickCount in retail). Set it before
-	// pump_send_intervals()/process_periodic_update(); every framed send and every
-	// admitted datagram is stamped with the latest value.
+	// pump()/process_periodic_update(); every framed send and every admitted datagram is
+	// stamped with the latest value.
 	void set_clock_ms(uint32_t now_ms) { clock_ms_ = now_ms; }
 
 	// Begin the handshake. Returns the ClientHello datagram to send (envelope
@@ -234,72 +235,85 @@ public:
 	//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 (the 0x42 re-send)]
 	std::vector<uint8_t> retransmit_stage_datagram();
 
-	// Feed one inbound datagram (received off the UDP socket, CRC envelope
-	// intact). Appends zero or more datagrams to send in reply to `out`.
-	// Returns false on a protocol error or a server rejection (state becomes
-	// Error; see last_error()). A datagram that fails the envelope/NWU decode is
-	// TOSSED (counted, logged) without touching the session, as retail's receive
-	// pump does; one that isn't expected in the current state is ignored.
+	// Feed one inbound datagram (received off the UDP socket, CRC envelope intact). Appends the
+	// datagrams retail sends from inside its receive pump to `out` — the 0x42 answering a
+	// ServerHello, a teardown's 0x46 burst, the packets a 0x84 asks for — to send at once;
+	// statements a dispatched container answers with are queued for the next pump(). Returns
+	// false on a protocol error or a server rejection (state becomes Error; see last_error()).
+	// A datagram that fails the envelope/NWU decode is TOSSED (counted, logged) without
+	// touching the session, as retail's receive pump does; one that isn't expected in the
+	// current state is ignored.
 	bool handle_datagram(const uint8_t *data, size_t len,
 	                     std::vector<std::vector<uint8_t>> &out);
 
-	// Run one session-periodic update after the caller has drained inbound
-	// datagrams. Once ServerSessionInit has established the NP connection and
-	// moved the session to Verifying, the first update emits ClientConnected;
-	// later updates do not repeat it. Once Verified, the GLSVSS deadline is
-	// polled here at most once per SESSION_GLSVSS_POLL_MS. Keeping this boundary
-	// explicit matches retail's conn_state==5 && session_state==2 timing instead
-	// of replying synchronously from handle_datagram().
-	void process_periodic_update(std::vector<std::vector<uint8_t>> &out);
+	// The receive pump's tail, after the tick's datagrams went through handle_datagram(): when
+	// a packet arrived ahead of a gap and one is still held, the missing-sequence list goes out
+	// at once (a 0x44 carrying the server's key) and the latch clears.
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266a0 — the latch test @0x6269bb, the queue
+	//  test @0x6269c8, CNapiNPConnection_SendMissingSeqList(conn, 0) @0x6269ce, the clear
+	//  @0x6269d6]
+	void finish_receive_batch(std::vector<std::vector<uint8_t>> &out);
 
-	// The connection's pump over the negotiated CS values: once the NP connection is up
-	// (Verifying/Verified), emits the header-only 0x43 when nothing is queued or retained
-	// and idle_send_interval_ms has elapsed since the last framed send, and reaps the
-	// connection when timeout_ms of receive silence has passed (a latched CLNTTMOUT record,
-	// the 0x46 burst, state Closed). Once torn down with the hosting/playing word set, the
-	// same pump runs the reconnect: the 0x41 re-probe windows and the re-join's 0x42 leg
+	// The connection's send pump over the negotiated CS values, once per tick after the receive
+	// batch: once the NP connection is up (Verifying/Verified) the queue — and a pending ACK —
+	// builds into packets (split at CS field 13, at most field 14 of them); the reap fires after
+	// timeout_ms of receive silence (a latched CLNTTMOUT record, the 0x46 burst, state Closed);
+	// then the send-interval legs: with records still retained, a header-only packet once
+	// active_send_interval_ms passed since the last send, the timed missing-sequence list when
+	// packet_queue_interval_ms is set, and the empty keepalive once idle_send_interval_ms passed
+	// with nothing queued, retained or held. Once torn down with the hosting/playing word set,
+	// the same pump runs the reconnect: the 0x41 re-probe windows and the re-join's 0x42 leg
 	// (see reconnecting()).
-	// [orig: CNapiNPConnection_PumpFlags @0x629780 -> PumpEnumeratorAndSend @0x6290c0, then
-	//  PumpStateMachine @0x6292e0 (case 3 @0x629508, case 5 @0x6295a2..0x62961c, the
-	//  reconnect tail @0x629487..0x6296cb); PumpSendIntervals @0x628fd0 @0x629041..0x629067]
-	void pump_send_intervals(std::vector<std::vector<uint8_t>> &out);
+	// [orig: CNapiNPConnection_PumpFlags @0x629780 -> PumpEnumeratorAndSend @0x6290c0 (the send
+	//  leg @0x629279..0x6292bb -> BuildOutgoingPackets @0x628430), then PumpStateMachine
+	//  @0x6292e0 (case 3 @0x629508, case 5 @0x6295a2..0x62961c, the reconnect tail
+	//  @0x629487..0x6296cb) -> PumpSendIntervals @0x628fd0; the flush counter @0x6297d5]
+	void pump(std::vector<std::vector<uint8_t>> &out);
 
-	// Build a keep-alive: a header-only 0x43 with no inner messages (advances
-	// our seq, acks the peer). Valid once Verified.
-	std::vector<uint8_t> build_heartbeat();
+	// Run one session-periodic update after the protocol pump. Once ServerSessionInit has
+	// established the NP connection and moved the session to Verifying, the first update
+	// queues ClientConnected; later updates do not repeat it. Once Verified, the GLSVSS deadline
+	// is polled here at most once per SESSION_GLSVSS_POLL_MS. What it queues builds on the next
+	// pump(). [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4d4400 — the protocol pump
+	//  @0x4d442e first, then the ClientConnected gate @0x4d444e..0x4d445b and the GLSVSS poll
+	//  @0x4d44cb..0x4d4532]
+	void process_periodic_update();
 
 	// Build a ClientGoodBye (0x46) datagram and mark the session Closed. Carries the
 	// latched disconnect record when the peer/reap set one, else the zero record.
 	std::vector<uint8_t> build_goodbye();
 
-	// Wrap one lobby container (e.g. a ClientHostRequest / ClientHostUpdate built
-	// via napi/session.h) as a ready-for-wire 0x43 ProtocolMessage — the
-	// host-registration send path. Valid only once Verified (returns an empty
-	// vector otherwise); advances our seq + acks the peer like any other 0x43.
-	std::vector<uint8_t> build_lobby_message(const NapiMessage &container);
+	// Queue one lobby container (e.g. a ClientHostUpdate built via napi/session.h) on the
+	// connection; it rides the next pump(). False unless Verified.
+	// [orig: CNapiNPConnection_QueueMessage @0x628640 — connection state 1 or 5, else -1]
+	bool queue_statement(const NapiMessage &container);
+	// Statements queued and not yet built, and records sent and not yet ACKed.
+	size_t queued_statement_count() const { return send_queue_.size(); }
+	size_t retained_record_count() const { return seq_.retained_outbound_message_count; }
 
 	// ---- the host leg -------------------------------------------------------
-	// ClientHostRequest (state 4 -> 5); the Cookie is the verify set with NWUID filled.
+	// ClientHostRequest (state 4 -> 5); the Cookie is the verify set with NWUID filled. False
+	// when the session is not in state 4 or the request could not be queued (state back to 4).
 	// [orig: CNapiGameSession_StartHostingSession @0x4d4540 -> SendHostRequest @0x4d3700]
-	std::vector<uint8_t> build_host_request(const HostRegistration &cfg, int currently_hosting);
+	bool request_hosting(const HostRegistration &cfg, int currently_hosting);
 	// ClientHostUpdate with the given Host and PlayerList vars (full lists or dirty deltas).
-	std::vector<uint8_t> build_host_update(const std::vector<ClientVar> &host,
-	                                       const std::vector<ClientVar> &player_list);
-	// ClientHostPlayerAdded / ClientHostPlayerRemoved — only while Established (state 6);
-	// empty otherwise. [orig: the state-6 wrappers @0x4d0e20 / @0x4d0e40]
-	std::vector<uint8_t> build_host_player_added(const HostPlayerSlot &player);
-	std::vector<uint8_t> build_host_player_removed(int player_number);
+	bool send_host_update(const std::vector<ClientVar> &host,
+	                      const std::vector<ClientVar> &player_list);
+	// ClientHostPlayerAdded / ClientHostPlayerRemoved — queued only while Established (state 6).
+	// [orig: the state-6 wrappers @0x4d0e20 / @0x4d0e40]
+	bool send_host_player_added(const HostPlayerSlot &player);
+	bool send_host_player_removed(int player_number);
 	// ClientPlayerEnterRequest for a joiner entering the hosted game
 	// [orig: CNapiGameSession_SendPlayEnterRequest @0x4d02a0 — itself ungated;
 	// retail's only gate is its caller's NovaWorld arm, `byte_B60100 & 0x40`
-	// @0x4c8b88 in CNapiNetwork_CheckPlayerTimeouts @0x4c8ad0]. Empty unless
+	// @0x4c8b88 in CNapiNetwork_CheckPlayerTimeouts @0x4c8ad0]. Queued only once
 	// hosting is established: our shell-side policy (the join tickets are armed
 	// only once registered), not a witness.
-	std::vector<uint8_t> build_player_enter_request(uint32_t connection_id, uint32_t ip_address,
-	                                                uint32_t port_number,
-	                                                const std::string &join_ticket);
-	// ClientStopHosting (states 5/6 -> 4). [orig: CGameSession_StopHosting @0x4d0e60]
-	std::vector<uint8_t> build_stop_hosting();
+	bool send_player_enter_request(uint32_t connection_id, uint32_t ip_address,
+	                               uint32_t port_number, const std::string &join_ticket);
+	// ClientStopHosting (states 5/6 -> 4); true when the statement was queued.
+	// [orig: CGameSession_StopHosting @0x4d0e60]
+	bool stop_hosting();
 	HostState host_state() const { return host_state_; }
 	const ServerResultFields &host_result() const { return host_result_; }
 	// The GSID the successful ServerHostResult's HostCommands carried (128-char cap): the
@@ -313,13 +327,14 @@ public:
 	// ---- the play leg -------------------------------------------------------
 	// ClientPlayRequest (state 4 -> 7) with the PlaySetup vars (make_play_setup_vars); the
 	// session keeps them for a reconnect's replay. `currently_playing` is the reconnect flag
-	// (0 on the fresh path). [orig: CNapiGameSession_StartPlayingSession @0x4d45e0 ->
+	// (0 on the fresh path). False when the session is not in state 4 or the request could not
+	// be queued (state back to 4). [orig: CNapiGameSession_StartPlayingSession @0x4d45e0 ->
 	//  SendPlayRequest @0x4d3920; g_SessionConnectVarList filled by ConnectOrHost
 	//  @0x4d53bb..0x4d542b]
-	std::vector<uint8_t> build_play_request(const std::vector<ClientVar> &play_setup,
-	                                        int currently_playing = 0);
-	// ClientStopPlaying (states 7/8 -> 4). [orig: CGameSession_StopPlaying @0x4d0ec0]
-	std::vector<uint8_t> build_stop_playing();
+	bool request_playing(const std::vector<ClientVar> &play_setup, int currently_playing = 0);
+	// ClientStopPlaying (states 7/8 -> 4); true when the statement was queued.
+	// [orig: CGameSession_StopPlaying @0x4d0ec0]
+	bool stop_playing();
 	PlayState play_state() const { return play_state_; }
 	const ServerResultFields &play_result() const { return play_result_; }
 
@@ -370,7 +385,9 @@ public:
 	int host_reconnect_counter() const { return reconnect_counter_; }
 	// The teardown's disconnect-packet burst: CS recv_max_per_tick clamped to 0..32, the first
 	// send always going. [orig: TeardownActiveConnection @0x6253ef..0x625424]
-	size_t disconnect_burst_count() const;
+	size_t disconnect_burst_count() const {
+		return opennova::disconnect_burst_count(cs_.recv_max_per_tick);
+	}
 	// The peer's / reap's latched disconnect record once the session Closed on it.
 	bool disconnected_by_peer() const { return disconnected_by_peer_; }
 	const DisconnectEvent &disconnect_event() const { return disconnect_event_; }
@@ -396,7 +413,9 @@ public:
 	const std::string &server_nwuid() const { return server_nwuid_; }
 	const std::string &sess_id_string() const { return sess_id_string_; }
 	const std::string &last_error() const { return last_error_; }
-	const ConnectionSettings &connection_settings() const { return cs_; }
+	// The connection's cs_dir0 block: the NOVAWORLDUDP template overlaid by the 0x82 and the
+	// H:0x00 CS updates.
+	const CsConfig &connection_settings() const { return cs_; }
 	// The verify Cookie set with the SessionInit NWUID substituted — what every
 	// Cookie-bearing statement serializes.
 	std::vector<ClientVar> cookie_vars() const;
@@ -404,14 +423,24 @@ public:
 private:
 	std::vector<uint8_t> build_client_hello();
 	std::vector<uint8_t> build_client_auth();
-	// Wrap a single lobby container (by name; fields/children optional) as a
-	// 0x43 ProtocolMessage stream + header, ready for the wire.
-	std::vector<uint8_t> build_lobby_packet(const NapiMessage &container);
-	// Build the ClientRequestVerifyResult: a SessIdString field plus the "Cookie"
-	// var-list (NW-S5, NWUID echoed from the ServerSessionInit) — rebuilt on
-	// EVERY ServerStartVerify. Bare when no cookie vars are configured.
-	std::vector<uint8_t> build_verify_request();
-	std::vector<uint8_t> build_glsvss_request();
+	// QueueMessage: one lobby container as a layer-4 record (tag 0) on the outgoing queue, retained
+	// until ACK once built. False unless the NP connection is up (Verifying/Verified).
+	bool queue_lobby_record(const NapiMessage &container);
+	// The ClientRequestVerifyResult: a SessIdString field plus the "Cookie" var-list (NW-S5,
+	// NWUID echoed from the ServerSessionInit) — rebuilt on EVERY ServerStartVerify. Bare when no
+	// cookie vars are configured.
+	bool queue_verify_request();
+	bool queue_glsvss_request();
+	// BuildOutgoingPackets over the queue and a pending ACK, then the boundary prune.
+	void build_outgoing_packets(std::vector<std::vector<uint8_t>> &out);
+	// The 0x84: rebuild each requested packet from its retained records and send it at once.
+	void on_server_resend_list(const std::vector<uint8_t> &body,
+	                           std::vector<std::vector<uint8_t>> &out);
+	// The 0x44 carrying the server's key and the missing sequences.
+	void send_missing_sequence_list(std::vector<std::vector<uint8_t>> &out);
+	// Sequencing for a fresh NP connection: seq 1, the ordered receive gate, and the queue and
+	// pool bounds from cs_ (fields 10/11).
+	void reset_sequencing();
 
 	void on_server_hello(const std::vector<uint8_t> &body,
 	                     std::vector<std::vector<uint8_t>> &out);
@@ -437,8 +466,8 @@ private:
 	void grow_reconnect_gap();
 	// The host and play legs' requests over the session-owned lists. [orig:
 	//  CNapiGameSession_StartHostingSession @0x4d4540 / StartPlayingSession @0x4d45e0]
-	std::vector<uint8_t> send_host_request(int currently_hosting);
-	std::vector<uint8_t> send_play_request(int currently_playing);
+	bool send_host_request(int currently_hosting);
+	bool send_play_request(int currently_playing);
 	void set_lobby_state(int state); // the CGameSession_SetState mirror (flags, GLSVSS arming)
 	void fail(std::string reason);
 
@@ -455,7 +484,7 @@ private:
 	std::string server_web_domain_;// ServerSessionInit NovaworldWebDomainNameAndPortNumber
 	std::string sess_id_string_;   // ServerVerifyResult.SessIdString
 	std::string last_error_;
-	ConnectionSettings cs_;
+	CsConfig cs_ = novaworld_service_cs_config();
 
 	// The host / play legs' last results and the two HostCommands values the
 	// host leg keeps.
@@ -512,6 +541,14 @@ private:
 
 	// The 0-default is deliberately preserved (start() resets it to 1 — see Risk #1 / capture frame 9739).
 	SessionSequencing seq_{0, 0}; // outbound seq + last inbound ack [ADR 0013 shared framing]
+	// The connection's outgoing message queue (conn+0x750, its count +0x758) and the pending-ACK
+	// flag a packet with records sets (has_pending_out, conn+0x650).
+	// [orig: ParseMessages @0x625dff; BuildOutgoingPackets @0x62847e (the header-only ACK
+	//  packet), @0x62861f..0x628629 (cleared once the queue is empty)]
+	std::vector<ProtocolMessage> send_queue_;
+	bool ack_pending_ = false;
+	// The last admitted packet or timed missing-sequence send (conn+0x648), the timed leg's clock.
+	uint32_t last_recv_activity_ms_ = 0;
 	bool sent_client_connected_ = false;
 	ProtocolReassemblyState reassembly_;
 };
