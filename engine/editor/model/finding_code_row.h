@@ -352,6 +352,7 @@ enum class CoreFinding {
 	ProjectFieldInvalid,
 	ProjectFileMissing,
 	ProjectFileUnreadable,
+	ProjectInstallInvalid,
 	ProjectJson,
 	ProjectMissionFeatureOff,
 	ProjectNone,

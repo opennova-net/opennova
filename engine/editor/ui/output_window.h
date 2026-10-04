@@ -29,6 +29,9 @@ public:
 		return devtools::InitialDockPlacement::Bottom;
 	}
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
+	// With no project open it stands aside for the welcome page (aside_for_welcome).
+	bool stands_aside() const override;
+	void show_anyway() override { welcome_asked_ = true; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
 	// The rows a log draws with the lines `open` names opened: each line (its absolute index, -1 as the
@@ -40,6 +43,7 @@ public:
 
 private:
 	Workspace &workspace_;
+	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	uint64_t lines_seen_ = 0; // the absolute index after the newest line drawn (OutputLog)
 	std::set<uint64_t> open_; // the lines whose folded lines show, by absolute index
 	// The rows drawn, made again only when the log or the lines opened move (an opened game log holds

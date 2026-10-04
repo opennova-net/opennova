@@ -58,6 +58,7 @@ private:
 	uint64_t seen_ = 0;       // the highest serial an answer carried
 	bool waiting_ = false;
 	std::string error_;       // what the last Apply could not write
+	std::string asked_;       // the install last checked (CheckInstall), what its line says
 };
 
 } // namespace opennova::editor

@@ -221,6 +221,12 @@ void test_workspace_layout() {
 
 	CHECK(!frame(windows, 1), "no draw before attach");
 	CHECK(windows.pass().attach_imgui(backend.context, test_alloc, test_free, nullptr), "attach");
+	// A project open with nothing in it: every window draws (with none open, every window but Document
+	// stands aside for the welcome page, below).
+	SessionView opened;
+	opened.project.open = true;
+	opened.project.root = "C:/mods/Layout";
+	windows.set_view(&opened);
 	for (uint64_t i = 2; i < 8; ++i) frame(windows, i);
 	CHECK(ImGui::GetDrawData() != nullptr && ImGui::GetDrawData()->TotalVtxCount > 0, "the home layout draws");
 	ImGuiWindow *files = ImGui::FindWindowByName("Files");
@@ -253,9 +259,21 @@ void test_workspace_layout() {
 	CHECK(GImGui->NavWindow == document, "Document has the focus");
 	CHECK(problems->DockNode && problems->DockNode->TabBar && problems->DockNode->TabBar->SelectedTabId == problems->TabId,
 	      "Problems is the bottom's tab");
-	const std::string home = logged_frame(windows, 8);
-	CHECK(home.find("New project") != std::string::npos, "no project: the welcome view");
-	CHECK(home.find("Open a menu, a model or an animation to preview it.") != std::string::npos, "nothing to preview yet");
+	CHECK(logged_frame(windows, 8).find("Open a menu, a model or an animation to preview it.") != std::string::npos,
+	      "nothing to preview yet");
+	// No project open (the UX round's project lane): the welcome page, the workspace's whole; the other windows
+	// stand aside, open in the Windows menu.
+	SessionView none;
+	windows.set_view(&none);
+	for (uint64_t i = 100; i < 104; ++i) frame(windows, i);
+	const std::string home = logged_frame(windows, 104);
+	CHECK(home.find("New project") != std::string::npos && home.find("OpenNova Editor") != std::string::npos,
+	      "no project: the welcome page");
+	CHECK(!files->Active && !preview->Active && !inspector->Active && !problems->Active && !output->Active &&
+	              find_window(pass, "Files")->open,
+	      "the other windows stand aside, still open");
+	CHECK(near(document->Size.x, size.x, 2.0f * ImGui::GetStyle().DockingSeparatorSize + 1.0f),
+	      "the welcome page the whole width");
 
 	// A seeded project with a catalog open: a missing model reference and a line the game
 	// ignores draw the inspector's Missing badge and the catalog's dropped-lines notice.
@@ -292,6 +310,10 @@ void test_workspace_layout() {
 // minimized and restored (S17: the Document dock was left a 20 px strip after a maximize and a restore).
 void test_dock_survives_resizes() {
 	Ui ui;
+	SessionView opened; // a project open: every window docked shows
+	opened.project.open = true;
+	opened.project.root = "C:/mods/Resizes";
+	ui.windows.set_view(&opened);
 	ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 900.0f);
 	ui.frames(6);
 	const char *const titles[] = {"Files", "Document", "Preview", "Inspector", "Problems"};
@@ -622,22 +644,29 @@ void test_thirty_tabs() {
 	      "the last tab, chosen from the list, opens");
 }
 
-// No project: the Document window is the welcome view (new, open, recent, what happened).
-// Create waits for a folder, the shell's pick fills it, Create raises NewProject; File > New
-// project... shows the same form in a modal; File > Open recent opens one.
+// No project: the Document window is the welcome page, the workspace's whole (the UX round's project
+// lane): open (a folder, the recent projects by their titles, their games and their folders, one whose
+// folder holds no project said so), new, what happened. Create waits for a folder, the shell's pick fills
+// it, Create raises NewProject; File > New project... shows the same form in a modal; File > Open recent
+// opens one.
 void test_welcome_view() {
 	SessionView v;
-	v.project.recent_projects = {"C:/mods/Armory", "C:/mods/Other"};
+	v.project.recent_projects = {"C:/mods/Armory", "C:/mods/Other", "C:/mods/Gone"};
+	v.project.recent_details = {{"C:/mods/Armory", true, "Armory Mod", "Joint Operations", "jxm", "jox01"},
+	                            {"C:/mods/Other", true, "Other", "Joint Operations", "", ""},
+	                            {"C:/mods/Gone", false, "", "", "", ""}};
 	v.activity.status = "No project open.";
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
 	ui.away();
 	ui.drain();
-	CHECK(in_order(logged_frame(ui), {"New project", "Create project", "Open project", "Open a project folder...", "Recent",
-	                                  "C:/mods/Armory", "C:/mods/Other", "No project open."}),
-	      "the welcome view");
-	const ImGuiID document = Ui::window_id("Document");
+	CHECK(in_order(logged_frame(ui), {"OpenNova Editor", "Open a project", "Open a project folder...", "Armory Mod",
+	                                  "Joint Operations, as the expansion jxm on jox01", "C:/mods/Armory", "Other",
+	                                  "No project here now", "C:/mods/Gone", "New project", "Name", "Folder", "Game install",
+	                                  "No game install chosen", "Create project", "No project open."}),
+	      "the welcome page");
+	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
 	ui.activate(item_id(document, {"Create project"}));
 	CHECK(ui.drain().empty(), "no folder yet: nothing to create");
 	ui.activate(item_id(document, {"Browse...##folder"}));
@@ -661,7 +690,7 @@ void test_welcome_view() {
 	ui.frames(2);
 	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && !modal_open("New project"),
 	      "its Create, and the modal closes");
-	requests = choose(ui, "File", {"Open recent", "C:/mods/Other"});
+	requests = choose(ui, "File", {"Open recent", "###C:/mods/Other"});
 	CHECK(one(requests, EditorRequestKind::OpenProject) && requests[0].dir == "C:/mods/Other", "File > Open recent");
 }
 

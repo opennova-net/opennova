@@ -50,6 +50,9 @@ public:
 	const char *title() const override { return "Inspector"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override { return devtools::InitialDockPlacement::Right; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
+	// With no project open it stands aside for the welcome page (aside_for_welcome).
+	bool stands_aside() const override;
+	void show_anyway() override { welcome_asked_ = true; }
 	void draw(devtools::ImGuiPass &, uint64_t) override;
 	// A RevealRecord held until the Inspector draws, with what it was sent against: the
 	// selection's revision and the identity of the document it names (Document::identity).
@@ -77,6 +80,7 @@ private:
 	void referenced_by(const Document &document, const NodeAddress &record, bool others_only = false);
 
 	Workspace &workspace_;
+	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	ReferencePicker picker_;
 	std::string typed_; // what an open list of choices' box holds (field_widgets: one open at a time)
 	// "Referenced by": each use of what the selected record defines, its edge and its line, and

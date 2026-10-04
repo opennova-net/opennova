@@ -25,6 +25,7 @@
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/welcome_view.h>
 
 #include <imgui.h>
 
@@ -234,6 +235,8 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 	}
 	return matches_;
 }
+
+bool FilesWindow::stands_aside() const { return aside_for_welcome(workspace_.view(), welcome_asked_); }
 
 void FilesWindow::receive(const ViewEvent &event) {
 	events_.post(event);

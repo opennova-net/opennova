@@ -9,6 +9,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/welcome_view.h>
 
 #include <imgui.h>
 
@@ -33,12 +34,13 @@ const char *game_display_name(const std::string &code) {
 }
 
 // A path field and its Browse..., the button under the field when the dialog is narrow;
-// true when Browse... was pressed.
-bool path_field(const char *label, char *buffer, size_t size, const char *browse) {
+// true when Browse... was pressed; `typing`, when given, whether the field is being typed in.
+bool path_field(const char *label, char *buffer, size_t size, const char *browse, bool *typing = nullptr) {
 	ui_kit::WrapRow row;
 	row.next(ui_kit::field_width(field_width(), label));
 	ImGui::SetNextItemWidth(field_width());
 	ImGui::InputText(label, buffer, size);
+	if (typing) *typing = ImGui::IsItemActive();
 	row.next(ui_kit::button_width(browse));
 	return ImGui::Button(browse);
 }
@@ -69,6 +71,7 @@ void ProjectSettingsDialog::open(const SessionView &view) {
 	pick_ = PickPurpose::None;
 	waiting_ = false;
 	error_.clear();
+	asked_.clear();
 }
 
 // Inside the modal: closes it, dropping what it waited for.
@@ -135,6 +138,10 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	ui_kit::tooltip("The game then needs the files a mission reads: Problems lists the missing ones. A mission is most "
 	                "of the game, so File > Import the whole game install... is the way to bring them in.");
 	ImGui::Checkbox("Multiplayer", &fields_.multiplayer);
+	// What it does today, in the game's terms (the UX round's project lane): the requirements have no
+	// multiplayer phase (requirement_phase_enabled), so it changes no check.
+	ui_kit::tooltip("Kept with the project; no check reads it yet. A multiplayer game reads the menus' files and a "
+	                "mission's: Missions brings the files a mission needs into Problems.");
 	ImGui::SeparatorText("Expansion");
 	const bool expansion_ok = expansion_.draw(v.project.install_expansions);
 	if (expansion_.value().name != v.project.document->expansion.name && !v.project.document->expansion.name.empty() &&
@@ -142,11 +149,26 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		ImGui::TextDisabled("Apply renames the project's own expansion files to the new name.");
 
 	ImGui::SeparatorText("This computer");
+	bool typing = false;
 	if (path_field("Game install folder", fields_.game_install, sizeof(fields_.game_install),
-	               "Browse...##install")) {
+	               "Browse...##install", &typing)) {
 		pick_ = PickPurpose::GameInstall;
 		workspace.request(request::pick_directory(PickPurpose::GameInstall));
 	}
+	ui_kit::tooltip(fields_.game_install);
+	// What the folder holds, checked once it is not being typed (the UX round's project lane).
+	if (!typing && fields_.game_install[0] != '\0' && asked_ != fields_.game_install &&
+	    v.allows(EditorRequestKind::CheckInstall)) {
+		asked_ = fields_.game_install;
+		workspace.request(request::check_install(fields_.game_install));
+	}
+	bool found = false;
+	const std::string words = install_check_words(workspace, fields_.game_install, found);
+	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
+	ImGui::PushStyleColor(ImGuiCol_Text, words.empty() || found ? ImVec4(0.55f, 0.85f, 0.55f, 1.0f) : ImVec4(0.95f, 0.55f, 0.45f, 1.0f));
+	ImGui::TextWrapped("%s", words.empty() ? "Checking the folder..." : words.c_str());
+	ImGui::PopStyleColor();
+	ImGui::PopTextWrapPos();
 	ImGui::TextDisabled("Where the game is installed, kept with the project: its game data is imported from it.");
 	if (v.activity.source_run) {
 		const std::string runtime = "OpenNova runtime: " + v.activity.runtime_executable;

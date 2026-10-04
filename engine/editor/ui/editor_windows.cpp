@@ -270,6 +270,7 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	if (path.empty()) return; // cancelled
 	switch (purpose) {
 	case PickPurpose::NewProjectLocation: new_project_.set_folder(path); break;
+	case PickPurpose::NewProjectInstall: new_project_.set_install(path); break;
 	case PickPurpose::OpenProject: request(request::open_project(path)); break;
 	case PickPurpose::RuntimeExecutable:
 	case PickPurpose::GameInstall: settings_.set_picked(purpose, path, view().project.root); break;
@@ -319,9 +320,20 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 	if (menu_item("Open project...", nullptr, v.allows(EditorRequestKind::OpenProject)))
 		request(request::pick_directory(PickPurpose::OpenProject));
 	if (ImGui::BeginMenu("Open recent", !v.project.recent_projects.empty())) {
-		for (const std::string &root : v.project.recent_projects) {
-			if (menu_item(root.c_str(), nullptr, v.allows(EditorRequestKind::OpenProject)))
+		// Each by its title, its folder beside it, muted (the UX round's project lane).
+		for (size_t i = 0; i < v.project.recent_projects.size(); ++i) {
+			const std::string &root = v.project.recent_projects[i];
+			const ProjectView::RecentProject *details =
+					i < v.project.recent_details.size() && v.project.recent_details[i].root == root ? &v.project.recent_details[i]
+					                                                                               : nullptr;
+			const bool found = !details || details->found;
+			const std::string title = details && !details->title.empty() ? details->title : root;
+			const std::string where = ui_kit::fit_middle(root, ImGui::GetFontSize() * 22.0f);
+			// Known by its folder ("###<root>"), whatever its title says.
+			if (menu_item((title + "###" + root).c_str(), title != root ? where.c_str() : nullptr,
+			              found && v.allows(EditorRequestKind::OpenProject)))
 				request(request::open_project(root));
+			ui_kit::tooltip(found ? root : root + " holds no project now.");
 		}
 		ImGui::EndMenu();
 	}

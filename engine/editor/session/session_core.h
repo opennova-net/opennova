@@ -162,9 +162,18 @@ public:
 	// A project of `game` (a gameprofile code; "" the default, jo) made in `dir` (titled `title`,
 	// else the folder's name) as `expansion` (ADR 0046 S16: its rule and the game install's
 	// expansions weighed first; its version text made and, on the base game, its text table), then
-	// opened as open_project opens it, with its import pass unless `import_pass` is false.
+	// opened as open_project opens it, with its import pass unless `import_pass` is false. `game_install`
+	// (the UX round's project lane), when given, is checked first (refused, project.install.invalid, for a
+	// folder that holds no install) and is the editor's install from then on, which the project's
+	// local.json takes as it opens.
 	bool new_project(const std::string &dir, const std::string &title, const std::string &game = std::string(),
-	                 bool import_pass = true, const ProjectExpansion &expansion = ProjectExpansion());
+	                 bool import_pass = true, const ProjectExpansion &expansion = ProjectExpansion(),
+	                 const std::string &game_install = std::string());
+	// CheckInstall: the folder `path` ("" the editor's last chosen) read as an install of the open
+	// project's game (check_install), the view's install_check.
+	void check_install(const std::string &path);
+	// The recent projects' details (ProjectView::recent_details), read again from their project files.
+	void read_recent_details();
 	// The project in `dir` read (its document, its local settings; `game_install` in place of the
 	// install they name, for the session alone, when given), then, the open one closed, opened as an
 	// operation (OpenOperation, S13 A3: the game install's names, the import pass unless `import_pass`

@@ -81,6 +81,25 @@ JsonValue project_section(const SessionView &view) {
 	out.set("install_expansions", listed(view.project.install_expansions));
 	// The install a new project opens with (the editor's last chosen): what New project offers.
 	out.set("new_project_expansions", listed(view.project.new_project_expansions));
+	// The last install checked (the UX round's project lane): what it holds, in a line.
+	const InstallCheck &check = view.project.install_check;
+	JsonValue checked = JsonValue::make_object();
+	checked.set("root", json_string(check.root));
+	checked.set("game", json_string(check.game));
+	checked.set("exists", boolean(check.exists));
+	checked.set("ok", boolean(check.ok()));
+	checked.set("files", json_number(double(check.files)));
+	checked.set("executable", boolean(check.executable));
+	JsonValue check_expansions = JsonValue::make_array();
+	for (const InstallCheck::Expansion &each : check.expansions) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("name", json_string(each.name));
+		entry.set("title", json_string(each.title));
+		check_expansions.push(std::move(entry));
+	}
+	checked.set("expansions", std::move(check_expansions));
+	checked.set("words", json_string(check.words()));
+	out.set("install_check", std::move(checked));
 	if (!view.project.open)
 		return out;
 	const ProjectDocument &document = *view.project.document;
@@ -335,7 +354,22 @@ JsonValue graph_counts_section(const SessionView &view) {
 // The editor's settings the windows read.
 JsonValue preferences_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
-	out.set("recent_projects", strings_to_json(view.project.recent_projects));
+	// Each recent project with what its project file says (the UX round's project lane).
+	JsonValue recent = JsonValue::make_array();
+	for (size_t i = 0; i < view.project.recent_projects.size(); ++i) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("root", json_string(view.project.recent_projects[i]));
+		if (i < view.project.recent_details.size() && view.project.recent_details[i].root == view.project.recent_projects[i]) {
+			const ProjectView::RecentProject &details = view.project.recent_details[i];
+			entry.set("found", boolean(details.found));
+			entry.set("title", json_string(details.title));
+			entry.set("game", json_string(details.game));
+			entry.set("expansion", json_string(details.expansion));
+			entry.set("builds_on", json_string(details.builds_on));
+		}
+		recent.push(std::move(entry));
+	}
+	out.set("recent_projects", std::move(recent));
 	out.set("game_install", json_string(view.project.retail_directory));
 	out.set("play_in_install", boolean(view.project.play_retail));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
@@ -376,8 +410,9 @@ constexpr ViewSectionRow kSections[] = {
 			"builds_on} (S16: \"\" a standalone project, \"\" the base game), file_count (the files query "
 			"pages the files), and quit_requested; open or not, install_expansions, the game install's "
 			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
-			"description), and new_project_expansions, the same of the install a new project opens with "
-			"(the one last chosen)." },
+			"description), new_project_expansions, the same of the install a new project opens with "
+			"(the one last chosen), and install_check, the last install checked (check_install): its root, "
+			"game, exists, ok (its archives mount), files, executable, expansions [{name, title}] and words." },
 	{ S::Requirements, "requirements", concern_set({ C::Files, C::Run }), requirements_section,
 			"The required files: total, missing, wrong_kind, and every row with its role, name, "
 			"state and expected kind (boot_missing where the last game reported it missing)." },
@@ -415,8 +450,8 @@ constexpr ViewSectionRow kSections[] = {
 			"What the asset graph holds: files, edges, symbols and missing (the references that "
 			"resolve to nothing)." },
 	{ S::Preferences, "preferences", concern_set({ C::Preferences }), preferences_section,
-			"The editor's settings: the recent projects, the game install, Play in it, the "
-			"runtime, the import setting." },
+			"The editor's settings: the recent projects [{root, found, title, game, expansion, builds_on}], "
+			"the game install, Play in it, the runtime, the import setting." },
 	{ S::Output, "output", concern_set({ C::Output }), output_section,
 			"The output lines held, first and next by absolute index (the output query pages "
 			"them)." },

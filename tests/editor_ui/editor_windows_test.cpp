@@ -1150,14 +1150,16 @@ void test_preview_canvas_smoke() {
 	CHECK(fake.width == 1200 && fake.height == 900, "Ctrl+wheel zooms in to 150%");
 	ui.drain();
 
-	// A viewport with nothing to show says why (its reason's sentence): no project; a menu the game
-	// could not read, until it changes.
+	// A viewport with nothing to show says why (its reason's sentence): a menu the game could not read,
+	// until it changes. With no project the Preview stands aside for the welcome page (the UX round's
+	// project lane), and comes back with one.
 	v.project.open = false;
 	v.revisions.touch(ViewConcern::Project);
-	CHECK(logged_frame(ui).find(menu_screen_status_message(MenuScreenStatus::NoProject, std::string())) != std::string::npos,
-			"no project: what to open");
+	ui.frames(2);
+	CHECK(!ImGui::FindWindowByName("Preview")->Active, "no project: the Preview stands aside");
 	v.project.open = true;
 	v.revisions.touch(ViewConcern::Project);
+	ui.frames(2);
 	CHECK(document->apply(set_edit(box, "string.justify", std::string("CEN\"TER")), error), "a justify the game cannot read");
 	CHECK(logged_frame(ui).find("The game could not read this menu as it stands") != std::string::npos,
 			"a menu the game could not read: why");

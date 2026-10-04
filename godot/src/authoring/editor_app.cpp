@@ -449,6 +449,7 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 			filters.push_back("*.exe ; Game runtime");
 			break;
 		case PickPurpose::GameInstall:
+		case PickPurpose::NewProjectInstall:
 			picker_->set_title("Choose the game install folder");
 			break;
 		case PickPurpose::ImportFiles:

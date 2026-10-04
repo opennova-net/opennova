@@ -60,6 +60,12 @@ inline EditorRequest forget_recent(std::string dir) {
 	request.dir = std::move(dir);
 	return request;
 }
+// The folder `game_install` read as a game install ("" the editor's last chosen): the view's install_check.
+inline EditorRequest check_install(std::string game_install = std::string()) {
+	EditorRequest request = of(EditorRequestKind::CheckInstall);
+	request.game_install = std::move(game_install);
+	return request;
+}
 inline EditorRequest rescan() {
 	return of(EditorRequestKind::Rescan);
 }

@@ -15,6 +15,7 @@
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/rename_dialog.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/welcome_view.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -1076,6 +1077,8 @@ void InspectorWindow::receive(const ViewEvent &event) {
 		if (document->path() == event.path) held.document = document->identity();
 	events_.post(std::move(held));
 }
+
+bool InspectorWindow::stands_aside() const { return aside_for_welcome(workspace_.view(), welcome_asked_); }
 
 char *InspectorWindow::filter_of(const std::string &path) {
 	// A closed document's filter goes with it.

@@ -63,6 +63,9 @@ public:
 	devtools::InitialDockPlacement initial_dock_placement() const override {
 		return devtools::InitialDockPlacement::Left;
 	}
+	// With no project open it stands aside for the welcome page (aside_for_welcome).
+	bool stands_aside() const override;
+	void show_anyway() override { welcome_asked_ = true; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
@@ -122,6 +125,7 @@ private:
 
 	Workspace &workspace_;
 	NewFilePrompt &new_file_;
+	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	char filter_[128]{};
 	std::string selected_;
 	// What refresh() makes of the view, kept while what it reads stands (cache_key); the files the

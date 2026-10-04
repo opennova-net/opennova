@@ -13,6 +13,7 @@
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_view.h>
 #include <editor/ui/viewport_views.h>
+#include <editor/ui/welcome_view.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -89,6 +90,9 @@ float PreviewWindow::document_room() const {
 
 bool PreviewWindow::stands_aside() const {
 	const SessionView &view = workspace_.view();
+	// With no project open, for the welcome page (aside_for_welcome).
+	if (aside_for_welcome(view, welcome_asked_)) return true;
+	if (!view.project.open) return false;
 	// The author's ask (the Windows menu's tick) holds for the document active then.
 	if (!shown_for_.empty() && shown_for_ != view.documents.active) shown_for_.clear();
 	if (!shown_for_.empty()) return false;
@@ -109,7 +113,8 @@ bool PreviewWindow::stands_aside() const {
 }
 
 void PreviewWindow::show_anyway() {
-	shown_for_ = workspace_.view().documents.active;
+	if (!workspace_.view().project.open) welcome_asked_ = true;
+	else shown_for_ = workspace_.view().documents.active;
 }
 
 ViewportView *PreviewWindow::view_of(const std::string &path, ViewportKind kind) {

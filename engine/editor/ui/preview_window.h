@@ -83,6 +83,7 @@ private:
 	// The document the author asked to see the Preview beside (the Windows menu), until another is
 	// active ("" none).
 	mutable std::string shown_for_;
+	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 };
 
 // Whether the Preview window steps aside over `view` whatever the room (PreviewWindow::stands_aside): a

@@ -25,6 +25,7 @@ enum class EditorRequestKind {
 	OpenProject,
 	CloseProject,
 	ForgetRecent,
+	CheckInstall,
 	Rescan,
 	ApplyProjectSettings,
 	PreviewImport,
@@ -88,7 +89,8 @@ enum class PickPurpose {
 	RuntimeExecutable,
 	GameInstall,
 	ImportFiles,
-	BuildFolder // Build > Build to folder...: where a build for players lands
+	BuildFolder, // Build > Build to folder...: where a build for players lands
+	NewProjectInstall // the New project form's game install
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited

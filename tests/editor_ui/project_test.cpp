@@ -11,6 +11,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/project/local_settings.h>
 #include <editor/ui/preview_window.h>
 
 namespace editor_ui_test {
@@ -246,12 +247,78 @@ void test_files_kind_and_card() {
 	      "a sound bank's card lists its waves");
 }
 
+// The welcome page's install: the editor's last chosen in the field, checked (a CheckInstall raised once,
+// not again while the answer stands), what it holds said under it; a folder picked for it checked in its
+// turn; one that holds no game holds Create back; Create carries the install. A new project with few files
+// offers the game's files: the main menu with what it needs.
+void test_welcome_install_and_first_steps() {
+	SessionView v;
+	v.project.retail_directory = "C:/Games/JO";
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(4);
+	std::vector<EditorRequest> raised = ui.drain();
+	const EditorRequest *check = only(raised, EditorRequestKind::CheckInstall);
+	CHECK(check && check->game_install == "C:/Games/JO", "the editor's install checked");
+	CHECK(logged_frame(ui).find("Checking the folder...") != std::string::npos, "until it is answered: checking");
+	v.project.install_check.root = absolute_install_path("C:/Games/JO");
+	v.project.install_check.game = "jo";
+	v.project.install_check.exists = v.project.install_check.mounts = v.project.install_check.executable = true;
+	v.project.install_check.files = 9290;
+	v.project.install_check.expansions = {{"jox01", "Escalation"}};
+	v.revisions.touch(ViewConcern::Preferences);
+	ui.frames(2);
+	std::string text = logged_frame(ui);
+	CHECK(text.find(": 9,290 files, the expansion Escalation (jox01).") != std::string::npos, "what it holds");
+	CHECK(only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr, "asked once");
+	// A folder picked: checked; it holds no game: Create held back.
+	ui.windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
+	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Empty");
+	ui.frames(2);
+	raised = ui.drain();
+	check = only(raised, EditorRequestKind::CheckInstall);
+	CHECK(check && check->game_install == "C:/Empty", "the folder picked checked");
+	v.project.install_check = InstallCheck();
+	v.project.install_check.root = absolute_install_path("C:/Empty");
+	v.project.install_check.exists = true;
+	v.revisions.touch(ViewConcern::Preferences);
+	ui.frames(2);
+	CHECK(logged_frame(ui).find("No game here") != std::string::npos, "no game here, said");
+	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
+	ui.activate(item_id(welcome, {"Create project"}));
+	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");
+	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Games/JO");
+	v.project.install_check.root = absolute_install_path("C:/Games/JO");
+	v.project.install_check.mounts = true;
+	v.revisions.touch(ViewConcern::Preferences);
+	ui.frames(2);
+	ui.drain();
+	ui.activate(item_id(welcome, {"Create project"}));
+	const std::vector<EditorRequest> creating = ui.drain();
+	const EditorRequest *made = only(creating, EditorRequestKind::NewProject);
+	CHECK(made && made->dir == "C:/mods/New" && made->game_install == "C:/Games/JO", "Create: with the install");
+	// A project open with nothing in it, few files: the game's files offered.
+	v.project.open = true;
+	v.project.root = "C:/mods/New";
+	for (size_t concern = 0; concern < kViewConcernCount; ++concern) v.revisions.touch(static_cast<ViewConcern>(concern));
+	ui.frames(3);
+	ui.drain();
+	text = logged_frame(ui);
+	CHECK(text.find("Bring in the game's files") != std::string::npos, "the first steps");
+	ui.activate(item_id(Ui::window_id("Document"), {"The main menu and what it needs..."}));
+	const std::vector<EditorRequest> planning = ui.drain();
+	const EditorRequest *menu = only(planning, EditorRequestKind::PreviewInstallImport);
+	CHECK(menu && menu->names == std::vector<std::string>({"main.mnu"}) && menu->with_dependencies,
+	      "the main menu with what it needs, planned");
+}
+
 } // namespace
 
 void run_project_tests() {
 	test_preview_room();
 	test_inspector_filter_per_document();
 	test_files_kind_and_card();
+	test_welcome_install_and_first_steps();
 }
 
 } // namespace editor_ui_test

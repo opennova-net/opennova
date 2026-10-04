@@ -6,9 +6,11 @@
 #include <optional>
 #include <utility>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <editor/assets/install_check.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
 #include <editor/graph/reference_kinds.h>
@@ -86,6 +88,7 @@ void SessionCore::start() {
 		report(finding);
 	const Preferences &settings = preferences_.values();
 	view_.project.recent_projects = settings.recent_projects;
+	read_recent_details();
 	view_.project.retail_directory = settings.game_install;
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.runtime_setting = settings.runtime_executable;
@@ -93,6 +96,8 @@ void SessionCore::start() {
 	show_recent_items();
 	view_.activity.status = "No project open.";
 	read_install_expansions();
+	// What the install the editor last chose holds, said on the welcome page (the UX round's project lane).
+	if (!settings.game_install.empty()) check_install(settings.game_install);
 	touch(ViewConcern::Preferences);
 	touch(ViewConcern::Graph);
 	touch(ViewConcern::Output);
@@ -242,7 +247,7 @@ void SessionCore::show_operation() {
 // titled `title` or else, left empty, after the folder (create_project's rule, the one every path to a
 // new project takes).
 bool SessionCore::new_project(const std::string &dir, const std::string &title, const std::string &game,
-                              bool import_pass, const ProjectExpansion &expansion) {
+                              bool import_pass, const ProjectExpansion &expansion, const std::string &game_install) {
 	if (dir.empty()) return false;
 	const std::string target_game = game.empty() ? std::string(kDefaultTargetGame) : game;
 	ProjectDocument doc;
@@ -254,6 +259,23 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		return false;
 	};
 	if (!can_create_project(dir, target_game, error, expansion)) return refused(error);
+	// The install the form names (the UX round's project lane): a folder that holds the game, which is the
+	// editor's install from now on (the one a new project opens with, below); another is refused, nothing made.
+	if (!game_install.empty()) {
+		view_.project.install_check = editor::check_install(game_install, target_game);
+		touch(ViewConcern::Preferences);
+		if (!view_.project.install_check.ok())
+			return refused(make_finding(CoreFinding::ProjectInstallInvalid, DiagnosticSeverity::Error,
+			                            view_.project.install_check.words()));
+		if (absolute_install_path(preferences_.values().game_install) != view_.project.install_check.root) {
+			Preferences next = preferences_.values();
+			next.game_install = view_.project.install_check.root;
+			Diagnostic unwritten;
+			if (!preferences_.write(next, unwritten)) return refused(unwritten);
+			view_.project.retail_directory = this->game_install();
+			read_install_expansions();
+		}
+	}
 	// The expansion against the game install the new project opens with (the one last chosen, whatever
 	// install an open project names): a name it has already, one to build on it lacks, a name whose
 	// files are those of one of its missions (ADR 0046 S16). With no install, nothing to weigh.
@@ -411,6 +433,7 @@ bool SessionCore::close_project() {
 	view_.project.build_folder.clear();
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	view_.project.retail_directory = game_install();
+	read_recent_details(); // the welcome page's, with the project as it closed (renamed in its settings)
 	show_recent_items(); // the project's game's go with it
 	touch(ViewConcern::Preferences);
 	read_install_expansions();
@@ -743,6 +766,35 @@ void SessionCore::forget_recent(const std::string &root) {
 	save_preferences();
 }
 
+void SessionCore::check_install(const std::string &path) {
+	const std::string asked = path.empty() ? preferences_.values().game_install : path;
+	const std::string game = view_.project.open ? view_.project.document->target_game : std::string(kDefaultTargetGame);
+	view_.project.install_check = editor::check_install(asked, game);
+	touch(ViewConcern::Preferences);
+}
+
+// Each recent project's title, game and expansion, as its project file has them now (a folder that no
+// longer holds one: not found).
+void SessionCore::read_recent_details() {
+	std::vector<ProjectView::RecentProject> details;
+	for (const std::string &root : view_.project.recent_projects) {
+		ProjectView::RecentProject recent;
+		recent.root = root;
+		ProjectDocument doc;
+		Diagnostic error;
+		if (::opennova::editor::open_project(root, doc, error)) {
+			recent.found = true;
+			recent.title = doc.title;
+			const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(doc.target_game.c_str());
+			recent.game = profile ? profile->display_name : doc.target_game;
+			recent.expansion = doc.expansion.name;
+			recent.builds_on = doc.expansion.builds_on;
+		}
+		details.push_back(std::move(recent));
+	}
+	view_.project.recent_details = std::move(details);
+}
+
 void SessionCore::clear_output() {
 	view_.activity.output.clear();
 	touch(ViewConcern::Output);
@@ -936,6 +988,7 @@ void SessionCore::save_preferences() {
 	if (!preferences_.save(error)) report(error);
 	const Preferences &settings = preferences_.values();
 	view_.project.recent_projects = settings.recent_projects;
+	read_recent_details();
 	view_.project.retail_directory = game_install();
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.import_dependencies = settings.import_dependencies;

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/assets/install_check.h>
 #include <editor/model/diagnostic.h>
 
 namespace opennova::editor {
@@ -66,6 +67,21 @@ struct ProjectView {
 	// editor), whether a preview the windows raise plans the files the chosen ones need, and the items
 	// most recently placed in a mission (ADR 0046 S15), most recent first.
 	std::vector<std::string> recent_projects;
+	// Each recent project as the welcome page shows it (the UX round's project lane), in the list's
+	// order: its title, its game's name and its expansion, read from its project file when the list
+	// changes; `found` false where the folder holds no project the editor reads now.
+	struct RecentProject {
+		std::string root;
+		bool found = false;
+		std::string title;
+		std::string game;
+		std::string expansion;
+		std::string builds_on;
+	};
+	std::vector<RecentProject> recent_details;
+	// The last game install checked (the CheckInstall request; the editor's last chosen as the session
+	// starts): what the New project form and the project settings show under an install's field.
+	InstallCheck install_check;
 	std::string retail_directory;
 	bool play_retail = false;
 	std::string runtime_setting;
