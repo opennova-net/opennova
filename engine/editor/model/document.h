@@ -337,6 +337,14 @@ public:
 	// The record as the graph's edges name it: every name from the row down, "/"-joined
 	// ("STARTUP/MAIN/EXIT").
 	std::string record_path(const NodeAddress &address) const;
+	// The record as itself, wherever it sits (the game's own data's fold keys a finding on it, the UX
+	// round's problems lane): its kind's token and its own name where it has one (a screen's, a
+	// window's, a string's key, an item's name: what the game reads it by), else its kind's token and a
+	// digest of what it holds (each field it writes, a field derived from its place or naming a record
+	// by its index left out, then what each of its records is, in order). Neither its owners' names nor
+	// its place among its siblings: a record inserted, removed or moved beside it, or an owner renamed,
+	// leaves it as it was. "" when the record is gone.
+	std::string record_identity(const NodeAddress &address) const;
 	// The record's place, stable across a reload of the same file: the row's index, then
 	// each collection's kind token and index ("0/window:0/window:2"); "" when unknown.
 	std::string locator(const NodeAddress &address) const;
@@ -685,5 +693,10 @@ inline std::unique_ptr<Document> records_of(std::unique_ptr<DocumentBase> docume
 	document.release();
 	return std::unique_ptr<Document>(records);
 }
+
+// Each finding of `findings` from `from` on that is about `document`'s file and names a record of it
+// (its row) with no record_key yet, given the record's identity (Document::record_identity): what the
+// game's own data's fold keys it on. A document of no records keys none.
+void key_findings(const DocumentBase &document, std::vector<Diagnostic> &findings, size_t from = 0);
 
 } // namespace opennova::editor
