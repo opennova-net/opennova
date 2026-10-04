@@ -174,6 +174,12 @@ public:
 	void check_install(const std::string &path);
 	// The recent projects' details (ProjectView::recent_details), read again from their project files.
 	void read_recent_details();
+	// The documents open now (DocumentSet::open_with_selection) and the active one kept in the project's
+	// local settings when they changed (the UX round's project lane): as the project closes, as the editor
+	// quits. restore_workspace opens them again as an Open finishes, in their order, each at its record, the
+	// active one last; a file gone since, or one the editor no longer opens, passed over.
+	void remember_workspace();
+	void restore_workspace();
 	// The project in `dir` read (its document, its local settings; `game_install` in place of the
 	// install they name, for the session alone, when given), then, the open one closed, opened as an
 	// operation (OpenOperation, S13 A3: the game install's names, the import pass unless `import_pass`

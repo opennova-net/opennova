@@ -285,6 +285,59 @@ int test_new_project_install() {
 	return 0;
 }
 
+// A project reopens as it was left: the documents open when it closed, in their order, the one active, and
+// the record selected in each (kept in .opennova/local.json as the project closes and as the editor quits);
+// a file gone since is passed over, the others reopened, Output saying how many.
+int test_reopen_as_left() {
+	editor_test::TempProjectDir dir("opennova_editor_reopen_as_left");
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	TEST_EXPECT(session.handle(request::new_project(dir.file("Mod"), "Mod")));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const std::string root = v.project.root;
+	const AssetEntry *menu_entry = v.project.scan->find("main.mnu");
+	const AssetEntry *strings_entry = v.project.scan->find("gametext.bin");
+	TEST_EXPECT(menu_entry && strings_entry);
+	const std::string menu_path = menu_entry->relative_path, strings_path = strings_entry->relative_path;
+	session.handle(request::open_document(strings_path));
+	session.handle(request::open_document(menu_path));
+	const Document *menu = session.document_for(menu_path);
+	TEST_EXPECT(menu && !menu->rows().empty());
+	const Node &screen = *menu->rows().back();
+	session.handle(request::select_record(menu_path, {screen.id, screen.kind, 0}));
+	const std::string locator = menu->locator({screen.id, screen.kind, 0});
+	session.handle(request::open_document(strings_path)); // the table active as the project closes
+	TEST_EXPECT(session.handle(request::close_project()));
+	LocalSettings local;
+	Diagnostic finding;
+	TEST_EXPECT(load_local_settings(ProjectPaths::for_root(root), local, finding));
+	TEST_EXPECT(local.open_documents.size() == 2 && local.open_documents[0].path == strings_path &&
+	            local.open_documents[1].path == menu_path && local.open_documents[1].locator == locator &&
+	            local.active_document == strings_path);
+	session.handle(request::open_project(root));
+	session.run_operations();
+	TEST_EXPECT(v.documents.open.size() == 2 && v.documents.open[0]->path() == strings_path &&
+	            v.documents.open[1]->path() == menu_path && v.documents.active == strings_path);
+	session.handle(request::open_document(menu_path));
+	TEST_EXPECT(v.documents.selection.primary.row == session.document_for(menu_path)->address_at(locator).row);
+	// Quit keeps them too; a file gone since is passed over.
+	session.handle(request::quit());
+	TEST_EXPECT(load_local_settings(ProjectPaths::for_root(root), local, finding) && local.active_document == menu_path);
+	session.handle(request::close_project());
+	std::error_code ec;
+	std::filesystem::remove(opennova::io::os_path(root + "/" + strings_path), ec);
+	session.handle(request::open_project(root));
+	session.run_operations();
+	TEST_EXPECT(v.documents.open.size() == 1 && v.documents.active == menu_path);
+	bool said = false;
+	for (size_t i = 0; i < v.activity.output.size(); ++i) said = said || v.activity.output[i].find("Reopened 1 file") != std::string::npos;
+	TEST_EXPECT(said);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -295,6 +348,7 @@ int main() {
 	failed += test_file_card();
 	failed += test_install_check();
 	failed += test_new_project_install();
+	failed += test_reopen_as_left();
 	if (failed == 0) std::printf("editor_project_lane: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

@@ -13,6 +13,7 @@
 #include <editor/assets/install_check.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
+#include <editor/documents/document_types.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/model/edit.h>
@@ -382,6 +383,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	imports().set_install_files(std::move(open.install_files()), std::move(open.base_files()));
 	read_install_expansions(); // the project's install's, before its requirements weigh them
 	absorb_refresh(open.refresh());
+	restore_workspace(); // the documents it was left with (the UX round's project lane)
 	const std::string &title = view_.project.document->title;
 	note("Opened " + title + ".");
 	view_.activity.status = "Opened " + title + ".";
@@ -401,6 +403,7 @@ bool SessionCore::close_project() {
 	}
 	problems().clear();
 	if (!view_.project.open) return true;
+	remember_workspace(); // what it reopens with (the UX round's project lane)
 	const std::string title = view_.project.document->title;
 	// What belongs to the project goes with it: its documents, their selections, a prompt
 	// waiting on them (an answer to it afterwards is refused: nothing waits), and the boot
@@ -773,6 +776,36 @@ void SessionCore::check_install(const std::string &path) {
 	touch(ViewConcern::Preferences);
 }
 
+void SessionCore::remember_workspace() {
+	if (!view_.project.open) return;
+	LocalSettings next = local_;
+	next.open_documents.clear();
+	for (const auto &[path, locator] : documents().open_with_selection()) next.open_documents.push_back({path, locator});
+	next.active_document = next.open_documents.empty() ? std::string() : view_.documents.active;
+	if (next.open_documents == local_.open_documents && next.active_document == local_.active_document) return;
+	Diagnostic error;
+	if (!save_local_settings(paths_, next, error)) {
+		report(error);
+		return;
+	}
+	local_ = std::move(next);
+}
+
+void SessionCore::restore_workspace() {
+	size_t reopened = 0;
+	for (const LocalSettings::OpenDocument &open : local_.open_documents) {
+		const AssetEntry *file = view_.project.scan->at_path(open.path);
+		if (!file || !is_editable_kind(file->kind)) continue;
+		EditorRequest request = request::open_document(file->relative_path);
+		request.locator = open.locator;
+		documents().open_document(request);
+		reopened += documents().document_for(file->relative_path) ? 1 : 0;
+	}
+	if (!local_.active_document.empty() && documents().document_for(local_.active_document))
+		documents().open_document(request::open_document(local_.active_document));
+	if (reopened) note("Reopened " + counted(reopened, "file") + " as the project was left.");
+}
+
 // Each recent project's title, game and expansion, as its project file has them now (a folder that no
 // longer holds one: not found).
 void SessionCore::read_recent_details() {
@@ -978,6 +1011,7 @@ void SessionCore::quit() {
 		return;
 	}
 	save_recent_items();
+	remember_workspace(); // what the project reopens with (the UX round's project lane)
 	view_.dialogs.quit_requested = true;
 	touch(ViewConcern::Project);
 }

@@ -111,6 +111,22 @@ void DocumentSet::activate(const std::string &path) {
 	core_.touch(ViewConcern::ActiveDocument); // the caller touches Selection
 }
 
+std::vector<std::pair<std::string, std::string>> DocumentSet::open_with_selection() const {
+	std::vector<std::pair<std::string, std::string>> out;
+	for (const std::shared_ptr<DocumentBase> &document : documents_) {
+		const std::string &path = document->path();
+		const Selection *kept = path == view_.documents.active ? &view_.documents.selection : nullptr;
+		if (!kept) {
+			const auto found = remembered_.find(path);
+			if (found != remembered_.end()) kept = &found->second;
+		}
+		const Document *records = records_of(*document);
+		const bool selected = kept && records && kept->primary.row && records->row(kept->primary.row);
+		out.emplace_back(path, selected ? records->locator(kept->primary) : std::string());
+	}
+	return out;
+}
+
 // A menu made the active document, or read again, with nothing selected shows its first
 // screen: the menu view lists the selected screen's windows and the preview draws it.
 void DocumentSet::select_first_screen() {
