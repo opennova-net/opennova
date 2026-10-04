@@ -284,7 +284,9 @@ static bool mark_for_import(const std::string &source) {
 	opennova::editor::ImportSidecar sidecar;
 	sidecar.importer = importer->id;
 	sidecar.version = importer->version;
-	sidecar.options = importer->default_options;
+	// A PCX, the 8-bit indexed file these sources make (the image importer's format option; its default
+	// is a 32-bit TGA).
+	sidecar.options = {{"format", "pcx"}};
 	opennova::editor::Diagnostic error;
 	return opennova::editor::save_import_sidecar(source + ".import", sidecar, error);
 }
@@ -343,7 +345,9 @@ static int test_imports() {
 	TEST_EXPECT(text.find("imported art/logo.png") != std::string::npos);
 	const std::string build = opennova::editor::last_good_build_dir(dir.file("out"));
 	TEST_EXPECT(!build.empty());
-	TEST_EXPECT(archive_has(build + "/resource.pff", "LOGO.PCX") && archive_has(build + "/resource.pff", "SPLASH.PCX"));
+	// logo.png's record asks for a PCX; splash.png, imported by the import verb, takes the image importer's
+	// default, a 32-bit TGA.
+	TEST_EXPECT(archive_has(build + "/resource.pff", "LOGO.PCX") && archive_has(build + "/resource.pff", "SPLASH.TGA"));
 	TEST_EXPECT(!archive_has(build + "/resource.pff", "LOGO.PNG"));
 	TEST_EXPECT(archive_has(build + "/resource.pff", "PLAIN.PNG"));
 	TEST_EXPECT(run({"validate", root}) == 0);
@@ -567,11 +571,12 @@ std::vector<std::string> lines_of(const std::string &text) {
 // finding, in the Problems window's order (errors, then warnings, then notes), and fails exactly
 // when a build would be refused (the build_gate query), which it says. Since the command line is
 // the session, the rows are pinned here, not compared with a session: for a project with a
-// texture whose name no archive can store and a menu whose colour the game draws transparent,
-// the name's error (the scan's), the render check's warning, then only notes (the optional files
+// texture whose name no archive can store, which is no PCX, and a menu whose colour the game draws
+// transparent, the name's error (the scan's), the texture's warning (S18: the game cannot load it), the
+// render check's warning, then only notes (the optional files
 // the project lacks, the stylesheet's variables no menu names); the build's own check of the name,
-// which no row shows, before the verdict; and exit 1, as the build is refused. The name gone, the
-// same warning and notes and exit 0: a warning never refuses a build.
+// which no row shows, before the verdict; and exit 1, as the build is refused. The texture gone, the
+// render check's warning and the notes and exit 0: a warning never refuses a build.
 static int test_validate_pins_the_rows() {
 	editor_test::TempProjectDir dir("opennova_editor_project_cli_problems");
 	const std::string root = dir.file("Problems");
@@ -586,6 +591,9 @@ static int test_validate_pins_the_rows() {
 	const std::string name_row =
 	        "error asset.name.too_long: The file name a_texture_name_too_long.pcx is longer than 16 characters; the "
 	        "game cannot store it in an archive. [art/a_texture_name_too_long.pcx]";
+	const std::string texture_row =
+	        "warning texture.unloadable: The game cannot load it: The PCX header is cut short or is not one. "
+	        "[art/a_texture_name_too_long.pcx]";
 	const std::string render_row =
 	        "warning menu.render.color_transparent: The game reads \"FF0000\" as AARRGGBB, so with fewer than eight "
 	        "digits its alpha is 0 (the preview draws it transparent); write eight digits (FF, then RRGGBB) for an "
@@ -608,8 +616,9 @@ static int test_validate_pins_the_rows() {
 	TEST_EXPECT(run_capture(dir.file("validate.txt"), {"validate", root}, text) == 1);
 	std::vector<std::string> lines = lines_of(text);
 	size_t notes = 0;
-	TEST_EXPECT(lines.size() > 4 && lines[0] == name_row && lines[1] == gate_row && lines[2] == render_row);
-	TEST_EXPECT(notes_only(lines, 3, lines.size() - 1, notes) && notes > 0);
+	TEST_EXPECT(lines.size() > 5 && lines[0] == name_row && lines[1] == gate_row && lines[2] == texture_row &&
+	            lines[3] == render_row);
+	TEST_EXPECT(notes_only(lines, 4, lines.size() - 1, notes) && notes > 0);
 	TEST_EXPECT(lines.back() == "not ok: 2 findings block a build");
 	TEST_EXPECT(run({"build", root}) == 1);
 	std::error_code ec;
