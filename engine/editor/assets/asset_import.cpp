@@ -408,8 +408,9 @@ private:
 			}
 			// Importing an author's file an importer converts makes it an import source (its record is
 			// written with it, below), whatever its name makes it otherwise; any other file is the kind
-			// its name and bytes give (the game's own PNG the texture it loads as it is).
-			const Importer *importer = authored ? importer_for(output.name) : nullptr;
+			// its name and bytes give (the game's own PNG the texture it loads as it is; an author's TGA,
+			// which a record alone makes a source: authored_importer_for).
+			const Importer *importer = authored ? authored_importer_for(output.name) : nullptr;
 			const AssetKind kind = importer ? AssetKind::ImportSource : classify_asset(output.name, &output.bytes);
 			if (kind == AssetKind::Unknown || kind == AssetKind::Archive) {
 				refuse(CoreFinding::ImportKind, "Unsupported asset type: " + output.name, output.name);

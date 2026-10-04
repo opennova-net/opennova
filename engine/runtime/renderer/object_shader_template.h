@@ -140,6 +140,27 @@ enum class ObjectSkinNormal : uint8_t {
 };
 
 ObjectSkinNormal object_skin_normal(ObjectShaderTechnique technique) noexcept;
+
+// The alpha a technique's NORMAL pass tests and blends by: Diffuse1's for most;
+// the normal map's for the unskinned tangent DOT3 effects (BDiffT2 tests it);
+// the vertex diffuse alpha for the skinned object-space PhongMap path; the
+// ReflectColor (cube) alpha for the mirrors and skinned glass; none (zero) for
+// SELFLUM and fixed glass. The pipeline manifest's coverage_source names the
+// same table [orig: the decoded NORMAL techniques: _FFP.fx, BDiffT2's ps.1.1
+// alpha from t1, _psPhong2.fx, BumpMirrT/BmTxMirrT/SkGlass ReflectColor.a,
+// Glass.fx and the SELFLUM blocks; render/render-material-re.md "coverage is
+// selected per technique"].
+enum class ObjectCoverageSource : uint8_t {
+	DiffuseAlpha,
+	NormalAlpha,
+	VertexDiffuseAlpha,
+	ReflectAlpha,
+	Zero,
+};
+ObjectCoverageSource object_coverage_source(ObjectShaderTechnique technique) noexcept;
+// The manifest token of a coverage source ("diffuse_alpha", "normal_alpha",
+// "vertex_diffuse_alpha", "reflect_alpha", "zero").
+const char *object_coverage_source_name(ObjectCoverageSource source) noexcept;
 // The manifest token of a skin-normal rule ("none", "blended", "first_bone").
 const char *object_skin_normal_name(ObjectSkinNormal skin_normal) noexcept;
 
