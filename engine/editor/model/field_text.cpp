@@ -80,7 +80,17 @@ bool written(const Document &document, const NodeAddress &address, const FieldSc
 }
 
 std::string counted(size_t count, const char *noun) {
-	return std::to_string(count) + " " + noun + (count == 1 ? "" : "s");
+	return grouped(count) + " " + noun + (count == 1 ? "" : "s");
+}
+
+std::string grouped(size_t count) {
+	const std::string digits = std::to_string(count);
+	std::string out;
+	for (size_t i = 0; i < digits.size(); ++i) {
+		if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
+		out += digits[i];
+	}
+	return out;
 }
 
 } // namespace opennova::editor
