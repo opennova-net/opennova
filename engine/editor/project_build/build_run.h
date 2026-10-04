@@ -9,7 +9,9 @@
 #include <string>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project_build/base_match.h>
 #include <editor/project_build/build_plan.h>
 
 namespace opennova::editor {
@@ -43,7 +45,8 @@ namespace opennova::editor {
 // 2: each archive's record carries its size beside its hash (1 kept the hash alone).
 // 3: the record names its project.
 inline constexpr int kBuildRecordSchemaVersion = 3;
-inline constexpr int kBuildCacheSchemaVersion = 1;
+// 2: the base game's hashes beside the project's files' (`base`, ADR 0046 S16 lean packing).
+inline constexpr int kBuildCacheSchemaVersion = 2;
 inline constexpr const char *kBuildRecordFileName = "build.json";
 inline constexpr const char *kLastGoodBuildFileName = "last_good.json";
 inline constexpr const char *kBuildStagingSuffix = ".tmp";
@@ -80,6 +83,9 @@ struct BuildReport {
 	bool refused = false;
 	std::string build_id;
 	std::string build_dir;               // the published directory (empty on failure)
+	// The expansion the build made (BuildTarget::expansion; "" for the standalone game), which Play
+	// runs with /exp (ADR 0046 S16).
+	std::string expansion;
 	bool reused_existing = false;        // the same content was already built
 	std::vector<std::string> archives_written;
 	std::vector<std::string> archives_reused; // the last good build's, its content unchanged
@@ -89,6 +95,12 @@ struct BuildReport {
 	// came from the hash cache (BuildPlan::hash_cache).
 	size_t files_hashed = 0;
 	uint64_t bytes_hashed = 0;
+	// An expansion's files left out because its base game serves the same under their names (ADR 0046
+	// S16, lean packing), their bytes, and the base's bytes read to tell (none where its hashes were
+	// cached).
+	size_t same_as_base_files = 0;
+	uint64_t same_as_base_bytes = 0;
+	uint64_t base_bytes_read = 0;
 	std::vector<Diagnostic> diagnostics;
 	// What the published directory holds, the archives in the plan's order then the loose files.
 	std::vector<BuiltFile> built;
@@ -130,7 +142,9 @@ public:
 	bool cancelled() const { return cancelled_; }
 
 	// The bytes hashed and then written or copied so far, out of how many (every entry's
-	// bytes twice, once per pass), never going back; and what the last step worked on.
+	// bytes twice, once per pass; an expansion's three times, its comparison with the base game a
+	// pass of its own, and a file left out as the base's leaving the write pass's total), never going
+	// back; and what the last step worked on.
 	uint64_t bytes_done() const { return bytes_done_; }
 	uint64_t bytes_total() const { return bytes_total_; }
 	const std::string &label() const { return label_; }
@@ -143,7 +157,10 @@ public:
 	const BuildReport &report() const { return report_; }
 
 private:
-	enum class Phase { Prepare, Hash, Settle, Archives, Loose, Publish, Done };
+	// Base: an expansion's files compared with what its base game serves (lean packing, ADR 0046
+	// S16), those the base serves the same dropped; Fold: the archives' hashes and the build id over
+	// what stays.
+	enum class Phase { Prepare, Hash, Base, Fold, Settle, Archives, Loose, Publish, Done };
 	struct Stamp {
 		uint64_t size = 0;
 		int64_t written = 0; // the file's last write, as the hash read it
@@ -159,6 +176,12 @@ private:
 
 	void prepare();
 	void hash(uint64_t budget);
+	void compare_base(uint64_t budget);
+	// What compare_base found the base serves the same left out of the plan (but a kept mission's
+	// text table, which the mission list reads from the archive paired with the mission's), and the
+	// root-only files said where the base's differ.
+	void drop_same_as_base();
+	void fold_all();
 	// The file's name, size and content hash folded into its archive's (or the loose files') hash.
 	void fold(const BuildEntry &entry, uint64_t size, uint64_t content);
 	static uint64_t archive_hash_seed();
@@ -186,6 +209,12 @@ private:
 	std::unique_ptr<Streams> streams_;
 	std::vector<size_t> group_base_; // each archive's first stamp; the loose files' last
 	std::vector<Stamp> stamps_;
+	std::vector<uint64_t> contents_; // each stamp's content hash, as the hash pass read it
+	// Lean packing: the base game's served copies, the stamp compared next, and which are the same.
+	std::unique_ptr<BaseMatch> base_;
+	io::JsonValue base_cache_; // the build cache's `base` section as read
+	size_t base_index_ = 0;
+	std::vector<bool> same_;
 	// The hash pass: the group (an archive, or the loose files after the archives), the entry,
 	// the running hashes (the file's, its group's, the build's), the cache as read and the files
 	// this build hashed or took from it, which the cache keeps when the pass ends.
