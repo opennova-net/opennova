@@ -27,11 +27,10 @@ scene stand where the pack shows them. In game the eye is each gun's own
 view rather than the pack's wider one.
 
 The person's rig is read from retail's `US01` when it is built (its 19
-bones' order, pivots on the Operator's joints, retail's bind frames), as the
-kine worktree's `art/US01/build_model.py` does, so retail's person clips play
-on it. Its own clip set is not here: the clips made so far come from packs
-whose terms are not cleared (`art/US01`), and they stay local until a clip
-scene keyed on `KINE Operator` can ship.
+bones' order, pivots on the Operator's joints, retail's bind frames), so
+retail's person clips play on it. Its own clips are keyed on `KINE Operator`
+and baked through the sockets by `art/on_person`, which stays local until its
+source packs' terms allow them in the repository.
 
 Source: KINEMATION, Tactical Shooter Pack ("Tactical FPS Animations" 4.0.1,
 Unity Asset Store), the Operator meshes and textures (downscaled to 1024).

@@ -1,0 +1,312 @@
+{
+ "run_f": {
+  "source": "motus/W2_Run_F_Loop",
+  "retail": "Dt1RunF"
+ },
+ "run_fr": {
+  "source": "kubold/Rifle_StrafeRun45RightLoop",
+  "retail": "Dt1RunFR",
+  "rate_max": 1.45
+ },
+ "run_fl": {
+  "source": "kubold/Rifle_StrafeRun45RightLoop",
+  "retail": "Dt1RunFL",
+  "rate_max": 1.45,
+  "mirror": true
+ },
+ "run_r": {
+  "source": "motus/W2_Jog_R_Loop",
+  "retail": "Dt1RunR"
+ },
+ "run_l": {
+  "source": "motus/W2_Jog_L_Loop",
+  "retail": "Dt1RunL"
+ },
+ "run_br": {
+  "source": "kubold/Rifle_StrafeRun135RightLoop",
+  "retail": "Dt1RunBR"
+ },
+ "run_bl": {
+  "source": "kubold/Rifle_StrafeRun135RightLoop",
+  "retail": "Dt1RunBL",
+  "mirror": true
+ },
+ "run_b": {
+  "source": "motus/W2_Jog_B_Loop",
+  "retail": "Dt1RunB"
+ },
+ "sprint_2": {
+  "source": "kine/A_Locomotion_Stand_Sprint_Loop_IP",
+  "retail": "RunFastK"
+ },
+ "sprint_3": {
+  "source": "kine/A_Locomotion_Stand_Sprint_Loop_IP",
+  "retail": "RunFastW"
+ },
+ "crouch_f": {
+  "source": "kubold/Rifle_Crouch_WalkFwd",
+  "retail": "Dt1CrF",
+  "rate_max": 1.6
+ },
+ "crouch_fr": {
+  "source": "kubold/Rifle_Crouch_StrafeRight45",
+  "retail": "Dt1CrFR",
+  "rate_max": 1.6
+ },
+ "crouch_r": {
+  "source": "kubold/Rifle_Crouch_WalkRt",
+  "retail": "Dt1CrR"
+ },
+ "crouch_br": {
+  "source": "kubold/Rifle_Crouch_StrafeRight135",
+  "retail": "Dt1CrBR"
+ },
+ "crouch_b": {
+  "source": "kubold/Rifle_Crouch_WalkBwd",
+  "retail": "Dt1CrB"
+ },
+ "crouch_bl": {
+  "source": "kubold/Rifle_Crouch_StrafeLeft135",
+  "retail": "Dt1CrBL",
+  "rate_min": 0.7
+ },
+ "crouch_l": {
+  "source": "kubold/Rifle_Crouch_WalkLt",
+  "retail": "Dt1CrL"
+ },
+ "crouch_fl": {
+  "source": "kubold/Rifle_Crouch_StrafeLeftt45",
+  "retail": "Dt1CrFL",
+  "rate_max": 1.6
+ },
+ "prone_f": {
+  "source": "kubold/Rifle_Prone_WalkFwd",
+  "retail": "Dt1PrF",
+  "rate_max": 1.6,
+  "eye": false
+ },
+ "prone_b": {
+  "source": "kubold/Rifle_Prone_WalkBwd",
+  "retail": "Dt1PrB",
+  "rate_max": 1.6,
+  "eye": false
+ },
+ "prone_r": {
+  "source": "kubold/Rifle_Prone",
+  "retail": "Dt1PrR",
+  "eye": false
+ },
+ "prone_l": {
+  "source": "kubold/Rifle_Prone",
+  "retail": "Dt1PrL",
+  "eye": false
+ },
+ "idle": {
+  "source": "kubold/Rifle_Idle",
+  "retail": "Dt1IdleA"
+ },
+ "idle_2": {
+  "source": "infima/A_TFA_TP_AR_Idle_Loop",
+  "retail": "Dt1idlA2"
+ },
+ "idle_3": {
+  "source": "motus/W2_Stand_Aim_Idle_v2",
+  "retail": "Dt1idlA3"
+ },
+ "idle_crouch": {
+  "source": "kine/A_Idle_Crouch_Loop_IP",
+  "retail": "Dt1kneel"
+ },
+ "idle_prone": {
+  "source": "kubold/Rifle_Prone",
+  "retail": "Dt1Prone",
+  "eye": false
+ },
+ "jump_start": {
+  "source": "kine/A_Locomotion_Stand_Jog_Jump_Start_IP",
+  "retail": "Dt1JumpS",
+  "range": [
+   8,
+   8
+  ],
+  "frames": 9
+ },
+ "jump_loop": {
+  "source": "kubold/Rifle_Jump_Platformer_Fall",
+  "retail": "Dt1JumpL",
+  "eye": false
+ },
+ "run2prone": {
+  "source": "kubold/Rifle_Idle2Prone",
+  "retail": "dive2pro"
+ },
+ "hold_rifle": {
+  "source": "infima/A_TFA_TP_AR_Idle_Pose",
+  "retail": "IDL_P90r",
+  "range": [
+   1,
+   1
+  ],
+  "frames": 60
+ },
+ "hold_rifle_s": {
+  "source": "infima/A_TFA_TP_AR_Aim_Pose",
+  "retail": "IDL_P90s",
+  "range": [
+   1,
+   1
+  ],
+  "frames": 60
+ },
+ "hold_smg": {
+  "source": "infima/A_TFA_TP_AR_Idle_Pose_Grip_Angled",
+  "retail": "IDL_MP7r",
+  "range": [
+   1,
+   1
+  ],
+  "frames": 60
+ },
+ "hold_smg_s": {
+  "source": "infima/A_TFA_TP_AR_Aim_Pose_Grip_Angled",
+  "retail": "IDL_MP7s",
+  "range": [
+   1,
+   1
+  ],
+  "frames": 60
+ },
+ "reload": {
+  "source": "infima/A_TFA_TP_AR_Reload_Quick",
+  "retail": "IDL_RLD"
+ },
+ "hold_grenade": {
+  "source": "kubold/Rifle_Grenade_Throw_Loop",
+  "retail": "IDL_GND"
+ },
+ "throw_grenade": {
+  "source": "kubold/Rifle_Grenade_Throw_Close",
+  "retail": "ATT_GND",
+  "fit": "natural",
+  "rate": 1.4
+ },
+ "death_hip_f": {
+  "source": "motus/W2_Stand_Relaxed_Death_B",
+  "retail": "Dt1DeaTF",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_hip_s": {
+  "source": "motus/W2_Stand_Relaxed_Death_R",
+  "retail": "Dt1Death",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_hip_b": {
+  "source": "motus/W2_Stand_Relaxed_Death_F",
+  "retail": "Dt1DeaTB",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_torso_f": {
+  "source": "kubold/Rifle_Death_L",
+  "retail": "Dt2DeTFC",
+  "rate": 1.2,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_torso_r": {
+  "source": "motus/W2_Stand_Relaxed_Death_L",
+  "retail": "Dt1DeaTR",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_head": {
+  "source": "kubold/Rifle_Death_3",
+  "retail": "Dt1DeaHF",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_limb_rs": {
+  "source": "kubold/Rifle_Death_R",
+  "retail": "Dt1DeRSD",
+  "rate": 1.2,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_limb_ls": {
+  "source": "kubold/Rifle_Death_L",
+  "retail": "Dt1DeLSD",
+  "rate": 1.2,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_limb_rt": {
+  "source": "motus/W2_Stand_Relaxed_Death_R",
+  "retail": "Dt1DeRTD",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_limb_lt": {
+  "source": "motus/W2_Stand_Relaxed_Death_L",
+  "retail": "Dt1DeLTD",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_knee": {
+  "source": "kubold/Rifle_Death_3",
+  "retail": "DeadKnee",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_gren_f": {
+  "source": "motus/W2_Stand_Relaxed_Death_B",
+  "retail": "Dt1DeaGF",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_gren_r": {
+  "source": "kubold/Rifle_Death_L",
+  "retail": "Dt1DeaGR",
+  "rate": 1.2,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_gren_b": {
+  "source": "motus/W2_Stand_Relaxed_Death_F",
+  "retail": "Dt1DeaGB",
+  "rate": 1.3,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_gren_l": {
+  "source": "kubold/Rifle_Death_R",
+  "retail": "Dt1DeaGL",
+  "rate": 1.2,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_fire": {
+  "source": "motus/W2_Stand_Relaxed_Death_F",
+  "retail": "OnFire",
+  "rate": 1.0,
+  "fit": "natural",
+  "own_travel": true
+ },
+ "death_pungi": {
+  "source": "kubold/Rifle_Death_3",
+  "retail": "KnifeDea",
+  "rate": 1.0,
+  "fit": "natural",
+  "own_travel": true
+ }
+}

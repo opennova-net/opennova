@@ -24,6 +24,12 @@ third_party/modsuperoed/
 # Blender
 *.blend1
 
+# art/on_person's clips stay local until their source packs' terms allow
+# them in the repository: only its README, scripts and table are tracked.
+art/on_person/work/
+art/on_person/src/
+art/on_person/export/
+
 # Build artifacts
 build/
 # Keep a Godot ignore sentinel in the in-project GDExtension build tree. MSVC

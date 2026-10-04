@@ -47,6 +47,9 @@ assets/**/*.mdt filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.md text eol=lf
 
 # art/ holds the authoring sources (Blender scenes and their textures) whose
-# exports land in assets/. Every file rides LFS but Markdown.
+# exports land in assets/. Every file rides LFS but Markdown and the build
+# scripts and their tables (Python, JSON).
 art/** filter=lfs diff=lfs merge=lfs -text -eol
 art/**/*.md text eol=lf filter= diff= merge=
+art/**/*.py text eol=lf filter= diff= merge=
+art/**/*.json text eol=lf filter= diff= merge=
