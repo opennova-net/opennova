@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include <editor/assets/asset_kinds.h>
+#include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/use_checks.h>
 
@@ -15,7 +16,9 @@ std::vector<const AssetEntry *> validation_files(const AssetScan &scan) {
 	std::array<std::vector<const AssetEntry *>, kDocumentTypeCount + 1> by_type;
 	for (const AssetEntry &asset : scan.entries) {
 		const size_t type = static_cast<size_t>(asset_kind_row(asset.kind).document);
-		if (type != 0 && type < by_type.size())
+		// A type whose files no validator reads (S18: a texture's, with no finding codes yet) has none.
+		const DocumentType *registered = document_type_for(asset.kind);
+		if (type != 0 && type < by_type.size() && registered && validates_files(*registered))
 			by_type[type].push_back(&asset);
 	}
 	std::vector<const AssetEntry *> out;
@@ -125,7 +128,7 @@ std::vector<Diagnostic> project_rows(
 	for (const AssetEntry *asset : validation_files(input.scan))
 		if (const std::vector<Diagnostic> *own = cache.kept_findings(asset->relative_path))
 			out.insert(out.end(), own->begin(), own->end());
-	run_use_checks(graph, cache, out);
+	run_use_checks(graph, cache, input, out);
 	const std::vector<Diagnostic> &references = graph.diagnostics();
 	out.insert(out.end(), references.begin(), references.end());
 	return out;
