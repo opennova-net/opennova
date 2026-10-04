@@ -102,18 +102,20 @@ static int test_registry_shape() {
 		for (size_t j = 0; j < i; ++j)
 			if (f->role[0] != '\0') TEST_EXPECT(std::string(blank_factory_at(j)->role) != f->role);
 	}
-	// Exactly one free-form factory per kind, and the kind lookup returns it: a new
-	// menu is not the STARTUP screen.
+	// At most one free-form factory per kind, and the kind lookup returns it: a new menu is
+	// not the STARTUP screen. A kind whose factories all fill a role has none (an expansion's
+	// version text, ADR 0046 S16: a text file is no kind New makes).
 	std::map<AssetKind, int> free_form;
 	for (size_t i = 0; i < blank_factory_count(); ++i) {
 		const BlankFactory *f = blank_factory_at(i);
 		free_form[f->kind] += f->free_form ? 1 : 0;
 	}
 	for (const auto &entry : free_form) {
-		TEST_EXPECT(entry.second == 1);
+		TEST_EXPECT(entry.second <= 1);
 		const BlankFactory *f = find_blank_factory_for_kind(entry.first);
-		TEST_EXPECT(f != nullptr && f->free_form && f->kind == entry.first);
+		TEST_EXPECT(entry.second == 0 ? f == nullptr : f != nullptr && f->free_form && f->kind == entry.first);
 	}
+	TEST_EXPECT(free_form[AssetKind::Text] == 0 && find_blank_factory_for_role("expansion_version"));
 	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::Menu) != find_blank_factory_for_role("main_menu"));
 	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::Strings) != find_blank_factory_for_role("gametext"));
 	BlankRequest request;

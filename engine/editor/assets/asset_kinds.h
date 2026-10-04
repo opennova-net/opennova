@@ -29,6 +29,16 @@ namespace opennova::editor {
 // the game never asks for (S13 A8: the build leaves it out).
 enum class ArchiveSlot { Language, Localres, Resource, Loose, None };
 
+// Where the game reads a loose file of a kind when it runs an expansion (`/exp <name>`, ADR 0046
+// S16): from the expansion's own folder, `expansion\<name>\`, which an expansion build ships; or only
+// from the install's folder, which an expansion cannot change (the build leaves such a file out and
+// says so, build.expansion.root_only). None for a kind that is not loose (an archive's, or one no
+// build packs). A file the game reads through the file system's front door is no loose kind: the
+// front door reads the archives alone unless `/d` [orig: FileSystem_OpenFile @ 0x75b1c0, the loose
+// search only when searchLooseFirst @ 0x75b1e5; its one setter for the session, the /d gate
+// Game_InitSubsystems @ 0x4a6fa9..0x4a6fac], so such a kind packs (the NovaWorld screens).
+enum class ExpansionLoose { None, Folder, RootOnly };
+
 // The document types the editor opens a kind with (ADR 0046 d9): documents/document_types holds
 // one DocumentType per value past None, in this order. None: a kind the build packs as it is.
 enum class DocumentTypeId {
@@ -73,6 +83,8 @@ struct AssetKindRow {
 	const char *file_name = nullptr;
 	const char *const *extensions = nullptr;
 	ArchiveSlot archive_slot = ArchiveSlot::Resource;
+	// A loose kind's place in an expansion build (ExpansionLoose): set exactly on the Loose rows.
+	ExpansionLoose expansion_loose = ExpansionLoose::None;
 	DocumentTypeId document = DocumentTypeId::None; // the type that edits it; None: packed as it is
 	// Its files name other files, or names other files define, that an import brings with them
 	// (import_plan's references_unread: those of a kind the graph does not read are not followed).
@@ -102,7 +114,8 @@ bool asset_kind_packed(AssetKind kind);
 // Whether the archives' name limit binds a file of the kind: a kind the build packs into an
 // archive, and an import source (its importer names its outputs after it). Not a loose one (a
 // video, a music bank, a config), which the build copies beside the archives under any name, nor
-// one the build leaves out (an archive, a file of no kind the game knows).
+// one the build leaves out (an archive, a file of no kind the game knows), nor a NovaWorld screen,
+// which the game reads by the few names its menus give (a longer one the build leaves out, said).
 bool archive_name_limit_binds(AssetKind kind);
 
 } // namespace opennova::editor
