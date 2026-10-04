@@ -17,6 +17,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/validation_cache.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
@@ -2127,9 +2128,48 @@ int memos_follow_a_load_in_place() {
 	return 0;
 }
 
+// A window's parts in words (the plain-words lane, the audit's 5.1): each by what it does or shows, as
+// the outline and the Inspector title it (record_display over the menu row's record_label), never "Action 2".
+int parts_in_words() {
+	editor_test::TempProjectDir dir("opennova_menu_parts_in_words");
+	const std::string path = dir.file("words.mnu");
+	TEST_EXPECT(editor_test::write_text(
+			path, "<SCREEN>\r\n\t<NAME>MAIN</NAME>\r\n\t<WINDOW type=\"button\" name=\"GO\">\r\n"
+			      "\t\t<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">btn.tga</APPEARANCE>\r\n"
+			      "\t\t<APPEARANCE STATE=\"MOUSEOVER\" TYPE=\"COLOR\">%TRIM_COLOR%</APPEARANCE>\r\n"
+			      "\t\t<APPEARANCE STATE=\"SELECTED\"></APPEARANCE>\r\n"
+			      "\t\t<SOUND STATE=\"MOUSEIN\" TRIGGER=\"MOUSE_OVER\">click.lwf</SOUND>\r\n"
+			      "\t\t<ACTION TYPE=\"SCREEN\" FILE=\"options.mnu\">OPTIONS</ACTION>\r\n"
+			      "\t\t<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\" TOGGLE>PANEL</ACTION>\r\n"
+			      "\t\t<ACTION TYPE=\"WINDOW\" STATE=\"HIDE\">PANEL</ACTION>\r\n"
+			      "\t\t<ACTION TYPE=\"POP_SCREEN\"></ACTION>\r\n"
+			      "\t\t<ACTION TYPE=\"JUMP\">TITLE</ACTION>\r\n"
+			      "\t\t<HOTKEY>O</HOTKEY>\r\n"
+			      "\t</WINDOW>\r\n</SCREEN>\r\n"));
+	MnuDocument document;
+	TEST_EXPECT(load(document, path));
+	NodeAddress go;
+	TEST_EXPECT(find_definition(AssetGraph(), document, "GO", go));
+	const auto words = [&](const char *token, size_t index) {
+		return record_display(document, child_of(document, go, token, index), nullptr);
+	};
+	TEST_EXPECT(words("appearance", 0) == "Normal: image btn.tga");
+	TEST_EXPECT(words("appearance", 1) == "Mouse over: colour %TRIM_COLOR%");
+	TEST_EXPECT(words("appearance", 2) == "Selected (marks the state only)");
+	TEST_EXPECT(words("sound", 0) == "Mouse enters: MOUSE_OVER (click.lwf)");
+	TEST_EXPECT(words("action", 0) == "Go to OPTIONS in options.mnu");
+	TEST_EXPECT(words("action", 1) == "Show or hide PANEL");
+	TEST_EXPECT(words("action", 2) == "Hide PANEL");
+	TEST_EXPECT(words("action", 3) == "Go back");
+	// A type the game's parse knows no code of does nothing [orig: CUIElement_ParseXMLDefinition @ 0x648ee2].
+	TEST_EXPECT(words("action", 4) == "Does nothing (JUMP is no action type)");
+	TEST_EXPECT(words("hotkey", 0) == "Key O");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	return memos_follow_a_load_in_place() || colours_and_flags() || changes_since_save() || structure_and_save() || validation() || windows_at_depth() || every_list() || defaults_survive() ||
+	return parts_in_words() || memos_follow_a_load_in_place() || colours_and_flags() || changes_since_save() || structure_and_save() || validation() || windows_at_depth() || every_list() || defaults_survive() ||
 	       window_index_matches_the_compiler() || copy_and_paste() || duplicate_selection() || copy_between_encodings() ||
 	       texts_in_their_code_page() ||
 	       copy_selection_shapes() || duplicate_screen() || typed_add_and_screen_copy() || screens_stay_found() ||

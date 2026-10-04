@@ -149,6 +149,49 @@ bool plan_file_finding(const AssetEntry &asset, const std::string &expansion, Di
 	return own_finding(asset, target, out);
 }
 
+BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &expansion) {
+	BuildPlaceWords out;
+	Diagnostic own;
+	if (plan_file_finding(asset, expansion, own)) {
+		out.words = own.severity == DiagnosticSeverity::Error ? "A build refuses it: " + own.message : own.message;
+		return out;
+	}
+	if (asset.kind == AssetKind::ImportSource) {
+		out.words = "The build packs what it makes, not the file itself.";
+		return out;
+	}
+	if (!asset_kind_packed(asset.kind)) {
+		out.words = "Left out of the build: the game never reads it.";
+		return out;
+	}
+	BuildTarget target;
+	target.expansion = expansion;
+	const Placement placement = place(asset, target);
+	if (placement.root_only) {
+		out.words = "Left out of the build: the game reads it from the install's own folder, which an expansion cannot change.";
+		return out;
+	}
+	switch (placement.slot) {
+	case ArchiveSlot::Language:
+	case ArchiveSlot::Localres:
+	case ArchiveSlot::Resource:
+		out.words = "Packed into " +
+		            (target.is_expansion() ? expansion_archive_path(expansion, placement.slot == ArchiveSlot::Language)
+		                                   : std::string(archive_slot_file_name(placement.slot))) +
+		            ".";
+		out.packed = true;
+		return out;
+	case ArchiveSlot::Loose:
+		out.words = target.is_expansion() ? "Copied loose into " + placement.loose_path + "."
+		                                  : "Copied beside the archives, where the game reads it by its name.";
+		out.packed = true;
+		return out;
+	case ArchiveSlot::None: break;
+	}
+	out.words = "Left out of the build: the game never reads it.";
+	return out;
+}
+
 bool lists_as_mission(const std::string &name) {
 	return strutil::ends_with_icase(name, ".bms") || strutil::ends_with_icase(name, ".npj") ||
 	       strutil::ends_with_icase(name, ".npz");
