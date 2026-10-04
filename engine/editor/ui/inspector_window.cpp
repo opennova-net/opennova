@@ -239,23 +239,21 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 	                  : status == ReferenceStatus::Missing
 	                          ? (record ? "This file has no " + std::string(kind.label) + " " + symbol + "."
 	                                    : "No project file or record is named '" + symbol + "'.")
-	                          : std::string("The editor cannot check this kind of reference yet.");
-	if (compact) {
-		ImGui::SameLine();
-		const float frame = ImGui::GetFrameHeight();
-		const ImVec2 at = ImGui::GetCursorScreenPos();
-		const bool pressed = ImGui::InvisibleButton("go to dot", ImVec2(frame * 0.5f, frame));
-		ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(at.x + frame * 0.25f, at.y + frame * 0.5f), frame * 0.2f,
-		                                            ImGui::GetColorU32(colour));
-		tip = std::string(word) + ": " + tip;
-		if (present) go_to_tool(workspace, field, value, pressed, tip, "A click: ");
-		else ui_kit::tooltip(tip);
-		return;
-	}
-	place(row, ui_kit::text_width(word));
-	ImGui::TextColored(colour, "%s", word);
-	ui_kit::tooltip(tip);
-	if (!present) return;
+	                          : "Not checked: the editor has no list of " + std::string(kind.label) +
+	                                    "s to look this name up in yet, so it cannot say whether the game finds it.";
+	// The state as a coloured dot, its words in its tooltip (the audit's 4.7: no word under every
+	// reference); a click on it the Go to where it resolves.
+	const float frame = ImGui::GetFrameHeight();
+	if (compact) ImGui::SameLine();
+	else place(row, frame * 0.5f);
+	const ImVec2 at = ImGui::GetCursorScreenPos();
+	const bool pressed = ImGui::InvisibleButton("go to dot", ImVec2(frame * 0.5f, frame));
+	ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(at.x + frame * 0.25f, at.y + frame * 0.5f), frame * 0.2f,
+	                                            ImGui::GetColorU32(colour));
+	tip = std::string(word) + ": " + tip;
+	if (present) go_to_tool(workspace, field, value, pressed, tip, "A click: ");
+	else ui_kit::tooltip(tip);
+	if (compact || !present) return;
 	place(row, ui_kit::button_width("Go to"));
 	go_to_tool(workspace, field, value, ImGui::SmallButton("Go to"), std::string(), "");
 }
@@ -317,7 +315,7 @@ Value picked_value(const FieldUse &field, const std::string &picked) {
 // Go to.
 float reference_tools_width(const FieldUse &field) {
 	const float gap = ImGui::GetStyle().ItemSpacing.x;
-	return (picks_reference(field) ? ui_kit::button_width("Pick") + gap : 0.0f) + ui_kit::text_width("Unverified") +
+	return (picks_reference(field) ? ui_kit::button_width("Pick") + gap : 0.0f) + ImGui::GetFrameHeight() * 0.5f +
 	       ui_kit::button_width("Go to") + gap * 2.0f;
 }
 
@@ -917,6 +915,14 @@ bool section_changed(const Document &document, const Targets &targets, const Ins
 	return false;
 }
 
+// Whether a section holds only fields no reader of the game is witnessed reading here (a string's
+// position, the audit's 5.3): it starts folded, written or not, its heading saying so.
+bool unread_section(const InspectorSection &section) {
+	if (section.has_toggle || !section.collections.empty() || section.fields.empty()) return false;
+	return std::all_of(section.fields.begin(), section.fields.end(),
+	                   [](const FieldUse &field) { return field.applies != Applicability::Reads; });
+}
+
 // One section of the plan: a heading (none for the general fields), then the form: the
 // block's own switch first, its fields after; then the collections it claims. A section
 // that holds something written, or a field changed since the last save, starts open; one
@@ -934,9 +940,11 @@ void draw_section(Workspace &workspace, Controls &controls, const Document &docu
 		const std::string heading = shown_title + "###" + section.key;
 		if (reveal && reveal->scroll && reveal->record == record && holds_field(section, reveal->field))
 			ImGui::SetNextItemOpen(true);
-		const bool shown = section.written || section_changed(document, {record}, section);
+		const bool unread = unread_section(section);
+		const bool shown = (section.written && !unread) || section_changed(document, {record}, section);
 		const bool open = ImGui::CollapsingHeader(heading.c_str(), shown ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-		ui_kit::tooltip(shown_title != title ? title + "\n" + section.key : section.key);
+		ui_kit::tooltip((shown_title != title ? title + "\n" + section.key : section.key) +
+		                (unread ? "\nNo reader of these in the game is witnessed: folded." : ""));
 		if (!open) return;
 	}
 	ImGui::PushID(section.key.c_str());

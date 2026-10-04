@@ -47,6 +47,8 @@ add_library(opennova_editor STATIC
     # per type that has one, kept between validations
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_catalog_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_words.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_labels.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/strings_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_clipboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_document.cpp

@@ -2,6 +2,7 @@
 
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/catalog_labels.h>
 #include <editor/documents/catalog_validation.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
@@ -39,8 +40,10 @@ std::unique_ptr<DocumentBase> make_animation_map() {
 }
 
 constexpr DocumentType kTypes[] = {
+	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
 	{ DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalog_file,
-			DefCatalogDocument::schema, catalog_finding_codes },
+			DefCatalogDocument::schema, catalog_finding_codes, nullptr, nullptr, nullptr, nullptr,
+			catalog_record_label },
 	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file,
 			StringsDocument::schema, strings_finding_codes },
 	{ DocumentTypeId::Menu, "menu", make_menu, validate_menu_file, MnuDocument::schema,

@@ -12,6 +12,7 @@
 #include <utility>
 
 #include <base/io/strutil.h>
+#include <editor/documents/def_words.h>
 #include <runtime/hud/game_text_lookup.h>
 
 namespace opennova::editor {
@@ -266,6 +267,14 @@ LabelledField labelled(R kind, const DefField &field) {
 	const bool flag = is_present_flag(kind, field.id);
 	entry.read_only = field.read_only || flag;
 	describe(member, entry);
+	// The member in a modder's words (def_words.h): its label, its section and what the game does with
+	// it, the parse's note after that meaning.
+	if (const DefWords *words = def_words_of(kind, field.id)) {
+		entry.label = words->label;
+		entry.section = words->section;
+		entry.description = entry.description.empty() ? std::string(words->meaning)
+		                                              : std::string(words->meaning) + "\n" + entry.description;
+	}
 
 	const auto shared = std::make_shared<const DefMember>(member);
 	out.value.get = [shared](const RecordHandle &record, Value &value) {
@@ -460,7 +469,14 @@ RecordTable make_table() {
 	std::vector<TableKind> kinds;
 	for (const CatalogKindRow &row : kKinds) {
 		TableKind kind(RecordKindRow{node_kind(row.kind), row.token, row.label, row.add_label, row.top});
-		for (const DefField &field : def_fields(row.record)) kind.field(labelled(row.record, field));
+		// The members by their sections' order (def_sections: who the record is first), each section's in
+		// the inventory's; the writer and the parser keep to the format's own order.
+		std::vector<LabelledField> fields;
+		for (const DefField &field : def_fields(row.record)) fields.push_back(labelled(row.record, field));
+		std::stable_sort(fields.begin(), fields.end(), [&row](const LabelledField &a, const LabelledField &b) {
+			return def_section_rank(row.record, a.schema.section.c_str()) < def_section_rank(row.record, b.schema.section.c_str());
+		});
+		for (LabelledField &field : fields) kind.field(std::move(field));
 		for (const ListRow &list : kLists) {
 			if (list.owner != row.kind) continue;
 			const CatalogKindRow &held = kKinds[size_t(list.kind)];

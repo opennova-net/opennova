@@ -80,7 +80,7 @@ DisplayName value_display(const Document &document, const NodeAddress &address, 
 	if (row.resolution != ReferenceResolution::Symbol && row.resolution != ReferenceResolution::Record) return out;
 	out.raw = name;
 	if (const GraphSymbol *symbol = names->symbol(kind, name, scope)) {
-		const std::string words = symbol_words(*symbol);
+		const std::string words = definition_words(*symbol, names);
 		if (words != name) out.text = words;
 		out.source = symbol->scope.empty() ? symbol->file : symbol->scope;
 		return out;
@@ -196,7 +196,8 @@ std::string symbol_preview(const AssetGraph &graph, ReferenceKind kind, const st
 		return out;
 	}
 	if (kind == ReferenceKind::TextId) return "\"" + symbol_words(*symbol) + "\"\n" + (symbol->scope.empty() ? symbol->file : symbol->scope);
-	const std::string words = symbol_words(*symbol);
+	const GraphNameSource names(graph);
+	const std::string words = definition_words(*symbol, &names);
 	return words != symbol->display ? words : std::string();
 }
 

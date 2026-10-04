@@ -239,8 +239,12 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 }
 
 void DefCatalogDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
-	if (address.child || def_kind(address.kind) != DefRecordKind::Item) return;
-	if (const void *item = record(address)) facts.value = std::to_string(static_cast<const DefItemDef *>(item)->type);
+	if (address.child) return;
+	const void *native = record(address);
+	if (!native) return;
+	if (def_kind(address.kind) == DefRecordKind::Item) facts.value = std::to_string(static_cast<const DefItemDef *>(native)->type);
+	// A weapon's loadout name's key, which its words read where the HUD's has no text (definition_words).
+	if (def_kind(address.kind) == DefRecordKind::Weapon) facts.value = static_cast<const DefWeaponDef *>(native)->loadout_menu_textid;
 }
 
 bool DefCatalogDocument::record_choices(const NodeAddress &address, const FieldUse &use,
