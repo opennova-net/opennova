@@ -61,6 +61,10 @@ public:
 	void activate(const std::string &path);
 	// A menu made the active document, or read again, with nothing selected shows its first screen.
 	void select_first_screen();
+	// The open documents in their order, each with the locator of the record selected in it ("" none): the
+	// active one's the view's selection, every other's the one it kept (the UX round's project lane: what a
+	// project reopens with).
+	std::vector<std::pair<std::string, std::string>> open_with_selection() const;
 
 	// --- the files ---------------------------------------------------------------------------
 
