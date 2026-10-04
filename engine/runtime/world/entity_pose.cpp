@@ -234,12 +234,22 @@ bool EntityPoseProvider::resolve_userpoint_frame(world::World &world,
 	const world::CollisionMatrix entity_world = world::entity_placement_matrix(*e);
 	world::CollisionMatrix bone_world = entity_world;
 	std::vector<ThreediMatrix4x4> part_matrices;
-	if (point.subobject_index >= 0 &&
-			panm_part_matrices(world, model3di, entity, part_matrices) &&
-			static_cast<size_t>(point.subobject_index) < part_matrices.size()) {
-		if (!world::collision_matrix_apply_render_pose(entity_world,
-					part_matrices[static_cast<size_t>(point.subobject_index)].m,
-					bone_world))
+	if (panm_part_matrices(world, model3di, entity, part_matrices)) {
+		// The part the point rides: -1 and an index past the part count both mean part
+		// 0, the root, compared signed; an index equal to the count, or another
+		// negative, reads past the posed parts in retail (the stale row of the shared
+		// pose buffer), which the port reads as the entity frame (D-3DI-8). Without
+		// live PANM every part sits in the entity frame, part 0 included.
+		// [orig: Userpoint_ComputeWorldTransform @0x56C420 — `cmp ebx, 0FFFFFFFFh`
+		//  @0x56C474, `cmp ebx, [ecx+34h]; jle` @0x56C484..0x56C487, `xor ebx, ebx`
+		//  @0x56C489; the matrix at index << 6 of Model_TransformBoneMatrices's result
+		//  @0x56C4E2..0x56C4E5]
+		const int count = static_cast<int>(part_matrices.size());
+		int part = point.subobject_index;
+		if (part == -1 || part > count) part = 0;
+		if (part >= 0 && part < count &&
+				!world::collision_matrix_apply_render_pose(entity_world,
+						part_matrices[static_cast<size_t>(part)].m, bone_world))
 			return false;
 	}
 	// The raw authored record position in the native model frame
