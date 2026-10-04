@@ -66,8 +66,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document_edits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_surfaces.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_collision_words.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_labels.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_slots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
@@ -120,6 +124,7 @@ add_library(opennova_editor STATIC
     # writes and what is drawn over the picture; the script device's viewport (S13 V10: a text
     # document's text as its Godot control shows it, the span edit a control's text plans, the
     # keystroke burst its edits fold in, the gutter marks and the highlights it colours)
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/animation_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
@@ -142,6 +147,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_collision.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_camera.cpp
@@ -200,6 +206,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_logic_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/model_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/operation_progress.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/original_bytes.cpp
@@ -241,6 +248,7 @@ add_library(opennova_editor STATIC
 # consumer whether the windows exist in this build.
 if(OPENNOVA_IMGUI)
     target_sources(opennova_editor PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/animation_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_toolbar.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
@@ -258,6 +266,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_logic_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_palette_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_inspector_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_model.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_view.cpp

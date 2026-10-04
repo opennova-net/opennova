@@ -4448,6 +4448,7 @@ opennova_add_mixed_test(editor_import COMMAND editor_import_test)
 # value's fixes) reference_picker_test.cpp's; find (S12 D8: the Document window's find bar, Find
 # in project) find_test.cpp's; Rename everywhere from the Inspector (S12 D9) rename_test.cpp's; every
 # control that raises a request enabled exactly when the busy gate takes it (S13 A1) gate_test.cpp's;
+# a clip's timeline and the animation types' Inspector (S17) animation_test.cpp's;
 # all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
 # group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
 # this list and the program's table of groups to one list.
@@ -4456,11 +4457,12 @@ if(OPENNOVA_IMGUI)
                                   editor_ui/markers_test.cpp editor_ui/bounds_test.cpp
                                   editor_ui/field_widgets_test.cpp editor_ui/reference_picker_test.cpp
                                   editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp
-                                  editor_ui/logic_test.cpp)
+                                  editor_ui/logic_test.cpp editor_ui/animation_test.cpp
+                                  editor_ui/model_test.cpp)
     target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
     target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
-                                  menu inspector preview styles problems gate logic)
+                                  menu inspector preview styles problems gate logic animation model)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
@@ -4606,6 +4608,23 @@ add_executable(editor_model_document_test editor/model_document_test.cpp)
 target_link_libraries(editor_model_document_test PRIVATE opennova_editor)
 target_include_directories(editor_model_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_model_document COMMAND editor_model_document_test)
+
+# A model's bullet-face surfaces set on its materials and its records in words (S17): each face's
+# material found, a material's surface set on every face made from it in one step, mixed and unified,
+# the refusals, the game's words; a SKIP-LEG counting the install's faces and mixed materials.
+add_executable(editor_model_surfaces_test editor/model_surfaces_test.cpp)
+target_link_libraries(editor_model_surfaces_test PRIVATE opennova_editor)
+target_include_directories(editor_model_surfaces_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_model_surfaces COMMAND editor_model_surfaces_test)
+
+# A model's collision shown in its viewport (S17): a box's planes make the box, every synthetic
+# model's collision as shapes on the collision LOD's triangles, each record's shape and back, a
+# person's hit spheres at the game's radius, a live part carrying its section, picking; a SKIP-LEG
+# making every installed model's volumes into solids inside their boxes.
+add_executable(editor_model_collision_test editor/model_collision_test.cpp)
+target_link_libraries(editor_model_collision_test PRIVATE opennova_editor)
+target_include_directories(editor_model_collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_model_collision COMMAND editor_model_collision_test)
 
 # The clip and animation map documents (S10e): untouched saves, engine data edits,
 # the motion refused, rows and clips, the reset row, the validator and the clip edges;
