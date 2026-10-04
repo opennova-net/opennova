@@ -45,6 +45,7 @@
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/strings_document.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
@@ -413,12 +414,13 @@ static int test_native_extractors() {
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetGraph &graph = *session.view().findings.graph;
 	const GraphEdge *sky = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
-	TEST_EXPECT(sky && !sky->rewritable && sky->field == "sky_map1");
+	TEST_EXPECT(sky && sky->rewritable && sky->field == "sky_map1"); // a name its text writes (native_text_sites.h)
 	TEST_EXPECT(edge_to(graph, "day.env", ReferenceKind::Model, "sun.3di"));
 	// A sky map loads through the archive loader naming the file twice: its .dds sibling first,
-	// else the name itself, no other extension.
+	// else the name itself, no other extension. Its edge carries its role (ADR 0046 S18), whose loader
+	// that is.
 	const int32_t sky_loader = texture_loader_arg(opennova::renderer::TextureLoader::ArchiveSelfAlpha);
-	TEST_EXPECT(sky && sky->loader_arg == sky_loader);
+	TEST_EXPECT(sky && sky->loader_arg == texture_role_arg(TextureRoleId::SkyCloud, kTextureArgPcx));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a.pcx", "", nullptr, sky_loader) == ReferenceStatus::Missing);
 	TEST_EXPECT(editor_test::write_text(root + "/sky_a.pcx", "x"));
 	editor_test::handle_to_end(session, request::rescan());
@@ -429,6 +431,23 @@ static int test_native_extractors() {
 	std::string sky_file;
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_c.pcx", "", &sky_file, sky_loader) == ReferenceStatus::Present &&
 	            sky_file == "sky_c.dds");
+	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a.pcx") == ReferenceStatus::Present);
+	// No loader of the game adds an extension (ADR 0046 S18): a name without one finds nothing.
+	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a") == ReferenceStatus::Missing);
+	// The sky map's own loader (ARCHIVE, the .dds beside the name first) finds the PCX, then its .dds.
+	{
+		std::string served;
+		const GraphEdge *map = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
+		TEST_EXPECT(map && graph.resolve(*map, &served) == ReferenceStatus::Present && served == "sky_a.pcx");
+		TEST_EXPECT(editor_test::write_text(root + "/sky_a.dds", "x"));
+		editor_test::handle_to_end(session, request::rescan());
+		map = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
+		TEST_EXPECT(map && graph.resolve(*map, &served) == ReferenceStatus::Present && served == "sky_a.dds");
+		TEST_EXPECT(!graph.referrers_of_file("sky_a.dds").empty());
+		std::error_code removed;
+		fs::remove(fs::path(root) / "sky_a.dds", removed);
+		editor_test::handle_to_end(session, request::rescan());
+	}
 	TEST_EXPECT(!graph.referrers_of_file("sky_a.pcx").empty());
 	TEST_EXPECT(has_symbol(graph, ReferenceKind::Particle, "BOOM"));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Particle, "boom") == ReferenceStatus::Present);
@@ -713,23 +732,37 @@ static int test_rename() {
 	            read_text(root + "/main.mnu").find("logo2.tga") != std::string::npos);
 	TEST_EXPECT(view.findings.graph->missing().empty());
 	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
-	// A site the editor cannot rewrite refuses the whole rename: an environment names
-	// the texture too.
+	// An environment names a sky map: its line is rewritten as text, every other byte kept (ADR 0046 S18,
+	// graph/native_text_sites.h). A sky map's name is made .pcx as the game parses it, so the environment
+	// naming logo2.tga uses no TGA: the TGA's rename leaves it as it is. (A Rescan keeps an open document
+	// whose file did not change: the same one.)
+	std::string environment;
 	{
 		opennova::env::Config config;
-		config.sky_map1 = "logo2.tga";
+		config.sky_map1 = "cloud.pcx";
+		config.sky_map2 = "logo2.tga";
 		std::ostringstream out;
 		std::string error;
 		TEST_EXPECT(opennova::env::save_env(out, config, error));
-		TEST_EXPECT(editor_test::write_text(root + "/day.env", out.str()));
+		environment = out.str();
+		TEST_EXPECT(editor_test::write_text(root + "/day.env", environment) && editor_test::write_text(root + "/cloud.pcx", "x"));
 	}
 	editor_test::handle_to_end(session, request::rescan());
-	editor_test::handle_to_end(session, request::rename_asset("logo2.tga", "logo3.tga"));
-	TEST_EXPECT(view.findings.diagnostics.back().code() == "rename.site" || view.findings.diagnostics.back().code() == "rename.refused");
-	TEST_EXPECT(fs::exists(root + "/logo2.tga") && !fs::exists(root + "/logo3.tga"));
-	// Through a style variable: the variable's value is the site. (A Rescan keeps an open
-	// document whose file did not change: the same one.)
 	TEST_EXPECT(session.document_for("main.mnu") == menu);
+	editor_test::handle_to_end(session, request::rename_asset("logo2.tga", "logo3.tga"));
+	TEST_EXPECT(session.outcome().done());
+	TEST_EXPECT(!fs::exists(root + "/logo2.tga") && fs::exists(root + "/logo3.tga"));
+	TEST_EXPECT(read_text(root + "/day.env") == environment);
+	editor_test::handle_to_end(session, request::rename_asset("cloud.pcx", "haze.pcx"));
+	TEST_EXPECT(session.outcome().done() && fs::exists(root + "/haze.pcx"));
+	{
+		const size_t at = environment.find("sky_map1 cloud.pcx");
+		TEST_EXPECT(at != std::string::npos);
+		environment.replace(at, 18, "sky_map1 haze.pcx");
+		TEST_EXPECT(read_text(root + "/day.env") == environment);
+	}
+	menu = session.document_for("main.mnu"); // reloaded after the rewrite
+	// Through a style variable: the variable's value is the site.
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	edit_window(session, *menu, menu_test::child_of(*menu, exit, "appearance"), "value", std::string("%DEF_FONTNAME_LG%"));
 	editor_test::handle_to_end(session, request::save_all());
@@ -1618,10 +1651,11 @@ static int test_reference_kind_rows() {
 
 // The names a file reference loads, in the order the game probes them (the graph takes the
 // first the project has, a fix the first the game install has): the name, then with each
-// extension the kind's loader appends; a texture of no model row the files the game's loader
-// for it opens (texture_loader_arg: renderer::texture_load_attempts, no alternate name; the
-// particle manager's loose tga\ leg is no project file), the name as written alone with no
-// loader given; a font the .fnt from the name's first dot; where the
+// extension the kind's loader appends; a texture of no model row the files its role's loader opens
+// (ADR 0046 S18), or the game's loader for it where only that is given (texture_loader_arg:
+// renderer::texture_load_attempts, no alternate name; the particle manager's loose tga\ leg is no
+// project file), the name as written alone with neither; a font the .fnt from the name's first dot;
+// where the
 // loader decides by what is there, the one file it opens: a menu texture's .tga, else its
 // .dds; a model's texture row by the row's type (S11f: a diffuse row's .dds sibling of the
 // name cut three characters after its first dot, the '.MDT' test with its case; a plain
@@ -1658,6 +1692,12 @@ static int test_reference_file_candidates() {
 	TEST_EXPECT(texture_loader_of(sky, loader) && loader == TextureLoader::ArchiveSelfAlpha &&
 	            !texture_loader_of(-1, loader) && !texture_loader_of(0, loader) &&
 	            !texture_loader_of(texture_loader_arg(TextureLoader::Particle) - 1, loader));
+	// One of a role, by its role's loader (ADR 0046 S18): a sky map's archive loader, the .dds beside it
+	// first; a colour map's TGA reader, the name alone.
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "sky.pcx", texture_role_arg(TextureRoleId::SkyCloud),
+	                                      has({"sky.dds"})) == Names({"sky.dds"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "map.tga", texture_role_arg(TextureRoleId::TerrainColourMap),
+	                                      has({"map.dds"})) == Names({"map.tga"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Font, "Arial99.fnt", -1, none) == Names({"Arial99.fnt"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Font, "arial12b", -1, none) == Names({"arial12b.fnt"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Font, "a.b.fnt", -1, none) == Names({"a.fnt"}));
@@ -1728,19 +1768,23 @@ static int test_terrain_and_bank_extractors() {
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetGraph &graph = *session.view().findings.graph;
 	const GraphEdge *heights = edge_to(graph, "isle.trn", ReferenceKind::TerrainData, "isle.cpt");
-	TEST_EXPECT(heights && heights->field == "polytrn_polydata" && !heights->rewritable);
+	TEST_EXPECT(heights && heights->field == "polytrn_polydata" && heights->rewritable);
 	for (const char *map : {"isle_c.tga", "det.tga", "tiles.tga", "isle_m.pcx"})
 		TEST_EXPECT(edge_to(graph, "isle.trn", ReferenceKind::Texture, map));
-	// Each map by its game loader: the colour map and the atlas through the TGA reader, a near
-	// detail map through the stage loader (its .dds sibling first), the character map by its name.
+	// Each map by its role (ADR 0046 S18) and so its game loader: the colour map and the atlas through
+	// the TGA reader, a near detail map through the stage loader (its .dds sibling first), the
+	// character map by its name.
 	using opennova::renderer::TextureLoader;
-	TEST_EXPECT(edge_to(graph, "isle.trn", ReferenceKind::Texture, "isle_c.tga")->loader_arg ==
-	                    texture_loader_arg(TextureLoader::Tga) &&
-	            edge_to(graph, "isle.trn", ReferenceKind::Texture, "tiles.tga")->loader_arg ==
-	                    texture_loader_arg(TextureLoader::Tga) &&
-	            edge_to(graph, "isle.trn", ReferenceKind::Texture, "det.tga")->loader_arg ==
-	                    texture_loader_arg(TextureLoader::Stage) &&
-	            edge_to(graph, "isle.trn", ReferenceKind::Texture, "isle_m.pcx")->loader_arg == -1);
+	const auto loader_of_map = [&](const char *map, TextureLoader &loader) {
+		TextureRoleId role = TextureRoleId::kCount;
+		const GraphEdge *edge = edge_to(graph, "isle.trn", ReferenceKind::Texture, map);
+		return edge && texture_arg_role(edge->loader_arg, role) && texture_role_renderer_loader(role, loader);
+	};
+	TextureLoader loader = TextureLoader::Stage;
+	TEST_EXPECT(loader_of_map("isle_c.tga", loader) && loader == TextureLoader::Tga);
+	TEST_EXPECT(loader_of_map("tiles.tga", loader) && loader == TextureLoader::Tga);
+	TEST_EXPECT(loader_of_map("det.tga", loader) && loader == TextureLoader::Stage);
+	TEST_EXPECT(!loader_of_map("isle_m.pcx", loader));
 	const GraphEdge *palm = edge_to(graph, "isle.trn", ReferenceKind::Model, "palm");
 	TEST_EXPECT(palm && palm->record == "foliage 1" && palm->field == "graphic");
 	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Missing &&
@@ -1773,9 +1817,9 @@ static int test_terrain_and_bank_extractors() {
 // A model's texture row resolves to the file its type's loader opens (S11f): a diffuse row
 // naming wall.tga to the .dds the project has beside no .tga, else to the .tga; a plain row
 // (type 1) never to the .dds; a normal map by renderer::material_texture_source; an authored type the
-// loader zeroes as a diffuse row. A particle's texture reads as the particle manager's TGA
-// loader does (renderer::TextureLoader::Particle). The badge, the finding and the edge's JSON read
-// the same rule, the row's type carried on the edge.
+// loader zeroes as a diffuse row. A particle's texture reads as its atlas loads it, the name alone
+// (ADR 0046 S18: its role on the edge). The badge, the finding and the edge's JSON read the same
+// rule, the row's type carried on the edge.
 static int test_model_texture_references() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_model_textures");
 	NoProcess platform;
@@ -1904,15 +1948,16 @@ static int test_model_texture_references() {
 	const opennova::io::JsonValue json = graph_edge_to_json(*view.findings.graph, *wall);
 	TEST_EXPECT(json.get("loader_arg") && json.get("loader_arg")->number == 0.0 && !json.get("material_type") &&
 	            json.get_string("status", "") == "present" && json.get_string("file", "") == "textures/wall.dds");
-	// A particle's texture, as the particle manager's TGA loader reads it: the name alone, never
-	// its stem's .dds, its overlay twin or an extension appended to the whole name.
+	// A particle's graphic, as the particle manager's TGA loader reads it (ADR 0046 S18, its role on the
+	// edge): the name alone, never its stem's .dds, its overlay twin or an extension appended to the
+	// whole name [orig: CParticleTextureEntry_ProbeSizeFromDisk @ 0x5DFAA0].
 	textures({"puff.tga"});
 	const GraphEdge *puff =
 			edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(puff && puff->loader_arg == texture_loader_arg(opennova::renderer::TextureLoader::Particle) &&
+	TEST_EXPECT(puff && puff->loader_arg == texture_role_arg(TextureRoleId::ParticleGraphic) &&
 			view.findings.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
 			file == "textures/puff.tga" &&
-			!graph_edge_to_json(*view.findings.graph, *puff).get("loader_arg"));
+			graph_edge_to_json(*view.findings.graph, *puff).get_string("texture_role", "") == "particle_graphic");
 	for (const char *other : {"puff.dds", "puff_O.tga", "puff.tga.dds"}) {
 		textures({other});
 		puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");

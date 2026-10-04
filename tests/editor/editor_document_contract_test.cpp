@@ -66,7 +66,11 @@
 // replacements one step, a gesture's two batches one step whose change set holds both spans; and a
 // snapshot sharing its identity, load and revision, serializing its bytes and refusing an edit, a
 // save and a load. Every text type but the text one (whose files the game reads through readers the
-// editor does not model) makes a finding over its files.
+// editor does not model) makes a finding over its files. S18: an image type's make gives a DocumentBase
+// that holds an image (the texture's, over a minted TGA, PCX and DDS): it loads unblocked, serializes the
+// bytes it was read from, validates alike twice, refuses another's change and an edit naming a record,
+// says nothing changed since its load, and snapshots as a text's does; the texture type makes no
+// finding yet (what the game makes of a texture is its role's), its table empty.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -107,11 +111,14 @@
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_write.h>
 #include <formats/cbin/binary_config.h>
+#include <formats/dds/dds.h>
 #include <formats/def/def_schema.h>
 #include <formats/mission/bms.h>
 #include <formats/mus/mus.h>
+#include <formats/pcx/pcx_io.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/scr/scr.h>
+#include <formats/tga/tga.h>
 
 #include "common/file_io.h"
 #include "common/test_paths.h"
@@ -255,6 +262,38 @@ std::vector<uint8_t> music_with_a_handler(const std::vector<uint8_t> &bin) {
 	return out;
 }
 
+// The texture type's files (S18): a 4 x 4 image of graded alpha as a TGA and as an A8R8G8B8 DDS, and an
+// 8-bit PCX.
+std::vector<uint8_t> minted_rgba() {
+	std::vector<uint8_t> rgba;
+	for (int i = 0; i < 16; ++i)
+		for (int c = 0; c < 4; ++c) rgba.push_back(uint8_t(i * 16 + c));
+	return rgba;
+}
+std::vector<uint8_t> minted_tga() {
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::tga::tga_write_rgba32(minted_rgba().data(), 4, 4, out, error);
+	return out;
+}
+std::vector<uint8_t> minted_dds() {
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::dds::dds_write_a8r8g8b8(minted_rgba().data(), 4, 4, out, error);
+	return out;
+}
+std::vector<uint8_t> minted_pcx() {
+	opennova::IndexedImage8 image;
+	image.width = 4;
+	image.height = 2;
+	for (int i = 0; i < 8; ++i) image.indices.push_back(uint8_t(i * 3));
+	for (int i = 0; i < 256; ++i) image.palette[i][0] = image.palette[i][1] = image.palette[i][2] = uint8_t(i);
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::encode_pcx_indexed(image, out, error);
+	return out;
+}
+
 // A menu screen whose root window holds an EXIT button: two of them give one window name in two
 // scopes (a lookup on screen B must reach B's EXIT, never A's).
 std::string exit_screen(const char *name, const char *action) {
@@ -306,6 +345,10 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Credits, "nlist.kda", credits_in_cbin()},
 	        {AssetKind::Shader, "glass.fx", shader_in_scr("// glass\r\nfloat4 main() : COLOR { return 0; }\r\n")},
 	        {AssetKind::Config, "game.cfg", text_bytes("[Game]\r\nname = Contract\r\n")},
+	        // The texture type (S18): a TGA, a PCX and a DDS, minted by our writers.
+	        {AssetKind::Texture, "brick.tga", minted_tga()},
+	        {AssetKind::Texture, "sky.pcx", minted_pcx()},
+	        {AssetKind::Texture, "cube.dds", minted_dds()},
 	};
 }
 
@@ -350,11 +393,23 @@ std::vector<uint8_t> mission_with_runs_reordered(const std::vector<uint8_t> &min
 	return out;
 }
 
+// A 2 x 2 true-colour TGA whose header says its first row is the top one.
+std::vector<uint8_t> top_first_tga() {
+	std::vector<uint8_t> out(18, 0);
+	out[2] = 2; // true colour
+	out[12] = 2;
+	out[14] = 2;
+	out[16] = 32;
+	out[17] = 0x28; // 8 alpha bits, the first row the top one
+	out.resize(out.size() + 2 * 2 * 4, 0xFF);
+	return out;
+}
+
 // A file of each type whose fixture above makes no finding, holding a flaw the type's
 // validate_file reports (a key twice in a section, two screens of one NAME, a CTRL register the
 // engine does not know, a clip at 25 frames per second, a slot named twice, a mission's runs out of
-// its events' order): what the per-type findings clause reads with the fixtures, through
-// check_validate_file alone.
+// its events' order, a TGA whose header says its rows run top first): what the per-type findings clause
+// reads with the fixtures, through check_validate_file alone.
 std::vector<Fixture> flawed_files(const std::string &repo) {
 	const auto file = [&](const char *relative) { return test_io::read_file(repo + "/fixtures/" + relative); };
 	const std::string pop = "<ACTION type=\"POP_SCREEN\"></ACTION>";
@@ -372,6 +427,8 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::MusicScript, "handled.bin", music_with_a_handler(file("mus/synth_gamemus.bin"))},
 	        {AssetKind::Credits, "spaced.kda", file("cbin/synth_nlist.kda")},
 	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
+	        // A 2 x 2 true-colour TGA, its origin bit set (S18: texture.tga_upside_down).
+	        {AssetKind::Texture, "top_first.tga", top_first_tga()},
 	};
 }
 
@@ -1523,8 +1580,76 @@ void check_record_references(const DocumentType &type, const Fixture &fixture, D
 	}
 }
 
+// An image type over its file (S18, a texture): make gives a DocumentBase that holds an image and
+// neither records nor a text; the file loads unblocked and serializes the bytes it was read from (no
+// rewrite), parse, serialize, parse again the same bytes; its validate_file's findings on its file
+// alone, a second load validating to the same; a change of a kind the type did not make, or an edit
+// naming a record, refused (document.payload) with nothing committed; nothing changed since its load
+// (an empty change set of its own kind), another load's state not said; and a snapshot sharing its
+// identity, load and revision, serializing its bytes and refusing an edit, a save and a load.
+size_t g_image_files = 0;
+
+void check_image_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
+	std::unique_ptr<DocumentBase> made = type.make();
+	check(made && made->holds_image() && !records_of(*made) && !text_of(*made), fixture.name,
+	      "make gives a DocumentBase that holds an image, neither records nor a text");
+	if (!made || !made->holds_image()) return;
+	DocumentBase &document = *made;
+	Diagnostic error;
+	const bool loaded = document.load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
+	check(loaded && !document.blocked(), fixture.name + " (" + error.message + ")", "the file loads unblocked");
+	if (!loaded || document.blocked()) return;
+	++g_image_files;
+	const std::string stored(fixture.bytes.begin(), fixture.bytes.end());
+	const SerializeResult first = document.serialize();
+	check(first.ok() && first.text == stored && document.rewrite_need() == DocumentBase::RewriteNeed::None, fixture.name,
+	      "an image document serializes the bytes it was read from");
+	std::unique_ptr<DocumentBase> again = type.make();
+	check(again->load_bytes(text_bytes(first.text), fixture.name, fixture.kind, "jo", error) &&
+	              again->serialize().text == first.text,
+	      fixture.name, "parse, serialize, parse again serializes the same bytes");
+	check_validate_file(type, fixture, document, counts);
+	Edit apply;
+	apply.operation = EditOperation::Apply;
+	apply.payload = std::make_shared<ForeignPayload>();
+	Diagnostic refused;
+	++g_foreign;
+	check(!document.apply(apply, refused) && refused.code() == "document.payload" && document.revision() == 0 &&
+	              !document.dirty() && document.serialize().text == stored,
+	      fixture.name, "an Apply of a change the type did not make is refused (document.payload)");
+	Edit set;
+	set.address = {1, 0, 0};
+	set.field = "name";
+	refused = Diagnostic();
+	check(!document.apply(set, refused) && refused.code() == "document.payload" && document.revision() == 0, fixture.name,
+	      "an edit naming a record is refused (document.payload)");
+	ChangeSet since;
+	check(document.changes_since(document.load_generation(), document.revision(), since) &&
+	              std::get_if<RasterChanges>(&since) && std::get_if<RasterChanges>(&since)->regions.empty() &&
+	              !document.changes_since(document.load_generation() + 1, 0, since),
+	      fixture.name, "nothing changed since its load; another load's state is not said");
+	const std::unique_ptr<DocumentBase> snapshot = document.snapshot();
+	check(snapshot && snapshot->is_snapshot() && snapshot->identity() == document.identity() &&
+	              snapshot->load_generation() == document.load_generation() &&
+	              snapshot->revision() == document.revision() && snapshot->holds_image() &&
+	              snapshot->serialize().text == stored,
+	      fixture.name, "a snapshot shares the document's identity, load generation and revision, and its bytes");
+	refused = Diagnostic();
+	check(!snapshot->apply(apply, refused) && refused.code() == "document.snapshot", fixture.name,
+	      "a snapshot refuses an edit (document.snapshot)");
+	refused = Diagnostic();
+	check(!snapshot->save(refused) && refused.code() == "document.snapshot", fixture.name,
+	      "a snapshot refuses a save (document.snapshot)");
+	refused = Diagnostic();
+	check(!snapshot->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", refused) &&
+	              refused.code() == "document.snapshot",
+	      fixture.name, "a snapshot refuses a load (document.snapshot)");
+	++g_snapshots;
+}
+
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	if (document_content(type) == DocumentContent::Text) return check_text_fixture(type, fixture, counts);
+	if (document_content(type) == DocumentContent::Image) return check_image_fixture(type, fixture, counts);
 	std::unique_ptr<DocumentBase> made = type.make();
 	check(made && made->as_records() == made.get() && records_of(*made) == made->as_records(),
 	      fixture.name, "make gives a DocumentBase whose record document (as_records) is itself");
@@ -1599,8 +1724,8 @@ int main() {
 		// Per type: a validate_file that never took its own documents (its cast to another type)
 		// would make nothing over its files. The text type makes none (S13 D9: its files are read
 		// through readers the editor does not model), its table empty.
-		const bool text_type = type->id == DocumentTypeId::Text;
-		check(counts.findings > 0 || (text_type && type->findings().count == 0), type->name,
+		const bool silent_type = type->id == DocumentTypeId::Text;
+		check(counts.findings > 0 || (silent_type && type->findings().count == 0), type->name,
 		      "validate_file makes a finding over the type's files");
 		// Likewise a project check that never read its type's files would keep the clause above
 		// over no findings.
@@ -1611,8 +1736,9 @@ int main() {
 			if (std::string(pin.type) == type->name) pinned = pin;
 		check(counts.optional == pinned.optional && counts.presences == pinned.presences, type->name,
 		      "a type's optional fields asked and left out and written again are the ones pinned");
-		check(fixed_text(*type) || document_content(*type) == DocumentContent::Text || counts.grown > 0, type->name,
-		      "a longer text grows a row of the type");
+		check(fixed_text(*type) || document_content(*type) == DocumentContent::Text ||
+		              document_content(*type) == DocumentContent::Image || counts.grown > 0,
+		      type->name, "a longer text grows a row of the type");
 		// S13 D8: a type whose schema names a Record reference renumbers one over its files.
 		check(!counts.declares_records || counts.records > 0, type->name,
 		      "a type whose records name others of their file by index keeps them named across an Add");
@@ -1633,6 +1759,8 @@ int main() {
 	check(g_grown > 0, "the files", "a longer text grows its row's footprint");
 	check(g_record_moves > 0 && g_named_removes_refused > 0, "the files",
 	      "a collection other records name by index is renumbered, and a record named is never removed");
+	check(g_image_files > 0, "the files", "an image type's file keeps the contract");
+	std::printf("  %zu image documents' files\n", g_image_files);
 	if (g_failures == 0)
 		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
 		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "

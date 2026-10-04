@@ -54,6 +54,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::Credits, "credits", "Credits" },
 	{ G::Shaders, "shader", "Shaders" },
 	{ G::Missions, "mission", "Missions" },
+	{ G::Textures, "texture", "Textures" },
 };
 
 constexpr bool groups_well_formed() {
@@ -112,6 +113,8 @@ const char *finding_fix_token(FindingFix fixes) {
 	case F::Reload: return "reload";
 	case F::Reimport: return "reimport";
 	case F::Rewrite: return "rewrite";
+	case F::TextureRows: return "texture_rows";
+	case F::ImportFitsUse: return "import_fits_use";
 	}
 	return "none";
 }
