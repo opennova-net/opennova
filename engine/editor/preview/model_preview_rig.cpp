@@ -1,13 +1,16 @@
 #include <editor/preview/model_preview_rig.h>
 
 #include <algorithm>
+#include <cstdio>
 
 #include <base/io/strutil.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/animation_slots.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/preview/viewport_follow.h>
 #include <formats/adm/adm.h>
+#include <runtime/anim/anim_event_bits.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/world/entity_pose.h>
 
@@ -70,17 +73,25 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 	}
 	if (rig.table.empty()) return rig;
 	for (const GraphEdge *edge : graph.referrers_of_file(path_of(rig.table))) {
-		if (edge->kind != ReferenceKind::AnimationMap || edge->field != "anim_def") continue;
-		for (const GraphEdge *graphic : graph.references_of(edge->source)) {
-			if (graphic->record != edge->record || graphic->kind != ReferenceKind::Model) continue;
-			const std::string model = model_file(scan, graphic->target);
-			if (model.empty()) continue;
-			rig.model = model;
-			rig.source = file_of(edge->source) + ": " + edge->record;
-			return rig;
-		}
+		if (edge->kind != ReferenceKind::AnimationMap) continue;
+		const std::vector<GraphEdge const *> record_edges = graph.references_of(edge->source);
+		for (const char *field : preview_model_fields(edge->field))
+			for (const GraphEdge *graphic : record_edges) {
+				if (graphic->record != edge->record || graphic->kind != ReferenceKind::Model || graphic->field != field) continue;
+				const std::string model = model_file(scan, graphic->target);
+				if (model.empty()) continue;
+				rig.model = model;
+				rig.source = file_of(edge->source) + ": " + edge->record;
+				return rig;
+			}
 	}
 	return rig;
+}
+
+std::vector<const char *> preview_model_fields(const std::string &map_field) {
+	if (map_field == "anim_def") return {"graphic", "graphic_enemy"};
+	if (map_field == "animadm") return {"gfx1"};
+	return {};
 }
 
 std::shared_ptr<const anim::SkeletalClips> load_preview_rig(const PreviewRig &rig, const threedi::Threedi3di3 &model,
@@ -96,10 +107,9 @@ std::shared_ptr<const anim::SkeletalClips> load_preview_rig(const PreviewRig &ri
 	return loaded ? clips : nullptr;
 }
 
-bool preview_clip_of(const Document &document, const NodeAddress &selection, const PreviewRig &rig,
-                     const anim::SkeletalClips &clips, std::string &key, int &variant) {
-	key.clear();
-	variant = 0;
+PreviewClipChoice preview_clip_choice(const Document &document, const NodeAddress &selection, const PreviewRig &rig,
+                                      const anim::SkeletalClips &clips) {
+	PreviewClipChoice out;
 	// A table's row and clip are the entry and token the rig's loader registered them
 	// from (it reads this document's rows, unsaved ones included, as the table's file; a
 	// table that cannot be written is not previewed at all): the selected clip, else the
@@ -107,27 +117,150 @@ bool preview_clip_of(const Document &document, const NodeAddress &selection, con
 	if (const auto *table = dynamic_cast<const AnimationMapDocument *>(&document)) {
 		const auto &rows = table->rows();
 		const auto row = std::find_if(rows.begin(), rows.end(), [&](const auto &r) { return r && r->id == selection.row; });
-		if (row == rows.end()) return false;
+		if (row == rows.end()) return out;
+		const auto &map_row = static_cast<const AnimationMapRow &>(**row);
+		const int slot = animation_key_slot(map_row.key);
+		if (slot < 0) {
+			out.note = "'" + map_row.key + "' names none of the game's slots: the game skips this row.";
+			return out;
+		}
+		const std::string words = animation_slot_words(slot);
 		const size_t entry = size_t(row - rows.begin());
 		const std::vector<NodeId> &tokens = (*row)->collections[0];
+		// What a token registered: its own file, failsafe.bad in its place, or nothing.
+		const auto registered = [&](size_t token, std::string &key) {
+			const int variant = clips.variant_of(entry, token, key);
+			if (variant < 0) return variant;
+			const anim::SkeletalClips::ClipSource *source = clips.find_clip_source(key, variant);
+			if (source && token < map_row.clips.size() && !same_clip(source->file, map_row.clips[token]))
+				out.note = map_row.clips[token] + " is not in the project: the game plays " + source->file + " in its place.";
+			return variant;
+		};
 		const auto chosen = selection.child ? std::find(tokens.begin(), tokens.end(), selection.child) : tokens.end();
 		if (chosen != tokens.end()) {
-			variant = clips.variant_of(entry, size_t(chosen - tokens.begin()), key);
-			return variant >= 0;
+			const size_t token = size_t(chosen - tokens.begin());
+			if ((out.variant = registered(token, out.key)) >= 0) return out;
+			out.key.clear();
+			if (token < map_row.clips.size())
+				out.note = (map_row.clips[token].empty() ? std::string("This clip names no file")
+				                                         : map_row.clips[token] + " is not in the project") +
+				           ": the game leaves it out of " + words + "'s clips.";
 		}
-		for (size_t token = 0; token < tokens.size(); ++token)
-			if ((variant = clips.variant_of(entry, token, key)) >= 0) return true;
-		variant = 0;
-		return false;
+		for (size_t token = 0; token < tokens.size(); ++token) {
+			std::string key;
+			const int variant = registered(token, key);
+			if (variant < 0) continue;
+			out.key = key;
+			out.variant = variant;
+			if (chosen != tokens.end()) out.note += " " + words + " plays " + map_row.clips[token] + " here.";
+			return out;
+		}
+		// No token of the row registered: the slot is unauthored (unless another row names it), and an
+		// unauthored slot serves the reset row's first clip, which the body plays only where the slot's
+		// selector does not test for its clip (animation_slot_absence).
+		out.variant = 0;
+		const std::string slot_key = adm::adm_slot_key(map_row.key);
+		if (slot != 0 && clips.has_clip(slot_key)) {
+			out.key = slot_key;
+			out.note = words + " has no clip the game loads on this row: it plays the clips another row gives the slot.";
+		} else if (slot != 0 && clips.has_clip("anim_reset")) {
+			out.key = "anim_reset";
+			const anim::SkeletalClips::ClipSource *reset = clips.find_clip_source(out.key, 0);
+			const std::string clip = "the reset clip" + (reset ? ", " + reset->file + "," : std::string());
+			const std::string why = words + " has no clip the game loads (" +
+			                        (map_row.clips.empty() ? std::string("the row names none")
+			                                               : "none of its files is in the project") + "): ";
+			switch (animation_slot_absence(slot)) {
+			case AnimSlotAbsence::PlaysReset:
+				out.note = why + "the game plays " + clip + " in its place.";
+				break;
+			case AnimSlotAbsence::NotPicked: {
+				const std::string instead = animation_slot_instead(slot);
+				out.note = why + "the game never picks " + words + " then" +
+				           (instead.empty() ? std::string() : " (" + instead + ")") + ". The slot serves " + clip +
+				           " shown here; a mission's forced animation of it plays that.";
+				break;
+			}
+			case AnimSlotAbsence::Untraced:
+				out.note = why + "the slot serves " + clip + " shown here; whether the game picks the slot then is not traced.";
+				break;
+			}
+		}
+		return out;
 	}
 	// A clip plays as the first token that registered its file.
-	if (!dynamic_cast<const AnimationDocument *>(&document)) return false;
+	if (!dynamic_cast<const AnimationDocument *>(&document)) return out;
 	for (const anim::SkeletalClips::LoadedClip &loaded : clips.clips())
 		if (same_clip(loaded.source.file, rig.clip)) {
-			variant = clips.variant_of(loaded.source.entry, loaded.source.token, key);
-			return true;
+			out.variant = clips.variant_of(loaded.source.entry, loaded.source.token, out.key);
+			if (out.variant < 0) out.key.clear();
+			return out;
 		}
-	return false;
+	return out;
+}
+
+std::string preview_joint_name(size_t bone, const std::string &clip_name) {
+	char word[8];
+	std::snprintf(word, sizeof(word), "BN%02u", unsigned(bone + 1));
+	// SkeletalClips names a model-table bone past the bind clip's records MDL<i> (its own rule, no
+	// name the clip gives): the part's name alone then.
+	const bool made = clip_name.size() > 3 && clip_name.compare(0, 3, "MDL") == 0 &&
+	                  clip_name.find_first_not_of("0123456789", 3) == std::string::npos;
+	if (clip_name.empty() || made) return word;
+	if (strutil::starts_with_icase(clip_name, word)) return clip_name;
+	return std::string(word) + " " + clip_name;
+}
+
+std::vector<PreviewJoint> preview_posed_joints(const anim::SkeletalClips &rig, const std::string &key, int variant,
+                                               int32_t ticks) {
+	std::vector<PreviewJoint> out;
+	if (!rig.loaded() || !rig.fk_valid() || key.empty() || !rig.find_clip_variant(key, variant)) return out;
+	std::vector<anim::PoseBone> pose;
+	rig.eval_pose(key, rig.clip_seconds_at_tick(key, ticks, variant), variant, pose);
+	const std::vector<int> &parents = rig.parents();
+	const auto &rest_inverse = rig.rest_global_inverse();
+	const size_t count = std::min({pose.size(), parents.size(), rest_inverse.size()});
+	// The parent-local FK the skin poses by: each bone's global on its parent's (the parents come
+	// first, fk_valid), its deform the global over the rest global's inverse (the matrices
+	// world::EntityPoseProvider::build_skeletal composes, before the render-frame swizzle).
+	std::vector<anim::SkeletalClips::RestTransform> global(count);
+	out.reserve(count);
+	for (size_t i = 0; i < count; ++i) {
+		anim::SkeletalClips::RestTransform local;
+		anim::quat_to_mat3_rows(pose[i].rotation, local.rows);
+		local.origin = pose[i].origin;
+		const int parent = parents[i];
+		global[i] = parent >= 0 && size_t(parent) < i ? anim::rest_mul(global[size_t(parent)], local) : local;
+		PreviewJoint joint;
+		joint.bone = int(i);
+		joint.parent = parent >= 0 && size_t(parent) < i ? parent : -1;
+		joint.name = preview_joint_name(i, i < rig.bones().size() ? rig.bones()[i].name : std::string());
+		joint.at = PreviewVec3{global[i].origin.x, global[i].origin.y, global[i].origin.z};
+		joint.deform = anim::rest_mul(global[i], rest_inverse[i]);
+		out.push_back(std::move(joint));
+	}
+	return out;
+}
+
+PreviewVec3 preview_joint_carry(const PreviewJoint &joint, const PreviewVec3 &point, bool direction) {
+	const float *r = joint.deform.rows;
+	const float in[3] = {point.x, point.y, point.z};
+	float o[3];
+	for (int row = 0; row < 3; ++row) o[row] = r[row * 3] * in[0] + r[row * 3 + 1] * in[1] + r[row * 3 + 2] * in[2];
+	if (!direction) {
+		o[0] += joint.deform.origin.x;
+		o[1] += joint.deform.origin.y;
+		o[2] += joint.deform.origin.z;
+	}
+	return PreviewVec3{o[0], o[1], o[2]};
+}
+
+const char *preview_event_letter(uint32_t trigger) {
+	if (trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary | anim::kAnimEventFireMarker3)) return "F";
+	if (trigger & anim::kAnimEventFootLeft) return "L";
+	if (trigger & anim::kAnimEventFootRight) return "R";
+	constexpr uint32_t kFoley = ((anim::kAnimEventFoley1 << anim::kAnimEventFoleyCount) - 1) & ~(anim::kAnimEventFoley1 - 1);
+	return trigger & kFoley ? "S" : "";
 }
 
 std::vector<PreviewClipEvent> preview_clip_events(const anim::SkeletalClips &rig, const std::string &key, int variant,

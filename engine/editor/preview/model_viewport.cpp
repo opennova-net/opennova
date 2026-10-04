@@ -7,15 +7,18 @@
 
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/threedi/threedi_panm_pose.h>
 
 namespace opennova::editor {
 
@@ -80,6 +83,13 @@ std::string file_of(const std::string &path) {
 	return path.substr(path.find_last_of("/\\") + 1);
 }
 
+// A colour on the wire: "RRGGBB".
+std::string rgb_hex(uint32_t rgb) {
+	char color[8];
+	std::snprintf(color, sizeof(color), "%06X", rgb & 0xFFFFFFu);
+	return color;
+}
+
 // The options an `options` member sets over `held`: {lod ("auto" or a level 0..255), ctrl
 // ({register: number}, the registers held, a 0 not held), overlays ({user_points, lights, pivots}
 // booleans), rig_model (a model's file name, "" the paired one)}, each optional, a number's fraction
@@ -118,8 +128,12 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 				if (number != 0) options.ctrl[register_held.key] = number;
 			}
 		} else if (key == "overlays") {
+			// The markers, and the collision layers by their tokens (preview/model_collision).
+			std::string tokens = "user_points, lights, pivots";
+			for (size_t l = 0; l < size_t(ModelCollisionLayer::kCount); ++l)
+				tokens += std::string(", ") + model_collision_layer(ModelCollisionLayer(l)).token;
 			if (!value.is_object()) {
-				error = "options.overlays is an object {user_points, lights, pivots}.";
+				error = "options.overlays is an object {" + tokens + "}.";
 				return false;
 			}
 			for (const io::JsonMember &mark : value.object) {
@@ -127,11 +141,18 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 					error = "options.overlays." + mark.key + " is true or false.";
 					return false;
 				}
+				bool layer = false;
+				for (size_t l = 0; l < size_t(ModelCollisionLayer::kCount) && !layer; ++l)
+					if (mark.key == model_collision_layer(ModelCollisionLayer(l)).token) {
+						model_collision_layer_set(options.overlays, ModelCollisionLayer(l), mark.value.boolean);
+						layer = true;
+					}
+				if (layer) continue;
 				if (mark.key == "user_points") options.overlays.user_points = mark.value.boolean;
 				else if (mark.key == "lights") options.overlays.lights = mark.value.boolean;
 				else if (mark.key == "pivots") options.overlays.pivots = mark.value.boolean;
 				else {
-					error = "Unknown overlay \"" + mark.key + "\" (user_points, lights, pivots).";
+					error = "Unknown overlay \"" + mark.key + "\" (" + tokens + ").";
 					return false;
 				}
 			}
@@ -141,8 +162,14 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 				return false;
 			}
 			options.rig_model = value.string;
+		} else if (key == "repeat" || key == "bones") {
+			if (!value.is_bool()) {
+				error = "options." + key + " is true or false.";
+				return false;
+			}
+			(key == "repeat" ? options.repeat : options.bones) = value.boolean;
 		} else {
-			error = "Unknown model option \"" + key + "\" (it takes lod, ctrl, overlays, rig_model).";
+			error = "Unknown model option \"" + key + "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones).";
 			return false;
 		}
 	}
@@ -207,6 +234,7 @@ const char *model_view_status_token(ModelViewStatus status) {
 	case ModelViewStatus::Unserializable: return "unserializable";
 	case ModelViewStatus::Unreadable: return "unreadable";
 	case ModelViewStatus::NoRig: return "no_rig";
+	case ModelViewStatus::Reading: return "reading";
 	case ModelViewStatus::Ready: return "ready";
 	}
 	return "no_project";
@@ -223,6 +251,10 @@ std::string model_view_status_message(ModelViewStatus status, const std::string 
 	case ModelViewStatus::NoRig:
 		return "No item pairs " + (detail.empty() ? std::string("this animation") : detail) +
 		       " with a model: choose the model it plays on.";
+	case ModelViewStatus::Reading:
+		return "Reading the project's references: the model " +
+		       (detail.empty() ? std::string("this animation") : detail) +
+		       " plays on shows when they are read, or choose it.";
 	case ModelViewStatus::Ready: return std::string();
 	}
 	return std::string();
@@ -247,8 +279,13 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 	marks.set("user_points", JsonValue::make_bool(held.overlays.user_points));
 	marks.set("lights", JsonValue::make_bool(held.overlays.lights));
 	marks.set("pivots", JsonValue::make_bool(held.overlays.pivots));
+	for (size_t l = 0; l < size_t(ModelCollisionLayer::kCount); ++l)
+		marks.set(model_collision_layer(ModelCollisionLayer(l)).token,
+		          JsonValue::make_bool(model_collision_layer_on(held.overlays, ModelCollisionLayer(l))));
 	options.set("overlays", std::move(marks));
 	options.set("rig_model", json_string(held.rig_model));
+	options.set("repeat", JsonValue::make_bool(held.repeat));
+	options.set("bones", JsonValue::make_bool(held.bones));
 	return options;
 }
 
@@ -293,7 +330,77 @@ std::vector<ModelOverlay> ModelViewport::overlays(const PreviewClock &clock) con
 	if (!model_) return {};
 	int32_t bus[96];
 	model_preview_ctrl_bus(options_.ctrl, bus);
-	return model_overlays(*model_, lod(), clock.ms(), bus, options_.overlays);
+	std::vector<ModelOverlay> out = model_overlays(*model_, lod(), clock.ms(), bus, options_.overlays);
+	// A clip playing (S17): a user point on a bone rides it as the skin carries the mesh there, as
+	// the game's attachment resolve poses a point on its bone [orig: Entity_GetAttachmentWorldPosition
+	// @ 0x4B2670, as world::EntityPoseProvider ports it].
+	if (!animating_ || !skeleton_ || clip_key_.empty() || !options_.overlays.user_points) return out;
+	const std::vector<PreviewJoint> posed = joints(clock);
+	for (ModelOverlay &overlay : out) {
+		if (overlay.kind != ModelOverlayKind::UserPoint || overlay.index < 0 ||
+				size_t(overlay.index) >= model_->user_point_count)
+			continue;
+		const int bone = model_->user_points[overlay.index].subobject_index;
+		if (bone < 0 || size_t(bone) >= posed.size()) continue;
+		overlay.at = preview_joint_carry(posed[size_t(bone)], overlay.at);
+		if (overlay.has_direction) {
+			const PreviewVec3 axis = preview_joint_carry(posed[size_t(bone)], overlay.direction, true);
+			const float length = std::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+			if (length > 0.0f) overlay.direction = PreviewVec3{axis.x / length, axis.y / length, axis.z / length};
+		}
+		overlay.part = bone;
+	}
+	return out;
+}
+
+ModelCollisionShapesPtr ModelViewport::collision(const PreviewClock &clock, ModelCollisionPick also) const {
+	static const ModelCollisionShapesPtr none = std::make_shared<const std::vector<ModelCollisionShape>>();
+	if (!model_ || animating_) return none;
+	const int level = lod();
+	// The clock matters only while a part the shapes ride animates (LOD 0's for the collision, the drawn
+	// level's for the part spheres).
+	const bool live = threedi::threedi_panm_lod_has_live(*model_, 0) ||
+	                  (options_.overlays.part_spheres && level >= 0 && threedi::threedi_panm_lod_has_live(*model_, level));
+	const uint32_t time_ms = live ? clock.ms() : 0;
+	CollisionCache &cache = collision_cache_;
+	if (cache.shapes && cache.model == model_.get() && cache.lod == level && cache.overlays == options_.overlays &&
+	    cache.ctrl == options_.ctrl && cache.also == also && cache.time_ms == time_ms)
+		return cache.shapes;
+	int32_t bus[96];
+	model_preview_ctrl_bus(options_.ctrl, bus);
+	cache.shapes = std::make_shared<const std::vector<ModelCollisionShape>>(
+			model_collision_shapes(model_, level, time_ms, bus, options_.overlays, also));
+	cache.model = model_.get();
+	cache.lod = level;
+	cache.overlays = options_.overlays;
+	cache.ctrl = options_.ctrl;
+	cache.also = also;
+	cache.time_ms = time_ms;
+	++cache.builds;
+	return cache.shapes;
+}
+
+std::vector<NodeId> ModelViewport::frame_ids(const ViewportContext &context) const {
+	const ViewportInput &input = context.input;
+	const auto *document = dynamic_cast<const ModelDocument *>(input.document ? records_of(*input.document) : nullptr);
+	const NodeAddress &selected = input.view.documents.selection.primary;
+	if (!document || input.view.documents.active != path() || !selected.child) return {};
+	ModelOverlayKind kind;
+	int index = -1;
+	if (model_overlay_of(*document, selected, kind, index)) return {selected.child};
+	ModelCollisionPick picked;
+	if (!model_collision_of(*document, selected, picked)) return {};
+	for (const ModelCollisionShape &shape : *collision(input.clock, picked))
+		if (shape.kind == picked.kind && shape.index == picked.index) return {selected.child};
+	return {};
+}
+
+ModelCollisionPick ModelViewport::selected_collision(const ViewportInput &input) const {
+	ModelCollisionPick picked;
+	const auto *document = dynamic_cast<const ModelDocument *>(input.document ? records_of(*input.document) : nullptr);
+	if (document && current(input) && input.view.documents.active == document->path())
+		model_collision_of(*document, input.view.documents.selection.primary, picked);
+	return picked;
 }
 
 PreviewVec3 ModelViewport::axis_tip(const ModelOverlay &overlay) const {
@@ -374,10 +481,50 @@ int32_t ModelViewport::tick_of_frame(int frame) const {
 	return size_t(frame) < ticks.size() ? ticks[size_t(frame)] : -1;
 }
 
+uint32_t ModelViewport::clip_frame_count() const {
+	const anim::SkeletalClips::LoadedClip *clip =
+			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
+	return clip ? clip->clip.frame_count : 0u;
+}
+
+uint32_t ModelViewport::clip_fps() const {
+	const anim::SkeletalClips::LoadedClip *clip =
+			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
+	return clip ? clip->clip.fps : 0u;
+}
+
+int32_t ModelViewport::clip_ticks(const PreviewClock &clock) const {
+	const int32_t ticks = clock.ticks();
+	const int32_t length = clip_length_ticks();
+	if (!options_.repeat || length <= 0 || clip_loops()) return ticks;
+	return ticks % (length + kClipRepeatHoldTicks);
+}
+
 double ModelViewport::clip_frame(const PreviewClock &clock) const {
 	const anim::SkeletalClips::LoadedClip *clip =
 			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
-	return clip ? clip->clip.playback().frame_at(clock.ticks()) : 0.0;
+	return clip ? clip->clip.playback().frame_at(clip_ticks(clock)) : 0.0;
+}
+
+int32_t ModelViewport::tick_of_step(int32_t ticks, int by) const {
+	const anim::SkeletalClips::LoadedClip *clip =
+			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
+	if (!clip || by == 0) return ticks;
+	const anim::ClipTimeline &timeline = clip->clip.playback();
+	const std::vector<int32_t> first = timeline.first_ticks();
+	const int32_t length = timeline.length_ticks();
+	// The frame shown, within one pass of the clip.
+	const int32_t within = length > 0 && clip->clip.loops() ? ticks % length : std::min(ticks, std::max(length, 0));
+	const int frame = int(timeline.frame_index_at(within));
+	// The next frame along that the clock runs on (a fast clip's clock steps over some).
+	for (int f = frame + (by > 0 ? 1 : -1); f >= 0 && size_t(f) < first.size(); f += by > 0 ? 1 : -1)
+		if (first[size_t(f)] >= 0) return first[size_t(f)];
+	return by > 0 ? within : 0;
+}
+
+std::vector<PreviewJoint> ModelViewport::joints(const PreviewClock &clock) const {
+	if (!animating_ || !skeleton_ || clip_key_.empty()) return {};
+	return preview_posed_joints(*skeleton_, clip_key_, clip_variant_, clip_ticks(clock));
 }
 
 ViewportAction ModelViewport::stop_(ModelViewStatus reason, const std::string &detail, bool failed) {
@@ -406,6 +553,7 @@ void ModelViewport::reset_animation_() {
 	clip_file_.clear();
 	clip_variant_ = 0;
 	clip_events_.clear();
+	clip_note_.clear();
 }
 
 ViewportAction ModelViewport::follow_(const ViewportInput &input, PreviewClock &clock) {
@@ -546,6 +694,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_file_.clear();
 		clip_variant_ = 0;
 		clip_events_.clear();
+		clip_note_.clear();
 		return stop_(ModelViewStatus::Unserializable, unwritable_, true);
 	}
 	const std::string file = file_of(document.path());
@@ -560,7 +709,10 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		skeleton_.reset();
 		clip_key_.clear();
 		clip_events_.clear();
-		return stop_(ModelViewStatus::NoRig, file, false);
+		clip_note_.clear();
+		// Until the first validation has read the project's references, the pairing item may not be read
+		// yet: said so, not that none pairs it (a validation after an edit reads with the graph built).
+		return stop_(!view.activity.validation.read ? ModelViewStatus::Reading : ModelViewStatus::NoRig, file, false);
 	}
 	const FileSource &files = *view.findings.assets;
 	const uint64_t generation = view.findings.assets->generation();
@@ -600,12 +752,17 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		++skeleton_serial_;
 	}
 	rig_ = rig;
-	// The clip the selection plays (the selection is the active document's).
+	// The clip the selection plays (the selection is the active document's), or what the game plays
+	// in its place, with why.
 	std::string key = clip_key_;
 	int variant = clip_variant_;
-	if (view.documents.active == document.path() &&
-			(!skeleton_ || !preview_clip_of(document, view.documents.selection.primary, rig_, *skeleton_, key, variant)))
-		key.clear();
+	if (view.documents.active == document.path()) {
+		PreviewClipChoice choice;
+		if (skeleton_) choice = preview_clip_choice(document, view.documents.selection.primary, rig_, *skeleton_);
+		key = choice.key;
+		variant = choice.variant;
+		clip_note_ = choice.note;
+	}
 	if (key != clip_key_ || variant != clip_variant_ || rig_moved || document_moved) {
 		if (key != clip_key_ || variant != clip_variant_) clock.seek_ticks(0);
 		clip_key_ = key;
@@ -655,7 +812,20 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 }
 
 bool ModelViewport::takes_(const std::string &member) const {
-	return member == "options" || member == "camera";
+	return member == "options" || member == "camera" || member == "frame";
+}
+
+int32_t ModelViewport::tick_of_frame_shown(int frame) const {
+	const anim::SkeletalClips::LoadedClip *clip =
+			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
+	if (!clip || frame < 0) return -1;
+	const std::vector<int32_t> first = clip->clip.playback().first_ticks();
+	for (size_t f = size_t(frame); f < first.size(); ++f)
+		if (first[f] >= 0) return first[f];
+	// Past the last frame the clock runs on: a one-shot holds its end, a loop its last frame shown.
+	for (size_t f = std::min(size_t(frame), first.size()); f-- > 0;)
+		if (first[f] >= 0) return clip->clip.loops() ? first[f] : clip->clip.playback().length_ticks();
+	return -1;
 }
 
 bool ModelViewport::check_(const io::JsonValue &json, std::string &error) const {
@@ -666,10 +836,30 @@ bool ModelViewport::check_(const io::JsonValue &json, std::string &error) const 
 	bool frame = false;
 	if (const JsonValue *member = json.get("camera"); member && !read_camera(*member, camera, frame, error))
 		return false;
+	// A clip's frame (S17): the clock held on the first tick the clip shows it, the wire's form of a
+	// scrub or a step of the timeline.
+	if (const JsonValue *member = json.get("frame")) {
+		int64_t number = 0;
+		if (!json_whole_in(*member, 0.0, 1000000.0, number)) {
+			error = "frame is a clip's frame, a whole number from 0.";
+			return false;
+		}
+		if (clip_key_.empty() || tick_of_frame_shown(int(number)) < 0) {
+			error = "frame: no clip plays in this viewport.";
+			return false;
+		}
+	}
 	return true;
 }
 
-void ModelViewport::apply_(const io::JsonValue &json, PreviewClock &) {
+void ModelViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
+	if (const JsonValue *member = json.get("frame")) {
+		int64_t number = 0;
+		if (json_whole_in(*member, 0.0, 1000000.0, number)) {
+			clock.seek_ticks(tick_of_frame_shown(int(number)));
+			clock.set_playing(false);
+		}
+	}
 	std::string error;
 	ModelViewportOptions options = options_;
 	if (const JsonValue *member = json.get("options"); member && read_options(*member, options, error) &&
@@ -701,7 +891,29 @@ ModelCanvasFrame ModelViewport::canvas_frame(const ViewportContext &context) con
 	frame.document = dynamic_cast<const ModelDocument *>(input.document ? records_of(*input.document) : nullptr);
 	frame.current = frame.document && current(input);
 	frame.overlays = overlays(input.clock);
-	if (!frame.current || input.view.documents.active != frame.document->path()) return frame;
+	// A clip playing (S17): its bones, and the clip's document while it is the active one (a joint's
+	// bone is its bone record of that index), its selected bone ringed.
+	if (animating_ && options_.bones) {
+		frame.joints = joints(input.clock);
+		const auto *clip = dynamic_cast<const AnimationDocument *>(input.document ? records_of(*input.document) : nullptr);
+		if (clip && input.view.documents.active == clip->path() && clip->clip()) {
+			frame.clip_document = clip;
+			const NodeAddress &primary = input.view.documents.selection.primary;
+			const std::vector<NodeId> &bones = clip->clip()->collections[0];
+			const auto found = primary.kind == node_kind(AnimationKind::Bone)
+			                           ? std::find(bones.begin(), bones.end(), primary.child)
+			                           : bones.end();
+			if (found != bones.end()) frame.selected_bone = int(found - bones.begin());
+		}
+	}
+	// The collision shown (S17), and the selected record's shape whatever its layer.
+	const bool active = frame.current && input.view.documents.active == frame.document->path();
+	const ModelCollisionPick picked = selected_collision(input);
+	frame.collision = collision(input.clock, picked);
+	for (size_t i = 0; picked.valid() && i < frame.collision->size(); ++i)
+		if ((*frame.collision)[i].kind == picked.kind && (*frame.collision)[i].index == picked.index)
+			frame.selected_collision = int(i);
+	if (!active) return frame;
 	const Selection &selection = input.view.documents.selection;
 	model_overlay_of(*frame.document, selection.primary, frame.selected_kind, frame.selected);
 	// The other selected records' markers (a place's drag moves them as far).
@@ -721,7 +933,21 @@ ViewportHit ModelViewport::hit(const ViewportContext &context, float x, float y)
 	if (status() != ViewportStatus::Ready || !model_) return out;
 	const std::vector<ModelOverlay> marks = overlays(context.input.clock);
 	out.index = pick_model_overlay(marks, camera_, context.width, context.height, x, y);
-	if (out.index < 0) return out;
+	if (out.index < 0) {
+		// No marker there: the collision shape the pixel is on (S17), the picture's own (the selected
+		// record's shape among them whatever its layer).
+		const ModelCollisionShapesPtr shapes = collision(context.input.clock, selected_collision(context.input));
+		const int at = pick_model_collision(*shapes, camera_, context.width, context.height, x, y);
+		if (at < 0) return out;
+		const ModelCollisionShape &shape = (*shapes)[size_t(at)];
+		const auto *document = dynamic_cast<const ModelDocument *>(
+				context.input.document ? records_of(*context.input.document) : nullptr);
+		out.index = shape.index;
+		out.id = document && out.current ? model_collision_record(*document, shape).child : 0;
+		out.name = shape.name;
+		out.kind = model_collision_kind_token(shape.kind);
+		return out;
+	}
 	const ModelOverlay &hit = marks[size_t(out.index)];
 	out.index = hit.index;
 	out.id = record_of(context.input, hit).child;
@@ -862,7 +1088,20 @@ bool ModelViewport::command(const ViewportContext &context, const std::string &n
 						model_camera_change(framed_on(overlay, context.width, context.height))));
 				return true;
 			}
-	error = "Record " + std::to_string(ids.front()) + " is no marker the viewport shows.";
+	// A collision record (S17): the camera on its shape, whatever its layer.
+	ModelCollisionPick picked;
+	if (document && model_collision_of(*document, document->address_of(ids.front()), picked))
+		for (const ModelCollisionShape &shape : *collision(context.input.clock, picked))
+			if (shape.kind == picked.kind && shape.index == picked.index) {
+				PreviewVec3 center;
+				float radius = 0.0f;
+				model_collision_bounds(shape, center, radius);
+				OrbitCamera camera = camera_;
+				camera.frame(center, radius, context.width, context.height);
+				out.request(request::set_viewport(path(), model_camera_change(camera)));
+				return true;
+			}
+	error = "Record " + std::to_string(ids.front()) + " is no marker or collision shape the viewport shows.";
 	return false;
 }
 
@@ -901,6 +1140,31 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		sphere.set("center", vec3(center));
 		sphere.set("radius", json_number(radius));
 		body.set("sphere", std::move(sphere));
+		// The collision layers (S17): each with its words, colour, count and whether it is shown, and the
+		// legend of what is drawn.
+		JsonValue layers = JsonValue::make_array();
+		for (size_t l = 0; l < size_t(ModelCollisionLayer::kCount); ++l) {
+			const ModelCollisionLayerRow &layer = model_collision_layer(ModelCollisionLayer(l));
+			JsonValue row = JsonValue::make_object();
+			row.set("token", json_string(layer.token));
+			row.set("label", json_string(layer.label));
+			row.set("words", json_string(layer.words));
+			row.set("color", json_string(rgb_hex(layer.rgb)));
+			row.set("count", json_number(double(model_collision_layer_count(shown, ModelCollisionLayer(l), lod()))));
+			row.set("shown", JsonValue::make_bool(model_collision_layer_on(options_.overlays, ModelCollisionLayer(l))));
+			layers.push(std::move(row));
+		}
+		JsonValue legend = JsonValue::make_array();
+		for (const ModelCollisionLegendRow &entry : model_collision_legend(*collision(input.clock, selected_collision(input)))) {
+			JsonValue row = JsonValue::make_object();
+			row.set("color", json_string(rgb_hex(entry.rgb)));
+			row.set("words", json_string(entry.words));
+			legend.push(std::move(row));
+		}
+		JsonValue collision_json = JsonValue::make_object();
+		collision_json.set("layers", std::move(layers));
+		collision_json.set("legend", std::move(legend));
+		body.set("collision", std::move(collision_json));
 		for (uint32_t i = 0; i < shown.ctrl.count; ++i) {
 			const std::string name = strutil::fixed_string(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
 			JsonValue row = JsonValue::make_object();
@@ -912,8 +1176,22 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	}
 	body.set("lod", std::move(lod_json));
 	body.set("registers", std::move(registers));
+	const AssetGraph *graph = input.view.findings.graph.get();
+	const AssetScan *scan = input.view.project.scan.get();
 	if (!animating_) {
 		body.set("animation", JsonValue::make_null());
+		// The maps this model plays (S17): each record pairing it with one (preview_model_fields), and how.
+		JsonValue maps = JsonValue::make_array();
+		if (graph && scan && input.document)
+			for (const ModelAnimation &played : model_animations(*graph, *scan, input.document->path())) {
+				JsonValue row = JsonValue::make_object();
+				row.set("map", json_string(played.map));
+				row.set("record", json_string(played.record));
+				row.set("file", json_string(played.file));
+				row.set("via", json_string(played.via));
+				maps.push(std::move(row));
+			}
+		body.set("animations", std::move(maps));
 		return body;
 	}
 	JsonValue animation = JsonValue::make_object();
@@ -925,19 +1203,85 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	animation.set("key", json_string(clip_key_));
 	animation.set("variant", json_number(clip_variant_));
 	animation.set("file", json_string(clip_file_));
+	animation.set("note", json_string(clip_note_));
 	animation.set("ticks", json_number(input.clock.ticks()));
+	// The clip's own clock (S17): the tick it plays (a repeated one-shot's taken again from 0), its
+	// frame, and both in seconds as the game's ticks pass.
+	const int32_t played = clip_ticks(input.clock);
+	const int32_t length = clip_length_ticks();
+	animation.set("clip_ticks", json_number(played));
 	animation.set("frame", json_number(clip_frame(input.clock)));
-	animation.set("length_ticks", json_number(clip_length_ticks()));
+	animation.set("frame_count", json_number(clip_frame_count()));
+	animation.set("fps", json_number(clip_fps()));
+	animation.set("seconds", json_number(played / io::kTickHz));
+	animation.set("length_ticks", json_number(length));
+	animation.set("length_seconds", json_number(length > 0 ? length / io::kTickHz : 0.0));
 	animation.set("loops", JsonValue::make_bool(clip_loops()));
+	animation.set("repeat", JsonValue::make_bool(options_.repeat));
 	JsonValue events = JsonValue::make_array();
 	for (const PreviewClipEvent &event : clip_events_) {
 		JsonValue row = JsonValue::make_object();
 		row.set("frame", json_number(event.frame));
 		row.set("tick", json_number(event.tick));
 		row.set("trigger", json_number(double(event.trigger)));
+		row.set("words", json_string(animation_trigger_words(event.trigger)));
 		events.push(std::move(row));
 	}
 	animation.set("events", std::move(events));
+	// The rig's bones as the clip poses them now: each by its name, its parent, where its joint
+	// stands and its pixel on the picture.
+	JsonValue bones = JsonValue::make_array();
+	for (const PreviewJoint &joint : joints(input.clock)) {
+		JsonValue row = JsonValue::make_object();
+		row.set("bone", json_number(joint.bone));
+		row.set("name", json_string(joint.name));
+		row.set("parent", json_number(joint.parent));
+		row.set("position", vec3(joint.at));
+		float x = 0.0f, y = 0.0f;
+		if (camera_.project(joint.at, size().width, size().height, x, y)) {
+			JsonValue screen = JsonValue::make_array();
+			screen.push(json_number(x));
+			screen.push(json_number(y));
+			row.set("screen", std::move(screen));
+		} else {
+			row.set("screen", JsonValue());
+		}
+		bones.push(std::move(row));
+	}
+	animation.set("bones", std::move(bones));
+	// Who plays it and what for (S17): a map's players (the items and weapons naming it, each item's
+	// model) and what the game does with the selected row; a clip's uses (the maps and slots naming it).
+	const Document *document = input.document ? records_of(*input.document) : nullptr;
+	JsonValue players = JsonValue::make_array();
+	JsonValue uses = JsonValue::make_array();
+	JsonValue notes = JsonValue::make_array();
+	if (const auto *map = dynamic_cast<const AnimationMapDocument *>(document)) {
+		if (graph && scan)
+			for (const MapPlayer &player : map_players(*graph, *scan, map->path())) {
+				JsonValue row = JsonValue::make_object();
+				row.set("record", json_string(player.record));
+				row.set("file", json_string(player.file));
+				row.set("model", json_string(player.model));
+				row.set("enemy_model", json_string(player.enemy_model));
+				row.set("first_person", JsonValue::make_bool(player.first_person));
+				players.push(std::move(row));
+			}
+		if (input.view.documents.active == map->path())
+			for (const std::string &note : map_row_notes(*map, input.view.documents.selection.primary,
+			                                             scan ? project_clip_loads(*scan) : ClipLoads()))
+				notes.push(json_string(note));
+	} else if (document && graph && scan) {
+		for (const ClipUse &use : clip_uses(*graph, *scan, document->path())) {
+			JsonValue row = JsonValue::make_object();
+			row.set("map", json_string(use.map));
+			row.set("key", json_string(use.key));
+			row.set("words", json_string(use.words));
+			uses.push(std::move(row));
+		}
+	}
+	animation.set("players", std::move(players));
+	animation.set("uses", std::move(uses));
+	animation.set("notes", std::move(notes));
 	body.set("animation", std::move(animation));
 	return body;
 }
@@ -966,9 +1310,64 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		if (overlay.kind == ModelOverlayKind::Light) {
 			row.set("radius", json_number(overlay.radius));
 			row.set("cone", json_number(overlay.cone));
-			char color[8];
-			std::snprintf(color, sizeof(color), "%06X", overlay.color & 0xFFFFFFu);
-			row.set("color", json_string(color));
+			row.set("color", json_string(rgb_hex(overlay.color)));
+		}
+		items.push(std::move(row));
+	}
+	// The collision shapes the options show (S17): each with its record (0 for a bound the game derives),
+	// its words, its colour, and its sphere or its corners in the preview's space, a handle's data.
+	const auto *document = dynamic_cast<const ModelDocument *>(input.document ? records_of(*input.document) : nullptr);
+	const bool now = document && current(input);
+	const ModelCollisionPick picked = selected_collision(input);
+	for (const ModelCollisionShape &shape : *collision(input.clock, picked)) {
+		JsonValue row = JsonValue::make_object();
+		row.set("kind", json_string(model_collision_kind_token(shape.kind)));
+		// The selected record's shape, listed whatever its layer as the picture draws it.
+		row.set("selected", JsonValue::make_bool(picked.valid() && picked.kind == shape.kind && picked.index == shape.index));
+		if (shape.kind == ModelCollisionKind::Section) {
+			row.set("person", JsonValue::make_bool(shape.person));
+			row.set("breaks", JsonValue::make_bool(shape.breaks));
+		}
+		row.set("index", json_number(shape.index));
+		row.set("id", json_number(now ? double(model_collision_record(*document, shape).child) : 0.0));
+		row.set("name", json_string(shape.name));
+		row.set("legend", json_string(shape.legend));
+		row.set("section", json_number(shape.section));
+		row.set("color", json_string(rgb_hex(shape.rgb)));
+		if (shape.sphere) {
+			row.set("center", vec3(shape.center));
+			row.set("radius", json_number(shape.radius));
+		}
+		// Its corners once each (a face's three, a solid's), in the order first drawn.
+		JsonValue points = JsonValue::make_array();
+		std::vector<PreviewVec3> seen;
+		for (const PreviewVec3 &p : shape.edges.empty() ? shape.triangles : shape.edges) {
+			bool again = false;
+			for (const PreviewVec3 &q : seen)
+				again = again || (std::fabs(p.x - q.x) < 1e-5f && std::fabs(p.y - q.y) < 1e-5f && std::fabs(p.z - q.z) < 1e-5f);
+			if (again) continue;
+			seen.push_back(p);
+			points.push(vec3(p));
+		}
+		row.set("points", std::move(points));
+		// A pixel on it (where a hit takes it, nothing nearer in the way): a sphere's centre, else the
+		// middle of its first triangle, else the middle of its bounds.
+		PreviewVec3 center;
+		float radius = 0.0f;
+		model_collision_bounds(shape, center, radius);
+		if (shape.sphere) center = shape.center;
+		else if (shape.triangles.size() >= 3)
+			center = PreviewVec3{(shape.triangles[0].x + shape.triangles[1].x + shape.triangles[2].x) / 3.0f,
+			                     (shape.triangles[0].y + shape.triangles[1].y + shape.triangles[2].y) / 3.0f,
+			                     (shape.triangles[0].z + shape.triangles[1].z + shape.triangles[2].z) / 3.0f};
+		float x = 0.0f, y = 0.0f;
+		if (camera_.project(center, size().width, size().height, x, y)) {
+			JsonValue screen = JsonValue::make_array();
+			screen.push(json_number(x));
+			screen.push(json_number(y));
+			row.set("screen", std::move(screen));
+		} else {
+			row.set("screen", JsonValue());
 		}
 		items.push(std::move(row));
 	}
