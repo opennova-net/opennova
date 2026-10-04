@@ -87,6 +87,7 @@ private:
 	bool child_ = false; // a design picture's scrolling child is open
 	bool drawn_ = false; // drew this frame
 	bool right_clicked_ = false;
+	bool popup_last_frame_ = false; // a popup was open as the canvas began last frame (its Esc is the popup's)
 	bool right_held_ = false; // the right button went down on a picture that fills the canvas
 	CanvasPoint origin_; // the picture's top-left corner on the screen
 	CanvasPoint surface_min_, surface_max_; // the canvas's surface on the screen (the shapes' clip)

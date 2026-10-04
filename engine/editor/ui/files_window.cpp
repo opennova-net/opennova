@@ -684,9 +684,11 @@ void FilesWindow::draw_rename(const SessionView &view) {
 			                          ("Rewrites " + std::to_string(sites.size()) + " reference" +
 			                           (sites.size() == 1 ? ":" : "s:")).c_str());
 		for (size_t i = 0; i < sites.size() && i < 12; ++i) {
+			// The record and the field in words (the plain-words lane, the audit's 8.3).
 			const RenameSite &site = sites[i];
-			ImGui::BulletText("%s", (site.file + ": " + (site.record.empty() ? "" : site.record + " - ") + site.field + ": " +
-			                         site.before + " -> " + site.after).c_str());
+			const std::string place = rename_site_place(site);
+			ImGui::BulletText("%s", (site.file + ": " + (place.empty() ? std::string() : place + ": ") + site.before + " -> " +
+			                         site.after).c_str());
 		}
 		if (sites.size() > 12) ImGui::TextDisabled("and %zu more", sites.size() - 12);
 	}

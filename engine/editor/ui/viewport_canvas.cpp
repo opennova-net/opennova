@@ -192,7 +192,10 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 		keyboard.arrow_held = ImGui::IsKeyDown(ImGuiKey_LeftArrow) ||
 				ImGui::IsKeyDown(ImGuiKey_RightArrow) || ImGui::IsKeyDown(ImGuiKey_UpArrow) ||
 				ImGui::IsKeyDown(ImGuiKey_DownArrow);
-		keyboard.escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+		// Esc that closes a popup (a toolbar's dropdown) is the popup's: Dear ImGui closes it as the frame
+		// starts, so a popup open last frame takes this frame's Esc (the audit's 3.6: it walked the
+		// selection up as well).
+		keyboard.escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !popup_last_frame_;
 		keyboard.frame = !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false); // Ctrl+F finds
 		keyboard.duplicate = io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_D, false);
 		// The keys a camera flies by, held; no chord's letter is one (Ctrl+S saves, Ctrl+D duplicates).
@@ -209,6 +212,7 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 		keyboard.page = (ImGui::IsKeyPressed(ImGuiKey_PageUp) ? 1 : 0) -
 				(ImGui::IsKeyPressed(ImGuiKey_PageDown) ? 1 : 0);
 	}
+	popup_last_frame_ = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
 	input_.dt = io.DeltaTime;
 	const bool design = zoom_ != Zoom::Fill;
 	const ImVec2 region(ImGui::GetContentRegionAvail().x, height);

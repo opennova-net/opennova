@@ -20,33 +20,6 @@ using io::JsonValue;
 
 namespace {
 
-// Where a build puts a file of the entry's kind, in words: the build's own word on it first (an archive it
-// refuses, a player's file or a name no archive stores: plan_file_finding, the plan's rule), then the archive,
-// beside the archives, or nowhere; for a project that builds as an expansion, the expansion's archive or
-// folder (archive_routing.h).
-std::string build_words(const AssetEntry &entry, const ProjectDocument &document) {
-	Diagnostic own;
-	if (plan_file_finding(entry, document.expansion.name, own))
-		return own.severity == DiagnosticSeverity::Error ? "A build refuses it: " + own.message : own.message;
-	if (entry.kind == AssetKind::ImportSource) return "The build packs what it makes, not the file itself.";
-	if (!document.expansion.standalone()) {
-		const std::string &b = document.expansion.name;
-		switch (route_for_expansion(entry, b)) {
-		case ExpansionPlace::LanguageArchive: return "Packed into " + expansion_archive_path(b, true) + ".";
-		case ExpansionPlace::Archive: return "Packed into " + expansion_archive_path(b, false) + ".";
-		case ExpansionPlace::Folder: return "Copied loose into " + expansion_folder(b) + "/.";
-		case ExpansionPlace::RootOnly:
-			return "Left out of the build: the game reads it from the install's own folder, which an expansion cannot "
-			       "change.";
-		case ExpansionPlace::None: return "Left out of the build: the game never reads it.";
-		}
-	}
-	const ArchiveSlot slot = route_asset(entry);
-	if (slot == ArchiveSlot::Loose) return "Copied beside the archives, where the game reads it by its name.";
-	if (slot == ArchiveSlot::None) return "Left out of the build: the game never reads it.";
-	return std::string("Packed into ") + archive_slot_file_name(slot) + ".";
-}
-
 FileCard::Sound decode_sound(const std::string &file, const AssetEntry &entry) {
 	FileCard::Sound sound;
 	sound.size = entry.size_bytes;
@@ -102,7 +75,9 @@ FileCard file_card(const SessionView &view, const std::string &path, const FileC
 	card.kind_label = asset_kind_label(entry->kind);
 	card.about = asset_kind_row(entry->kind).about;
 	card.size = entry->size_bytes;
-	card.build = build_words(*entry, *view.project.document);
+	// Where a build puts it, by the plan's own rule (build_place_words: its word on the file first, then the
+	// archive, the expansion's archive or folder, or nowhere), as a file's page says it.
+	card.build = build_place_words(*entry, view.project.document->expansion.name).words;
 	card.imported_from = entry->imported_from;
 	card.opens = is_editable_kind(entry->kind);
 	card.wave = entry->kind == AssetKind::Wave;

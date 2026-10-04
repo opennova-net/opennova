@@ -38,10 +38,17 @@ constexpr NodeKind node_kind(def::DefRecordKind kind) { return static_cast<NodeK
 // The record kind whose members a catalog kind's records are (both action blocks: PowerupAction).
 def::DefRecordKind def_kind(NodeKind kind);
 
+// How a copy of a row is named apart from its original: the words " (copy)" after a name that is words
+// (an item's display name), "_2" after one a file names it by as a token (a weapon's, an ammo's).
+enum class CopyName { None, Words, Token };
+
 // What a catalog kind is beyond its table row: its record kind, what the core calls it, the field
 // that names one of its records ("" none), and the rules a kind of its own keeps: what a new row of it
-// takes beside its defaults and its name (`made`, over the records of its kind beside it), and what
-// its record derives after any edit (`after_edit`).
+// takes beside its defaults and its name (`made`, over the records of its kind beside it), what its
+// record derives after any edit (`after_edit`), what a copy a Duplicate makes takes beside a name of
+// its own (`duplicated`: an item's id), how that name is made (`copy_name`), and how many characters of
+// a name the game keeps (`name_chars`; 0: the field's width), which the copy's name keeps within. A new
+// row's identity and a copy's keep clear of `taken` too: the ids other files of the project name.
 struct CatalogKindRow {
 	CatalogKind kind;
 	def::DefRecordKind record;
@@ -50,9 +57,16 @@ struct CatalogKindRow {
 	const char *add_label; // the outline's tool adding a row of it ("" = none)
 	bool top;              // a row of its file
 	const char *name_field;
-	void (*made)(void *record, const std::vector<const void *> &others) = nullptr;
+	void (*made)(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) = nullptr;
 	void (*after_edit)(void *record) = nullptr;
+	void (*duplicated)(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) = nullptr;
+	CopyName copy_name = CopyName::None;
+	size_t name_chars = 0;
 };
+// The name a copy of a row named `name` takes, none of `taken` (upper case: the game's lookups compare
+// names without case) and within `limit` characters (0: none): `name (copy)`, `name (copy 2)`, ... for
+// words, `name_2`, `name_3`, ... for a token, the name cut short to leave the suffix room.
+std::string copy_name(const std::string &name, CopyName how, size_t limit, const std::vector<std::string> &taken);
 const CatalogKindRow &catalog_kind_row(NodeKind kind);
 // The field that names a record of a kind: an item's display_name, a weapon's weapon_name, an ammo's
 // and a carry limit's name, a powerup's name ("" for a kind no name names).
@@ -86,9 +100,18 @@ private:
 	std::vector<uint64_t> storage_;
 };
 
-// One file-wide state a family keeps beside its rows (items.def's vehicle spawn registry), whose
-// family row says how a set and a comparison go.
-struct ItemsFileState : FileState {
+// What every catalog keeps of its file beside its rows: the indentation it was read with
+// (def::DefLayout), which its writer keeps (each row keeps the order its lines were read in, in its
+// native record), so a file read and saved again keeps its layout where the model holds it.
+struct CatalogFileState : FileState {
+	def::DefLayout layout{};
+	std::shared_ptr<FileState> clone() const override { return std::make_shared<CatalogFileState>(*this); }
+	size_t footprint() const override { return sizeof(CatalogFileState); }
+};
+
+// items.def's file-wide state beside its layout: the vehicle spawn registry, whose family row says how
+// a set and a comparison go.
+struct ItemsFileState : CatalogFileState {
 	std::vector<int> spawn_ids;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<ItemsFileState>(*this); }
 	size_t footprint() const override { return sizeof(ItemsFileState) + footprint_of(spawn_ids); }
