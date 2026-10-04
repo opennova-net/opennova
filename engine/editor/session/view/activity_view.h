@@ -13,6 +13,7 @@
 namespace opennova::editor {
 
 struct BuildReport;
+struct ExportReport;
 
 // The project's validation as the poll steps it (ProblemsService, ADR 0046 S13 A3): whether one is
 // due or under way, and the files it has asked for their own findings of those it asks (0 of 0
@@ -33,7 +34,7 @@ struct ValidationStatus {
 // report is shared and never null (an ActivityView made empty holds an empty one), so a header
 // naming the view pulls none of the build's headers.
 struct ActivityView {
-	ActivityView(); // the build's report made, empty
+	ActivityView(); // the build's and the export's reports made, empty
 
 	// The operation that runs (a build: its progress, what it works on, whether it can be
 	// cancelled, what it reads and writes; id 0 when none), and what the last one came to (id 0
@@ -45,6 +46,9 @@ struct ActivityView {
 	ValidationStatus validation;
 	bool has_build = false;
 	std::shared_ptr<const BuildReport> last_build;
+	// The last Export's copy of a build (ADR 0046 S16; never null, as the build's report).
+	bool has_export = false;
+	std::shared_ptr<const ExportReport> last_export;
 
 	PlayState play_state = PlayState::Stopped;
 	int64_t play_pid = -1;

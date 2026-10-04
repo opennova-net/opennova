@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <editor/import/import_run.h>
@@ -11,8 +13,11 @@
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
+#include <editor/project_build/export_build.h>
+#include <editor/requirements/requirements.h>
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/original_bytes.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/view_revisions.h>
 #include <editor/session/view/session_view.h>
@@ -27,6 +32,7 @@ class PlayController;
 class ProblemsService;
 class ProjectRefresh;
 struct PlayIntent;
+struct ExportIntent;
 class RenameController;
 class UnsavedGuard;
 class Viewports;
@@ -154,10 +160,11 @@ public:
 	// --- the project ------------------------------------------------------------------------
 
 	// A project of `game` (a gameprofile code; "" the default, jo) made in `dir` (titled `title`,
-	// else the folder's name), then opened as open_project opens it, with its import pass unless
-	// `import_pass` is false.
+	// else the folder's name) as `expansion` (ADR 0046 S16: its rule and the game install's
+	// expansions weighed first; its version text made and, on the base game, its text table), then
+	// opened as open_project opens it, with its import pass unless `import_pass` is false.
 	bool new_project(const std::string &dir, const std::string &title, const std::string &game = std::string(),
-	                 bool import_pass = true);
+	                 bool import_pass = true, const ProjectExpansion &expansion = ProjectExpansion());
 	// The project in `dir` read (its document, its local settings; `game_install` in place of the
 	// install they name, for the session alone, when given), then, the open one closed, opened as an
 	// operation (OpenOperation, S13 A3: the game install's names, the import pass unless `import_pass`
@@ -236,6 +243,12 @@ public:
 	// The game install the editor imports from and plays in: the open project's (its local.json),
 	// else the one the editor last chose.
 	std::string game_install() const;
+	// The game install's expansions read again into the view (ADR 0046 S16: the ones it mounts, with
+	// the Mods list's name and description of each), when the install may have moved.
+	void read_install_expansions();
+	// The requirements of `doc` over `scan`, with the game install's expansions weighed
+	// (evaluate_requirements: the project's expansion against them, listed).
+	RequirementReport requirements_of(const ProjectDocument &doc, const AssetScan &scan) const;
 	// The requirement row of `role`, or null.
 	const RequirementRow *requirement_row(const std::string &role) const;
 	// The project file `file` names: the one at that project-relative path, else the first of that
@@ -250,10 +263,31 @@ public:
 	// ("" the project's .opennova/build/play; a relative one taken from the project's folder; one
 	// inside the project but in its cache or its export folder refused); `rehash`, every file read
 	// again, the build cache set aside (BuildPlan::rehash).
-	void start_build(const PlayIntent &intent, const std::string &out_dir = std::string(), bool rehash = false);
+	// With the Export that waits on it (`exported`, ADR 0046 S16: the folder it lands in, refused
+	// before anything is built when it lies inside the project but its export folder).
+	void start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash, const ExportIntent &exported);
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,
-	// the game started on it, in the Play's mission, when a Play waits and it is good.
-	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, const PlayIntent &intent);
+	// the game started on it, in the Play's mission, when a Play waits and it is good; what the export
+	// that waited on it came to (`shipped`: its ExportRun's report, or what refused it; null when none ran).
+	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, const PlayIntent &intent,
+	                              const ExportIntent &exported, const ExportReport *shipped);
+	// What an Export that waited on the build `built` copies (BuildOperation's ExportResolver): its folder
+	// (export_folder), the runtime beside a standalone game when the project asks for it; false with
+	// `refused` holding what refuses it.
+	bool export_request(const ExportIntent &intent, const BuildReport &built, ExportRequest &request, ExportReport &refused);
+	// The folder an Export lands in: `to` from the project's folder when relative, else the
+	// project's export folder; "" with a finding reported when it lies inside the project but the
+	// export folder (the next scan would list what it holds as the project's files).
+	std::string export_folder(const std::string &to);
+	// What the open project's build makes (ADR 0046 S16): its project.opennova's expansion (none: the
+	// standalone game), over the project's game install, keyed by its game.
+	BuildTarget build_target() const;
+	// The files the build packs as the game ships them (ADR 0046 S16, ShippedFiles), its gate reading
+	// them: of the files a gate row says do not serialize, those that are the game install's bytes
+	// (OriginalBytes, asked here), less the open documents with unsaved edits.
+	ShippedFiles shipped_files();
+	// The same over the gate rows `gate` (the Problems rows' marking asks it without composing them).
+	ShippedFiles shipped_files(const std::vector<Diagnostic> &gate);
 
 private:
 	// The path of the document a viewport request names (its path or logical name; "" the active
@@ -278,6 +312,14 @@ private:
 	// The gesture of the wire's open in the document at `path` ends (its EndEdit, as a client's last
 	// sample would raise it).
 	void end_wire_gesture(const std::string &path);
+	// The project's own expansion files under the name `from`, renamed to the name `to`'s, and the project
+	// document `project` (which names `to`) saved, all or nothing (ADR 0046 S16): every rename planned and
+	// checked first (a target taken, a file another file names, a file open with unsaved edits refuses the
+	// whole change, nothing written), then each file moved, then the document saved; a move or the save
+	// that fails puts back every move made before it. True when the change is in, its open documents
+	// read again at their new paths and the scan updated; false with `failures`, nothing changed.
+	bool rename_expansion_files(const std::string &from, const std::string &to, const ProjectDocument &project,
+	                            std::vector<Diagnostic> &failures);
 
 	ProcessPlatform &platform_;
 	EditorPreferences &preferences_;
@@ -290,6 +332,8 @@ private:
 	std::shared_ptr<Viewports> viewports_;
 	ActionOutcome outcome_;
 	std::map<std::string, WireDrag> wire_drags_;
+	OriginalBytes original_bytes_; // which files are the install's bytes (shipped_files)
+	std::vector<std::string> install_expansion_names_; // the game install's expansions, by folder name
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's
 	std::string refusal_status_; // the status line the last refused request left, until a request is served
