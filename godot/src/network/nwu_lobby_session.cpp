@@ -242,6 +242,16 @@ void NwuLobbySession::send(const std::vector<uint8_t> &dg) {
 	if (hooks_.on_sent) hooks_.on_sent(dg);
 }
 
+void NwuLobbySession::flush() {
+	if (!session_ || !nw_socket_.is_valid()) return;
+	session_->set_clock_ms(clock_ms_);
+	std::vector<std::vector<uint8_t>> pumped;
+	session_->pump(pumped);
+	for (const auto &dg : pumped) {
+		send(dg);
+	}
+}
+
 void NwuLobbySession::send_to(const String &host, int port, const std::vector<uint8_t> &dg) {
 	if (!gate_socket_.is_valid() || dg.empty() || host.is_empty() || port <= 0) return;
 	gate_socket_->set_dest_address(host, port);
@@ -274,16 +284,17 @@ void NwuLobbySession::poll_session() {
 		if (hooks_.on_session_state) hooks_.on_session_state();
 	}
 
-	// Match the retail session boundary: ClientConnected is a one-shot from the
-	// periodic update after ServerSessionInit, never a synchronous 0x82 reply;
-	// the same tick polls the GLSVSS deadline.
+	// The rest of retail's periodic update, in its order: the receive pump's
+	// missing-sequence tail, the connection's send pump (the queued statements and a
+	// pending ACK, the reap, the send-interval legs), then the session statements the
+	// update queues for the next pump (the one-shot ClientConnected after
+	// ServerSessionInit, the GLSVSS poll).
 	// [orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400, see docs/net/novaworld-net-re.md]
-	std::vector<std::vector<uint8_t>> periodic;
-	session_->process_periodic_update(periodic);
-	// The connection's send-interval pump: the negotiated idle keepalive and the
-	// receive-silence reap (both witnessed in ClientSession::pump_send_intervals).
-	session_->pump_send_intervals(periodic);
-	for (const auto &dg : periodic) {
+	std::vector<std::vector<uint8_t>> pumped;
+	session_->finish_receive_batch(pumped);
+	session_->pump(pumped);
+	session_->process_periodic_update();
+	for (const auto &dg : pumped) {
 		send(dg);
 	}
 	if (session_->state() == opennova::ClientSession::State::Closed &&

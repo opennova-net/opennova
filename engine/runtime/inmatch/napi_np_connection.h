@@ -44,9 +44,8 @@ inline constexpr uint32_t kNetQualityLinkErrorIncoming = 2u;
 // Retail's Joint Operations connection template bounds the reliable outbound-message pool at
 // 0x4B0 records.
 // NapiNPMessage_Create rejects a new record when pending + retained + 1 exceeds this field; admitted
-// peer ACKs retire retained records. Keep this opt-in at the JO in-match connection seam. The
-// NOVAWORLDUDP lobby ClientSession has no witnessed 0x44/0x84 owner in this slice and remains on the
-// generic, recovery-disabled SessionSequencing behavior.
+// peer ACKs retire retained records. The NOVAWORLDUDP lobby connection runs the same pool at its
+// own template's bound (CsConfig field 11, novaworld_service_cs_config).
 // [orig: CNapiNetwork_Init @0x4CAB20/@0x4CABF0 writes cs_dir0.msg_out_max = 0x4B0;
 // NapiNPMessage_Create @0x627FC0 checks the combined count]
 inline constexpr std::size_t JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX =

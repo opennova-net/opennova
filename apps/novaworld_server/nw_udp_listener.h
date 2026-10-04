@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <net/npwire/cs_config.h>
 #include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/protocol_message.h>
@@ -48,9 +49,12 @@ namespace opennova::server {
 // across listeners, so teardown is scoped to the peers this listener admitted.
 struct LobbyConnState {
 	LobbyState lobby;
-	// Inbound keeps the shared no-queue high-water policy (newer packets skip a
-	// permanent loss; zero/stale/duplicate packets never redispatch). Outbound
-	// retains every reply's reliable records under its packet sequence until the
+	// The NOVAWORLDUDP connection template the 0x82 advertised: the ordered receive gate's
+	// queue bound (field 10), the reply pool (field 11), the reply packet ceiling (field 13).
+	CsConfig cs = novaworld_service_cs_config();
+	// Inbound runs the ordered gate: only the next sequence dispatches, a later packet is held
+	// until its gap closes, and the receive batch's end asks for a surviving gap with a 0x84.
+	// Outbound retains every reply's reliable records under its packet sequence until the
 	// client's ACK covers it, so a stock client's 0x44 gets them back (D-NET-291).
 	SessionSequencing sequencing;
 	// Exact ClientAuth fingerprint and the already-enveloped ServerAuth reply.

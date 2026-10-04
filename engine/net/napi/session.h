@@ -45,9 +45,6 @@ enum class SessionState : int {
 // @0x4d4400] — kept below as its own named constant (the old 20000 here mis-cited the connect poll).
 constexpr uint32_t SESSION_CONNECT_TIMEOUT_MS = 60000u;          // 0xEA60 — ConnectOrHost poll
 constexpr uint32_t SESSION_PERIODIC_UPDATE_TIMEOUT_MS = 20000u;  // 0x4E20 — ProcessPeriodicUpdate
-// [D-NET-24] 1300 is a MESSAGE CHUNK SIZE in bytes (the QueueMessage fragment limit), not a ms
-// interval — renamed from the misnomer SESSION_HANDSHAKE_RETRANSMIT_MS. [orig: CNapiNPConnection_QueueMessage @0x628640]
-constexpr uint32_t SESSION_MESSAGE_CHUNK_BYTES = 1300u;
 // The per-session HostSetup/Host "AppId": (GetTickCount() + rand()) % 0x2328 + 1000, minted once
 // per host registration. It is NOT a timeout (the old SESSION_TIMEOUT_RANDOM_* name misread the
 // function): its only readers are the two var-list builders, the server status screen, the

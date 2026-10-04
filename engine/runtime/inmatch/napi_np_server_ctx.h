@@ -406,7 +406,7 @@ struct NapiNPServerCtx {
 	SessionIdRing cookie_key_table;
 	// One ClientPlayerEnterRequest: the joiner's connection id, its UDP source
 	// and the JOINTICKET its JOIN carried. The shell binds the hook to its
-	// NovaWorld host session (ClientSession::build_player_enter_request); an
+	// NovaWorld host session (ClientSession::send_player_enter_request); an
 	// unbound hook drops the request, and the joiner then reaps on the ticket
 	// deadline exactly as a service that never answered.
 	// [orig: CNapiGameSession_SendPlayEnterRequest @0x4D02A0 — ConnectionId

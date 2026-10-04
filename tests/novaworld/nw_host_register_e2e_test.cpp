@@ -256,6 +256,27 @@ int main() {
 		if (!dg.empty())
 			opennova::net::udp_send_to(client, server_ep, dg.data(), dg.size());
 	};
+	// The owner's tick after its receive batch: the missing-sequence tail and the send pump,
+	// everything they build on the wire.
+	auto flush_session = [&]() {
+		std::vector<std::vector<uint8_t>> out;
+		session.finish_receive_batch(out);
+		session.pump(out);
+		for (const auto &dg : out) send(dg);
+	};
+	// Receive whatever the listener sent (a 0x84 among it) and answer, for `ms` milliseconds.
+	auto service_session = [&](int ms) {
+		uint8_t buf[4096];
+		for (int waited = 0; waited < ms; waited += 20) {
+			opennova::net::Endpoint from;
+			const int n = opennova::net::udp_recv_from(client, buf, sizeof buf, from, 20);
+			if (n <= 0) continue;
+			std::vector<std::vector<uint8_t>> out;
+			session.handle_datagram(buf, static_cast<size_t>(n), out);
+			for (const auto &dg : out) send(dg);
+			flush_session();
+		}
+	};
 
 	// Drive the handshake to Verified: send ClientHello, then pump replies back
 	// through the session, then run the same periodic-update boundary as the
@@ -275,7 +296,9 @@ int main() {
 				break;
 			}
 		}
-		session.process_periodic_update(out);
+		session.finish_receive_batch(out);
+		session.pump(out);
+		session.process_periodic_update();
 		for (const auto &dg : out) send(dg);
 		verified = session.is_verified();
 	}
@@ -292,9 +315,8 @@ int main() {
 		    /*Host*/      {{0, "ServerName", "E2E Listen Host"}, {0, "Port", "32768"},
 		                   {0, "Players", "1"}, {0, "Region", "us"}},
 		    /*PlayerList*/{{0, "PlayerName", "Host"}});
-		auto dg = session.build_lobby_message(host_req);
-		expect(!dg.empty(), "host-request datagram built (session Verified)");
-		send(dg);
+		expect(session.queue_statement(host_req), "host request queued (session Verified)");
+		flush_session();
 
 		// The listener processes the request on its worker thread; poll the
 		// hosted snapshot until the row appears (or time out).
@@ -317,7 +339,8 @@ int main() {
 		auto upd = opennova::make_client_host_update(
 		    /*Host*/      {{0, "Players", "2"}},
 		    /*PlayerList*/{{0, "PlayerName", "Host"}, {1, "PlayerName", "Joiner"}});
-		send(session.build_lobby_message(upd));
+		session.queue_statement(upd);
+		flush_session();
 		int players = 0;
 		for (int i = 0; i < 100; ++i) {
 			std::this_thread::sleep_for(20ms);
@@ -327,64 +350,64 @@ int main() {
 		}
 		expect(players == 2, "ClientHostUpdate refreshed the player count to 2");
 
-		// Lobby does not own a retained-resend pump, so its bounded policy has
-		// no reorder queue: N+1 advances the high-water mark immediately and a
-		// late N becomes stale. This cannot deadlock on a permanently lost N,
-		// and neither the late packet nor a duplicate can redispatch.
-		const auto gap_update = opennova::make_client_host_update(
+		// The lobby connection is a type-2 NAPI connection on both ends: the service admits
+		// only the next sequence, holds a later packet until its gap closes, and asks for a
+		// permanently lost one with a 0x84 the client answers from its retained records.
+		// [orig: NapiNPProtocol_HandleSessionPacket @0x626be0..0x626c3a;
+		//  NapiNPProtocol_PumpRecvQueues @0x6269bb..0x6269d6; NapiNP_HandleResendList @0x623800]
+		auto built = [&](const opennova::NapiMessage &statement) {
+			session.queue_statement(statement);
+			std::vector<std::vector<uint8_t>> out;
+			session.pump(out);
+			return out.empty() ? std::vector<uint8_t>{} : out.front();
+		};
+		auto wait_players = [&](int want) {
+			int seen = 0;
+			for (int i = 0; i < 100; ++i) {
+				std::this_thread::sleep_for(20ms);
+				const auto snap = listener.snapshot_hosted();
+				if (!snap.empty()) seen = snap[0].lobby.player_count;
+				if (seen == want) break;
+			}
+			return seen;
+		};
+		service_session(200); // the update's ACK
+		const auto gap_datagram = built(opennova::make_client_host_update(
 		    /*Host*/      {{0, "Players", "4"}},
-		    /*PlayerList*/{});
-		const auto future_update = opennova::make_client_host_update(
+		    /*PlayerList*/{}));
+		const auto future_datagram = built(opennova::make_client_host_update(
 		    /*Host*/      {{0, "Players", "5"}},
-		    /*PlayerList*/{});
-		const auto gap_datagram = session.build_lobby_message(gap_update);
-		const auto future_datagram = session.build_lobby_message(future_update);
+		    /*PlayerList*/{}));
 		send(future_datagram);
-		players = 0;
-		for (int i = 0; i < 100; ++i) {
-			std::this_thread::sleep_for(20ms);
+		std::this_thread::sleep_for(100ms);
+		{
 			const auto snap = listener.snapshot_hosted();
-			if (!snap.empty()) players = snap[0].lobby.player_count;
-			if (players == 5) break;
+			expect(!snap.empty() && snap[0].lobby.player_count == 2,
+			       "a lobby packet past a gap is held, not dispatched");
 		}
-		expect(players == 5,
-		       "future lobby packet advances the no-deadlock high-water frontier");
 		send(gap_datagram);
-		std::this_thread::sleep_for(100ms);
-		{
-			const auto snap = listener.snapshot_hosted();
-			expect(!snap.empty() && snap[0].lobby.player_count == 5,
-			       "late lobby gap packet is stale and is not redispatched");
-		}
+		expect(wait_players(5) == 5, "the gap's arrival releases both packets in order");
 		send(future_datagram);
 		std::this_thread::sleep_for(100ms);
 		{
 			const auto snap = listener.snapshot_hosted();
 			expect(!snap.empty() && snap[0].lobby.player_count == 5,
-			       "duplicate high-water lobby packet is not redispatched");
+			       "a duplicate lobby packet is not redispatched");
 		}
 
-		// Permanently omit the next sequence, then deliver its successor. The
-		// successor must apply without waiting for an unavailable resend path.
-		const auto permanently_lost = session.build_lobby_message(
-				opennova::make_client_host_update(
-						/*Host*/{{0, "Players", "6"}},
-						/*PlayerList*/{}));
+		// Permanently omit the next sequence, then deliver its successor: the service asks for
+		// the lost one with a 0x84 and the client answers from its retained records.
+		const auto permanently_lost = built(opennova::make_client_host_update(
+				/*Host*/{{0, "Players", "6"}},
+				/*PlayerList*/{}));
 		(void)permanently_lost;
-		const auto after_loss = session.build_lobby_message(
-				opennova::make_client_host_update(
-						/*Host*/{{0, "Players", "7"}},
-						/*PlayerList*/{}));
+		const auto after_loss = built(opennova::make_client_host_update(
+				/*Host*/{{0, "Players", "7"}},
+				/*PlayerList*/{}));
 		send(after_loss);
-		players = 0;
-		for (int i = 0; i < 100; ++i) {
-			std::this_thread::sleep_for(20ms);
-			const auto snap = listener.snapshot_hosted();
-			if (!snap.empty()) players = snap[0].lobby.player_count;
-			if (players == 7) break;
-		}
-		expect(players == 7,
-		       "permanent lobby packet loss cannot stall later semantic traffic");
+		service_session(500);
+		expect(wait_players(7) == 7,
+		       "a lost lobby packet is recovered through the service's 0x84");
 	}
 
 	// The NWU reconnect against the real listener: a registered host's connection drops (its own
@@ -420,7 +443,9 @@ int main() {
 						: -1;
 				std::vector<std::vector<uint8_t>> out;
 				if (n > 0) recon.handle_datagram(buf, static_cast<size_t>(n), out);
-				recon.process_periodic_update(out);
+				recon.finish_receive_batch(out);
+				recon.pump(out);
+				recon.process_periodic_update();
 				for (const auto &dg : out) send_recon(dg);
 			}
 			return done();
@@ -440,7 +465,7 @@ int main() {
 		opennova::HostRegistration reg;
 		reg.server_name = "Reconnect Host";
 		reg.app_id = 1357;
-		if (up) send_recon(recon.build_host_request(reg, 0));
+		if (up) recon.request_hosting(reg, 0);
 		const bool hosting = up && drive([&] {
 			return recon.host_state() == opennova::ClientSession::HostState::Established;
 		}, 80);
@@ -453,7 +478,7 @@ int main() {
 		// The session's own reap: its 0x46 burst drops the listener's connection.
 		recon.set_clock_ms(240001);
 		std::vector<std::vector<uint8_t>> burst;
-		recon.pump_send_intervals(burst);
+		recon.pump(burst);
 		expect(recon.reconnecting() && burst.size() == 4, "reconnect: the reap sends the 0x46 burst");
 		for (const auto &dg : burst) send_recon(dg);
 		uint32_t rid_dropped = 0;
@@ -469,7 +494,7 @@ int main() {
 		for (uint32_t t = 240002; t < 250000 && !probed; ++t) {
 			recon.set_clock_ms(t);
 			std::vector<std::vector<uint8_t>> pumped;
-			recon.pump_send_intervals(pumped);
+			recon.pump(pumped);
 			for (const auto &dg : pumped) send_recon(dg);
 			probed = !pumped.empty();
 		}
@@ -644,7 +669,8 @@ int main() {
 					               opennova::ClientSession::State::Verifying,
 			       "first ServerAuth installs retry session material");
 		}
-		retry_session.process_periodic_update(out);
+		retry_session.process_periodic_update();
+		retry_session.pump(out);
 		expect(out.size() == 1,
 		       "retry session emits sequence-one ClientConnected");
 		if (out.size() == 1) send_retry(out.front());
@@ -669,8 +695,10 @@ int main() {
 		if (got_first_start_verify) {
 			expect(retry_session.handle_datagram(
 					       first_start_verify.data(), first_start_verify.size(), out) &&
-			               out.size() == 1,
-			       "delayed ServerStartVerify produces sequence-two verify request");
+			               out.empty(),
+			       "delayed ServerStartVerify queues the verify request");
+			retry_session.pump(out);
+			expect(out.size() == 1, "delayed ServerStartVerify produces sequence-two verify request");
 		}
 		if (out.size() == 1) send_retry(out.front());
 		inbound.clear();
@@ -721,7 +749,8 @@ int main() {
 					       replacement_server_auth.size(), out),
 			       "replacement accepts fresh ServerAuth");
 		}
-		replacement.process_periodic_update(out);
+		replacement.process_periodic_update();
+		replacement.pump(out);
 		expect(out.size() == 1,
 		       "replacement emits fresh sequence-one ClientConnected");
 		if (out.size() == 1) send_retry(out.front());
@@ -733,8 +762,10 @@ int main() {
 		if (got_replacement_start_verify) {
 			expect(replacement.handle_datagram(
 					       inbound.data(), inbound.size(), out) &&
-			               out.size() == 1,
-			       "replacement ServerStartVerify produces verify request");
+			               out.empty(),
+			       "replacement ServerStartVerify queues the verify request");
+			replacement.pump(out);
+			expect(out.size() == 1, "replacement ServerStartVerify produces verify request");
 		}
 		if (out.size() == 1) send_retry(out.front());
 		inbound.clear();
@@ -972,30 +1003,14 @@ int main() {
 			manager.registry().find_by_addr(lobby_peer);
 	expect(before_wrong_session.has_value(),
 	       "live lobby connection is present before wrong-key SESSION");
-	const std::vector<uint8_t> valid_heartbeat = session.build_heartbeat();
-	uint8_t heartbeat_opcode = 0;
-	std::vector<uint8_t> heartbeat_body;
+	// A header-only packet under the session's own SCRK, addressed to a foreign receiver key.
 	opennova::ProtocolPacketHeader heartbeat_header;
-	std::vector<opennova::ProtocolMessage> heartbeat_messages;
-	const bool decoded_heartbeat =
-			opennova::nw_decode_inbound(
-					valid_heartbeat.data(), valid_heartbeat.size(),
-					heartbeat_opcode, heartbeat_body) &&
-			heartbeat_opcode ==
-					opennova::SESSION_OPCODE_PROTOCOL_MESSAGE &&
-			opennova::decode_protocol_packet_plaintext(
-					heartbeat_body.data(), heartbeat_body.size(),
-					session.client_scrk(), heartbeat_header,
-					heartbeat_messages);
-	expect(decoded_heartbeat,
-	       "wrong-key liveness probe decodes a valid client heartbeat");
-	heartbeat_header.session_id ^= 0x01010101u;
+	heartbeat_header.session_id = session.server_key() ^ 0x01010101u;
+	heartbeat_header.seq_num = 1;
 	std::vector<uint8_t> wrong_session_body;
 	const bool encoded_wrong_session =
-			decoded_heartbeat &&
 			opennova::encode_protocol_packet_plaintext(
-					heartbeat_header, heartbeat_messages,
-					session.client_scrk(), wrong_session_body);
+					heartbeat_header, {}, session.client_scrk(), wrong_session_body);
 	expect(encoded_wrong_session,
 	       "wrong-key liveness probe re-encodes its foreign receiver key");
 	std::this_thread::sleep_for(20ms);

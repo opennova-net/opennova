@@ -130,7 +130,9 @@ int main() {
 		const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 200);
 		std::vector<std::vector<uint8_t>> out;
 		if (n > 0 && !session.handle_datagram(rx, static_cast<size_t>(n), out)) break;
-		session.process_periodic_update(out);
+		session.finish_receive_batch(out);
+		session.pump(out);
+		session.process_periodic_update();
 		for (const auto &dg : out) send(dg);
 	}
 	expect(session.is_verified(), "the session verifies against the real listener");
@@ -143,7 +145,10 @@ int main() {
 				{{0, "LobbyName", "jop_2_consumer"}, {0, "MaxPlayers", "8"}},
 				{{0, "ServerName", "Resend Host"}, {0, "Players", "1"}},
 				{{0, "PlayerName", "Host"}});
-		send(session.build_lobby_message(host_req));
+		session.queue_statement(host_req);
+		std::vector<std::vector<uint8_t>> request;
+		session.pump(request);
+		for (const auto &dg : request) send(dg);
 		opennova::ProtocolPacketHeader lost_hdr;
 		std::vector<opennova::ProtocolMessage> lost_messages;
 		expect(receive_records(client, session.server_scrk(), lost_hdr, lost_messages, 1000),

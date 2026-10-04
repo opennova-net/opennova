@@ -79,6 +79,9 @@ public:
 	void process(double delta);
 	// Send one datagram to the NW session endpoint (fires on_sent).
 	void send(const std::vector<uint8_t> &dg);
+	// One connection send pump now, outside the frame's poll: what the session queued
+	// (a stop statement before the goodbye) goes out at once.
+	void flush();
 	// Send one raw datagram to an arbitrary endpoint over the gate socket: the
 	// host's POST status heartbeat to the gate's POSTIPADDRESS:POSTIPPORT
 	// (retail's CNapiNetwork_SendUDPPacket leg, a plain sendto outside the NP

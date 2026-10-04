@@ -277,10 +277,11 @@ void NovaWorldClient::stop() {
 		// legs), and an established one leaves the same way the NovaWorld menu's
 		// re-entry after a match leaves it (each statement empty outside its own
 		// states); then the session goes.
-		const std::vector<uint8_t> stop_playing = lobby_.session()->build_stop_playing();
-		if (!stop_playing.empty()) lobby_.send(stop_playing);
+		lobby_.session()->stop_playing();
 		play_in_flight_ = false;
 		host_role_.stop();
+		// The stop statements leave on one send pump before the goodbye.
+		lobby_.flush();
 		opennova::ClientSession *session = lobby_.session();
 		if (session->is_verified()) {
 			// The reset's teardown of a connected connection sends its disconnect burst.
@@ -884,7 +885,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 // token and the LN lobby number; the ServerPlayResult (state 8) releases the
 // in-match handoff, a rejection or the 60 s poll cancels it with ClientStopPlaying
 // (the PlaySetup shape and the state machine are engine-side: make_play_setup_vars,
-// ClientSession::build_play_request).
+// ClientSession::request_playing).
 void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
 	pending_join_ = resolved;
 	// NI/NP/BK next to NK: the proxy-assisted join fields the in-match joiner
@@ -906,20 +907,18 @@ void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
 	const std::vector<opennova::ClientVar> play_setup = opennova::make_play_setup_vars(
 			pending_join_server_name_, resolved.host_ip, std::to_string(resolved.host_port),
 			resolved.app_id, resolved.ln);
-	const std::vector<uint8_t> dg = session->build_play_request(play_setup);
-	if (dg.empty()) {
+	if (!session->request_playing(play_setup)) {
 		enter_state(STATE_CONNECTED);
 		emit_signal("join_failed", String(opennova::NWEC_PLAY_START_FAILED));
 		return;
 	}
-	lobby_.send(dg);
 	play_in_flight_ = true;
 	play_started_ms_ = lobby_.clock_ms();
 }
 
 void NovaWorldClient::abort_playing(const String &tag) {
 	if (play_in_flight_ && lobby_.session()) {
-		lobby_.send(lobby_.session()->build_stop_playing());
+		lobby_.session()->stop_playing();
 	}
 	play_in_flight_ = false;
 	enter_state(STATE_CONNECTED);
@@ -1001,8 +1000,7 @@ void NovaWorldClient::stop_hosting() {
 void NovaWorldClient::stop_playing() {
 	opennova::ClientSession *session = lobby_.session();
 	if (session != nullptr && lobby_.sockets_open()) {
-		const std::vector<uint8_t> dg = session->build_stop_playing();
-		if (!dg.empty()) lobby_.send(dg);
+		session->stop_playing();
 	}
 	play_in_flight_ = false;
 	if (state_ == STATE_JOINING || state_ == STATE_IN_GAME_HELLO) {

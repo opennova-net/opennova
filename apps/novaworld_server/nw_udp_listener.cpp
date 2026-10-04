@@ -12,7 +12,9 @@
 #include <net/novaworld/db/sqlite.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_session.h>
+#include <net/npwire/cs_config.h>
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -401,6 +403,30 @@ void NwUdpListener::run_loop() {
 		const int n = opennova::net::udp_recv_from(socket.get(), rx, sizeof(rx),
 		                                           from, timeout_ms);
 		if (n <= 0) {
+			if (receive_batch_active) {
+				// The receive batch's end: a lobby connection that saw a packet past a gap and
+				// still holds one asks for the gap with one 0x84 keyed by the client's CK.
+				// [orig: NapiNPProtocol_PumpRecvQueues @0x6269bb..0x6269d6 ->
+				//  CNapiNPConnection_SendMissingSeqList @0x623560]
+				std::lock_guard<std::mutex> lk(lobby_states_mu_);
+				for (auto &entry : lobby_states_) {
+					LobbyConnState &state = entry.second;
+					if (!state.sequencing.missing_request_pending) continue;
+					state.sequencing.missing_request_pending = false;
+					if (state.sequencing.queued_inbound.empty()) continue;
+					std::vector<uint8_t> missing_body;
+					if (!encode_session_resend_list(state.client_ck,
+							build_session_missing_sequence_list(state.sequencing, false),
+							missing_body)) {
+						continue;
+					}
+					const auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST,
+					                                       std::move(missing_body));
+					const opennova::net::Endpoint to =
+							opennova::net::NetDatagramSocket::to_endpoint(entry.first);
+					opennova::net::udp_send_to(socket.get(), to, packet.data(), packet.size());
+				}
+			}
 			receive_batch_active = false;
 			continue;
 		}
@@ -621,13 +647,14 @@ void NwUdpListener::run_loop() {
 			{
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				LobbyConnState state;
-				// The reply records stay retained for the client's 0x44, bounded by the
-				// NOVAWORLDUDP template's msg_out_max (CS field 11, 500) the 0x82 advertised
+				// The connection runs the NOVAWORLDUDP template its 0x82 advertised: the ordered
+				// receive gate bounded by field 10, the reply records retained for the client's
+				// 0x44 bounded by field 11 (500), the replies split at field 13.
 				// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 writes the template;
-				//  NapiNP_HandleResendList @0x623800 resends from the retained nodes].
-				for (const CsField &field : novaworld_service_cs_fields()) {
-					if (field.field_index == 11) state.sequencing.outbound_message_limit = field.value;
-				}
+				//  NapiNPProtocol_HandleSessionPacket @0x626be0..0x626c3a (the gate);
+				//  NapiNP_HandleResendList @0x623800 resends from the retained nodes]
+				state.sequencing.ordered_recovery_enabled = true;
+				sync_session_sequencing_limits(state.sequencing, state.cs);
 				state.client_ci = auth.ci;
 				state.client_ck = auth.ck;
 				state.server_sk = server_sk;
@@ -755,11 +782,11 @@ void NwUdpListener::run_loop() {
 						continue;                            // only Layer-4 lobby
 					}
 
-					// Fragment reassembly: multi-packet payloads (e.g.
-					// ClientRequestVerifyResult @ ~3.4 KB) span 2-3 SESSION
-					// packets with FRAG_CONT set on every chunk except the
-					// final. reassemble_protocol_payload accumulates and
-					// returns true only when the assembled buffer is ready.
+					// Fragment reassembly: a statement longer than the client's CS field 13
+					// (a cookie-heavy ClientRequestVerifyResult or ClientHostRequest) spans
+					// several SESSION packets, FRAG_CONT set on every piece but the final.
+					// reassemble_protocol_payload accumulates and returns true only when the
+					// assembled buffer is ready.
 					std::vector<uint8_t> assembled;
 					bool was_fragmented = false;
 					if (!reassemble_protocol_payload(lobby_state.reassembly, pm,
@@ -852,26 +879,44 @@ void NwUdpListener::run_loop() {
 				}
 			}
 
-			// The ONE seq/ack framer (ADR 0013): it stamps session_id,
-			// seq_num = next_outbound_seq++, ack_count = last_inbound_seq and
-			// connection_flags = 0 exactly as this leg used to by hand.
-			// session_id = retail's local_key = retail's ClientAuth.ck (per
-			// protocol_message.h's NapiNPProtocol_HandleSessionPacket witness).
-			// Using conn_opt->id (= ClientHello.ci) made retail TOSS our reply
-			// with code [4] — confirmed via _connectlog.txt 2026-04-27.
-			std::vector<uint8_t> body_out;
-			if (!frame_session_packet(lobby_state.sequencing,
-			                          SessionCrypto{conn_opt->server_scrk, {}, lobby_state.client_ck},
-			                          replies, body_out)) {
-				std::fprintf(stderr, "[nwudp] %s — frame_session_packet failed\n",
-				             client_label.c_str());
-				break;
+			// The shared BuildOutgoingPackets planner splits the replies at the connection's
+			// CS field 13 (a long reply leaves as FIRST/MID/FINAL records), and the ONE seq/ack
+			// framer (ADR 0013) stamps each packet: session_id, seq_num = next_outbound_seq++,
+			// ack_count = last_inbound_seq, connection_flags = 0. session_id = retail's
+			// local_key = retail's ClientAuth.ck (per protocol_message.h's
+			// NapiNPProtocol_HandleSessionPacket witness); using conn_opt->id (= ClientHello.ci)
+			// made retail TOSS our reply with code [4] — confirmed via _connectlog.txt
+			// 2026-04-27. Every SESSION is answered, header-only when nothing replies.
+			// [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430;
+			//  NapiNPMessage_SplitAtLength @0x628350]
+			OutgoingPacketPlan plan = plan_outgoing_packets(lobby_state.sequencing, replies,
+					packet_ceiling_bytes(lobby_state.cs.max_packet_bytes),
+					max_packets_per_build(lobby_state.cs.max_packets_per_tick),
+					OutgoingOverflow::DropRefused);
+			if (plan.overflow) {
+				std::fprintf(stderr, "[nwudp] %s — reply pool full (NP.C:MSGCRE, %u records)\n",
+				             client_label.c_str(), plan.overflow_count);
 			}
-			std::printf("[nwudp]   sending %zu reply byte(s) (server_scrk=%zuB)\n",
-			            body_out.size(), conn_opt->server_scrk.size());
-			auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
-			                                 std::move(body_out));
-			opennova::net::udp_send_to(socket.get(), from, packet.data(), packet.size());
+			if (plan.encode_failed) {
+				std::fprintf(stderr, "[nwudp] %s — a reply failed to encode\n",
+				             client_label.c_str());
+			}
+			if (plan.packets.empty()) plan.packets.emplace_back();
+			for (const std::vector<ProtocolMessage> &packet_records : plan.packets) {
+				std::vector<uint8_t> body_out;
+				if (!frame_session_packet(lobby_state.sequencing,
+				                          SessionCrypto{conn_opt->server_scrk, {}, lobby_state.client_ck},
+				                          packet_records, body_out)) {
+					std::fprintf(stderr, "[nwudp] %s — frame_session_packet failed\n",
+					             client_label.c_str());
+					break;
+				}
+				std::printf("[nwudp]   sending %zu reply byte(s) (server_scrk=%zuB)\n",
+				            body_out.size(), conn_opt->server_scrk.size());
+				auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
+				                                 std::move(body_out));
+				opennova::net::udp_send_to(socket.get(), from, packet.data(), packet.size());
+			}
 			break;
 		}
 
