@@ -568,8 +568,10 @@ void test_texture_import_section() {
 	CHECK(set && set->path == source && set->values == asked, "the one click raises the set_import_options of what its uses ask");
 }
 
-// S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., raise a
-// replace_texture of that texture.
+// S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., ask first
+// (preview_texture_source of that texture); the dialog the preview opens shows the texture before and after
+// and replaces only on its Replace, Cancel closing it; an image dropped on a texture field's value asks for
+// the file the field's loader opens.
 void test_texture_drop_replaces() {
 	PickerProject project;
 	CHECK(project.open(), "the item table's project");
@@ -601,23 +603,75 @@ void test_texture_drop_replaces() {
 	ui.windows.drop_files({"C:/art/new.png"}, info->Pos.x + info->Size.x * 0.5f, info->Pos.y + info->Size.y * 0.5f);
 	ui.frames(1);
 	std::vector<EditorRequest> requests = ui.drain();
-	const EditorRequest *dropped = only(requests, EditorRequestKind::ReplaceTexture);
+	const EditorRequest *dropped = only(requests, EditorRequestKind::PreviewTextureSource);
 	CHECK(dropped && dropped->path == "textures/plain.tga" && dropped->paths == std::vector<std::string>({"C:/art/new.png"}),
-	      "a drop on the tab replaces the texture");
+	      "a drop on the tab asks to replace the texture");
+	CHECK(!only(requests, EditorRequestKind::ReplaceTexture), "a drop replaces nothing before it is asked");
 	// A drop elsewhere is none's.
 	ui.windows.drop_files({"C:/art/new.png"}, -100.0f, -100.0f);
 	ui.frames(3);
-	CHECK(!only(ui.drain(), EditorRequestKind::ReplaceTexture), "a drop on no item does nothing");
-	// Picked through Replace with image...: the pick asks the Shell, its answer replaces.
+	CHECK(!only(ui.drain(), EditorRequestKind::PreviewTextureSource), "a drop on no item does nothing");
+	// Picked through Replace with image...: the pick asks the Shell, its answer asks to replace.
 	ui.activate(ImHashStr("Replace with image...", 0, info->ID));
 	requests = ui.drain();
 	const EditorRequest *pick = only(requests, EditorRequestKind::PickFile);
 	CHECK(pick && pick->purpose == PickPurpose::TextureImage, "the button asks the Shell for an image");
 	ui.windows.deliver_pick(PickPurpose::TextureImage, "C:/art/picked.tga");
 	requests = ui.drain();
-	const EditorRequest *picked = only(requests, EditorRequestKind::ReplaceTexture);
+	const EditorRequest *picked = only(requests, EditorRequestKind::PreviewTextureSource);
 	CHECK(picked && picked->path == "textures/plain.tga" && picked->paths == std::vector<std::string>({"C:/art/picked.tga"}),
-	      "the image picked replaces the texture the button was for");
+	      "the image picked asks to replace the texture the button was for");
+
+	// The dialog over a real image: what it shows, Replace raising the replace, Cancel closing it.
+	opennova::RgbaImage other;
+	other.width = other.height = 4;
+	other.pixels.assign(64, 30);
+	std::vector<uint8_t> other_tga;
+	opennova::tga::tga_write_rgba32(other.pixels.data(), 4, 4, other_tga, why);
+	const std::string picture = project.dir.file("new.tga");
+	CHECK(editor_test::write_bytes(picture, other_tga), "an image outside the project");
+	project.session.handle(request::preview_texture_source("textures/plain.tga", picture));
+	CHECK(view.dialogs.texture_source.open && view.dialogs.texture_source.refusal.empty() &&
+	              view.dialogs.texture_source.before && view.dialogs.texture_source.after,
+	      "the preview opens with the texture before and after");
+	ui.frames(3);
+	ImGuiWindow *dialog = ImGui::FindWindowByName("Make a texture from an image###texture_source");
+	CHECK(dialog && dialog->Active, "the dialog shows");
+	if (!dialog) return;
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Replace plain.tga with new.tga?") != std::string::npos && text.find("Now") != std::string::npos &&
+	              text.find("Then") != std::string::npos,
+	      "it says what it replaces with what, before and after");
+	ui.drain();
+	ui.activate(ImHashStr("Replace", 0, dialog->ID));
+	requests = ui.drain();
+	const EditorRequest *replace = only(requests, EditorRequestKind::ReplaceTexture);
+	CHECK(replace && replace->path == "textures/plain.tga" && replace->paths == std::vector<std::string>({picture}),
+	      "its Replace replaces the texture with the image");
+	ui.activate(ImHashStr("Cancel", 0, dialog->ID));
+	requests = ui.drain();
+	CHECK(only(requests, EditorRequestKind::CancelTextureSource) != nullptr, "its Cancel closes it");
+	project.session.handle(request::cancel_texture_source());
+	ui.frames(3);
+	CHECK(!view.dialogs.texture_source.open && !GImGui->OpenPopupStack.Size, "closed, the dialog goes");
+
+	// Dropped on a texture field's value (the item's HUD image, which names gone.tga): the file the field's
+	// loader opens.
+	project.session.handle(request::open_document("defs/items.def"));
+	EditorRequest select = request::select_record(project.items->path(), project.item);
+	project.session.handle(select);
+	ui.frames(3);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	const ImVec2 hud = centre_of(ui, field_item(project, "hud_image", "##value"));
+	CHECK(hud.x > 0.0f && hud.y > 0.0f, "the HUD image's value is on the screen");
+	ui.windows.drop_files({"C:/art/hud.png"}, hud.x, hud.y);
+	ui.frames(1);
+	requests = ui.drain();
+	const EditorRequest *field = only(requests, EditorRequestKind::PreviewTextureSource);
+	CHECK(field && field->path == "gone.tga" && field->paths == std::vector<std::string>({"C:/art/hud.png"}),
+	      "an image dropped on a texture field asks to make the file its loader opens");
 }
 
 } // namespace

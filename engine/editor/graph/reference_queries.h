@@ -93,7 +93,14 @@ struct TextureReferenceLoad {
 	std::string name;
 	std::string file;
 	TextureLoadTransform transform = TextureLoadTransform::None;
+	// The name the loader opens for it (a HUD name's suffix cut, a sky map's made .pcx): the file a Replace
+	// makes where the project has none.
+	std::string opens;
 };
+// The file a Replace of a texture reference's texture makes (S18: an image dropped on its field): the project
+// file the loader opens for it (a .dds beside the name the field writes), else the name the loader opens; ""
+// for a reference naming no texture.
+std::string texture_replace_target(const TextureReferenceLoad &loads);
 // The kinds a texture's file is: a texture, a menu's texture, a mission's loading image.
 bool is_texture_reference(ReferenceKind kind);
 TextureReferenceLoad texture_reference(const AssetGraph &graph, const FieldUse &field, const Value &value);

@@ -6,6 +6,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
+#include <editor/project/project_files.h>
 
 namespace opennova::editor {
 
@@ -220,11 +221,14 @@ TextureReferenceLoad texture_reference(const AssetGraph &graph, ReferenceKind ki
 	out.status = graph.resolve(kind, name, scope, &out.file, loader_arg);
 	if (out.status != ReferenceStatus::Present) out.file.clear();
 	// What a texture's loader makes of the file it opens (a menu's and a loading screen's draw it as
-	// read): the loader asked again over the project's files.
-	if (kind == ReferenceKind::Texture && !out.file.empty())
-		out.transform =
-				texture_reference_load(name, loader_arg, [&graph](const std::string &file) { return graph.has_file(file); })
-						.transform;
+	// read), and the name it opens: the loader asked again over the project's files.
+	out.opens = name;
+	if (kind == ReferenceKind::Texture) {
+		const TextureLoad load =
+				texture_reference_load(name, loader_arg, [&graph](const std::string &file) { return graph.has_file(file); });
+		if (!out.file.empty()) out.transform = load.transform;
+		if (!load.file.empty()) out.opens = load.file;
+	}
 	return out;
 }
 
@@ -249,6 +253,12 @@ TextureReferenceLoad texture_reference(const AssetGraph &graph, const FieldUse &
 
 TextureReferenceLoad texture_reference(const AssetGraph &graph, const GraphEdge &edge) {
 	return texture_reference(graph, edge.kind, edge.value, edge.scope, edge.loader_arg);
+}
+
+std::string texture_replace_target(const TextureReferenceLoad &loads) {
+	if (!loads.texture) return std::string();
+	if (!loads.file.empty()) return loads.file;
+	return basename_of(loads.opens.empty() ? loads.name : loads.opens);
 }
 
 } // namespace opennova::editor

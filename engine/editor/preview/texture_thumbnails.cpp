@@ -152,6 +152,12 @@ std::shared_ptr<const TextureThumbnail> TextureThumbnails::make_now(const Sessio
 	return make_(view, key, nullptr);
 }
 
+std::shared_ptr<const TextureThumbnail> TextureThumbnails::picture_of(const std::string &name, const std::vector<uint8_t> &bytes) {
+	std::shared_ptr<TextureThumbnail> picture = make_texture_thumbnail(name, bytes, TextureLoadTransform::None);
+	picture->serial = ++serial_;
+	return picture;
+}
+
 bool TextureThumbnails::step(const SessionView &view, size_t bytes) {
 	bool made = false;
 	size_t read = 0;

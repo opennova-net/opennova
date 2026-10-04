@@ -305,6 +305,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_preview.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_source_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp

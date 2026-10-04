@@ -66,6 +66,9 @@ public:
 	// read): what the wire answers with.
 	std::shared_ptr<const TextureThumbnail> make_now(const SessionView &view, const std::string &file,
 	                                                 TextureLoadTransform transform);
+	// The picture of bytes the project holds no file of yet (S18: what a Replace would make), named `name`,
+	// made now, never kept, with a serial of the cache's own (a device uploads each picture once).
+	std::shared_ptr<const TextureThumbnail> picture_of(const std::string &name, const std::vector<uint8_t> &bytes);
 	// Makes the queued pictures, one at least, until `bytes` of files are read: true when one was made.
 	bool step(const SessionView &view, size_t bytes);
 	bool pending() const { return !queue_.empty(); }

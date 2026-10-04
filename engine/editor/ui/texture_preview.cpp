@@ -97,6 +97,12 @@ void picture(Workspace &workspace, const std::string &file, TextureLoadTransform
 	draw_box(workspace, made.get(), at, side);
 }
 
+void picture(Workspace &workspace, const TextureThumbnail *made, float side) {
+	const ImVec2 at = ImGui::GetCursorScreenPos();
+	ImGui::Dummy(ImVec2(side, side));
+	draw_box(workspace, made, at, side);
+}
+
 void facts_block(Workspace &workspace, const std::string &file, TextureLoadTransform transform, float width) {
 	const std::shared_ptr<const TextureThumbnail> made = picture_of(workspace, file, transform);
 	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);

@@ -400,6 +400,66 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 	return true;
 }
 
+namespace {
+
+// One plane's row, run-length coded as the readers decode it: a run of 2 to 63 equal bytes, or a byte with
+// its top two bits set, a count byte (0xC0 | n) and the byte; any other a byte alone.
+void append_rle_row(const uint8_t *row, int length, std::vector<uint8_t> &out) {
+	int pos = 0;
+	while (pos < length) {
+		const uint8_t value = row[pos];
+		int run = 1;
+		while (pos + run < length && run < 63 && row[pos + run] == value) ++run;
+		if (run > 1 || (value & 0xC0) == 0xC0) {
+			out.push_back(static_cast<uint8_t>(0xC0 | run));
+			out.push_back(value);
+		} else {
+			out.push_back(value);
+		}
+		pos += run;
+	}
+}
+
+} // namespace
+
+// [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31 — the 24-bit path, 3 * BytesPerLine RLE bytes a row, the
+// planes `width` apart; load_pcx_to_argb @ 0x664cc0 likewise]
+bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::string &error) {
+	out.clear();
+	if (image.width <= 0 || image.height <= 0 || image.width > 0xFFFF || image.height > 0xFFFF) {
+		error = "Invalid PCX dimensions";
+		return false;
+	}
+	if (image.pixels.size() < static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 3u) {
+		error = "PCX colour payload too small";
+		return false;
+	}
+	uint8_t header[128] = {};
+	header[0] = 0x0A;
+	header[1] = 5;
+	header[2] = 1;
+	header[3] = 8;
+	header[8] = static_cast<uint8_t>((image.width - 1) & 0xFF);
+	header[9] = static_cast<uint8_t>(((image.width - 1) >> 8) & 0xFF);
+	header[10] = static_cast<uint8_t>((image.height - 1) & 0xFF);
+	header[11] = static_cast<uint8_t>(((image.height - 1) >> 8) & 0xFF);
+	header[12] = 72;
+	header[14] = 72;
+	header[65] = 3;
+	header[66] = static_cast<uint8_t>(image.width & 0xFF);
+	header[67] = static_cast<uint8_t>((image.width >> 8) & 0xFF);
+	header[68] = 1;
+	out.insert(out.end(), header, header + 128);
+	std::vector<uint8_t> plane(static_cast<size_t>(image.width));
+	for (int y = 0; y < image.height; ++y)
+		for (int p = 0; p < 3; ++p) {
+			for (int x = 0; x < image.width; ++x)
+				plane[static_cast<size_t>(x)] = image.pixels[(static_cast<size_t>(y) * static_cast<size_t>(image.width) + static_cast<size_t>(x)) * 3u + static_cast<size_t>(p)];
+			append_rle_row(plane.data(), image.width, out);
+		}
+	return true;
+}
+
 bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, std::string &error) {
 	out.clear();
 

@@ -103,6 +103,7 @@ const std::vector<ImportOptionRow> &image_import_option_rows() {
 		        {"tga", "TGA, 32-bit: colour and alpha, the form every TGA loader reads"},
 		        {"tga24", "TGA, 24-bit: colour alone (a terrain colour map's form)"},
 		        {"pcx", "PCX, 8-bit: 256 colours, no alpha (a loading screen's, a sky cloud's form)"},
+		        {"pcx24", "PCX, 24-bit: three planes of colour, no alpha (two of the game's loading screens)"},
 		        {"dds", "DDS: DXT5 with its mip chain, the form of the game's model textures"},
 		        {"mdt", "MDT: a 32-bit TGA under .mdt, a model's finished normal map"},
 		        {"png", "PNG: the menus alone read one"},
@@ -298,6 +299,7 @@ void height_into_alpha(RgbaImage &image) {
 
 std::string image_format_extension(const std::string &format) {
 	if (format == "tga24") return ".tga";
+	if (format == "pcx24") return ".pcx";
 	return "." + format;
 }
 
@@ -424,7 +426,19 @@ bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, s
 	const uint32_t w = uint32_t(image.width), h = uint32_t(image.height);
 	const std::string &format = settings.format;
 	if (format == "tga" || format == "mdt") return tga::tga_write_rgba32(image.pixels.data(), w, h, out, why);
-	if (format == "tga24") return tga::tga_write_rgb24(image.pixels.data(), w, h, out, why);
+	if (format == "tga24") {
+		if (translucent(image)) note = "a 24-bit TGA carries no alpha: the transparency is dropped (format tga keeps it).";
+		return tga::tga_write_rgb24(image.pixels.data(), w, h, out, why);
+	}
+	if (format == "pcx24") {
+		if (translucent(image)) note = "a PCX carries no alpha: the transparency is dropped (format tga keeps it).";
+		RgbImage rgb;
+		rgb.width = image.width;
+		rgb.height = image.height;
+		rgb.pixels.reserve(size_t(w) * h * 3);
+		for (size_t i = 0; i + 3 < image.pixels.size(); i += 4) rgb.pixels.insert(rgb.pixels.end(), {image.pixels[i], image.pixels[i + 1], image.pixels[i + 2]});
+		return encode_pcx_rgb(rgb, out, why);
+	}
 	if (format == "png") {
 		out = encode_png_rgba(image.pixels.data(), w, h);
 		if (out.empty()) why = "the PNG writer made nothing of it";
@@ -446,7 +460,7 @@ bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, s
 				return false;
 			}
 		}
-		if (translucent(image)) note = "PCX carries no alpha: the transparency is dropped (format tga keeps it).";
+		if (translucent(image)) note = "a PCX carries no alpha: the transparency is dropped (format tga keeps it).";
 		return encode_pcx_indexed(quantize_to_256(image), out, why);
 	}
 	if (format == "dds") {
@@ -469,7 +483,7 @@ bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, s
 		for (const renderer::DxtSurface &level : chain) blocks.push_back(level.blocks);
 		return dds::dds_write_dxt(dds::dds_fourcc('D', 'X', 'T', dxt5 ? '5' : '1'), w, h, blocks, out, why);
 	}
-	why = "the format '" + format + "' is none of tga, tga24, pcx, dds, mdt or png";
+	why = "the format '" + format + "' is none of tga, tga24, pcx, pcx24, dds, mdt or png";
 	return false;
 }
 
@@ -522,16 +536,17 @@ bool run_image_import(ImportContext &context, ImportProduct &out) {
 	image = resize_image(image, width, height);
 	if (settings.green == "flip") flip_image_green(image);
 	if (settings.format == "tga" && settings.normal == "height") height_into_alpha(image);
-	else if (settings.format != "tga24" && settings.format != "pcx" && !apply_image_alpha(image, settings.alpha, error))
+	else if (settings.format != "tga24" && settings.format != "pcx" && settings.format != "pcx24" &&
+	         !apply_image_alpha(image, settings.alpha, error))
 		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", "alpha");
 	std::string note;
 	if (!encode_image(image, settings, output.bytes, error, note))
 		return refuse(CoreFinding::ImportEncode, "Could not write " + name + ": " + error + ".");
-	if (!note.empty())
+	if (!note.empty()) {
+		note[0] = char(std::toupper(static_cast<unsigned char>(note[0])));
 		out.diagnostics.push_back(make_finding(CoreFinding::ImportAlphaDropped, DiagnosticSeverity::Warning,
-		                                       "PCX carries no alpha: the transparency of " + source_name +
-		                                               " is dropped (format tga keeps it).",
-		                                       source_name));
+		                                       source_name + ": " + note, source_name));
+	}
 	out.outputs.push_back(std::move(output));
 	return true;
 }

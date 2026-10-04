@@ -495,6 +495,8 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 		out.height = image.header.height;
 		out.dds_format = image.format.name;
 		out.dds_levels = uint32_t(image.levels.size());
+		out.dds_faces = std::max<uint32_t>(1, uint32_t(image.faces));
+		out.dds_depth = std::max<uint32_t>(1, uint32_t(image.depth));
 		const std::string format = image.format.name;
 		// A DXT1 block may hold a transparent texel (its three-colour mode), so it counts as holding one.
 		out.alpha = format.rfind("DXT", 0) == 0 || format.find('A') != std::string::npos;

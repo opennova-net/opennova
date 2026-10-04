@@ -27,6 +27,8 @@ namespace texture_preview {
 void thumbnail(Workspace &workspace, const std::string &file, TextureLoadTransform transform, float side);
 // The same box drawn at the cursor as a dummy item (no tooltip of its own: a list's row has its own).
 void picture(Workspace &workspace, const std::string &file, TextureLoadTransform transform, float side);
+// The box of a picture in hand (a dialog's: what a Replace would make), null a framed box.
+void picture(Workspace &workspace, const TextureThumbnail *made, float side);
 // The facts of `file` under its picture, wrapped to `width`: what a picker's preview panel shows.
 void facts_block(Workspace &workspace, const std::string &file, TextureLoadTransform transform, float width);
 // While the item just drawn is hovered: a tooltip of the texture `file` (its picture larger, its size,

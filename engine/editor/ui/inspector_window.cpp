@@ -345,8 +345,9 @@ void reference_tools(Workspace &workspace, ReferencePicker &picker, const Docume
 }
 
 // A Files row dropped on a text reference's value: the file set on every target, when it is one
-// the field's kind loads. An image the OS dropped on a texture field's value (S18): the texture it names
-// made from it (replace_texture: the name kept, a texture the project lacks made under it).
+// the field's kind loads. An image the OS dropped on a texture field's value (S18): the file the game loads
+// for the field made from it, asked first (preview_texture_source: the file its loader opens, a .dds beside
+// the name the field writes; a name the project lacks, made under the name the loader takes).
 void drop_target(Workspace &workspace, const Document &document, const Targets &targets, const FieldUse &field,
                  const Value &value) {
 	std::string dropped;
@@ -354,14 +355,18 @@ void drop_target(Workspace &workspace, const Document &document, const Targets &
 	    ReferencePicker::accept_file(workspace.view(), field, dropped))
 		set(workspace, document, targets, field.schema->id, dropped, false);
 	const std::string *name = std::get_if<std::string>(&value);
-	if (field.reference != ReferenceKind::Texture || !name || name->empty()) return;
+	if (!is_texture_reference(field.reference) || !name || name->empty()) return;
 	const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
 	std::vector<std::string> paths;
 	if (!workspace.take_dropped_files(min.x, min.y, max.x, max.y, paths)) return;
+	const SessionView &view = workspace.view();
+	if (!view.findings.graph) return;
+	const std::string target = texture_replace_target(texture_reference(*view.findings.graph, field, value));
+	if (target.empty()) return;
 	for (const std::string &path : paths) {
 		const std::string extension = strutil::to_lower(utf8_of(path_of(path).extension()));
 		if (extension == ".png" || extension == ".tga" || extension == ".pcx") {
-			workspace.request(request::replace_texture(basename_of(*name), path));
+			workspace.request(request::preview_texture_source(target, path));
 			return;
 		}
 	}

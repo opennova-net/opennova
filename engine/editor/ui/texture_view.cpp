@@ -19,6 +19,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/texture_uses.h>
 #include <editor/import/texture_import.h>
+#include <editor/import/texture_source.h>
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/texture_show_use.h>
@@ -62,18 +63,18 @@ void TextureView::draw(Workspace &workspace, const DocumentBase &document) {
 				const char *data = static_cast<const char *>(dragged->Data);
 				const std::string path(data, strnlen(data, size_t(dragged->DataSize)));
 				if (replaceable_image(path) && path != document.path() && ImGui::AcceptDragDropPayload(kFileDragPayload))
-					workspace.request(request::replace_texture(document.path(), path));
+					workspace.request(request::preview_texture_source(document.path(), path));
 			}
 			ImGui::EndDragDropTarget();
 		}
 	}
 	ImGui::EndChild();
-	// An image the OS dropped on the tab: Replace (S18).
+	// An image the OS dropped on the tab: Replace, asked first (S18).
 	std::vector<std::string> dropped;
 	if (workspace.take_dropped_files(origin.x, origin.y, origin.x + size.x, origin.y + size.y, dropped)) {
 		for (const std::string &path : dropped)
 			if (replaceable_image(path)) {
-				workspace.request(request::replace_texture(document.path(), path));
+				workspace.request(request::preview_texture_source(document.path(), path));
 				break;
 			}
 	}
@@ -123,24 +124,30 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 	// Made from an image the modder brings (S18): a Replace, which keeps the name every referrer writes.
 	const SessionView &view = workspace.view();
 	ui_kit::WrapRow made;
-	if (ui_kit::tool(made, "Replace with image...", view.allows(EditorRequestKind::ReplaceTexture),
+	if (ui_kit::tool(made, "Replace with image...", view.allows(EditorRequestKind::PreviewTextureSource),
 	                 "Makes " + basename_of(document.path()) +
 	                         " from a PNG, a TGA or a PCX of yours, in the form it is stored in, under the name every file "
-	                         "that uses it writes. The file it replaces is kept under .opennova/replaced/. Dropping an image "
-	                         "on this tab does the same.")) {
+	                         "that uses it writes, after showing you what changes. The file it replaces is kept under " +
+	                         std::string(kReplacedFolder) + "/. Dropping an image on this tab does the same.")) {
 		EditorRequest pick = request::pick_file(PickPurpose::TextureImage);
 		pick.path = document.path();
 		workspace.request(std::move(pick));
 	}
-	// Painted in the modder's own program (S18): what it saves comes back as the editor gains the focus.
+	// Painted in the modder's own program (S18): what it saves comes back as the editor gains the focus. A
+	// texture with a source opens it; one without is given one, asked first.
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(document.path()) : nullptr;
+	const bool has_source = (entry && !entry->imported_from.empty()) ||
+	                        strutil::to_lower(utf8_of(path_of(document.path()).extension())) == ".png";
 	const bool unsaved = document.dirty();
-	if (ui_kit::tool(made, "Edit in its program", view.allows(EditorRequestKind::EditExternally) && !unsaved,
+	if (ui_kit::tool(made, "Edit in its program",
+	                 view.allows(has_source ? EditorRequestKind::OpenTextureSource : EditorRequestKind::PreviewTextureSource) && !unsaved,
 	                 unsaved ? "Save or discard its edits first: its program edits the file as saved."
 	                         : "Opens the image this texture is made from in the program your system has for it: its "
 	                           "import's source, or a PNG the game reads itself. A texture stored in another form gets a "
-	                           "source of its own once, in art/, which its import turns back into this file. What the "
-	                           "program saves is imported again when you come back to the editor."))
-		workspace.request(request::edit_externally(document.path()));
+	                           "source of its own once, in art/, which its import turns back into this file (you are shown "
+	                           "what changes first). What the program saves is imported again when you come back to the "
+	                           "editor."))
+		workspace.request(has_source ? request::open_texture_source(document.path()) : request::preview_texture_source(document.path()));
 	if (!image->palette.empty() && ImGui::CollapsingHeader("Palette", ImGuiTreeNodeFlags_DefaultOpen)) draw_palette(image->palette);
 	draw_import(workspace, document);
 	if (!import_.imported) draw_edits(workspace, document, *image);

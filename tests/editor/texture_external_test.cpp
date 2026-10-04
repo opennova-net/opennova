@@ -2,8 +2,9 @@
 // given a source once (a copy in art/ under a name of its own, its record reproducing it, the TGA set
 // aside) and opened (the open_externally view event naming the source on disk); an import's output's own
 // source opened, nothing made; a change a program saves there imported by refresh_changed_sources, the
-// open texture document of the output read again; nothing changed, nothing done; a name the project lacks
-// refused.
+// open texture document of the output read again; nothing changed, nothing done; the tab's open of a
+// source (open_texture_source: an output's opened, a plain texture's refused until one is made, a PNG with
+// unsaved edits refused); a name the project lacks refused.
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -13,6 +14,7 @@
 
 #include <editor/documents/texture_document.h>
 #include <editor/import/import_run.h>
+#include <editor/import/png_encode.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
@@ -103,6 +105,38 @@ int test_round_trip() {
 	TEST_EXPECT(session.outcome().done() && opened(view) == root + "/art/rock_src.tga");
 	session.run_operations();
 	TEST_EXPECT(view.project.scan->entries.size() == entries);
+
+	// The tab's "Edit in its program" on a texture with a source of its own: open_texture_source opens it,
+	// nothing made; one with none is refused (the dialog's preview asks before making one).
+	editor_test::handle_to_end(session, request::open_texture_source("rock.tga"));
+	TEST_EXPECT(session.outcome().done() && opened(view) == root + "/art/rock_src.tga");
+	TEST_EXPECT(editor_test::write_bytes(root + "/textures/plain.tga", tga32(9, 9, 9)));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	session.handle(request::open_texture_source("textures/plain.tga"));
+	TEST_EXPECT(session.outcome().refused && session.outcome().findings.back().message.find("has no source yet") != std::string::npos &&
+	            fs::exists(root + "/textures/plain.tga"));
+	session.handle(request::preview_texture_source("textures/plain.tga"));
+	TEST_EXPECT(view.dialogs.texture_source.open && view.dialogs.texture_source.refusal.empty() &&
+	            view.dialogs.texture_source.image.empty() && !view.dialogs.texture_source.changes.empty() &&
+	            fs::exists(root + "/textures/plain.tga"));
+	session.handle(request::cancel_texture_source());
+	// A PNG the game reads as it is, edited in place: open with unsaved edits, its program is not given it.
+	{
+		std::vector<uint8_t> rgba(64, 120);
+		const std::vector<uint8_t> png = encode_png_rgba(rgba.data(), 4, 4);
+		TEST_EXPECT(editor_test::write_bytes(root + "/textures/pic.png", png));
+		editor_test::handle_to_end(session, request::rescan());
+		session.run_operations();
+		editor_test::handle_to_end(session, request::open_document("textures/pic.png"));
+		editor_test::handle_to_end(session, request::texture_operation("textures/pic.png", "alpha", {{"alpha", "invert"}}, true));
+		TEST_EXPECT(session.document_base_for("textures/pic.png") && session.document_base_for("textures/pic.png")->dirty());
+		session.handle(request::open_texture_source("textures/pic.png"));
+		TEST_EXPECT(session.outcome().refused && session.outcome().findings.back().message.find("unsaved edits") != std::string::npos);
+		editor_test::handle_to_end(session, request::save("textures/pic.png"));
+		editor_test::handle_to_end(session, request::open_texture_source("textures/pic.png"));
+		TEST_EXPECT(session.outcome().done() && opened(view) == root + "/textures/pic.png");
+	}
 
 	// A name the project lacks: refused.
 	session.handle(request::edit_externally("nothing.tga"));

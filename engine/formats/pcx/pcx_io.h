@@ -12,6 +12,11 @@ namespace opennova {
 bool decode_pcx_rgb(const uint8_t *data, size_t size, RgbImage &out, std::string &error);
 bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error);
 bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, std::string &error);
+// A 24-bit PCX (8 bits a plane, three planes): each row the red, green and blue planes of `width`
+// bytes each, run-length coded a plane at a time, no palette. The shape the game's 24-bit path reads
+// [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31; load_pcx_to_argb @ 0x664cc0's NPlanes == 3 path]: 3 x
+// BytesPerLine bytes a row, the planes `width` apart, so its bytes a line are its width exactly.
+bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::string &error);
 
 // The archive loader's alpha read: the game's 8-bit PCX reader
 // (Texture_LoadPCXFromPFF8Bit) then each pixel's palette-entry luminance

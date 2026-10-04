@@ -133,6 +133,55 @@ int test_operations() {
 	            moved.indices[0] == 1 && moved.indices[1] == 9 && moved.indices[2] == 9 && moved.indices[3] == 3);
 	TEST_EXPECT(!apply_texture_operation("f.pcx", pcx, op(K::RemapPalette, {{"2", "300"}}), out, words, why));
 	TEST_EXPECT(!apply_texture_operation("a.tga", file, op(K::RemapPalette, {{"2", "9"}}), out, words, why));
+	// An 8-bit PCX halved keeps its codes: each texel an index of the file's own, the palette as it is (its
+	// indices are data a foliage or char map's reader takes, never averaged and chosen again).
+	{
+		IndexedImage8 codes;
+		codes.width = codes.height = 4;
+		for (int i = 0; i < 16; ++i) codes.indices.push_back(uint8_t(10 + i * 3));
+		for (int i = 0; i < 256; ++i) codes.palette[i][0] = codes.palette[i][1] = codes.palette[i][2] = uint8_t(255 - i);
+		std::vector<uint8_t> map;
+		TEST_EXPECT(encode_pcx_indexed(codes, map, why));
+		TEST_EXPECT(apply_texture_operation("f.pcx", map, op(K::Resize, {{"size", "2x2"}}), out, words, why) &&
+		            words == "Resized to 2 x 2, its palette indices kept");
+		IndexedImage8 halved;
+		TEST_EXPECT(decode_pcx_indexed(out.data(), out.size(), halved, why) && halved.width == 2 && halved.height == 2 &&
+		            halved.indices == std::vector<uint8_t>({uint8_t(10 + 5 * 3), uint8_t(10 + 7 * 3), uint8_t(10 + 13 * 3),
+		                                                    uint8_t(10 + 15 * 3)}) &&
+		            halved.palette[3][0] == 252);
+		// A palette chosen again would renumber them: refused.
+		TEST_EXPECT(!apply_texture_operation("f.pcx", map, op(K::Format, {{"palette", "exact"}}), out, words, why) &&
+		            why.find("renumber") != std::string::npos);
+		TEST_EXPECT(!apply_texture_operation("f.pcx", map, op(K::Format, {{"format", "pcx"}}), out, words, why) &&
+		            why.find("already") != std::string::npos);
+	}
+	// A 24-bit PCX stays one: resized, its three planes kept.
+	{
+		RgbImage colours;
+		colours.width = colours.height = 4;
+		for (int i = 0; i < 16; ++i) colours.pixels.insert(colours.pixels.end(), {uint8_t(i * 16), uint8_t(255 - i * 16), 40});
+		std::vector<uint8_t> planes;
+		TEST_EXPECT(encode_pcx_rgb(colours, planes, why));
+		TEST_EXPECT(apply_texture_operation("s.pcx", planes, op(K::Resize, {{"size", "2x2"}}), out, words, why) &&
+		            out.size() > 128 && out[65] == 3);
+		const TextureHeader made = texture_header("s.pcx", out);
+		TEST_EXPECT(made.read && made.pcx_rgb() && made.width == 2 && made.height == 2);
+		TEST_EXPECT(!apply_texture_operation("s.pcx", planes, op(K::Format, {{"format", "pcx24"}}), out, words, why) &&
+		            why.find("already") != std::string::npos);
+	}
+	// A cube map: every operation refused, which would keep its first face alone.
+	{
+		const std::vector<uint8_t> texels(16, 90);
+		std::vector<uint8_t> cube;
+		TEST_EXPECT(dds::dds_write_a8r8g8b8(texels.data(), 2, 2, cube, why) && cube.size() == 128 + 16);
+		const std::vector<uint8_t> face(cube.begin() + 128, cube.end());
+		for (int i = 0; i < 5; ++i) cube.insert(cube.end(), face.begin(), face.end());
+		cube[113] = 0xFE; // caps2: the cube map and its six faces
+		TEST_EXPECT(texture_header("sky.dds", cube).dds_faces == 6);
+		for (const TextureOperation &each : {op(K::Resize, {{"size", "1x1"}}), op(K::Format, {{"dds", "dxt5"}}),
+		                                     op(K::Alpha, {{"alpha", "opaque"}})})
+			TEST_EXPECT(!apply_texture_operation("sky.dds", cube, each, out, words, why) && why.find("cube map") != std::string::npos);
+	}
 	TextureOperationKind kind;
 	TEST_EXPECT(texture_operation_kind("reorder_rows", kind) && kind == K::ReorderRows && !texture_operation_kind("blur", kind));
 	std::printf("operations: a resize, the alphas, the stored forms, the rows, a palette's indices, the refusals\n");

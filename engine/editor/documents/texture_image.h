@@ -114,9 +114,15 @@ struct TextureHeader {
 	// PCX (reader Pcx)
 	uint8_t pcx_bits = 0, pcx_planes = 0;
 	uint16_t pcx_bytes_per_line = 0;
-	// DDS (reader Dds)
+	// DDS (reader Dds): its format, its levels, its faces (6 for a cube map) and its depth (a volume's slices)
 	std::string dds_format;
 	uint32_t dds_levels = 0;
+	uint32_t dds_faces = 1;
+	uint32_t dds_depth = 1;
+	// PCX (reader Pcx): three planes of colour, no palette indices
+	bool pcx_rgb() const { return reader == TextureReader::Pcx && pcx_planes == 3; }
+	// A DDS of more than one picture (a cube map's faces, a volume's slices), which the editor writes flat.
+	bool layered() const { return dds_faces > 1 || dds_depth > 1; }
 	bool alpha = false;
 };
 TextureHeader texture_header(const std::string &name, const std::vector<uint8_t> &bytes);

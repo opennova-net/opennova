@@ -299,7 +299,8 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::GameInstall: settings_.set_picked(purpose, path, view().project.root); break;
 	case PickPurpose::ImportFiles: deliver_picks(purpose, {path}); break;
 	case PickPurpose::TextureImage:
-		if (!replace_target_.empty()) request(request::replace_texture(replace_target_, path));
+		// Asked before it is done: the dialog shows what the Replace would change (S18).
+		if (!replace_target_.empty()) request(request::preview_texture_source(replace_target_, path));
 		replace_target_.clear();
 		break;
 	case PickPurpose::BuildFolder: {
@@ -334,6 +335,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	new_file_.draw(*this);
 	find_.draw(*this);
 	rename_.draw(*this);
+	texture_source_.draw(*this);
 	draw_build_panel(v);
 	if (document_window_) document_window_->draw_modals();
 	shortcuts(v, document);

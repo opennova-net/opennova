@@ -52,10 +52,57 @@ std::string free_source_name(const AssetScan &scan, const std::string &wanted, c
 	return std::string();
 }
 
-bool decodes(const std::string &name, const std::vector<uint8_t> &bytes, bool &indexed, std::string &why) {
-	ImageSource source;
-	if (!decode_image_source(name, bytes, source, why)) return false;
-	indexed = source.indexed;
+// A texture's sides and stored form in words ("256 x 128, a 32-bit TGA"); "" for bytes that say nothing.
+std::string texture_words(const std::string &name, const std::vector<uint8_t> &bytes) {
+	const TextureHeader header = texture_header(name, bytes);
+	if (!header.read) return std::string();
+	std::string form;
+	switch (header.reader) {
+	case TextureReader::Tga:
+		form = extension_of(name) == ".mdt" ? "a TGA under .mdt" : header.tga_bits == 32 ? "a 32-bit TGA" : "a " + std::to_string(header.tga_bits) + "-bit TGA";
+		break;
+	case TextureReader::Pcx: form = header.pcx_rgb() ? "a 24-bit PCX" : "an 8-bit PCX"; break;
+	case TextureReader::Dds:
+		form = "a " + (header.dds_format.empty() ? std::string("DDS") : header.dds_format + " DDS") +
+		       (header.dds_levels > 1 ? " of " + std::to_string(header.dds_levels) + " levels" : std::string());
+		break;
+	case TextureReader::Png: form = "a PNG"; break;
+	case TextureReader::None: break;
+	}
+	return std::to_string(header.width) + " x " + std::to_string(header.height) + (form.empty() ? "" : ", " + form);
+}
+
+// The texture the import makes of the plan's source (its bytes), and what the import said of it; false,
+// with the findings, where it makes none.
+bool make_output(const ProjectPaths &paths, TextureSourcePlan &plan, const std::string &source_name) {
+	ImportContext context(source_name, plan.bytes, plan.options, paths.root, paths.root);
+	ImportProduct product;
+	if (!run_image_import(context, product) || product.outputs.empty()) {
+		for (const Diagnostic &d : product.diagnostics)
+			if (d.severity == DiagnosticSeverity::Error) plan.refusals.push_back(refused(d.message, plan.texture));
+		if (plan.refusals.empty()) plan.refusals.push_back(refused("The import makes nothing of " + source_name + ".", plan.texture));
+		return false;
+	}
+	plan.made = std::move(product.outputs.front().bytes);
+	plan.made_name = product.outputs.front().name;
+	plan.after_words = texture_words(plan.made_name, plan.made);
+	for (const Diagnostic &d : product.diagnostics)
+		if (d.severity != DiagnosticSeverity::Error) plan.changes.push_back(d.message);
+	return true;
+}
+
+// A cube map or a volume, refused: the editor writes flat textures.
+bool layered(TextureSourcePlan &plan, const std::string &name, const std::vector<uint8_t> &bytes, const std::string &asset) {
+	const TextureHeader header = texture_header(name, bytes);
+	if (!header.layered()) return false;
+	plan.refusals.push_back(refused(basename_of(name) +
+	                                        (header.dds_faces > 1
+	                                                 ? " is a cube map of six faces, and the editor makes a flat texture of one, which "
+	                                                   "the cube map's loader could not take. Edit it in a program that writes cube maps."
+	                                                 : " is a volume of " + std::to_string(header.dds_depth) +
+	                                                           " slices, and the editor makes a flat texture of one. Edit it in a "
+	                                                           "program that writes volume textures."),
+	                                asset));
 	return true;
 }
 
@@ -75,8 +122,9 @@ ImportOptions texture_reproducing_options(const std::string &name, const std::ve
 		// A DXT file of one level stays one (an A8R8G8B8 is always one).
 		if (header.read && header.dds_levels <= 1 && header.dds_format != "A8R8G8B8") out["mips"] = "none";
 	} else if (extension == ".pcx") {
-		out["format"] = "pcx";
-		if (indexed_source) out["palette"] = "indices";
+		// Its three planes of colour stay so; its 8-bit form's indices are kept from an indexed source.
+		out["format"] = header.pcx_rgb() ? "pcx24" : "pcx";
+		if (indexed_source && !header.pcx_rgb()) out["palette"] = "indices";
 	} else if (extension == ".mdt") {
 		out["format"] = "mdt";
 	} else if (extension == ".png") {
@@ -90,24 +138,25 @@ ImportOptions texture_reproducing_options(const std::string &name, const std::ve
 
 TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetScan &scan, const std::string &texture,
                                        const std::string &image_name, const std::vector<uint8_t> &image_bytes,
-                                       const ImportOptions &overrides) {
+                                       const ImportOptions &overrides, const TextureUseAsks &asks) {
 	TextureSourcePlan plan;
 	const std::string image = basename_of(image_name);
 	const std::string extension = extension_of(image);
-	bool indexed = false;
-	std::string why;
 	if (extension != ".png" && extension != ".tga" && extension != ".pcx") {
 		plan.refusals.push_back(refused(image + " is no image the importer reads: a PNG, a TGA or a PCX.", texture));
 		return plan;
 	}
-	if (!decodes(image, image_bytes, indexed, why)) {
+	ImageSource decoded;
+	std::string why;
+	if (!decode_image_source(image, image_bytes, decoded, why)) {
 		plan.refusals.push_back(refused(image + " does not read: " + why + ".", texture));
 		return plan;
 	}
 	const AssetEntry *entry = scan.at_path(texture);
 	if (!entry) entry = scan.find(basename_of(texture));
-	std::string kept_name;
 	ImportOptions options;
+	std::vector<uint8_t> current;
+	std::string current_name;
 	if (entry && !entry->imported_from.empty()) {
 		// An import's output: its import's own options, its source set aside where the new one is another file.
 		plan.texture = entry->logical_name;
@@ -116,13 +165,17 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 		Diagnostic error;
 		if (load_import_sidecar(join_path(paths.root, plan.old_source + kImportSidecarSuffix), record, error)) options = record.options;
 		options.erase("name");
+		std::string message;
+		read_file_bytes(join_path(paths.root, entry->relative_path), current, message);
+		current_name = entry->logical_name;
+		plan.changes.push_back(plan.texture + " is made as its import makes it now (" + plan.old_source + "'s options), from " + image + ".");
 	} else if (entry && entry->kind == AssetKind::Texture) {
 		plan.texture = entry->logical_name;
 		plan.replaced = entry->relative_path;
-		std::vector<uint8_t> bytes;
 		std::string message;
-		read_file_bytes(join_path(paths.root, entry->relative_path), bytes, message);
-		options = texture_reproducing_options(entry->logical_name, bytes, image, indexed);
+		read_file_bytes(join_path(paths.root, entry->relative_path), current, message);
+		current_name = entry->logical_name;
+		options = texture_reproducing_options(entry->logical_name, current, image, decoded.indexed);
 		options.erase("name");
 	} else if (entry) {
 		plan.refusals.push_back(refused(entry->logical_name + " is no texture: " + entry->relative_path +
@@ -139,8 +192,25 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 			plan.refusals.push_back(refused(message, plan.texture));
 			return plan;
 		}
-		options = texture_reproducing_options(plan.texture, {}, image, indexed);
+		options = texture_reproducing_options(plan.texture, {}, image, decoded.indexed);
 		options.erase("name");
+		plan.changes.push_back(plan.texture + ", which the project lacks, is made from " + image + ".");
+	}
+	if (!current.empty() && layered(plan, current_name, current, plan.texture)) return plan;
+	plan.before_words = current.empty() ? std::string() : texture_words(current_name, current);
+	// What the uses ask: their palette indices from an indexed image alone; their exact size.
+	if (asks.indices && !decoded.indexed) {
+		plan.refusals.push_back(refused(plan.texture + "'s uses read its palette indices (" + asks.indices_why + "), which " + image +
+		                                        ", an image of colours, cannot carry: bring an 8-bit PCX of the codes.",
+		                                plan.texture));
+		return plan;
+	}
+	if (asks.indices && extension_of(plan.texture) == ".pcx") options["palette"] = "indices";
+	const std::string wanted = std::to_string(decoded.image.width) + "x" + std::to_string(decoded.image.height);
+	if (!asks.size.empty() && strutil::to_lower(asks.size) != wanted && !overrides.count("size") && !options.count("size")) {
+		options["size"] = asks.size;
+		plan.changes.push_back(image + " is " + std::to_string(decoded.image.width) + " x " + std::to_string(decoded.image.height) +
+		                       ": resized to " + asks.size + ", as " + asks.size_why + ".");
 	}
 	for (const auto &[key, value] : overrides) {
 		const ImportOptionRow *row = import_option_row(image_import_option_rows(), key);
@@ -156,6 +226,7 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 	if (!plan.old_source.empty() && extension_of(plan.old_source) == extension) {
 		plan.source = plan.old_source;
 		plan.old_source.clear();
+		plan.changes.push_back(plan.source + " is written over with " + image + " (its old bytes kept in " + kReplacedFolder + "/).");
 	} else {
 		const std::string name = free_source_name(scan, image, plan.texture, std::string());
 		if (name.empty()) {
@@ -171,6 +242,12 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 	if (normalized_logical_name(made) != normalized_logical_name(plan.texture)) options["name"] = plan.texture;
 	else options.erase("name");
 	plan.options = std::move(options);
+	if (!make_output(paths, plan, basename_of(plan.source))) return plan;
+	if (!plan.replaced.empty())
+		plan.changes.push_back(plan.replaced + " is set aside in " + std::string(kReplacedFolder) +
+		                       "/, never deleted; " + plan.source + " makes " + plan.texture + " from now on.");
+	if (!plan.old_source.empty())
+		plan.changes.push_back(plan.old_source + ", the source it was made from, is set aside in " + std::string(kReplacedFolder) + "/.");
 	return plan;
 }
 
@@ -188,6 +265,16 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 		return plan;
 	}
 	if (entry->kind == AssetKind::ImportSource) {
+		// A texture's source: one the image importer reads (an .o3d's is a model's).
+		ImportSidecar record;
+		Diagnostic error;
+		if (!load_import_sidecar(join_path(paths.root, entry->relative_path + kImportSidecarSuffix), record, error) ||
+		    record.importer != "image") {
+			plan.refusals.push_back(refused(entry->logical_name + " is no texture's source: its import is " +
+			                                        (record.importer.empty() ? std::string("none it reads") : record.importer + "'s") + ".",
+			                                entry->relative_path));
+			return plan;
+		}
 		plan.source = entry->relative_path;
 		return plan;
 	}
@@ -206,6 +293,7 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 		plan.refusals.push_back(refused(message, entry->relative_path));
 		return plan;
 	}
+	if (layered(plan, entry->logical_name, bytes, entry->relative_path)) return plan;
 	const std::shared_ptr<const TextureImage> image = decode_texture(entry->logical_name, bytes);
 	if (!image || !image->loads || !image->decoded || image->levels.empty()) {
 		plan.refusals.push_back(refused(entry->logical_name + " does not read, so no image of it can be made" +
@@ -214,6 +302,8 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 		return plan;
 	}
 	plan.replaced = entry->relative_path;
+	plan.before_words = texture_words(entry->logical_name, bytes);
+	const TextureHeader header = texture_header(entry->logical_name, bytes);
 	std::string wanted;
 	bool indexed = false;
 	if (extension == ".tga" || extension == ".mdt" || extension == ".pcx") {
@@ -221,11 +311,19 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 		wanted = stem_of(entry->logical_name) + (extension == ".pcx" ? ".pcx" : ".tga");
 		plan.bytes = bytes;
 		indexed = extension == ".pcx" && !image->indices.empty();
+		if (header.reader == TextureReader::Tga && (header.tga_descriptor & 0x20))
+			plan.changes.push_back(entry->logical_name + "'s rows are stored top first, so the game draws it upside down now; made from "
+			                                             "its source, it is stored bottom first and drawn as its program shows it.");
 	} else {
 		// A DDS's first level as its reader decodes it, a PNG.
 		wanted = stem_of(entry->logical_name) + ".png";
 		const TextureLevel &level = image->levels.front();
 		plan.bytes = encode_png_rgba(level.rgba.data(), level.width, level.height);
+		plan.changes.push_back(entry->logical_name + " is made again from a PNG of its first level: its " +
+		                       (header.dds_format.empty() ? std::string("DDS") : header.dds_format) + " texels are encoded again" +
+		                       (header.dds_levels > 1 ? " and its " + std::to_string(header.dds_levels) + " levels made anew from the first"
+		                                              : std::string()) +
+		                       ", so the file the game reads changes before any edit.");
 	}
 	const std::string name = free_source_name(scan, wanted, plan.texture, std::string());
 	if (name.empty() || plan.bytes.empty()) {
@@ -234,6 +332,9 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 	}
 	plan.source = "art/" + name;
 	plan.options = texture_reproducing_options(entry->logical_name, bytes, name, indexed);
+	if (!make_output(paths, plan, name)) return plan;
+	plan.changes.push_back(plan.source + ", a copy for its program, makes " + plan.texture + " from now on; " + plan.replaced +
+	                       " is set aside in " + std::string(kReplacedFolder) + "/, never deleted.");
 	return plan;
 }
 
@@ -244,11 +345,23 @@ bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &pl
 	}
 	if (plan.bytes.empty()) return true; // the source is there as it is
 	const auto at = [&](const std::string &relative) { return system_path(join_path(paths.root, relative)); };
-	// Set aside, never deleted: .opennova/replaced/<stamp>/<the file's own path>.
-	const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-	char stamp[32];
-	std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", std::localtime(&now));
-	const std::string aside = join_path(".opennova/replaced", stamp);
+	// Set aside, never deleted: .replaced/<stamp>/<the file's own path>, the stamp to the millisecond and
+	// numbered past a folder already there (two set-asides within one never share it).
+	const auto now = std::chrono::system_clock::now();
+	const std::time_t seconds = std::chrono::system_clock::to_time_t(now);
+	const int millis = int(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000);
+	char stamp[48];
+	std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", std::localtime(&seconds));
+	char milli[8];
+	std::snprintf(milli, sizeof(milli), "%03d", millis);
+	const std::string base = std::string(stamp) + "-" + milli;
+	std::string folder = base;
+	{
+		std::error_code ec;
+		for (int n = 2; fs::exists(at(join_path(kReplacedFolder, folder)), ec) && n < 1000; ++n)
+			folder = base + "-" + std::to_string(n);
+	}
+	const std::string aside = join_path(kReplacedFolder, folder);
 	std::vector<std::pair<fs::path, fs::path>> moved;
 	const auto set_aside = [&](const std::string &relative) {
 		std::error_code ec;
@@ -262,16 +375,26 @@ bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &pl
 		findings.push_back(refused("Could not set " + relative + " aside: " + ec.message() + ".", relative));
 		return false;
 	};
+	// A source written over: its old bytes kept beside the set-asides, and put back should the plan fail; a
+	// source written new taken away again.
+	std::vector<uint8_t> overwritten;
+	bool had_source = false, wrote_source = false;
 	const auto put_back = [&] {
 		std::error_code ec;
+		std::string message;
+		if (wrote_source) {
+			if (had_source) write_file_atomic(join_path(paths.root, plan.source), overwritten.data(), overwritten.size(), message);
+			else fs::remove(at(plan.source), ec);
+		}
 		for (auto it = moved.rbegin(); it != moved.rend(); ++it) rename_with_retry(it->second, it->first, ec);
 	};
 	bool ok = set_aside(plan.replaced) && set_aside(plan.old_source) &&
 	          set_aside(plan.old_source.empty() ? std::string() : plan.old_source + kImportSidecarSuffix);
-	// The source's own old bytes where it is written over (Replace of an output by an image of its kind).
-	if (ok && plan.old_source.empty() && plan.replaced.empty()) {
+	if (ok) {
 		std::error_code ec;
-		if (fs::exists(at(plan.source), ec)) {
+		std::string message;
+		if (fs::exists(at(plan.source), ec) && read_file_bytes(join_path(paths.root, plan.source), overwritten, message)) {
+			had_source = true;
 			const fs::path to = at(join_path(aside, plan.source));
 			fs::create_directories(to.parent_path(), ec);
 			fs::copy_file(at(plan.source), to, fs::copy_options::overwrite_existing, ec);
@@ -281,6 +404,7 @@ bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &pl
 	if (ok) {
 		std::error_code ec;
 		fs::create_directories(at(plan.source).parent_path(), ec);
+		wrote_source = true;
 		ok = write_file_atomic(join_path(paths.root, plan.source), plan.bytes.data(), plan.bytes.size(), message);
 		if (!ok) findings.push_back(refused("Could not write " + plan.source + ": " + message + ".", plan.source));
 	}

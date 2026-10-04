@@ -58,7 +58,9 @@ bool stored_settings(const std::string &name, const std::vector<uint8_t> &bytes,
 		return true;
 	}
 	if (extension == ".pcx") {
-		out.format = "pcx";
+		// Its colours in three planes stay so; its indices are kept by the operations that read them
+		// (indexed_pcx), never quantized again.
+		out.format = header.pcx_rgb() ? "pcx24" : "pcx";
 		return true;
 	}
 	if (extension == ".png") {
@@ -91,6 +93,7 @@ std::string format_words(const ImageImportSettings &settings) {
 	if (settings.format == "tga24") return "a 24-bit TGA";
 	if (settings.format == "mdt") return "a 32-bit TGA under .mdt";
 	if (settings.format == "png") return "a PNG";
+	if (settings.format == "pcx24") return "a 24-bit PCX";
 	if (settings.format == "pcx") return settings.palette == "exact" ? "an 8-bit PCX of its own colours" : "an 8-bit PCX";
 	const std::string dds = settings.dds == "dxt5" ? "DXT5" : settings.dds == "dxt1" ? "DXT1" : "A8R8G8B8";
 	return "a " + dds + " DDS" + (settings.dds != "argb" ? (settings.mips == "full" ? " with its mip chain" : " of one level") : "");
@@ -118,12 +121,62 @@ bool encode(const RgbaImage &image, const ImageImportSettings &settings, std::ve
 	return encode_image(image, settings, out, why, note);
 }
 
+// An 8-bit PCX's indices and palette as the game reads them (decode_pcx_menu_rgba): false, with why, for
+// one of colours or one that does not read.
+bool indexed_pcx(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out, std::string &why) {
+	if (extension_of(name) != ".pcx") return false;
+	RgbaImage colours;
+	PcxIndexed indexed;
+	if (!decode_pcx_menu_rgba(bytes.data(), bytes.size(), colours, why, &indexed) || !indexed.indexed) return false;
+	out.width = colours.width;
+	out.height = colours.height;
+	out.indices = std::move(indexed.indices);
+	std::copy(&indexed.palette[0][0], &indexed.palette[0][0] + 256 * 3, &out.palette[0][0]);
+	return true;
+}
+
+// A cube map's faces or a volume's slices, which every operation would flatten to the first: refused.
+bool layered_refused(const std::string &name, const std::vector<uint8_t> &bytes, std::string &why) {
+	const TextureHeader header = texture_header(name, bytes);
+	if (!header.layered()) return false;
+	why = header.dds_faces > 1 ? "it is a cube map of six faces, and the editor writes a flat texture: the edit would keep the first "
+	                             "face alone, which the cube map's loader cannot take"
+	                           : "it is a volume of " + std::to_string(header.dds_depth) +
+	                                     " slices, and the editor writes a flat texture: the edit would keep the first slice alone";
+	return true;
+}
+
 bool resize(const std::string &name, const std::vector<uint8_t> &bytes, const TextureOperation &operation,
             std::vector<uint8_t> &out, std::string &words, std::string &why) {
 	std::string size;
 	if (!param(operation, "size", size)) {
 		why = "a resize takes a size (pow2_down, pow2_up, <W>x<H> or fit:<W>x<H>)";
 		return false;
+	}
+	// An 8-bit PCX's indices are data (a foliage map's codes): resized as indices, each texel the index of the
+	// source texel under its middle, written with the file's own palette; never averaged and quantized again.
+	IndexedImage8 indices;
+	std::string ignored;
+	if (indexed_pcx(name, bytes, indices, ignored)) {
+		uint32_t width = 0, height = 0;
+		if (!image_target_size(size, uint32_t(indices.width), uint32_t(indices.height), width, height, why)) return false;
+		if (width == uint32_t(indices.width) && height == uint32_t(indices.height)) {
+			why = "it is " + std::to_string(width) + " x " + std::to_string(height) + " already";
+			return false;
+		}
+		IndexedImage8 sized;
+		sized.width = int(width);
+		sized.height = int(height);
+		std::copy(&indices.palette[0][0], &indices.palette[0][0] + 256 * 3, &sized.palette[0][0]);
+		sized.indices.resize(size_t(width) * height);
+		for (uint32_t y = 0; y < height; ++y)
+			for (uint32_t x = 0; x < width; ++x) {
+				const uint32_t sx = std::min(uint32_t(indices.width) - 1, uint32_t((uint64_t(x) * 2 + 1) * uint32_t(indices.width) / (uint64_t(width) * 2)));
+				const uint32_t sy = std::min(uint32_t(indices.height) - 1, uint32_t((uint64_t(y) * 2 + 1) * uint32_t(indices.height) / (uint64_t(height) * 2)));
+				sized.indices[size_t(y) * width + x] = indices.indices[size_t(sy) * uint32_t(indices.width) + sx];
+			}
+		words = "Resized to " + std::to_string(width) + " x " + std::to_string(height) + ", its palette indices kept";
+		return encode_pcx_indexed(sized, out, why);
 	}
 	ImageImportSettings settings;
 	RgbaImage image;
@@ -171,9 +224,19 @@ bool format(const std::string &name, const std::vector<uint8_t> &bytes, const Te
 	const ImageImportSettings was = settings;
 	const std::string extension = extension_of(name);
 	std::string value;
+	// An 8-bit PCX's indices are data: storing it again from its colours would renumber them.
+	IndexedImage8 indices;
+	std::string ignored;
+	const bool indexed = indexed_pcx(name, bytes, indices, ignored);
+	if (indexed && param(operation, "palette", value)) {
+		why = "it holds palette indices, which a palette chosen again would renumber (a foliage or char map's codes "
+		      "are its indices): remap them instead";
+		return false;
+	}
 	if (param(operation, "format", value)) {
 		// The stored form within the name's extension: another extension is another file.
-		const bool fits = (extension == ".tga" && (value == "tga" || value == "tga24")) || ("." + value) == extension;
+		const bool fits = (extension == ".tga" && (value == "tga" || value == "tga24")) ||
+		                  (extension == ".pcx" && (value == "pcx" || value == "pcx24")) || ("." + value) == extension;
 		if (!fits) {
 			why = "a " + extension + " file holds " + extension.substr(1) +
 			      ": for the file a " + value + " would be, rename it or set its import's format";
@@ -189,7 +252,7 @@ bool format(const std::string &name, const std::vector<uint8_t> &bytes, const Te
 		return false;
 	}
 	if (settings.format != "pcx" && param(operation, "palette", value)) {
-		why = "only a PCX takes a palette";
+		why = "only an 8-bit PCX takes a palette";
 		return false;
 	}
 	if (settings.palette == "indices") {
@@ -200,7 +263,9 @@ bool format(const std::string &name, const std::vector<uint8_t> &bytes, const Te
 		why = "it is stored as " + format_words(settings) + " already";
 		return false;
 	}
-	words = "Stored as " + format_words(settings);
+	words = "Stored as " + format_words(settings) +
+	        (indexed && settings.format == "pcx24" ? ": its palette indices are colours from now on" : std::string()) +
+	        (was.format == "pcx24" && settings.format == "pcx" ? ": its colours are chosen down to 256" : std::string());
 	return encode(image, settings, out, why);
 }
 
@@ -290,6 +355,7 @@ bool texture_operation_kind(const std::string &token, TextureOperationKind &out)
 bool apply_texture_operation(const std::string &name, const std::vector<uint8_t> &bytes, const TextureOperation &operation,
                              std::vector<uint8_t> &out, std::string &words, std::string &why) {
 	out.clear();
+	if (layered_refused(name, bytes, why)) return false;
 	switch (operation.kind) {
 	case K::Resize: return resize(name, bytes, operation, out, words, why);
 	case K::Alpha: return alpha(name, bytes, operation, out, words, why);

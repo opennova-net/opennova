@@ -1,11 +1,13 @@
 // ADR 0046 S18, a texture made from an image (import/texture_source, replace_texture) and a texture split
 // (graph/rename_transaction plan_split, split_texture): the options that make a texture again as it is
 // stored; a plain texture replaced by a PNG (the image an import source in art/, its record making the
-// texture under its name, the plain file set aside under .opennova/replaced/), an import's output
+// texture under its name, the plain file set aside under .replaced/), an import's output
 // replaced by an image of its source's kind (the source written over) and by one of another (a new
-// source, the old set aside), a name the project lacks made; the refusals; a texture two files use split
-// so one of them names a copy (a plain file copied; an import's output copied as its source); the source
-// a paint program edits for each kind of texture.
+// source, the old set aside), a name the project lacks made; the refusals; what a Replace will do said
+// before anything is written (the dialog's preview: before and after, the stored form kept, what the uses
+// ask, a cube map refused), a folder per set-aside, a failed record write putting everything back; a
+// texture two files use split so one of them names a copy (a plain file copied; an import's output copied
+// as its source); the source a paint program edits for each kind of texture.
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -22,6 +24,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/texture_import_state.h>
 #include <editor/session/view/session_view.h>
 #include <formats/dds/dds.h>
 #include <formats/env/env.h>
@@ -74,12 +77,16 @@ ImportOptions record_of(const std::string &root, const std::string &source) {
 	return record.options;
 }
 
-bool set_aside(const std::string &root, const std::string &relative) {
+// How many set-aside folders under .replaced/ hold the file `relative`.
+size_t set_aside_count(const std::string &root, const std::string &relative) {
 	std::error_code ec;
-	for (const auto &stamp : fs::directory_iterator(fs::path(root) / ".opennova" / "replaced", ec))
-		if (fs::is_regular_file(stamp.path() / relative, ec)) return true;
-	return false;
+	size_t count = 0;
+	for (const auto &stamp : fs::directory_iterator(fs::path(root) / kReplacedFolder, ec))
+		if (fs::is_regular_file(stamp.path() / relative, ec)) ++count;
+	return count;
 }
+
+bool set_aside(const std::string &root, const std::string &relative) { return set_aside_count(root, relative) > 0; }
 
 int test_options() {
 	const std::vector<uint8_t> rgba = solid(4, 4, 10, 20, 30, 128);
@@ -95,7 +102,149 @@ int test_options() {
 	TEST_EXPECT(texture_reproducing_options("isle_f.pcx", {}, "isle_f_src.pcx", true) ==
 	            ImportOptions({{"format", "pcx"}, {"name", "isle_f.pcx"}, {"palette", "indices"}}));
 	TEST_EXPECT(texture_reproducing_options("bump.mdt", {}, "bump.png", false) == ImportOptions({{"format", "mdt"}}));
-	std::printf("options: a 32- and a 24-bit TGA, a DDS's form, an indexed PCX's indices, an MDT, the name\n");
+	// A 24-bit PCX stays three planes of colour, whatever the source.
+	RgbImage colours;
+	colours.width = colours.height = 4;
+	colours.pixels.assign(48, 77);
+	std::vector<uint8_t> planes;
+	TEST_EXPECT(encode_pcx_rgb(colours, planes, why));
+	TEST_EXPECT(texture_reproducing_options("shot.pcx", planes, "shot.png", false) == ImportOptions({{"format", "pcx24"}}));
+	TEST_EXPECT(texture_reproducing_options("shot.pcx", planes, "shot.pcx", true) == ImportOptions({{"format", "pcx24"}}));
+	std::printf("options: a 32- and a 24-bit TGA, a DDS's form, an indexed and a 24-bit PCX, an MDT, the name\n");
+	return 0;
+}
+
+// A cube map of six 2 x 2 A8R8G8B8 faces.
+std::vector<uint8_t> cube_dds() {
+	const std::vector<uint8_t> texels(16, 90);
+	std::vector<uint8_t> out;
+	std::string why;
+	dds::dds_write_a8r8g8b8(texels.data(), 2, 2, out, why);
+	const std::vector<uint8_t> face(out.begin() + 128, out.end());
+	for (int i = 0; i < 5; ++i) out.insert(out.end(), face.begin(), face.end());
+	out[113] = 0xFE; // caps2: the cube map and its six faces
+	return out;
+}
+
+size_t folders_in(const std::string &path) {
+	std::error_code ec;
+	size_t count = 0;
+	for (const auto &each : fs::directory_iterator(path, ec))
+		if (each.is_directory()) ++count;
+	return count;
+}
+
+bool holds(const std::vector<std::string> &lines, const std::string &words) {
+	for (const std::string &line : lines)
+		if (line.find(words) != std::string::npos) return true;
+	return false;
+}
+
+// What a Replace will do, said before anything is written (preview_texture_source, the dialog's: its changes,
+// the texture before and after, its stored form kept, the forms its name offers) and closed by
+// cancel_texture_source; what the uses ask of the image (a colour map's exact size, a foliage map's palette
+// indices); a cube map refused; each set-aside a folder of its own; a record that cannot be written putting
+// back what was done.
+int test_preview() {
+	editor_test::TempProjectDir dir{"opennova_editor_texture_preview"};
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Preview"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const std::string outside = dir.file("mine");
+	const std::vector<uint8_t> rgba = solid(8, 8, 10, 20, 30);
+	std::vector<uint8_t> rgb, map_pcx;
+	std::string why;
+	TEST_EXPECT(tga::tga_write_rgb24(rgba.data(), 8, 8, rgb, why));
+	IndexedImage8 codes;
+	codes.width = codes.height = 4;
+	codes.indices.assign(16, 3);
+	TEST_EXPECT(encode_pcx_indexed(codes, map_pcx, why));
+	TEST_EXPECT(editor_test::write_bytes(root + "/textures/body.tga", tga32(rgba, 8, 8)) &&
+	            editor_test::write_bytes(root + "/textures/map.tga", rgb) &&
+	            editor_test::write_bytes(root + "/textures/isle_f.pcx", map_pcx) &&
+	            editor_test::write_bytes(root + "/textures/sky_cube.dds", cube_dds()) &&
+	            editor_test::write_bytes(root + "/textures/one.tga", tga32(rgba, 8, 8)) &&
+	            editor_test::write_bytes(root + "/textures/two.tga", tga32(rgba, 8, 8)) &&
+	            editor_test::write_bytes(root + "/textures/five.tga", tga32(rgba, 8, 8)) &&
+	            editor_test::write_text(root + "/terrains/isle.trn",
+	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_foliagemap isle_f.pcx\n"
+	                                    "polytrn_polydata isle.cpt\n"
+	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n") &&
+	            editor_test::write_bytes(outside + "/new.png", png(solid(8, 8, 0, 200, 0), 8, 8)) &&
+	            editor_test::write_bytes(outside + "/codes.pcx", map_pcx));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+
+	// A plain TGA: before and after in words, its form kept, the set-aside said, nothing written yet.
+	TextureSourcePlan plan = plan_texture_replace(paths, *view.project.scan, "textures/body.tga", "new.png",
+	                                              read_bytes(outside + "/new.png"), {});
+	TEST_EXPECT(plan.ok() && plan.before_words == "8 x 8, a 32-bit TGA" && plan.after_words == "8 x 8, a 32-bit TGA" &&
+	            plan.made_name == "body.tga" && first_texel("body.tga", plan.made) == std::vector<uint8_t>({0, 200, 0, 255}) &&
+	            holds(plan.changes, std::string("set aside in ") + kReplacedFolder));
+	// The dialog's preview through the session: a colour map's exact size asked and said, its 24-bit form kept.
+	session.handle(request::preview_texture_source("textures/map.tga", outside + "/new.png"));
+	const DialogsView::TextureSourcePreview &preview = view.dialogs.texture_source;
+	TEST_EXPECT(preview.open && preview.refusal.empty() && preview.texture == "textures/map.tga" &&
+	            preview.forms == std::vector<std::string>({"tga", "tga24"}) && preview.form == "tga24");
+	TEST_EXPECT(preview.before_words == "8 x 8, a 24-bit TGA" && preview.after_words == "1024 x 1024, a 24-bit TGA" &&
+	            holds(preview.changes, "resized to 1024x1024"));
+	TEST_EXPECT(preview.before && preview.after);
+	TEST_EXPECT(!fs::exists(root + "/art/new.png") && fs::exists(root + "/textures/map.tga"));
+	const uint64_t serial = preview.serial;
+	session.handle(request::cancel_texture_source());
+	TEST_EXPECT(!view.dialogs.texture_source.open && view.dialogs.texture_source.serial == serial);
+	// A foliage map's palette indices: an image of colours refused, an indexed one keeping its indices.
+	session.handle(request::preview_texture_source("textures/isle_f.pcx", outside + "/new.png"));
+	TEST_EXPECT(preview.open && preview.refusal.find("palette indices") != std::string::npos);
+	plan = plan_texture_replace(paths, *view.project.scan, "textures/isle_f.pcx", "codes.pcx", map_pcx, {},
+	                            texture_use_asks(view, "textures/isle_f.pcx"));
+	TEST_EXPECT(plan.ok() && plan.options.count("palette") && plan.options.at("palette") == "indices");
+	// A cube map: refused for a Replace and for a source of its own.
+	session.handle(request::preview_texture_source("textures/sky_cube.dds", outside + "/new.png"));
+	TEST_EXPECT(preview.open && preview.refusal.find("cube map") != std::string::npos);
+	session.handle(request::replace_texture("textures/sky_cube.dds", outside + "/new.png"));
+	TEST_EXPECT(session.outcome().refused && fs::exists(root + "/textures/sky_cube.dds"));
+	TEST_EXPECT(!plan_texture_source(paths, *view.project.scan, "textures/sky_cube.dds").ok());
+	session.handle(request::cancel_texture_source());
+
+	// Two set-asides at once: a folder each, never one written over.
+	const std::vector<uint8_t> image = read_bytes(outside + "/new.png");
+	const TextureSourcePlan one = plan_texture_replace(paths, *view.project.scan, "textures/one.tga", "one.png", image, {});
+	const TextureSourcePlan two = plan_texture_replace(paths, *view.project.scan, "textures/two.tga", "two.png", image, {});
+	std::vector<Diagnostic> findings;
+	TEST_EXPECT(apply_texture_source(paths, one, findings) && apply_texture_source(paths, two, findings));
+	TEST_EXPECT(folders_in(root + "/" + kReplacedFolder) == 2 && set_aside_count(root, "textures/one.tga") == 1 &&
+	            set_aside_count(root, "textures/two.tga") == 1);
+	// A record that cannot be written (its path a folder): the source taken away again, the texture put back.
+	const TextureSourcePlan five = plan_texture_replace(paths, *view.project.scan, "textures/five.tga", "five.png", image, {});
+	TEST_EXPECT(five.ok() && five.source == "art/five.png");
+	std::error_code ec;
+	fs::create_directories(root + "/art/five.png" + kImportSidecarSuffix, ec);
+	findings.clear();
+	TEST_EXPECT(!apply_texture_source(paths, five, findings) && !findings.empty());
+	TEST_EXPECT(!fs::exists(root + "/art/five.png") && fs::exists(root + "/textures/five.tga") &&
+	            set_aside_count(root, "textures/five.tga") == 0);
+	fs::remove_all(root + "/art/five.png" + kImportSidecarSuffix, ec);
+	// A source written over: its bytes put back.
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const AssetEntry *made = view.project.scan->find("one.tga");
+	TEST_EXPECT(made && made->imported_from == "art/one.png");
+	const std::vector<uint8_t> was = read_bytes(root + "/art/one.png");
+	const TextureSourcePlan again =
+			plan_texture_replace(paths, *view.project.scan, "one.tga", "one.png", png(solid(8, 8, 1, 2, 3), 8, 8), {});
+	TEST_EXPECT(again.ok() && again.source == "art/one.png" && again.old_source.empty());
+	fs::remove(root + "/art/one.png" + kImportSidecarSuffix, ec);
+	fs::create_directories(root + "/art/one.png" + kImportSidecarSuffix, ec);
+	findings.clear();
+	TEST_EXPECT(!apply_texture_source(paths, again, findings) && read_bytes(root + "/art/one.png") == was);
+	std::printf("preview: before and after, the form kept, an exact size and palette indices asked, a cube map refused, "
+	            "a folder per set-aside, a failed record putting back the source and the texture\n");
 	return 0;
 }
 
@@ -257,6 +406,7 @@ int test_split() {
 int main() {
 	int failures = test_options();
 	failures += test_replace();
+	failures += test_preview();
 	failures += test_split();
 	if (failures == 0) std::printf("editor_texture_replace: all passed\n");
 	return failures == 0 ? 0 : 1;

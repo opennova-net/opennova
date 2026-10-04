@@ -172,6 +172,24 @@ inline EditorRequest edit_externally(std::string path) {
 }
 // What changed on disk among the import sources imported again (S18: the Shell's on its window's focus).
 inline EditorRequest refresh_changed_sources() { return of(EditorRequestKind::RefreshChangedSources); }
+// What a Replace of the texture `path` by the image `image` (none: an Edit externally) would do, asked in
+// the dialog before it is done (S18), `values` the options asked over the ones reproducing its form.
+inline EditorRequest preview_texture_source(std::string path, std::string image = std::string(),
+                                            std::vector<std::pair<std::string, std::string>> values = {}) {
+	EditorRequest request = of(EditorRequestKind::PreviewTextureSource);
+	request.path = std::move(path);
+	if (!image.empty()) request.paths = {std::move(image)};
+	std::sort(values.begin(), values.end());
+	request.values = std::move(values);
+	return request;
+}
+inline EditorRequest cancel_texture_source() { return of(EditorRequestKind::CancelTextureSource); }
+// The texture `path`'s existing source opened in its program, nothing written (S18).
+inline EditorRequest open_texture_source(std::string path) {
+	EditorRequest request = of(EditorRequestKind::OpenTextureSource);
+	request.path = std::move(path);
+	return request;
+}
 // The texture `path`'s use in the project file `referrer` (at `locator` and `field`, when it has several)
 // shown where the game draws it (S18: session/texture_show_use.h).
 inline EditorRequest show_use(std::string path, std::string referrer, std::string locator = std::string(),

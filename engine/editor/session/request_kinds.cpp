@@ -189,6 +189,15 @@ void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &) {
 void serve_show_use(SessionCore &core, const EditorRequest &request) {
 	show_texture_use(core, request);
 }
+void serve_preview_texture_source(SessionCore &core, const EditorRequest &request) {
+	core.imports().preview_texture_source(request);
+}
+void serve_cancel_texture_source(SessionCore &core, const EditorRequest &) {
+	core.imports().close_texture_source();
+}
+void serve_open_texture_source(SessionCore &core, const EditorRequest &request) {
+	core.imports().open_texture_source(request);
+}
 void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
 	core.imports().preview_install(request);
 }
@@ -749,6 +758,29 @@ constexpr RequestKindRow kRows[] = {
 			"the game opens itself, a terrain or an environment no mission names.")
 			.takes(request_params({ F::Path, F::Paths }, { F::Locator, F::Field }))
 			.holds(kFiles, kDocuments)
+			.row,
+	Request(K::PreviewTextureSource, "preview_texture_source", serve_preview_texture_source,
+			"What a Replace of the texture path by the image in paths (a file on disk, or a project file), "
+			"or with no image an Edit externally, would do, planned into the view's texture_source dialog, "
+			"nothing written: the stored forms the texture's extension offers and the one written (values "
+			"over the form reproduced, as replace_texture takes them), the changes in words, the texture "
+			"before and after in words and as pictures (the file the import would make), or why it would "
+			"be refused. The dialog asks before replace_texture or edit_externally does it.")
+			.takes(request_params({ F::Path }, { F::Paths, F::Values }))
+			.holds(kFiles, kNone)
+			.row,
+	Request(K::CancelTextureSource, "cancel_texture_source", serve_cancel_texture_source,
+			"The texture_source dialog closed, nothing done.")
+			.row,
+	// Nothing written: it goes on beside a build, as a read does.
+	Request(K::OpenTextureSource, "open_texture_source", serve_open_texture_source,
+			"The texture path's existing source opened in the program the system has for its kind, "
+			"nothing written: an import's output's own source, a PNG the game reads as it is itself (the "
+			"open_externally view event names it). Refused (texture.external): a texture with no source "
+			"yet (edit_externally makes one), a PNG open with unsaved edits (its program edits the file "
+			"as saved), no texture.")
+			.takes(request_params({ F::Path }))
+			.holds(kFiles, kNone)
 			.row,
 	Request(K::PreviewInstallImport, "preview_install_import", serve_preview_install_import,
 			"The import dialog on the game install's files: the names alone, chosen, or with none "

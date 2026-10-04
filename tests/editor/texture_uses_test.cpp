@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_import.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
@@ -123,6 +124,18 @@ int test_uses() {
 	TEST_EXPECT(diffuse && diffuse->context.material == 0 && diffuse->context.alpha_test() && diffuse->context.alpha_ref == 128 &&
 	            diffuse->context.shader == "VS_SKBASIC");
 	TEST_EXPECT(diffuse && diffuse->words == "Model diffuse: material 1 of thing.3di (VS_SKBASIC, cut-out above 128)");
+	// A Replace of the row's texture (an image dropped on its field) makes the file the loader opens, the .dds
+	// beside the .tga the row writes; of a name the project lacks, the name the loader opens (a HUD image's
+	// suffix cut off: gone.tga.FULL opens gone.tga).
+	bool made_dds = false, made_missing = false;
+	for (const GraphEdge *edge : view.findings.graph->references_of("models/thing.3di"))
+		if (opennova::strutil::iequals(edge->value, "body.tga"))
+			made_dds = texture_replace_target(texture_reference(*view.findings.graph, *edge)) == "textures/body.dds";
+	for (const GraphEdge *edge : view.findings.graph->references_of("defs/items.def"))
+		if (opennova::strutil::iequals(edge->value, "stance.tga"))
+			made_missing = texture_replace_target(texture_reference(*view.findings.graph, edge->kind, "gone.tga.FULL", edge->scope,
+			                                                        edge->loader_arg)) == "gone.tga";
+	TEST_EXPECT(made_dds && made_missing);
 	// The .dds: the same use, read.
 	const std::vector<TextureUse> &dds = index.uses_of(view, "textures/body.dds");
 	diffuse = use_of(dds, TextureRoleId::ModelDiffuse);

@@ -7,6 +7,7 @@
 #include <editor/graph/texture_import_needs.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
+#include <editor/import/texture_source.h>
 
 namespace opennova::editor {
 
@@ -42,5 +43,11 @@ std::string import_option_value(const TextureImportState &state, const ImportOpt
 // Whether the option applies with the options the record holds (a DDS's compression only to the dds
 // format).
 bool import_option_applies_now(const TextureImportState &state, const ImportOptionRow &row);
+
+// What the uses of the texture `path` (a project file by its path or logical name, or a name a field writes
+// that the project lacks) ask of an image made into it (S18: a Replace): its palette indices kept where a
+// foliage or a char map reads them; the exact size a role reads (a colour map's 1024 x 1024, a loading
+// screen's 800 x 600), where every use that asks one asks the same.
+TextureUseAsks texture_use_asks(const SessionView &view, const std::string &path);
 
 } // namespace opennova::editor

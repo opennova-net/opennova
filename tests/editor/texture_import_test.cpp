@@ -163,6 +163,19 @@ int test_formats() {
 	if (read && read->loads)
 		TEST_EXPECT(read->levels[0].rgba[0] == image.pixels[0] && read->levels[0].rgba[1] == image.pixels[1] &&
 		            read->levels[0].rgba[3] == 255);
+	// Its alpha dropped is said (the image is translucent).
+	TEST_EXPECT(note.find("24-bit TGA carries no alpha") != std::string::npos);
+	// A 24-bit PCX: three planes of the colours as they are, read so; the alpha dropped and said.
+	note.clear();
+	TEST_EXPECT(encode_image(image, settings_of({{"format", "pcx24"}}), bytes, why, note) && bytes.size() > 128 && bytes[65] == 3 &&
+	            note.find("carries no alpha") != std::string::npos);
+	read = read_back("planes.pcx", bytes);
+	TEST_EXPECT(read && read->loads && read->width() == 8);
+	if (read && read->loads)
+		for (size_t i = 0; i < image.pixels.size(); i += 4)
+			TEST_EXPECT(read->levels[0].rgba[i] == image.pixels[i] && read->levels[0].rgba[i + 1] == image.pixels[i + 1] &&
+			            read->levels[0].rgba[i + 2] == image.pixels[i + 2]);
+	TEST_EXPECT(image_import_output_name("art/logo.png", settings_of({{"format", "pcx24"}})) == "logo.pcx");
 	// A 32-bit TGA keeps the alpha; an MDT is its bytes.
 	TEST_EXPECT(encode_image(image, settings_of({}), bytes, why, note));
 	read = read_back("a.tga", bytes);

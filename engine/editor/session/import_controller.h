@@ -7,6 +7,8 @@
 #include <vector>
 
 #include <editor/assets/asset_import.h>
+#include <editor/import/texture_source.h>
+#include <editor/model/finding_code_row.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/session_operation.h>
 
@@ -58,9 +60,19 @@ public:
 	void replace_texture(const EditorRequest &request);
 	// EditExternally (S18): the texture's source opened in its program (import/texture_source.h's
 	// plan_texture_source: made once for a plain texture, then imported), the OpenExternally view event the
-	// Shell opens it by. Refused (texture.external): what the plan refuses, a texture open with unsaved
-	// edits.
+	// Shell opens it by; the texture_source dialog closed. Refused (texture.external): what the plan
+	// refuses, a texture or a source edited in place open with unsaved edits.
 	void edit_externally(const EditorRequest &request);
+	// OpenTextureSource (S18): an existing source opened alike, nothing written. Refused (texture.external):
+	// a texture with none yet, a source edited in place open with unsaved edits.
+	void open_texture_source(const EditorRequest &request);
+	// PreviewTextureSource (S18): what a Replace (an image in paths) or an Edit externally (none) would do,
+	// into the view's texture_source dialog, nothing written: the plan's changes, its before and after in
+	// words and as pictures (the texture's thumbnail, the file the import would make), the stored forms
+	// offered and the one written, or the plan's refusal.
+	void preview_texture_source(const EditorRequest &request);
+	// The texture_source dialog closed (CancelTextureSource, and a Replace or an Edit externally done).
+	void close_texture_source();
 	// RefreshChangedSources (S18): a refresh when an import source moved since the scan
 	// (changed_import_sources), nothing otherwise.
 	void refresh_changed_sources();
@@ -98,6 +110,12 @@ private:
 	void show_plan(std::shared_ptr<const ImportPlan> plan, const ImportPlan *shown);
 	// An import's one Output line: its files, bytes and kinds (its files folded under it).
 	std::string import_words(const std::vector<std::string> &paths) const;
+	// What a Replace request would do (its image read, what the texture's uses ask).
+	TextureSourcePlan replace_plan(const EditorRequest &request) const;
+	// The OpenExternally event for a source, and the status line.
+	void post_open_externally(const std::string &source);
+	// A source edited in place open with unsaved edits: refused with `code`, true.
+	bool source_dirty(const std::string &source, CoreFinding code);
 
 	SessionCore &core_;
 	SessionView &view_;

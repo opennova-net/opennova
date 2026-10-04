@@ -81,6 +81,41 @@ bool texture_import_state(const SessionView &view, const std::string &path, Text
 	return true;
 }
 
+TextureUseAsks texture_use_asks(const SessionView &view, const std::string &path) {
+	TextureUseAsks out;
+	if (!view.documents.texture_uses || !view.project.scan) return out;
+	const AssetEntry *entry = view.project.scan->at_path(path);
+	if (!entry) entry = view.project.scan->find(basename_of(path));
+	std::vector<TextureUse> uses;
+	if (entry) {
+		uses = view.documents.texture_uses->uses_of(view, entry->relative_path);
+	} else {
+		// A name the project lacks: the uses writing it.
+		for (const TextureUse &use : view.documents.texture_uses->uses_named(view, utf8_of(path_of(basename_of(path)).stem())))
+			if (normalized_logical_name(basename_of(use.name_written)) == normalized_logical_name(basename_of(path))) uses.push_back(use);
+	}
+	std::set<std::string> sizes;
+	for (const TextureUse &use : uses) {
+		// A use that opens another file of the name asks nothing of this one (a missing name's uses read it).
+		if (!use.known() || (entry && !use.reads_file)) continue;
+		if ((use.role == TextureRoleId::TerrainFoliageMap || use.role == TextureRoleId::TerrainCharMap) && !out.indices) {
+			out.indices = true;
+			out.indices_why = use.words;
+		}
+		const TextureRoleRow &row = texture_role_row(use.role);
+		if (row.size == TextureSizeRule::Exact) {
+			const std::string size = std::to_string(row.width) + "x" + std::to_string(row.height);
+			if (sizes.insert(size).second && out.size.empty()) out.size_why = use.words + " reads it at " + texture_size_words(row);
+			out.size = size;
+		}
+	}
+	if (sizes.size() > 1) {
+		out.size.clear();
+		out.size_why.clear();
+	}
+	return out;
+}
+
 std::string import_option_value(const TextureImportState &state, const ImportOptionRow &row) {
 	const auto found = state.sidecar.options.find(row.key);
 	return found == state.sidecar.options.end() || found->second.empty() ? row.fallback : found->second;

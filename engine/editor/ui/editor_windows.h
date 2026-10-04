@@ -13,6 +13,7 @@
 #include <editor/ui/project_find.h>
 #include <editor/ui/project_settings_dialog.h>
 #include <editor/ui/rename_dialog.h>
+#include <editor/ui/texture_source_dialog.h>
 #include <editor/ui/welcome_view.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -138,6 +139,7 @@ private:
 	NewFilePrompt new_file_;
 	ProjectFind find_;
 	RenameDialog rename_;
+	TextureSourceDialog texture_source_;
 	FilesWindow *files_window_ = nullptr; // owned by the pass
 	DocumentWindow *document_window_ = nullptr; // owned by the pass
 	InspectorWindow *inspector_window_ = nullptr; // owned by the pass
