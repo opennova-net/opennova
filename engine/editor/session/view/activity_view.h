@@ -22,8 +22,11 @@ struct ValidationStatus {
 	bool running = false;
 	uint64_t done = 0;
 	uint64_t total = 0;
+	// A validation has ended since the project opened: the graph has read the project's references
+	// (the pairings a preview looks up), whatever validation runs again after an edit.
+	bool read = false;
 	bool operator==(const ValidationStatus &o) const {
-		return running == o.running && done == o.done && total == o.total;
+		return running == o.running && done == o.done && total == o.total && read == o.read;
 	}
 	bool operator!=(const ValidationStatus &o) const { return !(*this == o); }
 };

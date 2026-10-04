@@ -109,6 +109,20 @@ bool adds_rows_of(const Document &document, NodeKind kind) {
 	return row && *row->add_label;
 }
 
+// Whether the outline's Duplicate / Remove / Up / Down could act on any record of the file: a kind
+// of row the file adds, or a row's list that is not fixed. A clip has neither (its one row, its
+// bones and its frame events), so its outline shows none of them. A file of many rows is taken to
+// have one, unread.
+bool rearranges(const Document &document) {
+	for (const RecordKindRow &kind : document.kinds())
+		if (*kind.add_label) return true;
+	if (document.rows().size() > 64) return true;
+	for (const auto &row : document.rows())
+		for (const Document::Collection &collection : document.collections_of({row->id, row->kind, 0}))
+			if (!collection.spec.fixed) return true;
+	return false;
+}
+
 // The project's names a document's lines read (the graph's), for a type that words its records with
 // them (DocumentType::record_label); none with no project open, and for any other type (its lines
 // then never made again for a graph's change).
@@ -461,6 +475,10 @@ void OutlineView::draw_tree_tools(Workspace &workspace, const Document &document
 		if (!adds_rows_of(document, selection.kind))
 			tools.locked = "It is one of the file's own records: none is added, duplicated, removed or moved.";
 	}
+	// What cannot apply is not shown: the selected record's tools where it stays as it is (its
+	// tooltip on its name says why), and with none selected where nothing in the file moves.
+	if (tools.locked || (!placed && !rearranges(document)))
+		tools.duplicate = tools.remove = tools.up = tools.down = nullptr;
 	ui_kit::WrapRow row;
 	const float line = ImGui::GetContentRegionAvail().x; // the row's whole line (a narrow column's)
 	for (const RecordKindRow &kind : document.kinds())
@@ -474,6 +492,7 @@ void OutlineView::draw_tree_tools(Workspace &workspace, const Document &document
 		ImGui::TextUnformatted(shown.c_str());
 		std::string tip = shown != title ? title : std::string();
 		if (name != title) tip += (tip.empty() ? "" : "\n") + name;
+		if (tools.locked) tip += (tip.empty() ? "" : "\n") + std::string(tools.locked);
 		ui_kit::tooltip(tip);
 	}
 	row_tool(workspace, document, ui_kit::row_tools(row, tools), selection, at.index);

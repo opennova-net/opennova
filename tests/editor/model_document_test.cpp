@@ -171,6 +171,13 @@ int edits() {
 		const NodeAddress volume{collision->id, kVolume, collision->ids.lists[1][0].id};
 		TEST_EXPECT(!document.apply(op(EditOperation::Remove, volume), error));
 		TEST_EXPECT(document.apply(set(volume, "flags", int64_t(0x4)), error));
+		// A blink box's letters read as the add-on writes them: a letter is there where its bit is clear
+		// (flags 0x4: every letter but S); setting the letters writes the bits back, the others kept.
+		Value letters;
+		TEST_EXPECT(document.get(volume, "letters", letters) && std::get<int64_t>(letters) == (0x3E & ~0x4));
+		TEST_EXPECT(document.apply(set(volume, "letters", int64_t(0x2 | 0x8)), error)); // V and W
+		Value flags;
+		TEST_EXPECT(document.get(volume, "flags", flags) && std::get<int64_t>(flags) == (0x3E & ~(0x2 | 0x8)));
 	}
 	TEST_EXPECT(!document.apply(op(EditOperation::Remove, {collision->id, node_kind(ModelKind::Collision), 0}), error));
 
@@ -625,9 +632,12 @@ int record_references() {
 	TEST_EXPECT(document.apply(more, error) && document.model_row()->registers.size() == 256);
 	TEST_EXPECT(document.apply(set(glow, "rgbgen.param", int64_t(255)), error));
 	const uint64_t full = document.revision();
+	// (The material named by its place, not its shader tag: S17.)
+	TEST_EXPECT(document.record_path(glow).rfind("rig/Material ", 0) == 0);
 	TEST_EXPECT(!document.apply(op(EditOperation::Add, {model, kRegister, 0}, 0), error) &&
 	            error.code() == "document.collection" &&
-	            error.message == "Register 255 would move to 256, which rig/FF_ST_AD_LUM rgbgen.param cannot hold." &&
+	            error.message == "Register 255 would move to 256, which " + document.record_path(glow) +
+	                                     " rgbgen.param cannot hold." &&
 	            document.revision() == full);
 	document.undo();
 	document.undo();
@@ -865,7 +875,7 @@ int field_metadata() {
 	// The light's part: LOD 0's parts, any other index typed.
 	const FieldSchema part = schema(light, "part");
 	const size_t parts = row->base->lods[0].render_object_count;
-	TEST_EXPECT(part.open_choices && part.choices.size() == parts && parts > 0 && part.choices[0].label == "Part 0");
+	TEST_EXPECT(part.open_choices && part.choices.size() == parts && parts > 0 && part.choices[0].label == "PN01");
 	// A part animation's parent: none (255) and the parts, its record's own choices.
 	const NodeAddress panm{model, kPanm, row->ids.lists[0][0].lists[0][0].id};
 	const FieldSchema parent = schema(panm, "parent");

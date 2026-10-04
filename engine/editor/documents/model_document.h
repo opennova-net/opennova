@@ -45,6 +45,8 @@ constexpr NodeKind node_kind(ModelKind kind) { return static_cast<NodeKind>(kind
 constexpr size_t kModelLods = 0, kModelMaterials = 1, kModelLights = 2, kModelUserPoints = 3, kModelRegisters = 4,
                  kModelFrames = 5;
 constexpr size_t kModelOwnList = 0;
+// The collision row's lists: its sections, volumes, bullet faces and occlusion records.
+constexpr size_t kCollisionSections = 0, kCollisionVolumes = 1, kCollisionFaces = 2, kCollisionOcclusion = 3;
 
 // A LOD: the base's LOD (its geometry pointers the base's) and its PANM rows, in part order.
 struct ModelLod {
@@ -144,6 +146,9 @@ public:
 			std::vector<FieldChoice> &out) const override;
 	// A user point past the first 16 is inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
+	// A record in the model's words (documents/model_labels.h, S17): every window that shows a record's
+	// title reads them, with no graph at hand.
+	std::string record_title(const NodeAddress &address) const override;
 	SerializeResult serialize() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<ModelDocument>(*this);
