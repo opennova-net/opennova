@@ -5,6 +5,7 @@
 namespace opennova::editor {
 
 std::string ImportChoice::name() const {
+	if (!as.empty()) return as;
 	return entry.empty() ? basename_of(path) : entry;
 }
 

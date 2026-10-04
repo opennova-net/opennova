@@ -60,6 +60,7 @@ void ProjectSettingsDialog::open(const SessionView &view) {
 	copy_into(fields_.title, view.project.document->title);
 	fields_.mission = view.project.document->features.mission;
 	fields_.multiplayer = view.project.document->features.multiplayer;
+	expansion_.set(view.project.document->expansion);
 	copy_into(fields_.game_install, view.project.retail_directory);
 	copy_into(fields_.runtime, view.project.runtime_setting);
 	fields_.play_in_install = view.project.play_retail;
@@ -134,6 +135,11 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	ui_kit::tooltip("The game then needs the files a mission reads: Problems lists the missing ones. A mission is most "
 	                "of the game, so File > Import the whole game install... is the way to bring them in.");
 	ImGui::Checkbox("Multiplayer", &fields_.multiplayer);
+	ImGui::SeparatorText("Expansion");
+	const bool expansion_ok = expansion_.draw(v.project.install_expansions);
+	if (expansion_.value().name != v.project.document->expansion.name && !v.project.document->expansion.name.empty() &&
+	    !expansion_.value().name.empty())
+		ImGui::TextDisabled("Apply renames the project's own expansion files to the new name.");
 
 	ImGui::SeparatorText("This computer");
 	if (path_field("Game install folder", fields_.game_install, sizeof(fields_.game_install),
@@ -164,7 +170,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s", error_.c_str());
 		ImGui::PopTextWrapPos();
 	}
-	const bool can_apply = !waiting_ && fields_.title[0] != '\0';
+	const bool can_apply = !waiting_ && fields_.title[0] != '\0' && expansion_ok;
 	ImGui::BeginDisabled(!can_apply);
 	if (ImGui::Button("Apply") && can_apply) apply(workspace);
 	ImGui::EndDisabled();
@@ -184,6 +190,9 @@ void ProjectSettingsDialog::apply(Workspace &workspace) {
 	settings.title = std::string(fields_.title);
 	settings.mission = fields_.mission;
 	settings.multiplayer = fields_.multiplayer;
+	const ProjectExpansion expansion = expansion_.value();
+	settings.expansion = expansion.name;
+	settings.builds_on = expansion.builds_on;
 	settings.game_install = std::string(fields_.game_install);
 	if (!v.activity.source_run) settings.runtime_executable = std::string(fields_.runtime);
 	settings.play_in_install = fields_.play_in_install;
