@@ -6,6 +6,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/documents/model_labels.h>
 #include <editor/project/project_files.h>
 #include <formats/threedi/threedi_build.h>
 #include <runtime/renderer/material_descriptor.h>
@@ -88,8 +89,9 @@ void part_choices(const ModelRow &row, NodeKind record, const FieldSchema &field
 	};
 	if (record == node_kind(ModelKind::PartAnimation)) offer(255, "255", "None");
 	if (record == node_kind(ModelKind::UserPoint)) offer(-1, "-1", "None");
+	// Each by the add-on's name for it (PN01 for part 0, a rig's BN01: model_labels.h).
 	const size_t parts = row.base && row.base->lod_count ? row.base->lods[0].render_object_count : 0;
-	for (size_t i = 0; i < parts; ++i) offer(int64_t(i), std::to_string(i), "Part " + std::to_string(i));
+	for (size_t i = 0; i < parts; ++i) offer(int64_t(i), std::to_string(i), model_part_name(row, int64_t(i)));
 }
 
 } // namespace
@@ -178,6 +180,11 @@ void ModelDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts
 		facts.inert_reason = "an item's lookup scans the model's first " +
 				std::to_string(THREEDI_USER_POINT_SCAN_LIMIT) + " user points only";
 	}
+}
+
+std::string ModelDocument::record_title(const NodeAddress &address) const {
+	const std::string title = model_record_label(*this, address, nullptr);
+	return title.empty() ? TableDocument::record_title(address) : title;
 }
 
 const ModelRow *ModelDocument::model_row() const {

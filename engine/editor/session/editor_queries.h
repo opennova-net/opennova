@@ -45,6 +45,7 @@ enum class EditorQueryKind : uint8_t {
 	MissionLogic,
 	MissionUses,
 	ScriptAssist,
+	ModelSurfaces,
 	Catalog,
 	kCount,
 };
