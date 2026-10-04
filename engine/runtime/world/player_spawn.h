@@ -60,6 +60,13 @@ struct PlayerSpawn {
     // the joiner's CI0/CI1 join vars (low u16). 0 = unassigned -> the encoder's D-NET-137 shim.
     // [orig: Server_PlayerAdd @0x51cbc0 slot+440 -> entity+0x15C]
     uint16_t minimap_net_id = 0;
+    // The BERSERK behavior bit (AiSlot[1] 0x200) the authority spawn sets on every player of a
+    // game type without the team bit (DM, KOTH, Flag Me): a solo-mode player is everyone's enemy,
+    // so the friendly-fire gate and the kill classifier treat a same-team pair as hostile.
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C53C `test g_GameType, 10000h` ->
+    //  `or [entity+0x68 slot +4], 200h` @0x43C54F; its callers are Server_PlayerAdd @0x51D056
+    //  and Server_InitAllPlayerEntitiesForRound @0x516B67]
+    bool berserk = false;
 };
 
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry (0x14B9) entity; (2/3)
