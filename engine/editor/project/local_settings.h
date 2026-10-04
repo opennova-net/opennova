@@ -25,6 +25,9 @@ struct LocalSettings {
 	// The project's game install (ADR 0046 d6/d10: project-local): what it imports from,
 	// depends on and plays in ("" = none). The editor and opennova-project both read it here.
 	std::string game_install;
+	// The folder Build to folder last built into (the UX round's problems lane: a build for players, a
+	// folder outside the project), which Build > Build to <it> builds into again ("" = none yet).
+	std::string build_folder;
 };
 
 // The project's local.json (paths.local_settings_file). A missing file reads as defaults, and so

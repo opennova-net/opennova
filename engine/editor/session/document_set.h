@@ -134,6 +134,8 @@ private:
 	// batch is none it words.
 	std::string records_words(const Document &document, const std::vector<Edit> &edits) const;
 	std::string edit_words(const Document &document, const std::vector<Edit> &edits, const std::string &named) const;
+	// The step the last edit of `document` made named with the status line's words (what Undo says).
+	void name_step(DocumentBase &document) const;
 	// After `document` moved from the state (load_generation, revision) by an edit, an undo or a
 	// redo: the active selection repaired against the rows that changed since (changes_since; all
 	// of them when the document cannot say), a gone primary giving way to `owner`.

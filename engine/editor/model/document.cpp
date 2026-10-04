@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 
 #include <base/io/strutil.h>
@@ -378,6 +379,71 @@ std::string Document::record_path(const NodeAddress &address) const {
 	std::string path;
 	for (const NodeAddress &owner : ancestors(address)) path += record_name(owner) + "/";
 	return path + record_name(address);
+}
+
+namespace {
+
+// FNV-1a over a word, then a separator: two words never run together.
+void digest_word(uint64_t &digest, const std::string &word) {
+	for (const unsigned char c : word) {
+		digest ^= c;
+		digest *= 1099511628211ull;
+	}
+	digest ^= 0x1f;
+	digest *= 1099511628211ull;
+}
+
+std::string value_word(const Value &value) {
+	if (const auto *number = std::get_if<int64_t>(&value)) return std::to_string(*number);
+	if (const auto *real = std::get_if<double>(&value)) {
+		uint64_t bits = 0;
+		std::memcpy(&bits, real, sizeof(bits));
+		return "r" + std::to_string(bits);
+	}
+	return "s" + std::get<std::string>(value);
+}
+
+} // namespace
+
+std::string Document::record_identity(const NodeAddress &address) const {
+	const Node *top = row(address.row);
+	if (!top) return std::string();
+	NodeKind kind = top->kind;
+	if (address.child) {
+		Placement at;
+		if (!placement(address, at)) return std::string();
+		kind = at.spec.kind;
+	}
+	const char *token = kind_token(kind);
+	const std::string word = *token ? std::string(token) : std::to_string(kind);
+	const std::string own = own_name(address);
+	if (!own.empty()) return word + ":" + own;
+	uint64_t digest = 14695981039346656037ull;
+	for (const FieldSchema &field : fields(kind)) {
+		// A field its place derives (a stylesheet line's number) or one naming a record by its index (an
+		// event's trigger naming another event: renumbered when one is inserted above) is no part of it.
+		if (field.read_only || (field.reference != ReferenceKind::None &&
+		                        reference_row(field.reference).resolution == ReferenceResolution::Record))
+			continue;
+		Value value;
+		if (!present(address, field.id) || !get(address, field.id, value)) continue;
+		digest_word(digest, field.id);
+		digest_word(digest, value_word(value));
+	}
+	for (const Collection &collection : collections_of(address))
+		for (size_t i = 0; i < collection.ids.size(); ++i)
+			digest_word(digest, record_identity({address.row, collection.kind_at(i), collection.ids[i]}));
+	return word + "#" + std::to_string(digest);
+}
+
+void key_findings(const DocumentBase &document, std::vector<Diagnostic> &findings, size_t from) {
+	const Document *records = records_of(document);
+	if (!records) return;
+	for (size_t i = from; i < findings.size(); ++i) {
+		Diagnostic &d = findings[i];
+		if (!d.row_id || !d.record_key.empty() || d.asset != document.path()) continue;
+		d.record_key = records->record_identity({d.row_id, d.record_kind, d.child_id});
+	}
 }
 
 std::string Document::locator(const NodeAddress &address) const {

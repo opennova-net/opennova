@@ -21,6 +21,7 @@ namespace opennova::editor {
 class DocumentWindow;
 class InspectorWindow;
 class PreviewWindow;
+class ProblemsWindow;
 class ViewportDeviceSource;
 
 // The OpenNova Editor's workspace (ADR 0046 d10, S11d): the ImGui pass with the editor's
@@ -98,6 +99,7 @@ private:
 	void draw_edit_menu(const SessionView &v, const DocumentBase *document);
 	void draw_build_menu(const SessionView &v);
 	void draw_new_project();
+	void draw_build_panel(const SessionView &v);
 	void shortcuts(const SessionView &v, const DocumentBase *document);
 
 	void dispatch_events();
@@ -112,6 +114,7 @@ private:
 	bool in_frame_ = false;
 	NewProjectForm new_project_;
 	bool open_new_project_ = false;
+	bool build_panel_open_ = false; // the build panel, open from a build's end (BuildEnded) until closed
 	ProjectSettingsDialog settings_;
 	ImportDialog import_;
 	NewFilePrompt new_file_;
@@ -121,7 +124,7 @@ private:
 	DocumentWindow *document_window_ = nullptr; // owned by the pass
 	InspectorWindow *inspector_window_ = nullptr; // owned by the pass
 	PreviewWindow *preview_window_ = nullptr; // owned by the pass
-	devtools::Window *problems_window_ = nullptr; // owned by the pass
+	ProblemsWindow *problems_window_ = nullptr; // owned by the pass
 };
 
 } // namespace opennova::editor
