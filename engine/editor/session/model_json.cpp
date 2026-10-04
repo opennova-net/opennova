@@ -2,6 +2,7 @@
 
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
+#include <editor/documents/model_surfaces.h>
 
 namespace opennova::editor {
 
@@ -26,6 +27,10 @@ JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &pag
 		entry.set("surface", number(double(choice.value)));
 		entry.set("name", json_string(words.name));
 		entry.set("tag", json_string(words.tag));
+		entry.set("label", json_string(choice.label));
+		// Whether rounds go on through it and what that costs them (the game's pass-through table).
+		entry.set("passes", JsonValue::make_bool(words.passes));
+		if (words.passes) entry.set("energy_cost", number(words.energy_cost));
 		if (!words.note.empty()) entry.set("note", json_string(words.note));
 		surfaces.push(std::move(entry));
 	}
@@ -44,7 +49,13 @@ JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &pag
 	const CollisionRow *collision = model.collision_row();
 	out.set("faces", number(collision ? double(collision->faces.size()) : 0.0));
 	out.set("without_material", number(double(model_faces_without_material(model))));
-	out.set("collision_lod", number(row ? double(model_face_materials(row->base)->lod) : -1.0));
+	const std::shared_ptr<const ModelFaceMaterials> made =
+			row ? model_face_materials(row->base) : std::make_shared<const ModelFaceMaterials>();
+	out.set("collision_lod", number(double(made->lod)));
+	// Faces with triangles of more than one material about them (the winding decided which), and those
+	// left a triangle wound against them.
+	out.set("ambiguous", number(double(made->ambiguous)));
+	out.set("against_winding", number(double(made->against)));
 	const size_t count = row ? row->materials.size() : 0;
 	set_page(out, page, count);
 	JsonValue list = JsonValue::make_array();
@@ -66,6 +77,7 @@ JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &pag
 			JsonValue one = JsonValue::make_object();
 			one.set("surface", number(double(c.surface)));
 			one.set("name", json_string(model_surface_words(c.surface).name));
+			one.set("passes", JsonValue::make_bool(model_surface_words(c.surface).passes));
 			one.set("faces", number(double(c.faces)));
 			counts.push(std::move(one));
 		}

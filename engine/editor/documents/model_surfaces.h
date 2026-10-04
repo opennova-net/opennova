@@ -39,12 +39,18 @@ inline constexpr int kModelSurfaceCount = 24;
 struct ModelSurfaceWords {
 	std::string name;  // a modder's word for it: "Metal", "Heavy metal", "Object"
 	std::string tag;   // the effects_table row the game plays: "metal", "hmetal", "obj"
-	std::string note;  // what else the game does with it, cited ("" for nothing more)
+	std::string note;  // what else the game does with it, cited at its source ("" for nothing more)
 	bool known = true; // false past 23: the game plays the `obj` row
+	// Rounds go on through it (Water, Glass, Cloth, Foliage, Flesh), paying this much of their energy
+	// [orig: Projectile_ProcessDamageOnTarget @ 0x4e823f..0x4e8266; the cost table @ 0x82d034].
+	bool passes = false;
+	double energy_cost = 0.0;
 };
 // The words of a face byte (any 0 to 255).
 ModelSurfaceWords model_surface_words(int64_t poly_type);
-// The surfaces a picker offers, by name, 0 to 23 (name: the tag; label: the words).
+// A surface as a picker names it: its words, and "(rounds pass)" after a surface rounds go through.
+std::string model_surface_label(int64_t poly_type);
+// The surfaces a picker offers, by name, 0 to 23 (name: the tag; label: model_surface_label).
 const std::vector<FieldChoice> &model_surface_choices();
 
 // The bullet-face flag bits a modder sets per material (docs/threedi/o3d-scene-format.md `cf`): both
@@ -62,13 +68,17 @@ const std::vector<ModelFaceFlag> &model_face_flags();
 
 // Each bullet face's material: the base material (its index in the parsed file's MTRL table) whose
 // triangle of the collision LOD the face is, found by the triangle's middle (the collision corners sit on
-// the 8.8 grid, so a face's middle lies within 1/256 m of its triangle's), and the LOD whose triangles
-// meet the most faces. A face no triangle meets (a first-person gun's collision mesh of its own, which
-// the file does not keep) has none (-1).
+// the 8.8 grid, so a face's middle lies within 1/256 m of its triangle's) and by its winding (a sheet
+// stored in both windings, each side its own material, puts two triangles at one middle: a face is the
+// one wound with it), one face to a triangle, in the LOD whose triangles meet the most faces. A face no
+// triangle meets (a first-person gun's collision mesh of its own, which the file does not keep) has none
+// (-1).
 struct ModelFaceMaterials {
 	std::vector<int> material; // per collision face, in the file's order (the collision row's faces)
 	int lod = -1;              // the collision LOD, -1 when no LOD meets a face
 	size_t matched = 0;        // faces with a material
+	size_t ambiguous = 0;      // faces with triangles of more than one material about them (the winding decided)
+	size_t against = 0;        // faces that took a triangle wound against them, the one wound with them taken
 };
 // Made once per parsed file (the documents' immutable base) and kept while it lives.
 std::shared_ptr<const ModelFaceMaterials> model_face_materials(const assets::Model &base);
