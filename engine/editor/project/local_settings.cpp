@@ -90,6 +90,13 @@ bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnost
 	settings.runtime_executable = json.get_string("runtime_executable", "");
 	settings.game_install = json.get_string("game_install", "");
 	settings.build_folder = json.get_string("build_folder", "");
+	if (const io::JsonValue *workspace = json.get("workspace"); workspace && workspace->is_object()) {
+		if (const io::JsonValue *open = workspace->get("open"); open && open->is_array())
+			for (const io::JsonValue &item : open->array)
+				if (item.is_object() && !item.get_string("path", "").empty())
+					settings.open_documents.push_back({item.get_string("path", ""), item.get_string("locator", "")});
+		settings.active_document = workspace->get_string("active", "");
+	}
 	out = std::move(settings);
 	return true;
 }
@@ -100,6 +107,19 @@ bool save_local_settings(const ProjectPaths &paths, const LocalSettings &setting
 	json.set("runtime_executable", io::JsonValue::make_string(settings.runtime_executable));
 	json.set("game_install", io::JsonValue::make_string(settings.game_install));
 	if (!settings.build_folder.empty()) json.set("build_folder", io::JsonValue::make_string(settings.build_folder));
+	if (!settings.open_documents.empty()) {
+		io::JsonValue workspace = io::JsonValue::make_object();
+		io::JsonValue open = io::JsonValue::make_array();
+		for (const LocalSettings::OpenDocument &document : settings.open_documents) {
+			io::JsonValue item = io::JsonValue::make_object();
+			item.set("path", io::JsonValue::make_string(document.path));
+			if (!document.locator.empty()) item.set("locator", io::JsonValue::make_string(document.locator));
+			open.push(std::move(item));
+		}
+		workspace.set("open", std::move(open));
+		workspace.set("active", io::JsonValue::make_string(settings.active_document));
+		json.set("workspace", std::move(workspace));
+	}
 	std::string io_error;
 	if (!ensure_project_cache_dir(paths, io_error) ||
 	    !write_file_atomic(paths.local_settings_file, io::json_write(json), io_error)) {

@@ -34,7 +34,8 @@ class NewProjectForm;
 // row moves there, and again for each RevealRecord view event its document is sent, which the view
 // holds until it draws.
 // With no project open it is the
-// welcome view; with nothing open it says how to open a file. Ctrl+F (Edit > Find...) opens the
+// welcome page, the workspace's whole (the other windows stand aside for it); with nothing open it
+// says how to open a file and, in a new project, how to bring in the game's files. Ctrl+F (Edit > Find...) opens the
 // find bar over the active tab's view: every field whose value as the Inspector shows it holds
 // the text (find_in_document), how many, the one shown of them, Enter and the arrows next and
 // previous (Shift+Enter previous), the hits listed under it; a hit shown (or clicked) selects its
@@ -86,6 +87,10 @@ private:
 	// The views of documents no longer open go.
 	void prune(const SessionView &view);
 	void draw_tabs(const SessionView &view);
+	// A project open with nothing open in it: how to open a file, and for a project of fewer than kFewFiles
+	// files (a new one) the ways to bring in the game's.
+	void draw_first_steps(const SessionView &view);
+	static constexpr size_t kFewFiles = 40;
 	void draw_find(const Document &document);
 	// The find bar's hit `index` shown: its record selected, its field revealed.
 	void show_hit(const Document &document, size_t index);

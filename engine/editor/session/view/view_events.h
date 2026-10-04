@@ -24,7 +24,7 @@ enum class ViewEventKind : uint8_t {
 	// document's view scrolls to the line and marks it (S13 V10's script device to the span).
 	RevealText,
 	// A ShowInFiles: `path` the project file (project-relative), `flag` asks its new name (Files'
-	// Rename...). Files comes forward and selects it.
+	// Rename...). Files comes forward and selects it. An AboutFile's: `tag` 1, its card opens too.
 	RevealFile,
 	// A PreviewRename that asks the new name: `path` the file defining the name, `field` its
 	// field, `tag` the rename preview's serial (the view's rename_preview it asks from). The Rename

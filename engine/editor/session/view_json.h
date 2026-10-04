@@ -86,12 +86,15 @@ io::JsonValue events_page_to_json(const ViewEvents &events, uint64_t cursor, siz
 // The import dialog's preview (DialogsView::ImportPreview): {open, with_dependencies, all?, changed?,
 // then a page of its plan's importable rows (`rows`, `count` the whole plan's; of `kind` alone when
 // one is named, `count` theirs and `kind` echoed), `total_bytes` and `summary` (the whole plan's
-// files by kind: {kind, files, bytes}, the largest first), and by the same offset and limit the
-// lists it offers and chose (`choices`, `roots`) and the files not found (`not_found`), each with
-// its whole length (`choice_count`, `root_count`, `not_found_count`), then `not_followed`,
-// `undefined`, `truncated` and the plan's `diagnostics`}. Each row: its state (selected or found),
-// name, kind, source (as a request's imports take it), destination, size, made_from, needed_by,
-// found_in, selected, problem and rivals.
+// files by kind: {kind, files, bytes}, the largest first), `groups` (the whole plan's rows by what
+// they come for, import_plan_groups: {depth, parent?, chosen? (the chosen file's name, on its own
+// group), kind, files, bytes}, a parent before its children), and by the same offset and limit the
+// lists it offers and chose (`choices`, each with its kind and size; `roots`) and the files not found
+// (`not_found`), each with its whole length (`choice_count`, `root_count`, `not_found_count`), then
+// `not_followed`, `undefined`, `truncated` and the plan's `diagnostics`}. Each row: its state
+// (selected or found), name, kind, source (as a request's imports take it), destination, size,
+// made_from, needed_by (with its `words`, import_need_text), found_in, selected, held and, where the
+// plan compared the project's file, held_same, problem, rivals and its group's index.
 io::JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, AssetKind kind = AssetKind::kCount);
 
 } // namespace opennova::editor

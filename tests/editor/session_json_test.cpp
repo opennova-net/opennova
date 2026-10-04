@@ -558,7 +558,7 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back) ==
 			"Unknown request member \"unsaved_choice\" (resolve_unsaved takes choice).");
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
-			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, import_pass).");
+			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, game_install, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
 			"Unknown request member \"flagg\" (build takes out_dir, rehash).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash).");
@@ -583,8 +583,9 @@ static int test_request_round_trip() {
 	TEST_EXPECT(!editor_request_to_json(request::open_project("C:/x")).get("game_install"));
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"dir\":\"C:/x\",\"import_pass\":false}", read).empty() &&
 	            !read.import_pass && read.title.empty());
-	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"dir\":\"C:/x\",\"game_install\":\"C:/g\"}", read)
-	                    .find("game_install") != std::string::npos);
+	// A new project names its game install too (the UX round's project lane).
+	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"dir\":\"C:/x\",\"game_install\":\"C:/g\"}", read).empty() &&
+	            read.game_install == "C:/g");
 	TEST_EXPECT(editor_request_to_json(request::new_project("C:/x", "T", "dfx")).get_string("game", "") == "dfx" &&
 	            editor_request_to_json(request::build("C:/out")).get_string("out_dir", "") == "C:/out");
 	// An expansion project (S16): its name and the expansion it builds on ride the request; a
