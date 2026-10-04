@@ -552,17 +552,17 @@ void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 	// the cookie-key ring as it advances.
 	NovaWorldClient *client = nw_client();
 	if (client != nullptr && nw_host_bound_ && !sim->is_joiner()) {
-		NwuHostRole &host = client->host_role();
+		opennova::NwuHostRole &host = client->host_role();
 		sync_nw_host_roster(host, sim);
 		host.set_round_time_remaining_ticks(sim->round_time_remaining_ticks());
-		sim->set_novaworld_registration(host.gsid(), host.app_id(), host.cookie_keys(),
+		sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(), host.cookie_keys(),
 				opennova::to_gd(client->get_login_pcid()));
 	}
 	sync_nwu_session(sim);
 }
 
 void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
-	NwuLobbySession::MatchFacts facts;
+	opennova::NwuLobbySession::MatchFacts facts;
 	bool node = false;
 	if (NovaWorldClient *client = nw_client()) {
 		facts = client->nwu_match_facts();
@@ -576,7 +576,7 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 		nwu_feed_live_ = true;
 	}
 	if (!node) {
-		facts = NwuLobbySession::MatchFacts{};
+		facts = opennova::NwuLobbySession::MatchFacts{};
 		facts.in_use = true;
 	}
 	p_sim->set_nwu_session(facts.in_use, facts.flags, facts.role, facts.exit_reason);
@@ -590,7 +590,7 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 // The ClientPlayerEnterRequest is NOT sent from here: the in-match host's
 // join-phase watchdog announces a validating joiner itself (the hook bound in
 // bind_nw_host), before the player is ever added to this roster.
-void SessionDrive::sync_nw_host_roster(NwuHostRole &p_host, const Ref<Simulation> &p_sim) {
+void SessionDrive::sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<Simulation> &p_sim) {
 	std::map<int, std::string> live;
 	for (const Simulation::HostPeerSlot &slot : p_sim->host_peer_slots()) {
 		const std::string signature = opennova::to_std(slot.player_name) + "|" +
@@ -724,10 +724,10 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	if (client == nullptr || !client->is_hosting() || sim.is_null() || !sim->is_host_listening()) {
 		return;
 	}
-	NwuHostRole &host = client->host_role();
+	opennova::NwuHostRole &host = client->host_role();
 	nw_host_bound_ = true;
 	const std::string login_pcid = client->get_login_pcid();
-	sim->set_novaworld_registration(host.gsid(), host.app_id(), host.cookie_keys(),
+	sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(), host.cookie_keys(),
 			opennova::to_gd(login_pcid));
 	// A service that asked for join tickets arms the in-match host's join-phase
 	// watchdog: it announces each validating joiner through this hook and holds

@@ -17,13 +17,16 @@
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
+#include <net/novaworld/nwu_host_role.h>
+#include <net/novaworld/nwu_lobby_session.h>
 #include <net/novaworld/proxy_rendezvous.h>
 
 #include "network/novaworld_server_row.h"
 #include "network/novaworld_gate_info.h"
-#include "network/nwu_host_role.h"
-#include "network/nwu_lobby_session.h"
 #include "network/ping_sweep_worker.h"
+#include "rtxt/rtxt_string_file.h"
+#include "network/udp_pump.h"
+#include "network/udp_pump_datagram_socket.h"
 
 #include <cstdint>
 #include <memory>
@@ -110,11 +113,13 @@ public:
 	bool is_authenticated() const { return authenticated_; }
 	// The NWU session as the match reads it (C++ only): the shell keeps this
 	// node alive through the match (SessionDrive::adopt_nw_client).
-	NwuLobbySession::MatchFacts nwu_match_facts() const { return lobby_.match_facts(); }
+	opennova::NwuLobbySession::MatchFacts nwu_match_facts() const { return lobby_.match_facts(); }
 
 	// Host a game (the NovaWorld menu's Host): ConnectOrHost's hosting leg on
-	// this logged-in session -- the session-state and gate checks, the host var
-	// lists and ClientHostRequest, then the 60 s wait for the ServerHostResult.
+	// this logged-in session -- the session-state and gate checks, the hosting
+	// page's HOSTKEY (the main page's @HOST_URL@, which needs the login), the
+	// host var lists and ClientHostRequest, then the 60 s wait for the
+	// ServerHostResult.
 	// Emits hosting_started once hosting (the shell then loads the mission) or
 	// host_failed(NWEC tag). `options` supplies the registration columns.
 	void start_hosting(const Ref<HostSessionOptions> &options);
@@ -126,7 +131,7 @@ public:
 	void stop_playing();
 	// The hosting session's in-match half (C++ only): the roster, the round
 	// clock, the GSID, the join tickets and the ServerCommand config changes.
-	NwuHostRole &host_role() { return host_role_; }
+	opennova::NwuHostRole &host_role() { return host_role_; }
 	// The gate reply the lobby HTTP legs resolve their base URL from; null
 	// until a gate response landed.
 	Ref<NovaWorldGateInfo> get_server_info() const;
@@ -204,12 +209,13 @@ private:
 	// The gate/session pump is the shared NwuLobbySession driver (lobby_);
 	// these hooks feed it the role-specific pieces and map its progress onto
 	// our State + signals + trace ring.
-	NwuLobbySession::Hooks make_lobby_hooks();
+	opennova::NwuLobbySession::Hooks make_lobby_hooks();
+	opennova::NwuLobbySession::Environment make_lobby_environment();
 	void on_gate_response(const opennova::GateResponse &parsed);
 	std::vector<std::pair<std::string, std::string>> make_cookie_vars();
 	void trace_sent_datagram(const std::vector<uint8_t> &dg);
-	void on_session_datagram(const NwuLobbySession::RxInfo &rx);
-	NwuHostRole::Hooks make_host_hooks();
+	void on_session_datagram(const opennova::NwuLobbySession::RxInfo &rx);
+	opennova::NwuHostRole::Hooks make_host_hooks();
 	void sync_session_state(); // ClientSession::State -> our State + signals
 	void drain_session_notices(); // the server notifications (stop/punt/command/results)
 
@@ -228,6 +234,12 @@ private:
 	void on_join_request_completed(int result, int response_code,
 	                               const PackedStringArray &headers,
 	                               const PackedByteArray &body);
+	// Host HTTP chain: the hosting page's HOSTKEY ahead of the host request.
+	void on_host_request_completed(int result, int response_code,
+	                               const PackedStringArray &headers,
+	                               const PackedByteArray &body);
+	// The hosting leg's HTTP part failed: back to the verified lobby, host_failed(reason).
+	void fail_host_leg(const String &reason);
 	// The NWJoin handshake resolved the host: send the ClientPlayRequest and wait for
 	// the ServerPlayResult (the start-playing poll, 60 s).
 	void start_playing(const opennova::JoinResult &resolved);
@@ -263,11 +275,21 @@ private:
 	State state_ = STATE_IDLE;
 	bool authenticated_ = false; // true only after the EPASK login returns NWHANDLE
 	Ref<NovaWorldGateInfo> server_info_;
-	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
-	// endpoint, and the connect deadlines all live in here.
-	NwuLobbySession lobby_;
+	// The driver's two sockets (bound at start(), closed at stop()) and their
+	// engine adapters, and the driver's ms wall clock.
+	Ref<UdpPump> gate_pump_;
+	Ref<UdpPump> nw_pump_;
+	std::unique_ptr<UdpPumpDatagramSocket> gate_socket_;
+	std::unique_ptr<UdpPumpDatagramSocket> nw_socket_;
+	double clock_accum_s_ = 0.0;
+	uint32_t clock_ms_ = 0;
+	// The shared gate/session driver (engine/net/novaworld): ClientSession, ci/ck,
+	// the NW endpoint, and the connect deadlines all live in here.
+	opennova::NwuLobbySession lobby_;
 	// The hosting half of the session (declared after lobby_, which it drives).
-	NwuHostRole host_role_;
+	opennova::NwuHostRole host_role_;
+	// The registration the hosting page's HOSTKEY completes.
+	opennova::HostRegistration pending_host_cfg_;
 
 	// The CD-key/hardware identity set (CountryName..NWHWI), built once per
 	// session and used for BOTH the UDP verify var-list and the HTTP login
@@ -297,6 +319,7 @@ private:
 	// sequencing/cookie-jar all live in flow_ (engine/net/novaworld); these are pure pumps.
 	HTTPRequest *login_http_ = nullptr;
 	HTTPRequest *join_http_ = nullptr;
+	HTTPRequest *host_http_ = nullptr;
 	// The lobby HTTP orchestration: the EPASK login chain, the GSB fetch, and the
 	// NWJoin handshake (URL builders + shared cookie jar + LoginStep/JoinStep). The
 	// binding ships each HttpRequestSpec and feeds (transport_ok, code, headers, body)

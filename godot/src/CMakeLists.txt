@@ -61,9 +61,7 @@ add_library(${TARGET_NAME} SHARED
     network/novaworld_gate_info.cpp
     network/novaworld_server_browser.cpp
     network/ping_sweep_worker.cpp
-    network/nwu_host_role.cpp
     network/novaworld_identity.cpp
-    network/nwu_lobby_session.cpp
     network/udp_datagram.cpp
     network/udp_pump.cpp
     network/lan_session.cpp
@@ -309,10 +307,6 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_runtime
     opennova_net
 )
-
-if(WIN32)
-    target_link_libraries(${TARGET_NAME} PRIVATE iphlpapi)
-endif()
 
 get_target_property(GODOTCPP_SUFFIX godot-cpp GODOTCPP_SUFFIX)
 

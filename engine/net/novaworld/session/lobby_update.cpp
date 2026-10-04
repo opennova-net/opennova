@@ -62,13 +62,14 @@ std::string lobby_update_build(const LobbyStatusBlob &blob) {
 	return out;
 }
 
-// The plaintext status heartbeat retail posts to the gate's POSTIPADDRESS:POSTIPPORT
-// right after its ClientHostUpdate on the same refresh, when the gate supplied
-// both and the junction bypass is off. It rides the NAPI CRC envelope (the
-// socket layer's encrypt flag) with no NWU and no NP session: the gate reads
-// it off its own port. [orig: Lobby_UpdateServerInfo @0x4ff448 (the
-//  dword_B5F490/dword_B5F494 non-zero gate) .. @0x4ff62c (CNapiNetwork_SendUDPPacket);
-//  CNapiNPManager_SendTo @0x61ec20 passes encrypt=1]
+// The plaintext status heartbeat retail posts to the gate's POSTIPADDRESS:POSTIPPORT on a
+// refresh when no NWU session is in use (the gate named no UDPNOVAWORLD address) and the
+// gate supplied both POST fields; with an NWU session the refresh rides ClientHostUpdate
+// alone (NwuHostRole). It rides the NAPI CRC envelope (the socket layer's encrypt flag)
+// with no NWU and no NP session: the gate reads it off its own port.
+// [orig: Lobby_UpdateServerInfo @0x4ff441..0x4ff448 (dword_B5FD2C, the NWU-in-use word),
+//  @0x4ff45c..0x4ff466 (the dword_B5F490/dword_B5F494 non-zero gate) .. @0x4ff62c
+//  (CNapiNetwork_SendUDPPacket); CNapiNPManager_SendTo @0x61ec20 passes encrypt=1]
 std::vector<uint8_t> lobby_update_build_datagram(const GateResponse &gate,
                                                  const LobbyStatusBlob &blob) {
 	const bool post_ip_set =

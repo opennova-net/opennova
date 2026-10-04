@@ -1,17 +1,6 @@
 #include "network/novaworld_identity.h"
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <winsock2.h>
-#include <windows.h>
-#include <iphlpapi.h>
-#include <ipifcons.h>
-#endif
+#include <net/novaworld/lobby_identity.h>
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/os.hpp>
@@ -21,8 +10,6 @@
 #include <godot_cpp/classes/translation_server.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
-// After the Windows block on purpose: godot-cpp's headers must not first meet
-// winnetwk.h's CONNECT_DEFERRED macro through this include.
 #include "util/string_convert.h"
 
 #include <algorithm>
@@ -37,15 +24,6 @@ namespace godot {
 using opennova::to_std;
 
 namespace {
-
-uint32_t fnv1a_32(std::string_view value) {
-	uint32_t hash = 2166136261u;
-	for (const unsigned char byte : value) {
-		hash ^= byte;
-		hash *= 16777619u;
-	}
-	return hash;
-}
 
 struct LocaleCodes {
 	std::string language;
@@ -84,43 +62,6 @@ Vector2i usable_size(Vector2i preferred, Vector2i fallback) {
 	return Vector2i(1920, 1080);
 }
 
-#ifdef _WIN32
-bool collect_retail_machine_inputs(opennova::RetailMachineInputs &out) {
-	char volume_name[MAX_PATH + 1]{};
-	char filesystem_name[MAX_PATH + 1]{};
-	DWORD serial = 0;
-	DWORD maximum_component_length = 0;
-	DWORD filesystem_flags = 0;
-	if (!GetVolumeInformationA(nullptr, volume_name, static_cast<DWORD>(sizeof(volume_name)),
-			&serial, &maximum_component_length, &filesystem_flags, filesystem_name,
-			static_cast<DWORD>(sizeof(filesystem_name)))) {
-		return false;
-	}
-	out.volume_serial = serial;
-	out.maximum_component_length = maximum_component_length;
-	out.filesystem_flags = filesystem_flags;
-	out.volume_name = volume_name;
-	out.filesystem_name = filesystem_name;
-
-	ULONG adapter_bytes = 0;
-	if (GetAdaptersInfo(nullptr, &adapter_bytes) == ERROR_BUFFER_OVERFLOW && adapter_bytes > 0) {
-		std::vector<uint8_t> storage(adapter_bytes);
-		auto *adapter = reinterpret_cast<PIP_ADAPTER_INFO>(storage.data());
-		if (GetAdaptersInfo(adapter, &adapter_bytes) == ERROR_SUCCESS) {
-			for (; adapter; adapter = adapter->Next) {
-				if (adapter->Type != MIB_IF_TYPE_ETHERNET ||
-						adapter->AddressLength != out.ethernet_address.size())
-					continue;
-				std::copy_n(adapter->Address, out.ethernet_address.size(), out.ethernet_address.begin());
-				out.has_ethernet_address = true;
-				break;
-			}
-		}
-	}
-	return true;
-}
-#endif
-
 } // namespace
 
 opennova::LobbyIdentityParams collect_lobby_identity_params(uint32_t client_index,
@@ -130,49 +71,30 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(uint32_t client_inde
 	out.client_key = client_key;
 
 	OS *os = OS::get_singleton();
-#ifdef _WIN32
-	char locale_name[512]{};
-	if (GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SENGCOUNTRY, locale_name,
-			static_cast<int>(sizeof(locale_name))) > 0) {
-		out.country = locale_name;
-	}
-	if (GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SENGLANGUAGE, locale_name,
-			static_cast<int>(sizeof(locale_name))) > 0) {
-		out.language = locale_name;
-	}
-#else
-	const String locale = os ? os->get_locale() : String();
-	const LocaleCodes codes = locale_codes(to_std(locale));
-	TranslationServer *translations = TranslationServer::get_singleton();
-	if (translations) {
-		if (!codes.language.empty()) {
-			const std::string name = to_std(translations->get_language_name(opennova::to_gd(codes.language)));
-			if (!name.empty()) out.language = name;
+	// The engine reads the locale trio where the retail APIs exist (Windows); elsewhere the
+	// Godot locale and time zone stand in (the bias inverts Godot's local-minus-UTC offset).
+	if (!opennova::read_locale_identity(out)) {
+		const String locale = os ? os->get_locale() : String();
+		const LocaleCodes codes = locale_codes(to_std(locale));
+		TranslationServer *translations = TranslationServer::get_singleton();
+		if (translations) {
+			if (!codes.language.empty()) {
+				const std::string name = to_std(translations->get_language_name(opennova::to_gd(codes.language)));
+				if (!name.empty()) out.language = name;
+			}
+			if (!codes.country.empty()) {
+				const std::string name = to_std(translations->get_country_name(opennova::to_gd(codes.country)));
+				if (!name.empty()) out.country = name;
+			}
 		}
-		if (!codes.country.empty()) {
-			const std::string name = to_std(translations->get_country_name(opennova::to_gd(codes.country)));
-			if (!name.empty()) out.country = name;
-		}
-	}
-#endif
-
-	// Retail sends the base Win32 bias (not the current daylight-adjusted
-	// offset): UTC = local + Bias. Use that exact API on its native platform;
-	// elsewhere invert Godot's local-minus-UTC offset.
-#ifdef _WIN32
-	TIME_ZONE_INFORMATION timezone{};
-	if (GetTimeZoneInformation(&timezone) != TIME_ZONE_ID_INVALID) {
-		out.tz_bias = std::to_string(timezone.Bias);
-	}
-#else
-	if (Time *time = Time::get_singleton()) {
-		const Dictionary zone = time->get_time_zone_from_system();
-		if (zone.has(String("bias"))) {
-			const int64_t utc_offset_minutes = zone[String("bias")];
-			out.tz_bias = std::to_string(-utc_offset_minutes);
+		if (Time *time = Time::get_singleton()) {
+			const Dictionary zone = time->get_time_zone_from_system();
+			if (zone.has(String("bias"))) {
+				const int64_t utc_offset_minutes = zone[String("bias")];
+				out.tz_bias = std::to_string(-utc_offset_minutes);
+			}
 		}
 	}
-#endif
 
 	RenderingServer *rendering = RenderingServer::get_singleton();
 	std::string adapter_name;
@@ -215,19 +137,15 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(uint32_t client_inde
 		stable_identity = to_std(os->get_processor_name()) + "|" + to_std(os->get_model_name());
 	}
 	stable_identity += "|" + adapter_name;
-	// Token lengths are the wire-load-bearing kNwpsskLen/kNwusidLen from
-	// engine/net/novaworld lobby_vars.h; the xor seeds are OpenNova's own.
-	const uint32_t seed = fnv1a_32(stable_identity);
-	out.nwpssk = opennova::az_fingerprint(seed ^ 0x5053534Bu, opennova::kNwpsskLen);
-	out.nwusid = opennova::az_fingerprint(seed ^ 0x55534944u, opennova::kNwusidLen);
-#ifdef _WIN32
+	const opennova::LobbyMachineTokens fallback = opennova::fallback_machine_tokens(stable_identity);
+	out.nwpssk = fallback.nwpssk;
+	out.nwusid = fallback.nwusid;
 	opennova::RetailMachineInputs machine;
-	if (collect_retail_machine_inputs(machine)) {
+	if (opennova::read_retail_machine_inputs(machine)) {
 		const opennova::LobbyMachineTokens tokens = opennova::make_retail_machine_tokens(machine);
 		out.nwpssk = tokens.nwpssk;
 		out.nwusid = tokens.nwusid;
 	}
-#endif
 
 	// The supported retail capture and OpenNova base install both advertise 0.
 	// Keep the field explicit so an expansion-aware binding can replace it.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -88,6 +89,17 @@ struct JoinResult {
 	std::string reason;       // when Failed
 };
 
+// --- host ---
+// The NovaWorld menu's Host leg: the hosting page the main page names answers, through its relay,
+// with a page whose <TITLE> carries [HOSTKEY=...&]; that key rides the host registration.
+struct HostKeyResult {
+	enum class Kind { NeedRequest, Resolved, Failed };
+	Kind kind = Kind::Failed;
+	HttpRequestSpec request;  // when NeedRequest
+	std::string host_key;     // when Resolved: the HOSTKEY= value, trimmed at '&' then ']'
+	std::string reason;       // when Failed
+};
+
 // The single stateful lobby HTTP flow. One per session; the owner sets the context, then drives login /
 // GSB / join. The cookie jar is SHARED across all three (login's NWHANDLE/PCID ride GSB + join).
 class LobbyHttpFlow {
@@ -131,6 +143,28 @@ public:
 	                            const std::vector<uint8_t> &body);
 	bool join_active() const { return join_step_ != JoinStep::Idle; }
 
+	// --- the Host leg ---
+	// Begin: the GET of the main page's @HOST_URL@ global (NeedRequest), or Failed when no page set
+	// one (log in first: the login lands on the main page). [orig: UI_HandleHostSessionStart
+	//  @0x556d00 @0x556f0d..0x556f98 — the PLoad / EXP form globals, sub_63B440("@HOST_URL@"),
+	//  UIScene_OpenUrl]
+	HostKeyResult host();
+	// Feed a completed host-leg response. A page whose <TITLE> starts [HOSTKEY= resolves the key; a
+	// relay page's META refresh is followed (at most kMaxHostHops pages); any other page fails with
+	// its message. [orig: UI_ProcessWebResponseContent @0x63d450 — the title test @0x63d5bb..0x63d604
+	//  posts screen event 7 with the title; UI_DispatchScreenEvent @0x54f2fa ->
+	//  URL_ParseConnectionQueryString @0x54dfb0 (HOSTKEY= @0x54e0be)]
+	HostKeyResult on_host_response(bool transport_ok, int code,
+	                               const std::vector<std::string> &response_headers,
+	                               const std::vector<uint8_t> &body);
+	bool host_active() const { return host_step_ != HostStep::Idle; }
+	static constexpr int kMaxHostHops = 8;
+
+	// The menu browser's page globals (<IB3_GLOBAL name="@NAME@">value</IB3_GLOBAL>) the pages this
+	// flow fetched set, by name ("@HOST_URL@"); null when no page set it.
+	// [orig: UI_ProcessWebResponseContent @0x63d50a..0x63d558 -> CUIScene_SetProperty @0x63b480]
+	const std::string *browser_global(const std::string &name) const;
+
 	// Exposed for the owner's cookie diagnostics / tests.
 	const CookieJar &cookies() const { return jar_; }
 	// Current browser cookies plus the locale/initial identity for UDP statements.
@@ -139,6 +173,7 @@ public:
 private:
 	enum class LoginStep { Idle, Prepare, NwStart, Post, Poll };
 	enum class JoinStep { Idle, First, Second };
+	enum class HostStep { Idle, Fetching };
 
 	std::vector<std::string> request_headers(bool form_content_type) const; // Content-Type + Cookie lines
 	void merge_response_cookies(const std::vector<std::string> &response_headers);
@@ -146,6 +181,9 @@ private:
 	LoginResult login_post();                 // the /NWLogin.dll POST (the 13-field form), or Failed
 	std::string gsb_url() const;
 	std::string nwlogin_poll_url() const;     // /NWLogin.dll?tag=<LOGINSESSIONTAG>
+	void capture_globals(const std::vector<uint8_t> &body);
+	std::string absolute_url(const std::string &url) const;
+	HostKeyResult host_get(const std::string &url);
 
 	LobbyHttpContext ctx_;
 	CookieJar jar_;
@@ -155,6 +193,9 @@ private:
 	std::string login_user_, login_pass_;
 	JoinStep join_step_ = JoinStep::Idle;
 	uint32_t join_rid_ = 0;
+	HostStep host_step_ = HostStep::Idle;
+	int host_hops_ = 0;
+	std::map<std::string, std::string> globals_; // upper-cased name -> value
 };
 
 } // namespace opennova
