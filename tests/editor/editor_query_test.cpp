@@ -455,7 +455,8 @@ static int test_build_gate() {
 	session.run_operations();
 	gate = ask(session, "build_gate");
 	TEST_EXPECT(!gate.get_bool("blocked", true));
-	// An archive in the project: blocked by the build's own check, no Problems row having it.
+	// An archive in the project: blocked by the build's own check, a Problems row before any build (the
+	// review's M3: the refusal's count, Problems' and Show them agree).
 	const uint8_t note[] = { 'x' };
 	const opennova::pff::PffWriteEntry entries[] = { { "note.txt", note, sizeof(note), 0, 0, 0 } };
 	TEST_EXPECT(opennova::pff::pff_write_archive(dir.file("project/extra.pff").c_str(),
@@ -466,8 +467,9 @@ static int test_build_gate() {
 	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
 			gate.get("blocking")->array.size() == 1 &&
 			gate.get("blocking")->array[0].get_string("code", "") == "build.archive_in_project");
-	for (const Diagnostic &d : session.view().findings.diagnostics)
-		TEST_EXPECT(d.code() != "build.archive_in_project");
+	size_t rows = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics) rows += d.code() == "build.archive_in_project" ? 1 : 0;
+	TEST_EXPECT(rows == 1);
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);
