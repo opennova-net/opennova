@@ -2,8 +2,9 @@
 
 `on_ar15.blend` is the KINEMATION Tactical Shooter Pack's TR15 (an AR-15
 pattern carbine with a holographic sight and a vertical grip) as a first-person
-gun. It exports `assets/on_ar15.3di`, `on_ar15.adm` and the `on_ar15_*` clips
-and textures. It replaces the earlier `on_ar15`, whose arms were not the stock
+gun and the gun a third-person body holds. It exports `assets/on_ar15.3di`,
+`on_ar15.adm` and the `on_ar15_*` clips and textures, and
+`assets/on_ar15_3rd.3di` with its `on_ar15_3_*` textures. It replaces the earlier `on_ar15`, whose arms were not the stock
 rig.
 
 ## The scene
@@ -24,6 +25,22 @@ rig.
   and high); the aim eye is 15 cm behind the sight's window, the pack's eye
   relief (`tpos -52.245 25.365 -179.092`). The root follows `KINE Eye` like
   the arms' does.
+
+## The third-person model
+
+`on_ar15_3rd` (beside the first-person model) is the TR15 as the gun a
+third-person body holds, exported to `assets/on_ar15_3rd.3di` (weapon.def
+`gfx3`). The game draws a rifle's `gfx3` rigid at the right hand's pivot
+plus a fixed nudge, turned by the body's aim rather than the hand, so it is
+authored as retail's `M4_3rd` is: muzzle +Z, up +Y, the origin at the grip.
+The TR15's rest meshes (without the follower and rounds) are turned into
+that frame with its ejection port on `M4_3rd`'s, so the grip and the
+stock's end (-0.25) land where retail's do; `bullet`, `bcasing` and `scope`
+stand where `M4_3rd`'s do on our receiver, `MFLASH01` on the muzzle. Four
+LODs at `M4_3rd`'s thresholds (160, 64, 12, 0): 2400 and 894 triangles,
+a hull and a box in one flat colour; its own textures at 256. The weapon
+edits file names no `gfx3`, so a `weapon.def` that uses the TR15 sets
+`gfx3 on_ar15_3rd` by hand.
 
 ## The rig
 

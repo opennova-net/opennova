@@ -18,6 +18,8 @@ Models, clips and textures ride Git LFS; everything else is a plain git blob.
 | `main.mnu` | The placeholder main menu: one `STARTUP` screen with literal text, `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT`. Hand-written. |
 | `opennova.fnt` | The menu's one font (uppercase 5x7 stroke art drawn at 2x). Minted by `engine/editor/blank/blank_font_art.h` (the same art as the editor's blank font); `minimal_fnt_gen_test --write` regenerates it and the `minimal_fnt_gen` ctest keeps it byte-identical to the builder. |
 | `on_ar15.3di` | A first-person AR-15-pattern carbine (the KINEMATION TR15), 60 parts on one rig: the player's 47 arm bones, then 13 of the gun's own. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` file below. |
+| `on_ar15_3rd.3di` | The same carbine as a third-person body holds it (weapon.def `gfx3`): one rigid part, four LODs, muzzle +Z with the origin at the grip as retail's third-person rifles are. Exported from `art/on_ar15/on_ar15.blend`. |
+| `on_ar15_3_{0..3}.tga` | Its diffuse textures (256 square) and the far LODs' flat colour. |
 | `on_arms.3di` | The player's first-person arms on 47 bones, the KINEMATION Operator's arm chains with their twist bones, so they draw on guns built on that rig. Exported from `art/on_player/on_player.blend`, like every `on_arms*` file below. |
 | `on_ar15.adm` | `on_ar15`'s animation table: the reset and nine weapon slots and the clip each plays. |
 | `on_ar15_{rst,i,f,rc,r,e,ei,swt,swf,swr}.bad` | The clips: reset, idle, fire, recoil, reload, empty, empty idle, switch to, switch from and switch rank. |
@@ -26,7 +28,7 @@ Models, clips and textures ride Git LFS; everything else is a plain git blob.
 | `on_person.3di` | The player's third-person body (the KINEMATION Operator) on retail's 19 person bones in retail's bind, then 36 of ours (fingers, toes, forearm twists), so retail's person clips play on it. Exported from `art/on_player/on_player.blend`, with the textures below. No clip set ships with it yet. |
 | `on_perso_{0..11}.tga` | The person's diffuse textures. |
 
-Nothing references the `on_ar15` or `on_arms` files yet. Re-export them with
+Nothing references the `on_ar15`, `on_ar15_3rd` or `on_arms` files yet. Re-export them with
 the add-on installed: Export Model on `on_arms` in `art/on_player/`, and
 Export Model and Export Animations on `on_ar15` in `art/on_ar15/` (which also
 writes `on_ar15_weapon_edits.txt` here, the `weapon.def` keys that would wire
