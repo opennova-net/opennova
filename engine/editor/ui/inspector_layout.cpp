@@ -4,6 +4,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/field_text.h>
+#include <editor/session/file_card.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 
@@ -24,12 +25,7 @@ std::string field_title(const Document &document, NodeKind kind, const std::stri
 std::string edge_field_title(const SessionView &view, const GraphEdge &edge) {
 	// The kind of the file the edge comes from, by its path (the scan's path index), and the
 	// field's name from its type's schema: a type's fields never depend on a file's content.
-	const AssetEntry *source = view.project.scan->at_path(edge.source);
-	const DocumentType *type = source ? document_type_for(source->kind) : nullptr;
-	if (!type || !type->fields) return edge.field;
-	for (const FieldSchema &field : type->fields(edge.address.kind))
-		if (field.id == edge.field) return field_title(field);
-	return edge.field;
+	return edge_field_words(*view.project.scan, edge);
 }
 
 namespace {

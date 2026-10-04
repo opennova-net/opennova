@@ -16,6 +16,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/welcome_view.h>
 
 #include <imgui.h>
 
@@ -131,6 +132,8 @@ void ProblemsWindow::set_blocking(bool on) {
 	}
 	query.blocking = false;
 }
+
+bool ProblemsWindow::stands_aside() const { return aside_for_welcome(workspace_.view(), welcome_asked_); }
 
 void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
