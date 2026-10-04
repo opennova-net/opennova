@@ -247,6 +247,7 @@ void ProblemsService::show_validation() {
 	// problems lane): until it settles the counts may still move, so a client waiting on the validation
 	// waits for it too, and the menu bar says "Validating" meanwhile.
 	status.running = validating() || (view_.project.open && originals_needed_ && !originals_->settled());
+	status.read = read_once_;
 	if (pass_) {
 		status.done = pass_->validation.files_done();
 		status.total = pass_->validation.files_total();
@@ -266,6 +267,7 @@ void ProblemsService::show_validation() {
 }
 
 void ProblemsService::compose_rows(bool keep_reported) {
+	read_once_ = true;
 	const bool moved = pass_->validation.moved() || pass_->checks_moved || moved_since_composed_;
 	moved_since_composed_ = false;
 	pass_.reset();
@@ -366,6 +368,7 @@ void ProblemsService::clear() {
 	gate_size_ = gate_tail_ = trailing_ = 0;
 	reported_.clear();
 	validation_due_ = false;
+	read_once_ = false;
 	pass_.reset();
 	moved_since_composed_ = false;
 	readings_.clear();
