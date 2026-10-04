@@ -37,9 +37,17 @@ void lines(Workspace &workspace, const char *heading, const std::vector<FilePage
 
 } // namespace
 
-void draw_file_page(Workspace &workspace, const std::string &path) {
+void draw_file_page(Workspace &workspace, const std::string &path, FilePageCache &cache) {
 	const SessionView &view = workspace.view();
-	const FilePage page = file_page(view, path);
+	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Graph, ViewConcern::Files, ViewConcern::Findings,
+	                                                      ViewConcern::Project});
+	if (!cache.made || cache.path != path || !(cache.key == key)) {
+		cache.page = file_page(view, path);
+		cache.path = path;
+		cache.key = key;
+		cache.made = true;
+	}
+	const FilePage &page = cache.page;
 	if (!page.found) {
 		ui_kit::empty_state(("The project no longer has " + path + ".").c_str());
 		if (ImGui::SmallButton("Close")) workspace.request(request::close_document(path));

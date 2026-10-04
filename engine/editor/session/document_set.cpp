@@ -621,6 +621,13 @@ void DocumentSet::set_string_text(const EditorRequest &request) {
 		return refuse("No string table of the project defines " + name + (scope.empty() ? "" : " in " + scope) +
 		                      ": pick a string id first, or add it to the table.",
 		              document->path());
+	// A string of a read-only base layer (the game's own data an expansion builds on) is no file of the
+	// project: it is copied in first, never edited where it is.
+	if (!view_.project.scan || !view_.project.scan->at_path(symbol->file))
+		return refuse("The string " + name + " is in " + symbol->file +
+		                      " of the data this project builds on, which the project has no copy of: import that table "
+		                      "into the project first (Import, from the game install), then set its words.",
+		              document->path());
 	// The table opened where it is not, the active document kept as it was.
 	const std::string table_path = symbol->file, locator = symbol->locator;
 	if (!document_for(table_path)) {
@@ -754,7 +761,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		core_.touch(ViewConcern::Output);
 		return true;
 	}
-	size_t saved = 0;
+	size_t saved = 0, noted = 0;
 	std::vector<Diagnostic> failures;
 	std::vector<std::string> written;
 	for (DocumentBase *document : writes) {
@@ -771,6 +778,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		++saved;
 		written.push_back(document->path());
 		core_.note("Saved " + document->path());
+		noted += note_save(*document);
 	}
 	// A Save ends the gesture of each document it saves (its save's checkpoint ended its group): a
 	// file written is validated as the scan reads it, and one not written now.
@@ -780,10 +788,17 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	core_.update_files(written);
 	// Reported after the scan's update, which leaves the validation that rebuilds the rows due.
 	for (const Diagnostic &d : failures) core_.report(d);
-	view_.activity.status = "Saved " + counted(saved, "file") +
+	view_.activity.status = "Saved " + counted(saved, "file") + (noted ? " (" + counted(noted, "note") + ": see Output)" : std::string()) +
 	               (failures.empty() ? "." : "; " + std::to_string(failures.size()) + " could not be saved: see Problems.");
 	core_.touch(ViewConcern::Output);
 	return failures.empty();
+}
+
+// What a save said beyond writing, an Output line each (a catalog's record written in the table's order, its
+// own order reading back otherwise), which the status line counts; how many.
+size_t DocumentSet::note_save(const DocumentBase &document) {
+	for (const std::string &note : document.save_notes()) core_.note("note: " + document.path() + ": " + note);
+	return document.save_notes().size();
 }
 
 // A Save of a file that is not open: read as its document type, written when it would
@@ -811,8 +826,9 @@ void DocumentSet::rewrite_file(const std::string &path) {
 		return;
 	}
 	core_.note("Saved " + relative);
+	const size_t noted = note_save(*document);
 	core_.update_files({relative});
-	view_.activity.status = "Saved " + relative + ".";
+	view_.activity.status = "Saved " + relative + (noted ? " (" + counted(noted, "note") + ": see Output)." : ".");
 	core_.touch(ViewConcern::Output);
 }
 
@@ -971,6 +987,19 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 	if (records && document.path() == view_.documents.active &&
 	    records->placement(view_.documents.selection.primary, at))
 		owner = at.owner;
+	// A record made (an Add, a Duplicate) takes an identity no other file names: the item ids the
+	// project's references use, handed over first (the plain-words lane: a copy never quietly becomes
+	// what a dangling reference names).
+	if (Document *made_in = records_for(document.path());
+	    made_in && view_.findings.graph && std::any_of(edits->begin(), edits->end(), [](const Edit &edit) {
+		    return edit.operation == EditOperation::Add || edit.operation == EditOperation::Duplicate;
+	    })) {
+		std::vector<std::string> named;
+		view_.findings.graph->for_each_edge([&](const GraphEdge &edge) {
+			if (edge.kind == ReferenceKind::Item) named.push_back(edge.value);
+		});
+		made_in->set_names_used_elsewhere(ReferenceKind::Item, named);
+	}
 	Diagnostic error;
 	const uint64_t before = document.revision(), generation = document.load_generation();
 	const std::string active = view_.documents.active;

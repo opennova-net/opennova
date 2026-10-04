@@ -107,6 +107,10 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 // `expansion` the project's own (its name, "" for a standalone project): where it builds a file, so which
 // names an archive must store (ADR 0046 S16).
 std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::string &expansion = std::string());
+// Where a build of the project (as the expansion `expansion`, "" for the standalone game) puts a file, in a
+// sentence, from the decision the plan makes (its own finding on the file, else its placement): the
+// archive it packs it into, the folder it copies it to, or why it leaves it out (a file page's line).
+std::string build_place_words(const AssetEntry &asset, const std::string &expansion = std::string());
 // The findings a plan is refused for (its diagnostics that block_build): what Problems marks "Blocks the
 // build", what the build_gate query lists and what a refused build names, in the plan's order.
 std::vector<Diagnostic> build_blockers(const BuildPlan &plan);

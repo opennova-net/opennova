@@ -156,7 +156,7 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		bool open = true;
 		const std::string label = "About " + basename_of(view.documents.page) + "###page";
 		if (ImGui::BeginTabItem(label.c_str(), &open, select ? ImGuiTabItemFlags_SetSelected : 0)) {
-			draw_file_page(workspace_, view.documents.page);
+			draw_file_page(workspace_, view.documents.page, page_cache_);
 			ImGui::EndTabItem();
 		}
 		ui_kit::tooltip("What " + view.documents.page + " is and who uses it: the editor has no editor for its kind yet.");

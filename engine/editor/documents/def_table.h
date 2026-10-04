@@ -47,7 +47,8 @@ enum class CopyName { None, Words, Token };
 // takes beside its defaults and its name (`made`, over the records of its kind beside it), what its
 // record derives after any edit (`after_edit`), what a copy a Duplicate makes takes beside a name of
 // its own (`duplicated`: an item's id), how that name is made (`copy_name`), and how many characters of
-// a name the game keeps (`name_chars`; 0: the field's width), which the copy's name keeps within.
+// a name the game keeps (`name_chars`; 0: the field's width), which the copy's name keeps within. A new
+// row's identity and a copy's keep clear of `taken` too: the ids other files of the project name.
 struct CatalogKindRow {
 	CatalogKind kind;
 	def::DefRecordKind record;
@@ -56,9 +57,9 @@ struct CatalogKindRow {
 	const char *add_label; // the outline's tool adding a row of it ("" = none)
 	bool top;              // a row of its file
 	const char *name_field;
-	void (*made)(void *record, const std::vector<const void *> &others) = nullptr;
+	void (*made)(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) = nullptr;
 	void (*after_edit)(void *record) = nullptr;
-	void (*duplicated)(void *record, const std::vector<const void *> &others) = nullptr;
+	void (*duplicated)(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) = nullptr;
 	CopyName copy_name = CopyName::None;
 	size_t name_chars = 0;
 };

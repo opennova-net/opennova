@@ -145,6 +145,32 @@ std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::str
 	return out;
 }
 
+std::string build_place_words(const AssetEntry &asset, const std::string &expansion) {
+	BuildTarget target;
+	target.expansion = expansion;
+	Diagnostic own;
+	if (own_finding(asset, target, own)) return own.message;
+	if (!asset_kind_packed(asset.kind))
+		return asset.kind == AssetKind::ImportSource
+		               ? "A build leaves it out: the files its import makes are packed in its place."
+		               : "A build leaves it out: the game never asks for a file of its kind.";
+	const Placement placement = place(asset, target);
+	if (placement.root_only)
+		return "A build of the expansion leaves it out: the game reads it from the install's own folder alone.";
+	switch (placement.slot) {
+	case ArchiveSlot::Language:
+	case ArchiveSlot::Localres:
+	case ArchiveSlot::Resource:
+		return "A build packs it into " +
+		       (target.is_expansion() ? expansion_archive_path(expansion, placement.slot == ArchiveSlot::Language)
+		                              : std::string(archive_slot_file_name(placement.slot))) +
+		       ".";
+	case ArchiveSlot::Loose: return "A build copies it to " + placement.loose_path + ", where the game reads it loose.";
+	case ArchiveSlot::None: break;
+	}
+	return "A build leaves it out: the game never asks for a file of its kind.";
+}
+
 bool lists_as_mission(const std::string &name) {
 	return strutil::ends_with_icase(name, ".bms") || strutil::ends_with_icase(name, ".npj") ||
 	       strutil::ends_with_icase(name, ".npz");

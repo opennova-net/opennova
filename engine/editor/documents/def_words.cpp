@@ -16,7 +16,7 @@ const DefWords kItemWords[] = {
 	{"score", "Kill score", "Attributes", "The unit score booked when this item is killed; zero means killing it is never scored.", "[orig: Score_ProcessKillEvent @ 0x4FD400]"},
 	{"graphic_enemy", "Enemy model", "Looks", "Unknown: the game loads this model at mission start, but no reader of the loaded model is witnessed.", "[orig: EntityDef_LoadModelsAndCallbacks @ 0x439f50]"},
 	{"text_id", "Text key", "Identity", "Unknown: the parser stores the text key; no reader is witnessed.", "itemdef-re.md, Catalog authoring (the property table)"},
-	{"display_name", "Name", "Identity", "Not a key: the name on the begin line; the game keeps 45 characters, and a lookup by name finds the first match, ignoring case.", "[orig: ItemList_FindIndexByPrimaryName @ 0x49e010]"},
+	{"display_name", "Name", "Identity", "Not a key: the name on the begin line; the game keeps 46 characters, and a lookup by name finds the first match, ignoring case.", "[orig: ItemDef_ParseProperty @ 0x49eb00, the begin arm's cut @ 0x49ebfb; ItemList_FindIndexByPrimaryName @ 0x49e010]"},
 	{"id", "Item id", "Identity", "The type id missions place this item by; when two items share an id, the first in the file is used.", "[orig: ItemList_FindIndexByTypeId @ 0x49e100]"},
 	{"sid", "Short id", "Identity", "The name hudpos.def vehicle panel blocks use to give this item its mounted HUD panel (silhouette and seat boxes).", "[orig: HUD_ParseHudposToken @ 0x59F370]"},
 	{"type", "Item type", "Identity", "The item's kind (vehicle, decoration, person, marker, building, powerup, effect); loading treats persons and effects specially, and FARP rearming serves vehicles only.", "[orig: EntityDef_LoadModelsAndCallbacks @ 0x439f50]"},

@@ -114,6 +114,8 @@ public:
 	// which also writes one with none whose file holds other bytes than it would write), past a
 	// failure, then one refresh; false when one could not be written.
 	bool save_documents(const std::vector<std::string> &paths, bool rewrite);
+	// What a document's last save said beyond writing, an Output line each; how many lines.
+	size_t note_save(const DocumentBase &document);
 	// EndEdit on every open document: the coalesced groups and the gestures end, and the validation
 	// a gesture's edits left waiting is due.
 	void end_edit_groups();

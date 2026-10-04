@@ -23,12 +23,13 @@ namespace {
 
 // --- the kinds ---------------------------------------------------------------------------------------
 
-// An id no item of the file has, from 100000 on (an item's id is its type_id, which a mission names it
-// by).
-int free_item_id(const std::vector<const void *> &others) {
+// An id no item of the file has and no file of the project names (`taken`: a mission's item, an
+// attachment's, a spawn list's, which a new item of that id would quietly become), from 100000 on (an
+// item's id is its type_id, which a mission names it by).
+int free_item_id(const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
 	int id = 100000;
 	for (;;) {
-		bool used = false;
+		bool used = std::find(taken.begin(), taken.end(), int64_t(id)) != taken.end();
 		for (const void *other : others) used = used || static_cast<const DefItemDef *>(other)->id == id;
 		if (!used) return id;
 		++id;
@@ -36,17 +37,17 @@ int free_item_id(const std::vector<const void *> &others) {
 }
 
 // A new item is a marker with an id of its own.
-void made_item(void *record, const std::vector<const void *> &others) {
+void made_item(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
 	auto &item = *static_cast<DefItemDef *>(record);
 	item.type = DEF_ITEM_TYPE_MARKER;
-	item.id = free_item_id(others);
+	item.id = free_item_id(others, taken);
 }
 
 // A copy of an item takes an id of its own as a new one does: the game's lookup by id finds the
 // first item of an id [orig: ItemList_FindIndexByTypeId @ 0x49e100], so a copy keeping its
 // original's would never be the one a mission places.
-void duplicated_item(void *record, const std::vector<const void *> &others) {
-	static_cast<DefItemDef *>(record)->id = free_item_id(others);
+void duplicated_item(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
+	static_cast<DefItemDef *>(record)->id = free_item_id(others, taken);
 }
 
 // An item's attachment slots: the 1-based place of its last G and C attachment (zero: none).
@@ -63,13 +64,14 @@ void attachment_slots(void *record) {
 using C = CatalogKind;
 using R = DefRecordKind;
 using N = CopyName;
-// The characters of a name the game keeps: an item's 45 [orig: ItemDef_ParseProperty @ 0x49eb00, the
-// begin arm's `cmp ecx, 2Eh` @0x49ebd9, its terminator @0x49ebfb], a weapon's 31 of its 0x20-byte
+// The characters of a name the game keeps: an item's 46 [orig: ItemDef_ParseProperty @ 0x49eb00, the
+// begin arm's `cmp ecx, 2Eh` @0x49ebd9 and, for a longer name, `mov byte ptr [edx+2Eh], 0` @0x49ebfb
+// cutting it to 46], a weapon's 31 of its 0x20-byte
 // strncpy [orig: WeaponDefs_ParseLineCallback @ 0x543680, @0x543737], an ammo's 31 [orig:
 // AmmoDef_AllocateSlot @ 0x409a20, @0x409afc]; 0 for the field's own width.
 constexpr CatalogKindRow kKinds[] = {
 	{C::Item, R::Item, "item", "Item", "Add record", true, "display_name", made_item, attachment_slots, duplicated_item,
-	 N::Words, 45},
+	 N::Words, 46},
 	{C::Weapon, R::Weapon, "weapon", "Weapon", "Add record", true, "weapon_name", nullptr, nullptr, nullptr, N::Token, 31},
 	{C::Ammo, R::Ammo, "ammo", "Ammo", "Add record", true, "name", nullptr, nullptr, nullptr, N::Token, 31},
 	{C::Action, R::Action, "action", "Action", "", false, "name"},
@@ -703,11 +705,19 @@ std::string copy_name(const std::string &name, CopyName how, size_t limit, const
 	const auto free = [&taken](const std::string &candidate) {
 		return std::find(taken.begin(), taken.end(), strutil::to_upper(candidate)) == taken.end();
 	};
+	// The name is UTF-8 and the limit the game's characters (its code page's bytes, one a character):
+	// counted and cut by whole characters, never inside one.
+	std::vector<size_t> starts; // where each character of the name begins
+	for (size_t at = 0; at < name.size(); ++at)
+		if ((static_cast<unsigned char>(name[at]) & 0xC0) != 0x80) starts.push_back(at);
 	for (int n = 1;; ++n) {
 		const std::string suffix = how == CopyName::Words ? (n == 1 ? std::string(" (copy)") : " (copy " + std::to_string(n) + ")")
 		                                                  : "_" + std::to_string(n + 1);
 		std::string stem = name;
-		if (limit && stem.size() + suffix.size() > limit) stem.resize(limit > suffix.size() ? limit - suffix.size() : 0);
+		if (limit && starts.size() + suffix.size() > limit) {
+			const size_t keep = limit > suffix.size() ? limit - suffix.size() : 0;
+			stem.resize(keep < starts.size() ? starts[keep] : name.size());
+		}
 		const std::string candidate = stem + suffix;
 		if (free(candidate)) return candidate;
 	}

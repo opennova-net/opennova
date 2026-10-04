@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <editor/ui/document_views.h>
+#include <editor/ui/file_page_view.h>
 #include <editor/ui/find_cursor.h>
 #include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
@@ -98,6 +99,7 @@ private:
 	std::string followed_;
 	std::string raised_;
 	std::string page_followed_; // the file page whose tab was last selected for it (the plain-words lane)
+	FilePageCache page_cache_;  // that page as last made (made again when what it reads moves)
 	// The find bar: open, the keyboard to go to its text on the next draw, the text and whether
 	// case matters, where it is among the hits.
 	struct Find {

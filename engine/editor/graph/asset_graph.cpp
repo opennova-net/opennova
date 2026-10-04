@@ -1177,9 +1177,13 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 	// its type's words (GraphSymbol::title: a menu's part by what it does): each searched as its name is
 	// (ADR 0046 S17's items; every kind since the plain-words lane, the audit's 8.2).
 	const GraphNameSource names(*this);
+	// Words and titles from three letters on, as a file by its record (a letter or two would find nearly every
+	// string of a table by its text); a symbol's own name from the first.
+	const bool by_words = wanted.size() >= kSearchByRecordLetters;
 	for_each_symbol([&](const GraphSymbol &symbol) {
 		// A record set's records go by their index, no name.
 		if (reference_row(symbol.kind).resolution == ReferenceResolution::Record) return;
+		if (!holds(symbol.display) && !by_words) return;
 		const std::string words = definition_words(symbol, &names);
 		if (!holds(symbol.display) && (words == symbol.display || !holds(words)) && (symbol.title.empty() || !holds(symbol.title)))
 			return;

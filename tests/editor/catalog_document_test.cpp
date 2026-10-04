@@ -12,6 +12,7 @@
 #include <editor/session/view/session_view.h>
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include <cstring>
 
@@ -575,7 +576,8 @@ static int duplicates_apart() {
 	TEST_EXPECT(std::string(row_at(items, 3).native.as<DefItemDef>().display_name) == long_name);
 	TEST_EXPECT(items.apply(duplicate, error));
 	const auto &cut = static_cast<const CatalogRow &>(*items.row(items.last_added())).native.as<DefItemDef>();
-	TEST_EXPECT(cut.id == 100004 && std::string(cut.display_name) == std::string(38, 'L') + " (copy)");
+	// The game keeps 46 characters of an item's name [orig: ItemDef_ParseProperty @ 0x49eb00, @0x49ebfb].
+	TEST_EXPECT(cut.id == 100004 && std::string(cut.display_name) == std::string(39, 'L') + " (copy)");
 	for (const Diagnostic &d : validate_catalog_file(items))
 		TEST_EXPECT(d.code() != "catalog.name_duplicate" && d.code() != "catalog.item_identity");
 	items.undo(); items.undo(); TEST_EXPECT(!items.dirty());
@@ -590,6 +592,22 @@ static int duplicates_apart() {
 	const DefWeaponDef &gun = row_at(weapons, 2).native.as<DefWeaponDef>();
 	TEST_EXPECT(gun.actions_count == 1 && std::string(gun.actions[0].name) == "FIRE");
 	TEST_EXPECT(copy_name("WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ0", CopyName::Token, 31, {}) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXY_2");
+
+	// A name of the game's code page cut by whole characters (the review's W2: by bytes it could end inside
+	// one, the name then refused and the copy keeping its original's): 45 characters, two of them two
+	// UTF-8 bytes, kept to 39 before " (copy)". An id other files name is no copy's (W9): with 100001 and
+	// 100002 named elsewhere, the copy takes 100003.
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	                                    "begin \"V\xE9hicule blind\xE9 de transport de troupes lourd\"\nid 100000\ntype vehicle\nend\n"));
+	DefCatalogDocument words;
+	TEST_EXPECT(words.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	words.set_names_used_elsewhere(ReferenceKind::Item, {"100001", "100002", "not an id"});
+	duplicate.address = {words.rows()[0]->id, item, 0};
+	TEST_EXPECT(words.apply(duplicate, error));
+	const auto &accented = static_cast<const CatalogRow &>(*words.row(words.last_added())).native.as<DefItemDef>();
+	TEST_EXPECT(accented.id == 100003 &&
+	            std::string(accented.display_name) == "V\xE9hicule blind\xE9 de transport de troupes (copy)");
+	TEST_EXPECT(copy_name("\xC3\xA9\xC3\xA9\xC3\xA9", CopyName::Words, 9, {}) == "\xC3\xA9\xC3\xA9 (copy)");
 	return 0;
 }
 
@@ -739,8 +757,45 @@ static int code_page_names() {
 	return 0;
 }
 
+// An ordinary edit through the session keeps the file's order (the review's W5): a weapon's switchcategory
+// unticked (its line's present tick cleared) and saved is that one line gone, every other line as the save
+// before it wrote it, no record reordered and no note.
+static int unticked_line_saves_alone() {
+	editor_test::TempProjectDir dir("opennova_catalog_unticked_line");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Unticked"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const AssetEntry *entry = view.project.scan->find("weapon.def");
+	TEST_EXPECT(entry != nullptr);
+	if (!entry) return 1;
+	const std::string path = entry->relative_path, file = view.project.root + "/" + entry->relative_path;
+	TEST_EXPECT(editor_test::write_text(file, "weapon \"WPN_A\"\n\tcategory 2\n\tswitchcategory 3\n\tclipsize 15\nend\n"
+	                                          "weapon \"WPN_B\"\n\tclipsize 30\n\tcategory 1\nend\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document(path));
+	Document *weapons = session.document_for(path);
+	TEST_EXPECT(weapons != nullptr);
+	if (!weapons) return 1;
+	const std::string before = weapons->serialize().text;
+	Edit untick;
+	untick.operation = EditOperation::Clear;
+	untick.address = {weapons->rows()[0]->id, weapons->rows()[0]->kind, 0};
+	untick.field = "switchcategory";
+	editor_test::handle_to_end(session, request::edit_record(path, untick));
+	editor_test::handle_to_end(session, request::save(path));
+	const std::vector<uint8_t> saved = test_io::read_file(file);
+	std::string after(saved.begin(), saved.end());
+	const size_t at = before.find("\tswitchcategory 3\r\n");
+	TEST_EXPECT(at != std::string::npos && after == std::string(before).erase(at, std::strlen("\tswitchcategory 3\r\n")));
+	TEST_EXPECT(view.activity.status == "Saved 1 file." && weapons->save_notes().empty());
+	return 0;
+}
+
 int main() {
-	return code_page_names() || history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
+	return unticked_line_saves_alone() || code_page_names() || history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
 	       witnessed_enums() || powerup_weapon() || duplicates_apart() || plain_words();
 }

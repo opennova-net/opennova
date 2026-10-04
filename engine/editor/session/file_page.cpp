@@ -7,27 +7,11 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_plan.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
-namespace {
-
-// Where a build puts a file of the kind (asset_kinds.h's ArchiveSlot) [orig: PFF_OpenAllArchives @
-// 0x4a4310 over the name table @ 0x829f90].
-std::string build_words(AssetKind kind) {
-	if (!asset_kind_packed(kind)) return "A build leaves it out: the game never asks for it.";
-	switch (asset_kind_row(kind).archive_slot) {
-	case ArchiveSlot::Language: return "A build packs it into language.pff.";
-	case ArchiveSlot::Localres: return "A build packs it into localres.pff.";
-	case ArchiveSlot::Resource: return "A build packs it into resource.pff.";
-	case ArchiveSlot::Loose: return "A build copies it beside the archives, where the game reads it loose.";
-	case ArchiveSlot::None: break;
-	}
-	return "A build leaves it out: the game never asks for it.";
-}
-
-} // namespace
 
 FilePage file_page(const SessionView &view, const std::string &path) {
 	FilePage page;
@@ -45,12 +29,15 @@ FilePage file_page(const SessionView &view, const std::string &path) {
 	page.what = words.what;
 	page.read_by = words.read_by;
 	page.cite = words.cite;
-	page.build = build_words(entry->kind);
+	// Where a build puts it, from the decision the build plan makes (a player's file, an archive, a name no
+	// archive stores among them), and what the editor does with it.
+	page.build = build_place_words(*entry, view.project.document ? view.project.document->expansion.name : std::string());
+	const bool packed = page.build.rfind("A build packs", 0) == 0 || page.build.rfind("A build copies", 0) == 0;
 	page.editor = entry->kind == AssetKind::ImportSource
 	                      ? "The editor imports it: its outputs are the project's files, opened as their kinds are."
-	              : is_editable_kind(entry->kind)
-	                      ? "The editor opens it as a document."
-	                      : "The editor has no editor for this kind yet: it keeps the file as it is and packs it as it is.";
+	              : is_editable_kind(entry->kind) ? "The editor opens it as a document."
+	              : packed ? "The editor has no editor for this kind yet: it keeps the file as it is, and a build packs it as it is."
+	                       : "The editor has no editor for this kind yet: it keeps the file as it is.";
 	if (const AssetGraph *graph = view.findings.graph.get()) {
 		for (const GraphEdge *edge : graph->usages_of(page.path)) {
 			const AssetEntry *source = view.project.scan->at_path(edge->source);

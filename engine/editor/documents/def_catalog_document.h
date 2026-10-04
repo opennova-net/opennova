@@ -61,8 +61,13 @@ public:
 	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<DefCatalogDocument>(*this);
 	}
+	// The item ids other files of the project name (Document::set_names_used_elsewhere): a new item's
+	// id and a copy's keep clear of them.
+	void set_names_used_elsewhere(ReferenceKind kind, const std::vector<std::string> &names) override;
 
 protected:
+	// A step a Duplicate's name could not be set in is refused, saying why (prepare_duplicate).
+	bool accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const override;
 	// An item's particle slot names a user point of the item's graphic model: the scope is
 	// that model's file, and a record with no graphic names none. An item's vehicle spawn
 	// slots offer the registry's ids (record_choices).
@@ -87,6 +92,11 @@ protected:
 	                                                    size_t remaining) const override;
 	// What the record's kind derives after any edit (an item's attachment slots).
 	void after_edit(Node &row) override;
+
+private:
+	std::vector<int64_t> item_ids_elsewhere_;
+	// Why the last copy's name could not be set ("" none), which its step's veto reports.
+	mutable std::string duplicate_refusal_;
 };
 
 bool is_catalog_kind(AssetKind kind);

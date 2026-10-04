@@ -79,10 +79,12 @@ private:
 	std::string typed_; // what an open list of choices' box holds (field_widgets: one open at a time)
 public:
 	// The words box of a string id's field (the plain-words lane): what it holds while it is edited, for
-	// which field (its document, record and field), and whether it is; one edited at a time.
+	// which field (its document, record and field), and whether it is; one edited at a time. `shown`: the
+	// string as it stood last frame; `pending`: a commit was raised that the string has not taken yet (a
+	// refused one keeps what was typed).
 	struct WordsBox {
-		std::string text, key;
-		bool editing = false;
+		std::string text, key, shown;
+		bool editing = false, pending = false;
 	};
 
 private:

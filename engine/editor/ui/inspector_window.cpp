@@ -562,6 +562,16 @@ float begin_row(Reveal *reveal, const NodeAddress &address, const RowFields &fie
 	return ImGui::GetCursorScreenPos().x - ImGui::GetStyle().CellPadding.x;
 }
 
+// The string a string id's field reaches as the game's lookup does (AssetGraph::symbol_reached: its scope,
+// then the table read in its place), null for none.
+const GraphSymbol *string_reached(const SessionView &view, const FieldUse &field, const Value &value) {
+	if (!view.findings.graph) return nullptr;
+	GraphEdge edge;
+	if (!reference_target(field, value, edge.kind, edge.value, edge.scope) || edge.kind != ReferenceKind::TextId) return nullptr;
+	if (field.scope_alternate) edge.scope_alternate = field.scope_alternate;
+	return view.findings.graph->symbol_reached(edge);
+}
+
 // A string id's words as an editable box (the plain-words lane, the audit's 3.2: a menu button's Text
 // edited the key, never the words): the string the id names, as the game's lookup reaches it, edited in
 // place and set in the table that defines it when the box lets go (SetStringText: that table opened in
@@ -569,25 +579,60 @@ float begin_row(Reveal *reveal, const NodeAddress &address, const RowFields &fie
 // control under it picks. The box holds what is typed while it is edited, the string as it stands
 // otherwise.
 void string_words(Workspace &workspace, InspectorWindow::WordsBox &box, const Document &document,
-                  const NodeAddress &address, const FieldUse &field, const DisplayName &words) {
-	const std::string shown = words.text.empty() ? words.raw : words.text;
+                  const NodeAddress &address, const FieldUse &field, const DisplayName &words, const GraphSymbol &string) {
+	// The string's own text (empty where it is: the player sees nothing, never its id).
+	const std::string &shown = string.value;
 	const std::string key = document.path() + "|" + std::to_string(address.row) + "|" + std::to_string(address.child) + "|" +
 	                        field.schema->id;
-	if (!box.editing || box.key != key) box.text = shown;
+	const SessionView &view = workspace.view();
+	// A string of the data the project builds on is no file of the project: its words read only, with the
+	// way to make the table the project's own.
+	if (!view.project.scan || !view.project.scan->at_path(string.file)) {
+		ImGui::PushTextWrapPos(0.0f);
+		if (shown.empty()) ImGui::TextDisabled("(empty)");
+		else ImGui::TextUnformatted(shown.c_str());
+		ImGui::PopTextWrapPos();
+		ui_kit::tooltip("The words the player sees: the string " + words.raw + " in " + string.file +
+		                " of the data this project builds on. The project has no copy of that table to change.");
+		const bool allowed = view.allows(EditorRequestKind::PreviewInstallImport);
+		ImGui::BeginDisabled(!allowed);
+		if (ImGui::SmallButton(("Import " + string.file + "...").c_str()))
+			workspace.request(request::preview_install_import({string.file}));
+		ImGui::EndDisabled();
+		ui_kit::tooltip("Plans importing the table from the game install into the project; once it is the "
+		                "project's, its words are edited here.");
+		ImGui::TextDisabled("String id in %s:", words.source.c_str());
+		return;
+	}
+	// The box shows the string as it stands, but for what is typed while it is edited and what a commit
+	// the session refused left in it (kept until the string or the field changes, never lost).
+	if (box.key != key) {
+		box.text = shown;
+		box.pending = false;
+	} else if (!box.editing && (shown != box.shown || !box.pending)) {
+		box.text = shown;
+		box.pending = false;
+	}
+	box.shown = shown;
 	text_edit::Box options;
 	options.code_page = true;
 	options.multiline = shown.find('\n') != std::string::npos;
 	options.height = ImGui::GetTextLineHeight() * 3.0f + ImGui::GetStyle().FramePadding.y * 2.0f;
+	options.hint = "(empty)";
 	ImGui::SetNextItemWidth(-FLT_MIN);
 	text_edit::edit("##words", box.text, 4096, options);
 	box.editing = ImGui::IsItemActive();
 	box.key = key;
-	if (ImGui::IsItemDeactivatedAfterEdit() && box.text != shown)
+	if (ImGui::IsItemDeactivatedAfterEdit() && box.text != shown) {
+		box.pending = true;
 		workspace.request(request::set_string_text(document.path(), address, field.schema->id, box.text));
+	}
 	ui_kit::tooltip("The words the player sees: the string " + words.raw + " in " + words.source +
 	                ". A change is made there, so every use of the string shows it (Undo there takes it back).\n"
 	                "{hot} before a letter makes it the button's key: the game takes the marker out and underlines "
 	                "the letter (case matters: {HOT} stays as written).");
+	if (box.pending && !box.editing && box.text != shown)
+		ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "Not set: the status line says why.");
 	ImGui::TextDisabled("String id in %s:", words.source.c_str());
 }
 
@@ -635,10 +680,13 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	const ViewNames names(workspace.view());
 	const DisplayName words = value_display(document, address, field, value, names.get());
 	// A string id's words first, as the value the modder edits (the plain-words lane, the audit's 3.2),
-	// the id after them.
-	const bool words_first = present && !mixed && targets.size() == 1 && !document.blocked() &&
-	                         value_reference(field, value) == ReferenceKind::TextId && !words.dangling && !words.source.empty();
-	if (words_first) string_words(workspace, controls.words, document, address, field, words);
+	// the id after them: the string the game's lookup reaches.
+	const GraphSymbol *string = present && !mixed && targets.size() == 1 && !document.blocked() && !words.dangling &&
+	                                            value_reference(field, value) == ReferenceKind::TextId
+	                                    ? string_reached(workspace.view(), field, value)
+	                                    : nullptr;
+	const bool words_first = string != nullptr;
+	if (words_first) string_words(workspace, controls.words, document, address, field, words, *string);
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(beside ? -tools : -FLT_MIN);
 	const bool by_name = picks_by_name(field);

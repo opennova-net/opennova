@@ -191,6 +191,7 @@ bool DocumentBase::save(Diagnostic &error) {
 	if (!write_file_atomic(absolute_path_, output.text, message)) return fail(error, path(), CoreFinding::DocumentWrite, message);
 	file_fingerprint_ = fingerprint(output.text);
 	wrote_file_ = true;
+	save_notes_ = output.notes;
 	on_saved();
 	// The source is now the text just written, read the way a reload would: its findings
 	// replace the ones of the text it was loaded from, so what the rewrite dropped (the lines
