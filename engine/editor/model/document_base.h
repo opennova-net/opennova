@@ -71,6 +71,9 @@ public:
 	// made, not the bytes the document was read from (a type whose writer normalizes what
 	// it read tells the two apart by it).
 	bool wrote_file() const { return wrote_file_; }
+	// What the last Save said beyond writing (SerializeResult::notes: a record written in the table's
+	// order), a sentence each; empty before one.
+	const std::vector<std::string> &save_notes() const { return save_notes_; }
 
 	// --- the edits and the history -------------------------------------------------------------
 	// A batch of edits applied as one undoable change, nothing applied when any is refused (the
@@ -143,6 +146,11 @@ public:
 	// (issues) and are dropped on save.
 	bool blocked() const { return blocked_; }
 	size_t ignored_lines() const;
+	// What a Save of the document changes in its file beyond the edits, in plain words, before saving
+	// (the UX round's plain-words lane): "" where a save writes the file as the editor read it but for
+	// them. The default says the lines the game ignores it leaves out, where there are any; a type
+	// whose writer lays the file out its own way says what it keeps and what it does not.
+	virtual std::string save_words() const;
 	const std::vector<SourceIssue> &issues() const { return issues_; }
 	// The bytes a Save writes, or the issues that keep it from writing (the save refuses it).
 	virtual SerializeResult serialize() const = 0;
@@ -212,6 +220,7 @@ private:
 	std::vector<SourceIssue> issues_;
 	bool blocked_ = false, wrote_file_ = false, snapshot_ = false;
 	uint64_t file_fingerprint_ = 0;
+	std::vector<std::string> save_notes_;
 	// Each step's words by the revision it made (revisions are never given twice within a load), and
 	// the revisions Redo goes back to, the next one last.
 	std::map<uint64_t, std::string> step_words_;

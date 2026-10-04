@@ -19,6 +19,7 @@
 #include <variant>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/document_types.h>
@@ -470,11 +471,14 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 		// A name its row reads as none (an empty one, NONE, NULL) is no reference, as a field's.
 		const std::string normalized = graph_names::key(reference.value);
 		if (reference.value.empty() || normalized == "NONE" || normalized == "NULL") continue;
+		// The text is the game's code page (Windows-1252), the project's file names and every other
+		// document's names UTF-8: a name compared in one encoding, UTF-8 (the plain-words lane; its span
+		// keeps the text's own bytes, which a rename rewrites).
 		GraphEdge edge = edge_of(document.path(), std::string(), std::string(), reference.kind,
-				reference.value, reference.scope, reference.rewritable);
+				cp1252_to_utf8(reference.value), reference.scope, reference.rewritable);
 		edge.locator = TextDocument::locator(reference.span.line, reference.span.column);
 		edge.span = reference.span;
-		edge.fallback = std::move(reference.fallback);
+		edge.fallback = cp1252_to_utf8(reference.fallback);
 		edge.scopes_after = std::move(reference.scopes_after);
 		edge.scope_alternate = std::move(reference.scope_alternate);
 		edge.scope_owner = std::move(reference.scope_owner);
@@ -522,6 +526,19 @@ void extract_from_document(const Document &document, Extracted &out) {
 		if (edge.address.row && edge.record_key.empty()) edge.record_key = identity_of(edge.address);
 	for (GraphSymbol &symbol : out.symbols)
 		if (symbol.address.row && symbol.record_key.empty()) symbol.record_key = identity_of(symbol.address);
+	// Each record in its type's own words where they are not its name (record_own_title), worked out once:
+	// what a place apart from the document names it by (a closed file's Problems row, a find's uses, the
+	// import plan; the plain-words lane).
+	std::map<std::pair<NodeId, NodeId>, std::string> titles;
+	const auto title_of = [&](const NodeAddress &address) -> const std::string & {
+		const auto found = titles.find({address.row, address.child});
+		if (found != titles.end()) return found->second;
+		return titles[{address.row, address.child}] = record_own_title(document, address);
+	};
+	for (GraphEdge &edge : out.edges)
+		if (edge.address.row) edge.record_title = title_of(edge.address);
+	for (GraphSymbol &symbol : out.symbols)
+		if (symbol.address.row) symbol.title = title_of(symbol.address);
 }
 
 bool graph_reads_kind(AssetKind kind) {
@@ -560,7 +577,24 @@ bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vect
 	// Decoded as the game's loader decodes a stored file (a document decodes its own).
 	std::vector<uint8_t> decoded = bytes;
 	vfs_decode_payload(decoded, gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
-	return extract(name, decoded, out, error);
+	const size_t edges = out.edges.size(), symbols = out.symbols.size();
+	const bool read = extract(name, decoded, out, error);
+	// A native file holds its names in the game's code page (Windows-1252), the project's file names and
+	// every document's names are UTF-8: its names compared in one encoding, UTF-8 (the plain-words lane;
+	// a rename of a native text's name writes it back in its code page, native_text_sites).
+	for (size_t i = edges; i < out.edges.size(); ++i) {
+		GraphEdge &edge = out.edges[i];
+		edge.value = cp1252_to_utf8(edge.value);
+		edge.record = cp1252_to_utf8(edge.record);
+		edge.fallback = cp1252_to_utf8(edge.fallback);
+	}
+	for (size_t i = symbols; i < out.symbols.size(); ++i) {
+		GraphSymbol &symbol = out.symbols[i];
+		symbol.display = cp1252_to_utf8(symbol.display);
+		symbol.name = symbol_name(symbol.kind, symbol.display);
+		symbol.record = cp1252_to_utf8(symbol.record);
+	}
+	return read;
 }
 
 bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset,
