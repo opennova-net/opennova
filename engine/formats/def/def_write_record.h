@@ -53,4 +53,11 @@ struct DefRecordWriter {
 	void alias_line(const DefItemDef &item, uint8_t step, AliasCover &cover);
 };
 
+// The text of a squib's or a door's number as the writer puts it down: the shortest decimal the item
+// parser's arithmetic over its atof reading takes to the word at both of the game's FPU precisions (the
+// 53-bit and the 24-bit of the reloads after the D3D device is up). For the tests.
+std::string def_squib_rate_text(int32_t ticks);
+std::string def_squib_q16_text(int32_t word);
+std::string def_door_open_rate_text(int32_t rate);
+
 } // namespace opennova::def
