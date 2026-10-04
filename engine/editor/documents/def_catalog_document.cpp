@@ -29,8 +29,8 @@ const ItemsFileState *items_state(const FileState *state) { return dynamic_cast<
 // [orig: HUD_LoadAllTextures @ 0x59E248..0x59E26A, the ItemDef's +0xA74 in mode 1]; a menu image for a
 // weapon's loadout icon [orig: CTextureManager_LoadOrFindTexture @ 0x654980]; a sight card for a
 // sight's texture (render-material-re.md "The game's texture loaders", the role table). None (-1) for a
-// field whose loader the game is not witnessed using (a weapon's crosshair_secondary, an item's
-// shadow_texture): the name as written.
+// field whose loader the game is not witnessed using (a weapon's crosshair_secondary): the name as
+// written. (An item's shadow_texture the game never loads: refine_field marks it ignored.)
 int32_t def_texture_role_arg(const std::string &field) {
 	if (field == "hudicon" || field == "hudclipgfx_texture" || field == "hudrndgfx_texture" || field == "crosshair" ||
 	    field == "hud_image")
@@ -190,6 +190,14 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 	// What the table's labelled field decides on its record (none of a catalog's decides: the rows say
 	// it all), then the catalog's own rules.
 	TableDocument::refine_field(address, use);
+	// An item's shadow line's TGA name, stored and never loaded: the game names no file by it [orig:
+	// ItemDef_ParseProperty @ 0x49f3a5..0x49f44c stores it at +0xA0 and loads nothing; the blob decal it
+	// would draw, RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0, is dead in JO, its ItemDef+0x114 gate never
+	// assigned (render-lighting-re)]. Its width and length the shadow slot reads (@ 0x5d572a..0x5d5754).
+	if (use.schema->id == "shadow_texture" && def_kind(address.kind) == DefRecordKind::Item) {
+		use.applies = Applicability::Ignored;
+		return;
+	}
 	// A texture through its use's loader, by its role (def_texture_role_arg).
 	if (use.reference == ReferenceKind::Texture) {
 		use.loader_arg = def_texture_role_arg(use.schema->id);

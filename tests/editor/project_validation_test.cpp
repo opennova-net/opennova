@@ -182,10 +182,12 @@ struct PinnedRows {
 // where the model numbered every list first), which moved the fixtures' model rows' child ids and
 // nothing else (the same rows with the model's former order give the former digest, 57832e00). S18
 // adds the stylesheet projects' one texture finding: their art/logo.tga holds no TGA header, which the
-// game cannot load (texture.unloadable; the former rows gave 8a3d7521 and 626d6c86).
+// game cannot load (texture.unloadable; the former rows gave 8a3d7521 and 626d6c86); and drops the
+// fixtures' item's missing shadow texture (atvshdw.tga), a name the game stores and never loads (the
+// former 238 rows gave c276a18f).
 static int test_rows_as_before() {
 	const PinnedRows pinned[] = {
-		{ "fixtures", fixture_files, false, 238, 0xc276a18f5cad4241ull },
+		{ "fixtures", fixture_files, false, 237, 0xe52b610c64b1461bull },
 		{ "styles", style_files, false, 15, 0xe39ad4219139a453ull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
 		{ "open", style_and_item_files, true, 19, 0x80eb2caf43356608ull },

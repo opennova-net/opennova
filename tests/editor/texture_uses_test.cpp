@@ -89,7 +89,8 @@ int test_uses() {
 	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_polydata isle.cpt\n"
 	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n") &&
 	            editor_test::write_text(root + "/defs/items.def",
-	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\nend\n"));
+	                                    "begin \"Brick\"\nid 100300\ntype building\nhud_image stance.tga\n"
+	                                    "shadow shadow1.tga 3.5 5.4 0.0 0.0\nend\n"));
 	{
 		std::ostringstream text;
 		opennova::env::Config config;
@@ -215,6 +216,11 @@ int test_uses() {
 	TEST_EXPECT(opennova::io::json_parse("{\"path\":\"defs/items.def\"}", args, error));
 	session.query("texture_uses", args, error);
 	TEST_EXPECT(!error.empty());
+	// An item's shadow line names a TGA the game stores and never loads: no reference, so nothing missing
+	// (shadow1.tga, which the install lacks too).
+	for (const GraphEdge *edge : view.findings.graph->references_of("defs/items.def")) TEST_EXPECT(edge->value != "shadow1.tga");
+	for (const Diagnostic &d : view.findings.diagnostics)
+		TEST_EXPECT(!(d.code() == "reference.missing" && d.asset == "defs/items.def"));
 	std::printf("uses: model rows by their material, a .tga beside its .dds, a terrain's map, a sky's clouds, a HUD "
 	            "image, a name the game opens; made once; over the wire\n");
 	return 0;
