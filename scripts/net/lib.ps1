@@ -45,7 +45,10 @@ function Get-OpenNovaJoinerReadinessClass {
         [Parameter(Mandatory = $true)] $State,
         [Parameter(Mandatory = $true)]
         [ValidateSet('in_match', 'deploy_hold')] [string] $ReadinessMode,
-        [switch] $AllowPostDeathRedeploy
+        [switch] $AllowPostDeathRedeploy,
+        # A scenario run deploys the held joiner itself (its steps press a
+        # deploy key), so a deploy_hold run may end in the match.
+        [switch] $AllowScenarioDeploy
     )
 
     $required = @(
@@ -74,17 +77,26 @@ function Get-OpenNovaJoinerReadinessClass {
         # open and the internal motor exists (the pre-pick C2S 0x0C source)
         # while the player-paced DEATH screen holds presentation. The class
         # asserts the raw observed split; the driver never projects fields.
+        # The hold has two admission shapes: the post-auth stage still owes
+        # the pick, or admission completed while the host still holds the
+        # deploy overlay (the engine's joiner_deploy_hold_ready).
+        $awaitingPick = [bool] $State.deployment_pick_pending -and
+            [string] $State.join_admission_stage -ceq "awaiting the player's deployment pick"
+        $initialOverlay = -not [bool] $State.deployment_pick_pending -and
+            [string] $State.join_admission_stage -ceq "complete"
         if ([bool] $State.in_match -and
                 [bool] $State.local_player -and
                 [bool] $State.deploy_hold_ready -and
-                [bool] $State.deployment_pick_pending -and
                 -not [bool] $State.deployment_pick_sent -and
                 -not [bool] $State.auto_deploy -and
                 [bool] $State.deploy_presented -and
                 [int] $State.joiner_phase -eq 4 -and
-                [string] $State.join_admission_stage -ceq
-                    "awaiting the player's deployment pick") {
+                ($awaitingPick -or $initialOverlay)) {
             return 'deploy_hold'
+        }
+        if ($AllowScenarioDeploy -and [bool] $State.in_match -and
+                [bool] $State.local_player -and -not [bool] $State.deploy_presented) {
+            return 'in_match'
         }
         return 'invalid'
     }
@@ -115,6 +127,7 @@ function Test-OpenNovaJoinerReadinessTransition {
         [Parameter(Mandatory = $true)]
         [ValidateSet('in_match', 'deploy_hold')] [string] $ReadinessMode,
         [switch] $AllowPostDeathRedeploy,
+        [switch] $AllowScenarioDeploy,
         [switch] $RequireMotionComplete
     )
 
@@ -129,7 +142,8 @@ function Test-OpenNovaJoinerReadinessTransition {
     }
     $finalClass = Get-OpenNovaJoinerReadinessClass -State $Final `
         -ReadinessMode $ReadinessMode `
-        -AllowPostDeathRedeploy:$AllowPostDeathRedeploy
+        -AllowPostDeathRedeploy:$AllowPostDeathRedeploy `
+        -AllowScenarioDeploy:$AllowScenarioDeploy
     if ($finalClass -eq 'invalid' -or
             [int] $Final.process_id -ne [int] $Initial.process_id -or
             [int] $Final.self_handle -ne [int] $Initial.self_handle -or

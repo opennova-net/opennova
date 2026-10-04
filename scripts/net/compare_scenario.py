@@ -4,13 +4,13 @@
 Each argument is a run-summary.json that scripts/net/run_parity_topology.ps1
 wrote for a -Scenario run. For every run this decodes the evidence capture
 with `nw_pp --scenario-events`, keeps the events between the scenario's start
-and the end of its settle, and names the actor: the handle on the capture's
-first C2S 0x0C uplink (the joiner the scenario drove) and its pool-0 index.
+and the end of its settle, and names the actor and its pool-0 index: a joiner
+by its first C2S 0x0C uplink's handle, the host by roster slot 0's.
 
 Every run must have played the same script (its run-root copy's mission,
-game type, actor, setup, steps and settle). The expectations come from the
-scenario's source file (or --scenario), so they can be tightened without
-replaying. A run passes when `expect.sequence` matches its events in order.
+game type, actor, prelude, setup, steps and settle). The expectations come
+from the scenario's source file (or --scenario), so they can be tightened
+without replaying. A run passes when `expect.sequence` matches its events in order.
 Across runs, every matched event's fields and every `expect.count_kinds` count
 must equal the reference run's (RR when present, else the first argument),
 except the capture-local fields (frame, ts_ns, session, pos) and the
@@ -43,7 +43,8 @@ CAPTURE_LOCAL = {"frame", "ts_ns", "session", "decode", "pos"}
 HANDLE_FIELDS = {"entity", "shooter", "target", "handle", "carrier", "sender",
                  "vehicle", "victim_slot", "zone"}
 INDEX_FIELDS = {"attacker", "victim", "aux"}
-PLAYED_FIELDS = ("mission", "game_type", "actor", "setup", "steps", "settle_seconds")
+PLAYED_FIELDS = ("mission", "game_type", "actor", "prelude", "setup", "steps",
+                 "settle_seconds")
 
 
 def parse_utc_ns(text: str) -> int:
@@ -72,14 +73,21 @@ def decode_events(nw_pp: Path, capture: Path) -> list[dict[str, str]]:
     return events
 
 
-def actor_of(events: list[dict[str, str]]) -> tuple[str, str]:
-    """The driven joiner's handle (hex word) and pool-0 index (decimal)."""
+def actor_of(events: list[dict[str, str]], actor: str) -> tuple[str, str]:
+    """The driven player's handle (hex word) and pool-0 index (decimal): a
+    joiner's is its first C2S 0x0C uplink's, the host's is roster slot 0's."""
     for event in events:
-        if event["dir"] == "C" and event["kind"] == "carrier":
+        if actor == "joiner" and event["dir"] == "C" and event["kind"] == "carrier":
             handle = int(event["handle"], 16)
-            index = str(handle & 0x0FFF) if handle >> 12 == 0 else ""
-            return f"0x{handle:04x}", index
-    raise RuntimeError("the capture carries no C2S 0x0C uplink to name the actor")
+            break
+        if (actor == "host" and event["dir"] == "S" and event["kind"] == "player_sync"
+                and event.get("slot") == "0" and "entity" in event):
+            handle = int(event["entity"], 16)
+            break
+    else:
+        raise RuntimeError(f"the capture does not name the {actor} actor")
+    index = str(handle & 0x0FFF) if handle >> 12 == 0 else ""
+    return f"0x{handle:04x}", index
 
 
 def normalize(event: dict[str, str], actor: tuple[str, str]) -> dict[str, str]:
@@ -133,7 +141,7 @@ def analyze(summary_path: Path, nw_pp: Path, expectations: Path | None) -> dict:
     source = expectations or Path(witness["source"])
     scenario = json.loads(source.read_text(encoding="utf-8"))
     events = decode_events(nw_pp, Path(summary["evidence_capture"]))
-    actor = actor_of(events)
+    actor = actor_of(events, played.get("actor", "joiner"))
     start = parse_utc_ns(witness["started_utc"])
     stop = parse_utc_ns(witness["settled_utc"])
     window = [normalize(event, actor) for event in events

@@ -114,14 +114,24 @@ only re-decodes our own capture; pass `--refresh` after a decoder change.
 ## Scenario parity (ADR 0050 R5)
 
 A scenario (`scenarios/*.json`, `opennova.scenario.v1`) is one scripted play in
-retail's action vocabulary: a setup pose, then steps on logic ticks relative to
-its start (`down`/`up`/`press` an action code, `look_px` raw mouse pixels,
-`end`), then a settle. `run_parity_topology.ps1 -Scenario <file>` plays it on
-the joiner right after the steady window starts. A retail joiner plays it
-through onHook's virtual keyboard (`onhook_play_input`, bridge protocol 1.9),
-and an OpenNova joiner through the `scenario_play` probe. The summary's
-`scenario_witness` records each step's applied logic tick, and the run root
-keeps the exact script it played.
+retail's action vocabulary, by its `actor` (the joiner or the host): an
+optional `prelude` stage, a setup pose, then steps on logic ticks relative to
+the stage's start (`down`/`up`/`press` an action code, `look_px` raw mouse
+pixels, `end`), then a settle. `run_parity_topology.ps1 -Scenario <file>`
+plays it right after the steady window starts, on `in_match` and on
+`deploy_hold` runs (a prelude can press the deploy key). A retail actor plays
+through onHook's virtual keyboard (`onhook_play_input`, bridge protocol 1.9,
+on both of retail's input-frame paths), an OpenNova actor through the
+`scenario_play` probe, whose scripted keys also arrive as the bound key's own
+events (the deploy keys read those). The summary's `scenario_witness` records
+each step's applied logic tick, and the run root keeps the exact script it
+played.
+
+A setup pose sticks only on the host's own player. A client snaps its players,
+its own included, to the host's replicated pose once they are more than two
+units apart (`Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A`, skipped on
+the authority), so a joiner pose sets only the heading. A scenario that needs
+a place uses the host as its actor.
 
 ```powershell
 pwsh -File scripts\net\run_parity_topology.ps1 -Topology RR ... -Scenario scripts\net\scenarios\self_nade.json
@@ -129,8 +139,9 @@ python scripts/net/compare_scenario.py .scratch/runs/<rr>/run-summary.json .scra
 ```
 
 `compare_scenario.py` decodes each evidence capture with
-`nw_pp --scenario-events`, keeps the scenario's window, and names the actor
-from the capture's first C2S 0x0C uplink. Each run must match the scenario's
+`nw_pp --scenario-events`, keeps the scenario's window, and names the actor: a
+joiner by the capture's first C2S 0x0C uplink, the host by roster slot 0
+(S2C 0x46). Each run must match the scenario's
 `expect.sequence` in order. Each run's matched fields and `expect.count_kinds`
 counts must also equal the reference (RR when given). Capture-local fields
 (frame, time, session, positions) and the scenario's `expect.mask` fields are
@@ -139,5 +150,6 @@ excluded.
 | Scenario | Mission / mode | Play | Notes |
 | --- | --- | --- | --- |
 | `self_nade` | 01TR co-op | select the frag, look down, 40-tick throw at the feet | `game_event.type` is masked: retail draws the suicide message type 1..3 from its PRNG (`GameEvent_PlayerDeath @0x5170ed`). Reload requests are sequence-only: a retail client repeats C2S 0x25 until the 0x49 echo refills the slot, so the count follows the round trip. |
-| `drive` | 01TR co-op | facing the spawn buggy: USE takes its 50cal, USE drops onto the deck, USE takes the driver seat, drive, USE | The setup pose sets only the heading: retail left a posed joiner at the spawn point it shares with the host in every probe (the cause is not walked). Seat swaps are held-USE digit keys, not action codes, so the seats come from retail's nearest-seat scan. |
+| `drive` | 01TR co-op | facing the spawn buggy: USE takes its 50cal, USE drops onto the deck, USE takes the driver seat, drive, USE | The joiner's setup pose sets only its heading (above). Seat swaps are held-USE digit keys, not action codes, so the seats come from retail's nearest-seat scan. |
 | `frag_kill` | 01TR deathmatch | the `self_nade` play with the host on the shared spawn | The frag kills the host (a kill, 0x1E type 4..6 from the PRNG, `GameEvent_PlayerDeath @0x517237`), then the thrower (a suicide). `game_event.type` is masked. |
+| `capture_base` | ASH_I5A Advance & Secure, `deploy_hold` | the host deploys with SPACE (auto team spawn), is posed inside zone 2's bunker (`0x1032`) and holds it | The zone drains (mode 0, -2730/s), turns (0x1E 60, 0x50 to team 1, 0x1E 52 and 56) and secures (mode 1, +1820/s, 0x1E 59) in about a minute. The first timer sample's `value` is masked: it depends on where the 1 Hz block falls after the pose. |

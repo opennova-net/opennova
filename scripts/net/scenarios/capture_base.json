@@ -1,0 +1,30 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "capture_base",
+  "mission": "ASH_I5A.BMS",
+  "game_type": 65552,
+  "actor": "host",
+  "prelude": [
+    {"tick": 60, "press": 153},
+    {"tick": 240, "end": true}
+  ],
+  "setup": {"pose": {"position_bms": [-310.1, -74.0, 54.3], "yaw": 0, "pitch": 0}},
+  "steps": [
+    {"tick": 5400, "end": true}
+  ],
+  "settle_seconds": 10,
+  "expect": {
+    "sequence": [
+      {"dir": "S", "kind": "zone_timer", "zone": "0x1033", "mode": "1", "b544": "1"},
+      {"dir": "S", "kind": "zone_timer", "zone": "0x1032", "mode": "0", "rate": "-2730", "b545": "1"},
+      {"dir": "S", "kind": "game_event", "type": "60", "attacker": "2"},
+      {"dir": "S", "kind": "team_assign", "entity": "0x1032", "team": "1"},
+      {"dir": "S", "kind": "game_event", "type": "52", "attacker": "2", "victim": "2"},
+      {"dir": "S", "kind": "game_event", "type": "56", "attacker": "actor"},
+      {"dir": "S", "kind": "zone_timer", "zone": "0x1032", "mode": "1", "rate": "1820", "b544": "1"},
+      {"dir": "S", "kind": "game_event", "type": "59", "attacker": "2", "victim": "1"}
+    ],
+    "count_kinds": ["team_assign"],
+    "mask": {"zone_timer": ["value"]}
+  }
+}

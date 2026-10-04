@@ -37,10 +37,11 @@ param(
 
     # A network-parity scenario (scripts/net/scenarios/*.json,
     # opennova.scenario.v1; ADR 0050 R5). At the steady-window start its
-    # actor takes the setup pose and plays the scripted steps -- a retail
-    # joiner through onHook's virtual keyboard, an OpenNova joiner through
-    # the scenario_play probe -- then the run settles for the scenario's
-    # settle_seconds. The summary records every step's applied logic tick.
+    # actor (the joiner or the host) plays its prelude, takes the setup pose
+    # and plays the scripted steps -- a retail actor through onHook's
+    # virtual keyboard, an OpenNova actor through the scenario_play probe --
+    # then the run settles for the scenario's settle_seconds. The summary
+    # records every step's applied logic tick.
     [string] $Scenario = "",
 
     [ValidatePattern('^[1-9][0-9]{2,4}x[1-9][0-9]{2,4}$')]
@@ -125,8 +126,8 @@ function Test-JsonNumber {
 }
 
 # opennova.scenario.v1: the case it is written for (mission, numeric game
-# type, actor), an optional setup pose, the steps both drivers consume
-# verbatim, and the settle after the last one. The drivers validate each step;
+# type, actor), an optional prelude stage, an optional setup pose, the steps
+# both drivers consume verbatim, and the settle after the last one. The drivers validate each step;
 # this binds the scenario to the run's case.
 function Read-ParityScenario {
     param([Parameter(Mandatory = $true)] [string] $Path)
@@ -134,8 +135,8 @@ function Read-ParityScenario {
         throw "Scenario file is missing: $Path"
     }
     $spec = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    $expected = @("schema", "name", "mission", "game_type", "actor", "setup",
-        "steps", "settle_seconds", "expect")
+    $expected = @("schema", "name", "mission", "game_type", "actor", "prelude",
+        "setup", "steps", "settle_seconds", "expect")
     $extra = @($spec.PSObject.Properties.Name | Where-Object { $_ -notin $expected })
     if ($extra.Count -gt 0) {
         throw "Scenario $Path has unknown fields: $($extra -join ', ')"
@@ -152,12 +153,18 @@ function Read-ParityScenario {
     if ([string] $spec.game_type -cne $GameType) {
         throw "Scenario $($spec.name) is written for game type $($spec.game_type), not $GameType"
     }
-    if ([string] $spec.actor -cne "joiner") {
-        throw "Scenario $($spec.name): only the joiner actor is supported (actor '$($spec.actor)')"
+    if ([string] $spec.actor -cnotin @("joiner", "host")) {
+        throw "Scenario $($spec.name): the actor is the joiner or the host (actor '$($spec.actor)')"
     }
     $steps = @($spec.steps)
     if ($steps.Count -lt 1 -or -not ($steps[-1].PSObject.Properties.Name -contains "end")) {
         throw "Scenario $($spec.name) must end with an end step"
+    }
+    if ($spec.PSObject.Properties.Name -contains "prelude") {
+        $prelude = @($spec.prelude)
+        if ($prelude.Count -lt 1 -or -not ($prelude[-1].PSObject.Properties.Name -contains "end")) {
+            throw "Scenario $($spec.name): the prelude must end with an end step"
+        }
     }
     $settle = $spec.settle_seconds
     if (-not (Test-JsonInteger $settle) -or $settle -lt 0 -or $settle -gt 300) {
@@ -178,8 +185,8 @@ function Read-ParityScenario {
 $script:ScenarioSpec = $null
 $script:ScenarioWitness = $null
 if ($Scenario) {
-    if ($ExerciseInput -or $WireOnly -or $ReadinessMode -ne "in_match") {
-        throw "A scenario plays on an in_match run with neither ExerciseInput nor WireOnly."
+    if ($ExerciseInput -or $WireOnly) {
+        throw "A scenario plays with neither ExerciseInput nor WireOnly: its steps drive the joiner."
     }
     $script:ScenarioSpec = Read-ParityScenario -Path $Scenario
 }
@@ -714,34 +721,31 @@ function Wait-UntilSteadyDeadline {
     }
 }
 
-# Plays -Scenario on its actor right after the steady window starts: the setup
-# pose, then the steps, then the settle. A retail joiner takes the pose through
-# onhook_load_debug_snapshot and the steps through onhook_play_input (retail's
-# own key and mouse handlers at the Input_ProcessFrame seam); an OpenNova
-# joiner takes both through the scenario_play probe (ScriptedInput at the
-# ControlsModel device seam). Both report each step's applied logic tick.
-function Invoke-ScenarioIfRequested {
-    param([string] $RetailJoinerInstanceId = "")
-    if (-not $script:ScenarioSpec) { return }
-    if (-not $script:SteadyStartedUtc -or $script:SteadyCompletedUtc) {
-        throw "Scenario play must follow the steady-window start"
-    }
-    if ($script:ScenarioWitness) {
-        throw "Scenario was already played in run $RunId"
-    }
-    $spec = $script:ScenarioSpec
-    $hasPose = $spec.PSObject.Properties.Name -contains "setup" -and
-        $null -ne $spec.setup -and $null -ne $spec.setup.pose
+# One scripted stage on the joiner, waited to its end: the setup pose first
+# when one is given, then the steps. A retail joiner takes the pose through
+# onhook_load_debug_snapshot and the steps through onhook_play_input
+# (retail's own key and mouse handlers at the Input_ProcessFrame seams); an
+# OpenNova joiner takes both through the scenario_play probe (ScriptedInput
+# at the ControlsModel device seam). Both report each step's applied tick.
+function Invoke-ScenarioStage {
+    param(
+        [Parameter(Mandatory = $true)] [object[]] $Steps,
+        $Setup = $null,
+        [string] $RetailInstanceId = ""
+    )
+    $hasPose = $null -ne $Setup -and $null -ne $Setup.pose
+    $actor = [string] $script:ScenarioSpec.actor
+    $retailActor = ($actor -eq "joiner" -and $Topology -in @("RR", "OR")) -or
+        ($actor -eq "host" -and $Topology -in @("RR", "RO"))
     # Generous: two retail windows on one machine tick well below 62 Hz.
-    $timeoutSeconds = [int] (@($spec.steps)[-1].tick / 10.0 + 60)
-    $startedUtc = [DateTime]::UtcNow.ToString("o")
-    $setup = $null
-    if ($Topology -in @("RR", "OR")) {
-        if (-not $RetailJoinerInstanceId) {
-            throw "Scenario play on $Topology needs the retail joiner's instance id"
+    $timeoutSeconds = [int] ($Steps[-1].tick / 10.0 + 60)
+    if ($retailActor) {
+        if (-not $RetailInstanceId) {
+            throw "Scenario play on $Topology needs the retail $actor's instance id"
         }
+        $setupResult = $null
         if ($hasPose) {
-            $pose = $spec.setup.pose
+            $pose = $Setup.pose
             $position = @($pose.position_bms)
             $snapshotPath = Join-Path $RunRoot "scenario-setup.debug_snapshot.json"
             if (Test-Path -LiteralPath $snapshotPath) {
@@ -758,44 +762,80 @@ function Invoke-ScenarioIfRequested {
                     }
                 }
             } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $snapshotPath -Encoding ASCII
-            $setup = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_load_debug_snapshot" -Arguments @{
-                instance_id = $RetailJoinerInstanceId
+            $setupResult = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_load_debug_snapshot" -Arguments @{
+                instance_id = $RetailInstanceId
                 path = $snapshotPath
             })
         }
         $played = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_play_input" -Arguments @{
-            instance_id = $RetailJoinerInstanceId
-            steps = @($spec.steps)
+            instance_id = $RetailInstanceId
+            steps = $Steps
             wait = $true
             timeout_ms = $timeoutSeconds * 1000
         })
-        # Retail skips the input seam while its local player is dead
-        # (sub_54B970 @0x52660D); a run that dies before its end step expires
+        # Retail runs no input frame while a menu that does not pass input
+        # through is up; a run that waits there past its end step expires
         # rather than finishing. Every step before the end must still apply.
         $unapplied = @($played.steps | Where-Object {
             [string] $_.kind -ne "end" -and $null -eq $_.applied_logic_tick
         })
         if ([string] $played.state -notin @("done", "expired") -or $unapplied.Count -gt 0) {
-            throw "Retail scenario $($spec.name) did not play: state=$($played.state) result=$($played.result) unapplied=$($unapplied.Count)"
+            throw "Retail scenario $($script:ScenarioSpec.name) did not play: state=$($played.state) result=$($played.result) unapplied=$($unapplied.Count)"
         }
-        $driver = "onhook_play_input"
-        $record = $played
+        return [pscustomobject]@{ driver = "onhook_play_input"; setup = $setupResult; record = $played }
     }
-    else {
-        $status = Invoke-GameProbe -Port $JoinerMcpPort -Name "scenario_play" -Process $script:OpenNovaJoiner `
-            -TimeoutSeconds $timeoutSeconds -PollMs 500 -Arguments @{
-                scenario = $spec
-                wait = $true
-            }
-        if ([string] $status.state -ne "passed" -or -not $status.verdict -or
-                -not [bool] $status.verdict.ok) {
-            $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
-            throw "OpenNova scenario $($spec.name) did not play: state=$($status.state) $why"
+    $stage = @{ steps = $Steps }
+    if ($null -ne $Setup) { $stage.setup = $Setup }
+    $port = if ($actor -eq "host") { $HostMcpPort } else { $JoinerMcpPort }
+    $process = if ($actor -eq "host") { $script:OpenNovaHost } else { $script:OpenNovaJoiner }
+    $status = Invoke-GameProbe -Port $port -Name "scenario_play" -Process $process `
+        -TimeoutSeconds $timeoutSeconds -PollMs 500 -Arguments @{
+            scenario = $stage
+            wait = $true
         }
-        $driver = "scenario_play"
-        $record = $status.verdict.data
-        $setup = $record.setup
+    if ([string] $status.state -ne "passed" -or -not $status.verdict -or
+            -not [bool] $status.verdict.ok) {
+        $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+        throw "OpenNova scenario $($script:ScenarioSpec.name) did not play: state=$($status.state) $why"
     }
+    $record = $status.verdict.data
+    return [pscustomobject]@{ driver = "scenario_play"; setup = $record.setup; record = $record }
+}
+
+# Plays -Scenario on its actor (the joiner or the host) right after the
+# steady window starts: its prelude stage when it has one (e.g. the deploy
+# key on a deploy_hold run), then the setup pose and the steps, then the
+# settle. A pose sticks only on the authority's own player: a client snaps
+# its players to the host's replicated pose past 2 units
+# [orig: Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A, skipped on the
+#  authority @0x4B432A], so a posed scenario's actor is the host.
+function Invoke-ScenarioIfRequested {
+    param(
+        [string] $RetailJoinerInstanceId = "",
+        [string] $RetailHostInstanceId = ""
+    )
+    if (-not $script:ScenarioSpec) { return }
+    if (-not $script:SteadyStartedUtc -or $script:SteadyCompletedUtc) {
+        throw "Scenario play must follow the steady-window start"
+    }
+    if ($script:ScenarioWitness) {
+        throw "Scenario was already played in run $RunId"
+    }
+    $spec = $script:ScenarioSpec
+    $retailInstanceId = if ([string] $spec.actor -eq "host") {
+        $RetailHostInstanceId
+    } else {
+        $RetailJoinerInstanceId
+    }
+    $startedUtc = [DateTime]::UtcNow.ToString("o")
+    $prelude = $null
+    if ($spec.PSObject.Properties.Name -contains "prelude") {
+        $prelude = Invoke-ScenarioStage -Steps @($spec.prelude) `
+            -RetailInstanceId $retailInstanceId
+    }
+    $setup = if ($spec.PSObject.Properties.Name -contains "setup") { $spec.setup } else { $null }
+    $main = Invoke-ScenarioStage -Steps @($spec.steps) -Setup $setup `
+        -RetailInstanceId $retailInstanceId
     $playedUtc = [DateTime]::UtcNow.ToString("o")
     Start-Sleep -Seconds ([int] $spec.settle_seconds)
     # The run keeps the exact script it played; the comparator checks every
@@ -812,13 +852,14 @@ function Invoke-ScenarioIfRequested {
         path = $playedCopy
         sha256 = (Get-FileHash -LiteralPath $playedCopy -Algorithm SHA256).Hash.ToLowerInvariant()
         actor = [string] $spec.actor
-        driver = $driver
+        driver = $main.driver
         started_utc = $startedUtc
         played_utc = $playedUtc
         settled_utc = [DateTime]::UtcNow.ToString("o")
         settle_seconds = [int] $spec.settle_seconds
-        setup = $setup
-        record = $record
+        prelude = $(if ($prelude) { $prelude.record } else { $null })
+        setup = $main.setup
+        record = $main.record
     }
 }
 
@@ -880,7 +921,9 @@ function Assert-RetailEndpointState {
     param(
         [Parameter(Mandatory = $true)] $Instance,
         [Parameter(Mandatory = $true)] [ValidateSet("host", "joiner")] [string] $Role,
-        [switch] $RequireInMatch
+        [switch] $RequireInMatch,
+        # After a scenario played, a deploy_hold joiner may have deployed.
+        [switch] $AllowScenarioDeploy
     )
     $state = $Instance.run_state
     if ([string] $state.failure -ne "none") {
@@ -917,7 +960,9 @@ function Assert-RetailEndpointState {
     }
     if (-not $RequireInMatch -and $ReadinessMode -eq "deploy_hold" -and
             $Role -eq "joiner" -and
-            ([string] $state.phase -ne "loading" -or [bool] $state.local_player)) {
+            ([string] $state.phase -ne "loading" -or [bool] $state.local_player) -and
+            -not ($AllowScenarioDeploy -and [string] $state.phase -eq "in_match" -and
+                [bool] $state.local_player)) {
         return $false
     }
     return $true
@@ -928,7 +973,8 @@ function Wait-RetailProcessForPeer {
         [Parameter(Mandatory = $true)] [int] $ProcessId,
         [Parameter(Mandatory = $true)] [ValidateSet("host", "joiner")] [string] $Role,
         [int] $TimeoutSeconds = 240,
-        [switch] $RequireInMatch
+        [switch] $RequireInMatch,
+        [switch] $AllowScenarioDeploy
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -947,7 +993,7 @@ function Wait-RetailProcessForPeer {
                 $script:RetailInstanceIds.Add($observedInstanceId)
             }
             if (Assert-RetailEndpointState -Instance $instance -Role $Role `
-                    -RequireInMatch:$RequireInMatch) {
+                    -RequireInMatch:$RequireInMatch -AllowScenarioDeploy:$AllowScenarioDeploy) {
                 return $instance
             }
         }
@@ -1454,7 +1500,8 @@ function Wait-OpenNovaJoinerReady {
         [int] $TimeoutSeconds = 240,
         [long] $MinimumTicksMsec = -1,
         [switch] $RequireMotionComplete,
-        [switch] $AllowPostDeathRedeploy
+        [switch] $AllowPostDeathRedeploy,
+        [switch] $AllowScenarioDeploy
     )
     $script:OpenNovaJoiner.Refresh()
     if ($script:OpenNovaJoiner.HasExited) {
@@ -1499,7 +1546,8 @@ function Wait-OpenNovaJoinerReady {
         }
         $readinessClass = Get-OpenNovaJoinerReadinessClass `
             -State $ready -ReadinessMode $ReadinessMode `
-            -AllowPostDeathRedeploy:$AllowPostDeathRedeploy
+            -AllowPostDeathRedeploy:$AllowPostDeathRedeploy `
+            -AllowScenarioDeploy:$AllowScenarioDeploy
         if ($readinessClass -eq 'invalid') {
             throw "OpenNova joiner witness reports an invalid admission/liveness state"
         }
@@ -1566,11 +1614,14 @@ try {
                     wire_ready = $script:WireReadyWitness
                 }
                 Begin-SteadyWindow
-                                Wait-UntilSteadyDeadline
+                Invoke-ScenarioIfRequested -RetailJoinerInstanceId ([string] $retailJoiner.instance_id) `
+                    -RetailHostInstanceId $hostInstanceId
+                Wait-UntilSteadyDeadline
                 $hostInstance = Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailHostProcess.Id -Role host
                 $joinerInstance = Wait-RetailProcessForPeer `
-                    -ProcessId $script:RetailJoinerProcess.Id -Role joiner
+                    -ProcessId $script:RetailJoinerProcess.Id -Role joiner `
+                    -AllowScenarioDeploy:([bool] $script:ScenarioSpec)
                 $script:Acceptance = [pscustomobject]@{
                     host = $hostInstance.run_state
                     joiner = $joinerInstance.run_state
@@ -1633,7 +1684,8 @@ try {
             $script:Acceptance | Add-Member -NotePropertyName wire_ready `
                 -NotePropertyValue $script:WireReadyWitness -Force
             Begin-SteadyWindow
-            Invoke-ScenarioIfRequested -RetailJoinerInstanceId ([string] $pair.joiner.instance_id)
+            Invoke-ScenarioIfRequested -RetailJoinerInstanceId ([string] $pair.joiner.instance_id) `
+                -RetailHostInstanceId ([string] $pair.host.instance_id)
             if ($ExerciseInput) {
                 Invoke-RetailInputExercise -ProcessId ([int] $pair.joiner.pid)
             }
@@ -1681,6 +1733,7 @@ try {
                     wire_ready = $script:WireReadyWitness
                 }
                 Begin-SteadyWindow
+                Invoke-ScenarioIfRequested -RetailHostInstanceId $hostInstanceId
                 Wait-UntilSteadyDeadline
                 $script:OpenNovaJoiner.Refresh()
                 if ($script:OpenNovaJoiner.HasExited) {
@@ -1689,10 +1742,12 @@ try {
                 $hostInstance = Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailHostProcess.Id -Role host
                 $joinerAcceptance = Wait-OpenNovaJoinerReady `
-                    -MinimumTicksMsec $initialJoinerTicks
+                    -MinimumTicksMsec $initialJoinerTicks `
+                    -AllowScenarioDeploy:([bool] $script:ScenarioSpec)
                 if (-not (Test-OpenNovaJoinerReadinessTransition `
                         -Initial $initialJoinerAcceptance -Final $joinerAcceptance `
-                        -ReadinessMode $ReadinessMode)) {
+                        -ReadinessMode $ReadinessMode `
+                        -AllowScenarioDeploy:([bool] $script:ScenarioSpec))) {
                     throw "OpenNova joiner deploy-hold heartbeat transition is invalid"
                 }
                 $script:Acceptance = [pscustomobject]@{
@@ -1752,7 +1807,7 @@ try {
             $script:Acceptance | Add-Member -NotePropertyName wire_ready `
                 -NotePropertyValue $script:WireReadyWitness -Force
             Begin-SteadyWindow
-            Invoke-ScenarioIfRequested
+            Invoke-ScenarioIfRequested -RetailHostInstanceId ([string] $retailHost.instance_id)
             if ($ExerciseInput) {
                 Publish-MotionGate
             }
@@ -1881,7 +1936,8 @@ try {
                     throw "An OR endpoint exited during the steady window"
                 }
                 $instance = Wait-RetailProcessForPeer -ProcessId $script:RetailProcess.Id `
-                    -Role joiner -RequireInMatch:($ReadinessMode -eq "in_match")
+                    -Role joiner -RequireInMatch:($ReadinessMode -eq "in_match") `
+                    -AllowScenarioDeploy:([bool] $script:ScenarioSpec)
                 & $ProbeExe --host 127.0.0.1 --port $Port --timeout-ms 5000 `
                     --interval-ms 250 --expect-name $ServerName
                 if ($LASTEXITCODE -ne 0) {
@@ -1944,11 +2000,13 @@ try {
             $endOwnership = Assert-OpenNovaHostOwnsPort
             $joinerAcceptance = Wait-OpenNovaJoinerReady `
                 -MinimumTicksMsec $initialJoinerTicks -RequireMotionComplete `
-                -AllowPostDeathRedeploy:($ReadinessMode -eq 'in_match')
+                -AllowPostDeathRedeploy:($ReadinessMode -eq 'in_match') `
+                -AllowScenarioDeploy:([bool] $script:ScenarioSpec)
             if (-not (Test-OpenNovaJoinerReadinessTransition `
                     -Initial $initialJoinerAcceptance -Final $joinerAcceptance `
                     -ReadinessMode $ReadinessMode `
                     -AllowPostDeathRedeploy:($ReadinessMode -eq 'in_match') `
+                    -AllowScenarioDeploy:([bool] $script:ScenarioSpec) `
                     -RequireMotionComplete)) {
                 throw "OpenNova joiner steady-window heartbeat transition is invalid"
             }

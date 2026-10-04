@@ -11,7 +11,7 @@
 // Handles print as (pool<<12)|slot hex words, pool-0 indices as decimals.
 // C2S 0x0C prints only when its ground carrier changes (the first uplink
 // included), so a mount or dismount shows as one line and the uplink's own
-// handle names the session's actor.
+// handle names a joiner actor; S2C 0x46's roster slot 0 names the host's.
 
 #include <net/npwire/wire_capture.h>
 

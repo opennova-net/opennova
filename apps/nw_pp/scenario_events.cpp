@@ -5,6 +5,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <string>
 
 namespace opennova::nwpp {
 
@@ -79,6 +80,16 @@ std::string server_fields(const InGameMessage &m, bool &decoded) {
 			return format("kind=team_assign entity=0x%04x team=%u net_id=%u anim_slot=%u",
 					unsigned(v.entity_handle), unsigned(v.team), unsigned(v.net_id),
 					unsigned(v.anim_slot));
+		}
+		case s2c::PLAYER_SYNC: {
+			// The roster: slot 0 is the host's own player.
+			PlayerSync v;
+			decoded = decode_player_sync(body, len, v);
+			if (v.removal) return format("kind=player_sync slot=%u removal=1", unsigned(v.slot_id));
+			const std::string team = (v.field_bitmask & 0x0004u) != 0
+					? std::to_string(v.team) : std::string("-");
+			return format("kind=player_sync slot=%u entity=0x%04x team=%s",
+					unsigned(v.slot_id), unsigned(v.entity_slot_id), team.c_str());
 		}
 		case s2c::ZONE_TIMER_VALUE: {
 			ZoneTimerValue v;
