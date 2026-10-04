@@ -32,13 +32,16 @@ struct FileCard {
 	std::string build; // where a build puts it, in words
 	std::string imported_from;
 	bool opens = false; // the editor opens a document of it
-	// A wave: what the game's decode makes of it.
+	// A wave: what the game's decode makes of it, read once for the file's size and last write (a card made
+	// again over the same file takes it as it is), and not for a file past kWaveCardBytes.
 	struct Sound {
 		bool decoded = false;
 		std::string error; // why it does not decode
 		uint32_t rate = 0;
 		uint16_t channels = 0;
 		double seconds = 0.0;
+		uint64_t size = 0;     // the file's, as read
+		int64_t modified = 0;  // its last-write ticks, as read (0: unknown, read again)
 	};
 	bool wave = false;
 	Sound sound;
@@ -64,8 +67,14 @@ struct FileCard {
 	std::vector<User> named_by;
 };
 
+// The most of a wave a card reads to say what it is (the game's own are a few hundred KB): a larger file is
+// said to be too large, nothing read.
+inline constexpr uint64_t kWaveCardBytes = uint64_t(32) << 20;
+
 // The card of the project file `path` (a project-relative path or a logical name); found false for none.
-FileCard file_card(const SessionView &view, const std::string &path);
+// `known`, a card's sound read before: taken as it is while the file's size and last write are those it was
+// read at, else read again.
+FileCard file_card(const SessionView &view, const std::string &path, const FileCard::Sound *known = nullptr);
 // Its wire form: {found, path, name, kind, kind_label, about, size, build, imported_from, opens, sound?
 // {decoded, error?, rate, channels, seconds}, names [{field, record, value, status, file, wave}], named_by
 // [{file, record, field}]}.

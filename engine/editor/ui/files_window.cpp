@@ -243,6 +243,8 @@ bool FilesWindow::stands_aside() const { return aside_for_welcome(workspace_.vie
 void FilesWindow::receive(const ViewEvent &event) {
 	events_.post(event);
 	request_focus();
+	// An AboutFile's card opens now, Files drawn or not.
+	if (event.kind == ViewEventKind::RevealFile && event.tag == 1) open_card(event.path);
 }
 
 // The file an ask names, selected; a filter that hides it cleared; the folders on its way
@@ -263,7 +265,6 @@ void FilesWindow::show_revealed(const SessionView &view, const ViewEvent &event)
 	scroll_to_ = entry->relative_path;
 	open_to_ = entry->imported_from.empty() ? entry->relative_path : entry->imported_from;
 	if (event.flag) start_rename(*entry);
-	if (event.tag == 1) open_card(entry->relative_path);
 }
 
 void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
@@ -276,6 +277,13 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (!v.project.open) {
 		ui_kit::empty_state("No project open.", "Make one or open one in the Document window.");
 		return;
+	}
+	// Another project: its own filter, kind and selection (none yet).
+	if (v.project.root != shown_root_) {
+		shown_root_ = v.project.root;
+		filter_[0] = '\0';
+		kind_shown_ = AssetKind::kCount;
+		selected_.clear();
 	}
 	refresh(v);
 	const auto newest = std::find_if(reveals.rbegin(), reveals.rend(),
@@ -325,7 +333,9 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ui_kit::empty_state(kind_shown_ != AssetKind::kCount && filter_[0] == '\0' ? "The project has no file of this kind."
 		                                                                         : "No file matches the filter.");
 	} else if (const bool kind_fits = ImGui::GetContentRegionAvail().x >= ImGui::GetFontSize() * kKindRoomEm;
-	           ImGui::BeginTable("files", 3,
+	           // "project_files": a table id of its own since the Kind column shows by default, so a layout an
+	           // earlier editor saved with it hidden (its default then) does not hide it (the UX round's project lane).
+	           ImGui::BeginTable("project_files", 3,
 	                             ImGuiTableFlags_Resizable | ImGuiTableFlags_Hideable | ImGuiTableFlags_RowBg |
 	                                     ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY)) {
 		// The name takes what the others leave; the kind as wide as "Animation map" (a longer label cut,
@@ -357,6 +367,15 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ImGui::EndTable();
 	}
 	draw_rename(v);
+}
+
+void FilesWindow::draw_card_window() {
+	const SessionView &v = workspace_.view();
+	// The card is its project's: closed with it, and when another opens.
+	if (!v.project.open || (!card_path_.empty() && v.project.root != card_root_)) {
+		close_card();
+		return;
+	}
 	draw_card(v);
 }
 
@@ -687,9 +706,19 @@ void FilesWindow::draw_rename(const SessionView &view) {
 }
 
 void FilesWindow::open_card(const std::string &path) {
+	if (card_path_ != path) close_card();
 	card_path_ = path;
+	card_root_ = workspace_.view().project.root;
 	card_.reset();
 	card_focus_ = true;
+}
+
+// The card closed: a sound its Play started stops with it.
+void FilesWindow::close_card() {
+	if (card_played_ && workspace_.view().allows(EditorRequestKind::StopSound)) workspace_.request(request::stop_sound());
+	card_played_ = false;
+	card_path_.clear();
+	card_.reset();
 }
 
 // The card (session/file_card.h), made again when the files, the graph or the project move: a window of its
@@ -699,11 +728,13 @@ void FilesWindow::draw_card(const SessionView &view) {
 	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Graph, ViewConcern::Project});
 	if (!card_ || card_key_ != key) {
 		card_key_ = key;
-		card_ = std::make_shared<const FileCard>(file_card(view, card_path_));
+		// A wave's sound as it was read, while its file stands (file_card reads it again when it moved).
+		const FileCard::Sound *known = card_ && card_->wave ? &card_->sound : nullptr;
+		card_ = std::make_shared<const FileCard>(file_card(view, card_path_, known));
 	}
 	const FileCard &card = *card_;
 	if (!card.found) {
-		card_path_.clear();
+		close_card();
 		return;
 	}
 	const ImGuiViewport *viewport = ImGui::GetMainViewport();
@@ -722,7 +753,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	if (!ImGui::Begin(title.c_str(), &open, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
 	                                             ImGuiWindowFlags_NoCollapse)) {
 		ImGui::End();
-		if (!open) card_path_.clear();
+		if (!open) close_card();
 		return;
 	}
 	ImGui::PushTextWrapPos(0.0f);
@@ -743,7 +774,10 @@ void FilesWindow::draw_card(const SessionView &view) {
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted(words);
 			ImGui::SameLine();
-			if (ImGui::Button("Play##card")) workspace_.request(request::play_sound(card.path));
+			if (ImGui::Button("Play##card")) {
+				workspace_.request(request::play_sound(card.path));
+				card_played_ = true;
+			}
 			ui_kit::tooltip("Play it as the game decodes it.");
 			ImGui::SameLine();
 			if (ImGui::Button("Stop##card")) workspace_.request(request::stop_sound());
@@ -799,7 +833,10 @@ void FilesWindow::draw_card(const SessionView &view) {
 					}
 					ImGui::TableNextColumn();
 					if (named.wave) {
-						if (ImGui::SmallButton("Play")) workspace_.request(request::play_sound(named.file));
+						if (ImGui::SmallButton("Play")) {
+							workspace_.request(request::play_sound(named.file));
+							card_played_ = true;
+						}
 						ui_kit::tooltip("Play " + named.file + ".");
 					} else if (named.status != ReferenceStatus::NotAReference) {
 						ImGui::TextColored(ui_kit::reference_color(named.status), "%s", reference_status_words(named.status));
@@ -827,7 +864,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 			}
 	}
 	ImGui::End();
-	if (!open) card_path_.clear();
+	if (!open) close_card();
 }
 
 } // namespace opennova::editor

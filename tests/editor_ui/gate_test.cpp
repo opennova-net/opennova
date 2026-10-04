@@ -178,7 +178,7 @@ void test_windows_show_the_gate() {
 	ui.drain();
 	const ImGuiID bar = menu_bar_id();
 	const ImGuiID files = Ui::window_id("Files");
-	const ImGuiID table = item_id(files, {"files"});
+	const ImGuiID table = item_id(files, {"project_files"});
 	const ImGuiID combo = ImHashStr("##Combo_00");
 	const ImGuiID tab = document_tab_id(a->path());
 	const ImGuiID summary = item_id(Ui::window_id("Problems"), {v.project.root.c_str(), "required"});

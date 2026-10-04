@@ -40,6 +40,8 @@ public:
 	// With no project open it stands aside for the welcome page (aside_for_welcome).
 	bool stands_aside() const override;
 	void show_anyway() override { welcome_asked_ = true; }
+	// Coming back (a project opened over the welcome page) it leaves the keyboard where it is.
+	bool focus_on_appearing() const override { return false; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
 	// How many findings the window has asked the fixes of while what they read stands (the

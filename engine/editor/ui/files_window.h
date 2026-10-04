@@ -66,8 +66,14 @@ public:
 	// With no project open it stands aside for the welcome page (aside_for_welcome).
 	bool stands_aside() const override;
 	void show_anyway() override { welcome_asked_ = true; }
+	// Coming back (a project opened over the welcome page) it leaves the keyboard where it is.
+	bool focus_on_appearing() const override { return false; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
+	// The file's card, a window of its own drawn every frame by the workspace (with its modals), whether
+	// Files draws or not (collapsed, behind a tab, standing aside): an AboutFile from Problems or the wire
+	// shows it at once. Closed with its project; a sound it played stopped as it closes.
+	void draw_card_window();
 
 	// The file a click selected (project-relative; "" = none).
 	const std::string &selected() const { return selected_; }
@@ -122,6 +128,7 @@ private:
 	// menu's About this file..., and an AboutFile request (a RevealFile event with tag 1).
 	void open_card(const std::string &path);
 	void draw_card(const SessionView &view);
+	void close_card();
 
 	Workspace &workspace_;
 	NewFilePrompt &new_file_;
@@ -148,11 +155,16 @@ private:
 	// dock had it when last drawn.
 	static constexpr float kKindRoomEm = 19.0f;
 	bool kind_fitted_ = true;
-	// The file whose card shows ("" none) and the card, made again when the files or the graph move.
+	// The file whose card shows ("" none) and the card, made again when the files or the graph move (a wave's
+	// sound kept while its file stands); whether its Play played, so its close stops the sound.
 	std::string card_path_;
 	bool card_focus_ = false;
 	RevisionKey card_key_;
 	std::shared_ptr<const FileCard> card_;
+	bool card_played_ = false;
+	std::string card_root_; // the project the card is of
+	// The project the filter, the kind and the selection are for: another one starts them afresh.
+	std::string shown_root_;
 	// The file a menu asked to rename, and the name typed.
 	std::string renaming_;
 	bool open_rename_ = false;

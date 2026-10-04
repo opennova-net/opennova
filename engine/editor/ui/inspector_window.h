@@ -53,6 +53,8 @@ public:
 	// With no project open it stands aside for the welcome page (aside_for_welcome).
 	bool stands_aside() const override;
 	void show_anyway() override { welcome_asked_ = true; }
+	// Coming back (a project opened over the welcome page) it leaves the keyboard where it is.
+	bool focus_on_appearing() const override { return false; }
 	void draw(devtools::ImGuiPass &, uint64_t) override;
 	// A RevealRecord held until the Inspector draws, with what it was sent against: the
 	// selection's revision and the identity of the document it names (Document::identity).

@@ -13,7 +13,8 @@ namespace opennova::editor {
 // and the wire's `groups`. Each chosen file is a group of its own (its row the group's one row), and a
 // file the walk found goes under the group of the file that wanted it (ImportPlanRow::needed_by), in a
 // group of its kind there: main.mnu > Sound bank > Wave, items.def > Model > Texture, so the textures
-// a thousand models bring are one line to read and one check to leave out. A plan with no file found
+// a thousand models bring are one line to read and one check to leave out; a file another planned file names
+// too is listed under that one's group as well (its `also`), counted once. A plan with no file found
 // and more than kKindGroupsPast chosen (every file of the game install) goes by kind alone, the
 // largest kind first. The rows not found are in no group (the dialog lists them apart).
 struct ImportPlanGroup {
@@ -25,6 +26,9 @@ struct ImportPlanGroup {
 	size_t root = kNone;
 	AssetKind kind = AssetKind::Unknown; // its rows' kind
 	std::vector<size_t> rows;            // its own rows, in the plan's order
+	// The rows of other groups the file above this group names too (ImportPlanRow::wanted_by): shown here
+	// as well, counted where they are planned.
+	std::vector<size_t> also;
 	std::vector<size_t> children;        // the groups in it, in the order their first rows were planned
 	size_t files = 0;                    // its rows and those of every group in it
 	uint64_t bytes = 0;                  // their sizes as stored

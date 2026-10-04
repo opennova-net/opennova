@@ -2,12 +2,34 @@
 
 #include <string>
 
+#include <editor/assets/install_check.h>
 #include <editor/ui/expansion_fields.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
 struct SessionView;
+
+// One install field's check (the New project form's, Project settings'): the folder named asked of the
+// session once it is not being typed (CheckInstall), the answer kept by the field when the view's one slot
+// holds it, so another field's check over that slot leaves this one's line as it was; asked again when the
+// slot was taken before the field read its answer.
+class InstallFieldCheck {
+public:
+	// What the field's line says of `path`: the kept answer's words (`ok` true for an install the editor
+	// imports from), "" while it waits; nothing named, what a project made then takes (`fallback`, the
+	// editor's install a new project takes when none is named; "" for none).
+	std::string words(Workspace &workspace, const std::string &path, bool typing, const std::string &fallback, bool &ok);
+	// The kept answer for `path` (null while there is none).
+	const InstallCheck *answer(const std::string &path) const;
+	void forget();
+
+private:
+	std::string asked_;           // the folder asked, as named
+	std::string slot_when_asked_; // the folder the slot held then
+	InstallCheck kept_;           // the answer for it
+	int retries_ = 0;             // asks again after the slot was taken (two at most for a folder)
+};
 
 // The new-project form: a name, a folder (Browse... asks the shell for one), the game install the project
 // imports from and plays in (the UX round's project lane: prefilled with the one the editor last chose,
@@ -31,7 +53,7 @@ private:
 	char folder_[512] = "";
 	char install_[512] = "";
 	bool install_named_ = false; // the author named one: no longer the editor's last
-	std::string asked_;          // the install last checked (CheckInstall), "" none
+	InstallFieldCheck check_;
 	ExpansionFields expansion_;
 };
 
@@ -46,10 +68,5 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form);
 // welcome page: no project is open and the author has not asked to see it (`asked`, set by its Windows
 // menu tick, show_anyway; a project opening forgets it).
 bool aside_for_welcome(const SessionView &view, bool &asked);
-
-// What the editor shows of a game install's check (ProjectView::install_check) for the folder `path` named
-// in a field: the check's line when it is of that folder (`ok` true when the folder is an install the
-// editor imports from), "" while it is not checked yet.
-std::string install_check_words(const Workspace &workspace, const std::string &path, bool &ok);
 
 } // namespace opennova::editor

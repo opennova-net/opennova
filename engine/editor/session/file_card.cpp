@@ -10,6 +10,7 @@
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
+#include <editor/project_build/build_plan.h>
 #include <editor/session/view/session_view.h>
 #include <formats/lwf/wav_pcm.h>
 
@@ -19,9 +20,14 @@ using io::JsonValue;
 
 namespace {
 
-// Where a build puts a file of the entry's kind, in words: the archive, beside the archives, or nowhere;
-// for a project that builds as an expansion, the expansion's archive or folder (archive_routing.h).
+// Where a build puts a file of the entry's kind, in words: the build's own word on it first (an archive it
+// refuses, a player's file or a name no archive stores: plan_file_finding, the plan's rule), then the archive,
+// beside the archives, or nowhere; for a project that builds as an expansion, the expansion's archive or
+// folder (archive_routing.h).
 std::string build_words(const AssetEntry &entry, const ProjectDocument &document) {
+	Diagnostic own;
+	if (plan_file_finding(entry, document.expansion.name, own))
+		return own.severity == DiagnosticSeverity::Error ? "A build refuses it: " + own.message : own.message;
 	if (entry.kind == AssetKind::ImportSource) return "The build packs what it makes, not the file itself.";
 	if (!document.expansion.standalone()) {
 		const std::string &b = document.expansion.name;
@@ -41,8 +47,15 @@ std::string build_words(const AssetEntry &entry, const ProjectDocument &document
 	return std::string("Packed into ") + archive_slot_file_name(slot) + ".";
 }
 
-FileCard::Sound decode_sound(const std::string &file) {
+FileCard::Sound decode_sound(const std::string &file, const AssetEntry &entry) {
 	FileCard::Sound sound;
+	sound.size = entry.size_bytes;
+	sound.modified = entry.modified_ticks;
+	if (entry.size_bytes > kWaveCardBytes) {
+		sound.error = "It is " + std::to_string(entry.size_bytes >> 20) + " MB: the editor reads a wave of " +
+		              std::to_string(kWaveCardBytes >> 20) + " MB at most.";
+		return sound;
+	}
 	std::vector<uint8_t> bytes;
 	if (!read_file_bytes(file, bytes, sound.error)) return sound;
 	lwf::WavPcm pcm;
@@ -76,7 +89,7 @@ std::string edge_field_words(const AssetScan &scan, const GraphEdge &edge) {
 	return edge.field;
 }
 
-FileCard file_card(const SessionView &view, const std::string &path) {
+FileCard file_card(const SessionView &view, const std::string &path, const FileCard::Sound *known) {
 	FileCard card;
 	if (!view.project.open || !view.project.scan) return card;
 	const AssetScan &scan = *view.project.scan;
@@ -93,7 +106,10 @@ FileCard file_card(const SessionView &view, const std::string &path) {
 	card.imported_from = entry->imported_from;
 	card.opens = is_editable_kind(entry->kind);
 	card.wave = entry->kind == AssetKind::Wave;
-	if (card.wave) card.sound = decode_sound(join_path(view.project.root, entry->relative_path));
+	if (card.wave)
+		card.sound = known && known->modified != 0 && known->size == entry->size_bytes && known->modified == entry->modified_ticks
+		                     ? *known
+		                     : decode_sound(join_path(view.project.root, entry->relative_path), *entry);
 	const AssetGraph *graph = view.findings.graph.get();
 	if (!graph) return card;
 	for (const GraphEdge *edge : graph->references_of(entry->relative_path)) {

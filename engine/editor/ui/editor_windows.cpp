@@ -347,6 +347,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	rename_.draw(*this);
 	texture_source_.draw(*this);
 	draw_build_panel(v);
+	if (files_window_) files_window_->draw_card_window();
 	if (document_window_) document_window_->draw_modals();
 	shortcuts(v, document);
 }

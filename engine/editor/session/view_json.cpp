@@ -100,8 +100,15 @@ JsonValue project_section(const SessionView &view) {
 		check_expansions.push(std::move(entry));
 	}
 	checked.set("expansions", std::move(check_expansions));
+	JsonValue missing_archives = JsonValue::make_array();
+	for (const std::string &name : check.missing_archives) missing_archives.push(json_string(name));
+	checked.set("missing_archives", std::move(missing_archives));
+	if (check.build) checked.set("build", boolean(true));
 	checked.set("words", json_string(check.words()));
 	out.set("install_check", std::move(checked));
+	// Why the last New project or Open was refused (the welcome page's line), and the editor's own install.
+	out.set("refused", json_string(view.project.refused));
+	out.set("editor_install", json_string(view.project.editor_install));
 	if (!view.project.open)
 		return out;
 	const ProjectDocument &document = *view.project.document;
@@ -429,8 +436,11 @@ constexpr ViewSectionRow kSections[] = {
 			"pages the files), and quit_requested; open or not, install_expansions, the game install's "
 			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
 			"description), new_project_expansions, the same of the install a new project opens with "
-			"(the one last chosen), and install_check, the last install checked (check_install): its root, "
-			"game, exists, ok (its archives mount), files, executable, expansions [{name, title}] and words." },
+			"(the one last chosen), install_check, the last install checked (check_install, new_project's): its "
+			"root, game, exists, ok (the boot table's three archives there and mounting, and no build of a "
+			"project's), files, executable, expansions [{name, title}], missing_archives, build and words; "
+			"refused, why the last new_project or open_project was refused (\"\" since one started or went "
+			"through), and editor_install, the editor's own game install (a new project's)." },
 	{ S::Requirements, "requirements", concern_set({ C::Files, C::Run }), requirements_section,
 			"The required files: total, missing, wrong_kind, and every row with its role, name, "
 			"state and expected kind (boot_missing where the last game reported it missing)." },
@@ -539,6 +549,8 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 		need.set("words", json_string(import_need_text(row.needed_by)));
 		entry.set("needed_by", std::move(need));
 	}
+	// Every planned file that names it, where more than the first does.
+	if (row.wanted_by.size() > 1) entry.set("wanted_by", strings_to_json(row.wanted_by));
 	if (!found)
 		return entry;
 	entry.set("source", source_to_json(row.source));
@@ -844,6 +856,7 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, 
 		line.set("kind", json_string(asset_kind_token(group.kind)));
 		line.set("files", json_number(double(group.files)));
 		line.set("bytes", json_number(double(group.bytes)));
+		if (!group.also.empty()) line.set("also", json_number(double(group.also.size())));
 		groups.push(std::move(line));
 	}
 	out.set("groups", std::move(groups));

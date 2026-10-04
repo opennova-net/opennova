@@ -79,10 +79,17 @@ struct ProjectView {
 		std::string builds_on;
 	};
 	std::vector<RecentProject> recent_details;
-	// The last game install checked (the CheckInstall request; the editor's last chosen as the session
-	// starts): what the New project form and the project settings show under an install's field.
+	// The last game install checked (the CheckInstall request, New project's check): what the New
+	// project form and the project settings show under an install's field, each keeping its own answer.
 	InstallCheck install_check;
+	// Why the last New project or Open was refused, in the request's own words ("" since one started, or
+	// when it went through): the welcome page says it under its form, Output and Problems standing aside
+	// while no project is open.
+	std::string refused;
+	// The game install in effect (the open project's: its local.json's, or the session's own over it; else
+	// the editor's) and the editor's own (the one a new project starts with, its preference).
 	std::string retail_directory;
+	std::string editor_install;
 	bool play_retail = false;
 	std::string runtime_setting;
 	bool import_dependencies = true;

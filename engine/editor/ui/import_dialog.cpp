@@ -301,15 +301,22 @@ void ImportDialog::group(const DialogsView::ImportPreview &preview) {
 	open_.assign(groups_.size(), false);
 	for (size_t g = 0; g < groups_.size(); ++g)
 		open_[g] = groups_[g].chosen() ? chosen <= 8 : groups_[g].files <= 12 || groups_.size() == 1;
-	// Each group's rows and those of the groups in it, together, depth first.
+	// Each group's rows (those it lists for the file above it too) and those of the groups in it, together,
+	// depth first.
 	order_.clear();
 	spans_.assign(groups_.size(), {0, 0});
 	const auto walk = [this](auto &&self, size_t g) -> void {
 		spans_[g].first = order_.size();
 		order_.insert(order_.end(), groups_[g].rows.begin(), groups_[g].rows.end());
+		order_.insert(order_.end(), groups_[g].also.begin(), groups_[g].also.end());
 		for (const size_t child : groups_[g].children) self(self, child);
 		spans_[g].second = order_.size();
 	};
+	// Each planned file's row by its name: whom a row's other wanting files are.
+	row_of_.clear();
+	for (size_t i = 0; i < preview.plan->rows.size(); ++i)
+		if (preview.plan->rows[i].state != State::NotFound)
+			row_of_.emplace(normalized_logical_name(preview.plan->rows[i].name), i);
 	for (size_t g = 0; g < groups_.size(); ++g)
 		if (groups_[g].parent == Group::kNone) walk(walk, g);
 	// The chosen files that bring others, by row: their arrows.
@@ -334,8 +341,26 @@ void ImportDialog::lay_out(size_t g) {
 	else lines_.push_back({true, g, group.depth});
 	if (!open_[g]) return;
 	for (const size_t child : group.children) lay_out(child);
-	if (!group.chosen())
-		for (const size_t row : group.rows) lines_.push_back({false, row, group.depth + 1});
+	if (group.chosen()) return;
+	for (const size_t row : group.rows) lines_.push_back({false, row, group.depth + 1});
+	for (const size_t row : group.also) lines_.push_back({false, row, group.depth + 1, true});
+}
+
+// Whether another checked file wants the row's file, one neither of the branch (`excluded`: its rows) nor of
+// the files above it (whose want of it is what leaving the branch out declines): it stays checked then.
+bool ImportDialog::needed_outside(const ImportPlan &plan, size_t row, const std::set<size_t> &excluded) const {
+	for (const std::string &file : plan.rows[row].wanted_by) {
+		const auto other = row_of_.find(normalized_logical_name(file));
+		if (other != row_of_.end() && !excluded.count(other->second) && other->second < checked_.size() && checked_[other->second])
+			return true;
+	}
+	return false;
+}
+
+// Whether a check of many rows at once (a kind's line, Check shown) takes the row: one the project can take,
+// and not a file the project has unless Replace existing files is on (each of those only by its own check).
+bool ImportDialog::takes_together(const ImportPlan &plan, size_t row) const {
+	return why_not_[row].empty() && (!plan.rows[row].held || replace_existing_);
 }
 
 // A listing's files to choose from, each with its kind and size, with a filter over the names (a
@@ -469,13 +494,15 @@ void ImportDialog::choose(Workspace &workspace, const DialogsView::ImportPreview
 
 // One row of the plan: its check (the files one converter source makes together), its name (indented
 // to its depth in the tree; a chosen file that brings others with the arrow that opens them), kind,
-// size, what wanted it and where it comes from.
-void ImportDialog::draw_row(const ImportPlan &plan, size_t index, size_t depth, bool tree) {
+// size, what wanted it and where it comes from. `also`: the row listed under another file that names it
+// too (its line there an id of its own, the same check).
+void ImportDialog::draw_row(const ImportPlan &plan, size_t index, size_t depth, bool tree, bool also) {
 	const ImportPlanRow &row = plan.rows[index];
 	// A dependency the project cannot take stays unchecked; a chosen one can only be
 	// unchecked (Import waits while it is checked).
 	const std::string &why_not = why_not_[index];
 	const bool can = why_not.empty() || (row.state == State::Selected && checked_[index]);
+	if (also) ImGui::PushID("also");
 	ImGui::PushID(static_cast<int>(index));
 	ImGui::TableNextRow();
 	ImGui::TableNextColumn();
@@ -513,9 +540,15 @@ void ImportDialog::draw_row(const ImportPlan &plan, size_t index, size_t depth, 
 	ImGui::TableNextColumn();
 	ui_kit::clipped_text(ui_kit::size_text(row.size), grouped(size_t(row.size)) + " bytes as stored");
 	ImGui::TableNextColumn();
-	if (row.state == State::Found) {
+	if (also) {
+		const std::string words = "named here too; it comes with " + row.needed_by.file;
+		ui_kit::clipped_text(words, "Listed under " + row.needed_by.file + ", which names it first: " +
+		                                    import_need_text(row.needed_by) + ". Every file that names it: " +
+		                                    joined(row.wanted_by) + ".");
+	} else if (row.state == State::Found) {
 		const std::string need = import_need_text(row.needed_by);
-		ui_kit::clipped_text(need, need + " names " + row.needed_by.name);
+		const std::string others = row.wanted_by.size() > 1 ? "\nNamed by " + joined(row.wanted_by) + " too." : std::string();
+		ui_kit::clipped_text(need, need + " names " + row.needed_by.name + others);
 	} else if (row.held) {
 		const auto [words, tip] = held_words(row);
 		ui_kit::clipped_text(words, tip);
@@ -528,16 +561,26 @@ void ImportDialog::draw_row(const ImportPlan &plan, size_t index, size_t depth, 
 	ImGui::TableNextColumn();
 	ui_kit::clipped_text(origin_words(row, true), origin_words(row, false));
 	ImGui::PopID();
+	if (also) ImGui::PopID();
 }
 
-// A kind's group: one check for every file in it and under it (the files the project cannot take left
-// as they are), the arrow that opens it, its kind and count, its size, and what names its files.
+// A kind's group: one check for every file in it and under it, the arrow that opens it, its kind and count,
+// its size, and what names its files. Its check takes the files the project can take, never one the
+// project has unless Replace existing files is on (each of those by its own check: the project's copy may
+// hold the modder's edits), and leaves out every file of it, a blocked chosen one too, but one another
+// checked file outside it names, which stays checked.
 void ImportDialog::draw_group(const ImportPlan &plan, size_t g) {
 	const Group &group = groups_[g];
-	size_t on = 0, can = 0;
-	for (size_t k = spans_[g].first; k < spans_[g].second; ++k) {
-		const size_t i = order_[k];
-		if (!why_not_[i].empty()) continue;
+	const std::set<size_t> span(order_.begin() + std::ptrdiff_t(spans_[g].first), order_.begin() + std::ptrdiff_t(spans_[g].second));
+	// The branch's rows and those of the lines above it: a want of theirs keeps nothing of it.
+	std::set<size_t> excluded = span;
+	for (size_t up = group.parent; up != Group::kNone; up = groups_[up].parent)
+		excluded.insert(groups_[up].rows.begin(), groups_[up].rows.end());
+	size_t on = 0, can = 0, held = 0, kept = 0;
+	for (const size_t i : span) {
+		if (plan.rows[i].held && !replace_existing_) ++held;
+		if (checked_[i] && needed_outside(plan, i, excluded)) ++kept;
+		if (!takes_together(plan, i)) continue;
 		++can;
 		on += checked_[i] ? 1 : 0;
 	}
@@ -546,24 +589,44 @@ void ImportDialog::draw_group(const ImportPlan &plan, size_t g) {
 	ImGui::TableNextColumn();
 	const bool mixed = on > 0 && on < can;
 	bool all = can > 0 && on == can;
-	ImGui::BeginDisabled(can == 0);
+	ImGui::BeginDisabled(can == 0 && on == 0);
 	if (mixed) ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
-	if (ImGui::Checkbox("##group", &all))
-		for (size_t k = spans_[g].first; k < spans_[g].second; ++k)
-			if (why_not_[order_[k]].empty()) checked_[order_[k]] = all;
+	if (ImGui::Checkbox("##group", &all)) {
+		if (all) {
+			for (const size_t i : span)
+				if (takes_together(plan, i)) checked_[i] = true;
+		} else {
+			// Decided over the checks as they stand, then applied: a file this uncheck leaves out never keeps
+			// another of the same branch.
+			std::vector<size_t> out;
+			for (const size_t i : span)
+				if (!needed_outside(plan, i, excluded)) out.push_back(i);
+			for (const size_t i : out) checked_[i] = false;
+		}
+	}
 	if (mixed) ImGui::PopItemFlag();
 	ImGui::EndDisabled();
-	ui_kit::tooltip(can == 0 ? std::string("The project can take none of these files.")
-	                         : "Check or uncheck every file of this group at once (" + counted(can, "file") + ").");
+	std::string tip = can == 0 ? std::string("The project can take none of these files at once.")
+	                           : "Check or uncheck every file of this group at once (" + counted(can, "file") + ").";
+	if (held)
+		tip += "\n" + counted(held, "file") + " the project has already " + (held == 1 ? "is" : "are") +
+		       " kept: check each to write over it, or Replace existing files.";
+	if (kept)
+		tip += "\n" + counted(kept, "file") + (kept == 1 ? " stays" : " stay") + " checked on an uncheck: other checked "
+		       "files name " + (kept == 1 ? "it." : "them.");
+	ui_kit::tooltip(tip);
 	ImGui::TableNextColumn();
 	const bool open = open_[g];
 	if (tree_lead(group.depth, &open)) {
 		open_[g] = !open;
 		laid_out_ = false;
 	}
-	// Its own files, and with those under it where they bring more ("Sound bank (1 file, 50 in all)").
-	ui_kit::clipped_text(std::string(asset_kind_label(group.kind)) + " (" + counted(group.rows.size(), "file") +
-	                     (group.files > group.rows.size() ? ", " + grouped(group.files) + " in all" : std::string()) + ")");
+	// Its own files, and with those under it where they bring more ("Sound bank (1 file, 50 in all)"); those
+	// another file brings first, listed here too.
+	std::string label = std::string(asset_kind_label(group.kind)) + " (" + counted(group.rows.size(), "file");
+	if (group.files > group.rows.size()) label += ", " + grouped(group.files) + " in all";
+	if (!group.also.empty()) label += ", " + grouped(group.also.size()) + " more another file brings";
+	ui_kit::clipped_text(label + ")");
 	ImGui::TableNextColumn();
 	ImGui::TableNextColumn();
 	ui_kit::clipped_text(ui_kit::size_text(group.bytes), grouped(size_t(group.bytes)) + " bytes as stored");
@@ -642,18 +705,29 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	controls.next(filter_width);
 	ui_kit::filter_box("##rows_filter", rows_filter_, sizeof(rows_filter_), "Filter the rows", filter_width, nullptr,
 	                   preview.choices.empty());
-	if (ui_kit::tool(controls, "Check shown", !rows.empty(), "Take every row the table shows that the project can take.")) {
-		for (const size_t i : rows)
-			if (why_not_[i].empty()) checked_[i] = true;
+	// The rows the table shows: those the filter or the kind lists, or in the tree those of its open lines
+	// (a closed group's rows are not shown, so these buttons leave them as they are).
+	if (!narrowed && !laid_out_) lay_out();
+	std::vector<size_t> shown_rows;
+	if (narrowed) {
+		shown_rows = rows;
+	} else {
+		for (const Line &line : lines_)
+			if (!line.group) shown_rows.push_back(line.index);
 	}
-	if (ui_kit::tool(controls, "Uncheck shown", !rows.empty(), "Leave every row the table shows out.")) {
-		for (const size_t i : rows) checked_[i] = false;
+	if (ui_kit::tool(controls, "Check shown", !shown_rows.empty(),
+	                 "Take every row the table shows that the project can take (a file the project has only with "
+	                 "Replace existing files).")) {
+		for (const size_t i : shown_rows)
+			if (takes_together(plan, i)) checked_[i] = true;
+	}
+	if (ui_kit::tool(controls, "Uncheck shown", !shown_rows.empty(), "Leave every row the table shows out.")) {
+		for (const size_t i : shown_rows) checked_[i] = false;
 	}
 	if (rows.empty()) {
 		ui_kit::empty_state("No row matches.", "Clear the filter, or show every kind.");
 		return;
 	}
-	if (!narrowed && !laid_out_) lay_out();
 	// The table takes the height the notes under it leave.
 	const float line = ImGui::GetFrameHeightWithSpacing();
 	const float notes = static_cast<float>(note_lines(plan)) * ImGui::GetTextLineHeightWithSpacing();
@@ -676,12 +750,12 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	clipper.Begin(static_cast<int>(narrowed ? rows.size() : lines_.size()));
 	while (clipper.Step()) for (int at = clipper.DisplayStart; at < clipper.DisplayEnd; ++at) {
 		if (narrowed) {
-			draw_row(plan, rows[static_cast<size_t>(at)], 0, false);
+			draw_row(plan, rows[static_cast<size_t>(at)], 0, false, false);
 			continue;
 		}
 		const Line &shown_line = lines_[static_cast<size_t>(at)];
 		if (shown_line.group) draw_group(plan, shown_line.index);
-		else draw_row(plan, shown_line.index, shown_line.depth, true);
+		else draw_row(plan, shown_line.index, shown_line.depth, true, shown_line.also);
 	}
 	ImGui::EndTable();
 }

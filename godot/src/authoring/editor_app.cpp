@@ -17,12 +17,14 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <string>
 #include <vector>
 
 #include <runtime/devtools/imgui_pass.h>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/session/file_card.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
@@ -82,6 +84,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("start_mcp_endpoint", "port"), &EditorApp::start_mcp_endpoint);
 	ClassDB::bind_method(D_METHOD("get_mcp_port"), &EditorApp::get_mcp_port);
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
+	ClassDB::bind_method(D_METHOD("get_sound_state"), &EditorApp::get_sound_state);
+	ClassDB::bind_method(D_METHOD("get_sound_path"), &EditorApp::get_sound_path);
 	ClassDB::bind_method(D_METHOD("set_open_externally", "open"), &EditorApp::set_open_externally);
 	ClassDB::bind_method(D_METHOD("get_open_externally"), &EditorApp::get_open_externally);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "open_externally"), "set_open_externally", "get_open_externally");
@@ -335,6 +339,7 @@ void EditorApp::pump() {
 	}
 	session_->poll();
 	open_externally_events_();
+	pump_sound_();
 	// The devices follow their viewports: the Preview's targets given one, each taking what its
 	// viewport asks.
 	if (devices_) devices_->sync(session_->viewports(), session_->view());
@@ -444,7 +449,7 @@ void EditorApp::serve(const EditorRequest &p_request) {
 			play_sound_(p_request.path);
 			break;
 		case EditorRequestKind::StopSound:
-			if (sound_ != nullptr) sound_->stop();
+			stop_sound_();
 			break;
 		default:
 			break;
@@ -452,21 +457,58 @@ void EditorApp::serve(const EditorRequest &p_request) {
 }
 
 // A project's wave played once (Files' card, the UX round's project lane), decoded as the game decodes it
-// (WavLoader over lwf::wav_decode_pcm16), in place of the one playing; a name the project has no wave of, or
-// a wave that does not decode, plays nothing and says so on the status line.
+// (lwf::wav_decode_pcm16, boxed by WavLoader) on a worker, in place of the one playing; a name the project
+// has no wave of, a wave past the card's cap, or one that does not decode plays nothing and says so on the
+// status line.
 void EditorApp::play_sound_(const std::string &p_path) {
+	stop_sound_();
 	const opennova::editor::SessionView &view = session_->view();
 	const opennova::editor::AssetEntry *entry =
 			view.project.open && view.project.scan ? view.project.scan->named(p_path) : nullptr;
-	Ref<AudioStreamWAV> stream;
-	if (entry != nullptr && entry->kind == opennova::editor::AssetKind::Wave) {
-		const String file = opennova::to_gd(opennova::editor::join_path(view.project.root, entry->relative_path));
-		stream = WavLoader::from_bytes(FileAccess::get_file_as_bytes(file));
-	}
-	if (stream.is_null()) {
+	if (entry == nullptr || entry->kind != opennova::editor::AssetKind::Wave) {
 		post_device_notice_("No wave of the project plays as " + p_path + ".");
 		return;
 	}
+	if (entry->size_bytes > opennova::editor::kWaveCardBytes) {
+		post_device_notice_(entry->relative_path + " is too large to play here (" + std::to_string(entry->size_bytes >> 20) +
+		                    " MB).");
+		return;
+	}
+	const std::string file = opennova::editor::join_path(view.project.root, entry->relative_path);
+	sound_path_ = entry->relative_path;
+	sound_root_ = view.project.root;
+	sound_job_ = std::async(std::launch::async, [file]() {
+		SoundDecode out;
+		std::vector<uint8_t> bytes;
+		if (!opennova::editor::read_file_bytes(file, bytes, out.error)) return out;
+		out.decoded = opennova::lwf::wav_decode_pcm16(bytes.data(), bytes.size(), out.pcm, out.error);
+		return out;
+	});
+}
+
+void EditorApp::stop_sound_() {
+	// A decode in flight is let finish (its future's end waits for it, the cap bounding it) and dropped.
+	if (sound_job_.valid()) sound_job_ = std::future<SoundDecode>();
+	if (sound_ != nullptr) sound_->stop();
+	sound_path_.clear();
+	sound_root_.clear();
+}
+
+void EditorApp::pump_sound_() {
+	if (sound_path_.empty()) return;
+	const opennova::editor::SessionView &view = session_->view();
+	if (!view.project.open || view.project.root != sound_root_) {
+		stop_sound_();
+		return;
+	}
+	if (!sound_job_.valid() || sound_job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+	const SoundDecode decoded = sound_job_.get();
+	if (!decoded.decoded) {
+		post_device_notice_(sound_path_ + " does not play: " + decoded.error);
+		sound_path_.clear();
+		return;
+	}
+	const Ref<AudioStreamWAV> stream = WavLoader::from_pcm(decoded.pcm);
 	if (sound_ == nullptr) {
 		sound_ = memnew(AudioStreamPlayer);
 		sound_->set_name("EditorSound");
@@ -475,6 +517,15 @@ void EditorApp::play_sound_(const std::string &p_path) {
 	sound_->stop();
 	sound_->set_stream(stream);
 	sound_->play();
+}
+
+String EditorApp::get_sound_state() const {
+	if (sound_job_.valid()) return "decoding";
+	return !sound_path_.empty() && sound_ != nullptr && sound_->is_playing() ? "playing" : "idle";
+}
+
+String EditorApp::get_sound_path() const {
+	return get_sound_state() == "idle" ? String() : opennova::to_gd(sound_path_);
 }
 
 void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {

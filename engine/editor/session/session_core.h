@@ -175,14 +175,30 @@ public:
 	// CheckInstall: the folder `path` ("" the editor's last chosen) read as an install of the open
 	// project's game (check_install), the view's install_check.
 	void check_install(const std::string &path);
-	// The recent projects' details (ProjectView::recent_details), read again from their project files.
-	void read_recent_details();
+	// The recent projects' details (ProjectView::recent_details): those of a root the details hold kept, a
+	// root new to the list read from its project file, a root gone from it dropped (each project file read
+	// once, at start and as it joins the list, never on every save of the preferences); the open project's
+	// own from its document (`open`, as it closes: a title renamed in its settings).
+	void read_recent_details(const ProjectDocument *open = nullptr, const std::string &open_root = std::string());
 	// The documents open now (DocumentSet::open_with_selection) and the active one kept in the project's
 	// local settings when they changed (the UX round's project lane): as the project closes, as the editor
-	// quits. restore_workspace opens them again as an Open finishes, in their order, each at its record, the
-	// active one last; a file gone since, or one the editor no longer opens, passed over.
+	// quits. Only the workspace's fields are written, over local.json as it is on disk (a session's own
+	// install, open_project's `game_install`, is never written); nothing for a project whose project file
+	// is gone (its folder moved or removed while it was open: no `.opennova/` made at its old path), nor
+	// when the session keeps no workspace (a command line's, set_workspace_kept). restore_workspace opens
+	// them again as an Open finishes, in their order, each at its record, the active one last; a file gone
+	// since, or one the editor no longer opens, passed over.
 	void remember_workspace();
 	void restore_workspace();
+	// Whether an Open reopens the documents a project was left with and a close or a quit keeps them (the
+	// editor's; true by default): a command line's run sets it false, so its verbs neither load the
+	// documents local.json lists nor write them.
+	void set_workspace_kept(bool kept) { workspace_kept_ = kept; }
+	// Why the last New project or Open was refused, for the welcome page, which stands in for Output and
+	// Problems while no project is open (ProjectView::refused); cleared as either starts.
+	void refuse_project(const Diagnostic &why, const std::string &what);
+	// The editor's install and the one in effect shown (ProjectView::editor_install, retail_directory).
+	void show_installs();
 	// The project in `dir` read (its document, its local settings; `game_install` in place of the
 	// install they name, for the session alone, when given), then, the open one closed, opened as an
 	// operation (OpenOperation, S13 A3: the game install's names, the import pass unless `import_pass`
@@ -353,6 +369,10 @@ private:
 	Parts parts_;
 	ProjectPaths paths_;
 	LocalSettings local_;
+	// The install the open project was opened with for this session alone (open_project's `game_install`),
+	// in effect over local.json's and written nowhere; "" for none.
+	std::string run_install_;
+	bool workspace_kept_ = true; // set_workspace_kept
 	OperationSlot operations_;
 	PollBudget poll_budget_ = kDefaultPollBudget;
 	SessionView view_;

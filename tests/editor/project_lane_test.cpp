@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -193,20 +194,52 @@ int test_file_card() {
 	// Playing is the Shell's.
 	TEST_EXPECT(!session.handle(request::play_sound("tone.wav")) && !session.handle(request::stop_sound()));
 	TEST_EXPECT(request_kind_row(EditorRequestKind::PlaySound).served_by == ServedBy::Shell);
+	// The review's L5: a sound read before is taken as it is while its file stands, read again once it moved,
+	// and a wave past the card's cap is said to be too large, nothing read.
+	FileCard::Sound known = wave.sound;
+	known.rate = 12345;
+	TEST_EXPECT(file_card(v, "sounds/tone.wav", &known).sound.rate == 12345);
+	known.size += 1;
+	TEST_EXPECT(file_card(v, "sounds/tone.wav", &known).sound.rate == wave.sound.rate);
+	const std::string root = v.project.root;
+	{
+		std::ofstream large(opennova::io::os_path(root + "/sounds/huge.wav"), std::ios::binary);
+		large.seekp(std::streamoff(kWaveCardBytes) + 16);
+		large.put('\0');
+	}
+	// L3: the card says what the build says of a file it refuses or leaves out.
+	TEST_EXPECT(editor_test::write_text(root + "/saves/player.sav", "a save") &&
+	            editor_test::write_text(root + "/extra/mine.pff", "an archive"));
+	session.handle(request::rescan());
+	session.run_operations();
+	const FileCard huge = file_card(v, "huge.wav");
+	TEST_EXPECT(huge.found && huge.wave && !huge.sound.decoded && huge.sound.error.find("MB at most") != std::string::npos);
+	const FileCard save = file_card(v, "player.sav");
+	TEST_EXPECT(save.found && save.build.find("left out") != std::string::npos && save.build.find("beside the archives") == std::string::npos);
+	const FileCard archive = file_card(v, "mine.pff");
+	TEST_EXPECT(archive.found && archive.build.rfind("A build refuses it: ", 0) == 0);
 	return 0;
 }
 
-// A folder made to look like a game install: one boot archive holding `files` files, the game's program
-// beside it when `executable`.
-bool fake_install(const std::string &dir, size_t files, bool executable) {
+// An archive at `path` holding the 4-byte files `names`.
+bool write_archive(const std::string &path, const std::vector<std::string> &names) {
 	static const uint8_t bytes[] = {1, 2, 3, 4};
-	std::vector<std::string> names;
+	std::error_code ec;
+	std::filesystem::create_directories(opennova::io::os_path(path).parent_path(), ec);
 	std::vector<opennova::pff::PffWriteEntry> entries;
-	for (size_t i = 0; i < files; ++i) names.push_back("file" + std::to_string(i) + ".tga");
 	for (const std::string &name : names) entries.push_back({name.c_str(), bytes, sizeof(bytes), 0, 0, 0});
+	return opennova::pff::pff_write_archive(path.c_str(), opennova::pff::PFF_FORMAT_PFF3, entries.data(), entries.size()) ==
+	       opennova::pff::PFF_WRITE_OK;
+}
+
+// A folder made to look like a game install: the boot table's three archives, resource.pff holding `files`
+// files and the other two one each (so `files` + 2 in all), the game's program beside them when `executable`.
+bool fake_install(const std::string &dir, size_t files, bool executable) {
+	std::vector<std::string> names;
+	for (size_t i = 0; i < files; ++i) names.push_back("file" + std::to_string(i) + ".tga");
 	if (!editor_test::write_text(dir + "/readme.txt", "an install")) return false;
-	if (opennova::pff::pff_write_archive((dir + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries.data(),
-	                                     entries.size()) != opennova::pff::PFF_WRITE_OK)
+	if (!write_archive(dir + "/resource.pff", names) || !write_archive(dir + "/language.pff", {"lang.tga"}) ||
+	    !write_archive(dir + "/localres.pff", {"local.tga"}))
 		return false;
 	return !executable || editor_test::write_text(dir + "/Jointops.exe", "MZ");
 }
@@ -219,16 +252,37 @@ int test_install_check() {
 	const std::string install = dir.file("Joint Operations");
 	TEST_EXPECT(fake_install(install, 3, true));
 	const InstallCheck found = check_install(install, "jo");
-	TEST_EXPECT(found.exists && found.ok() && found.files == 3 && found.executable && found.expansions.empty());
+	TEST_EXPECT(found.exists && found.ok() && found.files == 5 && found.executable && found.expansions.empty());
 	TEST_EXPECT(found.root == absolute_install_path(install));
-	TEST_EXPECT(found.words().find(": 3 files.") != std::string::npos && found.words().find("Jointops.exe") == std::string::npos);
+	TEST_EXPECT(found.words().find(": 5 files.") != std::string::npos && found.words().find("Jointops.exe") == std::string::npos);
 	const std::string bare = dir.file("Bare");
 	TEST_EXPECT(fake_install(bare, 1, false));
-	TEST_EXPECT(check_install(bare, "jo").words().find("No Jointops.exe beside them") != std::string::npos);
+	TEST_EXPECT(check_install(bare, "jo").ok() && check_install(bare, "jo").words().find("No Jointops.exe beside them") != std::string::npos);
 	const std::string empty = dir.file("Empty");
 	TEST_EXPECT(editor_test::write_text(empty + "/notes.txt", "nothing of the game"));
 	const InstallCheck none = check_install(empty, "jo");
 	TEST_EXPECT(none.exists && !none.ok() && none.words().rfind("No game here", 0) == 0);
+	// The review's L11: a language pack alone is no install (the game boots on any one archive, the editor
+	// imports from the whole game); archives that do not open say so; a build the editor made is a project's.
+	const std::string pack = dir.file("Pack");
+	TEST_EXPECT(write_archive(pack + "/language.pff", {"words.tga"}));
+	const InstallCheck language = check_install(pack, "jo");
+	TEST_EXPECT(!language.ok() && language.mounts &&
+	            language.missing_archives == std::vector<std::string>({"localres.pff", "resource.pff"}) &&
+	            language.words() == "Not the whole game: no localres.pff or resource.pff here (a language pack, or an install in part).");
+	const std::string broken = dir.file("Broken");
+	TEST_EXPECT(editor_test::write_text(broken + "/resource.pff", "not an archive") &&
+	            editor_test::write_text(broken + "/language.pff", "not one either"));
+	const InstallCheck unopened = check_install(broken, "jo");
+	TEST_EXPECT(!unopened.ok() && unopened.archives_present &&
+	            unopened.words().rfind("The game's archives here do not open: language.pff and resource.pff are there", 0) == 0);
+	const std::string built = dir.file("Built");
+	TEST_EXPECT(fake_install(built, 1, false) && editor_test::write_text(built + "/build.json", "{}"));
+	TEST_EXPECT(!check_install(built, "jo").ok() && check_install(built, "jo").build &&
+	            check_install(built, "jo").words().rfind("This is a build the editor made", 0) == 0);
+	const std::string cached = dir.file("Mod/.opennova/build/play/abc");
+	TEST_EXPECT(fake_install(cached, 1, false));
+	TEST_EXPECT(!check_install(cached, "jo").ok() && check_install(cached, "jo").build);
 	TEST_EXPECT(!check_install(dir.file("Nowhere"), "jo").exists &&
 	            check_install(dir.file("Nowhere"), "jo").words().rfind("There is no folder", 0) == 0);
 	TEST_EXPECT(!check_install("", "jo").ok() && check_install("", "jo").words().rfind("No game install chosen", 0) == 0);
@@ -257,13 +311,23 @@ int test_new_project_install() {
 		TEST_EXPECT(!v.project.open && !std::filesystem::exists(opennova::io::os_path(dir.file("Refused"))));
 		TEST_EXPECT(v.project.install_check.root == absolute_install_path(empty) && !v.project.install_check.ok());
 		TEST_EXPECT(preferences.preferences().game_install.empty());
+		// The review's M3: why, where the welcome page shows it.
+		TEST_EXPECT(v.project.refused.rfind("The project could not be created: No game here", 0) == 0);
+		// The review's L2: a project refused after its install was checked leaves the editor's install as it was.
+		EditorRequest expansion = request::new_expansion_project(dir.file("Exp"), "Exp", "myexp", "jox99");
+		expansion.game_install = install;
+		session.handle(expansion);
+		session.run_operations();
+		TEST_EXPECT(!v.project.open && v.project.install_check.ok() && !v.project.refused.empty() &&
+		            preferences.preferences().game_install.empty());
 		// The install: the project opens on it, and the editor keeps it.
 		EditorRequest made = request::new_project(dir.file("Mod"), "My Mod");
 		made.game_install = install;
 		session.handle(made);
 		session.run_operations();
-		TEST_EXPECT(v.project.open && v.project.retail_directory == absolute_install_path(install));
-		TEST_EXPECT(preferences.preferences().game_install == absolute_install_path(install));
+		TEST_EXPECT(v.project.open && v.project.retail_directory == absolute_install_path(install) && v.project.refused.empty());
+		TEST_EXPECT(preferences.preferences().game_install == absolute_install_path(install) &&
+		            v.project.editor_install == absolute_install_path(install));
 		LocalSettings local;
 		Diagnostic finding;
 		TEST_EXPECT(load_local_settings(ProjectPaths::for_root(v.project.root), local, finding) &&
@@ -272,7 +336,7 @@ int test_new_project_install() {
 		session.handle(request::check_install(dir.file("Nowhere")));
 		TEST_EXPECT(!v.project.install_check.exists);
 		session.handle(request::check_install());
-		TEST_EXPECT(v.project.install_check.ok() && v.project.install_check.files == 2);
+		TEST_EXPECT(v.project.install_check.ok() && v.project.install_check.files == 4);
 		// A second project, then the first's folder emptied: the recent projects as the welcome page lists them.
 		EditorRequest other = request::new_project(dir.file("Other"), "Other Mod");
 		session.handle(other);
@@ -287,8 +351,79 @@ int test_new_project_install() {
 	ProjectSession again(platform, preferences);
 	const SessionView &v = again.view();
 	TEST_EXPECT(v.project.recent_details.size() == 2 && v.project.recent_details[0].found && !v.project.recent_details[1].found);
-	// The editor's install checked as the session starts: the welcome page says what it holds.
-	TEST_EXPECT(v.project.install_check.ok() && v.project.install_check.root == absolute_install_path(install));
+	// The review's L10: nothing mounted as the session starts; the welcome page's field asks for its check.
+	TEST_EXPECT(v.project.install_check.root.empty() && v.project.editor_install == absolute_install_path(install));
+	// The review's M3: an Open of a recent project that no longer reads drops it, saying so.
+	again.handle(request::open_project(dir.file("Mod")));
+	TEST_EXPECT(!v.project.open && v.project.recent_projects.size() == 1 &&
+	            v.project.refused.find("off the recent projects") != std::string::npos);
+	return 0;
+}
+
+// The review's M1: an Open with a session's own install (open_project's game_install) plays and imports
+// from it while it is open and never writes it: closing (with the documents moved, which writes the
+// workspace) and quitting leave local.json naming the project's own; Project settings' Apply of the
+// project's own install drops the session's. The review's L13: a project whose folder went while it was open
+// gets no `.opennova/` made at its old path as it closes. L15e: a session that keeps no workspace (the
+// command line's) reopens none and writes none.
+int test_session_install_and_workspace() {
+	editor_test::TempProjectDir dir("opennova_editor_session_install");
+	const std::string own = dir.file("JO");
+	const std::string other = dir.file("Other JO");
+	TEST_EXPECT(fake_install(own, 1, true) && fake_install(other, 1, true));
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	EditorRequest made = request::new_project(dir.file("Mod"), "Mod");
+	made.game_install = own;
+	session.handle(made);
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const std::string root = v.project.root;
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	session.handle(request::close_project());
+	EditorRequest opened = request::open_project(root);
+	opened.game_install = other;
+	session.handle(opened);
+	session.run_operations();
+	TEST_EXPECT(v.project.open && v.project.retail_directory == absolute_install_path(other));
+	const AssetEntry *strings = v.project.scan->find("gametext.bin");
+	TEST_EXPECT(strings != nullptr);
+	if (strings) session.handle(request::open_document(strings->relative_path));
+	session.handle(request::close_project());
+	LocalSettings local;
+	Diagnostic finding;
+	TEST_EXPECT(load_local_settings(paths, local, finding) && local.game_install == absolute_install_path(own) &&
+	            local.open_documents.size() == 1);
+	session.handle(opened);
+	session.run_operations();
+	session.handle(request::quit());
+	TEST_EXPECT(load_local_settings(paths, local, finding) && local.game_install == absolute_install_path(own));
+	// Apply of the project's own install in the settings: the session's dropped, nothing else written.
+	ProjectSettingsChange change;
+	change.game_install = own;
+	session.handle(request::apply_project_settings(change));
+	TEST_EXPECT(v.project.retail_directory == absolute_install_path(own));
+	// L15e: no workspace kept: the document local.json lists stays closed, and a close writes nothing.
+	session.handle(request::close_project());
+	session.set_workspace_kept(false);
+	session.handle(request::open_project(root));
+	session.run_operations();
+	TEST_EXPECT(v.project.open && v.documents.open.empty());
+	session.handle(request::close_project());
+	TEST_EXPECT(load_local_settings(paths, local, finding) && local.open_documents.size() == 1);
+	session.set_workspace_kept(true);
+	// L13: the folder gone while the project is open: nothing made at its old path as it closes.
+	session.handle(request::open_project(root));
+	session.run_operations();
+	TEST_EXPECT(v.project.open && !v.documents.open.empty());
+	if (strings) session.handle(request::close_document(v.documents.open.front()->path()));
+	std::error_code ec;
+	std::filesystem::remove_all(opennova::io::os_path(root), ec);
+	TEST_EXPECT(!ec);
+	session.handle(request::close_project());
+	TEST_EXPECT(!std::filesystem::exists(opennova::io::os_path(root)));
 	return 0;
 }
 
@@ -397,6 +532,56 @@ int test_import_plan_words() {
 	const std::vector<ImportPlanGroup> kinds = import_plan_groups(project.plan(many, false));
 	TEST_EXPECT(kinds.size() == 2 && kinds[0].kind == AssetKind::Texture && kinds[0].files == 22 &&
 	            kinds[0].root == ImportPlanGroup::kNone && kinds[1].kind == AssetKind::Font);
+	// The review's L7: a font two chosen menus name: wanted by both, planned under the first, listed under the
+	// second too (its `also`), counted once.
+	TEST_EXPECT(editor_test::write_text(art + "/b.mnu", screen("B", window("BUTTON", "GO", font("arial99")))));
+	const ImportPlan both = project.plan({{art + "/a.mnu", {}}, {art + "/b.mnu", {}}});
+	const ImportPlanRow *shared = row_named(both, "arial99.fnt");
+	TEST_EXPECT(shared && shared->wanted_by == std::vector<std::string>({"a.mnu", "b.mnu"}));
+	const size_t shared_row = shared ? size_t(shared - both.rows.data()) : SIZE_MAX;
+	const std::vector<ImportPlanGroup> shared_groups = import_plan_groups(both);
+	bool under_a = false, under_b = false;
+	for (const ImportPlanGroup &group : shared_groups) {
+		if (group.chosen() || group.parent == ImportPlanGroup::kNone) continue;
+		const std::string &above = both.rows[shared_groups[group.parent].root].name;
+		under_a = under_a || (above == "a.mnu" && std::find(group.rows.begin(), group.rows.end(), shared_row) != group.rows.end());
+		under_b = under_b || (above == "b.mnu" && std::find(group.also.begin(), group.also.end(), shared_row) != group.also.end());
+	}
+	TEST_EXPECT(under_a && under_b && shared_groups[0].files == 3);
+	return 0;
+}
+
+// The review's L6 and the 64-file cap: a chosen file the project has from an archive compared by its size
+// first, then its bytes; the first kHeldCompared held files compared, those past them unknown.
+int test_held_compare() {
+	using import_test::row_named;
+	import_test::Project project("opennova_editor_lane_held");
+	const std::string root = project.root();
+	const std::string archive = project.dir.file("mod/held.pff");
+	TEST_EXPECT(write_archive(archive, {"same.tga", "other.tga"}));
+	TEST_EXPECT(editor_test::write_bytes(root + "/textures/same.tga", {1, 2, 3, 4}) &&
+	            editor_test::write_bytes(root + "/textures/other.tga", {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
+	const std::string art = project.dir.file("art");
+	std::vector<ImportChoice> chosen{{archive, "same.tga"}, {archive, "other.tga"}};
+	for (size_t i = 0; i < kHeldCompared + 2; ++i) {
+		const std::string name = "h" + std::to_string(100 + i) + ".tga";
+		TEST_EXPECT(editor_test::write_text(art + "/" + name, "held") && editor_test::write_text(root + "/textures/" + name, "held"));
+		chosen.push_back({art + "/" + name, {}});
+	}
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	const ImportPlan plan = project.plan(chosen, false);
+	const ImportPlanRow *same = row_named(plan, "same.tga");
+	const ImportPlanRow *other = row_named(plan, "other.tga");
+	TEST_EXPECT(same && same->held && same->held_as == ImportPlanRow::Held::Same);
+	TEST_EXPECT(other && other->held && other->held_as == ImportPlanRow::Held::Differs);
+	size_t compared = 0, unknown = 0;
+	for (const ImportPlanRow &row : plan.rows) {
+		if (!row.held) continue;
+		if (row.held_as == ImportPlanRow::Held::Unknown) ++unknown;
+		else ++compared;
+	}
+	TEST_EXPECT(compared == kHeldCompared && unknown == 4);
 	return 0;
 }
 
@@ -411,7 +596,7 @@ int test_import_choices() {
 	std::vector<Diagnostic> findings;
 	std::vector<ImportChoiceFacts> facts;
 	const std::vector<ImportChoice> choices = list_retail_import_choices(install, document, findings, &facts);
-	TEST_EXPECT(choices.size() == 3 && facts.size() == 3 && findings.empty());
+	TEST_EXPECT(choices.size() == 5 && facts.size() == 5 && findings.empty());
 	for (const ImportChoiceFacts &fact : facts) TEST_EXPECT(fact.kind == AssetKind::Texture && fact.size == 4);
 	facts.clear();
 	const std::vector<ImportChoice> members = list_import_choices({install + "/resource.pff"}, findings, &facts);
@@ -428,7 +613,7 @@ int test_import_choices() {
 	session.run_operations();
 	const JsonValue preview = ask(session, "import_preview", JsonValue::make_object());
 	const JsonValue *listed = preview.get("choices");
-	TEST_EXPECT(listed && listed->array.size() == 3 && listed->array[0].get_string("kind", "") == "texture" &&
+	TEST_EXPECT(listed && listed->array.size() == 5 && listed->array[0].get_string("kind", "") == "texture" &&
 	            listed->array[0].get_number("size", 0) == 4);
 	TEST_EXPECT(preview.get("groups") && preview.get("groups")->is_array());
 	return 0;
@@ -489,8 +674,10 @@ int main() {
 	failed += test_file_card();
 	failed += test_install_check();
 	failed += test_new_project_install();
+	failed += test_session_install_and_workspace();
 	failed += test_reopen_as_left();
 	failed += test_import_plan_words();
+	failed += test_held_compare();
 	failed += test_import_choices();
 	failed += test_import_findings_kept();
 	if (failed == 0) std::printf("editor_project_lane: all tests passed\n");

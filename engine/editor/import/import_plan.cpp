@@ -492,6 +492,7 @@ private:
 		const auto taken = provided_.find(key(name));
 		if (taken != provided_.end()) {
 			if (row_out) *row_out = taken->second.row;
+			add_wanting(taken->second.row, need.file);
 			return true;
 		}
 		const ImportOrigin *install = install_ != own ? install_ : nullptr;
@@ -512,6 +513,7 @@ private:
 		row.size = from->size(spelling);
 		row.found_in = from->words(spelling);
 		row.needed_by = need;
+		if (!need.file.empty()) row.wanted_by.push_back(need.file);
 		place(row);
 		row.selected = row.problem.empty();
 		const size_t index = plan_.rows.size();
@@ -967,11 +969,13 @@ private:
 			if (graph_.resolve(edge.kind, candidate, edge.scope, nullptr, edge.loader_arg) == ReferenceStatus::Present) return;
 			mine = look(own, need);
 			theirs = look(install, need);
-			// A file the plan takes serves it: the places that have one too are that file's rivals.
+			// A file the plan takes serves it: the places that have one too are that file's rivals, and this
+			// file wants it too.
 			if (const Provided *taken = provided_for(need)) {
 				const size_t row = taken->row;
 				add_rival(row, own, mine);
 				add_rival(row, install, theirs);
+				add_wanting(row, file);
 				return;
 			}
 			if (!mine.empty() || !theirs.empty()) break;
@@ -1001,6 +1005,7 @@ private:
 		row.size = from->size(spelling);
 		row.found_in = from->words(spelling);
 		row.needed_by = need;
+		row.wanted_by.push_back(file);
 		place(row);
 		row.selected = row.problem.empty(); // one the project cannot take is listed, not taken
 		const size_t index = plan_.rows.size();
@@ -1102,9 +1107,18 @@ private:
 		return field.empty() ? record : record + ": " + field;
 	}
 
+	// A planned file names the row's file too (ImportPlanRow::wanted_by), once.
+	void add_wanting(size_t row, const std::string &file) {
+		ImportPlanRow &wanted_row = plan_.rows[row];
+		if (file.empty() || key(file) == key(wanted_row.name)) return;
+		for (const std::string &known : wanted_row.wanted_by)
+			if (known == file) return;
+		wanted_row.wanted_by.push_back(file);
+	}
+
 	// Whether the project's file `own` holds the bytes the chosen file of its name brings (`bytes` in
-	// hand, else read from `from` by `name`), for the first kHeldCompared held files: the sizes first,
-	// then the bytes.
+	// hand, else read from `from` by `name`), for the first kHeldCompared held files: the sizes first
+	// (kHeldReadBytes), then the bytes.
 	ImportPlanRow::Held compare_held(const AssetEntry &own, const std::vector<uint8_t> *bytes, const ImportOrigin *from,
 	                                 const std::string &name) {
 		using Held = ImportPlanRow::Held;
@@ -1112,7 +1126,13 @@ private:
 		++held_compared_;
 		std::vector<uint8_t> theirs;
 		if (!bytes) {
-			if (!from || !from->read(name, theirs)) return Held::Unknown;
+			if (!from) return Held::Unknown;
+			const uint64_t stored = from->size(name);
+			if (stored != own.size_bytes) {
+				if (from->kind() == ImportOrigin::Kind::Folder) return Held::Differs; // served as stored
+				if (stored > kHeldReadBytes) return Held::Unknown;
+			}
+			if (!from->read(name, theirs)) return Held::Unknown;
 			cost_ += theirs.size();
 			bytes = &theirs;
 		}

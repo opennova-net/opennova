@@ -1203,7 +1203,7 @@ void test_files_window() {
 	CHECK(window != nullptr, "the Files window");
 	if (!window) return;
 	const ImGuiID files = Ui::window_id("Files");
-	const ImGuiID table = item_id(files, {"files"});
+	const ImGuiID table = item_id(files, {"project_files"});
 	// (Files draws first; Document's tab, with its Reload, after.)
 	const auto files_text = [&ui]() {
 		const std::string text = logged_frame(ui);
@@ -1445,6 +1445,106 @@ bool same_line(const std::string &text, const char *first, const char *second) {
 // unchecked. The check box raises the setting's request. A listing's choices raise PlanImport
 // with the files chosen; a changed plan says so; a file with unsaved edits holds nothing, and
 // the unsaved prompt an Import raises takes the dialog's place until it is answered (S12).
+// The import dialog's group checks (the review of the project lane, M2, L7, L8, L9). A plan of 22 chosen
+// textures and none found goes by kind: its Texture line's check leaves out every file, the chosen one the
+// project cannot take too (L8), and takes back the files it can, never the one the project has already,
+// whose replace no one asked for (M2: Import sends no replace). A tree of two chosen menus naming one font:
+// the font listed under both, leaving out a.mnu's Font keeps it while b.mnu, checked, names it (L7); Uncheck
+// shown leaves the rows of a closed line as they are (L9).
+void test_import_dialog_groups() {
+	using State = ImportPlanRow::State;
+	const auto row = [](State state, const std::string &name, AssetKind kind) {
+		ImportPlanRow out;
+		out.state = state;
+		out.selected = true;
+		out.source = {"C:/art/" + name, "", false, state == State::Found};
+		out.name = name;
+		out.kind = kind;
+		out.destination = "textures/" + name;
+		out.found_in = "the folder C:/art";
+		return out;
+	};
+	{
+		SessionView v = seeded_view();
+		DialogsView::ImportPreview &preview = v.dialogs.import_preview;
+		preview.open = true;
+		ImportPlan plan;
+		for (int i = 0; i < 22; ++i) plan.rows.push_back(row(State::Selected, "t" + std::to_string(10 + i) + ".tga", AssetKind::Texture));
+		plan.rows[20].held = true;
+		plan.rows[20].selected = false;
+		plan.rows[20].held_as = ImportPlanRow::Held::Differs;
+		plan.rows[21].problem = "t31.tga cannot be stored.";
+		plan.rows[21].selected = false;
+		for (const ImportPlanRow &each : plan.rows) preview.roots.push_back(each.source);
+		preview.plan = std::make_shared<const ImportPlan>(std::move(plan));
+		Ui ui;
+		ui.windows.set_view(&v);
+		ui.frames(6);
+		ui.away();
+		ui.drain();
+		ImGui::SetWindowSize("Import files", ImVec2(1700.0f, 1000.0f));
+		ui.frames(2);
+		const ImGuiID textures = item_id(pushed(item_id(import_body_id(), {"import_plan"}), 22 + 0), {"##group"});
+		CHECK(logged_frame(ui).find("Texture (22 files)") != std::string::npos, "by kind: one Texture line");
+		ui.activate(textures);
+		ui.away();
+		CHECK(logged_frame(ui).find("Import 0 files") != std::string::npos,
+		      "the line's uncheck: every file left out, the chosen one the project cannot take too (L8)");
+		ui.activate(textures);
+		ui.away();
+		CHECK(logged_frame(ui).find("Import 20 files") != std::string::npos,
+		      "its check: the files the project can take, not the one it has already (M2)");
+		ui.activate(item_id(ImHashStr("Import files"), {"###import"}));
+		const std::vector<EditorRequest> requests = ui.drain();
+		const EditorRequest *import = only(requests, EditorRequestKind::ImportFiles);
+		CHECK(import && !import->replace && import->imports.size() == 20, "Import: no replace asked, the held file not sent");
+	}
+	SessionView v = seeded_view();
+	DialogsView::ImportPreview &preview = v.dialogs.import_preview;
+	preview.open = true;
+	preview.with_dependencies = true;
+	ImportPlan plan;
+	plan.rows.push_back(row(State::Selected, "a.mnu", AssetKind::Menu));
+	plan.rows.push_back(row(State::Selected, "b.mnu", AssetKind::Menu));
+	ImportPlanRow font = row(State::Found, "shared.fnt", AssetKind::Font);
+	font.needed_by = {"a.mnu", "MAIN/TITLE", "font.name", ReferenceKind::Font, "shared", -1};
+	font.wanted_by = {"a.mnu", "b.mnu"};
+	plan.rows.push_back(font);
+	ImportPlanRow logo = row(State::Found, "logo.tga", AssetKind::Texture);
+	logo.needed_by = {"a.mnu", "MAIN/LOGO/Appearance 1", "value", ReferenceKind::MenuTexture, "logo.tga", -1};
+	logo.wanted_by = {"a.mnu"};
+	plan.rows.push_back(logo);
+	preview.roots = {plan.rows[0].source, plan.rows[1].source};
+	preview.plan = std::make_shared<const ImportPlan>(std::move(plan));
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	ui.drain();
+	ImGui::SetWindowSize("Import files", ImVec2(1700.0f, 1000.0f));
+	ui.frames(2);
+	std::string text = logged_frame(ui);
+	CHECK(in_order(text, {"a.mnu", "Font (1 file)", "shared.fnt", "Texture (1 file)", "logo.tga", "b.mnu",
+	                      "Font (0 files, 1 more another file brings)", "shared.fnt", "named here too; it comes with a.mnu"}),
+	      "the font b.mnu names too, under b.mnu as well (L7)");
+	const auto group_item = [](size_t group, const char *label) {
+		return item_id(pushed(item_id(import_body_id(), {"import_plan"}), int(4 + group)), {label});
+	};
+	ui.activate(group_item(2, "##group"));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 4 files") != std::string::npos, "a.mnu's Font left out: the font kept, b.mnu names it");
+	ui.activate(import_table_item("import_plan", 1, "##take"));
+	ui.activate(group_item(2, "##group"));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "b.mnu left out too: the font goes with the line");
+	// a.mnu's Texture line closed: Uncheck shown leaves its logo as it is (L9).
+	ui.activate(group_item(3, "##open"));
+	ui.away();
+	ui.activate(item_id(import_body_id(), {"Uncheck shown"}));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos, "Uncheck shown: the rows shown alone, the closed line's logo kept");
+}
+
 void test_import_dialog() {
 	SessionView v = seeded_view();
 	v.dialogs.import_preview = planned_import("C:/assets");
@@ -2950,6 +3050,7 @@ void run_workspace_tests() {
 	test_menu_bar_status();
 	test_files_window();
 	test_import_dialog();
+	test_import_dialog_groups();
 	test_import_dialog_problem_root();
 	test_import_dialog_held_rows();
 	test_preview_follows();

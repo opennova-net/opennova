@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <editor/assets/asset_kind.h>
@@ -49,6 +51,7 @@ private:
 		bool group = false;
 		size_t index = 0; // the row's, or the group's
 		size_t depth = 0;
+		bool also = false; // a row listed under another file that names it too (ImportPlanGroup::also)
 	};
 
 	void take(const DialogsView::ImportPreview &preview);
@@ -61,8 +64,10 @@ private:
 	void group(const DialogsView::ImportPreview &preview);
 	void lay_out();
 	void lay_out(size_t group);
-	void draw_row(const ImportPlan &plan, size_t index, size_t depth, bool tree);
+	void draw_row(const ImportPlan &plan, size_t index, size_t depth, bool tree, bool also);
 	void draw_group(const ImportPlan &plan, size_t group);
+	bool needed_outside(const ImportPlan &plan, size_t row, const std::set<size_t> &excluded) const;
+	bool takes_together(const ImportPlan &plan, size_t row) const;
 
 	ViewEventMailbox<> events_;
 	bool retake_ = true;        // a plan made since the checks were taken: they are taken again
@@ -86,6 +91,7 @@ private:
 	std::vector<size_t> order_;
 	std::vector<std::pair<size_t, size_t>> spans_;
 	std::vector<size_t> brings_; // per plan row: the group of a chosen file that brings others (kNone)
+	std::unordered_map<std::string, size_t> row_of_; // a planned file's row by its normalized name
 	std::vector<Line> lines_;
 	bool laid_out_ = false;
 };

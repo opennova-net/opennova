@@ -95,16 +95,23 @@ void test_preview_room() {
 	run.open(strings);
 	ui.frames(3);
 	CHECK(!preview_stands_aside(v) && preview_feeds_table(v), "a string table feeds the menu shown");
+	CHECK(preview->Active && document->Size.x >= kFeedTableRoomEm * ImGui::GetFontSize(),
+	      "at 1920 wide the table has its room: the live menu shown beside it (the review's L15d)");
+	// Narrower (the audit's 1600, the Document some 330 px), the table takes the centre.
+	ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 1080.0f);
+	ui.frames(4);
 	CHECK(!preview->Active && std::fabs(document->Size.x - centre()) < separators,
-	      "at 1920 wide the table lacks its room beside the Preview: it takes the centre");
+	      "at 1600 wide the table lacks its room beside the Preview: it takes the centre");
 	// Wider, the Preview keeps the width it had and the Document takes what grew (the centre's split).
 	ImGui::GetIO().DisplaySize = ImVec2(3600.0f, 1080.0f);
 	ui.frames(4);
 	CHECK(preview->Active && document->Size.x >= kFeedTableRoomEm * ImGui::GetFontSize(),
 	      "at 3600 wide it has the room: the menu shown beside the table");
-	ImGui::GetIO().DisplaySize = ImVec2(1920.0f, 1080.0f);
+	ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 1080.0f);
 	ui.frames(4);
 	CHECK(!preview->Active, "narrow again: the table first");
+	ImGui::GetIO().DisplaySize = ImVec2(1920.0f, 1080.0f);
+	ui.frames(4);
 	const DocumentBase *menu = session.document_base_for("main.mnu");
 	if (menu) session.handle(request::close_document(menu->path()));
 	run.open(strings);
@@ -192,8 +199,10 @@ void test_files_kind_and_card() {
 	Run run{ session, devices, ui };
 	run.settle();
 	std::string text = logged_frame(ui);
-	CHECK(text.find("Kind") != std::string::npos && text.find("Sound bank") != std::string::npos, "the Kind column shown");
 	const ImGuiID files = Ui::window_id("Files");
+	// The Kind column of Files' own table (its id of its own, so no layout saved with it hidden hides it).
+	const ImGuiTable *table = ImGui::TableFindByID(item_id(files, {"project_files"}));
+	CHECK(table && table->ColumnsCount == 3 && table->Columns[1].IsEnabled, "the Kind column shown");
 	ImGui::ActivateItemByID(item_id(files, {"##filter"}));
 	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
 	ui.frames(2);
@@ -226,25 +235,43 @@ void test_files_kind_and_card() {
 	              text.find("menu.lwf") == std::string::npos && text.find("1 of 4 files") != std::string::npos,
 	      "Wave: the waves alone");
 	ImGui::ClosePopupsExceptModals();
-	// The card.
+	// The card, Files closed (the review's L14: the card is drawn whether Files draws or not).
+	devtools::Window *files_window = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Files") == 0) files_window = &ui.windows.pass().window(i);
+	if (files_window) files_window->open = false;
+	ui.frames(2);
 	session.handle(request::about_file("tone.wav"));
 	run.settle();
 	text = logged_frame(ui);
 	CHECK(text.find("About tone.wav") != std::string::npos && text.find("Wave, ") != std::string::npos &&
 	              (text.find("Mono, ") != std::string::npos || text.find("Stereo, ") != std::string::npos) &&
 	              text.find("Packed into localres.pff.") != std::string::npos && text.find("Named by (1)") != std::string::npos,
-	      "the card: what it is, its sound, where it goes, who names it");
+	      "the card, Files closed: what it is, its sound, where it goes, who names it");
+	if (files_window) files_window->open = true;
 	const ImGuiID card = ImHashStr("###file_card");
 	ui.activate(item_id(card, {"Play##card"}));
 	const std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *play = only(raised, EditorRequestKind::PlaySound);
 	CHECK(play && play->path == "sounds/tone.wav", "Play: the Shell plays the wave");
+	// Closed, the card stops what its Play played (the review's L4).
+	ImGuiWindow *card_window = ImGui::FindWindowByName("###file_card");
+	if (card_window) ui.activate(card_window->GetID("#CLOSE"));
+	const std::vector<EditorRequest> closed = ui.drain();
+	CHECK(card_window && only(closed, EditorRequestKind::StopSound) != nullptr, "the card closed: the sound stopped");
 	// The bank's card: its waves named, the one the project has a Play of its own, the others missing.
 	session.handle(request::about_file("menu.lwf"));
 	run.settle();
 	text = logged_frame(ui);
 	CHECK(text.find("About menu.lwf") != std::string::npos && text.find("missing from the project") != std::string::npos,
 	      "a sound bank's card lists its waves");
+	// Another project: its own Files (no filter, no kind narrowing it), the card of the last one closed (the
+	// review's L15c).
+	session.handle(request::new_project(dir.file("other"), "Other"));
+	run.settle();
+	text = logged_frame(ui);
+	CHECK(text.find("About menu.lwf") == std::string::npos && text.find("Every kind") != std::string::npos,
+	      "another project: the card closed, every kind listed");
 }
 
 // The welcome page's install: the editor's last chosen in the field, checked (a CheckInstall raised once,
@@ -253,7 +280,10 @@ void test_files_kind_and_card() {
 // offers the game's files: the main menu with what it needs.
 void test_welcome_install_and_first_steps() {
 	SessionView v;
-	v.project.retail_directory = "C:/Games/JO";
+	// The editor's own install fills the form, never the one in effect (an open project's own, or a session's:
+	// the review's L2).
+	v.project.editor_install = "C:/Games/JO";
+	v.project.retail_directory = "C:/Session/Other";
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(4);
@@ -271,6 +301,37 @@ void test_welcome_install_and_first_steps() {
 	std::string text = logged_frame(ui);
 	CHECK(text.find(": 9,290 files, the expansion Escalation (jox01).") != std::string::npos, "what it holds");
 	CHECK(only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr, "asked once");
+	// The view's one slot taken by another field's check (Project settings'): this field keeps its own answer
+	// (the review's L12).
+	const InstallCheck answered = v.project.install_check;
+	v.project.install_check = InstallCheck();
+	v.project.install_check.root = absolute_install_path("C:/Elsewhere");
+	v.revisions.touch(ViewConcern::Preferences);
+	ui.frames(2);
+	CHECK(logged_frame(ui).find(": 9,290 files") != std::string::npos && only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr,
+	      "another field's check over the slot: this field's line as it was, nothing asked again");
+	v.project.install_check = answered;
+	// The field cleared: what a project made then takes, the editor's install (the review's L1).
+	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
+	ImGui::ActivateItemByID(item_id(welcome, {"Game install"}));
+	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
+	ui.frames(2);
+	ui.key(ImGuiMod_Ctrl, true);
+	ui.key(ImGuiKey_A, true);
+	ui.key(ImGuiKey_A, false);
+	ui.key(ImGuiMod_Ctrl, false);
+	ui.key(ImGuiKey_Backspace, true);
+	ui.key(ImGuiKey_Backspace, false);
+	ImGui::ClearActiveID();
+	ui.frames(2);
+	CHECK(logged_frame(ui).find("Left empty, the project takes the editor's game install, C:/Games/JO.") != std::string::npos,
+	      "the field cleared: the install a project takes then said");
+	// A refused New project or Open says why on the page (the review's M3).
+	v.project.refused = "The project could not be created: C:/mods/New holds a project already.";
+	v.revisions.touch(ViewConcern::Project);
+	ui.frames(2);
+	CHECK(logged_frame(ui).find("C:/mods/New holds a project already.") != std::string::npos, "the refusal said on the page");
+	v.project.refused.clear();
 	// A folder picked: checked; it holds no game: Create held back.
 	ui.windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
 	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Empty");
@@ -284,7 +345,6 @@ void test_welcome_install_and_first_steps() {
 	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("No game here") != std::string::npos, "no game here, said");
-	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
 	ui.activate(item_id(welcome, {"Create project"}));
 	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");
 	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Games/JO");
@@ -305,6 +365,12 @@ void test_welcome_install_and_first_steps() {
 	ui.drain();
 	text = logged_frame(ui);
 	CHECK(text.find("Bring in the game's files") != std::string::npos, "the first steps");
+	// The windows back from standing aside take no keyboard (the review's L15a).
+	const ImGuiWindow *focused = GImGui->NavWindow ? GImGui->NavWindow->RootWindow : nullptr;
+	const std::string focused_name = focused ? focused->Name : "";
+	CHECK(focused_name.rfind("Files", 0) != 0 && focused_name.rfind("Inspector", 0) != 0 &&
+	              focused_name.rfind("Problems", 0) != 0 && focused_name.rfind("Output", 0) != 0,
+	      "a project open over the welcome page: the windows coming back take no keyboard");
 	ui.activate(item_id(Ui::window_id("Document"), {"The main menu and what it needs..."}));
 	const std::vector<EditorRequest> planning = ui.drain();
 	const EditorRequest *menu = only(planning, EditorRequestKind::PreviewInstallImport);

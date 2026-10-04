@@ -19,8 +19,9 @@ struct SessionView;
 inline constexpr float kDocumentShare = 0.375f;
 // The width, in the font's ems, a table that feeds the Preview's picture needs beside it (a string
 // table's key, section and text columns; a stylesheet's name, value and Pick): less, and the table goes
-// first.
-inline constexpr float kFeedTableRoomEm = 40.0f;
+// first. 28 ems keeps the live menu beside its table in the default layout 1920 wide (the Document some
+// 390 px) and gives the table the centre at 1600 (some 330 px, the audit's cut keys).
+inline constexpr float kFeedTableRoomEm = 28.0f;
 
 // The Preview window (ADR 0046 S11d, S13 V5), beside Document: the viewport of the kind the view
 // says it shows (DocumentsView::preview_shown, viewport_kinds.h's preview_kind) over the document

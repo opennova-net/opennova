@@ -1,5 +1,6 @@
 #include <editor/import/import_plan_groups.h>
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <utility>
@@ -65,6 +66,21 @@ std::vector<ImportPlanGroup> import_plan_groups(const ImportPlan &plan) {
 			const size_t group = kind_group(parent, row.kind, parent == Group::kNone ? Group::kNone : groups[parent].root);
 			groups[group].rows.push_back(i);
 			group_of[i] = group;
+		}
+		// A file other planned files name too, listed under each one's group of its kind as well (once a
+		// group), after every row has its own place.
+		for (size_t i = 0; i < plan.rows.size(); ++i) {
+			const ImportPlanRow &row = plan.rows[i];
+			if (row.state != State::Found || row.wanted_by.size() < 2) continue;
+			for (size_t w = 1; w < row.wanted_by.size(); ++w) {
+				const auto other = by_name.find(normalized_logical_name(row.wanted_by[w]));
+				if (other == by_name.end() || group_of[other->second] == Group::kNone) continue;
+				const size_t parent = group_of[other->second];
+				const size_t group = kind_group(parent, row.kind, groups[parent].root);
+				if (group == group_of[i]) continue;
+				std::vector<size_t> &also = groups[group].also;
+				if (std::find(also.begin(), also.end(), i) == also.end()) also.push_back(i);
+			}
 		}
 	}
 	// The counts, the children first (each above its parent).

@@ -162,6 +162,10 @@ struct ImportPlanRow {
 	// whose lookup nothing planned meets (two references to one name can want different files:
 	// a diffuse row takes a .dds the plan brings, a plain row does not).
 	ImportNeed needed_by;
+	// Every planned file that names it, in the order the walk met them, needed_by's first (the UX
+	// round's project lane: a texture main.mnu and a model both name is under each in the dialog's tree,
+	// and leaving out one's branch keeps it while the other is taken); empty for a selected source.
+	std::vector<std::string> wanted_by;
 	// What the import takes: the selected sources (one with a problem is refused when the import
 	// runs; one the project holds is not, `held`), and each dependency found that the project can
 	// take (one with a problem is listed, not taken).
@@ -240,8 +244,12 @@ struct ImportPlan {
 // install, 8,700 files of JO's 9,290): the walk stops there and says so.
 inline constexpr size_t kImportPlanFileCap = 50000;
 // The held files a plan compares with the project's (ImportPlanRow::held_as): a few chosen again over
-// a project are compared, a whole install over one is not read twice.
+// a project are compared, a whole install over one is not read twice. The sizes first: a folder's file
+// of another size differs, nothing read; an archive's or the install's may be stored in the SCR or the
+// compressed form, so one of another size is read only up to kHeldReadBytes (a text), a larger one left
+// unknown.
 inline constexpr size_t kHeldCompared = 64;
+inline constexpr uint64_t kHeldReadBytes = uint64_t(4) << 20;
 
 // The plan made a step at a time (ADR 0046 S14; S13 A3's rule for every long job): the game
 // install mounted where the plan looks there (unless the caller mounted it), then the chosen

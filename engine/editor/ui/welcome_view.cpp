@@ -120,13 +120,42 @@ void draw_recent(Workspace &workspace) {
 
 } // namespace
 
-std::string install_check_words(const Workspace &workspace, const std::string &path, bool &ok) {
-	const InstallCheck &check = workspace.view().project.install_check;
+std::string InstallFieldCheck::words(Workspace &workspace, const std::string &path, bool typing, const std::string &fallback,
+                                     bool &ok) {
 	ok = false;
-	if (path.empty()) return "No game install chosen: the project can still take files from the disk.";
-	if (check.root.empty() || check.root != absolute_install_path(path)) return std::string();
-	ok = check.ok();
-	return check.words();
+	if (path.empty())
+		return fallback.empty() ? std::string("No game install chosen: the project can still take files from the disk.")
+		                        : "Left empty, the project takes the editor's game install, " + fallback + ".";
+	const std::string root = absolute_install_path(path);
+	const InstallCheck &slot = workspace.view().project.install_check;
+	// The slot's answer for this folder, kept: another field's check over the slot leaves it.
+	if (slot.root == root && (kept_.root != root || kept_.words() != slot.words())) kept_ = slot;
+	if (kept_.root == root) {
+		ok = kept_.ok();
+		return kept_.words();
+	}
+	if (typing || !workspace.view().allows(EditorRequestKind::CheckInstall)) return std::string();
+	// Asked once a folder; again (twice at most) when another folder's answer took the slot since it asked,
+	// before this field read its own.
+	const bool taken = asked_ == path && slot.root != slot_when_asked_ && slot.root != root && retries_ < 2;
+	if (asked_ != path || taken) {
+		retries_ = asked_ == path ? retries_ + 1 : 0;
+		asked_ = path;
+		slot_when_asked_ = slot.root;
+		workspace.request(request::check_install(path));
+	}
+	return std::string();
+}
+
+const InstallCheck *InstallFieldCheck::answer(const std::string &path) const {
+	return !path.empty() && kept_.root == absolute_install_path(path) ? &kept_ : nullptr;
+}
+
+void InstallFieldCheck::forget() {
+	asked_.clear();
+	slot_when_asked_.clear();
+	kept_ = InstallCheck();
+	retries_ = 0;
 }
 
 bool NewProjectForm::draw(Workspace &workspace) {
@@ -140,24 +169,20 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	ImGui::PushTextWrapPos(0.0f);
 	ImGui::TextDisabled("The folder is made if it does not exist; it must not hold a project already.");
 	ImGui::PopTextWrapPos();
-	// The install, the editor's last until the author names one; checked once it is not being typed.
-	if (!install_named_) copy_into(install_, v.project.retail_directory);
+	// The install, the editor's own until the author names one (never another project's: an open project's
+	// install may be its own, or a session's); checked once it is not being typed.
+	if (!install_named_) copy_into(install_, v.project.editor_install);
 	const PathField field = path_field("Game install", install_, sizeof(install_), "Browse...##install", allowed);
 	if (field.edited) install_named_ = true;
 	if (field.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectInstall));
 	ui_kit::tooltip("The game's folder: the project imports its files from it and plays in it. Kept with the project.");
-	if (!field.typing && install_[0] != '\0' && asked_ != install_ && v.allows(EditorRequestKind::CheckInstall)) {
-		asked_ = install_;
-		workspace.request(request::check_install(install_));
-	}
 	bool found = false;
-	const std::string words = install_check_words(workspace, install_, found);
+	const std::string words = check_.words(workspace, install_, field.typing, v.project.editor_install, found);
 	install_line(words.empty() ? std::string("Checking the folder...") : words, found, install_[0] != '\0' && !words.empty());
 	// What it builds on: the expansions of the install named, once it is checked.
-	const InstallCheck &check = v.project.install_check;
 	std::vector<ProjectView::InstallExpansion> installed;
-	if (found)
-		for (const InstallCheck::Expansion &each : check.expansions) installed.push_back({ each.name, each.title, std::string() });
+	if (const InstallCheck *check = found ? check_.answer(install_) : nullptr)
+		for (const InstallCheck::Expansion &each : check->expansions) installed.push_back({ each.name, each.title, std::string() });
 	const bool expansion_ok = expansion_.draw(install_[0] ? installed : v.project.new_project_expansions);
 	// A folder named that holds no install refuses the project (the session says why, as it checks the
 	// folder again); none at all is a project of the files from the disk; one not checked yet is the session's
@@ -208,6 +233,14 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 	ImGui::TextUnformatted("OpenNova Editor");
 	ImGui::SetWindowFontScale(1.0f);
 	ImGui::TextDisabled("A project is your mod's own files: import the game's, change them, build, and play.");
+	// Why the last New project or Open was refused, in its own words: Output and Problems stand aside while no
+	// project is open, so this is where it shows.
+	if (!v.project.refused.empty()) {
+		ImGui::Spacing();
+		ImGui::PushStyleColor(ImGuiCol_Text, kWrongColor);
+		ImGui::TextWrapped("%s", v.project.refused.c_str());
+		ImGui::PopStyleColor();
+	}
 	ImGui::PopTextWrapPos();
 	ImGui::Spacing();
 	const bool beside = width >= em * 56.0f;
@@ -230,7 +263,7 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 		ImGui::Spacing();
 		draw_recent(workspace);
 	}
-	if (!v.activity.status.empty()) {
+	if (!v.activity.status.empty() && v.activity.status != v.project.refused) {
 		ImGui::Spacing();
 		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
 		ImGui::TextWrapped("%s", v.activity.status.c_str());

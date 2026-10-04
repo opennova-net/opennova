@@ -71,7 +71,7 @@ void ProjectSettingsDialog::open(const SessionView &view) {
 	pick_ = PickPurpose::None;
 	waiting_ = false;
 	error_.clear();
-	asked_.clear();
+	check_.forget();
 }
 
 // Inside the modal: closes it, dropping what it waited for.
@@ -157,13 +157,8 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	}
 	ui_kit::tooltip(fields_.game_install);
 	// What the folder holds, checked once it is not being typed (the UX round's project lane).
-	if (!typing && fields_.game_install[0] != '\0' && asked_ != fields_.game_install &&
-	    v.allows(EditorRequestKind::CheckInstall)) {
-		asked_ = fields_.game_install;
-		workspace.request(request::check_install(fields_.game_install));
-	}
 	bool found = false;
-	const std::string words = install_check_words(workspace, fields_.game_install, found);
+	const std::string words = check_.words(workspace, fields_.game_install, typing, std::string(), found);
 	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
 	ImGui::PushStyleColor(ImGuiCol_Text, words.empty() || found ? ImVec4(0.55f, 0.85f, 0.55f, 1.0f) : ImVec4(0.95f, 0.55f, 0.45f, 1.0f));
 	ImGui::TextWrapped("%s", words.empty() ? "Checking the folder..." : words.c_str());
