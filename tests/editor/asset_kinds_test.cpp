@@ -183,12 +183,14 @@ static int test_boot_files() {
 	}
 	TEST_EXPECT(expected_asset_kind_for_required_name("CC.BIN") == AssetKind::CountryCode);
 	TEST_EXPECT(expected_asset_kind_for_required_name("fgn2.bin") == AssetKind::RawBin);
-	// The NovaWorld screens retail ships loose in its folder and reads from there, the error page
-	// [orig: "nw_error.mnx" @ 0x558449] and the login's start page (D-NET-31): a kind of their own,
-	// loose (S13 A8: no kind before, so no build carried them).
+	// The NovaWorld screens, the error page [orig: "nw_error.mnx" @ 0x558449] and the login's start
+	// page (D-NET-31): a kind of their own (S13 A8: no kind before, so no build carried them). Retail
+	// ships them loose in its folder, where the front door reads only under /d [orig: FileSystem_OpenFile
+	// @ 0x75b1c0; Game_InitSubsystems @ 0x4a6fac]: a build packs them with the menus (S16).
 	for (const char *name : {"nw_error.mnx", "nw_startup.mnx", "JOP_2_MAIN.MNX"}) {
 		const AssetKind kind = classify_asset(name, nullptr);
-		TEST_EXPECT(kind == AssetKind::NovaWorldScreen && asset_kind_row(kind).archive_slot == ArchiveSlot::Loose);
+		TEST_EXPECT(kind == AssetKind::NovaWorldScreen && asset_kind_row(kind).archive_slot == ArchiveSlot::Localres &&
+		            asset_kind_row(kind).expansion_loose == ExpansionLoose::None);
 	}
 	return 0;
 }

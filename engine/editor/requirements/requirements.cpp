@@ -4,6 +4,8 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/model/diagnostic.h>
 #include <editor/requirements/requirement_words.h>
+#include <editor/project/expansion_files.h>
+#include <editor/project/expansion_name.h>
 
 namespace opennova::editor {
 
@@ -29,24 +31,76 @@ const char *requirement_phase_label(int phase) {
 	}
 }
 
-RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetScan &scan) {
+namespace {
+
+// The project's files the game never reads for its expansion setting (ADR 0046 S16): a music bank but
+// the pair the game streams, and under an expansion the base game's music scripts.
+void unread_expansion_files(const ProjectDocument &doc, const AssetScan &scan, std::vector<Diagnostic> &out) {
+	const bool expansion = !doc.expansion.standalone();
+	const std::string menu = expansion ? expansion_file_name(expansion_file_row(ExpansionFileRole::MenuMusicBank), doc.expansion.name)
+	                                   : expansion_file_row(ExpansionFileRole::MenuMusicBank).replaces;
+	const std::string game = expansion ? expansion_file_name(expansion_file_row(ExpansionFileRole::GameMusicBank), doc.expansion.name)
+	                                   : expansion_file_row(ExpansionFileRole::GameMusicBank).replaces;
+	for (const AssetEntry &entry : scan.entries) {
+		std::string read_instead;
+		if (entry.kind == AssetKind::MusicBank && !strutil::iequals(entry.logical_name, menu) &&
+		    !strutil::iequals(entry.logical_name, game))
+			read_instead = "the game streams music from " + menu + " and " + game + " alone";
+		else if (expansion && entry.kind == AssetKind::MusicScript)
+			for (const ExpansionFileRole role : { ExpansionFileRole::MenuMusicScript, ExpansionFileRole::GameMusicScript }) {
+				const ExpansionFileRow &row = expansion_file_row(role);
+				if (strutil::iequals(entry.logical_name, row.replaces))
+					read_instead = "under /exp " + doc.expansion.name + " the game reads " +
+					               expansion_file_name(row, doc.expansion.name) + " in its place";
+			}
+		if (read_instead.empty()) continue;
+		out.push_back(make_finding(CoreFinding::ExpansionFileUnread, DiagnosticSeverity::Warning,
+		                           "The game never reads " + entry.logical_name + ": " + read_instead +
+		                                   ". Rename it to be read, or remove it.",
+		                           entry.relative_path));
+	}
+}
+
+} // namespace
+
+RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetScan &scan,
+                                        const std::vector<std::string> *install_expansions) {
 	RequirementReport report;
 	const int count = gameprofile_required_resource_count();
 	for (int i = 0; i < count; ++i) {
 		const RequiredResource *resource = gameprofile_required_resource_at(i);
-		// A pattern, a boot archive, or the player's own file (a save, a configuration: never a
-		// project's, ADR 0046 S14) is no row of the checklist.
-		if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) continue;
+		// An expansion's own file is a row of a project that builds as one, by the name its expansion
+		// forms (ADR 0046 S16, expansion_files.h); a project of the base game has none.
+		const ExpansionFileRow *expansion_file = nullptr;
+		if (resource->flags & RES_F_EXPANSION) {
+			if (doc.expansion.standalone()) continue;
+			expansion_file = expansion_file_row_for_manifest_role(resource->role);
+			if (!expansion_file) continue;
+		} else if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) {
+			// A pattern, a boot archive, or the player's own file (a save, a configuration: never a
+			// project's, ADR 0046 S14) is no row of the checklist.
+			continue;
+		} else if (!doc.expansion.standalone()) {
+			// A file the game reads in place of the base's under /exp (MENUMUS.SBF/.BIN, GAMEMUS.SBF/.BIN:
+			// M<n>.* and G<n>.* take their place [orig: Expansion_LoadAssets @ 0x4a4906..0x4a494a]) is no
+			// row of an expansion's checklist: the game never reads it there.
+			bool replaced = false;
+			for (size_t role = 0; role < kExpansionFileRoleCount; ++role) {
+				const ExpansionFileRow &own = expansion_file_row(static_cast<ExpansionFileRole>(role));
+				replaced = replaced || (own.replaces && strutil::iequals(own.replaces, resource->name));
+			}
+			if (replaced) continue;
+		}
 		if (!requirement_phase_enabled(doc, resource->phase)) continue;
 
 		RequirementRow row;
 		row.resource = resource;
 		row.role = resource->role;
-		row.name = resource->name;
+		row.name = expansion_file ? expansion_file_name(*expansion_file, doc.expansion.name) : resource->name;
 		row.phase = resource->phase;
 		row.severity = resource->severity;
 		row.required = resource->severity != RES_OPTIONAL;
-		row.expected_kind = expected_asset_kind_for_required_name(row.name);
+		row.expected_kind = expansion_file ? expansion_file->kind : expected_asset_kind_for_required_name(row.name);
 		if (const AssetEntry *asset = scan.find(row.name)) {
 			row.asset_path = asset->relative_path;
 			row.found_kind = asset->kind;
@@ -106,6 +160,11 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			break;
 		}
 	}
+	// The project's expansion (ADR 0046 S16): against the game install's, listed; and the files its
+	// setting leaves the game never reading.
+	if (install_expansions)
+		expansion_install_findings(doc.expansion, *install_expansions, DiagnosticSeverity::Warning, report.diagnostics);
+	unread_expansion_files(doc, scan, report.diagnostics);
 	return report;
 }
 
