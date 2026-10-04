@@ -41,6 +41,9 @@ RequirementRow missing_row(const char *role, const char *name, AssetKind kind) {
 	row.required = true;
 	row.expected_kind = kind;
 	row.state = RequirementState::Missing;
+	// The manifest row's failure class: whether the boot stops without it (the summary's first line).
+	if (const opennova::gameprofile::RequiredResource *manifest = opennova::gameprofile::gameprofile_required_resource_by_role(role))
+		row.severity = manifest->severity;
 	return row;
 }
 
@@ -151,8 +154,19 @@ int test_lines() {
 	TEST_EXPECT(ProblemsList::location_of(v.findings.diagnostics[2], true) ==
 	            "defs/items.def:12 - Marker - type");
 	TEST_EXPECT(ProblemsList::location_of(v.findings.diagnostics[0], false) == "gametext.bin");
-	TEST_EXPECT(ProblemsList::summary(*v.project.requirements) ==
-	            "The game cannot start: 2 required files are missing.");
+	// The summary from the gate: both rows stop the boot (the game exits without gametext.bin and
+	// dead-ends without main.mnu); a row the game starts without is said after them.
+	ProblemsList::Summary summary = ProblemsList::summary(*v.project.requirements);
+	TEST_EXPECT(summary.stops == "The game will not start: 2 required files are missing." && summary.more.empty());
+	editor_test::own(v.project.requirements).rows.push_back(missing_row("weapon_def", "weapon.def", AssetKind::WeaponDefs));
+	summary = ProblemsList::summary(*v.project.requirements);
+	TEST_EXPECT(summary.more == "1 more file the game reads is missing: part of it will not work.");
+	RequirementReport starts;
+	starts.rows = {missing_row("weapon_def", "weapon.def", AssetKind::WeaponDefs),
+	               missing_row("menu_style", "menu_style.mns", AssetKind::MenuStyle)};
+	summary = ProblemsList::summary(starts);
+	TEST_EXPECT(summary.stops.empty() &&
+	            summary.more == "The game starts, but 2 files it reads are missing: parts of it will not work.");
 	RequirementReport met;
 	TEST_EXPECT(ProblemsList::summary(met).empty());
 	return 0;
@@ -290,26 +304,30 @@ int test_folding() {
 	return 0;
 }
 
-// What the Fix alls say and raise: the required files' group one Create naming every role; the
-// summary's one Create for what factories make and one import list for what only the game data
-// has, each of one kind; a Use fix its rename; two missing textures' placeholders in one line;
+// What the Fix alls say and raise: the required files' group the game's own copy for what the game
+// data has (gametext.bin) and a placeholder for the rest (main.mnu); the summary's import list and
+// Create, each of one kind; a Use fix its rename; two missing textures' placeholders in one line;
 // no Rewrite for a file that does not serialize, and Only fixable lists what has a fix.
 int test_proposals() {
 	SessionView v = problems_view();
 	ProblemsList list;
 	list.refresh(v);
 	const ProblemsList::Proposal &required = list.group_fixes(0);
-	TEST_EXPECT(required.findings == 2 && required.requests.size() == 1 &&
+	// The placeholder made first, the import's preview last (an operation a request after it would find busy).
+	TEST_EXPECT(required.findings == 2 && required.requests.size() == 2 &&
 	            required.requests[0].kind == EditorRequestKind::CreateMissing &&
-	            required.requests[0].roles == Words({"gametext", "main_menu"}));
-	TEST_EXPECT(required.lines ==
-	            Words({"Create 2 files: gametext.bin, main.mnu. They start as placeholder "
-	                   "content, to replace with your own.",
-	                   "What this does to the files cannot be undone with Undo."}));
+	            required.requests[0].roles == Words({"main_menu"}) &&
+	            required.requests[1].kind == EditorRequestKind::PreviewInstallImport &&
+	            required.requests[1].names == Words({"gametext.bin"}));
+	TEST_EXPECT(required.lines.size() == 3 &&
+	            required.lines[0] == "Create main.mnu. It starts as placeholder content, to replace with your own." &&
+	            required.lines[1].rfind("Import gametext.bin from the game data", 0) == 0 &&
+	            required.lines[2] == "What this does to the files cannot be undone with Undo.");
 	// The catalog's and the menus' findings have no fix: no Fix all.
 	TEST_EXPECT(list.group_fixes(1).requests.empty() && list.group_fixes(2).requests.empty());
 
-	// The summary's Fix alls: a Create and an import list, each confirmed by kind.
+	// The summary's Fix alls: an import list of what the game data has (first: the game's own copies)
+	// and a Create of what it lacks, each confirmed by kind.
 	editor_test::own(v.project.requirements)
 			.rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
 	editor_test::own(v.project.requirements).required_missing = 3;
@@ -319,18 +337,19 @@ int test_proposals() {
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	const std::vector<EditorRequest> &summary = list.required_fixes().requests;
-	TEST_EXPECT(summary.size() == 2 && ProblemsList::fix_all_label(summary[0]) == "Create 2" &&
-	            ProblemsList::fix_all_label(summary[1]) == "Import 1 from the game data...");
-	TEST_EXPECT(ProblemsList::summary(*v.project.requirements) ==
-	            "The game cannot start: 3 required files are missing.");
+	// The placeholders first, the import's preview last (the window draws the import's button first).
+	TEST_EXPECT(summary.size() == 2 && ProblemsList::fix_all_label(summary[0]) == "Create 1 placeholder" &&
+	            ProblemsList::fix_all_label(summary[1]) == "Import 2 from the game data...");
+	const ProblemsList::Summary said = ProblemsList::summary(*v.project.requirements);
+	TEST_EXPECT(said.stops == "The game will not start: 2 required files are missing." &&
+	            said.more == "1 more file the game reads is missing: part of it will not work.");
 	const ProblemsList::Proposal create =
 	        list.propose(v, list.required_fix(v, EditorRequestKind::CreateMissing));
-	TEST_EXPECT(create.requests.size() == 1 &&
-	            create.requests[0].roles == Words({"gametext", "main_menu"}));
+	TEST_EXPECT(create.requests.size() == 1 && create.requests[0].roles == Words({"main_menu"}));
 	const ProblemsList::Proposal import =
 	        list.propose(v, list.required_fix(v, EditorRequestKind::PreviewInstallImport));
-	TEST_EXPECT(import.requests.size() == 1 && import.requests[0].names == Words({"cmap.mnu"}) &&
-	            import.lines.front().rfind("Import cmap.mnu from the game data", 0) == 0);
+	TEST_EXPECT(import.requests.size() == 1 && import.requests[0].names == Words({"gametext.bin", "cmap.mnu"}) &&
+	            import.lines.front().rfind("Import 2 files from the game data", 0) == 0);
 
 	// A Use fix: gametext.bin's, spare.bin renamed to it, asked first.
 	const std::vector<ProblemFix> &fixes = list.fixes(v, 0);
@@ -371,8 +390,8 @@ int test_proposals() {
 	            made.requests[1].path == "puff.tga");
 	// The same two in files that are the game's own data (ADR 0046 S15): their group, folded at first,
 	// offers no Fix all (it would change the original's files in bulk); each finding keeps its own fix.
-	textures.findings.original_files =
-	        std::make_shared<const std::set<std::string>>(std::set<std::string>{"models/tank.3di", "fx.ptl"});
+	const OriginalData held = editor_test::originals_of(textures.findings.diagnostics, {"models/tank.3di", "fx.ptl"});
+	textures.findings.originals = std::make_shared<const OriginalData>(held);
 	textures.revisions.touch(ViewConcern::Findings);
 	ProblemsList shipped;
 	const ProblemAnswer &apart = shipped.refresh(textures);
@@ -405,6 +424,7 @@ int test_proposals() {
 // version counts for nothing on its release while a key's does; its project closed, it closes.
 int test_confirmation() {
 	SessionView v = problems_view();
+	v.project.retail_files.clear(); // no game install: placeholders are the fix
 	ProblemsList list;
 	list.ask(v, list.fix_all_of(v, list.refresh(v).groups[0].rows));
 	const uint64_t asked = list.version();
