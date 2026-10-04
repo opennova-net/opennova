@@ -20,6 +20,11 @@ struct SessionView;
 struct ViewportBuildReport;
 struct ViewportDeviceReport;
 
+// Whether the viewport of `kind` over `path` draws the file Files selects (ADR 0046 S18: a kind that
+// previews files, ViewportKindRow::files, whose Preview target the selection is), its document open or
+// not: such a viewport is kept, read and changed while the file is selected.
+bool draws_selected_file(const SessionView &view, const std::string &path, ViewportKind kind);
+
 // The session's viewports (ADR 0046 S13 V5; CONTEXT.md "Viewport"): one per (document, kind), a
 // document owning several where kinds show it (a mission's 3D view and its map), kept while the
 // document is open; and the one preview clock they all read (CONTEXT.md "Preview clock"). The

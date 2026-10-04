@@ -399,6 +399,9 @@ static int test_expansion_staging() {
 	            fs::equivalent(run4 + "/language.pff", run3 + "/language.pff", ec));
 	TEST_EXPECT(editor_test::tree_digest(key) == cache_tree);
 	TEST_EXPECT(editor_test::write_text(install + "/intro.bik", "a new video"));
+	// Its last write a minute ahead: too recent to trust however long the runs below take (io_test pins the
+	// settle window's edge itself).
+	fs::last_write_time(opennova::io::os_path(install + "/intro.bik"), fs::file_time_type::clock::now() + std::chrono::minutes(1), ec);
 	const std::string run5 = dir.file("run/5"), run6 = dir.file("run/6");
 	fs::create_directories(run5);
 	fs::create_directories(run6);

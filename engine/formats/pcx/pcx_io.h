@@ -12,6 +12,11 @@ namespace opennova {
 bool decode_pcx_rgb(const uint8_t *data, size_t size, RgbImage &out, std::string &error);
 bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error);
 bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, std::string &error);
+// A 24-bit PCX (8 bits a plane, three planes): each row the red, green and blue planes of `width`
+// bytes each, run-length coded a plane at a time, no palette. The shape the game's 24-bit path reads
+// [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31; load_pcx_to_argb @ 0x664cc0's NPlanes == 3 path]: 3 x
+// BytesPerLine bytes a row, the planes `width` apart, so its bytes a line are its width exactly.
+bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::string &error);
 
 // The archive loader's alpha read: the game's 8-bit PCX reader
 // (Texture_LoadPCXFromPFF8Bit) then each pixel's palette-entry luminance
@@ -40,6 +45,20 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 // The header-sized buffer is allocated only when the file's data can describe it (32
 // pixels a byte after the 128-byte header, at most 2^28 pixels); a larger claim fails
 // the decode, as retail's failed allocation fails the load (code 2).
-bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error);
+//
+// `indexed`, where the caller asks it: what the 8-bit path (NPlanes other than 3) made the
+// image of, each texel's palette index as the rows wrote it (a row's padding landing on
+// the next row's start, as the colours do) and the palette, the last 768 bytes; the
+// models' reader decodes alike [orig: Texture_LoadPCXFromPFF32 @ 0x56EA30: the BPP check
+// returning 3, the palette from Seek(-768, 2), file size - 896 bytes of RLE data from
+// offset 128, each row to BytesPerLine], so a texel's colour is its index's entry,
+// opaque. An image the 24-bit path reads leaves it not indexed.
+struct PcxIndexed {
+	bool indexed = false;
+	std::vector<uint8_t> indices; // a texel's index, the top row first
+	uint8_t palette[256][3] = {};
+};
+bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error,
+                          PcxIndexed *indexed = nullptr);
 
 } // namespace opennova

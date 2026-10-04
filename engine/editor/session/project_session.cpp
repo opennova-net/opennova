@@ -9,6 +9,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
@@ -28,6 +29,13 @@
 #include <editor/session/unsaved_guard.h>
 
 namespace opennova::editor {
+
+namespace {
+
+// How many bytes of texture files a poll reads to make thumbnails (one thumbnail at least).
+constexpr size_t kThumbnailPollBytes = size_t(4) << 20;
+
+} // namespace
 
 // The session's parts, each holding the core and reaching the others through it (SessionCore::
 // Parts). Made in this order and destroyed in the reverse: the core outlives every part.
@@ -75,7 +83,7 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 
 bool ProjectSession::handle(const EditorRequest &request) {
 	++impl_->handle_entries;
-	const SessionCore::RequestScope scope(impl_->core);
+	const SessionCore::RequestScope scope(impl_->core, request_kind_row(request.kind).background);
 	// A gesture of the wire's open in the document the request is on ends first, unless the request is
 	// its next sample (S13 V7).
 	impl_->core.request_arrives(request);
@@ -212,6 +220,14 @@ void ProjectSession::poll() {
 	session.play.poll();
 	if (session.core.operations().done()) session.core.finish_operation();
 	session.core.save_recent_items();
+	// The texture thumbnails the windows asked for and the cache lacks (ADR 0046 S18), at least one a
+	// poll, then within what is left of the poll's milliseconds and until kThumbnailPollBytes of files are
+	// read: a list of hundreds of textures fills a few at a frame.
+	const SessionView &view = session.core.view();
+	if (view.project.open && view.documents.thumbnails) {
+		const std::function<int64_t()> clock = budget.ms > 0 ? std::function<int64_t()>(steady_clock_ms) : std::function<int64_t()>();
+		view.documents.thumbnails->step(view, kThumbnailPollBytes, clock, started + budget.ms);
+	}
 }
 
 void ProjectSession::set_poll_budget(const PollBudget &budget) {
