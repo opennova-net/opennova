@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import editor_mcp  # noqa: E402
 import game_mcp  # noqa: E402
 from game_mcp import BehindLaunch  # noqa: E402
 
@@ -258,6 +259,11 @@ class LaunchersTest(unittest.TestCase):
     def test_the_launch_takes_front(self):
         self.assertTrue(game_mcp.build_parser().parse_args(["launch", "--front"]).front)
         self.assertFalse(game_mcp.build_parser().parse_args(["launch"]).front)
+
+    def test_the_editor_launch_takes_front(self):
+        # editor_mcp's launch starts as game_mcp's does (ADR 0046 S17).
+        self.assertTrue(editor_mcp.build_parser().parse_args(["launch", "--front"]).front)
+        self.assertFalse(editor_mcp.build_parser().parse_args(["launch"]).front)
 
     def test_a_run_returns_its_command_exit_code(self):
         command = [sys.executable, "-c", "import sys; sys.exit(3)"]
