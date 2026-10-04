@@ -115,6 +115,9 @@ private:
 // the field, what kind of file it names and the name as the loader is handed it (a style
 // variable's value where one stands; its case matters to a model texture's rule), and what the
 // reference's loader picks the file by (GraphEdge::loader_arg: a model texture row's type).
+// `record_kind`: the kind of the record (GraphEdge::address). `words`: the record and the field as the
+// file's document type words them, once the plan is whole (the UX round's project lane), "" where the
+// record and the field say it already (the game's own needs).
 struct ImportNeed {
 	std::string file;
 	std::string record;
@@ -122,7 +125,15 @@ struct ImportNeed {
 	ReferenceKind reference = ReferenceKind::None;
 	std::string name;
 	int32_t loader_arg = -1;
+	NodeKind record_kind = 0;
+	std::string words;
 };
+
+// What wanted a file, in words (the import dialog's Needed by, the wire's needed_by.words): the file,
+// then the record by its kind's label and its names ("main.mnu, window STARTUP > MAIN: String table"),
+// as its document type words them; the record and the field as written where the type has no words
+// for them.
+std::string import_need_text(const ImportNeed &need);
 
 // Another place with a file for a reference the planned file serves, which the plan's order
 // passed over.
@@ -160,6 +171,11 @@ struct ImportPlanRow {
 	// asked to replace it (the row checked in the dialog, or Replace existing files: import_files'
 	// `replace`). Not selected.
 	bool held = false;
+	// For a held file, whether the project's holds the same bytes as the one chosen (the UX round's
+	// project lane: a Replace of a file the author edited loses the edits): compared for the first
+	// kHeldCompared held files, Unknown past them.
+	enum class Held : uint8_t { Unknown, Same, Differs };
+	Held held_as = Held::Unknown;
 	// Why the project cannot take the file as it is (check_project_file_name; a kind the game
 	// does not use; a second selected file of the name), "" when it can.
 	std::string problem;
@@ -223,6 +239,9 @@ struct ImportPlan {
 // A guard, not a limit a real import meets (ADR 0046 S14: a mission's closure is most of a game
 // install, 8,700 files of JO's 9,290): the walk stops there and says so.
 inline constexpr size_t kImportPlanFileCap = 50000;
+// The held files a plan compares with the project's (ImportPlanRow::held_as): a few chosen again over
+// a project are compared, a whole install over one is not read twice.
+inline constexpr size_t kHeldCompared = 64;
 
 // The plan made a step at a time (ADR 0046 S14; S13 A3's rule for every long job): the game
 // install mounted where the plan looks there (unless the caller mounted it), then the chosen

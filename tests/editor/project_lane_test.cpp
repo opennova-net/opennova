@@ -16,6 +16,11 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_check.h>
+#include <editor/import/import_plan.h>
+#include <editor/import/import_plan_groups.h>
+#include <editor/import/import_run.h>
+#include <editor/import/importer.h>
+#include <editor/import/sidecar.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
@@ -31,6 +36,8 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/import_test_support.h"
+#include "editor/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -338,6 +345,140 @@ int test_reopen_as_left() {
 	return 0;
 }
 
+// The import's plan as a modder reads it: what wanted a file in the words of the wanting file's type, a
+// chosen file the project has said to be the same or not, the rows by what they come for (the chosen menu
+// with the kinds of the files it brings under it), and a plan of many chosen files and none found by kind.
+int test_import_plan_words() {
+	using import_test::font;
+	using import_test::image;
+	using import_test::row_named;
+	using import_test::screen;
+	using import_test::window;
+	import_test::Project project("opennova_editor_lane_plan");
+	const std::string root = project.root();
+	const std::string art = project.dir.file("art");
+	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga")))));
+	TEST_EXPECT(editor_test::write_text(art + "/arial99.fnt", "fnt") && editor_test::write_text(art + "/LOGO.TGA", "tga"));
+	TEST_EXPECT(editor_test::write_text(root + "/fonts/same.fnt", "same") && editor_test::write_text(art + "/same.fnt", "same") &&
+	            editor_test::write_text(root + "/fonts/edited.fnt", "mine!!") &&
+	            editor_test::write_text(art + "/edited.fnt", "theirs"));
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	const ImportPlan plan = project.plan({{art + "/a.mnu", {}}, {art + "/same.fnt", {}}, {art + "/edited.fnt", {}}});
+	const ImportPlanRow *arial = row_named(plan, "arial99.fnt");
+	const ImportPlanRow *logo = row_named(plan, "LOGO.TGA");
+	TEST_EXPECT(arial && logo);
+	if (!arial || !logo) return 1;
+	// The window by its kind and its names, the field by its title, never a record path or a field's id.
+	const std::string words = import_need_text(arial->needed_by);
+	std::printf("needed by: %s; %s\n", words.c_str(), import_need_text(logo->needed_by).c_str());
+	TEST_EXPECT(words == "a.mnu, window A > GO: Font");
+	// A record whose own name says its kind is not said twice.
+	TEST_EXPECT(import_need_text(logo->needed_by) == "a.mnu, A > GO > Appearance 1: Image or colour");
+	const ImportPlanRow *same = row_named(plan, "same.fnt");
+	const ImportPlanRow *edited = row_named(plan, "edited.fnt");
+	TEST_EXPECT(same && same->held && same->held_as == ImportPlanRow::Held::Same);
+	TEST_EXPECT(edited && edited->held && edited->held_as == ImportPlanRow::Held::Differs);
+	// The rows by what they come for: the menu with its font and its texture under it, each chosen font apart.
+	const std::vector<ImportPlanGroup> groups = import_plan_groups(plan);
+	TEST_EXPECT(groups.size() == 5 && groups[0].chosen() && plan.rows[groups[0].root].name == "a.mnu" &&
+	            groups[0].children.size() == 2 && groups[0].files == 3);
+	for (const size_t child : groups.empty() ? std::vector<size_t>() : groups[0].children)
+		TEST_EXPECT(groups[child].depth == 1 && groups[child].parent == 0 && groups[child].rows.size() == 1 &&
+		            (groups[child].kind == AssetKind::Font || groups[child].kind == AssetKind::Texture));
+	// Many files chosen and none found: by kind, the largest first.
+	std::vector<ImportChoice> many;
+	for (int i = 0; i < 22; ++i) {
+		const std::string name = art + "/t" + std::to_string(10 + i) + ".tga";
+		TEST_EXPECT(editor_test::write_text(name, "texture bytes"));
+		many.push_back({name, {}});
+	}
+	many.push_back({art + "/arial99.fnt", {}});
+	const std::vector<ImportPlanGroup> kinds = import_plan_groups(project.plan(many, false));
+	TEST_EXPECT(kinds.size() == 2 && kinds[0].kind == AssetKind::Texture && kinds[0].files == 22 &&
+	            kinds[0].root == ImportPlanGroup::kNone && kinds[1].kind == AssetKind::Font);
+	return 0;
+}
+
+// The chooser's facts: a game install's files and an archive's members each with its kind by its name and its
+// size as stored; the import_preview query's choices carry them, and its rows their words and groups.
+int test_import_choices() {
+	editor_test::TempProjectDir dir("opennova_editor_lane_choices");
+	const std::string install = dir.file("JO");
+	TEST_EXPECT(fake_install(install, 3, true));
+	ProjectDocument document;
+	document.target_game = "jo";
+	std::vector<Diagnostic> findings;
+	std::vector<ImportChoiceFacts> facts;
+	const std::vector<ImportChoice> choices = list_retail_import_choices(install, document, findings, &facts);
+	TEST_EXPECT(choices.size() == 3 && facts.size() == 3 && findings.empty());
+	for (const ImportChoiceFacts &fact : facts) TEST_EXPECT(fact.kind == AssetKind::Texture && fact.size == 4);
+	facts.clear();
+	const std::vector<ImportChoice> members = list_import_choices({install + "/resource.pff"}, findings, &facts);
+	TEST_EXPECT(members.size() == 3 && facts.size() == 3 && facts[0].kind == AssetKind::Texture && facts[0].size == 4);
+	// Through the session: the game data listed to choose from, each with its kind and size.
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	EditorRequest made = request::new_project(dir.file("Mod"), "Mod");
+	made.game_install = install;
+	session.handle(made);
+	session.run_operations();
+	session.handle(request::preview_install_import());
+	session.run_operations();
+	const JsonValue preview = ask(session, "import_preview", JsonValue::make_object());
+	const JsonValue *listed = preview.get("choices");
+	TEST_EXPECT(listed && listed->array.size() == 3 && listed->array[0].get_string("kind", "") == "texture" &&
+	            listed->array[0].get_number("size", 0) == 4);
+	TEST_EXPECT(preview.get("groups") && preview.get("groups")->is_array());
+	return 0;
+}
+
+// What an import reported stays with the source while it is current (the UX round's project lane): a
+// project's PNG whose alpha a PCX drops says so on the pass that imports it and on every pass after (a
+// reopened project), and no more once its record keeps the alpha.
+int test_import_findings_kept() {
+	editor_test::TempProjectDir dir("opennova_editor_lane_findings");
+	const std::string root = dir.file("project");
+	ProjectDocument doc;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "Kept", "jo", doc, error));
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	editor_test::PngSpec spec;
+	spec.width = spec.height = 2;
+	for (uint32_t y = 0; y < 2; ++y) {
+		spec.rows.push_back(0);
+		for (uint32_t x = 0; x < 2; ++x)
+			for (const uint32_t channel : {x * 90, y * 120, 33u, 40u + x * 100}) spec.rows.push_back(uint8_t(channel));
+	}
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/glow.png", editor_test::make_png(spec)));
+	const Importer *importer = importer_for("glow.png");
+	TEST_EXPECT(importer != nullptr);
+	if (!importer) return 1;
+	ImportSidecar record;
+	record.importer = importer->id;
+	record.version = importer->version;
+	record.options["format"] = "pcx";
+	TEST_EXPECT(save_import_sidecar(root + "/art/glow.png.import", record, error));
+	const auto dropped = [](const ImportRunResult &run) {
+		size_t count = 0;
+		for (const Diagnostic &d : run.diagnostics) count += d.code() == "import.alpha_dropped" && d.asset == "art/glow.png" ? 1 : 0;
+		return count;
+	};
+	ImportRunResult run = run_imports(paths, doc);
+	TEST_EXPECT(run.reimported == 1 && dropped(run) == 1);
+	run = run_imports(paths, doc);
+	TEST_EXPECT(run.reimported == 0 && dropped(run) == 1);
+	TEST_EXPECT(load_import_sidecar(root + "/art/glow.png.import", record, error));
+	record.options["format"] = "tga";
+	TEST_EXPECT(save_import_sidecar(root + "/art/glow.png.import", record, error));
+	run = run_imports(paths, doc);
+	TEST_EXPECT(run.reimported == 1 && dropped(run) == 0);
+	run = run_imports(paths, doc);
+	TEST_EXPECT(run.reimported == 0 && dropped(run) == 0);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -349,6 +490,9 @@ int main() {
 	failed += test_install_check();
 	failed += test_new_project_install();
 	failed += test_reopen_as_left();
+	failed += test_import_plan_words();
+	failed += test_import_choices();
+	failed += test_import_findings_kept();
 	if (failed == 0) std::printf("editor_project_lane: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

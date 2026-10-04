@@ -1446,8 +1446,7 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		}
 		exported_ok = shipped->ok;
 		if (shipped->ok) {
-			note("Exported " + std::to_string(shipped->files.size()) + " file(s) to " +
-			     shown_path(shipped->export_dir, paths_.root));
+			note("Exported " + counted(shipped->files.size(), "file") + " to " + shown_path(shipped->export_dir, paths_.root));
 			view_.activity.status = "Exported.";
 		} else {
 			note("Export failed.");

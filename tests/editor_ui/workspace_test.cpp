@@ -39,6 +39,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/model/field_text.h>
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_canvas.h>
@@ -1457,13 +1458,15 @@ void test_import_dialog() {
 	ImGui::SetWindowSize("Import files", ImVec2(1700.0f, 1000.0f));
 	ui.frames(2);
 	std::string text = logged_frame(ui);
-	const std::string stopped = "The plan stopped at " + std::to_string(kImportPlanFileCap) + " files";
+	const std::string stopped = "The plan stopped at " + grouped(kImportPlanFileCap) + " files";
 	// S14: the plan in short first, its files and bytes, then each kind with its count and size, the
-	// largest first (alike: by token), each a toggle; then the rows, each with its size.
+	// largest first (alike: by token), each a toggle; then the rows, each with its size, by what they
+	// come for (the UX round's project lane): each chosen file, the kinds of the files it brings under it.
 	CHECK(in_order(text, {"Include the files these need (3 found)", "6 files, 0 B:", "Texture 2 (0 B)", "Animation 1 (0 B)",
 	                      "Animation map 1 (0 B)", "Font 1 (0 B)", "Menu 1 (0 B)", "Check shown", "Uncheck shown",
-	                      "menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "Font", "0 B",
-	                      "menu.mnu: MAIN/TITLE font.name", "the folder assets", "logo.tga", "a_long_texture_name.tga",
+	                      "menu.mnu", "chosen; it brings 3 files", "Font (1 file)", "what menu.mnu names", "arial99.fnt",
+	                      "Font", "0 B", "menu.mnu: MAIN/TITLE font.name", "the folder assets", "Texture (2 files)", "logo.tga",
+	                      "a_long_texture_name.tga", "CHECK.adm", "walk.bad",
 	                      "Not found (1)", "gone.tga", "menu.mnu: MAIN/KEEP/Appearance 1 value",
 	                      "arial99.fnt: found in both the folder C:/assets and the game install; using the folder C:/assets",
 	                      "The files these kinds name are not looked for yet: Terrain.",
@@ -1473,6 +1476,24 @@ void test_import_dialog() {
 	      "the plan: the summary, the rows, then what is not found, found twice, not followed, the cap, the finding");
 	CHECK(same_line(text, "menu.mnu", "chosen") && same_line(text, "CHECK.adm", "made from walk.o3a, the folder assets"),
 	      "a chosen file says so; a converter's output, what it is made from");
+	// A kind's line: one check for its files (the one the project cannot take left as it is), a click
+	// on its arrow closing it.
+	const ImGuiID textures = item_id(pushed(item_id(import_body_id(), {"import_plan"}), 7 + 4), {"##group"});
+	ui.activate(textures);
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 4 files") != std::string::npos, "the Texture line's check: its file left out");
+	ui.activate(textures);
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 5 files") != std::string::npos, "and back");
+	ui.activate(item_id(pushed(item_id(import_body_id(), {"import_plan"}), 7 + 4), {"##open"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Texture (2 files)", "CHECK.adm"}) && text.find("logo.tga") == std::string::npos,
+	      "the Texture line closed: its rows hidden");
+	ui.activate(item_id(pushed(item_id(import_body_id(), {"import_plan"}), 7 + 4), {"##open"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Texture (2 files)", "logo.tga", "CHECK.adm"}), "open again");
 	const ImGuiID dialog = ImHashStr("Import files");
 	// A kind's toggle shows its rows alone; Uncheck shown and Check shown take the shown rows
 	// together (one the project cannot take never); the toggle again shows every kind.
@@ -1491,7 +1512,7 @@ void test_import_dialog() {
 	ui.activate(item_id(import_body_id(), {"###kind_texture"}));
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "logo.tga"}), "the toggle again: every kind");
+	CHECK(in_order(text, {"menu.mnu", "arial99.fnt", "logo.tga", "CHECK.adm", "walk.bad"}), "the toggle again: every kind");
 	const auto sources = [](const EditorRequest &request) {
 		std::vector<std::string> out;
 		for (const ImportChoice &source : request.imports) out.push_back(source.path);
@@ -1529,13 +1550,28 @@ void test_import_dialog() {
 	// An archive's members to choose from: a choice checked plans the chosen files again.
 	v.dialogs.import_preview.choices = { { "C:/assets/data.pff", "main.mnu", false, false },
 		{ "C:/assets/data.pff", "stat.mnu", false, false } };
+	v.dialogs.import_preview.facts = { { AssetKind::Menu, 2048 }, { AssetKind::Menu, 512 } };
 	post_event(v, ViewEventKind::ImportPlanned);
 	ui.frames(3);
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"Choose the files to import from the archive data.pff:", "main.mnu", "stat.mnu",
-	                      "Include the files these need"}),
-	      "the list to choose from above the plan");
+	CHECK(in_order(text, {"Choose the files to import from the archive data.pff (2 files):", "2 files shown, 0 chosen", "File",
+	                      "Kind", "Size", "main.mnu", "Menu", "stat.mnu", "Include the files these need"}) &&
+	              text.find("Source") == std::string::npos,
+	      "the list to choose from above the plan, each file with its kind and size; no Source where every file "
+	      "comes from one place");
+	// The filter: a part of a name, or a kind's name.
+	type_into(ui, item_id(import_body_id(), {"##filter"}), "stat");
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("1 of 2 files shown") != std::string::npos && text.find("[ ] main.mnu") == std::string::npos &&
+	              text.find("[ ] stat.mnu") != std::string::npos,
+	      "a part of a name: the files holding it");
+	type_into(ui, item_id(import_body_id(), {"##filter"}), "menus");
+	ui.away();
+	CHECK(logged_frame(ui).find("2 files shown") != std::string::npos, "a kind's name: the files of the kind");
+	type_into(ui, item_id(import_body_id(), {"##filter"}), "");
+	ui.drain();
 	ui.activate(import_table_item("import_choices", 1, "###pick"));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::PlanImport) && requests[0].with_dependencies &&

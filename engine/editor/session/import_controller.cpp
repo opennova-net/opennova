@@ -62,17 +62,26 @@ void ImportController::preview_files(const EditorRequest &request) {
 	if (!view_.project.open) return;
 	std::vector<Diagnostic> diagnostics;
 	std::vector<ImportChoice> choices, roots;
-	// A loose file picked is chosen; an archive's members are listed to choose from.
-	for (ImportChoice &source : list_import_choices(request.paths, diagnostics))
-		(source.entry.empty() ? roots : choices).push_back(std::move(source));
+	std::vector<ImportChoiceFacts> listed, facts;
+	// A loose file picked is chosen; an archive's members are listed to choose from, with their facts.
+	std::vector<ImportChoice> sources = list_import_choices(request.paths, diagnostics, &listed);
+	for (size_t i = 0; i < sources.size(); ++i) {
+		if (sources[i].entry.empty()) {
+			roots.push_back(std::move(sources[i]));
+			continue;
+		}
+		choices.push_back(std::move(sources[i]));
+		facts.push_back(listed[i]);
+	}
 	for (const auto &d : diagnostics) core_.report(d);
-	preview(std::move(choices), std::move(roots), request.with_dependencies);
+	preview(std::move(choices), std::move(facts), std::move(roots), request.with_dependencies);
 }
 
 void ImportController::plan(const EditorRequest &request) {
 	if (!view_.project.open) return;
-	preview(view_.dialogs.import_preview.open ? view_.dialogs.import_preview.choices : std::vector<ImportChoice>(), request.imports,
-	        request.with_dependencies);
+	const DialogsView::ImportPreview &open = view_.dialogs.import_preview;
+	preview(open.open ? open.choices : std::vector<ImportChoice>(), open.open ? open.facts : std::vector<ImportChoiceFacts>(),
+	        request.imports, request.with_dependencies);
 }
 
 void ImportController::preview_install(const EditorRequest &request) {
@@ -84,12 +93,14 @@ void ImportController::preview_install(const EditorRequest &request) {
 		                        "Every file of the game install is chosen with no walk: \"all\" takes neither \"names\" nor "
 		                        "\"with_dependencies\".");
 	std::vector<Diagnostic> diagnostics;
-	std::vector<ImportChoice> sources = list_retail_import_choices(core_.game_install(), *view_.project.document, diagnostics);
+	std::vector<ImportChoiceFacts> facts;
+	std::vector<ImportChoice> sources =
+	        list_retail_import_choices(core_.game_install(), *view_.project.document, diagnostics, &facts);
 	// Everything: every file chosen, none to choose from, no walk (the closure of everything is
 	// everything: nothing a walk could find is not chosen already).
 	if (request.all) {
 		for (const auto &d : diagnostics) core_.report(d);
-		preview({}, std::move(sources), false, true);
+		preview({}, {}, std::move(sources), false, true);
 		return;
 	}
 	// With names (an Import fix): those files alone, chosen; a name the game data does
@@ -109,9 +120,12 @@ void ImportController::preview_install(const EditorRequest &request) {
 		}
 		named.push_back(sources[found->second]);
 	}
-	if (!request.names.empty()) sources.clear();
+	if (!request.names.empty()) {
+		sources.clear();
+		facts.clear();
+	}
 	for (const auto &d : diagnostics) core_.report(d);
-	preview(std::move(sources), std::move(named), request.with_dependencies);
+	preview(std::move(sources), std::move(facts), std::move(named), request.with_dependencies);
 }
 
 void ImportController::cancel() {
@@ -343,13 +357,16 @@ void ImportController::refresh_changed_sources() {
 	core_.touch(ViewConcern::Output);
 }
 
-// The import dialog on `roots` chosen among `choices` (each file once), planned with the
-// files they need when `with_dependencies`: open while it has something to show, a list to
-// choose from or a file chosen. `all`: the roots are every file of the game install.
-void ImportController::preview(std::vector<ImportChoice> choices, std::vector<ImportChoice> roots,
-                               bool with_dependencies, bool all) {
+// The import dialog on `roots` chosen among `choices` (each file once, `facts` saying each one's
+// kind and size), planned with the files they need when `with_dependencies`: open while it has
+// something to show, a list to choose from or a file chosen. `all`: the roots are every file of the
+// game install.
+void ImportController::preview(std::vector<ImportChoice> choices, std::vector<ImportChoiceFacts> facts,
+                               std::vector<ImportChoice> roots, bool with_dependencies, bool all) {
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
 	preview.choices = std::move(choices);
+	preview.facts = std::move(facts);
+	preview.facts.resize(preview.choices.size());
 	preview.roots.clear();
 	if (all) {
 		// The install lists each file once already (list_retail_import_choices): nine thousand
@@ -411,11 +428,11 @@ void ImportController::show_plan(std::shared_ptr<const ImportPlan> plan, const I
 			held += row.held ? 1 : 0;
 		}
 		view_.activity.status = preview.roots.empty() ? std::string("Choose the files to import.")
-		               : "Import preview: " + std::to_string(files) + " file" + (files == 1 ? "" : "s") + " to import" +
-		                         (preview.with_dependencies ? " (" + std::to_string(found) + " the chosen ones need), " +
-		                                                              std::to_string(missing) + " not found."
+		               : "Import preview: " + counted(files, "file") + " to import" +
+		                         (preview.with_dependencies ? " (" + grouped(found) + " the chosen ones need), " +
+		                                                              grouped(missing) + " not found."
 		                                                    : std::string(".")) +
-		                         (held ? " " + std::to_string(held) + " the project has already: kept unless replaced." : "");
+		                         (held ? " " + grouped(held) + " the project has already: kept unless replaced." : "");
 	}
 	core_.touch(ViewConcern::Dialogs);
 	if (preview.open) core_.touch(ViewConcern::Output);
@@ -572,8 +589,8 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 	const size_t done = imported.imported.size();
 	if (!imported.not_imported.empty()) outcome.end = OperationEnd::Failed;
 	view_.activity.status = !imported.not_imported.empty()
-	                       ? std::to_string(done) + " of " + std::to_string(done + imported.not_imported.size()) +
-	                                 " files imported: the import stopped at " + imported.not_imported.front() + "."
+	                       ? grouped(done) + " of " + counted(done + imported.not_imported.size(), "file") +
+	                                 " imported: the import stopped at " + imported.not_imported.front() + "."
 	                       : counted(done, "file") + " imported.";
 	core_.touch(ViewConcern::Dialogs); // the preview closed
 	core_.touch(ViewConcern::Output);

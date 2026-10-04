@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <iterator>
+#include <map>
 
 #include <base/io/cp1252.h>
 #include <editor/assets/asset_kind.h>
@@ -11,6 +12,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_plan.h>
+#include <editor/import/import_plan_groups.h>
 #include <editor/import/import_run.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
@@ -533,6 +535,8 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 		need.set("name", json_string(row.needed_by.name));
 		if (row.needed_by.loader_arg >= 0)
 			need.set("loader_arg", json_number(double(row.needed_by.loader_arg)));
+		// What wanted it in words (the UX round's project lane): the dialog's Needed by.
+		need.set("words", json_string(import_need_text(row.needed_by)));
 		entry.set("needed_by", std::move(need));
 	}
 	if (!found)
@@ -546,6 +550,9 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 	entry.set("selected", boolean(row.selected));
 	if (row.held)
 		entry.set("held", boolean(true));
+	// Whether the project's file of the name holds the same bytes, where the plan compared them.
+	if (row.held && row.held_as != ImportPlanRow::Held::Unknown)
+		entry.set("held_same", boolean(row.held_as == ImportPlanRow::Held::Same));
 	if (!row.problem.empty())
 		entry.set("problem", json_string(row.problem));
 	if (!row.rivals.empty()) {
@@ -822,9 +829,30 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, 
 		summary.push(std::move(line));
 	}
 	out.set("summary", std::move(summary));
+	// The rows by what they come for (import_plan_groups: each chosen file, the kinds of the files it
+	// brings under it), every group whatever the page; each row says its group.
+	const std::vector<ImportPlanGroup> grouped_rows = import_plan_groups(plan);
+	std::map<const ImportPlanRow *, size_t> group_of;
+	JsonValue groups = JsonValue::make_array();
+	for (size_t g = 0; g < grouped_rows.size(); ++g) {
+		const ImportPlanGroup &group = grouped_rows[g];
+		for (const size_t row : group.rows) group_of.emplace(&plan.rows[row], g);
+		JsonValue line = JsonValue::make_object();
+		line.set("depth", json_number(double(group.depth)));
+		if (group.parent != ImportPlanGroup::kNone) line.set("parent", json_number(double(group.parent)));
+		if (group.chosen()) line.set("chosen", json_string(plan.rows[group.root].name));
+		line.set("kind", json_string(asset_kind_token(group.kind)));
+		line.set("files", json_number(double(group.files)));
+		line.set("bytes", json_number(double(group.bytes)));
+		groups.push(std::move(line));
+	}
+	out.set("groups", std::move(groups));
 	JsonValue planned = JsonValue::make_array();
-	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i)
-		planned.push(plan_row_to_json(*rows[i]));
+	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i) {
+		JsonValue row = plan_row_to_json(*rows[i]);
+		if (const auto in = group_of.find(rows[i]); in != group_of.end()) row.set("group", json_number(double(in->second)));
+		planned.push(std::move(row));
+	}
 	out.set("rows", std::move(planned));
 	const auto sources_page = [&page](const std::vector<ImportChoice> &sources) {
 		JsonValue list = JsonValue::make_array();
@@ -833,7 +861,17 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, 
 		return list;
 	};
 	out.set("choice_count", json_number(double(preview.choices.size())));
-	out.set("choices", sources_page(preview.choices));
+	// Each choice with its kind by its name and its size as stored (the chooser's columns).
+	JsonValue choices = JsonValue::make_array();
+	for (size_t i = page.first(preview.choices.size()); i < page.last(preview.choices.size()); ++i) {
+		JsonValue choice = import_choice_to_json(preview.choices[i]);
+		if (i < preview.facts.size()) {
+			choice.set("kind", json_string(asset_kind_token(preview.facts[i].kind)));
+			choice.set("size", json_number(double(preview.facts[i].size)));
+		}
+		choices.push(std::move(choice));
+	}
+	out.set("choices", std::move(choices));
 	out.set("root_count", json_number(double(preview.roots.size())));
 	out.set("roots", sources_page(preview.roots));
 	JsonValue missing = JsonValue::make_array();

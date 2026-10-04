@@ -96,8 +96,8 @@ public:
 	OperationOutcome absorb_import(ImportOperation &operation);
 
 private:
-	void preview(std::vector<ImportChoice> choices, std::vector<ImportChoice> roots, bool with_dependencies,
-	             bool all = false);
+	void preview(std::vector<ImportChoice> choices, std::vector<ImportChoiceFacts> facts, std::vector<ImportChoice> roots,
+	             bool with_dependencies, bool all = false);
 	// What an ImportFiles takes: its imports, or with `planned` the open preview's rows as its plan
 	// has them (each the project can take, once per source); false, said why, with planned and no
 	// preview open.
