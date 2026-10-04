@@ -23,7 +23,10 @@
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/animation_uses.h>
+#include <editor/preview/model_canvas.h>
 #include <editor/preview/model_handle_edit.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_camera.h>
@@ -619,9 +622,13 @@ static int test_animation() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
-	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
-	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
-	                                                        "/fixtures/threedi/o3d/skinned.o3d")));
+	// The skinned fixture with two user points at one place off the bones' axis: on the child bone
+	// (part 1) and on the root (part 0).
+	std::vector<uint8_t> skinned = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
+	                                                  "/fixtures/threedi/o3d/skinned.o3d");
+	const std::string tip = "userpoint tip 0 0.25 1 0 0 1 1\nuserpoint hip 0 0.25 1 0 0 1 0\n";
+	skinned.insert(skinned.end(), tip.begin(), tip.end());
+	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d", skinned));
 	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
@@ -793,9 +800,13 @@ static int test_runtime_clips() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
-	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
-	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
-	                                                        "/fixtures/threedi/o3d/skinned.o3d")));
+	// The skinned fixture with two user points at one place off the bones' axis: on the child bone
+	// (part 1) and on the root (part 0).
+	std::vector<uint8_t> skinned = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
+	                                                  "/fixtures/threedi/o3d/skinned.o3d");
+	const std::string tip = "userpoint tip 0 0.25 1 0 0 1 1\nuserpoint hip 0 0.25 1 0 0 1 0\n";
+	skinned.insert(skinned.end(), tip.begin(), tip.end());
+	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d", skinned));
 	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
 	TEST_EXPECT(editor_test::write_text(source + "/step.o3a", kStepClips));
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
@@ -851,10 +862,15 @@ static int test_runtime_clips() {
 	const auto *served = model->skeleton() ? model->skeleton()->find_clip_variant(model->clip_key(), model->clip_variant())
 	                                       : nullptr;
 	TEST_EXPECT(served && served->source.file == "walk" && served->source.token == 2 && served->clip.frame_count == 4);
+	// The missing token, selected: the game leaves it out, so the slot plays its other clips; the
+	// viewport plays the row's first that registered and says why (S17).
 	select.address = {walk.row, clip_kind, tokens[1]};
 	session.handle(select);
 	rig.pump();
-	TEST_EXPECT(model->clip_key().empty() && model->clip_file().empty() && model->clip_events().empty());
+	TEST_EXPECT(model->clip_key() == "anim_walk_forward" && model->clip_variant() == 0 &&
+	            strutil_iequals(model->clip_file(), "reset"));
+	TEST_EXPECT(model->clip_note() ==
+	            "missing is not in the project: the game leaves it out of walk forward's clips. walk forward plays reset here.");
 
 	// The one-shot's events against the game's root motion over the same files (its viewport's
 	// rig model chosen as well).
@@ -884,6 +900,442 @@ static int test_runtime_clips() {
 	for (size_t i = 0; i < fired.size() && i < events.size(); ++i)
 		TEST_EXPECT(fired[i].tick == events[i].tick && fired[i].trigger == events[i].trigger);
 	TEST_EXPECT(step->clip_length_ticks() == 2 && step->tick_of_frame(1) == 1 && step->tick_of_frame(2) == -1);
+	return 0;
+}
+
+// A clip set over the skinned fixture's bones whose `bend` turns the pelvis a quarter about x from
+// its frame 1, so the spine and the leg swing off the axis.
+constexpr const char *kBendClips = R"(o3a 1
+adm BEND.adm
+row anim_reset "rest"
+row anim_idle "bend"
+clip rest
+fps 30
+flags 0x1
+frames 1
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+clip bend
+fps 30
+flags 0x1
+frames 2
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0.7071068 0 0 0.7071068
+ k 0.7071068 0 0 0.7071068
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+)";
+
+struct RecordedRequests final : CanvasRequests {
+	std::vector<EditorRequest> raised;
+	void request(EditorRequest request) override { raised.push_back(std::move(request)); }
+};
+
+// The clip's preview made a modder's (ADR 0046 S17): a row whose one clip the project lacks plays
+// what the game plays in its place, the reset clip, and says so; a map names who plays it and what
+// the game does with the selected row, a clip the rows that play it, a model the maps it plays; the
+// timeline steps frame by frame and tells frames and seconds; a one-shot repeats after its hold when
+// asked; the rig's bones pose with the clip, each named, a point on a bone riding it, and a click on
+// a joint in the clip's own document selects its bone; an item is found by its catalog's name.
+static int test_clip_preview() {
+	editor_test::TempProjectDir dir("opennova_editor_model_viewport_clip_preview");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	Rig rig{session};
+	const SessionView &view = session.view();
+	session.handle(request::new_project(dir.file("project"), "Clip Preview"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const std::string source = dir.file("source");
+	// The skinned fixture with two user points at one place off the bones' axis: on the child bone
+	// (part 1) and on the root (part 0).
+	std::vector<uint8_t> skinned = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
+	                                                  "/fixtures/threedi/o3d/skinned.o3d");
+	const std::string tip = "userpoint tip 0 0.25 1 0 0 1 1\nuserpoint hip 0 0.25 1 0 0 1 0\n";
+	skinned.insert(skinned.end(), tip.begin(), tip.end());
+	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d", skinned));
+	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
+	TEST_EXPECT(editor_test::write_text(source + "/step.o3a", kStepClips));
+	TEST_EXPECT(editor_test::write_text(source + "/bend.o3a", kBendClips));
+	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
+	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}, {source + "/step.o3a", {}},
+	                  {source + "/bend.o3a", {}}};
+	session.handle(import);
+	session.run_operations();
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def",
+	                                    "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\n"
+	                                    "anim_def skin\nend\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+
+	// The walk row's one clip renamed to one the project lacks: the game leaves it out, the slot is
+	// unauthored, and an unauthored slot plays the reset row's first clip. The viewport plays that
+	// and says why; the map names its player and what the game does with the row.
+	session.handle(request::open_document("anims/SKIN.adm"));
+	Document *table = session.document_for("anims/SKIN.adm");
+	NodeAddress walk;
+	TEST_EXPECT(table && find_definition(AssetGraph(), *table, "anim_walk_forward", walk));
+	if (!table) return 1;
+	const NodeKind clip_kind = node_kind(AnimationMapKind::Clip);
+	const NodeId walk_token = table->row(walk.row)->collections[0][0];
+	set(session, table->path(), {walk.row, clip_kind, walk_token}, "clip", std::string("nothere.bad"));
+	session.handle(request::select_record(table->path(), walk));
+	rig.pump();
+	const ModelViewport *model = rig.viewport();
+	TEST_EXPECT(model && model->view_status() == ModelViewStatus::Ready && model->clip_key() == "anim_reset" &&
+	            strutil_iequals(model->clip_file(), "reset"));
+	TEST_EXPECT(model->clip_note() == "walk forward has no clip the game loads (none of its files is in the project): "
+	                                  "the game plays the reset clip, reset, in its place.");
+	JsonValue shown = rig.json();
+	const JsonValue *animation = shown.get("body")->get("animation");
+	TEST_EXPECT(animation && animation->get_string("note", "") == model->clip_note());
+	const JsonValue *players = animation->get("players");
+	TEST_EXPECT(players && players->array.size() == 1 && players->array[0].get_string("record", "") == "Skinned Thing" &&
+	            strutil_iequals(players->array[0].get_string("model", ""), "skinned.3di") &&
+	            !players->array[0].get_bool("first_person", true));
+	const JsonValue *notes = animation->get("notes");
+	TEST_EXPECT(notes && !notes->array.empty() && notes->array[0].string == "walk forward (slot 1): Walking forward.");
+	// A slot the game picks only when the map has its clip (an NPC's attack, S17 review): the note says
+	// the game never picks it then and what it does instead, the reset clip shown as what the slot serves.
+	set(session, table->path(), walk, "key", std::string("anim_attack"));
+	session.handle(request::select_record(table->path(), walk));
+	rig.pump();
+	TEST_EXPECT(model->clip_key() == "anim_reset" &&
+	            model->clip_note() == "attack has no clip the game loads (none of its files is in the project): the game "
+	                                  "never picks attack then (the NPC takes another reaction, or closes in). The slot "
+	                                  "serves the reset clip, reset, shown here; a mission's forced animation of it plays "
+	                                  "that.");
+	session.handle(request::undo(table->path()));
+	session.handle(request::undo(table->path()));
+	session.handle(request::select_record(table->path(), walk));
+	rig.pump();
+	TEST_EXPECT(model->clip_key() == "anim_walk_forward" && model->clip_note().empty());
+
+	// The timeline's frames and seconds: the walk's four frames at 30, stepped frame by frame from
+	// tick to tick the clip's clock first runs on each; its events in words.
+	TEST_EXPECT(model->clip_frame_count() == 4 && model->clip_fps() == 30);
+	TEST_EXPECT(model->tick_of_step(0, 1) == model->tick_of_frame(1) &&
+	            model->tick_of_step(model->tick_of_frame(3), -1) == model->tick_of_frame(2) &&
+	            model->tick_of_step(0, -1) == 0);
+	shown = rig.json();
+	animation = shown.get("body")->get("animation");
+	TEST_EXPECT(int(animation->get("frame_count")->number) == 4 && int(animation->get("fps")->number) == 30);
+	TEST_EXPECT(near(animation->get("length_seconds")->number, model->clip_length_ticks() / 62.5, 1e-6));
+	const JsonValue *events = animation->get("events");
+	TEST_EXPECT(events && events->array.size() >= 2 && events->array[0].get_string("words", "") == "left footstep" &&
+	            events->array[1].get_string("words", "") == "right footstep");
+	// The wire's form of a scrub or a step: a frame, the clock held on the tick that first shows it.
+	TEST_EXPECT(rig.set(R"({"frame": 2})") && rig.clock().ticks() == model->tick_of_frame(2) && !rig.clock().playing());
+	TEST_EXPECT(!rig.set(R"({"frame": -1})") && rig.clock().ticks() == model->tick_of_frame(2));
+	// A frame past the clip's shows its last.
+	TEST_EXPECT(model->tick_of_frame_shown(99) == model->tick_of_frame_shown(int(model->clip_frame_count()) - 1));
+
+	// The clip's own document: the rows that play it.
+	session.handle(request::open_document("anims/walk.bad"));
+	rig.pump();
+	shown = rig.json();
+	const JsonValue *uses = shown.get("body")->get("animation")->get("uses");
+	TEST_EXPECT(uses && uses->array.size() == 1 && uses->array[0].get_string("map", "") == "anims/SKIN.adm" &&
+	            uses->array[0].get_string("words", "") == "walk forward");
+
+	// "Reading" only until the first validation has read the project's references (S17 review): an
+	// animation no item pairs reads as such, and goes on doing so while a validation runs after an edit.
+	session.handle(request::open_document("anims/step.bad"));
+	rig.pump();
+	TEST_EXPECT(view.activity.validation.read && rig.viewport() &&
+	            rig.viewport()->view_status() == ModelViewStatus::NoRig);
+	{
+		Document *step_clip = session.document_for("anims/step.bad");
+		TEST_EXPECT(step_clip && !step_clip->rows().empty());
+		if (step_clip && !step_clip->rows().empty()) {
+			set(session, step_clip->path(), {step_clip->rows().front()->id, step_clip->rows().front()->kind, 0}, "fps",
+			    int64_t(25));
+			TEST_EXPECT(view.activity.validation.running && view.activity.validation.read);
+			rig.pump();
+			TEST_EXPECT(rig.viewport()->view_status() == ModelViewStatus::NoRig);
+			session.handle(request::undo(step_clip->path()));
+		}
+	}
+	// A one-shot repeats from its start after its length and the hold; with Repeat off it holds its end.
+	TEST_EXPECT(rig.set(R"({"options": {"rig_model": "skinned.3di"}})"));
+	rig.pump();
+	const ModelViewport *step = rig.viewport();
+	TEST_EXPECT(step && !step->clip_loops() && step->clip_length_ticks() == 2 && step->options().repeat);
+	PreviewClock clock;
+	clock.seek_ticks(1);
+	TEST_EXPECT(step->clip_ticks(clock) == 1);
+	clock.seek_ticks(2 + kClipRepeatHoldTicks + 1);
+	TEST_EXPECT(step->clip_ticks(clock) == 1);
+	TEST_EXPECT(rig.set(R"({"options": {"repeat": false}})"));
+	rig.pump();
+	TEST_EXPECT(!step->options().repeat && step->clip_ticks(clock) == 2 + kClipRepeatHoldTicks + 1);
+
+	// The bones: the rest pose's on the axis, the bend's frame 1 swinging the spine a quarter turn off
+	// it; a point on the spine at rest carried to the spine's joint; the bones on the wire by name.
+	session.handle(request::open_document("anims/bend.bad"));
+	TEST_EXPECT(rig.set(R"({"options": {"rig_model": "skinned.3di"}})"));
+	rig.pump();
+	const ModelViewport *bend = rig.viewport();
+	TEST_EXPECT(bend && bend->view_status() == ModelViewStatus::Ready && bend->clip_key() == "anim_idle");
+	clock.seek_ticks(0);
+	std::vector<PreviewJoint> joints = bend->joints(clock);
+	TEST_EXPECT(joints.size() == 3 && joints[0].name == "BN01 Pelvis" && joints[1].name == "BN02 Spine" &&
+	            joints[1].parent == 0 && joints[0].parent == -1);
+	if (joints.size() != 3) return 1;
+	// Signs pinned (S17 review: a mirrored rig passes no test): the spine's joint up at rest, and the
+	// quarter turn of the pelvis swinging it to -x in the preview's frame.
+	TEST_EXPECT(near(joints[1].at.x, 0.0) && near(joints[1].at.y, 1.0) && near(joints[1].at.z, 0.0));
+	const PreviewVec3 spine_rest = joints[1].at;
+	// The user points through the viewport's own overlays (the path the picture and the wire take).
+	const auto point_at = [&](const PreviewClock &at, int index) {
+		const std::optional<ModelOverlay> point = find_overlay(bend->overlays(at), ModelOverlayKind::UserPoint, index);
+		return point ? point->at : PreviewVec3{-99.0f, -99.0f, -99.0f};
+	};
+	const PreviewVec3 tip_rest = point_at(clock, 0), hip_rest = point_at(clock, 1);
+	TEST_EXPECT(near(tip_rest.x, 0.25) && near(tip_rest.y, 1.0) && near(tip_rest.z, 0.0) && near(hip_rest.x, 0.25) &&
+	            near(hip_rest.y, 1.0) && near(hip_rest.z, 0.0));
+	clock.seek_ticks(bend->tick_of_frame(1));
+	TEST_EXPECT(bend->tick_of_frame(1) > 0);
+	joints = bend->joints(clock);
+	TEST_EXPECT(joints.size() == 3 && near(joints[1].at.x, -1.0) && near(joints[1].at.y, 0.0) && near(joints[1].at.z, 0.0));
+	// The point on the pelvis turns with it (the quarter turn: (0.25, 1) to (-1, 0.25)); the one on the
+	// spine, whose own key holds it unturned, rides its joint (the clip's rotations are each bone's in
+	// the model, as the game composes them).
+	const PreviewVec3 tip_bent = point_at(clock, 0), hip_bent = point_at(clock, 1);
+	TEST_EXPECT(near(hip_bent.x, -1.0) && near(hip_bent.y, 0.25) && near(hip_bent.z, 0.0));
+	TEST_EXPECT(near(tip_bent.x, -0.75) && near(tip_bent.y, 0.0) && near(tip_bent.z, 0.0));
+	const PreviewVec3 tip_carried = preview_joint_carry(joints[1], tip_rest);
+	TEST_EXPECT(near(tip_carried.x, tip_bent.x, 1e-4) && near(tip_carried.y, tip_bent.y, 1e-4) &&
+	            near(tip_carried.z, tip_bent.z, 1e-4));
+	const PreviewVec3 carried = preview_joint_carry(joints[1], spine_rest);
+	TEST_EXPECT(near(carried.x, joints[1].at.x, 1e-4) && near(carried.y, joints[1].at.y, 1e-4) &&
+	            near(carried.z, joints[1].at.z, 1e-4));
+	TEST_EXPECT(rig.set(R"({"clock": {"playing": false, "ticks": 0}})"));
+	shown = rig.json();
+	const JsonValue *bones = shown.get("body")->get("animation")->get("bones");
+	TEST_EXPECT(bones && bones->array.size() == 3 && bones->array[1].get_string("name", "") == "BN02 Spine");
+
+	// A click on the spine's joint, the clip's own document active, selects its bone; its name on hover.
+	Document *bend_clip = session.document_for("anims/bend.bad");
+	const ViewportContext context = rig.context();
+	ModelCanvasFrame frame = bend->canvas_frame(context);
+	TEST_EXPECT(bend_clip && frame.clip_document == bend_clip && frame.joints.size() == 3);
+	float jx = 0.0f, jy = 0.0f;
+	TEST_EXPECT(bend->camera().project(frame.joints[1].at, context.width, context.height, jx, jy));
+	ModelCanvas canvas;
+	RecordedRequests out;
+	canvas.follow(frame, out);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	in.hovered = true;
+	in.mouse = in.screen = CanvasPoint{ jx, jy };
+	TEST_EXPECT(model_canvas_under(frame, in) < 0 && model_canvas_bone_under(frame, in) == 1);
+	TEST_EXPECT(canvas.hover_tip(frame, -1, 1) == "BN02 Spine (click to select it)");
+	in.pressed = in.down = true;
+	canvas.input(frame, in, -1, out);
+	in.pressed = in.down = false;
+	canvas.input(frame, in, -1, out);
+	const auto *clip_row = bend_clip ? static_cast<const AnimationDocument *>(bend_clip)->clip() : nullptr;
+	TEST_EXPECT(clip_row && out.raised.size() == 1 && out.raised[0].kind == EditorRequestKind::SelectRecord &&
+	            out.raised[0].path == "anims/bend.bad" &&
+	            out.raised[0].address == NodeAddress({clip_row->id, node_kind(AnimationKind::Bone), clip_row->collections[0][1]}));
+
+	// From the model to its animations: the maps the items pairing it play; an item by its name.
+	session.handle(request::open_document("models/skinned.3di"));
+	rig.pump();
+	shown = rig.json();
+	const JsonValue *maps = shown.get("body")->get("animations");
+	TEST_EXPECT(maps && maps->array.size() == 1 && maps->array[0].get_string("map", "") == "anims/SKIN.adm" &&
+	            maps->array[0].get_string("record", "") == "Skinned Thing");
+	// While the first validation reads the references, an animation no item pairs yet says so.
+	TEST_EXPECT(std::string(model_view_status_token(ModelViewStatus::Reading)) == "reading" &&
+	            model_view_status_message(ModelViewStatus::Reading, "x.adm").rfind("Reading the project's references", 0) == 0);
+	const std::vector<std::string> animated = animated_models(*view.findings.graph, *view.project.scan);
+	TEST_EXPECT(animated.size() == 1 && strutil_iequals(animated[0], "skinned.3di"));
+	bool found = false;
+	for (const GraphSearchHit &hit : view.findings.graph->search("skinned th"))
+		found = found || (hit.symbol && hit.words == "Skinned Thing" && hit.name == "100200");
+	TEST_EXPECT(found);
+
+	// Pairings beyond the graphic (S17 review): an item's graphic_enemy plays its map on that model too;
+	// an item naming a map the project lacks plays default.adm there.
+	TEST_EXPECT(editor_test::write_text(
+	        view.project.root + "/defs/items.def",
+	        "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n"
+	        "begin \"Bent Enemy\"\nid 100201\ntype building\ngraphicenemy skinned\nanim_def bend\nend\n"
+	        "begin \"Lost Map\"\nid 100202\ntype building\ngraphic skinned\nanim_def nowhere\nend\n"));
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/anims/default.adm", "anim_reset\t\"reset\"\r\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	while (view.activity.validation.running) session.poll();
+	const std::vector<ModelAnimation> played = model_animations(*view.findings.graph, *view.project.scan, "models/skinned.3di");
+	const auto plays = [&](const char *map, const char *record, const char *via) {
+		for (const ModelAnimation &one : played)
+			if (strutil_iequals(one.map, map) && one.record == record && strutil_iequals(one.via, via)) return true;
+		return false;
+	};
+	TEST_EXPECT(played.size() == 3 && plays("anims/SKIN.adm", "Skinned Thing", "") &&
+	            plays("anims/BEND.adm", "Bent Enemy", "as an enemy") &&
+	            plays("anims/default.adm", "Lost Map", "in place of nowhere.adm"));
+	const PreviewRig paired =
+	        resolve_preview_rig(*view.findings.graph, *view.project.scan, "BEND.adm", AssetKind::AnimationMap, std::string());
+	TEST_EXPECT(strutil_iequals(paired.model, "skinned.3di") && paired.source.find("Bent Enemy") != std::string::npos);
+	const std::vector<MapPlayer> enemies = map_players(*view.findings.graph, *view.project.scan, "anims/BEND.adm");
+	TEST_EXPECT(enemies.size() == 1 && strutil_iequals(enemies[0].model, "skinned.3di") && enemies[0].enemy_model.empty());
+	return 0;
+}
+
+// The collision shown (S17): the layers by their tokens, each shape an item with its record; the body's
+// layers and legend; a hit on a shape names its record; the selected record's shape drawn whatever its
+// layer, Frame looking at it; a click on a shape selects its record, its words on hover; the legend drawn.
+static int test_collision() {
+	editor_test::TempProjectDir dir("opennova_editor_model_viewport_collision");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	Rig rig{session};
+	session.handle(request::new_project(dir.file("project"), "Collision Test"));
+	session.run_operations();
+	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("models/armory.3di"));
+	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/armory.3di"));
+	TEST_EXPECT(document && rig.pump() == ViewportAction::Rebuild);
+	if (!document) return 1;
+	const CollisionRow *collision = document->collision_row();
+	TEST_EXPECT(collision && !collision->volumes.empty() && !collision->faces.empty());
+	if (!collision || collision->volumes.empty() || collision->faces.empty()) return 1;
+	// Off until shown: only the markers are items.
+	TEST_EXPECT(rig.viewport()->collision(rig.clock())->empty());
+	TEST_EXPECT(!rig.set(R"({"options": {"overlays": {"walls": true}}})"));
+	TEST_EXPECT(rig.set(R"({"options": {"overlays": {"volumes": true, "bullet_faces": true, "user_points": false, "lights": false}}})"));
+	TEST_EXPECT(rig.pump() == ViewportAction::Update);
+	JsonValue shown = rig.json();
+	TEST_EXPECT(shown.get("options")->get("overlays")->get_bool("volumes", false) &&
+	            !shown.get("options")->get("overlays")->get_bool("sections", true));
+	size_t faces = 0, volumes = 0;
+	JsonValue face_item;
+	for (const JsonValue &item : shown.get("items")->array) {
+		const std::string kind = item.get_string("kind", "");
+		TEST_EXPECT(item.get_number("id", 0) != 0 && !item.get_string("name", "").empty() && item.get("points"));
+		if (kind == "face" && !faces++) face_item = item;
+		volumes += kind == "volume" ? 1 : 0;
+	}
+	TEST_EXPECT(faces == collision->faces.size() && volumes == collision->volumes.size());
+	const JsonValue *layers = shown.get("body")->get("collision")->get("layers");
+	TEST_EXPECT(layers && layers->array.size() == size_t(ModelCollisionLayer::kCount) &&
+	            layers->array[0].get_string("token", "") == "bullet_faces" && layers->array[0].get_bool("shown", false) &&
+	            layers->array[0].get_number("count", 0) == double(collision->faces.size()));
+	TEST_EXPECT(!shown.get("body")->get("collision")->get("legend")->array.empty());
+
+	// A hit on a face's middle names a collision record.
+	TEST_EXPECT(face_item.get("screen") && face_item.get("screen")->array.size() == 2);
+	const float fx = float(face_item.get("screen")->array[0].number), fy = float(face_item.get("screen")->array[1].number);
+	const ViewportHit hit = rig.viewport()->hit(rig.context(), fx, fy);
+	TEST_EXPECT((hit.kind == "face" || hit.kind == "volume") && hit.id != 0 && hit.current);
+
+	// The canvas: a click on the shape under the pointer selects its record, its words on hover.
+	const ViewportContext context = rig.context();
+	ModelCanvasFrame frame = rig.viewport()->canvas_frame(context);
+	TEST_EXPECT(model_canvas_collision(frame).size() == faces + volumes && frame.selected_collision == -1);
+	ModelCanvas canvas;
+	RecordedRequests out;
+	canvas.follow(frame, out);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	in.hovered = true;
+	in.mouse = in.screen = CanvasPoint{fx, fy};
+	const int under = model_canvas_collision_under(frame, in);
+	TEST_EXPECT(under >= 0 && model_canvas_under(frame, in) < 0);
+	if (under < 0) return 1;
+	TEST_EXPECT(canvas.hover_tip(frame, -1, -1, under) == model_canvas_collision(frame)[size_t(under)].name + " (click to select it)");
+	in.pressed = in.down = true;
+	canvas.input(frame, in, -1, out);
+	in.pressed = in.down = false;
+	canvas.input(frame, in, -1, out);
+	const NodeAddress picked = model_collision_record(*document, model_canvas_collision(frame)[size_t(under)]);
+	TEST_EXPECT(out.raised.size() == 1 && out.raised[0].kind == EditorRequestKind::SelectRecord &&
+	            out.raised[0].address == picked && NodeId(hit.id) == picked.child);
+	// Drawn: lines in the shapes' colours and the legend's words.
+	const OverlayList list = canvas.shapes(frame, in, -1, -1, under);
+	size_t lines = 0, legend = 0;
+	for (const OverlayShape &shape : list.shapes) {
+		lines += shape.kind == OverlayKind::Line ? 1 : 0;
+		legend += shape.kind == OverlayKind::Text && shape.text == "Bullet faces" ? 1 : 0;
+	}
+	TEST_EXPECT(lines >= faces * 3 && legend == 1);
+
+	// Made once: another frame of the same state reads the kept shapes (no rebuild), and the canvas
+	// looks for what lies under the pointer once for the shapes and the hover together.
+	const uint64_t builds = rig.viewport()->collision_builds();
+	const ModelCanvasFrame again = rig.viewport()->canvas_frame(rig.context());
+	TEST_EXPECT(rig.viewport()->collision_builds() == builds && again.collision == frame.collision);
+	ModelCanvas once;
+	RecordedRequests followed;
+	once.follow(*rig.viewport(), rig.context(), followed);
+	once.shapes(rig.context(), in);
+	TEST_EXPECT(!once.hover_tip(rig.context(), in).empty() && once.pick_count() == 1);
+
+	// The layers off, a volume selected: its shape alone, highlighted; Frame looks at it.
+	TEST_EXPECT(rig.set(R"({"options": {"overlays": {"volumes": false, "bullet_faces": false}}})"));
+	rig.pump();
+	const NodeAddress volume{collision->id, node_kind(ModelKind::Volume), collision->ids.lists[kCollisionVolumes][0].id};
+	session.handle(request::select_record(document->path(), volume));
+	frame = rig.viewport()->canvas_frame(rig.context());
+	TEST_EXPECT(model_canvas_collision(frame).size() == 1 && frame.selected_collision == 0 &&
+	            model_canvas_collision(frame)[0].kind == ModelCollisionKind::Volume && model_canvas_collision(frame)[0].index == 0);
+	// The wire as the picture: the selected shape among the items, marked, and a hit on it names it.
+	shown = rig.json();
+	JsonValue selected_item;
+	for (const JsonValue &item : shown.get("items")->array)
+		if (item.get_string("kind", "") == "volume") selected_item = item;
+	TEST_EXPECT(selected_item.get_bool("selected", false) && NodeId(selected_item.get_number("id", 0)) == volume.child);
+	const ViewportHit on_it = rig.viewport()->hit(rig.context(), float(selected_item.get("screen")->array[0].number),
+	                                               float(selected_item.get("screen")->array[1].number));
+	TEST_EXPECT(on_it.kind == "volume" && on_it.id == volume.child);
+	// Frame names a record with a shape; a record with none (a material) leaves the whole model.
+	TEST_EXPECT(rig.viewport()->frame_ids(rig.context()) == std::vector<NodeId>{volume.child});
+	const ModelRow *model_row = document->model_row();
+	session.handle(request::select_record(
+			document->path(), {model_row->id, node_kind(ModelKind::Material), model_row->ids.lists[kModelMaterials][0].id}));
+	TEST_EXPECT(rig.viewport()->frame_ids(rig.context()).empty());
+	session.handle(request::select_record(document->path(), volume));
+	const OrbitCamera before = rig.viewport()->camera();
+	RecordedRequests framed;
+	std::string error;
+	TEST_EXPECT(rig.viewport()->command(rig.context(), "frame", {volume.child}, framed, error) && framed.raised.size() == 1);
+	for (const EditorRequest &request : framed.raised) session.handle(request);
+	PreviewVec3 center;
+	float radius = 0.0f;
+	model_collision_bounds(model_canvas_collision(frame)[0], center, radius);
+	const OrbitCamera &after = rig.viewport()->camera();
+	TEST_EXPECT(near(after.target.x, center.x, 1e-3) && near(after.target.y, center.y, 1e-3) &&
+	            near(after.target.z, center.z, 1e-3) && (!near(before.distance, after.distance, 1e-4) ||
+	                                                     !near(before.target.x, after.target.x, 1e-4)));
+	std::printf("test_collision passed\n");
 	return 0;
 }
 
@@ -927,9 +1379,11 @@ int main() {
 	TEST_EXPECT(test_handles() == 0);
 	TEST_EXPECT(test_animation() == 0);
 	TEST_EXPECT(test_runtime_clips() == 0);
+	TEST_EXPECT(test_clip_preview() == 0);
 	TEST_EXPECT(test_camera() == 0);
 	TEST_EXPECT(test_options_from_json() == 0);
 	TEST_EXPECT(test_auto_lod() == 0);
+	TEST_EXPECT(test_collision() == 0);
 	std::printf("editor_model_viewport: all tests passed\n");
 	return 0;
 }
