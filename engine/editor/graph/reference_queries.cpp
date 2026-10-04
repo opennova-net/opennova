@@ -6,6 +6,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
+#include <editor/project/project_files.h>
 
 namespace opennova::editor {
 
@@ -137,7 +138,10 @@ std::vector<ReferenceChoice> reference_choices(const AssetGraph &graph, const Fi
 	if (row.also_offers == ReferenceKind::None) return out;
 	const bool checked = row.resolution != ReferenceResolution::Unchecked;
 	for (ReferenceChoice &choice : graph.choices(row.also_offers)) {
-		if (checked) choice.status = graph.resolve(field.reference, choice.name, field.scope, nullptr, field.loader_arg);
+		if (checked) {
+			choice.status = graph.resolve(field.reference, choice.name, field.scope, &choice.served, field.loader_arg);
+			if (choice.status != ReferenceStatus::Present) choice.served.clear();
+		}
 		out.push_back(std::move(choice));
 	}
 	return out;
@@ -162,6 +166,7 @@ bool missing_finding(const AssetGraph &graph, const Document &document, const No
 	edge.value = name;
 	edge.scope = scope;
 	edge.loader_arg = field.loader_arg;
+	edge.use_context = field.use_context;
 	if (field.reference == ReferenceKind::None) edge.through = field.variable_through; // a text's %NAME%
 	if (kind != ReferenceKind::StyleVar && graph_names::is_style_reference(name) && !graph.style_binding(name)) {
 		edge.kind = ReferenceKind::StyleVar;
@@ -201,6 +206,59 @@ std::vector<ReferenceTarget> reference_targets(const AssetGraph &graph, const As
 	if (graph.resolve(kind, name, scope, &file, field.loader_arg) == ReferenceStatus::Present)
 		out.push_back(file_target(scan, file));
 	return out;
+}
+
+bool is_texture_reference(ReferenceKind kind) {
+	return kind == ReferenceKind::Texture || kind == ReferenceKind::MenuTexture || kind == ReferenceKind::LoadingImage;
+}
+
+TextureReferenceLoad texture_reference(const AssetGraph &graph, ReferenceKind kind, const std::string &name,
+                                       const std::string &scope, int32_t loader_arg) {
+	TextureReferenceLoad out;
+	if (!is_texture_reference(kind) || name.empty()) return out;
+	out.texture = true;
+	out.name = name;
+	out.status = graph.resolve(kind, name, scope, &out.file, loader_arg);
+	if (out.status != ReferenceStatus::Present) out.file.clear();
+	// What a texture's loader makes of the file it opens (a menu's and a loading screen's draw it as
+	// read), and the name it opens: the loader asked again over the project's files.
+	out.opens = name;
+	if (kind == ReferenceKind::Texture) {
+		const TextureLoad load =
+				texture_reference_load(name, loader_arg, [&graph](const std::string &file) { return graph.has_file(file); });
+		if (!out.file.empty()) out.transform = load.transform;
+		if (!load.file.empty()) out.opens = load.file;
+	}
+	return out;
+}
+
+TextureReferenceLoad texture_reference(const AssetGraph &graph, const FieldUse &field, const Value &value) {
+	ReferenceKind kind;
+	std::string name, scope;
+	if (!reference_target(field, value, kind, name, scope)) return TextureReferenceLoad();
+	// A menu's texture through a stylesheet variable: the file the variable's value names.
+	if (kind == ReferenceKind::StyleVar && is_texture_reference(field.reference)) {
+		const GraphSymbol *binding = graph.style_binding(name);
+		if (!binding) {
+			TextureReferenceLoad out;
+			out.texture = true;
+			out.name = name;
+			out.status = ReferenceStatus::Missing;
+			return out;
+		}
+		return texture_reference(graph, field.reference, binding->value, field.scope, field.loader_arg);
+	}
+	return texture_reference(graph, kind, name, scope, field.loader_arg);
+}
+
+TextureReferenceLoad texture_reference(const AssetGraph &graph, const GraphEdge &edge) {
+	return texture_reference(graph, edge.kind, edge.value, edge.scope, edge.loader_arg);
+}
+
+std::string texture_replace_target(const TextureReferenceLoad &loads) {
+	if (!loads.texture) return std::string();
+	if (!loads.file.empty()) return loads.file;
+	return basename_of(loads.opens.empty() ? loads.name : loads.opens);
 }
 
 } // namespace opennova::editor

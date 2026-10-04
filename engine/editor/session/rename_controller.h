@@ -37,6 +37,9 @@ public:
 	// reported): a name's rename everywhere, or a file's (no field).
 	void preview(const EditorRequest &request);
 	void rename_symbol(const EditorRequest &request);
+	// SplitTexture (S18): a texture copied, the uses in the files named moved to the copy
+	// (graph/rename_transaction.h plan_split), committed as a rename is; not undoable, and no way back.
+	void split_texture(const EditorRequest &request);
 	// A rename committed (RenameOperation's finish): the files it touched read again (the scan
 	// updated, or an import source's refresh taken), the open documents it rewrote read again, the
 	// one the modder was in active again, its findings and what it did said.

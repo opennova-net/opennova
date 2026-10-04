@@ -6,6 +6,7 @@
 #include "authoring/mission_viewport_applier.h"
 #include "authoring/model_viewport_applier.h"
 #include "authoring/script_device.h"
+#include "authoring/texture_viewport_applier.h"
 #include "authoring/viewport_device.h"
 
 namespace godot {
@@ -26,12 +27,16 @@ std::unique_ptr<opennova::editor::ViewportDevice> make_script_device(Node &owner
 std::unique_ptr<ViewportApplier> make_mission_applier(SubViewport &viewport) {
 	return std::make_unique<MissionViewportApplier>(viewport);
 }
+std::unique_ptr<ViewportApplier> make_texture_applier(SubViewport &viewport) {
+	return std::make_unique<TextureViewportApplier>(viewport);
+}
 
 constexpr ViewportDeviceRow kDevices[] = {
 	{ ViewportKind::Menu, make_menu_applier, nullptr },
 	{ ViewportKind::Model, make_model_applier, nullptr },
 	{ ViewportKind::Script, nullptr, make_script_device },
 	{ ViewportKind::Mission, make_mission_applier, nullptr },
+	{ ViewportKind::Texture, make_texture_applier, nullptr },
 };
 
 constexpr bool devices_in_order() {

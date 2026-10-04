@@ -6,6 +6,8 @@
 #include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/animation_slots.h>
+#include <editor/documents/texture_load_rules.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
 #include <formats/trn/trn.h>
@@ -27,18 +29,28 @@ std::vector<std::string> one(const std::string &file) {
 
 // --- the loaders' own rules (ReferenceKindRow::file_names) ---------------------------------
 
-// A model's texture row (`loader_arg` >= 0, the row's type): the one file the loader the
-// dispatcher picks for the row's type opens (renderer::material_texture_source; the shell's
-// TextureFiles::load_material_texture reads the same file), none when that loader opens none;
-// a loose file is never preferred, the project's files being an archive's as the game mounts
-// them. The row's type is the one the loader copies into the runtime row [orig:
-// Material_ConvertDefinition @ 0x5B045B..0x5B04A0]. A texture of no model row (a particle's
-// graphic, a sky map, a def's HUD art): the files the game's loader for it opens, in its order
-// (texture_loader_arg; renderer::texture_load_attempts, which TextureFiles::load_texture reads),
-// no loose-first search competing and no loose folder of the game's there (the particle
-// manager's tga\ leg). With no loader given (a reference whose game loader is not witnessed),
-// the name as written alone: no loader reads an alternate name.
+// The files the reference's loader opens, in its order (ADR 0046 S18), none when it opens none: a
+// model's texture row (`loader_arg` its row's type) the one file the loader the dispatcher picks for
+// the type opens (renderer::material_texture_source; the shell's TextureFiles::load_material_texture
+// reads the same file; the row's type is the one the loader copies into the runtime row [orig:
+// Material_ConvertDefinition @ 0x5B045B..0x5B04A0]); any other referrer's by its role's loader, or by
+// the game's loader alone where only that is known (texture_loader_arg; renderer::texture_load_attempts,
+// which TextureFiles::load_texture reads: a sky map's .dds beside the name first, a colour map's TGA
+// reader on the name alone, the HUD's suffixes), no loose-first search competing and no loose folder
+// of the game's there (the particle manager's tga\ leg); a use whose loader is not witnessed yet, the
+// name as written alone. No loader reads another extension's twin or an _O name.
 std::vector<std::string> texture_files(const std::string &name, int32_t loader_arg, const Exists &exists) {
+	// A role (ADR 0046 S18): the game's loader for it (texture_role_renderer_loader), a mission's tile set
+	// its TGA, a role read by its own name (a foliage map) or whose loader is not witnessed the name alone.
+	TextureRoleId role = TextureRoleId::kCount;
+	if (texture_arg_role(loader_arg, role)) {
+		if (loader_arg & kTextureArgTileSet) return texture_files(name, kTileSetTextureArg, exists);
+		// A sky map: its extension made PCX first (kTextureArgPcx).
+		if (loader_arg & kTextureArgPcx)
+			return texture_files(menu::replace_or_append_extension(name, "pcx"), loader_arg & ~kTextureArgPcx, exists);
+		renderer::TextureLoader by;
+		return texture_role_renderer_loader(role, by) ? texture_files(name, texture_loader_arg(by), exists) : one(name);
+	}
 	if (loader_arg >= 0) {
 		const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(loader_arg));
 		return one(renderer::material_texture_source(name, type, exists).file);
@@ -56,6 +68,37 @@ std::vector<std::string> texture_files(const std::string &name, int32_t loader_a
 		    std::find(out.begin(), out.end(), load.file) == out.end())
 			out.push_back(load.file);
 	return out;
+}
+
+// A texture the game cannot do without (a terrain's colour map; its blend map, whenever its key names
+// one): the reference's role says so (texture_arg_gates).
+const char *texture_gates(int32_t loader_arg) {
+	if (!texture_arg_gates(loader_arg)) return nullptr;
+	return "[orig: PolyTrn_InitTextures @ 0x60B389 (\"colormap\") and @ 0x60B19A (\"blendermap\", the blend on by its "
+	       "key alone, Terrain_ParseConfigCallback @ 0x60F7D0) logging the error Game_StartMission @ 0x525AD8 shows as "
+	       "\"Polytrn: Critical file not found\" before it aborts the mission, sub_520AA0 @ 0x520B4E..0x520B64]";
+}
+
+// What the game does without the file, in the role's words (texture_roles.h); where the project holds the
+// name as written, that the loader opens other files for it (a HUD name written .dds, a sky map's name made
+// .pcx), and which.
+std::string texture_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	TextureRoleId role = TextureRoleId::kCount;
+	const bool has_role = texture_arg_role(edge.loader_arg, role);
+	const std::string then = has_role && *texture_role_row(role).missing ? ": " + std::string(texture_role_row(role).missing) + "." : ".";
+	const std::string name = basename_of(edge.value);
+	if (!name.empty() && graph.has_file(name)) {
+		// What the loader would open were every name it tries there (a .dds beside the name first), then
+		// were none.
+		std::vector<std::string> tries = texture_files(edge.value, edge.loader_arg, [](const std::string &) { return true; });
+		for (const std::string &each : texture_files(edge.value, edge.loader_arg, [](const std::string &) { return false; }))
+			if (std::find(tries.begin(), tries.end(), each) == tries.end()) tries.push_back(each);
+		std::string opens;
+		for (const std::string &each : tries) opens += (opens.empty() ? "" : " or ") + basename_of(each);
+		return ", which the project has, but the game's loader for it opens " +
+		       (opens.empty() ? std::string("no file of that name") : opens + ", which the project does not have") + then;
+	}
+	return ", which the project does not have" + then;
 }
 
 // The name's extension decides, and a .tga the files lack loads its .dds [orig: the dispatch
@@ -306,6 +349,14 @@ struct Row {
 		out.row.missing_message = message;
 		return out;
 	}
+	// The game refuses some of the kind's references that find nothing, by what each gives its loader
+	// (gates_when_missing_for), each saying what the game does without it.
+	constexpr Row fatal_for(const char *(*gates)(int32_t), ReferenceMissingMessage message) const {
+		Row out = *this;
+		out.row.gates_when_missing_for = gates;
+		out.row.missing_message = message;
+		return out;
+	}
 	// The game tolerates the name missing: a warning, saying what the game does instead.
 	constexpr Row tolerated(ReferenceMissingMessage message) const {
 		Row out = *this;
@@ -335,7 +386,12 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::Ammo, "ammo", "the ammo", "ammo").symbol(NameCase::FileName, AssetKind::AmmoDefs).row,
 	Row(ReferenceKind::Weapon, "weapon", "the weapon", "weapon").symbol(NameCase::FileName, AssetKind::WeaponDefs).row,
 	Row(ReferenceKind::Item, "item", "the item id", "item id").symbol(NameCase::Exact, AssetKind::ItemDefs).row,
-	Row(ReferenceKind::Texture, "texture", "the texture", "texture").loads(AssetKind::Texture, nullptr, texture_files).row,
+	// Each by its loader (ADR 0046 S18): the terrain's colour map and its blend map abort the mission when
+	// they load nothing (texture_gates).
+	Row(ReferenceKind::Texture, "texture", "the texture", "texture")
+	        .loads(AssetKind::Texture, nullptr, texture_files)
+	        .fatal_for(texture_gates, texture_missing)
+	        .row,
 	Row(ReferenceKind::Sound, "sound", "the sound", "sound").row,
 	Row(ReferenceKind::Particle, "particle", "the particle effect", "particle effect")
 	        .symbol(NameCase::FileName, AssetKind::Particles)
@@ -537,8 +593,9 @@ constexpr bool records_well_formed() {
 // A kind whose missing name refuses a build is one the graph finds missing, at an error's severity.
 constexpr bool gates_well_formed() {
 	for (const ReferenceKindRow &row : kRows)
-		if (row.gates_when_missing &&
-		    (!*row.gates_when_missing || !row.missing_message || row.severity_when_missing != DiagnosticSeverity::Error))
+		if ((row.gates_when_missing && !*row.gates_when_missing) ||
+		    ((row.gates_when_missing || row.gates_when_missing_for) &&
+		     (!row.missing_message || row.severity_when_missing != DiagnosticSeverity::Error)))
 			return false;
 	return true;
 }
@@ -611,8 +668,11 @@ bool blocks_build(const Diagnostic &d) {
 	// exit; Menu_InitShellResources @ 0x552651, the main menu's dead end], missing, or holding a file of
 	// another kind, which the boot reads as its table with no check (its header's offsets made
 	// pointers unchecked [orig: TextResource_FixupPointers @ 0x75d050]).
-	if (const ReferenceSubject *reference = reference_subject(d))
-		return reference_row(reference->kind).gates_when_missing != nullptr;
+	if (const ReferenceSubject *reference = reference_subject(d)) {
+		const ReferenceKindRow &row = reference_row(reference->kind);
+		return row.gates_when_missing != nullptr ||
+		       (row.gates_when_missing_for && row.gates_when_missing_for(reference->loader_arg) != nullptr);
+	}
 	if (const RequirementSubject *requirement = requirement_subject(d)) {
 		const gameprofile::RequiredResource *row = gameprofile::gameprofile_required_resource_by_role(requirement->role.c_str());
 		return (d.row() == &finding_code(CoreFinding::RequirementMissing) ||

@@ -55,14 +55,21 @@ constexpr RequestField kFields[] = {
 	{ F::Mission, "mission", J::String,
 			"A mission of the project by its logical name (04TR.bms): the one Play starts the game "
 			"in; left out, the game starts at its menu." },
+	{ F::Operation, "operation", J::String,
+			"A texture document's whole-image edit: resize, alpha, format, reorder_rows or "
+			"remap_palette (its params in values)." },
 	{ F::Values, "values", J::Object,
-			"A new file's starting values, each a string by its blank's parameter: a mission's "
-			"{title?, terrain, environment} (the terrain and the environment files of the project, "
-			"by name, with or without their extension; the title its file's name when left out)." },
+			"Named values, each a string: a new file's starting values by its blank's parameter, a "
+			"mission's {title?, terrain, environment} (the terrain and the environment files of the "
+			"project, by name, with or without their extension; the title its file's name when left "
+			"out); an import's options by their keys, as the import_options query lists them (\"\" an "
+			"option's default); a texture operation's params (resize: size; alpha: alpha; format: "
+			"format, dds, mips, palette; remap_palette: each index to move, \"<from>\": \"<to>\")." },
 	{ F::Roles, "roles", J::Strings, "Requirements' roles." },
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,
-			"Files on disk to import: a loose file is chosen, an archive's members are listed to "
+			"replace_texture: the image a texture is made from; split_texture: the project files whose uses "
+			"the copy takes. Otherwise files on disk to import: a loose file is chosen, an archive's members are listed to "
 			"choose "
 			"from." },
 	{ F::Imports, "imports", J::Objects,
