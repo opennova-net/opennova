@@ -21,6 +21,7 @@
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
+#include <runtime/inmatch/session_timeout_config.h> // parse_nstmout
 #include <runtime/world/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
 #include <formats/def/def.h>

@@ -570,7 +570,7 @@ public:
 	const JoinQueueRecord &join_queue() const { return join_queue_; }
 	// The cs_dir0 values this connection runs under: the template, overlaid by the host's 0x82 CS
 	// block at acceptance and by later cs_dir0 H:0x00 updates (fields 0, 1, 4, 5, 11, 13).
-	const SessionTimeoutConfig &session_timeouts() const { return conn_.timeouts; }
+	const CsConfig &session_timeouts() const { return conn_.timeouts; }
 
 	// Inbound-gap diagnostics: how many future S2C packets are queued behind an
 	// unresolved sequence gap, and how many reliable outbound records remain

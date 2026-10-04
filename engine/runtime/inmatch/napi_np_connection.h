@@ -10,7 +10,7 @@
 #include <vector>
 
 #include <runtime/replication/connection.h>             // replication::Connection, replication::TransportMode
-#include <runtime/inmatch/session_timeout_config.h>     // SessionTimeoutConfig (the cs_dir template copy)
+#include <net/npwire/cs_config.h> // opennova::CsConfig (the cs_dir template copy) and its helpers
 #include <net/npwire/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
 #include <net/npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 #include <net/npwire/session_hello.h>    // opennova::DisconnectEvent (the latched disconnect record)
@@ -54,47 +54,9 @@ inline constexpr std::size_t JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX =
 
 // Both JO game-session direction profiles reap a connection after 120000 ms without receive
 // activity. The client keepalive interval is deliberately shorter (30000 ms). This is the
-// DEFAULT of SessionTimeoutConfig::timeout_ms; a loose `_NSTMOUT.TXT` overrides it at init.
+// DEFAULT of CsConfig::timeout_ms; a loose `_NSTMOUT.TXT` overrides it at init.
 // [orig: CNapiNetwork_Init @0x4caa81/@0x4cab54]
 inline constexpr uint32_t JO_GAME_SESSION_TIMEOUT_MS = 120000;
-
-// The teardown of an active connection sends its disconnect packet cs_dir0.recv_max_per_tick
-// (CS field 1; 4 on the JOINTOPERATIONS template) times, clamped to [0, 32]; the first send
-// goes whatever the count, so a count of 0 still sends one.
-// [orig: CNapiNetwork_Init @0x4cab60; CNapiNPConnection_TeardownActiveConnection @0x6253C0 —
-//  the clamp @0x6253ef..0x625403, the first send @0x625406 and the loop @0x625412..0x625424
-//  (state 1), @0x62549e..0x6254d3 (state 5)]
-inline constexpr std::size_t disconnect_burst_count(int32_t recv_max_per_tick) {
-	const int32_t clamped =
-			recv_max_per_tick > 32 ? 32 : (recv_max_per_tick < 0 ? 0 : recv_max_per_tick);
-	return clamped < 1 ? std::size_t{1} : static_cast<std::size_t>(clamped);
-}
-
-// A negative cs_dir msg_out_max (the `_NSTMOUT.TXT` NEVER form) is unbounded: NapiNPMessage_Create
-// only checks the pool when `msg_out_max >= 0` [orig: @0x628048], and zero is
-// session_outbound_message_prefix_count's unbounded sentinel.
-inline std::size_t outbound_message_limit_for(int32_t msg_out_max) {
-	return msg_out_max < 0 ? std::size_t{0} : static_cast<std::size_t>(msg_out_max);
-}
-
-// The cs_dir0 slots the shared session sequencing enforces, pushed onto a connection's
-// sequencing whenever its block changes: the outbound pool bound (field 11) and the
-// out-of-order queue bound (field 10).
-inline void sync_session_sequencing_limits(
-		SessionSequencing &sequencing, const SessionTimeoutConfig &timeouts) {
-	sequencing.outbound_message_limit = outbound_message_limit_for(timeouts.msg_out_max);
-	sequencing.packet_queue_max = timeouts.packet_queue_max;
-}
-
-// BuildOutgoingPackets' packets per call, cs_dir0 field 14: negative is unbounded, and the
-// loop builds one packet before it first tests the count, so 0 still builds one.
-// [orig: BuildOutgoingPackets @0x62844e (the load), @0x62860b..0x628619 (`max < 0` or
-//  `built < max` loops again)]
-inline std::size_t max_packets_per_build(int32_t max_packets_per_tick) {
-	if (max_packets_per_tick < 0) return static_cast<std::size_t>(-1);
-	return max_packets_per_tick < 1 ? std::size_t{1}
-	                                : static_cast<std::size_t>(max_packets_per_tick);
-}
 
 inline SessionSequencing make_jo_game_session_sequencing(
 		uint32_t next_outbound_seq = 1, uint32_t last_inbound_seq = 0,
@@ -659,7 +621,7 @@ struct NapiNPConnection {
 	// [orig: CNapiNPConnection_Create @0x62acb0 copies proto+0xE44/+0xE80 (`rep movsd ecx=0Fh`
 	//  @0x62ae7b/@0x62aeb8); a client overlays the host's 0x82 CS block on top,
 	//  NapiNP_HandleServerJoinResponse @0x629b4c..0x629b75 -> @0x629d72/@0x629d89]
-	SessionTimeoutConfig timeouts{};
+	CsConfig timeouts{};
 	// The connection's disconnect record — the NapiNPDisconnectEvent at +0x654 whose `valid`
 	// gate makes the FIRST latch win. SendDisconnectPacket serializes it into the 0x46/0x86
 	// teardown burst; producers are the receive reap (SERTMOUT/CLNTTMOUT), StopServer (STOP),

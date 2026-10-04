@@ -41,17 +41,17 @@ bool expect(bool condition, const char *message) {
 }
 
 bool check_parse(const char *text, int32_t timeout_ms, int32_t msg_out_max, const char *message) {
-	inmatch::SessionTimeoutConfig cfg;
+	CsConfig cfg;
 	inmatch::parse_nstmout(text, cfg);
 	return expect(cfg.timeout_ms == timeout_ms && cfg.msg_out_max == msg_out_max, message);
 }
 
 bool check_parser_matches_network_init() {
 	bool ok = true;
-	const inmatch::SessionTimeoutConfig defaults;
+	const CsConfig defaults;
 	ok = expect(defaults.timeout_ms == 120000 && defaults.msg_out_max == 1200,
 			"the template defaults are 120000 ms / 1200 records") && ok;
-	const inmatch::SessionTimeoutConfig absent = inmatch::load_session_timeout_config("");
+	const CsConfig absent = inmatch::load_session_timeout_config("");
 	ok = expect(absent.timeout_ms == 120000 && absent.msg_out_max == 1200,
 			"no game directory keeps the defaults") && ok;
 	ok = check_parse("NEVER", -1, -1, "NEVER disables the reap and the pool bound") && ok;
@@ -61,8 +61,8 @@ bool check_parser_matches_network_init() {
 	ok = check_parse("-5", -1, -1, "a negative number disables both") && ok;
 	ok = check_parse("abc", 0, 1200, "non-numeric text atol's to 0") && ok;
 	ok = check_parse("  45 seconds", 45000, 1200, "atol skips leading whitespace") && ok;
-	ok = expect(inmatch::outbound_message_limit_for(-1) == 0 &&
-					inmatch::outbound_message_limit_for(1200) == 1200,
+	ok = expect(outbound_message_limit_for(-1) == 0 &&
+					outbound_message_limit_for(1200) == 1200,
 			"a negative pool bound is the unbounded sentinel") && ok;
 	return ok;
 }

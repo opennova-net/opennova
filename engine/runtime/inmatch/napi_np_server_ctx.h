@@ -102,7 +102,7 @@ struct NapiNPProtocol {
 	// (CS field 0) and outbound pool bound (CS field 11) every server-side node is created with
 	// and the host's 0x82 advertises. CNapiNetwork_Init seeds 120000 / 1200 and a loose
 	// `_NSTMOUT.TXT` overrides both (session_timeout_config.h); start_host_session installs it.
-	SessionTimeoutConfig connection_template{};
+	CsConfig connection_template{};
 
 	// [orig +0xEBC] connection_list — the NapiListHead SendFiltered / timeouts walk. Modeled as a
 	// vector of nodes (faithful structural translation of the intrusive list).

@@ -2886,6 +2886,12 @@ target_link_libraries(peer_addr_test PRIVATE opennova_net)
 target_include_directories(peer_addr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME peer_addr COMMAND peer_addr_test)
 
+# The shared BuildOutgoingPackets planner and the CS block it reads (npwire/outgoing_packets.h,
+# npwire/cs_config.h): split under the field-13 ceiling, the field-14 budget, both overflow policies.
+add_executable(npwire_outgoing_packets_test npwire/outgoing_packets_test.cpp)
+target_link_libraries(npwire_outgoing_packets_test PRIVATE opennova_net)
+add_test(NAME npwire_outgoing_packets COMMAND npwire_outgoing_packets_test)
+
 add_executable(net_ports_test npwire/net_ports_test.cpp)
 target_link_libraries(net_ports_test PRIVATE opennova_net)
 target_include_directories(net_ports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -365,7 +365,7 @@ bool run_cs_block_drives_the_joiner_ceiling_and_intervals() {
 		return false;
 	}
 	joiner.handle_datagram(update_packet.data(), update_packet.size());
-	const inmatch::SessionTimeoutConfig &cs = joiner.session_timeouts();
+	const CsConfig &cs = joiner.session_timeouts();
 	if (!expect(cs.idle_send_interval_ms == 5000 && cs.active_send_interval_ms == 3000 &&
 				cs.max_packet_bytes == 400,
 			"a cs_dir0 update stores fields 4, 5 and 13")) {
