@@ -371,6 +371,16 @@ inline EditorRequest rename_symbol(
 	return request;
 }
 
+// The last rename's way back planned (only the sites it rewrote), nothing written; the Rename back dialog
+// opens when `ask_name`.
+inline EditorRequest preview_rename_back(bool ask_name = false) {
+	EditorRequest request = of(EditorRequestKind::PreviewRenameBack);
+	request.ask_name = ask_name;
+	return request;
+}
+// The last rename taken back, on disk.
+inline EditorRequest rename_back() { return of(EditorRequestKind::RenameBack); }
+
 // --- the shell's -------------------------------------------------------------------------------
 
 inline EditorRequest pick_directory(PickPurpose purpose) {
