@@ -25,6 +25,10 @@ struct RenameSite {
 	std::string file;   // the referencing document, project-relative
 	AssetKind kind = AssetKind::Unknown;
 	std::string record;
+	// The record in its type's own words where they are not its name, and its kind (its field's label is
+	// its type's for that kind): the words the rename's plan names the site by (the plain-words lane).
+	std::string record_title;
+	NodeKind record_kind = 0;
 	// The record's place in the file (Document::locator), what the commit finds it by; in a text
 	// document the span's place ("line:column", TextDocument::locator).
 	std::string locator;
@@ -34,6 +38,10 @@ struct RenameSite {
 	std::string after;
 	std::string target; // the file the site names today, project-relative (the renamed file, or one of its outputs)
 };
+
+// A site's record and field in words, as a rename's plan lists it ("STARTUP/MAIN/BUTTONS/OPTIONS - Text",
+// the audit's 8.3): its record's title where it has one, its field's label, else their ids.
+std::string rename_site_place(const RenameSite &site);
 
 // An import output a renamed source takes along (ADR 0046 d6, S9c): its importer names
 // it after the source (logo.png makes logo.pcx), so it is renamed with the source and

@@ -72,16 +72,20 @@ const std::vector<FieldSchema> &string_fields() {
 			      "The string id a lookup finds in the section, in any case: the first string of a key."),
 			field("text", FieldType::Text, kTextWidth, "Text",
 			      "Stored in Windows-1252, the game's text encoding: a character it has no byte for is refused."),
-			field("x", FieldType::Integer, 0, "Position X", "A 16-bit layout hint the table stores; no reader of it in the game is witnessed."),
-			field("y", FieldType::Integer, 0, "Position Y", "A 16-bit layout hint the table stores; no reader of it in the game is witnessed."),
+			field("x", FieldType::Integer, 0, "Position X",
+			      "Unknown: a 16-bit number the table stores beside the text; no reader of it in the game is witnessed."),
+			field("y", FieldType::Integer, 0, "Position Y",
+			      "Unknown: a 16-bit number the table stores beside the text; no reader of it in the game is witnessed."),
 		};
 		out[0].defines = ReferenceKind::TextId;
 		out[1].multiline = true;
 		// Both stored in cp1252 (set_text): their widths count characters.
 		out[0].code_page = true;
 		out[1].code_page = true;
+		// Folded under More (the Inspector folds a section the game is not witnessed reading).
 		for (size_t coordinate : {size_t(2), size_t(3)}) {
 			out[coordinate].group = "Position";
+			out[coordinate].section = "More";
 			out[coordinate].applies = Applicability::Unverified;
 		}
 		return out;

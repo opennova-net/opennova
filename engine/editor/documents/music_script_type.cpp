@@ -75,7 +75,8 @@ public:
 
 void hold_read_only(std::vector<SourceIssue> &issues, const std::string &why) {
 	issues.push_back({true, 0, std::string(), std::string(),
-			"This music script " + why + ": the editor shows its MUS text and does not save it."});
+			"This music script " + why + ": the editor shows its MUS text read only and cannot save this file yet "
+			"(the game keeps playing it as it is)."});
 }
 
 bool decode_music_script(const std::string &, const std::vector<uint8_t> &stored, std::string &text,
