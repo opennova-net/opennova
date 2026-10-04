@@ -71,7 +71,11 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	const DocumentType *type = document_type_for(asset.kind);
 	// A type whose documents hold neither records nor a text (S13 D6, D9): no validator reads
 	// them yet, the file unread.
-	const bool records = type && document_content(*type) != DocumentContent::Other;
+	const DocumentContent content = type ? document_content(*type) : DocumentContent::Other;
+	const bool records = type && content != DocumentContent::Other;
+	// An image's type with no finding codes (S18: a texture's, until its roles' findings) makes no
+	// finding: its file is left unread, as a file no type opens is (validates_files).
+	const bool silent = type && !validates_files(*type);
 	const auto validate = [&entry, type](const DocumentBase &document) {
 		if (type->validate_file)
 			entry.findings = type->validate_file(document);
@@ -88,7 +92,7 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 		entry.wrote_file = open->wrote_file();
 		if (type && !records)
 			entry.findings.push_back(no_records(asset));
-		else if (type)
+		else if (type && !silent)
 			validate(*open);
 		return entry.findings;
 	}
@@ -96,7 +100,7 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	entry.modified = asset.modified_ticks;
 	entry.kind = asset.kind;
 	entry.game = input.project.target_game;
-	if (!type)
+	if (!type || silent)
 		return entry.findings;
 	if (!records) {
 		entry.findings.push_back(no_records(asset));

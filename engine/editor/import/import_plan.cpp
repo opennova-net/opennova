@@ -433,7 +433,7 @@ private:
 			// gets no record and is the kind its name and bytes give: a PNG of it the texture the game
 			// loads.
 			const bool authored = !source.install && source.entry.empty() && !source.native;
-			row.kind = authored && importer_for(output.name) ? AssetKind::ImportSource
+			row.kind = authored && authored_importer_for(output.name) ? AssetKind::ImportSource
 			           : loaded                              ? classify_asset(output.name, &output.bytes)
 			                                                 : from->file_kind(name);
 			row.size = loaded ? output.bytes.size() : from->size(name);
