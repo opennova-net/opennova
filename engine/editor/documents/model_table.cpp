@@ -895,10 +895,25 @@ std::vector<Entry> volume_entries() {
 					as<ThreediBoundingVolume>(d).collidable_type = static_cast<int32_t>(whole(v));
 					return true;
 				}},
-		// A blink box's enabled letters (the add-on's BLINK_LETTER_BITS); the upper
-		// bytes ride as they are.
-		{integer("flags", INT32_MIN, INT32_MAX, "Flags",
+		// A blink box's letters as the manual and the add-on write them (V, S, W, L, O after BB in the
+		// name): a letter clears its bit from 0x3E (the add-on's BLINK_LETTER_BITS), so a letter is checked
+		// where its bit is clear; the game reads the bits (render-occlusion-re D-OCC-8). Read on a blink box
+		// alone (type 8 [orig: @ 0x4aea68]).
+		{integer("letters", 0, 0x3E, "Letters",
 				 {{"V", 0x2, "V"}, {"S", 0x4, "S"}, {"W", 0x8, "W"}, {"L", 0x10, "L"}, {"O", 0x20, "O"}}, true),
+				[](const void *d, int) -> Value { return int64_t(~as<ThreediBoundingVolume>(d).flags & 0x3E); },
+				[](void *d, const Value &v, int, std::string &) {
+					int32_t &flags = as<ThreediBoundingVolume>(d).flags;
+					flags = (flags & ~0x3E) | (~static_cast<int32_t>(whole(v)) & 0x3E);
+					return true;
+				},
+				[](const void *d, int) { return as<ThreediBoundingVolume>(d).collidable_type == 8; }},
+		// The flags word as the file holds it (each letter's bit set where the letter is absent; the upper
+		// bytes ride as they are).
+		{integer("flags", INT32_MIN, INT32_MAX, "Flag bits",
+				 {{"bit_2", 0x2, "0x2 (no V)"}, {"bit_4", 0x4, "0x4 (no S)"}, {"bit_8", 0x8, "0x8 (no W)"},
+				  {"bit_10", 0x10, "0x10 (no L)"}, {"bit_20", 0x20, "0x20 (no O)"}},
+				 true),
 				[](const void *d, int) -> Value { return int64_t(as<ThreediBoundingVolume>(d).flags); },
 				[](void *d, const Value &v, int, std::string &) {
 					as<ThreediBoundingVolume>(d).flags = static_cast<int32_t>(whole(v));
@@ -1248,7 +1263,10 @@ void add_lists(ModelKind kind, TableKind &table) {
 	case ModelKind::Model:
 		table.list({spec(ModelKind::Lod, "LODs", "", true),
 		            vector_list<ModelRow, ModelLod>(node_kind(ModelKind::Lod), [](ModelRow &r) -> std::vector<ModelLod> & { return r.lods; })});
-		table.list({spec(ModelKind::Material, "Materials", "shader", false),
+		// A material's record name is its place ("Material 2"), not its shader tag: two materials share
+		// a tag (the Blackhawk's two FF_ST_OP), and the graph's paths, the import plan's Needed by and
+		// the Problems rows read record names (its words, texture and shader, are its title).
+		table.list({spec(ModelKind::Material, "Materials", "", false),
 		            vector_list<ModelRow, ModelMaterial>(
 		                    node_kind(ModelKind::Material), [](ModelRow &r) -> std::vector<ModelMaterial> & { return r.materials; },
 		                    [](const ModelRow &, size_t) { return ModelMaterial{fresh_material(), -1}; })});
