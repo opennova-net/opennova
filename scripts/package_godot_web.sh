@@ -39,7 +39,7 @@ done
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 
-# The files of assets/ the site ships. The on_ar15/on_arms art is about 540 MB
+# The files of assets/ the site ships. The on_ar15/on_arms art is about 47 MB
 # of textures and nothing references it yet (assets/README.md); every visitor
 # would download it before the menu. Drop a pattern here once the game uses
 # that art.

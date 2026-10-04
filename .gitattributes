@@ -43,6 +43,7 @@ assets/** -text -eol
 assets/**/*.3di filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.bad filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.tga filter=lfs diff=lfs merge=lfs -text -eol
+assets/**/*.mdt filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.md text eol=lf
 
 # art/ holds the authoring sources (Blender scenes and their textures) whose

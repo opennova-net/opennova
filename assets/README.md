@@ -17,16 +17,19 @@ Models, clips and textures ride Git LFS; everything else is a plain git blob.
 |---|---|
 | `main.mnu` | The placeholder main menu: one `STARTUP` screen with literal text, `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT`. Hand-written. |
 | `opennova.fnt` | The menu's one font (uppercase 5x7 stroke art drawn at 2x). Minted by `engine/editor/blank/blank_font_art.h` (the same art as the editor's blank font); `minimal_fnt_gen_test --write` regenerates it and the `minimal_fnt_gen` ctest keeps it byte-identical to the builder. |
-| `on_ar15.3di` | A first-person AR-15-pattern carbine, 64 parts on one rig. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` and `on_arms*` file below. |
-| `on_arms.3di` | The first-person arms skinned to `on_ar15`'s rig (its first 55 parts). |
-| `on_ar15.adm` | `on_ar15`'s animation table: the eight weapon slots and the clip each plays. |
-| `on_ar15_{rst,i,f,r,e,swt,swf,swr}.bad` | The clips: reset, idle, fire, reload, empty, switch to, switch from and switch rank. |
-| `on_ar15_{0,1,2,3}_c.tga`, `on_arms_{0,1}_c.tga`, `on_arms_{0,1}_n.tga` | The models' diffuse textures and the arms' normal maps. |
+| `on_ar15.3di` | A first-person AR-15-pattern carbine (the KINEMATION TR15), 50 parts on one rig: the stock first-person arms' 37 bones, then 13 of the gun's own. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` file below. |
+| `on_arms.3di` | The player's first-person arms on the stock arms' 37 bones, so they draw on any first-person gun. Exported from `art/on_player/on_player.blend`, like every `on_arms*` file below. |
+| `on_ar15.adm` | `on_ar15`'s animation table: the reset and nine weapon slots and the clip each plays. |
+| `on_ar15_{rst,i,f,rc,r,e,ei,swt,swf,swr}.bad` | The clips: reset, idle, fire, recoil, reload, empty, empty idle, switch to, switch from and switch rank. |
+| `on_ar15_{0,1,2}.tga`, `on_ar15_{0,1,2}n.mdt` | The carbine's diffuse textures and normal maps. |
+| `on_arms_{0,1}.tga`, `on_arms_{0,1}n.mdt` | The arms' diffuse textures and normal maps. |
 
-Nothing references the `on_ar15` files yet. Re-export them by opening the
-scene with the add-on installed and running Export Model on `on_ar15` and
-`on_arms` and Export Animations on `on_ar15`: the scene's output paths point
-here. The menu names its font and colors literally, so it needs no string
+Nothing references the `on_ar15` or `on_arms` files yet. Re-export them with
+the add-on installed: Export Model on `on_arms` in `art/on_player/`, and
+Export Model and Export Animations on `on_ar15` in `art/on_ar15/` (which also
+writes `on_ar15_weapon_edits.txt` here, the `weapon.def` keys that would wire
+it to `WPN_M4AUTO` and `WPN_M4`; it is not kept). The scenes' output paths
+point here. The menu names its font and colors literally, so it needs no string
 table, stylesheet or cursor file (the OS arrow stands in). Adding a file here
 means adding it to this table.
 
