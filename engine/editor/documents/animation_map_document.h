@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/name_source.h>
 #include <editor/model/document.h>
 #include <editor/model/finding_code_row.h>
 #include <formats/adm/adm.h>
@@ -47,7 +48,8 @@ public:
 	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
 	// answers, the type's own for the process.
 	static const std::vector<FieldSchema> &schema(NodeKind kind);
-	// A row by its slot's words (animation_key_title), a clip by its file.
+	// A row by its slot's words and the clips it plays ("walk forward: I_WalkF.bad"; a key naming no
+	// slot as written, "(no slot)"), a clip by its file.
 	std::string record_title(const NodeAddress &address) const override;
 	SerializeResult serialize() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override {
@@ -79,6 +81,12 @@ bool is_animation_map_kind(AssetKind kind);
 // the engine compares them ("anim_walk_forward": "walk forward"), any other key as it is.
 std::string animation_key_title(const std::string &key);
 
+// The headings a map's rows stand under in its outline (OutlineSpec::groups, ADR 0046 S17): each
+// row under its slot's family (documents/animation_slots.h: "Walking and running", "Deaths"), a
+// key naming no slot under the rows the game skips.
+void animation_map_row_headings(const Document &document, const NameSource *names,
+		std::vector<std::vector<RowHeading>> &out);
+
 // The animation map document type's validator over one table (DocumentType::validate_file), an
 // open document standing in for its file. Each line the table leaves out is a finding on its
 // line (and its row, where it keeps one): input the game ignores a warning
@@ -87,7 +95,8 @@ std::string animation_key_title(const std::string &key);
 // refuses are errors; a key naming none of the engine's slots is a warning (the game skips
 // the row [orig: AnimMap_ParseConfigLine @ 0x40CB60, the test @0x40CBA4]); a row naming a
 // slot an earlier row names is a note (animation_map.slot_repeated: the game joins their
-// clips into one ring, and keeps only the last reset clip). A clip the project lacks is the
+// clips into one ring; a later reset clip replaces the earlier as the skeleton, the slots left
+// out serving the first). A clip the project lacks is the
 // asset graph's.
 std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document);
 

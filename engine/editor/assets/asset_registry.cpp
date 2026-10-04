@@ -100,6 +100,22 @@ bool logical_name_fits_archive(std::string_view name) {
 	return !normalized_logical_name(name).empty();
 }
 
+const AssetEntry *AssetScan::named(std::string_view file, bool *ambiguous) const {
+	if (ambiguous) *ambiguous = false;
+	if (const AssetEntry *exact = at_path(file)) return exact;
+	const AssetEntry *found = nullptr;
+	for (const AssetEntry &candidate : entries) {
+		if (!strutil::iequals(candidate.relative_path, file)) continue;
+		if (found) {
+			if (ambiguous) *ambiguous = true;
+			return nullptr;
+		}
+		found = &candidate;
+	}
+	if (found || file.find_first_of("/\\") != std::string_view::npos) return found;
+	return find(file);
+}
+
 const AssetEntry *AssetScan::find(std::string_view logical_name) const {
 	const std::string key = normalized_logical_name(logical_name);
 	if (!index_current(entries, by_path_.size())) {
