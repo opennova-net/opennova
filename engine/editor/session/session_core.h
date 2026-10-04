@@ -35,6 +35,7 @@ struct PlayIntent;
 struct ExportIntent;
 class RenameController;
 class UnsavedGuard;
+class TextureUseIndex;
 class Viewports;
 
 // How long a gesture of the wire's stays open with no sample (S13 V7): a client that began a drag
@@ -99,10 +100,11 @@ public:
 	// the outer outcome's, which it neither empties nor ends. Leaving the scope, however it is
 	// left, ends only the request it began. The status line a refused request leaves is that
 	// request's (ADR 0046 S15): the next request served without a refusal replaces it with its own
-	// line, or, saying nothing, clears it, so a refusal never reads as the outcome of what came after.
+	// line, or, saying nothing, clears it, so a refusal never reads as the outcome of what came after;
+	// a `background` request (its row's: one the Shell sends of its own, S18) is no such request.
 	class RequestScope {
 	public:
-		explicit RequestScope(SessionCore &core);
+		explicit RequestScope(SessionCore &core, bool background = false);
 		~RequestScope();
 		RequestScope(const RequestScope &) = delete;
 		RequestScope &operator=(const RequestScope &) = delete;
@@ -110,6 +112,7 @@ public:
 	private:
 		SessionCore &core_;
 		bool outermost_;
+		bool background_;
 		std::string status_before_; // the line when the request arrived
 	};
 	const ActionOutcome &outcome() const { return outcome_; }
@@ -199,6 +202,14 @@ public:
 	// imports, scan and requirements are the view's, an Output line for each source it imported,
 	// the validation left due. What its import pass came to.
 	ImportRunResult absorb_refresh(ProjectRefresh &refresh);
+	// What a program changed of the watched files (S18's external round trip, ExternalChanges) refreshed
+	// alone, as an operation (ChangedSourcesOperation): the sources it names imported (the pass over them
+	// alone), then the scan updated for those sources and the files; false, refused, while another runs.
+	bool start_changed_refresh(ExternalChanges changes);
+	// Its finish: the sources' imports and findings the view's in place of what they were, the scan updated
+	// for them and the files that moved, the open documents of those files read again, the validation left
+	// due.
+	void absorb_changed(ImportRunResult &imports, const std::vector<std::string> &files);
 	// The refresh run to its end now and the project validated (the build's, before it plans).
 	void refresh_now();
 	// The project files at `paths` read again alone (AssetScan::update: a Save's, a create's, a
@@ -346,6 +357,7 @@ private:
 	PollBudget poll_budget_ = kDefaultPollBudget;
 	SessionView view_;
 	std::shared_ptr<Viewports> viewports_;
+	std::shared_ptr<TextureUseIndex> texture_uses_; // the view's texture_uses, cleared with the project
 	ActionOutcome outcome_;
 	std::map<std::string, WireDrag> wire_drags_;
 	OriginalBytes original_bytes_; // which files are the install's bytes (shipped_files)

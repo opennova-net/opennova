@@ -25,6 +25,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
@@ -365,16 +366,18 @@ static int test_fixes() {
 	TEST_EXPECT(labels_of(fixes_for(texture, v)) == std::vector<std::string>({"Import badge.png from the game data..."}));
 	// A model's texture row (S11f): the file its type's loader reads from what the game data
 	// has, a diffuse row's .dds sibling; a plain row (type 1) reads its own name alone, which
-	// the game data lacks; a texture of no model reads as its game loader opens it (the stage
-	// loader's .dds sibling; with no loader given, the name as written alone); each takes a
-	// placeholder as the name it opens once that is there (S11h).
+	// the game data lacks; so does a texture whose use's loader is not witnessed (ADR 0046 S18: no
+	// twin of another extension), and one of a role by its loader (a sky map's archive loader, the
+	// .dds beside it first); each takes a placeholder as the name it opens once that is there (S11h).
 	Diagnostic skin = font;
 	skin.subject = ReferenceSubject{ReferenceKind::Texture, "logo.tga", std::string(), 0};
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) ==
 	            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
 	editor_test::own_reference(skin).loader_arg = 1;
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) == std::vector<std::string>({"Create a placeholder logo.tga"}));
-	editor_test::own_reference(skin).loader_arg = texture_loader_arg(opennova::renderer::TextureLoader::Stage);
+	editor_test::own_reference(skin).loader_arg = -1;
+	TEST_EXPECT(labels_of(fixes_for(skin, v)) == std::vector<std::string>({"Create a placeholder logo.tga"}));
+	editor_test::own_reference(skin).loader_arg = texture_role_arg(TextureRoleId::SkyCloud);
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) ==
 	            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
 	editor_test::own_reference(skin).loader_arg = -1;
@@ -704,8 +707,8 @@ static int test_fix_index() {
 // S11h: a texture the project lacks takes a placeholder, the game's own missing-texture
 // checkerboard, as the file the reference's loader opens once it is there: a model's diffuse row
 // naming a .tga its own name (no DDS sibling there), a menu's image its .tga (though the loader
-// takes the .dds a missing .tga leaves), a particle's graphic the name as written (or, with no
-// extension, the runtime's lookup's first name the factory makes); each in bulk, a Fix all making
+// takes the .dds a missing .tga leaves), a particle's graphic the name as written (its atlas's
+// TGA, ADR 0046 S18); each in bulk, a Fix all making
 // every one; none for a model's chunk row, a name no placeholder is made for, a particle's name
 // whose own extension the factory cannot write, or a model row whose reader would read the
 // placeholder in another format; Import first when the game install has the file. Applied, the
@@ -742,7 +745,7 @@ static int test_placeholders() {
 	const Diagnostic *logo = missing(ReferenceKind::MenuTexture, "logo.tga");
 	const Diagnostic *puff = missing(ReferenceKind::Texture, "puff.tga");
 	TEST_EXPECT(skin && editor_test::reference_of(*skin).loader_arg == 0 && logo && puff &&
-	            editor_test::reference_of(*puff).loader_arg == texture_loader_arg(opennova::renderer::TextureLoader::Particle));
+	            editor_test::reference_of(*puff).loader_arg == texture_role_arg(TextureRoleId::ParticleGraphic));
 	if (!skin || !logo || !puff) return 1;
 	std::vector<ProblemFix> firsts;
 	for (const auto &expected : {std::make_pair(skin, "armry.tga"), std::make_pair(logo, "logo.tga"), std::make_pair(puff, "puff.tga")}) {
@@ -769,9 +772,9 @@ static int test_placeholders() {
 	Diagnostic png = *logo;
 	editor_test::own_reference(png).target = "badge.png";
 	TEST_EXPECT(fixes_for(chunk, v).empty() && fixes_for(png, v).empty() && !has_fixes(png, v));
-	// A particle's graphic, as the particle manager's TGA loader reads it: the name as written
-	// alone, so a name the factory cannot write (an extension it does not make, or none) takes
-	// none.
+	// A particle's graphic, as its atlas reads it (ADR 0046 S18): the name alone, so one whose
+	// extension the factory cannot write takes none, and neither does a name with no extension (no
+	// loader of the game adds one).
 	Diagnostic particle = *puff;
 	editor_test::own_reference(particle).target = "puff.png";
 	TEST_EXPECT(fixes_for(particle, v).empty() && !has_fixes(particle, v));

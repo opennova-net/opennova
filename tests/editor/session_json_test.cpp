@@ -137,7 +137,7 @@ static int test_tokens() {
 		TEST_EXPECT(*edit_operation_token(operation) && edit_operation_from_token(edit_operation_token(operation), back) &&
 		            back == operation);
 	}
-	for (int i = 0; i <= static_cast<int>(PickPurpose::NewProjectInstall); ++i) {
+	for (int i = 0; i <= static_cast<int>(PickPurpose::TextureImage); ++i) {
 		const auto purpose = static_cast<PickPurpose>(i);
 		PickPurpose back = PickPurpose::None;
 		TEST_EXPECT(*pick_purpose_token(purpose) && pick_purpose_from_token(pick_purpose_token(purpose), back) &&
@@ -703,6 +703,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::OutDir: out.out_dir = "C:/builds/sample"; break;
 		case F::ExportDir: out.export_dir = "C:/shipped/sample"; break;
 		case F::Mission: out.mission = "04TR.bms"; break;
+		case F::Operation: out.operation = "resize"; break;
 		// In its keys' order, as the wire keeps an object's members.
 		// Given in the New file prompt's order, through the factory, which sorts them as the wire reads
 		// them: the request equals its round trip (review F10).

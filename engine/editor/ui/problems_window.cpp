@@ -6,12 +6,15 @@
 #include <utility>
 #include <vector>
 
+#include <editor/assets/asset_kinds.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/requirements/requirement_words.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/view/session_view.h>
+#include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/welcome_view.h>
 
@@ -408,7 +411,11 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 			if (!part->empty()) where += " - " + *part;
 	}
 	const std::string whole = ProblemsList::location_of(d, true) + (where == plain ? std::string() : "\n" + where);
-	ui_kit::clipped_text(where, whole != where ? whole : std::string());
+	// A texture's finding shows the texture as its tooltip (S18).
+	const AssetEntry *asset = view.project.scan && !d.asset.empty() ? view.project.scan->at_path(d.asset) : nullptr;
+	const bool texture = asset && asset->kind == AssetKind::Texture;
+	ui_kit::clipped_text(where, !texture && whole != where ? whole : std::string());
+	if (texture) texture_preview::file_tooltip(workspace_, d.asset, whole);
 	ImGui::TableNextColumn();
 	if (!expanded && !fixes.empty()) draw_fixes(view, line.finding, fixes, note);
 	ImGui::PopID();

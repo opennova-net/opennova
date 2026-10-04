@@ -10,6 +10,7 @@
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/script_viewport.h>
+#include <editor/preview/texture_viewport.h>
 #include <editor/session/view/documents_view.h>
 
 namespace opennova::editor {
@@ -46,6 +47,12 @@ constexpr ViewportFeed kMissionFeeds[] = {
 	{ T::Mission, true },
 };
 
+// The texture's (S18): a texture, the Document tab's main view, and the Preview window's for a texture
+// Files selects (open or not).
+constexpr ViewportFeed kTextureFeeds[] = {
+	{ T::Texture, true },
+};
+
 // The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
 // over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8); the
 // mission's waits too (a drag is Updates alone: its entities move in place), and the Shell keeps two
@@ -59,6 +66,8 @@ constexpr ViewportKindRow kRows[] = {
 			ScriptViewport::make, false },
 	{ ViewportKind::Mission, ViewportRole::Main, false, false, true, kMissionFeeds, std::size(kMissionFeeds),
 			MissionViewport::make, true, 2 },
+	{ ViewportKind::Texture, ViewportRole::Main, false, false, false, kTextureFeeds, std::size(kTextureFeeds),
+			TextureViewport::make, true, 0, true },
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");
@@ -161,12 +170,27 @@ std::string viewport_shown_types() {
 	return out;
 }
 
+ViewportKind file_preview_kind(DocumentTypeId type) {
+	for (const ViewportKindRow &row : kRows)
+		if (row.files && viewport_kind_shows(row.kind, type)) return row.kind;
+	return ViewportKind::kCount;
+}
+
 ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {
+	// The file Files selects, while it leads and is not the active document (its tab shows it).
+	if (documents.files_lead) {
+		const ViewportKind files = file_preview_kind(documents.file_selected.type);
+		if (files != ViewportKind::kCount && !documents.previews[files].path.empty() &&
+				documents.previews[files].path != documents.active)
+			return files;
+	}
 	ViewportKind kind = last;
 	if (const DocumentBase *active = open_at(documents, documents.active)) {
 		const ViewportKind fed = preview_kind_of(asset_kind_row(active->kind()).document);
 		if (fed != ViewportKind::kCount) kind = fed;
 	}
+	// A files kind the Preview window showed stays only while Files leads.
+	if (kind != ViewportKind::kCount && viewport_kind_row(kind).role != ViewportRole::Preview) kind = ViewportKind::kCount;
 	// What each has to show: the view keeps a kind's target until its document closes.
 	if (kind != ViewportKind::kCount && !documents.previews[kind].path.empty()) return kind;
 	for (const ViewportKindRow &row : kRows)
@@ -175,13 +199,21 @@ ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {
 }
 
 void update_preview_targets(DocumentsView &documents) {
+	// Another document made active: Files no longer leads.
+	if (documents.active != documents.previews_active) {
+		documents.files_lead = false;
+		documents.previews_active = documents.active;
+	}
 	const DocumentBase *shown = open_at(documents, documents.active);
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const auto kind = static_cast<ViewportKind>(i);
 		const ViewportKindRow &row = viewport_kind_row(kind);
 		PreviewTarget &target = documents.previews[kind];
 		if (row.role != ViewportRole::Preview) {
-			target = PreviewTarget();
+			// A files kind's: the file Files selects, where the kind draws its type.
+			const bool selected = row.files && !documents.file_selected.path.empty() &&
+					viewport_kind_shows(kind, documents.file_selected.type);
+			target = selected ? PreviewTarget{ documents.file_selected.path, 0 } : PreviewTarget();
 			continue;
 		}
 		// The active document, when the kind shows its type: a kind that shows a row of it follows

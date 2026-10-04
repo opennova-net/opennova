@@ -10,6 +10,7 @@
 #include <unordered_set>
 
 #include <editor/documents/document_types.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
 #include <editor/model/diagnostic.h>
@@ -41,7 +42,7 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 	return a.source == b.source && a.record == b.record && a.record_key == b.record_key && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.kind == b.kind &&
 			a.value == b.value && a.scope == b.scope && a.rewritable == b.rewritable &&
-			a.through == b.through && a.loader_arg == b.loader_arg &&
+			a.through == b.through && a.loader_arg == b.loader_arg && a.use_context == b.use_context &&
 			a.span.line == b.span.line && a.span.column == b.span.column &&
 			a.span.length == b.span.length && a.fallback == b.fallback &&
 			a.scopes_after == b.scopes_after && a.optional == b.optional && a.scope_alternate == b.scope_alternate &&
@@ -163,7 +164,8 @@ bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_ar
 	const ReferenceKindRow &row = reference_row(kind);
 	if (row.resolution != ReferenceResolution::File) return false;
 	if (file == row.file) return true;
-	if (file != AssetKind::MaterialChunk || kind != ReferenceKind::Texture || loader_arg < 0) return false;
+	if (file != AssetKind::MaterialChunk || kind != ReferenceKind::Texture || !texture_arg_is_row_type(loader_arg))
+		return false;
 	// A chunk row reads its name as a chunk container whatever the name (a chunk reader for
 	// any name, renderer::material_texture_source): a file no rule types by its name serves one
 	// when its bytes hold a chunk (the scan's MaterialChunk), and no other texture row.
@@ -959,7 +961,8 @@ std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::
 				choice.name = slot.logical_name;
 				choice.kind = kind;
 				choice.file = slot.path;
-				choice.status = resolve(kind, choice.name, scope, nullptr, loader_arg);
+				choice.status = resolve(kind, choice.name, scope, &choice.served, loader_arg);
+				if (choice.status != ReferenceStatus::Present) choice.served.clear();
 				out.push_back(std::move(choice));
 			});
 		};

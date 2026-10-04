@@ -11,11 +11,14 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/texture_document.h>
+#include <editor/documents/texture_operations.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
@@ -456,6 +459,28 @@ void DocumentSet::show_in_files(const EditorRequest &request) {
 	// AboutFile: its card opens too (the UX round's project lane).
 	reveal.tag = request.kind == EditorRequestKind::AboutFile ? 1 : 0;
 	view_.events.post(std::move(reveal));
+	// Files selects it, as a click there does (S18).
+	select_file(asset->relative_path);
+	core_.touch(ViewConcern::Selection);
+}
+
+void DocumentSet::select_file(const std::string &path) {
+	if (!view_.project.open) return;
+	FileSelection selected;
+	if (!path.empty()) {
+		const AssetEntry *asset = core_.project_file(path);
+		if (!asset) {
+			core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
+			return;
+		}
+		selected.path = asset->relative_path;
+		selected.type = asset_kind_row(asset->kind).document;
+	}
+	// A file a viewport draws whether or not it is open leads the Preview window (a texture's).
+	const bool lead = file_preview_kind(selected.type) != ViewportKind::kCount;
+	if (selected.path == view_.documents.file_selected.path && lead == view_.documents.files_lead) return;
+	view_.documents.file_selected = std::move(selected);
+	view_.documents.files_lead = lead;
 	core_.touch(ViewConcern::Selection);
 }
 
@@ -510,6 +535,55 @@ void DocumentSet::edit_record(const EditorRequest &request) {
 	// A batch that asks nothing (a replace_list of an empty list by none, S13 A5) is done.
 	if (request.edits.empty()) return;
 	apply_edits(*document, request.edits);
+}
+
+void DocumentSet::texture_operation(const EditorRequest &request) {
+	if (!document_for(request.path) && request.open_first && view_.project.open && !request.path.empty())
+		open_document(request::open_document(request.path));
+	DocumentBase *document = document_for(request.path);
+	auto *texture = dynamic_cast<TextureDocument *>(document);
+	if (!texture) {
+		if (view_.project.open)
+			core_.refuse_now(document ? CoreFinding::TextureOperation : CoreFinding::DocumentNotOpen,
+			                 document ? basename_of(document->path()) + " is no texture." : "Open the texture before editing it.",
+			                 request.path);
+		return;
+	}
+	const std::string &path = texture->path();
+	const std::string file = basename_of(path);
+	// A file an import makes is made by its import's options, never edited in place.
+	if (const AssetEntry *entry = core_.project_file(path); entry && !entry->imported_from.empty()) {
+		core_.refuse_now(CoreFinding::TextureOperation,
+		                 file + " is made from " + entry->imported_from + ": change how it is made (its import's options), "
+		                 "not the file, which the next import makes again.",
+		                 path);
+		return;
+	}
+	TextureOperation operation;
+	if (!texture_operation_kind(request.operation, operation.kind)) {
+		core_.refuse_now(CoreFinding::TextureOperation,
+		                 "A texture takes no operation '" + request.operation +
+		                         "': resize, alpha, format, reorder_rows or remap_palette.",
+		                 path);
+		return;
+	}
+	operation.params = request.values;
+	auto image = std::make_shared<TextureImageEdit>();
+	std::string why;
+	if (!apply_texture_operation(path, texture->bytes(), operation, image->bytes, image->words, why)) {
+		core_.refuse_now(CoreFinding::TextureOperation, "Cannot " + std::string(texture_operation_token(operation.kind)) + " " + file +
+		                                                        ": " + why + ".",
+		                 path);
+		return;
+	}
+	Edit edit;
+	edit.operation = EditOperation::Apply;
+	edit.payload = image;
+	const std::string words = image->words + " (" + file + ").";
+	if (!apply_edits(*document, {edit})) return;
+	// The step named with the operation's words, what Undo says it takes back.
+	view_.activity.status = words;
+	name_step(*document);
 }
 
 void DocumentSet::revert_to_saved(const EditorRequest &request) {
@@ -750,6 +824,9 @@ void DocumentSet::close_all() {
 	stale_.clear();
 	conflicts_.clear();
 	end_gestures(false);
+	// No file of a project closed is selected in Files any more.
+	view_.documents.file_selected = FileSelection();
+	view_.documents.files_lead = false;
 }
 
 bool DocumentSet::position_after(const Document &document, const NodeAddress &record, NodeId &parent, size_t &position) {

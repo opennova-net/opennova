@@ -14,6 +14,7 @@
 #include <editor/session/project_session.h>
 
 #include "authoring/child_process.h"
+#include "authoring/thumbnail_images.h"
 #include "devtools/imgui_pass_node.h"
 #include "mission/mission_object_placer.h"
 
@@ -99,6 +100,11 @@ public:
 	// viewport is read through query_json's `viewport` and changed through request_json's
 	// set_viewport and edit_in_viewport (S13 V7).
 	SubViewport *get_viewport_device(const String &p_path, const String &p_kind) const;
+	// The GPU texture of a texture file's thumbnail (ADR 0046 S18) as `p_transform` makes it (a
+	// texture_thumbnail query's transform token), made and uploaded now: for the thumbnail device's
+	// test alone (the windows draw it through the ImGui pass). Null for a file that is no texture of the
+	// project or a picture with no texels.
+	Ref<ImageTexture> get_thumbnail_texture(const String &p_path, const String &p_transform);
 	// The mission device over the mission at `p_path` (ADR 0046 S14), for its parity tests alone: its
 	// MissionObjectPlacer (null before its item table is read, or no device); a count by name
 	// ("placements": the whole placements run; "placed", "lifted", "hidden": its entities;
@@ -115,6 +121,13 @@ public:
 	// The newest message on the editor's status line (the menu bar's, which fades it after a few
 	// seconds): what the session's refusals and a device's notices say. For the tests; "" for none.
 	String get_status_text() const;
+
+	// Whether an open_externally view event (S18: an edit_externally's) opens its file in the program the
+	// system has for it (OS::shell_open; the `open_externally` property, true): a test turns it off and
+	// reads the file the last one named instead ("" for none yet).
+	void set_open_externally(bool p_open) { open_externally_ = p_open; }
+	bool get_open_externally() const { return open_externally_; }
+	String get_last_external_open() const { return last_external_open_; }
 
 	// "editor": the variant this library is (the runtime variant has no EditorApp).
 	String get_loaded_variant() const { return "editor"; }
@@ -150,6 +163,20 @@ private:
 	void _on_file_selected(const String &p_file);
 	void _on_files_selected(const PackedStringArray &p_files);
 	void _on_picker_canceled();
+	void _on_files_dropped(const PackedStringArray &p_files);
+
+public:
+	// Files dropped at `p_at` of the window's pixels, as the OS's drop is taken (a test's, S18).
+	void drop_files(const PackedStringArray &p_files, const Vector2 &p_at);
+	// Files the OS dropped with its cursor at `p_screen` (screen pixels): the point in the window's viewport
+	// (its client area's position taken off, its stretch undone), as drop_files takes it. The OS drop
+	// arrives with the cursor where it let go; the viewport's own mouse position is the last mouse event's,
+	// which a drag from another program over the window never moves.
+	void drop_files_at_screen(const PackedStringArray &p_files, const Vector2 &p_screen);
+	// The point the last drop was held at, in the window's viewport (for the tests).
+	Vector2 get_last_drop_at() const { return last_drop_at_; }
+
+private:
 	// A free loopback port for the game's MCP endpoint, allocated when the session spawns the game
 	// (the launcher source the session asks, once the build lands).
 	int allocate_mcp_port();
@@ -160,6 +187,11 @@ private:
 	// The SubViewports of devices given up before this frame, freed (queued: they go at the frame's
 	// end, after the ImGui pass of this frame drew without them).
 	void free_retired_();
+	// A refresh_changed_sources sent of the Shell's own (S18), when the busy gate takes it: as the
+	// window gains the focus and once a second while it has it.
+	void refresh_changed_sources_();
+	// The open_externally view events posted since the last pump, each file opened in its program.
+	void open_externally_events_();
 
 	std::unique_ptr<ChildProcessPlatform> platform_;
 	// The preferences' store, owned here and outliving the session that reads and writes it.
@@ -178,6 +210,8 @@ private:
 	std::vector<opennova::editor::EditorRequest> queued_device_requests_;
 	// The viewports' devices (S13 V5): at most four, by document and kind, made under this node.
 	std::unique_ptr<opennova::editor::ViewportDeviceCache> devices_;
+	// The texture thumbnails' GPU copies (S18), which the windows draw through.
+	std::unique_ptr<ThumbnailImages> thumbnails_;
 	// The milliseconds each frame gives the devices' builds (S13 V6).
 	int build_budget_ms_ = kBuildBudgetMs;
 	int first_picture_budget_ms_ = kFirstPictureBudgetMs;
@@ -190,6 +224,14 @@ private:
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window
+	// The external round trip (S18): whether the window has the focus, when the sources were last
+	// checked, the last view event taken, and the file the last open_externally named.
+	bool focused_ = false;
+	uint64_t last_source_check_ms_ = 0;
+	uint64_t external_seq_ = 0;
+	bool open_externally_ = true;
+	String last_external_open_;
+	Vector2 last_drop_at_;
 };
 
 } // namespace godot

@@ -569,6 +569,19 @@ leaves nothing out.
 _Avoid_: dependency mount, base, parent project (a project builds on nothing but what it holds),
 bundle
 
+**Import option**:
+One setting of how an import makes its outputs, held in its import record by a key (ADR 0046 S18):
+each a row of its importer's, with the values it takes, what it means where the record leaves it out
+and the option it applies under (the image importer's format, file name, alpha, size, palette, DDS
+compression, mip levels, green and normal map). What a texture's uses ask of its import (a model row's
+`.tga` the DXT5 `.dds` its loader reads first, a colour map a 24-bit 1024 x 1024 TGA, a loading screen an
+800 x 600 PCX, a foliage map from an 8-bit PCX its indices kept) is said beside them, with why; a
+texture's tab sets them and its uses' in one click. A PNG an author imports is an import source; a TGA or
+a PCX is one only where its record makes it one (Replace, Edit externally), else the texture the game
+reads as it is.
+_Avoid_: import setting, sidecar field, conversion (an option is how the outputs are made, never a
+change to the source)
+
 **Mission sidecar**:
 A file the game finds by a mission's name rather than by a reference in it, each skipped when
 absent: `<mission>.bin` (its text, else `medmssn.bin`), `.wac` (its script), `.pcx` (its loading
@@ -774,8 +787,8 @@ generic form beside it)
 
 **Viewport**:
 One document's picture as the game would draw it, of one kind (a menu's screen, a model, a text in
-its script device, a mission's 3D view), kept by the session while the document is
-open: one per document and kind. Its role is Preview (shown by the Preview window while its document
+its script device, a mission's 3D view, a texture), kept by the session while the document is
+open: one per document and kind (a texture's also while Files selects the file, open or not). Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
 picture with the outline and the Inspector beside it: a mission's, for which the Preview window steps
 aside while that document is active and it has nothing to show, so the picture has the centre);
@@ -850,6 +863,62 @@ text while an operation holds the documents. Where no window draws it (headless)
 drawn over the tab (a menu, a dialog), the document's lines show instead, read only.
 _Avoid_: script editor (the whole editor), code view, text view (the lines shown read only where no
 device draws), CodeEdit (the Godot control behind it)
+
+**Texture document**:
+A texture file of the project (a .tga, .mdt, .pcx, .dds or .png) open in the editor, read as the
+game reads it: by the reader its name picks (a .tga or an .mdt the game's TGA reader, which takes every
+file's rows bottom up whatever its header says; a .pcx the PCX reader, every colour opaque; a .dds
+D3DX's loader, which reads the bytes by their content; a .png the menus' reader), never by what the
+bytes would say elsewhere. It holds the file's texels (each level a DDS stores, an indexed file's
+palette and indices) and what the texture is in a modder's words (its format, size, texels,
+compression, alpha, mip levels, palette, whether the game loads it and why not); a file the game
+cannot load still opens and says why. Its Document tab is its texture viewport beside those facts,
+its palette and what uses it; the Preview window shows the texture Files selects before it is opened.
+Its edits are whole-image ones (a texture operation: a resize, an alpha, its stored form, an upside-down
+TGA's rows, an 8-bit PCX's palette indices), each one undo step that makes the file anew through the
+editor's writers, which Save writes; no paint program. A file an import makes is made by its import's
+options, never edited in place (ADR 0046 S18).
+_Avoid_: image (the decoded texels alone), bitmap, sprite, asset (a project file by its logical name)
+
+**Texture role**:
+One way the game uses a texture file (ADR 0046 S18): a model's diffuse or normal map, a terrain's
+colour map or foliage map, a sky's cloud layer, a particle's graphic, a HUD's alpha-only art, a menu's
+image, a mission's loading screen, and so on, 46 in all. Each names the loader that picks the file for
+a name and the reader that decodes it (a model row's: the `.dds` beside the name first; the HUD's: the
+`.FULL` and `.ALPHA` suffixes, a PCX made white with its alpha from blue), the formats that work, the
+size the game needs, what the alpha means there, and what the game does with a wrong or missing file,
+each with its witness. A file has as many roles as uses; the role, not the file, decides what is
+right.
+_Avoid_: texture type (a model texture row's type field), usage, slot (a model row's slot field)
+
+**Texture use**:
+One way a texture file is used (ADR 0046 S18): a reference to it from another file (a model's material
+row, a terrain's key, a sky's cloud layer, a particle's graphic, an item's HUD image, a menu's image) with
+the role that reference gives it and what the referrer says of it (the material's shader and cut-out),
+or a name the game opens itself (the HUD's art, the weather, the scars). A use whose loader opens another
+file of the name (a `.tga` beside the `.dds` a model row loads) does not read this one. A texture's tab
+lists its uses as Used as.
+_Avoid_: usage (the graph's references to any file), referrer (the file that makes the use)
+
+**Texture thumbnail**:
+A texture file as a small picture (ADR 0046 S18): read by the reader its name picks, what a use's
+loader makes of its texels applied (the HUD's alpha alone, a sky map's PCX alpha from its palette),
+shrunk to 128 pixels a side, with its size and format in words. The session keeps them by the file's
+stamp and makes them off the frame; the editor shows one wherever a field names a texture (the file the
+reference's loader opens, a `.tga`'s `.dds` where that is what the game loads), in a texture field's
+picker, and as the tooltip of a texture in Files, Problems and the outline.
+_Avoid_: icon, preview (the Preview window), image
+
+**Texture viewport**:
+A texture's picture (the Main view of a texture document, and the Preview window's for a texture
+Files selects, read from its file while it is not open): its texels at a zoom (fitted, or a scale about
+a middle texel, which the wheel steps about the pointer and a drag pans), through its colour, one
+channel or its alpha as grey, or its colour over a checkerboard by its alpha, at a mip level, as the
+file holds it or as the game draws it for one of its uses (the use's loader's texels, a cut-out's test,
+a tile atlas's cells); each a SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
+its palette entry), never a record. Its device draws the texels the portable decode made, texel for
+texel where a texel covers a pixel or more.
+_Avoid_: image viewer, preview (the Preview window, or the role)
 
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by

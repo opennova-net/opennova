@@ -146,6 +146,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Texture, "texture", "Texture", ArchiveSlot::Resource)
 	        .extensions(kTexture)
+	        .edited_by(DocumentTypeId::Texture)
 	        .new_name("newtexture.tga")
 	        .folder("textures")
 	        .about("An image the game draws: a model's surfaces, a menu, the HUD.")

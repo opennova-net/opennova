@@ -23,6 +23,10 @@ enum class ViewportKind : uint8_t {
 	// A mission as the game draws it (S14: its terrain, environment and entities, the Shell's own
 	// Terrain, MissionEnvironment and MissionObjectPlacer), its marks drawn over it by its canvas
 	Mission,
+	// A texture as the game reads it (S18: its texels at a zoom, through its channels, at a mip level;
+	// the Shell's texture device), the Document tab's view of a texture, and the Preview window's of a
+	// texture Files selects
+	Texture,
 	kCount,
 };
 
@@ -36,8 +40,8 @@ inline constexpr size_t kViewportKindCount = static_cast<size_t>(ViewportKind::k
 // are one Main and one Preview.
 enum class ViewportRole : uint8_t { Preview, Main };
 
-// A kind's token on the wire ("menu", "model", "script", "mission"; "" past the last kind), and the kind a
-// token names (false for none).
+// A kind's token on the wire ("menu", "model", "script", "mission", "texture"; "" past the last kind), and
+// the kind a token names (false for none).
 const char *viewport_kind_token(ViewportKind kind);
 bool viewport_kind_from_token(const std::string &token, ViewportKind &out);
 

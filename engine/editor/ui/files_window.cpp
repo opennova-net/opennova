@@ -16,6 +16,7 @@
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
 #include <editor/model/field_text.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_card.h>
 #include <editor/session/problem_query.h>
@@ -24,6 +25,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
+#include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/welcome_view.h>
 
@@ -279,6 +281,16 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const auto newest = std::find_if(reveals.rbegin(), reveals.rend(),
 			[](const ViewEvent &event) { return event.kind == ViewEventKind::RevealFile; });
 	if (newest != reveals.rend()) show_revealed(v, *newest);
+	// A file the session selected since Files last drew (a select_file over the wire, or this
+	// window's own click coming back) is the row selected, its folders opened and scrolled to.
+	if (v.documents.file_selected.path != followed_) {
+		followed_ = v.documents.file_selected.path;
+		if (const AssetEntry *entry = followed_.empty() ? nullptr : entry_at(v, followed_)) {
+			selected_ = entry->relative_path;
+			scroll_to_ = entry->relative_path;
+			open_to_ = entry->imported_from.empty() ? entry->relative_path : entry->imported_from;
+		}
+	}
 	draw_toolbar(v);
 	// The filter and the kind beside it, then how many files the list shows (under them in a narrow dock).
 	const std::vector<size_t> &matches = matching(v);
@@ -498,7 +510,14 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick |
 	                              ImGuiSelectableFlags_AllowOverlap)) {
 		selected_ = entry.relative_path;
-		// A double click opens what the editor opens, and says what any other file is (its card).
+		// The selection is the session's too (S18): a texture so selected shows in the Preview window
+		// (again, once another document was made active since).
+		const bool previews = file_preview_kind(asset_kind_row(entry.kind).document) != ViewportKind::kCount;
+		if (view.allows(EditorRequestKind::SelectFile) &&
+		    (view.documents.file_selected.path != entry.relative_path || (previews && !view.documents.files_lead)))
+			workspace_.request(request::select_file(entry.relative_path));
+		// A double click opens what the editor opens, and says what any other file is (its card: the UX
+		// round's project lane).
 		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
 			if (!is_editable_kind(entry.kind)) open_card(entry.relative_path);
 			else if (view.allows(EditorRequestKind::OpenDocument)) workspace_.request(request::open_document(entry.relative_path));
@@ -517,8 +536,8 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		open_to_.clear();
 	}
 	draw_file_menu(view, entry);
-	// Its path, kind and size, made only while its tooltip shows.
-	ui_kit::tooltip_lazy([&] {
+	// Its path, kind and size, made only while its tooltip shows; a texture's picture above them (S18).
+	const auto tip = [&] {
 		std::string tip = entry.relative_path + "\n" + asset_kind_label(entry.kind) + ", " +
 		                  size_text(entry.size_bytes);
 		if (!entry.imported_from.empty()) tip += "\nImported from " + entry.imported_from;
@@ -532,7 +551,10 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 			tip += "\n" + said(counts.original_errors, counts.original_warnings) +
 			       " in the game's own data (the game as it ships has them too)";
 		return tip;
-	});
+	};
+	if (entry.kind != AssetKind::Texture) ui_kit::tooltip_lazy(tip);
+	else if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+		texture_preview::tooltip(workspace_, entry.relative_path, TextureLoadTransform::None, tip());
 	ImGui::SameLine(0.0f, 0.0f);
 	if (in_tree) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetTreeNodeToLabelSpacing());
 	const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;

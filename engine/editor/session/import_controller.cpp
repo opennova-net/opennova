@@ -2,17 +2,22 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
 
-#include <cstdio>
-
+#include <base/io/file_time.h>
+#include <base/io/strutil.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
+#include <editor/import/sidecar.h>
+#include <editor/import/texture_source.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
+#include <editor/preview/texture_thumbnails.h>
+#include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_operation.h>
@@ -21,6 +26,8 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
+#include <editor/session/texture_import_state.h>
+#include <editor/session/view/view_events.h>
 
 namespace opennova::editor {
 
@@ -119,6 +126,220 @@ void ImportController::cancel() {
 void ImportController::reimport(const std::string &source, bool force) {
 	if (!view_.project.open) return;
 	if (core_.start_refresh(true, force, source)) view_.activity.status = "Importing again...";
+	core_.touch(ViewConcern::Output);
+}
+
+// The record of the import `path` names, each value set as its option's row takes it ("" back to its
+// row's fallback: left out of the record), written only when it changed, then the refresh that imports
+// it again (the pass takes a record that changed as stale, and drops an output the import no longer
+// makes).
+void ImportController::set_options(const std::string &path,
+                                   const std::vector<std::pair<std::string, std::string>> &values) {
+	if (!view_.project.open) return;
+	TextureImportState state;
+	std::string error;
+	if (!texture_import_state(view_, path, state, error))
+		return core_.refuse_now(CoreFinding::ImportOption, "No import options to set: " + error, path);
+	ImportSidecar sidecar = state.sidecar;
+	for (const auto &[key, value] : values) {
+		const ImportOptionRow *row = import_option_row(state.importer->options, key);
+		if (!row) {
+			std::string keys;
+			for (const ImportOptionRow &each : state.importer->options) keys += (keys.empty() ? "" : ", ") + each.key;
+			return core_.refuse_now(CoreFinding::ImportOption,
+			                        "The " + state.sidecar.importer + " importer has no option '" + key +
+			                                "' (its options: " + keys + ").",
+			                        state.source);
+		}
+		const std::string taken = row->keeps_case ? value : strutil::to_lower(value);
+		if (taken.empty()) {
+			sidecar.options.erase(key);
+			continue;
+		}
+		if (!import_option_accepts(*row, taken))
+			return core_.refuse_now(CoreFinding::ImportOption,
+			                        "The " + state.sidecar.importer + " importer's " + key + " takes " +
+			                                import_option_takes(*row) + "; '" + value + "' is none of them.",
+			                        state.source);
+		sidecar.options[key] = taken;
+	}
+	if (sidecar.options == state.sidecar.options) return;
+	Diagnostic write_error;
+	if (!save_import_sidecar(join_path(view_.project.root, state.record), sidecar, write_error))
+		return core_.refuse_now(CoreFinding::ImportSidecar, write_error.message, state.record);
+	reimport(state.source, false);
+}
+
+// The plan a Replace of `request.path` by the image request.paths names would carry out (refusals inside):
+// the image read (a file on disk, or a project file by its path), what the texture's uses ask of it.
+TextureSourcePlan ImportController::replace_plan(const EditorRequest &request) const {
+	TextureSourcePlan plan;
+	if (request.paths.size() != 1) {
+		plan.refusals.push_back(make_finding(CoreFinding::TextureReplace, DiagnosticSeverity::Error, "A texture is replaced by one image.",
+		                                     request.path));
+		return plan;
+	}
+	const std::string &image = request.paths.front();
+	const std::string file = path_of(image).is_absolute() ? image : join_path(view_.project.root, image);
+	std::vector<uint8_t> bytes;
+	std::string message;
+	if (!read_file_bytes(file, bytes, message)) {
+		plan.refusals.push_back(make_finding(CoreFinding::TextureReplace, DiagnosticSeverity::Error,
+		                                     basename_of(image) + " could not be read: " + message, request.path));
+		return plan;
+	}
+	const ImportOptions overrides(request.values.begin(), request.values.end());
+	return plan_texture_replace(paths_, *view_.project.scan, request.path, basename_of(image), bytes, overrides,
+	                            texture_use_asks(view_, request.path));
+}
+
+void ImportController::replace_texture(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	const TextureSourcePlan plan = replace_plan(request);
+	const std::string image = request.paths.empty() ? std::string() : request.paths.front();
+	if (!plan.ok()) {
+		for (size_t i = 0; i + 1 < plan.refusals.size(); ++i) core_.report(plan.refusals[i]);
+		return core_.refuse_now(CoreFinding::TextureReplace, plan.refusals.back().message, plan.refusals.back().asset);
+	}
+	// The file set aside takes its open document with it: one with unsaved edits waits for them.
+	if (!plan.replaced.empty())
+		if (DocumentBase *open = core_.documents().document_for(plan.replaced)) {
+			if (open->dirty())
+				return core_.refuse_now(CoreFinding::TextureReplace,
+				                        plan.texture + " is open with unsaved edits: save or discard them before replacing it.",
+				                        plan.replaced);
+			core_.documents().close_document(plan.replaced);
+		}
+	std::vector<Diagnostic> findings;
+	if (!apply_texture_source(paths_, plan, findings)) {
+		for (size_t i = 0; i + 1 < findings.size(); ++i) core_.report(findings[i]);
+		return core_.refuse_now(CoreFinding::TextureReplace,
+		                        findings.empty() ? std::string("The texture could not be replaced.") : findings.back().message, plan.texture);
+	}
+	close_texture_source();
+	core_.note("Replaced " + plan.texture + " with " + basename_of(image) + ": " + plan.source + " makes it now, as its import record says" +
+	           (plan.replaced.empty() ? std::string(".") : "; the file it replaced is kept under " + std::string(kReplacedFolder) + "/."));
+	reimport(plan.source, true);
+}
+
+void ImportController::preview_texture_source(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	DialogsView::TextureSourcePreview &preview = view_.dialogs.texture_source;
+	const uint64_t serial = preview.serial + 1;
+	preview = DialogsView::TextureSourcePreview();
+	preview.open = true;
+	preview.serial = serial;
+	preview.texture = request.path;
+	preview.image = request.paths.empty() ? std::string() : request.paths.front();
+	preview.values = request.values;
+	// The stored forms the texture's name offers: the format's tokens within its extension.
+	const std::string extension = strutil::to_lower(utf8_of(path_of(request.path).extension()));
+	if (extension == ".tga") preview.forms = {"tga", "tga24"};
+	else if (extension == ".pcx") preview.forms = {"pcx", "pcx24"};
+	else if (extension == ".dds") preview.forms = {"dxt5", "dxt1", "argb"};
+	const TextureSourcePlan plan = preview.image.empty() ? plan_texture_source(paths_, *view_.project.scan, request.path)
+	                                                     : replace_plan(request);
+	if (!plan.ok()) {
+		preview.refusal = plan.refusals.back().message;
+	} else {
+		preview.changes = plan.changes;
+		preview.before_words = plan.before_words;
+		preview.after_words = plan.after_words;
+		const auto format = plan.options.find("format");
+		const auto dds = plan.options.find("dds");
+		preview.form = format == plan.options.end() ? std::string("tga")
+		               : format->second == "dds" ? (dds == plan.options.end() ? std::string("dxt5") : dds->second)
+		                                         : format->second;
+		if (view_.documents.thumbnails) {
+			const AssetEntry *entry = view_.project.scan->at_path(request.path);
+			if (!entry) entry = view_.project.scan->find(basename_of(request.path));
+			if (entry) preview.before = view_.documents.thumbnails->make_now(view_, entry->relative_path, TextureLoadTransform::None);
+			if (!plan.made.empty()) preview.after = view_.documents.thumbnails->picture_of(plan.made_name, plan.made);
+		}
+	}
+	core_.touch(ViewConcern::Dialogs);
+}
+
+void ImportController::close_texture_source() {
+	if (!view_.dialogs.texture_source.open) return;
+	const uint64_t serial = view_.dialogs.texture_source.serial;
+	view_.dialogs.texture_source = DialogsView::TextureSourcePreview();
+	view_.dialogs.texture_source.serial = serial;
+	core_.touch(ViewConcern::Dialogs);
+}
+
+// The OpenExternally view event the Shell opens a source by, and the status line.
+void ImportController::post_open_externally(const std::string &source) {
+	ViewEvent open;
+	open.kind = ViewEventKind::OpenExternally;
+	open.path = join_path(view_.project.root, source);
+	view_.events.post(std::move(open));
+	core_.touch(ViewConcern::Dialogs);
+	view_.activity.status = "Opening " + source + " in its program.";
+	core_.touch(ViewConcern::Output);
+}
+
+// A source edited in place (a PNG the game reads as it is) open with unsaved edits: its program would not
+// see them, and a refresh would read over them.
+bool ImportController::source_dirty(const std::string &source, CoreFinding code) {
+	const DocumentBase *open = core_.documents().document_for(source);
+	if (!open || !open->dirty()) return false;
+	core_.refuse_now(code, source + " is open with unsaved edits: save or discard them before its program edits it.", source);
+	return true;
+}
+
+void ImportController::open_texture_source(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	const TextureSourcePlan plan = plan_texture_source(paths_, *view_.project.scan, request.path);
+	if (!plan.ok()) return core_.refuse_now(CoreFinding::TextureExternal, plan.refusals.back().message, plan.refusals.back().asset);
+	if (!plan.bytes.empty())
+		return core_.refuse_now(CoreFinding::TextureExternal,
+		                        plan.texture + " has no source yet: Edit in its program (edit_externally) makes one, " + plan.source +
+		                                ", which its import turns into it.",
+		                        request.path);
+	if (source_dirty(plan.source, CoreFinding::TextureExternal)) return;
+	post_open_externally(plan.source);
+}
+
+void ImportController::edit_externally(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	const TextureSourcePlan plan = plan_texture_source(paths_, *view_.project.scan, request.path);
+	if (!plan.ok()) return core_.refuse_now(CoreFinding::TextureExternal, plan.refusals.back().message, plan.refusals.back().asset);
+	if (plan.bytes.empty() && source_dirty(plan.source, CoreFinding::TextureExternal)) return;
+	if (!plan.bytes.empty()) {
+		// A plain texture's source made once: the file set aside takes its open document with it.
+		if (DocumentBase *open = core_.documents().document_for(plan.replaced)) {
+			if (open->dirty())
+				return core_.refuse_now(CoreFinding::TextureExternal,
+				                        plan.texture + " is open with unsaved edits: save or discard them before its program edits it.",
+				                        plan.replaced);
+			core_.documents().close_document(plan.replaced);
+		}
+		std::vector<Diagnostic> findings;
+		if (!apply_texture_source(paths_, plan, findings)) {
+			for (size_t i = 0; i + 1 < findings.size(); ++i) core_.report(findings[i]);
+			return core_.refuse_now(CoreFinding::TextureExternal,
+			                        findings.empty() ? std::string("No source could be made.") : findings.back().message, plan.texture);
+		}
+		core_.note("Made " + plan.source + " for " + plan.texture + ": its import makes the texture from it now, so what its "
+		           "program saves there comes back; the file it replaced is kept under " + std::string(kReplacedFolder) + "/.");
+		reimport(plan.source, true);
+	}
+	close_texture_source();
+	post_open_externally(plan.source);
+}
+
+// What a program saved of the watched files, refreshed alone (the sources imported again, the scan updated
+// for them and the files that moved); a file written too recently waits for a later check, never read
+// half-written.
+void ImportController::refresh_changed_sources() {
+	if (!view_.project.open || !view_.project.scan) return;
+	ExternalChanges changes = external_changes(paths_, *view_.project.scan,
+	                                           view_.project.imports ? *view_.project.imports : std::vector<ImportedSource>(),
+	                                           io::file_clock_now_ticks());
+	if (changes.empty()) return;
+	if (core_.start_changed_refresh(std::move(changes)))
+		view_.activity.status = "Reading what its program saved...";
 	core_.touch(ViewConcern::Output);
 }
 

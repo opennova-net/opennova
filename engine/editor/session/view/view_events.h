@@ -41,6 +41,12 @@ enum class ViewEventKind : uint8_t {
 	// A build ended (the UX round's problems lane): `flag` it landed, `tag` 1 when a Play waits on it.
 	// The build panel comes forward with what it came to (unless the game follows it).
 	BuildEnded,
+	// An EditExternally (S18): `path` the file on disk for the Shell to open in the program the system has
+	// for its kind (a texture's source).
+	OpenExternally,
+	// A ShowUse whose picture is the Preview window's (S18: a model's, a menu's): `path` the document it
+	// shows. The Preview window comes forward.
+	RevealPreview,
 	kCount,
 };
 
@@ -60,6 +66,8 @@ inline constexpr ViewEventKindRow kViewEventKindRows[] = {
 	{ViewEventKind::SettingsApplied, "settings_applied"},
 	{ViewEventKind::ImportPlanned, "import_planned"},
 	{ViewEventKind::BuildEnded, "build_ended"},
+	{ViewEventKind::OpenExternally, "open_externally"},
+	{ViewEventKind::RevealPreview, "reveal_preview"},
 };
 
 static_assert(std::size(kViewEventKindRows) == kViewEventKindCount,

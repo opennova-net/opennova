@@ -313,6 +313,22 @@ JsonValue dialogs_section(const SessionView &view) {
 	JsonValue settings = JsonValue::make_object();
 	settings.set("failures", diagnostics_to_json(view.project.settings_result.failures));
 	out.set("settings_result", std::move(settings));
+	// What a Replace or an Edit externally would do, asked before (S18: preview_texture_source).
+	const DialogsView::TextureSourcePreview &source = view.dialogs.texture_source;
+	JsonValue texture_source = JsonValue::make_object();
+	texture_source.set("open", boolean(source.open));
+	texture_source.set("serial", json_number(double(source.serial)));
+	if (source.open) {
+		texture_source.set("texture", json_string(source.texture));
+		texture_source.set("image", json_string(source.image));
+		texture_source.set("forms", strings_to_json(source.forms));
+		texture_source.set("form", json_string(source.form));
+		texture_source.set("changes", strings_to_json(source.changes));
+		texture_source.set("before", json_string(source.before_words));
+		texture_source.set("after", json_string(source.after_words));
+		texture_source.set("refusal", json_string(source.refusal));
+	}
+	out.set("texture_source", std::move(texture_source));
 	return out;
 }
 
@@ -443,7 +459,9 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::Dialogs, "dialogs", concern_set({ C::Dialogs }), dialogs_section,
 			"The unsaved-changes prompt (what waits, the files it lists, whether Discard is "
 			"offered), the last rename's plan (rename_preview: its sites before and after, its "
-			"refusals) and what the settings' last Apply could not write." },
+			"refusals), what the settings' last Apply could not write, and the texture_source "
+			"dialog (S18: open, serial, the texture, the image, the stored forms offered and the "
+			"one written, the changes, the texture before and after in words, the refusal)." },
 	{ S::ProblemCounts, "problem_counts", concern_set({ C::Findings, C::DocumentSet }), problem_counts_section,
 			"How many Problems rows there are, by severity (the problems query pages them)." },
 	{ S::GraphCounts, "graph_counts", concern_set({ C::Graph }), graph_counts_section,

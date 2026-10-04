@@ -51,6 +51,8 @@ ViewportKind active_preview_kind(const SessionView &view, DocumentTypeId &type) 
 bool preview_stands_aside(const SessionView &view) {
 	DocumentTypeId type = DocumentTypeId::None;
 	if (view.documents.active.empty()) return false; // nothing open: it says what to open
+	// A file Files selects leads (S18: a texture shown as it is selected): it shows that, whatever is active.
+	if (view.documents.files_lead && view.documents.preview_shown != ViewportKind::kCount) return false;
 	const ViewportKind kind = active_preview_kind(view, type);
 	// Nothing of the document shows in it: a definition table, a text, a mission (whose picture is its tab's).
 	if (kind == ViewportKind::kCount) return true;
@@ -59,6 +61,7 @@ bool preview_stands_aside(const SessionView &view) {
 }
 
 bool preview_feeds_table(const SessionView &view) {
+	if (view.documents.files_lead && view.documents.preview_shown != ViewportKind::kCount) return false;
 	DocumentTypeId type = DocumentTypeId::None;
 	const ViewportKind kind = active_preview_kind(view, type);
 	return kind != ViewportKind::kCount && !viewport_kind_shows(kind, type) && !view.documents.previews[kind].path.empty();
@@ -147,7 +150,7 @@ void PreviewWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	prune_(view);
 	const ViewportKind kind = view.documents.preview_shown;
 	if (kind == ViewportKind::kCount) {
-		ui_kit::empty_state("Open a menu, a model or an animation to preview it.");
+		ui_kit::empty_state("Open a menu, a model or an animation to preview it, or select a texture in Files.");
 		return;
 	}
 	const std::string &path = view.documents.previews[kind].path;

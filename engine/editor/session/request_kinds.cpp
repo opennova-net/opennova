@@ -13,6 +13,7 @@
 #include <editor/session/problems_service.h>
 #include <editor/session/rename_controller.h>
 #include <editor/session/session_core.h>
+#include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
 
 namespace opennova::editor {
@@ -105,6 +106,9 @@ void serve_open_document(SessionCore &core, const EditorRequest &request) {
 void serve_show_in_files(SessionCore &core, const EditorRequest &request) {
 	core.documents().show_in_files(request);
 }
+void serve_select_file(SessionCore &core, const EditorRequest &request) {
+	core.documents().select_file(request.path);
+}
 void serve_close_document(SessionCore &core, const EditorRequest &request) {
 	core.documents().close_document(request.path);
 }
@@ -166,6 +170,36 @@ void serve_rename_back(SessionCore &core, const EditorRequest &) {
 }
 void serve_reimport(SessionCore &core, const EditorRequest &request) {
 	core.imports().reimport(request.path, request.force);
+}
+void serve_set_import_options(SessionCore &core, const EditorRequest &request) {
+	core.imports().set_options(request.path, request.values);
+}
+void serve_texture_operation(SessionCore &core, const EditorRequest &request) {
+	core.documents().texture_operation(request);
+}
+void serve_replace_texture(SessionCore &core, const EditorRequest &request) {
+	core.imports().replace_texture(request);
+}
+void serve_split_texture(SessionCore &core, const EditorRequest &request) {
+	core.renames().split_texture(request);
+}
+void serve_edit_externally(SessionCore &core, const EditorRequest &request) {
+	core.imports().edit_externally(request);
+}
+void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &) {
+	core.imports().refresh_changed_sources();
+}
+void serve_show_use(SessionCore &core, const EditorRequest &request) {
+	show_texture_use(core, request);
+}
+void serve_preview_texture_source(SessionCore &core, const EditorRequest &request) {
+	core.imports().preview_texture_source(request);
+}
+void serve_cancel_texture_source(SessionCore &core, const EditorRequest &) {
+	core.imports().close_texture_source();
+}
+void serve_open_texture_source(SessionCore &core, const EditorRequest &request) {
+	core.imports().open_texture_source(request);
 }
 void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
 	core.imports().preview_install(request);
@@ -240,6 +274,11 @@ struct Request {
 	constexpr Request ends_edit_groups() const {
 		Request out = *this;
 		out.row.ends_edit_groups = true;
+		return out;
+	}
+	constexpr Request background() const {
+		Request out = *this;
+		out.row.background = true;
 		return out;
 	}
 };
@@ -461,6 +500,12 @@ constexpr RequestKindRow kRows[] = {
 			"reads the same.")
 			.takes(request_params({ F::Path }))
 			.row,
+	Request(K::SelectFile, "select_file", serve_select_file,
+			"The project file path selected in Files (left out, none): a file a viewport draws whether "
+			"or not it is open (a texture) shows in the Preview window until another document is made "
+			"active.")
+			.takes(request_params({}, { F::Path }))
+			.row,
 	Request(K::ReloadDocument, "reload_document", serve_open_document,
 			"The document at path read again from its file, its unsaved edits dropped (the prompt "
 			"asks first).")
@@ -644,6 +689,121 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({}, { F::Path, F::Force }))
 			.holds(kFiles, kFiles | kSlot)
 			.ends_edit_groups()
+			.row,
+	// An import's options are its record's (S18): the record written, then the refresh that imports it
+	// again, which holds the slot as a reimport does.
+	Request(K::SetImportOptions, "set_import_options", serve_set_import_options,
+			"The import record of the source path names, or of the import a file of that path or "
+			"logical name comes from, given values, each an option's key as the import_options query "
+			"lists them and a value its row takes (\"\" its default, left out of the record); then "
+			"imported again, a refresh (the outcome names the operation): an output whose format moves "
+			"takes the name its extension gives and the old file goes. Refused, nothing written, for a "
+			"file no import makes, or a key or a value no row takes (import.option).")
+			.takes(request_params({ F::Path, F::Values }))
+			.holds(kFiles, kFiles | kSlot)
+			.ends_edit_groups()
+			.row,
+	// A texture's whole-image edit is an edit of its document (S18), as edit_record's.
+	Request(K::TextureOperation, "texture_operation", serve_texture_operation,
+			"The texture document at path (left out, the active one) edited as a whole image by "
+			"operation, one undo step, its "
+			"params in values: resize (size: pow2_down, pow2_up, <W>x<H> or fit:<W>x<H>), alpha "
+			"(alpha: opaque, luminance, invert, threshold:<n> or key:#RRGGBB), format (the stored form "
+			"within the name's extension: format tga or tga24, a DDS's dds and mips, a PCX's palette), "
+			"reorder_rows (a TGA stored top first saved bottom first) or remap_palette (an 8-bit PCX's "
+			"indices, each \"<from>\": \"<to>\"); the file made anew through the editor's writers, which "
+			"Save writes. open_first: the document opened first when it is not (a fix's). Refused, "
+			"nothing changed (texture.operation): a file an import makes (its import's options make it), "
+			"an operation it does not take, one it cannot do (a form that holds no alpha).")
+			.takes(request_params({ F::Operation }, { F::Path, F::Values, F::OpenFirst }))
+			.holds(kFiles, kDocuments)
+			.names_active()
+			.row,
+	// A texture made from an image is an import of it (S18): its record written, then the refresh that
+	// imports it, which holds the slot as a reimport does; the texture's open document is closed.
+	Request(K::ReplaceTexture, "replace_texture", serve_replace_texture,
+			"The texture path (a project file, an import's output, or a name the project lacks, as a field "
+			"names it) made from the image in paths (a PNG, a TGA or a PCX: a file on disk, or a project "
+			"file): the image copied into art/ as an import source whose record makes the texture under its "
+			"name, in the form it is stored in (its format and compression; an import's output keeps its "
+			"import's options), values over those; the plain file it replaces set aside under "
+			".opennova/replaced/, never deleted; then imported, a refresh (the outcome names the "
+			"operation). Refused, nothing written (texture.replace): an image the importer does not read, a "
+			"texture that is no texture, an option no row takes, a texture open with unsaved edits.")
+			.takes(request_params({ F::Path, F::Paths }, { F::Values }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.row,
+	Request(K::SplitTexture, "split_texture", serve_split_texture,
+			"The texture path copied as new_name, the uses in the project files paths names moved to the "
+			"copy (their fields rewritten, every other use left on the texture); an import's output split "
+			"as its source copied beside it, the copy's record making new_name with the output's options. "
+			"Refused as rename_asset is, and with texture.split for an import's source, no referrer named "
+			"or none that uses it; not undoable. Committed as an operation (the outcome names it).")
+			.takes(request_params({ F::Path, F::NewName, F::Paths }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.guarded(GuardScope::PlannedWrites, "Split %s", "Save all and split")
+			.acts_on_saved()
+			.row,
+	// A source made once is an import of it (S18), as replace_texture's.
+	Request(K::EditExternally, "edit_externally", serve_edit_externally,
+			"The texture path's source opened in the program the system has for its kind: an import's "
+			"output's own source, a PNG the game reads as it is itself, a plain texture's made once (a copy "
+			"of a TGA or a PCX, a PNG of a DDS's first level, in art/ under a name of its own, its record "
+			"reproducing the texture, the plain file set aside under .opennova/replaced/) and imported, a "
+			"refresh. The open_externally view event names the file on disk, which the Shell opens. Refused "
+			"(texture.external): a name the project lacks, a file that does not read, a texture open with "
+			"unsaved edits.")
+			.takes(request_params({ F::Path }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.row,
+	Request(K::RefreshChangedSources, "refresh_changed_sources", serve_refresh_changed_sources,
+			"When a watched file's size or last write moved since the scan (a program saved it: an import "
+			"source, a file an import read, a PNG the game reads as it is), a refresh of what moved alone (the "
+			"outcome names the operation): the sources it touches imported again, the scan updated for them "
+			"and those files, the open documents of them read again. A file written within the last two "
+			"seconds waits for a later check, never read half-written. Nothing otherwise, no operation "
+			"started. The Shell sends it when its window gains the focus and once a second while it has it, "
+			"of its own: the status line a refused request left stays.")
+			.holds(kFiles, kFiles | kSlot)
+			.background()
+			.row,
+	Request(K::ShowUse, "show_use", serve_show_use,
+			"The texture path's use in the project file paths names (at locator and field, when given: the "
+			"use there, a native text's use, which has no locator, by its record; else its first) shown "
+			"where the game draws it: a model's or a menu's opened at the "
+			"use, the Preview window brought forward (a reveal_preview view event); a terrain's or an "
+			"environment's, the view of a mission that names it (one open, else the first); any other "
+			"referrer's, the texture opened with its viewport's as_used set to the use. Refused, nothing "
+			"opened (texture.show_use): the references not read yet, a file that does not use it, a name "
+			"the game opens itself, a terrain or an environment no mission names.")
+			.takes(request_params({ F::Path, F::Paths }, { F::Locator, F::Field }))
+			.holds(kFiles, kDocuments)
+			.row,
+	Request(K::PreviewTextureSource, "preview_texture_source", serve_preview_texture_source,
+			"What a Replace of the texture path by the image in paths (a file on disk, or a project file), "
+			"or with no image an Edit externally, would do, planned into the view's texture_source dialog, "
+			"nothing written: the stored forms the texture's extension offers and the one written (values "
+			"over the form reproduced, as replace_texture takes them), the changes in words, the texture "
+			"before and after in words and as pictures (the file the import would make), or why it would "
+			"be refused. The dialog asks before replace_texture or edit_externally does it.")
+			.takes(request_params({ F::Path }, { F::Paths, F::Values }))
+			.holds(kFiles, kNone)
+			.row,
+	Request(K::CancelTextureSource, "cancel_texture_source", serve_cancel_texture_source,
+			"The texture_source dialog closed, nothing done.")
+			.row,
+	// Nothing written: it goes on beside a build, as a read does.
+	Request(K::OpenTextureSource, "open_texture_source", serve_open_texture_source,
+			"The texture path's existing source opened in the program the system has for its kind, "
+			"nothing written: an import's output's own source, a PNG the game reads as it is itself (the "
+			"open_externally view event names it). Refused (texture.external): a texture with no source "
+			"yet (edit_externally makes one), a PNG open with unsaved edits (its program edits the file "
+			"as saved), no texture.")
+			.takes(request_params({ F::Path }))
+			.holds(kFiles, kNone)
 			.row,
 	Request(K::PreviewInstallImport, "preview_install_import", serve_preview_install_import,
 			"The import dialog on the game install's files: the names alone, chosen, or with none "
