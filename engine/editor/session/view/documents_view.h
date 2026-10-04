@@ -77,6 +77,11 @@ struct DocumentsView {
 	// The open documents, each as the base: a window that reads rows asks records_of.
 	std::vector<std::shared_ptr<const DocumentBase>> open;
 	std::string active; // the active document's path ("" = none)
+	// The file whose page the Document window shows beside the documents (the plain-words lane, the
+	// audit's 4.6): one of a kind the editor has no editor for, opened by an OpenDocument naming it (what
+	// it is, what reads it, who names it: session/file_page.h) and closed by a CloseDocument naming it;
+	// "" none. Never a document: the selection and the Inspector stay the active document's.
+	std::string page;
 	// The selection in the active document (S13 D7: its records over any of its rows, the primary
 	// among them; selection.document is `active`). Repaired after every edit, undo and redo: a
 	// record that is gone drops out, a removed primary gives way to its owner, what an edit made is

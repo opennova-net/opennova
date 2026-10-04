@@ -204,6 +204,16 @@ static int test_non_record_type() {
 		session.handle(request::save(path));
 		TEST_EXPECT(session.outcome().done() && !opened->dirty());
 		TEST_EXPECT(file_text(file) == "BLOB FFFFFFFF\r\n");
+		// What a save says beyond writing (a catalog's record written in the table's order): a note in
+		// Output, counted on the status line, never a refusal.
+		replace.payload = std::make_shared<BlobReplace>("BLOB 0\n%one record in the table's order");
+		session.handle(request::edit_record(path, replace));
+		session.handle(request::save(path));
+		bool noted = false;
+		for (const std::string &line : session.view().activity.output)
+			noted = noted || line == "note: " + path + ": one record in the table's order";
+		TEST_EXPECT(session.outcome().done() && noted && session.view().activity.status.find("(1 note: see Output)") != std::string::npos &&
+		            file_text(file) == "BLOB 0\n" && opened->save_notes().size() == 1);
 		session.handle(request::close_document(path));
 		TEST_EXPECT(!session.document_base_for(path) && session.handle_entries() > entries);
 	}
