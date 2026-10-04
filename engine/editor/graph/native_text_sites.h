@@ -19,6 +19,8 @@ namespace opennova::editor {
 // over, its line ends) stays.
 bool native_text_kind(AssetKind kind);
 
+// The names (before, after) are UTF-8, as the graph reads them; the text is the game's code page
+// (Windows-1252), each name looked for and written in its bytes there.
 struct NativeTextSite {
 	std::string record;
 	std::string field;

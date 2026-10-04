@@ -88,7 +88,9 @@ void test_rename_everywhere_ui() {
 	serve(session, requests);
 	ui.frames(2);
 	const std::string text = logged_frame(ui);
-	CHECK(text.find("GUN_A -> " + name) != std::string::npos && text.find("primary_weapon") != std::string::npos,
+	// The item's use by its field's words (the plain-words lane), not its token.
+	CHECK(text.find("GUN_A -> " + name) != std::string::npos && text.find("Built-in weapon") != std::string::npos &&
+	              text.find("primary_weapon") == std::string::npos,
 	      "the definition and the item's use, before and after");
 	ui.key(ImGuiKey_Enter, true);
 	ui.key(ImGuiKey_Enter, false);
