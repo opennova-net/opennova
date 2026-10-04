@@ -103,9 +103,14 @@ bool finding(const ActionOutcome &outcome, const char *code, DiagnosticSeverity 
 	return false;
 }
 
+// A line Output says, or one folded under a line (an import's files fold under its one line).
 bool said(const SessionView &view, const std::string &line) {
-	for (const std::string &output : view.activity.output)
-		if (output == line) return true;
+	const OutputLog &output = view.activity.output;
+	for (size_t i = 0; i < output.size(); ++i) {
+		if (output[i] == line) return true;
+		for (const std::string &folded : output.folded(i))
+			if (folded == line) return true;
+	}
 	return false;
 }
 
@@ -165,6 +170,21 @@ static int test_apply_closure() {
 	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open && view.dialogs.import_preview.plan->rows.empty());
 	for (const char *name : {"a.mnu", "b.mnu", "arial99.fnt", "fb.fnt", "LOGO.TGA"}) TEST_EXPECT(view.project.scan->find(name));
 	TEST_EXPECT(!view.project.scan->find("gone.tga") && said(view, "Imported menus/a.mnu") && said(view, "Imported LOGO.TGA"));
+	// One line for the import (the UX round's problems lane), its files folded under it: the import's
+	// lines no longer push everything else out of Output.
+	{
+		const OutputLog &output = view.activity.output;
+		size_t lines = 0;
+		for (size_t i = 0; i < output.size(); ++i) {
+			if (output[i].rfind("Imported 5 files (", 0) != 0) continue;
+			++lines;
+			TEST_EXPECT(output.folded(i).size() == 5 && output[i].find("): ") != std::string::npos &&
+			            output[i].find("Menu 2") != std::string::npos);
+		}
+		bool loose = false;
+		for (const std::string &line : output) loose = loose || line == "Imported menus/a.mnu";
+		TEST_EXPECT(lines == 1 && !loose);
+	}
 	// Each font and texture copied as the game's own: no import record beside it.
 	TEST_EXPECT(!fs::exists(project.root() + "/LOGO.TGA" + kImportSidecarSuffix));
 	const auto a = file_references(view, "menus/a.mnu");

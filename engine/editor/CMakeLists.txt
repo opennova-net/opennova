@@ -170,6 +170,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_run.cpp
     # requirements — the manifest rows evaluated against the project
+    ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirement_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirements.cpp
     # run — the Play launch plan, the run directory the game runs in, and the one managed child
     # over the platform seam
@@ -184,6 +185,7 @@ add_library(opennova_editor STATIC
     # A5) and their wire forms (session_json, view_json), the selection (S13 D7), and the
     # finding codes' lookup over every table (S13 A6)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/build_result.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp

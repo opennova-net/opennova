@@ -150,6 +150,12 @@ void serve_preview_rename(SessionCore &core, const EditorRequest &request) {
 void serve_rename_symbol(SessionCore &core, const EditorRequest &request) {
 	core.renames().rename_symbol(request);
 }
+void serve_preview_rename_back(SessionCore &core, const EditorRequest &request) {
+	core.renames().preview_back(request);
+}
+void serve_rename_back(SessionCore &core, const EditorRequest &) {
+	core.renames().rename_back();
+}
 void serve_reimport(SessionCore &core, const EditorRequest &request) {
 	core.imports().reimport(request.path, request.force);
 }
@@ -566,6 +572,25 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Rename everywhere (defined in %s)",
 					"Save all and rename")
+			.acts_on_saved()
+			.row,
+	Request(K::PreviewRenameBack, "preview_rename_back", serve_preview_rename_back,
+			"The last rename's way back planned into the view's rename_preview (back), nothing written: the "
+			"name it gave found again by itself (its kind and name in the file and field defining it; a file's "
+			"rename: the file at its new path), renamed back to the old name at only the sites the rename "
+			"rewrote; refused where a file it wrote changed since, a use it wrote is gone, or the name is; "
+			"ask_name: the Rename back dialog opens (an AskRename view event).")
+			.takes(request_params({}, { F::AskName }))
+			.holds(kFiles, kNone)
+			.row,
+	Request(K::RenameBack, "rename_back", serve_rename_back,
+			"The last rename taken back, its true inverse (preview_rename_back's plan): only the sites it "
+			"rewrote rewritten again on disk, or refused with the reasons; not undoable. Committed as an "
+			"operation (the outcome names it), which is then the last rename.")
+			.takes(request_params({}))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.guarded(GuardScope::PlannedWrites, "Rename back", "Save all and rename back")
 			.acts_on_saved()
 			.row,
 	Request(K::Reimport, "reimport", serve_reimport,

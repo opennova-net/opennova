@@ -111,6 +111,27 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		}
 		break;
 	}
+	case EditorRequestKind::RenameBack: {
+		// The way back of a rename of the screen extra.mnu defines: its edit saved, the screen renamed, then
+		// an edit made again (the way back rewrites extra.mnu).
+		dirty.session.handle(request::save(dirty.extra));
+		dirty.session.run_operations(); // validated: the graph holds the screen
+		std::string locator, field;
+		for (const GraphSymbol *symbol : dirty.view().findings.graph->symbols_of_kind(ReferenceKind::MenuScreen))
+			if (symbol->file == dirty.extra) {
+				locator = symbol->locator;
+				field = symbol->field;
+			}
+		editor_test::handle_to_end(dirty.session, request::rename_symbol(dirty.extra, locator, field, "RENAMED"));
+		if (Document *document = dirty.session.document_for(dirty.extra)) {
+			Edit set;
+			set.address = document->address_at("0/window:0");
+			set.field = "position.left";
+			set.value = int64_t(9);
+			dirty.session.handle(request::edit_record(dirty.extra, set));
+		}
+		break;
+	}
 	default: break;
 	}
 	return request;
@@ -148,7 +169,7 @@ static int test_guard_column_is_the_prompt() {
 		const std::string named = !request.dir.empty() ? request.dir : request.path;
 		TEST_EXPECT(prompt.target == (row.guard == GuardScope::Document ? dirty.extra : named));
 	}
-	TEST_EXPECT(prompted == 12 && went_ahead == kEditorRequestKindCount - 12);
+	TEST_EXPECT(prompted == 13 && went_ahead == kEditorRequestKindCount - 13);
 	return 0;
 }
 

@@ -245,6 +245,13 @@ static int test_filled_project_builds_and_mounts() {
 	const BuildReport again = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(again.ok && again.reused_existing && again.build_id == report.build_id);
 	TEST_EXPECT(again.build_dir == report.build_dir);
+	// What it lists: every archive the last build's, kept (the first build wrote each).
+	size_t listed = 0;
+	for (const BuiltFile &file : report.built) listed += file.archive && !file.reused;
+	TEST_EXPECT(listed == 3);
+	listed = 0;
+	for (const BuiltFile &file : again.built) listed += file.archive && file.reused;
+	TEST_EXPECT(listed == 3 && again.built.size() == report.built.size());
 
 	// One changed file: a new build in which only its archive is re-packed.
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "one")); // a valid table with new content
@@ -254,6 +261,8 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(changed.build_id != report.build_id);
 	TEST_EXPECT(changed.archives_written == std::vector<std::string>{"language.pff"});
 	TEST_EXPECT(changed.archives_reused.size() == 2);
+	for (const BuiltFile &file : changed.built)
+		if (file.archive) TEST_EXPECT(file.reused == (file.name != "language.pff"));
 	TEST_EXPECT(last_good_build_dir(p.output_root()) == changed.build_dir);
 	TEST_EXPECT(!fs::exists(report.build_dir)); // the older build is pruned
 	return 0;
@@ -923,8 +932,44 @@ static int test_deep_output_root() {
 	return 0;
 }
 
+// Several projects building into one folder (Build to folder; the review's M6): each build names its project
+// in its record, reuses, prunes and replaces only its own project's builds, and says how many of the others'
+// it left. Another project's build of the same files is left as it is: the build is refused, saying so.
+static int test_shared_folder() {
+	Project a("opennova_editor_build_shared_a"), b("opennova_editor_build_shared_b");
+	TEST_EXPECT(a.create() && a.fill() && b.create() && b.fill());
+	const std::string shared = a.dir.file("shared");
+	const auto planned = [](Project &p, const char *project) {
+		BuildPlan plan = p.plan();
+		plan.project = project;
+		return plan;
+	};
+	const BuildReport first_a = run_build(planned(a, "project-a"), shared);
+	TEST_EXPECT(first_a.ok && first_a.others.empty());
+	// b with the same files: a's build of them is a's, left as it is.
+	const BuildReport same = run_build(planned(b, "project-b"), shared);
+	bool said = false;
+	for (const Diagnostic &d : same.diagnostics) said = said || d.message.find("another project's build of the same files") != std::string::npos;
+	TEST_EXPECT(!same.ok && said && fs::is_directory(first_a.build_dir));
+	// b with files of its own: built beside a's, which it names and leaves.
+	TEST_EXPECT(editor_test::write_text(b.root + "/music/menumus.sbf", "SBF!"));
+	const BuildReport first_b = run_build(planned(b, "project-b"), shared);
+	TEST_EXPECT(first_b.ok && first_b.build_id != first_a.build_id && fs::is_directory(first_a.build_dir));
+	TEST_EXPECT(first_b.others == std::vector<std::string>({first_a.build_id}));
+	// a changed: its own last build pruned, b's left and named.
+	TEST_EXPECT(editor_test::write_text(a.root + "/music/menumus.sbf", "SBF?"));
+	const BuildReport second_a = run_build(planned(a, "project-a"), shared);
+	TEST_EXPECT(second_a.ok && !fs::exists(first_a.build_dir) && fs::is_directory(first_b.build_dir));
+	TEST_EXPECT(second_a.others == std::vector<std::string>({first_b.build_id}));
+	// Unchanged: handed back, b's named still.
+	const BuildReport again = run_build(planned(a, "project-a"), shared);
+	TEST_EXPECT(again.ok && again.reused_existing && again.others == std::vector<std::string>({first_b.build_id}));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_shared_folder();
 	failures += test_steps_are_bounded();
 	failures += test_cancel_publishes_nothing();
 	failures += test_file_rewritten_mid_read_fails();
