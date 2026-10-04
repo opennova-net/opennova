@@ -169,7 +169,7 @@ static int test_new_status_validate() {
 		std::string built;
 		TEST_EXPECT(run_capture(dir.file("built.txt"), {"build", root, "--out", dir.file("rehashed"), "--rehash"}, built) == 0);
 		TEST_EXPECT(built.find("built ") != std::string::npos && built.find(" of them linked, ") != std::string::npos &&
-		            built.find(" file(s) hashed)") != std::string::npos);
+		            built.find(" hashed)") != std::string::npos);
 	}
 
 	// Generic native file import uses the same core; a file the project holds already is kept as it
@@ -225,7 +225,7 @@ static int test_imports() {
 	TEST_EXPECT(run({"new", holder}) == 0);
 	TEST_EXPECT(!fs::exists(holder + "/.opennova/imported"));
 	TEST_EXPECT(run_capture(capture, {"status", holder}, text) == 0);
-	TEST_EXPECT(text.find("imports: 1 source(s), 1 imported now, 0 failed") != std::string::npos);
+	TEST_EXPECT(text.find("imports: 1 source, 1 imported now, 0 failed") != std::string::npos);
 	TEST_EXPECT(fs::exists(holder + "/.opennova/imported"));
 	TEST_EXPECT(run({"new", root}) == 0);
 	TEST_EXPECT(run({"create-missing", root}) == 0);
@@ -234,25 +234,25 @@ static int test_imports() {
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", editor_test::gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0);
-	TEST_EXPECT(text.find("imports: 1 source(s), 1 imported now, 0 failed") != std::string::npos);
+	TEST_EXPECT(text.find("imports: 1 source, 1 imported now, 0 failed") != std::string::npos);
 	TEST_EXPECT(fs::is_regular_file(root + "/art/logo.png.import"));
 	// A PNG brought in by `import` is imported at once, as the editor's rescan does.
 	TEST_EXPECT(editor_test::write_bytes(dir.file("splash.png"), editor_test::gradient_png(4, 4, 5)));
 	TEST_EXPECT(run_capture(capture, {"import", root, dir.file("splash.png")}, text) == 0);
-	TEST_EXPECT(text.find("-> 1 output(s)") != std::string::npos);
+	TEST_EXPECT(text.find("-> 1 output") != std::string::npos);
 	TEST_EXPECT(text.find("imported splash.png\n") != std::string::npos);
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0);
-	TEST_EXPECT(text.find("imports: 2 source(s), 0 imported now, 0 failed") != std::string::npos);
+	TEST_EXPECT(text.find("imports: 2 sources, 0 imported now, 0 failed") != std::string::npos);
 	// reimport: nothing changed, nothing imports; --force with a source imports that one.
-	TEST_EXPECT(run_capture(capture, {"reimport", root}, text) == 0 && text.find("2 source(s), 0 imported") != std::string::npos);
+	TEST_EXPECT(run_capture(capture, {"reimport", root}, text) == 0 && text.find("2 sources, 0 imported") != std::string::npos);
 	TEST_EXPECT(run_capture(capture, {"reimport", root, "--force", "--source", "logo.png"}, text) == 0);
-	TEST_EXPECT(text.find("imported art/logo.png") != std::string::npos && text.find("2 source(s), 1 imported") != std::string::npos);
+	TEST_EXPECT(text.find("imported art/logo.png") != std::string::npos && text.find("2 sources, 1 imported") != std::string::npos);
 	// A fresh clone has no .opennova/ at all (its .gitignore ignores itself): status
 	// imports into it and makes it again with its self-ignore file, so neither the cache
 	// nor the outputs show up in the modder's repository.
 	fs::remove_all(root + "/.opennova", ec);
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0);
-	TEST_EXPECT(text.find("imports: 2 source(s), 2 imported now, 0 failed") != std::string::npos);
+	TEST_EXPECT(text.find("imports: 2 sources, 2 imported now, 0 failed") != std::string::npos);
 	TEST_EXPECT(fs::is_regular_file(root + "/.opennova/.gitignore") && fs::is_regular_file(root + "/.opennova/import_cache.json"));
 	// The same clone built: the build imports first and packs the texture; the source
 	// itself never ships.
@@ -313,15 +313,15 @@ static int test_import_with_dependencies() {
 	TEST_EXPECT(has("not found gone.tga (texture), needed by a.mnu: A/GO/Appearance 1"));
 	// S14: the screen B is a symbol the planned b.mnu defines, followed to nothing; the plan by kind.
 	TEST_EXPECT(!has("not followed: menu_screen") && !has("undefined:"));
-	TEST_EXPECT(has("  menu: 2 file(s), 0.0 MB\n") && has("  font: 1 file(s), 0.0 MB\n"));
-	TEST_EXPECT(has("plan: 3 file(s) to import, 1 not found, 0.0 MB"));
+	TEST_EXPECT(has("  menu: 2 files, 0.0 MB\n") && has("  font: 1 file, 0.0 MB\n"));
+	TEST_EXPECT(has("plan: 3 files to import, 1 not found, 0.0 MB"));
 	TEST_EXPECT(!fs::exists(root + "/menus") && !fs::exists(root + "/fonts")); // written nowhere
 	// Without --rows, the summary alone.
 	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies", "--dry-run"}, text) == 0);
-	TEST_EXPECT(!has("take ") && has("not found gone.tga") && has("  menu: 2 file(s)") && has("plan: 3 file(s) to import"));
+	TEST_EXPECT(!has("take ") && has("not found gone.tga") && has("  menu: 2 files") && has("plan: 3 files to import"));
 	// The source alone without --with-dependencies.
 	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--dry-run"}, text) == 0);
-	TEST_EXPECT(has("plan: 1 file(s) to import, 0 not found") && !has("arial99") && !fs::exists(root + "/menus"));
+	TEST_EXPECT(has("plan: 1 file to import, 0 not found") && !has("arial99") && !fs::exists(root + "/menus"));
 	// The import: the closure copied, the file found nowhere named.
 	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies"}, text) == 0);
 	TEST_EXPECT(has("imported menus/a.mnu") && has("imported fonts/arial99.fnt") && has("imported menus/b.mnu"));
@@ -510,10 +510,10 @@ static int test_validate_pins_the_rows() {
 	        "digits its alpha is 0 (the preview draws it transparent); write eight digits (FF, then RRGGBB) for an "
 	        "opaque one. [menus/extra.mnu] record EXTRA/TITLE/Appearance 1 field value";
 	const std::string gate_row =
-	        "blocks a build: error build.name_unstorable: The game cannot store a_texture_name_too_long.pcx in an "
+	        "error build.name_unstorable: The game cannot store a_texture_name_too_long.pcx in an "
 	        "archive (the name is too long). [art/a_texture_name_too_long.pcx]";
 	// Only notes after the rows pinned above them, of the two kinds the project makes, then the
-	// build gate's lines.
+	// build gate's verdict. The build's own word on the files is a row among the errors.
 	const auto notes_only = [](const std::vector<std::string> &lines, size_t from, size_t to, size_t &notes) {
 		notes = 0;
 		for (size_t i = from; i < to; ++i) {
@@ -527,9 +527,9 @@ static int test_validate_pins_the_rows() {
 	TEST_EXPECT(run_capture(dir.file("validate.txt"), {"validate", root}, text) == 1);
 	std::vector<std::string> lines = lines_of(text);
 	size_t notes = 0;
-	TEST_EXPECT(lines.size() > 4 && lines[0] == name_row && lines[1] == render_row);
-	TEST_EXPECT(notes_only(lines, 2, lines.size() - 2, notes) && notes > 0);
-	TEST_EXPECT(lines[lines.size() - 2] == gate_row && lines.back() == "not ok: 2 finding(s) block a build");
+	TEST_EXPECT(lines.size() > 4 && lines[0] == name_row && lines[1] == gate_row && lines[2] == render_row);
+	TEST_EXPECT(notes_only(lines, 3, lines.size() - 1, notes) && notes > 0);
+	TEST_EXPECT(lines.back() == "not ok: 2 findings block a build");
 	TEST_EXPECT(run({"build", root}) == 1);
 	std::error_code ec;
 	fs::remove(root + "/art/a_texture_name_too_long.pcx", ec);
@@ -537,7 +537,7 @@ static int test_validate_pins_the_rows() {
 	lines = lines_of(text);
 	size_t notes_now = 0;
 	TEST_EXPECT(lines.size() > 2 && lines[0] == render_row && notes_only(lines, 1, lines.size() - 1, notes_now));
-	TEST_EXPECT(notes_now == notes && lines.back() == "ok: 0 error(s)");
+	TEST_EXPECT(notes_now == notes && lines.back() == "ok: no errors");
 	TEST_EXPECT(run({"build", root}) == 0);
 	return 0;
 }
@@ -607,7 +607,7 @@ static int test_one_game_install() {
 	            text.find("--with-dependencies") != std::string::npos);
 	TEST_EXPECT(run_capture(capture, {"import", root, "--all", "--dry-run", "--rows"}, text) == 0);
 	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, chosen, from the game install") &&
-	            has("take menumus.sbf (music_bank) -> ") && !has("game.cfg") && has("plan: 2 file(s) to import, 0 not found"));
+	            has("take menumus.sbf (music_bank) -> ") && !has("game.cfg") && has("plan: 2 files to import, 0 not found"));
 	TEST_EXPECT(!fs::exists(root + "/fonts/arial99.fnt"));
 	TEST_EXPECT(run_capture(capture, {"import", root, "--all"}, text) == 0);
 	TEST_EXPECT(has("imported fonts/arial99.fnt") && has("imported ") && fs::is_regular_file(root + "/fonts/arial99.fnt"));

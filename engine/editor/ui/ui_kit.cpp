@@ -178,6 +178,26 @@ std::string fit(const std::string &text, float width) {
 	return std::string(begin, stop) + (width < dots ? "" : "...");
 }
 
+std::string fit_middle(const std::string &text, float width) {
+	if (ImGui::CalcTextSize(text.c_str()).x <= width) return text;
+	const float dots = ImGui::CalcTextSize("...").x;
+	if (width <= dots) return fit(text, width);
+	// The end takes three fifths of the room, the start the rest; each cut at a whole character.
+	const float room = width - dots;
+	size_t tail = text.size();
+	while (tail > 0) {
+		size_t back = tail - 1;
+		while (back > 0 && (static_cast<unsigned char>(text[back]) & 0xC0) == 0x80) --back;
+		if (ImGui::CalcTextSize(text.c_str() + back, text.c_str() + text.size()).x > room * 0.6f) break;
+		tail = back;
+	}
+	const float tail_width = ImGui::CalcTextSize(text.c_str() + tail, text.c_str() + text.size()).x;
+	const char *const begin = text.c_str();
+	const char *stop = begin;
+	ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize(), room - tail_width, 0.0f, begin, begin + tail, &stop);
+	return std::string(begin, stop) + "..." + text.substr(tail);
+}
+
 bool fitted_button(const std::string &label, const char *id, float width) {
 	const std::string shown = fit(label, width - ImGui::GetStyle().FramePadding.x * 2.0f);
 	return ImGui::Button((shown + "###" + id).c_str());

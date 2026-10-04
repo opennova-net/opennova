@@ -28,6 +28,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/rename_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
@@ -680,8 +681,70 @@ static int test_open_menu_that_does_not_write() {
 	return 0;
 }
 
+// The way back of a rename (the UX round's problems lane; the review's H1 and L3): its true inverse, shown
+// before it commits. a.mnu's HOME renamed to START: a.mnu's own use and one of b.mnu's are its sites, and
+// b.mnu's other ACTION, which named START before the rename (nothing then), is none. The way back finds
+// START by itself and rewrites only what the rename wrote: that other ACTION still names START. Renamed
+// again, then a screen put above START in a.mnu (its place among the screens moved): the way back is
+// refused, a.mnu changed since (which of its uses the rename wrote can no longer be told), nothing written,
+// the screen now first untouched. The name gone from a.mnu: Edit no longer offers the way back, and its plan
+// says why.
+static int test_rename_back() {
+	Project project("opennova_rename_back");
+	const auto count = [](const std::string &text, const std::string &needle) {
+		size_t n = 0;
+		for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) ++n;
+		return n;
+	};
+	TEST_EXPECT(project.write("menus/a.mnu", screen("HOME", window("STATIC", "PANEL", go("a.mnu", "HOME"))) +
+	                                                 screen("AWAY", window("STATIC", "BOARD"))));
+	TEST_EXPECT(project.write("menus/b.mnu", screen("BEE", window("BUTTON", "GO", go("a.mnu", "HOME") + go("a.mnu", "START")))));
+	project.rescan();
+	const SessionView &v = project.view();
+	const GraphSymbol *home = project.defined(ReferenceKind::MenuScreen, "HOME", "menus/a.mnu");
+	TEST_EXPECT(home != nullptr);
+	if (!home) return 1;
+	TEST_EXPECT(!rename_back_offered(v));
+	TEST_EXPECT(project.rename(*home, "START"));
+	TEST_EXPECT(count(project.read("menus/b.mnu"), ">START</ACTION>") == 2);
+	TEST_EXPECT(v.activity.last_rename.made && v.activity.last_rename.to == "START" && rename_back_offered(v));
+	// Its plan: the definition and the two uses the rename wrote, the other ACTION none of them.
+	editor_test::handle_to_end(project.session, request::preview_rename_back());
+	const DialogsView::RenamePreview &back = v.dialogs.rename_preview;
+	TEST_EXPECT(back.back && back.refusals.empty() && back.old_name == "START" && back.new_name == "HOME");
+	TEST_EXPECT(back.sites && back.sites->size() == 3 && sites_in(back, "menus/a.mnu") == 2 && sites_in(back, "menus/b.mnu") == 1);
+	TEST_EXPECT(editor_test::handle_to_end(project.session, request::rename_back()).done());
+	const std::string b_back = project.read("menus/b.mnu");
+	TEST_EXPECT(count(b_back, ">HOME</ACTION>") == 1 && count(b_back, ">START</ACTION>") == 1);
+	TEST_EXPECT(count(project.read("menus/a.mnu"), "<NAME>HOME</NAME>") == 1 && count(project.read("menus/a.mnu"), ">HOME</ACTION>") == 1);
+	TEST_EXPECT(v.activity.status == "Renamed START back to HOME.");
+	// Renamed again, then a screen put above START in a.mnu: a.mnu changed since, so the way back is refused and
+	// writes nothing; the screen now first (at START's old place) is untouched.
+	home = project.defined(ReferenceKind::MenuScreen, "HOME", "menus/a.mnu");
+	TEST_EXPECT(home && project.rename(*home, "START"));
+	const std::string a_renamed = project.read("menus/a.mnu");
+	TEST_EXPECT(project.write("menus/a.mnu", screen("NEWS", window("STATIC", "TICKER")) + a_renamed));
+	project.rescan();
+	const std::string a_moved = project.read("menus/a.mnu"), b_moved = project.read("menus/b.mnu");
+	TEST_EXPECT(rename_back_offered(v)); // START is still defined in a.mnu
+	editor_test::handle_to_end(project.session, request::preview_rename_back());
+	TEST_EXPECT(v.dialogs.rename_preview.back && refused(v.dialogs.rename_preview, "rename.site", "menus/a.mnu"));
+	TEST_EXPECT(!editor_test::handle_to_end(project.session, request::rename_back()).done());
+	TEST_EXPECT(project.read("menus/a.mnu") == a_moved && project.read("menus/b.mnu") == b_moved &&
+	            count(a_moved, "<NAME>NEWS</NAME>") == 1);
+	// The name gone: no way back is offered, and its plan says why.
+	TEST_EXPECT(project.write("menus/a.mnu", screen("NEWS", window("STATIC", "TICKER"))));
+	project.rescan();
+	TEST_EXPECT(!rename_back_offered(v));
+	editor_test::handle_to_end(project.session, request::preview_rename_back());
+	TEST_EXPECT(refused(v.dialogs.rename_preview, "rename.unknown_symbol", "menus/a.mnu"));
+	std::printf("rename back: only what the rename wrote, refused once its files moved\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_rename_back();
 	failures += test_written_together();
 	failures += test_name_as_its_definition_holds_it();
 	failures += test_open_menu_that_does_not_write();
