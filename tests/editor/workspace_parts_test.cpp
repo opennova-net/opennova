@@ -1,0 +1,445 @@
+// What the windows show of their own, held by the session (ADR 0046, the MCP gaps lane): the set_workspace
+// request and the workspace section, over a session on a fake process platform. Each part a person's controls
+// change has its wire form: the file card (about_file opens it, set_workspace closes it), the build result's
+// panel (a build's end opens it), the new-project form, the project settings (opened over the settings in
+// effect, closed by its Apply that wrote everything and with its project), focus (a focus_window event),
+// Files' filter, the find bars, the New file prompt and Rename..., Rename everywhere and Rename back,
+// Problems' filters and confirmation, and what a document's views show of it. A change the table does not
+// have is refused as it is read, naming what it takes; one the session cannot take is a workspace.refused
+// warning, nothing changed.
+#include <cstdio>
+#include <string>
+#include <vector>
+
+#include <base/io/json.h>
+#include <editor/assets/asset_registry.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
+#include <editor/model/document.h>
+#include <editor/project/project_document.h>
+#include <editor/session/preferences_store.h>
+#include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/request_kinds.h>
+#include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
+
+#include "common/test_expect.h"
+#include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
+
+using namespace opennova::editor;
+using opennova::io::JsonValue;
+
+namespace {
+
+JsonValue parsed(const std::string &text) {
+	JsonValue out;
+	std::string error;
+	opennova::io::json_parse(text, out, error);
+	return out;
+}
+
+// A set_workspace on the wire, as the editor MCP raises it: the answer handle_json gives.
+JsonValue wire(ProjectSession &session, const std::string &workspace) {
+	JsonValue request = JsonValue::make_object();
+	request.set("kind", JsonValue::make_string("set_workspace"));
+	request.set("workspace", parsed(workspace));
+	return session.handle_json(request);
+}
+
+// The workspace section, as the state query writes it.
+JsonValue section(ProjectSession &session) {
+	JsonValue args = JsonValue::make_object();
+	JsonValue sections = JsonValue::make_array();
+	sections.push(JsonValue::make_string("workspace"));
+	args.set("sections", sections);
+	std::string error;
+	const JsonValue state = session.query("state", args, error);
+	const JsonValue *workspace = state.get("workspace");
+	return workspace ? *workspace : JsonValue();
+}
+
+bool refused_with(const ProjectSession &session, const char *code) {
+	const ActionOutcome &outcome = session.outcome();
+	if (outcome.done()) return false;
+	for (const Diagnostic &d : outcome.findings)
+		if (d.code() == code) return true;
+	return false;
+}
+
+// The table on the wire: every part with its members, each its JSON type and doc; a change naming a part, a
+// member or a type the table has not is refused as it is read, naming what it takes; focus names a window.
+int test_table_and_wire() {
+	size_t count = 0;
+	const WorkspacePartRow *parts = workspace_parts(count);
+	TEST_EXPECT(count >= 4);
+	for (size_t p = 0; p < count; ++p) {
+		TEST_EXPECT(*parts[p].token && *parts[p].doc && parts[p].member_count > 0);
+		for (size_t m = 0; m < parts[p].member_count; ++m) TEST_EXPECT(*parts[p].members[m].token && *parts[p].members[m].doc);
+	}
+	std::string error;
+	TEST_EXPECT(check_workspace_change(parsed(R"({"new_project": {"title": "A", "open": true}, "focus": "output"})"), error));
+	TEST_EXPECT(!check_workspace_change(parsed(R"({"no_part": {}})"), error) && error.find("no part \"no_part\"") != std::string::npos);
+	TEST_EXPECT(!check_workspace_change(parsed(R"({"card": {"file": "a"}})"), error) &&
+	            error.find("takes no \"file\" (it takes path)") != std::string::npos);
+	TEST_EXPECT(!check_workspace_change(parsed(R"({"build_result": {"open": "yes"}})"), error) &&
+	            error.find("must be true or false") != std::string::npos);
+	TEST_EXPECT(!check_workspace_change(parsed(R"({"focus": "nowhere"})"), error) && error.find("files, document") != std::string::npos);
+	TEST_EXPECT(!check_workspace_change(parsed(R"({"card": "a"})"), error) && error.find("an object of its members") != std::string::npos);
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const uint64_t before = session.view().revisions.of(ViewConcern::Workspace);
+	const JsonValue answer = wire(session, R"({"card": {"file": "a"}})");
+	TEST_EXPECT(!answer.get_bool("ok", true) && answer.get_string("error", "").find("takes no \"file\"") != std::string::npos);
+	TEST_EXPECT(session.view().revisions.of(ViewConcern::Workspace) == before);
+	return 0;
+}
+
+// The new-project form: its fields set as a person types them (nothing made), the install named once given,
+// building on an expansion building as one; the state section writes the form as it shows; the modal opened
+// closes once new_project makes the project.
+int test_new_project_form() {
+	editor_test::TempProjectDir dir("opennova_editor_workspace_form");
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	TEST_EXPECT(v.workspace.new_project.title == "My Game" && !v.workspace.new_project.install_named);
+	JsonValue answer = wire(session, R"({"new_project": {"open": true, "title": "Operation Nightfall", "dir": ")" +
+	                                         dir.file("nightfall") + R"(", "builds_on": "jox01", "expansion": "nightfall"}})");
+	TEST_EXPECT(answer.get_bool("ok", false) && answer.get("outcome") && answer.get("outcome")->get_bool("done", false));
+	const WorkspaceView::NewProject &form = v.workspace.new_project;
+	TEST_EXPECT(form.open && form.title == "Operation Nightfall" && form.dir == dir.file("nightfall") && form.builds_on == "jox01" &&
+	            form.as_expansion && form.expansion == "nightfall" && !form.install_named && !v.project.open);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"game_install": "C:/Games/JO"}})")));
+	TEST_EXPECT(form.install_named && form.game_install == "C:/Games/JO");
+	JsonValue shown = section(session);
+	const JsonValue *made = shown.get("new_project");
+	TEST_EXPECT(made && made->get_bool("open", false) && made->get_string("title", "") == "Operation Nightfall" &&
+	            made->get_string("game_install", "") == "C:/Games/JO" && made->get_bool("install_named", false) &&
+	            made->get_bool("as_expansion", false) && made->get_string("builds_on", "") == "jox01");
+	// Building on nothing: as_expansion stays as set.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"builds_on": "", "as_expansion": false}})")));
+	TEST_EXPECT(!form.as_expansion && form.builds_on.empty() && form.expansion == "nightfall");
+	// new_project makes the project (standalone, no install named in the request): the modal closes.
+	TEST_EXPECT(session.handle(request::new_project(dir.file("plain"), "Plain")) && session.outcome().done());
+	session.run_operations();
+	TEST_EXPECT(v.project.open && !form.open && form.title == "Operation Nightfall");
+	return 0;
+}
+
+// The build result's panel: a build's end opens it (a refused one's too), set_workspace closes it and opens
+// it again; the project closing closes it. The card of a file the project lacks, or with no project open,
+// refused: a warning, nothing changed. focus posts a focus_window event naming the window.
+int test_build_result_card_and_focus() {
+	editor_test::TempProjectDir dir("opennova_editor_workspace_build");
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"card": {"path": "a.mnu"}})")) &&
+	            refused_with(session, "workspace.refused") && v.workspace.card.path.empty());
+	TEST_EXPECT(session.handle(request::new_project(dir.file("project"), "Built")));
+	session.run_operations();
+	TEST_EXPECT(!v.workspace.build_result.open);
+	TEST_EXPECT(session.handle(request::build()));
+	session.run_operations();
+	TEST_EXPECT(v.activity.has_build && v.workspace.build_result.open);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"build_result": {"open": false}})")) && !v.workspace.build_result.open);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"build_result": {"open": true}})")) && v.workspace.build_result.open);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"card": {"path": "nothing.wav"}})")) &&
+	            refused_with(session, "workspace.refused") && v.workspace.card.path.empty());
+	const uint64_t next = v.events.next_seq();
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"focus": "problems"})")) && session.outcome().done());
+	TEST_EXPECT(v.events.next_seq() == next + 1 && v.events.held().back().kind == ViewEventKind::FocusWindow &&
+	            v.events.held().back().path == "problems");
+	TEST_EXPECT(session.handle(request::close_project()));
+	TEST_EXPECT(!v.workspace.build_result.open);
+	return 0;
+}
+
+// The project settings: refused with no project open; opened over the settings in effect; a field set while
+// closed refused; the fields set; its Apply (a serial) that wrote everything closes it, one that failed keeps
+// it; the project closing closes it.
+int test_settings() {
+	editor_test::TempProjectDir dir("opennova_editor_workspace_settings");
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"settings": {"open": true}})")) &&
+	            refused_with(session, "workspace.refused") && !v.workspace.settings.open);
+	TEST_EXPECT(session.handle(request::new_project(dir.file("project"), "Armory")));
+	session.run_operations();
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"settings": {"title": "Early"}})")) &&
+	            refused_with(session, "workspace.refused") && !v.workspace.settings.open);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"settings": {"open": true, "multiplayer": true}})")) &&
+	            session.outcome().done());
+	const WorkspaceView::Settings &settings = v.workspace.settings;
+	TEST_EXPECT(settings.open && settings.title == "Armory" && settings.multiplayer && !settings.mission &&
+	            !v.project.document->features.multiplayer);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"settings": {"title": "Harbor"}})")) && settings.title == "Harbor" &&
+	            v.project.document->title == "Armory");
+	JsonValue shown = section(session);
+	TEST_EXPECT(shown.get("settings") && shown.get("settings")->get_string("title", "") == "Harbor" &&
+	            shown.get("settings")->get_bool("multiplayer", false));
+	// A settings change with no serial (a menu's Play in the game install) leaves the dialog open.
+	ProjectSettingsChange play;
+	play.play_in_install = false;
+	TEST_EXPECT(session.handle(request::apply_project_settings(play)) && settings.open);
+	// The dialog's Apply, its serial: written, it closes.
+	ProjectSettingsChange apply;
+	apply.serial = 4;
+	apply.title = settings.title;
+	apply.multiplayer = settings.multiplayer;
+	TEST_EXPECT(session.handle(request::apply_project_settings(apply)));
+	TEST_EXPECT(!settings.open && v.project.document->title == "Harbor" && v.project.document->features.multiplayer);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"settings": {"open": true}})")) && settings.open &&
+	            settings.title == "Harbor");
+	TEST_EXPECT(session.handle(request::close_project()) && !settings.open);
+	return 0;
+}
+
+// A project with the files the game reads by name (a new project's, made), its catalogs' records, open.
+struct FilesProject {
+	editor_test::TempProjectDir dir{ "opennova_editor_workspace_files" };
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{ platform, preferences };
+	std::string weapons_path, items_path;
+
+	bool open() {
+		session.handle(request::new_project(dir.file("project"), "Files"));
+		session.run_operations();
+		editor_test::create_missing_files(session);
+		const SessionView &v = session.view();
+		const AssetEntry *weapons = v.project.scan->find("weapon.def");
+		const AssetEntry *items = v.project.scan->find("items.def");
+		if (!weapons || !items) return false;
+		weapons_path = weapons->relative_path;
+		items_path = items->relative_path;
+		if (!editor_test::write_text(v.project.root + "/" + weapons_path, "weapon \"GUN_A\"\nend\n") ||
+		    !editor_test::write_text(v.project.root + "/" + items_path,
+		                             "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"))
+			return false;
+		session.handle(request::rescan());
+		session.run_operations();
+		return true;
+	}
+};
+
+// Files' filter and kind, the find bar and Find in project, the New file prompt and Rename...: each set as a
+// person's controls set it, refused where it names what the project lacks or while its part is closed, opened
+// and closed by the requests a dialog's button raises; the project closing starts them afresh.
+int test_files_find_and_prompts() {
+	FilesProject project;
+	TEST_EXPECT(project.open());
+	ProjectSession &session = project.session;
+	const SessionView &v = session.view();
+	const WorkspaceView &w = v.workspace;
+	// Files' filter and kind; a kind no file has is refused.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"files": {"filter": "def", "kind": "menu"}})")) &&
+	            session.outcome().done() && w.files.filter == "def" && w.files.kind == AssetKind::Menu);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"files": {"kind": "nothing"}})")) &&
+	            refused_with(session, "workspace.refused") && w.files.kind == AssetKind::Menu);
+	JsonValue shown = section(session);
+	TEST_EXPECT(shown.get("files") && shown.get("files")->get_string("filter", "") == "def" &&
+	            shown.get("files")->get_string("kind", "") == "menu");
+	// The find bar and Find in project.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"find": {"open": true, "text": "GUN", "match_case": true}})")) &&
+	            w.find.open && w.find.text == "GUN" && w.find.match_case);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"project_find": {"open": true, "text": "carrier"}})")) &&
+	            w.project_find.open && w.project_find.text == "carrier");
+	// The New file prompt: a field before its kind refused; opened on a kind, emptied; the create_file of the name
+	// it holds closes it.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_file": {"name": "extra.mnu"}})")) &&
+	            refused_with(session, "workspace.refused") && w.new_file.kind == AssetKind::kCount);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_file": {"kind": "menu", "name": "extra.mnu"}})")) &&
+	            w.new_file.kind == AssetKind::Menu && w.new_file.name == "extra.mnu");
+	shown = section(session);
+	TEST_EXPECT(shown.get("new_file") && shown.get("new_file")->get_string("kind", "") == "menu" &&
+	            shown.get("new_file")->get_string("name", "") == "extra.mnu");
+	TEST_EXPECT(session.handle(request::create_file("other.mnu", "menu")) && w.new_file.kind == AssetKind::Menu);
+	TEST_EXPECT(session.handle(request::create_file("extra.mnu", "menu")) && w.new_file.kind == AssetKind::kCount &&
+	            w.new_file.name.empty());
+	// Rename...: a file the project lacks refused; opened on a file, its name the file's; show_in_files that asks
+	// the name opens it; rename_asset of its file closes it.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"file_rename": {"path": "gone.def"}})")) &&
+	            refused_with(session, "workspace.refused") && w.file_rename.path.empty());
+	TEST_EXPECT(session.handle(request::set_workspace("{\"file_rename\": {\"path\": \"" + project.items_path + "\"}}")) &&
+	            w.file_rename.path == project.items_path && w.file_rename.name == "items.def");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"file_rename": {"name": "things.def"}})")) && w.file_rename.name == "things.def");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"file_rename": {"path": ""}})")) && w.file_rename.path.empty());
+	TEST_EXPECT(session.handle(request::show_in_files(project.weapons_path, true)) && w.file_rename.path == project.weapons_path &&
+	            w.file_rename.name == "weapon.def");
+	TEST_EXPECT(session.handle(request::rename_asset(project.weapons_path, "arms.def")));
+	TEST_EXPECT(w.file_rename.path.empty());
+	session.run_operations();
+	// The project closing: Files' filter and the prompts start afresh, the find bars close keeping their text.
+	TEST_EXPECT(session.handle(request::close_project()));
+	TEST_EXPECT(w.files.filter.empty() && w.files.kind == AssetKind::kCount && !w.find.open && w.find.text == "GUN" &&
+	            !w.project_find.open);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"project_find": {"open": true}})")) &&
+	            refused_with(session, "workspace.refused") && !w.project_find.open);
+	return 0;
+}
+
+// Rename everywhere and Rename back: refused with no plan of theirs; a preview_rename that asks the name opens
+// Rename everywhere over the plan (its target, its name), a plan of the open one's name moves the name typed,
+// rename_symbol closes it; a preview_rename_back that asks opens Rename back, rename_back closes it.
+int test_rename_dialogs() {
+	FilesProject project;
+	TEST_EXPECT(project.open());
+	ProjectSession &session = project.session;
+	const SessionView &v = session.view();
+	const WorkspaceView &w = v.workspace;
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"rename": {"open": true}})")) &&
+	            refused_with(session, "workspace.refused") && !w.rename.open);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"rename_back": {"open": true}})")) &&
+	            refused_with(session, "workspace.refused") && !w.rename_back.open);
+	session.handle(request::open_document(project.weapons_path));
+	const Document *weapons = session.document_for(project.weapons_path);
+	NodeAddress gun;
+	TEST_EXPECT(weapons && find_definition(AssetGraph(), *weapons, "GUN_A", gun));
+	if (!weapons) return 1;
+	const std::string locator = weapons->locator(gun);
+	TEST_EXPECT(session.handle(request::preview_rename(project.weapons_path, locator, "weapon_name", "GUN_A", true)));
+	TEST_EXPECT(w.rename.open && w.rename.path == project.weapons_path && w.rename.locator == locator &&
+	            w.rename.field == "weapon_name" && w.rename.old_name == "GUN_A" && w.rename.name == "GUN_A");
+	TEST_EXPECT(session.handle(request::preview_rename(project.weapons_path, locator, "weapon_name", "GUN_B")) &&
+	            w.rename.name == "GUN_B");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"rename": {"name": "GUN_C"}})")) && w.rename.name == "GUN_C");
+	const JsonValue shown = section(session);
+	TEST_EXPECT(shown.get("rename") && shown.get("rename")->get_bool("open", false) &&
+	            shown.get("rename")->get_string("name", "") == "GUN_C" && shown.get("rename")->get_string("field", "") == "weapon_name");
+	TEST_EXPECT(session.handle(request::rename_symbol(project.weapons_path, locator, "weapon_name", "GUN_C")));
+	TEST_EXPECT(!w.rename.open);
+	session.run_operations();
+	TEST_EXPECT(session.handle(request::preview_rename_back(true)) && w.rename_back.open);
+	TEST_EXPECT(session.handle(request::rename_back()));
+	TEST_EXPECT(!w.rename_back.open);
+	session.run_operations();
+	return 0;
+}
+
+// Problems' filters: severities, a text, the scope and the grouping set (a token no filter takes refused);
+// Blocks the build sets aside the filters that could hide a refusal and puts them back, what else changed kept;
+// a confirmation asked moves the serial (a finding named by no index refused), {} closes it.
+int test_problems() {
+	FilesProject project;
+	TEST_EXPECT(project.open());
+	ProjectSession &session = project.session;
+	const WorkspaceView &w = session.view().workspace;
+	const WorkspaceView::Problems &p = w.problems;
+	TEST_EXPECT(p.errors && p.warnings && p.infos && p.grouping == ProblemGrouping::Kind);
+	TEST_EXPECT(session.handle(request::set_workspace(
+			R"({"problems": {"severities": ["error"], "text": "gun", "scope": "open_files", "fixable": true}})")));
+	TEST_EXPECT(p.errors && !p.warnings && !p.infos && p.text == "gun" && p.scope == ProblemScope::OpenFiles && p.fixable);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"severities": ["fatal"]}})")) &&
+	            refused_with(session, "workspace.refused") && !p.warnings);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"group": "row"}})")) &&
+	            refused_with(session, "workspace.refused") && p.grouping == ProblemGrouping::Kind);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"blocking": true}})")));
+	TEST_EXPECT(p.blocking && p.errors && p.warnings && p.infos && p.text.empty() && p.scope == ProblemScope::Project && !p.fixable);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"group": "file"}})")) && p.grouping == ProblemGrouping::File);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"blocking": false}})")));
+	TEST_EXPECT(!p.blocking && p.errors && !p.warnings && p.text == "gun" && p.scope == ProblemScope::OpenFiles && p.fixable &&
+	            p.grouping == ProblemGrouping::File);
+	const uint64_t serial = p.confirm_serial;
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"confirm": {"group": "requirement"}}})")) &&
+	            p.confirm.group == "requirement" && p.confirm_serial == serial + 1);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"confirm": {"finding": "x", "label": "Fix"}}})")) &&
+	            refused_with(session, "workspace.refused") && p.confirm.group == "requirement");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"problems": {"confirm": {}}})")) && !p.confirm.open() &&
+	            p.confirm_serial == serial + 2);
+	const JsonValue shown = section(session);
+	const JsonValue *problems = shown.get("problems");
+	TEST_EXPECT(problems && problems->get("severities") && problems->get("severities")->array.size() == 1 &&
+	            problems->get_string("scope", "") == "open_files" && problems->get_string("group", "") == "file");
+	return 0;
+}
+
+// What a document's views show of it: set for an open document (the active one when none is named), its kinds
+// by their tokens (one the document has not refused, all of them every kind), refused for a document not open;
+// the section lists every open document's; closing the document forgets them, and reading a menu again drops
+// the screen its Remove prompt named.
+int test_document_views() {
+	FilesProject project;
+	TEST_EXPECT(project.open());
+	ProjectSession &session = project.session;
+	const SessionView &v = session.view();
+	const WorkspaceView &w = v.workspace;
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"document": {"filter": "a"}})")) &&
+	            refused_with(session, "workspace.refused") && w.documents.empty());
+	session.handle(request::open_document(project.items_path));
+	const Document *items = session.document_for(project.items_path);
+	TEST_EXPECT(items && !items->kinds().empty());
+	if (!items) return 1;
+	const std::string kind = items->kinds().front().token;
+	TEST_EXPECT(session.handle(request::set_workspace(
+			"{\"document\": {\"filter\": \"car\", \"sort\": true, \"inspector_filter\": \"id\", \"kinds\": [\"" + kind + "\"]}}")) &&
+	            session.outcome().done());
+	const WorkspaceView::DocumentView &shown = w.document(project.items_path);
+	TEST_EXPECT(shown.filter == "car" && shown.sort && shown.inspector_filter == "id" &&
+	            (items->kinds().size() == 1 ? shown.kinds == ~uint64_t(0) : shown.kinds == 1));
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"document": {"kinds": ["no_such_kind"]}})")) &&
+	            refused_with(session, "workspace.refused") && shown.filter == "car");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"document": {"path": "gone.def", "filter": "x"}})")) &&
+	            refused_with(session, "workspace.refused"));
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"document": {"remap_from": 300}})")) &&
+	            refused_with(session, "workspace.refused"));
+	const JsonValue section_json = section(session);
+	const JsonValue *documents = section_json.get("documents");
+	TEST_EXPECT(documents && documents->array.size() == 1 && documents->array[0].get_string("path", "") == project.items_path &&
+	            documents->array[0].get_string("filter", "") == "car" && documents->array[0].get_bool("active", false));
+	TEST_EXPECT(session.handle(request::close_document(project.items_path)) && w.documents.empty());
+	// A menu's Remove prompt: the screen it names, dropped as the menu is read again.
+	const AssetEntry *menu = v.project.scan->find("main.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	const std::string menu_path = menu->relative_path;
+	session.handle(request::open_document(menu_path));
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"document": {"remove_screen": 2, "new_window_type": "button"}})")) &&
+	            w.document(menu_path).remove_screen == 2 && w.document(menu_path).new_window_type == "button");
+	EditorRequest reload = request::of(EditorRequestKind::ReloadDocument);
+	reload.path = menu_path;
+	TEST_EXPECT(session.handle(reload));
+	TEST_EXPECT(w.document(menu_path).remove_screen == 0 && w.document(menu_path).new_window_type == "button");
+	return 0;
+}
+
+// The problems query names each row's finding by its index (what a confirmation of its fix names).
+int test_problems_index() {
+	FilesProject project;
+	TEST_EXPECT(project.open());
+	ProjectSession &session = project.session;
+	std::string error;
+	const JsonValue answer = session.query("problems", JsonValue::make_object(), error);
+	const JsonValue *rows = answer.get("problems");
+	TEST_EXPECT(rows && !rows->array.empty());
+	for (size_t i = 0; rows && i < rows->array.size(); ++i) {
+		const double index = rows->array[i].get_number("index", -1.0);
+		TEST_EXPECT(index >= 0.0 && size_t(index) < session.view().findings.diagnostics.size() &&
+		            session.view().findings.diagnostics[size_t(index)].message == rows->array[i].get_string("message", ""));
+	}
+	return 0;
+}
+
+} // namespace
+
+int main() {
+	int failed = 0;
+	failed += test_table_and_wire();
+	failed += test_new_project_form();
+	failed += test_build_result_card_and_focus();
+	failed += test_settings();
+	failed += test_files_find_and_prompts();
+	failed += test_rename_dialogs();
+	failed += test_problems();
+	failed += test_document_views();
+	failed += test_problems_index();
+	if (failed == 0) std::printf("editor_workspace_parts: all tests passed\n");
+	return failed == 0 ? 0 : 1;
+}

@@ -157,6 +157,36 @@ bool filter_box(const char *id, char *text, size_t size, const char *hint, float
 	return changed;
 }
 
+bool HeldPopup::begin(const char *id, bool held, bool modal, int flags, bool closable) {
+	dismissed_ = false;
+	if (!held) closing_ = false;
+	if (held && !closing_ && !shown_ && !ImGui::IsPopupOpen(id)) ImGui::OpenPopup(id);
+	bool open = true;
+	const bool drawing = modal ? ImGui::BeginPopupModal(id, closable ? &open : nullptr, flags) : ImGui::BeginPopup(id, flags);
+	if (!drawing) {
+		// ImGui closed it while the session holds it open: the caller asks the session to close it.
+		if (shown_ && held && !closing_) {
+			closing_ = true;
+			dismissed_ = true;
+		}
+		shown_ = false;
+		return false;
+	}
+	if (!held || closing_) {
+		ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+		shown_ = false;
+		return false;
+	}
+	shown_ = true;
+	return true;
+}
+
+void HeldPopup::close() {
+	closing_ = true;
+	ImGui::CloseCurrentPopup();
+}
+
 std::string size_text(uint64_t bytes) {
 	char text[32];
 	if (bytes < 1024) std::snprintf(text, sizeof(text), "%llu B", static_cast<unsigned long long>(bytes));

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 #include <editor/model/diagnostic.h>
@@ -77,6 +79,59 @@ RowTool row_tools(WrapRow &row, const RowTools &tools);
 // text changed.
 bool filter_box(const char *id, char *text, size_t size, const char *hint, float width = 0.0f,
                 const char *tip = nullptr, bool ctrl_f = true);
+
+// A text field's buffer over a value the session holds (the workspace's, the MCP gaps lane): the field
+// takes the value whenever it moved from the value it last took (`follow`, each frame before the field
+// draws), and what the person typed goes to the session (`sent`, once the field says it changed), so the
+// session's value is the field's whoever set it, a person or the editor MCP. What was typed stays shown
+// until the session's value moves (a field being typed in keeps its own text the while: ImGui's).
+template <size_t N> struct HeldText {
+	char text[N] = "";
+	std::string seen;
+	void follow(const std::string &value) {
+		if (value == seen) return;
+		seen = value;
+		const size_t n = std::min(value.size(), N - 1);
+		std::memcpy(text, value.data(), n);
+		text[n] = '\0';
+	}
+	std::string sent() const { return text; }
+};
+
+// Any control's value over one the session holds (a toggle, a choice, a mask): `follow` takes the session's
+// value when it moved from the one last taken (true then: the control shows it), each frame before the
+// control draws; what the person picks goes to the session, the control showing it the while.
+template <class T> struct Held {
+	T seen{};
+	bool known = false;
+	bool follow(const T &value) {
+		if (known && value == seen) return false;
+		known = true;
+		seen = value;
+		return true;
+	}
+};
+
+// A popup whose being open is the session's (a part of the workspace, the MCP gaps lane): opened while the
+// session holds it open (`held`), closed as the session closes it. begin() draws it (true: drawing, the
+// caller's EndPopup after; `modal` a modal, `flags` ImGui's window flags, `closable` a modal's title-bar
+// close button). `dismissed()` after a begin that did not draw: ImGui closed it itself (a click outside it,
+// the close button) while the session holds it open, and the caller asks the session to close it, once. A
+// close the caller makes itself (Cancel, Create: its own request asks the session) is close(), inside the
+// popup: it is not opened again until the session has closed it.
+class HeldPopup {
+public:
+	bool begin(const char *id, bool held, bool modal = false, int flags = 0, bool closable = false);
+	bool dismissed() const { return dismissed_; }
+	// Drawn the frame before (a popup several owners share by its name begins only its asker's).
+	bool shown() const { return shown_; }
+	void close();
+
+private:
+	bool shown_ = false;   // drawn the frame before
+	bool closing_ = false; // closed here, the session holding it open still
+	bool dismissed_ = false;
+};
 
 // A number of bytes as a list's cell says it: "512 B", "3.4 KB", "12.0 MB".
 std::string size_text(uint64_t bytes);

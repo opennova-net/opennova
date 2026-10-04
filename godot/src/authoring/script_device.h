@@ -17,6 +17,7 @@ namespace opennova::editor {
 class DocumentBase;
 class TextDocument;
 struct EditorRequest;
+struct ScriptAssistAsk;
 } // namespace opennova::editor
 
 namespace godot {
@@ -92,6 +93,8 @@ private:
 	void complete_(bool force);
 	std::string hover_(int line, int column) const;
 	void lookup_(int line, int column);
+	// The viewport's assist shown (the MCP gaps lane): the list or the words at its place, or neither.
+	void show_assist_(const opennova::editor::ScriptAssistAsk &assist);
 	// The control takes `shown` where it holds another text (the fewest characters replaced, its caret
 	// and selection kept): true when it changed.
 	bool take_text_(const std::u32string &shown);
@@ -108,7 +111,7 @@ private:
 	bool drawn_ = false;         // a draw came since the last tick
 	bool ending_ = false;        // the burst's end is deferred
 	opennova::editor::TextBurst burst_;
-	uint64_t marks_serial_ = 0, highlights_serial_ = 0, reveal_seq_ = 0;
+	uint64_t marks_serial_ = 0, highlights_serial_ = 0, reveal_seq_ = 0, assist_serial_ = 0;
 };
 
 } // namespace godot

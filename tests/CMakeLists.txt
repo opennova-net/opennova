@@ -4044,6 +4044,13 @@ target_link_libraries(editor_project_lane_test PRIVATE opennova_editor)
 target_include_directories(editor_project_lane_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_project_lane COMMAND editor_project_lane_test)
 
+# What the windows show of their own, held by the session (ADR 0046, the MCP gaps lane): set_workspace and
+# the workspace section, each part's wire form, the refusals.
+add_executable(editor_workspace_parts_test editor/workspace_parts_test.cpp)
+target_link_libraries(editor_workspace_parts_test PRIVATE opennova_editor)
+target_include_directories(editor_workspace_parts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_workspace_parts COMMAND editor_workspace_parts_test)
+
 add_executable(editor_document_set_test editor/document_set_test.cpp)
 target_link_libraries(editor_document_set_test PRIVATE opennova_editor)
 target_include_directories(editor_document_set_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

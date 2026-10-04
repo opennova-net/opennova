@@ -9,6 +9,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/view/view_revisions.h>
+#include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
@@ -19,11 +20,12 @@ namespace opennova::editor {
 // result opens to its uses (a file's usages, a symbol's uses that reach exactly it), each a
 // click away (usage_target, made once while the results stand, drawn only in sight), and its own
 // Go to leads to the file or the defining record. Going anywhere, or Escape, closes the modal,
-// which keeps what was typed.
+// which keeps what was typed. The modal and its text are the workspace's (the MCP gaps lane:
+// workspace.project_find {open, text}).
 class ProjectFind {
 public:
-	// Asks on the next draw, the keyboard in the text.
-	void open();
+	// The workspace's Find in project opened (the keyboard in the text as it appears).
+	static void open(Workspace &workspace);
 	void draw(Workspace &workspace);
 
 private:
@@ -36,8 +38,8 @@ private:
 	// The uses of result `hit`, made on its first opening while the hits stand.
 	const std::vector<Usage> &usages(const SessionView &view, size_t hit);
 
-	bool ask_ = false;
-	char text_[128]{};
+	ui_kit::HeldPopup popup_;
+	ui_kit::HeldText<128> text_;
 	// The hits, kept while what they read (the graph) and the text stand.
 	const SessionView *view_ = nullptr;
 	RevisionKey key_;

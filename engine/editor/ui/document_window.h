@@ -7,9 +7,11 @@
 #include <string>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/file_page_view.h>
 #include <editor/ui/find_cursor.h>
+#include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -106,16 +108,23 @@ private:
 	std::string page_followed_; // the file page whose tab was last selected for it (the plain-words lane)
 	FilePageCache page_cache_;  // that page as last made (made again when what it reads moves)
 	// The find bar: open, the keyboard to go to its text on the next draw, the text and whether
-	// case matters, where it is among the hits.
+	// case matters (the workspace's: workspace.find, taken when the session's moved, a person's change
+	// sent to it), where it is among the hits.
 	struct Find {
 		bool open = false;
+		ui_kit::Held<bool> open_held;
 		bool focus = false;
-		char text[128] = {};
+		ui_kit::HeldText<128> text;
 		bool match_case = false;
+		ui_kit::Held<bool> case_held;
 		FindCursor cursor;
 		bool scroll = false; // the hit shown moved: its line scrolled to
 	};
 	Find find_;
+	// The find bar's state taken from the workspace where the session's moved.
+	void follow_find(const SessionView &view);
+	// The find bar's open, its text or its case sent to the workspace.
+	void send_find(const char *member, io::JsonValue value);
 };
 
 } // namespace opennova::editor

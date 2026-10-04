@@ -81,13 +81,14 @@ enum class EditorRequestKind {
 	ClearOutput,
 	SetViewport,
 	EditInViewport,
+	SetWorkspace,
+	PlaySound,
+	StopSound,
 	Quit,
 	// The shell's: the portable session cannot serve these.
 	PickDirectory,
 	PickFile,
 	RevealPath,
-	PlaySound,
-	StopSound,
 	kCount,
 };
 
@@ -310,6 +311,9 @@ struct EditorRequest {
 	ViewportDrag drag;
 	ViewportCommand command;
 	ViewportDrop drop;
+	// What the windows show of their own, changed (SetWorkspace, the MCP gaps lane): the JSON text of an
+	// object {<part>: {<member>: value}, focus?}, as session/workspace_parts.h reads it.
+	std::string workspace;
 	PickPurpose purpose = PickPurpose::None;
 	// An import brings the files the chosen ones need; it replaces the project's files of the
 	// names; a source imports again even when unchanged; and asks the new name (Files'
@@ -328,6 +332,9 @@ struct EditorRequest {
 	// an import takes the open preview's rows as its plan has them, in place of `imports`.
 	bool all = false;
 	bool planned = false;
+	// Play's game window starts behind every other, never taking the foreground (the MCP gaps lane: a client
+	// driving the editor while a person works at the machine).
+	bool behind = false;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -344,11 +351,11 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.paste_at == b.paste_at &&
 			a.mode == b.mode && a.choice == b.choice && a.settings == b.settings &&
 			a.viewport == b.viewport && a.drag == b.drag && a.command == b.command && a.drop == b.drop &&
-			a.purpose == b.purpose &&
+			a.workspace == b.workspace && a.purpose == b.purpose &&
 			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
-			a.all == b.all && a.planned == b.planned;
+			a.all == b.all && a.planned == b.planned && a.behind == b.behind;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

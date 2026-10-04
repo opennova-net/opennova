@@ -258,6 +258,12 @@ void ScriptDevice::take(opennova::editor::ViewportAction action, const opennova:
 		edit->set_caret_column(int(reveal.end_column), false);
 		edit->center_viewport_to_caret();
 	}
+	// The help asked at a place (the viewport's assist, the MCP gaps lane), once an ask.
+	const opennova::editor::ScriptAssistAsk &assist = script.assist();
+	if (assist.serial != assist_serial_) {
+		assist_serial_ = assist.serial;
+		show_assist_(assist);
+	}
 	report.width = int(edit->get_size().x);
 	report.height = int(edit->get_size().y);
 	report.canvas_sized = drawn_;
@@ -358,6 +364,27 @@ void ScriptDevice::lookup_(int line, int column) {
 	} else if (sink_.notice) {
 		sink_.notice("The editor knows no place that defines this word.");
 	}
+}
+
+// The caret put at the place, then the completion list there as typing a word's character shows it, or the
+// word's words there in a box under it as the pointer shows them; with neither asked, both closed.
+void ScriptDevice::show_assist_(const opennova::editor::ScriptAssistAsk &assist) {
+	ScriptEdit *edit = this->edit();
+	if (!edit) return;
+	edit->cancel_code_completion();
+	edit->set_hover_note(String());
+	if (assist.op == opennova::editor::ScriptAssistOp::None) return;
+	edit->deselect();
+	edit->set_caret_line(int(assist.shown_line), false);
+	edit->set_caret_column(int(assist.shown_column), false);
+	edit->center_viewport_to_caret();
+	if (assist.op == opennova::editor::ScriptAssistOp::Complete) {
+		complete_(true);
+		return;
+	}
+	const std::string words = hover_(int(assist.shown_line), int(assist.shown_column));
+	edit->set_hover_note(opennova::to_gd(words.empty() ? std::string("Nothing the editor knows is here.") : words),
+			int(assist.shown_line), int(assist.shown_column));
 }
 
 void ScriptDevice::end_burst_() {

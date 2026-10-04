@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <utility>
 
+#include <base/io/json.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
 #include <editor/session/rename_controller.h>
@@ -14,7 +16,9 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/document_window.h>
+#include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_window.h>
 #include <editor/ui/output_window.h>
 #include <editor/ui/preview_window.h>
@@ -149,7 +153,7 @@ std::string operation_tip(const OperationStatus &operation) {
 
 EditorWindows::EditorWindows() {
 	{
-		auto files = std::make_unique<FilesWindow>(*this, new_file_);
+		auto files = std::make_unique<FilesWindow>(*this);
 		files_window_ = files.get();
 		pass_.register_window(std::move(files));
 	}
@@ -242,18 +246,24 @@ void EditorWindows::dispatch_events() {
 		case ViewEventKind::RevealFile:
 			if (files_window_) files_window_->receive(event);
 			break;
-		case ViewEventKind::AskRename: rename_.receive(event); break;
+		// Rename everywhere and Rename back open over the workspace's (the session opens them with the ask).
+		case ViewEventKind::AskRename: break;
 		case ViewEventKind::SettingsApplied: settings_.receive(event); break;
 		case ViewEventKind::ImportPlanned: import_.receive(event); break;
-		// The build panel comes forward with what a build came to, unless the game follows it (a Play's
-		// build that landed: the game is what the modder waits on).
-		case ViewEventKind::BuildEnded:
-			if (!(event.flag && event.tag == 1)) build_panel_open_ = true;
-			break;
+		// The build panel's opening is the workspace's (the session opens it as a build ends).
+		case ViewEventKind::BuildEnded: break;
 		case ViewEventKind::OpenExternally: break; // the Shell's (EditorApp opens the file)
 		// A use shown on its model or in its menu (S18): the Preview window that draws it comes forward.
 		case ViewEventKind::RevealPreview:
 			if (preview_window_) preview_window_->request_focus();
+			break;
+		// A set_workspace's focus (the MCP gaps lane): the window it names comes forward.
+		case ViewEventKind::FocusWindow:
+			for (size_t i = 0; const char *token = workspace_window_token(i); ++i) {
+				if (event.path != token) continue;
+				for (int w = 0; w < pass_.window_count(); ++w)
+					if (std::strcmp(pass_.window(w).title(), workspace_window_title(i)) == 0) pass_.window(w).request_focus();
+			}
 			break;
 		case ViewEventKind::kCount: break;
 		}
@@ -299,14 +309,32 @@ bool EditorWindows::take_request(EditorRequest &out) {
 	return true;
 }
 
+std::vector<EditorRequest> EditorWindows::take_requests_of(EditorRequestKind kind) {
+	std::vector<EditorRequest> out;
+	for (auto request = requests_.begin(); request != requests_.end();) {
+		if (request->kind != kind) {
+			++request;
+			continue;
+		}
+		out.push_back(std::move(*request));
+		request = requests_.erase(request);
+	}
+	return out;
+}
+
 void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	if (path.empty()) return; // cancelled
 	switch (purpose) {
-	case PickPurpose::NewProjectLocation: new_project_.set_folder(path); break;
-	case PickPurpose::NewProjectInstall: new_project_.set_install(path); break;
+	// The new-project form's fields are the workspace's.
+	case PickPurpose::NewProjectLocation:
+		window_requests::set_workspace(*this, "new_project", "dir", io::JsonValue::make_string(path));
+		break;
+	case PickPurpose::NewProjectInstall:
+		window_requests::set_workspace(*this, "new_project", "game_install", io::JsonValue::make_string(path));
+		break;
 	case PickPurpose::OpenProject: request(request::open_project(path)); break;
 	case PickPurpose::RuntimeExecutable:
-	case PickPurpose::GameInstall: settings_.set_picked(purpose, path, view().project.root); break;
+	case PickPurpose::GameInstall: settings_.set_picked(*this, purpose, path, view().project.root); break;
 	case PickPurpose::ImportFiles: deliver_picks(purpose, {path}); break;
 	case PickPurpose::TextureImage:
 		// Asked before it is done: the dialog shows what the Replace would change (S18).
@@ -356,7 +384,8 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("File")) return;
 	// A project switch and Quit, like every item that raises a request, are enabled while the
 	// busy gate takes their request (an operation that cannot be cancelled refuses them).
-	if (menu_item("New project...", nullptr, v.allows(EditorRequestKind::NewProject))) open_new_project_ = true;
+	if (menu_item("New project...", nullptr, v.allows(EditorRequestKind::NewProject)))
+		window_requests::set_workspace(*this, "new_project", "open", io::JsonValue::make_bool(true));
 	if (menu_item("Open project...", nullptr, v.allows(EditorRequestKind::OpenProject)))
 		request(request::pick_directory(PickPurpose::OpenProject));
 	if (ImGui::BeginMenu("Open recent", !v.project.recent_projects.empty())) {
@@ -407,7 +436,7 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 	if (!missions) whole_install();
 	ImGui::Separator();
 	if (menu_item("Project settings...", nullptr, v.project.open && v.allows(EditorRequestKind::ApplyProjectSettings)))
-		settings_.open(v);
+		window_requests::set_workspace(*this, "settings", "open", io::JsonValue::make_bool(true));
 	if (menu_item("Show project folder", nullptr, v.project.open && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.project.root));
 	if (menu_item("Close project", nullptr, v.project.open && v.allows(EditorRequestKind::CloseProject)))
@@ -446,7 +475,7 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 	ImGui::Separator();
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
 	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project.open && v.findings.graph))
-		find_.open();
+		ProjectFind::open(*this);
 	ImGui::EndMenu();
 }
 
@@ -504,11 +533,13 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 }
 
 // What the last build came to (the UX round's problems lane): a floating window that comes forward when a
-// build ends (BuildEnded), its words the portable model's (session/build_result.h): how long, where, each
-// file with its size, a folder build's line on how players install it; a refused build's refusals, a
-// click from their rows in Problems; a failed one's why. Closed until the next build ends.
+// build ends (the workspace's build_result, which the session opens then), its words the portable model's
+// (session/build_result.h): how long, where, each file with its size, a folder build's line on how players
+// install it; a refused build's refusals, a click from their rows in Problems; a failed one's why. Closed (a
+// set_workspace) until the next build ends.
 void EditorWindows::draw_build_panel(const SessionView &v) {
-	if (!build_panel_open_ || !v.project.open || !v.activity.has_build) return;
+	if (!v.workspace.build_result.open || !v.project.open || !v.activity.has_build) return;
+	const auto close = [this] { window_requests::set_workspace(*this, "build_result", "open", io::JsonValue::make_bool(false)); };
 	const BuildReport &report = *v.activity.last_build;
 	const std::string own = v.project.root + "/.opennova/";
 	const bool in_project = report.build_dir.rfind(own, 0) == 0;
@@ -518,12 +549,15 @@ void EditorWindows::draw_build_panel(const SessionView &v) {
 	// Kept in the editor's own window: it comes forward on its own, so it never pops out as a window
 	// of its own over the desktop (a floating window that cannot merge into a minimized editor would).
 	ImGui::SetNextWindowViewport(viewport->ID);
-	if (!ImGui::Begin("Build result", &build_panel_open_,
+	bool open = true;
+	if (!ImGui::Begin("Build result", &open,
 	                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
 	                          ImGuiWindowFlags_NoCollapse)) {
 		ImGui::End();
+		if (!open) close();
 		return;
 	}
+	if (!open) close();
 	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 36.0f);
 	const bool refused = result.outcome == BuildResult::Outcome::Refused;
 	const bool failed = result.outcome == BuildResult::Outcome::Failed;
@@ -563,34 +597,45 @@ void EditorWindows::draw_build_panel(const SessionView &v) {
 	ImGui::Spacing();
 	if (refused && problems_window_ && ImGui::Button("Show them in Problems")) {
 		problems_window_->show_blocking();
-		build_panel_open_ = false;
+		close();
 	}
 	if (!result.where.empty()) {
 		if (enabled_button("Show folder", v.allows(EditorRequestKind::RevealPath))) request(request::reveal_path(report.build_dir));
 		ImGui::SameLine();
 		if (enabled_button("Play", v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play))) {
 			request(request::play());
-			build_panel_open_ = false;
+			close();
 		}
 		ImGui::SameLine();
 		if (enabled_button("Build to folder...", v.allows(EditorRequestKind::Build)))
 			request(request::pick_directory(PickPurpose::BuildFolder));
 		ImGui::SameLine();
 	}
-	if (ImGui::Button("Close")) build_panel_open_ = false;
+	if (ImGui::Button("Close")) close();
 	ImGui::End();
 }
 
-// File > New project...: the welcome view's form in a modal.
+// File > New project...: the welcome view's form in a modal, open while the workspace's new_project says
+// (the session closes it as the project is made; Cancel closes it).
 void EditorWindows::draw_new_project() {
-	if (open_new_project_) {
-		open_new_project_ = false;
-		ImGui::OpenPopup("New project");
-	}
+	const SessionView &v = view();
+	const bool wanted = v.workspace.new_project.open;
+	if (wanted && !ImGui::IsPopupOpen("New project")) ImGui::OpenPopup("New project");
 	if (!ImGui::BeginPopupModal("New project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-	if (new_project_.draw(*this)) ImGui::CloseCurrentPopup();
+	if (!wanted) { // closed another way (made, the editor MCP)
+		ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+		return;
+	}
+	new_project_.draw(*this);
 	ImGui::SameLine();
-	if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+	if (ImGui::Button("Cancel")) window_requests::set_workspace(*this, "new_project", "open", io::JsonValue::make_bool(false));
+	// Why the last New project was refused, here as on the welcome page.
+	if (!v.project.refused.empty()) {
+		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+		ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s", v.project.refused.c_str());
+		ImGui::PopTextWrapPos();
+	}
 	ImGui::EndPopup();
 }
 
@@ -612,7 +657,8 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 	if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_W, false) && !v.documents.active.empty() &&
 	    v.allows(EditorRequestKind::CloseDocument))
 		request(request::close_document());
-	if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false) && v.project.open && v.findings.graph) find_.open();
+	if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false) && v.project.open && v.findings.graph)
+		ProjectFind::open(*this);
 	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project.open && v.allows(EditorRequestKind::Build)) {
 		request(request::build());
 	}
@@ -749,8 +795,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		if (const int missing = v.project.requirements->required_missing + v.project.requirements->required_wrong_kind)
 			tip += " " + std::to_string(missing) + " of " + std::to_string(v.project.requirements->required_total) +
 			       " required files " + (missing == 1 ? "is" : "are") + " missing.";
-		if (clickable("##problems", widths[1], tip + " A click shows Problems.") && problems_window_)
-			problems_window_->request_focus();
+		if (clickable("##problems", widths[1], tip + " A click shows Problems.")) window_requests::focus(*this, "problems");
 		ui_kit::severity_count(DiagnosticSeverity::Error, errors, height);
 		ui_kit::severity_count(DiagnosticSeverity::Warning, warnings, height);
 	}
@@ -764,7 +809,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 			if (clickable("##built", ui_kit::text_width(state.c_str()),
 			              state_tip + (refused ? std::string() : std::string("\nA click shows what it built.")))) {
 				if (refused && problems_window_) problems_window_->show_blocking();
-				else build_panel_open_ = true;
+				else window_requests::set_workspace(*this, "build_result", "open", io::JsonValue::make_bool(true));
 			}
 			if (refused) ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Error));
 		}

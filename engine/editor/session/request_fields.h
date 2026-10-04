@@ -43,6 +43,7 @@ enum class RequestFieldId : uint8_t {
 	Drag,
 	Command,
 	Drop,
+	Workspace,
 	Purpose,
 	WithDependencies,
 	Replace,
@@ -53,6 +54,7 @@ enum class RequestFieldId : uint8_t {
 	Rehash,
 	All,
 	Planned,
+	Behind,
 	kCount,
 };
 
@@ -63,7 +65,7 @@ enum class RequestJson : uint8_t {
 	String, // a string (a token for mode, choice and purpose)
 	Boolean, // true or false
 	Strings, // an array of strings
-	Object, // an object (address, paste_at, settings, viewport, drag, command, drop)
+	Object, // an object (address, paste_at, settings, viewport, drag, command, drop, workspace)
 	Objects, // an array of objects (imports, edits, records)
 };
 

@@ -141,6 +141,8 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 			var mission := String(args.get("mission", ""))
 			if not mission.is_empty():
 				play["mission"] = mission
+			if bool(args.get("behind", false)):
+				play["behind"] = true
 			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(play))))
 			var failed := _outcome_error(answer, "editor_play op=start")
 			if failed != null:

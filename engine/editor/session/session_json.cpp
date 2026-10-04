@@ -24,6 +24,7 @@
 #include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
+#include <editor/session/workspace_parts.h>
 
 namespace opennova::editor {
 
@@ -872,6 +873,12 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Drag: return drag_from_json(json, request.drag, error);
 	case F::Command: return command_from_json(json, request.command, error);
 	case F::Drop: return drop_from_json(json, request.drop, error);
+	case F::Workspace:
+		// Held as its text, as a viewport's change is; its parts and members checked as it is read, so one
+		// the table has not is refused before anything is asked.
+		if (!check_workspace_change(json, error)) return false;
+		request.workspace = io::json_write(json);
+		return true;
 	case F::Purpose:
 		if (json.is_string() && pick_purpose_from_token(json.string, request.purpose)) return true;
 		error = "Unknown pick purpose \"" + shown + "\".";
@@ -885,6 +892,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Rehash: return flag_of(json, token, request.rehash, error);
 	case F::All: return flag_of(json, token, request.all, error);
 	case F::Planned: return flag_of(json, token, request.planned, error);
+	case F::Behind: return flag_of(json, token, request.behind, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -961,6 +969,12 @@ bool field_to_json(
 	case F::Drop:
 		out = drop_to_json(request.drop);
 		return request.drop != ViewportDrop();
+	case F::Workspace: {
+		std::string error;
+		if (request.workspace.empty() || !io::json_parse(request.workspace, out, error))
+			out = JsonValue::make_object();
+		return !request.workspace.empty();
+	}
 	case F::Purpose:
 		out = json_string(pick_purpose_token(request.purpose));
 		return request.purpose != PickPurpose::None;
@@ -976,6 +990,7 @@ bool field_to_json(
 	case F::Rehash: out = boolean(request.rehash); return request.rehash;
 	case F::All: out = boolean(request.all); return request.all;
 	case F::Planned: out = boolean(request.planned); return request.planned;
+	case F::Behind: out = boolean(request.behind); return request.behind;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();
@@ -1237,6 +1252,8 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	for (size_t i = first; i < last; ++i) {
 		const Diagnostic &d = view.findings.diagnostics[answer.rows[i]];
 		JsonValue row = diagnostic_to_json(d);
+		// Its index among the findings: what a confirmation of its fix names it by (workspace.problems.confirm).
+		row.set("index", json_number(double(answer.rows[i])));
 		// The record and the field in the words the windows show for them (S15), a closed file's as its
 		// finding cached them (the plain-words lane).
 		const std::string title = finding_record_title(d, view);

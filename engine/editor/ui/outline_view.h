@@ -1,11 +1,14 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <string>
 
 #include <editor/session/view/findings_index.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/outline_model.h>
 #include <editor/ui/record_reveal.h>
+#include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
 
@@ -61,6 +64,23 @@ private:
 	void draw_details(Workspace &workspace, const Document &document, const Node *master, size_t revealed);
 	void draw_file_values(Workspace &workspace, const Document &document);
 
+	// What the outline shows of its document is the workspace's (the MCP gaps lane: workspace.document's
+	// filter, kinds, all_rows, sort and every): taken into the model where the session's moved, before the
+	// view draws; what the view changed of the model as it drew (a person's control, a reveal clearing a
+	// filter that hid its record) sent to the session after.
+	struct Shown {
+		std::string filter;
+		uint64_t kinds = ~uint64_t(0);
+		bool all_rows = false, sort = false, every = false;
+		bool operator==(const Shown &other) const {
+			return filter == other.filter && kinds == other.kinds && all_rows == other.all_rows && sort == other.sort &&
+			       every == other.every;
+		}
+	};
+	Shown shown() const;
+	void follow_workspace(const SessionView &view, const Document &document);
+	void send_workspace(Workspace &workspace, const Document &document, const Shown &before);
+
 	// The mark after a record's line where a finding is on it (none drawn for none).
 	void finding_mark(const SessionView &view, const Document &document, const NodeAddress &address);
 	// Master and detail: the widest value of the column whose field defines a record's name (a string's
@@ -74,6 +94,7 @@ private:
 	RecordReveal reveal_;
 	FindingsIndex findings_;
 	char filter_[128]{};  // the filter box's text: the model's filter
+	ui_kit::Held<Shown> held_; // the workspace's, as last taken
 	NodeAddress editing_; // master and detail: the record whose cell had the keyboard last frame
 	struct Measured {
 		float width = 0.0f;

@@ -135,10 +135,12 @@ int test_kind_table() {
 		TEST_EXPECT((viewport_kind_row(static_cast<ViewportKind>(i)).role == ViewportRole::Main) ==
 		            (i == size_t(ViewportKind::Script) || i == size_t(ViewportKind::Mission) || i == size_t(ViewportKind::Texture)));
 	TEST_EXPECT(shown == 5 && mains == 7); // the five text types, the mission (S14) and the texture (S18) have a Main-role kind
-	// Its viewport: no options, no camera, no canvas; the empty one's reason.
+	// Its viewport: one option, assist (the MCP gaps lane: none asked), no camera, no canvas; the empty one's
+	// reason.
 	std::unique_ptr<ViewportModel> made = row.make("t.wac");
 	TEST_EXPECT(made && made->kind() == ViewportKind::Script && !made->make_canvas() && made->options_json().is_object() &&
-	            made->options_json().object.empty() && made->camera_json().is_null() &&
+	            made->options_json().object.size() == 1 && made->options_json().get("assist") &&
+	            made->options_json().get("assist")->get_string("op", "") == "none" && made->camera_json().is_null() &&
 	            std::string(made->reason()) == "no_text" && made->status() == ViewportStatus::Empty);
 	std::printf("kinds: %zu, the Main role's one shows %zu text types\n", kViewportKindCount, shown);
 	return 0;
@@ -714,8 +716,55 @@ int test_session() {
 	// refused; a kind no row has refused naming the three.
 	TEST_EXPECT(rig.session.handle(request::set_viewport(rig.script, R"({"kind": "script", "device": {"width": 640, "height": 400}})")) &&
 	            rig.session.outcome().done() && viewport->state().width == 640 && viewport->state().height == 400);
-	rig.session.handle(request::set_viewport(rig.script, R"({"kind": "script", "options": {}})"));
-	TEST_EXPECT(!rig.session.outcome().done());
+	// Its one option (the MCP gaps lane): assist, the completion list or a word's words asked shown at a place
+	// (lines and columns from 1, the control's from 0), a new serial each ask, the device taking it as an
+	// Update; an edit of the document closes it; an op, a member or a place it does not take refused.
+	{
+		const uint64_t before = viewport->assist().serial;
+		const size_t assist_taken = device->taken.size();
+		TEST_EXPECT(rig.session.handle(request::set_viewport(
+		                    rig.script, R"({"kind": "script", "options": {"assist": {"op": "complete", "line": 3, "column": 9}}})")) &&
+		            rig.session.outcome().done());
+		rig.pump();
+		const ScriptAssistAsk &assist = viewport->assist();
+		TEST_EXPECT(assist.op == ScriptAssistOp::Complete && assist.line == 3 && assist.column == 9 && assist.shown_line == 2 &&
+		            assist.shown_column == 8 && assist.serial == before + 1 &&
+		            device->since(assist_taken) == std::vector<ViewportAction>{ViewportAction::Update});
+		const JsonValue asked_envelope = viewport_to_json(rig.view(), *viewport, JsonPage());
+		const JsonValue *asked = asked_envelope.get("options") ? asked_envelope.get("options")->get("assist") : nullptr;
+		TEST_EXPECT(asked && asked->get_string("op", "") == "complete" && asked->get_number("line", 0) == 3 &&
+		            asked->get_number("column", 0) == 9);
+		// Past the line's end: held at its end.
+		TEST_EXPECT(rig.session.handle(request::set_viewport(
+		                    rig.script, R"({"kind": "script", "options": {"assist": {"op": "hover", "line": 2, "column": 400}}})")));
+		rig.pump();
+		const TextDocument *now = text_of(*rig.session.document_base_for(rig.script));
+		TEST_EXPECT(now && viewport->assist().op == ScriptAssistOp::Hover && viewport->assist().column == now->line(2).size() + 1 &&
+		            viewport->assist().serial == before + 2);
+		// An edit closes it.
+		editor_test::Gathered typed;
+		TextBurst typing;
+		std::u32string with = viewport->shown_text().text();
+		with.insert(0, U";");
+		TEST_EXPECT(viewport->edit(viewport_context(rig.view(), *viewport), with, 1, 9.0, typing, typed, error) &&
+		            editor_test::serve(rig.session, typed.requests));
+		rig.pump();
+		TEST_EXPECT(viewport->assist().op == ScriptAssistOp::None && viewport->assist().serial == before + 3);
+		typed.requests.clear();
+		typing.end(typed);
+		editor_test::serve(rig.session, typed.requests);
+		editor_test::handle_to_end(rig.session, request::undo(rig.script));
+		rig.pump();
+		for (const char *refused : {R"({"kind": "script", "options": {"assist": {"op": "explain", "line": 1, "column": 1}}})",
+		                            R"({"kind": "script", "options": {"assist": {"op": "complete"}}})",
+		                            R"({"kind": "script", "options": {"assist": {"op": "complete", "line": 0, "column": 1}}})",
+		                            R"({"kind": "script", "options": {"zoom": 2}})"}) {
+			rig.session.handle(request::set_viewport(rig.script, refused));
+			TEST_EXPECT(!rig.session.outcome().done() && viewport->assist().serial == before + 3);
+		}
+		TEST_EXPECT(rig.session.handle(request::set_viewport(rig.script, R"({"kind": "script", "options": {}})")) &&
+		            rig.session.outcome().done());
+	}
 	JsonValue unknown;
 	std::string parse_error, set_error;
 	TEST_EXPECT(opennova::io::json_parse(R"({"kind": "scrpt"})", unknown, parse_error) &&

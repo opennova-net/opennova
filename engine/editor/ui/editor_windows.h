@@ -58,7 +58,8 @@ public:
 	// mailbox of the window it is for, which holds it until that window draws (a RevealRecord to
 	// the view of its document and to the Inspector, a RevealFile to Files, which comes forward
 	// for it, an AskRename to Rename everywhere, a SettingsApplied to the project settings, an
-	// ImportPlanned to the import dialog); a request that acts on the files as saved, raised in
+	// ImportPlanned to the import dialog; a FocusWindow brings the window it names forward); a request
+	// that acts on the files as saved, raised in
 	// between, waits for every other request of the frame (request()), and end_frame queues it
 	// after them, once the viewports' canvases that did not draw this frame (the Preview window's,
 	// a document view's) have ended their gestures.
@@ -67,10 +68,13 @@ public:
 
 	// The oldest pending request; false when none.
 	bool take_request(EditorRequest &out);
+	// The pending requests of `kind`, oldest first, taken out; the others left waiting as they were (a
+	// test standing in for the Shell serves one kind as it comes: the windows' set_workspace requests).
+	std::vector<EditorRequest> take_requests_of(EditorRequestKind kind);
 	size_t pending_requests() const { return requests_.size() + deferred_.size(); }
 
 	// The shell's answer to a PickDirectory / PickFile request (an empty path = cancelled):
-	// a folder for a new project fills the new-project form, a project to open opens, the
+	// a folder for a new project fills the new-project form (the workspace's), a project to open opens, the
 	// game install folder and the runtime fill the project settings' fields (while the
 	// dialog that asked is open on the project open now), a file to import is planned as
 	// deliver_picks plans several.
@@ -133,9 +137,8 @@ private:
 		int frames = 0;
 	};
 	Dropped dropped_;
+	// The new-project form's text fields (what it holds is the workspace's: new_project).
 	NewProjectForm new_project_;
-	bool open_new_project_ = false;
-	bool build_panel_open_ = false; // the build panel, open from a build's end (BuildEnded) until closed
 	ProjectSettingsDialog settings_;
 	ImportDialog import_;
 	NewFilePrompt new_file_;

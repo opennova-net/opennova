@@ -250,15 +250,24 @@ void test_files_kind_and_card() {
 	      "the card, Files closed: what it is, its sound, where it goes, who names it");
 	if (files_window) files_window->open = true;
 	const ImGuiID card = ImHashStr("###file_card");
+	CHECK(v.workspace.card.path == "sounds/tone.wav", "the card is the workspace's");
 	ui.activate(item_id(card, {"Play##card"}));
 	const std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *play = only(raised, EditorRequestKind::PlaySound);
-	CHECK(play && play->path == "sounds/tone.wav", "Play: the Shell plays the wave");
-	// Closed, the card stops what its Play played (the review's L4).
+	CHECK(play && play->path == "sounds/tone.wav", "Play: the wave played");
+	if (play) session.handle(*play);
+	CHECK(v.workspace.sound.path == "sounds/tone.wav" && v.workspace.sound.state == WorkspaceView::SoundState::Starting,
+	      "the sound the session's: starting until the Shell reports it (none here)");
+	session.report_sound(v.workspace.sound.serial, WorkspaceView::SoundState::Playing);
+	run.settle();
+	CHECK(logged_frame(ui).find("Playing") != std::string::npos, "the card says it plays, as the Shell reports");
+	// Closed, the card stops what its Play played (the review's L4): its close the workspace's, which stops it.
 	ImGuiWindow *card_window = ImGui::FindWindowByName("###file_card");
 	if (card_window) ui.activate(card_window->GetID("#CLOSE"));
+	ui.session = &session; // the set_workspace it raises served by the session
 	const std::vector<EditorRequest> closed = ui.drain();
-	CHECK(card_window && only(closed, EditorRequestKind::StopSound) != nullptr, "the card closed: the sound stopped");
+	CHECK(card_window && closed.empty() && v.workspace.card.path.empty(), "the card closed: the workspace's");
+	CHECK(v.workspace.sound.state == WorkspaceView::SoundState::Stopped, "the card closed: the sound stopped");
 	// The bank's card: its waves named, the one the project has a Play of its own, the others missing.
 	session.handle(request::about_file("menu.lwf"));
 	run.settle();
@@ -285,6 +294,7 @@ void test_welcome_install_and_first_steps() {
 	v.project.editor_install = "C:/Games/JO";
 	v.project.retail_directory = "C:/Session/Other";
 	Ui ui;
+	ui.serve_workspace = false; // the set_workspace requests looked at, the view set by hand
 	ui.windows.set_view(&v);
 	ui.frames(4);
 	std::vector<EditorRequest> raised = ui.drain();
@@ -332,9 +342,19 @@ void test_welcome_install_and_first_steps() {
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("C:/mods/New holds a project already.") != std::string::npos, "the refusal said on the page");
 	v.project.refused.clear();
-	// A folder picked: checked; it holds no game: Create held back.
+	// A folder picked: checked; it holds no game: Create held back. The picks fill the form, the workspace's
+	// (the MCP gaps lane: set_workspace, which the session takes, here the view it would make).
 	ui.windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
 	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Empty");
+	raised = ui.drain();
+	CHECK(workspace_sets(raised, "new_project", "dir").size() == 1 &&
+	              !workspace_sets(raised, "new_project", "game_install").empty() &&
+	              workspace_sets(raised, "new_project", "game_install").back().string == "C:/Empty",
+	      "the picks fill the form, the workspace's");
+	v.workspace.new_project.dir = "C:/mods/New";
+	v.workspace.new_project.game_install = "C:/Empty";
+	v.workspace.new_project.install_named = true;
+	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(2);
 	raised = ui.drain();
 	check = only(raised, EditorRequestKind::CheckInstall);
@@ -348,6 +368,8 @@ void test_welcome_install_and_first_steps() {
 	ui.activate(item_id(welcome, {"Create project"}));
 	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");
 	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Games/JO");
+	v.workspace.new_project.game_install = "C:/Games/JO";
+	v.revisions.touch(ViewConcern::Workspace);
 	v.project.install_check.root = absolute_install_path("C:/Games/JO");
 	v.project.install_check.mounts = true;
 	v.revisions.touch(ViewConcern::Preferences);

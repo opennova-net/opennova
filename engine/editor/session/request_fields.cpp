@@ -146,6 +146,12 @@ constexpr RequestField kFields[] = {
 			"reference area, no name); snap a mission's grid in metres; kind the viewport's (left out, "
 			"the one the document shows in). The viewport plans what it makes, one batch, one undo "
 			"step; one that takes no drop refuses it (a menu's, a model's)." },
+	{ F::Workspace, "workspace", J::Object,
+			"What the windows show of their own, changed (the workspace section shows it): {<part>: {<member>: "
+			"value, ...}, focus?}, each part and member left out as it is; the parts and their members are "
+			"editor_query catalog's workspace (card {path}, build_result {open}, new_project {open, title, dir, "
+			"game_install, builds_on, as_expansion, expansion}); focus a window brought forward (files, document, "
+			"preview, inspector, problems, output)." },
 	{ F::Purpose, "purpose", J::String,
 			"What a picked path is for: new_project_location, open_project, runtime_executable, "
 			"game_install or import_files." },
@@ -172,6 +178,10 @@ constexpr RequestField kFields[] = {
 			"An import takes the open import preview's rows as its plan has them (each the project can "
 			"take, once per source) in place of imports, so a client need not echo thousands of rows "
 			"back; refused with no preview open." },
+	{ F::Behind, "behind", J::Boolean,
+			"Play's game window starts behind every other window and never takes the foreground (shown without "
+			"activation, kept at the bottom while it starts): a client driving the editor while a person works "
+			"at the machine." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

@@ -18,6 +18,9 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
+#include <godot_cpp/variant/packed_string_array.hpp>
+
+#include <algorithm>
 #include <cmath>
 
 #include "util/string_convert.h"
@@ -94,6 +97,8 @@ void ScriptEdit::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mark_tip", "line"), &ScriptEdit::get_mark_tip);
 	ClassDB::bind_method(D_METHOD("get_mark_note", "line"), &ScriptEdit::get_mark_note);
 	ClassDB::bind_method(D_METHOD("get_word_tip", "line", "column"), &ScriptEdit::get_word_tip);
+	ClassDB::bind_method(D_METHOD("get_hover_note"), &ScriptEdit::get_hover_note);
+	ClassDB::bind_method(D_METHOD("is_completion_shown"), &ScriptEdit::is_completion_shown);
 }
 
 ScriptEdit::ScriptEdit() {
@@ -219,9 +224,43 @@ void ScriptEdit::_notification(int p_what) {
 		}
 		window_id_ = 0;
 	} else if (p_what == NOTIFICATION_DRAW) {
-		// After the text control drew its text: each marked line's note after it (S15).
+		// After the text control drew its text: each marked line's note after it (S15), then a hover note
+		// over the text.
 		draw_notes_();
+		draw_hover_note_();
 	}
+}
+
+void ScriptEdit::set_hover_note(const String &p_text, int p_line, int p_column) {
+	if (p_text == hover_note_ && p_line == hover_line_ && p_column == hover_column_) return;
+	hover_note_ = p_text;
+	hover_line_ = p_line;
+	hover_column_ = p_column;
+	queue_redraw();
+}
+
+void ScriptEdit::draw_hover_note_() {
+	if (hover_note_.is_empty() || hover_line_ < 0 || hover_line_ >= get_line_count()) return;
+	const Ref<Font> font = get_theme_font("font");
+	const int size = get_theme_font_size("font_size");
+	if (font.is_null() || size <= 0) return;
+	const Rect2i word = get_rect_at_line_column(hover_line_, std::min(hover_column_, int(get_line(hover_line_).length())));
+	if (word.position.x < 0 || word.position.y < 0) return;
+	// A tooltip's box under the word, its lines as the words have them, kept inside the control.
+	const PackedStringArray lines = hover_note_.split("\n");
+	const float line_height = font->get_height(size);
+	const float pad = float(size) * 0.4f;
+	float width = 0.0f;
+	for (int i = 0; i < lines.size(); ++i) width = std::max(width, font->get_string_size(lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, size).x);
+	const Vector2 box_size(width + pad * 2.0f, line_height * float(lines.size()) + pad * 2.0f);
+	Vector2 at(float(word.position.x), float(word.position.y + word.size.y) + pad * 0.5f);
+	at.x = std::max(0.0f, std::min(at.x, get_size().x - box_size.x));
+	if (at.y + box_size.y > get_size().y) at.y = std::max(0.0f, float(word.position.y) - box_size.y - pad * 0.5f);
+	draw_rect(Rect2(at, box_size), Color(0.12f, 0.12f, 0.14f, 0.96f));
+	draw_rect(Rect2(at, box_size), Color(0.45f, 0.45f, 0.5f, 1.0f), false);
+	for (int i = 0; i < lines.size(); ++i)
+		draw_string(font, at + Vector2(pad, pad + font->get_ascent(size) + line_height * float(i)), lines[i],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0.92f, 0.92f, 0.92f));
 }
 
 void ScriptEdit::set_listener(std::function<void()> on_text_changed, std::function<void()> on_focus_exited) {

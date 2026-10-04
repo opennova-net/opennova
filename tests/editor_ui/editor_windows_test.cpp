@@ -91,18 +91,20 @@ void test_requests_round_trip() {
 	// The pickers' answers: an open-project pick becomes the request; the runtime and the
 	// game install folder fill the project settings' fields (while the dialog that asked is
 	// open on its project), which its Apply sends (workspace_test.cpp); a folder for a new
-	// project fills the new-project form; a cancelled pick raises nothing.
+	// project fills the new-project form, the workspace's (a set_workspace, the MCP gaps lane); a
+	// cancelled pick raises nothing.
 	windows.deliver_pick(PickPurpose::OpenProject, "C:/mods/B");
 	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::OpenProject && out.dir == "C:/mods/B",
 	      "open pick");
 	windows.deliver_pick(PickPurpose::RuntimeExecutable, "C:/tools/opennova.exe");
 	windows.deliver_pick(PickPurpose::GameInstall, "C:/games/Joint Operations");
-	CHECK(!windows.take_request(out), "the settings' picks fill its fields, they apply nothing by themselves");
+	CHECK(!windows.take_request(out), "the settings' picks fill its fields while it is open, they apply nothing by themselves");
 	windows.deliver_pick(PickPurpose::OpenProject, "");
 	CHECK(!windows.take_request(out), "a cancelled pick raises nothing");
 	windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
-	CHECK(!windows.take_request(out) && std::string(windows.new_project_form().folder()) == "C:/mods/New",
-	      "a location pick fills the form, it does not open");
+	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::SetWorkspace &&
+	              workspace_member(out, "new_project", "dir").string == "C:/mods/New" && !windows.take_request(out),
+	      "a location pick fills the form, the workspace's: it does not open");
 }
 
 // The frame bracket reads the request table (S13 A4: acts_on_saved_files and

@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document.h>
@@ -119,6 +120,26 @@ inline void set_written(Workspace &workspace, const Document &document, NodeAddr
 	change.address = address;
 	change.field = field;
 	workspace.request(request::edit_record(document.path(), std::move(change)));
+}
+
+// What a window shows of its own changed (set_workspace, the MCP gaps lane): `part`'s `members`, an
+// object of the members it names, each left out as it is.
+inline void set_workspace(Workspace &workspace, const char *part, io::JsonValue members) {
+	io::JsonValue change = io::JsonValue::make_object();
+	change.set(part, std::move(members));
+	workspace.request(request::set_workspace(io::json_write(change)));
+}
+// One member of one part.
+inline void set_workspace(Workspace &workspace, const char *part, const char *member, io::JsonValue value) {
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set(member, std::move(value));
+	set_workspace(workspace, part, std::move(members));
+}
+// A window brought forward by its token (files, document, preview, inspector, problems, output).
+inline void focus(Workspace &workspace, const char *window) {
+	io::JsonValue change = io::JsonValue::make_object();
+	change.set("focus", io::JsonValue::make_string(window));
+	workspace.request(request::set_workspace(io::json_write(change)));
 }
 
 // True when `name` contains `filter`, compared as the game compares names.

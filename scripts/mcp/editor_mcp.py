@@ -27,6 +27,14 @@ as usual.
     python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"game_install": "C:/Games/JO"}'
     python scripts/mcp/editor_mcp.py request set_viewport --path models/tank.3di --viewport '{"kind": "model",
         "camera": {"yaw": 1.2}}'                     # that model's viewport (left out: the active document's)
+    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"card": {"path": ""}}'   # the card closed
+    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"new_project": {"title": "Nightfall",
+        "builds_on": "jox01", "expansion": "nightfall"}}'   # the form filled, nothing made
+    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"problems": {"severities": ["error"],
+        "group": "file"}, "focus": "problems"}'           # Problems' filters, the window brought forward
+    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"document": {"filter": "gun",
+        "inspector_filter": "rate"}, "find": {"open": true, "text": "90"}}'   # the active document's views
+    python scripts/mcp/editor_mcp.py state --sections workspace   # what the windows show of their own
     python scripts/mcp/editor_mcp.py viewport --op state --path main.mnu        # a document's viewport: its envelope
     python scripts/mcp/editor_mcp.py viewport --op hit --x 400 --y 300          # what lies under a point
     python scripts/mcp/editor_mcp.py viewport --op drag --id 5 --handle move --by=-8,4 --snap 1   # one undo step
@@ -249,7 +257,7 @@ REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install
                  "purpose")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
-                    "planned")
+                    "planned", "behind")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -271,7 +279,7 @@ def request_of(args: argparse.Namespace) -> dict:
         request["edits"] = parse_list(args.edits, "--edits", "edit")
     if args.records:
         request["records"] = parse_list(args.records, "--records", "{row, kind, child}")
-    for field in ("address", "paste_at", "settings", "viewport", "drag", "command", "values"):
+    for field in ("address", "paste_at", "settings", "viewport", "drag", "command", "values", "workspace"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
     return request
@@ -491,6 +499,10 @@ def cmd_play(args: argparse.Namespace) -> int:
         request = {"kind": "play"}
         if args.mission:
             request["mission"] = args.mission
+        # The game's window behind every other, never taking the foreground, as a launch's is (--front: as
+        # usual).
+        if not args.front:
+            request["behind"] = True
         outcome, ended = raise_and_wait(client, request, args.timeout)
         if ended is None:
             return EXIT_NOT_DONE
@@ -719,6 +731,10 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--values", default=None,
                          help="named values as a JSON object of strings: create_file's starting values, "
                               "set_import_options' options, texture_operation's params")
+    request.add_argument("--workspace", default=None,
+                         help="set_workspace: what the windows show of their own, as a JSON object {<part>: "
+                              "{<member>: value}, focus?} (the parts: `query catalog`'s workspace; the state's "
+                              "workspace section shows them)")
     switch = ("true", "false")
     request.add_argument("--with-dependencies", dest="with_dependencies", choices=switch, default=None,
                          help="preview_import, plan_import, preview_install_import: with the files they need; "
@@ -739,6 +755,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="preview_install_import: every file of the game install chosen at once, with no walk")
     request.add_argument("--planned", choices=switch, default=None,
                          help="import_files: the open preview's rows as its plan has them, in place of --imports")
+    request.add_argument("--behind", choices=switch, default=None,
+                         help="play: the game's window starts behind every other and never takes the foreground")
     request.add_argument("--wait", action="store_true",
                          help="await the operation the request starts or joins (open_project, new_project, rescan, "
                               "reimport, the import previews and import_files, the renames, build, play) and the "
@@ -833,6 +851,9 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--mission", default=None,
                       help="start: a mission of the project by its logical name (04TR.bms), the one the game starts "
                            "in (left out: its menu)")
+    play.add_argument("--front", action="store_true",
+                      help="start: the game's window as usual (by default it starts behind every other window and "
+                           "never takes the foreground: play's behind)")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 

@@ -23,8 +23,9 @@ enum class ViewEventKind : uint8_t {
 	// row's line; ADR 0046 S13 D9): `path` the document, `locator` the place ("line:column"). The
 	// document's view scrolls to the line and marks it (S13 V10's script device to the span).
 	RevealText,
-	// A ShowInFiles: `path` the project file (project-relative), `flag` asks its new name (Files'
-	// Rename...). Files comes forward and selects it. An AboutFile's: `tag` 1, its card opens too.
+	// A ShowInFiles or an AboutFile: `path` the project file (project-relative). Files comes forward and
+	// selects it (the workspace's card or Rename... being the session's state: an AboutFile's card, a
+	// ShowInFiles' ask_name).
 	RevealFile,
 	// A PreviewRename that asks the new name: `path` the file defining the name, `field` its
 	// field, `tag` the rename preview's serial (the view's rename_preview it asks from). The Rename
@@ -47,6 +48,10 @@ enum class ViewEventKind : uint8_t {
 	// A ShowUse whose picture is the Preview window's (S18: a model's, a menu's): `path` the document it
 	// shows. The Preview window comes forward.
 	RevealPreview,
+	// A set_workspace's focus (the MCP gaps lane): `path` a window's token (files, document, preview,
+	// inspector, problems, output; session/workspace_parts.h). That window comes forward, as a click on its
+	// tab brings it.
+	FocusWindow,
 	kCount,
 };
 
@@ -68,6 +73,7 @@ inline constexpr ViewEventKindRow kViewEventKindRows[] = {
 	{ViewEventKind::BuildEnded, "build_ended"},
 	{ViewEventKind::OpenExternally, "open_externally"},
 	{ViewEventKind::RevealPreview, "reveal_preview"},
+	{ViewEventKind::FocusWindow, "focus_window"},
 };
 
 static_assert(std::size(kViewEventKindRows) == kViewEventKindCount,

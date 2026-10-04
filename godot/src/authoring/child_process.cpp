@@ -135,6 +135,22 @@ BOOL CALLBACK close_window_of_process(HWND window, LPARAM param) {
 	return TRUE;
 }
 
+// A child started behind: each shown window of it sent to the bottom without activation (posted to its
+// thread: the editor never waits on the game) and its flashing stopped, unless it is the foreground window
+// (the person's own choice).
+BOOL CALLBACK keep_window_behind(HWND window, LPARAM param) {
+	DWORD owner = 0;
+	GetWindowThreadProcessId(window, &owner);
+	if (owner != static_cast<DWORD>(param) || !IsWindowVisible(window) || window == GetForegroundWindow()) return TRUE;
+	SetWindowPos(window, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+	FLASHWINFO flash{};
+	flash.cbSize = sizeof(flash);
+	flash.hwnd = window;
+	flash.dwFlags = FLASHW_STOP;
+	FlashWindowEx(&flash);
+	return TRUE;
+}
+
 } // namespace
 #endif
 
@@ -171,6 +187,14 @@ int64_t ChildProcessPlatform::spawn(const opennova::editor::LaunchPlan &plan) {
 	}
 	STARTUPINFOW startup{};
 	startup.cb = sizeof(startup);
+	// Behind (the MCP gaps lane): its first window shown without activation, and the foreground locked while
+	// it starts (tend() lets it go).
+	if (plan.behind) {
+		startup.dwFlags |= STARTF_USESHOWWINDOW;
+		startup.wShowWindow = SW_SHOWNOACTIVATE;
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (!locked_) locked_ = LockSetForegroundWindow(LSFW_LOCK) != 0;
+	}
 	PROCESS_INFORMATION info{};
 	// A mutable buffer: CreateProcessW may write into lpCommandLine.
 	std::vector<wchar_t> buffer(command.begin(), command.end());
@@ -190,6 +214,7 @@ int64_t ChildProcessPlatform::spawn(const opennova::editor::LaunchPlan &plan) {
 		children_.erase(stale);
 	}
 	children_.emplace(pid, info.hProcess);
+	if (plan.behind) behind_[pid] = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec()) + kBehindMs;
 	return pid;
 #else
 	(void)plan;
@@ -336,6 +361,31 @@ opennova::editor::ProcessLiveness ChildProcessPlatform::process_liveness(int64_t
 
 int64_t ChildProcessPlatform::now_ms() {
 	return static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+}
+
+void ChildProcessPlatform::tend() {
+#ifdef _WIN32
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (behind_.empty() && !locked_) return;
+	const int64_t now = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	for (auto it = behind_.begin(); it != behind_.end();) {
+		const auto child = children_.find(it->first);
+		if (now >= it->second || child == children_.end() || has_exited(static_cast<HANDLE>(child->second))) {
+			it = behind_.erase(it);
+			continue;
+		}
+		EnumWindows(keep_window_behind, static_cast<LPARAM>(it->first));
+		++it;
+	}
+	// Held only while a child starts: the system lets it go as the person switches windows anyway.
+	if (behind_.empty() && locked_) {
+		LockSetForegroundWindow(LSFW_UNLOCK);
+		locked_ = false;
+	}
+#else
+	behind_.clear();
+	locked_ = false;
+#endif
 }
 
 void ChildProcessPlatform::sleep_ms(int64_t ms) {

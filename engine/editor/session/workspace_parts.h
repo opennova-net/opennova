@@ -1,0 +1,104 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include <base/io/json.h>
+#include <editor/session/editor_request.h>
+#include <editor/session/view/workspace_view.h>
+
+namespace opennova::editor {
+
+class SessionCore;
+struct SessionView;
+
+// What the windows show of their own, on the wire (ADR 0046, the MCP gaps lane; session/view/
+// workspace_view.h): one row per part of the workspace a person's controls change (a card, a panel, a
+// form), each with the members a set_workspace may name, their JSON types and what they mean. The
+// request carries {<part>: {<member>: value, ...}, ...}: a part or a member left out stays as it is;
+// `focus` is no part but an ask, the window it names brought forward (a focus_window view event).
+// The catalog query lists the table, from which the editor MCP makes the request's schema.
+enum class WorkspaceJson : uint8_t { String, Boolean, Integer, Strings, Object };
+
+// A JSON type's word: "string", "boolean", "integer", "string[]", "object".
+const char *workspace_json_token(WorkspaceJson json);
+
+struct WorkspaceMember {
+	const char *token = "";
+	WorkspaceJson json = WorkspaceJson::String;
+	const char *doc = "";
+};
+
+struct WorkspacePartRow {
+	const char *token = "";
+	const WorkspaceMember *members = nullptr;
+	size_t member_count = 0;
+	const char *doc = "";
+};
+
+// The table's rows, in their order, and their count.
+const WorkspacePartRow *workspace_parts(size_t &count);
+// The windows `focus` brings forward, by token (files, document, preview, inspector, problems,
+// output), and each one's title, in their order; null past the last.
+const char *workspace_window_token(size_t index);
+const char *workspace_window_title(size_t index);
+
+// The change `json` (set_workspace's workspace) checked against the table, nothing changed: an object
+// of parts, each an object of its members, each of its type, `focus` one of the windows. False with
+// `error` naming the part or the member at fault and what it takes.
+bool check_workspace_change(const io::JsonValue &json, std::string &error);
+
+// What a change refused: why, and the project file it is about ("" none).
+struct WorkspaceRefusal {
+	std::string message;
+	std::string asset;
+};
+
+// `change` (set_workspace's JSON text) checked, then each part it names set in `view`'s workspace as it says,
+// a part refused (`refusals`) left as it was (its members are set together, or none of them): the session's
+// view, or a test's hand-made one, as the session serves the request. True when the workspace moved (the
+// caller's to touch). What a part does beside its members: the card a project file's (refused for one the
+// project lacks), its close stopping the sound; the new-project form's install named once given, its building
+// on an expansion building as one; the settings filled from those in effect as they open; the New file
+// prompt's name and values emptied as it opens on a kind; Rename... starting with the file's name; Rename
+// everywhere opened over the name's rename planned; Blocks the build setting aside the filters that could hide
+// a refusal, which come back as it is turned off; a confirmation asked moving its serial.
+bool apply_workspace_change(SessionView &view, const std::string &change, std::vector<WorkspaceRefusal> &refusals);
+// SetWorkspace: apply_workspace_change over the session's view, each refusal a workspace.refused warning.
+void set_workspace(SessionCore &core, const std::string &change);
+// What a request just served opens of the workspace beside its own work, as a person's gesture does:
+// show_in_files with ask_name opens Rename... on the file, preview_rename with ask_name Rename everywhere (a
+// plan of the open one's name is the name typed), preview_rename_back with ask_name Rename back.
+void workspace_follows(SessionCore &core, const EditorRequest &request);
+// What a request closes as the session takes it (past the busy gate, before an unsaved-changes prompt it
+// may wait on), as the dialog's own button does: rename_asset of Rename...'s file closes it, rename_symbol
+// Rename everywhere, rename_back Rename back, create_file of the name the New file prompt holds the prompt.
+void workspace_closes_for(SessionCore &core, const EditorRequest &request);
+
+// The workspace section: each part as the windows show it, the sound, and each open document's views.
+io::JsonValue workspace_to_json(const SessionView &view);
+
+// The card of the project file at `path` (project-relative) shown, a card of another file closing (the
+// sound it played stopped): true when the card moved. An about_file's, a set_workspace's.
+bool show_card(WorkspaceView &workspace, const std::string &path);
+
+// PlaySound: the project's wave at `path` (a path or a logical name) played, the sound's serial moved and
+// its state Starting until the Shell reports it; refused (workspace.refused, nothing changed) for a name no
+// wave of the project has and for one past kWaveCardBytes. StopSound: the sound stopped.
+void play_sound(SessionCore &core, const std::string &path);
+void stop_sound(SessionCore &core);
+// What the Shell reports of the play of `serial` (ProjectSession::report_sound): Playing once decoded and
+// playing, Ended once played through, Failed with why; a report of a play since stopped or replaced is
+// passed over. True when the sound moved.
+bool report_sound(WorkspaceView &workspace, uint64_t serial, WorkspaceView::SoundState state, const std::string &error);
+
+// A document closing: what its views showed of it goes with it. True when the workspace held any.
+bool forget_document_workspace(WorkspaceView &workspace, const std::string &path);
+// The project closing: what its windows showed of it goes with it (its card, its build's panel, its dialogs
+// and prompts, a confirmation, its documents' views, Files' filter, the sound it played); the find bars close,
+// keeping their text.
+void forget_project_workspace(WorkspaceView &workspace);
+
+} // namespace opennova::editor

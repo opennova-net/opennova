@@ -15,6 +15,7 @@
 #include <editor/session/session_core.h>
 #include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
+#include <editor/session/workspace_parts.h>
 
 namespace opennova::editor {
 
@@ -84,7 +85,7 @@ void serve_build(SessionCore &core, const EditorRequest &request) {
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(PlayIntent{ true, request.mission }, std::string(), false, ExportIntent());
+		core.start_build(PlayIntent{ true, request.mission, request.behind }, std::string(), false, ExportIntent());
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
@@ -216,6 +217,15 @@ void serve_set_viewport(SessionCore &core, const EditorRequest &request) {
 }
 void serve_edit_in_viewport(SessionCore &core, const EditorRequest &request) {
 	core.edit_in_viewport(request);
+}
+void serve_set_workspace(SessionCore &core, const EditorRequest &request) {
+	set_workspace(core, request.workspace);
+}
+void serve_play_sound(SessionCore &core, const EditorRequest &request) {
+	play_sound(core, request.path);
+}
+void serve_stop_sound(SessionCore &core, const EditorRequest &) {
+	stop_sound(core);
 }
 void serve_quit(SessionCore &core, const EditorRequest &) {
 	core.quit();
@@ -445,8 +455,9 @@ constexpr RequestKindRow kRows[] = {
 			"anything is built, play.mission.unknown; Play in the game install starts at its menu "
 			"all the same); a build running already serves it and starts the game when it lands, in "
 			"the mission the last Play named. A mission that does not load is a Problems row "
-			"(play.mission.failed) until the next Play.")
-			.takes(request_params({}, { F::Mission }))
+			"(play.mission.failed) until the next Play. behind: the game's window starts behind every other "
+			"and never takes the foreground (the run section says behind).")
+			.takes(request_params({}, { F::Mission, F::Behind }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
 			.acts_on_saved()
@@ -499,9 +510,9 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::Path }, { F::AskName }))
 			.row,
 	Request(K::AboutFile, "about_file", serve_show_in_files,
-			"Files selects the project file path and opens its card (a RevealFile view event, tag 1): what it "
-			"is, where a build puts it, what it names and who names it, a wave's sound; the file_card query "
-			"reads the same.")
+			"Files selects the project file path and comes forward (a RevealFile view event), and its card opens "
+			"(the workspace section's card; set_workspace closes it): what it is, where a build puts it, what it "
+			"names and who names it, a wave's sound; the file_card query reads the same.")
 			.takes(request_params({ F::Path }))
 			.row,
 	Request(K::SelectFile, "select_file", serve_select_file,
@@ -867,6 +878,36 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({}, { F::Path, F::Drag, F::Command, F::Drop }))
 			.names_active()
 			.row,
+	// What the windows show of their own (the MCP gaps lane): no file and no document, so it runs beside any
+	// operation, as a viewport's state does.
+	Request(K::SetWorkspace, "set_workspace", serve_set_workspace,
+			"What the windows show of their own set as workspace says, {<part>: {<member>: value}}, each part "
+			"and member it leaves out as it is (the workspace section shows it, the windows draw it; the "
+			"catalog's workspace lists every part and member): a file's card (card {path}, \"\" closing it and "
+			"stopping its sound), the build result's panel, the new-project form (nothing made until "
+			"new_project), Project settings (its fields until apply_project_settings), Files' New file prompt, "
+			"filter and Rename..., Rename everywhere and Rename back, the find bar, Find in project, Problems' "
+			"filters and the confirmation a Fix all or a Use fix waits in, and what a document's views show of "
+			"it (document {path, ...}: its outline's filter and kinds, the Inspector's filter, a menu's new "
+			"window type and Remove screen prompt, a texture's palette remap); focus brings a window forward "
+			"(a focus_window view event). Each part refused alone, nothing of it changed (workspace.refused): a "
+			"part or a member the table has not, a value of another type, a file or a document the project "
+			"lacks, a field of a part that is closed.")
+			.takes(request_params({ F::Workspace }))
+			.row,
+	// The sound is the session's state, the Shell playing what it says and reporting how it goes
+	// (ProjectSession::report_sound), so a play is seen in the workspace section.
+	Request(K::PlaySound, "play_sound", serve_play_sound,
+			"The project's wave at path (a project-relative path or a logical name) played by the editor as "
+			"the game decodes it, once, in place of any sound it plays: the workspace section's sound says how "
+			"it stands (starting until the Shell has decoded it, playing, ended, stopped, failed with why; a "
+			"headless editor plays nothing, its sound staying starting). Refused (workspace.refused): a name no "
+			"wave of the project has, a wave past what a card reads.")
+			.takes(request_params({ F::Path }))
+			.row,
+	Request(K::StopSound, "stop_sound", serve_stop_sound,
+			"The sound the editor plays stopped (the workspace section's sound: stopped).")
+			.row,
 	Request(K::Quit, "quit", serve_quit,
 			"The editor quits once the prompt has asked about unsaved edits; the running operation "
 			"is cancelled first (one that cannot be keeps the editor open).")
@@ -890,15 +931,6 @@ constexpr RequestKindRow kRows[] = {
 			"The file or folder path shown in the OS file manager.")
 			.served_by(ServedBy::Shell)
 			.takes(request_params({ F::Path }))
-			.row,
-	Request(K::PlaySound, "play_sound", nullptr,
-			"The project's wave at path (a project-relative path or a logical name) played by the editor as "
-			"the game decodes it, once, in place of any sound it plays.")
-			.served_by(ServedBy::Shell)
-			.takes(request_params({ F::Path }))
-			.row,
-	Request(K::StopSound, "stop_sound", nullptr, "The sound the editor plays stopped.")
-			.served_by(ServedBy::Shell)
 			.row,
 };
 
@@ -1132,9 +1164,12 @@ bool serve_request(SessionCore &core, const EditorRequest &request) {
 		core.documents().end_edit_groups();
 	if (gate_busy(core, request))
 		return true;
+	// The dialog whose button the request is closes as it is taken (the MCP gaps lane: workspace_parts.h).
+	workspace_closes_for(core, request);
 	if (core.guard().holds(request))
 		return true;
 	row.handler(core, request);
+	workspace_follows(core, request);
 	return true;
 }
 

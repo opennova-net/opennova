@@ -47,9 +47,20 @@ public:
 	int64_t now_ms() override;
 	void sleep_ms(int64_t ms) override;
 
+	// A child spawned behind (LaunchPlan::behind, the MCP gaps lane: play {behind}) kept behind while it
+	// starts: its first window was shown without activation (STARTUPINFO SW_SHOWNOACTIVATE) and the
+	// foreground was locked as it started (LockSetForegroundWindow, refused harmlessly when the editor holds
+	// no foreground rights, when the child gets none either); each call (the Shell's pump) sends each of its
+	// shown windows to the bottom of the z-order without activation and stops their taskbar flashing, for
+	// kBehindMs after the spawn, a window the person brought to the foreground left alone; then the lock goes.
+	void tend();
+	static constexpr int64_t kBehindMs = 20000;
+
 private:
 	std::mutex mutex_;
 	std::unordered_map<int64_t, void *> children_; // pid -> process handle
+	std::unordered_map<int64_t, int64_t> behind_;  // pid -> when it stops being tended (now_ms)
+	bool locked_ = false;                          // the foreground lock is held
 };
 
 } // namespace godot

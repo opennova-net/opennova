@@ -94,6 +94,31 @@ std::vector<EditorRequest> serve(Ui &ui, ProjectSession &session) {
 	return requests;
 }
 
+// A menu's item chosen over a real session: what it raised served (a set_workspace opening a dialog), the
+// frames after it drawn.
+std::vector<EditorRequest> choose_served(Ui &ui, ProjectSession &session, const char *menu,
+                                         std::initializer_list<const char *> items) {
+	std::vector<EditorRequest> requests = choose(ui, menu, items);
+	for (const EditorRequest &request : requests) session.handle(request);
+	ui.frames(2);
+	return requests;
+}
+
+// The workspace's Rename... opened on the file at `path`, as the session opens it for a show_in_files that
+// asks the name (a hand-made view's).
+void open_file_rename(SessionView &v, const std::string &path) {
+	std::vector<WorkspaceRefusal> refusals;
+	CHECK(apply_workspace_change(v, "{\"file_rename\": {\"path\": \"" + path + "\"}}", refusals) && refusals.empty(),
+	      "Rename... opened on the file");
+	v.revisions.touch(ViewConcern::Workspace);
+}
+
+// Whether every request of `requests` is a set_workspace (what a field of a dialog raises as it is typed).
+bool only_workspace(const std::vector<EditorRequest> &requests) {
+	return std::all_of(requests.begin(), requests.end(),
+	                   [](const EditorRequest &request) { return request.kind == EditorRequestKind::SetWorkspace; });
+}
+
 // Text typed into a field: activated for input, its text selected and deleted, the text
 // typed.
 void type_into(Ui &ui, ImGuiID field, const char *text) {
@@ -597,6 +622,9 @@ void test_view_prompt_outlives_its_tab() {
 	CHECK(ask(a), "asked again");
 	const auto reread = two_screens("a.mnu", "menus/a.mnu");
 	v.documents.open = {reread, b};
+	// The session drops the prompt's screen as it reads the menu again (its ids start again).
+	v.workspace.documents[reread->path()].remove_screen = 0;
+	v.revisions.touch(ViewConcern::Workspace);
 	select_in(v, {reread->rows()[1]->id, kScreen, 0});
 	ui.frames(3);
 	CHECK(!modal_open("Remove screen?") && ui.drain().empty(), "its menu read again: the prompt closes");
@@ -667,6 +695,7 @@ void test_welcome_view() {
 	                            {"C:/mods/Gone", false, "", "", "", ""}};
 	v.activity.status = "No project open.";
 	Ui ui;
+	ui.serve_workspace = false; // the set_workspace requests looked at, the view set by hand
 	ui.windows.set_view(&v);
 	ui.frames(6);
 	ui.away();
@@ -683,7 +712,13 @@ void test_welcome_view() {
 	std::vector<EditorRequest> requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::PickDirectory) && requests[0].purpose == PickPurpose::NewProjectLocation,
 	      "Browse... asks the shell for a folder");
+	// The form is the workspace's (the MCP gaps lane): the pick a set_workspace, which the session takes (here,
+	// the view it would make).
 	ui.windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
+	requests = ui.drain();
+	CHECK(requests.size() == 1 && workspace_member(requests[0], "new_project", "dir").string == "C:/mods/New",
+	      "the pick fills the form, the workspace's");
+	v.workspace.new_project.dir = "C:/mods/New";
 	ui.frames(2);
 	ui.activate(item_id(document, {"Create project"}));
 	requests = ui.drain();
@@ -693,13 +728,27 @@ void test_welcome_view() {
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::PickDirectory) && requests[0].purpose == PickPurpose::OpenProject, "Open...");
 
-	CHECK(choose(ui, "File", {"New project..."}).empty() && modal_open("New project"), "File > New project... asks");
-	CHECK(logged_frame(ui).find("C:/mods/New") != std::string::npos, "with the same form");
+	requests = choose(ui, "File", {"New project..."});
+	CHECK(requests.size() == 1 && workspace_member(requests[0], "new_project", "open").boolean,
+	      "File > New project... asks: the workspace's modal opens");
+	v.workspace.new_project.open = true;
+	ui.frames(2);
+	CHECK(modal_open("New project") && logged_frame(ui).find("C:/mods/New") != std::string::npos, "with the same form");
 	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
 	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New", "its Create");
+	v.workspace.new_project.open = false; // the session closes it as the project is made
 	ui.frames(2);
-	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && !modal_open("New project"),
-	      "its Create, and the modal closes");
+	CHECK(!modal_open("New project"), "and the modal closes");
+	v.workspace.new_project.open = true;
+	ui.frames(2);
+	ui.activate(item_id(ImHashStr("New project"), {"Cancel"}));
+	requests = ui.drain();
+	CHECK(requests.size() == 1 && workspace_member(requests[0], "new_project", "open").is_bool() &&
+	              !workspace_member(requests[0], "new_project", "open").boolean,
+	      "Cancel closes it, the workspace's");
+	v.workspace.new_project.open = false;
+	ui.frames(2);
 	requests = choose(ui, "File", {"Open recent", "###C:/mods/Other"});
 	CHECK(one(requests, EditorRequestKind::OpenProject) && requests[0].dir == "C:/mods/Other", "File > Open recent");
 }
@@ -729,7 +778,9 @@ void test_project_settings() {
 	ui.away();
 	serve(ui, session);
 	const ImGuiID dialog = ImHashStr("Project settings");
-	CHECK(choose(ui, "File", {"Project settings..."}).empty() && modal_open("Project settings"), "the dialog opens");
+	CHECK(only_workspace(choose_served(ui, session, "File", {"Project settings..."})) && modal_open("Project settings") &&
+	              v.workspace.settings.open && v.workspace.settings.title == "Armory",
+	      "the dialog opens, the workspace's, over the settings in effect");
 	CHECK(in_order(logged_frame(ui), {"Armory", "Name", "Missions", "Multiplayer", "Game install folder", "OpenNova runtime",
 	                                  "Play in the game install", "Apply", "Cancel"}),
 	      "its fields");
@@ -749,9 +800,12 @@ void test_project_settings() {
 	// file is written first): the dialog stays, saying why, however often it is applied.
 	std::error_code ec;
 	std::filesystem::create_directories(settings_file + ".tmp", ec);
-	CHECK(choose(ui, "File", {"Project settings..."}).empty() && modal_open("Project settings"), "opened again");
+	CHECK(only_workspace(choose_served(ui, session, "File", {"Project settings..."})) && modal_open("Project settings"),
+	      "opened again");
 	type_into(ui, item_id(dialog, {"OpenNova runtime"}), "C:/tools/opennova.exe");
-	CHECK(ui.drain().empty(), "a field is the dialog's until Apply");
+	CHECK(only_workspace(serve(ui, session)) && v.workspace.settings.runtime == "C:/tools/opennova.exe" &&
+	              v.project.runtime_setting.empty(),
+	      "a field is the workspace's until Apply, which writes it");
 	for (int attempt = 0; attempt < 2; ++attempt) {
 		ui.activate(item_id(dialog, {"Apply"}));
 		requests = serve(ui, session);
@@ -789,8 +843,8 @@ void test_project_settings() {
 	      "none failed: done");
 
 	// Browse...: the shell's answer fills the field it asked for (an answer for another field
-	// is dropped).
-	choose(ui, "File", {"Project settings..."});
+	// is dropped), the workspace's.
+	choose_served(ui, session, "File", {"Project settings..."});
 	ui.activate(item_id(dialog, {"Browse...##install"}));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::PickDirectory) && requests[0].purpose == PickPurpose::GameInstall,
@@ -800,10 +854,12 @@ void test_project_settings() {
 	const std::string install = dir.file("Joint Operations");
 	ui.windows.deliver_pick(PickPurpose::RuntimeExecutable, "C:/elsewhere/other.exe");
 	ui.windows.deliver_pick(PickPurpose::GameInstall, install);
-	ui.frames(2);
+	requests = serve(ui, session);
 	std::string text = logged_frame(ui);
-	CHECK(text.find(install) != std::string::npos && text.find("C:/elsewhere") == std::string::npos,
-	      "the folder in its field, nothing in the other");
+	CHECK(requests.empty() && v.workspace.settings.game_install == install &&
+	              v.workspace.settings.runtime == "C:/tools/opennova.exe" &&
+	              text.find(install) != std::string::npos && text.find("C:/elsewhere") == std::string::npos,
+	      "the folder in its field (the workspace's), nothing in the other");
 	ui.activate(item_id(dialog, {"Apply"}));
 	serve(ui, session);
 	CHECK(!modal_open("Project settings") && v.project.retail_directory == install,
@@ -812,40 +868,43 @@ void test_project_settings() {
 	// Open in Armory with a new name typed and a Browse... pending, then the editor MCP opens
 	// another project: the dialog closes, raising nothing; the answer that comes after, in
 	// the dialog opened on the other project, is dropped.
-	choose(ui, "File", {"Project settings..."});
+	choose_served(ui, session, "File", {"Project settings..."});
 	type_into(ui, item_id(dialog, {"Name"}), "Renamed");
 	ui.activate(item_id(dialog, {"Browse...##runtime"}));
-	CHECK(one(ui.drain(), EditorRequestKind::PickFile) != nullptr, "a Browse... pending");
+	CHECK(only(ui.drain(), EditorRequestKind::PickFile) != nullptr, "a Browse... pending");
 	CHECK(session.handle(request::new_project(dir.file("Harbor"), "Harbor")) && v.project.root != armory,
 	      "the editor MCP opens another project");
 	session.run_operations();
 	ui.frames(3);
-	CHECK(!modal_open("Project settings") && ui.drain().empty(), "the dialog closes with its project, raising nothing");
-	choose(ui, "File", {"Project settings..."});
+	CHECK(!modal_open("Project settings") && !v.workspace.settings.open && ui.drain().empty(),
+	      "the dialog closes with its project, raising nothing");
+	choose_served(ui, session, "File", {"Project settings..."});
 	ui.windows.deliver_pick(PickPurpose::RuntimeExecutable, "C:/late/opennova.exe");
 	ui.frames(2);
-	CHECK(logged_frame(ui).find("C:/late/opennova.exe") == std::string::npos, "the answer asked for in Armory is dropped");
+	CHECK(logged_frame(ui).find("C:/late/opennova.exe") == std::string::npos && ui.drain().empty(),
+	      "the answer asked for in Armory is dropped");
 	ui.activate(item_id(dialog, {"Apply"}));
 	serve(ui, session);
 	CHECK(!modal_open("Project settings") && v.project.document->title == "Harbor" && v.project.runtime_setting == "C:/tools/opennova.exe" &&
 	              open_project(armory, on_disk, error) && on_disk.title == "Armory",
 	      "neither project renamed, the runtime as it was");
 
-	// Cancel raises nothing; on a source run the runtime is the checkout's, not a field.
+	// Cancel writes nothing (it closes the workspace's dialog); on a source run the runtime is the checkout's,
+	// not a field.
 	PlayLauncher launcher;
 	launcher.source_run = true;
 	launcher.executable = "C:/checkout/godot.exe";
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
-	choose(ui, "File", {"Project settings..."});
+	choose_served(ui, session, "File", {"Project settings..."});
 	ui.activate(item_id(dialog, {"Multiplayer"}));
+	CHECK(only_workspace(serve(ui, session)) && v.workspace.settings.multiplayer, "Multiplayer ticked, the workspace's");
 	text = logged_frame(ui);
 	CHECK(text.find("A source run") != std::string::npos && text.find("C:/checkout/godot.exe") != std::string::npos,
 	      "a source run: the runtime Play drives, no field");
 	ui.activate(item_id(dialog, {"Cancel"}));
-	ui.frames(2);
-	CHECK(!modal_open("Project settings") && ui.drain().empty() &&
-					!v.project.document->features.multiplayer,
-			"Cancel changes nothing");
+	CHECK(only_workspace(serve(ui, session)) && !modal_open("Project settings") && !v.workspace.settings.open &&
+	              !v.project.document->features.multiplayer,
+	      "Cancel changes nothing");
 }
 
 // Two Applies answered before the settings dialog draws, its own and another client's after it
@@ -872,12 +931,12 @@ void test_project_settings_two_applies() {
 	// first): a runtime typed cannot be set.
 	std::error_code ec;
 	std::filesystem::create_directories(settings_file + ".tmp", ec);
-	CHECK(choose(ui, "File", {"Project settings..."}).empty() && modal_open("Project settings"),
+	CHECK(only_workspace(choose_served(ui, session, "File", {"Project settings..."})) && modal_open("Project settings"),
 			"the dialog opens");
 	type_into(ui, item_id(dialog, {"OpenNova runtime"}), "C:/tools/opennova.exe");
 	ui.activate(item_id(dialog, {"Apply"}));
 	std::vector<EditorRequest> requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::ApplyProjectSettings) != nullptr, "the dialog's Apply");
+	CHECK(only(requests, EditorRequestKind::ApplyProjectSettings) != nullptr, "the dialog's Apply");
 	for (const EditorRequest &request : requests)
 		session.handle(request);
 	ProjectSettingsChange name_only;
@@ -1084,7 +1143,12 @@ void test_menu_bar_status() {
 	ui.activate(item_id(bar, {"status", "##unsaved"}));
 	ui.activate(popup_item(unsaved, "Save all"));
 	CHECK(ui.drain().empty(), "no Save all while the build packs");
+	// A click on the counts asks Problems forward (the workspace's focus, the MCP gaps lane): the session's
+	// focus_window event brings it.
 	ui.activate(item_id(bar, {"status", "##problems"}));
+	requests = ui.drain();
+	CHECK(requests.empty() && newest_event(v, ViewEventKind::FocusWindow).path == "problems",
+	      "a click on the counts asks Problems forward (served: a focus_window event)");
 	ui.frames(3);
 	CHECK(GImGui->NavWindow == ImGui::FindWindowByName("Problems"), "a click on the counts shows Problems");
 	ui.activate(item_id(bar, {"status", "Build"}));
@@ -1299,7 +1363,9 @@ void test_files_window() {
 	ui.button(false);
 	ui.button(true);
 	ui.button(false);
-	CHECK(window->selected() == "art/logo.png" && without_selects(ui.drain()).empty(), "an image source is selected, not opened");
+	requests = without_selects(ui.drain());
+	CHECK(window->selected() == "art/logo.png" && one(requests, EditorRequestKind::AboutFile) && requests[0].path == "art/logo.png",
+	      "an image source is selected, not opened: its card asked (the workspace's)");
 
 	// New: weapon.def made at once; items.def, which the project has, not offered; a menu's
 	// name asked first, checked as it is typed.
@@ -1379,8 +1445,10 @@ void test_files_window() {
 	ui.frames(3);
 	CHECK(window->selected() == "menus/sub/options.mnu" && files_text().find("options.mnu") != std::string::npos,
 	      "the file asked for selected, the filter that hid it cleared");
+	// A show_in_files that asks the name: the session opens the workspace's Rename... on it too.
 	post_event(v, ViewEventKind::RevealFile, "menus/sub/options.mnu", NodeAddress(), std::string(),
 			true);
+	open_file_rename(v, "menus/sub/options.mnu");
 	ui.frames(3);
 	CHECK(logged_frame(ui).find("Rename options.mnu to") != std::string::npos, "Rename... asked on it");
 	ImGui::ClosePopupsExceptModals();
@@ -2921,36 +2989,33 @@ void test_view_event_mailboxes() {
 	ui.frames(4);
 	CHECK(files->events().held() == 0 && files->selected() == c->path(),
 			"taken as Files draws: the file selected");
-	// Asking the rename: Rename... opens on it once.
+	// Asking the rename (the session opens the workspace's Rename... with the ask): Rename... opens on it; its
+	// close (a click outside it) closes the workspace's, so it stays closed.
 	post_event(v, ViewEventKind::RevealFile, b->path(), NodeAddress(), std::string(), true);
+	open_file_rename(v, b->path());
 	ui.frames(4);
 	CHECK(files->selected() == b->path() &&
 					logged_frame(ui).find("Rename b.mnu to") != std::string::npos,
 			"Rename... asked on it");
 	ImGui::ClosePopupsExceptModals();
 	ui.frames(4);
-	CHECK(logged_frame(ui).find("Rename b.mnu to") == std::string::npos,
-			"taken once: closed, it stays closed");
-	// Two asks before Files draws, the older asking Rename...: the newest is shown and the
-	// older passed over, its Rename... too, whether Files was closed or both came in one pump
-	// (the view's one reveal was overwritten by each ask).
+	CHECK(logged_frame(ui).find("Rename b.mnu to") == std::string::npos && v.workspace.file_rename.path.empty(),
+			"closed: the workspace's closed, it stays closed");
+	// Two asks before Files draws: the newest is shown and the older passed over, whether Files
+	// was closed or both came in one pump (the view's one reveal was overwritten by each ask).
 	files_window.open = false;
 	ui.frames(2);
-	post_event(v, ViewEventKind::RevealFile, c->path(), NodeAddress(), std::string(), true);
+	post_event(v, ViewEventKind::RevealFile, c->path());
 	post_event(v, ViewEventKind::RevealFile, a->path());
 	ui.frames(3);
 	CHECK(files->events().held() == 2, "both held while Files is closed");
 	files_window.open = true;
 	ui.frames(4);
-	CHECK(files->events().held() == 0 && files->selected() == a->path() &&
-					logged_frame(ui).find("Rename c.mnu to") == std::string::npos,
-			"Files opened: the newest shown, the older's Rename... not opened");
-	post_event(v, ViewEventKind::RevealFile, b->path(), NodeAddress(), std::string(), true);
+	CHECK(files->events().held() == 0 && files->selected() == a->path(), "Files opened: the newest shown");
+	post_event(v, ViewEventKind::RevealFile, b->path());
 	post_event(v, ViewEventKind::RevealFile, c->path());
 	ui.frames(4);
-	CHECK(files->selected() == c->path() &&
-					logged_frame(ui).find("Rename b.mnu to") == std::string::npos,
-			"both in one pump: the same");
+	CHECK(files->selected() == c->path(), "both in one pump: the same");
 	// Files closed while more asks come than the view keeps, over several frames: the newest
 	// kKept wait, the newest of them shown when it opens.
 	files_window.open = false;
@@ -2968,7 +3033,11 @@ void test_view_event_mailboxes() {
 	CHECK(files->events().held() == 0 && files->selected() == b->path(),
 			"opened: the newest shown");
 
-	// Rename everywhere on the preview an AskRename names, once.
+	// Rename everywhere, the workspace's: opened over a name's rename planned (none planned, it is refused),
+	// on the plan's name; cancelled, it closes, and stays closed.
+	std::vector<WorkspaceRefusal> refusals;
+	CHECK(!apply_workspace_change(v, R"({"rename": {"open": true}})", refusals) && refusals.size() == 1,
+	      "no rename planned: Rename everywhere is not opened");
 	v.dialogs.rename_preview.serial = 3;
 	v.dialogs.rename_preview.symbol = true;
 	v.dialogs.rename_preview.kind = ReferenceKind::MenuScreen;
@@ -2977,16 +3046,17 @@ void test_view_event_mailboxes() {
 	v.dialogs.rename_preview.field = "name";
 	v.dialogs.rename_preview.old_name = b->rows().front()->name();
 	v.dialogs.rename_preview.new_name = v.dialogs.rename_preview.requested = "RENAMED";
-	post_event(v, ViewEventKind::AskRename, b->path(), NodeAddress(), "name", false, 2);
+	refusals.clear();
+	CHECK(apply_workspace_change(v, R"({"rename": {"open": true}})", refusals) && refusals.empty() &&
+	              v.workspace.rename.name == "RENAMED" && v.workspace.rename.path == b->path(),
+	      "over the plan: its target and its name");
+	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(3);
-	CHECK(!modal_open("Rename everywhere"), "an ask naming another preview opens nothing");
-	post_event(v, ViewEventKind::AskRename, b->path(), NodeAddress(), "name", false, 3);
-	ui.frames(3);
-	CHECK(modal_open("Rename everywhere"), "the ask naming the preview opens it");
+	CHECK(modal_open("Rename everywhere"), "the workspace's rename open: the dialog opens");
 	ui.activate(item_id(ImHashStr("Rename everywhere"), { "Cancel" }));
 	ui.frames(4);
 	ui.drain();
-	CHECK(!modal_open("Rename everywhere"), "taken once: cancelled, it stays closed");
+	CHECK(!modal_open("Rename everywhere") && !v.workspace.rename.open, "cancelled: the workspace's closed, it stays closed");
 
 	// The import dialog takes a plan's checks again on each ImportPlanned, once.
 	v.dialogs.import_preview = planned_import("C:/assets");

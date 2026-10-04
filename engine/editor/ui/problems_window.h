@@ -5,8 +5,10 @@
 #include <optional>
 #include <string>
 
+#include <base/io/json.h>
 #include <editor/session/problem_query.h>
 #include <editor/ui/problems_list.h>
+#include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -52,6 +54,10 @@ public:
 	// fixable hid, which come back when "Blocks the build" is turned off.
 	void show_blocking();
 
+	// The filters and the confirmation are the workspace's (the MCP gaps lane: workspace.problems): the
+	// query a workspace's filters make.
+	static ProblemQuery query_of(const WorkspaceView::Problems &problems);
+
 private:
 	using Line = ProblemsList::Line;
 
@@ -69,20 +75,33 @@ private:
 	bool fix_pressed(const SessionView &view, size_t finding, const ProblemFix &fix, bool clicked);
 	// A fix chosen: raised, or a Use fix's confirmation asked.
 	void apply(const SessionView &view, size_t finding, const ProblemFix &fix);
-	void ask(const SessionView &view, ProblemsList::Confirmation confirmation);
+	// A confirmation asked (a group's Fix all by its key, the summary's of a request kind, a finding's fix by
+	// its index and label): shown at once, and asked of the workspace (its confirm), whose it is from then on.
+	void ask(const SessionView &view, const WorkspaceView::Problems::Confirm &confirm);
+	// The workspace's confirm set as `confirm` says ({} closes it).
+	void ask(io::JsonValue confirm);
+	// The workspace's confirmation, taken when it moved: the list's confirmation made from it (false: it
+	// names nothing the list shows now).
+	bool take_confirm(const SessionView &view, const WorkspaceView::Problems::Confirm &confirm);
 	// "Blocks the build" on: the filters that could hide a refusal set aside; off: put back.
 	void set_blocking(bool on);
+	// The filters taken from the workspace where the session's moved; the filters sent to it.
+	void follow_filters(const SessionView &view);
+	void send_filters();
 
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	ProblemsList list_;
 	char text_[128]{}; // the filter box, the query's text
-	// The query and the filter box's text as they were when "Blocks the build" was turned on.
-	std::optional<ProblemQuery> before_blocking_;
-	std::string text_before_;
+	ui_kit::Held<ProblemQuery> held_; // the workspace's filters, as last taken
+	// The filters "Blocks the build" set aside, as they were when it was turned on.
+	std::optional<WorkspaceView::Problems::Filters> before_blocking_;
 	ProblemsList::FindingRef more_; // the finding whose fixes More lists
 	bool open_more_ = false;
-	bool open_confirm_ = false;
+	ui_kit::HeldPopup confirm_popup_;
+	uint64_t confirm_serial_ = 0; // the workspace's confirmation last taken
+	bool confirming_ = false;     // the list holds a confirmation, shown
+	WorkspaceView::Problems::Confirm taken_; // what it is
 	ProblemsList::PressLatch fix_press_;   // the fix control a press was on
 	ProblemsList::PressLatch apply_press_; // the confirmation's version Apply was pressed on
 };

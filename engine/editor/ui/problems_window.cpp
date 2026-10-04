@@ -11,9 +11,12 @@
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/requirements/requirement_words.h>
+#include <base/io/strutil.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
+#include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
+#include <editor/ui/editor_requests.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/welcome_view.h>
@@ -102,19 +105,60 @@ std::string fix_tip(const ProblemFix &fix, const std::string &note, bool allowed
 
 } // namespace
 
+ProblemQuery ProblemsWindow::query_of(const WorkspaceView::Problems &problems) {
+	ProblemQuery query;
+	query.errors = problems.errors;
+	query.warnings = problems.warnings;
+	query.infos = problems.infos;
+	query.text = problems.text;
+	query.scope = problems.scope;
+	query.fixable = problems.fixable;
+	query.grouping = problems.grouping;
+	query.blocking = problems.blocking;
+	return query;
+}
+
+void ProblemsWindow::follow_filters(const SessionView &view) {
+	const ProblemQuery wanted = query_of(view.workspace.problems);
+	if (!held_.follow(wanted)) return;
+	list_.query() = wanted;
+	const size_t n = std::min(wanted.text.size(), sizeof(text_) - 1);
+	wanted.text.copy(text_, n);
+	text_[n] = '\0';
+	// The filters Blocks the build set aside are the session's too.
+	before_blocking_ = view.workspace.problems.before_blocking;
+}
+
+void ProblemsWindow::send_filters() {
+	const ProblemQuery &query = list_.query();
+	io::JsonValue members = io::JsonValue::make_object();
+	io::JsonValue severities = io::JsonValue::make_array();
+	if (query.errors) severities.push(io::JsonValue::make_string("error"));
+	if (query.warnings) severities.push(io::JsonValue::make_string("warning"));
+	if (query.infos) severities.push(io::JsonValue::make_string("info"));
+	members.set("severities", std::move(severities));
+	members.set("text", io::JsonValue::make_string(query.text));
+	members.set("scope", io::JsonValue::make_string(problem_scope_token(query.scope)));
+	members.set("group", io::JsonValue::make_string(problem_grouping_token(query.grouping)));
+	members.set("fixable", io::JsonValue::make_bool(query.fixable));
+	window_requests::set_workspace(workspace_, "problems", std::move(members));
+}
+
 void ProblemsWindow::show_blocking() {
 	set_blocking(true);
 	request_focus();
 }
 
+// As the session does it (workspace_parts' set_problems): turned on, the filters that could hide a
+// refusal set aside; turned off, those put back, what else changed meanwhile kept.
 void ProblemsWindow::set_blocking(bool on) {
 	ProblemQuery &query = list_.query();
 	if (on == query.blocking) return;
+	window_requests::set_workspace(workspace_, "problems", "blocking", io::JsonValue::make_bool(on));
 	if (on) {
 		// Every refusal shown: a required file's finding names no file (no scope but the project's shows it),
 		// and a hidden severity, a text or Only fixable could hide the rest.
-		before_blocking_ = query;
-		text_before_ = text_;
+		before_blocking_ = WorkspaceView::Problems::Filters{ query.errors, query.warnings, query.infos, query.text, query.scope, query.fixable };
 		query.scope = ProblemScope::Project;
 		query.errors = query.warnings = query.infos = true;
 		query.fixable = false;
@@ -124,9 +168,15 @@ void ProblemsWindow::set_blocking(bool on) {
 		return;
 	}
 	if (before_blocking_) {
-		query = *before_blocking_;
-		const size_t n = std::min(text_before_.size(), sizeof(text_) - 1);
-		text_before_.copy(text_, n);
+		const WorkspaceView::Problems::Filters before = *before_blocking_;
+		query.errors = before.errors;
+		query.warnings = before.warnings;
+		query.infos = before.infos;
+		query.text = before.text;
+		query.scope = before.scope;
+		query.fixable = before.fixable;
+		const size_t n = std::min(before.text.size(), sizeof(text_) - 1);
+		before.text.copy(text_, n);
 		text_[n] = '\0';
 		before_blocking_.reset();
 	}
@@ -137,6 +187,7 @@ bool ProblemsWindow::stands_aside() const { return aside_for_welcome(workspace_.
 
 void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
+	follow_filters(view);
 	if (view.project.open) list_.refresh(view);
 	if (!view.project.open) {
 		ui_kit::empty_state("No project open.");
@@ -155,6 +206,9 @@ void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
 const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	const ProblemAnswer &counts = list_.answer(view); // every finding's, whatever it shows
 	ProblemQuery &query = list_.query();
+	if (query.scope == ProblemScope::ActiveFile && view.documents.active.empty()) query.scope = ProblemScope::Project;
+	// The filters as they stand before the controls: one the person changes goes to the workspace.
+	const ProblemQuery before = query;
 	ui_kit::WrapRow row;
 	// Your project's own counts (S15: the game's own data's are counted apart, under their group).
 	severity_toggle(row, "Errors", "###errors", counts.errors, "errors", query.errors);
@@ -192,7 +246,6 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 		scopes.push_back({basename_of(view.documents.active) + "###scope_active", ProblemScope::ActiveFile,
 		                  "Only the problems of " + view.documents.active + ", the active file."});
 	scopes.push_back({"Open files###scope_open", ProblemScope::OpenFiles, "Only the problems of the files open in Document."});
-	if (query.scope == ProblemScope::ActiveFile && view.documents.active.empty()) query.scope = ProblemScope::Project;
 	float scopes_width = 0.0f;
 	for (const Scope &scope : scopes) scopes_width += ui_kit::button_width(scope.label.c_str()) + 1.0f;
 	row.next(scopes_width);
@@ -211,6 +264,10 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	row.next(ui_kit::checkbox_width("Only fixable"));
 	ImGui::Checkbox("Only fixable", &query.fixable);
 	ui_kit::tooltip("Only the problems the editor offers a fix for.");
+	// Blocks the build sends its own (set_blocking); any other filter changed goes to the workspace.
+	ProblemQuery changed = query;
+	changed.blocking = before.blocking;
+	if (query.blocking == before.blocking && changed != before) send_filters();
 	const ProblemAnswer &answer = list_.refresh(view);
 	// The severities count the modder's findings; the game's own data's are said after the shown count.
 	std::string shown = std::to_string(answer.rows.size()) + " of " + std::to_string(answer.total());
@@ -249,8 +306,11 @@ void ProblemsWindow::draw_summary(const SessionView &view) {
 		ImGui::PushID(static_cast<int>(request.kind));
 		const bool allowed = view.allows(request.kind);
 		ImGui::BeginDisabled(!allowed);
-		if (ui_kit::fitted_button(label, "fix", ImGui::GetContentRegionAvail().x) && allowed)
-			ask(view, list_.required_fix(view, request.kind));
+		if (ui_kit::fitted_button(label, "fix", ImGui::GetContentRegionAvail().x) && allowed) {
+			WorkspaceView::Problems::Confirm confirm;
+			confirm.required = editor_request_kind_token(request.kind);
+			ask(view, confirm);
+		}
 		ImGui::EndDisabled();
 		ui_kit::tooltip_lazy([&] { return ProblemsList::describe(view, request) + (allowed ? "" : std::string("\n") + kWaits); });
 		ImGui::PopID();
@@ -326,8 +386,11 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 	if (all.findings >= 2 && !all.requests.empty()) {
 		const bool allowed = allows_all(view, all.requests);
 		ImGui::BeginDisabled(!allowed);
-		if (ui_kit::fitted_button("Fix all", "fix_all", ImGui::GetContentRegionAvail().x) && allowed)
-			ask(view, list_.fix_all_of(view, group.rows));
+		if (ui_kit::fitted_button("Fix all", "fix_all", ImGui::GetContentRegionAvail().x) && allowed) {
+			WorkspaceView::Problems::Confirm confirm;
+			confirm.group = group.key;
+			ask(view, confirm);
+		}
 		ImGui::EndDisabled();
 		ui_kit::tooltip_lazy([&] {
 			std::string tip;
@@ -350,8 +413,10 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	// its place, when it has one.
 	if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
 	                      ImVec2(0.0f, ImGui::GetFrameHeight()))) {
+		// A click that folds the selected one back goes nowhere.
+		const bool folding = list_.selected() == line.finding;
 		list_.toggle_selected(view, line.finding);
-		const ProblemLocation location = problem_location(d, view);
+		const ProblemLocation location = folding ? ProblemLocation() : problem_location(d, view);
 		if (!location.empty()) workspace_.request(location.request());
 	}
 	ImGui::SameLine(0.0f, 0.0f);
@@ -479,17 +544,65 @@ void ProblemsWindow::draw_more(const SessionView &view) {
 	ImGui::EndPopup();
 }
 
-// What a Use fix or a Fix all will do (the list's confirmation, which follows the project it
-// was asked in and the findings it is for), raised on Apply; Cancel raises nothing.
-void ProblemsWindow::draw_confirm(const SessionView &view) {
-	if (open_confirm_) {
-		ImGui::OpenPopup(kConfirm);
-		open_confirm_ = false;
+bool ProblemsWindow::take_confirm(const SessionView &view, const WorkspaceView::Problems::Confirm &confirm) {
+	if (!view.project.open) return false;
+	if (!confirm.group.empty()) {
+		// A group of the answer as the workspace's grouping makes it, by its key.
+		const ProblemAnswer &answer = list_.refresh(view);
+		for (const ProblemGroup &group : answer.groups)
+			if (group.key == confirm.group) {
+				list_.ask(view, list_.fix_all_of(view, group.rows));
+				return true;
+			}
+		return false;
 	}
-	if (!ImGui::BeginPopupModal(kConfirm, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-	if (!list_.follow(view)) {
-		ImGui::CloseCurrentPopup();
-		ImGui::EndPopup();
+	if (!confirm.required.empty()) {
+		EditorRequestKind kind = EditorRequestKind::CreateMissing;
+		if (!editor_request_kind_from_token(confirm.required, kind)) return false;
+		list_.refresh(view);
+		list_.ask(view, list_.required_fix(view, kind));
+		return true;
+	}
+	const std::optional<unsigned long> index = strutil::parse_ulong(confirm.finding);
+	if (!index || *index >= view.findings.diagnostics.size()) return false;
+	list_.refresh(view);
+	for (const ProblemFix &fix : list_.fixes(view, *index))
+		if (fix.label == confirm.label) {
+			list_.ask(view, list_.use_fix(view, *index, fix));
+			return true;
+		}
+	return false;
+}
+
+// What a Use fix or a Fix all will do (the workspace's confirmation, the list's made from it, which follows
+// the project it was asked in and the findings it is for), raised on Apply; Cancel raises nothing.
+void ProblemsWindow::draw_confirm(const SessionView &view) {
+	const WorkspaceView::Problems &problems = view.workspace.problems;
+	const io::JsonValue none = io::JsonValue::make_object();
+	if (confirm_serial_ != problems.confirm_serial) {
+		confirm_serial_ = problems.confirm_serial;
+		const WorkspaceView::Problems::Confirm &asked = problems.confirm;
+		// The one this window asked and shows already (a click's) is kept as it shows; any other taken.
+		const bool same = confirming_ && asked.group == taken_.group && asked.required == taken_.required &&
+		                  asked.finding == taken_.finding && asked.label == taken_.label;
+		if (!same) {
+			confirming_ = asked.open() && take_confirm(view, asked);
+			taken_ = confirming_ ? asked : WorkspaceView::Problems::Confirm();
+			if (!confirming_) list_.close();
+			// One that names nothing the list shows now closes.
+			if (asked.open() && !confirming_) ask(none);
+		}
+	}
+	// Another project, or none, closes it.
+	if (confirming_ && !list_.follow(view)) {
+		confirming_ = false;
+		ask(none);
+	}
+	if (!confirm_popup_.begin(kConfirm, confirming_, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+		if (confirm_popup_.dismissed()) {
+			confirming_ = false;
+			ask(none);
+		}
 		return;
 	}
 	const ProblemsList::Proposal &shown = list_.shown();
@@ -510,12 +623,16 @@ void ProblemsWindow::draw_confirm(const SessionView &view) {
 	if (applies && allowed) {
 		for (const EditorRequest &request : shown.requests) workspace_.request(request);
 		list_.close();
-		ImGui::CloseCurrentPopup();
+		confirming_ = false;
+		ask(none);
+		confirm_popup_.close();
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Cancel")) {
 		list_.close();
-		ImGui::CloseCurrentPopup();
+		confirming_ = false;
+		ask(none);
+		confirm_popup_.close();
 	}
 	// Said beside the buttons, which then stay where they were pressed.
 	if (list_.changed()) {
@@ -537,12 +654,26 @@ bool ProblemsWindow::fix_pressed(const SessionView &view, size_t finding, const 
 
 void ProblemsWindow::apply(const SessionView &view, size_t finding, const ProblemFix &fix) {
 	if (!ProblemsList::asks_first(fix)) return workspace_.request(fix.request);
-	ask(view, list_.use_fix(view, finding, fix));
+	WorkspaceView::Problems::Confirm confirm;
+	confirm.finding = std::to_string(finding);
+	confirm.label = fix.label;
+	ask(view, confirm);
 }
 
-void ProblemsWindow::ask(const SessionView &view, ProblemsList::Confirmation confirmation) {
-	list_.ask(view, std::move(confirmation));
-	open_confirm_ = true;
+void ProblemsWindow::ask(const SessionView &view, const WorkspaceView::Problems::Confirm &confirm) {
+	// Shown at once, the workspace's from when the session takes it.
+	confirming_ = take_confirm(view, confirm);
+	taken_ = confirming_ ? confirm : WorkspaceView::Problems::Confirm();
+	io::JsonValue members = io::JsonValue::make_object();
+	if (!confirm.group.empty()) members.set("group", io::JsonValue::make_string(confirm.group));
+	if (!confirm.required.empty()) members.set("required", io::JsonValue::make_string(confirm.required));
+	if (!confirm.finding.empty()) members.set("finding", io::JsonValue::make_string(confirm.finding));
+	if (!confirm.label.empty()) members.set("label", io::JsonValue::make_string(confirm.label));
+	ask(std::move(members));
+}
+
+void ProblemsWindow::ask(io::JsonValue confirm) {
+	window_requests::set_workspace(workspace_, "problems", "confirm", std::move(confirm));
 }
 
 } // namespace opennova::editor

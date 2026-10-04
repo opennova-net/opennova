@@ -43,6 +43,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/unsaved_guard.h>
+#include <editor/session/workspace_parts.h>
 
 namespace fs = std::filesystem;
 
@@ -301,6 +302,11 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	if (!close_project()) return false;
 	if (!create_project(dir, title, target_game, doc, error, expansion)) return refused(error);
 	note("Created " + doc.title + ".");
+	// File > New project...'s modal has done what it was open for.
+	if (view_.workspace.new_project.open) {
+		view_.workspace.new_project.open = false;
+		touch(ViewConcern::Workspace);
+	}
 	// The install named: the project's (its local.json, which the Open reads), and the editor's from now on.
 	// A preference that cannot be written is said; the project keeps the install all the same.
 	if (!chosen.empty()) {
@@ -457,6 +463,7 @@ bool SessionCore::close_project() {
 	view_.findings.marks.reset();
 	view_.activity.last_rename = ActivityView::LastRename(); // its way back is this project's
 	renames().forget();
+	forget_project_workspace(view_.workspace); // its card, its build's panel, the sound it played
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
 	view_.activity.has_export = false;
@@ -812,6 +819,12 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	applied.flag = !failures.empty();
 	applied.tag = change.serial;
 	view_.events.post(std::move(applied));
+	// The settings dialog's Apply (a serial names it) that wrote everything: the dialog has done what it was
+	// open for (the workspace's settings, the MCP gaps lane); one that failed keeps it open saying why.
+	if (failures.empty() && change.serial != 0 && view_.workspace.settings.open) {
+		view_.workspace.settings = WorkspaceView::Settings();
+		touch(ViewConcern::Workspace);
+	}
 	view_.activity.status = !failures.empty() ? "A setting could not be saved: see Problems."
 			: project_changed || install_changed || editor_changed ? "Saved the settings."
 																   : "No setting changed.";
@@ -1487,6 +1500,12 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 	ended.tag = intent.wanted ? 1 : 0;
 	view_.events.post(std::move(ended));
 	touch(ViewConcern::Dialogs);
+	// Its panel opens with what it came to, unless the game follows a build that landed (the MCP gaps lane:
+	// the workspace's, which a set_workspace closes as the panel's Close does).
+	if (!(result.ok && intent.wanted)) {
+		view_.workspace.build_result.open = true;
+		touch(ViewConcern::Workspace);
+	}
 	if (result.ok) {
 		BuildResult said = build_result(result, true);
 		said.where = shown_path(result.build_dir, paths_.root);
@@ -1508,7 +1527,7 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		note("Build failed.");
 		view_.activity.status = "Build failed; see Problems.";
 	}
-	if (result.ok && intent.wanted) play().start(intent.mission);
+	if (result.ok && intent.wanted) play().start(intent.mission, intent.behind);
 	bool exported_ok = true;
 	if (result.ok && exported.wanted && shipped) {
 		for (const Diagnostic &d : shipped->diagnostics) {

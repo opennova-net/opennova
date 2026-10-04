@@ -758,7 +758,11 @@ The editor's windows (Files, Document, Preview, Inspector, Problems and Output, 
 and the modals) and their seam to the session: the view every window reads, the typed
 requests it raises, and the devices its viewports' canvases draw through (the Shell's, one per
 document and kind; none in a headless run or a test). The Shell (`EditorApp`) drains the requests
-into the session and hands the devices in (`ui/workspace.h`).
+into the session and hands the devices in (`ui/workspace.h`). What the windows show of their own
+(a card or a dialog open, a form's fields, a list's filter, a confirmation waiting) is the session's
+too: the view's workspace (`session/view/workspace_view.h`), its parts changed by `set_workspace`
+alone (`session/workspace_parts`), so the editor MCP sets and reads it as a person's controls do; a
+window keeps only how it shows (scroll, folds, column widths, the docking).
 _Avoid_: host, editor host (host is the game host alone), UI (too broad), project (the data)
 
 **Document**:

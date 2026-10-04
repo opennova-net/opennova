@@ -39,11 +39,21 @@ std::string written_type(const std::string &token) { return "The file writes it 
 
 } // namespace
 
+void MenuView::send(Workspace &workspace, const char *member, io::JsonValue value) const {
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("path", io::JsonValue::make_string(path_));
+	members.set(member, std::move(value));
+	window_requests::set_workspace(workspace, "document", std::move(members));
+}
+
 void MenuView::draw(Workspace &workspace, const DocumentBase &base) {
 	// A RevealRecord taken: the tree opens the selection's owners and scrolls to it again.
 	if (!take_events().empty()) revealed_ = NodeAddress();
 	const auto *document = dynamic_cast<const MnuDocument *>(records_of(base));
 	if (!document) return ui_kit::empty_state("This file holds no menu screens to list.");
+	path_ = document->path();
+	const WorkspaceView::DocumentView &held = workspace.view().workspace.document(path_);
+	if (add_type_held_.follow(held.new_window_type)) add_type_ = held.new_window_type;
 	draw_document_toolbar(workspace, *document);
 	ImGui::BeginDisabled(document->blocked());
 	if (const Node *screen = draw_screens(workspace, *document)) draw_windows(workspace, *document, *screen);
@@ -52,8 +62,8 @@ void MenuView::draw(Workspace &workspace, const DocumentBase &base) {
 }
 
 void MenuView::rebind(const DocumentBase &) {
-	// A range's anchor and the tree name the old document's records; the prompt's question keeps
-	// the old one's identity, so it closes (draw_modals) with nothing removed.
+	// A range's anchor and the tree name the old document's records; the prompt's question the session
+	// drops as it reads the document again (its screens' ids start again), so it closes with nothing removed.
 	anchor_ = 0;
 	tree_document_ = 0;
 	revealed_ = NodeAddress();
@@ -87,9 +97,8 @@ const Node *MenuView::draw_screens(Workspace &workspace, const MnuDocument &docu
 	case ui_kit::RowTool::Add: edit(workspace, document, EditOperation::Add, {0, kScreen, 0}, current ? index + 1 : SIZE_MAX); break;
 	case ui_kit::RowTool::Duplicate: edit(workspace, document, EditOperation::Duplicate, address, index + 1); break;
 	case ui_kit::RowTool::Remove:
-		removing_document_ = document.identity();
-		removing_screen_ = address.row;
-		ask_remove_ = true;
+		// The prompt is the workspace's: open while it names the screen.
+		send(workspace, "remove_screen", io::JsonValue::make_number(double(address.row)));
 		break;
 	case ui_kit::RowTool::Up: edit(workspace, document, EditOperation::Move, address, index - 1); break;
 	case ui_kit::RowTool::Down: edit(workspace, document, EditOperation::Move, address, index + 1); break;
@@ -116,38 +125,38 @@ const Node *MenuView::draw_screens(Workspace &workspace, const MnuDocument &docu
 // is about the menu it was asked in, that very document (one read again, or closed, closes
 // it), and a screen of it while the menu keeps a second one.
 void MenuView::draw_modals(Workspace &workspace) {
-	// Each open menu has its view, whose prompts share the one name: only the view asking draws
-	// it.
-	if (!ask_remove_ && !removing_document_) return;
-	if (ask_remove_) {
-		ask_remove_ = false;
-		ImGui::OpenPopup(kRemovePrompt);
-	}
-	if (!ImGui::BeginPopupModal(kRemovePrompt, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		removing_document_ = 0; // closed another way (Escape outside its buttons): no longer asking
-		return;
-	}
+	// Each open menu has its view, whose prompts share the one name: only the view of the menu whose
+	// workspace names a screen draws it.
+	if (path_.empty()) return;
+	const SessionView &view = workspace.view();
+	const NodeId asked = NodeId(view.workspace.document(path_).remove_screen);
 	const MnuDocument *document = nullptr;
-	for (const auto &open : workspace.view().documents.open)
-		if (open->identity() == removing_document_) document = dynamic_cast<const MnuDocument *>(open.get());
-	const Node *screen = document ? document->row(removing_screen_) : nullptr;
-	if (!screen || document->rows().size() < 2) {
-		removing_document_ = 0;
-		ImGui::CloseCurrentPopup();
-		ImGui::EndPopup();
+	for (const auto &open : view.documents.open)
+		if (open->path() == path_) document = dynamic_cast<const MnuDocument *>(open.get());
+	const Node *screen = document && asked ? document->row(asked) : nullptr;
+	const bool asks = screen && document->rows().size() >= 2;
+	// One that names no screen of the menu (gone, the last one) is no longer asked.
+	if (asked && !asks && document) {
+		send(workspace, "remove_screen", io::JsonValue::make_number(0.0));
+		if (!remove_popup_.shown()) return;
+	}
+	// The prompt's name is every menu view's: only the view asking (or closing it) begins it.
+	if (!asks && !remove_popup_.shown()) return;
+	if (!remove_popup_.begin(kRemovePrompt, asks, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+		if (remove_popup_.dismissed()) send(workspace, "remove_screen", io::JsonValue::make_number(0.0));
 		return;
 	}
 	ImGui::Text("Remove the screen %s and every window on it?", screen->name().c_str());
 	ImGui::TextDisabled("Undo brings it back.");
 	if (ImGui::Button("Remove")) {
 		edit(workspace, *document, EditOperation::Remove, {screen->id, kScreen, 0});
-		removing_document_ = 0;
-		ImGui::CloseCurrentPopup();
+		send(workspace, "remove_screen", io::JsonValue::make_number(0.0));
+		remove_popup_.close();
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-		removing_document_ = 0;
-		ImGui::CloseCurrentPopup();
+		send(workspace, "remove_screen", io::JsonValue::make_number(0.0));
+		remove_popup_.close();
 	}
 	ImGui::EndPopup();
 }
@@ -227,7 +236,10 @@ void MenuView::draw_windows(Workspace &workspace, const MnuDocument &document, c
 			ImGui::SetNextItemWidth(width);
 			if (ImGui::BeginCombo("##new_type", current ? choice_title(*current).c_str() : add_type_.c_str())) {
 				for (const FieldChoice &choice : type->choices) {
-					if (ImGui::Selectable(choice_title(choice).c_str(), current == &choice)) add_type_ = choice.name;
+					if (ImGui::Selectable(choice_title(choice).c_str(), current == &choice) && add_type_ != choice.name) {
+						add_type_ = choice.name;
+						send(workspace, "new_window_type", io::JsonValue::make_string(add_type_));
+					}
 					ui_kit::tooltip(written_type(choice.name));
 				}
 				ImGui::EndCombo();

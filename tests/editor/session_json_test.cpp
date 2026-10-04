@@ -803,6 +803,14 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			out.drop.y = 200.0f;
 			out.drop.kind = ViewportKind::Model;
 			break;
+		case F::Workspace: {
+			// The text the wire reader keeps of the object (json_write's), as a viewport's change is.
+			opennova::io::JsonValue change;
+			std::string error;
+			opennova::io::json_parse(R"({"build_result": {"open": true}, "focus": "problems"})", change, error);
+			out.workspace = opennova::io::json_write(change);
+			break;
+		}
 		case F::Purpose: out.purpose = PickPurpose::GameInstall; break;
 		case F::WithDependencies: out.with_dependencies = true; break;
 		case F::Replace: out.replace = true; break;
@@ -813,6 +821,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Rehash: out.rehash = true; break;
 		case F::All: out.all = true; break;
 		case F::Planned: out.planned = true; break;
+		case F::Behind: out.behind = true; break;
 		case F::kCount: break;
 		}
 	}

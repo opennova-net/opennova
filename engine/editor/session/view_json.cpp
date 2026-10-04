@@ -19,6 +19,7 @@
 #include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
 #include <editor/session/problem_query.h>
+#include <editor/session/workspace_parts.h>
 
 namespace opennova::editor {
 
@@ -206,6 +207,7 @@ JsonValue run_section(const SessionView &view) {
 	out.set("pid", json_number(double(activity.play_pid)));
 	out.set("mcp_port", json_number(double(activity.play_mcp_port)));
 	out.set("mission", json_string(activity.play_mission));
+	out.set("behind", boolean(activity.play_behind));
 	out.set("command_line", json_string(activity.play_command_line));
 	out.set("run_dir", json_string(activity.play_run_dir));
 	out.set("log_file", json_string(activity.play_log_file));
@@ -462,7 +464,7 @@ constexpr ViewSectionRow kSections[] = {
 			"build." },
 	{ S::Run, "run", concern_set({ C::Run, C::Preferences }), run_section,
 			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), the mission "
-			"it was started in (\"\" at its menu), exit_code, "
+			"it was started in (\"\" at its menu), behind (its window started behind the others), exit_code, "
 			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
 			"the build directory), the files it reported missing at boot, and what Play runs (the "
 			"game install, in it or not, the runtime)." },
@@ -488,8 +490,23 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::Output, "output", concern_set({ C::Output }), output_section,
 			"The output lines held, first and next by absolute index (the output query pages "
 			"them)." },
-	{ S::Events, "events", concern_set({ C::Selection, C::Dialogs }), events_section,
+	{ S::Events, "events", concern_set({ C::Selection, C::Dialogs, C::Workspace }), events_section,
 			"The view events held, first and next by seq (the events query pages them)." },
+	{ S::Workspace, "workspace", concern_set({ C::Workspace, C::Preferences, C::DocumentSet, C::ActiveDocument }),
+			workspace_to_json,
+			"What the windows show of their own (set_workspace sets it; the catalog's workspace lists the parts): "
+			"the file whose card shows (card {path}, \"\" none), the sound the editor plays (sound {path, state: "
+			"idle, starting, playing, ended, stopped or failed, serial, error}), the build result's panel "
+			"(build_result {open}), the new-project form (new_project {open: File > New project...'s modal, title, "
+			"dir, game_install as the form shows it, install_named, builds_on, as_expansion, expansion}), Project "
+			"settings (settings {open, and while open its fields}), the New file prompt (new_file {kind, \"\" "
+			"closed, name, values}), Rename... (file_rename {path, name}), Rename everywhere (rename {open, path, "
+			"locator, field, old_name, kind, name}) and Rename back (rename_back {open}), the find bar (find {open, "
+			"text, match_case}), Find in project (project_find {open, text}), Files' filter (files {filter, kind}), "
+			"Problems' filters and confirmation (problems {severities, text, scope, group, fixable, blocking, "
+			"confirm {group | required | finding, label}, confirm_serial}) and each open document's views "
+			"(documents [{path, active, filter, kinds, all_rows, sort, every, inspector_filter, new_window_type, "
+			"remove_screen, remap_from, remap_to}])." },
 };
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");
