@@ -224,8 +224,8 @@ bool members_known(const JsonValue &object, std::initializer_list<const char *> 
 // type checked.
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
-	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "game_install", "runtime_executable",
-	                          "play_in_install", "build_folder"},
+	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "game_install",
+	                          "runtime_executable", "play_in_install", "build_folder"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
 	if (const JsonValue *serial = json.get("serial"); serial && !read_id(*serial, change.serial)) {
@@ -247,6 +247,7 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 		return true;
 	};
 	if (!text("title", change.title) || !flag("mission", change.mission) || !flag("multiplayer", change.multiplayer) ||
+	    !text("expansion", change.expansion) || !text("builds_on", change.builds_on) ||
 	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
 	    !flag("play_in_install", change.play_in_install) || !text("build_folder", change.build_folder))
 		return false;
@@ -260,6 +261,8 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	if (change.title) out.set("title", json_string(*change.title));
 	if (change.mission) out.set("mission", boolean(*change.mission));
 	if (change.multiplayer) out.set("multiplayer", boolean(*change.multiplayer));
+	if (change.expansion) out.set("expansion", json_string(*change.expansion));
+	if (change.builds_on) out.set("builds_on", json_string(*change.builds_on));
 	if (change.game_install) out.set("game_install", json_string(*change.game_install));
 	if (change.runtime_executable)
 		out.set("runtime_executable", json_string(*change.runtime_executable));
@@ -315,6 +318,7 @@ JsonValue import_choice_to_json(const ImportChoice &source) {
 	if (!source.entry.empty()) out.set("entry", json_string(source.entry));
 	if (source.install) out.set("install", boolean(true));
 	if (source.native) out.set("native", boolean(true));
+	if (!source.as.empty()) out.set("as", json_string(source.as));
 	return out;
 }
 
@@ -701,23 +705,26 @@ bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error
 	return true;
 }
 
-// An import source: {path, entry?, install?, native?}.
+// An import source: {path, entry?, install?, native?, as?}.
 constexpr const char *kImportsShape =
-        "\"imports\" must be an array of {path, entry, install, native}.";
+        "\"imports\" must be an array of {path, entry, install, native, as}.";
 
 bool import_choice_from_json(const JsonValue &json, ImportChoice &out, std::string &error) {
 	if (!json.is_object()) {
 		error = kImportsShape;
 		return false;
 	}
-	if (!members_known(json, {"path", "entry", "install", "native"}, "import", error)) return false;
+	if (!members_known(json, {"path", "entry", "install", "native", "as"}, "import", error)) return false;
 	ImportChoice import;
 	if (!read_string(json, "path", import.path, error) ||
 	    !read_string(json, "entry", import.entry, error) ||
 	    !read_bool(json, "install", import.install, error) ||
-	    !read_bool(json, "native", import.native, error))
+	    !read_bool(json, "native", import.native, error) ||
+	    !read_string(json, "as", import.as, error))
 		return false;
 	if (import.path.empty()) { error = "An import names its path."; return false; }
+	// A name of its own is an install's file's (ImportChoice::as).
+	if (!import.as.empty() && !import.install) { error = "An import's \"as\" names an install's file."; return false; }
 	out = std::move(import);
 	return true;
 }
@@ -735,6 +742,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Dir: return text_of(json, token, request.dir, error);
 	case F::Title: return text_of(json, token, request.title, error);
 	case F::Game: return text_of(json, token, request.game, error);
+	case F::Expansion: return text_of(json, token, request.expansion, error);
+	case F::BuildsOn: return text_of(json, token, request.builds_on, error);
 	case F::GameInstall: return text_of(json, token, request.game_install, error);
 	case F::Path: return text_of(json, token, request.path, error);
 	case F::Locator: return text_of(json, token, request.locator, error);
@@ -743,6 +752,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Role: return text_of(json, token, request.role, error);
 	case F::FileKind: return text_of(json, token, request.file_kind, error);
 	case F::OutDir: return text_of(json, token, request.out_dir, error);
+	case F::ExportDir: return text_of(json, token, request.export_dir, error);
 	case F::Mission: return text_of(json, token, request.mission, error);
 	case F::Values: {
 		// An object of strings, sorted by key: the writer emits an object's keys sorted, so the order
@@ -854,6 +864,8 @@ bool field_to_json(
 	case F::Dir: out = json_string(request.dir); return !request.dir.empty();
 	case F::Title: out = json_string(request.title); return !request.title.empty();
 	case F::Game: out = json_string(request.game); return !request.game.empty();
+	case F::Expansion: out = json_string(request.expansion); return !request.expansion.empty();
+	case F::BuildsOn: out = json_string(request.builds_on); return !request.builds_on.empty();
 	case F::GameInstall: out = json_string(request.game_install); return !request.game_install.empty();
 	case F::Path: out = json_string(request.path); return !request.path.empty();
 	case F::Locator: out = json_string(request.locator); return !request.locator.empty();
@@ -862,6 +874,7 @@ bool field_to_json(
 	case F::Role: out = json_string(request.role); return !request.role.empty();
 	case F::FileKind: out = json_string(request.file_kind); return !request.file_kind.empty();
 	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
+	case F::ExportDir: out = json_string(request.export_dir); return !request.export_dir.empty();
 	case F::Mission: out = json_string(request.mission); return !request.mission.empty();
 	case F::Values:
 		out = JsonValue::make_object();

@@ -33,6 +33,7 @@
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/install_view.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/script_type.h>
 #include <editor/model/text_document.h>
@@ -804,8 +805,10 @@ int test_retail() {
 	}
 	ProjectDocument project;
 	project.target_game = "jo";
-	opennova::Vfs mount;
-	TEST_EXPECT(mount_retail(mount, install, project));
+	InstallView view;
+	std::string view_error;
+	TEST_EXPECT(view.open(install_spec(install, project), view_error));
+	const opennova::Vfs &mount = view.vfs();
 	size_t scripts = 0, keywords = 0, commands = 0, operands = 0, lines = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;
