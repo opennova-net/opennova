@@ -35,7 +35,8 @@ typedef struct PffEntry {
     uint32_t flags;
     uint32_t offset;
     uint32_t size;
-    uint32_t timestamp;         /* Unknown purpose */
+    uint32_t timestamp;         /* a Unix time in retail's archives; 0 hides the entry from the
+                                   effect loaders (PFF_NEW_ENTRY_TIMESTAMP) */
     char     filename[16];      /* Null-padded ASCII */
     uint32_t checksum;          /* Unknown purpose */
 } PffEntry;
@@ -94,11 +95,19 @@ typedef enum PffFormat {
     PFF_FORMAT_BHD  = 2     /* BHD variant  */
 } PffFormat;
 
+/* The +12 word a writer stamps a NEW entry with (a retained entry keeps its source's): never 0, since
+   the game's effect loaders walk each archive's directory and skip an entry whose +12 word is 0
+   [orig: CEffectSystem_Init @ 0x5f64c0; HLSLEffect_LoadAllFromPFFArchive @ 0x5aff26], so a .ptl,
+   .ptu or .fx packed with 0 never loads (D-VFS-12), and retail stamps every entry with a Unix time
+   (the 11,576 entries of JO:CA's five archives: 473418166..1248404912). One fixed time, so the same
+   files write the same bytes: 2004-06-15 00:00 UTC. */
+inline constexpr uint32_t PFF_NEW_ENTRY_TIMESTAMP = 1087257600u;
+
 /* One stored entry to serialize. `data` is the EXACT bytes that will live in the archive: it is
    already container-XOR-encrypted iff (flags & PFF_FLAG_ENCRYPTED). pff_write_archive applies NO
-   SCR/BFC1/XOR transform to payloads. timestamp/checksum are written verbatim (the engine reads
-   neither, verified vs PFF_Open/PFF_LoadFileToMemory; use the source values for retained entries
-   and 0 for new ones). */
+   SCR/BFC1/XOR transform to payloads. timestamp/checksum are written verbatim (PFF_Open and
+   PFF_LoadFileToMemory read neither, the effect loaders the timestamp: use the source values for
+   retained entries, and PFF_NEW_ENTRY_TIMESTAMP with a 0 checksum for new ones). */
 typedef struct PffWriteEntry {
     const char    *name;       /* original-case logical name; > PFF_NAME_SIZE bytes is rejected */
     const uint8_t *data;       /* stored payload bytes, or NULL when size == 0                  */

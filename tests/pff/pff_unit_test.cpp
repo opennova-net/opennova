@@ -163,6 +163,13 @@ static int test_modern_roundtrip(void) {
         pff_test_xor(raw, (uint32_t)sizeof(c_data));
         CHECK(memcmp(raw, c_data, sizeof(c_data)) == 0, "xor(raw) == plaintext");
     }
+    /* Every entry a writer adds carries the writers' nonzero stamp, inside retail's range of
+       Unix times (473418166..1248404912 over JO:CA's archives): the effect loaders skip an
+       entry stamped 0 [orig: CEffectSystem_Init @ 0x5f64c0] (D-VFS-12). */
+    CHECK(PFF_NEW_ENTRY_TIMESTAMP >= 473418166u && PFF_NEW_ENTRY_TIMESTAMP <= 1248404912u,
+          "the new-entry stamp is a retail-range Unix time");
+    for (uint32_t i = 0; i < ar.entry_count; ++i)
+        CHECK(ar.entries[i].timestamp == PFF_NEW_ENTRY_TIMESTAMP, "entry +12 stamped");
     pff_close(&ar);
     remove(path);
     return 1;

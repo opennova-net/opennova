@@ -7,6 +7,13 @@ extends RefCounted
 ## String payload is stored as UTF-8. Names longer than 16 bytes are
 ## truncated and reported as ERR_INVALID_PARAMETER after the file is written
 ## (the fixture stays on disk so the failing test can still inspect it).
+## Each entry's +12 word is stamped NEW_ENTRY_TIMESTAMP, as every retail entry
+## carries a Unix time and the game's effect loaders skip an entry stamped 0
+## (pff.h PFF_NEW_ENTRY_TIMESTAMP, D-VFS-12); a row's optional `timestamp`
+## overrides it (0 is a third-party packer's unstamped entry, D-VFS-13).
+
+## pff::PFF_NEW_ENTRY_TIMESTAMP: 2004-06-15 00:00 UTC.
+const NEW_ENTRY_TIMESTAMP := 1087257600
 
 
 static func write(path: String, entries: Array) -> Error:
@@ -30,7 +37,7 @@ static func write(path: String, entries: Array) -> Error:
 		file.store_32(0)
 		file.store_32(next_payload_offset)
 		file.store_32(bytes.size())
-		file.store_32(0)
+		file.store_32(int(entry.get("timestamp", NEW_ENTRY_TIMESTAMP)))
 		for index in range(16):
 			file.store_8(name_bytes[index] if index < name_bytes.size() else 0)
 		file.store_32(0)
