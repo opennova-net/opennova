@@ -604,8 +604,15 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
 		reference_tools(workspace, controls.picker, document, targets, field, value, false, beside);
+	// The words under a control that shows the value as it is: one with no choices, or a value none of its
+	// choices is (an open choice typed: a model's part past LOD 0's, S17).
 	std::vector<FieldChoice> own;
-	if (!by_name && !mixed && present && !schema.flags && document.choices_on(address, field, own).empty()) value_words(words);
+	const std::vector<FieldChoice> &choices = document.choices_on(address, field, own);
+	const int64_t *number = std::get_if<int64_t>(&value);
+	const bool chosen = std::any_of(choices.begin(), choices.end(), [&](const FieldChoice &c) {
+		return number ? c.value == *number : std::holds_alternative<std::string>(value) && c.name == std::get<std::string>(value);
+	});
+	if (!by_name && !mixed && present && !schema.flags && !chosen) value_words(words);
 	if (renames) {
 		if (beside) ImGui::SameLine();
 		if (ImGui::SmallButton("Rename...")) rename_everywhere(workspace, document, address, field, value);
@@ -787,9 +794,9 @@ std::string record_tip(const Document &document, const NodeAddress &address) {
 	return title + (name != title ? "\n" + name : std::string()) + (*change ? std::string("\n") + change : std::string());
 }
 
-// The records as a table: a numbered row each (a click selects it; marked when it changed
-// since the last save), a column per field, every cell edited in place. The columns size
-// to the font, resize, and scroll sideways past the table's width.
+// The records as a table: a numbered row each, from the list's first number (a click selects it;
+// marked when it changed since the last save), a column per field, every cell edited in place. The
+// columns size to the font, resize, and scroll sideways past the table's width.
 void records_table(Workspace &workspace, Controls &controls, const Document &document, const NodeAddress &owner,
                    const Document::Collection &records, const std::vector<FieldSchema> &fields) {
 	const ImGuiStyle &style = ImGui::GetStyle();
@@ -827,7 +834,7 @@ void records_table(Workspace &workspace, Controls &controls, const Document &doc
 			const bool on = workspace.view().documents.selection.holds(address);
 			if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(ImGuiCol_Header));
 			const float x = ImGui::GetCursorScreenPos().x;
-			const std::string number = ui_kit::kChangeRoom + std::to_string(i + 1);
+			const std::string number = ui_kit::kChangeRoom + std::to_string(records.spec.first_number + size_t(i));
 			if (ImGui::Selectable(number.c_str(), on, ImGuiSelectableFlags_None, ImVec2(0.0f, ImGui::GetFrameHeight())))
 				select_row(workspace, document, address);
 			ui_kit::change_dot(document.record_change(address), x);
@@ -853,7 +860,8 @@ void records_list(Workspace &workspace, const Document &document, const NodeAddr
 		ImGui::PushID(static_cast<int>(address.child));
 		const float x = ImGui::GetCursorScreenPos().x;
 		const std::string name =
-		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + record_display(document, address, names.get()),
+		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(records.spec.first_number + i) + ". " +
+		                            record_display(document, address, names.get()),
 		                    ImGui::GetContentRegionAvail().x);
 		if (ImGui::Selectable((name + "###record").c_str(), workspace.view().documents.selection.holds(address))) select_row(workspace, document, address);
 		ui_kit::change_dot(document.record_change(address), x);
@@ -939,15 +947,19 @@ bool section_changed(const Document &document, const Targets &targets, const Ins
 void draw_section(Workspace &workspace, Controls &controls, const Document &document, const NodeAddress &record,
                   const NodeAddress &owner, const InspectorSection &section, Reveal *reveal) {
 	if (!section.key.empty()) {
-		std::string heading = section.title;
+		std::string title = section.title;
 		if (!section.has_toggle && section.fields.empty() && section.collections.size() == 1)
-			heading += " (" + std::to_string(section.collections.front().ids.size()) + ")";
-		heading += "###" + section.key;
+			title += " (" + std::to_string(section.collections.front().ids.size()) + ")";
+		// Cut to the room beside the header's arrow (a narrow Inspector, a long list's title), whole in
+		// its tooltip.
+		const float room = ImGui::GetContentRegionAvail().x - ImGui::GetFontSize() - ImGui::GetStyle().FramePadding.x * 2.0f;
+		const std::string shown_title = ui_kit::fit(title, room);
+		const std::string heading = shown_title + "###" + section.key;
 		if (reveal && reveal->scroll && reveal->record == record && holds_field(section, reveal->field))
 			ImGui::SetNextItemOpen(true);
 		const bool shown = section.written || section_changed(document, {record}, section);
 		const bool open = ImGui::CollapsingHeader(heading.c_str(), shown ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-		ui_kit::tooltip(section.key);
+		ui_kit::tooltip(shown_title != title ? title + "\n" + section.key : section.key);
 		if (!open) return;
 	}
 	ImGui::PushID(section.key.c_str());

@@ -1,13 +1,16 @@
 #include "document_views.h"
 
 #include <editor/assets/asset_kinds.h>
+#include <editor/documents/animation_map_document.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_table.h>
 #include <editor/model/document_base.h>
+#include <editor/ui/animation_inspector.h>
 #include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_view.h>
 #include <editor/ui/mission_logic_view.h>
+#include <editor/ui/model_inspector_view.h>
 #include <editor/ui/outline_view.h>
 #include <editor/ui/script_view.h>
 #include <editor/ui/styles_view.h>
@@ -50,6 +53,10 @@ constexpr OutlineSpec kMissionOutline{OutlineMode::Tree, "", nullptr, true, miss
                                       mission_row_reads_others};
 constexpr OutlineSpec kStringsOutline{OutlineMode::MasterDetail, "Sections", nullptr};
 constexpr OutlineSpec kTreeOutline{OutlineMode::Tree, "", nullptr};
+// An animation map's rows under their slots' families (S17: "Walking and running", "Deaths"), each
+// row titled by its slot's words and the clips it plays.
+constexpr OutlineSpec kAnimationMapOutline{OutlineMode::Tree, "", nullptr, false, nullptr, "", nullptr, nullptr,
+                                           animation_map_row_headings};
 std::unique_ptr<DocumentView> make_menu_view() { return std::make_unique<MenuView>(); }
 std::unique_ptr<DocumentView> make_styles_view() { return std::make_unique<StylesView>(); }
 std::unique_ptr<DocumentView> make_script_view() { return std::make_unique<ScriptView>(); }
@@ -64,9 +71,14 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Strings, DocumentViewRole::Records, &kStringsOutline, nullptr},
 	{DocumentTypeId::Menu, DocumentViewRole::Records, nullptr, make_menu_view},
 	{DocumentTypeId::Styles, DocumentViewRole::Records, nullptr, make_styles_view},
-	{DocumentTypeId::Model, DocumentViewRole::Records, &kTreeOutline, nullptr},
-	{DocumentTypeId::Animation, DocumentViewRole::Records, &kTreeOutline, nullptr},
-	{DocumentTypeId::AnimationMap, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// A model's material heads the Inspector with its bullet faces' surface and flags, set on every face
+	// made from it (S17, ui/model_inspector_view).
+	{DocumentTypeId::Model, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_model_inspector},
+	// A clip's and a map's words head the Inspector (S17: what a row is for, who plays a map, a clip's
+	// length and the rows that play it).
+	{DocumentTypeId::Animation, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_clip_inspector},
+	{DocumentTypeId::AnimationMap, DocumentViewRole::Records, &kAnimationMapOutline, nullptr,
+	 draw_animation_map_inspector},
 	// A mission's 3D viewport fills the tab beside its outline (ADR 0046 S14: the Main role,
 	// ui/main_viewport_view over the Mission viewport kind); its logic in words heads the Inspector,
 	// what names a record closes it (S15, ui/mission_logic_view).

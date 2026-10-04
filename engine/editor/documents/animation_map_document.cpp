@@ -7,6 +7,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/documents/animation_slots.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/model/id_list.h>
 #include <runtime/anim/adm_clip_index.h>
@@ -114,7 +115,34 @@ std::string animation_key_title(const std::string &key) {
 
 std::string AnimationMapDocument::record_title(const NodeAddress &address) const {
 	const std::string name = record_name(address);
-	return address.child ? name : animation_key_title(name);
+	if (address.child) return name;
+	const Node *node = row(address.row);
+	if (!node || node->kind != kRow) return animation_key_title(name);
+	const AnimationMapRow &r = row_of(*node);
+	// The slot the game reads the key as (past its first five characters, any case), else the key
+	// as written: the game skips its row.
+	const int slot = animation_key_slot(r.key);
+	std::string title = slot >= 0 ? animation_slot_words(slot) : r.key + " (no slot)";
+	if (r.clips.empty()) return title + ": no clip";
+	title += ": " + r.clips[0];
+	if (r.clips.size() == 2) title += ", " + r.clips[1];
+	else if (r.clips.size() > 2) title += ", " + r.clips[1] + " and " + std::to_string(r.clips.size() - 2) + " more";
+	return title;
+}
+
+void animation_map_row_headings(const Document &document, const NameSource *,
+		std::vector<std::vector<RowHeading>> &out) {
+	out.clear();
+	for (const auto &node : document.rows()) {
+		std::vector<RowHeading> headings;
+		if (node && node->kind == kRow) {
+			const int family = animation_slot_family(animation_key_slot(row_of(*node).key));
+			const AnimSlotFamily &heading =
+					family >= 0 ? animation_slot_family_row(family) : animation_slot_unknown_family();
+			headings.push_back({heading.key, heading.heading});
+		}
+		out.push_back(std::move(headings));
+	}
 }
 
 const std::vector<RecordKindRow> &AnimationMapDocument::kinds() const {
@@ -355,7 +383,8 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 		const std::string earlier = "row " + std::to_string(first.first->second + 1);
 		add(DiagnosticSeverity::Info, AnimationMapFinding::SlotRepeated,
 		    slot == 0 ? "'" + r.key + "' names the reset slot as " + earlier +
-		                        " does: the game keeps only the last reset clip it loads."
+		                        " does: each reset clip replaces the one before, so the skeleton is the last reset "
+		                        "clip it loads, and the slots the map leaves out serve the first."
 		              : "'" + r.key + "' names the slot " + earlier +
 		                        " names: the game joins their clips into one ring, served last to first.");
 	}

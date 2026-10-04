@@ -254,9 +254,10 @@ public:
 	RequirementReport requirements_of(const ProjectDocument &doc, const AssetScan &scan) const;
 	// The requirement row of `role`, or null.
 	const RequirementRow *requirement_row(const std::string &role) const;
-	// The project file `file` names: the one at that project-relative path, else the first of that
-	// logical name; null when the project has none.
-	const AssetEntry *project_file(const std::string &file) const;
+	// The project file `file` names, its case aside: the one at that project-relative path in any
+	// case, or for a name alone the first of that logical name; null when the project has none, or
+	// when two files answer to the path in another case (`ambiguous` then true).
+	const AssetEntry *project_file(const std::string &file, bool *ambiguous = nullptr) const;
 
 	// --- the build ---------------------------------------------------------------------------
 

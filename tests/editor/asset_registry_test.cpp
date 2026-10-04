@@ -307,6 +307,35 @@ static int test_lookups() {
 	return 0;
 }
 
+// The entry a request names, its case aside (AssetScan::named, what the session opens and edits by,
+// ADR 0046 S17): the path as spelled, the path in another case, a name alone by find(); a path names
+// its folder (the file of its name elsewhere is not it); two files answering to one spelling in
+// another case (a file system that keeps case) are none, said ambiguous.
+static int test_named() {
+	AssetScan scan;
+	const auto add = [&](const char *path) {
+		AssetEntry entry;
+		entry.relative_path = path;
+		entry.logical_name = std::string(path).substr(std::string(path).find_last_of('/') + 1);
+		entry.kind = AssetKind::Menu;
+		scan.entries.push_back(entry);
+	};
+	add("menus/Extra.mnu");
+	add("menus/Main.mnu");
+	add("old/Twin.mnu");
+	add("old/twin.mnu");
+	scan.index();
+	bool ambiguous = true;
+	const AssetEntry *extra = scan.at_path("menus/Extra.mnu");
+	TEST_EXPECT(extra && scan.named("menus/Extra.mnu", &ambiguous) == extra && !ambiguous);
+	TEST_EXPECT(scan.named("MENUS/EXTRA.MNU", &ambiguous) == extra && !ambiguous);
+	TEST_EXPECT(scan.named("extra.MNU") == extra);
+	TEST_EXPECT(!scan.named("missions/old/Extra.mnu") && !scan.named("menus/nowhere.mnu"));
+	TEST_EXPECT(scan.named("old/Twin.mnu", &ambiguous) == scan.at_path("old/Twin.mnu") && !ambiguous);
+	TEST_EXPECT(!scan.named("OLD/TWIN.MNU", &ambiguous) && ambiguous);
+	return 0;
+}
+
 static int test_empty_project_scans_clean() {
 	editor_test::TempProjectDir dir("opennova_editor_asset_registry_empty_test");
 	const std::string root = dir.file("E");
@@ -325,6 +354,7 @@ int main() {
 	failures += test_name_rules();
 	failures += test_scan_exclusions_and_diagnostics();
 	failures += test_lookups();
+	failures += test_named();
 	failures += test_empty_project_scans_clean();
 	if (failures == 0) std::printf("editor_asset_registry: all tests passed\n");
 	return failures == 0 ? 0 : 1;

@@ -21,16 +21,16 @@
 #include <editor/documents/mission_logic.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
+#include <editor/documents/model_document.h>
+#include <editor/documents/model_surfaces.h>
 #include <editor/documents/texture_roles.h>
-#include <editor/preview/texture_thumbnails.h>
-#include <editor/session/texture_import_state.h>
-#include <editor/session/texture_use_index.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document_search.h>
 #include <editor/preview/menu_report.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
@@ -38,6 +38,7 @@
 #include <editor/session/document_set.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/mission_logic_json.h>
+#include <editor/session/model_json.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
@@ -45,6 +46,8 @@
 #include <editor/session/script_assist.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
+#include <editor/session/texture_import_state.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/session/view_json.h>
 
 namespace opennova::editor {
@@ -1106,6 +1109,71 @@ JsonValue answer_mission_uses(const QueryContext &context, const QueryArgs &args
 	return mission_uses_to_json(mission_uses(*mission, address, *MissionWords(context, *mission)), page_of(args));
 }
 
+// --- a model's surfaces (S17) --------------------------------------------------------------------
+
+constexpr const char *kSurfaceOps[] = { "materials", "set", "flag", "faces" };
+const char *surface_op_choice(size_t index) { return index < std::size(kSurfaceOps) ? kSurfaceOps[index] : nullptr; }
+const char *surface_flag_choice(size_t index) {
+	return index < model_face_flags().size() ? model_face_flags()[index].token : nullptr;
+}
+constexpr QueryChoices kSurfaceChoices[] = {
+	{ "op", surface_op_choice },
+	{ "flag", surface_flag_choice },
+};
+
+constexpr QueryParam kModelSurfacesParams[] = {
+	{ "path", J::String, false, nullptr, "An open model by its project-relative path or its logical name; left out, the "
+			"active document." },
+	{ "op", J::String, true, nullptr,
+			"materials (the surfaces and flags a material takes by name, and a page of the model's materials, "
+			"each its bullet faces' surface in words), set (the edits that give every face made from the material "
+			"the surface), flag (the edits that set or clear a flag on every face made from it), faces (a page of "
+			"its faces whose surface is not its common one)." },
+	{ "id", J::Integer, false, nullptr, "The material by its identity (set, flag, faces)." },
+	{ "surface", J::Integer, false, nullptr,
+			"set's surface: a face byte, 0 to 23 by the game's names (materials lists them); any other byte is "
+			"played as obj." },
+	{ "flag", J::String, false, nullptr, "flag's flag: both_sides, bullets_pass or front_only." },
+	{ "on", J::Boolean, false, "true", "flag's: set it (true) or clear it (false)." },
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+JsonValue answer_model_surfaces(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const Document *document = document_of(context, args, error);
+	const auto *model = dynamic_cast<const ModelDocument *>(document);
+	if (document && !model) error = document->path() + " is no model.";
+	if (!model) return JsonValue::make_null();
+	const std::string op = args.text("op");
+	if (op == "materials") return model_surfaces_to_json(*model, page_of(args));
+	if (!args.has("id")) {
+		error = "op " + op + " needs \"id\", the material by its identity.";
+		return JsonValue::make_null();
+	}
+	const NodeId material = NodeId(args.integer("id"));
+	if (op == "faces") return model_differing_faces_to_json(*model, material, page_of(args));
+	std::vector<Edit> edits;
+	std::string refusal;
+	bool ok = false;
+	if (op == "set") {
+		if (!args.has("surface")) {
+			error = "op set needs \"surface\", a face byte.";
+			return JsonValue::make_null();
+		}
+		ok = model_surface_edits(*model, material, args.integer("surface"), edits, refusal);
+	} else {
+		if (!args.has("flag")) {
+			error = "op flag needs \"flag\": both_sides, bullets_pass or front_only.";
+			return JsonValue::make_null();
+		}
+		uint32_t bit = 0;
+		for (const ModelFaceFlag &flag : model_face_flags())
+			if (args.text("flag") == flag.token) bit = flag.bit;
+		ok = model_face_flag_edits(*model, material, bit, args.boolean("on"), edits, refusal);
+	}
+	return planned(*model, ok, edits, refusal);
+}
+
 // --- a script's help (S15) -----------------------------------------------------------------------
 
 constexpr const char *kScriptOps[] = { "complete", "hover", "definition", "mission_script" };
@@ -1447,7 +1515,7 @@ constexpr EditorQueryRow kRows[] = {
 	Query(K::ProjectSearch, "project_search", answer_project_search, kProjectSearchParams,
 			kGraphReads,
 			"A page of the files whose names and the symbols whose names hold the text, without "
-			"case, files first, each with its usages.")
+			"case, files first, each with its usages; an item also by its catalog's name (its words).")
 			.pages("hits")
 			.row,
 	Query(K::MenuTree, "menu_tree", answer_menu_tree, kMenuTreeParams, kMenuReads,
@@ -1637,6 +1705,19 @@ constexpr EditorQueryRow kRows[] = {
 			"rows (key, label, words, values {token, words}, forms, fallback, applies {option, values}, "
 			"applies_now); the files it makes; and needs, what the uses of those files and of every "
 			"name of the source's stem ask of it (options, reasons, conflicts, uses).")
+			.row,
+	Query(K::ModelSurfaces, "model_surfaces", answer_model_surfaces, kModelSurfacesParams, kRecordReads,
+			"A model's bullet-face surfaces on its materials (ADR 0046 S17), by op. materials: the surfaces a face "
+			"takes by name (surface, name, the effects row tag it plays, note: what else the game does with it), the "
+			"flags a material sets (flag, bit, label, tip), the model's faces and those no material made "
+			"(without_material), its collision LOD, and a page of its materials (id, index, title, faces, surface "
+			"(null where none or mixed), words, mixed, counts of each surface, each flag's count, differing). set, "
+			"flag: the edits that give every face made from the material `id` the surface, or set or clear the "
+			"flag on them, in the batch form an edit_record takes back (one undo step), or the refusal that says "
+			"why none. faces: a page of the material's faces whose surface is not its common one (id, index, "
+			"surface, name).")
+			.pages("materials")
+			.chooses(kSurfaceChoices)
 			.row,
 	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "

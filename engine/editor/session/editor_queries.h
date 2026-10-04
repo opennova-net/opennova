@@ -49,6 +49,7 @@ enum class EditorQueryKind : uint8_t {
 	TextureThumbnail,
 	TextureUses,
 	ImportOptions,
+	ModelSurfaces,
 	Catalog,
 	kCount,
 };

@@ -11,6 +11,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/documents/model_labels.h>
 #include <editor/documents/music_script_type.h>
 #include <editor/documents/script_type.h>
 #include <editor/documents/strings_document.h>
@@ -47,8 +48,9 @@ constexpr DocumentType kTypes[] = {
 			menu_finding_codes, make_menu_render_check },
 	{ DocumentTypeId::Styles, "styles", make_styles, validate_styles_file, MnsDocument::schema,
 			style_finding_codes },
+	// The model: its records and the values naming a part or a surface in a modder's words (S17).
 	{ DocumentTypeId::Model, "model", make_model, validate_model_file, ModelDocument::schema,
-			model_finding_codes },
+			model_finding_codes, nullptr, nullptr, nullptr, nullptr, model_record_label, model_value_label },
 	{ DocumentTypeId::Animation, "animation", make_animation, validate_animation_file,
 			AnimationDocument::schema, animation_finding_codes },
 	{ DocumentTypeId::AnimationMap, "animation_map", make_animation_map,

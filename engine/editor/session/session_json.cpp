@@ -1649,7 +1649,13 @@ JsonValue graph_search_to_json(const std::vector<GraphSearchHit> &hits, const Js
 			entry.set("kind", json_string("file"));
 			entry.set("name", json_string(hit.name));
 			entry.set("file", json_string(hit.file));
+			// Found by a record that names it (a model by its item's name, S17).
+			if (!hit.via.empty()) {
+				entry.set("via", json_string(hit.via));
+				entry.set("via_file", json_string(hit.via_file));
+			}
 		}
+		if (!hit.words.empty()) entry.set("words", json_string(hit.words));
 		entry.set("usages", json_number(double(hit.usages)));
 		list.push(std::move(entry));
 	}

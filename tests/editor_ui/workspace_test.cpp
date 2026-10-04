@@ -298,6 +298,61 @@ void test_workspace_layout() {
 	windows.pass().detach_imgui();
 }
 
+// The docked windows keep their share of the window through the OS window maximized and restored, and
+// minimized and restored (S17: the Document dock was left a 20 px strip after a maximize and a restore).
+void test_dock_survives_resizes() {
+	Ui ui;
+	ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 900.0f);
+	ui.frames(6);
+	const char *const titles[] = {"Files", "Document", "Preview", "Inspector", "Problems"};
+	const auto sizes = [&] {
+		std::vector<ImVec2> out;
+		for (const char *title : titles) {
+			const ImGuiWindow *window = ImGui::FindWindowByName(title);
+			out.push_back(window ? window->Size : ImVec2(0.0f, 0.0f));
+		}
+		return out;
+	};
+	const std::vector<ImVec2> before = sizes();
+	for (const ImVec2 &s : before) CHECK(s.x > 100.0f && s.y > 100.0f, "every docked window has room at first");
+	const ImVec2 sequences[][2] = {{ImVec2(2560.0f, 1400.0f), ImVec2(1600.0f, 900.0f)},
+	                               {ImVec2(0.0f, 0.0f), ImVec2(1600.0f, 900.0f)},
+	                               {ImVec2(160.0f, 28.0f), ImVec2(1600.0f, 900.0f)}};
+	for (int s = 0; s < int(std::size(sequences)) + 2; ++s) {
+		ImVec2 sequence[2] = {ImVec2(0.0f, 0.0f), ImVec2(1600.0f, 900.0f)};
+		if (s < int(std::size(sequences))) {
+			sequence[0] = sequences[s][0];
+			for (const ImVec2 &size : sequences[s]) {
+				ImGui::GetIO().DisplaySize = size;
+				ui.frames(4);
+			}
+		} else {
+			// A drag of the window's corner: a step a frame down to a small window and back up.
+			const float low = s == int(std::size(sequences)) ? 640.0f : 120.0f;
+			sequence[0] = ImVec2(low, low * 0.5625f);
+			for (float w = 1600.0f; w > low; w -= 40.0f) {
+				ImGui::GetIO().DisplaySize = ImVec2(w, w * 0.5625f);
+				ui.frames(1);
+			}
+			for (float w = low; w <= 1600.0f; w += 40.0f) {
+				ImGui::GetIO().DisplaySize = ImVec2(w, w * 0.5625f);
+				ui.frames(1);
+			}
+			ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 900.0f);
+			ui.frames(4);
+		}
+		const std::vector<ImVec2> after = sizes();
+		for (size_t i = 0; i < after.size(); ++i) {
+			char message[160];
+			std::snprintf(message, sizeof(message), "%s after %.0fx%.0f and back: %.0fx%.0f, was %.0fx%.0f", titles[i],
+			              sequence[0].x, sequence[0].y, after[i].x, after[i].y, before[i].x, before[i].y);
+			CHECK(std::fabs(after[i].x - before[i].x) <= before[i].x * 0.1f + 2.0f &&
+			              std::fabs(after[i].y - before[i].y) <= before[i].y * 0.1f + 2.0f,
+			      message);
+		}
+	}
+}
+
 // The Document window's tabs over three open menus, b.mnu with unsaved changes: a tab each,
 // the unsaved one marked; a click on a tab makes its document the active one (once); the
 // tab follows the active document when it changes elsewhere, raising nothing; the close
@@ -2803,6 +2858,7 @@ void test_view_event_mailboxes() {
 void run_workspace_tests() {
 	test_files_tree_kept();
 	test_workspace_layout();
+	test_dock_survives_resizes();
 	test_document_tabs();
 	test_document_tab_choices();
 	test_view_prompt_outlives_its_tab();

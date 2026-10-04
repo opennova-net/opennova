@@ -38,6 +38,10 @@ DocumentBase *DocumentSet::document_for(const std::string &path) {
 	for (auto &document : documents_)
 		if (document->path() == wanted || normalized_logical_name(basename_of(document->path())) == normalized_logical_name(wanted))
 			return document.get();
+	// Named in another case (names are the game's, case-insensitive): the project's file of it.
+	if (const AssetEntry *file = core_.project_file(wanted))
+		for (auto &document : documents_)
+			if (document->path() == file->relative_path) return document.get();
 	return nullptr;
 }
 
@@ -332,7 +336,12 @@ void DocumentSet::create_file(const EditorRequest &request) {
 
 void DocumentSet::open_document(const EditorRequest &request) {
 	if (!view_.project.open) return;
-	const std::string path = request.path.empty() ? view_.documents.active : request.path;
+	// The file the request names, however it spells it (another case, the name alone): the
+	// project's file (SessionCore::project_file, the scan's case-insensitive lookup).
+	const std::string named = request.path.empty() ? view_.documents.active : request.path;
+	bool ambiguous = false;
+	const AssetEntry *file = core_.project_file(named, &ambiguous);
+	const std::string path = file ? file->relative_path : named;
 	// The record a request names (by its address, or by its locator: a Go to) is selected,
 	// and its field (a Problems row's, the defining field a Go to shows) shown: a RevealRecord
 	// event for the document's view and the Inspector, one per ask (the same row clicked again
@@ -372,6 +381,13 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		core_.report(finding);
 		say(path + " could not be opened: see Problems.");
 	};
+	if (ambiguous) {
+		refuse(make_finding(CoreFinding::DocumentName, DiagnosticSeverity::Error,
+		                    "More than one file of the project is spelled like this in another case: name the one "
+		                    "to open as its path is spelled.",
+		                    named));
+		return;
+	}
 	if (request.kind == EditorRequestKind::OpenDocument && document_for(path)) {
 		// An open document comes back with the selection it had, unless the request names
 		// a record (a Problems row, a Go to).
@@ -382,8 +398,8 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		say("Showing " + document.path() + ".");
 		return;
 	}
-	for (const auto &asset : view_.project.scan->entries) {
-		if (asset.relative_path != path && normalized_logical_name(asset.logical_name) != normalized_logical_name(path)) continue;
+	if (file) {
+		const AssetEntry &asset = *file;
 		const DocumentType *type = document_type_for(asset.kind);
 		if (!type) {
 			refuse(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This kind of file has no editor yet.", path));
@@ -451,7 +467,9 @@ void DocumentSet::select_file(const std::string &path) {
 }
 
 void DocumentSet::close_document(const std::string &requested) {
-	const std::string path = requested.empty() ? view_.documents.active : requested;
+	// However the request spells it (another case, the name alone), as the open took it.
+	const DocumentBase *document = document_for(requested);
+	const std::string path = document ? document->path() : requested.empty() ? view_.documents.active : requested;
 	for (auto it = documents_.begin(); it != documents_.end(); ++it)
 		if ((*it)->path() == path) { documents_.erase(it); break; }
 	remembered_.erase(path);
@@ -957,8 +975,9 @@ std::string DocumentSet::records_words(const Document &document, const std::vect
 
 // What a batch did, in words, for the status line (ADR 0046 S15): a field set by its name, on its
 // record by its title as it read before (`named`), to what its new value names ("Set Group of Ranger
-// #12 to Group 3 (5 entities)."); a row added by its title; "" for any other batch (the line then
-// names the file).
+// #12 to Group 3 (5 entities)."), and on several records to the one value they now share, or "to
+// different values" when they do not (S17: never one record's value said of all); a row added by
+// its title; "" for any other batch (the line then names the file).
 std::string DocumentSet::edit_words(const Document &document, const std::vector<Edit> &edits,
                                     const std::string &named) const {
 	std::optional<GraphNameSource> names;
@@ -967,17 +986,30 @@ std::string DocumentSet::edit_words(const Document &document, const std::vector<
 	if (edits.empty()) return std::string();
 	const Edit &first = edits.front();
 	if (!named.empty() && sets_one_field(edits) && document.row(first.address.row)) {
-		const FieldSchema *schema = nullptr;
-		for (const FieldSchema &field : document.fields(first.address.kind))
-			if (field.id == first.field) schema = &field;
-		if (!schema) return std::string();
-		const FieldUse use = document.field_on(first.address, *schema);
-		Value value;
-		if (!document.get(first.address, first.field, value)) return std::string();
-		const DisplayName words = value_display(document, first.address, use, value, source);
-		std::vector<FieldChoice> own;
-		const std::string shown = words.text.empty() ? shown_value(*schema, document.choices_on(first.address, use, own), value) : words.text;
-		return "Set " + field_title(use) + " of " + named + " to " + shown + ".";
+		// A record's field as it reads now: its title, and its value in words.
+		const auto read = [&](const NodeAddress &address, std::string &title, std::string &shown) {
+			const FieldSchema *schema = nullptr;
+			for (const FieldSchema &field : document.fields(address.kind))
+				if (field.id == first.field) schema = &field;
+			if (!schema) return false;
+			const FieldUse use = document.field_on(address, *schema);
+			Value value;
+			if (!document.get(address, first.field, value)) return false;
+			const DisplayName words = value_display(document, address, use, value, source);
+			std::vector<FieldChoice> own;
+			title = field_title(use);
+			shown = words.text.empty() ? shown_value(*schema, document.choices_on(address, use, own), value) : words.text;
+			return true;
+		};
+		std::string title, shown;
+		if (!read(first.address, title, shown)) return std::string();
+		for (const Edit &edit : edits) {
+			std::string other_title, other;
+			if (edit.address == first.address) continue;
+			if (!read(edit.address, other_title, other)) return std::string();
+			if (other != shown) return "Set " + title + " of " + named + " to different values.";
+		}
+		return "Set " + title + " of " + named + " to " + shown + ".";
 	}
 	// Several fields of one record (a drag's left, top, right and bottom; the UX round's problems lane):
 	// the fields by name, on the record by its title as it read before.

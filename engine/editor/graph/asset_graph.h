@@ -5,7 +5,9 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -67,12 +69,17 @@ struct ReferenceChoice {
 };
 
 // A file or a symbol whose name holds a searched text (AssetGraph::search), with how many uses
-// it has.
+// it has; or a file found by a record that names it (ADR 0046 S17: a model by its item's name).
 struct GraphSearchHit {
 	const GraphSymbol *symbol = nullptr; // the symbol; null for a file
 	std::string name;   // the file's logical name, or the symbol as defined
+	std::string words;  // what the symbol reads as where it is not its name (an item's catalog name); ""
 	std::string file;   // the file, or the file defining the symbol (project-relative)
 	size_t usages = 0;  // the file's usages (usages_of), or the symbol's users (users_of)
+	// A file whose name does not hold the text: the record naming it whose name does, and that record's
+	// file (Flyable Blackhawk in defs/ITEMS.DEF for models/Dblkhwk1.3di); empty otherwise.
+	std::string via;
+	std::string via_file;
 };
 
 // What the last update (or set_base) did.
@@ -193,8 +200,11 @@ public:
 	// Find in the project: the files whose logical name, and the symbols whose name as defined,
 	// holds `text` (ASCII letters without case), files first (by name), then symbols in the order
 	// the files define them, each with its usage count; a record set's records, named by an index
-	// and no name, are not searched. None for an empty text.
+	// and no name, are not searched. From kSearchByRecordLetters letters on, a file whose name does
+	// not hold the text is found by a record of another file naming the file itself whose name does
+	// (`via`; the records are indexed once per generation). None for an empty text.
 	std::vector<GraphSearchHit> search(const std::string &text) const;
+	static constexpr size_t kSearchByRecordLetters = 3;
 	// The symbol a document's field defines, by its file, its record's locator and the field; null
 	// for none (a rename everywhere names its symbol so: the graph may have been rebuilt since).
 	const GraphSymbol *symbol_at(const std::string &file, const std::string &locator, const std::string &field) const;
@@ -361,6 +371,30 @@ private:
 			return *this;
 		}
 	};
+
+	// The records naming each file (search's `via`), made once per generation; a copy of the graph starts
+	// with none (it takes a generation of its own).
+	struct ViaRecord {
+		std::string upper_record;
+		std::string record;
+		std::string source;
+	};
+	struct ViaCache {
+		std::mutex mutex;
+		uint64_t generation = 0;
+		bool built = false;
+		std::unordered_map<std::string, std::vector<ViaRecord>> by_file;
+		ViaCache() = default;
+		ViaCache(const ViaCache &) {}
+		ViaCache &operator=(const ViaCache &) {
+			std::lock_guard<std::mutex> lock(mutex);
+			built = false;
+			by_file.clear();
+			return *this;
+		}
+	};
+	const std::vector<ViaRecord> *records_naming_(const std::string &path) const;
+	mutable ViaCache via_;
 
 	GraphIndex index_;
 	std::shared_ptr<const GraphLayer> base_;

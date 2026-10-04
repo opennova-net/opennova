@@ -67,9 +67,10 @@ PATH_OPTIONS = {"PATH_SUPPORTS_BLEND_RELATIVE"}
 # The engine's tables `opennova-3di catalog` prints: the CTRL register names,
 # the generator style names {code: name}, the shader tags with their capability
 # words [(tag, flags)], the 252 anim slots [(index, key)], the weapon actions
-# that have a slot of their own [(suffix, slot index, key)] and the animation
-# event bits [(mask, NAME)], each in the engine's order.
-Catalog = collections.namedtuple("Catalog", "registers styles shaders slots actions triggers")
+# that have a slot of their own [(suffix, slot index, key)], the animation
+# event bits [(mask, NAME)] and the bullet-face surfaces [(byte, tag, words)],
+# each in the engine's order.
+Catalog = collections.namedtuple("Catalog", "registers styles shaders slots actions triggers surfaces")
 
 
 def read_catalog(retry=False):
@@ -84,9 +85,9 @@ def read_catalog(retry=False):
     try:
         key = (path, os.path.getmtime(path))
     except OSError:
-        return Catalog([], {}, [], [], [], []), f"opennova-3di not found at {path}"
+        return Catalog([], {}, [], [], [], [], []), f"opennova-3di not found at {path}"
     if key not in _catalog or retry and _catalog[key][1] is not None:
-        table = Catalog([], {}, [], [], [], [])
+        table = Catalog([], {}, [], [], [], [], [])
         problem = None
         try:
             out = run_cli(None, ["catalog"], ExportError, timeout=10).stdout
@@ -106,6 +107,8 @@ def read_catalog(retry=False):
                 table.actions.append((parts[1], int(parts[2]), parts[3]))
             elif len(parts) == 3 and parts[0] == "trigger":
                 table.triggers.append((int(parts[1], 16), parts[2]))
+            elif len(parts) >= 4 and parts[0] == "surface":
+                table.surfaces.append((int(parts[1]), parts[2], " ".join(parts[3:])))
         if not table.shaders and problem is None:
             problem = f"opennova-3di catalog ({path}) printed no shader table"
         _catalog.clear()
@@ -144,6 +147,33 @@ def search_shaders(self, context, edit_text):
 
 def style_label(style):
     return catalog()[1].get(style, "?")
+
+
+# The surfaces a material's bullet faces take, by name, each item's number its
+# byte; kept alive here (Blender keeps no copy of a callback's strings).
+_surface_items = []
+
+
+def surface_items(self, context):
+    _surface_items[:] = [(tag.upper(), words, f"A hit plays the ammo's `{tag}` effects row (surface byte {byte})", byte)
+                         for byte, tag, words in catalog().surfaces]
+    if not _surface_items:
+        _surface_items.append(("NONE", "(opennova-3di catalog not read)", "", 255))
+    return _surface_items
+
+
+def get_surface_name(self):
+    return self.surface
+
+
+def set_surface_name(self, value):
+    self.surface = value
+
+
+def surface_words(byte):
+    """A surface byte by its name ("Metal"), or the byte where the catalog
+    names none (past 23 the game plays obj)."""
+    return next((words for b, _, words in catalog().surfaces if b == byte), f"byte {byte} (plays obj)")
 
 
 def register_prop(name="Register"):
@@ -383,11 +413,17 @@ class O3DMaterialProps(bpy.types.PropertyGroup):
                        description="The material's index in the model; -1 sorts it after the ordered ones, in the "
                                    "order meshes first use it. A material in a mesh's slots that no face draws "
                                    "with exports only with an order (retail models keep such materials)")
-    # The bullet-mesh face material on COLLISION meshes: the impact effect is
-    # the ammo effects-table row material + 4 (metal = 14 -> "metal").
-    surface: IntProperty(name="Collision surface", default=14, min=0, max=255,
-                         description="Bullet-face poly type: 14 metal, 15 glass, 18 heavy metal, 13 wood, "
-                                     "12 stone, 16 cloth, 17 foliage, 1 object")
+    # The surface of the bullet faces the material makes (the CFAC poly type of
+    # each): a round that hits one plays its ammo's effects row surface + 4
+    # (metal 14 plays "metal") [orig: Projectile_HandleEntityImpact @ 0x4e9390,
+    # `ray[22] + 4` @ 0x4e982b]. Picked by name (surface_name, the engine's tag
+    # table through `opennova-3di catalog`); the byte is what the file stores.
+    surface: IntProperty(name="Surface byte", default=14, min=0, max=255,
+                         description="The bullet faces' surface as the file stores it: a byte b plays the effects "
+                                     "row b + 4 (14 metal, 15 glass, 13 wood, 12 stone); past 23 the game plays obj")
+    surface_name: EnumProperty(name="Surface", items=surface_items, get=get_surface_name, set=set_surface_name,
+                               description="What a round that hits these bullet faces plays: its ammo's effects row "
+                                           "of this name")
     # The bullet faces' CFAC flags. "Both sides" (1) follows Two sided unless
     # set: OED derived both from one render attribute (the retired port's
     # material_flags), but 154 JOTAC models store faces whose flag disagrees
@@ -1692,6 +1728,70 @@ class O3D_PT_light(bpy.types.Panel):
             body.prop(p, "other_flags")
 
 
+def collision_meshes(context):
+    """The meshes of the active model's collision LOD (its bullet faces)."""
+    model = active_model(context)
+    if model is None:
+        return []
+    li = model.o3d.poly_collision_lod
+    root = next((c for c in model.children if rig.is_lod_root(c) and rig.lod_index(c) == li), None)
+    return [ob for ob in rig.descendants(root) if ob.type == "MESH"] if root is not None else []
+
+
+class O3D_OT_surface_make_all(bpy.types.Operator):
+    """Give every bullet face drawn with this material the material's surface
+    and flags: the faces that kept their own (an imported model's) take it"""
+    bl_idname = "opennova_3di.surface_make_all"
+    bl_label = "Make all the material's"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.material is not None
+
+    def execute(self, context):
+        own, _ = materials.material_face_overrides(collision_meshes(context), context.material)
+        by_mesh = {}
+        for ob, pi in own:
+            by_mesh.setdefault(ob, []).append(pi)
+        for ob, polygons in by_mesh.items():
+            for name in (materials.FACE_SURFACE, materials.FACE_FLAGS):
+                values = materials.face_overrides(ob.data, name)
+                if values is None:
+                    continue
+                for pi in polygons:
+                    values[pi] = -1
+                materials.set_face_overrides(ob.data, name, values)
+        self.report({"INFO"}, f"{len(own)} bullet faces take {context.material.name}'s surface and flags")
+        return {"FINISHED"}
+
+
+class O3D_OT_surface_select_own(bpy.types.Operator):
+    """Select the bullet faces drawn with this material that keep a surface or
+    flags of their own (Edit Mode shows them)"""
+    bl_idname = "opennova_3di.surface_select_own"
+    bl_label = "Select the faces that keep their own"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.material is not None and context.mode == "OBJECT"
+
+    def execute(self, context):
+        own, _ = materials.material_face_overrides(collision_meshes(context), context.material)
+        meshes = {ob for ob, _ in own}
+        for ob in meshes:
+            for poly in ob.data.polygons:
+                poly.select = False
+            ob.select_set(True)
+        for ob, pi in own:
+            ob.data.polygons[pi].select = True
+        if meshes:
+            context.view_layer.objects.active = next(iter(meshes))
+        self.report({"INFO"}, f"{len(own)} faces selected on {len(meshes)} meshes: Tab shows them")
+        return {"FINISHED"}
+
+
 class O3D_PT_material(bpy.types.Panel):
     bl_label = "OpenNova 3DI"
     bl_space_type = "PROPERTIES"
@@ -1735,9 +1835,25 @@ class O3D_PT_material(bpy.types.Panel):
                   "Opaque pass (Render Method Dithered)")
         box.label(text="Glows (Emission)" if materials.emission(mat) else "No glow (Emission off)")
         box = layout.box()
-        box.label(text="Bullet faces")
+        box.label(text="Bullet faces (the collision LOD's triangles drawn with it)")
         row = box.row()
-        row.prop(p, "surface")
+        if any(b == p.surface for b, _, _ in catalog().surfaces):
+            row.prop(p, "surface_name")
+        else:
+            row.prop(p, "surface")
+        # The faces that keep a surface or flags of their own (an imported
+        # retail model's that disagree with their material's vote).
+        own, drawn = materials.material_face_overrides(collision_meshes(context), mat)
+        if own:
+            counts = collections.Counter(s for s, _ in own.values() if s >= 0)
+            words = ", ".join(f"{n} {surface_words(s)}" for s, n in counts.most_common(3))
+            sub = box.column(align=True)
+            sub.alert = True
+            sub.label(text=f"Mixed: {len(own)} of its {drawn} faces keep their own" + (f" ({words})" if words else ""),
+                      icon="ERROR")
+            row = box.row()
+            row.operator("opennova_3di.surface_make_all", text=f"Make all {surface_words(p.surface)}")
+            row.operator("opennova_3di.surface_select_own", text="Select them")
         box.prop(p, "face_both_sides")
         row = box.row()
         row.prop(p, "face_never_hit")
@@ -1805,7 +1921,8 @@ class O3D_PT_material(bpy.types.Panel):
 
 CLASSES = (O3DTrack, O3DAdmVariant, O3DAdmRow, O3DWeaponEntry, O3DActionProps, O3DObjectProps, O3DBoneProps,
            O3DTexture, O3DMaterialProps, O3DLightProps, O3DSceneProps, O3DPreferences,
-           O3D_OT_add_track, O3D_OT_remove_track, O3D_OT_add_texture, O3D_OT_remove_texture, O3D_OT_export,
+           O3D_OT_add_track, O3D_OT_remove_track, O3D_OT_add_texture, O3D_OT_remove_texture,
+           O3D_OT_surface_make_all, O3D_OT_surface_select_own, O3D_OT_export,
            O3D_OT_export_all, O3D_OT_add_model, O3D_OT_add_lod, O3D_OT_add_part, O3D_OT_add_rig,
            O3D_OT_share_rig, O3D_OT_number_parts,
            O3D_OT_import,
