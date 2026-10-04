@@ -167,15 +167,15 @@ float round_to_float(double value) {
 	return static_cast<float>(value);
 }
 
-void put_rgba(std::vector<uint8_t> &pixels, size_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-	uint8_t *dst = pixels.data() + index * 4u;
+void put_rgba(uint8_t *pixels, size_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+	uint8_t *dst = pixels + index * 4u;
 	dst[0] = r;
 	dst[1] = g;
 	dst[2] = b;
 	dst[3] = a;
 }
 
-void put_float_rgb(std::vector<uint8_t> &pixels, size_t index, float r, float g, float b) {
+void put_float_rgb(uint8_t *pixels, size_t index, float r, float g, float b) {
 	// The codecs' alpha is 1.0 [orig: PFM @ 0x6DE3F5..0x6DE3F7; HDR @ 0x6DF0AF..0x6DF0B1].
 	put_rgba(pixels, index, d3dx_float_to_unorm8(r), d3dx_float_to_unorm8(g), d3dx_float_to_unorm8(b),
 			d3dx_float_to_unorm8(1.0f));
@@ -225,7 +225,7 @@ bool decode_d3dx_ppm(const uint8_t *data, size_t size, opennova::RgbaImage &out,
 	const auto level = [&](uint32_t sample) { return static_cast<uint32_t>(sample * 255u) / maxval; };
 	// The X8R8G8B8 word, read as R, G, B and an opaque alpha (the texture's X channel).
 	const auto store = [&](size_t index, uint32_t w) {
-		put_rgba(out.pixels, index, static_cast<uint8_t>(w >> 16), static_cast<uint8_t>(w >> 8),
+		put_rgba(out.pixels.data(), index, static_cast<uint8_t>(w >> 16), static_cast<uint8_t>(w >> 8),
 				static_cast<uint8_t>(w), 255);
 	};
 	// The header (and, for P3, every sample): whitespace skipped, a '#' comment skipped
@@ -384,21 +384,36 @@ bool decode_d3dx_pfm(const uint8_t *data, size_t size, opennova::RgbaImage &out,
 			const size_t index = row * width + x;
 			if (grey) {
 				const float v = sample();
-				put_float_rgb(out.pixels, index, v, v, v);
+				put_float_rgb(out.pixels.data(), index, v, v, v);
 			} else {
 				const float r = sample();
 				const float g = sample();
 				const float b = sample();
-				put_float_rgb(out.pixels, index, r, g, b);
+				put_float_rgb(out.pixels.data(), index, r, g, b);
 			}
 		}
 	}
 	return true;
 }
 
-// [orig: D3DXTex_LoadHDRFromMemory @ 0x6DEA53]
-bool decode_d3dx_hdr(const uint8_t *data, size_t size, opennova::RgbaImage &out, std::string &error) {
-	out = opennova::RgbaImage{};
+namespace {
+
+// A Radiance HDR file's header as the codec reads it: the image's sides, the
+// scanline order, the exposure and where the scanlines start.
+struct HdrHeader {
+	uint32_t width = 0;
+	uint32_t height = 0;
+	bool first_y = false; // the first resolution axis is Y, so a scanline is a row
+	bool x_plus = false;
+	bool y_plus = false;
+	float exposure = 1.0f;
+	size_t at = 0;         // the first scanline's first byte
+	int64_t remaining = 0; // the bytes from there to the end
+};
+
+// [orig: D3DXTex_LoadHDRFromMemory @ 0x6DEA53 — everything up to the image
+//  @ 0x6DEA5E..0x6DEE10]
+bool hdr_header(const uint8_t *data, size_t size, HdrHeader &header, std::string &error) {
 	// Eleven bytes at least, the first ten "#?RADIANCE" [orig: @ 0x6DEA5E..0x6DEA8B]; the
 	// size is a signed int [orig: @ 0x6DEA96..0x6DEA9B].
 	if (data == nullptr || size <= 10) return fail(error, "HDR: under eleven bytes");
@@ -494,23 +509,38 @@ bool decode_d3dx_hdr(const uint8_t *data, size_t size, opennova::RgbaImage &out,
 	if (!scan_u32(p, second_count)) return fail(error, "HDR: no second resolution number");
 	at += length + 1;
 	remaining -= static_cast<int64_t>(length) + 1;
-	const uint32_t width = first_y ? second_count : first_count;
-	const uint32_t height = first_y ? first_count : second_count;
+	header.width = first_y ? second_count : first_count;
+	header.height = first_y ? first_count : second_count;
 	// Retail fails a 32-bit product of zero [orig: @ 0x6DEDF9..0x6DEE10] and wraps a huge
 	// one; the port fails both, and a file whose scanlines cannot each start with a
 	// 4-byte word, as its decode would.
-	if (!pixel_count_ok(width, height)) return fail(error, "HDR: no pixels, or too many");
-	const int64_t scanlines = first_y ? height : width;
-	const int64_t scan_length = first_y ? width : height;
+	if (!pixel_count_ok(header.width, header.height)) return fail(error, "HDR: no pixels, or too many");
+	const int64_t scanlines = first_y ? header.height : header.width;
 	if (scanlines * 4 > remaining) return fail(error, "HDR: the data cannot hold the scanlines");
-	// The image is A32B32G32R32F [orig: format 116 @ 0x6DEE01]; the port holds each
-	// pixel's R, G, B, E bytes (the integers the codec stores as floats), zeroed where
-	// retail leaves its buffer unwritten (heap garbage there).
-	const int64_t w = width;
-	const int64_t h = height;
-	out.width = static_cast<int>(width);
-	out.height = static_cast<int>(height);
-	out.pixels.assign(static_cast<size_t>(w * h) * 4u, 0);
+	header.first_y = first_y;
+	header.x_plus = x_plus;
+	header.y_plus = y_plus;
+	header.exposure = exposure;
+	header.at = at;
+	header.remaining = remaining;
+	return true;
+}
+
+// The scanlines, each pixel's R, G, B, E bytes (the integers the codec stores as
+// floats) into `rgbe` (width x height x 4 bytes, zeroed where retail leaves its buffer
+// unwritten: heap garbage there) [orig: @ 0x6DEE36..0x6DF1B6]. With `rgbe` null the
+// bytes are read exactly as the decode reads them and written nowhere, so a file whose
+// data cannot describe every scanline fails before any buffer is made.
+bool hdr_scanlines(const uint8_t *data, const HdrHeader &header, uint8_t *rgbe, std::string &error) {
+	size_t at = header.at;
+	int64_t remaining = header.remaining;
+	const bool first_y = header.first_y;
+	const bool x_plus = header.x_plus;
+	const bool y_plus = header.y_plus;
+	const int64_t w = header.width;
+	const int64_t h = header.height;
+	const int64_t scanlines = first_y ? h : w;
+	const int64_t scan_length = first_y ? w : h;
 	// Where each scanline starts and how it steps, in pixels [orig: @ 0x6DEE36..0x6DEED5].
 	int64_t start = 0, inner = 0, outer = 0;
 	if (first_y) {
@@ -527,12 +557,12 @@ bool decode_d3dx_hdr(const uint8_t *data, size_t size, opennova::RgbaImage &out,
 	// one there) fails here.
 	const auto put = [&](int64_t pixel, int channel, uint8_t value) {
 		if (pixel < 0 || pixel >= total) return false;
-		out.pixels[static_cast<size_t>(pixel) * 4u + static_cast<size_t>(channel)] = value;
+		if (rgbe != nullptr) rgbe[static_cast<size_t>(pixel) * 4u + static_cast<size_t>(channel)] = value;
 		return true;
 	};
-	const auto put4 = [&](int64_t pixel, const uint8_t rgbe[4]) {
+	const auto put4 = [&](int64_t pixel, const uint8_t word[4]) {
 		for (int c = 0; c < 4; ++c)
-			if (!put(pixel, c, rgbe[c])) return false;
+			if (!put(pixel, c, word[c])) return false;
 		return true;
 	};
 	for (int64_t scanline = 0; scanline < scanlines; ++scanline) {
@@ -599,8 +629,16 @@ bool decode_d3dx_hdr(const uint8_t *data, size_t size, opennova::RgbaImage &out,
 					const uint32_t run = static_cast<uint32_t>(next[3]) << (shift & 31u);
 					written += run;
 					if (static_cast<int32_t>(written) > scan_length) return fail(error, "HDR: a run passes the scanline");
-					for (int32_t i = 0; i < static_cast<int32_t>(run); ++i, pixel += inner)
-						if (!put4(pixel, held)) return fail(error, "HDR: a run leaves the image");
+					const int32_t count = static_cast<int32_t>(run);
+					if (rgbe != nullptr) {
+						for (int32_t i = 0; i < count; ++i, pixel += inner)
+							if (!put4(pixel, held)) return fail(error, "HDR: a run leaves the image");
+					} else if (count > 0) {
+						// The run's pixels lie on one line of steps: its two ends bound them.
+						if (!put4(pixel, held) || !put4(pixel + (static_cast<int64_t>(count) - 1) * inner, held))
+							return fail(error, "HDR: a run leaves the image");
+						pixel += static_cast<int64_t>(count) * inner;
+					}
 					shift += 8;
 				} else {
 					shift = 0;
@@ -612,26 +650,51 @@ bool decode_d3dx_hdr(const uint8_t *data, size_t size, opennova::RgbaImage &out,
 			} while (below(written));
 		}
 	}
+	return true;
+}
+
+} // namespace
+
+// [orig: D3DXTex_LoadHDRFromMemory @ 0x6DEA53 — the image made @ 0x6DEE01..0x6DEE10
+//  only after the header; the port walks the scanlines first]
+bool d3dx_hdr_size(const uint8_t *data, size_t size, int &width, int &height, std::string &error) {
+	HdrHeader header;
+	if (!hdr_header(data, size, header, error)) return false;
+	if (!hdr_scanlines(data, header, nullptr, error)) return false;
+	width = static_cast<int>(header.width);
+	height = static_cast<int>(header.height);
+	return true;
+}
+
+// [orig: D3DXTex_LoadHDRFromMemory @ 0x6DEA53]
+bool decode_d3dx_hdr_into(const uint8_t *data, size_t size, uint8_t *rgba, std::string &error) {
+	HdrHeader header;
+	if (!hdr_header(data, size, header, error)) return false;
+	// The image is A32B32G32R32F [orig: format 116 @ 0x6DEE01]; the scanlines land as
+	// each pixel's R, G, B, E bytes, then become the channels in place.
+	const size_t total = static_cast<size_t>(header.width) * header.height;
+	std::memset(rgba, 0, total * 4u);
+	if (!hdr_scanlines(data, header, rgba, error)) return false;
 	// Every pixel, written or not: channel = (byte + 0.5) * 2^(E - 136) / exposure, no
 	// special case for E == 0, rounded to a float; alpha 1.0
 	// [orig: @ 0x6DF02A..0x6DF0BD — fld1 / exposure stored as a float @ 0x6DF03D..0x6DF045,
 	//  _ftol of E @ 0x6DF04B, the 0.5 @ 0x7C3B94, CRT_ldexp @ 0x6DF065]. The scaled value
 	// is exact in a double, so one rounding to float is the store's.
 	float inverse;
-	if (exposure == 0.0f)
-		inverse = std::copysign(std::numeric_limits<float>::infinity(), exposure);
+	if (header.exposure == 0.0f)
+		inverse = std::copysign(std::numeric_limits<float>::infinity(), header.exposure);
 	else
-		inverse = 1.0f / exposure;
+		inverse = 1.0f / header.exposure;
 	const auto scaled = [&](uint8_t byte, int exponent) {
 		return round_to_float(std::ldexp(static_cast<double>(byte) + 0.5, exponent) * static_cast<double>(inverse));
 	};
-	for (size_t i = 0; i < static_cast<size_t>(total); ++i) {
-		const uint8_t *px = out.pixels.data() + i * 4u;
+	for (size_t i = 0; i < total; ++i) {
+		const uint8_t *px = rgba + i * 4u;
 		const int exponent = static_cast<int>(px[3]) - 136;
 		const float r = scaled(px[0], exponent);
 		const float g = scaled(px[1], exponent);
 		const float b = scaled(px[2], exponent);
-		put_float_rgb(out.pixels, i, r, g, b);
+		put_float_rgb(rgba, i, r, g, b);
 	}
 	return true;
 }

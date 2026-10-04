@@ -401,6 +401,35 @@ func test_dds_reader_decodes_ppm_pfm_and_dib() -> void:
 		assert_eq(_pixel(dib_texture), Color.GREEN)
 
 
+# D3DX's HDR codec under a .dds name: decoded straight into the image's one buffer,
+# made only once the scanlines describe the image. A 16384 x 16384 header over 64 KiB
+# of bare words fails its size step, before any buffer, and reads as no texture
+# [orig: D3DXTex_LoadHDRFromMemory @0x6DEA53; the flat scanline @0x6DEF26..0x6DF00A].
+func test_dds_reader_decodes_hdr_into_one_buffer() -> void:
+	var dir := _root_dir("dds_hdr")
+	var hdr := "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 3\n".to_ascii_buffer()
+	hdr.append_array(PackedByteArray([10, 20, 30, 128, 40, 50, 60, 128, 70, 80, 90, 128]))
+	var huge := "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 16384 +X 16384\n".to_ascii_buffer()
+	var words := PackedByteArray()
+	words.resize(16384 * 4)
+	words.fill(0x10)
+	huge.append_array(words)
+	var root := _packed(dir, [
+		{"name": "flat.dds", "bytes": hdr},
+		{"name": "huge.dds", "bytes": huge},
+	])
+	var stage := ResourceRoot.TEXTURE_LOADER_STAGE
+	var flat := root.load_texture("flat.dds", stage)
+	assert_not_null(flat, "a flat HDR under a .dds name decodes")
+	if flat != null:
+		assert_eq(flat.get_width(), 3)
+		# (byte + 0.5) * 2^(128 - 136) through D3DX's 8-bit encode: 40 -> 40.
+		assert_eq(_pixel(flat, 0, 0), Color8(40, 50, 60), "the first word is held, never written")
+		assert_eq(_pixel(flat, 2, 0), Color8(0, 0, 0), "the last pixel stays unwritten")
+	assert_null(root.load_texture("huge.dds", stage),
+			"a header its data cannot describe is no texture, and no 1 GiB buffer")
+
+
 func test_names_differing_in_case_stay_apart() -> void:
 	# ".MDT" is tested as written, so "x.mdt" takes the .dds sibling and "x.MDT" the
 	# TGA reader: two textures, whichever loads first.

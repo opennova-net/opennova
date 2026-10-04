@@ -24,7 +24,7 @@ namespace opennova::renderer {
 
 // The most pixels any of these decodes to: Godot's own image limit (Image::MAX_PIXELS,
 // 16384 x 16384), the TGA reader's kMaxTgaPixels. A header past it, or one naming
-// more pixels than its bytes can describe, fails before any buffer is made.
+// more pixels than its data describes, fails before any buffer is made.
 inline constexpr size_t kMaxD3dxImagePixels = size_t(1) << 28;
 
 // The byte D3DX's A8R8G8B8 encoder writes for a float channel without dithering:
@@ -44,9 +44,16 @@ bool decode_d3dx_ppm(const uint8_t *data, size_t size, opennova::RgbaImage &out,
 bool decode_d3dx_pfm(const uint8_t *data, size_t size, opennova::RgbaImage &out, std::string &error);
 
 // The Radiance HDR codec: "#?RADIANCE", a FORMAT line, optional EXPOSURE lines, the
-// resolution line, then RGBE scanlines (flat, old run-length or new run-length).
-// Into `out` as RGBA8 through d3dx_float_to_unorm8, the top row first, opaque.
-bool decode_d3dx_hdr(const uint8_t *data, size_t size, opennova::RgbaImage &out, std::string &error);
+// resolution line, then RGBE scanlines (flat, old run-length or new run-length). Two
+// steps, so the embedder makes the one buffer and makes it only for data that
+// describes its image: d3dx_hdr_size reads the header and walks every scanline as the
+// decode does, writing nothing (false, with `error`, where the codec fails; an
+// old-style run can describe millions of pixels in four bytes, so no byte count
+// bounds the image before that walk); decode_d3dx_hdr_into then writes the image into
+// `rgba` (width x height x 4 bytes) as RGBA8 through d3dx_float_to_unorm8, the top row
+// first, opaque.
+bool d3dx_hdr_size(const uint8_t *data, size_t size, int &width, int &height, std::string &error);
+bool decode_d3dx_hdr_into(const uint8_t *data, size_t size, uint8_t *rgba, std::string &error);
 
 // The DIB codec: the bytes as a BITMAPINFOHEADER (or BITMAPCOREHEADER) with no file
 // header, which D3DX reads with its BMP codec's core. `bmp` becomes the same bytes

@@ -90,9 +90,17 @@ bool pfm(const std::vector<uint8_t> &bytes, RgbaImage &image) {
 	return decode_d3dx_pfm(bytes.data(), bytes.size(), image, error);
 }
 
+// The HDR codec's two steps as the embedder takes them: the size (every scanline
+// walked, nothing written), then the one buffer, then the decode into it.
 bool hdr(const std::vector<uint8_t> &bytes, RgbaImage &image) {
 	std::string error;
-	return decode_d3dx_hdr(bytes.data(), bytes.size(), image, error);
+	image = RgbaImage{};
+	int width = 0, height = 0;
+	if (!d3dx_hdr_size(bytes.data(), bytes.size(), width, height, error)) return false;
+	image.width = width;
+	image.height = height;
+	image.pixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height) * 4u, 0xEE);
+	return decode_d3dx_hdr_into(bytes.data(), bytes.size(), image.pixels.data(), error);
 }
 
 void test_unorm8() {
@@ -421,6 +429,34 @@ void test_hdr_rejects() {
 	CHECK(!hdr(text("#?RADIANCE"), image), "ten bytes");
 }
 
+// The size step walks every scanline before the embedder makes a buffer: a header
+// naming 16384 x 16384 (1 GiB of RGBA8) over 64 KiB, one bare word per scanline,
+// fails there, never reaching an allocation; data that does describe a large image
+// (old runs, a few bytes a scanline) passes, and the decode agrees with the size.
+void test_hdr_size_walks_the_data_before_any_buffer() {
+	std::vector<uint8_t> bytes = hdr_head("-Y 16384 +X 16384");
+	bytes.resize(bytes.size() + 16384u * 4u, 0x10);
+	int width = -1, height = -1;
+	std::string error;
+	CHECK(!d3dx_hdr_size(bytes.data(), bytes.size(), width, height, error),
+			"a 16384 x 16384 header over 64 KiB of bare words fails at its size");
+	// The header's own check passes (a word per scanline fits); the first flat scanline
+	// takes every word, so the second finds none.
+	CHECK(error == "HDR: the data ends before a scanline", "the scanline walk is what fails it");
+	CHECK(width == -1 && height == -1, "and names no size to allocate");
+
+	// 512 x 512 in old runs, twelve bytes a scanline: the held word, then runs of 255
+	// and 1 << 8 (the second shifted): 512 counted, 511 written, the last pixel left.
+	bytes = hdr_head("-Y 512 +X 512");
+	for (int row = 0; row < 512; ++row) add(bytes, {10, 20, 30, 128, 1, 1, 1, 255, 1, 1, 1, 1});
+	error.clear();
+	CHECK(d3dx_hdr_size(bytes.data(), bytes.size(), width, height, error) && width == 512 && height == 512,
+			"runs describing every scanline pass the size step");
+	RgbaImage image;
+	CHECK(hdr(bytes, image) && pixel_is(image, 510, 511, 10, 20, 30) && pixel_is(image, 511, 511, 0, 0, 0),
+			"and decode, each row's last pixel unwritten");
+}
+
 // A 40-byte BITMAPINFOHEADER.
 std::vector<uint8_t> info_header(int32_t width, int32_t height, uint16_t bits, uint32_t compression,
 		uint32_t colors_used, uint32_t header_size = 40) {
@@ -576,6 +612,7 @@ int main() {
 	test_hdr_old_rle();
 	test_hdr_axes();
 	test_hdr_rejects();
+	test_hdr_size_walks_the_data_before_any_buffer();
 	test_dib();
 	test_bmp_rehead();
 	if (failures != 0) {
