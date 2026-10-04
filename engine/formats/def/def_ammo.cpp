@@ -178,6 +178,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
     size_t eff_cap = 0;
     std::vector<DefEffectTableEntry> staged;
     size_t number = 0; // the line a finding names, counting from 1
+    bool indent_noted = false; // the file's indentation read (DefLayout)
 
     /* The first load walks the file twice, a count of its `ammo` lines and
        then the parse, so the parse's first lines read the slots the count
@@ -189,7 +190,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
     for_each_def_line(buf, file_len, tokens_state,
                       [](const io::ConfigTokens &, const char *, size_t, size_t) {});
     for_each_def_line(buf, file_len, tokens_state, [&](const io::ConfigTokens &tokens,
-                                                       const char *, size_t,
+                                                       const char *line, size_t line_len,
                                                        size_t line_index) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1); // the first value token, "" when none
@@ -273,6 +274,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             else if (table_installed)
                 authoring_issue(current.unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size());
             in_effects = 1;
+            def_note_line(DefRecordKind::Ammo, current.line_order, key, strlen(key)); // where its table stands
             staged.clear();
             return false;
         }
@@ -490,7 +492,12 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out,
             parsed = 1;
         }
 
-        if (parsed) validate_property(DefRecordKind::Ammo, as_read.c_str(), as_read.size(), current.unmodeled_count, report, number, current.name);
+        if (parsed) {
+            validate_property(DefRecordKind::Ammo, as_read.c_str(), as_read.size(), current.unmodeled_count, report, number, current.name);
+            // What a writer keeps of the line: its place in the ammo's order, the file's indentation.
+            def_note_line(DefRecordKind::Ammo, current.line_order, key, strlen(key));
+            def_note_indent(out->layout, indent_noted, line, line_len);
+        }
         if (!parsed) {
             authoring_issue(current.unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size());
         }
