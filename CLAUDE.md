@@ -20,6 +20,7 @@ easier to relay than to rediscover.
   `web/` (the `OpenNova Web` export's page shell; the site image is
   `deploy/game/`, ADR 0049), `tests/` (GUT suite).
 - `apps/` — `novaworld_server/` (the NovaWorld service), `nw_lan_probe/`, `nw_pp/`,
+  `nw_lister/` (`nw-lister`: lists one server on a NovaWorld master without the game),
   `extract/` (`opennova-extract`, ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047),
   `common/` (shared socket helpers, deliberately app-layer; pcap I/O lives in
   `engine/base/pcapio`).

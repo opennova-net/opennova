@@ -3619,6 +3619,14 @@ target_link_libraries(npruntime_lan_probe_client_test
     PRIVATE opennova_lan_probe_client opennova_net opennova_app_common)
 add_test(NAME npruntime_lan_probe_client COMMAND npruntime_lan_probe_client_test)
 
+# nw-lister (apps/nw_lister): the listing JSON + credentials readers, and a
+# --dry-run that builds every gate/session/host statement without a socket.
+add_executable(novaworld_nw_lister_listing_test novaworld/nw_lister_listing_test.cpp)
+target_link_libraries(novaworld_nw_lister_listing_test PRIVATE opennova_nw_lister_core)
+add_test(NAME novaworld_nw_lister_listing COMMAND novaworld_nw_lister_listing_test)
+add_test(NAME novaworld_nw_lister_dry_run
+    COMMAND opennova_nw_lister --listing ${CMAKE_SOURCE_DIR}/apps/nw_lister/listing.example.json --dry-run)
+
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)
 # plus the host-as-client D-NET-121/122 anchor/fold path. No capture needed.

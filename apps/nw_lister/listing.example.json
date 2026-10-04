@@ -1,0 +1,16 @@
+{
+  "server_name": "Example Server",
+  "msg": "Mirrored listing",
+  "mission": "Example Mission",
+  "game_type": "COOP",
+  "max_players": 32,
+  "password": false,
+  "exp": "jox01",
+  "country": "UK",
+  "region": "Jungle",
+  "time_left_minutes": 25,
+  "time_of_day": "Day",
+  "dedicated": true,
+  "tracers": true,
+  "players": ["Alpha", "Bravo"]
+}
