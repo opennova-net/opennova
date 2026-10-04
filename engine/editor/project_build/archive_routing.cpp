@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <editor/project/expansion_files.h>
 
 namespace opennova::editor {
 
@@ -25,6 +26,43 @@ ArchiveSlot route_asset(const AssetEntry &asset) {
 
 ArchiveSlot route_asset(AssetKind kind) {
 	return asset_kind_row(kind).archive_slot;
+}
+
+ExpansionPlace route_for_expansion(AssetKind kind) {
+	const AssetKindRow &row = asset_kind_row(kind);
+	switch (row.archive_slot) {
+	case ArchiveSlot::Language: return ExpansionPlace::LanguageArchive;
+	case ArchiveSlot::Localres:
+	case ArchiveSlot::Resource: return ExpansionPlace::Archive;
+	case ArchiveSlot::Loose:
+		switch (row.expansion_loose) {
+		case ExpansionLoose::Folder: return ExpansionPlace::Folder;
+		case ExpansionLoose::RootOnly:
+		case ExpansionLoose::None: return ExpansionPlace::RootOnly;
+		}
+		return ExpansionPlace::RootOnly;
+	case ArchiveSlot::None: return ExpansionPlace::None;
+	}
+	return ExpansionPlace::None;
+}
+
+std::string expansion_folder(const std::string &expansion) {
+	return "expansion/" + expansion;
+}
+
+std::string expansion_archive_path(const std::string &expansion, bool language) {
+	return expansion_folder(expansion) + "/" + expansion + (language ? "L.pff" : ".pff");
+}
+
+ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &expansion) {
+	const ExpansionPlace by_kind = route_for_expansion(asset.kind);
+	if (by_kind == ExpansionPlace::None) return by_kind;
+	// The expansion's own files where their row puts them (project/expansion_files: <b>.bin, version.txt
+	// and the music banks loose in the folder, the rest by kind).
+	if (const ExpansionFileRow *row = expansion_file_for(expansion, asset.logical_name))
+		if (row->placement == ExpansionPlacement::Folder) return ExpansionPlace::Folder;
+	if (strutil::iequals(asset.logical_name, "gt.ssc")) return ExpansionPlace::Folder;
+	return by_kind;
 }
 
 } // namespace opennova::editor
