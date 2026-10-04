@@ -71,6 +71,15 @@ bool local_death_screen_active(const RoleView &view);
 // replica, the authority's entity flags (the kernel).
 bool local_player_dead(const RoleView &view);
 
+// The frame loop's two triggers for death.mnu's DEATH screen, every role's
+// (the listen host's own client included): the deploy-map overlay, or the
+// local entity's dead bit while in session or under the single-player
+// respawn mission attribute. ClientState::take_death_menu_open latches the
+// open over them. [orig: Render_ProcessMainSceneFrame @0x5CAB39..0x5CAB58
+// (is_in_session || g_BmsAttribFlags & 0x40, then entity+0x24 & 2) and
+// @0x5CAC81 (g_DeployScreenActive)]
+bool death_menu_triggered(const RoleView &view);
+
 // The deploy leg of the special-key handler over this role's facts (the
 // session bit, the mission attribute, the local player's dead bit and team
 // byte, the deploy-map overlay, the spawn-zone list's team bytes); the rule

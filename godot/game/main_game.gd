@@ -1101,7 +1101,8 @@ func _on_join_deploy_pick_required() -> void:
 	# fold queues it, the HUD presenter's drain applies it; a fresh join leaves
 	# the level alone, hud-re.md "Forced levels").
 	_finish_world_load_presentation()
-	if _deploy_presenter.open():
+	# The frame loop's death trigger may have opened it already.
+	if _deploy_presenter.is_open() or _deploy_presenter.open():
 		return
 	# The admission watchdog has already ended at the player-paced stage (retail
 	# waits at the DEATH screen), so a failed open with the pick still owed is a
@@ -1122,21 +1123,24 @@ func _on_join_deploy_pick_required() -> void:
 ## [orig: Server_TickUpdate linger drain @0x51da04..; g_MissionExitReason = 3
 ##  @0x51db63; every exit reason lands on the same teardown + nav push
 ##  @0x568654. SP mission end runs the epilog flow instead.]
-# The frame loop's death.mnu DEATH open off the host-driven deploy-map overlay.
-# The once-per-arming open latch, its result-blind stamp, and its clear when
-# the host drops the bit all live on the engine's ClientState
-# (client_state.h deploy_overlay_open_latch; hud-re D-HUD-19) — this leg is
-# the device call. State.WORLD stands in for retail's no-active-menu gate
+# The frame loop's death.mnu DEATH open, every frame and every role (the
+# listen host's own client included): the engine's triggers (the host-driven
+# deploy-map overlay, or the in-session local death), its once-per-arming
+# open latch with its result-blind stamp, and its clear when the triggers
+# fall all live on the engine side (inmatch::death_menu_triggered,
+# ClientState::take_death_menu_open; hud-re D-HUD-19); this leg is the device
+# call. Any state but State.WORLD stands in for retail's no-active-menu gate
 # (PAUSED / ARMORY / DEPLOY / END_ROUND all hold a screen), so the latch is
 # never burned under another screen and the open retries on the next clear
 # frame. Closing is the presenter's own affair. NOT yet modeled (hud-re
-# D-HUD-19 residuals): the second open trigger — the local entity's undeployed
-# bit — and the spawn-success suppression gate.
-func _maybe_open_deploy_overlay() -> void:
-	if _state != State.WORLD or _world_load_pending:
+# D-HUD-19 residuals): the spawn-success suppression gate.
+func _maybe_open_death_menu() -> void:
+	if _state == State.MENU or _world == null:
 		return
 	var sim: Simulation = _world.get_sim()
-	if sim == null or not bool(sim.take_join_deploy_overlay_open()):
+	if sim == null:
+		return
+	if not bool(sim.take_death_menu_open(_state != State.WORLD or _world_load_pending)):
 		return
 	_deploy_presenter.open()
 
@@ -1590,7 +1594,7 @@ func _process(delta: float) -> void:
 		_hud_presenter.tick(is_gameplay_input_active())
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
-	_maybe_open_deploy_overlay()
+	_maybe_open_death_menu()
 	_maybe_exit_round_cycle()
 	if timing:
 		_frame_phase_sampler.record_shell_spans(

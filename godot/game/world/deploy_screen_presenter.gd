@@ -148,18 +148,19 @@ func select_spawn_row(row: int) -> void:
 	_on_widget_value_changed(SPAWN_LIST, "list", row, "")
 
 
-## Open over the live world when the join owes a deployment pick, or when the
-## host drives the deploy-map OVERLAY (0x0F game_flags bit0 / per-frame 0x0A
-## flags1 bit1) — retail opens this same death.mnu DEATH screen for both, and
-## the once-per-arming open latch belongs to the engine's ClientState, like
-## retail's frame loop. The witnesses live on ClientState.deploy_overlay_active
+## Open over the live world while the screen is held: the join owes a
+## deployment pick, the host drives the deploy-map OVERLAY (0x0F game_flags
+## bit0 / per-frame 0x0A flags1 bit1), or the local player lies dead in a
+## session. Retail's frame loop opens this same death.mnu DEATH screen off
+## those on every role (the listen host's own client included), and the
+## once-per-arming open latch belongs to the engine's ClientState. The
+## witnesses live on ClientState.death_menu_open_latch
 ## (engine/runtime/replication/client_state.h) and hud-re D-HUD-19.
 func open() -> bool:
 	if is_open() or _view == null or _ui_parent == null:
 		return false
 	var sim: Simulation = _view.sim()
-	if sim == null or not (bool(sim.is_join_deploy_pick_pending())
-			or bool(sim.is_join_deploy_overlay_active())):
+	if sim == null or not bool(sim.is_death_menu_held()):
 		return false
 	if not _ensure_menu():
 		return false
@@ -176,6 +177,14 @@ func open() -> bool:
 	set_process(true)
 	opened.emit()
 	return true
+
+
+# A selection under the initial overlay closes the screen at once; a death
+# re-pick (a joiner's owed pick, or a dead local player) keeps it until the
+# host releases the hold, because an invalid or contested pick is dropped
+# silently and the keys only reach an open screen.
+func _initial_overlay(sim: Simulation) -> bool:
+	return not bool(sim.is_join_deploy_pick_pending()) and not bool(sim.is_local_player_dead())
 
 
 func close() -> void:
@@ -205,7 +214,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var param := int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
 	if param < 0:
 		return
-	var initial_overlay := not bool(sim.is_join_deploy_pick_pending())
+	var initial_overlay := _initial_overlay(sim)
 	if sim.send_deployment_pick(param) and initial_overlay:
 		close()
 	get_viewport().set_input_as_handled()
@@ -246,14 +255,14 @@ func _process(_delta: float) -> void:
 	if bool(sim.is_session_lost()):
 		teardown()
 		return
-	# The screen's lifetime: a pending DEATH pick holds it, and so does the
-	# host-driven overlay bit (which follows the per-frame 0x0A flags1 bit1,
-	# set AND cleared). Only both falling closes it — retail's frame loop
-	# closes the latched screen exactly when its two open triggers are gone
-	# (the per-frame fold and close-on-clear witnesses live on
-	# ClientState.deploy_overlay_active and hud-re D-HUD-19).
-	if not bool(sim.is_join_deploy_pick_pending()) \
-			and not bool(sim.is_join_deploy_overlay_active()):
+	# The screen's lifetime: a pending DEATH pick holds it, and so do the
+	# frame loop's two triggers, the host-driven overlay bit (which follows
+	# the per-frame 0x0A flags1 bit1, set AND cleared) and the in-session
+	# local death. Only all falling closes it: retail's frame loop closes the
+	# latched screen exactly when its open triggers are gone (the per-frame
+	# fold and close-on-clear witnesses live on ClientState.death_menu_open_latch
+	# and hud-re D-HUD-19).
+	if not bool(sim.is_death_menu_held()):
 		close()
 		return
 	# The shroud reveal and, inside it, the content refresh on each 16-tick
@@ -292,7 +301,7 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 	var param := _spawn_rows[index].param
 	if param == -1:
 		return
-	var initial_overlay := not bool(sim.is_join_deploy_pick_pending())
+	var initial_overlay := _initial_overlay(sim)
 	if sim.send_deployment_pick(param) and initial_overlay:
 		# Input case 12 resets the dialogs and queues the request even for an
 		# alive player. Runtime holds gameplay until the host releases the pick.

@@ -16,6 +16,7 @@
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/world/angle.h>
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/role_feeds.h>
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -700,6 +701,107 @@ int main() {
 		while (host.host_loop.host_recv(left))
 			CHECK(left.tag != c2s::MEDIC_REQUEST && left.tag != c2s::TEAM_CHANGE_REQUEST &&
 					left.tag != c2s::FIRETEAM_ASSIGN);
+	}
+
+	// --- the listen host's own player holds at the join and deploys by its pick
+	// With spawn zones, the host's own player joins RESPAWN-PENDING and hidden
+	// like any joiner: its own client folds the per-frame 0x0A overlay bit, the
+	// frame loop's DEATH trigger reads it, and its Default Spawn pick rides its
+	// loopback as the C2S 0x0E the server's respawn handler releases. Out of a
+	// session the single player is never held. (D-NET-339)
+	// [orig: Game_StartMission @0x52624B (C2S 0x0B) -> Server_OnPlayerJoin
+	//  @0x51a6f2; Input_HandleActionBinding case 12 @0x49b17b;
+	//  Render_ProcessMainSceneFrame @0x5CAC81]
+	for (const bool mp_session : {true, false}) {
+		ms::MissionKernel kernel;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "deploy_hold", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = mp_session;
+		options.game_type = mission_game_type(kernel.mission);
+		bool zone_marked = false;
+		options.bringup_net_session = [&] {
+			// The placed item stands in for an authored spawn zone (def attrib
+			// 0x40000), present before the host's own player joins.
+			w::EntityHandle placed;
+			kernel.world.registry.for_each([&](const w::Entity &e) {
+				if (e.net_id == 21) placed = e.handle;
+			});
+			if (w::Entity *zone = kernel.world.registry.get(placed)) {
+				zone->is_spawn_point = true;
+				zone_marked = true;
+			}
+			if (!mp_session) {
+				role.bring_up_singleplayer();
+				return;
+			}
+			inmatch::HostConfig cfg;
+			cfg.config.server_name = "deploy_hold";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(zone_marked && kernel.world.zones.has_spawn_zone());
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		inmatch::NapiNPConnection *own = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+		CHECK(own != nullptr && host.client_runtime != nullptr);
+		if (own == nullptr || host.client_runtime == nullptr) continue;
+		const w::Entity *player = kernel.world.registry.get(own->link.owned_entity);
+		CHECK(player != nullptr);
+		if (player == nullptr) continue;
+		inmatch::RoleView view;
+		view.kernel = &kernel;
+		view.runtime = host.client_runtime.get();
+		// The trigger's dead-bit arm: in a session, or out of one only under
+		// the single-player respawn attribute [orig: @0x5CAB39..0x5CAB58].
+		auto dead_triggers = [&] {
+			w::Entity *body = kernel.world.registry.get(own->link.owned_entity);
+			const uint32_t flags = body->flags;
+			body->flags |= w::kEntityFlagDead;
+			const bool triggered = inmatch::death_menu_triggered(view);
+			body->flags = flags;
+			return triggered;
+		};
+		if (!mp_session) {
+			CHECK(!own->link.respawn_pending && (player->flags & 1u) == 0);
+			for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
+			CHECK(!inmatch::death_menu_triggered(view));
+			CHECK(!dead_triggers());
+			kernel.world.tables.mission_attrib_flags |=
+					w::MissionTables::kMissionAttribSinglePlayerRespawn;
+			CHECK(dead_triggers());
+			continue;
+		}
+		CHECK(own->link.respawn_pending && (player->flags & 1u) != 0);
+		for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
+		CHECK(own->link.respawn_pending);
+		CHECK(host.client_runtime->state().deploy_overlay_active);
+		CHECK(inmatch::death_menu_triggered(view));
+		CHECK(host.client_runtime->state().take_death_menu_open(
+				inmatch::death_menu_triggered(view), /*menu_open=*/false));
+		// The pick queues on the host's own client, leaves with its client
+		// frame, and the next server tick releases the hold.
+		CHECK(host.client_runtime->queue_deployment_pick(0xFFFFu));
+		for (int i = 0; i < 3 && own->link.respawn_pending; ++i) role.run_tick(tick_input(0));
+		player = kernel.world.registry.get(own->link.owned_entity);
+		CHECK(!own->link.respawn_pending && player != nullptr && (player->flags & 1u) == 0);
+		role.run_tick(tick_input(0));
+		CHECK(!host.client_runtime->state().deploy_overlay_active);
+		CHECK(!inmatch::death_menu_triggered(view));
+		CHECK(!host.client_runtime->state().take_death_menu_open(false, false));
+		CHECK(!host.client_runtime->state().death_menu_open_latch);
+		CHECK(dead_triggers());
 	}
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");

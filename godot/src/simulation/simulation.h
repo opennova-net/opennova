@@ -1277,13 +1277,14 @@ public:
 	// and the in-match arm.
 	bool is_join_deploy_hold_ready() const;
 	bool is_join_in_match_ready(bool p_auto_deploy) const;
-	// The deploy-map overlay signal (retail g_DeployScreenActive). UI only.
-	bool is_join_deploy_overlay_active() const;
-	// The frame loop's open decision for death.mnu's DEATH screen: true once
-	// per arming of the overlay (the engine-side open latch stamps itself and
-	// clears when the host drops the bit). The shell calls it only while no
-	// other screen is up and opens the presenter on true.
-	bool take_join_deploy_overlay_open();
+	// The deploy-map overlay (retail g_DeployScreenActive), every role's. UI only.
+	bool is_deploy_overlay_active() const;
+	// The frame loop's DEATH open, every frame: true once per arming of the
+	// triggers (inmatch::death_menu_triggered) unless another screen is up;
+	// the engine latch clears when they fall. The shell opens on true.
+	bool take_death_menu_open(bool p_menu_open);
+	// The DEATH screen stays up while a trigger holds or a join pick is owed.
+	bool is_death_menu_held() const;
 	// The DEATH screen's spawn-zone rows (simulation/deploy_rows.h): one
 	// DeployZoneRow per team-owned deploy zone with its SECURED verdict, wave
 	// countdown and occupants, letters/names keyed by the spawn-zone registry

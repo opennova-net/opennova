@@ -1669,16 +1669,27 @@ int main() {
 	expect(world.kill_stats.team_kills_by_others == 1,
 	       "a blue NON-person killed by an NPC -> team_kills_by_others");
 
-	// --- 4. SinglePlayerRespawn (attrib 0x40): the dead player respawns, no auto-lose. ---
+	// --- 4. SinglePlayerRespawn (attrib 0x40): the dead player respawns by its
+	// own deploy pick, no auto-lose. Nothing deploys it when the hold expires:
+	// the X key's C2S 0x0E rides its loopback to the server's respawn handler
+	// [orig: Input_HandleSpecialKeys @0x49c9c9..0x49c9fd -> case 12 @0x49b17b;
+	//  Server_ProcessClientRequestRespawn @0x519AF0]. ---
 	// Each player death below is a lethal one: the body update re-reads the
 	// health word every tick, so a record over a healthy body would revive it.
+	auto pick_default_spawn = [&] {
+		(void)inmatch::dispatch_session_replies(ctx.config, ctx.np_protocol.connection_list[0],
+				{make_protocol_message(c2s::RESPAWN_REQUEST, {0xFF, 0xFF})}, world.logic_tick,
+				ctx.np_protocol.connection_list, &world);
+	};
 	world.tables.mission_attrib_flags = 0x40;
 	world.registry.get(player)->health = 0;
 	push_death(world, player, red_person);
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx); // past a 1 Hz check
 	expect(!world.match.outcome().ended, "death with SP-respawn never auto-loses");
 	for (int i = 0; i < 621; ++i) inmatch::Server_TickUpdate(ctx);
-	expect(world.registry.get(player)->alive, "the player respawned after the timer");
+	expect(!world.registry.get(player)->alive, "the expired hold deploys nothing by itself");
+	pick_default_spawn();
+	expect(world.registry.get(player)->alive, "the player respawned on its pick after the timer");
 
 	// --- 4b. The Player's own lethal blast: no Player definition authors a
 	// `score`, so the self-kill tallies nothing (the missions whose WAC reads
@@ -1691,6 +1702,7 @@ int main() {
 	       "the player's self-kill tallies nothing");
 	expect(!world.match.outcome().ended, "the self-kill with SP-respawn never auto-loses");
 	for (int i = 0; i < 621; ++i) inmatch::Server_TickUpdate(ctx);
+	pick_default_spawn();
 	expect(world.registry.get(player)->alive, "the player respawned after the self-kill");
 
 	// --- 5. No SP-respawn: the 1 Hz check ends the round, winner 2 (lose); the

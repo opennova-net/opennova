@@ -158,36 +158,48 @@ void test_deploy_overlay_follows_the_host() {
 	CHECK(!view.state().deploy_overlay_active);
 }
 
-// The death.mnu open latch: one open per arming, stamped result-blind, and
-// cleared only by the host dropping the bit — never by a dismiss.
-// [orig: Render_ProcessMainSceneFrame latch @0x5cab70/@0x5cab8b;
+// The death.mnu open latch over the frame loop's triggers: one open per
+// arming, stamped result-blind, held off while another menu is up, and
+// cleared only by the triggers falling - never by a dismiss.
+// [orig: Render_ProcessMainSceneFrame gate @0x5cab67, latch @0x5cab70/@0x5cab8b;
 //  Game_CloseInGameScreens @0x54b954 on the close-on-clear leg]
-void test_deploy_overlay_open_latch() {
+void test_death_menu_open_latch() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
-	CHECK(!view.state().take_deploy_overlay_open()); // nothing armed
+	auto take = [&](bool menu_open = false) {
+		return view.state().take_death_menu_open(view.state().deploy_overlay_active, menu_open);
+	};
+	CHECK(!take()); // nothing armed
 	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
-	CHECK(view.state().take_deploy_overlay_open());  // the one open
-	CHECK(!view.state().take_deploy_overlay_open()); // latched (a dismiss
-	                                                 // does not re-arm)
+	CHECK(!take(/*menu_open=*/true)); // another menu holds the open off
+	CHECK(!view.state().death_menu_open_latch);
+	CHECK(take());  // the one open
+	CHECK(!take()); // latched (a dismiss does not re-arm)
 	FrameUpdate fu;
 	fu.carried_handle = 0xFFFF;
 	fu.health = 150;
 	fu.local_tail_present = true;
 	fu.flags1 = 0x02; // the host keeps the bit set: still latched
 	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
-	CHECK(!view.state().take_deploy_overlay_open());
-	fu.flags1 = 0x00; // the trigger falls: the latch clears
+	CHECK(!take());
+	fu.flags1 = 0x00; // the trigger falls: the frame clears the latch
 	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
-	CHECK(!view.state().deploy_overlay_open_latch);
-	CHECK(!view.state().take_deploy_overlay_open()); // nothing armed again
+	CHECK(view.state().death_menu_open_latch); // the fold alone leaves it
+	CHECK(!take());
+	CHECK(!view.state().death_menu_open_latch);
 	fu.flags1 = 0x02; // re-armed: the screen opens again
 	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
-	CHECK(view.state().take_deploy_overlay_open());
-	CHECK(!view.state().take_deploy_overlay_open());
-	// The 0x0F zero clears it the same way [orig: @0x42e2d8].
+	CHECK(take());
+	CHECK(!take());
+	// The 0x0F zero drops the trigger the same way [orig: @0x42e2d8].
 	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x00));
-	CHECK(!view.state().deploy_overlay_open_latch);
+	CHECK(!take());
+	CHECK(!view.state().death_menu_open_latch);
+	// A trigger other than the overlay (the local death) latches the same way.
+	CHECK(view.state().take_death_menu_open(true, false));
+	CHECK(!view.state().take_death_menu_open(true, false));
+	CHECK(!view.state().take_death_menu_open(false, false));
+	CHECK(!view.state().death_menu_open_latch);
 }
 
 // The count of spectator-tip commands the pass queued (replication::
@@ -287,7 +299,7 @@ int main() {
 	test_sub_block_0_timers_fold_and_retain();
 	test_self_wave_zone();
 	test_deploy_overlay_follows_the_host();
-	test_deploy_overlay_open_latch();
+	test_death_menu_open_latch();
 	test_death_edge_raises_the_spectator_tip();
 	test_world_state_load_blanks_the_hud_only_with_the_death_screen_up();
 	test_truncated_known_body_counts_as_malformed();
