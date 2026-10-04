@@ -3,6 +3,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/model/diagnostic.h>
+#include <editor/requirements/requirement_words.h>
 
 namespace opennova::editor {
 
@@ -19,9 +20,11 @@ bool requirement_phase_enabled(const ProjectDocument &doc, int phase) {
 
 const char *requirement_phase_label(int phase) {
 	switch (phase) {
-	case BOOT_PHASE_BOOT: return "needed to start the game";
-	case BOOT_PHASE_MENU: return "needed by the main menu";
-	case BOOT_PHASE_MISSION: return "needed to start a mission";
+	// When the game reads it, not that it cannot go on without it: what it does then is the row's
+	// own words (requirement_without), and only the manifest's fatal rows stop it.
+	case BOOT_PHASE_BOOT: return "read as the game starts";
+	case BOOT_PHASE_MENU: return "read by the main menu";
+	case BOOT_PHASE_MISSION: return "read as a mission starts";
 	default: return "";
 	}
 }
@@ -61,14 +64,17 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			d.subject = RequirementSubject{ row.role, row.name };
 			return d;
 		};
+		// What the game does without it, in plain words (requirement_words.h; the manifest's own record
+		// of it is the cited detail, requirement_witness).
+		const std::string without = requirement_without(row.role);
+		const std::string then = without.empty() ? std::string(" The game reads it by name.") : " " + without;
 		if (row.required) {
 			++report.required_total;
 			if (row.state == RequirementState::Missing) {
 				++report.required_missing;
 				report.diagnostics.push_back(finding(DiagnosticSeverity::Error, CoreFinding::RequirementMissing,
-				                                     "Missing required file " + row.name + " (" +
-				                                             requirement_phase_label(row.phase) + "). Without it: " +
-				                                             resource->failure + ".",
+				                                     row.name + " is missing (" + requirement_phase_label(row.phase) + ")." +
+				                                             then,
 				                                     std::string()));
 			} else if (row.state == RequirementState::WrongKind) {
 				++report.required_wrong_kind;
@@ -81,9 +87,7 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 		} else if (row.state == RequirementState::Missing) {
 			// An optional file the game does without: a note that says how.
 			report.diagnostics.push_back(finding(DiagnosticSeverity::Info, CoreFinding::RequirementOptionalMissing,
-			                                     "Optional file " + row.name + " is not in the project (" +
-			                                             requirement_phase_label(row.phase) + "). Without it: " +
-			                                             resource->failure + ".",
+			                                     "Optional file " + row.name + " is not in the project." + then,
 			                                     std::string()));
 		}
 		report.rows.push_back(std::move(row));

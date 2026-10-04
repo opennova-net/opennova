@@ -69,15 +69,19 @@ public:
 	}
 	// The poll's validation steps (S13 A3): the validation left due, or the one under way, stepped
 	// within `budget` (at least one step, none while a gesture's edits wait for it to end), its rows
-	// composed on the step that ends it; with none left, within what is left of the budget, the check
-	// of which files the rows are about are the game's own data (S15, OriginalFiles), the view's
-	// original_files and Findings moving when it finds otherwise.
+	// composed on the step that ends it; with none left, within what is left of the budget, the game's own
+	// data's baseline (S15, OriginalFiles: the install validated once, while a row may be about its data),
+	// the view's originals, its marks and Findings moving when it finds otherwise.
 	void step_validation(const PollBudget &budget, const OperationClock &clock);
+	// The rows' marks made again (FindingsView::marks: the game's own data's, and what blocks the build,
+	// the build's plan over the gate as it stands among them): after every change of the rows, of what
+	// the game's own data's check found and of the open documents' unsaved state (a Play's drop of its own
+	// rows calls it). Findings moves when they changed.
+	void mark_rows();
 	// That check run to its end (a test's, after its operations: ProjectSession::run_operations).
 	void settle_originals();
-	// What it found forgotten (a whole refresh: the install may have changed under the same folder); the
-	// files the rows are about are checked again after the next validation.
-	void forget_originals();
+	// The game's own data's baseline (for the tests and the measure).
+	const OriginalFiles &originals() const { return *originals_; }
 	// One step of the validation due or under way within `bytes` (an operation that joins it: its
 	// first steps are the validation's remaining ones), its rows composed on the step that ends it;
 	// none while a gesture's edits are open. True when none is due or under way.
@@ -166,8 +170,11 @@ private:
 	// `bytes`, true when none is left.
 	void want_originals();
 	bool step_originals(uint64_t bytes);
-	// The view's original_files made the check's set where it moved (Findings then moves).
+	// The view's originals made the check's where they moved, the rows marked again (Findings then moves).
 	void show_originals();
+	// The gate as it stands among the rows (gate_findings' range), never composing: none when the rows
+	// no longer hold it.
+	std::vector<Diagnostic> gate_rows() const;
 
 	SessionCore &core_;
 	SessionView &view_;
@@ -200,8 +207,13 @@ private:
 	GraphReadings readings_;
 	ProblemQueryCache query_cache_;         // the problems query's answer, kept while both stand
 	ProblemFixCache fix_cache_;             // and its problems' fixes while the view stands
-	// Which of the files the rows are about are the game's own data (S15), checked after a validation.
+	// What the game install makes of its own files (S15, per finding against the install as a whole): the
+	// install validated once, while a row may be about its data (originals_needed_: a finding on a file of
+	// a name it serves).
 	std::unique_ptr<OriginalFiles> originals_;
+	bool originals_needed_ = false;
+	// The plan's refusals the rows were last marked against (mark_rows), which a reported finding's mark reads.
+	std::vector<Diagnostic> blockers_;
 };
 
 } // namespace opennova::editor
