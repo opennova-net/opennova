@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <system_error>
+#include <unordered_set>
 
+#include <base/io/log.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <formats/mission/bms.h>
@@ -59,19 +63,28 @@ bool read_header(const std::vector<uint8_t> &bytes, bms::Header &header) {
 	return true;
 }
 
+// The install root's file names, lower case: what File_CheckExists can open by a bare
+// name. Listed once per build (an extract's flat root holds thousands of files, and
+// the loose leg asks once per mission); a listing the filesystem stops partway keeps
+// the names it read and says so.
 // [orig: File_CheckExists @ 0x75a5d0 — a raw `_lopen` of the bare name, so against the
 //  working directory (the install's root) whatever the mount; case-insensitive, as the
 //  filesystem retail ran on]
-bool exists_in_root(const std::string &root, const std::string &name) {
-	if (root.empty() || name.empty()) return false;
+std::unordered_set<std::string> root_file_names(const std::string &root) {
+	std::unordered_set<std::string> names;
+	if (root.empty()) return names;
 	std::error_code ec;
-	for (const fs::directory_entry &entry :
-			fs::directory_iterator(io::os_path(root), fs::directory_options::skip_permission_denied, ec)) {
-		if (ec) break;
-		if (entry.is_regular_file(ec) && strutil::iequals(io::utf8_path(entry.path().filename()), name))
-			return true;
+	fs::directory_iterator it(io::os_path(root), fs::directory_options::skip_permission_denied, ec);
+	for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
+		std::error_code type_ec;
+		if (it->is_regular_file(type_ec))
+			names.insert(strutil::to_lower(io::utf8_path(it->path().filename())));
 	}
-	return false;
+	if (ec) {
+		io::logf(io::LogLevel::kWarn, "mission catalog: listing %s stopped (%s); %zu names read",
+				root.c_str(), ec.message().c_str(), names.size());
+	}
+	return names;
 }
 
 // One row from its header and its text table: the game-mode word, then the title and the
@@ -144,6 +157,7 @@ std::vector<Row> build(const ResourceIndex &index) {
 	//  "*.bms" @ 0x563222, Mission_LoadBMSFromLooseFile @ 0x5632e7, the loose flag 1
 	//  @ 0x563353, File_CheckExists(bin) @ 0x563461 before TextResource_LoadFromArchive
 	//  @ 0x56347b]
+	std::optional<std::unordered_set<std::string>> root_names; // listed on first need
 	for (const ResourceFileEntry &entry : index.resource_files("*")) {
 		if (entry.source_type != "file" || !strutil::ends_with_icase(entry.logical_name, ".bms"))
 			continue;
@@ -155,8 +169,9 @@ std::vector<Row> build(const ResourceIndex &index) {
 		const bool header_ok = index.read_file(row.file, bytes, VfsLookupPolicy::ForceLooseFirst) &&
 				read_header(bytes, header);
 		const std::string bin = bin_sibling_name(row.file);
+		if (!root_names) root_names = root_file_names(index.root_dir());
 		rtxt::File text;
-		const bool text_ok = exists_in_root(index.root_dir(), bin) && load_text(index, bin, text);
+		const bool text_ok = root_names->count(strutil::to_lower(bin)) != 0 && load_text(index, bin, text);
 		fill_row(row, header, header_ok, text_ok ? &text : nullptr);
 		rows.push_back(std::move(row));
 	}
@@ -167,8 +182,10 @@ std::vector<Row> build(const ResourceIndex &index) {
 	//  Mission_BuildMapListFromPFF(slot 1, slot 0), then (slot 3, slot 2)]
 	walk_pair(index, kArchiveSlotExpansion, kArchiveSlotExpansionText, rows);
 	walk_pair(index, kArchiveSlotLocalres, kArchiveSlotLanguage, rows);
-	// [orig: qsort(list, count, 0x11E8, Mission_CompareMapNames) @ 0x5635f0, no dedupe;
-	//  a stable sort keeps two same-named rows in their walk order]
+	// [orig: qsort(list, count, 0x11E8, Mission_CompareMapNames) @ 0x5635f0, no dedupe]
+	// The CRT's qsort is a platform primitive the port does not reproduce, and it is not
+	// stable: two rows with the same name (a loose copy of an archived mission, or one
+	// name in both pairs) come out in its order in retail, in walk order here.
 	std::stable_sort(rows.begin(), rows.end(), file_less);
 	return rows;
 }

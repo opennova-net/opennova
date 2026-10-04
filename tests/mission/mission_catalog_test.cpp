@@ -166,6 +166,10 @@ int main() {
 	write_bytes(root / "mike.bin",
 			info_bin("", "Briefing without a title.", /*include_title=*/false));
 	write_bytes(root / "kilo.bms", bms_blob("Kilo Header Name", 0));
+	// The root's names compare case-insensitively, as File_CheckExists's open did on
+	// the filesystem retail ran on: an upper-case .bin titles its mission.
+	write_bytes(root / "oscar.bms", bms_blob("Oscar Header Name", 0));
+	write_bytes(root / "OSCAR.BIN", info_bin("Oscar Op", "Upper-case table."));
 
 	std::vector<uint8_t> bad_magic = bms_blob("Bad Header Name", 0);
 	bad_magic[3] = static_cast<uint8_t>(0x80); // a version byte read signed: below 19
@@ -205,15 +209,20 @@ int main() {
 	TEST_EXPECT(index.mounted_expansion() == "jox01");
 
 	const std::vector<catalog::Row> rows = catalog::build(index);
-	// alpha, kilo, mike, zulu (loose); exp, pack (expansion pair); bad, lonely, pack
-	// (base pair).
-	TEST_EXPECT(rows.size() == 9u);
+	// alpha, kilo, mike, oscar, zulu (loose); exp, pack (expansion pair); bad, lonely,
+	// pack (base pair).
+	TEST_EXPECT(rows.size() == 10u);
 
 	// Retail order: case-insensitive by FILENAME, no dedupe
 	// [orig: Mission_CompareMapNames @ 0x5628e0; the qsort @ 0x5635f0].
 	const char *order[] = {"alpha.bms", "bad.bms", "exp.bms", "kilo.bms", "lonely.bms",
-		"mike.bms", "pack.bms", "pack.bms", "zulu.bms"};
-	for (size_t i = 0; i < rows.size() && i < 9; ++i) TEST_EXPECT(rows[i].file == order[i]);
+		"mike.bms", "oscar.bms", "pack.bms", "pack.bms", "zulu.bms"};
+	for (size_t i = 0; i < rows.size() && i < 10; ++i) TEST_EXPECT(rows[i].file == order[i]);
+
+	// The loose leg lists the root once for every mission's .bin; each finds its own.
+	const catalog::Row *oscar = find_row(rows, "oscar.bms", true);
+	TEST_EXPECT(oscar != nullptr && oscar->title == "Oscar Op" &&
+			oscar->briefing == "Upper-case table.");
 
 	const catalog::Row *zulu = find_row(rows, "zulu.bms", true);
 	TEST_EXPECT(zulu != nullptr);
@@ -291,7 +300,7 @@ int main() {
 	opennova::ResourceIndex loose_index;
 	TEST_EXPECT(loose_index.scan(root.string(), "", opennova::VfsMountMode::LooseOnly));
 	const std::vector<catalog::Row> loose_rows = catalog::build(loose_index);
-	TEST_EXPECT(loose_rows.size() == 4u);
+	TEST_EXPECT(loose_rows.size() == 5u);
 	for (const catalog::Row &row : loose_rows) TEST_EXPECT(row.loose);
 
 	// Release the mounted archive handles before deleting the fixture tree
