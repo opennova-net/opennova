@@ -175,7 +175,7 @@ static int test_apply_closure() {
 	const ActionOutcome imported = import(project.session, kept);
 	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open && view.dialogs.import_preview.plan->rows.empty());
 	for (const char *name : {"a.mnu", "b.mnu", "arial99.fnt", "fb.fnt", "LOGO.TGA"}) TEST_EXPECT(view.project.scan->find(name));
-	TEST_EXPECT(!view.project.scan->find("gone.tga") && said(view, "Imported menus/a.mnu") && said(view, "Imported LOGO.TGA"));
+	TEST_EXPECT(!view.project.scan->find("gone.tga") && said(view, "Imported menus/a.mnu") && said(view, "Imported textures/LOGO.TGA"));
 	// One line for the import (the UX round's problems lane), its files folded under it: the import's
 	// lines no longer push everything else out of Output.
 	{
@@ -192,7 +192,7 @@ static int test_apply_closure() {
 		TEST_EXPECT(lines == 1 && !loose);
 	}
 	// Each font and texture copied as the game's own: no import record beside it.
-	TEST_EXPECT(!fs::exists(project.root() + "/LOGO.TGA" + kImportSidecarSuffix));
+	TEST_EXPECT(!fs::exists(project.root() + "/textures/LOGO.TGA" + kImportSidecarSuffix));
 	const auto a = file_references(view, "menus/a.mnu");
 	const auto b = file_references(view, "menus/b.mnu");
 	TEST_EXPECT(a.size() == 4 && b.size() == 1);
@@ -222,7 +222,7 @@ static int test_apply_unchecked() {
 	const ActionOutcome imported = import(project.session, kept);
 	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
 	TEST_EXPECT(view.project.scan->find("arial99.fnt") && view.project.scan->find("b.mnu") && view.project.scan->find("fb.fnt") && !view.project.scan->find("LOGO.TGA"));
-	TEST_EXPECT(!fs::exists(project.root() + "/LOGO.TGA"));
+	TEST_EXPECT(!fs::exists(project.root() + "/textures/LOGO.TGA"));
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "logo.tga") == ReferenceStatus::Missing);
 	return 0;
 }
@@ -455,7 +455,7 @@ static int test_apply_scene_textures() {
 	const ImportPlan plan = *view.dialogs.import_preview.plan;
 	TEST_EXPECT(row_named(plan, "spinner.3di") && row_named(plan, "SPINNER.TGA") && row_named(plan, "glow.tga"));
 	const ActionOutcome outcome = import(project.session, selected_sources(plan));
-	TEST_EXPECT(outcome.done() && fs::is_regular_file(root + "/models/spinner.3di") && fs::is_regular_file(root + "/SPINNER.TGA"));
+	TEST_EXPECT(outcome.done() && fs::is_regular_file(root + "/models/spinner.3di") && fs::is_regular_file(root + "/textures/SPINNER.TGA"));
 	TEST_EXPECT(has_warning(outcome.findings, "import.texture_not_imported", "spinner.3di"));
 	size_t textures = 0, resolved = 0;
 	for (const GraphEdge *edge : view.findings.graph->references_of("models/spinner.3di")) {
@@ -464,7 +464,7 @@ static int test_apply_scene_textures() {
 		std::string file;
 		if (view.findings.graph->resolve(*edge, &file) == ReferenceStatus::Present) {
 			++resolved;
-			TEST_EXPECT(file == "SPINNER.TGA");
+			TEST_EXPECT(file == "textures/SPINNER.TGA");
 		} else {
 			TEST_EXPECT(edge->value == "glow.tga");
 		}
@@ -493,7 +493,7 @@ static int test_apply_scene_textures() {
 			TEST_EXPECT(d.asset == "spinner.3di" && d.message.find("--with-dependencies") != std::string::npos &&
 			            d.message.find("Include the files these need") != std::string::npos);
 		}
-	TEST_EXPECT(told == 2 && !fs::exists(direct.root() + "/SPINNER.TGA"));
+	TEST_EXPECT(told == 2 && !fs::exists(direct.root() + "/textures/SPINNER.TGA"));
 	return 0;
 }
 
@@ -508,20 +508,20 @@ static int test_apply_record_with_its_file() {
 	TEST_EXPECT(editor_test::write_bytes(art + "/logo.png", editor_test::gradient_png(4, 4)) &&
 	            editor_test::write_text(art + "/extra.mnu", screen("EXTRA", window("STATIC", "GO", ""))));
 	std::error_code ec;
-	fs::create_directories(root + "/logo.png.import", ec);
+	fs::create_directories(root + "/textures/logo.png.import", ec);
 	TEST_EXPECT(!ec);
 	const auto before = snapshot(root);
 	const ActionOutcome refused = import(project.session, {{art + "/extra.mnu", {}}, {art + "/logo.png", {}}});
 	TEST_EXPECT(!refused.done() &&
 	            finding(refused, "import.record", DiagnosticSeverity::Error, "logo.png"));
-	TEST_EXPECT(snapshot(root) == before && !fs::exists(root + "/logo.png") && !fs::exists(root + "/menus/extra.mnu"));
-	fs::remove(root + "/logo.png.import", ec);
+	TEST_EXPECT(snapshot(root) == before && !fs::exists(root + "/textures/logo.png") && !fs::exists(root + "/menus/extra.mnu"));
+	fs::remove(root + "/textures/logo.png.import", ec);
 	const ActionOutcome imported = import(project.session, {{art + "/extra.mnu", {}}, {art + "/logo.png", {}}});
 	const SessionView &view = project.view();
-	TEST_EXPECT(imported.done() && fs::is_regular_file(root + "/logo.png.import") &&
+	TEST_EXPECT(imported.done() && fs::is_regular_file(root + "/textures/logo.png.import") &&
 	            fs::is_regular_file(root + "/menus/extra.mnu") && !staged_left(root));
 	TEST_EXPECT(
-			view.project.imports->size() == 1 && (*view.project.imports)[0].source == "logo.png");
+			view.project.imports->size() == 1 && (*view.project.imports)[0].source == "textures/logo.png");
 	return 0;
 }
 
