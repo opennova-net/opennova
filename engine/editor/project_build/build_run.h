@@ -36,9 +36,13 @@ namespace opennova::editor {
 // run/play_lease.h) are never pruned, and pruning only ever deletes a directory that proves it is
 // a build (its name is a build id and its record names the same id, or it is a marked staging
 // directory), its proof last: the output root may be any folder the user chose, as deep as it is
-// (every call to the system takes a path through system_path, project/project_files.h).
+// (every call to the system takes a path through system_path, project/project_files.h). A build is
+// its project's (BuildPlan::project, in its record and its staging marker): where several projects
+// build into one folder (Build to folder), a build reuses, prunes and replaces only its own
+// project's, and says how many of the others' it left (BuildReport::others).
 // 2: each archive's record carries its size beside its hash (1 kept the hash alone).
-inline constexpr int kBuildRecordSchemaVersion = 2;
+// 3: the record names its project.
+inline constexpr int kBuildRecordSchemaVersion = 3;
 inline constexpr int kBuildCacheSchemaVersion = 1;
 inline constexpr const char *kBuildRecordFileName = "build.json";
 inline constexpr const char *kLastGoodBuildFileName = "last_good.json";
@@ -60,8 +64,20 @@ struct BuildProgress {
 	virtual void on_step(const std::string &what, size_t done, size_t total) = 0;
 };
 
+// A file a build published (the UX round's problems lane: the build panel's): an archive with how many
+// files it packs and whether the last good build's was kept, or a loose file; its size as published.
+struct BuiltFile {
+	std::string name;
+	uint64_t bytes = 0;
+	size_t files = 0;
+	bool archive = false;
+	bool reused = false;
+};
+
 struct BuildReport {
 	bool ok = false;
+	// Refused by the gate before anything was read (its plan blocked: build_blockers), not failed on the way.
+	bool refused = false;
 	std::string build_id;
 	std::string build_dir;               // the published directory (empty on failure)
 	bool reused_existing = false;        // the same content was already built
@@ -74,6 +90,12 @@ struct BuildReport {
 	size_t files_hashed = 0;
 	uint64_t bytes_hashed = 0;
 	std::vector<Diagnostic> diagnostics;
+	// What the published directory holds, the archives in the plan's order then the loose files.
+	std::vector<BuiltFile> built;
+	// How long it took, start to finish (its caller's clock: the session's; 0 when none timed it).
+	double seconds = 0;
+	// The builds of other projects its folder holds (their directories' names), left as they are.
+	std::vector<std::string> others;
 };
 
 // One build, advanced a budget of bytes at a time (S13 A1): every file hashed in a stream
@@ -146,6 +168,10 @@ private:
 	void pack(uint64_t budget);
 	void copy_loose(uint64_t budget);
 	void publish();
+	// The report's `built`: each published file of the plan with its size in the build directory.
+	void list_built();
+	// The builds of other projects its folder holds (BuildReport::others), for a build handed back unchanged.
+	void list_others();
 	void fail(Diagnostic error);
 	void close_streams();
 	// The flat index of an archive's entry (archives in plan order, then the loose files).

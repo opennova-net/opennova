@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,7 @@ private:
 	BuildRun run_;
 	std::vector<Diagnostic> gate_;
 	PlayIntent play_;
+	std::chrono::steady_clock::time_point started_ = std::chrono::steady_clock::now();
 };
 
 } // namespace opennova::editor

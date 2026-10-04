@@ -95,6 +95,12 @@ private:
 	std::string game_log_file_;
 	uint64_t game_log_offset_ = 0;
 	std::string game_log_partial_;
+	// The game's one Output line (its log folded under it): its index, what runs ("OpenNova", "the game
+	// install"), the lines its log held and how many of them were shown; game_words is its text.
+	std::string game_words() const;
+	uint64_t game_line_ = 0;
+	std::string game_name_;
+	size_t game_lines_ = 0, game_shown_ = 0;
 	std::string boot_project_; // the project the game was started in: its boot report is that project's
 	std::vector<Diagnostic> findings_; // this Play's own rows: its mission's failure, its crash
 };
