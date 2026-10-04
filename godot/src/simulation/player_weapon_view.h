@@ -78,6 +78,7 @@ public:
 	X(int, rescope_serial, INT)                                             \
 	/* the magazine, recoil kick, and the crosshair spread domains */       \
 	X(int, clip, INT)                                                       \
+	X(int, clip_capacity, INT)                                              \
 	X(int, reserve, INT)                                                    \
 	/* the clip-flash key's def halves (D-HUD-5) */                         \
 	X(int, ammo_bucket, INT)                                                \

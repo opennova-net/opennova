@@ -14,6 +14,9 @@
 
 #include <runtime/world/present_drains.h> // FirePresentationRow (the fire drain's row)
 
+#include <formats/threedi/threedi_ctrl_catalog.h>
+
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -248,16 +251,38 @@ void weapon_batch_plan(bool view_active, int32_t view_play_serial, int32_t play_
 //     them;
 //   * the character arms' own raw camo triplet is stored immediately before
 //     each arms submit -- the same per-submit writer family, arms part only
-//     [orig: Avatar_SetArmsCamoCtrl @0x57a3b0 at @0x4df008/@0x4df070].
+//     [orig: Avatar_SetArmsCamoCtrl @0x57a3b0 at @0x4df008/@0x4df070];
+//   * OpenNova's magazine registers (fp_magazine_registers below) ride the
+//     same submit as heat, for the gun and its arms alike, since retail's
+//     bus is one array every first-person draw reads.
 // A false member means the writer's registers are CLEARED for the frame.
 struct FpCtrlRegisterWrites {
     bool team = false;
     bool heat = false;
     bool emplaced = false;
     bool arms_camo = false;
+    bool magazine = false;
 };
 FpCtrlRegisterWrites fp_ctrl_register_writes(bool submit, bool has_weapon_view,
                                              bool emplaced_controls_valid, bool arms_part);
+
+// --- OpenNova's magazine registers ----------------------------------------------
+
+// What a first-person model WE author reads of the magazine (ADR 0047
+// decision 17; D-3DI-7, docs/threedi/3di-gp-format-re.md): WPN_SPENT, the
+// spent share as 16.16 ((capacity - clip) / capacity, truncated; 0 full,
+// 0x10000 empty), and WPN_ROUND_1..8, round k from the top 0x10000 once
+// spent (the clip holds fewer than k rounds), else 0. They follow the active
+// slot's clip, which the FIRE action decrements and the RELOAD action
+// refills as it begins (weapon_fsm.cpp), so they read full again from the
+// reload's first tick. A weapon without a finite clip (capacity <= 0) reads
+// full. Retail has no such register: its executable keeps a track naming one
+// at its start.
+struct FpMagazineRegisters {
+    int32_t spent = 0;
+    std::array<int32_t, threedi::THREEDI_CTRL_WPN_ROUND_COUNT> rounds{};
+};
+FpMagazineRegisters fp_magazine_registers(int32_t clip, int32_t clip_capacity);
 
 // --- the raw-key down latch -----------------------------------------------------
 

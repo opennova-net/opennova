@@ -558,6 +558,7 @@ struct LocalPlayerWeaponView {
     int32_t unscope_serial = 0;
     int32_t rescope_serial = 0;
     int32_t clip = 0;
+    int32_t clip_capacity = 0; // the def's rounds per clip; < 0 infinite
     int32_t reserve = 0;
     int32_t ammo_bucket = 0;   // the def's ammobucket (def+0xDC)
     int32_t ammo_class_id = 0; // the def's resolved ammo-class id (def+0xD8)

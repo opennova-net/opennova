@@ -315,12 +315,16 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 			return true;
 		}
 		if (!reads_register) return false;
-		const char *global = threedi_ctrl_register_name(static_cast<size_t>(index));
+		// The retail game's own table: OpenNova's registers past it are names a
+		// model carries, never a raw index the game reads (D-3DI-7).
+		const char *global = threedi_ctrl_register_is_retail(static_cast<size_t>(index))
+		                             ? threedi_ctrl_register_name(static_cast<size_t>(index))
+		                             : nullptr;
 		severity = global ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
 		message = "The model has no CTRL registers: the game reads " + reference +
 		          (global ? std::string(" as the global register ") + global + "."
-		                  : " as a global register, past the " + std::to_string(THREEDI_CTRL_REGISTER_COUNT) +
-		                            " it has.");
+		                  : " as a global register, past the " +
+		                            std::to_string(THREEDI_CTRL_RETAIL_REGISTER_COUNT) + " it has.");
 		return true;
 	};
 	const auto check_register = [&](int64_t index, bool reads_register, ModelKind kind, size_t collection, size_t at,

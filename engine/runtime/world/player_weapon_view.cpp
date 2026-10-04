@@ -101,6 +101,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	v.unscope_serial = static_cast<int32_t>(w.unscope_serial);
 	v.rescope_serial = static_cast<int32_t>(w.rescope_serial);
 	v.clip = active_slot.clip;
+	v.clip_capacity = w.def.clip_capacity;
 	v.reserve = active_slot.reserve;
 	// The equipped def's two clip-flash key halves: its ammo bucket (def+0xDC)
 	// and its ammo-class id (def+0xD8) [orig: HUD_DrawAmmoIndicator

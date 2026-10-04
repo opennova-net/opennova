@@ -1,8 +1,8 @@
 extends GutTest
 
 # End-to-end checks for the 3DI loader boundary: PANM/LGHT bytes name a
-# model-local CTRL record, while runtime evaluation consumes the shared retail
-# 96-register bus.
+# model-local CTRL record, while runtime evaluation consumes the shared
+# register bus (retail's 96, then OpenNova's own past them, D-3DI-7).
 
 const MOUNT := "res://../fixtures/threedi/synth/mount.3di"
 # Authored variants of the fixture above, minted once from the retired edit

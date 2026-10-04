@@ -152,6 +152,12 @@ endif()
 add_test(NAME threedi_cli_catalog_anim COMMAND opennova_3di catalog)
 set_tests_properties(threedi_cli_catalog_anim PROPERTIES PASS_REGULAR_EXPRESSION
     "animslot 0 anim_reset[\r\n]+.*animslot 140 anim_guard[\r\n]+.*animslot 239 anim_death_bullet_leftfoot_left[\r\n]+.*animslot 251 anim_wpn_scopedown[\r\n]+weaponaction idle 241 anim_wpn_idle[\r\n]+weaponaction emptyidle 242 anim_wpn_empty_idle[\r\n]+.*weaponaction scopedown 251 anim_wpn_scopedown[\r\n]+trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
+# ... and the CTRL registers a track may name: retail's 96 in its order, then
+# OpenNova's own past them (ADR 0047 decision 17), which the add-on's register
+# search offers from this list alone.
+add_test(NAME threedi_cli_catalog_registers COMMAND opennova_3di catalog)
+set_tests_properties(threedi_cli_catalog_registers PROPERTIES PASS_REGULAR_EXPRESSION
+    "^register LOD_FRAC[\r\n]+.*register TEX_CAMO3[\r\n]+register WPN_SPENT[\r\n]+register WPN_ROUND_1[\r\n]+.*register WPN_ROUND_8[\r\n]+style ")
 add_test(NAME threedi_cli_anim_info_flag COMMAND opennova_3di anim info unread.adm --bogus)
 set_tests_properties(threedi_cli_anim_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
     "anim info takes --verbose or --keys")

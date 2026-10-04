@@ -10,7 +10,7 @@ namespace {
 
 // Exact descriptor order from the 96 populated retail records.
 // [orig: global control-register descriptor table @ 0x83DCE8]
-const char *const kCtrlRegisterNames[THREEDI_CTRL_REGISTER_COUNT] = {
+const char *const kCtrlRegisterNames[THREEDI_CTRL_RETAIL_REGISTER_COUNT] = {
     "LOD_FRAC",
     "LOD_FADE_IN",
     "LOD_FADE_OUT",
@@ -111,8 +111,28 @@ const char *const kCtrlRegisterNames[THREEDI_CTRL_REGISTER_COUNT] = {
 
 static_assert(
     sizeof(kCtrlRegisterNames) / sizeof(kCtrlRegisterNames[0]) ==
-        THREEDI_CTRL_REGISTER_COUNT,
+        THREEDI_CTRL_RETAIL_REGISTER_COUNT,
     "retail CTRL catalog must contain every populated descriptor");
+
+// OpenNova's registers, in bus order past retail's table (ADR 0047 decision
+// 17; D-3DI-7). Not retail descriptors: retail's loader reads each as slot 0.
+const char *const kOpenNovaRegisterNames[THREEDI_CTRL_REGISTER_COUNT -
+                                         THREEDI_CTRL_RETAIL_REGISTER_COUNT] = {
+    "WPN_SPENT",
+    "WPN_ROUND_1",
+    "WPN_ROUND_2",
+    "WPN_ROUND_3",
+    "WPN_ROUND_4",
+    "WPN_ROUND_5",
+    "WPN_ROUND_6",
+    "WPN_ROUND_7",
+    "WPN_ROUND_8"
+};
+
+static_assert(
+    sizeof(kOpenNovaRegisterNames) / sizeof(kOpenNovaRegisterNames[0]) ==
+        THREEDI_CTRL_REGISTER_COUNT - THREEDI_CTRL_RETAIL_REGISTER_COUNT,
+    "every OpenNova register has its name");
 
 } // namespace
 
@@ -121,7 +141,14 @@ const char *threedi_ctrl_register_name(size_t ordinal)
     if (ordinal >= THREEDI_CTRL_REGISTER_COUNT) {
         return NULL;
     }
-    return kCtrlRegisterNames[ordinal];
+    return ordinal < THREEDI_CTRL_RETAIL_REGISTER_COUNT
+        ? kCtrlRegisterNames[ordinal]
+        : kOpenNovaRegisterNames[ordinal - THREEDI_CTRL_RETAIL_REGISTER_COUNT];
+}
+
+bool threedi_ctrl_register_is_retail(size_t ordinal)
+{
+    return ordinal < THREEDI_CTRL_RETAIL_REGISTER_COUNT;
 }
 
 int threedi_ctrl_register_ordinal(const char *name)
@@ -132,10 +159,11 @@ int threedi_ctrl_register_ordinal(const char *name)
 
     // Retail scans from ordinal zero and returns the first case-insensitive
     // match.  Unlike the original return convention, this interface keeps
-    // LOD_FRAC (zero) distinguishable from an unknown name.
+    // LOD_FRAC (zero) distinguishable from an unknown name. OpenNova's
+    // registers are scanned after retail's table (D-3DI-7).
     // [orig: CtrlName_ToOrdinal @ 0x57B290]
     for (size_t ordinal = 0; ordinal < THREEDI_CTRL_REGISTER_COUNT; ++ordinal) {
-        if (opennova::strutil::iequals(name, kCtrlRegisterNames[ordinal])) {
+        if (opennova::strutil::iequals(name, threedi_ctrl_register_name(ordinal))) {
             return static_cast<int>(ordinal);
         }
     }

@@ -206,6 +206,12 @@ void test_power_throw_windup() {
 	CHECK(!v.windup_active && v.windup_held_ticks == 0);
 	rig.weapon.def.clip_capacity = -1;
 	CHECK(rig.view().windup_active);
+	// The def's clip size rides beside the clip (the magazine registers'
+	// denominator, D-3DI-7).
+	CHECK(rig.view().clip_capacity == -1);
+	rig.weapon.def.clip_capacity = 30;
+	CHECK(rig.view().clip_capacity == 30);
+	rig.weapon.def.clip_capacity = -1;
 	// The start tick and the def bit are both gates.
 	rig.weapon.power_throw_start_tick = 0;
 	CHECK(!rig.view().windup_active);

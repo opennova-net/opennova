@@ -2,6 +2,9 @@
 //
 // A model's CTRL records name entries in this global table.  The ordinal is
 // the index used by retail's two-dword runtime control-register storage.
+// Retail's 96 come first, in its order; OpenNova's own registers follow them
+// (ADR 0047 decision 17), so the bus holds both and retail's ordinals never
+// move.
 
 #pragma once
 
@@ -113,19 +116,55 @@ enum {
     THREEDI_CTRL_TEX_CAMO1 = 93,
     THREEDI_CTRL_TEX_CAMO2 = 94,
     THREEDI_CTRL_TEX_CAMO3 = 95,
-    THREEDI_CTRL_REGISTER_COUNT = 96
+    // Retail's table: every populated descriptor, the next one zero.
+    THREEDI_CTRL_RETAIL_REGISTER_COUNT = 96,
+
+    // OpenNova's registers past retail's 96 (ADR 0047 decision 17; a ratified
+    // divergence, docs/threedi/3di-gp-format-re.md D-3DI-7): names a model WE
+    // author may carry. Retail's loader resolves an unknown name to slot 0,
+    // which nothing writes, so the same model in the retail executable holds
+    // every such track at its start; author the full state there.
+    // The magazine's spent share, 16.16: (capacity - rounds in the clip) /
+    // capacity, 0 full and 0x10000 empty.
+    THREEDI_CTRL_WPN_SPENT = 96,
+    // Round k from the top of the magazine: 0x10000 once it is spent (the clip
+    // holds fewer than k rounds), else 0. A stepped register for hiding one
+    // round with a scale or translation track.
+    THREEDI_CTRL_WPN_ROUND_1 = 97,
+    THREEDI_CTRL_WPN_ROUND_2 = 98,
+    THREEDI_CTRL_WPN_ROUND_3 = 99,
+    THREEDI_CTRL_WPN_ROUND_4 = 100,
+    THREEDI_CTRL_WPN_ROUND_5 = 101,
+    THREEDI_CTRL_WPN_ROUND_6 = 102,
+    THREEDI_CTRL_WPN_ROUND_7 = 103,
+    THREEDI_CTRL_WPN_ROUND_8 = 104,
+    THREEDI_CTRL_WPN_ROUND_COUNT = 8,
+
+    // The bus: retail's registers and OpenNova's.
+    THREEDI_CTRL_REGISTER_COUNT = 105
 };
+
+static_assert(THREEDI_CTRL_WPN_ROUND_8 - THREEDI_CTRL_WPN_ROUND_1 + 1 == THREEDI_CTRL_WPN_ROUND_COUNT,
+              "the round registers are consecutive");
+static_assert(THREEDI_CTRL_WPN_SPENT == THREEDI_CTRL_RETAIL_REGISTER_COUNT,
+              "OpenNova's registers start right past retail's table");
 
 // Return the canonical spelling for ordinal, or NULL when ordinal is outside
 // [0, THREEDI_CTRL_REGISTER_COUNT).  The returned string has static lifetime.
 const char *threedi_ctrl_register_name(size_t ordinal);
+
+// True for an ordinal of retail's own table (below
+// THREEDI_CTRL_RETAIL_REGISTER_COUNT); OpenNova's registers follow it.
+bool threedi_ctrl_register_is_retail(size_t ordinal);
 
 // Resolve a canonical name using retail's ASCII case-insensitive comparison.
 // Return THREEDI_CTRL_REGISTER_NOT_FOUND for NULL, empty, or unknown names.
 int threedi_ctrl_register_ordinal(const char *name);
 
 // Resolve a model-authored CTRL name using the retail loader convention:
-// unknown and empty inline names alias global ordinal zero (LOD_FRAC).
+// unknown and empty inline names alias global ordinal zero (LOD_FRAC). An
+// OpenNova register resolves to its own slot here, where retail's loader
+// reads zero (D-3DI-7).
 // NULL also returns zero as an OpenNova API safety extension; retail's loader
 // always passes a non-NULL inline name buffer. This compatibility behavior is
 // deliberately separate from the unambiguous lookup above.

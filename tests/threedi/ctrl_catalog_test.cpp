@@ -131,8 +131,8 @@ int main()
     const std::size_t expected_count =
         sizeof(kExpectedRegisters) / sizeof(kExpectedRegisters[0]);
 
-    ok &= expect_equal("catalog count",
-                       THREEDI_CTRL_REGISTER_COUNT,
+    ok &= expect_equal("retail catalog count",
+                       THREEDI_CTRL_RETAIL_REGISTER_COUNT,
                        static_cast<int>(expected_count));
 
     for (std::size_t ordinal = 0; ordinal < expected_count; ++ordinal) {
@@ -178,6 +178,49 @@ int main()
 
     ok &= threedi_ctrl_register_name(THREEDI_CTRL_REGISTER_COUNT) == NULL;
     ok &= threedi_ctrl_register_name(999) == NULL;
+
+    // OpenNova's registers follow retail's table (ADR 0047 decision 17,
+    // D-3DI-7): the magazine's spent share, then rounds 1 to 8 from the top.
+    // Retail's ordinals do not move and its table stays exactly the 96 above.
+    {
+        static const char *const kOpenNova[] = {
+            "WPN_SPENT", "WPN_ROUND_1", "WPN_ROUND_2", "WPN_ROUND_3", "WPN_ROUND_4",
+            "WPN_ROUND_5", "WPN_ROUND_6", "WPN_ROUND_7", "WPN_ROUND_8"};
+        const int count = static_cast<int>(sizeof(kOpenNova) / sizeof(kOpenNova[0]));
+        ok &= expect_equal("bus size", THREEDI_CTRL_REGISTER_COUNT,
+                           THREEDI_CTRL_RETAIL_REGISTER_COUNT + count);
+        ok &= expect_equal("spent ordinal", THREEDI_CTRL_WPN_SPENT, 96);
+        ok &= expect_equal("round 1 ordinal", THREEDI_CTRL_WPN_ROUND_1, 97);
+        ok &= expect_equal("round 8 ordinal", THREEDI_CTRL_WPN_ROUND_8, 104);
+        for (int i = 0; i < count; ++i) {
+            const size_t ordinal = static_cast<size_t>(THREEDI_CTRL_RETAIL_REGISTER_COUNT + i);
+            const char *name = threedi_ctrl_register_name(ordinal);
+            if (!name || std::strcmp(name, kOpenNova[i]) != 0) {
+                std::fprintf(stderr, "ordinal %zu: got %s, expected %s\n", ordinal,
+                             name ? name : "<null>", kOpenNova[i]);
+                ok = false;
+                continue;
+            }
+            ok &= !threedi_ctrl_register_is_retail(ordinal);
+            ok &= expect_equal(name, threedi_ctrl_register_ordinal(name), static_cast<int>(ordinal));
+            ok &= expect_equal("loader resolves an OpenNova register",
+                               threedi_ctrl_register_loader_ordinal(name), static_cast<int>(ordinal));
+        }
+        ok &= threedi_ctrl_register_is_retail(THREEDI_CTRL_TEX_CAMO3);
+        ok &= !threedi_ctrl_register_is_retail(THREEDI_CTRL_REGISTER_COUNT);
+        ok &= expect_equal("OpenNova lookup is case-insensitive too",
+                           threedi_ctrl_register_ordinal("wpn_round_3"), THREEDI_CTRL_WPN_ROUND_3);
+        // Every other name keeps the retail loader's zero, OpenNova-looking
+        // misses included.
+        static const char *const kMisses[] = {
+            "WPN_ROUND_9", "WPN_ROUND_0", "WPN_SPENT_", "WPN_ROUND", "VEHICLE_TIRE14"};
+        for (const char *miss : kMisses) {
+            ok &= expect_equal(miss, threedi_ctrl_register_ordinal(miss),
+                               THREEDI_CTRL_REGISTER_NOT_FOUND);
+            ok &= expect_equal("loader miss aliases zero",
+                               threedi_ctrl_register_loader_ordinal(miss), THREEDI_CTRL_LOD_FRAC);
+        }
+    }
     ok &= expect_equal("LOD_FRAC is valid zero",
                        threedi_ctrl_register_ordinal("lod_frac"),
                        THREEDI_CTRL_LOD_FRAC);

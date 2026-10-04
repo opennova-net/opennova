@@ -5,6 +5,7 @@
 // the spawn-loadout projection.
 
 #include <runtime/world/player_present.h>
+#include <runtime/world/weapon_fsm.h>
 
 #include <cstdio>
 #include <cstring>
@@ -197,12 +198,101 @@ void test_batch_plan_replays_only_an_unseen_serial() {
 void test_fp_ctrl_writers() {
 	const w::FpCtrlRegisterWrites hidden = w::fp_ctrl_register_writes(false, true, true, true);
 	CHECK(!hidden.team && !hidden.heat && !hidden.emplaced && !hidden.arms_camo);
+	CHECK(!hidden.magazine);
 	const w::FpCtrlRegisterWrites gun = w::fp_ctrl_register_writes(true, true, false, false);
-	CHECK(gun.team && gun.heat && !gun.emplaced && !gun.arms_camo);
+	CHECK(gun.team && gun.heat && !gun.emplaced && !gun.arms_camo && gun.magazine);
 	const w::FpCtrlRegisterWrites arms = w::fp_ctrl_register_writes(true, true, true, true);
-	CHECK(arms.team && arms.heat && arms.emplaced && arms.arms_camo);
+	CHECK(arms.team && arms.heat && arms.emplaced && arms.arms_camo && arms.magazine);
 	const w::FpCtrlRegisterWrites no_view = w::fp_ctrl_register_writes(true, false, true, true);
 	CHECK(no_view.team && !no_view.heat && !no_view.emplaced && no_view.arms_camo);
+	CHECK(!no_view.magazine);
+}
+
+// OpenNova's magazine registers (D-3DI-7) over the values alone.
+void test_magazine_register_values() {
+	using opennova::threedi::THREEDI_CTRL_WPN_ROUND_COUNT;
+	const w::FpMagazineRegisters full = w::fp_magazine_registers(30, 30);
+	CHECK(full.spent == 0);
+	for (int k = 0; k < THREEDI_CTRL_WPN_ROUND_COUNT; ++k) CHECK(full.rounds[k] == 0);
+	const w::FpMagazineRegisters empty = w::fp_magazine_registers(0, 30);
+	CHECK(empty.spent == 0x10000);
+	for (int k = 0; k < THREEDI_CTRL_WPN_ROUND_COUNT; ++k) CHECK(empty.rounds[k] == 0x10000);
+	// Three left of thirty: 27/30 spent, truncated; rounds 1..3 still in the
+	// magazine, 4..8 gone.
+	const w::FpMagazineRegisters three = w::fp_magazine_registers(3, 30);
+	CHECK(three.spent == (27 * 0x10000) / 30);
+	for (int k = 1; k <= THREEDI_CTRL_WPN_ROUND_COUNT; ++k)
+		CHECK(three.rounds[k - 1] == (k <= 3 ? 0 : 0x10000));
+	// A five-round magazine never holds rounds 6..8.
+	const w::FpMagazineRegisters small = w::fp_magazine_registers(5, 5);
+	CHECK(small.spent == 0 && small.rounds[4] == 0 && small.rounds[5] == 0x10000);
+	// No finite clip (an infinite or clipless weapon) reads full; an
+	// over-full clip clamps.
+	const w::FpMagazineRegisters infinite = w::fp_magazine_registers(7, -1);
+	CHECK(infinite.spent == 0 && infinite.rounds[0] == 0 && infinite.rounds[7] == 0);
+	CHECK(w::fp_magazine_registers(40, 30).spent == 0);
+}
+
+float mag_clip_seconds(void *, const char *key) {
+	if (std::strcmp(key, "anim_wpn_fire") == 0) return 0.096f;
+	if (std::strcmp(key, "anim_wpn_reload") == 0) return 0.5f;
+	return 1.0f;
+}
+
+int mag_clip_resolves(void *, const char *) { return 1; }
+
+// The registers follow the live clip through the real FSM: every shot the
+// FIRE action consumes moves them, and the reload refills the clip as it
+// begins, so they read full from its first tick, not when it ends
+// [orig: WeaponAction_Fire @ 0x542b10, the consume @ 0x542c75].
+void test_magazine_registers_follow_the_clip() {
+	namespace wa = opennova::world::weapon_action;
+	w::WeaponFsmActionRow rows[6];
+	const char *names[6][2] = {{"idle", "anim_wpn_idle"}, {"emptyidle", "anim_wpn_idle"},
+			{"fire", "anim_wpn_fire"}, {"recoil", "anim_wpn_recoil"},
+			{"reload", "anim_wpn_reload"}, {"empty", "anim_wpn_empty"}};
+	const int32_t delay_end[6] = {-1, -1, 6, 0, -1, -1};
+	for (int i = 0; i < 6; ++i) {
+		std::snprintf(rows[i].name, sizeof(rows[i].name), "%s", names[i][0]);
+		std::snprintf(rows[i].anim, sizeof(rows[i].anim), "%s", names[i][1]);
+		rows[i].delaystart = 0;
+		rows[i].delayend = delay_end[i];
+	}
+	w::WeaponFsmDef def;
+	w::weapon_fsm_bake(rows, 6, mag_clip_resolves, mag_clip_seconds, nullptr, def);
+	def.auto_fire = true;
+	def.clip_capacity = 30;
+	w::WeaponSlotState slot;
+	slot.clip = 10;
+	slot.reserve = 300;
+	w::WeaponFsmInputs in;
+	in.auto_reload = true;
+	in.fire_pressed = true;
+	in.fire_held = true;
+	int32_t last_clip = slot.clip;
+	int shots = 0;
+	bool reloaded = false;
+	for (int t = 0; t < 600 && !reloaded; ++t) {
+		w::WeaponFsmEvents ev;
+		w::weapon_fsm_tick(def, slot, in, ev);
+		in.fire_pressed = false;
+		const w::FpMagazineRegisters regs = w::fp_magazine_registers(slot.clip, def.clip_capacity);
+		CHECK(regs.spent == ((30 - slot.clip) * 0x10000) / 30);
+		for (int k = 1; k <= 8; ++k)
+			CHECK(regs.rounds[k - 1] == (slot.clip < k ? 0x10000 : 0));
+		if (slot.clip < last_clip) ++shots;
+		if (ev.reload_applied) {
+			// The reload's refill tick: the RELOAD action has begun and the
+			// clip is full again, so the magazine reads full.
+			CHECK(slot.current == wa::kReload);
+			CHECK(slot.clip == 30);
+			CHECK(regs.spent == 0 && regs.rounds[0] == 0 && regs.rounds[7] == 0);
+			reloaded = true;
+		}
+		last_clip = slot.clip;
+	}
+	CHECK(shots == 10);
+	CHECK(reloaded);
 }
 
 void test_raw_key_latch_updates_regardless_of_the_gate() {
@@ -327,6 +417,8 @@ int main() {
 	test_batch_plan_orders_one_events_legs_and_adopts_the_serial();
 	test_batch_plan_replays_only_an_unseen_serial();
 	test_fp_ctrl_writers();
+	test_magazine_register_values();
+	test_magazine_registers_follow_the_clip();
 	test_raw_key_latch_updates_regardless_of_the_gate();
 	test_def_precedence_and_memo();
 	test_spawn_loadout_projection();

@@ -147,6 +147,18 @@ FpCtrlRegisterWrites fp_ctrl_register_writes(bool submit, bool has_weapon_view,
     out.heat = submit && has_weapon_view;
     out.emplaced = submit && has_weapon_view && emplaced_controls_valid;
     out.arms_camo = submit && arms_part;
+    out.magazine = submit && has_weapon_view;
+    return out;
+}
+
+FpMagazineRegisters fp_magazine_registers(int32_t clip, int32_t clip_capacity) {
+    FpMagazineRegisters out;
+    if (clip_capacity <= 0) return out;
+    const int64_t held = clip < 0 ? 0 : (clip > clip_capacity ? clip_capacity : clip);
+    out.spent = static_cast<int32_t>(
+            ((static_cast<int64_t>(clip_capacity) - held) * 0x10000) / clip_capacity);
+    for (int k = 1; k <= threedi::THREEDI_CTRL_WPN_ROUND_COUNT; ++k)
+        out.rounds[static_cast<size_t>(k - 1)] = held < k ? 0x10000 : 0;
     return out;
 }
 

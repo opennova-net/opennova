@@ -127,6 +127,19 @@ int main() {
     resolve_nodes[0].rotation_y.control_param = 9;
     threedi_panm_resolve_registers(model, resolve_nodes);
     CHECK(resolve_nodes[0].rotation_y.control_param == 0);
+    // An OpenNova register (D-3DI-7) resolves to its own slot past retail's
+    // 96; an unknown name still reads LOD_FRAC.
+    std::snprintf(registers[0].name, sizeof(registers[0].name), "%s", "WPN_ROUND_3");
+    std::snprintf(registers[1].name, sizeof(registers[1].name), "%s", "WPN_ROUND_9");
+    resolve_nodes[0].rotation_x.control_param = 0;
+    resolve_nodes[0].rotation_z.control = 113;
+    resolve_nodes[0].rotation_z.control_param = 1;
+    threedi_panm_resolve_registers(model, resolve_nodes);
+    CHECK(resolve_nodes[0].rotation_x.control_param == THREEDI_CTRL_WPN_ROUND_3);
+    CHECK(resolve_nodes[0].rotation_z.control_param == THREEDI_CTRL_LOD_FRAC);
+    std::memset(registers, 0, sizeof(registers));
+    std::snprintf(registers[1].name, sizeof(registers[1].name), "%s",
+            "VEHICLE_SPECIAL1");
 
     // H50cal's barrel uses file PANM byte +6 to select MTRX row 1,
     // diag(-1, 1, -1). Its reverse 360->0 pitch track must raise +Z
@@ -277,6 +290,26 @@ int main() {
             CHECK(near(posed[0].m[k], clip.m[k]));
             CHECK(near(posed[2].m[k], clip.m[k]));
         }
+
+        // A magazine round hides by its own register (D-3DI-7): the same
+        // trigger node scaled from WPN_ROUND_2 (style 113, 1.0 -> 0) collapses
+        // to its pivot once that round is spent, and stays drawn otherwise.
+        std::strcpy(fp_registers[0].name, "WPN_ROUND_2");
+        fp_nodes[1].flags = 1u; // uniform scale
+        fp_nodes[1].rotation_z.control = 0;
+        fp_nodes[1].scale_x.control = 113;
+        fp_nodes[1].scale_x.control_param = 0;
+        fp_nodes[1].scale_x.start = 256;
+        fp_nodes[1].scale_x.end = 0;
+        std::memset(fp_bus, 0, sizeof(fp_bus));
+        CHECK(threedi_panm_pose_parts_over(fp_gun, 0, 0, fp_bus, clip_frames, posed, &driven));
+        for (int k = 0; k < 16; ++k) CHECK(near(posed[1].m[k], clip.m[k]));
+        fp_bus[THREEDI_CTRL_WPN_ROUND_2] = 0x10000;
+        CHECK(threedi_panm_pose_parts_over(fp_gun, 0, 0, fp_bus, clip_frames, posed, &driven));
+        threedi_mat4_apply_point(&posed[1], trigger_tip, at);
+        threedi_mat4_apply_point(&clip, trigger_pivot, expect);
+        CHECK(near(at[0], expect[0]) && near(at[1], expect[1]) && near(at[2], expect[2]));
+        CHECK(near(posed[1].m[0], 0.0f) && near(posed[1].m[5], 0.0f) && near(posed[1].m[10], 0.0f));
 
         // A model without nodes leaves the clip's frames as they are.
         fp_lod.part_animation_count = 0;

@@ -26,6 +26,7 @@ constexpr const char *kCtrlOwnerFpHeat = "first_person:heat";
 constexpr const char *kCtrlOwnerFpEmplaced = "first_person:emplaced";
 constexpr const char *kCtrlOwnerFpTeam = "first_person:team";
 constexpr const char *kCtrlOwnerFpArmsCamo = "first_person:arms_camo";
+constexpr const char *kCtrlOwnerFpMagazine = "first_person:magazine";
 constexpr const char *kViewmodelProjectionGlobal = "opennova_viewmodel_projection";
 
 } // namespace
@@ -360,6 +361,21 @@ void PlayerViewmodelRig::apply_viewmodel_control_registers(bool p_submit_viewmod
 			visual->clear_ctrl_override(kCtrlOwnerFpEmplaced, "EWEAP_GUNYAW");
 			visual->clear_ctrl_override(kCtrlOwnerFpEmplaced, "EWEAP_GUNPITCH");
 			visual->clear_ctrl_override(kCtrlOwnerFpEmplaced, "WEAP_SPIN");
+		}
+		// OpenNova's magazine registers (world::fp_magazine_registers).
+		if (writes.magazine) {
+			const opennova::world::FpMagazineRegisters magazine =
+					opennova::world::fp_magazine_registers(
+							p_weapon_view->get_clip(), p_weapon_view->get_clip_capacity());
+			visual->set_ctrl_override_native(kCtrlOwnerFpMagazine,
+					opennova::threedi::THREEDI_CTRL_WPN_SPENT, magazine.spent);
+			for (int k = 0; k < opennova::threedi::THREEDI_CTRL_WPN_ROUND_COUNT; ++k) {
+				visual->set_ctrl_override_native(kCtrlOwnerFpMagazine,
+						opennova::threedi::THREEDI_CTRL_WPN_ROUND_1 + k,
+						magazine.rounds[static_cast<size_t>(k)]);
+			}
+		} else {
+			visual->clear_ctrl_overrides_owned_native(kCtrlOwnerFpMagazine);
 		}
 		if (arms_part) {
 			if (writes.arms_camo) {

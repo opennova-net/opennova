@@ -1163,6 +1163,21 @@ func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> 
 # --- the real FP viewmodel ----------------------------------------------------
 
 
+# OpenNova's magazine registers as world::fp_magazine_registers derives them
+# from the view's live clip and the def's clip size (D-3DI-7): the spent share
+# in 16.16 and round k from the top spent once the clip holds fewer than k.
+func _assert_magazine_registers(ctrl: Dictionary, view: PlayerWeaponView) -> void:
+	var capacity := int(view.clip_capacity)
+	var clip := clampi(int(view.clip), 0, maxi(capacity, 0))
+	assert_eq(int(ctrl.get("WPN_SPENT", -999)),
+			((capacity - clip) * 0x10000) / capacity if capacity > 0 else 0,
+			"WPN_SPENT is the clip's spent share")
+	for k in range(1, 9):
+		assert_eq(int(ctrl.get("WPN_ROUND_%d" % k, -999)),
+				0x10000 if capacity > 0 and clip < k else 0,
+				"WPN_ROUND_%d steps with the clip" % k)
+
+
 func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
 	# The FP CTRL writers execute only on a visible FP submit: TEX_TEAM is the
 	# store immediately before the FP lighting/heat/model-submit path, and heat
@@ -1188,6 +1203,9 @@ func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
 				"the visible FP submit stores the sim's team byte")
 		assert_eq(int(ctrl.get("HEAT_GLOW", -999)), int(weapon_view.heat_glow),
 				"the FP writer publishes the FSM's literal heat value (cold zero)")
+		# OpenNova's magazine registers ride the same submit, gun and arms
+		# alike (world::fp_magazine_registers, D-3DI-7).
+		_assert_magazine_registers(ctrl, weapon_view)
 	# The arms part alone carries the character's raw camo triplet, stored by
 	# the same per-submit writer family (Avatar_SetArmsCamoCtrl before the arms
 	# submit); the gun part never does.
@@ -1310,6 +1328,17 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	assert_true(reached_recoil, "the held trigger chains fire -> recoil on the parts")
 	assert_gt(int(world.local_player_weapon_view().play_serial), serial_before,
 			"the FSM's play serial advances with the served clips")
+
+	# The consumed round moves OpenNova's magazine registers on both parts on
+	# the next submit (D-3DI-7).
+	_frame(world, presenter, camera, 1)
+	var view: PlayerWeaponView = world.local_player_weapon_view()
+	assert_eq(int(view.clip_capacity), 30, "the M4 carries a 30-round clip")
+	assert_lt(int(view.clip), 30, "the trigger pull consumed rounds")
+	for part_v in presenter.vm_parts():
+		var ctrl: Dictionary = (part_v as ObjectModel).get_ctrl_values()
+		_assert_magazine_registers(ctrl, view)
+		assert_gt(int(ctrl.get("WPN_SPENT", 0)), 0, "the spent share moved off full")
 
 
 func test_fire_mode_change_keeps_one_posed_viewmodel_per_frame() -> void:
