@@ -45,11 +45,13 @@ struct DialogsView {
 	// shown, wrote nothing, and this is the plan made again. `all`: every file of the game
 	// install chosen at once (ADR 0046 S14), nothing to choose from and no walk (the closure of
 	// everything is everything; the setting changes nothing of it). Every plan made posts an
-	// ImportPlanned event (view_events.h).
+	// ImportPlanned event (view_events.h). `facts`: each choice's kind and size, in the order of
+	// `choices` (the UX round's project lane: the chooser's Kind and Size).
 	struct ImportPreview {
 		ImportPreview(); // the plan made, empty
 		bool open = false;
 		std::vector<ImportChoice> choices;
+		std::vector<ImportChoiceFacts> facts;
 		std::vector<ImportChoice> roots;
 		bool with_dependencies = false;
 		bool all = false;

@@ -57,18 +57,23 @@ constexpr bool holds_conflict(Holds reads, Holds writes, Holds held_reads, Holds
 	return holds_any(writes, held_reads | held_writes) || holds_any(reads, held_writes);
 }
 
-// A set of request kinds, one bit each.
+// A set of request kinds, one bit each, in words of 64.
 struct RequestKindSet {
-	uint64_t bits = 0;
+	static constexpr size_t kWords = 2;
+	uint64_t words[kWords] = {};
 	constexpr RequestKindSet() = default;
 	constexpr RequestKindSet(std::initializer_list<EditorRequestKind> kinds) {
-		for (const EditorRequestKind kind : kinds) bits |= uint64_t(1) << static_cast<unsigned>(kind);
+		for (const EditorRequestKind kind : kinds) {
+			const unsigned bit = static_cast<unsigned>(kind);
+			words[bit / 64] |= uint64_t(1) << (bit % 64);
+		}
 	}
 	constexpr bool has(EditorRequestKind kind) const {
-		return ((bits >> static_cast<unsigned>(kind)) & 1u) != 0;
+		const unsigned bit = static_cast<unsigned>(kind);
+		return ((words[bit / 64] >> (bit % 64)) & 1u) != 0;
 	}
 };
-static_assert(kEditorRequestKindCount <= 64, "a RequestKindSet holds every request kind");
+static_assert(kEditorRequestKindCount <= 64 * RequestKindSet::kWords, "a RequestKindSet holds every request kind");
 
 // Each kind's row: its wire token, what it reads and writes, the request kinds it serves as they
 // are while it runs (joined_by: a Build and a Play onto a build) and those that take its place,

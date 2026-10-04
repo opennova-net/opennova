@@ -107,7 +107,10 @@ std::string from_here(const std::string &path) {
 // preferences in memory, both ending with it), the verb it runs and where it prints.
 struct Cli {
 	Cli(const CliVerbRow &verb_row, std::FILE *out_to, std::FILE *err_to, bool as_json) :
-	        row(verb_row), out(out_to), err(err_to), json(as_json) {}
+	        row(verb_row), out(out_to), err(err_to), json(as_json) {
+		// A verb reads and writes no editor's workspace: the documents local.json lists stay unopened.
+		session.set_workspace_kept(false);
+	}
 
 	editor::NullProcessPlatform platform;
 	editor::MemoryPreferencesStore preferences;
