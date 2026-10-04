@@ -71,11 +71,64 @@ static int test_on_disk_form_is_deterministic() {
 	        "    \"multiplayer\": false\n"
 	        "  },\n"
 	        "  \"project_id\": \"00000000-0000-4000-8000-000000000000\",\n"
-	        "  \"schema_version\": 1,\n"
+	        "  \"schema_version\": 2,\n"
 	        "  \"target_game\": \"jo\",\n"
 	        "  \"title\": \"T\"\n"
 	        "}\n";
 	TEST_EXPECT(text == expected);
+	// An expansion project's object, both keys written; a standalone one has none (above).
+	doc.expansion = { "jxm", "jox01" };
+	const std::string with = opennova::io::json_write(project_document_to_json(doc));
+	TEST_EXPECT(with.find("  \"expansion\": {\n"
+	                      "    \"builds_on\": \"jox01\",\n"
+	                      "    \"name\": \"jxm\"\n"
+	                      "  },\n") != std::string::npos);
+	doc.expansion = { "jxm", "" };
+	TEST_EXPECT(opennova::io::json_write(project_document_to_json(doc)).find("\"builds_on\": \"\"") != std::string::npos);
+	return 0;
+}
+
+// The expansion object (ADR 0046 S16): read back as written, absent for a standalone project, and
+// refused where the game could not take it (the name rule, a builds_on with no name, another game).
+static int test_expansion_object() {
+	editor_test::TempProjectDir dir("opennova_editor_project_document_expansion_test");
+	Diagnostic error;
+	ProjectDocument doc;
+	const std::string root = dir.file("Mod");
+	TEST_EXPECT(create_project(root, "Mod", "jo", doc, error, ProjectExpansion{ "jxm", "jox01" }));
+	TEST_EXPECT(doc.expansion.name == "jxm" && doc.expansion.builds_on == "jox01");
+	ProjectDocument opened;
+	TEST_EXPECT(open_project(root, opened, error) && opened.expansion == doc.expansion);
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const auto refused = [&](const std::string &object, const char *code, const char *words) {
+		const std::string text = "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"target_game\": "
+		                         "\"jo\", \"expansion\": " + object + "}\n";
+		if (!editor_test::write_text(paths.project_file, text)) return false;
+		ProjectDocument out;
+		Diagnostic why;
+		return !open_project(root, out, why) && why.code() == code && why.message.find(words) != std::string::npos;
+	};
+	TEST_EXPECT(refused("[]", "project.field.invalid", "must be an object"));
+	TEST_EXPECT(refused("{}", "project.field.invalid", "names no expansion"));
+	TEST_EXPECT(refused("{\"name\": 3}", "project.field.invalid", "must be a string"));
+	TEST_EXPECT(refused("{\"builds_on\": \"jox01\"}", "project.field.invalid", "only as an expansion of its own"));
+	TEST_EXPECT(refused("{\"name\": \"my mod\"}", "project.field.invalid", "one word"));
+	TEST_EXPECT(refused("{\"name\": \"twelve_chars\"}", "project.field.invalid", "holds 11"));
+	TEST_EXPECT(refused("{\"name\": \"jxm\", \"builds_on\": \"a/b\"}", "project.field.invalid", "'/'"));
+	// An installed expansion's name binds no archive name: only the mount's 31 characters.
+	TEST_EXPECT(editor_test::write_text(paths.project_file,
+	        "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"expansion\": {\"name\": \"jxm\", "
+	        "\"builds_on\": \"a_long_expansion_name\"}}\n"));
+	TEST_EXPECT(open_project(root, opened, error) && opened.expansion.builds_on == "a_long_expansion_name");
+	// Only Joint Operations' expansions are witnessed.
+	TEST_EXPECT(editor_test::write_text(paths.project_file,
+	        "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"target_game\": \"dfx\", "
+	        "\"expansion\": {\"name\": \"jxm\"}}\n"));
+	TEST_EXPECT(!open_project(root, opened, error) && error.code() == "project.expansion.unsupported");
+	TEST_EXPECT(!create_project(dir.file("Dfx"), "t", "dfx", doc, error, ProjectExpansion{ "jxm", "" }));
+	TEST_EXPECT(error.code() == "project.expansion.unsupported" && !fs::exists(dir.file("Dfx")));
+	TEST_EXPECT(!create_project(dir.file("Long"), "t", "jo", doc, error, ProjectExpansion{ "twelve_chars", "" }));
+	TEST_EXPECT(error.code() == "project.field.invalid" && !fs::exists(dir.file("Long")));
 	return 0;
 }
 
@@ -92,17 +145,24 @@ static int test_refusals() {
 	std::error_code ec;
 	fs::create_directories(root, ec);
 	TEST_EXPECT(editor_test::write_text(paths.project_file,
-	                                    "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\"}\n"));
+	                                    "{\"schema_version\": 3, \"project_id\": \"x\", \"title\": \"t\"}\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
 	TEST_EXPECT(error.code() == "project.schema_version.unsupported");
+	// Schema 1, which S16's expansion object superseded: refused (no reader pre-1.0), saying what
+	// changed so its author can bring it over.
+	TEST_EXPECT(editor_test::write_text(paths.project_file,
+	                                    "{\"schema_version\": 1, \"project_id\": \"x\", \"title\": \"t\"}\n"));
+	TEST_EXPECT(!open_project(root, doc, error));
+	TEST_EXPECT(error.code() == "project.schema_version.unsupported" &&
+	            error.message.find("set \"schema_version\" to 2") != std::string::npos);
 
 	TEST_EXPECT(editor_test::write_text(
 	        paths.project_file,
-	        "{\"schema_version\": 1, \"project_id\": \"x\", \"title\": \"t\", \"target_game\": \"quake\"}\n"));
+	        "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"target_game\": \"quake\"}\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
 	TEST_EXPECT(error.code() == "project.target_game.unknown");
 
-	TEST_EXPECT(editor_test::write_text(paths.project_file, "{\"schema_version\": 1,\n"));
+	TEST_EXPECT(editor_test::write_text(paths.project_file, "{\"schema_version\": 2,\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
 	TEST_EXPECT(error.code() == "project.json");
 
@@ -207,6 +267,7 @@ int main() {
 	failures += test_create_then_open();
 	failures += test_on_disk_form_is_deterministic();
 	failures += test_refusals();
+	failures += test_expansion_object();
 	failures += test_export_dir_and_local_settings();
 	if (failures == 0) std::printf("editor_project_document: all tests passed\n");
 	return failures == 0 ? 0 : 1;

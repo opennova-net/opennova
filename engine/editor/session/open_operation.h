@@ -39,6 +39,7 @@ public:
 	const std::string &run_install() const { return run_install_; }
 	const ProjectDocument &document() const { return document_; }
 	std::vector<std::string> &install_files() { return install_files_; }
+	std::vector<std::string> &base_files() { return base_files_; }
 	ProjectRefresh &refresh() { return refresh_; }
 
 private:
@@ -48,6 +49,7 @@ private:
 	std::string seed_;
 	std::string run_install_;
 	std::vector<std::string> install_files_;
+	std::vector<std::string> base_files_;
 	bool listed_ = false; // the game install's names read
 	ProjectRefresh refresh_;
 };
