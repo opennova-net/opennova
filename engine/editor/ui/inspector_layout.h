@@ -41,8 +41,9 @@ struct InspectorSection {
 
 // The sections for `record`, whose fields are shown, and `collections_owner`, whose
 // collections are (the record itself, or its owner when it holds none: the records beside
-// it). A filter keeps the fields whose id, name or key as the file spells it contains it and
-// the collections whose name or token does ("" = everything); a section left empty is dropped.
+// it, each headed with its owner's title, "Collision: Volumes", as the owner's). A filter keeps
+// the fields whose id, name or key as the file spells it contains it and the collections whose
+// name or token does ("" = everything); a section left empty is dropped.
 std::vector<InspectorSection> plan_inspector(const Document &document, const NodeAddress &record,
                                              const NodeAddress &collections_owner, const std::string &filter);
 // The plan without what a type's own part of the Inspector draws itself (ADR 0046 S15: a mission's
