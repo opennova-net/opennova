@@ -39,7 +39,8 @@ bool ImportOperation::step(const StepBudget &budget) {
 		// The sources the plan takes, looked up once (a mission's closure asks for thousands).
 		std::set<std::string> taken;
 		const auto key_of = [](const ImportChoice &source) {
-			return source.path + '\n' + source.entry + '\n' + (source.install ? '1' : '0') + (source.native ? '1' : '0');
+			return source.path + '\n' + source.entry + '\n' + (source.install ? '1' : '0') + (source.native ? '1' : '0') +
+			       '\n' + source.as;
 		};
 		for (const ImportPlanRow &row : new_plan_->rows)
 			if (row.state != ImportPlanRow::State::NotFound) taken.insert(key_of(row.source));
