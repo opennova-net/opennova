@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include <editor/import/import_pass.h>
+#include <editor/import/import_run.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_refresh.h>
 #include <editor/session/session_operation.h>
@@ -30,6 +32,25 @@ private:
 	bool reimport_ = false;
 	std::string only_;
 	ProjectRefresh refresh_;
+};
+
+// What a program changed of the watched files refreshed alone (S18's external round trip, ExternalChanges):
+// the import pass over the sources it names (ImportPass::limit_to), stepped by bytes; no walk of the
+// project. finish() takes it into the view (SessionCore::absorb_changed: the scan updated for those
+// sources and the files alone).
+class ChangedSourcesOperation : public SessionOperation {
+public:
+	ChangedSourcesOperation(const ProjectPaths &paths, const ProjectDocument &document, ExternalChanges changes);
+
+	OperationKind kind() const override { return OperationKind::Refresh; }
+	bool step(const StepBudget &budget) override { return pass_.step(budget.bytes); }
+	OperationProgress progress() const override;
+	void cancel() override {}
+	OperationOutcome finish(SessionCore &core) override;
+
+private:
+	ExternalChanges changes_;
+	ImportPass pass_;
 };
 
 } // namespace opennova::editor
