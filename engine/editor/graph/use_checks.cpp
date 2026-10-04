@@ -34,6 +34,7 @@ Diagnostic on_definition(const GraphSymbol &symbol, DiagnosticSeverity severity,
 	Diagnostic d = make_finding(code, severity, message, symbol.file, field);
 	d.line = line;
 	d.record = symbol.record;
+	d.record_key = symbol.record_key;
 	d.row_id = symbol.address.row;
 	d.child_id = symbol.address.child;
 	d.record_kind = symbol.address.kind;
@@ -154,6 +155,7 @@ void pool_findings(const AssetGraph &graph, const std::string &path, std::vector
 		                                    ". What the game makes of it is not known.",
 		                            path, edge->field);
 		d.record = edge->record;
+		d.record_key = edge->record_key;
 		d.row_id = edge->address.row;
 		d.child_id = edge->address.child;
 		d.record_kind = edge->address.kind;

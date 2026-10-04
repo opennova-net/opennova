@@ -34,6 +34,10 @@ private:
 	ReferenceKind kind_ = ReferenceKind::None;
 	char name_[128]{};
 	std::string asked_; // the name the last PreviewRename was raised for
+	// The last rename's way back (a PreviewRenameBack's ask): its plan shown, Rename back raises RenameBack.
+	bool back_ = false, open_back_ = false;
+	uint64_t back_serial_ = 0;
+	void draw_back(Workspace &workspace);
 };
 
 } // namespace opennova::editor
