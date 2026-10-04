@@ -94,6 +94,12 @@ struct DocumentType {
 	io::JsonValue (*content_json)(const DocumentBase &document) = nullptr;
 };
 
+// A record in its type's own words with no project names (its record_label with none, else the
+// document's record_title), "" where those words are its name (record_name): what a place kept apart
+// from its document names the record by (GraphEdge::record_title, GraphSymbol::title,
+// Diagnostic::record_title; the plain-words lane), so a closed file's reads as an open one's.
+std::string record_own_title(const Document &document, const NodeAddress &address);
+
 // The type its row names (null for DocumentTypeId::None); the type that opens a kind (null for a
 // kind the build packs as it is).
 const DocumentType *document_type(DocumentTypeId id);

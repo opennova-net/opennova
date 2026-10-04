@@ -63,6 +63,11 @@ private:
 
 	// The mark after a record's line where a finding is on it (none drawn for none).
 	void finding_mark(const SessionView &view, const Document &document, const NodeAddress &address);
+	// Master and detail: the widest value of the column whose field defines a record's name (a string's
+	// key) over `lines`, its box's padding on top, measured again only when the document's revision or
+	// the lines move; and the widest row name of the master column, the same way.
+	float defining_width(const Document &document, const std::vector<OutlineLine> &lines, const FieldSchema &field);
+	float masters_width(const Document &document);
 
 	OutlineSpec spec_;
 	OutlineModel model_;
@@ -70,6 +75,13 @@ private:
 	FindingsIndex findings_;
 	char filter_[128]{};  // the filter box's text: the model's filter
 	NodeAddress editing_; // master and detail: the record whose cell had the keyboard last frame
+	struct Measured {
+		float width = 0.0f;
+		uint64_t document = 0, revision = ~uint64_t(0);
+		size_t lines = SIZE_MAX;
+		const void *first = nullptr;
+	};
+	Measured defining_, masters_; // defining_width's and masters_width's
 };
 
 } // namespace opennova::editor

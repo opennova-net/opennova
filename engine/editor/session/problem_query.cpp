@@ -306,7 +306,17 @@ std::string finding_record_title(const Diagnostic &diagnostic, const SessionView
 		const std::string title = record_display(*document, address, names ? &*names : nullptr);
 		return title == document->record_name(address) ? std::string() : title;
 	}
-	return std::string();
+	// A closed file's: a record defining a name by the words the project's names give it, as the open
+	// file's title reads (definition_words: an ammo by the name the player sees), else the words cached
+	// with the finding (Diagnostic::record_title, its type's own words; the plain-words lane, the audit's 6.7).
+	if (view.findings.graph && !diagnostic.record.empty()) {
+		const GraphNameSource names(*view.findings.graph);
+		for (const GraphSymbol *symbol : view.findings.graph->symbols_of(diagnostic.asset, diagnostic.record)) {
+			const std::string words = definition_words(*symbol, &names);
+			if (!words.empty() && words != symbol->display && words != diagnostic.record) return words;
+		}
+	}
+	return diagnostic.record_title;
 }
 
 std::string finding_field_title(const Diagnostic &diagnostic, const SessionView &view) {
@@ -323,7 +333,10 @@ std::string finding_field_title(const Diagnostic &diagnostic, const SessionView 
 		}
 		return std::string();
 	}
-	return std::string();
+	// A closed file's: the label its type gives the field, no document read (the audit's 6.7: "key" where an
+	// open file's row said "Key").
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(diagnostic.asset) : nullptr;
+	return entry ? field_words(entry->kind, diagnostic.record_kind, diagnostic.field) : std::string();
 }
 
 EditorRequest ProblemLocation::request() const {
