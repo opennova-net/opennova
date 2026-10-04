@@ -2,6 +2,7 @@
 
 #include <filesystem>
 
+#include <base/io/file_time.h>
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_scan.h>
@@ -31,6 +32,19 @@ ImportRunResult run_imports(const ProjectPaths &paths, const ProjectDocument &pr
 	while (!pass.step(kWholeWalkStep)) {
 	}
 	return pass.take();
+}
+
+std::vector<std::string> changed_import_sources(const ProjectPaths &paths, const AssetScan &scan) {
+	std::vector<std::string> out;
+	for (const AssetEntry &entry : scan.entries) {
+		if (entry.kind != AssetKind::ImportSource) continue;
+		const fs::path file = system_path(join_path(paths.root, entry.relative_path));
+		std::error_code ec;
+		const uint64_t size = uint64_t(fs::file_size(file, ec));
+		if (ec) continue;
+		if (size != entry.size_bytes || io::file_modified_ticks(file) != entry.modified_ticks) out.push_back(entry.relative_path);
+	}
+	return out;
 }
 
 } // namespace opennova::editor

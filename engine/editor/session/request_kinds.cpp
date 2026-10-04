@@ -179,6 +179,12 @@ void serve_replace_texture(SessionCore &core, const EditorRequest &request) {
 void serve_split_texture(SessionCore &core, const EditorRequest &request) {
 	core.renames().split_texture(request);
 }
+void serve_edit_externally(SessionCore &core, const EditorRequest &request) {
+	core.imports().edit_externally(request);
+}
+void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &) {
+	core.imports().refresh_changed_sources();
+}
 void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
 	core.imports().preview_install(request);
 }
@@ -252,6 +258,11 @@ struct Request {
 	constexpr Request ends_edit_groups() const {
 		Request out = *this;
 		out.row.ends_edit_groups = true;
+		return out;
+	}
+	constexpr Request background() const {
+		Request out = *this;
+		out.row.background = true;
 		return out;
 	}
 };
@@ -701,6 +712,28 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Split %s", "Save all and split")
 			.acts_on_saved()
+			.row,
+	// A source made once is an import of it (S18), as replace_texture's.
+	Request(K::EditExternally, "edit_externally", serve_edit_externally,
+			"The texture path's source opened in the program the system has for its kind: an import's "
+			"output's own source, a PNG the game reads as it is itself, a plain texture's made once (a copy "
+			"of a TGA or a PCX, a PNG of a DDS's first level, in art/ under a name of its own, its record "
+			"reproducing the texture, the plain file set aside under .opennova/replaced/) and imported, a "
+			"refresh. The open_externally view event names the file on disk, which the Shell opens. Refused "
+			"(texture.external): a name the project lacks, a file that does not read, a texture open with "
+			"unsaved edits.")
+			.takes(request_params({ F::Path }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.row,
+	Request(K::RefreshChangedSources, "refresh_changed_sources", serve_refresh_changed_sources,
+			"When an import source's size or last write moved since the scan (a program saved it), a refresh "
+			"(the outcome names the operation), which imports it again and reads again the open documents "
+			"whose files changed; nothing otherwise, no operation started. The Shell sends it when its "
+			"window gains the focus and once a second while it has it, of its own: the status line a "
+			"refused request left stays.")
+			.holds(kFiles, kFiles | kSlot)
+			.background()
 			.row,
 	Request(K::PreviewInstallImport, "preview_install_import", serve_preview_install_import,
 			"The import dialog on the game install's files: the names alone, chosen, or with none "

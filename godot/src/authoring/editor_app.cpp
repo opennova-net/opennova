@@ -77,6 +77,10 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("start_mcp_endpoint", "port"), &EditorApp::start_mcp_endpoint);
 	ClassDB::bind_method(D_METHOD("get_mcp_port"), &EditorApp::get_mcp_port);
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
+	ClassDB::bind_method(D_METHOD("set_open_externally", "open"), &EditorApp::set_open_externally);
+	ClassDB::bind_method(D_METHOD("get_open_externally"), &EditorApp::get_open_externally);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "open_externally"), "set_open_externally", "get_open_externally");
+	ClassDB::bind_method(D_METHOD("get_last_external_open"), &EditorApp::get_last_external_open);
 
 	ClassDB::bind_method(D_METHOD("set_settings_path", "path"), &EditorApp::set_settings_path);
 	ClassDB::bind_method(D_METHOD("get_settings_path"), &EditorApp::get_settings_path);
@@ -311,12 +315,42 @@ void EditorApp::pump() {
 	// budget steps the validation they left due first (S13 A3: no request runs it).
 	serve_queued_device_requests_();
 	drain_requests();
+	// A source a program edits comes back once a second while the window has the focus (S18).
+	if (focused_) {
+		const uint64_t now = Time::get_singleton()->get_ticks_msec();
+		if (now - last_source_check_ms_ >= 1000) {
+			last_source_check_ms_ = now;
+			refresh_changed_sources_();
+		}
+	}
 	session_->poll();
+	open_externally_events_();
 	// The devices follow their viewports: the Preview's targets given one, each taking what its
 	// viewport asks.
 	if (devices_) devices_->sync(session_->viewports(), session_->view());
 	apply_window_title();
 	if (session_->view().dialogs.quit_requested) get_tree()->quit(0);
+}
+
+// The import sources a program saved, imported again (S18: RefreshChangedSources), when the busy gate
+// takes it: an operation that holds the files runs, and the next check asks again.
+void EditorApp::refresh_changed_sources_() {
+	if (!session_ || !session_->view().project.open ||
+			!session_->view().allows(opennova::editor::EditorRequestKind::RefreshChangedSources))
+		return;
+	session_->handle(opennova::editor::request::refresh_changed_sources());
+}
+
+// Each OpenExternally view event the session posted since the last pump: its file opened in the program
+// the system has for it (OS::shell_open), or, with open_externally off (a test's), only kept.
+void EditorApp::open_externally_events_() {
+	for (const opennova::editor::ViewEvent &event : session_->view().events.held()) {
+		if (event.seq <= external_seq_) continue;
+		external_seq_ = event.seq;
+		if (event.kind != opennova::editor::ViewEventKind::OpenExternally) continue;
+		last_external_open_ = opennova::to_gd(event.path);
+		if (open_externally_) OS::get_singleton()->shell_open(last_external_open_);
+	}
 }
 
 void EditorApp::set_poll_budget(int p_ms, int64_t p_step_bytes) {
@@ -605,6 +639,13 @@ int EditorApp::get_mission_entity_key(const String &p_path, int64_t p_row) const
 void EditorApp::_notification(int p_what) {
 	if (p_what == NOTIFICATION_WM_CLOSE_REQUEST) {
 		ensure_session(); session_->handle(opennova::editor::request::quit());
+	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_IN) {
+		// Back from another program (S18): what it saved comes back now, then once a second (pump).
+		focused_ = true;
+		last_source_check_ms_ = Time::get_singleton()->get_ticks_msec();
+		refresh_changed_sources_();
+	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_OUT) {
+		focused_ = false;
 	}
 }
 } // namespace godot

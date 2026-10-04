@@ -56,6 +56,14 @@ public:
 	// (texture.replace): what the plan refuses, an image that does not read, a texture open with unsaved
 	// edits.
 	void replace_texture(const EditorRequest &request);
+	// EditExternally (S18): the texture's source opened in its program (import/texture_source.h's
+	// plan_texture_source: made once for a plain texture, then imported), the OpenExternally view event the
+	// Shell opens it by. Refused (texture.external): what the plan refuses, a texture open with unsaved
+	// edits.
+	void edit_externally(const EditorRequest &request);
+	// RefreshChangedSources (S18): a refresh when an import source moved since the scan
+	// (changed_import_sources), nothing otherwise.
+	void refresh_changed_sources();
 	// The game install's file names, for the Import fixes (problem_fixes.h), and for a project that
 	// builds as an expansion its base game's, for its build's gate (ADR 0046 S16).
 	void refresh_install_files();

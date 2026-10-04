@@ -312,3 +312,42 @@ func test_a_texture_replaced_by_an_image() -> void:
 			made = String(file.get("imported_from", ""))
 	assert_eq(made, "art/mine.png", "the texture is the image's import output now")
 	assert_false(FileAccess.file_exists(root.path_join("textures/brick.tga")), "the file it replaced is set aside")
+
+
+## S18: a texture opened in its program through the wire: edit_externally's open_externally event taken by
+## the Shell at the next pump (kept, not opened, with open_externally off); what the program saves comes
+## back through refresh_changed_sources, the texture made from it again.
+func test_a_texture_edited_in_its_program() -> void:
+	if _app == null:
+		return
+	_app.set("open_externally", false)
+	var root := _new_project()
+	_write(root.path_join("textures/brick.tga"), _tga(0))
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.settle())
+	assert_true(_seam.done({"kind": "edit_externally", "path": "textures/brick.tga"}), "edit_externally is served")
+	assert_true(_seam.settle())
+	_app.pump()
+	var source := root.path_join("art/brick_src.tga")
+	assert_eq(String(_app.get_last_external_open()).replace("\\", "/"), source.replace("\\", "/"),
+			"the Shell takes the source it names")
+	# The program saves the source: the import makes the texture from it again.
+	var saved := _tga(0)
+	saved[18] = 0
+	saved[19] = 0
+	saved[20] = 255
+	_write(source, saved)
+	assert_true(_seam.done({"kind": "refresh_changed_sources"}), "refresh_changed_sources is served")
+	assert_true(_seam.settle())
+	var output := ""
+	for file in _seam.every("files", "files", {"limit": 200}):
+		if String(file.get("name", "")) == "brick.tga":
+			output = String(file.get("path", ""))
+	assert_true(_seam.open_document(output), "the import's output opens: %s" % output)
+	var state := await _await_ready(output)
+	var material := _material(output)
+	assert_not_null(material, str(state))
+	if material == null:
+		return
+	var texture := material.get_shader_parameter("level_nearest") as Texture2D
+	assert_eq(texture.get_image().get_pixel(0, 1), Color8(255, 0, 0, 50), "the texel the program saved")

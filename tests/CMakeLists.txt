@@ -4232,6 +4232,14 @@ target_link_libraries(editor_texture_replace_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_replace_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_replace COMMAND editor_texture_replace_test)
 
+# ADR 0046 S18, the external program round trip (edit_externally, refresh_changed_sources): a plain TGA
+# given a source once and opened, a change saved there imported and its document read again, nothing done
+# for nothing changed, an output's own source, a missing name; the Shell's check leaving a refusal's line.
+add_executable(editor_texture_external_test editor/texture_external_test.cpp)
+target_link_libraries(editor_texture_external_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_external_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_external COMMAND editor_texture_external_test)
+
 # A file's rename through the native texts (ADR 0046 S18, graph/native_text_sites): a terrain's, an
 # environment's, a particle file's and the HUD layout's names rewritten as text, only the token the game
 # reads at each site; a flipbook's frame refused; a file in the SCR form written back as plain text. The

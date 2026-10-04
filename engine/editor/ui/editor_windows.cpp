@@ -249,6 +249,7 @@ void EditorWindows::dispatch_events() {
 		case ViewEventKind::BuildEnded:
 			if (!(event.flag && event.tag == 1)) build_panel_open_ = true;
 			break;
+		case ViewEventKind::OpenExternally: break; // the Shell's (EditorApp opens the file)
 		case ViewEventKind::kCount: break;
 		}
 	}

@@ -121,6 +121,13 @@ public:
 	// seconds): what the session's refusals and a device's notices say. For the tests; "" for none.
 	String get_status_text() const;
 
+	// Whether an open_externally view event (S18: an edit_externally's) opens its file in the program the
+	// system has for it (OS::shell_open; the `open_externally` property, true): a test turns it off and
+	// reads the file the last one named instead ("" for none yet).
+	void set_open_externally(bool p_open) { open_externally_ = p_open; }
+	bool get_open_externally() const { return open_externally_; }
+	String get_last_external_open() const { return last_external_open_; }
+
 	// "editor": the variant this library is (the runtime variant has no EditorApp).
 	String get_loaded_variant() const { return "editor"; }
 	// True when Play drives the Godot binary at the source checkout instead of a
@@ -170,6 +177,11 @@ private:
 	// The SubViewports of devices given up before this frame, freed (queued: they go at the frame's
 	// end, after the ImGui pass of this frame drew without them).
 	void free_retired_();
+	// A refresh_changed_sources sent of the Shell's own (S18), when the busy gate takes it: as the
+	// window gains the focus and once a second while it has it.
+	void refresh_changed_sources_();
+	// The open_externally view events posted since the last pump, each file opened in its program.
+	void open_externally_events_();
 
 	std::unique_ptr<ChildProcessPlatform> platform_;
 	// The preferences' store, owned here and outliving the session that reads and writes it.
@@ -200,6 +212,13 @@ private:
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window
+	// The external round trip (S18): whether the window has the focus, when the sources were last
+	// checked, the last view event taken, and the file the last open_externally named.
+	bool focused_ = false;
+	uint64_t last_source_check_ms_ = 0;
+	uint64_t external_seq_ = 0;
+	bool open_externally_ = true;
+	String last_external_open_;
 };
 
 } // namespace godot

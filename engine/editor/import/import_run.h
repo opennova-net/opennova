@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/assets/asset_registry.h>
 #include <editor/import/sidecar.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
@@ -61,5 +62,10 @@ bool import_source_named(const std::string &only, const std::string &source_rela
 // Where a source's outputs live, project-relative: a directory named by a hash of the
 // source's project-relative path (lower-cased), so it is stable across imports.
 std::string import_output_dir(const ProjectPaths &paths, const std::string &source_relative_path);
+
+// The import sources of `scan` whose file's size or last write moved since the scan read it (a program
+// saved it: ADR 0046 S18's external round trip), project-relative, in the scan's order; a source gone is
+// none (the next scan says so). What refresh_changed_sources asks before it refreshes: a stat a source.
+std::vector<std::string> changed_import_sources(const ProjectPaths &paths, const AssetScan &scan);
 
 } // namespace opennova::editor

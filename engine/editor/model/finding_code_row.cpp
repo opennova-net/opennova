@@ -277,6 +277,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// use asks.
 	{ C::TextureAlphaNotLoaded, code("texture.alpha_not_loaded", G::Textures, F::ImportFitsUse) },
 	{ C::TextureColourMapSize, code("texture.colormap_size", G::Textures, F::ImportFitsUse) },
+	{ C::TextureExternal, code("texture.external", G::Textures) },
 	{ C::TextureFoliageMapOverrun, code("texture.foliage_map_overrun", G::Textures, F::ImportFitsUse) },
 	{ C::TextureFoliageMapShape, code("texture.foliage_map_shape", G::Textures, F::ImportFitsUse) },
 	{ C::TextureHeightWrap, code("texture.height_wrap", G::Textures, F::ImportFitsUse) },

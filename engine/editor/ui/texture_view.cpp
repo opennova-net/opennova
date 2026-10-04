@@ -97,7 +97,7 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 	const TextureImage *image = texture ? texture->image().get() : nullptr;
 	ImGui::TextUnformatted(basename_of(document.path()).c_str());
 	ui_kit::tooltip(document.path() + "\nShown as the game reads it. Its edits are whole-image ones (Edit, below); paint it in "
-	                                  "your own program.");
+	                                  "your own program (Edit in its program).");
 	if (!image) {
 		ui_kit::empty_state("This texture did not read.");
 		return;
@@ -131,6 +131,15 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 		pick.path = document.path();
 		workspace.request(std::move(pick));
 	}
+	// Painted in the modder's own program (S18): what it saves comes back as the editor gains the focus.
+	const bool unsaved = document.dirty();
+	if (ui_kit::tool(made, "Edit in its program", view.allows(EditorRequestKind::EditExternally) && !unsaved,
+	                 unsaved ? "Save or discard its edits first: its program edits the file as saved."
+	                         : "Opens the image this texture is made from in the program your system has for it: its "
+	                           "import's source, or a PNG the game reads itself. A texture stored in another form gets a "
+	                           "source of its own once, in art/, which its import turns back into this file. What the "
+	                           "program saves is imported again when you come back to the editor."))
+		workspace.request(request::edit_externally(document.path()));
 	if (!image->palette.empty() && ImGui::CollapsingHeader("Palette", ImGuiTreeNodeFlags_DefaultOpen)) draw_palette(image->palette);
 	draw_import(workspace, document);
 	if (!import_.imported) draw_edits(workspace, document, *image);

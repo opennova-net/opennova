@@ -108,7 +108,8 @@ void SessionCore::start() {
 	touch(ViewConcern::Output);
 }
 
-SessionCore::RequestScope::RequestScope(SessionCore &core) : core_(core), outermost_(!core.in_request_) {
+SessionCore::RequestScope::RequestScope(SessionCore &core, bool background)
+	: core_(core), outermost_(!core.in_request_), background_(background) {
 	assert(outermost_ && "a request entered the session while another was served");
 	if (!outermost_) return;
 	core_.outcome_ = ActionOutcome();
@@ -120,10 +121,10 @@ SessionCore::RequestScope::~RequestScope() {
 	if (!outermost_) return;
 	// A refused request's line is its own: kept until a request is served, which said its own line
 	// or, having said nothing, leaves none (ADR 0046 S15). A refusal that said nothing on the line
-	// claims none.
+	// claims none. One the Shell sent of its own (S18: a timer's) leaves it.
 	if (core_.outcome_.refused) {
 		if (core_.view_.activity.status != status_before_) core_.refusal_status_ = core_.view_.activity.status;
-	} else if (!core_.refusal_status_.empty()) {
+	} else if (!background_ && !core_.refusal_status_.empty()) {
 		if (core_.view_.activity.status == core_.refusal_status_) {
 			core_.view_.activity.status.clear();
 			core_.touch(ViewConcern::Output);
@@ -465,6 +466,9 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	// A whole refresh (an open, a Rescan, a Reimport) makes a new scan, on which the game's own data's
 	// baseline looks at the install's folder again (S15: a patch over it is validated again).
 	problems().validate_later();
+	// The open documents whose files the refresh changed (an import's outputs made again: S18, a texture
+	// a program saved the source of) read again; one with unsaved edits is a conflict, as on a Rescan.
+	documents().reload_changed();
 	return imports;
 }
 

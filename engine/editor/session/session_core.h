@@ -100,10 +100,11 @@ public:
 	// the outer outcome's, which it neither empties nor ends. Leaving the scope, however it is
 	// left, ends only the request it began. The status line a refused request leaves is that
 	// request's (ADR 0046 S15): the next request served without a refusal replaces it with its own
-	// line, or, saying nothing, clears it, so a refusal never reads as the outcome of what came after.
+	// line, or, saying nothing, clears it, so a refusal never reads as the outcome of what came after;
+	// a `background` request (its row's: one the Shell sends of its own, S18) is no such request.
 	class RequestScope {
 	public:
-		explicit RequestScope(SessionCore &core);
+		explicit RequestScope(SessionCore &core, bool background = false);
 		~RequestScope();
 		RequestScope(const RequestScope &) = delete;
 		RequestScope &operator=(const RequestScope &) = delete;
@@ -111,6 +112,7 @@ public:
 	private:
 		SessionCore &core_;
 		bool outermost_;
+		bool background_;
 		std::string status_before_; // the line when the request arrived
 	};
 	const ActionOutcome &outcome() const { return outcome_; }

@@ -25,6 +25,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
 #include <editor/session/texture_import_state.h>
+#include <editor/session/view/view_events.h>
 
 namespace opennova::editor {
 
@@ -207,6 +208,45 @@ void ImportController::replace_texture(const EditorRequest &request) {
 	core_.note("Replaced " + plan.texture + " with " + basename_of(image) + ": " + plan.source + " makes it now, as its import record says" +
 	           (plan.replaced.empty() ? std::string(".") : "; the file it replaced is kept under .opennova/replaced/."));
 	reimport(plan.source, true);
+}
+
+void ImportController::edit_externally(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	const TextureSourcePlan plan = plan_texture_source(paths_, *view_.project.scan, request.path);
+	if (!plan.ok()) return core_.refuse_now(CoreFinding::TextureExternal, plan.refusals.back().message, plan.refusals.back().asset);
+	if (!plan.bytes.empty()) {
+		// A plain texture's source made once: the file set aside takes its open document with it.
+		if (DocumentBase *open = core_.documents().document_for(plan.replaced)) {
+			if (open->dirty())
+				return core_.refuse_now(CoreFinding::TextureExternal,
+				                        plan.texture + " is open with unsaved edits: save or discard them before its program edits it.",
+				                        plan.replaced);
+			core_.documents().close_document(plan.replaced);
+		}
+		std::vector<Diagnostic> findings;
+		if (!apply_texture_source(paths_, plan, findings)) {
+			for (size_t i = 0; i + 1 < findings.size(); ++i) core_.report(findings[i]);
+			return core_.refuse_now(CoreFinding::TextureExternal,
+			                        findings.empty() ? std::string("No source could be made.") : findings.back().message, plan.texture);
+		}
+		core_.note("Made " + plan.source + " for " + plan.texture + ": its import makes the texture from it now, so what its "
+		           "program saves there comes back; the file it replaced is kept under .opennova/replaced/.");
+		reimport(plan.source, true);
+	}
+	ViewEvent open;
+	open.kind = ViewEventKind::OpenExternally;
+	open.path = join_path(view_.project.root, plan.source);
+	view_.events.post(std::move(open));
+	core_.touch(ViewConcern::Dialogs);
+	view_.activity.status = "Opening " + plan.source + " in its program.";
+	core_.touch(ViewConcern::Output);
+}
+
+void ImportController::refresh_changed_sources() {
+	if (!view_.project.open || !view_.project.scan) return;
+	if (changed_import_sources(paths_, *view_.project.scan).empty()) return;
+	if (core_.start_refresh()) view_.activity.status = "Importing what its program saved...";
+	core_.touch(ViewConcern::Output);
 }
 
 // The import dialog on `roots` chosen among `choices` (each file once), planned with the

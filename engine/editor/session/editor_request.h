@@ -68,6 +68,8 @@ enum class EditorRequestKind {
 	TextureOperation,
 	ReplaceTexture,
 	SplitTexture,
+	EditExternally,
+	RefreshChangedSources,
 	PreviewInstallImport,
 	ClearOutput,
 	SetViewport,

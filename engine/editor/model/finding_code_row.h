@@ -393,6 +393,7 @@ enum class CoreFinding {
 	RequirementWrongKind,
 	TextureAlphaNotLoaded,
 	TextureColourMapSize,
+	TextureExternal,
 	TextureFoliageMapOverrun,
 	TextureFoliageMapShape,
 	TextureHeightWrap,

@@ -83,7 +83,7 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 
 bool ProjectSession::handle(const EditorRequest &request) {
 	++impl_->handle_entries;
-	const SessionCore::RequestScope scope(impl_->core);
+	const SessionCore::RequestScope scope(impl_->core, request_kind_row(request.kind).background);
 	// A gesture of the wire's open in the document the request is on ends first, unless the request is
 	// its next sample (S13 V7).
 	impl_->core.request_arrives(request);
