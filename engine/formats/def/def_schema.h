@@ -6,6 +6,8 @@
 #include <variant>
 #include <vector>
 
+#include <formats/def/def.h>
+
 namespace opennova::def {
 
 // The records the tables describe: the item, weapon and ammo tables' rows and what they hold, a
@@ -141,5 +143,20 @@ bool def_set(void *record, const DefField &field, const DefValue &value, std::st
 void def_sync_derived(DefRecordKind kind, void *record, const std::string &field);
 size_t def_record_size(DefRecordKind kind);
 void def_init_record(DefRecordKind kind, void *record);
+
+// The order a record's lines were read in (def.h's DefLineOrder), a writer's to keep: the record's
+// own, null for a kind that keeps none (a sight, an attachment, an effect, a carry limit, a powerup
+// and what it holds: one line each, or few enough to write in the table's order).
+DefLineOrder *def_line_order(DefRecordKind kind, void *record);
+const DefLineOrder *def_line_order(DefRecordKind kind, const void *record);
+// A line of `kind`'s record read: the property its key names (the line's first token, any case; an
+// alias the parser reads into a property's members as the property: sqb_rate as deathtime,
+// particletesttime as dawnshot; an item's addeweap rows, a weapon's sights and an ammo's effects table
+// as the record's rows, DEF_LINE_ORDER_ROWS; a weapon's action blocks, DEF_LINE_ORDER_BLOCKS) noted in
+// `order` at its first line. A key no property has notes nothing.
+void def_note_line(DefRecordKind kind, DefLineOrder &order, const char *line, size_t length);
+// The leading blanks of a line read inside a block, as a file's indentation (DefLayout), the first
+// time a file meets one: what its writer indents with.
+void def_note_indent(DefLayout &layout, bool &noted, const char *line, size_t length);
 
 } // namespace opennova::def

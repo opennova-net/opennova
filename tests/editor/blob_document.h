@@ -40,11 +40,14 @@ public:
 			for (const State &state : *list) bytes += state.blob.size();
 		return bytes;
 	}
+	// A line starting with '%' is no part of the file: a note its save says (SerializeResult::notes).
 	opennova::editor::SerializeResult serialize() const override {
 		opennova::editor::SerializeResult result;
 		std::istringstream in(blob_);
-		for (std::string line; std::getline(in, line);)
-			if (line.rfind('#', 0) != 0) result.text += line + "\n";
+		for (std::string line; std::getline(in, line);) {
+			if (line.rfind('%', 0) == 0) result.notes.push_back(line.substr(1));
+			else if (line.rfind('#', 0) != 0) result.text += line + "\n";
+		}
 		return result;
 	}
 	std::unique_ptr<opennova::editor::DocumentBase> snapshot() const override {

@@ -120,8 +120,9 @@ void test_frame_bracket_follows_the_table() {
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.
+	// The plain-words lane: a string id's words set name the document whose field holds the id.
 	const std::vector<K> active = {K::OpenDocument, K::ReloadDocument, K::CloseDocument, K::SelectRecord, K::EditRecord,
-	                               K::RevertToSaved, K::EndEdit, K::Copy, K::Cut, K::Paste, K::Duplicate, K::Save,
+	                               K::SetStringText, K::RevertToSaved, K::EndEdit, K::Copy, K::Cut, K::Paste, K::Duplicate, K::Save,
 	                               K::Undo, K::Redo, K::TextureOperation, K::SetViewport, K::EditInViewport};
 	const auto listed = [](const std::vector<K> &kinds, K kind) {
 		return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
@@ -1150,6 +1151,29 @@ void test_preview_canvas_smoke() {
 	ui.frames(2);
 	CHECK(fake.width == 1200 && fake.height == 900, "Ctrl+wheel zooms in to 150%");
 	ui.drain();
+
+	// Esc that closes the toolbar's dropdown is the dropdown's (the plain-words lane, the audit's 3.6: it
+	// walked the selection up too); Esc on the canvas then is the canvas's again. The Shell's ImGui closes a
+	// popup on Esc by keyboard navigation (imgui-godot's), which this harness turns on for it.
+	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	select_in(v, box);
+	ui.focus("Preview");
+	ui.frames(2);
+	ui.drain();
+	ui.activate(item_id(preview.scope, {"State"}));
+	CHECK(GImGui->OpenPopupStack.Size == 1, "the State dropdown open");
+	ui.key(ImGuiKey_Escape, true);
+	ui.key(ImGuiKey_Escape, false);
+	ui.frames(2);
+	CHECK(GImGui->OpenPopupStack.Size == 0, "Esc closes the dropdown");
+	CHECK(!only(ui.drain(), EditorRequestKind::SelectRecord), "and selects nothing");
+	ui.focus("Preview");
+	ui.drain();
+	ui.key(ImGuiKey_Escape, true);
+	ui.key(ImGuiKey_Escape, false);
+	ui.frames(2);
+	CHECK(only(ui.drain(), EditorRequestKind::SelectRecord) != nullptr, "Esc on the canvas selects up");
+	ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
 
 	// A viewport with nothing to show says why (its reason's sentence): a menu the game could not read,
 	// until it changes. With no project the Preview stands aside for the welcome page (the UX round's

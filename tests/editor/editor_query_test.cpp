@@ -26,6 +26,8 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/assets/asset_kinds.h>
+#include <editor/documents/document_types.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
@@ -46,6 +48,7 @@
 #include <editor/session/view/viewport_kind.h>
 #include <editor/session/view_json.h>
 #include <formats/pff/pff.h>
+#include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -1734,8 +1737,138 @@ static int test_viewport_query() {
 	return 0;
 }
 
+// The plain-words lane (ADR 0046, the UX round): a file of a kind the editor has no editor for has a
+// page, what it is, who reads it and what names it (the file_page query; open_document shows it and
+// close_document takes it away); a field's string id edited as the words the player sees
+// (set_string_text: the table that defines the id opened in the background, its string set there as one
+// undo step, the field's document still the active one); a finding titles its record and its field in
+// the same words whether its file is open or closed (record_title, field_title).
+static int test_plain_words() {
+	editor_test::TempProjectDir dir("opennova_editor_query_plain_words");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Words"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	TEST_EXPECT(view.findings.graph != nullptr);
+	if (!view.findings.graph) return 1;
+	// A font: no editor; the stylesheet names it.
+	std::string font;
+	for (const AssetEntry &entry : view.project.scan->entries)
+		if (entry.kind == AssetKind::Font && !view.findings.graph->usages_of(entry.relative_path).empty()) {
+			font = entry.relative_path;
+			break;
+		}
+	TEST_EXPECT(!font.empty() && !is_editable_kind(AssetKind::Font));
+	if (font.empty()) return 1;
+	const JsonValue page = ask(session, "file_page", R"({"path": ")" + font + R"("})");
+	TEST_EXPECT(page.get_string("path", "") == font && page.get_string("kind", "") == asset_kind_label(AssetKind::Font));
+	TEST_EXPECT(page.get_string("what", "").find("bitmap font") != std::string::npos &&
+	            page.get_string("read_by", "").find("Loaded by name") != std::string::npos &&
+	            page.get_string("cite", "").find("[orig:") != std::string::npos &&
+	            page.get_string("editor", "").find("no editor") != std::string::npos);
+	const JsonValue *used_by = page.get("used_by");
+	// Each use by its file, record and field in words ("main.mnu: STARTUP/MAIN - Font").
+	bool worded = false;
+	if (used_by)
+		for (const JsonValue &use : used_by->array)
+			worded |= !use.get_string("file", "").empty() && use.get_string("text", "").find(" - Font") != std::string::npos;
+	TEST_EXPECT(worded);
+	TEST_EXPECT(refusal(session, "file_page", "{}").find("no page shows") != std::string::npos);
+	// Opened, the page shows (no document opens); the query names it with no path; closed, it goes.
+	TEST_EXPECT(done(send(session, R"({"kind": "open_document", "path": ")" + font + R"("})")));
+	TEST_EXPECT(view.documents.page == font && session.document_for(font) == nullptr);
+	TEST_EXPECT(ask(session, "file_page").get_string("path", "") == font);
+	TEST_EXPECT(done(send(session, R"({"kind": "close_document", "path": ")" + font + R"("})")));
+	TEST_EXPECT(view.documents.page.empty());
+
+	// A weapon's loadout name, a WepDes id of gametext.bin, edited as its words.
+	const AssetEntry *weapons = view.project.scan->find("weapon.def");
+	const AssetEntry *gametext = view.project.scan->find("gametext.bin");
+	TEST_EXPECT(weapons && gametext);
+	if (!weapons || !gametext) return 1;
+	// The paths kept (a rescan makes the scan again).
+	const std::string weapons_path = weapons->relative_path, gametext_path = gametext->relative_path;
+	opennova::rtxt::File table;
+	table.sections = {{"WepDes", 1}};
+	opennova::rtxt::Entry name;
+	name.key = "WPN_ONE";
+	name.text = "The first weapon";
+	table.entries = {name};
+	std::vector<uint8_t> bytes;
+	std::string error;
+	TEST_EXPECT(opennova::rtxt::write(table, bytes, error) &&
+	            editor_test::write_bytes(view.project.root + "/" + gametext->relative_path, bytes) &&
+	            editor_test::write_text(view.project.root + "/" + weapons->relative_path,
+	                                    "weapon \"Gun\"\nloadout_menu_textid WPN_ONE\nend\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document(weapons_path));
+	const Document *catalog = session.document_for(weapons_path);
+	TEST_EXPECT(catalog != nullptr && session.document_for(gametext_path) == nullptr);
+	if (!catalog) return 1;
+	NodeAddress gun;
+	TEST_EXPECT(find_definition(*view.findings.graph, *catalog, "Gun", gun));
+	session.handle(request::set_string_text(weapons_path, gun, "loadout_menu_textid", "Rifle \xC3\xA9"));
+	session.run_operations();
+	const Document *strings = session.document_for(gametext_path);
+	TEST_EXPECT(strings != nullptr && view.documents.active == weapons_path);
+	if (!strings) return 1;
+	const std::vector<const GraphSymbol *> one = view.findings.graph->symbols_named(ReferenceKind::TextId, "WPN_ONE");
+	TEST_EXPECT(one.size() == 1);
+	if (one.size() != 1) return 1;
+	Value text;
+	TEST_EXPECT(strings->get(strings->address_at(one[0]->locator), "text", text) &&
+	            std::get<std::string>(text) == "Rifle \xC3\xA9" && strings->dirty() && !catalog->dirty());
+	// One undo step of the table takes it back.
+	session.handle(request::undo(gametext_path));
+	TEST_EXPECT(strings->get(strings->address_at(one[0]->locator), "text", text) &&
+	            std::get<std::string>(text) == "The first weapon");
+	// A field naming no string is refused, saying why; nothing changes.
+	session.handle(request::set_string_text(weapons_path, gun, "weapon_name", "Other"));
+	TEST_EXPECT(!view.findings.diagnostics.empty() &&
+	            view.findings.diagnostics.back().message.find("names no string id") != std::string::npos);
+
+	// A menu's action naming a menu file the project lacks: its finding by the action's words and the
+	// field's, open and closed alike.
+	session.handle(request::open_document("main.mnu"));
+	const Document *menu = session.document_for("main.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	NodeAddress main;
+	TEST_EXPECT(find_definition(*view.findings.graph, *menu, "MAIN", main));
+	TEST_EXPECT(done(send(session, R"({"kind": "edit_record", "path": "main.mnu", "edits": [
+		{"op": "add", "kind": "action", "parent": )" + std::to_string(main.child) + R"(, "as": "a"},
+		{"op": "set", "id": "a", "field": "type", "value": "SCREEN"},
+		{"op": "set", "id": "a", "field": "file", "value": "nowhere.mnu"},
+		{"op": "set", "id": "a", "field": "target", "value": "AWAY"}]})")));
+	const std::string menu_path = menu->path();
+	const auto titled = [&](std::string &record, std::string &field) {
+		const JsonValue problems = ask(session, "problems", R"({"limit": 200})");
+		const JsonValue *rows = problems.get("problems");
+		if (!rows) return false;
+		for (const JsonValue &row : rows->array)
+			if (row.get_string("asset", "") == menu_path && row.get_string("field", "") == "file") {
+				record = row.get_string("record_title", "");
+				field = row.get_string("field_title", "");
+				return true;
+			}
+		return false;
+	};
+	std::string open_record, open_field, closed_record, closed_field;
+	TEST_EXPECT(titled(open_record, open_field) && open_record == "Go to AWAY in nowhere.mnu" && open_field == "Menu file");
+	TEST_EXPECT(done(send(session, R"({"kind": "save", "path": "main.mnu"})")));
+	TEST_EXPECT(done(send(session, R"({"kind": "close_document", "path": "main.mnu"})")));
+	TEST_EXPECT(session.document_for("main.mnu") == nullptr);
+	TEST_EXPECT(titled(closed_record, closed_field) && closed_record == open_record && closed_field == open_field);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_plain_words();
 	failures += test_paging();
 	failures += test_refusals();
 	failures += test_build_gate();

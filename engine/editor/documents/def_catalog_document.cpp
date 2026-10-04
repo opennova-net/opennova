@@ -132,7 +132,26 @@ SerializeResult DefCatalogDocument::serialize() const {
 	DefWriteResult written = own->write(records, file_state());
 	result.text = std::move(written.text);
 	result.issues = source_issues(written.diagnostics);
+	for (const std::string &record : written.reordered)
+		result.notes.push_back(record + ": written in the table's order, as its lines in the file's order would read "
+		                                "back otherwise (an edit they cannot carry as they stand).");
 	return result;
+}
+
+std::string DefCatalogDocument::save_words() const {
+	// What the writer keeps of the file it read (def.h's DefLineOrder and DefLayout) and what it does
+	// not: it writes from the records, never the file's text (ADR 0003, itemdef-re.md D-ITEMDEF-4).
+	const size_t ignored = ignored_lines();
+	std::string words = "Saving keeps each record's lines, in the order the file has them under the names it gives them, "
+	                    "and the file's indentation (a record whose edit that order cannot carry is written in the "
+	                    "table's order, and Output names it); the spacing inside a line, how a number or a word is "
+	                    "spelled (0.0 as 0, AIData as aidata), comments and blank lines are the editor's";
+	if (kind() == AssetKind::ItemDefs) words += ", an item's attributes go on attrib: lines of up to 16 words";
+	if (ignored)
+		words += ", and " + std::to_string(ignored) + (ignored == 1 ? " thing" : " things") +
+		         " in the file the game skips are left out (Problems lists each)";
+	return words + ". The game reads the same " + (kind() == AssetKind::ItemDefs ? "items" : kind() == AssetKind::WeaponDefs ? "weapons"
+	                                                     : kind() == AssetKind::AmmoDefs ? "ammo" : "rows") + ".";
 }
 
 std::shared_ptr<Node> DefCatalogDocument::make_node(
@@ -153,10 +172,53 @@ std::shared_ptr<Node> DefCatalogDocument::make_node(
 		std::vector<const void *> others;
 		for (const auto &other : rows)
 			if (other->kind == kind) others.push_back(static_cast<const CatalogRow &>(*other).native.data());
-		rules.made(row->native.data(), others);
+		rules.made(row->native.data(), others, item_ids_elsewhere_);
 	}
 	shape(*row);
 	return row;
+}
+
+void DefCatalogDocument::set_names_used_elsewhere(ReferenceKind kind, const std::vector<std::string> &names) {
+	if (kind != ReferenceKind::Item) return;
+	item_ids_elsewhere_.clear();
+	for (const std::string &name : names)
+		if (const std::optional<int> id = strutil::parse_int(name)) item_ids_elsewhere_.push_back(*id);
+}
+
+bool DefCatalogDocument::accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const {
+	if (duplicate_refusal_.empty()) return TableDocument::accept_step(step, rows, error);
+	error = duplicate_refusal_;
+	duplicate_refusal_.clear();
+	return false;
+}
+
+void DefCatalogDocument::prepare_duplicate(Node &copy, const Node &,
+                                           const std::vector<std::shared_ptr<const Node>> &rows) const {
+	auto &row = static_cast<CatalogRow &>(copy);
+	const CatalogKindRow &rules = catalog_kind_row(row.kind);
+	// The rows of its kind beside it (its original among them), whose ids and names it keeps apart from.
+	std::vector<const void *> others;
+	std::vector<std::string> names;
+	for (const auto &other : rows) {
+		if (other->kind != row.kind) continue;
+		const auto &held = static_cast<const CatalogRow &>(*other);
+		others.push_back(held.native.data());
+		names.push_back(strutil::to_upper(held.name()));
+	}
+	if (rules.duplicated) rules.duplicated(row.native.data(), others, item_ids_elsewhere_);
+	// A name of its own: the game's lookups by name find the first row of a name (an item, an ammo), and a
+	// weapon block of a name the table has replaces that weapon (itemdef-re.md, "Repeated names and ids").
+	const TableKind &own = *catalog_table().kind(row.kind);
+	const size_t place = own.find(catalog_name_field(row.kind));
+	if (place == TableKind::npos || rules.copy_name == CopyName::None) return;
+	const FieldSchema &schema = own.fields()[place];
+	const size_t limit = rules.name_chars ? rules.name_chars : schema.width ? schema.width - 1 : 0;
+	const std::string name = copy_name(row.name(), rules.copy_name, limit, names);
+	std::string refused;
+	// A name that cannot be set (a character the game's code page lacks) refuses the copy, saying why: a
+	// copy under its original's name would be the one no lookup finds.
+	if (!own.value(place).set(row.record(), name, refused))
+		duplicate_refusal_ = "The copy's name \"" + name + "\" cannot be set: " + refused;
 }
 
 bool DefCatalogDocument::set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) {
@@ -224,8 +286,12 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 }
 
 void DefCatalogDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
-	if (address.child || def_kind(address.kind) != DefRecordKind::Item) return;
-	if (const void *item = record(address)) facts.value = std::to_string(static_cast<const DefItemDef *>(item)->type);
+	if (address.child) return;
+	const void *native = record(address);
+	if (!native) return;
+	if (def_kind(address.kind) == DefRecordKind::Item) facts.value = std::to_string(static_cast<const DefItemDef *>(native)->type);
+	// A weapon's loadout name's key, which its words read where the HUD's has no text (definition_words).
+	if (def_kind(address.kind) == DefRecordKind::Weapon) facts.value = static_cast<const DefWeaponDef *>(native)->loadout_menu_textid;
 }
 
 bool DefCatalogDocument::record_choices(const NodeAddress &address, const FieldUse &use,

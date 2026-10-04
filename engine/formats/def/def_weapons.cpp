@@ -95,6 +95,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                              DefParseReport *report, const DefFileProbe *files) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
     int state = ST_TOP;
+    bool indent_noted = false; // the file's indentation read (DefLayout)
 
     size_t entries_cap = 0, carry_cap = 0;
     DefWeaponDef cw; memset(&cw, 0, sizeof(cw));
@@ -167,7 +168,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
     // line counting from 1.
     size_t number = 0;
     const size_t walk_end = for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens,
-                                                                 const char *, size_t,
+                                                                 const char *line, size_t line_len,
                                                                  size_t line_index) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1); // the first value token, "" when none
@@ -224,6 +225,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
 
         if (state == ST_WEAPON) {
             if (key_is(key, "action")) {
+                def_note_line(DefRecordKind::Weapon, cw.line_order, key, strlen(key)); // where its blocks stand
                 memset(&ca, 0, sizeof(ca));
                 open_source = ActionSource{number};
                 open_findings.clear();
@@ -715,7 +717,12 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             }
 
-            if (parsed) validate_property(DefRecordKind::Weapon, as_read.c_str(), as_read.size(), cw.unmodeled_count, report, number, cw.weapon_name);
+            if (parsed) {
+                validate_property(DefRecordKind::Weapon, as_read.c_str(), as_read.size(), cw.unmodeled_count, report, number, cw.weapon_name);
+                // What a writer keeps of the line: its place in the weapon's order, the file's indentation.
+                def_note_line(DefRecordKind::Weapon, cw.line_order, key, strlen(key));
+                def_note_indent(out->layout, indent_noted, line, line_len);
+            }
             if (!parsed) {
                 authoring_issue(cw.unmodeled_count, report, number, cw.weapon_name, as_read.c_str(), as_read.size());
             }
@@ -798,7 +805,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             }
 
-            if (parsed) validate_property(DefRecordKind::Action, as_read.c_str(), as_read.size(), ca.unmodeled_count, block_report, number, ca.name);
+            if (parsed) {
+                validate_property(DefRecordKind::Action, as_read.c_str(), as_read.size(), ca.unmodeled_count, block_report, number, ca.name);
+                def_note_line(DefRecordKind::Action, ca.line_order, key, strlen(key));
+            }
             if (!parsed) {
                 authoring_issue(ca.unmodeled_count, block_report, number, ca.name, as_read.c_str(), as_read.size());
             }
