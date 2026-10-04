@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/finding_code_row.h>
@@ -28,6 +29,16 @@ struct LocalSettings {
 	// The folder Build to folder last built into (the UX round's problems lane: a build for players, a
 	// folder outside the project), which Build > Build to <it> builds into again ("" = none yet).
 	std::string build_folder;
+	// The documents open as the project last closed or the editor quit (the UX round's project lane), in
+	// their tabs' order, each with the record selected in it (its Document::locator, "" for none), and the
+	// one active: what the project reopens with. Written only when they changed.
+	struct OpenDocument {
+		std::string path;
+		std::string locator;
+		bool operator==(const OpenDocument &o) const { return path == o.path && locator == o.locator; }
+	};
+	std::vector<OpenDocument> open_documents;
+	std::string active_document;
 };
 
 // The project's local.json (paths.local_settings_file). A missing file reads as defaults, and so

@@ -6,6 +6,7 @@
 #include <editor/session/editor_request.h>
 #include <editor/ui/expansion_fields.h>
 #include <editor/ui/view_event_mailbox.h>
+#include <editor/ui/welcome_view.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
@@ -58,6 +59,7 @@ private:
 	uint64_t seen_ = 0;       // the highest serial an answer carried
 	bool waiting_ = false;
 	std::string error_;       // what the last Apply could not write
+	InstallFieldCheck check_; // the install field's check, its line
 };
 
 } // namespace opennova::editor

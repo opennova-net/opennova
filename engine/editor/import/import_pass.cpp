@@ -18,10 +18,27 @@ namespace opennova::editor {
 
 namespace {
 
-// 3: every file an import reads (a source, and since S13 A8 its inputs) by its path, and each
-// source's record apart with the content hash of each input it lists; a cache of 2 kept a source's
-// size, time, hash and record on one line.
-constexpr int kImportCacheSchemaVersion = 3;
+// 4: what each source's import reported beside its record (the UX round's project lane); 3: every
+// file an import reads (a source, and since S13 A8 its inputs) by its path, and each source's record
+// apart with the content hash of each input it lists; a cache of 2 kept a source's size, time, hash
+// and record on one line.
+constexpr int kImportCacheSchemaVersion = 4;
+
+// A finding the cache kept, made again from its code's row (the editor's own codes: an importer's
+// findings are; one of another code is not kept).
+bool kept_finding(const io::JsonValue &item, Diagnostic &out) {
+	if (!item.is_object()) return false;
+	const std::string code = item.get_string("code", "");
+	const int severity = item.get_int("severity", -1);
+	if (severity < int(DiagnosticSeverity::Info) || severity > int(DiagnosticSeverity::Error)) return false;
+	for (const FindingCodeRow &row : core_finding_codes())
+		if (row.token && code == row.token) {
+			out = make_finding(row, DiagnosticSeverity(severity), item.get_string("message", ""), item.get_string("asset", ""),
+			                   item.get_string("field", ""));
+			return true;
+		}
+	return false;
+}
 
 } // namespace
 
@@ -70,6 +87,11 @@ ImportPass::Cache ImportPass::load_cache(const std::string &path, std::string &t
 					uint64_t hash = 0;
 					read = read && input.is_string() && io::parse_hex64(input.string, hash);
 					made.inputs.push_back(hash);
+				}
+			if (const io::JsonValue *findings = item.get("findings"); findings && findings->is_array())
+				for (const io::JsonValue &finding : findings->array) {
+					Diagnostic kept;
+					if (kept_finding(finding, kept)) made.findings.push_back(std::move(kept));
 				}
 			if (read) cache.records[source] = std::move(made);
 		}
@@ -125,6 +147,19 @@ void ImportPass::save_cache() const {
 			io::JsonValue inputs = io::JsonValue::make_array();
 			for (const uint64_t hash : made.inputs) inputs.push(io::JsonValue::make_string(io::hex64(hash)));
 			item.set("inputs", std::move(inputs));
+		}
+		if (!made.findings.empty()) {
+			io::JsonValue findings = io::JsonValue::make_array();
+			for (const Diagnostic &d : made.findings) {
+				io::JsonValue finding = io::JsonValue::make_object();
+				finding.set("code", io::JsonValue::make_string(d.code()));
+				finding.set("severity", io::JsonValue::make_number(int(d.severity)));
+				finding.set("message", io::JsonValue::make_string(d.message));
+				if (!d.asset.empty()) finding.set("asset", io::JsonValue::make_string(d.asset));
+				if (!d.field.empty()) finding.set("field", io::JsonValue::make_string(d.field));
+				findings.push(std::move(finding));
+			}
+			item.set("findings", std::move(findings));
 		}
 		records.push(std::move(item));
 	}
@@ -393,11 +428,15 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 			made.record = import_sidecar_fingerprint(sidecar);
 			made.inputs.clear();
 			for (const ImportInput &input : context.inputs()) made.inputs.push_back(input.hash);
+			made.findings = std::move(findings);
 			source.reimported = true;
 			++result_.reimported;
 		}
 	} else if (stale) {
 		source.ok = false; // the read failed: its finding is listed
+	} else {
+		// Current: what the import that made its outputs reported, said again.
+		result_.diagnostics.insert(result_.diagnostics.end(), made.findings.begin(), made.findings.end());
 	}
 	seen_.files[source.source] = now;
 	if (made.record != 0) seen_.records[source.source] = made;
