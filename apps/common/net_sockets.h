@@ -39,6 +39,9 @@ std::string endpoint_to_string(const Endpoint &ep);
 // is left alone. False when it does not resolve.
 bool resolve_ipv4(const std::string &host, Endpoint &out, bool allow_names = true);
 
+// This machine's host name (gethostname); empty when it cannot be read.
+std::string local_host_name();
+
 // Open a UDP socket and bind it to `port` on all interfaces. Pass port=0
 // for an ephemeral port (the bound port is reported back in `out_bound`).
 Socket udp_bind(uint16_t port, uint16_t *out_bound = nullptr);

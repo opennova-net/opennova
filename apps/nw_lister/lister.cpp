@@ -9,7 +9,6 @@
 #include <net/novaworld/lobby_identity.h>
 
 #include <chrono>
-#include <cstdlib>
 #include <set>
 #include <system_error>
 
@@ -79,10 +78,8 @@ std::string ip4(const std::array<uint8_t, 4> &ip) {
 
 // A stable machine id for the stand-in NWPSSK / NWUSID where retail's inputs do not read.
 std::string stable_identity() {
-	for (const char *name : {"COMPUTERNAME", "HOSTNAME"}) {
-		if (const char *value = std::getenv(name); value != nullptr && *value != '\0') return value;
-	}
-	return "nw-lister";
+	const std::string host = net::local_host_name();
+	return host.empty() ? std::string("nw-lister") : "nw-lister|" + host;
 }
 
 // The strings the Host list's Region, TimeLeft, Y/N and TimeOfDay tokens resolve to: retail's

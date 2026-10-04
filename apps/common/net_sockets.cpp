@@ -156,6 +156,14 @@ bool resolve_ipv4(const std::string &host, Endpoint &out, bool allow_names) {
 	return true;
 }
 
+std::string local_host_name() {
+	char name[256] = {};
+	if (::gethostname(name, sizeof(name) - 1) != 0) {
+		return {};
+	}
+	return name;
+}
+
 Socket udp_bind(uint16_t port, uint16_t *out_bound) {
 	Socket s{};
 	const native_socket_t native_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
