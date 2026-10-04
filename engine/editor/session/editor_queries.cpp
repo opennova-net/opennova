@@ -14,6 +14,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
@@ -34,6 +35,7 @@
 #include <editor/preview/viewports.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/session/document_set.h>
+#include <editor/session/file_card.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/mission_logic_json.h>
 #include <editor/session/model_json.h>
@@ -84,6 +86,15 @@ constexpr QueryParam kStateParams[] = {
 };
 
 constexpr QueryParam kPageParams[] = {
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+constexpr QueryParam kFilesParams[] = {
+	{ "text", J::String, false, nullptr,
+			"Only the files Files' filter lists for this text: a path holding it, then the files of a kind it "
+			"names (\"texture\", \"waves\"; \"kind:texture\" that kind's alone)." },
+	{ "kind", J::String, false, nullptr, "Only the files of this asset kind (its token: texture, wave, model...)." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
@@ -372,15 +383,27 @@ JsonValue answer_state(const QueryContext &context, const QueryArgs &args, std::
 	return out;
 }
 
-JsonValue answer_files(const QueryContext &context, const QueryArgs &args, std::string &) {
+JsonValue answer_files(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
 	const std::vector<AssetEntry> &entries = view.project.scan->entries;
+	// Narrowed as Files narrows its list (the UX round's project lane): by a kind's token, and by a text.
+	AssetKind kind = AssetKind::kCount;
+	if (args.has("kind")) {
+		kind = asset_kind_from_token(args.text("kind"));
+		if (kind == AssetKind::Unknown && args.text("kind") != asset_kind_token(AssetKind::Unknown)) {
+			error = "no file kind \"" + args.text("kind") + "\".";
+			return JsonValue::make_null();
+		}
+	}
+	std::vector<size_t> shown;
+	if (args.has("text") || kind != AssetKind::kCount) shown = match_files(*view.project.scan, args.text("text"), kind);
+	else for (size_t i = 0; i < entries.size(); ++i) shown.push_back(i);
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
-	set_page(out, page, entries.size());
+	set_page(out, page, shown.size());
 	JsonValue files = JsonValue::make_array();
-	for (size_t i = page.first(entries.size()); i < page.last(entries.size()); ++i) {
-		const AssetEntry &entry = entries[i];
+	for (size_t at = page.first(shown.size()); at < page.last(shown.size()); ++at) {
+		const AssetEntry &entry = entries[shown[at]];
 		JsonValue file = JsonValue::make_object();
 		file.set("path", json_string(entry.relative_path));
 		file.set("name", json_string(entry.logical_name));
@@ -1237,6 +1260,15 @@ JsonValue answer_script_assist(const QueryContext &context, const QueryArgs &arg
 
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
 
+constexpr QueryParam kFileCardParams[] = {
+	{ "path", J::String, true, nullptr,
+			"A project file: its project-relative path, or its name alone (the file the name resolves to)." },
+};
+
+JsonValue answer_file_card(const QueryContext &context, const QueryArgs &args, std::string &) {
+	return file_card_json(file_card(context.core.view(), args.text("path")));
+}
+
 // --- the table -----------------------------------------------------------------------------------
 
 // A row built up column by column, as the request table's are.
@@ -1311,9 +1343,11 @@ constexpr EditorQueryRow kRows[] = {
 			"stamp (the clock value at which it last moved); with `since`, a view_revision an "
 			"earlier answer carried, the sections none of whose concerns moved since left out.")
 			.row,
-	Query(K::Files, "files", answer_files, kPageParams, concern_set({ C::Files }),
+	Query(K::Files, "files", answer_files, kFilesParams, concern_set({ C::Files }),
 			"A page of the files the project's scan lists, in its order: each file's path, name, "
-			"kind (its asset kind's token) and editable, whether the editor opens it.")
+			"kind (its asset kind's token) and editable, whether the editor opens it; with text or kind "
+			"(an asset kind's token), the files Files' filter lists for them: the paths holding the text, "
+			"then, where the text names a kind (\"texture\", \"waves\", \"kind:texture\"), that kind's files.")
 			.pages("files")
 			.row,
 	Query(K::Documents, "documents", answer_documents, kPageParams, kDocumentReads,
@@ -1586,6 +1620,14 @@ constexpr EditorQueryRow kRows[] = {
 			"that is a Problems row its severity (problem: info or warning, left out for none) and "
 			"how many of the findings held now carry it (count); a row a held finding carries that "
 			"no table lists comes last, as table none.")
+			.row,
+	Query(K::FileCard, "file_card", answer_file_card, kFileCardParams, concern_set({ C::Files, C::Graph, C::Project }),
+			"A project file as Files' card shows it (the UX round's project lane): found, its path, name, "
+			"kind and kind_label, about (what a file of its kind is to the game), size, build (where a build "
+			"puts it, in words), imported_from, opens (the editor opens a document of it), a wave's sound "
+			"as the game decodes it {decoded, error, rate, channels, seconds}, names (what it names: field, "
+			"record, value, status in words, the file it resolves to, whether that file is a wave) and "
+			"named_by (file, record, field).")
 			.row,
 };
 

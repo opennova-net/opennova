@@ -1269,12 +1269,13 @@ func test_png_import_through_the_endpoint() -> void:
 	var imported: Array = state.get("import", {}).get("imported", [])
 	assert_eq(imported.size(), 1, str(state.get("import", {})))
 	if imported.size() == 1:
-		assert_eq(String(imported[0].get("source", "")), "logo.png")
+		# The UX round's project lane: an author's PNG lands with the textures its import makes.
+		assert_eq(String(imported[0].get("source", "")), "textures/logo.png")
 		assert_true(bool(imported[0].get("ok", false)))
 		assert_eq(imported[0].get("outputs", []).size(), 1)
 		assert_true(FileAccess.file_exists(root.path_join(String(imported[0]["outputs"][0]))))
 		assert_eq(imported[0].get("inputs", null), [], "the image importer reads its source alone")
-	assert_true(FileAccess.file_exists(root.path_join("logo.png.import")), "importing writes the record beside the source")
+	assert_true(FileAccess.file_exists(root.path_join("textures/logo.png.import")), "importing writes the record beside the source")
 	var problems := await _query("problems", {"severities": ["error"]})
 	assert_eq(int(problems.get("shown", -1)), 0, str(problems))
 	var symbols := await _query("referrers", {"path": "logo.pcx"})

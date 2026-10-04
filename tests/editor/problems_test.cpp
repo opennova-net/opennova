@@ -810,25 +810,27 @@ static int test_placeholders() {
 	logo = missing(ReferenceKind::MenuTexture, "logo.tga");
 	TEST_EXPECT(logo && labels_of(fixes_for(*logo, v)) ==
 	                            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
-	// Applied: the checkerboard written at the root, the finding gone, the reference found.
+	// Applied: the checkerboard written in the textures' folder (the UX round's project lane), the finding
+	// gone, the reference found.
 	skin = missing(ReferenceKind::Texture, "armry.tga");
 	TEST_EXPECT(skin != nullptr);
 	if (!skin) return 1;
 	editor_test::handle_to_end(session, fixes_for(*skin, v).front().request);
 	TEST_EXPECT(session.outcome().done());
 	const AssetEntry *made = v.project.scan->find("armry.tga");
-	TEST_EXPECT(made && made->kind == AssetKind::Texture && made->relative_path == "armry.tga");
+	TEST_EXPECT(made && made->kind == AssetKind::Texture && made->relative_path == "textures/armry.tga");
 	BlankRequest blank;
 	blank.logical_name = "armry.tga";
 	std::vector<uint8_t> checkerboard;
 	Diagnostic error;
-	TEST_EXPECT(make_blank(blank, AssetKind::Texture, checkerboard, error) && test_io::read_file(root + "/armry.tga") == checkerboard);
+	TEST_EXPECT(make_blank(blank, AssetKind::Texture, checkerboard, error) &&
+	            test_io::read_file(root + "/textures/armry.tga") == checkerboard);
 	TEST_EXPECT(missing(ReferenceKind::Texture, "armry.tga") == nullptr);
 	bool found = false;
 	for (const GraphEdge *edge : v.findings.graph->references_of("models/armory.3di")) {
 		if (edge->kind != ReferenceKind::Texture || edge->value != "armry.tga") continue;
 		std::string file;
-		TEST_EXPECT(v.findings.graph->resolve(*edge, &file) == ReferenceStatus::Present && file == "armry.tga");
+		TEST_EXPECT(v.findings.graph->resolve(*edge, &file) == ReferenceStatus::Present && file == "textures/armry.tga");
 		found = true;
 	}
 	TEST_EXPECT(found);

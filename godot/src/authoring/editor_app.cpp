@@ -1,6 +1,9 @@
 #include "authoring/editor_app.h"
 
+#include <godot_cpp/classes/audio_stream_player.hpp>
+#include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -17,8 +20,10 @@
 
 #include <runtime/devtools/imgui_pass.h>
 
+#include <editor/assets/asset_registry.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
+#include <editor/project/project_files.h>
 #include <editor/run/launch_plan.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/request_factories.h>
@@ -29,6 +34,7 @@
 #include "authoring/mission_viewport_applier.h"
 #include "authoring/viewport_device.h"
 #include "authoring/viewport_devices.h"
+#include "lwf/wav_loader.h"
 #include "object/object_model.h"
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
@@ -379,9 +385,41 @@ void EditorApp::serve(const EditorRequest &p_request) {
 				OS::get_singleton()->shell_show_in_file_manager(opennova::to_gd(p_request.path), true);
 			}
 			break;
+		case EditorRequestKind::PlaySound:
+			play_sound_(p_request.path);
+			break;
+		case EditorRequestKind::StopSound:
+			if (sound_ != nullptr) sound_->stop();
+			break;
 		default:
 			break;
 	}
+}
+
+// A project's wave played once (Files' card, the UX round's project lane), decoded as the game decodes it
+// (WavLoader over lwf::wav_decode_pcm16), in place of the one playing; a name the project has no wave of, or
+// a wave that does not decode, plays nothing and says so on the status line.
+void EditorApp::play_sound_(const std::string &p_path) {
+	const opennova::editor::SessionView &view = session_->view();
+	const opennova::editor::AssetEntry *entry =
+			view.project.open && view.project.scan ? view.project.scan->named(p_path) : nullptr;
+	Ref<AudioStreamWAV> stream;
+	if (entry != nullptr && entry->kind == opennova::editor::AssetKind::Wave) {
+		const String file = opennova::to_gd(opennova::editor::join_path(view.project.root, entry->relative_path));
+		stream = WavLoader::from_bytes(FileAccess::get_file_as_bytes(file));
+	}
+	if (stream.is_null()) {
+		post_device_notice_("No wave of the project plays as " + p_path + ".");
+		return;
+	}
+	if (sound_ == nullptr) {
+		sound_ = memnew(AudioStreamPlayer);
+		sound_->set_name("EditorSound");
+		add_child(sound_);
+	}
+	sound_->stop();
+	sound_->set_stream(stream);
+	sound_->play();
 }
 
 void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {

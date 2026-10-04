@@ -162,11 +162,96 @@ void test_inspector_filter_per_document() {
 	CHECK(logged_frame(ui).find("zzqq") == std::string::npos, "Clear: every field again");
 }
 
+// Files: the Kind column shown; "texture" typed into the filter lists the textures, the one at the root
+// whose name does not hold the word among them, and no wave; the kind list narrows to the waves; an
+// AboutFile (a double click on a file the editor opens nothing of raises the same card) opens the card
+// over the editor: what the wave is, how it sounds as the game decodes it, Play raising play_sound, who
+// names it; Close.
+void test_files_kind_and_card() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_files_card");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(request::new_project(dir.file("project"), "Sounds")), "a project");
+	session.run_operations();
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/lwf/";
+	CHECK(editor_test::write_bytes(root + "/sounds/menu.lwf", test_io::read_file(fixtures + "menu.lwf")) &&
+	              editor_test::write_bytes(root + "/sounds/tone.wav", test_io::read_file(fixtures + "tone.wav")) &&
+	              editor_test::write_text(root + "/rootpic.tga", "not a picture") &&
+	              editor_test::write_text(root + "/textures/aa.tga", "not a picture"),
+	      "the files");
+	session.handle(request::rescan());
+	session.run_operations();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	Run run{ session, devices, ui };
+	run.settle();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Kind") != std::string::npos && text.find("Sound bank") != std::string::npos, "the Kind column shown");
+	const ImGuiID files = Ui::window_id("Files");
+	ImGui::ActivateItemByID(item_id(files, {"##filter"}));
+	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
+	ui.frames(2);
+	ImGui::GetIO().AddInputCharactersUTF8("texture");
+	ui.frames(2);
+	ImGui::ClearActiveID();
+	ui.frames(1);
+	text = logged_frame(ui);
+	CHECK(text.find("rootpic.tga") != std::string::npos && text.find("aa.tga") != std::string::npos &&
+	              text.find("tone.wav") == std::string::npos && text.find("2 of ") != std::string::npos,
+	      "\"texture\": the textures, the one at the root by its kind, no wave");
+	// The text cleared, the kind list: waves alone.
+	ImGui::ActivateItemByID(item_id(files, {"##filter"}));
+	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
+	ui.frames(2);
+	ui.key(ImGuiMod_Ctrl, true);
+	ui.key(ImGuiKey_A, true);
+	ui.key(ImGuiKey_A, false);
+	ui.key(ImGuiMod_Ctrl, false);
+	ui.key(ImGuiKey_Backspace, true);
+	ui.key(ImGuiKey_Backspace, false);
+	ImGui::ClearActiveID();
+	ui.frames(1);
+	ui.activate(item_id(files, {"##kind"}));
+	ui.activate(item_id(ImHashStr("##Combo_00"), {"Wave (1)###wave"}));
+	// Files draws first: its text runs to the Document window's.
+	text = logged_frame(ui);
+	text = text.substr(0, text.find("Double-click a file in Files"));
+	CHECK(text.find("tone.wav") != std::string::npos && text.find("rootpic.tga") == std::string::npos &&
+	              text.find("menu.lwf") == std::string::npos && text.find("1 of 4 files") != std::string::npos,
+	      "Wave: the waves alone");
+	ImGui::ClosePopupsExceptModals();
+	// The card.
+	session.handle(request::about_file("tone.wav"));
+	run.settle();
+	text = logged_frame(ui);
+	CHECK(text.find("About tone.wav") != std::string::npos && text.find("Wave, ") != std::string::npos &&
+	              (text.find("Mono, ") != std::string::npos || text.find("Stereo, ") != std::string::npos) &&
+	              text.find("Packed into localres.pff.") != std::string::npos && text.find("Named by (1)") != std::string::npos,
+	      "the card: what it is, its sound, where it goes, who names it");
+	const ImGuiID card = ImHashStr("###file_card");
+	ui.activate(item_id(card, {"Play##card"}));
+	const std::vector<EditorRequest> raised = ui.drain();
+	const EditorRequest *play = only(raised, EditorRequestKind::PlaySound);
+	CHECK(play && play->path == "sounds/tone.wav", "Play: the Shell plays the wave");
+	// The bank's card: its waves named, the one the project has a Play of its own, the others missing.
+	session.handle(request::about_file("menu.lwf"));
+	run.settle();
+	text = logged_frame(ui);
+	CHECK(text.find("About menu.lwf") != std::string::npos && text.find("missing from the project") != std::string::npos,
+	      "a sound bank's card lists its waves");
+}
+
 } // namespace
 
 void run_project_tests() {
 	test_preview_room();
 	test_inspector_filter_per_document();
+	test_files_kind_and_card();
 }
 
 } // namespace editor_ui_test

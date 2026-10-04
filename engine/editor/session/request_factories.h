@@ -212,6 +212,21 @@ inline EditorRequest show_in_files(std::string path, bool ask_name = false) {
 	request.ask_name = ask_name;
 	return request;
 }
+// Files' card of the project file `path` (the UX round's project lane).
+inline EditorRequest about_file(std::string path) {
+	EditorRequest request = of(EditorRequestKind::AboutFile);
+	request.path = std::move(path);
+	return request;
+}
+// The project's wave at `path` played by the Shell, and stopped.
+inline EditorRequest play_sound(std::string path) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	return request;
+}
+inline EditorRequest stop_sound() {
+	return of(EditorRequestKind::StopSound);
+}
 inline EditorRequest reload_document(std::string path = std::string()) {
 	EditorRequest request = of(EditorRequestKind::ReloadDocument);
 	request.path = std::move(path);

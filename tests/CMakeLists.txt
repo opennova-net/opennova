@@ -4018,6 +4018,13 @@ target_link_libraries(editor_preferences_test PRIVATE opennova_editor)
 target_include_directories(editor_preferences_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_preferences COMMAND editor_preferences_test)
 
+# The project, the import and Files as a modder meets them (ADR 0046, the UX round's project lane): a kind
+# named in words, the folders each kind lands in, the files a filter lists, a file's card and its requests.
+add_executable(editor_project_lane_test editor/project_lane_test.cpp)
+target_link_libraries(editor_project_lane_test PRIVATE opennova_editor)
+target_include_directories(editor_project_lane_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_project_lane COMMAND editor_project_lane_test)
+
 add_executable(editor_document_set_test editor/document_set_test.cpp)
 target_link_libraries(editor_document_set_test PRIVATE opennova_editor)
 target_include_directories(editor_document_set_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

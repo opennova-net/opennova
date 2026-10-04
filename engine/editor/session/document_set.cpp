@@ -437,6 +437,8 @@ void DocumentSet::show_in_files(const EditorRequest &request) {
 	reveal.kind = ViewEventKind::RevealFile;
 	reveal.path = asset->relative_path;
 	reveal.flag = request.ask_name;
+	// AboutFile: its card opens too (the UX round's project lane).
+	reveal.tag = request.kind == EditorRequestKind::AboutFile ? 1 : 0;
 	view_.events.post(std::move(reveal));
 	core_.touch(ViewConcern::Selection);
 }

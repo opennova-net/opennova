@@ -37,11 +37,6 @@ std::string ImportController::import_words(const std::vector<std::string> &paths
 			++kinds[entry->kind];
 			bytes += entry->size_bytes;
 		}
-	const auto grouped = [](size_t n) {
-		std::string digits = std::to_string(n), out;
-		for (size_t i = 0; i < digits.size(); ++i) out += (i && (digits.size() - i) % 3 == 0 ? "," : "") + std::string(1, digits[i]);
-		return out;
-	};
 	char size[32];
 	if (bytes < (uint64_t(1) << 20)) std::snprintf(size, sizeof(size), "%.1f KB", double(bytes) / 1024.0);
 	else std::snprintf(size, sizeof(size), "%.1f MB", double(bytes) / double(uint64_t(1) << 20));

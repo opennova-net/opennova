@@ -218,4 +218,24 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 	return scan.take();
 }
 
+std::vector<size_t> match_files(const AssetScan &scan, const std::string &text, AssetKind kind) {
+	std::vector<size_t> out;
+	bool only = false;
+	const AssetKind named = asset_kind_named_by(text, &only);
+	const std::string wanted = normalized_logical_name(text);
+	std::vector<bool> listed(scan.entries.size(), false);
+	if (!only)
+		for (size_t i = 0; i < scan.entries.size(); ++i) {
+			const AssetEntry &entry = scan.entries[i];
+			if (kind != AssetKind::kCount && entry.kind != kind) continue;
+			if (!wanted.empty() && normalized_logical_name(entry.relative_path).find(wanted) == std::string::npos) continue;
+			out.push_back(i);
+			listed[i] = true;
+		}
+	if (named != AssetKind::kCount && (kind == AssetKind::kCount || kind == named))
+		for (size_t i = 0; i < scan.entries.size(); ++i)
+			if (!listed[i] && scan.entries[i].kind == named) out.push_back(i);
+	return out;
+}
+
 } // namespace opennova::editor

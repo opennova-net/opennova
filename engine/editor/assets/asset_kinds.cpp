@@ -96,51 +96,73 @@ struct Kind {
 		out.row.expansion_loose = place;
 		return out;
 	}
+	constexpr Kind about(const char *words) const {
+		Kind out = *this;
+		out.row.about = words;
+		return out;
+	}
 };
 
 constexpr AssetKindRow kRows[] = {
 	// A file of no kind the game knows: the game never asks for one, so the build leaves it out
 	// (S13 A8; it packed into resource.pff with the art before).
-	Kind(AssetKind::Unknown, "unknown", "Unknown file", ArchiveSlot::None).row,
-	Kind(AssetKind::Archive, "archive", "Archive", ArchiveSlot::None).extensions(kArchive).row,
+	Kind(AssetKind::Unknown, "unknown", "Unknown file", ArchiveSlot::None)
+	        .about("A file of no kind the game reads: the build leaves it out.")
+	        .row,
+	Kind(AssetKind::Archive, "archive", "Archive", ArchiveSlot::None).extensions(kArchive)
+	        .about("A PFF archive: the editor imports files out of one, and a build makes the project's own.")
+	        .row,
 	Kind(AssetKind::Model, "model", "Model", ArchiveSlot::Resource)
 	        .runtime("object_model")
 	        .edited_by(DocumentTypeId::Model)
 	        .names_files()
 	        .folder("models")
+	        .about("A 3D model: the items, vehicles and buildings the game shows name it.")
 	        .row,
 	Kind(AssetKind::Animation, "animation", "Animation", ArchiveSlot::Resource)
 	        .extensions(kAnimation)
 	        .edited_by(DocumentTypeId::Animation)
 	        .folder("anims")
+	        .about("A clip of bone animation: animation maps name it.")
 	        .row,
 	Kind(AssetKind::AnimationMap, "animation_map", "Animation map", ArchiveSlot::Resource)
 	        .extensions(kAnimationMap)
 	        .edited_by(DocumentTypeId::AnimationMap)
 	        .names_files()
 	        .folder("anims")
+	        .about("An animation map: which clip a soldier or a vehicle plays for each move.")
 	        .row,
 	// Its base and eye textures by name (formats/grm).
 	Kind(AssetKind::FaceAnimation, "face_animation", "Face animation", ArchiveSlot::Resource)
 	        .extensions(kFaceAnimation)
 	        .names_files()
+	        .folder("anims")
+	        .about("A face's animation, with the base and eye textures it names.")
 	        .row,
 	Kind(AssetKind::AiProfile, "ai_profile", "AI profile", ArchiveSlot::Resource)
 	        .extensions(kAiProfile)
+	        .folder("ai")
+	        .about("An AI profile: how a unit the computer runs picks its targets and moves, loaded by the name a placed unit gives.")
 	        .row,
 	Kind(AssetKind::Texture, "texture", "Texture", ArchiveSlot::Resource)
 	        .extensions(kTexture)
 	        .new_name("newtexture.tga")
+	        .folder("textures")
+	        .about("An image the game draws: a model's surfaces, a menu, the HUD.")
 	        .row,
 	// No name gives it: a model's chunk row reads the file it names as a chunk container whatever
 	// the name [orig: NQ8B @0x58F350; HRZ8 @0x58F470; AOC8 @0x58F590] (renderer::load_material_chunk),
 	// so a file no rule types by its name is one when its bytes hold one (classify_asset, the scan's
 	// peek at its chunk headers); it packs with the art.
-	Kind(AssetKind::MaterialChunk, "material_chunk", "Material chunk", ArchiveSlot::Resource).row,
+	Kind(AssetKind::MaterialChunk, "material_chunk", "Material chunk", ArchiveSlot::Resource)
+	        .folder("textures")
+	        .about("A model's material data: a material row of a model reads it as a chunk container.")
+	        .row,
 	Kind(AssetKind::Font, "font", "Font", ArchiveSlot::Localres)
 	        .runtime("font")
 	        .folder("fonts")
 	        .new_name("newfont.fnt")
+	        .about("A font the menus and the HUD write with.")
 	        .row,
 	// The boot text bins, the menu tables and the per-mission text sidecars.
 	Kind(AssetKind::Strings, "strings", "String table", ArchiveSlot::Language)
@@ -148,16 +170,20 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Strings)
 	        .folder("strings")
 	        .new_name("newtable.bin")
+	        .about("A string table: the words the menus, the HUD and the missions show, each by its key.")
 	        .row,
 	Kind(AssetKind::MusicScript, "music_script", "Music script", ArchiveSlot::Localres)
 	        .runtime("music_script")
 	        .edited_by(DocumentTypeId::MusicScript)
+	        .folder("music")
+	        .about("A music script: which music plays when.")
 	        .row,
 	// A raw table read through the archives, fgn2.bin among them: its only reader asks after the
 	// archives mount [orig: CEffectSystem_Init @ 0x5f6070 through FileSystem_FileExists @
 	// 0x75aa50].
 	Kind(AssetKind::RawBin, "raw_bin", "Binary table", ArchiveSlot::Language)
 	        .extensions(kRawBin)
+	        .about("A table the game reads through the archives as it is.")
 	        .row,
 	// The country code the boot opens with the C library's fopen, never through the archives,
 	// on every read [orig: Game_ReadCCBinFile @ 0x4a5860]: loose, as retail ships it.
@@ -166,10 +192,13 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::CountryCode, "country_code", "Country code", ArchiveSlot::Loose)
 	        .file("cc.bin")
 	        .expansion(ExpansionLoose::RootOnly)
+	        .about("The country code the game reads at boot from its own folder.")
 	        .row,
 	Kind(AssetKind::Credits, "credits", "Credits", ArchiveSlot::Localres)
 	        .runtime("credits")
 	        .edited_by(DocumentTypeId::Credits)
+	        .folder("menus")
+	        .about("The credits the menus scroll.")
 	        .row,
 	// A .bms in localres: retail's mission list walks only the localres/language volumes [orig:
 	// Mission_BuildMapListFromPFF @ 0x562910].
@@ -179,6 +208,7 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Mission)
 	        .folder("missions")
 	        .new_name("newmission.bms")
+	        .about("A mission: what it places, its events and its settings.")
 	        .row,
 	// The original mission editor's interchange text (dfx2med.exe, docs/mission/mis-format-re.md): the
 	// image holds no `.mis` literal and no reader of one, so the game never asks for it and the build
@@ -188,6 +218,7 @@ constexpr AssetKindRow kRows[] = {
 	        .extensions(kMissionText)
 	        .names_files()
 	        .folder("missions")
+	        .about("The original mission editor's text form of a mission: the game never reads it, and a build leaves it out.")
 	        .row,
 	// Where retail keeps its own (localres.pff holds ASP_G7.npz): its mission list's archive walk
 	// takes a .npj or .npz as it takes a .bms [orig: Mission_BuildMapListFromPFF @ 0x562910]
@@ -195,23 +226,32 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::MapProject, "map_project", "Map project", ArchiveSlot::Localres)
 	        .extensions(kMapProject)
 	        .names_files()
+	        .folder("missions")
+	        .about("A map project, which the game's mission list takes as it takes a mission.")
 	        .row,
 	Kind(AssetKind::Terrain, "terrain", "Terrain", ArchiveSlot::Resource)
 	        .runtime("terrain")
 	        .names_files()
+	        .folder("terrain")
+	        .about("A terrain: the ground a mission is played on.")
 	        .row,
 	Kind(AssetKind::TerrainPolyData, "terrain_polydata", "Terrain height data",
 	     ArchiveSlot::Resource)
 	        .extensions(kTerrainPolyData)
+	        .folder("terrain")
+	        .about("A terrain's height data.")
 	        .row,
 	// Beside the missions: the game finds a mission's by its name (mission::sidecars).
 	Kind(AssetKind::TileInfo, "tile_info", "Tile placement", ArchiveSlot::Resource)
 	        .extensions(kTileInfo)
 	        .folder("missions")
+	        .about("A mission's tile placement, which the game finds by the mission's name.")
 	        .row,
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
 	        .runtime("environment")
 	        .names_files()
+	        .folder("terrain")
+	        .about("An environment: a mission's sky, light, fog and water.")
 	        .row,
 	Kind(AssetKind::Menu, "menu", "Menu", ArchiveSlot::Localres)
 	        .runtime("menu")
@@ -219,12 +259,14 @@ constexpr AssetKindRow kRows[] = {
 	        .names_files()
 	        .folder("menus")
 	        .new_name("newmenu.mnu")
+	        .about("A menu: screens of windows, buttons and lists.")
 	        .row,
 	Kind(AssetKind::MenuStyle, "menu_style", "Menu style", ArchiveSlot::Localres)
 	        .runtime("menu_style")
 	        .edited_by(DocumentTypeId::Styles)
 	        .names_files()
 	        .folder("menus")
+	        .about("A menu stylesheet: the fonts and colours the menus name by variable.")
 	        .row,
 	// Streamed by path, never through the archives (ArchiveSlot). It names no file: its entries are
 	// its own chunks of audio (formats/sbf). An expansion's banks, M<name>.sbf and G<name>.sbf, are read
@@ -232,26 +274,36 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::MusicBank, "music_bank", "Music bank", ArchiveSlot::Loose)
 	        .runtime("sbf")
 	        .expansion(ExpansionLoose::Folder)
+	        .folder("music")
+	        .about("Music the game streams by its path, never through the archives.")
 	        .row,
 	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their singles naming the waves
 	// (the graph's extract_sound_bank).
 	Kind(AssetKind::SoundBank, "sound_bank", "Sound bank", ArchiveSlot::Resource)
 	        .runtime("sound")
 	        .names_files()
+	        .folder("sounds")
+	        .about("A sound bank: sound sets by name, each playing the waves it names.")
 	        .row,
 	// A wave a sound bank's single names, which the game loads from the archives by name
 	// (docs/audio/lwf-dbf-sound-re.md): retail packs its sound waves in localres.pff and its
 	// localized voice lines in language.pff, and a name resolves from any mounted archive, so the
 	// slot places it and nothing more.
-	Kind(AssetKind::Wave, "wave", "Wave", ArchiveSlot::Localres).extensions(kWave).row,
+	Kind(AssetKind::Wave, "wave", "Wave", ArchiveSlot::Localres).extensions(kWave)
+	        .folder("sounds")
+	        .about("A sound: sound banks, dialogs and scripts name it, and the game loads it from the archives by name.")
+	        .row,
 	Kind(AssetKind::DialogBank, "dialog_bank", "Dialog bank", ArchiveSlot::Localres)
 	        .extensions(kDialogBank)
 	        .names_files()
 	        .folder("missions")
+	        .about("A mission's dialog lines and the sounds they play.")
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
 	        .runtime("particle")
 	        .names_files()
+	        .folder("particles")
+	        .about("Particle effects (smoke, fire, sparks) by name, which items, weapons and ammo name.")
 	        .row,
 	// Its operands' names (S13 D9), the script a RUN names [orig: Script_LoadAndCompileFile @
 	// 0x4EE660] and the waves it plays (S14), each an edge the graph reads (documents/script_type).
@@ -261,6 +313,7 @@ constexpr AssetKindRow kRows[] = {
 	        .names_files()
 	        .folder("missions")
 	        .new_name("newscript.wac")
+	        .about("A mission's script: the commands its events run.")
 	        .row,
 	// The .def family by name: the runtime consumes each by its exact name, and browses only
 	// Avatars.def and hudpos.def.
@@ -269,54 +322,64 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
 	        .folder("defs")
+	        .about("The item definitions: every soldier, vehicle and object a mission can place.")
 	        .row,
 	Kind(AssetKind::WeaponDefs, "weapon_defs", "Weapon definitions", ArchiveSlot::Localres)
 	        .file("weapon.def")
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
 	        .folder("defs")
+	        .about("The weapon definitions.")
 	        .row,
 	Kind(AssetKind::AmmoDefs, "ammo_defs", "Ammo definitions", ArchiveSlot::Localres)
 	        .file("ammo.def")
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
 	        .folder("defs")
+	        .about("The ammunition definitions.")
 	        .row,
 	Kind(AssetKind::HudPosDefs, "hudpos_defs", "HUD layout", ArchiveSlot::Localres)
 	        .runtime("hudpos")
 	        .names_files()
 	        .folder("defs")
+	        .about("Where the HUD draws its parts.")
 	        .row,
 	Kind(AssetKind::HudFxDefs, "hudfx_defs", "HUD effects", ArchiveSlot::Localres)
 	        .file("hudfx.def")
 	        .names_files()
 	        .folder("defs")
+	        .about("The HUD's effects.")
 	        .row,
 	Kind(AssetKind::AvatarDefs, "avatar_defs", "Avatars", ArchiveSlot::Localres)
 	        .runtime("avatar")
 	        .names_files()
 	        .folder("defs")
+	        .about("The player's avatars.")
 	        .row,
 	Kind(AssetKind::SoundProfileDefs, "sound_profile_defs", "Sound profiles", ArchiveSlot::Localres)
 	        .file("sndprof.def")
 	        .names_files()
 	        .folder("defs")
+	        .about("The sound profiles: named sets of sounds the game looks up by name.")
 	        .row,
 	Kind(AssetKind::CharAttrDefs, "charattr_defs", "Character attributes", ArchiveSlot::Localres)
 	        .file("charattr.def")
 	        .names_files()
 	        .folder("defs")
+	        .about("The characters' attributes.")
 	        .row,
 	Kind(AssetKind::PowerupDefs, "powerup_defs", "Powerup definitions", ArchiveSlot::Localres)
 	        .file("powerup.def")
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
 	        .folder("defs")
+	        .about("The pickups: what each powerup gives.")
 	        .row,
 	Kind(AssetKind::OtherDefs, "other_defs", "Definitions", ArchiveSlot::Localres)
 	        .extensions(kOtherDefs)
 	        .names_files()
 	        .folder("defs")
+	        .about("A definition table the game reads by its name.")
 	        .row,
 	// Opened with fopen by its bare name, from the install's folder whatever the expansion [orig:
 	// CUIStringTable_OpenAndLoad @ 0x63a500, from @ 0x55262b].
@@ -325,6 +388,7 @@ constexpr AssetKindRow kRows[] = {
 	        .extensions(kStringTableCoo)
 	        .folder("strings")
 	        .expansion(ExpansionLoose::RootOnly)
+	        .about("NovaWorld's string table, which the game opens from its own folder.")
 	        .row,
 	// The NovaWorld screens' markup: the error page [orig: "nw_error.mnx", UI_ShowNovaWorldErrorMessage
 	// @ 0x558449] and the login's start page [orig: "nw_startup.mnx", UI_EnterNovaWorldMenu @ 0x558937],
@@ -337,6 +401,8 @@ constexpr AssetKindRow kRows[] = {
 	// (localres), the one place the game reads them with /d and without, and nowhere else.
 	Kind(AssetKind::NovaWorldScreen, "novaworld_screen", "NovaWorld screen", ArchiveSlot::Localres)
 	        .extensions(kNovaWorldScreen)
+	        .folder("menus")
+	        .about("A NovaWorld screen's page, which the menus read.")
 	        .row,
 	// A video by its name, the expansion's own folder first, then the install's: the menus' [orig:
 	// UI_CreateMenuBinkVideos @ 0x54b5ff..0x54b74a] and the intro's [orig: Game_PlayIntroVideos @
@@ -344,6 +410,8 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::Video, "video", "Video", ArchiveSlot::Loose)
 	        .extensions(kVideo)
 	        .expansion(ExpansionLoose::Folder)
+	        .folder("videos")
+	        .about("A video the menus or the intro play, read by its name from the game's folder.")
 	        .row,
 	// An expansion's weapon.sav is the game's beside the expansion's files [orig:
 	// PlayerProfile_LoadAllFromDisk @ 0x54f6b7; the save @ 0x54becd]; a build packs no save
@@ -351,6 +419,7 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::PlayerSave, "player_save", "Player save", ArchiveSlot::Loose)
 	        .extensions(kPlayerSave)
 	        .expansion(ExpansionLoose::Folder)
+	        .about("A player's saved settings: a project ships none.")
 	        .row,
 	// The HLSL effects, which the shader loader takes in the SCR form alone, under its own key
 	// [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060].
@@ -358,6 +427,8 @@ constexpr AssetKindRow kRows[] = {
 	        .extensions(kShader)
 	        .edited_by(DocumentTypeId::Shader)
 	        .scr(ScrForm::Shader)
+	        .folder("shaders")
+	        .about("A shader effect the renderer compiles.")
 	        .row,
 	// Read from the install's folder before any archive mounts (game.cfg, assets.cd:
 	// docs/required-resources.md); gt.ssc, read loose first from the expansion's folder, is its own
@@ -366,12 +437,14 @@ constexpr AssetKindRow kRows[] = {
 	        .extensions(kConfig)
 	        .edited_by(DocumentTypeId::Text)
 	        .expansion(ExpansionLoose::RootOnly)
+	        .about("A configuration the game reads from its own folder before any archive.")
 	        .row,
 	// Loose in the install root, where retail ships it, opened by its bare name [orig: ScoreConfig_LoadFile
 	// @ 0x52d8a0].
 	Kind(AssetKind::Score, "score", "Score table", ArchiveSlot::Loose)
 	        .file("score.ini")
 	        .expansion(ExpansionLoose::RootOnly)
+	        .about("The score table, read from the game's own folder.")
 	        .row,
 	// A text the game reads opens its bare name in the install's folder (earlyerr.txt [orig:
 	// Game_ShowEarlyError @ 0x4a68a0 through Game_ReadLineFromFile @ 0x4a59a0]); an expansion's
@@ -380,11 +453,14 @@ constexpr AssetKindRow kRows[] = {
 	        .extensions(kText)
 	        .edited_by(DocumentTypeId::Text)
 	        .expansion(ExpansionLoose::RootOnly)
+	        .about("A text the game reads from its own folder.")
 	        .row,
 	// No name gives it: the scan gives it to a file an importer converts while its import record
 	// is there (scan_project_assets), whatever the file's name would make it (a .png a texture).
 	// Its outputs, named after it, pack by their own kinds; it never packs.
-	Kind(AssetKind::ImportSource, "import_source", "Import source", ArchiveSlot::None).row,
+	Kind(AssetKind::ImportSource, "import_source", "Import source", ArchiveSlot::None)
+	        .about("A file the editor turns into the game's form: its import record says how, and the build packs what it made.")
+	        .row,
 };
 
 constexpr bool same_text(const char *a, const char *b) {
@@ -428,7 +504,7 @@ constexpr bool new_name_fits(const AssetKindRow &row) {
 // kind the game knows pack nowhere, every other kind somewhere; no name gives an import source or
 // a material chunk (the scan does, by a record beside the file or by its bytes); a kind is edited
 // by a type the registry has; a new file's name ends with one of the kind's extensions where it
-// lists them.
+// lists them; every kind says what it is (about).
 constexpr bool rows_well_formed() {
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKindRow &row = kRows[i];
@@ -441,7 +517,7 @@ constexpr bool rows_well_formed() {
 		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::MaterialChunk;
 		if (by_the_scan && (*row.runtime || row.file_name || row.extensions)) return false;
 		if (static_cast<size_t>(row.document) > kDocumentTypeCount) return false;
-		if (!row.folder || !row.new_name || !new_name_fits(row)) return false;
+		if (!row.folder || !row.new_name || !new_name_fits(row) || !row.about || !*row.about) return false;
 		for (size_t j = 0; j < i; ++j) {
 			const AssetKindRow &other = kRows[j];
 			if (same_text(row.token, other.token)) return false;
@@ -498,6 +574,32 @@ AssetKind asset_kind_for_name(const std::string &logical_name) {
 
 bool asset_kind_packed(AssetKind kind) {
 	return asset_kind_row(kind).archive_slot != ArchiveSlot::None;
+}
+
+AssetKind asset_kind_named_by(const std::string &text, bool *only) {
+	std::string wanted = strutil::to_lower(text);
+	const bool prefixed = wanted.rfind("kind:", 0) == 0;
+	if (prefixed) wanted.erase(0, 5);
+	while (!wanted.empty() && wanted.front() == ' ') wanted.erase(wanted.begin());
+	while (!wanted.empty() && wanted.back() == ' ') wanted.pop_back();
+	if (only) *only = prefixed;
+	if (wanted.empty()) return AssetKind::kCount;
+	// A token spells a space as '_': "sound bank" and "sound_bank" alike.
+	for (char &c : wanted)
+		if (c == '_') c = ' ';
+	const auto spelled = [](const char *name) {
+		std::string out = strutil::to_lower(name);
+		for (char &c : out)
+			if (c == '_') c = ' ';
+		return out;
+	};
+	for (const AssetKindRow &row : kRows) {
+		for (const std::string &name : { spelled(row.label), spelled(row.token) })
+			if (wanted == name || wanted == name + "s" || (name.size() > 1 && name.back() == 'y' &&
+			                                               wanted == name.substr(0, name.size() - 1) + "ies"))
+				return row.kind;
+	}
+	return AssetKind::kCount;
 }
 
 bool archive_name_limit_binds(AssetKind kind) {

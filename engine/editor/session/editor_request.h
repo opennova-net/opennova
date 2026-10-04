@@ -41,6 +41,7 @@ enum class EditorRequestKind {
 	CreateFile,
 	OpenDocument,
 	ShowInFiles,
+	AboutFile,
 	ReloadDocument,
 	CloseDocument,
 	SelectRecord,
@@ -72,6 +73,8 @@ enum class EditorRequestKind {
 	PickDirectory,
 	PickFile,
 	RevealPath,
+	PlaySound,
+	StopSound,
 	kCount,
 };
 

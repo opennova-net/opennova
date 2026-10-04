@@ -1176,7 +1176,8 @@ void test_files_window() {
 			"defs", "items.def", "2", "1", "3.0 KB", "menus", "sub", "options.mnu", "main.mnu",
 			"readme.txt"}),
 	      "the file count; the folders sorted, each over its files; an import beside its source; the counts after a name");
-	CHECK(text.find("Kind") == std::string::npos && text.find("Item defin") == std::string::npos, "the kind hidden");
+	// The UX round's project lane: the kind shown, a column of its own.
+	CHECK(in_order(text, {"Name", "Kind", "Size", "items.def", "Item def", "3.0 KB"}), "the kind shown");
 	// ADR 0046 S15: a file that is the game's own data has its findings counted apart, as Problems
 	// counts them: none after its name (its tooltip says them); the modder's again once it is not.
 	const OriginalData shipped = editor_test::originals_of(v.findings.diagnostics, {"defs/items.def"});
@@ -1193,12 +1194,12 @@ void test_files_window() {
 	ui.frames(2);
 	text = files_text();
 	ImGuiTable *files_table = ImGui::TableFindByID(table);
-	CHECK(files_table && files_table->ColumnsCount == 3 && !files_table->Columns[1].IsEnabled &&
+	CHECK(files_table && files_table->ColumnsCount == 3 && files_table->Columns[1].IsEnabled &&
 	              files_table->Columns[0].WidthGiven > 2.0f * files_table->Columns[2].WidthGiven &&
 	              files_table->Columns[2].WidthGiven >= ImGui::CalcTextSize("999.9 KB").x - 1.0f,
 	      "the name has most of the width; the size is as wide as 999.9 KB");
 	if (!files_table) return;
-	// The kind shown through the header's menu (a right click on a header).
+	// The kind hidden through the header's menu (a right click on a header).
 	const ImGuiTableColumn &size_column = files_table->Columns[2];
 	ui.mouse((size_column.MinX + size_column.MaxX) * 0.5f, files_table->OuterRect.Min.y + ImGui::GetFontSize() * 0.5f + 1.0f);
 	ui.button(true, 1);
@@ -1208,8 +1209,8 @@ void test_files_window() {
 	ui.away();
 	ui.frames(2);
 	text = files_text();
-	CHECK(files_table->Columns[1].IsEnabled && in_order(text, {"Name", "Kind", "Size", "items.def", "Item defin", "3.0 KB"}),
-	      "the kind shown from the header's menu");
+	CHECK(!files_table->Columns[1].IsEnabled && text.find("Item def") == std::string::npos,
+	      "the kind hidden from the header's menu");
 
 	// A filter: its matches, flat.
 	type_into(ui, item_id(files, {"##filter"}), "mnu");

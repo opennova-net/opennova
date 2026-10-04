@@ -441,6 +441,12 @@ constexpr RequestKindRow kRows[] = {
 			"(Rename...).")
 			.takes(request_params({ F::Path }, { F::AskName }))
 			.row,
+	Request(K::AboutFile, "about_file", serve_show_in_files,
+			"Files selects the project file path and opens its card (a RevealFile view event, tag 1): what it "
+			"is, where a build puts it, what it names and who names it, a wave's sound; the file_card query "
+			"reads the same.")
+			.takes(request_params({ F::Path }))
+			.row,
 	Request(K::ReloadDocument, "reload_document", serve_open_document,
 			"The document at path read again from its file, its unsaved edits dropped (the prompt "
 			"asks first).")
@@ -695,6 +701,15 @@ constexpr RequestKindRow kRows[] = {
 			"The file or folder path shown in the OS file manager.")
 			.served_by(ServedBy::Shell)
 			.takes(request_params({ F::Path }))
+			.row,
+	Request(K::PlaySound, "play_sound", nullptr,
+			"The project's wave at path (a project-relative path or a logical name) played by the editor as "
+			"the game decodes it, once, in place of any sound it plays.")
+			.served_by(ServedBy::Shell)
+			.takes(request_params({ F::Path }))
+			.row,
+	Request(K::StopSound, "stop_sound", nullptr, "The sound the editor plays stopped.")
+			.served_by(ServedBy::Shell)
 			.row,
 };
 

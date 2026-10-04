@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/file_dialog.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -142,6 +143,8 @@ private:
 	void serve_queued_device_requests_();
 	// A device's notice for the person (an edit it refused), on the status line as an error.
 	void post_device_notice_(const std::string &p_text);
+	// PlaySound: the project's wave at `p_path` (a path or a logical name) played once.
+	void play_sound_(const std::string &p_path);
 	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);
 	void _on_dir_selected(const String &p_dir);
 	void _on_file_selected(const String &p_file);
@@ -182,6 +185,8 @@ private:
 	PackedStringArray play_engine_args_;
 	FileDialog *picker_ = nullptr;
 	opennova::editor::PickPurpose pending_pick_ = opennova::editor::PickPurpose::None;
+	// The player of a project's wave (PlaySound: Files' card), made with the first; a child, freed with it.
+	AudioStreamPlayer *sound_ = nullptr;
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window

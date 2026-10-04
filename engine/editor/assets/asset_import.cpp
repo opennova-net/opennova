@@ -135,7 +135,9 @@ std::vector<std::string> list_base_file_names(const std::string &retail_root, co
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {
 	if (const AssetEntry *prior = existing.find(name)) return prior->relative_path;
-	return join_path(asset_kind_row(kind).folder, name);
+	// An import source sits with the files of the kind its name gives (a PNG with the textures it makes).
+	const AssetKind placed = kind == AssetKind::ImportSource ? asset_kind_for_name(name) : kind;
+	return join_path(asset_kind_row(placed).folder, name);
 }
 
 namespace {
