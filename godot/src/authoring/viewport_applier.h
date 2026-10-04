@@ -108,6 +108,10 @@ public:
 	virtual uint64_t scene_state() const { return 0; }
 	virtual void publish_scene_state() {}
 	virtual void present(double dt) { (void)dt; }
+	// Whether its picture reads the process-wide render state at all (ADR 0046 S18): a texture's flat
+	// picture reads none, so it never enters the frame's arbitration (its device asks no render of it)
+	// and renders beside any state.
+	virtual bool reads_scene_state() const { return true; }
 };
 
 } // namespace godot

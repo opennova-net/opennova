@@ -22,6 +22,7 @@
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 namespace opennova::editor {
 namespace {
@@ -202,6 +203,11 @@ void EditorWindows::set_view(const SessionView *view) {
 void EditorWindows::request(EditorRequest request) {
 	const RequestKindRow &row = request_kind_row(request.kind);
 	if (request.path.empty() && row.names_active) request.path = view().documents.active;
+	// A texture's Replace with image... (S18): the texture it is for kept until the Shell's pick comes back.
+	if (request.kind == EditorRequestKind::PickFile && request.purpose == PickPurpose::TextureImage) {
+		replace_target_ = request.path;
+		request.path.clear();
+	}
 	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
 	else requests_.push_back(std::move(request));
 }
@@ -244,9 +250,34 @@ void EditorWindows::dispatch_events() {
 		case ViewEventKind::BuildEnded:
 			if (!(event.flag && event.tag == 1)) build_panel_open_ = true;
 			break;
+		case ViewEventKind::OpenExternally: break; // the Shell's (EditorApp opens the file)
+		// A use shown on its model or in its menu (S18): the Preview window that draws it comes forward.
+		case ViewEventKind::RevealPreview:
+			if (preview_window_) preview_window_->request_focus();
+			break;
 		case ViewEventKind::kCount: break;
 		}
 	}
+}
+
+void EditorWindows::drop_files(std::vector<std::string> paths, float x, float y) {
+	dropped_ = {std::move(paths), x, y, 2};
+}
+
+bool EditorWindows::take_dropped_files(float min_x, float min_y, float max_x, float max_y, std::vector<std::string> &paths) {
+	if (dropped_.paths.empty() || dropped_.x < min_x || dropped_.x >= max_x || dropped_.y < min_y || dropped_.y >= max_y)
+		return false;
+	// The window under the drop is the item's own (or a child of it), never one drawn over it; with a modal
+	// open, only the modal's items take one.
+	const ImGuiWindow *current = ImGui::GetCurrentWindowRead();
+	ImGuiWindow *under = nullptr, *under_moving = nullptr;
+	ImGui::FindHoveredWindowEx(ImVec2(dropped_.x, dropped_.y), true, &under, &under_moving);
+	if (!current || !under || under->RootWindow != current->RootWindow) return false;
+	if (const ImGuiWindow *modal = ImGui::GetTopMostAndVisiblePopupModal())
+		if (modal->RootWindow != current->RootWindow) return false;
+	paths = std::move(dropped_.paths);
+	dropped_ = Dropped();
+	return true;
 }
 
 void EditorWindows::end_frame() {
@@ -254,6 +285,8 @@ void EditorWindows::end_frame() {
 	// tab hidden): its gesture ends, before what waits on the files as saved.
 	if (preview_window_) preview_window_->end_frame();
 	if (document_window_) document_window_->end_frame();
+	// A drop no item took within two frames is none's (the frame it came in may have drawn before it).
+	if (!dropped_.paths.empty() && --dropped_.frames <= 0) dropped_ = Dropped();
 	in_frame_ = false;
 	for (EditorRequest &request : deferred_) requests_.push_back(std::move(request));
 	deferred_.clear();
@@ -274,6 +307,11 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::RuntimeExecutable:
 	case PickPurpose::GameInstall: settings_.set_picked(purpose, path, view().project.root); break;
 	case PickPurpose::ImportFiles: deliver_picks(purpose, {path}); break;
+	case PickPurpose::TextureImage:
+		// Asked before it is done: the dialog shows what the Replace would change (S18).
+		if (!replace_target_.empty()) request(request::preview_texture_source(replace_target_, path));
+		replace_target_.clear();
+		break;
 	case PickPurpose::BuildFolder: {
 		// The modder's pick, kept with the project's local settings (Build > Build to <it>), then built into.
 		ProjectSettingsChange keep;
@@ -306,6 +344,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	new_file_.draw(*this);
 	find_.draw(*this);
 	rename_.draw(*this);
+	texture_source_.draw(*this);
 	draw_build_panel(v);
 	if (document_window_) document_window_->draw_modals();
 	shortcuts(v, document);

@@ -40,4 +40,32 @@ OperationOutcome RefreshOperation::finish(SessionCore &core) {
 	return outcome;
 }
 
+ChangedSourcesOperation::ChangedSourcesOperation(const ProjectPaths &paths, const ProjectDocument &document,
+		ExternalChanges changes) :
+		changes_(std::move(changes)), pass_(paths, document) {
+	pass_.limit_to(changes_.sources);
+}
+
+OperationProgress ChangedSourcesOperation::progress() const {
+	return {uint64_t(pass_.sources_done()), uint64_t(pass_.sources_listed()), OperationUnit::Files,
+	        pass_.current().empty() ? std::string("Reading what its program saved") : "Importing " + pass_.current()};
+}
+
+OperationOutcome ChangedSourcesOperation::finish(SessionCore &core) {
+	ImportRunResult imported = pass_.take();
+	core.absorb_changed(imported, changes_.files);
+	OperationOutcome outcome;
+	for (const Diagnostic &d : imported.diagnostics) {
+		outcome.findings.push_back(d);
+		if (d.severity == DiagnosticSeverity::Error) outcome.end = OperationEnd::Failed;
+	}
+	const size_t files = changes_.files.size();
+	core.view().activity.status = imported.reimported
+	                                      ? std::to_string(imported.reimported) + " source" + (imported.reimported == 1 ? "" : "s") +
+	                                                " imported from what its program saved."
+	                                      : std::to_string(files) + " file" + (files == 1 ? "" : "s") + " read again.";
+	core.touch(ViewConcern::Output);
+	return outcome;
+}
+
 } // namespace opennova::editor
