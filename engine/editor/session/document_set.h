@@ -84,9 +84,17 @@ public:
 	// OpenDocument and ReloadDocument.
 	void open_document(const EditorRequest &request);
 	void show_in_files(const EditorRequest &request);
+	// SelectFile (ADR 0046 S18): the project file at `path` selected in Files ("" none), leading the
+	// Preview window where a viewport draws it whether or not it is open (a texture).
+	void select_file(const std::string &path);
 	void close_document(const std::string &path);
 	void select_record(const EditorRequest &request);
 	void edit_record(const EditorRequest &request);
+	// TextureOperation (ADR 0046 S18): the texture document at path (opened first when open_first says so)
+	// made anew by the operation over the bytes it holds (documents/texture_operations.h), applied as one
+	// step whose words are the operation's. Refused, nothing changed (texture.operation): a file an import
+	// makes (its import's options make it), an operation no row names, one the file cannot take.
+	void texture_operation(const EditorRequest &request);
 	void revert_to_saved(const EditorRequest &request);
 	// Copy and Cut.
 	void copy(const EditorRequest &request);

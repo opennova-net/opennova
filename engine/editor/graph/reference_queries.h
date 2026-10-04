@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/texture_load_rules.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_edge.h>
 #include <editor/model/diagnostic.h>
@@ -80,5 +81,32 @@ ReferenceTarget usage_target(const AssetScan &scan, const GraphEdge &edge);
 // and a file itself; opened, or shown in Files, as usage_target.
 ReferenceTarget symbol_target(const AssetScan &scan, const GraphSymbol &symbol);
 ReferenceTarget file_target(const AssetScan &scan, const std::string &file);
+
+// What a texture reference loads (ADR 0046 S18): whether the value names a texture (a model row's, a
+// role's, a menu's image or a mission's loading screen; a menu's through a stylesheet variable, by the
+// file its value names), its status, the name its loader takes, the project file the loader opens for it
+// ("" for none) and what the loader makes of that file's texels (texture_load_rules: the HUD's alpha-only
+// art, a sky map's PCX alpha from its palette), which the previews draw.
+struct TextureReferenceLoad {
+	bool texture = false;
+	ReferenceStatus status = ReferenceStatus::NotAReference;
+	std::string name;
+	std::string file;
+	TextureLoadTransform transform = TextureLoadTransform::None;
+	// The name the loader opens for it (a HUD name's suffix cut, a sky map's made .pcx): the file a Replace
+	// makes where the project has none.
+	std::string opens;
+};
+// The file a Replace of a texture reference's texture makes (S18: an image dropped on its field): the project
+// file the loader opens for it (a .dds beside the name the field writes), else the name the loader opens; ""
+// for a reference naming no texture.
+std::string texture_replace_target(const TextureReferenceLoad &loads);
+// The kinds a texture's file is: a texture, a menu's texture, a mission's loading image.
+bool is_texture_reference(ReferenceKind kind);
+TextureReferenceLoad texture_reference(const AssetGraph &graph, const FieldUse &field, const Value &value);
+TextureReferenceLoad texture_reference(const AssetGraph &graph, const GraphEdge &edge);
+// The same for a name of `kind`, as `loader_arg` and `scope` give it its loader.
+TextureReferenceLoad texture_reference(const AssetGraph &graph, ReferenceKind kind, const std::string &name,
+                                       const std::string &scope, int32_t loader_arg);
 
 } // namespace opennova::editor

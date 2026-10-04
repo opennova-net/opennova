@@ -1238,9 +1238,11 @@ func test_model_viewport_through_the_editor_mcp() -> void:
 
 
 ## The image importer through the endpoint (S8): a PNG imported into the project becomes a
-## PCX under the cache with a committed sidecar beside the source, the state lists the import,
-## the graph resolves the output as a texture, and the source itself is never a build member.
-## A PNG saved into the project with no record is a texture the game loads as it is (S9p2a).
+## 32-bit TGA under the cache (S18: the default, its alpha kept) with a committed sidecar beside the
+## source, the state lists the import, the graph resolves the output as a texture, and the source
+## itself is never a build member. A PNG saved into the project with no record is a texture the game
+## loads as it is (S9p2a). S18: the import_options query answers its options; set_import_options
+## makes it a PCX, the TGA gone.
 func test_png_import_through_the_endpoint() -> void:
 	if _client == null:
 		return
@@ -1277,8 +1279,19 @@ func test_png_import_through_the_endpoint() -> void:
 	assert_true(FileAccess.file_exists(root.path_join("logo.png.import")), "importing writes the record beside the source")
 	var problems := await _query("problems", {"severities": ["error"]})
 	assert_eq(int(problems.get("shown", -1)), 0, str(problems))
-	var symbols := await _query("referrers", {"path": "logo.pcx"})
+	var symbols := await _query("referrers", {"path": "logo.tga"})
 	assert_eq(int(symbols.get("count", -1)), 0)
+	var options := await _query("import_options", {"path": "logo.tga"})
+	assert_eq(String(options.get("source", "")), "logo.png", str(options))
+	assert_eq(String(options.get("effective", {}).get("format", "")), "tga", str(options))
+	var made_pcx := await _call("editor_request", {"kind": "set_import_options", "path": "logo.png", "values": {"format": "pcx"}})
+	assert_true(_done(made_pcx), str(made_pcx))
+	var renamed := await _query("files", {"limit": 200})
+	var outputs: Array[String] = []
+	for file in renamed.get("files", []):
+		outputs.append(String(file["name"]))
+	assert_has(outputs, "logo.pcx", "the import makes the PCX")
+	assert_does_not_have(outputs, "logo.tga", "the TGA it made before is gone")
 	var listed := await _query("files", {"limit": 200})
 	var names: Array[String] = []
 	var kinds := {}
