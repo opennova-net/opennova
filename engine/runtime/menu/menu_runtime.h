@@ -279,6 +279,14 @@ public:
 	std::string widget_name_of(int id) const;
 	int widget_kind_of(int id) const; // mnu::WindowType as int, -1 unknown id
 	std::string widget_screen_of(int id) const;
+	// A named screen's control the way retail finds one: the first screen of that name
+	// (case-insensitive), then a pre-order search of its windows, each window before its
+	// children, names compared case-insensitively; an UNNAMED window ends the search of
+	// its own subtree. -1 when absent.
+	// [orig: UI_FindScreenControl @0x63ae80 (the section by stricmp, then its root
+	//  windows); CWnd_FindChildByName @0x646850 (`!name || !window->name` returns 0
+	//  before the children are searched)]
+	int find_screen_control(const std::string &screen, const std::string &name) const;
 	// The current screen's pre-order index of a doc id; -1 off-screen or frameless.
 	int frame_index(int id) const;
 	int id_at_index(int index) const;

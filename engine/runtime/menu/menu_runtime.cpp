@@ -4,6 +4,7 @@
 
 #include <runtime/menu/menu_runtime.h>
 
+#include <base/gameprofile/build_version.h>
 #include <base/io/strutil.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/options_policy.h>
@@ -250,6 +251,16 @@ bool MenuRuntime::pop_screen() {
 }
 
 void MenuRuntime::on_screen_shown_() {
+	// The activate dispatch's STARTUP leg sets the screen's VERSION label to the
+	// build's version text; the backdrop movies it toggles are menu_video.h's.
+	// [orig: UI_DispatchScreenEvent @0x54e6a0 case 5, stricmp(screen, "STARTUP")
+	//  @0x54eeff -> UI_OnStartupScreenActivate @0x5557f0: UI_FindScreenControl(
+	//  g_GameMenu, "STARTUP", "VERSION") @0x555840, then the control's vtable+76
+	//  (CButtonWnd_SetLabel @0x6572f0) with byte_B4C070 @0x555857]
+	if (strutil::iequals(current_screen_, "STARTUP")) {
+		const int version = find_screen_control("STARTUP", "VERSION");
+		if (version >= 0) set_widget_text(version, gameprofile::kBuildVersionText);
+	}
 	MenuEvent changed;
 	changed.kind = MenuEvent::Kind::ScreenChanged;
 	changed.text = current_screen_;
@@ -329,6 +340,41 @@ void MenuRuntime::replay_state_() {
 int MenuRuntime::widget_id(const std::string &name) const {
 	const auto it = name_to_id_.find(strutil::to_upper(name));
 	return it != name_to_id_.end() ? it->second : -1;
+}
+
+namespace {
+
+// [orig: CWnd_FindChildByName @0x646850 — no name, or a window without one, finds
+//  nothing (its children unsearched); a stricmp match is the window itself; else each
+//  child in order, recursively]
+int find_child_by_name(const MenuDocIndex &index, int id, const std::string &name) {
+	const MenuDocIndex::Node *node = index.node(id);
+	if (node == nullptr || node->window == nullptr || name.empty() || node->window->name.empty())
+		return -1;
+	if (strutil::iequals(name, node->window->name)) return id;
+	for (int child : node->child_ids) {
+		const int found = find_child_by_name(index, child, name);
+		if (found >= 0) return found;
+	}
+	return -1;
+}
+
+} // namespace
+
+int MenuRuntime::find_screen_control(const std::string &screen, const std::string &name) const {
+	// [orig: UI_FindScreenControl @0x63ae80 — the first section whose name stricmps
+	//  equal, then CWnd_FindChildByName over its root windows in order]
+	for (int screen_id : index_.screen_ids()) {
+		const mnu::Screen *section = index_.screen(screen_id);
+		if (section == nullptr || !strutil::iequals(section->name, screen)) continue;
+		const MenuDocIndex::Node *node = index_.node(screen_id);
+		for (int root : node->child_ids) {
+			const int found = find_child_by_name(index_, root, name);
+			if (found >= 0) return found;
+		}
+		return -1;
+	}
+	return -1;
 }
 
 std::string MenuRuntime::widget_name_of(int id) const {

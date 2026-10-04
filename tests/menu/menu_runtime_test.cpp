@@ -946,8 +946,82 @@ void test_table_column_records() {
 			!seen[2].defined);
 }
 
+// The STARTUP screen's activate sets its VERSION label to the build's version text,
+// found the way retail finds it: the first screen of that name (case-insensitive),
+// pre-order, each window before its children, an unnamed window's subtree unsearched
+// (retail's main.mnu carries two VERSION statics: the empty right-justified one the
+// version fills, then the copyright line, which keeps its text).
+// [orig: UI_OnStartupScreenActivate @0x5557f0; UI_FindScreenControl @0x63ae80;
+//  CWnd_FindChildByName @0x646850]
+void test_startup_version() {
+	mnu::Document doc;
+	mnu::Screen other;
+	other.name = "OTHER";
+	other.root_window = widget("ROOT0", mnu::WindowType::Window);
+	mnu::Window other_version = widget("VERSION", mnu::WindowType::Static);
+	other_version.string_data.value = "other";
+	other.root_window.children = { other_version };
+	mnu::Screen startup;
+	startup.name = "Startup";
+	startup.root_window = widget("MAIN", mnu::WindowType::Window);
+	mnu::Window unnamed;
+	unnamed.type = mnu::WindowType::Window;
+	mnu::Window hidden = widget("VERSION", mnu::WindowType::Static);
+	hidden.string_data.value = "hidden";
+	unnamed.children = { hidden };
+	mnu::Window buttons = widget("BUTTONS", mnu::WindowType::Window);
+	mnu::Window version = widget("version", mnu::WindowType::Static);
+	mnu::Window copyright = widget("VERSION", mnu::WindowType::Static);
+	copyright.string_data.value = "(c) 2009, NovaLogic, Inc.";
+	buttons.children = { version, copyright };
+	startup.root_window.children = { unnamed, buttons };
+	doc.screens = { other, startup };
+	// OTHER: screen 1, ROOT0 2, VERSION 3; Startup: screen 4, MAIN 5, unnamed 6,
+	// hidden VERSION 7, BUTTONS 8, version 9, copyright VERSION 10.
+
+	// Frameless first: every read takes the state store or the authored text.
+	MenuRuntime rt;
+	CHECK(rt.open_document(&doc, "main.mnu", "OTHER"));
+	CHECK(rt.find_screen_control("STARTUP", "VERSION") == 9);
+	CHECK(rt.find_screen_control("startup", "Version") == 9);
+	CHECK(rt.find_screen_control("OTHER", "VERSION") == 3);
+	CHECK(rt.find_screen_control("STARTUP", "MAIN") == 5);
+	CHECK(rt.find_screen_control("STARTUP", "ROOT0") == -1);
+	CHECK(rt.find_screen_control("NOPE", "VERSION") == -1);
+	CHECK(rt.find_screen_control("STARTUP", "") == -1);
+	// Another screen's activate leaves every label alone.
+	CHECK(rt.get_widget_text(3) == "other" && rt.get_widget_text(9).empty());
+
+	CHECK(rt.show_screen("STARTUP"));
+	CHECK(rt.get_widget_text(9) == "V1.7.5.7");
+	CHECK(rt.get_widget_text(10) == "(c) 2009, NovaLogic, Inc.");
+	CHECK(rt.get_widget_text(7) == "hidden");
+	CHECK(rt.get_widget_text(3) == "other");
+	// The frame draws it: version is the Startup screen's pre-order index 4, the
+	// only label written.
+	FakeFrame frame;
+	MenuRuntime framed;
+	framed.set_frame(&frame);
+	CHECK(framed.open_document(&doc, "main.mnu", "Startup"));
+	CHECK(framed.frame_index(9) == 4);
+	CHECK(frame.texts.size() == 1 && frame.texts.count(4) == 1 && frame.texts[4] == "V1.7.5.7");
+
+	// A STARTUP screen whose VERSION sits only under an unnamed window draws none.
+	mnu::Document bare;
+	mnu::Screen bare_startup;
+	bare_startup.name = "STARTUP";
+	bare_startup.root_window.type = mnu::WindowType::Window;
+	bare_startup.root_window.children = { widget("VERSION", mnu::WindowType::Static) };
+	bare.screens = { bare_startup };
+	MenuRuntime bare_rt;
+	CHECK(bare_rt.open_document(&bare, "main.mnu", ""));
+	CHECK(bare_rt.find_screen_control("STARTUP", "VERSION") == -1);
+	CHECK(bare_rt.get_widget_text(3).empty());
+}
+
 int main() {
 	test_index_and_frameless();
+	test_startup_version();
 	test_navigation_replay_and_actions();
 	test_radio_spin_tables_scroll();
 	test_table_row_operations();
