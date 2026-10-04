@@ -178,7 +178,7 @@ void test_windows_show_the_gate() {
 	ui.drain();
 	const ImGuiID bar = menu_bar_id();
 	const ImGuiID files = Ui::window_id("Files");
-	const ImGuiID table = item_id(files, {"files"});
+	const ImGuiID table = item_id(files, {"project_files"});
 	const ImGuiID combo = ImHashStr("##Combo_00");
 	const ImGuiID tab = document_tab_id(a->path());
 	const ImGuiID summary = item_id(Ui::window_id("Problems"), {v.project.root.c_str(), "required"});
@@ -253,7 +253,7 @@ void test_windows_show_the_gate() {
 	         },
 	         nullptr},
 	        {"File > Open project...", K::OpenProject, menu("File", {"Open project..."}, K::PickDirectory), nullptr},
-	        {"File > Open recent", K::OpenProject, menu("File", {"Open recent", "C:/mods/Other"}, K::OpenProject), nullptr},
+	        {"File > Open recent", K::OpenProject, menu("File", {"Open recent", "###C:/mods/Other"}, K::OpenProject), nullptr},
 	        {"File > Save", K::Save, menu("File", {"Save"}, K::Save), nullptr},
 	        {"File > Save All", K::SaveAll, menu("File", {"Save All"}, K::SaveAll), nullptr},
 	        {"File > Close file", K::CloseDocument, menu("File", {"Close file"}, K::CloseDocument), nullptr},
@@ -446,16 +446,19 @@ void test_windows_show_the_gate() {
 	ui.frames(3);
 	ui.windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
 	ui.frames(2);
-	const ImGuiID document = Ui::window_id("Document");
+	// (The welcome page's two columns are a table: its items in its scope.)
+	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
 	const std::vector<Probe> welcome_probes = {
 	        {"the welcome view's Create project", K::NewProject, pressed(item_id(document, {"Create project"}), K::NewProject),
 	         nullptr},
 	        {"the welcome view's Browse...", K::NewProject, pressed(item_id(document, {"Browse...##folder"}), K::PickDirectory),
 	         nullptr},
+	        {"the welcome view's install Browse...", K::NewProject, pressed(item_id(document, {"Browse...##install"}), K::PickDirectory),
+	         nullptr},
 	        {"the welcome view's Open a project folder...", K::OpenProject,
 	         pressed(item_id(document, {"Open a project folder..."}), K::PickDirectory), nullptr},
 	        {"a recent project", K::OpenProject,
-	         pressed(item_id(document, {"recent", "C:/mods/Other", "###root"}), K::OpenProject), nullptr},
+	         pressed(item_id(document, {"recent", "C:/mods/Other", "###open"}), K::OpenProject), nullptr},
 	        {"a recent project's Forget", K::ForgetRecent,
 	         pressed(item_id(document, {"recent", "C:/mods/Other", "Forget"}), K::ForgetRecent), nullptr},
 	};

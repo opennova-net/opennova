@@ -323,7 +323,7 @@ static int test_imports() {
 	TEST_EXPECT(editor_test::write_bytes(dir.file("splash.png"), editor_test::gradient_png(4, 4, 5)));
 	TEST_EXPECT(run_capture(capture, {"import", root, dir.file("splash.png")}, text) == 0);
 	TEST_EXPECT(text.find("-> 1 output") != std::string::npos);
-	TEST_EXPECT(text.find("imported splash.png\n") != std::string::npos);
+	TEST_EXPECT(text.find("imported textures/splash.png\n") != std::string::npos);
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0);
 	TEST_EXPECT(text.find("imports: 2 sources, 0 imported now, 0 failed") != std::string::npos);
 	// reimport: nothing changed, nothing imports; --force with a source imports that one.
@@ -501,12 +501,12 @@ static int test_scene_textures() {
 	TEST_EXPECT(!ec && editor_test::write_text(scene + "/SPINNER.TGA", "tga")); // it names spinner.tga and glow.tga
 	std::string text;
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, scene + "/spinner.o3d"}, text) == 1);
-	TEST_EXPECT(fs::is_regular_file(root + "/models/spinner.3di") && !fs::exists(root + "/SPINNER.TGA"));
+	TEST_EXPECT(fs::is_regular_file(root + "/models/spinner.3di") && !fs::exists(root + "/textures/SPINNER.TGA"));
 	TEST_EXPECT(text.find("import.texture_not_imported") != std::string::npos && text.find("spinner.tga") != std::string::npos &&
 	            text.find("glow.tga") != std::string::npos && text.find("--with-dependencies") != std::string::npos);
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, scene + "/spinner.o3d", "--replace", "--with-dependencies"},
 	                      text) == 1);
-	TEST_EXPECT(fs::is_regular_file(root + "/SPINNER.TGA"));
+	TEST_EXPECT(fs::is_regular_file(root + "/textures/SPINNER.TGA"));
 	TEST_EXPECT(text.find("glow.tga") != std::string::npos && text.find("names the texture spinner.tga") == std::string::npos);
 	// The same model again: the .3di the project holds with the same bytes is left as it is, so the
 	// import names nothing it wrote (the outcome's imported list is import_assets' own); with
@@ -702,7 +702,7 @@ static int test_one_game_install() {
 	TEST_EXPECT(run_capture(capture, {"import", root, "--all"}, text) == 0);
 	TEST_EXPECT(has("imported fonts/arial99.fnt") && has("imported ") && fs::is_regular_file(root + "/fonts/arial99.fnt"));
 	std::string music, io_error;
-	TEST_EXPECT(opennova::editor::read_file_text(root + "/menumus.sbf", music, io_error) && music == "music");
+	TEST_EXPECT(opennova::editor::read_file_text(root + "/music/menumus.sbf", music, io_error) && music == "music");
 
 	// Another project names none: the editor opens it on the install it last chose.
 	const std::string other = dir.file("Other");
