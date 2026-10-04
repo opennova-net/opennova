@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/name_source.h>
@@ -87,6 +88,10 @@ struct DocumentType {
 	// mission's SSN 10000, the player), added before the graph's names; null for a type with none.
 	void (*game_choices)(const Document &document, const NodeAddress &address, const FieldUse &field,
 	                     std::vector<GameChoice> &out) = nullptr;
+	// What a document of another content than records or a text holds, on the wire (S18: a texture's
+	// reader, sides, levels and facts), the document query's member named by the type's name; null for
+	// a type whose documents the base's lifecycle, the rows or the lines say.
+	io::JsonValue (*content_json)(const DocumentBase &document) = nullptr;
 };
 
 // The type its row names (null for DocumentTypeId::None); the type that opens a kind (null for a
@@ -98,11 +103,17 @@ const DocumentType *registered_document_type(DocumentTypeId id);
 const DocumentType *document_type_for(AssetKind kind);
 bool is_editable_kind(AssetKind kind);
 // What the documents a type makes hold: records (DocumentBase::as_records), a text
-// (DocumentBase::as_text, S13 D9), or content of another kind, which the graph's extraction, the
-// validation and the rename read nothing of until it has hooks of its own (a test's blob; a raster
-// to come). Asked of a document the type makes, once per registered type.
-enum class DocumentContent { Records, Text, Other };
+// (DocumentBase::as_text, S13 D9), an image (DocumentBase::holds_image, S18: a texture's texels,
+// which names nothing the graph reads and which the validation reads through its type's
+// validate_file where the type has finding codes, its file left unread where it has none), or
+// content of another kind, which the graph's extraction, the validation and the rename read nothing
+// of until it has hooks of its own (a test's blob; a raster to come). Asked of a document the type
+// makes, once per registered type.
+enum class DocumentContent { Records, Text, Image, Other };
 DocumentContent document_content(const DocumentType &type);
+// Whether the validation reads a type's files: every type's but an image type's with no finding codes
+// (S18: the texture's, until its roles' findings), which could make no finding of a file.
+bool validates_files(const DocumentType &type);
 
 // A test's document type in a registered one's place (S13 D6: a type whose documents hold
 // neither records nor a text): while it lives, document_type answers it for its id, and so

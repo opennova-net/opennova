@@ -89,8 +89,9 @@
     defines, one `use_checks` row per asset kind, and what a stylesheet line's value is used as
     (`style_value_use`, from the menus' uses of it); and `project_validation`, the one pass over the
     project's files: the graph's update, each file's own findings, the use checks, the graph's
-    findings), `import` (the importers: a PNG to the game's
-    PCX, the `.import` sidecars, the import pass whose outputs the scan lists; and the
+    findings), `import` (the importers: a PNG to the texture file its uses read, by the
+    record's options, each a row of its importer's (S18), the `.import` sidecars, the import pass
+    whose outputs the scan lists; and the
     one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
     (the viewports, S13 V5: a document's picture as the game would draw it, one per (document,
     kind) from a compiled-in kind table (`viewport_kinds`: the menu's and the model's, each a
