@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include <base/gameprofile/required_resources.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/documents/texture_load_rules.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
@@ -657,6 +658,54 @@ bool blocks_build(const Diagnostic &d) {
 bool diagnostics_block_build(const std::vector<Diagnostic> &items) {
 	for (const Diagnostic &d : items)
 		if (blocks_build(d)) return true;
+	return false;
+}
+
+bool BaseNames::has(const std::string &name) const {
+	if (!sorted) return false;
+	const std::string wanted = normalized_logical_name(name);
+	const auto found = std::lower_bound(sorted->begin(), sorted->end(), wanted,
+	                                    [](const std::string &listed, const std::string &key) {
+		                                    return normalized_logical_name(listed) < key;
+	                                    });
+	return found != sorted->end() && normalized_logical_name(*found) == wanted;
+}
+
+bool blocks_build(const Diagnostic &d, const BaseNames *base) {
+	if (!blocks_build(d)) return false;
+	if (!base) return true;
+	if (d.row() == &finding_code(CoreFinding::RequirementMissing))
+		if (const RequirementSubject *requirement = requirement_subject(d)) return !base->has(requirement->target);
+	if (d.row() == &finding_code(CoreFinding::ReferenceMissing)) {
+		if (const ReferenceSubject *reference = reference_subject(d)) {
+			// A file the reference's loader opens by one of its names, the base's (a symbol is no file).
+			const auto in_base = [base](const std::string &name) { return base->has(name); };
+			for (const std::string &candidate :
+			     reference_file_candidates(reference->kind, reference->target, reference->loader_arg, in_base))
+				if (base->has(candidate)) return false;
+		}
+	}
+	return true;
+}
+
+bool diagnostics_block_build(const std::vector<Diagnostic> &items, const BaseNames *base) {
+	for (const Diagnostic &d : items)
+		if (blocks_build(d, base)) return true;
+	return false;
+}
+
+bool ShippedFiles::has(const std::string &asset) const {
+	return !asset.empty() && original.count(asset) != 0 && unsaved.count(asset) == 0;
+}
+
+bool blocks_build(const Diagnostic &d, const BaseNames *base, const ShippedFiles *shipped) {
+	if (!blocks_build(d, base)) return false;
+	return !(shipped && d.row() && d.row()->blocks_save && shipped->has(d.asset));
+}
+
+bool diagnostics_block_build(const std::vector<Diagnostic> &items, const BaseNames *base, const ShippedFiles *shipped) {
+	for (const Diagnostic &d : items)
+		if (blocks_build(d, base, shipped)) return true;
 	return false;
 }
 

@@ -663,6 +663,10 @@ void Vfs::set_scr_policy(int scr_policy) {
     impl_->scr_policy = scr_policy;
 }
 
+int Vfs::scr_policy() const {
+    return impl_->scr_policy;
+}
+
 std::vector<VfsFileLocation> Vfs::list_files() const {
     impl_->ensure_index();
     std::vector<VfsFileLocation> out;

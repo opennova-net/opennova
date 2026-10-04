@@ -24,6 +24,7 @@
 // files in the retail leg.
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/project_checks.h>
@@ -538,8 +539,9 @@ static int test_retail_validation() {
 	ImportOrigin origin;
 	std::string error;
 	TEST_EXPECT(origin.open(ImportOrigin::Kind::GameInstall, install, project.document, error));
-	opennova::Vfs mount;
-	TEST_EXPECT(mount_retail(mount, install, project.document));
+	InstallView view;
+	TEST_EXPECT(view.open(install_spec(install, project.document), error));
+	const opennova::Vfs &mount = view.vfs();
 	size_t exported = 0, models = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;

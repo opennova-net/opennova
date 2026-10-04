@@ -613,7 +613,8 @@ static int test_location() {
 		            shown.request().path == asset && !shown.request().ask_name);
 	}
 	// The rows about the file as a whole (FindingPlace::File: S13 A6, the four the location named
-	// before).
+	// before; S16 a root-only file an expansion's build leaves out, a file its expansion setting leaves
+	// unread, a mission the game's list shows untitled or twice, a NovaWorld screen the game never reads).
 	std::vector<const FindingCodeRow *> file_rows;
 	std::vector<std::string> about_files;
 	for (const NamedFindingTable &table : finding_tables())
@@ -623,7 +624,9 @@ static int test_location() {
 				about_files.push_back(row.token);
 			}
 	TEST_EXPECT(about_files == std::vector<std::string>({"asset.name.duplicate", "asset.name.empty", "asset.name.too_long",
-	                                                     "build.archive_in_project", "build.name_unstorable"}));
+	                                                     "build.archive_in_project", "build.expansion.mission_twice",
+	                                                     "build.expansion.mission_untitled", "build.expansion.root_only",
+	                                                     "build.name_unstorable", "build.unread", "expansion.file.unread"}));
 	for (const FindingCodeRow *row : file_rows) {
 		Diagnostic named = make_finding(*row, catalog.severity, catalog.message, catalog.asset, catalog.field);
 		named.record = catalog.record;

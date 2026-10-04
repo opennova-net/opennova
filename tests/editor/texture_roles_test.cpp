@@ -15,6 +15,7 @@
 
 #include <base/io/json.h>
 #include <base/vfs/vfs.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
@@ -342,8 +343,10 @@ int test_retail() {
 	editor_test::handle_to_end(session, request::new_project(root, "Roles"));
 	ProjectDocument project;
 	project.target_game = "jo";
-	opennova::Vfs mount;
-	TEST_EXPECT(mount_retail(mount, install, project));
+	InstallView install_view;
+	std::string why;
+	TEST_EXPECT(install_view.open(install_spec(install, project), why));
+	const opennova::Vfs &mount = install_view.vfs();
 	const std::set<AssetKind> referrers = {AssetKind::Terrain,    AssetKind::Environment, AssetKind::Particles,
 	                                       AssetKind::HudPosDefs, AssetKind::ItemDefs,    AssetKind::WeaponDefs,
 	                                       AssetKind::AmmoDefs,   AssetKind::Menu,        AssetKind::MenuStyle,

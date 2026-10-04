@@ -24,6 +24,7 @@
 
 #include <base/io/json.h>
 #include <base/vfs/vfs.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
@@ -371,8 +372,10 @@ int test_retail() {
 	}
 	ProjectDocument project;
 	project.target_game = "jo";
-	opennova::Vfs mount;
-	TEST_EXPECT(mount_retail(mount, install, project));
+	InstallView install_view;
+	std::string why;
+	TEST_EXPECT(install_view.open(install_spec(install, project), why));
+	const opennova::Vfs &mount = install_view.vfs();
 	constexpr size_t kSample = 40;
 	std::map<std::string, size_t> listed, opened;
 	size_t texels = 0;

@@ -26,7 +26,7 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	{OperationKind::Open, "open", kHoldsAll, kHoldsAll | HoldsSlot, {}, {}, "Opening", "opening the project"},
 	{OperationKind::Refresh, "refresh", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {}, "Refreshing",
 	 "the refresh"},
-	{OperationKind::Build, "build", HoldsFiles, HoldsSlot, {K::Build, K::Play}, {}, "Building", "the build"},
+	{OperationKind::Build, "build", HoldsFiles, HoldsSlot, {K::Build, K::Play, K::Export}, {}, "Building", "the build"},
 	{OperationKind::ImportPlan, "import_plan", HoldsFiles, HoldsSlot, {},
 	 {K::PreviewImport, K::PlanImport, K::PreviewInstallImport, K::CancelImport},
 	 "Planning the import", "the import's plan"},

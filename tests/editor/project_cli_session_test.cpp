@@ -6,7 +6,7 @@
 // project's local.json as the editor reads it, a dry run's for that run alone, one naming no folder
 // refused; validate exiting as the build's gate says; and, with the game install, a project
 // imported from it whose Problems the query verb reads as the session does (the round's end-to-end
-// check).
+// check), and an expansion project built over its jox01 (ADR 0046 S16).
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -18,6 +18,8 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/resource_index/boot_policy.h>
+#include <base/vfs/vfs.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/project_check.h>
 #include <editor/import/importer.h>
@@ -27,6 +29,7 @@
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
+#include <editor/run/launch_plan.h>
 #include <editor/run/null_process_platform.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/preferences_store.h>
@@ -301,7 +304,7 @@ static int test_verb_table() {
 		TEST_EXPECT(error.empty() && (args.is_null() || args.is_object()));
 		++queries;
 	}
-	TEST_EXPECT(kCliVerbCount == 9 && queries == 7 && requests >= 2 * kCliVerbCount);
+	TEST_EXPECT(kCliVerbCount == 10 && queries == 8 && requests >= 2 * kCliVerbCount); // export (S16)
 	TEST_EXPECT(cli_verb_row(CliVerb::Request).answer == CliAnswer::Request &&
 	            cli_verb_row(CliVerb::Query).answer == CliAnswer::NamedQuery);
 	const Ran usage = run(dir.root(), { "--help" });
@@ -753,6 +756,43 @@ static int test_retail_install_import() {
 	return 0;
 }
 
+// Retail (ADR 0046 S16, the design's §6 row): a project built as the expansion jxm over the game
+// install's jox01. Its table imported from the install as /exp jox01 serves it (jox01.bin loose in its
+// folder, under the project's name), the main menu and its stylesheet with the files they need; the
+// build leaves out what the base game serves the same (same_as_base > 0); its run directory, staged
+// over the install as Play stages it, mounts with /exp jxm and serves the table and the menu.
+static int test_retail_expansion_build() {
+	const std::string install = retail::install();
+	if (install.empty())
+		return retail::skip_leg("OPENNOVA_JO_DIR (an expansion project built over the game install's jox01)");
+	if (!fs::is_regular_file(install + "/expansion/jox01/jox01.pff"))
+		return retail::skip_leg("the game install's expansion jox01 (an expansion project built over it)");
+	editor_test::TempProjectDir dir("opennova_project_cli_retail_expansion");
+	const std::string scratch = dir.root(), root = dir.file("Mod");
+	TEST_EXPECT(run(scratch, { "new", root, "--title", "Retail Mod", "--expansion", "jxm", "--builds-on", "jox01" }).code == 0);
+	Ran ran = run(scratch, { "import", root, "--install", install, "--entry", "jxm.bin", "--entry", "main.mnu", "--entry",
+	                         "menu_style.mns", "--with-dependencies" });
+	TEST_EXPECT(ran.code == 0 && ran.out.find("jxm.bin") != std::string::npos);
+	ran = run(scratch, { "build", root });
+	TEST_EXPECT(ran.code == 0);
+	unsigned long same = 0;
+	const size_t at = ran.out.find("expansion jxm: ");
+	TEST_EXPECT(at != std::string::npos && std::sscanf(ran.out.c_str() + at, "expansion jxm: %lu", &same) == 1 && same > 0);
+	const std::string built = editor::last_good_build_dir(root + "/.opennova/build/play");
+	TEST_EXPECT(!built.empty() && fs::is_regular_file(built + "/expansion/jxm/jxm.bin"));
+	const std::string run_dir = dir.file("run");
+	fs::create_directories(run_dir);
+	editor::Diagnostic error;
+	TEST_EXPECT(editor::prepare_expansion_run(install, built, "jxm", run_dir, dir.file("copies"), error));
+	opennova::Vfs vfs;
+	opennova::LaunchFlags flags;
+	flags.expansion = "jxm";
+	TEST_EXPECT(opennova::mount_install(vfs, run_dir, flags) && vfs.mounted_expansion() == "jxm" &&
+	            vfs.has_file("main.mnu") && vfs.has_file("menu_style.mns"));
+	std::printf("retail: expansion jxm over jox01, %lu file(s) left out as the base game's own\n", same);
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
@@ -762,6 +802,7 @@ int main(int argc, char **argv) {
 	failures += test_install();
 	failures += test_validate_follows_the_gate();
 	failures += test_retail_install_import();
+	failures += test_retail_expansion_build();
 	if (failures == 0) std::printf("project_cli_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

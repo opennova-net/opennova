@@ -43,6 +43,14 @@ const char *const kLightImpact = "A radius (a decimal, stored as 16.16), the col
 const char *const kAmmoTurnRate = "Degrees a second (a decimal), stored as a binary angle a tick.";
 // [orig: AmmoDef_ParseProperty boresight_maxang atol x 0xB60B60 @ 0x40ae3b..0x40ae52] reads
 // kWholeDegrees.
+// [orig: WeaponDefs_ParseLineCallback 'farpinfo' @ 0x544da3 -> +0xE8 / +0xEC; the rearm pass
+// Server_UpdateEntityTargetLockAndWeaponOverlays @ 0x51190b..0x511934, a vehicle's (def type 1
+// @ 0x51187E) weapon when its item def carries EWeap (+0x54 bit 0x20 @ 0x5118EF)]
+const char *const kFarpInfo = "On a FARP, the rounds a vehicle's weapon gains in clip and reserve, then how many "
+                              "steps of the rearm count apart; 0 in either adds none.";
+// [orig: WeaponDefs_ParseLineCallback 'gfx1' @ 0x5448fc / 'gfx3' @ 0x544912, `nocheckdepth`
+// compared @ 0x544F92, the model loaded with the load-pass flags 0x300000 @ 0x544FA4]
+const char *const kModelOption = "A model, then `nocheckdepth` to load it with its depth check off.";
 // [orig: WeaponDefs_ParseLineCallback @ 0x543FB5..0x543FD3 (red, blue: the host's loadout
 // check, NapiNPServerMsg_HandlePlayerLoadout @ 0x515790); WeaponDef_ParseProperty
 // @ 0x54daae..0x54db08 (also yellow, violet: the armory's lists, PlayerInfo_PopulateWeaponSlotLists
@@ -208,8 +216,8 @@ const std::vector<DefProperty> kWeaponProperties = {
 	{"hudicon", {"hudicon"}, DefEncoding::Plain, 1.0, ""},
 	{"gfx1a", {"gfx1a"}, DefEncoding::Plain, 1.0, ""},
 	{"gfx1b", {"gfx1b"}, DefEncoding::Plain, 1.0, ""},
-	{"gfx1", {"gfx1"}, DefEncoding::Plain, 1.0, ""},
-	{"gfx3", {"gfx3"}, DefEncoding::Plain, 1.0, ""},
+	{"gfx1", {"gfx1", "gfx1_nocheckdepth"}, DefEncoding::ModelOption, 1.0, "", {"", "No depth check"}, "", {}, kModelOption},
+	{"gfx3", {"gfx3", "gfx3_nocheckdepth"}, DefEncoding::ModelOption, 1.0, "", {"", "No depth check"}, "", {}, kModelOption},
 	{"error_hiptheta", {"error_hip_theta_fp16"}, DefEncoding::Fixed16, 1.0, "", {}, "", {}, kFixed16},
 	{"error_uptheta", {"error_up_theta_fp16"}, DefEncoding::Fixed16, 1.0, "", {}, "", {}, kFixed16},
 	{"renderfov", {"renderfov"}, DefEncoding::Plain, 1.0, ""},
@@ -246,6 +254,10 @@ const std::vector<DefProperty> kWeaponProperties = {
 	{"heat_values", {"heat_per_shot", "heat_decay_per_tick"}, DefEncoding::Heat, 1.0, "", {"Heat per shot", "Cooling per second"}, "", {"%", "%/s"}, kHeat},
 	{"heat_effect", {"heat_effect", "heat_glow_threshold"}, DefEncoding::Fixed16, 1.0, "", {"", "Glow threshold"}, "", {}, kFixed16},
 	{"heat_sound", {"heat_sound"}, DefEncoding::Plain, 1.0, ""},
+	{"farpinfo", {"farp_rounds", "farp_interval"}, DefEncoding::Plain, 1.0, "", {"FARP rounds", "FARP interval"}, "", {},
+	 kFarpInfo},
+	{"designation_time", {"designation_ticks"}, DefEncoding::ScaledInteger, 62.0, "", {}, "", {"s"}, kSeconds},
+	{"sameas", {"sameas"}, DefEncoding::Plain, 1.0, ""},
 };
 
 const std::vector<DefProperty> kAmmoProperties = {

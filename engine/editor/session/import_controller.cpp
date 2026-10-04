@@ -99,7 +99,7 @@ void ImportController::preview_install(const EditorRequest &request) {
 	std::vector<ImportChoice> named;
 	std::map<std::string, size_t> by_name; // the install's files by name, the first of each, once (review F7)
 	if (!request.names.empty())
-		for (size_t i = 0; i < sources.size(); ++i) by_name.emplace(normalized_logical_name(sources[i].entry), i);
+		for (size_t i = 0; i < sources.size(); ++i) by_name.emplace(normalized_logical_name(sources[i].name()), i);
 	for (const std::string &name : request.names) {
 		const auto found = by_name.find(normalized_logical_name(name));
 		if (found == by_name.end()) {
@@ -340,7 +340,7 @@ bool ImportController::sources_of(const EditorRequest &request, std::vector<Impo
 		    !row.problem.empty())
 			continue;
 		const std::string key = row.source.path + '\n' + row.source.entry + '\n' + (row.source.install ? '1' : '0') +
-		                        (row.source.native ? '1' : '0');
+		                        (row.source.native ? '1' : '0') + '\n' + row.source.as;
 		if (taken.insert(key).second) imports.push_back(row.source);
 	}
 	return true;
@@ -411,11 +411,14 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 void ImportController::refresh_install_files() {
 	view_.project.retail_files = view_.project.open ? list_retail_file_names(core_.game_install(), *view_.project.document)
 	                                        : std::vector<std::string>();
+	view_.project.base_files = view_.project.open ? list_base_file_names(core_.game_install(), *view_.project.document)
+	                                      : std::vector<std::string>();
 	core_.touch(ViewConcern::Files);
 }
 
-void ImportController::set_install_files(std::vector<std::string> names) {
+void ImportController::set_install_files(std::vector<std::string> names, std::vector<std::string> base) {
 	view_.project.retail_files = std::move(names);
+	view_.project.base_files = std::move(base);
 	core_.touch(ViewConcern::Files);
 }
 
@@ -456,6 +459,7 @@ void ImportController::clear() {
 	view_.dialogs.import_preview = DialogsView::ImportPreview();
 	view_.project.imports = std::make_shared<const std::vector<ImportedSource>>();
 	view_.project.retail_files.clear();
+	view_.project.base_files.clear();
 }
 
 } // namespace opennova::editor

@@ -35,6 +35,7 @@ enum class EditorRequestKind {
 	CreateMissing,
 	Build,
 	Play,
+	Export,
 	StopPlay,
 	CancelOperation,
 	CreateFile,
@@ -101,16 +102,20 @@ enum class UnsavedChoice { Save, Discard, Cancel };
 enum class SelectMode { Replace, Add, Toggle };
 
 // The settings ApplyProjectSettings sets, each one left out staying as it is: the
-// project's (its name and features, written to project.opennova, which needs a project
-// open) and the editor's (the game install, the runtime Play runs, Play in the game
-// install, written to the editor's settings). Only what differs from the value in effect
-// is written. `serial` names the application: the SettingsApplied view event carries it back
-// (its tag), the view's settings_result what could not be written.
+// project's (its name, its features and its expansion, written to project.opennova, which
+// needs a project open) and the editor's (the game install, the runtime Play runs, Play in
+// the game install, written to the editor's settings). Only what differs from the value in
+// effect is written. `serial` names the application: the SettingsApplied view event carries it
+// back (its tag), the view's settings_result what could not be written.
 struct ProjectSettingsChange {
 	uint64_t serial = 0;
 	std::optional<std::string> title;
 	std::optional<bool> mission;
 	std::optional<bool> multiplayer;
+	// The project's expansion (ADR 0046 S16): the name it builds as ("" a standalone project) and the
+	// installed one it builds on ("" the base game; it needs a name).
+	std::optional<std::string> expansion;
+	std::optional<std::string> builds_on;
 	std::optional<std::string> game_install;
 	std::optional<std::string> runtime_executable; // "" = the runtime packaged beside the editor
 	std::optional<bool> play_in_install;
@@ -121,9 +126,9 @@ struct ProjectSettingsChange {
 
 inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChange &b) {
 	return a.serial == b.serial && a.title == b.title && a.mission == b.mission &&
-			a.multiplayer == b.multiplayer && a.game_install == b.game_install &&
-			a.runtime_executable == b.runtime_executable && a.play_in_install == b.play_in_install &&
-			a.build_folder == b.build_folder;
+			a.multiplayer == b.multiplayer && a.expansion == b.expansion && a.builds_on == b.builds_on &&
+			a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
+			a.play_in_install == b.play_in_install && a.build_folder == b.build_folder;
 }
 
 // Where Paste puts the clipboard: into the owner `parent` (0 = the row `row` itself) at
@@ -233,11 +238,14 @@ inline bool operator!=(const ViewportDrop &a, const ViewportDrop &b) {
 // carry). A field a kind does not take stays as it was made.
 struct EditorRequest {
 	EditorRequestKind kind = EditorRequestKind::Rescan;
-	// A project's directory; a new project's title and game (a gameprofile code, "" the default);
-	// a game install a project opens with for the session alone ("" its own).
+	// A project's directory; a new project's title and game (a gameprofile code, "" the default),
+	// the expansion it builds as and the installed one it builds on ("" each: standalone, on the base
+	// game; ADR 0046 S16); a game install a project opens with for the session alone ("" its own).
 	std::string dir;
 	std::string title;
 	std::string game;
+	std::string expansion;
+	std::string builds_on;
 	std::string game_install;
 	// A file: a project file or open document ("" the active one where the kind names it), a
 	// source to import again, a path to reveal.
@@ -250,8 +258,10 @@ struct EditorRequest {
 	std::string new_name;
 	std::string role;
 	std::string file_kind;
-	// Where a build lands ("" the project's own place under its cache).
+	// Where a build lands ("" the project's own place under its cache); where an export lands ("" the
+	// project's export folder, ADR 0046 S16).
 	std::string out_dir;
+	std::string export_dir;
 	// The mission Play starts the game in, by its logical name ("" the game's menu; S14).
 	std::string mission;
 	// Named values, in their names' order: a new file's starting values, by its blank's parameter tokens
@@ -304,10 +314,12 @@ struct EditorRequest {
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 	return a.kind == b.kind && a.dir == b.dir && a.title == b.title && a.game == b.game &&
+			a.expansion == b.expansion && a.builds_on == b.builds_on &&
 			a.game_install == b.game_install && a.path == b.path && a.locator == b.locator &&
 			a.field == b.field &&
 			a.new_name == b.new_name && a.role == b.role && a.file_kind == b.file_kind &&
-			a.out_dir == b.out_dir && a.mission == b.mission && a.values == b.values && a.roles == b.roles &&
+			a.out_dir == b.out_dir && a.export_dir == b.export_dir && a.mission == b.mission && a.values == b.values &&
+			a.roles == b.roles &&
 			a.names == b.names && a.paths == b.paths && a.imports == b.imports &&
 			a.edits == b.edits && a.address == b.address && a.records == b.records &&
 			a.paste_at == b.paste_at &&

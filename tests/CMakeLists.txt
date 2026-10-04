@@ -797,7 +797,7 @@ opennova_add_mixed_test(mus_names_roundtrip COMMAND mus_names_roundtrip_test
 # (true for both stock bins). Pins that the recompiled entry names the same
 # section -- a drift the text round-trip and encode-idempotence cannot see.
 add_executable(mus_entry_roundtrip_test mus/mus_entry_roundtrip_test.cpp)
-target_link_libraries(mus_entry_roundtrip_test PRIVATE opennova_formats)
+target_link_libraries(mus_entry_roundtrip_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mus_entry_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_entry_roundtrip_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
@@ -3923,6 +3923,13 @@ add_executable(editor_project_document_test editor/project_document_test.cpp)
 target_link_libraries(editor_project_document_test PRIVATE opennova_editor)
 target_include_directories(editor_project_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_project_document COMMAND editor_project_document_test)
+
+# A project's expansion (ADR 0046 S16): the names the game takes for one, weighed against an install's;
+# the files its name forms; the install as the game serves it; a session's expansion project.
+add_executable(editor_expansion_test editor/expansion_test.cpp)
+target_link_libraries(editor_expansion_test PRIVATE opennova_editor)
+target_include_directories(editor_expansion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_expansion COMMAND editor_expansion_test)
 
 add_executable(editor_asset_registry_test editor/asset_registry_test.cpp)
 target_link_libraries(editor_asset_registry_test PRIVATE opennova_editor)
