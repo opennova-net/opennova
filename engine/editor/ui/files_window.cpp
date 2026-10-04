@@ -220,18 +220,25 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 			compared_.push_back(normalized_logical_name(entry.relative_path));
 	}
 	const std::string wanted = normalized_logical_name(filter_);
+	std::vector<bool> listed(compared_.size(), false);
 	for (size_t i = 0; i < compared_.size(); ++i)
-		if (compared_[i].find(wanted) != std::string::npos) matches_.push_back(i);
+		if (compared_[i].find(wanted) != std::string::npos) {
+			matches_.push_back(i);
+			listed[i] = true;
+		}
 	// Then the files a record naming them is found by, after them: a model by the item whose graphic it
 	// is (lack finds Dblkhwk1.3di through Flyable Blackhawk), from three letters on.
-	if (view.findings.graph && std::strlen(filter_) >= 3) {
+	// Each once: a file its folder's name already lists is not listed again (the graph's search finds by
+	// record from three letters on).
+	if (view.findings.graph) {
 		std::unordered_map<std::string, size_t> at;
 		for (const GraphSearchHit &hit : view.findings.graph->search(filter_)) {
 			if (hit.symbol || hit.via.empty()) continue;
 			if (at.empty())
 				for (size_t i = 0; i < view.project.scan->entries.size(); ++i) at.emplace(view.project.scan->entries[i].relative_path, i);
 			const auto found = at.find(hit.file);
-			if (found == at.end()) continue;
+			if (found == at.end() || found->second >= listed.size() || listed[found->second]) continue;
+			listed[found->second] = true;
 			matches_.push_back(found->second);
 			via_[hit.file] = hit.via;
 		}

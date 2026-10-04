@@ -5,7 +5,9 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -195,8 +197,11 @@ public:
 	// Find in the project: the files whose logical name, and the symbols whose name as defined,
 	// holds `text` (ASCII letters without case), files first (by name), then symbols in the order
 	// the files define them, each with its usage count; a record set's records, named by an index
-	// and no name, are not searched. None for an empty text.
+	// and no name, are not searched. From kSearchByRecordLetters letters on, a file whose name does
+	// not hold the text is found by a record of another file naming the file itself whose name does
+	// (`via`; the records are indexed once per generation). None for an empty text.
 	std::vector<GraphSearchHit> search(const std::string &text) const;
+	static constexpr size_t kSearchByRecordLetters = 3;
 	// The symbol a document's field defines, by its file, its record's locator and the field; null
 	// for none (a rename everywhere names its symbol so: the graph may have been rebuilt since).
 	const GraphSymbol *symbol_at(const std::string &file, const std::string &locator, const std::string &field) const;
@@ -363,6 +368,30 @@ private:
 			return *this;
 		}
 	};
+
+	// The records naming each file (search's `via`), made once per generation; a copy of the graph starts
+	// with none (it takes a generation of its own).
+	struct ViaRecord {
+		std::string upper_record;
+		std::string record;
+		std::string source;
+	};
+	struct ViaCache {
+		std::mutex mutex;
+		uint64_t generation = 0;
+		bool built = false;
+		std::unordered_map<std::string, std::vector<ViaRecord>> by_file;
+		ViaCache() = default;
+		ViaCache(const ViaCache &) {}
+		ViaCache &operator=(const ViaCache &) {
+			std::lock_guard<std::mutex> lock(mutex);
+			built = false;
+			by_file.clear();
+			return *this;
+		}
+	};
+	const std::vector<ViaRecord> *records_naming_(const std::string &path) const;
+	mutable ViaCache via_;
 
 	GraphIndex index_;
 	std::shared_ptr<const GraphLayer> base_;

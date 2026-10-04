@@ -1111,6 +1111,26 @@ bool AssetGraph::for_each_definition(const Document &document,
 	return true;
 }
 
+const std::vector<AssetGraph::ViaRecord> *AssetGraph::records_naming_(const std::string &path) const {
+	// Made once per generation: every file's records in other files whose fields name the file itself (an
+	// item's graphic, a material row's texture), never a record naming a symbol the file defines.
+	std::lock_guard<std::mutex> lock(via_.mutex);
+	if (!via_.built || via_.generation != generation()) {
+		via_.by_file.clear();
+		index_.for_each_slot([&](uint32_t id) {
+			const GraphSlot &slot = index_.slot(id);
+			for (const GraphEdge *edge : referrers_of_file(slot.path)) {
+				if (edge->source == slot.path || edge->record.empty()) continue;
+				via_.by_file[slot.path].push_back({upper(edge->record), edge->record, edge->source});
+			}
+		});
+		via_.generation = generation();
+		via_.built = true;
+	}
+	const auto found = via_.by_file.find(path);
+	return found == via_.by_file.end() ? nullptr : &found->second;
+}
+
 std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 	std::vector<GraphSearchHit> hits;
 	if (text.empty()) return hits;
@@ -1122,22 +1142,25 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 		const GraphSlot &slot = index_.slot(id);
 		if (last && *last == slot.key) return;
 		last = &slot.key;
-		const std::vector<const GraphEdge *> usages = usages_of(slot.path);
 		GraphSearchHit hit;
 		if (!holds(slot.logical_name)) {
-			// Found by what names it: the first record naming the file whose name holds the text (a model
-			// by the item whose graphic it is, a texture by the material row naming it).
-			// A file's own records naming it (an item table's items naming each other) find nothing.
-			const auto by = std::find_if(usages.begin(), usages.end(), [&](const GraphEdge *edge) {
-				return edge->source != slot.path && holds(edge->record);
+			// Found by what names it, from three letters on: the first record of another file naming the
+			// file itself whose name holds the text (a model by the item whose graphic it is, a texture by the
+			// material row naming it). A record naming a symbol the file defines (an item a weapons table
+			// names) does not find the file; nor do a file's own records naming it.
+			if (wanted.size() < kSearchByRecordLetters) return;
+			const std::vector<ViaRecord> *records = records_naming_(slot.path);
+			if (!records) return;
+			const auto by = std::find_if(records->begin(), records->end(), [&](const ViaRecord &r) {
+				return r.upper_record.find(wanted) != std::string::npos;
 			});
-			if (by == usages.end()) return;
-			hit.via = (*by)->record;
-			hit.via_file = (*by)->source;
+			if (by == records->end()) return;
+			hit.via = by->record;
+			hit.via_file = by->source;
 		}
 		hit.name = slot.logical_name;
 		hit.file = slot.path;
-		hit.usages = usages.size();
+		hit.usages = usages_of(slot.path).size();
 		hits.push_back(std::move(hit));
 	});
 	for_each_symbol([&](const GraphSymbol &symbol) {

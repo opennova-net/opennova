@@ -201,6 +201,14 @@ static int test_project_search() {
 	});
 	TEST_EXPECT(model != things.end() && model->via == "Searched Thing" &&
 	            model->via_file == view.project.scan->find("items.def")->relative_path);
+	// Not the weapons file: "Searched Thing" names a weapon it defines (primary_weapon Searchgun), not
+	// the file itself; nor the items file through its own records.
+	const std::string weapons_file = view.project.scan->find("weapon.def")->relative_path;
+	const std::string items_file = view.project.scan->find("items.def")->relative_path;
+	for (const GraphSearchHit &hit : things)
+		TEST_EXPECT(hit.symbol || (hit.file != weapons_file && hit.file != items_file));
+	// Two letters find no file by a record (every file would be a hit); the name still finds.
+	for (const GraphSearchHit &hit : graph.search("th")) TEST_EXPECT(hit.symbol || hit.via.empty());
 	// A file whose own name holds the text is found by it, with no record.
 	const std::vector<GraphSearchHit> armories = graph.search("armory");
 	TEST_EXPECT(!armories.empty() && armories.front().name == "armory.3di" && armories.front().via.empty());
