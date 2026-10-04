@@ -125,7 +125,7 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 			controls_.is_valid() ? controls_->get_scripted_input() : Ref<ScriptedInput>();
 	Vector2 scripted_look;
 	if (scripted.is_valid()) {
-		if (tick_sim.is_valid()) scripted->advance(tick_sim->get_logic_tick());
+		if (tick_sim.is_valid()) controls_->advance_scripted_input(tick_sim->get_logic_tick());
 		scripted_look = scripted->take_look();
 	}
 	if (!owner->has_player()) {

@@ -75,10 +75,16 @@ public:
 	bool is_token_pressed(const String &p_token) const;
 	// The scenario driver's scripted input device (devtools/scripted_input.h)
 	// at this seam: a token it holds reads held like a keyboard slot, so an
-	// open chat line silences it the same way; it has no VK, so
-	// pressed_key_for_token never reports it. Null detaches.
+	// open chat line silences it the same way. Null detaches.
 	void set_scripted_input(const Ref<ScriptedInput> &p_input) { scripted_input_ = p_input; }
 	Ref<ScriptedInput> get_scripted_input() const { return scripted_input_; }
+	// The device sample's step of the attached script at the session's logic
+	// tick. Each code the step starts or stops holding also arrives as its
+	// bound key's own press or release event (slot 1, else slot 2), as a
+	// keyboard's would: the readers of raw key events (the deploy keys, the
+	// held-USE digits) see the script the way the binding scan does. A
+	// mouse-bound code holds its token only; no click is synthesized.
+	void advance_scripted_input(int64_t p_logic_tick);
 	String mouse_event_token(int p_button) const;
 	// The VK (0 = none) of the keyboard slot firing the token RIGHT NOW under
 	// those same two passes — the sampler's seam for rules that look at WHICH

@@ -238,7 +238,8 @@ hud::HudMapGridOrigin hud_map_grid_origin(const RoleView &view);
 // protocol InMatch phase and owns a live motor after the first loadout grant
 // so its pre-pick C2S 0x0C flows, while the player-paced DEATH screen holds
 // presentation). Both are false on every role but a live joiner.
-// The deploy hold: the pick is the player's (AwaitDeployPick) on a bound self
+// The deploy hold: the pick is the player's (AwaitDeployPick), or initial
+// admission is complete under the host's deploy-map overlay, on a bound self
 // handle, no join error, the session alive — the embedder ANDs its DEATH
 // screen's presented state.
 bool joiner_deploy_hold_ready(const RoleView &view);

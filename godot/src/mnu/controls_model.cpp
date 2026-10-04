@@ -3,9 +3,11 @@
 
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/input.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
 
 #include <runtime/controls/controls.h>
 
+#include <algorithm>
 #include <cmath>
 
 using namespace godot;
@@ -187,6 +189,45 @@ void ControlsModel::consume_key_press(int p_vk) {
 	if (p_vk > 0 && p_vk < static_cast<int>(consumed_vks_.size())) consumed_vks_[p_vk] = true;
 }
 
+void ControlsModel::advance_scripted_input(int64_t p_logic_tick) {
+	if (!scripted_input_.is_valid()) return;
+	opennova::devtools::ScriptedInput &script = scripted_input_->native();
+	const std::vector<int> before = script.held_codes();
+	script.advance(p_logic_tick);
+	const std::vector<int> after = script.held_codes();
+	Input *input = Input::get_singleton();
+	if (input == nullptr) return;
+	const auto replay = [&](int p_code, bool p_pressed) {
+		const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
+		if (def == nullptr) return false;
+		const opennova::controls::BindingRecord *r =
+				bindings_.record(bindings_.index_of_token(def->token));
+		if (r == nullptr) return false;
+		const int key = godot_key_from_vk(r->primary != 0 ? r->primary : r->secondary);
+		if (key == 0) return false;
+		Ref<InputEventKey> event;
+		event.instantiate();
+		event->set_keycode(static_cast<Key>(key));
+		event->set_physical_keycode(static_cast<Key>(key));
+		event->set_pressed(p_pressed);
+		input->parse_input_event(event);
+		return true;
+	};
+	const auto holds = [](const std::vector<int> &p_codes, int p_code) {
+		return std::find(p_codes.begin(), p_codes.end(), p_code) != p_codes.end();
+	};
+	bool replayed = false;
+	for (const int code : after) {
+		if (!holds(before, code)) replayed = replay(code, true) || replayed;
+	}
+	for (const int code : before) {
+		if (!holds(after, code)) replayed = replay(code, false) || replayed;
+	}
+	// The key state lands now, in step with the held tokens the sample reads
+	// next, not at the next frame's event flush.
+	if (replayed) input->flush_buffered_events();
+}
+
 bool ControlsModel::is_token_pressed(const String &p_token) const {
 	const CharString token = p_token.utf8();
 	const int index = bindings_.index_of_token(token.get_data());
@@ -365,6 +406,8 @@ void ControlsModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_scripted_input", "input"),
 			&ControlsModel::set_scripted_input);
 	ClassDB::bind_method(D_METHOD("get_scripted_input"), &ControlsModel::get_scripted_input);
+	ClassDB::bind_method(D_METHOD("advance_scripted_input", "logic_tick"),
+			&ControlsModel::advance_scripted_input);
 	ClassDB::bind_method(D_METHOD("pressed_key_for_token", "token"),
 			&ControlsModel::pressed_key_for_token);
 	ClassDB::bind_method(D_METHOD("set_keyboard_captured", "captured"),

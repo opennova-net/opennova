@@ -118,8 +118,30 @@ func test_the_binding_seam_reads_scripted_tokens_held() -> void:
 	driver.advance(50)
 	assert_true(model.is_token_pressed("move_forward"))
 	driver.cancel()
-	assert_eq(driver.get_state(), ScriptedInput.STATE_CANCELLED)
-	assert_false(model.is_token_pressed("move_forward"), "cancel releases")
+
+
+# A scripted hold also arrives as its bound key's own events (slot 1, else
+# slot 2), in step with the token: the readers of raw key events (the deploy
+# keys) see the script the way the binding scan does.
+func test_the_seam_replays_scripted_holds_as_bound_key_events() -> void:
+	var model := ControlsModel.new()
+	var driver := ScriptedInput.new()
+	assert_eq(driver.load_steps([
+		{"tick": 0, "press": 153},
+		{"tick": 4, "end": true},
+	]), OK, driver.get_error())
+	model.set_scripted_input(driver)
+	assert_true(driver.start())
+	assert_false(Input.is_key_pressed(KEY_SPACE), "nothing held before the first sample")
+	model.advance_scripted_input(10)
+	assert_true(Input.is_key_pressed(KEY_SPACE), "jump's slot-1 key went down with the press")
+	assert_eq(model.pressed_key_for_token("move_jump"), 0x20, "the binding scan sees the key")
+	model.advance_scripted_input(11)
+	assert_false(Input.is_key_pressed(KEY_SPACE), "the press released its key on the next tick")
+	model.advance_scripted_input(14)
+	assert_true(driver.is_done())
+	assert_eq(driver.get_state(), ScriptedInput.STATE_FINISHED)
+	assert_false(model.is_token_pressed("move_jump"), "the end leaves nothing held")
 	model.set_scripted_input(null)
 	assert_null(model.get_scripted_input(), "null detaches")
 

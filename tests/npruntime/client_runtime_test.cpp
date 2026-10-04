@@ -31,6 +31,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/role_feeds.h>
 #include <runtime/inmatch/server_tick.h>
 
 #include "host_test_setup.h"
@@ -2721,6 +2722,14 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	if (!expect(host_still_pending,
 			"zones: host keeps its spawn-zone hold until a selection"))
 		return false;
+	// The parity runner's deploy_hold readiness reads this admitted, overlay-held
+	// joiner as held, though no post-auth pick is pending.
+	inmatch::RoleView hold_view;
+	hold_view.runtime = &client;
+	hold_view.joiner = true;
+	if (!expect(!client.deployment_pick_pending() && inmatch::joiner_deploy_hold_ready(hold_view),
+			"zones: the admitted joiner under the host's overlay reads as the deploy hold"))
+		return false;
 
 	// AAS retail keeps this alive player in its spawn-zone hold until the
 	// deploy-map selection arrives. Closing only the local overlay leaves the
@@ -2749,6 +2758,8 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 			"zones: the real selection releases both host and client deployment state")) return false;
 	if (!expect(!client.queue_deployment_pick(0xFFFFu),
 			"zones: normal gameplay without the deploy UI cannot queue another pick")) return false;
+	if (!expect(!inmatch::joiner_deploy_hold_ready(hold_view),
+			"zones: the released joiner no longer reads as the deploy hold")) return false;
 
 	// The injected kit rode the wire: the SAME rows/class twice under the 0x04-latched
 	// team, first with the fixed pre-init slot 195, then the injected equipped combo.
