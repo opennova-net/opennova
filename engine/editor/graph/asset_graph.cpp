@@ -38,7 +38,7 @@ Diagnostic unreadable(const AssetEntry &asset, const Diagnostic &error) {
 
 // An edge as its file's reading makes it: every field but the target, which its resolution sets.
 bool same_reading(const GraphEdge &a, const GraphEdge &b) {
-	return a.source == b.source && a.record == b.record && a.locator == b.locator &&
+	return a.source == b.source && a.record == b.record && a.record_key == b.record_key && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.kind == b.kind &&
 			a.value == b.value && a.scope == b.scope && a.rewritable == b.rewritable &&
 			a.through == b.through && a.loader_arg == b.loader_arg &&
@@ -53,7 +53,7 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 bool same_reading(
 		const GraphSymbol &a, bool a_inert, const std::string &a_reason, const GraphSymbol &b) {
 	return a.kind == b.kind && a.name == b.name && a.display == b.display && a.value == b.value &&
-			a.file == b.file && a.record == b.record && a.locator == b.locator &&
+			a.file == b.file && a.record == b.record && a.record_key == b.record_key && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.scope == b.scope &&
 			a_inert == b.inert && a_reason == b.inert_reason && a.line == b.line;
 }
@@ -1196,6 +1196,7 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	Diagnostic d = other ? make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, message, edge.source, edge.field)
 	                     : make_finding(CoreFinding::ReferenceMissing, row.severity_when_missing, message, edge.source, edge.field);
 	d.record = edge.record;
+	d.record_key = edge.record_key;
 	// A text's reference: its place, where Problems opens the document.
 	d.line = edge.span.line;
 	d.column = edge.span.column;

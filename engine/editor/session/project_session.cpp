@@ -265,6 +265,8 @@ size_t ProjectSession::problems_compositions() const {
 	return impl_->problems.compositions();
 }
 
+const OriginalFiles &ProjectSession::originals() const { return impl_->problems.originals(); }
+
 size_t ProjectSession::files_scanned() const {
 	return impl_->core.files_scanned();
 }
