@@ -18,8 +18,11 @@ rig.
   pack's general clips, kept for later use.
 - `on_ar15` (the model): `on_ar15 Rig` and the part meshes on its bones, the
   user points `bcasing`, `bullet` and `MFLASH01` on `BN38 Body`, and the
-  `Hip view` and `Aim view` cameras (the hip eye, and 15 cm behind the
-  sight's window, the pack's eye relief). The root follows `KINE Eye` like
+  `Hip view` and `Aim view` cameras. The hip eye frames the gun low and right
+  as retail's rifles stand at the game's 80 degree view (`pos -12.8 4 -195`;
+  the pack's own camera place, framed for a much wider view, shows it too big
+  and high); the aim eye is 15 cm behind the sight's window, the pack's eye
+  relief (`tpos -52.245 25.365 -179.092`). The root follows `KINE Eye` like
   the arms' does.
 
 ## The rig

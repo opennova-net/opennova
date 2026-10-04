@@ -15,8 +15,10 @@ Because the rig is the stock 37, the game draws these arms correctly on every
 stock first-person gun, and a stock character's arms correctly on every gun
 built on this rig (ADR 0047; the add-on's `stock_arms_fit` note stays quiet).
 
-The model-space eye puts a gun's `weapon.def` `pos` near retail's rifles'
-(`-33.28 0 -179.2` against the M4's `-26.55 23.25 -165`).
+That model-space eye is where the pack's camera sits, so the arms in this
+scene stand where the pack shows them. In game the eye is each gun's own
+`Hip view` camera (its `weapon.def` `pos`), framed for the game's 80 degree
+view rather than the pack's wider one.
 
 Source: KINEMATION, Tactical Shooter Pack ("Tactical FPS Animations" 4.0.1,
 Unity Asset Store), the Operator meshes and textures (downscaled to 1024).
