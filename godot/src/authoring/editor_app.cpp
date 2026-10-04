@@ -8,6 +8,8 @@
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/tcp_server.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -17,6 +19,8 @@
 
 #include <runtime/devtools/imgui_pass.h>
 
+#include <editor/assets/asset_registry.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
 #include <editor/run/launch_plan.h>
@@ -66,12 +70,17 @@ void EditorApp::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "first_picture_budget_ms"), "set_first_picture_budget_ms",
 			"get_first_picture_budget_ms");
 	ClassDB::bind_method(D_METHOD("get_viewport_device", "path", "kind"), &EditorApp::get_viewport_device);
+	ClassDB::bind_method(D_METHOD("get_thumbnail_texture", "path", "transform"), &EditorApp::get_thumbnail_texture);
 	ClassDB::bind_method(D_METHOD("get_mission_placer", "path"), &EditorApp::get_mission_placer);
 	ClassDB::bind_method(D_METHOD("get_mission_device_count", "path", "what"), &EditorApp::get_mission_device_count);
 	ClassDB::bind_method(D_METHOD("get_mission_entity_key", "path", "row"), &EditorApp::get_mission_entity_key);
 	ClassDB::bind_method(D_METHOD("start_mcp_endpoint", "port"), &EditorApp::start_mcp_endpoint);
 	ClassDB::bind_method(D_METHOD("get_mcp_port"), &EditorApp::get_mcp_port);
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
+	ClassDB::bind_method(D_METHOD("set_open_externally", "open"), &EditorApp::set_open_externally);
+	ClassDB::bind_method(D_METHOD("get_open_externally"), &EditorApp::get_open_externally);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "open_externally"), "set_open_externally", "get_open_externally");
+	ClassDB::bind_method(D_METHOD("get_last_external_open"), &EditorApp::get_last_external_open);
 
 	ClassDB::bind_method(D_METHOD("set_settings_path", "path"), &EditorApp::set_settings_path);
 	ClassDB::bind_method(D_METHOD("get_settings_path"), &EditorApp::get_settings_path);
@@ -86,6 +95,10 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_file_selected", "file"), &EditorApp::_on_file_selected);
 	ClassDB::bind_method(D_METHOD("_on_files_selected", "files"), &EditorApp::_on_files_selected);
 	ClassDB::bind_method(D_METHOD("_on_picker_canceled"), &EditorApp::_on_picker_canceled);
+	ClassDB::bind_method(D_METHOD("_on_files_dropped", "files"), &EditorApp::_on_files_dropped);
+	ClassDB::bind_method(D_METHOD("drop_files", "files", "at"), &EditorApp::drop_files);
+	ClassDB::bind_method(D_METHOD("drop_files_at_screen", "files", "screen"), &EditorApp::drop_files_at_screen);
+	ClassDB::bind_method(D_METHOD("get_last_drop_at"), &EditorApp::get_last_drop_at);
 }
 
 EditorApp::EditorApp() : platform_(std::make_unique<ChildProcessPlatform>()) {
@@ -164,14 +177,24 @@ void EditorApp::_ready() {
 	devices_->set_pin_all_targets(!is_available());
 	// A planner with no canvas (the wire's drag and drop) reads the device of its viewport there.
 	session_->viewports().set_devices(devices_.get());
+	// The texture thumbnails' GPU copies, uploaded a few a frame as the windows draw them (S18).
+	thumbnails_ = std::make_unique<ThumbnailImages>();
 	if (is_available()) {
 #if OPENNOVA_EDITOR_UI
 		windows_->set_devices(devices_.get());
+		windows_->set_thumbnail_images(thumbnails_.get());
 #endif
 		UtilityFunctions::print_verbose("OpenNova Editor: editor variant loaded, workspace attached");
 	} else {
 		UtilityFunctions::print_verbose("OpenNova Editor: editor variant loaded, no ImGui context (headless)");
 	}
+	// Files the OS drops on the editor's own window, for the item they land on (S18: an image on a texture's
+	// tab or a texture field, a Replace).
+	if (get_tree()->get_current_scene() == this && get_window() != nullptr)
+		get_window()->connect("files_dropped", Callable(this, "_on_files_dropped"));
+	// A window that starts with the focus gets no focus-in: the sources a program edits are checked from the
+	// first pump (S18).
+	focused_ = get_window() != nullptr && get_window()->has_focus();
 	const PackedStringArray args = OS::get_singleton()->get_cmdline_user_args();
 	for (int i = 0; i < args.size(); ++i) {
 		if (args[i] == kSmokeFlag) {
@@ -227,9 +250,11 @@ void EditorApp::_exit_tree() {
 	mcp_port_ = 0;
 #if OPENNOVA_EDITOR_UI
 	windows_->set_devices(nullptr);
+	windows_->set_thumbnail_images(nullptr);
 #endif
 	if (session_) session_->viewports().set_devices(nullptr);
 	devices_.reset();
+	thumbnails_.reset();
 	free_retired_();
 	if (picker_ != nullptr) {
 		picker_->queue_free();
@@ -276,6 +301,7 @@ void EditorApp::_process(double p_delta) {
 }
 
 void EditorApp::before_layout(double) {
+	if (thumbnails_) thumbnails_->begin_frame();
 #if OPENNOVA_EDITOR_UI
 	windows_->begin_frame();
 #endif
@@ -294,12 +320,42 @@ void EditorApp::pump() {
 	// budget steps the validation they left due first (S13 A3: no request runs it).
 	serve_queued_device_requests_();
 	drain_requests();
+	// A source a program edits comes back once a second while the window has the focus (S18).
+	if (focused_) {
+		const uint64_t now = Time::get_singleton()->get_ticks_msec();
+		if (now - last_source_check_ms_ >= 1000) {
+			last_source_check_ms_ = now;
+			refresh_changed_sources_();
+		}
+	}
 	session_->poll();
+	open_externally_events_();
 	// The devices follow their viewports: the Preview's targets given one, each taking what its
 	// viewport asks.
 	if (devices_) devices_->sync(session_->viewports(), session_->view());
 	apply_window_title();
 	if (session_->view().dialogs.quit_requested) get_tree()->quit(0);
+}
+
+// The import sources a program saved, imported again (S18: RefreshChangedSources), when the busy gate
+// takes it: an operation that holds the files runs, and the next check asks again.
+void EditorApp::refresh_changed_sources_() {
+	if (!session_ || !session_->view().project.open ||
+			!session_->view().allows(opennova::editor::EditorRequestKind::RefreshChangedSources))
+		return;
+	session_->handle(opennova::editor::request::refresh_changed_sources());
+}
+
+// Each OpenExternally view event the session posted since the last pump: its file opened in the program
+// the system has for it (OS::shell_open), or, with open_externally off (a test's), only kept.
+void EditorApp::open_externally_events_() {
+	for (const opennova::editor::ViewEvent &event : session_->view().events.held()) {
+		if (event.seq <= external_seq_) continue;
+		external_seq_ = event.seq;
+		if (event.kind != opennova::editor::ViewEventKind::OpenExternally) continue;
+		last_external_open_ = opennova::to_gd(event.path);
+		if (open_externally_) OS::get_singleton()->shell_open(last_external_open_);
+	}
 }
 
 void EditorApp::set_poll_budget(int p_ms, int64_t p_step_bytes) {
@@ -419,6 +475,10 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 		case PickPurpose::BuildFolder:
 			picker_->set_title("Choose a folder to build the game's files into");
 			break;
+		case PickPurpose::TextureImage:
+			picker_->set_title("Replace the texture with an image");
+			filters.push_back("*.png, *.tga, *.pcx ; Images");
+			break;
 		case PickPurpose::None:
 			break;
 	}
@@ -453,6 +513,30 @@ void EditorApp::_on_file_selected(const String &p_file) {
 
 void EditorApp::_on_picker_canceled() {
 	pending_pick_ = PickPurpose::None;
+}
+
+// The OS's drop on the editor's window, where the OS's cursor let go: held for the item it lands on.
+void EditorApp::_on_files_dropped(const PackedStringArray &p_files) {
+	drop_files_at_screen(p_files, Vector2(DisplayServer::get_singleton()->mouse_get_position()));
+}
+
+void EditorApp::drop_files_at_screen(const PackedStringArray &p_files, const Vector2 &p_screen) {
+	Window *window = get_window();
+	if (window == nullptr) return;
+	const Vector2 client = p_screen - Vector2(window->get_position());
+	drop_files(p_files, window->get_final_transform().affine_inverse().xform(client));
+}
+
+void EditorApp::drop_files(const PackedStringArray &p_files, const Vector2 &p_at) {
+	last_drop_at_ = p_at;
+#if OPENNOVA_EDITOR_UI
+	std::vector<std::string> paths;
+	for (int i = 0; i < p_files.size(); ++i) paths.push_back(opennova::to_std(p_files[i]));
+	windows_->drop_files(std::move(paths), p_at.x, p_at.y);
+#else
+	(void)p_files;
+	(void)p_at;
+#endif
 }
 
 // A free loopback port for the game's MCP endpoint: bind an ephemeral port, read it,
@@ -516,6 +600,23 @@ SubViewport *EditorApp::get_viewport_device(const String &p_path, const String &
 	return device ? device->sub_viewport() : nullptr;
 }
 
+Ref<ImageTexture> EditorApp::get_thumbnail_texture(const String &p_path, const String &p_transform) {
+	ensure_session();
+	const opennova::editor::SessionView &view = session_->view();
+	if (!thumbnails_ || !view.documents.thumbnails || !view.project.scan) return Ref<ImageTexture>();
+	const opennova::editor::AssetEntry *entry = view.project.scan->at_path(opennova::to_std(p_path));
+	if (!entry) entry = view.project.scan->find(opennova::to_std(p_path));
+	if (!entry || entry->kind != opennova::editor::AssetKind::Texture) return Ref<ImageTexture>();
+	opennova::editor::TextureLoadTransform transform = opennova::editor::TextureLoadTransform::None;
+	for (size_t i = 0; i < size_t(opennova::editor::TextureLoadTransform::kCount); ++i) {
+		const auto each = static_cast<opennova::editor::TextureLoadTransform>(i);
+		if (opennova::to_std(p_transform) == opennova::editor::texture_load_transform_token(each)) transform = each;
+	}
+	const std::shared_ptr<const opennova::editor::TextureThumbnail> thumbnail =
+			view.documents.thumbnails->make_now(view, entry->relative_path, transform);
+	return thumbnail ? thumbnails_->texture_of(*thumbnail) : Ref<ImageTexture>();
+}
+
 namespace {
 
 // The applier of the mission device over the mission at `path` (null: none held).
@@ -551,6 +652,13 @@ int EditorApp::get_mission_entity_key(const String &p_path, int64_t p_row) const
 void EditorApp::_notification(int p_what) {
 	if (p_what == NOTIFICATION_WM_CLOSE_REQUEST) {
 		ensure_session(); session_->handle(opennova::editor::request::quit());
+	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_IN) {
+		// Back from another program (S18): what it saved comes back now, then once a second (pump).
+		focused_ = true;
+		last_source_check_ms_ = Time::get_singleton()->get_ticks_msec();
+		refresh_changed_sources_();
+	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_OUT) {
+		focused_ = false;
 	}
 }
 } // namespace godot

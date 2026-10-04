@@ -4153,6 +4153,8 @@ static int test_prompt_words_from_the_table() {
 		{EditorRequestKind::AssignRequirement, "Rename main.mnu", "Save all and rename"},
 		{EditorRequestKind::RenameSymbol, "Rename everywhere (defined in main.mnu)", "Save all and rename"},
 		{EditorRequestKind::RenameBack, "Rename back", "Save all and rename back"},
+		// S18: a texture's split rewrites its referrers as a rename does.
+		{EditorRequestKind::SplitTexture, "Split main.mnu", "Save all and split"},
 		{EditorRequestKind::Quit, "Quit", "Save all"},
 	};
 	size_t guarded = 0;

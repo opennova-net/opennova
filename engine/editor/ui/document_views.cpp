@@ -14,6 +14,7 @@
 #include <editor/ui/outline_view.h>
 #include <editor/ui/script_view.h>
 #include <editor/ui/styles_view.h>
+#include <editor/ui/texture_view.h>
 
 namespace opennova::editor {
 
@@ -88,6 +89,8 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Credits, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::Shader, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::Text, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	// A texture's picture fills the tab beside what it is and what uses it (S18, ui/texture_view).
+	{DocumentTypeId::Texture, DocumentViewRole::MainViewport, nullptr, make_texture_view},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.
