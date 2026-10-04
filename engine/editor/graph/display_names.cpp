@@ -7,6 +7,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
+#include <editor/graph/graph_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/field_text.h>
 
@@ -58,6 +59,21 @@ DisplayName value_display(const Document &document, const NodeAddress &address, 
 	if (const DocumentType *type = type_of(document); type && type->value_label)
 		if (type->value_label(document, address, field, value, names, out)) return out;
 	out = DisplayName();
+	// A %NAME% by what it stands for (the plain-words lane, the audit's 3.3): the value of the definition the
+	// game reads, brand.mns over menu_style.mns, the last in each [orig: Menu_InitShellResources @ 0x552500]
+	// (AssetGraph::style_binding), a colour as its swatch beside it.
+	if (const auto *text = std::get_if<std::string>(&value); names && text && graph_names::is_style_reference(*text)) {
+		out.raw = *text;
+		if (const GraphSymbol *binding = names->symbol(ReferenceKind::StyleVar, *text)) {
+			out.text = "= " + (binding->value.empty() ? std::string("(empty)") : binding->value);
+			out.resolved = binding->value;
+			out.source = binding->file;
+		} else {
+			out.text = "No stylesheet the game reads defines " + *text;
+			out.dangling = true;
+		}
+		return out;
+	}
 	// A choice's name (a flags field's bits by their names).
 	std::vector<FieldChoice> own;
 	const std::vector<FieldChoice> &choices = document.choices_on(address, field, own);
@@ -80,7 +96,7 @@ DisplayName value_display(const Document &document, const NodeAddress &address, 
 	if (row.resolution != ReferenceResolution::Symbol && row.resolution != ReferenceResolution::Record) return out;
 	out.raw = name;
 	if (const GraphSymbol *symbol = names->symbol(kind, name, scope)) {
-		const std::string words = symbol_words(*symbol);
+		const std::string words = definition_words(*symbol, names);
 		if (words != name) out.text = words;
 		out.source = symbol->scope.empty() ? symbol->file : symbol->scope;
 		return out;
@@ -179,6 +195,34 @@ std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Docum
 	return choices;
 }
 
+std::string edge_record_words(const GraphEdge &edge) {
+	if (edge.record_title.empty()) return edge.record;
+	const size_t slash = edge.record.rfind('/');
+	return slash == std::string::npos ? edge.record_title : edge.record.substr(0, slash + 1) + edge.record_title;
+}
+
+std::string field_words(AssetKind kind, NodeKind record_kind, const std::string &field) {
+	const DocumentType *type = document_type_for(kind);
+	if (!type || !type->fields || field.empty()) return std::string();
+	for (const FieldSchema &schema : type->fields(record_kind))
+		if (schema.id == field) {
+			const std::string title = field_title(schema);
+			return title == field ? std::string() : title;
+		}
+	return std::string();
+}
+
+std::string edge_field_words(const GraphEdge &edge, AssetKind source_kind) {
+	const std::string words = field_words(source_kind, edge.address.kind, edge.field);
+	return words.empty() ? edge.field : words;
+}
+
+std::string edge_place_words(const GraphEdge &edge, AssetKind source_kind) {
+	const std::string record = edge_record_words(edge), field = edge_field_words(edge, source_kind);
+	if (record.empty()) return field;
+	return field.empty() ? record : record + " - " + field;
+}
+
 std::string symbol_preview(const AssetGraph &graph, ReferenceKind kind, const std::string &name, const std::string &scope) {
 	const GraphSymbol *symbol = graph.resolve_symbol(kind, name, scope);
 	if (!symbol) return std::string();
@@ -196,7 +240,8 @@ std::string symbol_preview(const AssetGraph &graph, ReferenceKind kind, const st
 		return out;
 	}
 	if (kind == ReferenceKind::TextId) return "\"" + symbol_words(*symbol) + "\"\n" + (symbol->scope.empty() ? symbol->file : symbol->scope);
-	const std::string words = symbol_words(*symbol);
+	const GraphNameSource names(graph);
+	const std::string words = definition_words(*symbol, &names);
 	return words != symbol->display ? words : std::string();
 }
 
