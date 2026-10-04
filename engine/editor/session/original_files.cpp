@@ -13,6 +13,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/install_view.h>
 #include <editor/documents/project_check.h>
 #include <editor/documents/project_checks.h>
 #include <editor/documents/validation_cache.h>
@@ -40,32 +41,26 @@ std::string without_numbers(const std::string &text) {
 	return out;
 }
 
-// The game install's files as the game is served them, by logical name: its archives' through the
-// mount (as an import copies them), the loose files it ships beside them from its folder.
+// The game install's files as the project imports them (assets/install_view.h: as the game is served
+// them, with `/exp` for a project that builds on an installed expansion and under the project's names
+// for one that builds as an expansion), by logical name.
 class InstallFiles final : public FileSource {
 public:
-	InstallFiles(std::unique_ptr<Vfs> game, std::string root) : game_(std::move(game)), root_(std::move(root)) {
-		for (const std::string &name : list_install_loose_files(root_)) loose_.insert(normalized_logical_name(name));
-	}
+	explicit InstallFiles(std::unique_ptr<InstallView> view) : view_(std::move(view)) {}
 	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
-		return read_install_file(*game_, root_, name, out);
+		const InstallFile *file = view_->find(name);
+		return file && view_->read(*file, out);
 	}
-	uint64_t stamp(const std::string &name) const override {
-		return game_->has_file(name) || loose_.count(normalized_logical_name(name)) ? 1 : 0;
-	}
+	uint64_t stamp(const std::string &name) const override { return view_->find(name) ? 1 : 0; }
 	// A file's size as stored, without reading it; 0 when it cannot be told.
 	uint64_t size_of(const std::string &name) const {
-		uint64_t size = 0;
-		if (game_->file_size(name, size)) return size;
-		std::error_code ec;
-		const uintmax_t loose = fs::file_size(system_path(join_path(root_, name)), ec);
-		return ec ? 0 : uint64_t(loose);
+		const InstallFile *file = view_->find(name);
+		return file ? view_->size(*file) : 0;
 	}
+	const InstallView &view() const { return *view_; }
 
 private:
-	std::unique_ptr<Vfs> game_;
-	std::string root_;
-	std::set<std::string> loose_;
+	std::unique_ptr<InstallView> view_;
 };
 
 } // namespace
@@ -121,10 +116,14 @@ OriginalFiles::~OriginalFiles() = default;
 void OriginalFiles::want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document,
                          const void *scan) {
 	const std::string game = document ? document->target_game : std::string();
-	if (install != install_ || game != game_ || !document_ || !document) {
+	// The install as the project imports it moves with the project's expansion (install_spec): another one
+	// is another install to judge against (ADR 0046 S16).
+	const ProjectExpansion expansion = document ? document->expansion : ProjectExpansion();
+	if (install != install_ || game != game_ || expansion != expansion_ || !document_ || !document) {
 		clear();
 		install_ = install;
 		game_ = game;
+		expansion_ = expansion;
 		document_ = document;
 		scan_ = scan;
 		if (!install_.empty() && document_) start();
@@ -178,8 +177,9 @@ bool OriginalFiles::step(uint64_t bytes) {
 		// types by what it holds).
 		run_ = std::make_unique<Run>();
 		run_->document = document_;
-		auto game = std::make_unique<Vfs>();
-		if (!mount_retail(*game, install_, *document_)) {
+		auto game = std::make_unique<InstallView>();
+		std::string why;
+		if (!game->open(install_spec(install_, *document_), why)) {
 			// An install that does not mount: none of the project's findings is the original's.
 			run_.reset();
 			phase_ = Phase::Done;
@@ -188,10 +188,13 @@ bool OriginalFiles::step(uint64_t bytes) {
 			publish(std::move(none));
 			return true;
 		}
-		run_->files = std::make_shared<InstallFiles>(std::move(game), install_);
+		run_->files = std::make_shared<InstallFiles>(std::move(game));
 		run_->paths = ProjectPaths::for_root(install_);
 		run_->paths.files = run_->files;
-		run_->names = list_retail_file_names(install_, *document_);
+		for (const InstallFile &file : run_->files->view().files()) run_->names.push_back(file.name);
+		std::sort(run_->names.begin(), run_->names.end(), [](const std::string &a, const std::string &b) {
+			return normalized_logical_name(a) < normalized_logical_name(b);
+		});
 		phase_ = Phase::Scan;
 		spent();
 		return false;
@@ -284,6 +287,7 @@ void OriginalFiles::publish(OriginalData data) {
 void OriginalFiles::clear() {
 	install_.clear();
 	game_.clear();
+	expansion_ = ProjectExpansion();
 	document_.reset();
 	folder_.clear();
 	scan_ = nullptr;

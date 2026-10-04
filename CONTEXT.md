@@ -492,6 +492,17 @@ a save, a configuration or a score). Play in the game install runs a build there
 _Avoid_: retail directory, retail root, retail files (the names before ADR 0046 S13 A4), resource
 dir (the runtime's `--resource-dir`, which may be a build)
 
+**Project expansion**:
+What a project builds as and on (ADR 0046 S16, `project.opennova`'s `expansion`): its **expansion
+name**, the folder `expansion\<name>\` its build is, played with `/exp <name>`, and the installed
+expansion it **builds on**, whose files it imports as `/exp` mounts them (none: the base game). A
+project with no expansion name is standalone; one that builds on an installed expansion builds as one
+of its own, since the game reads an expansion's files only under `/exp`. The files the game reads by an
+expansion's name (`<name>.bin`, `version.txt`, `M<name>.*`, `G<name>.*`, `<name>L.lwf`, `<name>.lwf`)
+are its **expansion files**.
+_Avoid_: mod (a project builds as an expansion; "mod" is the Mods list's word for one), base (for
+the expansion a project builds on: the base game is the install with none)
+
 **Logical name**:
 The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
 `items.def`), at most 16 bytes as a PFF entry. A project asset's identity; its path in

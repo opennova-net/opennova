@@ -32,6 +32,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/assets/project_scan.h>
 #include <editor/documents/document_types.h>
@@ -998,8 +999,9 @@ static int test_retail_open() {
 	ImportOrigin origin;
 	std::string error;
 	TEST_EXPECT(origin.open(ImportOrigin::Kind::GameInstall, install, document, error));
-	opennova::Vfs mount;
-	TEST_EXPECT(mount_retail(mount, install, document));
+	InstallView view;
+	TEST_EXPECT(view.open(install_spec(install, document), error));
+	const opennova::Vfs &mount = view.vfs();
 	size_t exported = 0;
 	uint64_t bytes_exported = 0;
 	std::vector<LayerFile> layer_files;
