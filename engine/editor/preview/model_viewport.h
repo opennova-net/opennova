@@ -118,8 +118,18 @@ public:
 	std::vector<ModelOverlay> overlays(const PreviewClock &clock) const;
 	// The collision the options show at `clock` (S17, preview/model_collision), and the record `also`
 	// names whatever its layer (the selection's); none while an animation plays (its rig's sections ride
-	// the skeleton, which the shapes do not pose).
-	std::vector<ModelCollisionShape> collision(const PreviewClock &clock, ModelCollisionPick also = ModelCollisionPick()) const;
+	// the skeleton, which the shapes do not pose). Made once per change of what they depend on (the model,
+	// the level, the options, `also`, and the clock while a part they ride animates) and kept: a frame, a
+	// hit and the items read the same shapes.
+	ModelCollisionShapesPtr collision(const PreviewClock &clock, ModelCollisionPick also = ModelCollisionPick()) const;
+	// The collision record the viewport's document has selected (none unless the picture is the document's
+	// as it is now and the document is the active one): the shape drawn whatever its layer.
+	ModelCollisionPick selected_collision(const ViewportInput &input) const;
+	// What the toolbar's Frame names: the selected record where it has a marker or a collision shape (a
+	// section that stores no sphere has none), else nothing (the whole model, as F frames it).
+	std::vector<NodeId> frame_ids(const ViewportContext &context) const;
+	// How many times the shapes were made (a test's measure of the cache).
+	uint64_t collision_builds() const { return collision_cache_.builds; }
 	// How long a marker's axis is drawn (its tip is the Axis handle): a share of the camera's
 	// distance, so it keeps its size on the picture.
 	float axis_length() const { return camera_.distance * 0.08f; }
@@ -275,6 +285,18 @@ private:
 	std::vector<PreviewClipEvent> clip_events_;
 	std::string clip_note_;
 	NodeId sought_event_ = 0; // the event record the clock last sought
+	// The collision shapes last made and what they were made for.
+	struct CollisionCache {
+		const void *model = nullptr;
+		int lod = -2;
+		ModelOverlayOptions overlays;
+		std::map<std::string, int64_t> ctrl;
+		ModelCollisionPick also;
+		uint32_t time_ms = 0;
+		ModelCollisionShapesPtr shapes;
+		uint64_t builds = 0;
+	};
+	mutable CollisionCache collision_cache_;
 };
 
 } // namespace opennova::editor

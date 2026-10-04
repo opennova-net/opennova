@@ -31,6 +31,7 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_panm_pose.h>
+#include <runtime/assets/asset_store.h>
 #include <formats/threedi/threedi_strip_decode.h>
 
 #include "common/retail_paths.h"
@@ -120,6 +121,7 @@ int box_planes_make_the_box() {
 
 int synthetic_shapes() {
 	int models = 0;
+	size_t frames_checked = 0;
 	std::error_code ec;
 	for (const auto &entry : fs::directory_iterator(synth_dir(), ec)) {
 		if (entry.path().extension() != ".3di") continue;
@@ -130,7 +132,10 @@ int synthetic_shapes() {
 		if (!row || !row->base || !row->base->collision) continue;
 		const Threedi3di3 &model = *row->base;
 		int32_t bus[96] = {};
-		const std::vector<ModelCollisionShape> shapes = model_collision_shapes(row->base, 0, 0, bus, every_layer());
+		// A model whose LOD 0 animates is taken posed (a quarter second and more in: its parts turned).
+		const bool live = threedi_panm_lod_has_live(model, 0);
+		const uint32_t at_ms = live ? 700 : 0;
+		const std::vector<ModelCollisionShape> shapes = model_collision_shapes(row->base, 0, at_ms, bus, every_layer());
 		size_t faces = 0, volumes = 0, sections = 0, occlusion = 0;
 		for (const ModelCollisionShape &s : shapes) {
 			TEST_EXPECT(!s.name.empty() && !s.legend.empty());
@@ -161,19 +166,47 @@ int synthetic_shapes() {
 			plane_cursor += size_t(bv.plane_count);
 		}
 		// A rigid model's faces lie on the collision LOD's triangles as the preview draws those (the
-		// render vertices through preview_from_model): the collision's axes reach the same place.
-		// (At rest: a live part's pose at the clock's 0 need not be the identity.)
-		if (model.header.mesh_type != THREEDI_MESH_SKINNED && faces > 0 && !threedi_panm_lod_has_live(model, 0)) {
+		// render vertices through preview_from_model, each part a PANM node drives turned by its matrix at
+		// the same clock): the collision's axes and its pose reach the same place.
+		// (A part a noise track moves poses anew at every call: such a model is not compared posed.)
+		std::vector<ThreediMatrix4x4> parts, again;
+		std::vector<uint8_t> driven;
+		if (live) {
+			threedi_panm_pose_parts(model, 0, at_ms, bus, parts, &driven);
+			threedi_panm_pose_parts(model, 0, at_ms, bus, again, nullptr);
+		}
+		const bool steady = !live || std::equal(parts.begin(), parts.end(), again.begin(), again.end(),
+		                                        [](const ThreediMatrix4x4 &a, const ThreediMatrix4x4 &b) {
+			                                        return std::equal(a.m, a.m + 16, b.m);
+		                                        });
+		if (model.header.mesh_type != THREEDI_MESH_SKINNED && faces > 0 && steady) {
+			// Every LOD's triangles, each part turned by LOD 0's part of its number (what the sections ride;
+			// the collision LOD need not be LOD 0).
 			std::vector<PreviewVec3> middles;
 			for (size_t l = 0; l < model.lod_count; ++l) {
 				const ThreediLod &lod = model.lods[l];
 				std::vector<uint16_t> tris;
+				size_t part = 0, left = lod.render_object_count ? size_t(lod.render_objects[0].num_strips +
+				                                                         lod.render_objects[0].num_alpha_strips)
+				                                                : 0;
 				for (size_t st = 0; st < lod.strip_count; ++st) {
+					while (left == 0 && part + 1 < lod.render_object_count) {
+						++part;
+						left = size_t(lod.render_objects[part].num_strips + lod.render_objects[part].num_alpha_strips);
+					}
+					if (left > 0) --left;
 					if (!threedi_decode_strip_indices(lod, lod.strips[st], tris)) continue;
+					const bool turns = live && part < driven.size() && driven[part];
 					for (size_t t = 0; t + 2 < tris.size(); t += 3) {
 						PreviewVec3 m;
 						for (int k = 0; k < 3; ++k) {
-							const PreviewVec3 p = preview_from_model(lod.vertices.items[lod.strips[st].start_vertex + tris[t + k]].position);
+							const float *v = lod.vertices.items[lod.strips[st].start_vertex + tris[t + k]].position;
+							float q[3] = {v[0], v[1], v[2]};
+							if (turns)
+								for (int c = 0; c < 3; ++c)
+									q[c] = v[0] * parts[part].m[c] + v[1] * parts[part].m[4 + c] + v[2] * parts[part].m[8 + c] +
+									       parts[part].m[12 + c];
+							const PreviewVec3 p = preview_from_model(q);
 							m = PreviewVec3{m.x + p.x / 3, m.y + p.y / 3, m.z + p.z / 3};
 						}
 						middles.push_back(m);
@@ -196,6 +229,60 @@ int synthetic_shapes() {
 				std::printf("shapes: %s: %zu of %zu faces on a triangle\n", entry.path().filename().string().c_str(), on, faces);
 			TEST_EXPECT(on == faces);
 		}
+		// Every other kind through its own axes, against the raw data by the maps written out here: the
+		// collision block (mission axes) at (y, z, x), the occlusion records (model axes) at (-x, y, z).
+		if (!live) {
+			const auto mission = [](double x, double y, double z) { return PreviewVec3{float(y), float(z), float(x)}; };
+			const auto box_of = [](const std::vector<PreviewVec3> &points, PreviewVec3 &lo, PreviewVec3 &hi) {
+				lo = PreviewVec3{1e9f, 1e9f, 1e9f};
+				hi = PreviewVec3{-1e9f, -1e9f, -1e9f};
+				for (const PreviewVec3 &p : points) {
+					lo = PreviewVec3{std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+					hi = PreviewVec3{std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+				}
+			};
+			const auto q = [](int32_t v) { return v / 65536.0; };
+			size_t checked = 0;
+			for (const ModelCollisionShape &s : shapes) {
+				PreviewVec3 lo, hi;
+				if (s.kind == ModelCollisionKind::Section) {
+					const ThreediCollisionObject &o = model.collision->objects[size_t(s.index)];
+					TEST_EXPECT(distance(s.center, mission(q(o.med[0]), q(o.med[1]), q(o.med[2]))) < 1e-4f);
+					++checked;
+				} else if (s.kind == ModelCollisionKind::Bounds) {
+					const float *b = model.collision->model_data.bbox;
+					box_of(s.edges, lo, hi);
+					TEST_EXPECT(distance(lo, mission(b[0], b[1], b[2])) < 1e-4f && distance(hi, mission(b[3], b[4], b[5])) < 1e-4f);
+					++checked;
+				} else if (s.kind == ModelCollisionKind::Volume) {
+					const ThreediBoundingVolume &v = model.collision->volumes[size_t(s.index)];
+					const PreviewVec3 vlo = mission(q(v.min_x_fp16), q(v.min_y_fp16), q(v.min_z_fp16));
+					const PreviewVec3 vhi = mission(q(v.max_x_fp16), q(v.max_y_fp16), q(v.max_z_fp16));
+					box_of(s.edges, lo, hi);
+					TEST_EXPECT(lo.x >= vlo.x - 0.002f && lo.y >= vlo.y - 0.002f && lo.z >= vlo.z - 0.002f &&
+					            hi.x <= vhi.x + 0.002f && hi.y <= vhi.y + 0.002f && hi.z <= vhi.z + 0.002f);
+					++checked;
+				} else if (s.kind == ModelCollisionKind::Occlusion) {
+					for (const PreviewVec3 &p : s.edges) {
+						bool found = false;
+						for (size_t i = 0; i < model.occlusion_vertex_count && !found; ++i) {
+							const float *v = model.occlusion_vertices[i].position;
+							found = distance(p, PreviewVec3{-v[0], v[1], v[2]}) < 1e-4f;
+						}
+						TEST_EXPECT(found);
+					}
+					++checked;
+				} else if (s.kind == ModelCollisionKind::ProbeBox && s.index == 0) {
+					ThreediCollisionProbeBoxes probes{};
+					TEST_EXPECT(threedi_3di3_collision_probe_boxes(model.collision, &probes));
+					box_of(s.edges, lo, hi);
+					TEST_EXPECT(distance(lo, mission(q(probes.box_x_lo), q(probes.box_y_lo), q(probes.box_z_lo))) < 1e-4f &&
+					            distance(hi, mission(q(probes.box_x_hi), q(probes.box_y_hi), q(probes.box_z_hi))) < 1e-4f);
+					++checked;
+				}
+			}
+			frames_checked += checked;
+		}
 		// A layer off shows nothing but the record asked for.
 		ModelOverlayOptions none;
 		TEST_EXPECT(model_collision_shapes(row->base, 0, 0, bus, none).empty());
@@ -206,8 +293,10 @@ int synthetic_shapes() {
 		TEST_EXPECT(!model_collision_legend(shapes).empty());
 		++models;
 	}
-	TEST_EXPECT(models > 5);
-	std::printf("shapes: %d synthetic models' collision as shapes, each record's back to its record\n", models);
+	TEST_EXPECT(models > 5 && frames_checked > 20);
+	std::printf("shapes: %d synthetic models' collision as shapes, each record's back to its record; %zu shapes' "
+	            "axes checked against the raw data\n",
+	            models, frames_checked);
 	return 0;
 }
 
@@ -251,6 +340,52 @@ int a_person_and_a_live_part() {
 			moved = moved || distance(rest[i].edges[k], later[i].edges[k]) > 1e-4f;
 	TEST_EXPECT(moved);
 	std::printf("a person's hit spheres at the game's radius; a live part carries its section\n");
+	return 0;
+}
+
+// A part no PANM node drives stands as it is while the others turn (the runtime gives its section the
+// entity's matrix): the pump's last part animation removed, part 4 (its pivot 3 m up and 2 m out) keeps
+// its section's faces where the file has them, not moved by its pivot.
+int a_part_no_node_drives() {
+	ModelDocument document;
+	TEST_EXPECT(load(document, synth_dir() + "/pump.3di", "pump.3di"));
+	const ModelRow *row = document.model_row();
+	TEST_EXPECT(row && row->base && threedi_panm_lod_has_live(*row->base, 0));
+	if (!row || !row->base) return 1;
+	const std::vector<RecordIds> &panm = row->ids.lists[kModelLods][0].lists[kModelOwnList];
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = {row->id, node_kind(ModelKind::PartAnimation), panm.back().id};
+	Diagnostic error;
+	TEST_EXPECT(document.apply(remove, error));
+	const SerializeResult written = document.serialize();
+	TEST_EXPECT(written.ok());
+	const opennova::assets::Model model =
+			opennova::assets::parse_model(reinterpret_cast<const uint8_t *>(written.text.data()), written.text.size());
+	TEST_EXPECT(model && model->lods[0].part_animation_count == 4 && threedi_panm_lod_has_live(*model, 0));
+	if (!model) return 1;
+	int32_t bus[96] = {};
+	ModelOverlayOptions faces;
+	faces.bullet_faces = true;
+	const std::vector<ModelCollisionShape> shapes = model_collision_shapes(model, 0, 700, bus, faces);
+	const ThreediCollisionModel &c = *model->collision;
+	std::vector<ThreediCollisionObjectRun> runs(c.object_count);
+	TEST_EXPECT(threedi_collision_object_runs(&c, runs.data()));
+	size_t checked = 0;
+	for (const ModelCollisionShape &s : shapes) {
+		if (s.section != 4) continue;
+		for (const PreviewVec3 &p : s.triangles) {
+			bool found = false;
+			for (int32_t v = 0; v < c.objects[4].num_vertices && !found; ++v) {
+				const float *q = c.vertices[size_t(runs[4].vertex_start + v)].position;
+				found = distance(p, PreviewVec3{q[1], q[2], q[0]}) < 1e-4f;
+			}
+			TEST_EXPECT(found);
+			++checked;
+		}
+	}
+	TEST_EXPECT(checked == size_t(c.objects[4].num_faces) * 3);
+	std::printf("a part no node drives: its section stands where the file has it (%zu corners)\n", checked);
 	return 0;
 }
 
@@ -298,6 +433,8 @@ int retail_collision() {
 	size_t models = 0, volumes = 0, solids = 0, flat = 0, boxes = 0, outside = 0, clipped = 0, inverted = 0, faces = 0,
 	       sections = 0, occlusion = 0;
 	double seconds = 0.0;
+	size_t persons = 0, not_persons = 0;
+	std::vector<std::string> not_person_names;
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
 		game.set_scr_policy(opennova::gameprofile::gameprofile_scr_policy_for_code(project.target_game.c_str()));
@@ -347,6 +484,18 @@ int retail_collision() {
 			const auto start = std::chrono::steady_clock::now();
 			const auto shapes = model_collision_shapes(row->base, 0, 0, bus, every_layer());
 			seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+			// The skinned models: a person's (its bone sections hit spheres) or not (no face anywhere).
+			if (row->base->header.mesh_type == THREEDI_MESH_SKINNED) {
+				bool bones = false, person = false;
+				for (size_t o = 0; o < c.object_count; ++o) {
+					bones = bones || (c.objects[o].num_faces == 0 && c.objects[o].num_bounding_volumes == 0 && c.objects[o].radius > 0);
+					person = person || model_section_is_person(*row->base, o);
+				}
+				if (bones) {
+					(person ? persons : not_persons) += 1;
+					if (!person && not_person_names.size() < 6) not_person_names.push_back(file.logical_name);
+				}
+			}
 			for (const ModelCollisionShape &s : shapes) {
 				faces += s.kind == ModelCollisionKind::Face ? 1 : 0;
 				sections += s.kind == ModelCollisionKind::Section ? 1 : 0;
@@ -359,6 +508,10 @@ int retail_collision() {
 	            "whose planes reach past their box, clipped to it; %zu boxes inside out; %zu leave it), %zu bullet faces, "
 	            "%zu section spheres, %zu occlusion records; shapes made in %.2f s (first time, every layer)\n",
 	            models, volumes, solids, flat, boxes, clipped, inverted, outside, faces, sections, occlusion, seconds);
+	std::string names;
+	for (const std::string &n : not_person_names) names += (names.empty() ? "" : ", ") + n;
+	std::printf("retail collision: %zu skinned models with bone spheres: %zu persons (a face mesh row), %zu not (%s...)\n",
+	            persons + not_persons, persons, not_persons, names.c_str());
 	TEST_EXPECT(outside == 0);
 	TEST_EXPECT(boxes * 50 <= volumes);
 	return 0;
@@ -371,6 +524,7 @@ int main(int argc, char **argv) {
 	if (box_planes_make_the_box() != 0) return 1;
 	if (synthetic_shapes() != 0) return 1;
 	if (a_person_and_a_live_part() != 0) return 1;
+	if (a_part_no_node_drives() != 0) return 1;
 	if (picking() != 0) return 1;
 	return retail_collision();
 }

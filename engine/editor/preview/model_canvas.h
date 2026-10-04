@@ -61,10 +61,13 @@ struct ModelCanvasFrame {
 	const Document *clip_document = nullptr;
 	int selected_bone = -1;
 	// The collision shown (ADR 0046 S17, preview/model_collision), drawn under the markers with its
-	// legend, and the selected record's shape among them (-1: none), drawn highlighted.
-	std::vector<ModelCollisionShape> collision;
+	// legend, and the selected record's shape among them (-1: none), drawn highlighted: the viewport's
+	// kept shapes, shared (model_canvas_collision reads them, none for none).
+	ModelCollisionShapesPtr collision;
 	int selected_collision = -1;
 };
+// The frame's collision shapes (empty for none).
+const std::vector<ModelCollisionShape> &model_canvas_collision(const ModelCanvasFrame &frame);
 
 // What a press on the canvas took: on the selected marker (or its axis tip) its handle, whose
 // drag moves (or turns) its record, kept where the press took it; else the marker under it (a
@@ -143,10 +146,28 @@ public:
 	// or while dragging).
 	std::string hover_tip(const ModelCanvasFrame &frame, int under, int bone_under = -1, int collision_under = -1) const;
 
+	// How many times the canvas looked for what lies under the pointer (once a frame and pointer: a test's
+	// measure).
+	uint64_t pick_count() const { return pick_count_; }
+
 private:
+	// What lies under the pointer in the frame made at follow: the marker, else the joint, else the
+	// collision shape; found once for the frame and the pointer, which the input, the shapes and the
+	// hover then read.
+	struct Picks {
+		int under = -1, bone = -1, collision = -1;
+	};
+	const Picks &picks_(const CanvasInput &in) const;
+
 	CanvasGesture gesture_;
 	ModelCanvasFrame frame_;
 	ModelGrab grab_;
+	mutable Picks picks_cache_;
+	mutable bool picks_valid_ = false;
+	mutable CanvasPoint picks_mouse_;
+	mutable int picks_width_ = 0, picks_height_ = 0;
+	mutable bool picks_hovered_ = false;
+	mutable uint64_t pick_count_ = 0;
 };
 
 } // namespace opennova::editor

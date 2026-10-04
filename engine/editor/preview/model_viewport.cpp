@@ -18,6 +18,7 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/threedi/threedi_panm_pose.h>
 
 namespace opennova::editor {
 
@@ -352,11 +353,54 @@ std::vector<ModelOverlay> ModelViewport::overlays(const PreviewClock &clock) con
 	return out;
 }
 
-std::vector<ModelCollisionShape> ModelViewport::collision(const PreviewClock &clock, ModelCollisionPick also) const {
-	if (!model_ || animating_) return {};
+ModelCollisionShapesPtr ModelViewport::collision(const PreviewClock &clock, ModelCollisionPick also) const {
+	static const ModelCollisionShapesPtr none = std::make_shared<const std::vector<ModelCollisionShape>>();
+	if (!model_ || animating_) return none;
+	const int level = lod();
+	// The clock matters only while a part the shapes ride animates (LOD 0's for the collision, the drawn
+	// level's for the part spheres).
+	const bool live = threedi::threedi_panm_lod_has_live(*model_, 0) ||
+	                  (options_.overlays.part_spheres && level >= 0 && threedi::threedi_panm_lod_has_live(*model_, level));
+	const uint32_t time_ms = live ? clock.ms() : 0;
+	CollisionCache &cache = collision_cache_;
+	if (cache.shapes && cache.model == model_.get() && cache.lod == level && cache.overlays == options_.overlays &&
+	    cache.ctrl == options_.ctrl && cache.also == also && cache.time_ms == time_ms)
+		return cache.shapes;
 	int32_t bus[96];
 	model_preview_ctrl_bus(options_.ctrl, bus);
-	return model_collision_shapes(model_, lod(), clock.ms(), bus, options_.overlays, also);
+	cache.shapes = std::make_shared<const std::vector<ModelCollisionShape>>(
+			model_collision_shapes(model_, level, time_ms, bus, options_.overlays, also));
+	cache.model = model_.get();
+	cache.lod = level;
+	cache.overlays = options_.overlays;
+	cache.ctrl = options_.ctrl;
+	cache.also = also;
+	cache.time_ms = time_ms;
+	++cache.builds;
+	return cache.shapes;
+}
+
+std::vector<NodeId> ModelViewport::frame_ids(const ViewportContext &context) const {
+	const ViewportInput &input = context.input;
+	const auto *document = dynamic_cast<const ModelDocument *>(input.document ? records_of(*input.document) : nullptr);
+	const NodeAddress &selected = input.view.documents.selection.primary;
+	if (!document || input.view.documents.active != path() || !selected.child) return {};
+	ModelOverlayKind kind;
+	int index = -1;
+	if (model_overlay_of(*document, selected, kind, index)) return {selected.child};
+	ModelCollisionPick picked;
+	if (!model_collision_of(*document, selected, picked)) return {};
+	for (const ModelCollisionShape &shape : *collision(input.clock, picked))
+		if (shape.kind == picked.kind && shape.index == picked.index) return {selected.child};
+	return {};
+}
+
+ModelCollisionPick ModelViewport::selected_collision(const ViewportInput &input) const {
+	ModelCollisionPick picked;
+	const auto *document = dynamic_cast<const ModelDocument *>(input.document ? records_of(*input.document) : nullptr);
+	if (document && current(input) && input.view.documents.active == document->path())
+		model_collision_of(*document, input.view.documents.selection.primary, picked);
+	return picked;
 }
 
 PreviewVec3 ModelViewport::axis_tip(const ModelOverlay &overlay) const {
@@ -864,11 +908,10 @@ ModelCanvasFrame ModelViewport::canvas_frame(const ViewportContext &context) con
 	}
 	// The collision shown (S17), and the selected record's shape whatever its layer.
 	const bool active = frame.current && input.view.documents.active == frame.document->path();
-	ModelCollisionPick picked;
-	if (active) model_collision_of(*frame.document, input.view.documents.selection.primary, picked);
+	const ModelCollisionPick picked = selected_collision(input);
 	frame.collision = collision(input.clock, picked);
-	for (size_t i = 0; picked.valid() && i < frame.collision.size(); ++i)
-		if (frame.collision[i].kind == picked.kind && frame.collision[i].index == picked.index)
+	for (size_t i = 0; picked.valid() && i < frame.collision->size(); ++i)
+		if ((*frame.collision)[i].kind == picked.kind && (*frame.collision)[i].index == picked.index)
 			frame.selected_collision = int(i);
 	if (!active) return frame;
 	const Selection &selection = input.view.documents.selection;
@@ -891,11 +934,12 @@ ViewportHit ModelViewport::hit(const ViewportContext &context, float x, float y)
 	const std::vector<ModelOverlay> marks = overlays(context.input.clock);
 	out.index = pick_model_overlay(marks, camera_, context.width, context.height, x, y);
 	if (out.index < 0) {
-		// No marker there: the collision shape the pixel is on (S17).
-		const std::vector<ModelCollisionShape> shapes = collision(context.input.clock);
-		const int at = pick_model_collision(shapes, camera_, context.width, context.height, x, y);
+		// No marker there: the collision shape the pixel is on (S17), the picture's own (the selected
+		// record's shape among them whatever its layer).
+		const ModelCollisionShapesPtr shapes = collision(context.input.clock, selected_collision(context.input));
+		const int at = pick_model_collision(*shapes, camera_, context.width, context.height, x, y);
 		if (at < 0) return out;
-		const ModelCollisionShape &shape = shapes[size_t(at)];
+		const ModelCollisionShape &shape = (*shapes)[size_t(at)];
 		const auto *document = dynamic_cast<const ModelDocument *>(
 				context.input.document ? records_of(*context.input.document) : nullptr);
 		out.index = shape.index;
@@ -1047,7 +1091,7 @@ bool ModelViewport::command(const ViewportContext &context, const std::string &n
 	// A collision record (S17): the camera on its shape, whatever its layer.
 	ModelCollisionPick picked;
 	if (document && model_collision_of(*document, document->address_of(ids.front()), picked))
-		for (const ModelCollisionShape &shape : collision(context.input.clock, picked))
+		for (const ModelCollisionShape &shape : *collision(context.input.clock, picked))
 			if (shape.kind == picked.kind && shape.index == picked.index) {
 				PreviewVec3 center;
 				float radius = 0.0f;
@@ -1111,7 +1155,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 			layers.push(std::move(row));
 		}
 		JsonValue legend = JsonValue::make_array();
-		for (const ModelCollisionLegendRow &entry : model_collision_legend(collision(input.clock))) {
+		for (const ModelCollisionLegendRow &entry : model_collision_legend(*collision(input.clock, selected_collision(input)))) {
 			JsonValue row = JsonValue::make_object();
 			row.set("color", json_string(rgb_hex(entry.rgb)));
 			row.set("words", json_string(entry.words));
@@ -1271,9 +1315,16 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 	// its words, its colour, and its sphere or its corners in the preview's space, a handle's data.
 	const auto *document = dynamic_cast<const ModelDocument *>(input.document ? records_of(*input.document) : nullptr);
 	const bool now = document && current(input);
-	for (const ModelCollisionShape &shape : collision(input.clock)) {
+	const ModelCollisionPick picked = selected_collision(input);
+	for (const ModelCollisionShape &shape : *collision(input.clock, picked)) {
 		JsonValue row = JsonValue::make_object();
 		row.set("kind", json_string(model_collision_kind_token(shape.kind)));
+		// The selected record's shape, listed whatever its layer as the picture draws it.
+		row.set("selected", JsonValue::make_bool(picked.valid() && picked.kind == shape.kind && picked.index == shape.index));
+		if (shape.kind == ModelCollisionKind::Section) {
+			row.set("person", JsonValue::make_bool(shape.person));
+			row.set("breaks", JsonValue::make_bool(shape.breaks));
+		}
 		row.set("index", json_number(shape.index));
 		row.set("id", json_number(now ? double(model_collision_record(*document, shape).child) : 0.0));
 		row.set("name", json_string(shape.name));

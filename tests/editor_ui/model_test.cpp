@@ -160,6 +160,8 @@ void test_material_surface() {
 		const ModelVolumeType &type = model_volume_type(collision->volumes[0].collidable_type);
 		const std::string words = std::string(type.code) + ", " + type.words;
 		CHECK(in_order(text, {"In the game", words.c_str(), "convex"}), "a volume by what its type does");
+		// A volume holds no list: the lists beside it are its owner's, headed so.
+		CHECK(in_order(text, {"Collision: Sections", "Collision: Volumes"}), "the owner's lists headed as the owner's");
 		CHECK(text.find("[orig:") == std::string::npos, "the citations in the tooltip, not the text");
 	}
 	session.handle(request::select_record(path, glass.address));

@@ -1142,7 +1142,7 @@ static int test_collision() {
 	TEST_EXPECT(collision && !collision->volumes.empty() && !collision->faces.empty());
 	if (!collision || collision->volumes.empty() || collision->faces.empty()) return 1;
 	// Off until shown: only the markers are items.
-	TEST_EXPECT(rig.viewport()->collision(rig.clock()).empty());
+	TEST_EXPECT(rig.viewport()->collision(rig.clock())->empty());
 	TEST_EXPECT(!rig.set(R"({"options": {"overlays": {"walls": true}}})"));
 	TEST_EXPECT(rig.set(R"({"options": {"overlays": {"volumes": true, "bullet_faces": true, "user_points": false, "lights": false}}})"));
 	TEST_EXPECT(rig.pump() == ViewportAction::Update);
@@ -1173,7 +1173,7 @@ static int test_collision() {
 	// The canvas: a click on the shape under the pointer selects its record, its words on hover.
 	const ViewportContext context = rig.context();
 	ModelCanvasFrame frame = rig.viewport()->canvas_frame(context);
-	TEST_EXPECT(frame.collision.size() == faces + volumes && frame.selected_collision == -1);
+	TEST_EXPECT(model_canvas_collision(frame).size() == faces + volumes && frame.selected_collision == -1);
 	ModelCanvas canvas;
 	RecordedRequests out;
 	canvas.follow(frame, out);
@@ -1185,12 +1185,12 @@ static int test_collision() {
 	const int under = model_canvas_collision_under(frame, in);
 	TEST_EXPECT(under >= 0 && model_canvas_under(frame, in) < 0);
 	if (under < 0) return 1;
-	TEST_EXPECT(canvas.hover_tip(frame, -1, -1, under) == frame.collision[size_t(under)].name + " (click to select it)");
+	TEST_EXPECT(canvas.hover_tip(frame, -1, -1, under) == model_canvas_collision(frame)[size_t(under)].name + " (click to select it)");
 	in.pressed = in.down = true;
 	canvas.input(frame, in, -1, out);
 	in.pressed = in.down = false;
 	canvas.input(frame, in, -1, out);
-	const NodeAddress picked = model_collision_record(*document, frame.collision[size_t(under)]);
+	const NodeAddress picked = model_collision_record(*document, model_canvas_collision(frame)[size_t(under)]);
 	TEST_EXPECT(out.raised.size() == 1 && out.raised[0].kind == EditorRequestKind::SelectRecord &&
 	            out.raised[0].address == picked && NodeId(hit.id) == picked.child);
 	// Drawn: lines in the shapes' colours and the legend's words.
@@ -1202,14 +1202,41 @@ static int test_collision() {
 	}
 	TEST_EXPECT(lines >= faces * 3 && legend == 1);
 
+	// Made once: another frame of the same state reads the kept shapes (no rebuild), and the canvas
+	// looks for what lies under the pointer once for the shapes and the hover together.
+	const uint64_t builds = rig.viewport()->collision_builds();
+	const ModelCanvasFrame again = rig.viewport()->canvas_frame(rig.context());
+	TEST_EXPECT(rig.viewport()->collision_builds() == builds && again.collision == frame.collision);
+	ModelCanvas once;
+	RecordedRequests followed;
+	once.follow(*rig.viewport(), rig.context(), followed);
+	once.shapes(rig.context(), in);
+	TEST_EXPECT(!once.hover_tip(rig.context(), in).empty() && once.pick_count() == 1);
+
 	// The layers off, a volume selected: its shape alone, highlighted; Frame looks at it.
 	TEST_EXPECT(rig.set(R"({"options": {"overlays": {"volumes": false, "bullet_faces": false}}})"));
 	rig.pump();
 	const NodeAddress volume{collision->id, node_kind(ModelKind::Volume), collision->ids.lists[kCollisionVolumes][0].id};
 	session.handle(request::select_record(document->path(), volume));
 	frame = rig.viewport()->canvas_frame(rig.context());
-	TEST_EXPECT(frame.collision.size() == 1 && frame.selected_collision == 0 &&
-	            frame.collision[0].kind == ModelCollisionKind::Volume && frame.collision[0].index == 0);
+	TEST_EXPECT(model_canvas_collision(frame).size() == 1 && frame.selected_collision == 0 &&
+	            model_canvas_collision(frame)[0].kind == ModelCollisionKind::Volume && model_canvas_collision(frame)[0].index == 0);
+	// The wire as the picture: the selected shape among the items, marked, and a hit on it names it.
+	shown = rig.json();
+	JsonValue selected_item;
+	for (const JsonValue &item : shown.get("items")->array)
+		if (item.get_string("kind", "") == "volume") selected_item = item;
+	TEST_EXPECT(selected_item.get_bool("selected", false) && NodeId(selected_item.get_number("id", 0)) == volume.child);
+	const ViewportHit on_it = rig.viewport()->hit(rig.context(), float(selected_item.get("screen")->array[0].number),
+	                                               float(selected_item.get("screen")->array[1].number));
+	TEST_EXPECT(on_it.kind == "volume" && on_it.id == volume.child);
+	// Frame names a record with a shape; a record with none (a material) leaves the whole model.
+	TEST_EXPECT(rig.viewport()->frame_ids(rig.context()) == std::vector<NodeId>{volume.child});
+	const ModelRow *model_row = document->model_row();
+	session.handle(request::select_record(
+			document->path(), {model_row->id, node_kind(ModelKind::Material), model_row->ids.lists[kModelMaterials][0].id}));
+	TEST_EXPECT(rig.viewport()->frame_ids(rig.context()).empty());
+	session.handle(request::select_record(document->path(), volume));
 	const OrbitCamera before = rig.viewport()->camera();
 	RecordedRequests framed;
 	std::string error;
@@ -1217,7 +1244,7 @@ static int test_collision() {
 	for (const EditorRequest &request : framed.raised) session.handle(request);
 	PreviewVec3 center;
 	float radius = 0.0f;
-	model_collision_bounds(frame.collision[0], center, radius);
+	model_collision_bounds(model_canvas_collision(frame)[0], center, radius);
 	const OrbitCamera &after = rig.viewport()->camera();
 	TEST_EXPECT(near(after.target.x, center.x, 1e-3) && near(after.target.y, center.y, 1e-3) &&
 	            near(after.target.z, center.z, 1e-3) && (!near(before.distance, after.distance, 1e-4) ||

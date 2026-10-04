@@ -32,8 +32,9 @@ bool model_part_exists(const ModelRow &row, int64_t part);
 
 // What a LOD draws at, by the game's level walk [orig: Model_SelectRlodLevel @ 0x5c3b20: level i draws
 // while the scaled projected radius is above its threshold and at or below the level before's; the walk
-// stops at the first level whose threshold is 0]: "above 160 px", "19 to 64 px", "below 19 px", "never
-// (LOD 3 draws down to 0 px)".
+// stops at the first level whose threshold is 0, and past the last level draws the last (@ 0x5c3b58)]:
+// "above 160 px", "19 to 64 px", "below 19 px" (the last LOD, whatever its own threshold), "at any size"
+// (a single LOD), "never (LOD 3 draws down to 0 px)".
 std::string model_lod_range(const ModelRow &row, size_t lod);
 std::string model_lod_range(const std::vector<int32_t> &thresholds, size_t lod);
 // Whether the game's walk can reach the LOD by distance.

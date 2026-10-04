@@ -124,10 +124,14 @@ std::string model_lod_range(const std::vector<int32_t> &thresholds, size_t lod) 
 		while (stop < lod && thresholds[stop] > 0) ++stop;
 		return "never (LOD " + std::to_string(stop) + " draws down to 0 px)";
 	}
+	// The walk past the last level draws the last [orig: Model_SelectRlodLevel @ 0x5c3b20, the clamp to
+	// numLODLevels - 1 @ 0x5c3b58..0x5c3b5a]: the last LOD draws at every size below the one before it
+	// (a single LOD at any size), whatever its own threshold.
 	const int32_t own = thresholds[lod];
-	if (lod == 0) return own > 0 ? "above " + std::to_string(own) + " px" : "at any size";
+	const bool last = lod + 1 == thresholds.size();
+	if (lod == 0) return own > 0 && !last ? "above " + std::to_string(own) + " px" : "at any size";
 	const int32_t before = thresholds[lod - 1];
-	if (own <= 0) return "below " + std::to_string(before) + " px";
+	if (own <= 0 || last) return "below " + std::to_string(before) + " px";
 	return std::to_string(own) + " to " + std::to_string(before) + " px";
 }
 
@@ -245,8 +249,10 @@ std::string model_record_label(const Document &document, const NodeAddress &addr
 		const CollisionRow *collision = model->collision_row();
 		if (!collision || i >= collision->sections.size()) return "";
 		const ThreediCollisionObject &s = collision->sections[i];
-		if (row->header.mesh_type == THREEDI_MESH_SKINNED && s.num_faces == 0 && s.num_bounding_volumes == 0)
+		if (row->base && model_section_is_person(*row->base, i))
 			return "Section of " + part_word(*row, int64_t(i)) + ": hit sphere" + (i == 14 ? " (the head)" : "");
+		if (row->header.mesh_type == THREEDI_MESH_SKINNED && s.num_faces == 0 && s.num_bounding_volumes == 0)
+			return "Section of " + part_word(*row, int64_t(i)) + ": bone sphere (no round tests it)";
 		return "Section of " + part_word(*row, int64_t(i)) + ": " + std::to_string(s.num_bounding_volumes) + " volumes, " +
 		       std::to_string(s.num_faces) + " faces";
 	}

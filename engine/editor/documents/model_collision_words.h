@@ -6,8 +6,11 @@
 // "no witnessed meaning" where the game's use is not known. Pure tables: the outline's titles, the
 // Inspector, the picture's legend and its hover read them.
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+
+#include <formats/threedi/threedi_3di3.h>
 
 namespace opennova::editor {
 
@@ -42,12 +45,22 @@ const char *model_occlusion_type_what(int64_t type);
 // section 15.8b].
 int32_t model_person_hit_radius_q16(int section, int32_t authored_q16);
 
+// Whether a section is a person's hit sphere: a bone section (no faces, no volumes) of a skinned model
+// whose whole-body row holds the face mesh, as every person model's does (docs/world/world-wac-ai-re.md
+// section 15.8b, person-model subobjects); a skinned model with no face at all (a first-person view's
+// arms) is no person's, and the game tests its bone spheres against no round.
+bool model_section_is_person(const threedi::Threedi3di3 &model, size_t section);
+// Whether a blast breaks the section off: its flags word carries 2 [orig: Entity_ApplyWeaponDamage @
+// 0x4e6c5e..0x4e6e6b, the bit @ 0x4e6cd0; runtime/world/collision.h CollisionSection::flags].
+bool model_section_breaks(const threedi::ThreediCollisionObject &section);
+
 // The sentences the Inspector and the picture's hover give each kind of collision record and bound.
 extern const char *const kModelCollisionWords;    // the collision row
 extern const char *const kModelSectionWords;      // a section of a rigid model
 extern const char *const kModelHitSphereWords;    // a section of a person (a skinned model)
 extern const char *const kModelVolumeWords;       // any volume, before its type's words
 extern const char *const kModelBulletFaceWords;   // a bullet face
+extern const char *const kModelSectionBreaksWords; // a section a blast breaks off
 extern const char *const kModelOcclusionWords;    // any occlusion record, before its type's words
 extern const char *const kModelBoundsWords;       // the collision block's box and the projection sphere
 extern const char *const kModelBoundRadiusWords;  // the model's bound radius

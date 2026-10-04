@@ -63,10 +63,16 @@ int model_canvas_bone_under(const ModelCanvasFrame &frame, const CanvasInput &in
 	return best;
 }
 
+const std::vector<ModelCollisionShape> &model_canvas_collision(const ModelCanvasFrame &frame) {
+	static const std::vector<ModelCollisionShape> none;
+	return frame.collision ? *frame.collision : none;
+}
+
 int model_canvas_collision_under(const ModelCanvasFrame &frame, const CanvasInput &in) {
-	if (!in.hovered || !frame.model || frame.collision.empty())
+	const std::vector<ModelCollisionShape> &shapes = model_canvas_collision(frame);
+	if (!in.hovered || !frame.model || shapes.empty())
 		return -1;
-	return pick_model_collision(frame.collision, frame.model->camera(), in.width, in.height, in.mouse.x, in.mouse.y);
+	return pick_model_collision(shapes, frame.model->camera(), in.width, in.height, in.mouse.x, in.mouse.y);
 }
 
 NodeAddress model_canvas_bone_record(const ModelCanvasFrame &frame, int joint) {
@@ -116,23 +122,39 @@ ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in
 void ModelCanvas::follow(
 		const ViewportModel &viewport, const ViewportContext &context, CanvasRequests &out) {
 	frame_ = static_cast<const ModelViewport &>(viewport).canvas_frame(context);
+	picks_valid_ = false;
 	follow(frame_, out);
 }
 
+const ModelCanvas::Picks &ModelCanvas::picks_(const CanvasInput &in) const {
+	if (picks_valid_ && picks_mouse_.x == in.mouse.x && picks_mouse_.y == in.mouse.y && picks_width_ == in.width &&
+	    picks_height_ == in.height && picks_hovered_ == in.hovered)
+		return picks_cache_;
+	++pick_count_;
+	picks_cache_.under = model_canvas_under(frame_, in);
+	picks_cache_.bone = picks_cache_.under < 0 ? model_canvas_bone_under(frame_, in) : -1;
+	picks_cache_.collision =
+			picks_cache_.under < 0 && picks_cache_.bone < 0 ? model_canvas_collision_under(frame_, in) : -1;
+	picks_valid_ = true;
+	picks_mouse_ = in.mouse;
+	picks_width_ = in.width;
+	picks_height_ = in.height;
+	picks_hovered_ = in.hovered;
+	return picks_cache_;
+}
+
 void ModelCanvas::input(const ViewportContext &, const CanvasInput &in, CanvasRequests &out) {
-	input(frame_, in, model_canvas_under(frame_, in), out);
+	input(frame_, in, picks_(in).under, out);
 }
 
 OverlayList ModelCanvas::shapes(const ViewportContext &, const CanvasInput &in) const {
-	const int under = model_canvas_under(frame_, in);
-	const int bone = under < 0 ? model_canvas_bone_under(frame_, in) : -1;
-	return shapes(frame_, in, under, bone, under < 0 && bone < 0 ? model_canvas_collision_under(frame_, in) : -1);
+	const Picks &at = picks_(in);
+	return shapes(frame_, in, at.under, at.bone, at.collision);
 }
 
 std::string ModelCanvas::hover_tip(const ViewportContext &, const CanvasInput &in) const {
-	const int under = model_canvas_under(frame_, in);
-	const int bone = under < 0 ? model_canvas_bone_under(frame_, in) : -1;
-	return hover_tip(frame_, under, bone, under < 0 && bone < 0 ? model_canvas_collision_under(frame_, in) : -1);
+	const Picks &at = picks_(in);
+	return hover_tip(frame_, at.under, at.bone, at.collision);
 }
 
 void ModelCanvas::follow(const ModelCanvasFrame &frame, CanvasRequests &out) {
@@ -173,8 +195,8 @@ void ModelCanvas::input(
 		}
 		// A click on a collision shape selects its record (S17), while the picture is the document's.
 		if (!gesture_.dragging() && grab_.pick < 0 && grab_.bone < 0 && grab_.collision >= 0 && frame.current &&
-				size_t(grab_.collision) < frame.collision.size()) {
-			const NodeAddress record = model_collision_record(*frame.document, frame.collision[size_t(grab_.collision)]);
+				size_t(grab_.collision) < model_canvas_collision(frame).size()) {
+			const NodeAddress record = model_collision_record(*frame.document, model_canvas_collision(frame)[size_t(grab_.collision)]);
 			if (record.row)
 				out.request(request::select_record(frame.document->path(), record));
 		}
@@ -235,10 +257,10 @@ void ModelCanvas::frame_selected(
 		return;
 	}
 	// The selected collision record's shape (S17).
-	if (frame.selected_collision >= 0 && size_t(frame.selected_collision) < frame.collision.size()) {
+	if (frame.selected_collision >= 0 && size_t(frame.selected_collision) < model_canvas_collision(frame).size()) {
 		PreviewVec3 center;
 		float radius = 0.0f;
-		model_collision_bounds(frame.collision[size_t(frame.selected_collision)], center, radius);
+		model_collision_bounds(model_canvas_collision(frame)[size_t(frame.selected_collision)], center, radius);
 		OrbitCamera camera = model.camera();
 		camera.frame(center, radius, width, height);
 		set_camera(frame, camera, out);
@@ -280,14 +302,14 @@ OverlayList ModelCanvas::shapes(
 			if (reach > 1.0f && reach < 4.0f * float(width)) list.ring(CanvasPoint{cx, cy}, reach, role, thickness, s.rgb, alpha);
 		}
 	};
-	for (size_t i = 0; i < frame.collision.size(); ++i)
-		if (int(i) != frame.selected_collision && int(i) != collision_under) draw_collision(frame.collision[i], OverlayRole::Normal);
-	if (collision_under >= 0 && size_t(collision_under) < frame.collision.size() && collision_under != frame.selected_collision)
-		draw_collision(frame.collision[size_t(collision_under)], OverlayRole::Hover);
-	if (frame.selected_collision >= 0 && size_t(frame.selected_collision) < frame.collision.size())
-		draw_collision(frame.collision[size_t(frame.selected_collision)], OverlayRole::Selected);
+	for (size_t i = 0; i < model_canvas_collision(frame).size(); ++i)
+		if (int(i) != frame.selected_collision && int(i) != collision_under) draw_collision(model_canvas_collision(frame)[i], OverlayRole::Normal);
+	if (collision_under >= 0 && size_t(collision_under) < model_canvas_collision(frame).size() && collision_under != frame.selected_collision)
+		draw_collision(model_canvas_collision(frame)[size_t(collision_under)], OverlayRole::Hover);
+	if (frame.selected_collision >= 0 && size_t(frame.selected_collision) < model_canvas_collision(frame).size())
+		draw_collision(model_canvas_collision(frame)[size_t(frame.selected_collision)], OverlayRole::Selected);
 	// The legend: a swatch and its words for each colour drawn, from the picture's lower left corner up.
-	const std::vector<ModelCollisionLegendRow> legend = model_collision_legend(frame.collision);
+	const std::vector<ModelCollisionLegendRow> legend = model_collision_legend(model_canvas_collision(frame));
 	const float row_height = 16.0f;
 	for (size_t i = 0; i < legend.size(); ++i) {
 		const float y = float(height) - 10.0f - row_height * float(legend.size() - i);
@@ -370,8 +392,8 @@ std::string ModelCanvas::hover_tip(const ModelCanvasFrame &frame, int under, int
 	if (gesture_.dragging())
 		return std::string();
 	// A collision shape by its words, and what a click does where the picture is the document's (S17).
-	if (under < 0 && bone_under < 0 && collision_under >= 0 && size_t(collision_under) < frame.collision.size()) {
-		const ModelCollisionShape &shape = frame.collision[size_t(collision_under)];
+	if (under < 0 && bone_under < 0 && collision_under >= 0 && size_t(collision_under) < model_canvas_collision(frame).size()) {
+		const ModelCollisionShape &shape = model_canvas_collision(frame)[size_t(collision_under)];
 		return shape.name + (shape.pickable && frame.current ? " (click to select it)" : std::string());
 	}
 	if (under >= 0 && size_t(under) < frame.overlays.size()) {

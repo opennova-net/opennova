@@ -26,9 +26,10 @@ const ModelVolumeType kTypes[] = {
 	{7, "VC", "vehicle wall", "Solid for vehicles alone (the vehicle contact mask) [orig: @ 0x4ae558].",
 	 ModelVolumeFamily::SolidFor},
 	{8, "BB", "blink box",
-	 "A building's inside: standing in it sets the indoors state and leaves out the terrain, sky and water "
-	 "but what its letters keep (V terrain, S sky, W water; L and O have no witnessed meaning) [orig: @ 0x4aea68; "
-	 "Entity_TestCollisionSections @ 0x4aef90].",
+	 "A building's inside: standing in it accumulates its flags into the frame's blink state, whose bits the "
+	 "draw reads as indoors (0x2), the sky off (0x4) and the water off (0x8) [orig: @ 0x4aea68; "
+	 "Entity_TestCollisionSections @ 0x4aef90]. The manual's letters (V, S, W keeping the voxels, sky and "
+	 "water; L and O) each clear a bit; how they meet those bits is unknown (render-occlusion-re D-OCC-8).",
 	 ModelVolumeFamily::Blink},
 	{9, "CD", "door", "Touching it opens the door section it belongs to [orig: @ 0x4aeb0f..0x4aeb22].",
 	 ModelVolumeFamily::Zone},
@@ -103,8 +104,9 @@ const char *model_occlusion_type_what(int64_t type) {
 	switch (type) {
 	case 0: return "Hides what lies behind it from the draw [orig: Terrain_TestSectorEntityOcclusion @ 0x5c4610].";
 	case 1:
-		return "An opening (a door): it hides what lies behind it only while its building is marked closed "
-		       "[orig: Terrain_TestSectorEntityOcclusion @ 0x5c4610].";
+		return "An open slot: it occludes only while its building is marked (bit 31), and marks the building "
+		       "open (drawn outside in) [orig: Terrain_TestSectorEntityOcclusion @ 0x5c4610]. What it stands for "
+		       "(a door, a window, a destroyed wall) is unknown (render-occlusion-re D-OCC-3).";
 	case 2:
 		return "A window to the outside: the draw looks through it into the room it belongs to [orig: "
 		       "Render_VisibilityPortalTraversal @ 0x5c4ae0].";
@@ -114,6 +116,20 @@ const char *model_occlusion_type_what(int64_t type) {
 	case 4: return "No witnessed meaning.";
 	default: return "A type the game reads nothing for.";
 	}
+}
+
+bool model_section_breaks(const threedi::ThreediCollisionObject &section) { return (section.unk0 & 2) != 0; }
+
+bool model_section_is_person(const threedi::Threedi3di3 &model, size_t section) {
+	const threedi::ThreediCollisionModel *c = model.collision;
+	if (model.header.mesh_type != threedi::THREEDI_MESH_SKINNED || !c || section >= c->object_count) return false;
+	const threedi::ThreediCollisionObject &object = c->objects[section];
+	if (object.num_faces != 0 || object.num_bounding_volumes != 0) return false;
+	// A person's whole-body row holds the face mesh (docs/world/world-wac-ai-re.md section 15.8b,
+	// person-model subobjects): a skinned model with no face anywhere is no person's.
+	for (size_t o = 0; o < c->object_count; ++o)
+		if (c->objects[o].num_faces > 0) return true;
+	return false;
 }
 
 int32_t model_person_hit_radius_q16(int section, int32_t authored_q16) {
@@ -134,14 +150,21 @@ const char *const kModelSectionWords =
 		"0x4e6c5e].";
 const char *const kModelHitSphereWords =
 		"A person's hit sphere on a bone: a round hits the bone when it passes within 45 percent of the radius "
-		"plus 1/20 m (the head, section 15: 65 percent), and the bone sets where the hit lands [orig: "
-		"Physics_RaycastAgainstBoneSections @ 0x4e4670].";
+		"plus 1/20 m (the head, BN15: 65 percent; BN16 and BN17 no more than 3/16 m), and the bone sets where "
+		"the hit lands [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]. Only a person is tested so: a "
+		"skinned model no person wears (a first-person view's arms) has its bone spheres read by no round.";
 const char *const kModelVolumeWords =
 		"A convex solid bounded by its planes, its box the quick test. Rounds pass volumes: they hit the "
 		"bullet faces.";
 const char *const kModelBulletFaceWords =
-		"A triangle a round's ray tests [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]: a hit plays "
-		"its surface's ammo effect; Bullets pass lets rounds through.";
+		"A triangle a round's ray tests from either side (Front only: from its front) [orig: "
+		"Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]: a hit plays its surface's ammo effect and stops the "
+		"round, but Bullets pass lets every round by with no effect, and the soft surfaces (Water, Glass, Cloth, "
+		"Foliage, Flesh) let it go on through at a cost of its energy [orig: Projectile_ProcessDamageOnTarget @ "
+		"0x4e823f..0x4e8266].";
+const char *const kModelSectionBreaksWords =
+		"A blast breaks this section off: its flags carry 2, so a blast whose box holds its box's middle "
+		"takes it [orig: Entity_ApplyWeaponDamage @ 0x4e6c5e..0x4e6e6b, the bit @ 0x4e6cd0].";
 const char *const kModelOcclusionWords = "A polygon the draw of a building's rooms reads (not a collision).";
 const char *const kModelBoundsWords =
 		"The collision block's box: its middle and half diagonal make the sphere the game culls the model by "

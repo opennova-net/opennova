@@ -466,22 +466,11 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	                "Alt to place freely.");
 	row.next(ui_kit::button_width("Frame"));
 	if (ImGui::Button("Frame")) {
-		// The selected record's marker, else the whole model (a record with no marker, a texture or a
-		// material, frames the whole model, as F does).
-		const SessionView &view = workspace.view();
-		std::vector<NodeId> ids;
-		const NodeAddress &selected = view.documents.selection.primary;
-		const auto *document = dynamic_cast<const ModelDocument *>(
-				context.input.document ? records_of(*context.input.document) : nullptr);
-		ModelOverlayKind kind;
-		int index = -1;
-		ModelCollisionPick picked;
-		if (view.documents.active == model.path() && selected.child && document &&
-		    (model_overlay_of(*document, selected, kind, index) || model_collision_of(*document, selected, picked)))
-			ids.push_back(selected.child);
+		// The selected record's marker or collision shape, else the whole model (a record with neither, a
+		// texture, a material, a section that stores no sphere, frames the whole model, as F does).
 		CanvasWindowRequests requests(workspace);
 		std::string error;
-		model.command(context, "frame", ids, requests, error);
+		model.command(context, "frame", model.frame_ids(context), requests, error);
 	}
 	ui_kit::tooltip("Look at the selected marker or collision record, or at the whole model (F).");
 	row.next(ui_kit::button_width("Registers"));

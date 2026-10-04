@@ -195,10 +195,9 @@ bool collision_words(const ModelDocument &model, const NodeAddress &record) {
 	ImGui::SeparatorText("In the game");
 	if (record.kind == k(ModelKind::Section) && i < collision->sections.size()) {
 		const threedi::ThreediCollisionObject &s = collision->sections[i];
-		const bool person =
-				row->header.mesh_type == threedi::THREEDI_MESH_SKINNED && s.num_faces == 0 && s.num_bounding_volumes == 0;
+		const bool person = row->base && model_section_is_person(*row->base, i);
 		game_words(person ? kModelHitSphereWords : kModelSectionWords);
-		if (s.unk0 & 2) ImGui::TextColored(kMuted, "A blast breaks this section off.");
+		if (model_section_breaks(s)) game_words(kModelSectionBreaksWords);
 		return true;
 	}
 	if (record.kind == k(ModelKind::Volume) && i < collision->volumes.size()) {
@@ -207,7 +206,9 @@ bool collision_words(const ModelDocument &model, const NodeAddress &record) {
 		return true;
 	}
 	if (record.kind == k(ModelKind::Face)) {
-		const bool person = row->header.mesh_type == threedi::THREEDI_MESH_SKINNED;
+		bool person = false;
+		for (size_t o = 0; row->base && row->base->collision && o < row->base->collision->object_count && !person; ++o)
+			person = model_section_is_person(*row->base, o);
 		game_words(kModelBulletFaceWords,
 		           person ? "On a person a round meets the hit spheres instead: these faces serve the knife, the "
 		                    "laser and the other rays [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]."

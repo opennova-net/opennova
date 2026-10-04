@@ -47,7 +47,9 @@ struct SectionGeometry {
 	bool sphere = false; // a bound sphere is stored (radius 0 or more, min below max)
 	ThreediBuildVec3 center, min, max;
 	double radius = 0.0;
-	bool person = false; // a skinned model's bone section: no faces, no volumes
+	bool person = false; // a person's bone section: its hit sphere (model_section_is_person)
+	bool bone = false;   // a bone section of a skinned model no person wears
+	bool breaks = false; // a blast breaks it off (model_section_breaks)
 	int32_t radius_q16 = 0;
 };
 
@@ -126,7 +128,9 @@ std::shared_ptr<const Geometry> make_geometry(const threedi::Threedi3di3 &model)
 			g.max = ThreediBuildVec3{q16(object.max[0]), q16(object.max[1]), q16(object.max[2])};
 			g.radius_q16 = object.radius;
 			g.radius = q16(object.radius);
-			g.person = skinned && object.num_faces == 0 && object.num_bounding_volumes == 0;
+			g.person = model_section_is_person(model, o);
+			g.bone = !g.person && skinned && object.num_faces == 0 && object.num_bounding_volumes == 0;
+			g.breaks = model_section_breaks(object);
 		}
 		// The collision block's box and the sphere the game projects (world::collision_projection_sphere_
 		// from_3di, the runtime's own); the bound radius the entity takes from the header, stamped only
@@ -166,14 +170,18 @@ std::shared_ptr<const Geometry> geometry_of(const assets::Model &model) {
 // --- posing ------------------------------------------------------------------------------------
 
 // A mission-axes point through part `part`'s posed matrix (model axes, row-vector) into the preview's
-// space; as it is where the part has none (at rest every matrix is the identity).
+// space, where a PANM node drives the part (its matrix turns about its pivot: the identity at rest); as it
+// is where none does, as the runtime gives such a section the entity's matrix alone [orig:
+// BoneCallback_Generic @ 0x4e26d0, overriding only the PANM nodes' parts; runtime/world/entity_pose.cpp].
 struct Poser {
 	const std::vector<ThreediMatrix4x4> *parts = nullptr;
+	const std::vector<uint8_t> *driven = nullptr;
 
 	PreviewVec3 operator()(const ThreediBuildVec3 &mission, int part) const {
 		const ThreediBuildVec3 m = threedi::threedi_build_to_model(mission);
 		float p[3] = {float(m.x), float(m.y), float(m.z)};
-		if (parts && part >= 0 && size_t(part) < parts->size()) {
+		if (parts && driven && part >= 0 && size_t(part) < parts->size() && size_t(part) < driven->size() &&
+		    (*driven)[size_t(part)]) {
 			const ThreediMatrix4x4 &t = (*parts)[size_t(part)];
 			float q[3];
 			for (int c = 0; c < 3; ++c) q[c] = p[0] * t.m[c] + p[1] * t.m[4 + c] + p[2] * t.m[8 + c] + t.m[12 + c];
@@ -342,9 +350,10 @@ std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &sho
 	// LOD 0's parts carry the sections while LOD 0 animates (model_overlays' rule for a user point); a
 	// person's bones are shown at rest.
 	std::vector<ThreediMatrix4x4> first;
+	std::vector<uint8_t> driven;
 	const bool posed = !skinned && threedi::threedi_panm_lod_has_live(model, 0) &&
-	                   threedi::threedi_panm_pose_parts(model, 0, time_ms, bus, first, nullptr);
-	const Poser pose{posed ? &first : nullptr};
+	                   threedi::threedi_panm_pose_parts(model, 0, time_ms, bus, first, &driven);
+	const Poser pose{posed ? &first : nullptr, posed ? &driven : nullptr};
 	const auto wanted = [&](ModelCollisionKind kind, size_t index, bool layer) {
 		return layer || (also.kind == kind && also.index == int(index));
 	};
@@ -362,7 +371,7 @@ std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &sho
 		s.rgb = face_rgb;
 		s.legend = "Bullet faces";
 		s.pickable = true;
-		s.name = "Face " + std::to_string(f + 1) + ": " + model_surface_words(c->faces[f].poly_type).name;
+		s.name = "Face " + std::to_string(f + 1) + ": " + model_surface_label(c->faces[f].poly_type);
 		if (c->faces[f].material_flags & 0x100) s.name += ", bullets pass";
 		add_polygon(s, {pose(face.corner[0], face.section), pose(face.corner[1], face.section),
 		                pose(face.corner[2], face.section)});
@@ -408,11 +417,20 @@ std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &sho
 		s.pickable = true;
 		s.sphere = true;
 		s.center = pose(section.center, int(o));
+		s.breaks = section.breaks;
 		if (section.person) {
+			s.person = true;
 			s.rgb = kModelHitSphereRgb;
 			s.legend = "Hit spheres";
 			s.radius = float(model_person_hit_radius_q16(int(o), section.radius_q16) / 65536.0);
 			s.name = "Hit sphere of " + part_word(o) + (o == 14 ? " (the head)" : "");
+		} else if (section.bone) {
+			// A skinned model no person wears (a first-person view's arms): its stored sphere, which no round
+			// tests (model_section_is_person).
+			s.rgb = section_rgb;
+			s.legend = "Bone spheres (no round tests them)";
+			s.radius = float(section.radius);
+			s.name = "Bone sphere of " + part_word(o) + " (no round tests it)";
 		} else {
 			s.rgb = section_rgb;
 			s.legend = "Sections";
@@ -504,7 +522,8 @@ std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &sho
 	if (options.part_spheres && model.lods && lod >= 0 && size_t(lod) < model.lod_count) {
 		const threedi::ThreediLod &level = model.lods[lod];
 		std::vector<ThreediMatrix4x4> drawn;
-		threedi::threedi_panm_pose_parts(model, lod, time_ms, bus, drawn, nullptr);
+		std::vector<uint8_t> drawn_driven;
+		threedi::threedi_panm_pose_parts(model, lod, time_ms, bus, drawn, &drawn_driven);
 		const uint32_t part_rgb = model_collision_layer(ModelCollisionLayer::PartSpheres).rgb;
 		for (size_t p = 0; p < level.render_object_count; ++p) {
 			const threedi::ThreediRenderObject &part = level.render_objects[p];
@@ -517,7 +536,10 @@ std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &sho
 			s.sphere = true;
 			const float at[3] = {part.abs[0] + part.bounding_center[0], part.abs[1] + part.bounding_center[1],
 			                     part.abs[2] + part.bounding_center[2]};
-			s.center = model_point(at, p < drawn.size() ? &drawn[p] : nullptr);
+			// A part a PANM node drives turns about its pivot; one none drives stands as it is (the Poser's
+			// rule).
+			const bool moves = p < drawn.size() && p < drawn_driven.size() && drawn_driven[p];
+			s.center = model_point(at, moves ? &drawn[p] : nullptr);
 			s.radius = part.bounding_radius;
 			out.push_back(std::move(s));
 		}
