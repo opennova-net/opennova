@@ -1086,15 +1086,9 @@ const RequirementRow *SessionCore::requirement_row(const std::string &role) cons
 	return row;
 }
 
-// Two files of one name are the scan's asset.name.duplicate: the path named, else the first of
-// the name.
-const AssetEntry *SessionCore::project_file(const std::string &file) const {
-	for (const AssetEntry &candidate : view_.project.scan->entries)
-		if (candidate.relative_path == file) return &candidate;
-	const std::string wanted = normalized_logical_name(basename_of(file));
-	for (const AssetEntry &candidate : view_.project.scan->entries)
-		if (normalized_logical_name(candidate.logical_name) == wanted) return &candidate;
-	return nullptr;
+const AssetEntry *SessionCore::project_file(const std::string &file, bool *ambiguous) const {
+	if (ambiguous) *ambiguous = false;
+	return view_.project.scan ? view_.project.scan->named(file, ambiguous) : nullptr;
 }
 
 // --- the build -------------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import addon_harness  # noqa: E402
 
+import bmesh  # noqa: E402
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
 
@@ -578,6 +579,117 @@ def flags_from_blender_settings():
     sides = {m.name.split(".")[0]: m.o3d.face_both_sides for m in {s.material for ob in imported.children_recursive
                                                                    if ob.type == "MESH" for s in ob.material_slots}}
     assert sorted(sides.values()) == ["DRAWN", "DRAWN", "NO", "YES"], sides
+
+
+@case
+def surface_on_the_material_faces_keep_their_own():
+    # A material's bullet faces take its surface (14 metal); a polygon that
+    # keeps its own (the o3d_own_surface face attribute, 15 glass) exports with
+    # it. Import votes the material's from its faces and keeps the face that
+    # differs on its polygon, so a re-export writes the same faces; Make all
+    # (clearing the polygon's value) gives it the material's.
+    metal = textured("Metal", image("metal", (1, 1, 1, 1)))
+    metal.o3d.surface = 14
+    root, obs = model("surfaces", metal, metal, metal)
+    materials.set_face_overrides(obs[1].data, materials.FACE_SURFACE, [15])
+    _, sc = export_model(root)
+    faces = [f[3] for c in sc["cobjs"] for f in c["faces"]]
+    assert sorted(faces) == [14, 14, 15], faces
+    imported, notes = import_model(root.o3d.output_path)
+    meshes = [ob for ob in imported.children_recursive if ob.type == "MESH" and ob.material_slots]
+    mat = next(s.material for ob in meshes for s in ob.material_slots)
+    assert mat.o3d.surface == 14, mat.o3d.surface
+    own, drawn = materials.material_face_overrides(meshes, mat)
+    assert drawn == 3 and list(own.values()) == [(15, -1)], (own, drawn)
+    assert any("keep their own on their polygon" in n for n in notes), notes
+    # The surface by name, from the engine's table (`opennova-3di catalog`).
+    assert mat.o3d.surface_name == "METAL", mat.o3d.surface_name
+    imported.o3d.output_path = os.path.join(OUT, "surfaces_again", "surfaces.3di").replace("\\", "/")
+    _, again = export_model(imported)
+    assert sorted(f[3] for c in again["cobjs"] for f in c["faces"]) == [14, 14, 15], again["cobjs"]
+    # Make all: the face takes the material's.
+    for ob, pi in own:
+        materials.set_face_overrides(ob.data, materials.FACE_SURFACE, [-1] * len(ob.data.polygons))
+    _, unified = export_model(imported)
+    assert [f[3] for c in unified["cobjs"] for f in c["faces"]] == [14, 14, 14], unified["cobjs"]
+
+
+@case
+def a_polygon_made_in_blender_takes_its_materials_surface():
+    # A polygon Blender makes itself (a new face, a mesh joined in without the
+    # face attributes) holds 0 there: 0 is the material's (the attributes store
+    # a polygon's own value plus one), never surface 0 (Object) with no flags.
+    metal = textured("Metal", image("metal", (1, 1, 1, 1)))
+    metal.o3d.surface = 14
+    root, obs = model("joined", metal, metal)
+    materials.set_face_overrides(obs[0].data, materials.FACE_SURFACE, [15])
+    bm = bmesh.new()
+    bm.from_mesh(obs[0].data)
+    bm.faces.new([bm.verts.new((x, y + 0.5, z)) for x, y, z in TRIANGLE])
+    bm.to_mesh(obs[0].data)
+    bm.free()
+    bpy.context.view_layer.update()
+    for ob in list(bpy.context.view_layer.objects):
+        if ob is not None:
+            ob.select_set(ob in obs)
+    bpy.context.view_layer.objects.active = obs[0]
+    bpy.ops.object.join()
+    joined = bpy.context.view_layer.objects.active
+    assert len(joined.data.polygons) == 3, len(joined.data.polygons)
+    assert materials.face_overrides(joined.data, materials.FACE_SURFACE) == [15, -1, -1], \
+        materials.face_overrides(joined.data, materials.FACE_SURFACE)
+    _, sc = export_model(root)
+    faces = sorted((f[3], f[4] & 1) for c in sc["cobjs"] for f in c["faces"])
+    assert [s for s, _ in faces] == [14, 14, 15], faces
+
+
+@case
+def a_sheet_both_ways_keeps_each_sides_surface():
+    # A sheet stored in both windings, each side its own material and surface
+    # (an inside and an outside skin): its two faces sit at one middle, and
+    # import gives each side the face wound with it, so each material votes
+    # its own surface and a re-export writes both faces as they were (the
+    # nearest middle alone gave both triangles one face's values).
+    front = textured("Front", image("front", (1, 1, 1, 1)))
+    front.o3d.surface = 14
+    back = textured("Back", image("back", (1, 1, 1, 1)))
+    back.o3d.surface = 17
+    root, obs = model("sheet", front, back)
+    me = obs[1].data
+    for v, co in zip(me.vertices, TRIANGLE):
+        v.co = co
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.reverse_faces(bm, faces=list(bm.faces))
+    bm.to_mesh(me)
+    bm.free()
+    _, sc = export_model(root)
+    assert sorted(f[3] for c in sc["cobjs"] for f in c["faces"]) == [14, 17], sc["cobjs"]
+    imported, notes = import_model(root.o3d.output_path)
+    mats = {s.material for ob in imported.children_recursive if ob.type == "MESH" for s in ob.material_slots}
+    assert sorted(m.o3d.surface for m in mats) == [14, 17], [(m.name, m.o3d.surface) for m in mats]
+    imported.o3d.output_path = os.path.join(OUT, "sheet_again", "sheet.3di").replace("\\", "/")
+    _, again = export_model(imported)
+    assert sorted(f[3] for c in again["cobjs"] for f in c["faces"]) == [14, 17], again["cobjs"]
+
+
+@case
+def faces_a_centimetre_apart_keep_their_own():
+    # Two faces of one material 1 cm apart, each its own surface: each triangle
+    # meets the face whose middle is nearest within 1/64 m (a 0.1 m key gave
+    # both one face's values), so a re-export writes both as the file held them.
+    metal = textured("Metal", image("metal", (1, 1, 1, 1)))
+    metal.o3d.surface = 14
+    root, obs = model("near", metal, metal, metal)
+    for v, co in zip(obs[1].data.vertices, TRIANGLE):
+        v.co = (co[0] + 0.01, co[1], co[2])
+    materials.set_face_overrides(obs[1].data, materials.FACE_SURFACE, [15])
+    _, sc = export_model(root)
+    assert sorted(f[3] for c in sc["cobjs"] for f in c["faces"]) == [14, 14, 15], sc["cobjs"]
+    imported, _ = import_model(root.o3d.output_path)
+    imported.o3d.output_path = os.path.join(OUT, "near_again", "near.3di").replace("\\", "/")
+    _, again = export_model(imported)
+    assert sorted(f[3] for c in again["cobjs"] for f in c["faces"]) == [14, 14, 15], again["cobjs"]
 
 
 @case
