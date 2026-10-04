@@ -163,6 +163,8 @@ JsonValue requirements_section(const SessionView &view) {
 JsonValue documents_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("active", json_string(view.documents.active));
+	// The file whose page shows beside the documents (the file_page query reads it), where one does.
+	if (!view.documents.page.empty()) out.set("page", json_string(view.documents.page));
 	JsonValue open = JsonValue::make_array();
 	for (const auto &document : view.documents.open) {
 		if (!document)
@@ -296,11 +298,12 @@ JsonValue dialogs_section(const SessionView &view) {
 			entry.set("file", json_string(site.file));
 			if (!site.record.empty())
 				entry.set("record", json_string(site.record));
+			// The record in its type's own words where they are not its name (the plain-words lane).
+			if (!site.record_title.empty()) entry.set("record_title", json_string(site.record_title));
 			if (!site.locator.empty())
 				entry.set("locator", json_string(site.locator));
-			// A text's site (S13 D9): its span, and the name it holds written as its text is, from
-			// the game's code page (as the references query writes an edge's); the new name is as
-			// typed.
+			// A text's site (S13 D9): its span, and the name it holds (UTF-8, read from the game's code
+			// page as the graph's names are); the new name is as typed.
 			if (site.span.line) {
 				JsonValue span = JsonValue::make_object();
 				span.set("line", json_number(double(site.span.line)));
@@ -309,7 +312,7 @@ JsonValue dialogs_section(const SessionView &view) {
 				entry.set("span", std::move(span));
 			}
 			entry.set("field", json_string(site.field));
-			entry.set("before", json_string(site.span.line ? cp1252_to_utf8(site.before) : site.before));
+			entry.set("before", json_string(site.before)); // UTF-8, as the graph's names are
 			entry.set("after", json_string(site.after));
 			sites.push(std::move(entry));
 		}

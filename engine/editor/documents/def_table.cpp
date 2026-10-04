@@ -11,7 +11,9 @@
 #include <new>
 #include <utility>
 
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
+#include <editor/documents/def_words.h>
 #include <runtime/hud/game_text_lookup.h>
 
 namespace opennova::editor {
@@ -21,18 +23,31 @@ namespace {
 
 // --- the kinds ---------------------------------------------------------------------------------------
 
-// A new item is a marker with an id no item of its file has, from 100000 on (an item's id is its
-// type_id, which a mission names it by).
-void made_item(void *record, const std::vector<const void *> &others) {
+// An id no item of the file has and no file of the project names (`taken`: a mission's item, an
+// attachment's, a spawn list's, which a new item of that id would quietly become), from 100000 on (an
+// item's id is its type_id, which a mission names it by).
+int free_item_id(const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
+	int id = 100000;
+	for (;;) {
+		bool used = std::find(taken.begin(), taken.end(), int64_t(id)) != taken.end();
+		for (const void *other : others) used = used || static_cast<const DefItemDef *>(other)->id == id;
+		if (!used) return id;
+		++id;
+	}
+}
+
+// A new item is a marker with an id of its own.
+void made_item(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
 	auto &item = *static_cast<DefItemDef *>(record);
 	item.type = DEF_ITEM_TYPE_MARKER;
-	item.id = 100000;
-	for (;;) {
-		bool used = false;
-		for (const void *other : others) used = used || static_cast<const DefItemDef *>(other)->id == item.id;
-		if (!used) break;
-		++item.id;
-	}
+	item.id = free_item_id(others, taken);
+}
+
+// A copy of an item takes an id of its own as a new one does: the game's lookup by id finds the
+// first item of an id [orig: ItemList_FindIndexByTypeId @ 0x49e100], so a copy keeping its
+// original's would never be the one a mission places.
+void duplicated_item(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
+	static_cast<DefItemDef *>(record)->id = free_item_id(others, taken);
 }
 
 // An item's attachment slots: the 1-based place of its last G and C attachment (zero: none).
@@ -48,16 +63,23 @@ void attachment_slots(void *record) {
 
 using C = CatalogKind;
 using R = DefRecordKind;
+using N = CopyName;
+// The characters of a name the game keeps: an item's 46 [orig: ItemDef_ParseProperty @ 0x49eb00, the
+// begin arm's `cmp ecx, 2Eh` @0x49ebd9 and, for a longer name, `mov byte ptr [edx+2Eh], 0` @0x49ebfb
+// cutting it to 46], a weapon's 31 of its 0x20-byte
+// strncpy [orig: WeaponDefs_ParseLineCallback @ 0x543680, @0x543737], an ammo's 31 [orig:
+// AmmoDef_AllocateSlot @ 0x409a20, @0x409afc]; 0 for the field's own width.
 constexpr CatalogKindRow kKinds[] = {
-	{C::Item, R::Item, "item", "Item", "Add record", true, "display_name", made_item, attachment_slots},
-	{C::Weapon, R::Weapon, "weapon", "Weapon", "Add record", true, "weapon_name"},
-	{C::Ammo, R::Ammo, "ammo", "Ammo", "Add record", true, "name"},
+	{C::Item, R::Item, "item", "Item", "Add record", true, "display_name", made_item, attachment_slots, duplicated_item,
+	 N::Words, 46},
+	{C::Weapon, R::Weapon, "weapon", "Weapon", "Add record", true, "weapon_name", nullptr, nullptr, nullptr, N::Token, 31},
+	{C::Ammo, R::Ammo, "ammo", "Ammo", "Add record", true, "name", nullptr, nullptr, nullptr, N::Token, 31},
 	{C::Action, R::Action, "action", "Action", "", false, "name"},
 	{C::Sight, R::Sight, "sight", "Sight", "", false, "texture"},
 	{C::Attachment, R::Attachment, "attachment", "Attachment", "", false, "userpoint"},
 	{C::Effect, R::Effect, "effect", "Effect", "", false, "surface_type"},
-	{C::Carry, R::Carry, "carry", "Carry limit", "Add carry limit", true, "name"},
-	{C::Powerup, R::Powerup, "powerup", "Powerup", "Add record", true, "name"},
+	{C::Carry, R::Carry, "carry", "Carry limit", "Add carry limit", true, "name", nullptr, nullptr, nullptr, N::Token},
+	{C::Powerup, R::Powerup, "powerup", "Powerup", "Add record", true, "name", nullptr, nullptr, nullptr, N::Token},
 	{C::PowerupAmmo, R::PowerupAmmo, "powerup_ammo", "Ammo", "", false, "class_name"},
 	{C::Pickup, R::PowerupAction, "pickup", "Pickup", "", false, ""},
 	{C::Respawn, R::PowerupAction, "respawn", "Respawn", "", false, ""},
@@ -248,18 +270,41 @@ LabelledField labelled(R kind, const DefField &field) {
 	const bool flag = is_present_flag(kind, field.id);
 	entry.read_only = field.read_only || flag;
 	describe(member, entry);
+	// The member in a modder's words (def_words.h): its label, its section and what the game does with
+	// it, the parse's note after that meaning.
+	if (const DefWords *words = def_words_of(kind, field.id)) {
+		entry.label = words->label;
+		entry.section = words->section;
+		entry.description = entry.description.empty() ? std::string(words->meaning)
+		                                              : std::string(words->meaning) + "\n" + entry.description;
+	}
 
+	// A text the game holds in its code page (Windows-1252, one byte a character): the editor reads and
+	// writes it as UTF-8, as a string table's and a menu's (the plain-words lane: a name compared with the
+	// project's UTF-8 file names in one encoding), refusing a character the code page has no byte for.
+	if (entry.type == FieldType::Text) entry.code_page = true;
 	const auto shared = std::make_shared<const DefMember>(member);
 	out.value.get = [shared](const RecordHandle &record, Value &value) {
 		// In written units while the line carries the stored word, else as stored.
 		if (shared->authored != DefAuthored::None && def_authored_get(*shared, record.data, value)) return true;
 		value = def_get(record.data, *shared->field);
+		if (auto *text = std::get_if<std::string>(&value)) *text = cp1252_to_utf8(*text);
 		return true;
 	};
-	out.value.set = [shared, flag](const RecordHandle &record, const Value &value, std::string &error) {
+	out.value.set = [shared, flag](const RecordHandle &record, const Value &given, std::string &error) {
 		if (flag) {
 			error = "Whether the line is written is the field's own tick.";
 			return false;
+		}
+		Value value = given;
+		if (auto *text = std::get_if<std::string>(&value)) {
+			std::string stored;
+			std::u32string unstorable;
+			if (!utf8_to_cp1252(*text, stored, &unstorable)) {
+				error = "The game's text encoding (Windows-1252) has no character for part of this text.";
+				return false;
+			}
+			*text = std::move(stored);
 		}
 		const DefValue before = def_get(record.data, *shared->field);
 		// A number in the units the file writes it goes through the file's own line.
@@ -442,7 +487,14 @@ RecordTable make_table() {
 	std::vector<TableKind> kinds;
 	for (const CatalogKindRow &row : kKinds) {
 		TableKind kind(RecordKindRow{node_kind(row.kind), row.token, row.label, row.add_label, row.top});
-		for (const DefField &field : def_fields(row.record)) kind.field(labelled(row.record, field));
+		// The members by their sections' order (def_sections: who the record is first), each section's in
+		// the inventory's; the writer and the parser keep to the format's own order.
+		std::vector<LabelledField> fields;
+		for (const DefField &field : def_fields(row.record)) fields.push_back(labelled(row.record, field));
+		std::stable_sort(fields.begin(), fields.end(), [&row](const LabelledField &a, const LabelledField &b) {
+			return def_section_rank(row.record, a.schema.section.c_str()) < def_section_rank(row.record, b.schema.section.c_str());
+		});
+		for (LabelledField &field : fields) kind.field(std::move(field));
 		for (const ListRow &list : kLists) {
 			if (list.owner != row.kind) continue;
 			const CatalogKindRow &held = kKinds[size_t(list.kind)];
@@ -467,6 +519,7 @@ bool parse_items(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &
 	def_parse_items_memory(bytes.data(), bytes.size(), &file, &report);
 	auto spawn = std::make_shared<ItemsFileState>();
 	spawn->spawn_ids.assign(file.vehicle_spawn_ids, file.vehicle_spawn_ids + file.vehicle_spawn_id_count);
+	spawn->layout = file.layout;
 	state = spawn;
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Item, &file.entries[i]);
 	std::free(file.entries); // each row took its record's arrays
@@ -483,8 +536,20 @@ DefWriteResult write_items(const std::vector<const CatalogRecord *> &rows, const
 	if (const ItemsFileState *spawn = items_state(state)) {
 		file.vehicle_spawn_id_count = int(spawn->spawn_ids.size());
 		std::copy(spawn->spawn_ids.begin(), spawn->spawn_ids.end(), file.vehicle_spawn_ids);
+		file.layout = spawn->layout;
 	}
 	return def_write_items(file);
+}
+
+// The layout a file of a family with no other file-wide state was read with.
+std::shared_ptr<const FileState> layout_state(const DefLayout &layout) {
+	auto state = std::make_shared<CatalogFileState>();
+	state->layout = layout;
+	return state;
+}
+DefLayout layout_of(const FileState *state) {
+	const auto *catalog = dynamic_cast<const CatalogFileState *>(state);
+	return catalog ? catalog->layout : DefLayout{};
 }
 
 // items.def's vehicle spawn registry: an id at a slot, a new one at the end, up to its 32 slots.
@@ -518,9 +583,10 @@ std::shared_ptr<const FileState> spawn_registry_after_remove(const std::shared_p
 }
 
 bool parse_weapons(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
-                   std::shared_ptr<const FileState> &, DefParseReport &report) {
+                   std::shared_ptr<const FileState> &state, DefParseReport &report) {
 	DefWeaponsFile file{};
 	def_parse_weapons_memory(bytes.data(), bytes.size(), &file, &report);
+	state = layout_state(file.layout);
 	for (size_t i = 0; i < file.ammo_classes_count; ++i) rows.emplace_back(R::Carry, &file.ammo_classes[i]);
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Weapon, &file.entries[i]);
 	std::free(file.entries);
@@ -528,7 +594,7 @@ bool parse_weapons(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord>
 	return true;
 }
 
-DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, const FileState *) {
+DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
 	std::vector<DefWeaponDef> weapons;
 	std::vector<DefAmmoClassCarry> carries;
 	for (const CatalogRecord *row : rows) {
@@ -540,6 +606,7 @@ DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, con
 	file.count = weapons.size();
 	file.ammo_classes = carries.data();
 	file.ammo_classes_count = carries.size();
+	file.layout = layout_of(state);
 	return def_write_weapons(file);
 }
 
@@ -564,7 +631,25 @@ struct RowsFamily {
 		return Write(file);
 	}
 };
-using AmmoFamily = RowsFamily<DefAmmoFile, DefAmmoDef, R::Ammo, def_parse_ammo_memory, def_write_ammo>;
+// ammo.def: its rows and the layout it was read with.
+bool parse_ammo(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
+                std::shared_ptr<const FileState> &state, DefParseReport &report) {
+	DefAmmoFile file{};
+	def_parse_ammo_memory(bytes.data(), bytes.size(), &file, &report);
+	state = layout_state(file.layout);
+	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Ammo, &file.entries[i]);
+	std::free(file.entries);
+	return true;
+}
+DefWriteResult write_ammo(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
+	std::vector<DefAmmoDef> entries;
+	for (const CatalogRecord *row : rows) entries.push_back(row->as<DefAmmoDef>());
+	DefAmmoFile file{};
+	file.entries = entries.data();
+	file.count = entries.size();
+	file.layout = layout_of(state);
+	return def_write_ammo(file);
+}
 using PowerupFamily =
         RowsFamily<DefPowerupFile, DefPowerupDef, R::Powerup, def_parse_powerup_memory, def_write_powerup>;
 
@@ -573,7 +658,7 @@ constexpr CatalogFamily kFamilies[] = {
 	 same_spawn_registry, spawn_registry_after_remove},
 	{AssetKind::WeaponDefs, bit(C::Weapon) | bit(C::Action) | bit(C::Sight) | bit(C::Carry), C::Weapon, parse_weapons,
 	 write_weapons},
-	{AssetKind::AmmoDefs, bit(C::Ammo) | bit(C::Effect), C::Ammo, AmmoFamily::parse, AmmoFamily::write},
+	{AssetKind::AmmoDefs, bit(C::Ammo) | bit(C::Effect), C::Ammo, parse_ammo, write_ammo},
 	{AssetKind::PowerupDefs, bit(C::Powerup) | bit(C::PowerupAmmo) | bit(C::Pickup) | bit(C::Respawn), C::Powerup,
 	 PowerupFamily::parse, PowerupFamily::write},
 };
@@ -613,6 +698,29 @@ const CatalogFamily *catalog_family(AssetKind kind) {
 	for (const CatalogFamily &family : kFamilies)
 		if (family.asset == kind) return &family;
 	return nullptr;
+}
+
+std::string copy_name(const std::string &name, CopyName how, size_t limit, const std::vector<std::string> &taken) {
+	if (how == CopyName::None || name.empty()) return name;
+	const auto free = [&taken](const std::string &candidate) {
+		return std::find(taken.begin(), taken.end(), strutil::to_upper(candidate)) == taken.end();
+	};
+	// The name is UTF-8 and the limit the game's characters (its code page's bytes, one a character):
+	// counted and cut by whole characters, never inside one.
+	std::vector<size_t> starts; // where each character of the name begins
+	for (size_t at = 0; at < name.size(); ++at)
+		if ((static_cast<unsigned char>(name[at]) & 0xC0) != 0x80) starts.push_back(at);
+	for (int n = 1;; ++n) {
+		const std::string suffix = how == CopyName::Words ? (n == 1 ? std::string(" (copy)") : " (copy " + std::to_string(n) + ")")
+		                                                  : "_" + std::to_string(n + 1);
+		std::string stem = name;
+		if (limit && starts.size() + suffix.size() > limit) {
+			const size_t keep = limit > suffix.size() ? limit - suffix.size() : 0;
+			stem.resize(keep < starts.size() ? starts[keep] : name.size());
+		}
+		const std::string candidate = stem + suffix;
+		if (free(candidate)) return candidate;
+	}
 }
 
 // --- the native record of a row ------------------------------------------------------------------------
