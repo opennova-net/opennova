@@ -171,6 +171,11 @@ func get_mcp_game_state() -> Variant:
 			# says nothing of the pair rule; the build says that (build.expansion.mission_*).
 			"expansion": String(root.get_expansion()) if root != null else "",
 			"mission_in_catalog": _mission_in_catalog(root, mission_file),
+			# What the game's string lookup answers for the expansion's Mods-list name ([exp_info]
+			# EXP_NAME), the override table consulted first: the expansion's loose <n>.bin, the only
+			# file that serves it (Strings.track_expansion_override); "" with no expansion mounted.
+			"expansion_title": (Strings.lookup(Strings.TABLE_GAMETEXT, "exp_info", "EXP_NAME")
+					if root != null and not String(root.get_expansion()).is_empty() else ""),
 		},
 		"session": _session_facts(sim),
 		"runtime": runtime_state,

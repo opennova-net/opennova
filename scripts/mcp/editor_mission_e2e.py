@@ -19,7 +19,8 @@ With --expansion (ADR 0046 S16) the project builds as that expansion, on the ins
 the expansion's folder (the base game's own files left out: same_as_base), Play running the game
 over the install's base game with /exp <expansion>, and the game read until the mission is loaded
 and in OpenNova's mission catalog, the build saying nothing of the stock game's list showing it
-untitled (build.expansion.mission_untitled).
+untitled (build.expansion.mission_untitled), and the game's strings showing the expansion's own table
+(its EXP_NAME set by the run, read from the loose <expansion>.bin the build placed).
 
 Local only: it needs a game install and starts the game, so no CI job runs it and it reads
 no environment variable. Standard library only; the clients are editor_mcp.py's and
@@ -119,6 +120,23 @@ def position_record(client: GameMcp, path: str) -> tuple[int, dict]:
             break
         offset = next_offset
     raise StepFailed(f"{path} holds no record with a position (the fields x, y, z)")
+
+
+def string_record(client: GameMcp, path: str, section: str, key: str) -> int | None:
+    """The id of a string table's entry `key` in its section `section` (compared without case, as the
+    game compares them); None when the table has none."""
+    page = query(client, "document", path=path, offset=0, limit=200)
+    for row in page.get("rows", []):
+        if "id" not in row:
+            continue
+        if str(fields_of(query(client, "record", path=path, id=int(row["id"]))).get("name", "")).lower() != section.lower():
+            continue
+        for collection in row.get("collections", []):
+            for child in collection.get("records", []):
+                values = fields_of(query(client, "record", path=path, id=int(child["id"])))
+                if str(values.get("key", "")).lower() == key.lower():
+                    return int(child["id"])
+    return None
 
 
 def document_state(client: GameMcp, path: str) -> dict:
@@ -239,6 +257,22 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     say(f"   imported in {time.monotonic() - started:.1f} s; the project holds {held} files")
     expect(held > 0, "the import wrote nothing")
 
+    title = ""
+    if args.expansion:
+        # The expansion's own text table (<b>.bin: the installed expansion's imported under the project's name,
+        # else a blank one made), its Mods-list name set to one of this run's, which the game must show.
+        table = f"{args.expansion}.bin"
+        client.call("editor_request", {"kind": "create_missing", "roles": ["expansion_table"], "wait": True,
+                                       "wait_ms": 60000}, timeout=120)
+        request(client, "open_document", path=table)
+        table_path = client.structured("editor_state", {"sections": ["documents"]}).get("documents", {}).get("active", "")
+        expect(table_path.lower().endswith(table.lower()), f"{table} did not open (active: {table_path!r})")
+        entry = string_record(client, table_path, "exp_info", "EXP_NAME")
+        expect(entry is not None, f"{table} has no [exp_info] EXP_NAME")
+        title = f"OpenNova e2e {args.expansion}"
+        request(client, "edit_record", path=table_path, edits=[{"op": "set", "id": entry, "field": "text", "value": title}])
+        say(f"   {table_path}'s EXP_NAME set to {title!r}")
+
     say(f"4. opening {args.mission}")
     request(client, "open_document", path=args.mission)
     path = client.structured("editor_state", {"sections": ["documents"]}).get("documents", {}).get("active", "")
@@ -330,6 +364,11 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
                     and args.mission.lower() in str(p.get("message", "")).lower()]
         expect(not untitled, f"the build says the game's mission list shows {args.mission} untitled: "
                + "; ".join(str(p.get("message")) for p in untitled))
+        # The expansion's strings: the game's lookup answers from the loose <b>.bin the build placed.
+        expect(shell.get("expansion_title") == title,
+               f"the game's strings do not show the expansion's table: EXP_NAME is {shell.get('expansion_title')!r}, "
+               f"not {title!r}")
+        say(f"   the game's string lookup shows the expansion's EXP_NAME {title!r}")
         say(f"   mounted /exp {shell.get('expansion')}; {args.mission} in OpenNova's mission catalog, its text table in "
             f"the expansion's pair")
     entities = game_entities(game)

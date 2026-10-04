@@ -302,6 +302,7 @@ static int test_expansion_staging() {
 	            write_empty_archive(build + "/expansion/jxm/jxmL.pff"));
 	TEST_EXPECT(editor_test::write_text(build + "/expansion/jxm/header.bik", "their video") &&
 	            editor_test::write_text(build + "/expansion/jxm/version.txt", "1.0") &&
+	            editor_test::write_text(build + "/expansion/jxm/jxm.bin", "the expansion's table") &&
 	            editor_test::write_text(build + "/build.json", "{}"));
 	const std::string build_tree = editor_test::tree_digest(build), install_tree = editor_test::tree_digest(install);
 	const std::string run = dir.file("run/1");
@@ -329,6 +330,13 @@ static int test_expansion_staging() {
 		opennova::LaunchFlags flags;
 		flags.expansion = "jxm";
 		TEST_EXPECT(opennova::mount_install(vfs, run, flags) && vfs.mounted_expansion() == "jxm");
+		// OpenNova's runtime takes the override table from the run directory as retail takes it from an
+		// install, the loose expansion/jxm/jxm.bin the build placed (vfs_expansion_override_table, the rule
+		// ResourceRoot's boot mount reads it by [orig: TextResource_LoadOverrideTable @ 0x4a49de]).
+		std::vector<uint8_t> table;
+		TEST_EXPECT(opennova::vfs_expansion_override_table(run, "jxm", opennova::ExpansionLoadPoint::ArchivesClosed, false,
+		                                                   table) &&
+		            std::string(table.begin(), table.end()) == "the expansion's table");
 	}
 	// The game writes through every staged file it may write (in place, as it opens them "w"), and its
 	// expansion's weapon.sav beside the expansion's files: the build and the install keep their own.
