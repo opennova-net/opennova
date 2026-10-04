@@ -79,8 +79,13 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	const auto validate = [&entry, type](const DocumentBase &document) {
 		if (type->validate_file)
 			entry.findings = type->validate_file(document);
-		// Each finding on a record keyed on the record as itself (the game's own data's fold).
+		// Each finding on a record keyed on the record as itself (the game's own data's fold), and named in
+		// its type's own words, which a closed file's row reads (the plain-words lane).
 		key_findings(document, entry.findings);
+		if (const Document *records = records_of(document))
+			for (Diagnostic &d : entry.findings)
+				if (d.row_id && d.record_title.empty() && d.asset == document.path())
+					d.record_title = record_own_title(*records, {d.row_id, d.record_kind, d.child_id});
 		entry.checked = !document.blocked();
 	};
 	if (open) {

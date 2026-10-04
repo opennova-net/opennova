@@ -3,6 +3,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/mns_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
@@ -67,17 +68,24 @@ void used_by_cell(Workspace &workspace, const std::vector<const GraphEdge *> &us
 	}
 	const std::string label = std::to_string(users.size()) + (users.size() == 1 ? " use" : " uses");
 	if (ImGui::SmallButton(label.c_str())) ImGui::OpenPopup("uses");
+	// Each use by its file, record and field in words ("main.mnu: STARTUP/MAIN/BUTTONS - Text colour", the
+	// plain-words lane).
+	const AssetScan *scan = workspace.view().project.scan.get();
+	const auto where_of = [scan](const GraphEdge &edge) {
+		const AssetEntry *source = scan ? scan->at_path(edge.source) : nullptr;
+		const std::string place = edge_place_words(edge, source ? source->kind : AssetKind::Unknown);
+		return edge.source + (place.empty() ? std::string() : ": " + place);
+	};
 	ui_kit::tooltip_lazy([&] {
 		std::string tip;
-		for (size_t i = 0; i < users.size() && i < 8; ++i)
-			tip += (i ? "\n" : "") + users[i]->source + ": " + (users[i]->record.empty() ? users[i]->field : users[i]->record);
+		for (size_t i = 0; i < users.size() && i < 8; ++i) tip += (i ? "\n" : "") + where_of(*users[i]);
 		return tip;
 	});
 	if (!ImGui::BeginPopup("uses")) return;
 	for (size_t i = 0; i < users.size(); ++i) {
 		const GraphEdge &edge = *users[i];
 		ImGui::PushID(int(i));
-		const std::string where = edge.source + ": " + (edge.record.empty() ? std::string() : edge.record + " ") + "(" + edge.field + ")";
+		const std::string where = where_of(edge);
 		if (ImGui::Selectable(where.c_str()))
 			window_requests::go_to(workspace, usage_target(*workspace.view().project.scan, edge));
 		ImGui::PopID();

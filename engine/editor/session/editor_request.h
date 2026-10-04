@@ -49,6 +49,7 @@ enum class EditorRequestKind {
 	SelectRecord,
 	EditRecord,
 	RevertToSaved,
+	SetStringText,
 	EndEdit,
 	Copy,
 	Cut,
