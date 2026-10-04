@@ -44,6 +44,12 @@ struct BuildPlan {
 	// Every file read again, whatever the cache says, which it then keeps afresh (the build
 	// request's `rehash`, the command line's --rehash).
 	bool rehash = false;
+	// The project's id (ProjectDocument::project_id), which its build record names: a build reuses, prunes
+	// and replaces only its own project's builds where several share a folder (Build to folder).
+	std::string project;
+	// The folder is the project's own (its default build folder, under its cache): a build recorded before
+	// records named their project is taken for its own there, and for another project's anywhere else.
+	bool own_folder = false;
 };
 
 // `document_findings` is the document validation over this scan
@@ -52,5 +58,30 @@ struct BuildPlan {
 // again.
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings);
+
+// The plan's own findings over the scan alone, which plan_build adds to the gate it reads (each one the gate
+// holds already it leaves): an archive the project holds (refused), a player's own file (left out), a name no
+// archive can store (refused). The Problems rows hold them in the gate (project/project_findings.h), so a build
+// is refused only for rows Problems shows and marks, before any build.
+std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan);
+// The findings a plan is refused for (its diagnostics that block_build): what Problems marks "Blocks the
+// build", what the build_gate query lists and what a refused build names, in the plan's order.
+std::vector<Diagnostic> build_blockers(const BuildPlan &plan);
+
+// A refusal in a few words, for a refused build's line and the status line: a required file by its name
+// and what the game does without it ("keyhelp.bin is missing: the game shows "Unable to load keyboard map
+// strings" and exits"), anything else by its message.
+std::string blocker_words(const Diagnostic &d);
+// Why a build is refused for it, citing the refusal it follows (ADR 0046 S14, the gate follows retail): a
+// required file the boot exits or dead-ends without, as its manifest row witnessed it; a reference whose
+// loader the game refuses to start without, as its kind's row cites it; else the editor's own integrity
+// (a file it cannot read, write or store as it is: it does not pack what it cannot vouch for).
+std::string blocker_reason(const Diagnostic &d);
+// Whether a refusal follows the game's own (a required file the boot cannot go on without, a reference whose
+// loader the game refuses to start without), as against the editor's integrity (a file it cannot read, write
+// or store as it is).
+bool blocker_is_the_games(const Diagnostic &d);
+// A refused build's line: how many problems refuse it and the first few in words.
+std::string refusal_words(const std::vector<Diagnostic> &blockers);
 
 } // namespace opennova::editor

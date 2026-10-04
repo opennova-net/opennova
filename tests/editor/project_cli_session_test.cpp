@@ -705,7 +705,7 @@ static int test_validate_follows_the_gate() {
 		const Ran ran = run(scratch, { "validate", root });
 		TEST_EXPECT(ran.code == 0);
 		TEST_EXPECT(ran.out.find("error probe.error: The probe's check found this. [defs/items.def]\n") != std::string::npos);
-		TEST_EXPECT(ran.out.find("ok: nothing blocks a build (1 error(s) the build does not gate on)\n") != std::string::npos);
+		TEST_EXPECT(ran.out.find("ok: nothing blocks a build (1 error the build does not gate on)\n") != std::string::npos);
 		Headless headless;
 		headless.send(request::open_project(root));
 		const JsonValue gate = headless.ask("build_gate", JsonValue::make_object());
@@ -717,8 +717,8 @@ static int test_validate_follows_the_gate() {
 	TEST_EXPECT(write_archive(root + "/extra.pff", "note.txt", "x"));
 	const Ran ran = run(scratch, { "validate", root });
 	TEST_EXPECT(ran.code == 1);
-	TEST_EXPECT(ran.out.find("blocks a build: error build.archive_in_project: extra.pff is an archive") != std::string::npos);
-	TEST_EXPECT(ran.out.find("not ok: 1 finding(s) block a build\n") != std::string::npos);
+	TEST_EXPECT(ran.out.find("error build.archive_in_project: extra.pff is an archive") != std::string::npos);
+	TEST_EXPECT(ran.out.find("not ok: 1 finding blocks a build\n") != std::string::npos);
 	TEST_EXPECT(run(scratch, { "build", root }).code == 1);
 	return 0;
 }

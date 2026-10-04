@@ -64,6 +64,8 @@ struct DialogsView {
 	struct RenamePreview {
 		RenamePreview(); // the sites made, none
 		uint64_t serial = 0;
+		// The last rename's way back (PreviewRenameBack): its sites only those the rename wrote.
+		bool back = false;
 		bool symbol = false;
 		ReferenceKind kind = ReferenceKind::None;
 		std::string path;

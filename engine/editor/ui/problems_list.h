@@ -130,9 +130,17 @@ public:
 	// A group's Fix all (in the answer's groups' order): shown while several of its findings
 	// give a fix.
 	const Proposal &group_fixes(size_t group) const { return group_fixes_[group]; }
-	// The summary's sentence while required files are missing or are other kinds of file than
-	// the game reads ("" while none is), and the Fix alls that make them.
-	static std::string summary(const RequirementReport &report);
+	// The summary while required files are missing or are other kinds of file than the game reads, from
+	// the build's gate (ADR 0046 S14; the UX round's problems lane): first what stops the game, the rows
+	// the boot exits or dead-ends without, whose findings block the build ("The game will not start: 2
+	// required files are missing."), then what it starts without ("14 more files the game reads are
+	// missing: parts of it will not work."); both "" while every one is there. And the Fix alls that make
+	// them (the game's own copies first where the install has them: each finding's first fix).
+	struct Summary {
+		std::string stops, more;
+		bool empty() const { return stops.empty() && more.empty(); }
+	};
+	static Summary summary(const RequirementReport &report);
 	const Proposal &required_fixes() const { return required_fixes_; }
 
 	// --- the selected finding ---------------------------------------------------------------
