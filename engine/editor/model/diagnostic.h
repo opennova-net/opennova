@@ -78,6 +78,11 @@ struct Diagnostic {
 	// The record as itself (Document::record_identity: its kind and own name, else a digest of what it
 	// holds), what the game's own data's fold keys the finding on; "" where it names no record.
 	std::string record_key;
+	// The record in its type's own words where they are not its name (a menu's action as what it does),
+	// cached where the finding is made with its document or its edge at hand, so a Problems row of a
+	// closed file names it in the same words as an open one's (the plain-words lane); "" where its name
+	// says it.
+	std::string record_title;
 	FindingSubject subject;
 
 	// The row the finding was made from; null for a Diagnostic no finding was made into (an error
@@ -140,7 +145,7 @@ inline bool operator==(const Diagnostic &a, const Diagnostic &b) {
 	return a.severity == b.severity && a.row() == b.row() && a.message == b.message &&
 			a.asset == b.asset && a.field == b.field && a.record == b.record && a.line == b.line &&
 			a.column == b.column && a.row_id == b.row_id && a.child_id == b.child_id && a.record_kind == b.record_kind &&
-			a.record_key == b.record_key && a.subject == b.subject;
+			a.record_key == b.record_key && a.record_title == b.record_title && a.subject == b.subject;
 }
 inline bool operator!=(const Diagnostic &a, const Diagnostic &b) { return !(a == b); }
 

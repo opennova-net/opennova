@@ -212,6 +212,13 @@ static int test_project_search() {
 	// A file whose own name holds the text is found by it, with no record.
 	const std::vector<GraphSearchHit> armories = graph.search("armory");
 	TEST_EXPECT(!armories.empty() && armories.front().name == "armory.3di" && armories.front().via.empty());
+	// A symbol by the words it reads as (the plain-words lane, the audit's 8.2): the item 100300 by its
+	// catalog's name, its words given with it.
+	const std::vector<GraphSearchHit> named = graph.search("searched th");
+	const auto item = std::find_if(named.begin(), named.end(), [](const GraphSearchHit &hit) {
+		return hit.symbol && hit.symbol->kind == ReferenceKind::Item && hit.name == "100300";
+	});
+	TEST_EXPECT(item != named.end() && item->words == "Searched Thing");
 	return 0;
 }
 
