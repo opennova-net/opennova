@@ -1,5 +1,8 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/catalog_validation.h>
+#include <editor/documents/def_words.h>
+#include <editor/graph/display_names.h>
+#include <base/io/strutil.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
@@ -9,6 +12,7 @@
 #include <editor/session/view/session_view.h>
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include <cstring>
 
@@ -382,7 +386,7 @@ static int written_units() {
 	            !team.description.empty());
 	TEST_EXPECT(weapons.get(weapon, "error_hip_theta_fp16", value) && std::get<double>(value) == 0.5);
 	const FieldSchema theta = schema(weapons, weapon, "error_hip_theta_fp16");
-	TEST_EXPECT(theta.type == FieldType::Real && theta.token == "error_hiptheta" && theta.label == "error_hiptheta");
+	TEST_EXPECT(theta.type == FieldType::Real && theta.token == "error_hiptheta" && theta.label == "Hip vertical spread");
 	// switchcategory's line is written while its present flag is set: Clear leaves it out, its
 	// latent value kept, and the file saves without the line and reads back without it. A Set of
 	// another value writes it again (a Set of the value it holds does not), and Revert gives
@@ -417,7 +421,7 @@ static int written_units() {
 	            schema(ammo, round, "max_age_ticks").unit == "s");
 	TEST_EXPECT(ammo.apply(field(round, "max_age_ticks", 1.5), error) && !ammo.dirty() && !ammo.can_undo());
 	TEST_EXPECT(schema(ammo, round, "light_move_color").color == FieldColor::PackedRgb &&
-	            schema(ammo, round, "light_move_radius_fp16").label == "Radius");
+	            schema(ammo, round, "light_move_radius_fp16").label == "Flight light radius");
 	return 0;
 }
 
@@ -551,8 +555,247 @@ static int powerup_weapon() {
 	return 0;
 }
 
+// A Duplicate gives the copy an identity of its own, as an Add does (the UX audit's 4.4): an item a
+// free id and its name with " (copy)", a weapon its token with "_2", each within the characters of a
+// name the game keeps, never one a row of its kind has; nested records keep theirs.
+static int duplicates_apart() {
+	editor_test::TempProjectDir dir("opennova_catalog_duplicates_apart");
+	const std::string long_name(44, 'L');
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	                                    "begin \"Dune Buggy\"\nid 100000\ntype vehicle\nhp 10\nend\nbegin \"Dune Buggy (copy)\"\n"
+	                                    "id 100001\ntype vehicle\nend\nbegin \"" + long_name + "\"\nid 100003\ntype marker\nend\n"));
+	DefCatalogDocument items; Diagnostic error;
+	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	const NodeKind item = node_kind(DefRecordKind::Item);
+	Edit duplicate; duplicate.operation = EditOperation::Duplicate; duplicate.address = {items.rows()[0]->id, item, 0};
+	TEST_EXPECT(items.apply(duplicate, error));
+	const auto &copy = static_cast<const CatalogRow &>(*items.row(items.last_added())).native.as<DefItemDef>();
+	TEST_EXPECT(copy.id == 100002 && std::string(copy.display_name) == "Dune Buggy (copy 2)" && copy.hp == 10 &&
+	            copy.type == DEF_ITEM_TYPE_VEHICLE);
+	duplicate.address = {items.rows()[3]->id, item, 0}; // the long name's row, after the copy
+	TEST_EXPECT(std::string(row_at(items, 3).native.as<DefItemDef>().display_name) == long_name);
+	TEST_EXPECT(items.apply(duplicate, error));
+	const auto &cut = static_cast<const CatalogRow &>(*items.row(items.last_added())).native.as<DefItemDef>();
+	// The game keeps 46 characters of an item's name [orig: ItemDef_ParseProperty @ 0x49eb00, @0x49ebfb].
+	TEST_EXPECT(cut.id == 100004 && std::string(cut.display_name) == std::string(39, 'L') + " (copy)");
+	for (const Diagnostic &d : validate_catalog_file(items))
+		TEST_EXPECT(d.code() != "catalog.name_duplicate" && d.code() != "catalog.item_identity");
+	items.undo(); items.undo(); TEST_EXPECT(!items.dirty());
+
+	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), "weapon \"WPN_M16\"\naction \"FIRE\"\nend\nend\n"));
+	DefCatalogDocument weapons;
+	TEST_EXPECT(weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
+	duplicate.address = {weapons.rows()[0]->id, node_kind(DefRecordKind::Weapon), 0};
+	TEST_EXPECT(weapons.apply(duplicate, error) && weapons.apply(duplicate, error));
+	TEST_EXPECT(weapons.rows().size() == 3 && std::string(row_at(weapons, 1).native.as<DefWeaponDef>().weapon_name) == "WPN_M16_3" &&
+	            std::string(row_at(weapons, 2).native.as<DefWeaponDef>().weapon_name) == "WPN_M16_2");
+	const DefWeaponDef &gun = row_at(weapons, 2).native.as<DefWeaponDef>();
+	TEST_EXPECT(gun.actions_count == 1 && std::string(gun.actions[0].name) == "FIRE");
+	TEST_EXPECT(copy_name("WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ0", CopyName::Token, 31, {}) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXY_2");
+
+	// A name of the game's code page cut by whole characters (the review's W2: by bytes it could end inside
+	// one, the name then refused and the copy keeping its original's): 45 characters, two of them two
+	// UTF-8 bytes, kept to 39 before " (copy)". An id other files name is no copy's (W9): with 100001 and
+	// 100002 named elsewhere, the copy takes 100003.
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	                                    "begin \"V\xE9hicule blind\xE9 de transport de troupes lourd\"\nid 100000\ntype vehicle\nend\n"));
+	DefCatalogDocument words;
+	TEST_EXPECT(words.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	words.set_names_used_elsewhere(ReferenceKind::Item, {"100001", "100002", "not an id"});
+	duplicate.address = {words.rows()[0]->id, item, 0};
+	TEST_EXPECT(words.apply(duplicate, error));
+	const auto &accented = static_cast<const CatalogRow &>(*words.row(words.last_added())).native.as<DefItemDef>();
+	TEST_EXPECT(accented.id == 100003 &&
+	            std::string(accented.display_name) == "V\xE9hicule blind\xE9 de transport de troupes (copy)");
+	TEST_EXPECT(copy_name("\xC3\xA9\xC3\xA9\xC3\xA9", CopyName::Words, 9, {}) == "\xC3\xA9\xC3\xA9 (copy)");
+	return 0;
+}
+
+// A table of names standing in for the project's (the graph's).
+class Names : public NameSource {
+public:
+	void define(ReferenceKind kind, const std::string &name, const std::string &record, const std::string &value,
+	            const std::string &scope = std::string()) {
+		GraphSymbol symbol;
+		symbol.kind = kind;
+		symbol.name = symbol.display = name;
+		symbol.record = record;
+		symbol.value = value;
+		symbol.scope = scope;
+		symbols_.push_back(symbol);
+	}
+	const GraphSymbol *symbol(ReferenceKind kind, const std::string &name, const std::string &scope) const override {
+		for (const GraphSymbol &symbol : symbols_)
+			if (symbol.kind == kind && opennova::strutil::iequals(symbol.name, name) &&
+			    (scope.empty() || opennova::strutil::iequals(symbol.scope, scope)))
+				return &symbol;
+		return nullptr;
+	}
+	const GraphSymbol *reached(const GraphEdge &) const override { return nullptr; }
+	uint64_t generation() const override { return 1; }
+
+private:
+	std::vector<GraphSymbol> symbols_;
+};
+
+// The members in a modder's words (the UX round's plain-words lane, the audit's 4.1): every member of
+// every kind a row in def_fields' order with a label, a section of its kind's, a meaning and its
+// witness; the fields carry them, sorted by section (an item's identity first); a weapon titled by the
+// name the HUD shows for it, else its loadout list's, an ammo by its round's, a mounted gun by its item,
+// a powerup's lines by what they give and when.
+static int plain_words() {
+	for (size_t k = 0; k < kDefRecordKindCount; ++k) {
+		const DefRecordKind kind = DefRecordKind(k);
+		size_t count = 0;
+		const DefWords *words = def_words(kind, count);
+		const std::vector<DefField> &fields = def_fields(kind);
+		TEST_EXPECT(words && count == fields.size());
+		for (size_t i = 0; i < count && i < fields.size(); ++i) {
+			const DefWords &row = words[i];
+			TEST_EXPECT(fields[i].id == row.id);
+			TEST_EXPECT(*row.label && *row.meaning && def_section_rank(kind, row.section) != SIZE_MAX);
+			const std::string cite = row.cite;
+			TEST_EXPECT(cite.find("[orig:") != std::string::npos || cite.find(".md") != std::string::npos);
+			if (fields[i].id != row.id) std::printf("FAIL kind %zu member %zu: %s is not %s\n", k, i, row.id, fields[i].id.c_str());
+		}
+	}
+	const std::vector<FieldSchema> &item = catalog_table().fields(node_kind(DefRecordKind::Item));
+	TEST_EXPECT(item.front().section == "Identity");
+	const FieldSchema *hp = nullptr;
+	for (const FieldSchema &field : item)
+		if (field.id == "hp") hp = &field;
+	TEST_EXPECT(hp && hp->label == "Health" && hp->section == "Health and armour" &&
+	            hp->description.find(def_words_of(DefRecordKind::Item, "hp")->meaning) == 0);
+	// The sections in their kind's order, each once.
+	size_t rank = 0;
+	for (const FieldSchema &field : item) {
+		const size_t at = def_section_rank(DefRecordKind::Item, field.section.c_str());
+		TEST_EXPECT(at >= rank);
+		rank = at;
+	}
+
+	editor_test::TempProjectDir dir("opennova_catalog_plain_words");
+	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), "weapon \"WPN_M16\"\nend\nweapon \"WPN_LOADOUT\"\n"
+	                                                            "loadout_menu_textid WEP_LOAD\nend\nweapon \"WPN_BARE\"\nend\n"));
+	DefCatalogDocument weapons; Diagnostic error;
+	TEST_EXPECT(weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
+	Names names;
+	const std::string wepdes = "GAMETEXT.BIN/WepDes";
+	names.define(ReferenceKind::TextId, "WPN_M16", "", "M16A2 Rifle", wepdes);
+	names.define(ReferenceKind::TextId, "WEP_LOAD", "", "Loadout Gun", wepdes);
+	names.define(ReferenceKind::TextId, "AMMO_556", "", "5.56x45", wepdes);
+	names.define(ReferenceKind::Item, "100184", "Hummer gun", "");
+	const NodeKind weapon = node_kind(DefRecordKind::Weapon);
+	const auto title = [&](const Document &document, size_t row, const NameSource *source) {
+		return record_display(document, {document.rows()[row]->id, document.rows()[row]->kind, 0}, source);
+	};
+	TEST_EXPECT(title(weapons, 0, &names) == "M16A2 Rifle" && title(weapons, 1, &names) == "Loadout Gun" &&
+	            title(weapons, 2, &names) == "WPN_BARE" && title(weapons, 0, nullptr) == "WPN_M16");
+	TEST_EXPECT(weapons.rows()[0]->kind == weapon);
+	TEST_EXPECT(editor_test::write_text(dir.file("ammo.def"), "ammo AMMO_556\nend\n"));
+	DefCatalogDocument ammo;
+	TEST_EXPECT(ammo.load(dir.file("ammo.def"), "ammo.def", AssetKind::AmmoDefs, "jo", error));
+	TEST_EXPECT(title(ammo, 0, &names) == "5.56x45" && title(ammo, 0, nullptr) == "AMMO_556");
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	                                    "begin \"Hummer\"\nid 100100\ntype vehicle\naddeweap ewep01 100184\nend\n"));
+	DefCatalogDocument items;
+	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	const NodeId row = items.rows()[0]->id;
+	const NodeAddress gun{row, node_kind(DefRecordKind::Attachment),
+	                      items.collections_of({row, node_kind(DefRecordKind::Item), 0}).front().ids.front()};
+	TEST_EXPECT(record_display(items, gun, &names) == "Hummer gun on ewep01" &&
+	            record_display(items, gun, nullptr) == "Item 100184 on ewep01");
+	TEST_EXPECT(title(items, 0, &names) == "Hummer");
+	// A picker's words for a weapon: the HUD's name (definition_words over the weapon's symbol).
+	GraphSymbol m16;
+	m16.kind = ReferenceKind::Weapon;
+	m16.display = "WPN_M16";
+	TEST_EXPECT(definition_words(m16, &names) == "M16A2 Rifle" && definition_words(m16, nullptr) == "WPN_M16");
+	return 0;
+}
+
+// A def's names are the game's code page (Windows-1252), the editor's UTF-8 (the plain-words lane, the
+// audit's 9.1): a weapon named "Caf\xE9" in the file reads as "Café", the item naming it reaches it in the
+// graph (both read in the one encoding), a name set is written back in the code page, and one the code
+// page has no character of is refused.
+static int code_page_names() {
+	editor_test::TempProjectDir dir("opennova_catalog_code_page");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Code page"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const AssetEntry *weapon_entry = view.project.scan->find("weapon.def");
+	const AssetEntry *item_entry = view.project.scan->find("items.def");
+	TEST_EXPECT(weapon_entry && item_entry);
+	if (!weapon_entry || !item_entry) return 1;
+	const std::string weapon_file = weapon_entry->relative_path, item_file = item_entry->relative_path;
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/" + weapon_file, "weapon \"Caf\xE9\"\nend\n") &&
+	            editor_test::write_text(view.project.root + "/" + item_file,
+	                                    "begin \"Thing\"\nid 100300\nprimary_weapon Caf\xE9\nend\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(view.findings.graph != nullptr);
+	if (!view.findings.graph) return 1;
+	const AssetGraph &graph = *view.findings.graph;
+	TEST_EXPECT(graph.symbols_named(ReferenceKind::Weapon, "Caf\xC3\xA9").size() == 1);
+	bool reached = false;
+	for (const GraphEdge *edge : graph.references_of(item_file))
+		if (edge->field == "primary_weapon")
+			reached = edge->value == "Caf\xC3\xA9" && graph.resolve(*edge) == ReferenceStatus::Present;
+	TEST_EXPECT(reached);
+	DefCatalogDocument weapons;
+	Diagnostic error;
+	TEST_EXPECT(weapons.load(view.project.root + "/" + weapon_file, weapon_file, AssetKind::WeaponDefs, "jo", error));
+	const NodeAddress gun{weapons.rows()[0]->id, weapons.rows()[0]->kind, 0};
+	Value name;
+	TEST_EXPECT(weapons.get(gun, "weapon_name", name) && std::get<std::string>(name) == "Caf\xC3\xA9");
+	TEST_EXPECT(weapons.apply(field(gun, "weapon_name", std::string("Caf\xC3\xA9 2")), error) &&
+	            weapons.serialize().text.find("\"Caf\xE9 2\"") != std::string::npos);
+	TEST_EXPECT(!weapons.apply(field(gun, "weapon_name", std::string("\xE6\x97\xA5")), error) &&
+	            error.message.find("Windows-1252") != std::string::npos);
+	return 0;
+}
+
+// An ordinary edit through the session keeps the file's order (the review's W5): a weapon's switchcategory
+// unticked (its line's present tick cleared) and saved is that one line gone, every other line as the save
+// before it wrote it, no record reordered and no note.
+static int unticked_line_saves_alone() {
+	editor_test::TempProjectDir dir("opennova_catalog_unticked_line");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Unticked"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const AssetEntry *entry = view.project.scan->find("weapon.def");
+	TEST_EXPECT(entry != nullptr);
+	if (!entry) return 1;
+	const std::string path = entry->relative_path, file = view.project.root + "/" + entry->relative_path;
+	TEST_EXPECT(editor_test::write_text(file, "weapon \"WPN_A\"\n\tcategory 2\n\tswitchcategory 3\n\tclipsize 15\nend\n"
+	                                          "weapon \"WPN_B\"\n\tclipsize 30\n\tcategory 1\nend\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document(path));
+	Document *weapons = session.document_for(path);
+	TEST_EXPECT(weapons != nullptr);
+	if (!weapons) return 1;
+	const std::string before = weapons->serialize().text;
+	Edit untick;
+	untick.operation = EditOperation::Clear;
+	untick.address = {weapons->rows()[0]->id, weapons->rows()[0]->kind, 0};
+	untick.field = "switchcategory";
+	editor_test::handle_to_end(session, request::edit_record(path, untick));
+	editor_test::handle_to_end(session, request::save(path));
+	const std::vector<uint8_t> saved = test_io::read_file(file);
+	std::string after(saved.begin(), saved.end());
+	const size_t at = before.find("\tswitchcategory 3\r\n");
+	TEST_EXPECT(at != std::string::npos && after == std::string(before).erase(at, std::strlen("\tswitchcategory 3\r\n")));
+	TEST_EXPECT(view.activity.status == "Saved 1 file." && weapons->save_notes().empty());
+	return 0;
+}
+
 int main() {
-	return history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
+	return unticked_line_saves_alone() || code_page_names() || history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
-	       witnessed_enums() || powerup_weapon();
+	       witnessed_enums() || powerup_weapon() || duplicates_apart() || plain_words();
 }
