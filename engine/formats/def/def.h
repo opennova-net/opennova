@@ -30,6 +30,22 @@ namespace opennova::def {
 inline constexpr size_t DEF_LINE_ORDER_MAX = 160;
 inline constexpr uint8_t DEF_LINE_ORDER_ROWS = 254;
 inline constexpr uint8_t DEF_LINE_ORDER_BLOCKS = 255;
+/* An items.def line under one of the names the parser reads into the death, door and clip words they
+ * share (the +0x890/+0x894 union and the door type; ItemDef_ParseProperty's squib, door and part
+ * arms): a step of its own, so a writer puts it down under the name the file gave it, from the words as
+ * they stand (def_write_record.cpp's alias lines). A property's place is below the first of them. */
+inline constexpr uint8_t DEF_LINE_ORDER_SQB_RATE = 240;
+inline constexpr uint8_t DEF_LINE_ORDER_NUM_DOORS = 241;
+inline constexpr uint8_t DEF_LINE_ORDER_FIRST_DOOR = 242;
+inline constexpr uint8_t DEF_LINE_ORDER_FIRST_SUBOBJECT = 243;
+inline constexpr uint8_t DEF_LINE_ORDER_ROTOR_PARTS = 244;
+inline constexpr uint8_t DEF_LINE_ORDER_AUX_PARTS = 245;
+inline constexpr uint8_t DEF_LINE_ORDER_SQB_ERROR = 246;
+inline constexpr uint8_t DEF_LINE_ORDER_SQB_DISTANCE = 247;
+inline constexpr uint8_t DEF_LINE_ORDER_DOOR_DIR = 248;
+inline constexpr bool def_line_order_alias(uint8_t step) {
+    return step >= DEF_LINE_ORDER_SQB_RATE && step <= DEF_LINE_ORDER_DOOR_DIR;
+}
 typedef struct DefLineOrder {
     uint8_t steps[DEF_LINE_ORDER_MAX];
     uint16_t count;

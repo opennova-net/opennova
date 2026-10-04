@@ -1,8 +1,11 @@
 #include "def_write_record.h"
 #include "def_scan.h"
 
+#include <base/io/crt_ftol.h>
+
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
@@ -20,6 +23,79 @@ std::string decimal(double value) {
 	while (text.size() > 1 && text.back() == '0') text.pop_back();
 	if (text.back() == '.') text.pop_back();
 	return text == "-0" ? "0" : text;
+}
+
+// A real a line's float read takes [the parsers' parse_float_n, atof then a float store]: the shortest
+// plain decimal that reads as the same float as the value's whole expansion does (5.4f as "5.4", not
+// "5.400000095367431640625"), else that expansion. What the game reads is the same; the form is the one a
+// person writes (the plain-words lane: a save after one edit no longer rewrites every real).
+std::string float_decimal(double value) {
+	const std::string whole = decimal(value);
+	const float read = defscan::parse_float_n(whole.data(), whole.size());
+	for (int precision = 0; precision <= 9; ++precision) {
+		std::ostringstream out;
+		out.imbue(std::locale::classic());
+		out << std::fixed << std::setprecision(precision) << value;
+		std::string text = out.str();
+		if (text.find_first_not_of("-0.") == std::string::npos) text = "0";
+		const float again = defscan::parse_float_n(text.data(), text.size());
+		if (std::memcmp(&again, &read, sizeof(float)) == 0) return text;
+	}
+	return whole;
+}
+
+// The shortest plain decimal near `value` that the parser's own arithmetic over its atof reading takes
+// to what the line should set (`reads`), else the whole expansion of `value`: "6" for a squib rate of
+// ten ticks, not "6.048780487804878...".
+template <class Reads> std::string shortest(double value, Reads reads) {
+	for (int precision = 0; precision <= 17; ++precision) {
+		std::ostringstream out;
+		out.imbue(std::locale::classic());
+		out << std::fixed << std::setprecision(precision) << value;
+		std::string text = out.str();
+		if (text.find_first_not_of("-0.") == std::string::npos) text = "0";
+		if (reads(std::strtod(text.c_str(), nullptr))) return text;
+	}
+	return decimal(value);
+}
+
+// The death word as a squib rate: atof, 62 over it, _ftol2_sse [orig: ItemDef_ParseProperty @0x49F06F,
+// the _ftol2_sse call @0x49F093]. Zero has none (62 over a reading is never 0).
+std::string squib_rate(int32_t ticks) {
+	if (ticks == INT32_MIN) return "0";
+	return shortest(62.0 / (ticks + (ticks < 0 ? -0.25 : 0.25)),
+	                [ticks](double read) { return io::retail_ftol_sse2(62.0 / read) == ticks; });
+}
+
+// A word as a 16.16 reading: atof times 65536, _ftol2_sse (sqb_distance, sqb_error @0x49F0DC / @0x49F125).
+std::string squib_q16(int32_t word) {
+	return shortest(double(word) / 65536.0, [word](double read) { return io::retail_ftol_sse2(read * 65536.0) == word; });
+}
+
+// The bytes of an item's death and clip words, and its door type, that a shared-word line written from
+// the words as they stand sets to them (DefRecordWriter::alias_line): a door count past 30 none (its arm
+// clamps it), a squib rate of a zero word none (no reading sets 0), a door_dir of the bit no token sets
+// (bit 0, or past thirty) none.
+DefRecordWriter::AliasCover alias_cover(const DefItemDef &item, uint8_t step) {
+	DefRecordWriter::AliasCover held;
+	const auto count = [&](int at) {
+		if (((uint32_t(item.deathtime_ticks) >> (8 * at)) & 0xFF) <= 30) held.death = uint8_t(1u << at);
+	};
+	switch (step) {
+	case DEF_LINE_ORDER_SQB_RATE: if (item.deathtime_ticks != 0) held.death = 0xF; break;
+	case DEF_LINE_ORDER_NUM_DOORS: count(0); break;
+	case DEF_LINE_ORDER_FIRST_DOOR: count(1); break;
+	case DEF_LINE_ORDER_FIRST_SUBOBJECT: count(2); break;
+	case DEF_LINE_ORDER_ROTOR_PARTS: held.death = 0x3; held.clip = 0x3; break;
+	case DEF_LINE_ORDER_AUX_PARTS: held.death = 0xC; held.clip = 0xC; break;
+	case DEF_LINE_ORDER_SQB_ERROR: held.door_type = true; break;
+	case DEF_LINE_ORDER_SQB_DISTANCE: held.clip = 0xF; break;
+	case DEF_LINE_ORDER_DOOR_DIR:
+		if (!(uint32_t(item.clipsize) & 1) && !(uint32_t(item.clipsize) >> 31)) held.clip = 0xF;
+		break;
+	default: break;
+	}
+	return held;
 }
 
 std::string fixed(int64_t value) {
@@ -68,7 +144,7 @@ double real(const DefValue &v) {
 }
 std::string token(const DefValue &v) {
 	if (const auto *s = std::get_if<std::string>(&v)) return s->empty() ? "\"\"" : *s;
-	return std::holds_alternative<double>(v) ? decimal(std::get<double>(v)) : std::to_string(integer(v));
+	return std::holds_alternative<double>(v) ? float_decimal(std::get<double>(v)) : std::to_string(integer(v));
 }
 
 // A value as a line's word: a text as it is ("" for an empty one), a number as the writer
@@ -149,7 +225,9 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 			const uint8_t step = order->steps[i];
 			if (step == DEF_LINE_ORDER_ROWS) rows = true;
 			else if (step == DEF_LINE_ORDER_BLOCKS) blocks = true;
-			else if (step >= properties.size() || placed[step]) continue;
+			else if (def_line_order_alias(step)) {
+				if (kind != DefRecordKind::Item) continue;
+			} else if (step >= properties.size() || placed[step]) continue;
 			else placed[step] = true;
 			steps.push_back(step);
 		}
@@ -158,9 +236,33 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 		if (!placed[i]) steps.push_back(uint8_t(i));
 	if (!rows) steps.push_back(DEF_LINE_ORDER_ROWS);
 	if (!blocks) steps.push_back(DEF_LINE_ORDER_BLOCKS);
-	for (const uint8_t step : steps) {
+	// What an item's shared-word lines after each step hold: a line of the word's own whose every byte a
+	// later line sets leaves nothing the game keeps (a helicopter's deathtime under its rotor_parts and
+	// aux_parts), and is left out; a door line raises the Door attribute itself.
+	std::vector<AliasCover> later(steps.size());
+	bool door_line = false;
+	if (kind == DefRecordKind::Item) {
+		const auto &item = *static_cast<const DefItemDef *>(value);
+		AliasCover after;
+		for (size_t i = steps.size(); i-- > 0;) {
+			later[i] = after;
+			if (!def_line_order_alias(steps[i])) continue;
+			const AliasCover held = alias_cover(item, steps[i]);
+			after.death |= held.death;
+			after.clip |= held.clip;
+			after.door_type = after.door_type || held.door_type;
+			door_line = door_line || steps[i] == DEF_LINE_ORDER_NUM_DOORS || steps[i] == DEF_LINE_ORDER_FIRST_DOOR;
+		}
+	}
+	AliasCover cover;
+	for (size_t at = 0; at < steps.size(); ++at) {
+		const uint8_t step = steps[at];
 		if (step == DEF_LINE_ORDER_ROWS || step == DEF_LINE_ORDER_BLOCKS) {
 			if (nested) nested(step);
+			continue;
+		}
+		if (def_line_order_alias(step)) {
+			alias_line(*static_cast<const DefItemDef *>(value), step, cover);
 			continue;
 		}
 		const DefProperty &property = properties[step];
@@ -197,6 +299,22 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
                 changed = read || std::strcmp(item.sound_profile_female, item.sound_profile) != 0;
             if (property.key == "deceleration" && item.acceleration)
                 changed = read || item.deceleration != item.acceleration * 2;
+            // The death, clip and door-type words the file wrote under other names: left to those lines
+            // where they hold every byte the word has. A door's death word of 1 is what its attrib line
+            // gives it while still 0 [orig: ItemDef_ParseProperty @0x4a0cb0..0x4a0cb9].
+            const auto held = [](int32_t word, uint8_t bytes) {
+                for (int i = 0; i < 4; ++i)
+                    if (!(bytes & (1u << i)) && ((uint32_t(word) >> (8 * i)) & 0xFF)) return false;
+                return true;
+            };
+            if (!read && property.key == "deathtime")
+                changed = changed && !held(item.deathtime_ticks, cover.death) &&
+                          !(item.deathtime_ticks == 1 && (item.attrib & DEF_ITEM_ATTRIB_DOOR));
+            if (!read && property.key == "clipsize") changed = changed && !held(item.clipsize, cover.clip);
+            if (!read && property.key == "door_type") changed = changed && !cover.door_type;
+            if (read && ((property.key == "deathtime" && later[at].death == 0xF) ||
+                         (property.key == "clipsize" && later[at].clip == 0xF) || (property.key == "door_type" && later[at].door_type)))
+                continue;
         }
 		// An item's attributes on one `attrib:` line, its first word bits, its second's and Parent, as the
 		// files write them: the chain reads every token of the line [orig: ItemDef_ParseProperty @ 0x49EB00,
@@ -206,6 +324,9 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 			const auto &item = *static_cast<const DefItemDef *>(value);
 			std::vector<std::string> tokens;
 			uint32_t first = item.attrib, second = item.attrib2;
+			// Door raised by a door line where the file has no attrib line of its own [orig: ItemDef_ParseProperty
+			// @0x49F766..0x49F7DE].
+			if (door_line && !placed[step]) first &= ~DEF_ITEM_ATTRIB_DOOR;
 			for (int i = 0; i < def_item_attrib_keyword_count(); ++i)
 				if (first & def_item_attrib_keyword_bit(i)) {
 					tokens.push_back(def_item_attrib_keyword(i));
@@ -221,7 +342,9 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 			if (!tokens.empty()) line("attrib:", tokens);
 			continue;
 		}
-        if (!changed && kind != DefRecordKind::Sight && kind != DefRecordKind::Attachment &&
+		// A line the file has stays, its value the default or not (its order notes it: `score 0`, a
+		// torque the table defaults to); a record made from nothing writes what differs.
+		if (!changed && !placed[step] && kind != DefRecordKind::Sight && kind != DefRecordKind::Attachment &&
 			kind != DefRecordKind::Effect && kind != DefRecordKind::Carry && kind != DefRecordKind::PowerupAmmo) continue;
 		const std::string &key = property.key;
 		auto n = [&](size_t i) { return integer(values.at(i)); };
@@ -371,27 +494,61 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 		args.push_back(fixed(n(0))); color(n(1));
 		if (property.encoding == DefEncoding::LightImpact) args.push_back(fixed(int64_t(std::llround(n(2) * 65536.0 / 62.0))));
 		break;
-	case DefEncoding::ItemDeathTime:
-		// The squib alias writes the same native field without deathtime's
-		// integer-seconds restriction. Zero is represented by the parser's
-		// reciprocal-zero result. Neither spelling retains source trivia.
-		key = "sqb_rate"; args.push_back(n(0) == 0 ? "0" : decimal(62.0 / (n(0) + (n(0) < 0 ? -0.25 : 0.25)))); break;
+	case DefEncoding::ItemDeathTime: {
+		// Whole seconds where the ticks are some: 62 a second and 62 of grace, an explicit 0 eight
+		// seconds [orig: ItemDef_ParseProperty @ 0x49fa6c-0x49faa0]; any other count as the squib alias,
+		// which writes the same native field without deathtime's integer-seconds restriction.
+		const int32_t ticks = int32_t(n(0));
+		if ((int64_t(ticks) - 62) % 62 == 0 && ticks != 62) {
+			args.push_back(std::to_string((int64_t(ticks) - 62) / 62));
+			break;
+		}
+		key = "sqb_rate";
+		args.push_back(squib_rate(ticks));
+		break;
+	}
 	case DefEncoding::DoorType:
-		key = "sqb_error"; args.push_back(decimal(double(uint32_t(n(0))) / 65536.0)); break;
-	case DefEncoding::DoorOpenRate: args.push_back(n(0) == 0 ? "0" : decimal(65536.0 / (62.0 * (n(0) + (n(0) < 0 ? -0.25 : 0.25))))); break;
-	case DefEncoding::DoorMaxAngle: args.push_back(decimal((n(0) + (n(0) < 0 ? -0.25 : 0.25)) * 360.0 / 4294967295.0)); break;
+		key = "sqb_error"; args.push_back(squib_q16(int32_t(uint32_t(n(0))))); break;
+	// atof, then 65536 over 62 times it, _ftol2_sse [orig: ItemDef_ParseProperty @0x49F91E].
+	case DefEncoding::DoorOpenRate: {
+		const int32_t rate = int32_t(n(0));
+		args.push_back(rate == 0 ? "0"
+		                         : shortest(65536.0 / (62.0 * (rate + (rate < 0 ? -0.25 : 0.25))), [rate](double read) {
+			                           return io::retail_ftol_sse2(65536.0 / (read * 62.0)) == rate;
+		                           }));
+		break;
+	}
+	// atof over 360 times 4294967295, _ftol2_sse [orig: ItemDef_ParseProperty @0x49F96D].
+	case DefEncoding::DoorMaxAngle: {
+		const int32_t angle = int32_t(n(0));
+		args.push_back(shortest((angle + (angle < 0 ? -0.25 : 0.25)) * 360.0 / 4294967295.0, [angle](double read) {
+			return io::retail_ftol_sse2(read * (1.0 / 360.0) * 4294967295.0) == angle;
+		}));
+		break;
+	}
 	case DefEncoding::HuskSeconds: args.push_back(decimal(f(0) / 62.0)); break;
 	case DefEncoding::HuskSwap: {
 		const auto &item = *static_cast<const DefItemDef *>(value);
 		args.push_back(decimal(item.husk_swap_at_sec == 0 ? f(0) * 100.0 : f(0) / 62.0)); break;
 	}
-	case DefEncoding::DeathPieces:
-		for (size_t i = 0; i < values.size(); ++i) if (n(i)) {
+	case DefEncoding::DeathPieces: {
+		// Every slot up to the last with a piece, as the files list them ("01_HULL 02_WHEEL"): HULL is
+		// the table's first row, which an unwritten slot reads as too [orig: @ 0x49f314-0x49f396].
+		size_t last = 0;
+		for (size_t i = 0; i < values.size(); ++i)
+			if (n(i)) last = i + 1;
+		for (size_t i = 0; i < last; ++i) {
 			const char *piece = defscan::death_piece_keyword(size_t(n(i)));
-			if (!piece) fail(name, key, "Unknown debris type.");
-			else args.push_back(std::to_string(i + 1) + "_" + piece);
+			if (!piece) {
+				fail(name, key, "Unknown debris type.");
+				continue;
+			}
+			char slot[8];
+			std::snprintf(slot, sizeof(slot), "%02zu_", i + 1);
+			args.push_back(slot + std::string(piece));
 		}
 		break;
+	}
 	case DefEncoding::SpawnMask:
 		if (!items) { fail(name, key, "Missing file-wide vehicle spawn registry."); return false; }
 		for (int i = 0; i < items->vehicle_spawn_id_count; ++i) if (uint32_t(n(0)) & (uint32_t(1) << i)) args.push_back(std::to_string(items->vehicle_spawn_ids[i]));
@@ -428,6 +585,47 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 	default: for (const auto &v : values) args.push_back(word(v)); break;
 	}
 	return true;
+}
+
+// Each name as its arm reads it [orig: ItemDef_ParseProperty @ 0x49EB00]: the squib arms atof through
+// _ftol2_sse (@0x49F06F); num_doors, first_door and first_subobject one byte each of the death word, the
+// low byte of atol read signed, the first_* keys one less, clamped to 0..30 (@0x49F766, @0x49F7BA,
+// @0x49F9B0); rotor_parts and aux_parts four atol low bytes across the death and clip words (@0x49EF5D,
+// @0x49EFF3); door_dir a bit past each nonzero token, up to thirty. A byte a line cannot hold as it
+// stands (a door count past 30) is put down all the same and left unheld, for the word's own line.
+void DefRecordWriter::alias_line(const DefItemDef &item, uint8_t step, AliasCover &cover) {
+	const int32_t death = item.deathtime_ticks, clip = item.clipsize;
+	const auto byte = [](int32_t word, int at) { return std::to_string((uint32_t(word) >> (8 * at)) & 0xFF); };
+	const auto count = [&](int at, int more) {
+		line(at == 0 ? "num_doors" : at == 1 ? "first_door" : "first_subobject",
+		     {std::to_string(int((uint32_t(death) >> (8 * at)) & 0xFF) + more)});
+	};
+	switch (step) {
+	case DEF_LINE_ORDER_SQB_RATE:
+		if (death == 0) return; // no reading of the rate sets 0: the words' own lines say it
+		line("sqb_rate", {squib_rate(death)});
+		break;
+	case DEF_LINE_ORDER_NUM_DOORS: count(0, 0); break;
+	case DEF_LINE_ORDER_FIRST_DOOR: count(1, 1); break;
+	case DEF_LINE_ORDER_FIRST_SUBOBJECT: count(2, 1); break;
+	case DEF_LINE_ORDER_ROTOR_PARTS: line("rotor_parts", {byte(death, 0), byte(death, 1), byte(clip, 0), byte(clip, 1)}); break;
+	case DEF_LINE_ORDER_AUX_PARTS: line("aux_parts", {byte(clip, 2), byte(clip, 3), byte(death, 2), byte(death, 3)}); break;
+	case DEF_LINE_ORDER_SQB_ERROR: line("sqb_error", {squib_q16(int32_t(item.door_type))}); break;
+	case DEF_LINE_ORDER_SQB_DISTANCE: line("sqb_distance", {squib_q16(clip)}); break;
+	case DEF_LINE_ORDER_DOOR_DIR: {
+		std::vector<std::string> tokens;
+		const uint32_t bits = uint32_t(clip);
+		for (int i = 0; i < 30 && (bits >> (i + 1)); ++i) tokens.push_back((bits >> (i + 1)) & 1 ? "1" : "0");
+		if (tokens.empty()) tokens.push_back("0");
+		line("door_dir", tokens);
+		break;
+	}
+	default: return;
+	}
+	const AliasCover held = alias_cover(item, step);
+	cover.death |= held.death;
+	cover.clip |= held.clip;
+	cover.door_type = cover.door_type || held.door_type;
 }
 
 } // namespace opennova::def

@@ -11,12 +11,13 @@
 namespace opennova::def {
 namespace {
 
-// The keys a line's first token names its property by, any case: each property's own key, then the
-// aliases the parsers read into a property's members (the squib, door and part keys sharing the death
-// and clip words [orig: ItemDef_ParseProperty @ 0x49EB00, the squib arms @0x49F06F, num_doors
-// @0x49F766, rotor_parts @0x49EF5D]; particletesttime the nameless dawn timing; animcal the anim map
-// animadm fills [orig: WeaponDefs_ParseLineCallback @ 0x543D77]; an action's delay its delayend [orig:
-// ActionDef_ParseScriptLine @0x402B2C]) and the keys that open a record's rows and blocks.
+// The keys a line's first token names its property by, any case: each property's own key; the squib,
+// door and part keys sharing the death, door and clip words, each its own step (def.h) [orig:
+// ItemDef_ParseProperty @ 0x49EB00, the squib arms @0x49F06F, num_doors @0x49F766, rotor_parts
+// @0x49EF5D]; the aliases the parsers read into a property's members (particletesttime the nameless
+// dawn timing; animcal the anim map animadm fills [orig: WeaponDefs_ParseLineCallback @ 0x543D77]; an
+// action's delay its delayend [orig: ActionDef_ParseScriptLine @0x402B2C]); and the keys that open a
+// record's rows and blocks.
 struct Alias {
 	DefRecordKind kind;
 	const char *key;
@@ -24,15 +25,16 @@ struct Alias {
 	uint8_t step;
 };
 const Alias kAliases[] = {
-	{DefRecordKind::Item, "sqb_rate", "deathtime", 0},
-	{DefRecordKind::Item, "num_doors", "deathtime", 0},
-	{DefRecordKind::Item, "first_door", "deathtime", 0},
-	{DefRecordKind::Item, "first_subobject", "deathtime", 0},
-	{DefRecordKind::Item, "rotor_parts", "deathtime", 0},
-	{DefRecordKind::Item, "sqb_error", "door_type", 0},
-	{DefRecordKind::Item, "sqb_distance", "clipsize", 0},
-	{DefRecordKind::Item, "door_dir", "clipsize", 0},
-	{DefRecordKind::Item, "aux_parts", "clipsize", 0},
+	// The names sharing the death, door and clip words, each a step of its own (def.h).
+	{DefRecordKind::Item, "sqb_rate", "", DEF_LINE_ORDER_SQB_RATE},
+	{DefRecordKind::Item, "num_doors", "", DEF_LINE_ORDER_NUM_DOORS},
+	{DefRecordKind::Item, "first_door", "", DEF_LINE_ORDER_FIRST_DOOR},
+	{DefRecordKind::Item, "first_subobject", "", DEF_LINE_ORDER_FIRST_SUBOBJECT},
+	{DefRecordKind::Item, "rotor_parts", "", DEF_LINE_ORDER_ROTOR_PARTS},
+	{DefRecordKind::Item, "aux_parts", "", DEF_LINE_ORDER_AUX_PARTS},
+	{DefRecordKind::Item, "sqb_error", "", DEF_LINE_ORDER_SQB_ERROR},
+	{DefRecordKind::Item, "sqb_distance", "", DEF_LINE_ORDER_SQB_DISTANCE},
+	{DefRecordKind::Item, "door_dir", "", DEF_LINE_ORDER_DOOR_DIR},
 	{DefRecordKind::Item, "particletesttime", "dawnshot", 0},
 	{DefRecordKind::Item, "addeweap", "", DEF_LINE_ORDER_ROWS},
 	{DefRecordKind::Item, "addeweapg", "", DEF_LINE_ORDER_ROWS},
@@ -56,7 +58,7 @@ const std::unordered_map<std::string, uint8_t> &steps_of(DefRecordKind kind) {
 		std::array<std::unordered_map<std::string, uint8_t>, kDefRecordKindCount> out;
 		for (size_t k = 0; k < kDefRecordKindCount; ++k) {
 			const std::vector<DefProperty> &properties = def_properties(DefRecordKind(k));
-			for (size_t i = 0; i < properties.size() && i < DEF_LINE_ORDER_ROWS; ++i)
+			for (size_t i = 0; i < properties.size() && i < DEF_LINE_ORDER_SQB_RATE; ++i)
 				if (!properties[i].key.empty())
 					out[k].emplace(lower(properties[i].key.data(), properties[i].key.size()), uint8_t(i));
 		}

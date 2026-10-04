@@ -829,6 +829,38 @@ int kept_layout() {
 	def_free_items(&back);
 	def_free_items(&file);
 
+	// The names sharing the death, door and clip words, each written under the name the file gave it from
+	// the words as they stand (a helicopter's deathtime, whose every byte its rotor_parts and aux_parts set
+	// after it, left out: the game keeps nothing of it); deathtime in whole seconds; a real in the form a
+	// person writes; a line at the default kept; every debris slot up to the last, in the files' two digits;
+	// no attrib line for the Door a door line raises.
+	const char *shared =
+	        "begin \"Heli\"\n\tid 100200\n\ttype vehicle\n\tdeathtime 5\n\tscore 0\n\trotor_parts 1 2 3 4\n\taux_parts 5 6 7 8\n"
+	        "\tshadow shadow8.tga 4.5 8.9 0.0 -0.14\n\thusk_sub_part_types 01_HULL 02_WHEEL 03_CHUNK_M\nend\n"
+	        "begin \"Door\"\n\tid 100201\n\ttype building\n\tnum_doors 2\n\tfirst_door 3\n\topen_rate 2\nend\n"
+	        "begin \"Squib\"\n\tid 100202\n\ttype effect\n\tsqb_rate 6\n\tsqb_distance 1.25\n\tsqb_error 20\nend\n"
+	        "begin \"Man\"\n\tid 100203\n\ttype person\n\tdeathtime 5\nend\n";
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(shared), std::strlen(shared), &file, nullptr);
+	const DefWriteResult names = def_write_items(file);
+	DefItemsFile again{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(names.text.data()), names.text.size(), &again, nullptr);
+	bool same = again.count == file.count;
+	for (size_t i = 0; same && i < file.count; ++i)
+		same = again.entries[i].deathtime_ticks == file.entries[i].deathtime_ticks && again.entries[i].clipsize == file.entries[i].clipsize &&
+		       again.entries[i].door_type == file.entries[i].door_type && again.entries[i].attrib == file.entries[i].attrib &&
+		       again.entries[i].door_open_rate_q16 == file.entries[i].door_open_rate_q16;
+	for (const char *line : {"\tdeathtime 5\r\n", "\tscore 0\r\n", "\trotor_parts 1 2 3 4\r\n", "\taux_parts 5 6 7 8\r\n",
+	                         "\tshadow shadow8.tga 4.5 8.9 0 -0.14\r\n", "\thusk_sub_part_types 01_HULL 02_WHEEL 03_CHUNK_M\r\n",
+	                         "\tnum_doors 2\r\n\tfirst_door 3\r\n\topen_rate 2\r\n", "\tsqb_rate 6\r\n\tsqb_distance 1.25\r\n\tsqb_error 20\r\n"})
+		same = same && names.text.find(line) != std::string::npos;
+	if (!names.ok() || !same || names.text.find("clipsize") != std::string::npos || names.text.find("attrib") != std::string::npos ||
+	    names.text.find("deathtime") != names.text.rfind("deathtime")) {
+		std::printf("FAIL kept layout: the shared words' names\n%s\n", names.text.c_str());
+		++failures;
+	}
+	def_free_items(&again);
+	def_free_items(&file);
+
 	// A weapon's lines, its sights and its actions where they stood; its actions a level in, their lines
 	// a level further, by the file's own indentation; the carry limits at the top level.
 	const char *weapons =
@@ -934,8 +966,8 @@ int main(int argc, char **argv) {
 	// Past 32 bits, the game's atol saturates (2147483647, or -2147483648 when negative) on
 	// every platform [orig: strtoxl @ 0x76b26f..0x76b295], and the bounds and the low byte apply
 	// to that: category 4294967297 is 2147483647, read as 0 (not 1); rank -4294967297 as 0;
-	// unit_type 2147483651 is byte 255 (not 3), -2147483649 byte 0 (written as no line, which the
-	// game reads as 0 too, as a category of 0 is).
+	// unit_type 2147483651 is byte 255 (not 3), -2147483649 byte 0 (written as `unit_type 0`: the
+	// file has the line, which a save keeps at the default as at any value).
 	{
 		const Outcome huge = run("weapon.def", "weapon \"WPN_HUGE\"\ncategory 4294967297\nrank -4294967297\nend\n");
 		const Outcome high = run("items.def", "begin \"High\"\nid 100001\nunit_type 2147483651\nend\n");
@@ -952,7 +984,7 @@ int main(int argc, char **argv) {
 		    huge.written.text.find("category 1\r\n") != std::string::npos ||
 		    high.blocking() || !reads_as(high, "unit_type", "255") ||
 		    high.written.text.find("unit_type 255\r\n") == std::string::npos || low.blocking() ||
-		    !reads_as(low, "unit_type", "0") || low.written.text.find("unit_type") != std::string::npos) {
+		    !reads_as(low, "unit_type", "0") || low.written.text.find("unit_type 0\r\n") == std::string::npos) {
 			std::printf("FAIL numbers past 32 bits:\n%s\n%s\n%s\n", huge.written.text.c_str(), high.written.text.c_str(),
 			            low.written.text.c_str());
 			++failures;

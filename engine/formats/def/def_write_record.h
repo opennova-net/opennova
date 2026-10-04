@@ -40,6 +40,17 @@ struct DefRecordWriter {
 	bool property_args(DefRecordKind kind, const DefProperty &property, const void *value,
 	                   const std::vector<DefValue> &values, const std::string &name, std::string &key,
 	                   std::vector<std::string> &args);
+	// The bytes of an item's death and clip words (a bit a byte) and whether its door type the alias
+	// lines put down as the words stand: the table's own lines for those words are left out where these
+	// hold every byte the words have.
+	struct AliasCover {
+		uint8_t death = 0;
+		uint8_t clip = 0;
+		bool door_type = false;
+	};
+	// An item's line under one of the names sharing those words (def.h's DEF_LINE_ORDER_SQB_RATE..
+	// DEF_LINE_ORDER_DOOR_DIR), written from the words as they stand, and the bytes it holds.
+	void alias_line(const DefItemDef &item, uint8_t step, AliasCover &cover);
 };
 
 } // namespace opennova::def

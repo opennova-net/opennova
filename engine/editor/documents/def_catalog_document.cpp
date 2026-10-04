@@ -139,8 +139,10 @@ std::string DefCatalogDocument::save_words() const {
 	// What the writer keeps of the file it read (def.h's DefLineOrder and DefLayout) and what it does
 	// not: it writes from the records, never the file's text (ADR 0003, itemdef-re.md D-ITEMDEF-4).
 	const size_t ignored = ignored_lines();
-	std::string words = "Saving keeps each record's lines in the order the file has them and the file's indentation; "
-	                    "the spacing inside a line, the numbers' form, comments and blank lines are the editor's";
+	std::string words = "Saving keeps each record's lines, in the order the file has them under the names it gives them, "
+	                    "and the file's indentation; the spacing inside a line, how a number or a word is spelled (0.0 as 0, "
+	                    "AIData as aidata), comments and blank lines are the editor's";
+	if (kind() == AssetKind::ItemDefs) words += ", an item's attributes go on one attrib: line";
 	if (ignored)
 		words += ", and " + std::to_string(ignored) + (ignored == 1 ? " thing" : " things") +
 		         " in the file the game skips are left out (Problems lists each)";
