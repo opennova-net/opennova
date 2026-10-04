@@ -11,6 +11,8 @@ namespace {
 
 // Past this many picture pixels a texel, the texel under the pointer is ringed.
 constexpr float kRingFromScale = 6.0f;
+// A cell edge's colour: a mid yellow that reads over dark and light texels alike.
+constexpr uint32_t kCellRgb = 0xE0C040;
 
 void set_camera(const TextureViewport &viewport, const TextureCamera &camera, CanvasRequests &out) {
 	out.request(request::set_viewport(viewport.path(), texture_camera_change(camera)));
@@ -85,9 +87,28 @@ void TextureCanvas::end_frame(CanvasRequests &out) {
 
 OverlayList TextureCanvas::shapes(const ViewportContext &, const CanvasInput &in) const {
 	OverlayList list;
-	if (!viewport_ || !viewport_->image() || !in.hovered || gesture_.dragging()) return list;
+	if (!viewport_ || !viewport_->image()) return list;
 	const TextureViewport &viewport = *viewport_;
 	const TexturePlacement at = viewport.placement(in.width, in.height);
+	// The cells the game cuts the texture in, for the use shown (a tile atlas's 64 texels), each edge a
+	// line over the picture while a cell is at least a few pixels wide.
+	const uint32_t cells = viewport.shown_use().cells;
+	if (cells > 0 && at.scale * float(cells) >= 4.0f) {
+		const float w = float(viewport.image()->width()), h = float(viewport.image()->height());
+		for (uint32_t x = cells; float(x) < w; x += cells) {
+			CanvasPoint from, to;
+			at.pixel_of(float(x), 0.0f, in.width, in.height, from.x, from.y);
+			at.pixel_of(float(x), h, in.width, in.height, to.x, to.y);
+			list.line(from, to, kCellRgb, 1.0f);
+		}
+		for (uint32_t y = cells; float(y) < h; y += cells) {
+			CanvasPoint from, to;
+			at.pixel_of(0.0f, float(y), in.width, in.height, from.x, from.y);
+			at.pixel_of(w, float(y), in.width, in.height, to.x, to.y);
+			list.line(from, to, kCellRgb, 1.0f);
+		}
+	}
+	if (!in.hovered || gesture_.dragging()) return list;
 	const size_t level = viewport.shown_level();
 	const TextureImage &image = *viewport.image();
 	if (level >= image.levels.size()) return list;

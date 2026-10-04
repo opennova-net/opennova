@@ -7,7 +7,7 @@ extends GutTest
 ## the game's reader takes them, whatever its descriptor says); the viewport's state reaches the shader
 ## at the next pump (the channels, the camera's scale and middle, the picture's size; the mip level of a
 ## DDS chain bound); opened as a document, the same device keeps drawing it; another file selected lets
-## it go.
+## it go; shown as one of its uses, the GPU texture holds what the use's loader makes of it.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -207,3 +207,44 @@ func test_a_dds_chain_binds_the_level_shown() -> void:
 	assert_true(_seam.done({"kind": "select_file", "path": "notes.txt"}))
 	_app.pump()
 	assert_true(_viewport("textures/metal.dds").has("error"), "no viewport kept once another file is selected")
+
+## S18: the texture as the game draws it for one of its uses: an item's HUD image, the HUD's alpha alone
+## (an A8, black where it shows), in the GPU texture once as_used names the use; the file again at -1.
+func test_a_texture_draws_as_a_use() -> void:
+	if _app == null:
+		return
+	var root := _new_project()
+	_write(root.path_join("textures/brick.tga"), _tga(0))
+	_write(root.path_join("defs/items.def"),
+			"begin \"Brick\"\nid 100300\ntype building\nhud_image brick.tga\nend\n".to_utf8_buffer())
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.done({"kind": "select_file", "path": "textures/brick.tga"}))
+	var state := await _await_ready("textures/brick.tga")
+	var builds := int(state.get("builds", 0))
+	assert_true(_seam.done({"kind": "set_viewport", "path": "textures/brick.tga",
+			"viewport": {"kind": "texture", "options": {"as_used": 0}}}))
+	for _frame in 600:
+		if int(state.get("builds", 0)) > builds:
+			break
+		_app.pump()
+		await get_tree().process_frame
+		state = _viewport("textures/brick.tga")
+	var as_used: Dictionary = state.get("body", {}).get("as_used", {}) if state.get("body", {}).get("as_used") is Dictionary else {}
+	assert_eq(String(as_used.get("transform", "")), "alpha_only", str(state.get("body", {})))
+	var material := _material("textures/brick.tga")
+	assert_not_null(material)
+	if material == null:
+		return
+	var texture := material.get_shader_parameter("level_nearest") as Texture2D
+	assert_eq(texture.get_image().get_pixel(0, 1), Color8(0, 0, 0, 50), "the alpha alone, black")
+	builds = int(state.get("builds", 0))
+	assert_true(_seam.done({"kind": "set_viewport", "path": "textures/brick.tga",
+			"viewport": {"kind": "texture", "options": {"as_used": -1}}}))
+	for _frame in 600:
+		if int(state.get("builds", 0)) > builds:
+			break
+		_app.pump()
+		await get_tree().process_frame
+		state = _viewport("textures/brick.tga")
+	texture = material.get_shader_parameter("level_nearest") as Texture2D
+	assert_eq(texture.get_image().get_pixel(0, 1), Color8(10, 100, 200, 50), "the file as it holds it")

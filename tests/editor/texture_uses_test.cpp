@@ -4,7 +4,8 @@
 // beside the .dds its loader opens (the .tga's uses said not to read it, the .dds's to), a terrain's
 // colour map, a sky's cloud layer, an item's HUD image (alpha only), and a name the game opens itself
 // (the scope's crosshair); the index made once while what it reads stands and again after an edit of a
-// referrer; the texture_uses query.
+// referrer; a texture's viewport showing it as a use draws it (a cut-out's test, the HUD's alpha alone)
+// and as the file again; the texture_uses query.
 #include <cstdio>
 #include <memory>
 #include <sstream>
@@ -16,18 +17,22 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/texture_uses.h>
+#include <editor/preview/texture_viewport.h>
+#include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
+#include <formats/dds/dds.h>
 #include <formats/env/env.h>
 #include <formats/tga/tga.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
@@ -39,6 +44,15 @@ std::vector<uint8_t> tga_bytes() {
 	std::vector<uint8_t> out;
 	std::string error;
 	opennova::tga::tga_write_rgba32(rgba.data(), 2, 2, out, error);
+	return out;
+}
+
+// The same texels as an A8R8G8B8 DDS.
+std::vector<uint8_t> dds_bytes() {
+	const std::vector<uint8_t> rgba(16, 200);
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::dds::dds_write_a8r8g8b8(rgba.data(), 2, 2, out, error);
 	return out;
 }
 
@@ -69,7 +83,8 @@ int test_uses() {
 			import_assets({{scene + "/thing.o3d", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/thing.3di"}));
 	for (const char *name : {"body.tga", "body.dds", "grain.tga", "skin.mdt", "map.tga", "cloud.pcx", "stance.tga", "scopexh.tga"})
-		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name, tga_bytes()));
+		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name,
+		                                     std::string(name).find(".dds") != std::string::npos ? dds_bytes() : tga_bytes()));
 	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
 	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_polydata isle.cpt\n"
 	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n") &&
@@ -139,6 +154,50 @@ int test_uses() {
 		const std::vector<TextureUse> &both = index.uses_of(view, "textures/scopexh.tga");
 		TEST_EXPECT(both.size() == 2 && !both[0].fixed && both[1].fixed);
 	}
+
+	// The texture's picture as a use draws it: the .dds the alpha-tested diffuse loads, its texels cut out
+	// at the material's reference (alpha 200, above 128: kept, opaque); the scope crosshair's alpha alone (an A8,
+	// black where it is opaque);
+	// back to the file as it is.
+	const auto viewport_of = [&](const std::string &path) {
+		return static_cast<const TextureViewport *>(session.viewports().find(path, ViewportKind::Texture));
+	};
+	editor_test::FakeDevices devices;
+	const auto show_as = [&](const std::string &path, int as_used) {
+		TextureViewportOptions options;
+		options.as_used = as_used;
+		editor_test::handle_to_end(session, request::set_viewport(path, texture_options_change(options)));
+		devices.sync(session);
+	};
+	editor_test::handle_to_end(session, request::open_document("textures/body.dds"));
+	devices.sync(session);
+	show_as("textures/body.dds", 0);
+	const TextureViewport *body = viewport_of("textures/body.dds");
+	TEST_EXPECT(body && body->shown_use().index == 0 && body->shown_use().cutout == 128 && body->image() &&
+	            body->image() != body->source() && body->image()->levels[0].rgba[3] == 255 &&
+	            body->source()->levels[0].rgba[3] == 200);
+	editor_test::handle_to_end(session, request::open_document("textures/scopexh.tga"));
+	devices.sync(session);
+	show_as("textures/scopexh.tga", 0);
+	const TextureViewport *scope_view = viewport_of("textures/scopexh.tga");
+	TEST_EXPECT(scope_view && scope_view->shown_use().transform == TextureLoadTransform::AlphaOnly && scope_view->image() &&
+	            scope_view->image()->levels[0].rgba[0] == 0 && scope_view->image()->levels[0].rgba[3] == 200);
+	{
+		JsonValue state_args;
+		std::string state_error;
+		TEST_EXPECT(opennova::io::json_parse("{\"path\":\"textures/scopexh.tga\",\"op\":\"state\"}", state_args, state_error));
+		const JsonValue state = session.query("viewport", state_args, state_error);
+		const JsonValue *body_json = state.get("body");
+		const JsonValue *as_used = body_json ? body_json->get("as_used") : nullptr;
+		TEST_EXPECT(state_error.empty() && as_used && as_used->get_string("transform", "") == "alpha_only" &&
+		            as_used->get_number("index", -1) == 0 && state.get("options") &&
+		            state.get("options")->get_number("as_used", -1) == 0);
+	}
+	show_as("textures/scopexh.tga", -1);
+	TEST_EXPECT(scope_view && scope_view->shown_use().index == -1 && scope_view->image() == scope_view->source());
+	// A use past the texture's uses shows the file.
+	show_as("textures/scopexh.tga", 9);
+	TEST_EXPECT(scope_view && scope_view->shown_use().index == -1 && scope_view->image() == scope_view->source());
 
 	// The wire.
 	JsonValue args;

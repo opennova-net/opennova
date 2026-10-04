@@ -6,6 +6,9 @@
 #include <string>
 
 #include <editor/documents/texture_image.h>
+#include <editor/documents/texture_load_rules.h>
+#include <editor/documents/texture_roles.h>
+#include <editor/graph/texture_uses.h>
 #include <editor/preview/viewport_model.h>
 
 namespace opennova::editor {
@@ -28,16 +31,42 @@ enum class TextureChannels : uint8_t { Rgb, Red, Green, Blue, Alpha, Rgba };
 const char *texture_channels_token(TextureChannels channels);
 bool texture_channels_from_token(const std::string &token, TextureChannels &out);
 
-// How a texture viewport draws its texture: the channels, and the mip level (0 the texture itself; a
-// level past the file's last shows the last).
+// How a texture viewport draws its texture: the channels, the mip level (0 the texture itself; a level
+// past the file's last shows the last), and the use it shows the texture as, by its index among the
+// texture's uses (texture_uses; -1 the file as its reader decodes it).
 struct TextureViewportOptions {
 	TextureChannels channels = TextureChannels::Rgba;
 	int level = 0;
+	int as_used = -1;
 	bool operator==(const TextureViewportOptions &other) const {
-		return channels == other.channels && level == other.level;
+		return channels == other.channels && level == other.level && as_used == other.as_used;
 	}
 	bool operator!=(const TextureViewportOptions &other) const { return !(*this == other); }
 };
+
+// A use as a texture viewport shows it (ADR 0046 S18): its index among the texture's uses (-1 none: the
+// file itself) and words, what its loader makes of the texels, a cut-out material's test (its reference,
+// -1 none; `inverted` keeps a texel at or below it), and the cells the game cuts it in (a tile atlas's
+// 64 texels; 0 none), which the picture draws over it.
+struct TextureShownUse {
+	int index = -1;
+	std::string words;
+	TextureRoleId role = TextureRoleId::kCount;
+	TextureLoadTransform transform = TextureLoadTransform::None;
+	int cutout = -1;
+	bool inverted = false;
+	uint32_t cells = 0;
+	bool operator==(const TextureShownUse &other) const {
+		return index == other.index && words == other.words && role == other.role && transform == other.transform &&
+		       cutout == other.cutout && inverted == other.inverted && cells == other.cells;
+	}
+};
+// What a viewport shows of the use `use`, the texture's use at `index`.
+TextureShownUse texture_shown_use(const TextureUse &use, int index);
+// The texels a use shows of `image`: its loader's transform, then its cut-out (alpha 255 where the
+// material's test keeps a texel, 0 where it discards it); `image` itself where the use changes nothing.
+std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const TextureImage> &image,
+                                                    const TextureShownUse &use);
 
 // Its camera: fitted to the picture (the whole texture, as large as the picture holds it), or a scale
 // (picture pixels a texel of the first level) with the texel at the picture's middle (x, y, in the
@@ -83,8 +112,8 @@ std::string texture_options_change(const TextureViewportOptions &options);
 // A texture's viewport (ADR 0046 S18; ViewportKind::Texture, the Main role of the texture type, which
 // the Preview window shows too for a texture Files selects, open or not): the texture as the game
 // reads it (texture_image.h), at a zoom (fitted, or a scale about a middle texel, which the wheel steps
-// about the pointer and a drag pans: its camera), through one or all of its channels, at a mip level
-// (its options); each a SetViewport. It reads the texture document open at its path, else the project's
+// about the pointer and a drag pans: its camera), through one or all of its channels, at a mip level, as
+// the file or as one of its uses draws it (its options); each a SetViewport. It reads the texture document open at its path, else the project's
 // file there (read again when the scan says its size or last write moved), so a file Files selects shows
 // before it is opened. A Rebuild hands the device another texture's texels; the camera and the options
 // it applies every pump. A point of the picture names the texel under it (hit: its column and row in the
@@ -95,10 +124,13 @@ public:
 	static std::unique_ptr<ViewportModel> make(const std::string &path);
 
 	TextureViewStatus view_status() const { return reason_; }
-	// The texture shown (null unless one is read), how many times a texture was read for it (an open
-	// document's image taken, or a closed file read and decoded), and whether it came from a file
-	// rather than an open document.
+	// The texture shown (null unless one is read: the file as its reader decodes it, or as the use the
+	// options name shows it), the file as its reader decodes it, the use shown, how many times a texture
+	// was read for it (an open document's image taken, or a closed file read and decoded), and whether it
+	// came from a file rather than an open document.
 	const std::shared_ptr<const TextureImage> &image() const { return image_; }
+	const std::shared_ptr<const TextureImage> &source() const { return source_; }
+	const TextureShownUse &shown_use() const { return use_; }
 	uint64_t reads() const { return reads_; }
 	bool from_file() const { return from_file_; }
 	const TextureViewportOptions &options() const { return options_; }
@@ -150,6 +182,8 @@ private:
 	TextureViewportOptions options_;
 	TextureCamera camera_;
 	std::shared_ptr<const TextureImage> image_;
+	std::shared_ptr<const TextureImage> source_;
+	TextureShownUse use_;
 	uint64_t reads_ = 0;
 	bool from_file_ = false;
 	// The closed file last read: its size and last write as the scan listed them, and what it held.

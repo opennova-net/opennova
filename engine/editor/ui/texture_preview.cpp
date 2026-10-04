@@ -9,6 +9,7 @@
 #include <editor/preview/texture_thumbnail_images.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/project/project_files.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
@@ -196,7 +197,17 @@ bool file_tooltip(Workspace &workspace, const std::string &file, const std::stri
 	const SessionView &view = workspace.view();
 	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(file) : nullptr;
 	if (!entry || entry->kind != AssetKind::Texture) return false;
-	tooltip(workspace, entry->relative_path, TextureLoadTransform::None, lead);
+	if (!ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) return true;
+	// What uses it (S18: the session's texture uses), its first use in words and how many more.
+	std::string words = lead;
+	if (view.documents.texture_uses) {
+		const std::vector<TextureUse> &uses = view.documents.texture_uses->uses_of(view, entry->relative_path);
+		const std::string used = uses.empty() ? std::string("Nothing in the project uses it.")
+		                                      : "Used as " + uses.front().words +
+		                                                (uses.size() > 1 ? " and " + std::to_string(uses.size() - 1) + " more" : "") + ".";
+		words += (words.empty() ? "" : "\n") + used;
+	}
+	tooltip(workspace, entry->relative_path, TextureLoadTransform::None, words);
 	return true;
 }
 

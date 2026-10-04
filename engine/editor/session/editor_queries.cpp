@@ -387,6 +387,8 @@ JsonValue answer_files(const QueryContext &context, const QueryArgs &args, std::
 		file.set("name", json_string(entry.logical_name));
 		file.set("kind", json_string(asset_kind_token(entry.kind)));
 		file.set("editable", JsonValue::make_bool(is_editable_kind(entry.kind)));
+		// The import that makes it (S18).
+		if (!entry.imported_from.empty()) file.set("imported_from", json_string(entry.imported_from));
 		files.push(std::move(file));
 	}
 	out.set("files", std::move(files));
@@ -1347,7 +1349,8 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::Files, "files", answer_files, kPageParams, concern_set({ C::Files }),
 			"A page of the files the project's scan lists, in its order: each file's path, name, "
-			"kind (its asset kind's token) and editable, whether the editor opens it.")
+			"kind (its asset kind's token) and editable, whether the editor opens it; imported_from, the "
+			"source of the import that makes it (S18).")
 			.pages("files")
 			.row,
 	Query(K::Documents, "documents", answer_documents, kPageParams, kDocumentReads,

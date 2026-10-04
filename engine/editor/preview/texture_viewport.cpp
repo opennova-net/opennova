@@ -10,6 +10,7 @@
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
@@ -40,13 +41,14 @@ JsonValue options_to_json(const TextureViewportOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	out.set("channels", json_string(texture_channels_token(options.channels)));
 	out.set("level", json_number(options.level));
+	out.set("as_used", json_number(options.as_used));
 	return out;
 }
 
-// A SetViewport's options: {channels, level}, each optional.
+// A SetViewport's options: {channels, level, as_used}, each optional.
 bool read_options(const JsonValue &json, TextureViewportOptions &held, std::string &error) {
 	if (!json.is_object()) {
-		error = "options is an object {channels, level}.";
+		error = "options is an object {channels, level, as_used}.";
 		return false;
 	}
 	TextureViewportOptions options = held;
@@ -63,8 +65,15 @@ bool read_options(const JsonValue &json, TextureViewportOptions &held, std::stri
 				return false;
 			}
 			options.level = int(member.value.number);
+		} else if (member.key == "as_used") {
+			if (!member.value.is_number() || member.value.number < -1 || member.value.number > 65535 ||
+			    std::floor(member.value.number) != member.value.number) {
+				error = "options.as_used is -1 (the file itself) or a use's index among the texture's uses.";
+				return false;
+			}
+			options.as_used = int(member.value.number);
 		} else {
-			error = "Unknown options member \"" + member.key + "\" (it takes channels, level).";
+			error = "Unknown options member \"" + member.key + "\" (it takes channels, level, as_used).";
 			return false;
 		}
 	}
@@ -115,6 +124,38 @@ bool read_camera(const JsonValue &json, TextureCamera &held, std::string &error)
 }
 
 } // namespace
+
+TextureShownUse texture_shown_use(const TextureUse &use, int index) {
+	TextureShownUse out;
+	out.index = index;
+	out.words = use.words;
+	out.role = use.role;
+	out.transform = use.load.transform;
+	// A material that cuts out by alpha keeps a texel above its reference, or at or below it inverted
+	// [orig: CRenderBatchQueue_FlushBatches @ 0x5DA3A9..0x5DA401].
+	if ((use.role == TextureRoleId::ModelDiffuse || use.role == TextureRoleId::ModelFlipFrame) && use.context.alpha_test()) {
+		out.cutout = use.context.alpha_ref;
+		out.inverted = use.context.alpha_test_inverted();
+	}
+	// A tile atlas is cut in 64-texel cells [orig: Terrain_LoadTileSetAtlas @ 0x604B7C].
+	if (use.role == TextureRoleId::TerrainTileAtlas) out.cells = 64;
+	return out;
+}
+
+std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const TextureImage> &image,
+                                                    const TextureShownUse &use) {
+	if (!image) return image;
+	std::shared_ptr<const TextureImage> made =
+	        use.transform == TextureLoadTransform::None ? image : apply_load_transform(*image, use.transform);
+	if (use.cutout < 0 || !made) return made;
+	auto out = std::make_shared<TextureImage>(*made);
+	for (TextureLevel &level : out->levels)
+		for (size_t i = 3; i < level.rgba.size(); i += 4) {
+			const bool kept = use.inverted ? level.rgba[i] <= use.cutout : level.rgba[i] > use.cutout;
+			level.rgba[i] = kept ? 255 : 0;
+		}
+	return out;
+}
 
 const char *texture_view_status_token(TextureViewStatus status) {
 	switch (status) {
@@ -274,15 +315,26 @@ ViewportAction TextureViewport::follow_(const ViewportInput &input, PreviewClock
 	if (!image) {
 		const bool had = image_ != nullptr;
 		image_.reset();
+		source_.reset();
+		use_ = TextureShownUse();
 		reason_ = TextureViewStatus::NoTexture;
 		detail_.clear();
 		from_file_ = false;
 		shown_none();
 		return had ? ViewportAction::Clear : ViewportAction::Keep;
 	}
-	const bool anew = image != image_;
-	if (anew && input.document) ++reads_;
-	image_ = image;
+	// The use the options name, as the texture's uses stand (none past their count).
+	TextureShownUse use;
+	if (options_.as_used >= 0 && input.view.documents.texture_uses) {
+		const std::vector<TextureUse> &uses = input.view.documents.texture_uses->uses_of(input.view, path());
+		if (size_t(options_.as_used) < uses.size()) use = texture_shown_use(uses[size_t(options_.as_used)], options_.as_used);
+	}
+	const bool read_anew = image != source_;
+	const bool anew = read_anew || !(use == use_);
+	if (read_anew && input.document) ++reads_;
+	source_ = image;
+	use_ = use;
+	if (anew) image_ = use.index >= 0 && image->decoded ? texture_as_used(image, use) : image;
 	from_file_ = from_file;
 	if (!image->loads) {
 		reason_ = TextureViewStatus::Unloadable;
@@ -375,6 +427,19 @@ io::JsonValue TextureViewport::camera_json() const {
 io::JsonValue TextureViewport::body_json(const ViewportInput &) const {
 	JsonValue out = image_ ? texture_image_json(*image_) : JsonValue::make_object();
 	out.set("from_file", JsonValue::make_bool(from_file_));
+	// The use shown: its index and words, what its loader makes of the texels, the cut-out and the cells.
+	JsonValue as_used = JsonValue::make_null();
+	if (use_.index >= 0) {
+		as_used = JsonValue::make_object();
+		as_used.set("index", json_number(use_.index));
+		as_used.set("words", json_string(use_.words));
+		as_used.set("role", json_string(use_.role == TextureRoleId::kCount ? "" : texture_role_row(use_.role).token));
+		as_used.set("transform", json_string(texture_load_transform_token(use_.transform)));
+		as_used.set("cutout", json_number(use_.cutout));
+		as_used.set("inverted", JsonValue::make_bool(use_.inverted));
+		as_used.set("cells", json_number(double(use_.cells)));
+	}
+	out.set("as_used", std::move(as_used));
 	out.set("level_shown", json_number(double(shown_level())));
 	const ViewportState at = size();
 	const TexturePlacement placed = placement(at.width, at.height);

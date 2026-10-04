@@ -9,7 +9,10 @@
 
 #include <editor/preview/texture_viewport.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/texture_use_index.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
@@ -97,6 +100,36 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		}
 		ui_kit::tooltip("The mip level shown, at the texture's size: the game samples a smaller level as the "
 		                "texture shrinks on screen.");
+	}
+	// What it is shown as: the file, or one of its uses as the game draws it (what the use's loader makes
+	// of its texels, a cut-out's test, a tile atlas's cells).
+	static const std::vector<TextureUse> kNone;
+	const SessionView &view = workspace.view();
+	const std::vector<TextureUse> &uses =
+	        view.documents.texture_uses ? view.documents.texture_uses->uses_of(view, model.path()) : kNone;
+	if (!uses.empty()) {
+		const char *file_words = "As the file holds it";
+		const float as_width = std::min(combo_width(ui_kit::text_width("As the game draws it for 00 uses")),
+		                                std::max(ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 10.0f));
+		const TextureShownUse &shown = model.shown_use();
+		const std::string label = shown.index >= 0 ? "As: " + shown.words : std::string(file_words);
+		row.next(ui_kit::field_width(as_width, "##as_used"));
+		ImGui::SetNextItemWidth(as_width);
+		if (ImGui::BeginCombo("##as_used", ui_kit::fit(label, as_width - ImGui::GetFrameHeight()).c_str())) {
+			if (ImGui::Selectable(file_words, options.as_used < 0)) options.as_used = -1;
+			ui_kit::tooltip("The texels as the file's reader decodes them.");
+			for (size_t i = 0; i < uses.size(); ++i) {
+				const std::string item = uses[i].words + "###use" + std::to_string(i);
+				if (ImGui::Selectable(item.c_str(), options.as_used == int(i))) options.as_used = int(i);
+				ui_kit::tooltip("As the game draws it for this use: " + uses[i].words);
+			}
+			ImGui::EndCombo();
+		}
+		ui_kit::tooltip(shown.index >= 0 ? "Shows the texture as the game draws it for " + shown.words +
+		                                           (shown.cutout >= 0 ? ": what its cut-out keeps opaque, what it discards clear" : "") +
+		                                           (shown.cells > 0 ? ": the cells the game cuts it in drawn over it" : "") + "."
+		                                 : std::string("Shows the texture as the file holds it; pick a use to see it as the game "
+		                                               "draws it there."));
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), texture_options_change(options)));
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y));
