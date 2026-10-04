@@ -37,6 +37,11 @@ public:
 		return devtools::InitialDockPlacement::Bottom;
 	}
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
+	// With no project open it stands aside for the welcome page (aside_for_welcome).
+	bool stands_aside() const override;
+	void show_anyway() override { welcome_asked_ = true; }
+	// Coming back (a project opened over the welcome page) it leaves the keyboard where it is.
+	bool focus_on_appearing() const override { return false; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
 	// How many findings the window has asked the fixes of while what they read stands (the
@@ -69,6 +74,7 @@ private:
 	void set_blocking(bool on);
 
 	Workspace &workspace_;
+	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	ProblemsList list_;
 	char text_[128]{}; // the filter box, the query's text
 	// The query and the filter box's text as they were when "Blocks the build" was turned on.

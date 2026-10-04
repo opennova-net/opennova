@@ -161,6 +161,64 @@ func test_new_project_fills_builds_and_plays() -> void:
 	assert_eq(_seam.get_required_missing(), 0)
 
 
+## A mono 16-bit RIFF wave of `seconds` at 22050 Hz, a tone.
+func _wave_bytes(seconds: float) -> PackedByteArray:
+	var samples := int(22050 * seconds)
+	var data := PackedByteArray()
+	data.resize(samples * 2)
+	for i in samples:
+		data.encode_s16(i * 2, int(sin(i * 0.1) * 8000.0))
+	var head := PackedByteArray()
+	head.resize(44)
+	head.encode_u32(0, 0x46464952) # RIFF
+	head.encode_u32(4, 36 + data.size())
+	head.encode_u32(8, 0x45564157) # WAVE
+	head.encode_u32(12, 0x20746d66) # "fmt "
+	head.encode_u32(16, 16)
+	head.encode_u16(20, 1) # PCM
+	head.encode_u16(22, 1) # mono
+	head.encode_u32(24, 22050)
+	head.encode_u32(28, 44100)
+	head.encode_u16(32, 2)
+	head.encode_u16(34, 16)
+	head.encode_u32(36, 0x61746164) # data
+	head.encode_u32(40, data.size())
+	head.append_array(data)
+	return head
+
+
+## The UX round's project lane (its review's test gap): play_sound, served by the Shell, plays a project's
+## wave once its worker has decoded it as the game decodes it; the project closing stops it; a name the
+## project has no wave of plays nothing.
+func test_play_sound_plays_and_stops() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor sound %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("Sounds")
+	assert_true(_seam.new_project(root, "Sounds"))
+	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("sounds")), OK)
+	var file := FileAccess.open(root.path_join("sounds/beep.wav"), FileAccess.WRITE)
+	file.store_buffer(_wave_bytes(3.0))
+	file.close()
+	assert_true(_run_operation({"kind": "rescan"}))
+	var answer := _request({"kind": "play_sound", "path": "beep.wav"})
+	assert_true(bool(answer.get("ok", false)) and not bool(answer.get("served", true)), str(answer))
+	var deadline := Time.get_ticks_msec() + 5000
+	while String(_app.get_sound_state()) != "playing" and Time.get_ticks_msec() < deadline:
+		OS.delay_msec(20)
+		_app.pump()
+	assert_eq(String(_app.get_sound_state()), "playing")
+	assert_eq(String(_app.get_sound_path()), "sounds/beep.wav")
+	_seam.close_project()
+	_app.pump()
+	assert_eq(String(_app.get_sound_state()), "idle", "the project closed: the sound stopped")
+	assert_true(_seam.open_project(root))
+	_request({"kind": "play_sound", "path": "nothing.wav"})
+	_app.pump()
+	assert_eq(String(_app.get_sound_state()), "idle", "no wave of that name: nothing plays")
+
+
 ## A switch that fails leaves the open project open, and new_project and open_project answer
 ## whether the project asked for is the one open afterwards (S13 A1: a new project's folder is
 ## checked, and another project read, before the open one closes).

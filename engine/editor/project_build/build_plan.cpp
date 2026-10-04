@@ -136,13 +136,17 @@ void check_expansion_table(const ProjectPaths &paths, const AssetScan &scan, con
 
 std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::string &expansion) {
 	std::vector<Diagnostic> out;
-	BuildTarget target;
-	target.expansion = expansion;
 	for (const AssetEntry &asset : scan.entries) {
 		Diagnostic own;
-		if (own_finding(asset, target, own)) out.push_back(std::move(own));
+		if (plan_file_finding(asset, expansion, own)) out.push_back(std::move(own));
 	}
 	return out;
+}
+
+bool plan_file_finding(const AssetEntry &asset, const std::string &expansion, Diagnostic &out) {
+	BuildTarget target;
+	target.expansion = expansion;
+	return own_finding(asset, target, out);
 }
 
 bool lists_as_mission(const std::string &name) {
