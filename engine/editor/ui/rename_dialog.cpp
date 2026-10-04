@@ -15,6 +15,7 @@ namespace opennova::editor {
 namespace {
 
 constexpr const char *kTitle = "Rename everywhere";
+constexpr const char *kBackTitle = "Rename back";
 
 // A site of a rename, on one line.
 std::string site_line(const RenameSite &site) {
@@ -35,8 +36,14 @@ void RenameDialog::draw(Workspace &workspace) {
 	// its own place in Files), while the view still holds that preview.
 	for (const ViewEvent &ask : events_.take()) {
 		const DialogsView::RenamePreview &preview = view.dialogs.rename_preview;
-		if (ask.kind != ViewEventKind::AskRename || ask.tag != preview.serial || !preview.symbol)
+		if (ask.kind != ViewEventKind::AskRename || ask.tag != preview.serial) continue;
+		// The last rename's way back: its plan, shown before it commits.
+		if (preview.back) {
+			open_back_ = true;
+			back_serial_ = preview.serial;
 			continue;
+		}
+		if (!preview.symbol) continue;
 		open_ = true;
 		path_ = preview.path;
 		locator_ = preview.locator;
@@ -52,6 +59,7 @@ void RenameDialog::draw(Workspace &workspace) {
 		open_ = false;
 		ImGui::OpenPopup(kTitle);
 	}
+	draw_back(workspace);
 	if (!ImGui::BeginPopupModal(kTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	if (!view.project.open) {
 		ImGui::CloseCurrentPopup();
@@ -112,6 +120,59 @@ void RenameDialog::draw(Workspace &workspace) {
 		EditorRequest request = preview(path_, locator_, field_, asked_, false);
 		request.kind = EditorRequestKind::RenameSymbol;
 		workspace.request(std::move(request));
+		ImGui::CloseCurrentPopup();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+	ImGui::EndPopup();
+}
+
+// The last rename's way back (RenameController's rename_back): the sites it rewrites (only those the rename
+// wrote) and why it is refused; Rename back raises RenameBack while the plan shown is the one asked and is
+// not refused.
+void RenameDialog::draw_back(Workspace &workspace) {
+	const SessionView &view = workspace.view();
+	if (open_back_) {
+		open_back_ = false;
+		ImGui::OpenPopup(kBackTitle);
+	}
+	if (!ImGui::BeginPopupModal(kBackTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+	const DialogsView::RenamePreview &plan = view.dialogs.rename_preview;
+	if (!view.project.open || !plan.back || plan.serial != back_serial_) {
+		ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+		return;
+	}
+	const float em = ImGui::GetFontSize();
+	ImGui::Text("Rename %s back to %s, where the rename wrote it:", plan.old_name.c_str(), plan.new_name.c_str());
+	const bool ready = plan.refusals.empty() && plan.sites && !plan.sites->empty();
+	ImGui::BeginChild("sites", ImVec2(em * 40.0f, em * 14.0f), ImGuiChildFlags_Borders);
+	for (const Diagnostic &refusal : plan.refusals) {
+		ui_kit::severity_marker(refusal.severity);
+		ImGui::SameLine();
+		ImGui::TextWrapped("%s", refusal.message.c_str());
+	}
+	if (plan.sites)
+		for (size_t i = 0; i < plan.sites->size(); ++i) {
+			ImGui::PushID(static_cast<int>(i));
+			ui_kit::clipped_text(site_line((*plan.sites)[i]));
+			ImGui::PopID();
+		}
+	for (size_t i = 0; i < plan.companions.size(); ++i) {
+		ImGui::PushID(static_cast<int>(1000000 + i));
+		ui_kit::clipped_text("Renamed with it: " + plan.companions[i]);
+		ImGui::PopID();
+	}
+	ImGui::EndChild();
+	const bool allowed = view.allows(EditorRequestKind::RenameBack);
+	ImGui::BeginDisabled(!ready || !allowed);
+	const bool back = ImGui::Button("Rename back");
+	ImGui::EndDisabled();
+	ui_kit::tooltip(!allowed ? "A rename rewrites the project's files: it waits for the running operation."
+	                : ready  ? "Rewrites the files listed on disk, only where the rename wrote. It cannot be undone with Undo."
+	                         : "Nothing can be renamed back as it is (the reasons are listed).");
+	if (back && ready && allowed) {
+		workspace.request(request::rename_back());
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::SameLine();

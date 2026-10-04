@@ -1,5 +1,6 @@
 #include <editor/session/problem_query.h>
 
+#include <algorithm>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -73,28 +74,92 @@ bool ProblemQuery::shows(DiagnosticSeverity severity) const {
 
 bool ProblemQuery::operator==(const ProblemQuery &other) const {
 	return errors == other.errors && warnings == other.warnings && infos == other.infos && text == other.text &&
-	       scope == other.scope && fixable == other.fixable && grouping == other.grouping;
+	       scope == other.scope && fixable == other.fixable && grouping == other.grouping && blocking == other.blocking;
 }
 
-bool in_original_data(const Diagnostic &diagnostic, const SessionView &view) {
-	const auto &files = view.findings.original_files;
-	if (!files || diagnostic.asset.empty() || files->count(diagnostic.asset) == 0) return false;
-	// A finding the build gates on stays the modder's to see, whatever file it is in: the gate follows the
-	// game's refusals, and a count of 0 errors beside a refused build would mislead.
-	if (blocks_build(diagnostic)) return false;
-	// An open document with unsaved edits is judged by what it holds, not by its file on disk: its
-	// findings are the modder's until it is saved as the install's bytes again.
-	for (const auto &open : view.documents.open)
-		if (open && open->path() == diagnostic.asset && open->dirty()) return false;
+namespace {
+
+// The logical name a row's file is served by (its project-relative path's file name), normalized: what
+// the install's findings are kept by.
+std::string served_name(const Diagnostic &d) {
+	const size_t slash = d.asset.find_last_of('/');
+	return normalized_logical_name(slash == std::string::npos ? d.asset : d.asset.substr(slash + 1));
+}
+
+// Whether a row is the game's own (mark_findings' rule): the install, as a whole, makes the same finding in
+// the file of the same name; `left` the install's findings not taken by an earlier row (null: none taken,
+// a single row's answer).
+bool original_row(const Diagnostic &d, const OriginalData &originals,
+                  std::map<std::string, std::map<std::string, size_t>> *left) {
+	// A finding the build gates on stays the modder's to see, whatever file it is in.
+	if (!originals.ready || d.asset.empty() || blocks_build(d)) return false;
+	const std::string name = served_name(d);
+	const auto served = originals.findings.find(name);
+	if (served == originals.findings.end()) return false;
+	const std::string key = original_finding_key(d);
+	if (!left) return served->second.count(key) != 0;
+	auto file = left->find(name);
+	if (file == left->end()) file = left->emplace(name, served->second).first;
+	const auto found = file->second.find(key);
+	if (found == file->second.end() || found->second == 0) return false;
+	--found->second;
 	return true;
+}
+
+} // namespace
+
+FindingMarks mark_findings(const std::vector<Diagnostic> &rows, const OriginalData *originals,
+                           const std::vector<Diagnostic> *blockers) {
+	FindingMarks marks;
+	marks.rows = rows.size();
+	marks.original.assign(rows.size(), 0);
+	marks.blocking.assign(rows.size(), 0);
+	std::map<std::string, std::map<std::string, size_t>> left;
+	for (size_t i = 0; i < rows.size(); ++i) {
+		const Diagnostic &d = rows[i];
+		if (originals && original_row(d, *originals, &left)) marks.original[i] = 1;
+		const bool blocks = blocks_build(d) &&
+		                    (!blockers || std::find(blockers->begin(), blockers->end(), d) != blockers->end());
+		if (blocks) {
+			marks.blocking[i] = 1;
+			++marks.blocking_count;
+		}
+	}
+	return marks;
+}
+
+const FindingMarks &finding_marks(const SessionView &view, FindingMarks &scratch) {
+	const auto &marks = view.findings.marks;
+	if (marks && marks->rows == view.findings.diagnostics.size()) return *marks;
+	scratch = mark_findings(view.findings.diagnostics, view.findings.originals.get(), nullptr);
+	return scratch;
+}
+bool in_original_data(size_t row, const SessionView &view) {
+	const std::vector<Diagnostic> &rows = view.findings.diagnostics;
+	if (row >= rows.size()) return false;
+	const auto &marks = view.findings.marks;
+	if (marks && marks->rows == rows.size()) return marks->original[row] != 0;
+	return view.findings.originals && original_row(rows[row], *view.findings.originals, nullptr);
+}
+
+bool blocks_the_build(size_t row, const SessionView &view) {
+	const std::vector<Diagnostic> &rows = view.findings.diagnostics;
+	if (row >= rows.size()) return false;
+	const auto &marks = view.findings.marks;
+	if (marks && marks->rows == rows.size()) return marks->blocking[row] != 0;
+	return blocks_build(rows[row]);
 }
 
 ProblemCounts count_problems(const SessionView &view) {
 	ProblemCounts counts;
-	for (const Diagnostic &d : view.findings.diagnostics) {
-		if (in_original_data(d, view)) tally(d.severity, counts.original_errors, counts.original_warnings, counts.original_infos);
-		else tally(d.severity, counts.errors, counts.warnings, counts.infos);
+	FindingMarks scratch;
+	const FindingMarks &marks = finding_marks(view, scratch);
+	const std::vector<Diagnostic> &rows = view.findings.diagnostics;
+	for (size_t i = 0; i < rows.size(); ++i) {
+		if (marks.original[i]) tally(rows[i].severity, counts.original_errors, counts.original_warnings, counts.original_infos);
+		else tally(rows[i].severity, counts.errors, counts.warnings, counts.infos);
 	}
+	counts.blocking = marks.blocking_count;
 	return counts;
 }
 
@@ -130,10 +195,14 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 	ProblemAnswer answer;
 	answer.grouped = query.grouping != ProblemGrouping::None;
 	const std::vector<Diagnostic> &findings = view.findings.diagnostics;
-	for (const Diagnostic &d : findings) {
-		if (in_original_data(d, view)) tally(d.severity, answer.original_errors, answer.original_warnings, answer.original_infos);
+	FindingMarks scratch;
+	const FindingMarks &marks = finding_marks(view, scratch);
+	for (size_t i = 0; i < findings.size(); ++i) {
+		const Diagnostic &d = findings[i];
+		if (marks.original[i]) tally(d.severity, answer.original_errors, answer.original_warnings, answer.original_infos);
 		else tally(d.severity, answer.errors, answer.warnings, answer.infos);
 	}
+	answer.blocking = marks.blocking_count;
 	const std::string needle = strutil::to_lower(query.text);
 	// Only the fixable: the view's findings read once for all of them, not once per finding.
 	std::unique_ptr<ProblemFixIndex> index;
@@ -145,8 +214,9 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 		for (size_t i = 0; i < findings.size(); ++i) {
 			const Diagnostic &d = findings[i];
 			if (d.severity != severity || !in_scope(d, query.scope, view) || !matches_text(d, needle)) continue;
+			if (query.blocking && !marks.blocking[i]) continue;
 			if (index && !has_fixes(d, view, index.get())) continue;
-			(in_original_data(d, view) ? original : answer.rows).push_back(i);
+			(marks.original[i] ? original : answer.rows).push_back(i);
 		}
 	}
 	if (!answer.grouped) {
@@ -178,7 +248,6 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 }
 
 RevisionKey problem_query_key(const SessionView &view, const ProblemQuery &query) {
-	// The game's own data's fold reads which documents have unsaved edits (in_original_data).
 	RevisionKey key = revision_key(view.revisions, {ViewConcern::Findings, ViewConcern::DocumentSet});
 	if (query.scope == ProblemScope::ActiveFile)
 		key = key | revision_key(view.revisions, {ViewConcern::ActiveDocument});

@@ -83,6 +83,9 @@ std::string size_text(uint64_t bytes);
 // The first line of `text`, cut to `width` with "..." where it is cut (narrower than the
 // "...", what fits of the text alone).
 std::string fit(const std::string &text, float width);
+// `text` cut to `width` in its middle ("C:/mods/...ilds/My Mod"), its start and its end kept: a path,
+// whose end tells two apart.
+std::string fit_middle(const std::string &text, float width);
 // A button at most `width` wide: its label cut to fit, its id `id` whatever the cut leaves.
 bool fitted_button(const std::string &label, const char *id, float width);
 // The first line of `text` in what is left of the line, cut to fit. Hovered, it shows `tip`

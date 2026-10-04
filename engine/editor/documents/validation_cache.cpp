@@ -21,6 +21,19 @@ Diagnostic no_records(const AssetEntry &asset) {
 
 } // namespace
 
+bool load_listed(DocumentBase &document, const ProjectPaths &paths, const AssetEntry &asset, const std::string &game,
+                 Diagnostic &error) {
+	if (!paths.files)
+		return document.load(join_path(paths.root, asset.relative_path), asset.relative_path, asset.kind, game, error);
+	std::vector<uint8_t> bytes;
+	if (!paths.files->read(asset.logical_name, bytes)) {
+		error = make_finding(CoreFinding::DocumentRead, DiagnosticSeverity::Error, asset.logical_name + " could not be read.",
+		                     asset.relative_path);
+		return false;
+	}
+	return document.load_bytes(bytes, asset.relative_path, asset.kind, game, error);
+}
+
 void ValidationCache::begin() {
 	const size_t passes = stats_.passes;
 	stats_ = ValidationStats();
@@ -62,6 +75,8 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	const auto validate = [&entry, type](const DocumentBase &document) {
 		if (type->validate_file)
 			entry.findings = type->validate_file(document);
+		// Each finding on a record keyed on the record as itself (the game's own data's fold).
+		key_findings(document, entry.findings);
 		entry.checked = !document.blocked();
 	};
 	if (open) {
@@ -93,9 +108,7 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	const std::shared_ptr<DocumentBase> document = type->make();
 	loaded_.push_back(document);
 	Diagnostic error;
-	if (!document->load(
-				join_path(input.paths.root, asset.relative_path),
-				asset.relative_path, asset.kind, input.project.target_game, error)) {
+	if (!load_listed(*document, input.paths, asset, input.project.target_game, error)) {
 		++stats_.files_failed;
 		entry.findings.push_back(std::move(error));
 		return entry.findings;
