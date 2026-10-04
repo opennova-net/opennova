@@ -1,7 +1,7 @@
 {
  "_arms": {
   "source": "infima/A_TFA_TP_AR_Idle_Pose",
-  "steady": 0.5
+  "steady": 1.0
  },
  "run_f": {
   "source": "motus/W2_Run_F_Loop",

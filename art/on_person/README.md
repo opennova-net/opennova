@@ -38,13 +38,14 @@ holds, for now).
   stands in every stance; a holding pose (the weapon channel takes only its
   arms and head) and the prone clips are left as they are (`"eye": false`).
 - A rifle's third-person arms are the body clip's own: its weapon channel
-  plays the body's state (`special_hold` 0), so every standing, crouched and
-  airborne clip takes one rifle hold (`_arms` in `clips.json`, Infima's
-  `A_TFA_TP_AR_Idle_Pose`, whose hands meet the third-person M4): each arm
-  bone keeps its turn from the chest as the hold has it, so the arms ride the
-  torso, and the neck and head are steadied half way toward the hold's
-  level, forward head. The prone, death, hold, reload and grenade clips keep
-  their own arms (`"arms": ""`).
+  plays the body's state (`special_hold` 0) on a playhead of its own, and
+  the game splices that channel's arm, neck and head turns in the model's
+  frame. So every standing, crouched and airborne clip takes one rifle hold
+  (`_arms` in `clips.json`, Infima's `A_TFA_TP_AR_Idle_Pose`, whose hands
+  meet the third-person M4) as fixed model-space turns, and its neck and
+  head the hold's level, forward turn: arms that moved with the clip would
+  land out of step with the body and flail. The prone, death, hold, reload
+  and grenade clips keep their own arms (`"arms": ""`).
 - `"mirror": true` plays the source left for right, so a left heading can
   be its right one's mirror.
 

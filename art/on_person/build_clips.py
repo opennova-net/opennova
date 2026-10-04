@@ -358,14 +358,18 @@ def arm_bones(k):
 
 
 def layered(k, T, hold, arms, steady):
-    """The turns with the arms the hold's, carried by the chest (each arm
-    bone keeps its turn from the chest as the hold has it), and the neck and
-    head steadied `steady` of the way toward the hold's."""
+    """The turns with the arms the hold's, in the model's frame: each arm
+    bone keeps the hold's turn whatever the torso does (the arms ride the
+    chest's place, not its turn), and the neck and head turned `steady` of
+    the way to the hold's level, forward head. The engine splices these
+    bones' model-space turns from the weapon channel, which plays the same
+    clip on a playhead of its own [orig: the mask @0x4b14db, the second
+    AnimChannel_ComputeBoneMatrices @0x4b16a7]: arms that moved with the
+    clip would land out of step with the body and flail."""
     T = dict(T)
-    chest = T[CHEST] @ hold[CHEST].transposed()
     for name in k.order:
         if name in arms:
-            T[name] = chest @ hold[name]
+            T[name] = hold[name].copy()
     if steady > 0.0:
         for name in HEAD:
             T[name] = T[name].to_quaternion().slerp(hold[name].to_quaternion(), steady).to_matrix()
