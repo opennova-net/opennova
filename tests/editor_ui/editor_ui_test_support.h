@@ -651,5 +651,8 @@ void run_logic_tests();
 void run_animation_tests();
 // A model's material surface and its records' words in the Inspector (model_test.cpp): S17.
 void run_model_tests();
+// The project, the import, Files and the layout as a modder meets them (project_test.cpp): the UX
+// round's project lane.
+void run_project_tests();
 
 } // namespace editor_ui_test
