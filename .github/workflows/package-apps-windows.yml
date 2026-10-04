@@ -66,7 +66,8 @@ jobs:
             @{ Exe = "opennova-3di.exe"; Arguments = @(); Code = 2 },
             @{ Exe = "opennova-extract.exe"; Arguments = @("--help"); Code = 2 },
             @{ Exe = "nw_pp.exe"; Arguments = @(); Code = 1 },
-            @{ Exe = "nw-lan-probe.exe"; Arguments = @("--help"); Code = 0 }
+            @{ Exe = "nw-lan-probe.exe"; Arguments = @("--help"); Code = 0 },
+            @{ Exe = "nw-lister.exe"; Arguments = @(); Code = 1 }
           )
           $server = "opennova-novaworld.exe"
           $expected = @($clis.Exe + $server | Sort-Object)

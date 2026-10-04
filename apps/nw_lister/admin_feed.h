@@ -1,23 +1,10 @@
 #pragma once
 
-// Live server state for the listing, read from the game server's retail
-// remote-admin port (TCP, 4000 by default) - the same exchange
-// opennova-net/WolfRAT2 drives (wolfrat/admin_session.py):
-//
-//   packet   = 00 00 0D 0A | u32le total length (header included) | payload
-//   server  -> 32-byte challenge + NUL
-//   client  -> 65-byte login: user[32] password[32] NUL, mixed with the
-//              challenge and the 0x04B05731 LCG (admin_login_response)
-//   server  -> "... logged in ..." text
-//   then one NUL-terminated ASCII command per packet, one text reply each:
-//   "PLAYER LIST", "MISSION LIST", "GET GAMESETTINGS".
-//
-// The admin port never states the game mode, so game_type stays the
-// listing file's.
+#include "net_sockets.h"
 
-#include <array>
+#include <net/admin/admin_protocol.h>
+
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -26,59 +13,51 @@
 
 namespace opennova::lister {
 
-// The 65-byte login answer to a challenge (the challenge's NUL ends the key).
-std::array<uint8_t, 65> admin_login_response(const uint8_t *challenge, size_t size, const std::string &user,
-                                             const std::string &password);
+// The retail admin client's default port (the server has none: remote_admin_port is 0, off, until
+// set).
+inline constexpr uint16_t kAdminDefaultPort = ADMIN_CLIENT_DEFAULT_PORT;
+inline constexpr int kAdminPollSeconds = 15;
 
-struct AdminPlayer {
-	int slot = 0;
-	std::string name;
-	std::string team;
-};
+using AdminPlayer = opennova::AdminPlayer;
 
-// "PLAYER LIST": tab-separated NAME # TEAM Class Kills Deaths PING rows. A
-// dedicated server's own slot 0 "Host" row is not a player and is dropped.
-std::vector<AdminPlayer> parse_admin_players(const std::string &reply);
-
-// "MISSION LIST": the <CURRENT MISSION> row's file name without its
-// .bms/.npj/.npz extension, as NovaWorld rows show maps; "" when absent.
-std::string parse_admin_current_mission(const std::string &reply);
-
-// "GET GAMESETTINGS": GameTime = remaining/total minutes. Returns the
-// remaining minutes, or -1 (shown as no time limit) when there is no limit,
-// none is left, or the row is missing.
-int parse_admin_time_left(const std::string &reply);
-
+// What the last poll of the game server's admin port read.
 struct AdminSnapshot {
-	bool ok = false;           // the last poll answered
-	uint64_t seq = 0;          // bumps whenever the content changes
+	bool ok = false;      // the last poll answered
+	uint64_t seq = 0;     // counts up whenever the content changes; 0 = no poll finished yet
 	std::vector<AdminPlayer> players;
-	std::string mission;       // "" = keep the listing file's
+	std::string mission;  // "" = keep the listing file's
 	int time_left_minutes = -1;
-	std::string status;        // last error, for the log
+	std::string status;   // why the last poll failed
 };
 
-// Polls the admin port on its own thread so a slow or dead server never
-// stalls the NovaWorld session.
+// Polls the game server's remote-admin port (the engine's admin codec over one TCP connection,
+// kept logged in between polls) on its own thread, so a slow or dead server never stalls the
+// NovaWorld session. Read-only commands only; the admin.cfg user needs the GET, MISSION and
+// PLAYER rights (0x01, 0x04, 0x08).
 class AdminFeed {
 public:
 	~AdminFeed() { stop(); }
-	void start(std::string host, uint16_t port, std::string user, std::string password, int poll_seconds);
+	void start(const net::Endpoint &server, std::string user, std::string password);
+	// Ends the poll thread, which says QUIT on a logged-in connection. Waits for at most one
+	// poll's I/O timeout.
 	void stop();
 	AdminSnapshot snapshot() const;
 
 private:
 	void run();
+	bool log_in(net::Socket &socket, std::string &error);
+	// Fills `next` (ok when every command answered); false when the connection is gone.
+	bool poll(net::Socket &socket, AdminSnapshot &next, std::string &error);
+	static void close(net::Socket &socket, bool logged_in);
 	void publish(AdminSnapshot next);
 
-	std::string host_, user_, password_;
-	uint16_t port_ = 4000;
-	int poll_seconds_ = 15;
+	net::Endpoint server_;
+	std::string user_;
+	std::string password_;
 	std::atomic<bool> stop_{false};
-	std::atomic<intptr_t> sock_{-1}; // the open connection, so stop() can cut a blocked read
 	std::thread thread_;
-	mutable std::mutex mu_;
-	AdminSnapshot snap_;
+	mutable std::mutex mutex_;
+	AdminSnapshot snapshot_;
 };
 
 } // namespace opennova::lister

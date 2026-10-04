@@ -1,12 +1,14 @@
-# nw-lister: advertises one server listing on a NovaWorld master without
-# running the game. Protocol and crypto come from the net group; the app owns
-# its sockets, the HTTP transport, timing and logging.
+# nw-lister: lists one server on a NovaWorld master without the game. The NWU session, the host
+# role, the lobby HTTP machines and the remote-admin codec are the engine's (net/novaworld,
+# net/admin); the app owns the sockets (apps/common), the listing file, the admin poll thread and
+# the log.
+find_package(Threads REQUIRED)
+
 add_library(opennova_nw_lister_core STATIC
     admin_feed.cpp
+    console_log.cpp
+    lister.cpp
     listing.cpp
-    log.cpp
-    udp.cpp
-    http_client.cpp
 )
 
 target_include_directories(opennova_nw_lister_core
@@ -16,12 +18,10 @@ target_include_directories(opennova_nw_lister_core
 
 target_link_libraries(opennova_nw_lister_core
     PUBLIC
+        opennova_app_common
         opennova_net
+        Threads::Threads
 )
-
-if(WIN32)
-    target_link_libraries(opennova_nw_lister_core PUBLIC ws2_32)
-endif()
 
 target_compile_features(opennova_nw_lister_core PUBLIC cxx_std_17)
 

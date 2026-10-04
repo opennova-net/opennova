@@ -3626,13 +3626,27 @@ target_link_libraries(admin_protocol_test PRIVATE opennova_net)
 target_include_directories(admin_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/admin)
 add_test(NAME admin_protocol COMMAND admin_protocol_test)
 
-# nw-lister (apps/nw_lister): the listing JSON + credentials readers, and a
-# --dry-run that builds every gate/session/host statement without a socket.
+# nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
+# end over real loopback UDP against the real NwUdpListener and an in-test gate (the row, a roster
+# edit keeping the other slot, the refresh, the stop).
 add_executable(novaworld_nw_lister_listing_test novaworld/nw_lister_listing_test.cpp)
 target_link_libraries(novaworld_nw_lister_listing_test PRIVATE opennova_nw_lister_core)
 add_test(NAME novaworld_nw_lister_listing COMMAND novaworld_nw_lister_listing_test)
-add_test(NAME novaworld_nw_lister_dry_run
-    COMMAND opennova_nw_lister --listing ${CMAKE_SOURCE_DIR}/apps/nw_lister/listing.example.json --dry-run)
+add_executable(nw_lister_e2e_test
+    novaworld/nw_lister_e2e_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(nw_lister_e2e_test
+    PRIVATE opennova_nw_lister_core opennova_novaworld_service opennova_runtime)
+target_include_directories(nw_lister_e2e_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME nw_lister_e2e COMMAND nw_lister_e2e_test)
+set_tests_properties(nw_lister_e2e PROPERTIES RUN_SERIAL TRUE)
+# The --admin poll thread against an in-test remote-admin server (the login it decrypts, the three
+# commands, the QUIT).
+add_executable(nw_lister_admin_feed_test novaworld/nw_lister_admin_feed_test.cpp)
+target_link_libraries(nw_lister_admin_feed_test PRIVATE opennova_nw_lister_core)
+target_include_directories(nw_lister_admin_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/admin)
+add_test(NAME nw_lister_admin_feed COMMAND nw_lister_admin_feed_test)
 
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)
