@@ -1119,7 +1119,9 @@ bool AssetGraph::for_each_definition(const Document &document,
 
 const std::vector<AssetGraph::ViaRecord> *AssetGraph::records_naming_(const std::string &path) const {
 	// Made once per generation: every file's records in other files whose fields name the file itself (an
-	// item's graphic, a material row's texture), never a record naming a symbol the file defines.
+	// item's graphic, a material row's texture), never a record naming a symbol the file defines; each by
+	// its words where its type has them (edge_record_words: a menu's action as "Go to OPTIONS in
+	// options.mnu", the plain-words lane).
 	std::lock_guard<std::mutex> lock(via_.mutex);
 	if (!via_.built || via_.generation != generation()) {
 		via_.by_file.clear();
@@ -1127,7 +1129,8 @@ const std::vector<AssetGraph::ViaRecord> *AssetGraph::records_naming_(const std:
 			const GraphSlot &slot = index_.slot(id);
 			for (const GraphEdge *edge : referrers_of_file(slot.path)) {
 				if (edge->source == slot.path || edge->record.empty()) continue;
-				via_.by_file[slot.path].push_back({upper(edge->record), edge->record, edge->source});
+				const std::string words = edge_record_words(*edge);
+				via_.by_file[slot.path].push_back({upper(words), words, edge->source});
 			}
 		});
 		via_.generation = generation();

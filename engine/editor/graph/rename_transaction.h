@@ -39,6 +39,10 @@ struct RenameSite {
 	std::string target; // the file the site names today, project-relative (the renamed file, or one of its outputs)
 };
 
+// A site's record and field in words, as a rename's plan lists it ("STARTUP/MAIN/BUTTONS/OPTIONS - Text",
+// the audit's 8.3): its record's title where it has one, its field's label, else their ids.
+std::string rename_site_place(const RenameSite &site);
+
 // An import output a renamed source takes along (ADR 0046 d6, S9c): its importer names
 // it after the source (logo.png makes logo.pcx), so it is renamed with the source and
 // every site naming it is rewritten; the next import pass makes it under the new name.

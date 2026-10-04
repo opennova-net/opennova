@@ -18,6 +18,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_file_set.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/graph_names.h>
 #include <editor/graph/native_text_sites.h>
 #include <editor/import/import_run.h>
@@ -31,6 +32,18 @@
 namespace fs = std::filesystem;
 
 namespace opennova::editor {
+
+std::string rename_site_place(const RenameSite &site) {
+	std::string record = site.record;
+	if (!site.record_title.empty()) {
+		const size_t slash = site.record.rfind('/');
+		record = slash == std::string::npos ? site.record_title : site.record.substr(0, slash + 1) + site.record_title;
+	}
+	const std::string words = field_words(site.kind, site.record_kind, site.field);
+	const std::string field = words.empty() ? site.field : words;
+	if (record.empty()) return field;
+	return field.empty() ? record : record + " - " + field;
+}
 
 namespace {
 

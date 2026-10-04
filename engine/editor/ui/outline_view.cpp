@@ -254,9 +254,12 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 		ui_kit::tooltip("Lists the records by name; Up and Down still move them in the file's order.");
 	}
 	draw_kinds(document);
+	// The rows by the project's names where the type words them so (a weapon by its WepDes text, the
+	// plain-words lane).
+	const ViewNames names(view, document);
 	// The selection moved there: its row shown (a filter hiding it cleared) and scrolled to, however
 	// far down.
-	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path()) : SIZE_MAX;
+	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path(), 0, names.get()) : SIZE_MAX;
 	ImGui::BeginDisabled(document.blocked());
 	const auto &rows = document.rows();
 	size_t index = SIZE_MAX; // the selected record's row, its place in the file
@@ -275,7 +278,7 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 		const NodeAddress address = index < rows.size() ? NodeAddress{rows[index]->id, rows[index]->kind, 0} : NodeAddress();
 		row_tool(workspace, document, ui_kit::row_tools(row, tools), address, index);
 	}
-	const std::vector<OutlineLine> &lines = model_.lines(document);
+	const std::vector<OutlineLine> &lines = model_.lines(document, 0, names.get());
 	if (rows.empty()) ui_kit::empty_state("The file has no records yet.", "Add one with the buttons above.");
 	else if (lines.empty()) ui_kit::empty_state("No record matches the filter.");
 	ImGuiListClipper clipper;
@@ -621,8 +624,8 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 	if (lines.empty())
 		return ui_kit::empty_state(every ? "Nothing in any of them matches the filter." : "Nothing matches the filter.");
 	const std::vector<const FieldSchema *> &columns = model_.columns();
-	// The column of the name a record is found by (a string's key) as wide as its widest value, up to two
-	// fifths of the table, and a Uses column after the others where the project's graph counts what names
+	// The column of the name a record is found by (a string's key) as wide as its widest value, up to a
+	// third of the table, and a Uses column after the others where the project's graph counts what names
 	// each record (the plain-words lane, the audit's 5.1 and 5.2).
 	const FieldSchema *defining = model_.defining_column();
 	const AssetGraph *graph = view.findings.graph.get();
@@ -639,12 +642,13 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 	for (const FieldSchema *field : columns) {
 		if (field == defining)
 			ImGui::TableSetupColumn(field_widgets::column_header(*field).c_str(), ImGuiTableColumnFlags_WidthFixed,
-			                        std::min(key_room, table_width * 0.4f));
+			                        std::min(key_room, table_width / 3.0f));
 		else
 			ImGui::TableSetupColumn(field_widgets::column_header(*field).c_str(), ImGuiTableColumnFlags_WidthStretch,
 			                        field->multiline ? 3.0f : 1.0f);
 	}
-	if (uses) ImGui::TableSetupColumn("Uses", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("Uses 9999"));
+	// As narrow as its header: the text keeps the room a narrow table has.
+	if (uses) ImGui::TableSetupColumn("Uses", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("Uses"));
 	ImGui::TableHeadersRow();
 	// Where the table's rows show (its own scrolling window), and how tall a row is: its tallest
 	// cell's box and the table's padding.

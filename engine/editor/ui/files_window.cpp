@@ -11,6 +11,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
 #include <editor/preview/viewport_kinds.h>
@@ -624,9 +625,11 @@ void FilesWindow::draw_rename(const SessionView &view) {
 			                          ("Rewrites " + std::to_string(sites.size()) + " reference" +
 			                           (sites.size() == 1 ? ":" : "s:")).c_str());
 		for (size_t i = 0; i < sites.size() && i < 12; ++i) {
+			// The record and the field in words (the plain-words lane, the audit's 8.3).
 			const RenameSite &site = sites[i];
-			ImGui::BulletText("%s", (site.file + ": " + (site.record.empty() ? "" : site.record + " - ") + site.field + ": " +
-			                         site.before + " -> " + site.after).c_str());
+			const std::string place = rename_site_place(site);
+			ImGui::BulletText("%s", (site.file + ": " + (place.empty() ? std::string() : place + ": ") + site.before + " -> " +
+			                         site.after).c_str());
 		}
 		if (sites.size() > 12) ImGui::TextDisabled("and %zu more", sites.size() - 12);
 	}
@@ -679,8 +682,8 @@ void FilesWindow::draw_references(const SessionView &view) {
 			std::string file;
 			const ReferenceStatus status = edge->target.empty() ? ReferenceStatus::NotAReference : view.findings.graph->resolve(*edge, &file);
 			const std::string field = edge_field_title(view, *edge);
-			ImGui::BulletText("%s%s = %s", edge->record.empty() ? "" : (edge->record + " - ").c_str(), field.c_str(),
-			                  edge->value.c_str());
+			const std::string record = edge_record_words(*edge);
+			ImGui::BulletText("%s%s = %s", record.empty() ? "" : (record + " - ").c_str(), field.c_str(), edge->value.c_str());
 			ui_kit::tooltip(edge->field);
 			if (status == ReferenceStatus::NotAReference) continue;
 			ImGui::SameLine();
@@ -693,8 +696,8 @@ void FilesWindow::draw_references(const SessionView &view) {
 		for (size_t i = 0; i < users.size(); ++i) {
 			const GraphEdge &edge = *users[i];
 			ImGui::PushID(static_cast<int>(i));
-			const std::string line =
-			        edge.source + ": " + (edge.record.empty() ? "" : edge.record + " - ") + edge_field_title(view, edge);
+			const std::string record = edge_record_words(edge);
+			const std::string line = edge.source + ": " + (record.empty() ? "" : record + " - ") + edge_field_title(view, edge);
 			const bool pressed = ImGui::Selectable((line + "###use").c_str());
 			if (pressed || ImGui::IsItemHovered()) {
 				const ReferenceTarget target = usage_target(*view.project.scan, edge);

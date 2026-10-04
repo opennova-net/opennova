@@ -306,8 +306,16 @@ std::string finding_record_title(const Diagnostic &diagnostic, const SessionView
 		const std::string title = record_display(*document, address, names ? &*names : nullptr);
 		return title == document->record_name(address) ? std::string() : title;
 	}
-	// A closed file's: the words cached with the finding (Diagnostic::record_title, its type's own words;
-	// the plain-words lane, the audit's 6.7).
+	// A closed file's: a record defining a name by the words the project's names give it, as the open
+	// file's title reads (definition_words: an ammo by the name the player sees), else the words cached
+	// with the finding (Diagnostic::record_title, its type's own words; the plain-words lane, the audit's 6.7).
+	if (view.findings.graph && !diagnostic.record.empty()) {
+		const GraphNameSource names(*view.findings.graph);
+		for (const GraphSymbol *symbol : view.findings.graph->symbols_of(diagnostic.asset, diagnostic.record)) {
+			const std::string words = definition_words(*symbol, &names);
+			if (!words.empty() && words != symbol->display && words != diagnostic.record) return words;
+		}
+	}
 	return diagnostic.record_title;
 }
 

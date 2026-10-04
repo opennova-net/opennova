@@ -1126,8 +1126,9 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 			for (const GraphEdge *edge : graph.referrers_of(symbol->kind, symbol->name, symbol->scope)) {
 				// Its own document's uses listed in its type's words already (S15: a mission's events).
 				if (others_only && edge->source == document.path()) continue;
-				const std::string field = edge_field_title(view, *edge);
-				users_.push_back({edge, edge->source + ": " + (edge->record.empty() ? field : edge->record + " - " + field)});
+				// The record in its type's words (the plain-words lane: an action as what it does).
+				const std::string field = edge_field_title(view, *edge), where = edge_record_words(*edge);
+				users_.push_back({edge, edge->source + ": " + (where.empty() ? field : where + " - " + field)});
 			}
 		}
 	}
