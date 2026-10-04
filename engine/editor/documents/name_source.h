@@ -27,6 +27,9 @@ struct DisplayName {
 	std::string source;
 	// The value names nothing the document or the project has, which the words say.
 	bool dangling = false;
+	// What a stylesheet variable the value is (%NAME%) stands for: the value of the definition the game
+	// reads ("FFFFFFFF", "Gunpl22b.fnt"), which a colour field shows as its swatch; "" for none.
+	std::string resolved;
 	bool empty() const { return text.empty(); }
 };
 
@@ -66,5 +69,15 @@ struct RowHeading {
 // symbol carries it (StringsDocument::refine_symbol), a record of a record set by its own name where it
 // has one; any other by its name as defined.
 std::string symbol_words(const GraphSymbol &symbol);
+// The text gametext.bin's WepDes section holds for `key` through `names` ("" for none, and with no
+// names): the names the game shows its weapons and rounds by.
+std::string wepdes_text(const NameSource *names, const std::string &key);
+// The words a definition reads as with the project's names, where they live in another file than the
+// definition (the UX round's plain-words lane): a weapon by the name the HUD shows for it, its id's text
+// in gametext.bin's WepDes section [orig: HUD_DrawWeaponAmmoAndName @ 0x593b7f], else its loadout list's
+// name, its loadout_menu_textid's text there (the symbol's value) [orig: PlayerInfo_PopulateWeaponSlotLists
+// @ 0x560430]; an ammo by its round's text there, the loadout screen's ammo rows' [orig:
+// PlayerInfo_PopulateAmmoComboBoxes @ 0x55def0]; any other by symbol_words, which it is with no names.
+std::string definition_words(const GraphSymbol &symbol, const NameSource *names);
 
 } // namespace opennova::editor
