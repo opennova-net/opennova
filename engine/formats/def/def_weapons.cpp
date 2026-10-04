@@ -126,6 +126,7 @@ static std::string line_as_read(const io::ConfigTokens &tokens) {
 static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out, DefParseReport *report) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
     int state = ST_TOP;
+    bool indent_noted = false; // the file's indentation read (DefLayout)
 
     size_t entries_cap = 0, carry_cap = 0;
     DefWeaponDef cw; memset(&cw, 0, sizeof(cw));
@@ -198,6 +199,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
 
         if (state == ST_WEAPON) {
             if (key_is(key, "action")) {
+                def_note_line(DefRecordKind::Weapon, cw.line_order, key, strlen(key)); // where its blocks stand
                 memset(&ca, 0, sizeof(ca));
                 open_source = ActionSource{it.line};
                 open_findings.clear();
@@ -673,7 +675,12 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             }
 
-            if (parsed) validate_property(DefRecordKind::Weapon, as_read.c_str(), as_read.size(), cw.unmodeled_count, report, it.line, cw.weapon_name);
+            if (parsed) {
+                validate_property(DefRecordKind::Weapon, as_read.c_str(), as_read.size(), cw.unmodeled_count, report, it.line, cw.weapon_name);
+                // What a writer keeps of the line: its place in the weapon's order, the file's indentation.
+                def_note_line(DefRecordKind::Weapon, cw.line_order, key, strlen(key));
+                def_note_indent(out->layout, indent_noted, line, line_len);
+            }
             if (!parsed) {
                 authoring_issue(cw.unmodeled_count, report, it.line, cw.weapon_name, as_read.c_str(), as_read.size());
             }
@@ -798,7 +805,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             }
 
-            if (parsed) validate_property(DefRecordKind::Action, as_read.c_str(), as_read.size(), ca.unmodeled_count, block_report, it.line, ca.name);
+            if (parsed) {
+                validate_property(DefRecordKind::Action, as_read.c_str(), as_read.size(), ca.unmodeled_count, block_report, it.line, ca.name);
+                def_note_line(DefRecordKind::Action, ca.line_order, key, strlen(key));
+            }
             if (!parsed) {
                 authoring_issue(ca.unmodeled_count, block_report, it.line, ca.name, as_read.c_str(), as_read.size());
             }

@@ -14,6 +14,35 @@
 namespace opennova::def {
 
 /* ========================================================================= */
+/* The order and the indentation a file was read with                        */
+/* ========================================================================= */
+
+/* What an authoring tool keeps of a record's lines beside their values (ADR 0046, the UX round's
+ * plain-words lane): the order the reader met its keys in, each step a property of its kind's
+ * table by its place there (def_properties; the first line of it), or where its nested rows stood
+ * (DEF_LINE_ORDER_ROWS: an item's attachments, a weapon's sights, an ammo's effects table) and
+ * where its blocks did (DEF_LINE_ORDER_BLOCKS: a weapon's actions). A writer puts the record's lines
+ * down in that order, the rest after them in the table's, so a file read and written again keeps its
+ * order and a one-field change is a one-line change. No text of the file is kept: a step is a place
+ * in the table, which a record made from nothing has none of (it is written in the table's order).
+ * The order the game reads in decides nothing a writer's reparse check does not catch (an
+ * acceleration's default deceleration): one it refuses is written in the table's order instead. */
+inline constexpr size_t DEF_LINE_ORDER_MAX = 160;
+inline constexpr uint8_t DEF_LINE_ORDER_ROWS = 254;
+inline constexpr uint8_t DEF_LINE_ORDER_BLOCKS = 255;
+typedef struct DefLineOrder {
+    uint8_t steps[DEF_LINE_ORDER_MAX];
+    uint16_t count;
+} DefLineOrder;
+
+/* A file's indentation, which its writer indents its lines with: the blanks before its first
+ * indented line inside a block, one level (a nested block's lines take two); "" for the writer's
+ * own (a tab). Like the order, a choice of layout read from the file, never its text. */
+typedef struct DefLayout {
+    char indent[8];
+} DefLayout;
+
+/* ========================================================================= */
 /* Ammo Definitions                                                          */
 /* ========================================================================= */
 
@@ -131,6 +160,7 @@ typedef struct DefAmmoDef {
     DefEffectTableEntry *effects_table;
     size_t effects_table_count;
     size_t unmodeled_count; // Blocking authoring findings (def_issue_blocks); no source text is retained.
+    DefLineOrder line_order; // the order its lines were read in (its effects table a step)
     /* Kill-zone blast geometry (appended; layout stability). The explosion
      * queue's blast radius is kz_maxradius (or the entry's float override); the
      * linear damage falloff starts at kz_minradius; kz_pieslice != 0 makes the
@@ -176,6 +206,7 @@ typedef struct DefAmmoFile {
     DefAmmoDef *entries;
     size_t count;
     size_t unmodeled_count; // Blocking file-level or incomplete-block findings.
+    DefLayout layout;
 } DefAmmoFile;
 
 /* ========================================================================= */
@@ -233,6 +264,7 @@ typedef struct DefWeaponAction {
 	   them back onto the text and checks the retail reading of those lines. */
 	size_t open_line;
 	size_t end_line;
+	DefLineOrder line_order; // the order its lines were read in
 } DefWeaponAction;
 
 /* DefWeaponDef.flags bits — the weapon.def `flags <name>` OR-mask (dword 1 of the
@@ -375,6 +407,7 @@ typedef struct DefWeaponDef {
     DefSightEntry *sights;
     size_t sights_count;
     size_t unmodeled_count; // Blocking authoring findings (def_issue_blocks); no source text is retained.
+    DefLineOrder line_order; // the order its lines were read in (its sights and its actions steps)
     /* PLAYER_INFO loadout fields. [orig: WeaponDef_ParseProperty @ 0x54d730;
        consumer PlayerInfo_PopulateWeaponSlotLists @ 0x560430]. Appended to keep the leading
        struct offsets (and native layouts) stable. loadout_selectable (+32: a row
@@ -600,6 +633,7 @@ typedef struct DefWeaponsFile {
     DefWeaponDef *entries;
     size_t count;
     size_t unmodeled_count; // Blocking file-level or incomplete-block findings.
+    DefLayout layout;
 } DefWeaponsFile;
 
 /* ========================================================================= */
@@ -896,6 +930,7 @@ typedef struct DefItemDef {
     char particlefinale[32];   /* +0x4E4 [orig: @ 0x4a175b] */
     char particlespawn[32];    /* +0x506 [orig: @ 0x4a179d] */
     size_t unmodeled_count; // Blocking authoring findings (def_issue_blocks); no source text is retained.
+    DefLineOrder line_order; // the order its lines were read in (its attachments a step)
     /* Four organic fire ammo names; lndm also reads closeattack/marker3.
        [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B..+0x5CB;
        Entity_InitOrganicAI @ 0x4BFCC0 -> entity+0x358..+0x35B] */
@@ -1064,6 +1099,7 @@ typedef struct DefItemsFile {
 	int vehicle_spawn_ids[DEF_VEHICLE_SPAWN_SLOTS];
 	int vehicle_spawn_id_count;
     size_t unmodeled_count; // Blocking file-level or incomplete-block findings.
+    DefLayout layout;
 } DefItemsFile;
 
 /* ========================================================================= */

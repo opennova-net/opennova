@@ -143,6 +143,11 @@ public:
 	// (issues) and are dropped on save.
 	bool blocked() const { return blocked_; }
 	size_t ignored_lines() const;
+	// What a Save of the document changes in its file beyond the edits, in plain words, before saving
+	// (the UX round's plain-words lane): "" where a save writes the file as the editor read it but for
+	// them. The default says the lines the game ignores it leaves out, where there are any; a type
+	// whose writer lays the file out its own way says what it keeps and what it does not.
+	virtual std::string save_words() const;
 	const std::vector<SourceIssue> &issues() const { return issues_; }
 	// The bytes a Save writes, or the issues that keep it from writing (the save refuses it).
 	virtual SerializeResult serialize() const = 0;

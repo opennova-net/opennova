@@ -730,6 +730,140 @@ int authored_units() {
 
 } // namespace
 
+// The lines of two texts that differ, place by place (two writes of the same rows: the same lines but
+// the changed ones), and the lines of the second past the first's.
+size_t lines_differing(const std::string &a, const std::string &b) {
+	const auto split = [](const std::string &text) {
+		std::vector<std::string> out;
+		size_t at = 0;
+		while (at < text.size()) {
+			const size_t end = text.find('\n', at);
+			out.push_back(text.substr(at, end == std::string::npos ? std::string::npos : end - at));
+			at = end == std::string::npos ? text.size() : end + 1;
+		}
+		return out;
+	};
+	const std::vector<std::string> left = split(a), right = split(b);
+	size_t differ = left.size() > right.size() ? left.size() - right.size() : right.size() - left.size();
+	for (size_t i = 0; i < std::min(left.size(), right.size()); ++i) differ += left[i] != right[i];
+	return differ;
+}
+
+// What the writer keeps of a file it read (the UX round's plain-words lane; def.h's DefLineOrder and
+// DefLayout): each record's lines in the order the file has them, its rows and its blocks where they
+// stood, the file's indentation, an item's attributes on one line, each item's spawn list on its own
+// line; a record made from nothing in the table's order. A one-field change is a one-line change; an
+// order the reparse would read otherwise (a deceleration before the acceleration that defaults it,
+// once the deceleration is cleared) is written in the table's order instead.
+int kept_layout() {
+	int failures = 0;
+	const char *items =
+	        "begin \"Buggy\"\n"
+	        "  sid dbuggy1\n"
+	        "  id 101291\n"
+	        "  type vehicle\n"
+	        "  attrib: AIData noscar PlayerControl DynamicShadow\n"
+	        "  hp 3000\n"
+	        "  addeweap ewep01 101419\n"
+	        "  pcvehicle_spawnlist 101291\n"
+	        "  sound_profile SP_DuneBuggy\n"
+	        "end\n"
+	        "begin \"Truck\"\n"
+	        "  id 101300\n"
+	        "  pcvehicle_spawnlist 101291 101300\n"
+	        "  type vehicle\n"
+	        "end\n";
+	DefItemsFile file{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(items), std::strlen(items), &file, nullptr);
+	const DefWriteResult first = def_write_items(file);
+	const std::string expected =
+	        "// Item definitions\r\n\r\n"
+	        "begin \"Buggy\"\r\n"
+	        "  sid dbuggy1\r\n"
+	        "  id 101291\r\n"
+	        "  type vehicle\r\n"
+	        "  attrib: playercontrol aidata noscar dynamicshadow\r\n"
+	        "  hp 3000\r\n"
+	        "  addeweap ewep01 101419\r\n"
+	        "  pcvehicle_spawnlist 101291\r\n"
+	        "  sound_profile SP_DuneBuggy\r\n"
+	        "end\r\n\r\n"
+	        "begin \"Truck\"\r\n"
+	        "  id 101300\r\n"
+	        "  pcvehicle_spawnlist 101291 101300\r\n"
+	        "  type vehicle\r\n"
+	        "end\r\n\r\n";
+	if (!first.ok() || first.text != expected) {
+		std::printf("FAIL kept layout, items:\n%s\n", first.text.c_str());
+		for (const auto &d : first.diagnostics) std::printf("  %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
+		++failures;
+	}
+	file.entries[0].hp = 2500;
+	const DefWriteResult second = def_write_items(file);
+	if (!second.ok() || lines_differing(first.text, second.text) != 1 || second.text.find("  hp 2500\r\n") == std::string::npos) {
+		std::printf("FAIL kept layout: one field, %zu lines\n", lines_differing(first.text, second.text));
+		++failures;
+	}
+	// A record made from nothing: the table's order, the file's indentation.
+	file.entries[0].line_order.count = 0;
+	const DefWriteResult table = def_write_items(file);
+	if (!table.ok() || table.text.find("begin \"Buggy\"\r\n  sid dbuggy1\r\n  id 101291\r\n  hp 2500\r\n  sound_profile "
+	                                   "SP_DuneBuggy\r\n  type vehicle\r\n") == std::string::npos) {
+		std::printf("FAIL kept layout: a record of no order\n%s\n", table.text.c_str());
+		++failures;
+	}
+	def_free_items(&file);
+
+	// The order the reparse reads otherwise: a deceleration of 0 written before the acceleration that
+	// defaults an unset one, which the table's order writes after it.
+	const char *ordered = "begin \"Car\"\n\tid 100100\n\ttype vehicle\n\tdeceleration 70\n\tacceleration 15\nend\n";
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(ordered), std::strlen(ordered), &file, nullptr);
+	file.entries[0].deceleration = 0;
+	const DefWriteResult reordered = def_write_items(file);
+	DefItemsFile back{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(reordered.text.data()), reordered.text.size(), &back, nullptr);
+	if (!reordered.ok() || back.count != 1 || back.entries[0].deceleration != 0 || back.entries[0].acceleration != 60) {
+		std::printf("FAIL kept layout: an order the reparse refuses\n%s\n", reordered.text.c_str());
+		++failures;
+	}
+	def_free_items(&back);
+	def_free_items(&file);
+
+	// A weapon's lines, its sights and its actions where they stood; its actions a level in, their lines
+	// a level further, by the file's own indentation; the carry limits at the top level.
+	const char *weapons =
+	        "ammoclass_max_carry CLASS_9mm 120\n"
+	        "weapon \"WPN_A\"\n"
+	        "    category 2\n"
+	        "    action \"fire\"\n"
+	        "        function wpn_std_fire\n"
+	        "        delayend 4\n"
+	        "    end\n"
+	        "    clipsize 15\n"
+	        "end\n";
+	DefWeaponsFile guns{};
+	def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(weapons), std::strlen(weapons), &guns, nullptr);
+	const DefWriteResult gun = def_write_weapons(guns);
+	const std::string gun_expected =
+	        "// Weapon definitions\r\n\r\n"
+	        "ammoclass_max_carry CLASS_9mm 120\r\n"
+	        "weapon \"WPN_A\"\r\n"
+	        "    category 2\r\n"
+	        "    action \"fire\"\r\n"
+	        "        function wpn_std_fire\r\n"
+	        "        delayend 4\r\n"
+	        "    end\r\n"
+	        "    clipsize 15\r\n"
+	        "end\r\n\r\n";
+	if (!gun.ok() || gun.text != gun_expected) {
+		std::printf("FAIL kept layout, weapons:\n%s\n", gun.text.c_str());
+		for (const auto &d : gun.diagnostics) std::printf("  %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
+		++failures;
+	}
+	def_free_weapons(&guns);
+	return failures;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
@@ -882,6 +1016,7 @@ int main(int argc, char **argv) {
 	failures += powerup_table();
 	failures += tokenizer_rules();
 	failures += authored_units();
+	failures += kept_layout();
 	{
 		// The minted items fixture, each member through its line.
 		const std::vector<uint8_t> fixture = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/items.def");
@@ -929,6 +1064,19 @@ int main(int argc, char **argv) {
 				// Every number the Inspector shows in written units reads back from the line
 				// the saved file writes, and a set of it leaves the record as it was.
 				failures += authored_catalog(family, bytes, true);
+				// A save after one field changed changes one line of what a save before it writes (the
+				// writer keeps the file's order and indentation).
+				if (std::strcmp(family, "items.def") == 0) {
+					DefItemsFile parsed{};
+					def_parse_items_memory(bytes.data(), bytes.size(), &parsed, nullptr);
+					const DefWriteResult before = def_write_items(parsed);
+					if (parsed.count > 1) parsed.entries[1].hp += 1;
+					const DefWriteResult after = def_write_items(parsed);
+					const size_t changed = lines_differing(before.text, after.text);
+					std::printf("%sitems.def: one hp changed, %zu line(s) of the save change\n", label.c_str(), changed);
+					if (!before.ok() || !after.ok() || changed != 1) ++failures;
+					def_free_items(&parsed);
+				}
 			}
 		};
 		catalogs(vfs, "");

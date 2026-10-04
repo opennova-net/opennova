@@ -143,6 +143,7 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefPa
     memset(&current, 0, sizeof(current));
     int in_block = 0, in_effects = 0;
     size_t eff_cap = 0;
+    bool indent_noted = false; // the file's indentation read (DefLayout)
 
     char lower[1024];
 
@@ -161,6 +162,7 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefPa
                 continue;
             }
             in_effects = 1;
+            def_note_line(DefRecordKind::Ammo, current.line_order, trimmed, tlen); // where its table stands
             continue;
         }
         if (in_effects) {
@@ -493,7 +495,12 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefPa
             parsed = 1;
         }
 
-        if (parsed) validate_property(DefRecordKind::Ammo, trimmed, tlen, current.unmodeled_count, report, it.line, current.name);
+        if (parsed) {
+            validate_property(DefRecordKind::Ammo, trimmed, tlen, current.unmodeled_count, report, it.line, current.name);
+            // What a writer keeps of the line: its place in the ammo's order, the file's indentation.
+            def_note_line(DefRecordKind::Ammo, current.line_order, trimmed, tlen);
+            def_note_indent(out->layout, indent_noted, line, line_len);
+        }
         if (!parsed) {
             authoring_issue(current.unmodeled_count, report, it.line, current.name, trimmed, tlen);
         }

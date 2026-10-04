@@ -99,9 +99,18 @@ private:
 	std::vector<uint64_t> storage_;
 };
 
-// One file-wide state a family keeps beside its rows (items.def's vehicle spawn registry), whose
-// family row says how a set and a comparison go.
-struct ItemsFileState : FileState {
+// What every catalog keeps of its file beside its rows: the indentation it was read with
+// (def::DefLayout), which its writer keeps (each row keeps the order its lines were read in, in its
+// native record), so a file read and saved again keeps its layout where the model holds it.
+struct CatalogFileState : FileState {
+	def::DefLayout layout{};
+	std::shared_ptr<FileState> clone() const override { return std::make_shared<CatalogFileState>(*this); }
+	size_t footprint() const override { return sizeof(CatalogFileState); }
+};
+
+// items.def's file-wide state beside its layout: the vehicle spawn registry, whose family row says how
+// a set and a comparison go.
+struct ItemsFileState : CatalogFileState {
 	std::vector<int> spawn_ids;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<ItemsFileState>(*this); }
 	size_t footprint() const override { return sizeof(ItemsFileState) + footprint_of(spawn_ids); }

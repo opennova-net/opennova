@@ -1318,7 +1318,8 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::Documents, "documents", answer_documents, kPageParams, kDocumentReads,
 			"The active document and a page of the open documents, each's lifecycle state: path, "
-			"kind, dirty, blocked, revision, can_undo, can_redo, ignored_lines and its source "
+			"kind, dirty, blocked, revision, can_undo, can_redo, ignored_lines, save_words (what a save "
+			"changes beyond the edits, in words, where it changes anything) and its source "
 			"issues; a record document's also file_state_changed, row_count, last_added and the "
 			"kinds of row its outline adds (top_kinds); a text document's its line_count.")
 			.pages("documents")

@@ -25,7 +25,8 @@ void check_record(DefRecordWriter &writer, DefRecordKind kind, const void *befor
 	}
 }
 
-bool header(DefRecordWriter &writer, const char *key, const char *name, size_t capacity, bool quoted) {
+bool header(DefRecordWriter &writer, const char *key, const char *name, size_t capacity, bool quoted,
+            const std::string &margin = std::string()) {
 	const auto *end = static_cast<const char *>(std::memchr(name, 0, capacity));
 	if (!end) { writer.fail("", key, "Name exceeds its capacity."); return false; }
 	const std::string text(name, end);
@@ -36,7 +37,7 @@ bool header(DefRecordWriter &writer, const char *key, const char *name, size_t c
 	if (text.find_first_of("\r\n\"") != std::string::npos || (!quoted && comment_start)) {
 		writer.fail(text, key, "Name contains an unsupported character."); return false;
 	}
-	writer.result.text += std::string(key) + " " + (quoted ? "\"" + text + "\"" : text) + "\r\n";
+	writer.result.text += margin + key + " " + (quoted ? "\"" + text + "\"" : text) + "\r\n";
 	return true;
 }
 
@@ -49,16 +50,51 @@ DefWriteResult finish(DefRecordWriter &writer) {
 	return std::move(writer.result);
 }
 
-} // namespace
-
-DefWriteResult def_write_items(const DefItemsFile &file) {
+// A writer over a file's layout (DefLayout): its indentation, and its records' lines in the order they
+// were read in where `keep_order`.
+DefRecordWriter writer_for(const DefLayout &layout, bool keep_order) {
 	DefRecordWriter writer;
+	writer.keep_order = keep_order;
+	if (layout.indent[0]) writer.indent = layout.indent;
+	return writer;
+}
+
+// A file written keeping its order, else, where the reparse check refuses that order (an order the
+// game reads otherwise than the record holds: a deceleration before the acceleration that defaults
+// it), in the table's.
+template <class File, class Write>
+DefWriteResult write_in_order(const File &file, Write write) {
+	DefWriteResult kept = write(file, true);
+	if (kept.ok()) return kept;
+	DefWriteResult table = write(file, false);
+	return table.ok() ? table : kept;
+}
+
+// Whether the items' own `pcvehicle_spawnlist` lines, each listing its mask's ids in slot order, build
+// the file's registry as it is: the parser gives each id a slot as a line first names it [orig: @0x4A0253;
+// @0x49DFC0], so they do when every slot's id is first named by the item that first named it (a file read
+// and kept as read). Else the first item registers every slot before its own line.
+bool lines_build_registry(const DefItemsFile &file) {
+	std::vector<int> built;
+	for (size_t i = 0; i < file.count; ++i)
+		for (int slot = 0; slot < file.vehicle_spawn_id_count && slot < DEF_VEHICLE_SPAWN_SLOTS; ++slot)
+			if (file.entries[i].vehicle_spawn_mask & (uint32_t(1) << slot)) {
+				const int id = file.vehicle_spawn_ids[slot];
+				if (std::find(built.begin(), built.end(), id) == built.end()) built.push_back(id);
+			}
+	return built.size() == size_t(file.vehicle_spawn_id_count) &&
+	       std::equal(built.begin(), built.end(), file.vehicle_spawn_ids);
+}
+
+DefWriteResult write_items(const DefItemsFile &file, bool keep_order) {
+	DefRecordWriter writer = writer_for(file.layout, keep_order);
 	writer.result.text = "// Item definitions\r\n\r\n";
 	writer.items = &file;
 	incomplete(writer, file.unmodeled_count, "");
 	if (file.vehicle_spawn_id_count < 0 || file.vehicle_spawn_id_count > DEF_VEHICLE_SPAWN_SLOTS ||
 		(file.vehicle_spawn_id_count && !file.count))
 		writer.fail("", "pcvehicle_spawnlist", "The vehicle spawn registry cannot be represented.");
+	const bool own_lines = keep_order && lines_build_registry(file);
 	for (size_t i = 0; i < file.count; ++i) {
 		const auto &item = file.entries[i];
 		if (!header(writer, "begin", item.display_name, sizeof(item.display_name), true)) continue;
@@ -66,17 +102,21 @@ DefWriteResult def_write_items(const DefItemsFile &file) {
         if (item.powerup_def[0] && (item.deathtime_ticks || item.clipsize || item.door_type ||
             item.door_open_rate_q16 || item.door_max_angle_bam || item.door_open_sound[0] || item.door_close_sound[0]))
             writer.fail(item.display_name, "powerup_def", "Powerup names and door/death numeric values share a native union; choose one branch.");
-		// Register file-wide slots in their original order, then set this item's mask.
-		// The parser's registry is cumulative; a repeated list replaces only the mask.
-		if (i == 0 && file.vehicle_spawn_id_count > 0 && file.vehicle_spawn_id_count <= DEF_VEHICLE_SPAWN_SLOTS) {
+		// Register file-wide slots in their original order, then set this item's mask, where the items'
+		// own lines do not build the registry. The parser's registry is cumulative; a repeated list
+		// replaces only the mask.
+		if (!own_lines && i == 0 && file.vehicle_spawn_id_count > 0 &&
+		    file.vehicle_spawn_id_count <= DEF_VEHICLE_SPAWN_SLOTS) {
 			std::vector<std::string> ids;
 			for (int j = 0; j < file.vehicle_spawn_id_count; ++j) ids.push_back(std::to_string(file.vehicle_spawn_ids[j]));
 			writer.line("pcvehicle_spawnlist", ids);
 			if (!item.vehicle_spawn_mask) writer.line("pcvehicle_spawnlist", {});
 		}
-		writer.record(DefRecordKind::Item, &item, item.display_name);
-		for (size_t j = 0; j < item.emplacement_attachments_count; ++j)
-			writer.record(DefRecordKind::Attachment, &item.emplacement_attachments[j], item.display_name);
+		writer.record(DefRecordKind::Item, &item, item.display_name, [&](uint8_t step) {
+			if (step != DEF_LINE_ORDER_ROWS) return;
+			for (size_t j = 0; j < item.emplacement_attachments_count; ++j)
+				writer.record(DefRecordKind::Attachment, &item.emplacement_attachments[j], item.display_name);
+		});
 		writer.result.text += "end\r\n\r\n";
 	}
 	if (!writer.result.ok()) return finish(writer);
@@ -98,26 +138,36 @@ DefWriteResult def_write_items(const DefItemsFile &file) {
 	return finish(writer);
 }
 
-DefWriteResult def_write_weapons(const DefWeaponsFile &file) {
-	DefRecordWriter writer;
+DefWriteResult write_weapons(const DefWeaponsFile &file, bool keep_order) {
+	DefRecordWriter writer = writer_for(file.layout, keep_order);
 	writer.result.text = "// Weapon definitions\r\n\r\n";
 	incomplete(writer, file.unmodeled_count, "");
+	// The carry limits at the top level, as the file states them.
+	writer.depth = 0;
 	for (size_t i = 0; i < file.ammo_classes_count; ++i)
 		writer.record(DefRecordKind::Carry, &file.ammo_classes[i], file.ammo_classes[i].name);
+	writer.depth = 1;
 	for (size_t i = 0; i < file.count; ++i) {
 		const auto &weapon = file.entries[i];
 		if (!header(writer, "weapon", weapon.weapon_name, sizeof(weapon.weapon_name), true)) continue;
 		incomplete(writer, weapon.unmodeled_count, weapon.weapon_name);
-		writer.record(DefRecordKind::Weapon, &weapon, weapon.weapon_name);
-		for (size_t j = 0; j < weapon.sights_count; ++j)
-			writer.record(DefRecordKind::Sight, &weapon.sights[j], weapon.weapon_name);
-		for (size_t j = 0; j < weapon.actions_count; ++j) {
-			const auto &action = weapon.actions[j];
-			if (!header(writer, "action", action.name, sizeof(action.name), true)) continue;
-			incomplete(writer, action.unmodeled_count, action.name);
-			writer.record(DefRecordKind::Action, &action, action.name);
-			writer.result.text += "\tend\r\n";
-		}
+		writer.record(DefRecordKind::Weapon, &weapon, weapon.weapon_name, [&](uint8_t step) {
+			if (step == DEF_LINE_ORDER_ROWS) {
+				for (size_t j = 0; j < weapon.sights_count; ++j)
+					writer.record(DefRecordKind::Sight, &weapon.sights[j], weapon.weapon_name);
+				return;
+			}
+			// Each action block a level in, its lines a level further.
+			for (size_t j = 0; j < weapon.actions_count; ++j) {
+				const auto &action = weapon.actions[j];
+				if (!header(writer, "action", action.name, sizeof(action.name), true, writer.margin(1))) continue;
+				incomplete(writer, action.unmodeled_count, action.name);
+				writer.depth = 2;
+				writer.record(DefRecordKind::Action, &action, action.name);
+				writer.depth = 1;
+				writer.result.text += writer.margin(1) + "end\r\n";
+			}
+		});
 		writer.result.text += "end\r\n\r\n";
 	}
 	if (!writer.result.ok()) return finish(writer);
@@ -141,21 +191,24 @@ DefWriteResult def_write_weapons(const DefWeaponsFile &file) {
 	return finish(writer);
 }
 
-DefWriteResult def_write_ammo(const DefAmmoFile &file) {
-	DefRecordWriter writer;
+DefWriteResult write_ammo(const DefAmmoFile &file, bool keep_order) {
+	DefRecordWriter writer = writer_for(file.layout, keep_order);
 	writer.result.text = "// Ammo definitions\r\n\r\n";
 	incomplete(writer, file.unmodeled_count, "");
 	for (size_t i = 0; i < file.count; ++i) {
 		const auto &ammo = file.entries[i];
 		if (!header(writer, "ammo", ammo.name, sizeof(ammo.name), false)) continue;
 		incomplete(writer, ammo.unmodeled_count, ammo.name);
-		writer.record(DefRecordKind::Ammo, &ammo, ammo.name);
-		if (ammo.effects_table_count) {
+		writer.record(DefRecordKind::Ammo, &ammo, ammo.name, [&](uint8_t step) {
+			if (step != DEF_LINE_ORDER_ROWS || !ammo.effects_table_count) return;
+			// The table a level in, its rows a level further.
 			writer.line("effects_table", {});
+			writer.depth = 2;
 			for (size_t j = 0; j < ammo.effects_table_count; ++j)
 				writer.record(DefRecordKind::Effect, &ammo.effects_table[j], ammo.name);
+			writer.depth = 1;
 			writer.line("end", {});
-		}
+		});
 		writer.result.text += "end\r\n\r\n";
 	}
 	if (!writer.result.ok()) return finish(writer);
@@ -173,6 +226,12 @@ DefWriteResult def_write_ammo(const DefAmmoFile &file) {
 	def_free_ammo(&parsed);
 	return finish(writer);
 }
+
+} // namespace
+
+DefWriteResult def_write_items(const DefItemsFile &file) { return write_in_order(file, write_items); }
+DefWriteResult def_write_weapons(const DefWeaponsFile &file) { return write_in_order(file, write_weapons); }
+DefWriteResult def_write_ammo(const DefAmmoFile &file) { return write_in_order(file, write_ammo); }
 
 DefWriteResult def_write_powerup(const DefPowerupFile &file) {
 	DefRecordWriter writer;

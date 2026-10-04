@@ -55,6 +55,9 @@ public:
 	// key, which its words read (documents/name_source.h's definition_words).
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
+	// A save keeps the records' order and the file's indentation, not its spacing or comments, and
+	// leaves out what the game skips: said before saving (the toolbar).
+	std::string save_words() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<DefCatalogDocument>(*this);
 	}

@@ -501,6 +501,7 @@ bool parse_items(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &
 	def_parse_items_memory(bytes.data(), bytes.size(), &file, &report);
 	auto spawn = std::make_shared<ItemsFileState>();
 	spawn->spawn_ids.assign(file.vehicle_spawn_ids, file.vehicle_spawn_ids + file.vehicle_spawn_id_count);
+	spawn->layout = file.layout;
 	state = spawn;
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Item, &file.entries[i]);
 	std::free(file.entries); // each row took its record's arrays
@@ -517,8 +518,20 @@ DefWriteResult write_items(const std::vector<const CatalogRecord *> &rows, const
 	if (const ItemsFileState *spawn = items_state(state)) {
 		file.vehicle_spawn_id_count = int(spawn->spawn_ids.size());
 		std::copy(spawn->spawn_ids.begin(), spawn->spawn_ids.end(), file.vehicle_spawn_ids);
+		file.layout = spawn->layout;
 	}
 	return def_write_items(file);
+}
+
+// The layout a file of a family with no other file-wide state was read with.
+std::shared_ptr<const FileState> layout_state(const DefLayout &layout) {
+	auto state = std::make_shared<CatalogFileState>();
+	state->layout = layout;
+	return state;
+}
+DefLayout layout_of(const FileState *state) {
+	const auto *catalog = dynamic_cast<const CatalogFileState *>(state);
+	return catalog ? catalog->layout : DefLayout{};
 }
 
 // items.def's vehicle spawn registry: an id at a slot, a new one at the end, up to its 32 slots.
@@ -552,9 +565,10 @@ std::shared_ptr<const FileState> spawn_registry_after_remove(const std::shared_p
 }
 
 bool parse_weapons(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
-                   std::shared_ptr<const FileState> &, DefParseReport &report) {
+                   std::shared_ptr<const FileState> &state, DefParseReport &report) {
 	DefWeaponsFile file{};
 	def_parse_weapons_memory(bytes.data(), bytes.size(), &file, &report);
+	state = layout_state(file.layout);
 	for (size_t i = 0; i < file.ammo_classes_count; ++i) rows.emplace_back(R::Carry, &file.ammo_classes[i]);
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Weapon, &file.entries[i]);
 	std::free(file.entries);
@@ -562,7 +576,7 @@ bool parse_weapons(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord>
 	return true;
 }
 
-DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, const FileState *) {
+DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
 	std::vector<DefWeaponDef> weapons;
 	std::vector<DefAmmoClassCarry> carries;
 	for (const CatalogRecord *row : rows) {
@@ -574,6 +588,7 @@ DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, con
 	file.count = weapons.size();
 	file.ammo_classes = carries.data();
 	file.ammo_classes_count = carries.size();
+	file.layout = layout_of(state);
 	return def_write_weapons(file);
 }
 
@@ -598,7 +613,25 @@ struct RowsFamily {
 		return Write(file);
 	}
 };
-using AmmoFamily = RowsFamily<DefAmmoFile, DefAmmoDef, R::Ammo, def_parse_ammo_memory, def_write_ammo>;
+// ammo.def: its rows and the layout it was read with.
+bool parse_ammo(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
+                std::shared_ptr<const FileState> &state, DefParseReport &report) {
+	DefAmmoFile file{};
+	def_parse_ammo_memory(bytes.data(), bytes.size(), &file, &report);
+	state = layout_state(file.layout);
+	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Ammo, &file.entries[i]);
+	std::free(file.entries);
+	return true;
+}
+DefWriteResult write_ammo(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
+	std::vector<DefAmmoDef> entries;
+	for (const CatalogRecord *row : rows) entries.push_back(row->as<DefAmmoDef>());
+	DefAmmoFile file{};
+	file.entries = entries.data();
+	file.count = entries.size();
+	file.layout = layout_of(state);
+	return def_write_ammo(file);
+}
 using PowerupFamily =
         RowsFamily<DefPowerupFile, DefPowerupDef, R::Powerup, def_parse_powerup_memory, def_write_powerup>;
 
@@ -607,7 +640,7 @@ constexpr CatalogFamily kFamilies[] = {
 	 same_spawn_registry, spawn_registry_after_remove},
 	{AssetKind::WeaponDefs, bit(C::Weapon) | bit(C::Action) | bit(C::Sight) | bit(C::Carry), C::Weapon, parse_weapons,
 	 write_weapons},
-	{AssetKind::AmmoDefs, bit(C::Ammo) | bit(C::Effect), C::Ammo, AmmoFamily::parse, AmmoFamily::write},
+	{AssetKind::AmmoDefs, bit(C::Ammo) | bit(C::Effect), C::Ammo, parse_ammo, write_ammo},
 	{AssetKind::PowerupDefs, bit(C::Powerup) | bit(C::PowerupAmmo) | bit(C::Pickup) | bit(C::Respawn), C::Powerup,
 	 PowerupFamily::parse, PowerupFamily::write},
 };

@@ -134,6 +134,19 @@ SerializeResult DefCatalogDocument::serialize() const {
 	return result;
 }
 
+std::string DefCatalogDocument::save_words() const {
+	// What the writer keeps of the file it read (def.h's DefLineOrder and DefLayout) and what it does
+	// not: it writes from the records, never the file's text (ADR 0003, itemdef-re.md D-ITEMDEF-4).
+	const size_t ignored = ignored_lines();
+	std::string words = "Saving keeps each record's lines in the order the file has them and the file's indentation; "
+	                    "the spacing inside a line, the numbers' form, comments and blank lines are the editor's";
+	if (ignored)
+		words += ", and " + std::to_string(ignored) + (ignored == 1 ? " thing" : " things") +
+		         " in the file the game skips are left out (Problems lists each)";
+	return words + ". The game reads the same " + (kind() == AssetKind::ItemDefs ? "items" : kind() == AssetKind::WeaponDefs ? "weapons"
+	                                                     : kind() == AssetKind::AmmoDefs ? "ammo" : "rows") + ".";
+}
+
 std::shared_ptr<Node> DefCatalogDocument::make_node(
 		NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &rows,
 		std::string &error) {

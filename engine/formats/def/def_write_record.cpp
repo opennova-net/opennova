@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iomanip>
 #include <locale>
 #include <sstream>
@@ -120,17 +121,49 @@ void DefRecordWriter::fail(const std::string &record, const std::string &field, 
 	result.diagnostics.push_back({DefIssueCode::Unrepresentable, 0, record, field, message});
 }
 
+std::string DefRecordWriter::margin(int levels) const {
+	std::string out;
+	for (int i = 0; i < levels; ++i) out += indent.empty() ? std::string("\t") : indent;
+	return out;
+}
+
 void DefRecordWriter::line(const std::string &key, const std::vector<std::string> &values) {
-	result.text += "\t" + key;
+	result.text += margin(depth) + key;
 	for (const auto &value : values) result.text += (key.empty() && &value == &values.front() ? "" : " ") + value;
 	result.text += "\r\n";
 }
 
-void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::string &name) {
+void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::string &name,
+                             const std::function<void(uint8_t step)> &nested) {
 	// Aligned storage is needed by the native member accessors.
 	std::vector<uint64_t> defaults((def_record_size(kind) + 7) / 8);
 	def_init_record(kind, defaults.data());
-	for (const auto &property : def_properties(kind)) {
+	const std::vector<DefProperty> &properties = def_properties(kind);
+	// The lines in the order the record was read in, then the rest in the table's; the record's rows and
+	// blocks where its order puts them, else after its lines.
+	std::vector<uint8_t> steps;
+	std::vector<bool> placed(properties.size(), false);
+	bool rows = false, blocks = false;
+	if (const DefLineOrder *order = keep_order ? def_line_order(kind, value) : nullptr) {
+		for (size_t i = 0; i < order->count; ++i) {
+			const uint8_t step = order->steps[i];
+			if (step == DEF_LINE_ORDER_ROWS) rows = true;
+			else if (step == DEF_LINE_ORDER_BLOCKS) blocks = true;
+			else if (step >= properties.size() || placed[step]) continue;
+			else placed[step] = true;
+			steps.push_back(step);
+		}
+	}
+	for (size_t i = 0; i < properties.size(); ++i)
+		if (!placed[i]) steps.push_back(uint8_t(i));
+	if (!rows) steps.push_back(DEF_LINE_ORDER_ROWS);
+	if (!blocks) steps.push_back(DEF_LINE_ORDER_BLOCKS);
+	for (const uint8_t step : steps) {
+		if (step == DEF_LINE_ORDER_ROWS || step == DEF_LINE_ORDER_BLOCKS) {
+			if (nested) nested(step);
+			continue;
+		}
+		const DefProperty &property = properties[step];
 		std::vector<DefValue> values;
 		bool changed = false, missing = false;
 		for (const auto &id : property.fields) {
@@ -155,10 +188,39 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 		}
 		if (kind == DefRecordKind::Item) {
             const auto &item = *static_cast<const DefItemDef *>(value);
-            // These properties override defaults established by an earlier property.
-            if (property.key == "sound_profilefemale" && item.sound_profile[0]) changed = true;
-            if (property.key == "deceleration" && item.acceleration) changed = true;
+            // These properties override what an earlier line derives: written where the derived value is
+            // not the record's, or where the file has the line (its order keeps it). sound_profile sets the
+            // female profile too while it tracks the primary [orig: @ 0x49fb0f-0x49fb64]; acceleration sets
+            // a deceleration still unset to twice itself [orig: @0x49da4b].
+            const bool read = placed[step];
+            if (property.key == "sound_profilefemale" && item.sound_profile[0])
+                changed = read || std::strcmp(item.sound_profile_female, item.sound_profile) != 0;
+            if (property.key == "deceleration" && item.acceleration)
+                changed = read || item.deceleration != item.acceleration * 2;
         }
+		// An item's attributes on one `attrib:` line, its first word bits, its second's and Parent, as the
+		// files write them: the chain reads every token of the line [orig: ItemDef_ParseProperty @ 0x49EB00,
+		// the attrib arm @ 0x4A06A8], whichever word a token sets.
+		if (property.encoding == DefEncoding::ItemAttrib2 || property.encoding == DefEncoding::ItemParent) continue;
+		if (property.encoding == DefEncoding::ItemAttrib) {
+			const auto &item = *static_cast<const DefItemDef *>(value);
+			std::vector<std::string> tokens;
+			uint32_t first = item.attrib, second = item.attrib2;
+			for (int i = 0; i < def_item_attrib_keyword_count(); ++i)
+				if (first & def_item_attrib_keyword_bit(i)) {
+					tokens.push_back(def_item_attrib_keyword(i));
+					first &= ~def_item_attrib_keyword_bit(i);
+				}
+			for (int i = 0; i < def_item_attrib2_keyword_count(); ++i)
+				if (second & def_item_attrib2_keyword_bit(i)) {
+					tokens.push_back(def_item_attrib2_keyword(i));
+					second &= ~def_item_attrib2_keyword_bit(i);
+				}
+			if (item.attrib_parent) tokens.push_back("parent");
+			if (first || second) fail(name, property.key, "Attributes contain bits without an authored token.");
+			if (!tokens.empty()) line("attrib:", tokens);
+			continue;
+		}
         if (!changed && kind != DefRecordKind::Sight && kind != DefRecordKind::Attachment &&
 			kind != DefRecordKind::Effect && kind != DefRecordKind::Carry && kind != DefRecordKind::PowerupAmmo) continue;
 		const std::string &key = property.key;
@@ -184,21 +246,6 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 			if (remaining) fail(name, key, "Flags contain bits without an authored token.");
 			continue;
 		}
-		case DefEncoding::ItemAttrib: case DefEncoding::ItemAttrib2: {
-			const bool second = property.encoding == DefEncoding::ItemAttrib2;
-			uint32_t remaining = uint32_t(n(0));
-			const int count = second ? def_item_attrib2_keyword_count() : def_item_attrib_keyword_count();
-			for (int i = 0; i < count; ++i) {
-				const uint32_t bit = second ? def_item_attrib2_keyword_bit(i) : def_item_attrib_keyword_bit(i);
-				if (remaining & bit) {
-					line("attrib:", {second ? def_item_attrib2_keyword(i) : def_item_attrib_keyword(i)});
-					remaining &= ~bit;
-				}
-			}
-			if (remaining) fail(name, key, "Attributes contain bits without an authored token.");
-			continue;
-		}
-		case DefEncoding::ItemParent: if (n(0)) line("attrib:", {"parent"}); continue;
 		// A key alone, which its parser reads as 1 [orig: PowerUpDef_ParseProperty @0x443220].
 		case DefEncoding::Switch: if (n(0)) line(key, {}); continue;
 		// `weapon all` (every weapon), else `weapon <name>` [orig: PowerUpDef_ParseProperty

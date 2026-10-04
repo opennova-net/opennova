@@ -1243,6 +1243,8 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page, const
 	if (const std::string words = base.undo_words(); !words.empty()) out.set("undo_words", json_string(words));
 	if (const std::string words = base.redo_words(); !words.empty()) out.set("redo_words", json_string(words));
 	out.set("ignored_lines", json_number(double(base.ignored_lines())));
+	// What a save changes beyond the edits, in words (the plain-words lane).
+	if (const std::string words = base.save_words(); !words.empty()) out.set("save_words", json_string(words));
 	if (records) {
 		out.set("row_count", json_number(double(records->rows().size())));
 		out.set("last_added", json_number(double(records->last_added())));
