@@ -207,18 +207,42 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 		matches_made_ = false;
 		return matches_;
 	}
-	if (matches_made_ && matched_ == filter_) return matches_;
+	const uint64_t generation = view.findings.graph ? view.findings.graph->generation() : 0;
+	if (matches_made_ && matched_ == filter_ && matched_generation_ == generation) return matches_;
 	matches_made_ = true;
 	matched_ = filter_;
+	matched_generation_ = generation;
 	matches_.clear();
+	via_.clear();
 	if (compared_.size() != view.project.scan->entries.size()) {
 		compared_.clear();
 		for (const AssetEntry &entry : view.project.scan->entries)
 			compared_.push_back(normalized_logical_name(entry.relative_path));
 	}
 	const std::string wanted = normalized_logical_name(filter_);
+	std::vector<bool> listed(compared_.size(), false);
 	for (size_t i = 0; i < compared_.size(); ++i)
-		if (compared_[i].find(wanted) != std::string::npos) matches_.push_back(i);
+		if (compared_[i].find(wanted) != std::string::npos) {
+			matches_.push_back(i);
+			listed[i] = true;
+		}
+	// Then the files a record naming them is found by, after them: a model by the item whose graphic it
+	// is (lack finds Dblkhwk1.3di through Flyable Blackhawk), from three letters on.
+	// Each once: a file its folder's name already lists is not listed again (the graph's search finds by
+	// record from three letters on).
+	if (view.findings.graph) {
+		std::unordered_map<std::string, size_t> at;
+		for (const GraphSearchHit &hit : view.findings.graph->search(filter_)) {
+			if (hit.symbol || hit.via.empty()) continue;
+			if (at.empty())
+				for (size_t i = 0; i < view.project.scan->entries.size(); ++i) at.emplace(view.project.scan->entries[i].relative_path, i);
+			const auto found = at.find(hit.file);
+			if (found == at.end() || found->second >= listed.size() || listed[found->second]) continue;
+			listed[found->second] = true;
+			matches_.push_back(found->second);
+			via_[hit.file] = hit.via;
+		}
+	}
 	return matches_;
 }
 
@@ -473,9 +497,18 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	if (dirty) marks += spacing + ui_kit::unsaved_dot_width();
 	if (counts.errors) marks += spacing + ui_kit::severity_count_width(counts.errors);
 	if (counts.warnings) marks += spacing + ui_kit::severity_count_width(counts.warnings);
+	// A file the filter found by a record naming it: that record after its name, muted ("Dblkhwk1.3di
+	// Flyable Blackhawk").
+	const auto via = in_tree ? via_.end() : via_.find(entry.relative_path);
 	const std::string name = ui_kit::fit(entry.logical_name, ImGui::GetContentRegionAvail().x - marks);
 	if (open) ImGui::TextColored(kOpenColor, "%s", name.c_str());
 	else ImGui::TextUnformatted(name.c_str());
+	if (via != via_.end()) {
+		ImGui::SameLine(0.0f, spacing * 2.0f);
+		const std::string by = ui_kit::fit(via->second, ImGui::GetContentRegionAvail().x - marks);
+		ImGui::TextDisabled("%s", by.c_str());
+		ui_kit::tooltip(entry.logical_name + " is named by " + via->second + ", whose name the filter holds.");
+	}
 	if (dirty) {
 		ImGui::SameLine(0.0f, spacing);
 		ui_kit::unsaved_dot();

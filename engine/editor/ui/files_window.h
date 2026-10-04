@@ -126,6 +126,10 @@ private:
 	std::string matched_;
 	bool matches_made_ = false;
 	std::vector<size_t> matches_;
+	// The graph the matches were found over (its generation): a file is matched by a record naming it
+	// too (a model by its item's name, ADR 0046 S17), each such file's record by its path.
+	uint64_t matched_generation_ = 0;
+	std::unordered_map<std::string, std::string> via_;
 	// What References... lists of a file (the graph's edges both ways), kept while the graph
 	// stands.
 	struct Listed {
