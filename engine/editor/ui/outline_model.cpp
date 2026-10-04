@@ -390,6 +390,28 @@ void OutlineModel::join_rows() {
 	for (const RowLines &row : rows_) lines_.insert(lines_.end(), row.lines.begin(), row.lines.end());
 }
 
+const FieldSchema *OutlineModel::defining_column() const {
+	for (const FieldSchema *field : columns_)
+		if (field->defines != ReferenceKind::None) return field;
+	return nullptr;
+}
+
+size_t OutlineModel::uses(const AssetGraph &graph, const Document &document, const NodeAddress &record) {
+	const FieldSchema *defining = defining_column();
+	if (!defining) return 0;
+	if (uses_graph_ != graph.generation() || uses_document_ != document.identity() || uses_revision_ != document.revision()) {
+		uses_.clear();
+		uses_graph_ = graph.generation();
+		uses_document_ = document.identity();
+		uses_revision_ = document.revision();
+	}
+	const NodeId id = record.child ? record.child : record.row;
+	const auto found = uses_.find(id);
+	if (found != uses_.end()) return found->second;
+	const GraphSymbol *symbol = graph.symbol_at(document.path(), document.locator(record), defining->id);
+	return uses_[id] = symbol ? graph.users_of(*symbol).size() : 0;
+}
+
 size_t OutlineModel::line_of(const NodeAddress &address) const {
 	for (size_t i = 0; i < lines_.size(); ++i)
 		if (!lines_[i].collection && !lines_[i].heading && lines_[i].address == address) return i;
