@@ -83,6 +83,7 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("list_files", "suffix"), &ResourceRoot::list_files, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("list_file_entries", "suffix"), &ResourceRoot::list_file_entries, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("particle_extension"), &ResourceRoot::particle_extension);
+	ClassDB::bind_method(D_METHOD("effect_files"), &ResourceRoot::effect_files);
 	ClassDB::bind_method(D_METHOD("has_file", "name", "policy"), &ResourceRoot::has_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("read_file", "name", "policy"), &ResourceRoot::read_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("load_texture", "name", "loader", "policy"), &ResourceRoot::load_texture,
@@ -481,6 +482,17 @@ Array ResourceRoot::list_file_entries(const String &suffix) const {
 	});
 	for (const opennova::ResourceFileEntry &entry : entries) {
 		out.push_back(file_entry_to_dictionary(entry));
+	}
+	return out;
+}
+
+PackedStringArray ResourceRoot::effect_files() const {
+	PackedStringArray out;
+	if (root_dir_.is_empty()) {
+		return out;
+	}
+	for (const std::string &name : index_.effect_files()) {
+		out.push_back(String::utf8(name.c_str()));
 	}
 	return out;
 }

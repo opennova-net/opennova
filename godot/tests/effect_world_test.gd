@@ -99,6 +99,36 @@ func test_load_from_resource_root_scans_every_ptl() -> void:
 	assert_true(world.get_texture_provider().is_valid(), "textures route through the mounted root")
 
 
+# Retail's effect loader walks every mounted archive's directory and skips an
+# entry whose +12 stamp is 0, so an archived `.ptl` packed unstamped (a
+# third-party packer's) never parses; every retail entry, and every entry our
+# writers add, is stamped (D-VFS-13).
+# [orig: CEffectSystem_Init @ 0x5f6070 — the slot walk @ 0x5f6485, the skip
+#  @ 0x5f64c0]
+func test_archive_walk_skips_a_zero_stamped_entry() -> void:
+	var dir := _root_dir.path_join("packed")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var fixtures := ProjectSettings.globalize_path("res://../fixtures/particle")
+	assert_eq(TestPff.write(dir.path_join("localres.pff"), [
+		{name = "minimal.ptl", bytes = FileAccess.get_file_as_bytes(
+				fixtures.path_join("synth_minimal_effect.ptl"))},
+		{name = "unstamped.ptl", timestamp = 0, bytes = FileAccess.get_file_as_bytes(
+				fixtures.path_join("synth_multi_section.ptl"))},
+	]), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.mount_runtime(dir), OK, "the packed fixture mounts")
+	assert_eq(root.effect_files(), PackedStringArray(["minimal.ptl"]),
+			"the walk admits the stamped entry alone")
+	var world := _make_world()
+	assert_eq(world.load_from_resource_root(root), 1,
+			"only the stamped entry's one effect registers")
+	assert_eq(world.file_count(), 1, "the zero-stamped entry is never parsed")
+	assert_true(root.has_file("unstamped.ptl"), "the file itself still reads by name")
+	# Release the archive before after_each deletes the fixture tree.
+	world.clear_world()
+	root.clear()
+
+
 # Retail's catalog spans `.ptl` PLUS one gore set — `.ptu` (US) or `.ptg` (German),
 # selected by the presence of `fgn2.bin`. Loading only `.ptl` silently loses every
 # effect defined there: retail's blood puffs (Effect_AmHitBody / Effect_SGvBody, in

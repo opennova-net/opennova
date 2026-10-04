@@ -327,6 +327,39 @@ std::string ResourceIndex::particle_extension() const {
 	return impl_->vfs.has_file("fgn2.bin") ? std::string(".ptg") : std::string(".ptu");
 }
 
+std::vector<std::string> ResourceIndex::effect_files() const {
+	// Retail parses an archived `.ptl` or gore-set file once per entry its walk admits, by
+	// name through the front door [orig: CEffectSystem_Init @ 0x5f6070 — slots 0..5
+	// ascending @ 0x5f6485, `cmp dword ptr [ebp-4], 0` @ 0x5f64c0 skipping a zero-stamped
+	// entry, strrchr('.') + stricmp(".ptl" / the gore extension) @ 0x5f64cd..0x5f64f3,
+	// File_ParseASCIIFile by name @ 0x5f6545]: a name every mounted entry of which is
+	// stamped 0 is never read, and one stamped entry is enough.
+	std::vector<std::string> out;
+	for (const std::string &extension : {std::string(".ptl"), particle_extension()}) {
+		std::vector<std::string> names;
+		for (const ResourceFileEntry &entry : impl_->records) {
+			if (entry.kind != "particle" || !strutil::ends_with_icase(entry.logical_name, extension))
+				continue;
+			if (impl_->vfs.archive_stamp(entry.logical_name) == VfsArchiveStamp::Unstamped)
+				continue;
+			names.push_back(entry.logical_name);
+		}
+		std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
+			return strutil::to_lower(a) < strutil::to_lower(b);
+		});
+		out.insert(out.end(), names.begin(), names.end());
+	}
+	return out;
+}
+
+std::vector<VfsArchiveEntry> ResourceIndex::archive_slot_entries(int slot) const {
+	return impl_->vfs.archive_slot_entries(slot);
+}
+
+bool ResourceIndex::archive_slot_has_file(int slot, const std::string &name) const {
+	return impl_->vfs.archive_slot_has_file(slot, name);
+}
+
 void ResourceIndex::set_scr_policy(int scr_policy) {
 	++revision_;
 	// Vfs::clear() (called by scan) does not reset the policy, so this persists across re-scans.

@@ -76,6 +76,17 @@ public:
 	// [orig: Game_LoadConfig @ 0x5514e8..0x5514fa -> byte_24D4DF9, read by
 	// CEffectSystem_Init @ 0x5f608b..0x5f6095]. Empty mount answers the ".ptu" default.
 	std::string particle_extension() const;
+	// The effect catalog's files, the order the runtime parses them: every mounted `.ptl`,
+	// then every file of the gore set (particle_extension()), each list by name. A name the
+	// mounted archives carry only in entries stamped 0 is left out: retail's effect loader
+	// walks each archive's directory and skips an entry whose +12 word is 0, so such a file
+	// is never parsed [orig: CEffectSystem_Init @ 0x5f6070 — the slot walk @ 0x5f6485, the
+	// skip @ 0x5f64c0, the extension test @ 0x5f64cd..0x5f64f3] (D-VFS-13). A name no
+	// archive carries (a loose file) stays.
+	std::vector<std::string> effect_files() const;
+	// The archive slots retail's walks visit (Vfs::archive_slot_entries / _has_file).
+	std::vector<VfsArchiveEntry> archive_slot_entries(int slot) const;
+	bool archive_slot_has_file(int slot, const std::string &name) const;
 	// Default overloads use the session policy selected by scan(); policy overloads
 	// let retail consumers force one lookup without mutating that session default.
 	bool has_file(const std::string &name) const;

@@ -183,6 +183,9 @@ public:
 	// mount — ".ptg" when `fgn2.bin` is present, else ".ptu" (engine/base
 	// ResourceIndex::particle_extension owns the witness).
 	String particle_extension() const;
+	// The effect catalog's files in parse order, less the names the archives carry only
+	// stamped 0 (engine ResourceIndex::effect_files owns the witness, D-VFS-13).
+	PackedStringArray effect_files() const;
 	// Runtime roots honor the retail per-call source policy. Loose roots resolve
 	// only flat loose files for every policy value.
 	bool has_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;

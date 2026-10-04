@@ -165,11 +165,11 @@ int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
 	// tga folder first, then the mounted name (renderer::TextureLoader::Particle).
 	texture_provider_ = Callable(p_root.ptr(), "load_texture").bind(ResourceRoot::TEXTURE_LOADER_PARTICLE);
 	_ensure_renderer()->set_texture_provider(texture_provider_);
-	Array entries = p_root->list_file_entries(".ptl");
-	entries.append_array(p_root->list_file_entries(p_root->particle_extension()));
-	for (int64_t i = 0; i < entries.size(); ++i) {
-		const Dictionary entry = entries[i];
-		const String logical_name = entry.get("logical_name", "");
+	// The `.ptl` set then the gore set, less what retail's archive walk skips
+	// (ResourceIndex::effect_files, D-VFS-13).
+	const PackedStringArray names = p_root->effect_files();
+	for (int64_t i = 0; i < names.size(); ++i) {
+		const String logical_name = names[i];
 		if (logical_name.is_empty()) {
 			continue;
 		}
