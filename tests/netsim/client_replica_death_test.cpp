@@ -28,7 +28,7 @@ namespace {
 
 FrameUpdate phase0_frame(uint8_t penalty, uint8_t revive, uint8_t hold) {
 	FrameUpdate fu;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 0;
 	fu.local_tail_present = true;
 	fu.sub_block = 0;
@@ -54,7 +54,7 @@ void test_sub_block_0_timers_fold_and_retain() {
 	CHECK(view.state().breath_samples == 40);
 	// A phase-1 frame (the timer sub-block) leaves the phase-0 landings alone.
 	FrameUpdate timer;
-	timer.mount_handle = 0xFFFF;
+	timer.carried_handle = 0xFFFF;
 	timer.local_tail_present = true;
 	timer.flags2 = 1; // the encoder keys the sub-block on flags2
 	timer.sub_block = 1;
@@ -140,7 +140,7 @@ void test_deploy_overlay_follows_the_host() {
 	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x00));
 	CHECK(!view.state().deploy_overlay_active);
 	FrameUpdate fu;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 150;
 	fu.local_tail_present = true;
 	fu.flags1 = 0x02;
@@ -171,7 +171,7 @@ void test_deploy_overlay_open_latch() {
 	CHECK(!view.state().take_deploy_overlay_open()); // latched (a dismiss
 	                                                 // does not re-arm)
 	FrameUpdate fu;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 150;
 	fu.local_tail_present = true;
 	fu.flags1 = 0x02; // the host keeps the bit set: still latched
@@ -219,7 +219,7 @@ void test_world_state_load_blanks_the_hud_only_with_the_death_screen_up() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
 	FrameUpdate fu;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 150;
 	fu.local_tail_present = true;
 	fu.flags1 = 0x02; // the deploy overlay up, the death screen down
@@ -248,7 +248,7 @@ void test_death_edge_raises_the_spectator_tip() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
 	FrameUpdate fu;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 0;
 	fu.local_tail_present = true;
 	fu.flags1 = 0x01;

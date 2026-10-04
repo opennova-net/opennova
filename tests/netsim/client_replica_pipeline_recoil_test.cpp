@@ -26,7 +26,7 @@ nw::EntityClass classify(uint16_t type_id) {
 
 std::vector<uint8_t> player_frame(uint16_t handle, uint8_t yaw_byte) {
 	nw::FrameUpdate frame;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 	nw::FrameUpdateRecord record;
 	record.handle = handle;
 	record.type_id = kPlayerType;

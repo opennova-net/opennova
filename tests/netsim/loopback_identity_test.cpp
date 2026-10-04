@@ -329,7 +329,7 @@ bool run() {
 bool run_unresolved_carrier_record_drops_whole() {
 	nw::FrameUpdate fu;
 	fu.flags2 = 0;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 100;
 	nw::FrameUpdateRecord player;
 	player.handle = 0x0003;
@@ -361,7 +361,7 @@ bool run_unresolved_carrier_record_drops_whole() {
 bool run_compact_pose_fields_survive_client_fold() {
 	nw::FrameUpdate mounted;
 	mounted.flags2 = 0;
-	mounted.mount_handle = 0xFFFF;
+	mounted.carried_handle = 0xFFFF;
 	mounted.health = 100;
 
 	nw::FrameUpdateRecord player;
@@ -467,7 +467,7 @@ bool run_compact_pose_fields_survive_client_fold() {
 bool run_remote_lean_integrator_decays_before_ramping() {
 	nw::FrameUpdate frame;
 	frame.flags2 = 0;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 
 	nw::FrameUpdateRecord left;
 	left.handle = 0x0001;
@@ -528,7 +528,7 @@ nw::FrameUpdate compact_lifecycle_frame(uint8_t player_flags,
 		uint8_t infantry_flags) {
 	nw::FrameUpdate frame;
 	frame.flags2 = 0;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 	frame.health = 100;
 
 	nw::FrameUpdateRecord player;
@@ -617,7 +617,7 @@ bool run_compact_lifecycle_survives_multi_frame_pump() {
 bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 	nw::FrameUpdate frame;
 	frame.flags2 = 0;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 	frame.health = 100;
 
 	nw::FrameUpdateRecord child;
@@ -665,7 +665,7 @@ bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 	// @0x46085d, bail @0x4608ae..0x4608c1].
 	nw::FrameUpdate missing;
 	missing.flags2 = 0;
-	missing.mount_handle = 0xFFFF;
+	missing.carried_handle = 0xFFFF;
 	missing.health = 100;
 	child.infantry.vehicle_slot_handle = 0x1008;
 	child.infantry.pos_x_compressed = nw::network_compress_fixedpoint(9 << 16);
@@ -728,7 +728,7 @@ bool run_carried_child_follows_later_carrier_same_mover_tick() {
 
 	nw::FrameUpdate frame;
 	frame.flags2 = 0;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 	frame.health = 100;
 	nw::FrameUpdateRecord child;
 	child.handle = 0x0002;
@@ -803,7 +803,7 @@ bool run_no_callback_child_follows_live_parent_heading() {
 
 	nw::FrameUpdate frame;
 	frame.flags2 = 0;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 	frame.health = 100;
 	nw::FrameUpdateRecord compact;
 	compact.handle = 0x1007;
@@ -886,7 +886,7 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 
 	nw::FrameUpdate live;
 	live.flags2 = 0;
-	live.mount_handle = 0xFFFF;
+	live.carried_handle = 0xFFFF;
 	live.health = 100;
 	nw::FrameUpdateRecord live_vehicle;
 	live_vehicle.handle = 0x1007;
@@ -1153,7 +1153,7 @@ bool run_header_only_records_are_ignored_by_replica_pipeline() {
 	fu.env.fog_dist = 0x1111;
 	fu.env.fog_accel = 0x2222;
 	fu.env.tod_fixed = 0x3333;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	fu.health = 100;
 
 	nw::FrameUpdateRecord r;

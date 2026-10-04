@@ -75,7 +75,7 @@ std::vector<uint8_t> build_mixed_frame(int32_t anchor_x, int32_t anchor_y, int32
 	fu.anchor_y = anchor_y;
 	fu.anchor_z = anchor_z;
 	fu.flags2 = 0;              // sub-block 0 (the common gameplay frame)
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 
 	nw::FrameUpdateRecord scenery;
 	scenery.handle = kNoCallbackHandle;
@@ -187,7 +187,7 @@ bool run_items_table_outranks_pool_blanket() {
 	fu.anchor_y = ay;
 	fu.anchor_z = az;
 	fu.flags2 = 0;
-	fu.mount_handle = 0xFFFF;
+	fu.carried_handle = 0xFFFF;
 	nw::FrameUpdateRecord emplacement;
 	emplacement.handle = 0x1009;
 	emplacement.type_id = kNoCallbackType;
@@ -253,7 +253,7 @@ bool run_catalog_presence_outranks_learned_pool_class() {
 			"absent catalog entry falls through to learned pool class")) return false;
 
 	nw::FrameUpdate frame;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 	nw::FrameUpdateRecord unresolved;
 	unresolved.handle = ambiguous_handle;
 	unresolved.type_id = ambiguous_type;
@@ -281,7 +281,7 @@ bool run_recipient_health_requires_a_decoded_tail() {
 	// Establish a known valid sample first.
 	nw::FrameUpdate baseline;
 	baseline.flags2 = 1;
-	baseline.mount_handle = 0xFFFF;
+	baseline.carried_handle = 0xFFFF;
 	baseline.health = 123;
 	view.apply(0x0A, nw::encode_frame_update(baseline));
 	if (!expect(view.state().local_health == 123 &&
@@ -302,7 +302,7 @@ bool run_recipient_health_requires_a_decoded_tail() {
 	// handler already consumed. Append an unresolved tag-1 header before EOB.
 	nw::FrameUpdate later;
 	later.flags2 = 1;
-	later.mount_handle = 0xFFFF;
+	later.carried_handle = 0xFFFF;
 	later.health = 77;
 	std::vector<uint8_t> malformed_event = nw::encode_frame_update(later);
 	malformed_event.pop_back();
@@ -346,7 +346,7 @@ bool run_objectives_require_a_complete_phase3_block() {
 	baseline.objective.state[1] = 0x22;
 	baseline.objective.state[2] = 0x44;
 	baseline.objective.state[3] = 0x88;
-	baseline.mount_handle = 0xFFFF;
+	baseline.carried_handle = 0xFFFF;
 	view.apply(0x0A, nw::encode_frame_update(baseline));
 	const ns::ClientState &established = view.state();
 	if (!expect(established.objective_won == 0x11 &&
@@ -366,7 +366,7 @@ bool run_objectives_require_a_complete_phase3_block() {
 	truncated.objective.state[1] = 0xBB;
 	truncated.objective.state[2] = 0xCC;
 	truncated.objective.state[3] = 0xDD;
-	truncated.mount_handle = 0xFFFF;
+	truncated.carried_handle = 0xFFFF;
 	std::vector<uint8_t> short_objective = nw::encode_frame_update(truncated);
 	constexpr std::size_t kHeaderBytes = 12 + 2;
 	short_objective.resize(kHeaderBytes + 10);
@@ -383,7 +383,7 @@ bool run_objectives_require_a_complete_phase3_block() {
 bool run_mounted_ammo_requires_a_complete_phase8_record() {
 	nw::FrameUpdate mounted;
 	mounted.flags2 = 8;
-	mounted.mount_handle = 0x1234;
+	mounted.carried_handle = 0xFFFF;
 	mounted.passenger.present = true;
 	mounted.passenger.has_mount = true;
 	mounted.passenger.mount_handle = 0x1234;
@@ -425,7 +425,7 @@ bool run_mounted_ammo_requires_a_complete_phase8_record() {
 
 	nw::FrameUpdate on_foot;
 	on_foot.flags2 = 8;
-	on_foot.mount_handle = 0xFFFF;
+	on_foot.carried_handle = 0xFFFF;
 	on_foot.passenger.present = true;
 	on_foot.passenger.mount_handle = 0xFFFF;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(on_foot));

@@ -367,7 +367,7 @@ bool run_seeded_objective_layout_hint() {
 	frame.objective.state[1] = 2;
 	frame.objective.state[2] = 4;
 	frame.objective.state[3] = 8;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 	frame.health = 100;
 	client.view().apply(0x0A, encode_frame_update(frame));
 	return expect(client.state().objective_updates_applied == 1 &&
@@ -1800,7 +1800,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 	reload.entity_handle = 0x0001;
 	reload.reload_param = 3;
 	FrameUpdate frame;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 	frame.health = 100;
 	// The Tab-board lanes, the feed lane, and the guided lane ride the same
 	// canonical stream (D-HUD-23/D-HUD-24/D-NET-64): 0x16 and 0x46 fold beyond
@@ -4767,7 +4767,7 @@ bool run_split_batch_keeps_deployment_pick_ack_causal() {
 	// 0x43 requests to make their C2S 0x08 replies split across the 1300-byte
 	// send ceiling.
 	FrameUpdate death;
-	death.mount_handle = 0xFFFF;
+	death.carried_handle = 0xFFFF;
 	death.health = 0;
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> death_datagram = frame_server_session(
@@ -4843,7 +4843,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	FrameUpdate death;
-	death.mount_handle = 0xFFFF;
+	death.carried_handle = 0xFFFF;
 	death.health = 0;
 	const std::vector<uint8_t> death_datagram = frame_server_session(
 			server_tx, server_scrk, 1u,
@@ -4860,7 +4860,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 	// dword_81474C clear. That literal edge must remain incapable of reopening
 	// authoritative spawn or accepting the stale positive tail beside it.
 	FrameUpdate stale_positive;
-	stale_positive.mount_handle = 0xFFFF;
+	stale_positive.carried_handle = 0xFFFF;
 	stale_positive.health = 100;
 	const std::vector<uint8_t> unrelated_grant = frame_server_session(
 			server_tx, server_scrk, 1u,
@@ -4908,7 +4908,7 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	FrameUpdate death;
-	death.mount_handle = 0xFFFF;
+	death.carried_handle = 0xFFFF;
 	death.health = 0;
 	const std::vector<uint8_t> death_datagram = frame_server_session(
 			server_tx, server_scrk, 1u,
@@ -5553,7 +5553,7 @@ bool run_c2s_producers_share_one_chronological_queue() {
 	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 	FrameUpdate death;
-	death.mount_handle = 0xFFFF;
+	death.carried_handle = 0xFFFF;
 	death.health = 0;
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> death_datagram = frame_server_session(
@@ -5583,7 +5583,7 @@ bool run_carrier_repair_queues_at_its_record() {
 	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 	FrameUpdate frame;
-	frame.mount_handle = 0xFFFF;
+	frame.carried_handle = 0xFFFF;
 	frame.health = 100;
 	FrameUpdateRecord record; // a slot the spawn stream never filled
 	record.handle = 0x0005;
