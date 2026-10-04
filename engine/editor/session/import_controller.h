@@ -44,10 +44,11 @@ public:
 	void cancel();
 	void import_files(const EditorRequest &request);
 	void reimport(const std::string &source, bool force);
-	// The game install's file names, for the Import fixes (problem_fixes.h).
+	// The game install's file names, for the Import fixes (problem_fixes.h), and for a project that
+	// builds as an expansion its base game's, for its build's gate (ADR 0046 S16).
 	void refresh_install_files();
 	// Those an Open read (OpenOperation).
-	void set_install_files(std::vector<std::string> names);
+	void set_install_files(std::vector<std::string> names, std::vector<std::string> base);
 	// The documents with unsaved edits an ImportFiles would write over (the unsaved guard's).
 	void unsaved_files(const EditorRequest &request, std::vector<std::string> &files);
 	// The project closes: the dialog, the imported sources and the install's names go.
