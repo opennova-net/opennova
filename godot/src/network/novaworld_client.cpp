@@ -1,3 +1,4 @@
+#include "network/random_id.h"
 #include "network/novaworld_client.h"
 
 #include "network/host_session_options.h"
@@ -6,6 +7,7 @@
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
+#include <array>
 #include <godot_cpp/classes/http_client.hpp>
 #include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/ip.hpp>
@@ -70,7 +72,7 @@ const char *state_name(NovaWorldClient::State s) {
 } // namespace
 
 NovaWorldClient::NovaWorldClient() :
-		lobby_(make_lobby_hooks()), host_role_(lobby_, make_host_hooks()) {}
+		lobby_(make_lobby_hooks(), make_lobby_environment()), host_role_(lobby_, make_host_hooks()) {}
 NovaWorldClient::~NovaWorldClient() = default;
 
 void NovaWorldClient::_bind_methods() {
@@ -119,6 +121,9 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(
 		D_METHOD("on_join_request_completed", "result", "response_code", "headers", "body"),
 		&NovaWorldClient::on_join_request_completed);
+	ClassDB::bind_method(
+		D_METHOD("on_host_request_completed", "result", "response_code", "headers", "body"),
+		&NovaWorldClient::on_host_request_completed);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "host"),     "set_host", "get_host");
 	ADD_PROPERTY(PropertyInfo(Variant::INT,    "gate_port"), "set_gate_port", "get_gate_port");
@@ -184,9 +189,30 @@ void NovaWorldClient::set_gate_port(int port) { gate_port_ = port; }
 int NovaWorldClient::get_gate_port() const { return gate_port_; }
 void NovaWorldClient::set_player_name(const String &name) { player_name_ = name; }
 String NovaWorldClient::get_player_name() const { return player_name_; }
+// The Host list's STRNOVA / TimeOfDay tokens resolve through the gametext table; the role keeps
+// the strings. GameText_GetStringWithFallback("TimeOfDay", KEY, fallback): the fallback stands
+// when the table lacks the key.
 void NovaWorldClient::set_gametext(const Ref<RtxtStringFile> &gametext) {
 	gametext_ = gametext;
-	host_role_.set_gametext(gametext);
+	opennova::HostLobbyText text;
+	if (gametext.is_valid()) {
+		auto lookup = [&gametext](const char *section, const char *key, std::string &out) {
+			if (gametext->has_string_in_section(section, StringName(key)))
+				out = opennova::to_std(gametext->get_string_in_section(section, StringName(key)));
+		};
+		lookup("NovaWorld", "STRNOVA11", text.yes);
+		lookup("NovaWorld", "STRNOVA12", text.no);
+		lookup("NovaWorld", "STRNOVA10", text.no_time_limit);
+		lookup("NovaWorld", "STRNOVA07", text.region[0]);
+		lookup("NovaWorld", "STRNOVA08", text.region[1]);
+		lookup("NovaWorld", "STRNOVA09", text.region[2]);
+		lookup("TimeOfDay", "UNKNOWN", text.time_of_day[0]);
+		lookup("TimeOfDay", "DAWN", text.time_of_day[1]);
+		lookup("TimeOfDay", "DAY", text.time_of_day[2]);
+		lookup("TimeOfDay", "DUSK", text.time_of_day[3]);
+		lookup("TimeOfDay", "NIGHT", text.time_of_day[4]);
+	}
+	host_role_.set_lobby_text(text);
 }
 
 Ref<NovaWorldGateInfo> NovaWorldClient::get_server_info() const { return server_info_; }
@@ -259,19 +285,38 @@ void NovaWorldClient::start() {
 		join_http_->connect("request_completed",
 		                    Callable(this, "on_join_request_completed"));
 	}
-
-	// The driver binds the gate/NW sockets and mints the ci/ck pair; a bind
-	// failure lands in STATE_ERROR through the on_fatal hook.
-	if (!lobby_.open()) {
-		return;
+	if (host_http_ == nullptr) {
+		host_http_ = memnew(HTTPRequest);
+		add_child(host_http_);
+		host_http_->set_timeout(10.0);
+		host_http_->connect("request_completed",
+		                    Callable(this, "on_host_request_completed"));
 	}
 
+	// The gate and NW sockets (any interface, an OS-assigned port), then the driver
+	// mints the ci/ck pair on them; a bind failure is the error state.
+	gate_pump_.instantiate();
+	nw_pump_.instantiate();
+	if (gate_pump_->bind_listen(0) != OK) {
+		enter_state(STATE_ERROR, String("gate UDP bind failed"));
+		return;
+	}
+	if (nw_pump_->bind_listen(0) != OK) {
+		enter_state(STATE_ERROR, String("nw UDP bind failed"));
+		return;
+	}
+	gate_socket_ = std::make_unique<UdpPumpDatagramSocket>(gate_pump_.ptr());
+	nw_socket_ = std::make_unique<UdpPumpDatagramSocket>(nw_pump_.ptr());
+	clock_accum_s_ = 0.0;
+	clock_ms_ = 0;
+	lobby_.open(*gate_socket_, *nw_socket_);
+
 	enter_state(STATE_GATE_PROBING);
-	lobby_.probe(host_, gate_port_);
+	lobby_.probe(opennova::to_std(host_), static_cast<uint16_t>(gate_port_));
 }
 
 void NovaWorldClient::stop() {
-	if (lobby_.session() && lobby_.sockets_open()) {
+	if (lobby_.session() && lobby_.is_open()) {
 		// A play or a hosting in flight is cancelled the retail way
 		// (ClientStopPlaying / ClientStopHosting, the ConnectOrHost escape/timeout
 		// legs), and an established one leaves the same way the NovaWorld menu's
@@ -305,6 +350,9 @@ void NovaWorldClient::stop() {
 	if (join_http_ != nullptr) {
 		join_http_->cancel_request();
 	}
+	if (host_http_ != nullptr) {
+		host_http_->cancel_request();
+	}
 	gsb_request_in_flight_ = false;
 	authenticated_ = false;
 	server_entries_.clear();
@@ -314,6 +362,12 @@ void NovaWorldClient::stop() {
 	total_players_ = 0;
 	flow_.reset();
 	lobby_.close();
+	gate_socket_.reset();
+	nw_socket_.reset();
+	if (gate_pump_.is_valid()) gate_pump_->close();
+	if (nw_pump_.is_valid()) nw_pump_->close();
+	gate_pump_.unref();
+	nw_pump_.unref();
 	if (state_ != STATE_DISCONNECTED && state_ != STATE_IDLE) {
 		enter_state(STATE_DISCONNECTED, String("stopped"));
 	}
@@ -327,9 +381,12 @@ void NovaWorldClient::_process(double delta) {
 	// The driver pumps the gate + session sockets, the stage retransmits, the
 	// connect deadlines and the session's negotiated keepalive/reap; role
 	// progress arrives through the hooks (sync_session_state / traces).
-	lobby_.process(delta);
+	// The ms wall clock every retail deadline and interval runs on (GetTickCount).
+	clock_accum_s_ += delta;
+	clock_ms_ = static_cast<uint32_t>(clock_accum_s_ * 1000.0);
+	lobby_.tick(clock_ms_);
 	drain_session_notices();
-	host_role_.process(delta);
+	host_role_.tick(clock_ms_);
 
 	// The start-playing poll: the ServerPlayResult must land within the connect
 	// window (SESSION_CONNECT_TIMEOUT_MS), else the play is cancelled (NWEC02).
@@ -342,8 +399,8 @@ void NovaWorldClient::_process(double delta) {
 // The role-specific halves of the shared NwuLobbySession driver: what to do
 // with the gate response, which verify identity to ship, and the trace lines
 // that keep the retail _connectlog shape (trace()).
-NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
-	NwuLobbySession::Hooks hooks;
+opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
+	opennova::NwuLobbySession::Hooks hooks;
 	hooks.on_gate_response = [this](const opennova::GateResponse &parsed) {
 		on_gate_response(parsed);
 	};
@@ -356,15 +413,39 @@ NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 		    + " Cookie vars");
 	};
 	hooks.on_sent = [this](const std::vector<uint8_t> &dg) { trace_sent_datagram(dg); };
-	hooks.on_received = [this](const NwuLobbySession::RxInfo &rx) { on_session_datagram(rx); };
+	hooks.on_received = [this](const opennova::NwuLobbySession::RxInfo &rx) { on_session_datagram(rx); };
 	hooks.on_session_state = [this]() { sync_session_state(); };
-	hooks.on_fatal = [this](const String &message) {
-		enter_state(STATE_ERROR, message);
+	hooks.on_fatal = [this](const std::string &message) {
+		enter_state(STATE_ERROR, opennova::cp1252_to_gd(message));
 	};
-	hooks.on_soft_error = [this](const String &message) {
-		emit_signal("error_occurred", message);
+	hooks.on_soft_error = [this](const std::string &message) {
+		emit_signal("error_occurred", opennova::cp1252_to_gd(message));
 	};
 	return hooks;
+}
+
+// The driver's device side: the random draws (ci/ck, the reconnect's CK, the AppId and
+// cookie-key seeds) and the gate / UDPNOVAWORLD host lookup.
+opennova::NwuLobbySession::Environment NovaWorldClient::make_lobby_environment() {
+	opennova::NwuLobbySession::Environment env;
+	env.random_u32 = []() { return pick_random_uint32(); };
+	env.resolve_ipv4 = [](const std::string &host, opennova::PeerAddr &out) {
+		IP *ip = IP::get_singleton();
+		if (ip == nullptr) return false;
+		const String resolved = ip->resolve_hostname(opennova::to_gd(host), IP::TYPE_IPV4);
+		const PackedStringArray octets = resolved.split(".");
+		if (octets.size() != 4) return false;
+		std::array<uint8_t, 4> bytes{};
+		for (int i = 0; i < 4; ++i) {
+			if (!octets[i].is_valid_int()) return false;
+			const int64_t value = octets[i].to_int();
+			if (value < 0 || value > 255) return false;
+			bytes[static_cast<size_t>(i)] = static_cast<uint8_t>(value);
+		}
+		out = opennova::peer_addr_from_octets(bytes, out.port);
+		return true;
+	};
+	return env;
 }
 
 // The gate replied: stash the fields the lobby HTTP legs resolve their base
@@ -425,15 +506,15 @@ void NovaWorldClient::trace_sent_datagram(const std::vector<uint8_t> &dg) {
 	const opennova::ClientSession *session = lobby_.session();
 	trace(String(">> sent ")
 	    + String::num_int64(static_cast<int64_t>(dg.size())) + "B op=" + String(op_buf)
-	    + " to " + lobby_.nw_udp_host() + ":"
+	    + " to " + opennova::cp1252_to_gd(lobby_.nw_udp_host()) + ":"
 	    + String::num_int64(static_cast<int64_t>(lobby_.nw_udp_port())) + " local_port="
-	    + String::num_int64(static_cast<int64_t>(lobby_.nw_local_port()))
+	    + String::num_int64(static_cast<int64_t>(nw_pump_.is_valid() ? nw_pump_->local_port() : 0))
 	    + " state=" + cs_state_name(session ? static_cast<int>(session->state()) : -1));
 }
 
 // Per-datagram session diagnostics (the driver already handled the datagram
 // and will ship the replies right after this hook returns).
-void NovaWorldClient::on_session_datagram(const NwuLobbySession::RxInfo &rx) {
+void NovaWorldClient::on_session_datagram(const opennova::NwuLobbySession::RxInfo &rx) {
 	// Peek the plaintext session opcode (read-only; handle_datagram
 	// re-decoded independently). 0x81=ServerHello, 0x82=ServerAuth,
 	// 0x83=ServerProtocolMessage. Tells us exactly what the server sent.
@@ -465,8 +546,8 @@ void NovaWorldClient::on_session_datagram(const NwuLobbySession::RxInfo &rx) {
 	// after the ClientAuth send, the server sent nothing (or it was lost).
 	String msg = String("<< recv ")
 	    + String::num_int64(static_cast<int64_t>(rx.bytes.size())) + "B op=" + String(op_buf)
-	    + " from " + rx.src_ip + ":"
-	    + String::num_int64(static_cast<int64_t>(rx.src_port)) + " state "
+	    + " from " + opennova::to_gd(opennova::peer_addr_ip_to_string(rx.from)) + ":"
+	    + String::num_int64(static_cast<int64_t>(rx.from.port)) + " state "
 	    + cs_state_name(rx.state_before) + "->" + cs_state_name(rx.state_after)
 	    + " ok=" + (rx.ok ? "1" : "0") + " replies="
 	    + String::num_int64(static_cast<int64_t>(rx.replies));
@@ -926,31 +1007,43 @@ void NovaWorldClient::abort_playing(const String &tag) {
 }
 
 // The hosting half's outcomes, mapped onto our State + signals.
-NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
-	NwuHostRole::Hooks hooks;
+opennova::NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
+	opennova::NwuHostRole::Hooks hooks;
 	hooks.on_hosting = [this]() {
 		enter_state(STATE_HOSTING);
 		emit_signal("hosting_started");
 	};
-	hooks.on_failed = [this](const String &tag) {
+	hooks.on_failed = [this](const std::string &tag) {
 		if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
 			enter_state(STATE_CONNECTED);
 		}
-		emit_signal("host_failed", tag);
+		emit_signal("host_failed", opennova::to_gd(tag));
 	};
-	hooks.on_stopped = [this](const String &reason) {
+	hooks.on_stopped = [this](const std::string &reason) {
 		if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
 			enter_state(STATE_CONNECTED);
 		}
-		emit_signal("hosting_stopped", reason);
+		emit_signal("hosting_stopped", opennova::to_gd(reason));
 	};
-	hooks.on_command = [this](const String &verb, const String &target, const PackedStringArray &args) {
-		emit_signal("server_command", verb, target, args);
+	// The verb's arguments are the service's wire bytes.
+	hooks.on_command = [this](const opennova::ServerCommand &command) {
+		PackedStringArray args;
+		for (const std::string &arg : command.args) args.push_back(opennova::cp1252_to_gd(arg));
+		const char *target = "";
+		switch (command.target) {
+		case opennova::ServerCommandTarget::ByIndex: target = "ByIndex"; break;
+		case opennova::ServerCommandTarget::ByIpAndPort: target = "ByIpAndPort"; break;
+		case opennova::ServerCommandTarget::ByName: target = "ByName"; break;
+		case opennova::ServerCommandTarget::ByPCID: target = "ByPCID"; break;
+		default: break;
+		}
+		emit_signal("server_command", String(opennova::server_command_verb_name(command.verb)),
+				String(target), args);
 	};
-	hooks.on_player_enter_result = [this](int64_t connection_id, int success, int msg_code,
-			const String &player_ticket, const String &access_code_list) {
-		emit_signal("player_enter_result", connection_id, success, msg_code, player_ticket,
-				access_code_list);
+	hooks.on_player_enter_result = [this](const opennova::ClientSession::PlayerEnterResult &result) {
+		emit_signal("player_enter_result", static_cast<int64_t>(result.connection_id),
+				result.success, result.msg_code, opennova::cp1252_to_gd(result.player_ticket),
+				opennova::cp1252_to_gd(result.access_code_list));
 	};
 	return hooks;
 }
@@ -962,7 +1055,7 @@ NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
 void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	opennova::ClientSession *session = lobby_.session();
 	const opennova::GateResponse &gate = lobby_.gate_response();
-	const bool set_up = options.is_valid() && session != nullptr && lobby_.sockets_open();
+	const bool set_up = options.is_valid() && session != nullptr && lobby_.is_open();
 	const char *refusal = opennova::host_leg_refusal(set_up,
 			set_up ? session->session_flags() : 0u, server_info_.is_valid(), gate.lobby_name);
 	if (refusal != nullptr) {
@@ -984,13 +1077,54 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 			: options->get_mission_name();
 	cfg.mission_name = opennova::to_std(mission);
 	enter_state(STATE_HOSTING_REQUESTED);
-	host_role_.request(cfg);
+	// The hosting page first: the menu opens the main page's @HOST_URL@, and the page whose
+	// title carries [HOSTKEY=...&] completes the registration. Without the login there is no
+	// main page and so no host. [orig: UI_HandleHostSessionStart @0x556d00 @0x556f0d..0x556f98;
+	//  UI_ProcessWebResponseContent @0x63d5bb..0x63d604 -> UI_DispatchScreenEvent @0x54f2fa]
+	pending_host_cfg_ = cfg;
+	sync_flow_context();
+	const opennova::HostKeyResult first = flow_.host();
+	if (first.kind != opennova::HostKeyResult::Kind::NeedRequest ||
+	    ship_spec(host_http_, first.request) != OK) {
+		fail_host_leg(opennova::to_gd(first.reason.empty() ? "host request failed" : first.reason));
+	}
+}
+
+void NovaWorldClient::fail_host_leg(const String &reason) {
+	if (state_ == STATE_HOSTING_REQUESTED) enter_state(STATE_CONNECTED);
+	emit_signal("host_failed", reason);
+}
+
+// The hosting page's chain: relay pages refresh to the next, the [HOSTKEY=...&] title resolves
+// the key and the host request goes out with it. A completion that lands after the hosting leg
+// was left (stop_hosting, stop) is dropped.
+void NovaWorldClient::on_host_request_completed(int result, int response_code,
+		const PackedStringArray &headers, const PackedByteArray &body) {
+	if (state_ != STATE_HOSTING_REQUESTED || !flow_.host_active()) return;
+	const opennova::HostKeyResult r = flow_.on_host_response(
+		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
+	switch (r.kind) {
+	case opennova::HostKeyResult::Kind::NeedRequest:
+		if (ship_spec(host_http_, r.request) != OK) fail_host_leg(String("host request failed"));
+		return;
+	case opennova::HostKeyResult::Kind::Resolved: {
+		opennova::HostRegistration cfg = pending_host_cfg_;
+		cfg.host_key = r.host_key;
+		host_role_.request(cfg);
+		return;
+	}
+	case opennova::HostKeyResult::Kind::Failed:
+	default:
+		fail_host_leg(opennova::cp1252_to_gd(r.reason));
+		return;
+	}
 }
 
 // The NovaWorld menu's re-entry after a match leaves the hosting and the play
 // and keeps the verified session (CGameSession_StopHosting / StopPlaying, the
 // ClientSession statements).
 void NovaWorldClient::stop_hosting() {
+	if (host_http_ != nullptr) host_http_->cancel_request();
 	host_role_.stop();
 	if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
 		enter_state(STATE_CONNECTED);
@@ -999,7 +1133,7 @@ void NovaWorldClient::stop_hosting() {
 
 void NovaWorldClient::stop_playing() {
 	opennova::ClientSession *session = lobby_.session();
-	if (session != nullptr && lobby_.sockets_open()) {
+	if (session != nullptr && lobby_.is_open()) {
 		session->stop_playing();
 	}
 	play_in_flight_ = false;

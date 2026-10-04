@@ -2960,6 +2960,23 @@ add_test(NAME client_session_cu COMMAND client_session_cu_test)
 # to Verified, sends a ClientHostRequest, asserts the host shows in snapshot_hosted
 # (the /api/hosts + GSB source). Compiles the listener sources directly — they live
 # in the server exe, not a lib. No DB (snapshot reads in-memory lobby state).
+# The engine NWU driver + host role (net/novaworld/nwu_lobby_session.h, nwu_host_role.h) over
+# real loopback UDP against the real NwUdpListener and an in-test gate: the probe, the
+# handshake, a duplicate gate reply ignored, the registration, a roster change, the 1860-tick
+# refresh and the stop.
+add_executable(nwu_host_session_e2e_test
+    novaworld/nwu_host_session_e2e_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(nwu_host_session_e2e_test
+    PRIVATE opennova_novaworld_service opennova_runtime opennova_app_common)
+target_include_directories(nwu_host_session_e2e_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server
+    ${CMAKE_SOURCE_DIR}/apps/common)
+add_test(NAME nwu_host_session_e2e COMMAND nwu_host_session_e2e_test)
+set_tests_properties(nwu_host_session_e2e PROPERTIES RUN_SERIAL TRUE)
+
 add_executable(nw_host_register_e2e_test
     novaworld/nw_host_register_e2e_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp

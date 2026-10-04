@@ -102,6 +102,32 @@ func test_late_join_http_completion_cannot_resurrect_a_stopped_or_restarted_clie
 	client.stop()
 
 
+func test_late_host_http_completion_cannot_resurrect_a_stopped_or_restarted_client() -> void:
+	var client := NovaWorldClient.new()
+	add_child_autofree(client)
+	client.host = "127.0.0.1"
+	client.gate_port = 1
+	watch_signals(client)
+	client.start()
+	client.stop()
+
+	client.on_host_request_completed(
+			HTTPRequest.RESULT_REQUEST_FAILED, 0,
+			PackedStringArray(), PackedByteArray())
+	assert_eq(client.get_state(), NovaWorldClient.STATE_DISCONNECTED,
+			"a cancelled hosting-page completion cannot reconnect a stopped client")
+	assert_signal_not_emitted(client, "host_failed")
+
+	client.start()
+	client.on_host_request_completed(
+			HTTPRequest.RESULT_REQUEST_FAILED, 0,
+			PackedStringArray(), PackedByteArray())
+	assert_eq(client.get_state(), NovaWorldClient.STATE_GATE_PROBING,
+			"an old hosting-page completion cannot supersede a restarted lifecycle")
+	assert_signal_not_emitted(client, "host_failed")
+	client.stop()
+
+
 func test_late_login_http_completion_cannot_fail_a_restarted_client() -> void:
 	var client := NovaWorldClient.new()
 	add_child_autofree(client)
@@ -138,7 +164,7 @@ func test_every_http_request_has_a_finite_timeout() -> void:
 	for child in client.get_children():
 		if child is HTTPRequest:
 			requests.append(child as HTTPRequest)
-	assert_eq(requests.size(), 3, "browser, login, and join each own one HTTP request")
+	assert_eq(requests.size(), 4, "browser, login, join, and host each own one HTTP request")
 	for request in requests:
 		assert_gt(request.timeout, 0.0, "no Matchmaking HTTP leg can wait forever")
 	client.stop()

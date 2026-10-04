@@ -384,7 +384,74 @@ static bool test_join_resolves() {
 	return g_fail == 0;
 }
 
+// The Host leg: the login lands on the main page whose @HOST_URL@ global names the hosting URL; the
+// relay page's refresh is followed with the tag cookie; the [HOSTKEY=...&] title resolves the key.
+// [orig: UI_HandleHostSessionStart @0x556d00 @0x556f4b; UI_ProcessWebResponseContent
+//  @0x63d5bb..0x63d604; URL_ParseConnectionQueryString @0x54dfb0 @0x54e0be]
+static bool test_host_resolves() {
+	nw::LobbyHttpFlow none;
+	none.set_context(concrete_ctx());
+	nw::HostKeyResult early = none.host();
+	expect(early.kind == nw::HostKeyResult::Kind::Failed && !none.host_active(),
+	       "host() before any main page set @HOST_URL@ fails (log in first)");
+
+	nw::LobbyHttpFlow f;
+	f.set_context(concrete_ctx());
+	f.login("player", "secret");
+	f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=tag123"), {});
+	const std::string main_page =
+			"<HTML><BODY><A HREF=\"jop_2_host1.htm\">Host</A>"
+			"<IB3_GLOBAL name=\"@HOST_URL@\">http://gs.opennova.test:8080/nwhost.dll</IB3_GLOBAL>"
+			"</BODY></HTML>";
+	nw::LoginResult login = f.on_login_response(
+			true, 200, {"Set-Cookie: NWHANDLE=PlayerOne", "Set-Cookie: PCID=42"}, bytes(main_page));
+	if (!expect(login.kind == nw::LoginResult::Kind::Succeeded, "host: the login lands on the main page"))
+		return false;
+	const std::string *global = f.browser_global("@host_url@");
+	expect(global != nullptr && *global == "http://gs.opennova.test:8080/nwhost.dll",
+	       "the main page's @HOST_URL@ global is kept (name case-insensitive)");
+
+	nw::HostKeyResult r = f.host();
+	if (!expect(r.kind == nw::HostKeyResult::Kind::NeedRequest, "host() -> the @HOST_URL@ GET")) return false;
+	expect(r.request.method == nw::HttpMethod::Get &&
+	               r.request.url == "http://gs.opennova.test:8080/nwhost.dll",
+	       "the host leg opens @HOST_URL@");
+	const std::string relay =
+			"<HTML><HEAD><TITLE></TITLE>"
+			"<META http-equiv=\"refresh\" CONTENT=0;URL=\"NWHost.dll\"></HEAD></HTML>";
+	r = f.on_host_response(true, 200, set_cookie("NWJOINSESSIONTAG=htag"), bytes(relay));
+	if (!expect(r.kind == nw::HostKeyResult::Kind::NeedRequest, "the relay page refreshes")) return false;
+	expect(r.request.url == "http://gs.opennova.test:8080/NWHost.dll", "the relative refresh joins the base");
+	bool tag_cookie = false;
+	for (const std::string &h : r.request.headers)
+		if (contains(h, "NWJOINSESSIONTAG=htag")) tag_cookie = true;
+	expect(tag_cookie, "the refresh carries the relay's tag cookie");
+	const std::string host2 =
+			"<HTML><HEAD><TITLE>\n  [HOSTKEY=ABCDEFGHIJKLMNOP&]</TITLE>"
+			"<META HTTP-EQUIV=\"refresh\" CONTENT=\"10;URL=jop_2_host3.htm\"></HEAD></HTML>";
+	r = f.on_host_response(true, 200, {}, bytes(host2));
+	if (!expect(r.kind == nw::HostKeyResult::Kind::Resolved, "the HOSTKEY title resolves")) return false;
+	expect(r.host_key == "ABCDEFGHIJKLMNOP", "the key is trimmed at '&' then ']'");
+	expect(!f.host_active(), "the host leg is idle once resolved");
+
+	// A message page fails with its rendered text; a refresh loop gives up.
+	r = f.host();
+	r = f.on_host_response(true, 200, {},
+			bytes("<IB3_SUBST name=\"@GENERIC@\">You must agree first.</IB3_SUBST>"));
+	expect(r.kind == nw::HostKeyResult::Kind::Failed && r.reason == "You must agree first.",
+	       "a message page fails the host leg with its text");
+	r = f.host();
+	for (int hop = 0; hop < nw::LobbyHttpFlow::kMaxHostHops && r.kind == nw::HostKeyResult::Kind::NeedRequest;
+	     ++hop) {
+		r = f.on_host_response(true, 200, {}, bytes(relay));
+	}
+	expect(r.kind == nw::HostKeyResult::Kind::Failed, "a refresh loop gives up");
+	return g_fail == 0;
+}
+
 int main() {
+	test_host_resolves();
 	test_url_builders();
 	test_login_success_concrete();
 	test_login_templated_nwstart();

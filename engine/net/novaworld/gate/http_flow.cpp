@@ -5,6 +5,7 @@
 
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <net/novaworld/registration_url.h>
 
 namespace opennova {
 namespace {
@@ -121,6 +122,41 @@ std::string extract_message(const std::vector<uint8_t> &body,
 	return strip_edges(normalized);
 }
 
+// The page's <TITLE> text ("" when it has none).
+std::string page_title(const std::string &html) {
+	const std::string lower = to_lower(html);
+	const std::size_t open = lower.find("<title");
+	if (open == std::string::npos) return std::string();
+	const std::size_t begin = lower.find('>', open);
+	if (begin == std::string::npos) return std::string();
+	const std::size_t end = lower.find("</title", begin + 1);
+	return html.substr(begin + 1, end == std::string::npos ? std::string::npos : end - begin - 1);
+}
+
+// The URL a <META http-equiv="refresh" content="N;URL=..."> names ("" when none), quotes stripped.
+std::string meta_refresh_url(const std::string &html) {
+	const std::string lower = to_lower(html);
+	std::size_t at = 0;
+	while ((at = lower.find("<meta", at)) != std::string::npos) {
+		const std::size_t close = lower.find('>', at);
+		if (close == std::string::npos) return std::string();
+		const std::string tag = lower.substr(at, close - at);
+		if (tag.find("http-equiv") != std::string::npos && tag.find("refresh") != std::string::npos) {
+			const std::size_t u = tag.find("url=");
+			if (u == std::string::npos) return std::string();
+			std::size_t begin = at + u + 4;
+			while (begin < close && (html[begin] == '"' || html[begin] == '\'' || html[begin] == ' ')) ++begin;
+			std::size_t end = begin;
+			while (end < close && html[end] != '"' && html[end] != '\'' && html[end] != '>' &&
+			       !std::isspace(static_cast<unsigned char>(html[end])))
+				++end;
+			return html.substr(begin, end - begin);
+		}
+		at = close + 1;
+	}
+	return std::string();
+}
+
 LoginResult login_need(HttpRequestSpec req) {
 	LoginResult r;
 	r.kind = LoginResult::Kind::NeedRequest;
@@ -148,8 +184,24 @@ JoinResult join_fail(std::string reason) {
 
 } // namespace
 
+HostKeyResult host_need(HttpRequestSpec req) {
+	HostKeyResult r;
+	r.kind = HostKeyResult::Kind::NeedRequest;
+	r.request = std::move(req);
+	return r;
+}
+HostKeyResult host_fail(std::string reason) {
+	HostKeyResult r;
+	r.kind = HostKeyResult::Kind::Failed;
+	r.reason = std::move(reason);
+	return r;
+}
+
 void LobbyHttpFlow::reset() {
 	jar_ = CookieJar{};
+	host_step_ = HostStep::Idle;
+	host_hops_ = 0;
+	globals_.clear();
 	epask_ = EpaskParams{};
 	login_step_ = LoginStep::Idle;
 	login_poll_count_ = 0;
@@ -331,6 +383,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 		return login_fail("login HTTP failed (code " + std::to_string(code) + ")");
 	}
 	merge_response_cookies(response_headers); // store Set-Cookie BEFORE branching
+	capture_globals(body);
 
 	switch (step) {
 		case LoginStep::Prepare: {
@@ -541,6 +594,111 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			join_step_ = JoinStep::Idle;
 			return join_fail("join response with no pending step");
 	}
+}
+
+// =============================== Host ===============================
+
+// The menu browser keeps every page global a page sets, by name, for the substitutions and the
+// menu's own reads. [orig: UI_ProcessWebResponseContent @0x63d50a..0x63d558 ->
+//  CUIScene_SetProperty @0x63b480; the reader sub_63B440]
+void LobbyHttpFlow::capture_globals(const std::vector<uint8_t> &body) {
+	const std::string html = to_string_body(body);
+	const std::string lower = to_lower(html);
+	std::size_t at = 0;
+	while ((at = lower.find("<ib3_global", at)) != std::string::npos) {
+		const std::size_t tag_end = lower.find('>', at);
+		if (tag_end == std::string::npos) return;
+		const std::size_t name_at = lower.find("name=", at);
+		const std::size_t close = lower.find("</ib3_global", tag_end);
+		if (name_at == std::string::npos || name_at > tag_end || close == std::string::npos) {
+			at = tag_end + 1;
+			continue;
+		}
+		std::size_t begin = name_at + 5;
+		while (begin < tag_end && (html[begin] == '"' || html[begin] == '\'')) ++begin;
+		std::size_t end = begin;
+		while (end < tag_end && html[end] != '"' && html[end] != '\'' &&
+		       !std::isspace(static_cast<unsigned char>(html[end])))
+			++end;
+		globals_[strutil::to_upper(html.substr(begin, end - begin))] =
+				strip_edges(html.substr(tag_end + 1, close - tag_end - 1));
+		at = close + 1;
+	}
+}
+
+const std::string *LobbyHttpFlow::browser_global(const std::string &name) const {
+	const auto it = globals_.find(strutil::to_upper(name));
+	return it == globals_.end() ? nullptr : &it->second;
+}
+
+std::string LobbyHttpFlow::absolute_url(const std::string &url) const {
+	if (begins_with(to_lower(url), "http://") || begins_with(to_lower(url), "https://")) return url;
+	const std::string base = http_base();
+	if (base.empty()) return std::string();
+	return base + (url.empty() || url[0] != '/' ? "/" : "") + url;
+}
+
+HostKeyResult LobbyHttpFlow::host_get(const std::string &url) {
+	const std::string absolute = absolute_url(url);
+	if (absolute.empty()) {
+		host_step_ = HostStep::Idle;
+		return host_fail("no server base URL — connect first");
+	}
+	host_step_ = HostStep::Fetching;
+	HttpRequestSpec req;
+	req.valid = true;
+	req.method = HttpMethod::Get;
+	req.url = absolute;
+	req.headers = request_headers(false);
+	return host_need(std::move(req));
+}
+
+HostKeyResult LobbyHttpFlow::host() {
+	if (host_step_ != HostStep::Idle) return host_fail("host already in flight");
+	const std::string *host_url = browser_global("@HOST_URL@");
+	if (host_url == nullptr || host_url->empty())
+		return host_fail("the NovaWorld main page set no @HOST_URL@ — log in first");
+	host_hops_ = 0;
+	return host_get(*host_url);
+}
+
+HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
+                                              const std::vector<std::string> &response_headers,
+                                              const std::vector<uint8_t> &body) {
+	if (host_step_ == HostStep::Idle) return host_fail("host response with no pending step");
+	if (!transport_ok || code != 200) {
+		host_step_ = HostStep::Idle;
+		const std::string message = extract_message(body);
+		if (!message.empty()) return host_fail(message);
+		return host_fail("host HTTP failed (code " + std::to_string(code) + ")");
+	}
+	merge_response_cookies(response_headers);
+	capture_globals(body);
+	const std::string html = to_string_body(body);
+	// The title test skips leading characters that are neither a letter nor '[', then compares
+	// case-insensitively. [orig: UI_ProcessWebResponseContent @0x63d5bb..0x63d604]
+	const std::string title = page_title(html);
+	std::size_t start = 0;
+	while (start < title.size() && !std::isalpha(static_cast<unsigned char>(title[start])) &&
+	       title[start] != '[')
+		++start;
+	if (strutil::starts_with_icase(std::string_view(title).substr(start), "[HOSTKEY=")) {
+		host_step_ = HostStep::Idle;
+		RegistrationUrl parsed;
+		if (!registration_url_parse(title, parsed) || !parsed.has_host_key || parsed.host_key.empty())
+			return host_fail("host: an empty HOSTKEY");
+		HostKeyResult r;
+		r.kind = HostKeyResult::Kind::Resolved;
+		r.host_key = parsed.host_key;
+		return r;
+	}
+	// A relay page refreshes to the next one; the menu browser follows it.
+	const std::string next = meta_refresh_url(html);
+	if (!next.empty() && ++host_hops_ < kMaxHostHops) return host_get(next);
+	host_step_ = HostStep::Idle;
+	const std::string message = extract_message(body);
+	if (!message.empty()) return host_fail(message);
+	return host_fail("host: no HOSTKEY page");
 }
 
 } // namespace opennova

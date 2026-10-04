@@ -52,6 +52,9 @@ add_library(opennova_net STATIC
     # classifier, join identity, the lobby CU var-list codec
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/session_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/client_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/nwu_lobby_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/nwu_host_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/lobby_identity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/join_identity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/lobby_update.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/lobby_vars.cpp
@@ -77,6 +80,10 @@ target_include_directories(opennova_net
 # wire only; the in-match session and replication live in runtime/ above it,
 # and opennova_net never links opennova_runtime (link_graph_check.py).
 target_link_libraries(opennova_net PUBLIC opennova_base)
+if(WIN32)
+    # lobby_identity.cpp: GetAdaptersInfo (the retail machine tokens' adapter input).
+    target_link_libraries(opennova_net PUBLIC iphlpapi)
+endif()
 
 target_compile_features(opennova_net PUBLIC cxx_std_17)
 

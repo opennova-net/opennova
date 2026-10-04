@@ -19,12 +19,15 @@
 #include <map>
 #include <string>
 
+namespace opennova {
+class NwuHostRole;
+} // namespace opennova
+
 namespace godot {
 
 class GameWorld;
 class MissionRoot;
 class NovaWorldClient;
-class NwuHostRole;
 
 // The drive between a typed session request and an admitted world -- the
 // engine side of a net-session load (the former net_session_drive.gd, ADR
@@ -178,7 +181,7 @@ private:
 	void unbind_nw_host();
 	// Mirror the admitted joiners onto the hosting session's per-slot roster
 	// (the PlayerList + ClientHostPlayerAdded/Removed).
-	void sync_nw_host_roster(NwuHostRole &p_host, const Ref<Simulation> &p_sim);
+	void sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<Simulation> &p_sim);
 	NovaWorldClient *nw_client() const;
 	void stop_nw_client();
 	// Hand the match the NovaWorld session's facts once a tick. The feed starts
