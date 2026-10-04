@@ -256,7 +256,7 @@ TextureUse fixed_use(const AssetScan &scan, const FixedTextureName &fixed, const
 	use.name_written = fixed.name;
 	use.context.hud_mode = fixed.hud_mode;
 	const TextureLoader loader = fixed.loader != TextureLoader::kCount ? fixed.loader : texture_role_row(fixed.role).loader;
-	use.load = texture_load(loader, fixed.name, exists, 0, std::max(fixed.hud_mode, 0));
+	use.load = texture_load(loader, fixed.name, exists, 0, fixed.hud_mode, fixed.role);
 	if (const AssetEntry *opened = use.load.file.empty() ? nullptr : scan.find(basename_of(use.load.file)))
 		use.served = opened->relative_path;
 	return use;

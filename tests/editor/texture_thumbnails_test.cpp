@@ -88,7 +88,7 @@ int test_pictures() {
 	            picture->rgba[3] == 128);
 	// What the use's loader makes of it: the HUD's alpha alone.
 	picture = make_texture_thumbnail("hud.tga", tga_of(solid(4, 4, 200, 100, 50, 60), 4, 4), TextureLoadTransform::AlphaOnly);
-	TEST_EXPECT(picture->rgba[0] == 0 && picture->rgba[1] == 0 && picture->rgba[3] == 60 && picture->transform == TextureLoadTransform::AlphaOnly);
+	TEST_EXPECT(picture->rgba[0] == 255 && picture->rgba[1] == 255 && picture->rgba[3] == 60 && picture->transform == TextureLoadTransform::AlphaOnly);
 	// A DXT5 chain: the level nearest above the picture (32 for a side of 32), its texels the codec's.
 	const std::vector<uint8_t> source = solid(128, 128, 0, 255, 0, 255);
 	const std::vector<renderer::DxtSurface> levels =
@@ -172,7 +172,7 @@ int test_session() {
 	            answer.get_number("source_width", 0) == 16 && answer.get_string("format", "") == "TGA image");
 	opennova::RgbaImage png;
 	TEST_EXPECT(decode_png(unbase64(answer.get_string("png", "")), png, error) && png.width == 16 && png.height == 16 &&
-	            png.pixels[0] == 0 && png.pixels[3] == 255);
+	            png.pixels[0] == 255 && png.pixels[3] == 255);
 	rig.query("texture_thumbnail", "{\"path\":\"defs/items.def\"}", &error);
 	TEST_EXPECT(!error.empty());
 	rig.query("texture_thumbnail", "{\"path\":\"stance.tga\",\"transform\":\"sideways\"}", &error);

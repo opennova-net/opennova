@@ -4,14 +4,12 @@
 
 #include <base/io/strutil.h>
 #include <formats/trn/trn.h>
-#include <runtime/menu/menu_assets.h>
 #include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/texture_load_rules.h>
 
 namespace opennova::editor {
 
 namespace {
-
-bool holds(const std::string &upper, const char *what) { return upper.find(what) != std::string::npos; }
 
 TextureFileReader reader_of(renderer::MaterialTextureReader reader) {
 	switch (reader) {
@@ -24,71 +22,62 @@ TextureFileReader reader_of(renderer::MaterialTextureReader reader) {
 	return TextureFileReader::None;
 }
 
-// The name up to its last '.', plus ".dds" (a loader's DDS sibling).
-std::string dds_sibling(const std::string &name) {
-	const size_t dot = name.find_last_of('.');
-	return (dot == std::string::npos ? name : name.substr(0, dot)) + ".dds";
-}
-
-// ARCHIVE [orig: Texture_LoadFromArchive @ 0x58B980]: the .dds sibling (the name cut at its last '.',
-// @ 0x58BA1B..0x58BA46) when the files hold it (@ 0x58BA50), through the DDS reader; else the name
-// upper-cased holding .TGA or .MDT through the TGA reader, else holding .PCX through the PCX reader
-// (@ 0x58BB0B..0x58BB75), whose alpha is the luminance of the second name's palette when that is a .PCX
-// the files hold (@ 0x58BBD9..0x58BCEE); else nothing.
-TextureLoad archive_load(const std::string &name, const TextureNameTest &exists) {
+// A load of the game's rules in the editor's words: the reader, and what the loader makes of the texels
+// (a PCX's palette luminance its alpha, the loader decoding it so; the HUD's alpha alone).
+TextureLoad from_renderer(const renderer::TextureLoad &load) {
 	TextureLoad out;
-	const std::string sibling = dds_sibling(name);
-	if (exists && exists(sibling)) {
-		out.file = sibling;
-		out.reader = TextureFileReader::Dds;
-		return out;
+	out.file = load.file;
+	switch (load.reader) {
+	case renderer::TextureReader::Dds: out.reader = TextureFileReader::Dds; break;
+	case renderer::TextureReader::Tga:
+	case renderer::TextureReader::TgaParticleLoose: out.reader = TextureFileReader::Tga; break;
+	case renderer::TextureReader::Pcx: out.reader = TextureFileReader::Pcx; break;
+	case renderer::TextureReader::Png: out.reader = TextureFileReader::Png; break;
+	case renderer::TextureReader::None: break;
 	}
-	const std::string upper = strutil::to_upper(name);
-	if (holds(upper, ".TGA") || holds(upper, ".MDT")) {
-		out.file = name;
-		out.reader = TextureFileReader::Tga;
-	} else if (holds(upper, ".PCX")) {
-		out.file = name;
-		out.reader = TextureFileReader::Pcx;
-		if (exists && exists(name)) {
-			out.transform = TextureLoadTransform::LuminanceAlpha;
-			out.alpha_source = name;
-		}
+	switch (load.transform) {
+	case renderer::TextureLoadTransform::WhiteAlphaFromBlue: out.transform = TextureLoadTransform::WhiteAlphaFromBlue; break;
+	case renderer::TextureLoadTransform::PaletteLuminanceAlpha:
+		out.transform = TextureLoadTransform::LuminanceAlpha;
+		out.alpha_source = load.file;
+		break;
+	case renderer::TextureLoadTransform::None: break;
 	}
+	if (load.alpha_only) out.transform = TextureLoadTransform::AlphaOnly;
 	return out;
 }
 
-// HUD [orig: sub_591750 @ 0x591750, HUD_LoadImageAsTexture @ 0x591550]: the name upper-cased, a .FULL
-// suffix cut (colour) or else an .ALPHA one (alpha only) overriding the caller's mode (@ 0x59179A..
-// 0x5917CE); nothing unless the files hold what is left (@ 0x5917DF); a .TGA through the TGA reader, a
-// .PCX through the PCX reader turned white with alpha from blue (@ 0x591615..0x591644); alpha mode
-// keeps the alpha alone (an A8 texture @ 0x591674..0x5916C4).
-TextureLoad hud_load(const std::string &name, const TextureNameTest &exists, int alpha_mode) {
+// The game's loader's tries for `name` (renderer::texture_load_attempts) over the project's files: the
+// first the files hold, else the first, each of the mounted set (the particle manager's loose tga\ leg is
+// no project file).
+TextureLoad attempts_load(renderer::TextureLoader loader, const std::string &name, const TextureNameTest &exists) {
+	renderer::TextureFileQuery files;
+	files.exists = [&exists](const std::string &file) { return exists && exists(file); };
+	files.loose_first_hit = [](const std::string &) { return false; };
+	const std::vector<renderer::TextureLoad> attempts = renderer::texture_load_attempts(loader, name, files);
+	const renderer::TextureLoad *first = nullptr;
+	for (const renderer::TextureLoad &attempt : attempts) {
+		if (attempt.source != renderer::TextureFileSource::Mounted || attempt.file.empty()) continue;
+		if (!first) first = &attempt;
+		if (files.exists(attempt.file)) return from_renderer(attempt);
+	}
+	return first ? from_renderer(*first) : TextureLoad();
+}
+
+// A model texture row's load by its authored type: the file and reader the dispatcher's loader picks
+// (renderer::material_texture_source), a type-1 row's upper-case .PCX white with its blue as alpha
+// (renderer::material_texture_load), a normal map's .tga (not its .mdt) converted from its height
+// [orig: Texture_LoadAsNormalMap @ 0x58C480] (renderer::material_texture_transform).
+TextureLoad row_load(const std::string &name, uint8_t row_type, const TextureNameTest &exists) {
+	const uint8_t runtime = renderer::material_texture_runtime_type(row_type);
+	const renderer::MaterialTextureSource source = renderer::material_texture_source(name, runtime, exists);
 	TextureLoad out;
-	// The name as written cut where its upper-cased copy is (the archive's lookup takes no case).
-	std::string upper = strutil::to_upper(name);
-	std::string file = name;
-	bool alpha = alpha_mode != 0;
-	if (const size_t full = upper.find(".FULL"); full != std::string::npos) {
-		upper.resize(full);
-		file.resize(full);
-		alpha = false;
-	} else if (const size_t only = upper.find(".ALPHA"); only != std::string::npos) {
-		upper.resize(only);
-		file.resize(only);
-		alpha = true;
-	}
-	if (!exists || !exists(file)) return out;
-	if (holds(upper, ".TGA")) {
-		out.reader = TextureFileReader::Tga;
-	} else if (holds(upper, ".PCX")) {
-		out.reader = TextureFileReader::Pcx;
+	out.file = source.file;
+	out.reader = reader_of(source.reader);
+	if (renderer::material_texture_load(source, runtime).transform == renderer::TextureLoadTransform::WhiteAlphaFromBlue)
 		out.transform = TextureLoadTransform::WhiteAlphaFromBlue;
-	} else {
-		return out;
-	}
-	out.file = file;
-	if (alpha) out.transform = TextureLoadTransform::AlphaOnly;
+	if (renderer::material_texture_transform(runtime, name, true) == renderer::MaterialTextureTransform::NormalFromAlpha)
+		out.transform = TextureLoadTransform::NormalFromHeight;
 	return out;
 }
 
@@ -132,67 +121,21 @@ const char *texture_load_transform_words(TextureLoadTransform transform) {
 }
 
 TextureLoad texture_load(TextureLoader loader, std::string_view written, const TextureNameTest &exists, uint8_t row_type,
-                         int alpha_mode) {
+                         int alpha_mode, TextureRoleId role) {
 	const std::string name(written);
 	TextureLoad out;
 	if (name.empty()) return out;
-	const std::string upper = strutil::to_upper(name);
 	switch (loader) {
 	case TextureLoader::Stage:
 	case TextureLoader::Plain:
 	case TextureLoader::Normal:
 	case TextureLoader::Producer:
-	case TextureLoader::Chunk: {
-		// The model row's dispatcher (renderer::material_texture_source) by the row's runtime type; a
-		// role named without a row (a terrain's detail, a scar) passes the STAGE type 0.
-		uint8_t type = row_type;
-		if (loader == TextureLoader::Plain) type = 1;
-		const renderer::MaterialTextureSource source =
-		        renderer::material_texture_source(name, renderer::material_texture_runtime_type(type), exists);
-		out.file = source.file;
-		out.reader = reader_of(source.reader);
-		const uint8_t runtime = renderer::material_texture_runtime_type(type);
-		// PLAIN's upper-case .PCX as written: white, alpha from blue [orig: Texture_LoadAndRegister @
-		// 0x58B8A5..0x58B8F7].
-		if (runtime == 1 && name.find(".PCX") != std::string::npos && out.reader == TextureFileReader::Pcx)
-			out.transform = TextureLoadTransform::WhiteAlphaFromBlue;
-		// A normal map's .tga (not its .mdt) is converted from its height [orig: Texture_LoadAsNormalMap
-		// @ 0x58C480] (renderer::material_texture_transform).
-		if (renderer::material_texture_transform(runtime, name, true) ==
-		    renderer::MaterialTextureTransform::NormalFromAlpha)
-			out.transform = TextureLoadTransform::NormalFromHeight;
-		return out;
-	}
-	case TextureLoader::Archive: return archive_load(name, exists);
-	case TextureLoader::Hud: return hud_load(name, exists, alpha_mode);
-	case TextureLoader::File:
-		// FILE [orig: Texture_LoadFromFile_0 @ 0x58FE00]: .TGA through the TGA reader, any other name
-		// through the PCX reader (@ 0x58FE5F..0x58FEC7).
-		out.file = name;
-		out.reader = holds(upper, ".TGA") ? TextureFileReader::Tga : TextureFileReader::Pcx;
-		return out;
-	case TextureLoader::Menu: {
-		const menu::MenuTextureSource source = menu::menu_texture_source(name, exists);
-		out.file = source.file;
-		switch (source.format) {
-		case menu::MenuTextureFormat::Tga: out.reader = TextureFileReader::Tga; break;
-		case menu::MenuTextureFormat::Dds: out.reader = TextureFileReader::Dds; break;
-		case menu::MenuTextureFormat::Pcx: out.reader = TextureFileReader::Pcx; break;
-		case menu::MenuTextureFormat::Png: out.reader = TextureFileReader::Png; break;
-		case menu::MenuTextureFormat::None: out.file.clear(); break;
-		}
-		return out;
-	}
-	case TextureLoader::Ptl:
-	case TextureLoader::Tga:
-		out.file = name;
-		out.reader = TextureFileReader::Tga;
-		return out;
-	case TextureLoader::Pcx:
-		out.file = name;
-		out.reader = TextureFileReader::Pcx;
-		return out;
+	case TextureLoader::Chunk:
+		// The model row's dispatcher by the row's runtime type; a role named without a row (a terrain's
+		// detail, a weather drop) passes the STAGE type 0, PLAIN its type 1.
+		return row_load(name, loader == TextureLoader::Plain ? uint8_t(1) : row_type, exists);
 	case TextureLoader::Pcx8:
+		// Read by its own name as 8-bit indices (a foliage or char map): no texture loader.
 		out.file = name;
 		out.reader = TextureFileReader::Pcx8;
 		return out;
@@ -200,9 +143,12 @@ TextureLoad texture_load(TextureLoader loader, std::string_view written, const T
 		out.file = name;
 		out.reader = TextureFileReader::Dds;
 		return out;
-	case TextureLoader::kCount: break;
+	case TextureLoader::kCount: return out;
+	default: break;
 	}
-	return out;
+	renderer::TextureLoader by;
+	if (!texture_role_renderer_loader(role, by, loader, alpha_mode)) return out;
+	return attempts_load(by, name, exists);
 }
 
 TextureLoad texture_reference_load(std::string_view written, int32_t loader_arg, const TextureNameTest &exists) {
@@ -219,8 +165,7 @@ TextureLoad texture_reference_load(std::string_view written, int32_t loader_arg,
 	// appended as, TGA [orig: Terrain_LoadEnvironmentConfig @ 0x6109EE, Path_ReplaceOrAppendExtension @
 	// 0x53C780] (formats/trn).
 	if (loader_arg & kTextureArgTileSet) name = trn_mission_tilestrip(TrnConfig{}, name);
-	const TextureRoleRow &row = texture_role_row(role);
-	return texture_load(row.loader, name, exists, 0, role == TextureRoleId::HudAlphaOnly ? 1 : 0);
+	return texture_load(texture_role_row(role).loader, name, exists, 0, -1, role);
 }
 
 std::shared_ptr<const TextureImage> apply_load_transform(const TextureImage &image, TextureLoadTransform transform,
@@ -231,7 +176,8 @@ std::shared_ptr<const TextureImage> apply_load_transform(const TextureImage &ima
 	case TextureLoadTransform::kCount: break;
 	case TextureLoadTransform::LuminanceAlpha: {
 		// [orig: Texture_LoadFromArchive @ 0x58BC35..0x58BCEE]: per palette entry A = (85 x (r + g + b))
-		// >> 8 of the second PCX's palette, each texel's by its index there.
+		// >> 8 of the second PCX's palette, each texel's by its index there (the game's 8-bit read of
+		// it: formats/pcx decode_pcx_luminance_alpha).
 		const TextureImage &source = alpha_source ? *alpha_source : image;
 		if (source.indices.empty() || source.palette.size() < 768 || out->levels.empty()) break;
 		uint8_t luminance[256];
@@ -242,20 +188,15 @@ std::shared_ptr<const TextureImage> apply_load_transform(const TextureImage &ima
 		break;
 	}
 	case TextureLoadTransform::WhiteAlphaFromBlue:
-		// [orig: HUD_LoadImageAsTexture @ 0x591615..0x591644]: each A8R8G8B8 texel shifted up 24 and or'd
-		// with 0xFFFFFF: white, its alpha the blue byte.
-		for (TextureLevel &level : out->levels)
-			for (size_t i = 0; i < level.rgba.size() / 4; ++i) {
-				const uint8_t blue = level.rgba[i * 4 + 2];
-				level.rgba[i * 4] = level.rgba[i * 4 + 1] = level.rgba[i * 4 + 2] = 0xFF;
-				level.rgba[i * 4 + 3] = blue;
-			}
-		break;
 	case TextureLoadTransform::AlphaOnly:
-		// [orig: HUD_LoadImageAsTexture @ 0x591674..0x5916C4]: the alpha alone (an A8 texture, which
-		// samples as black with that alpha).
+		// As the game's loaders do it (renderer::apply_texture_load_transform): white with the blue as alpha;
+		// the alpha alone, white, the form an A8 texture takes under the HUD's alpha material.
 		for (TextureLevel &level : out->levels)
-			for (size_t i = 0; i < level.rgba.size() / 4; ++i) level.rgba[i * 4] = level.rgba[i * 4 + 1] = level.rgba[i * 4 + 2] = 0;
+			renderer::apply_texture_load_transform(transform == TextureLoadTransform::WhiteAlphaFromBlue
+			                                               ? renderer::TextureLoadTransform::WhiteAlphaFromBlue
+			                                               : renderer::TextureLoadTransform::None,
+			                                       transform == TextureLoadTransform::AlphaOnly, level.rgba.data(),
+			                                       level.rgba.size() / 4);
 		break;
 	case TextureLoadTransform::NormalFromHeight:
 		// [orig: Texture_LoadAsNormalMap @ 0x58C985..0x58CAED] (renderer::normal_map_from_height_rgba,

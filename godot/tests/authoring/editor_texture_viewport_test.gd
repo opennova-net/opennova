@@ -209,7 +209,7 @@ func test_a_dds_chain_binds_the_level_shown() -> void:
 	assert_true(_viewport("textures/metal.dds").has("error"), "no viewport kept once another file is selected")
 
 ## S18: the texture as the game draws it for one of its uses: an item's HUD image, the HUD's alpha alone
-## (an A8, black where it shows), in the GPU texture once as_used names the use; the file again at -1.
+## (an A8, white under its alpha), in the GPU texture once as_used names the use; the file again at -1.
 func test_a_texture_draws_as_a_use() -> void:
 	if _app == null:
 		return
@@ -236,7 +236,7 @@ func test_a_texture_draws_as_a_use() -> void:
 	if material == null:
 		return
 	var texture := material.get_shader_parameter("level_nearest") as Texture2D
-	assert_eq(texture.get_image().get_pixel(0, 1), Color8(0, 0, 0, 50), "the alpha alone, black")
+	assert_eq(texture.get_image().get_pixel(0, 1), Color8(255, 255, 255, 50), "the alpha alone, white")
 	builds = int(state.get("builds", 0))
 	assert_true(_seam.done({"kind": "set_viewport", "path": "textures/brick.tga",
 			"viewport": {"kind": "texture", "options": {"as_used": -1}}}))

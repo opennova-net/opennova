@@ -10,6 +10,7 @@
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
+#include <formats/tga/tga_read.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_dxt.h>
 
@@ -110,17 +111,26 @@ void read_tga(TextureImage &image, const std::vector<uint8_t> &stored) {
 			return;
 		}
 	}
+	// The texels as the game's TGA reader decodes them (formats/tga/tga_read.h, its witnesses); the
+	// header's fields say what form the file is and what the reader makes of it.
+	tga::TgaHeader h;
 	tga::TgaImage tga;
 	std::string error;
-	if (!tga::tga_decode_game(bytes.data(), bytes.size(), tga, error)) {
-		image.refusal = error;
+	if (!tga::tga_read_header(bytes.data(), bytes.size(), h) || !tga::tga_decode_retail(bytes.data(), bytes.size(), tga, error)) {
+		image.refusal = error.empty() ? std::string("The TGA header is cut short.") : error;
 		return;
 	}
-	const tga::TgaHeader &h = tga.header;
+	// The forms the reader zeroes, and those it leaves unwritten (which the port reads as zeros too)
+	// [orig: CTerrainTileData_LoadTGAFromArchive @ 0x56E570, the switch @ 0x56E6C2].
+	const uint8_t type = h.image_type;
+	const bool known = type == 1 || type == 2 || type == 3 || type == 9 || type == 10 || type == 11;
+	const bool unset = !known || (type == 3 && h.bits != 8);
+	const bool zeroed = !unset && (type == 9 || type == 11 || ((type == 2 || type == 10) && h.bits != 24 && h.bits != 32) ||
+	                               (type == 1 && h.map_entry_bits != 24));
 	image.loads = true;
 	image.decoded = true;
-	image.blank = tga.pixels != tga::TgaPixels::Decoded;
-	if (tga.width > 0 && tga.height > 0) image.levels.push_back({uint32_t(tga.width), uint32_t(tga.height), std::move(tga.rgba)});
+	image.blank = unset || zeroed;
+	image.levels.push_back({uint32_t(tga.width), uint32_t(tga.height), std::move(tga.rgba)});
 	size_fact(image);
 	std::string texels;
 	switch (h.image_type) {
@@ -143,16 +153,13 @@ void read_tga(TextureImage &image, const std::vector<uint8_t> &stored) {
 	std::string compression = h.run_length() ? "run-length" : "none";
 	if (image.bfc1) compression = "BFC1-packed (the models' reader unpacks it), then " + compression;
 	fact(image, "compression", "Compression", compression);
-	if (tga.pixels == tga::TgaPixels::Blank)
+	if (zeroed)
 		fact(image, "loads", "In the game", "loads blank: its reader zeroes this form (every texel transparent black)");
-	else if (tga.pixels == tga::TgaPixels::Unset)
+	else if (unset)
 		fact(image, "loads", "In the game",
 		     "loads no texels of the file: its reader leaves this form's texels unwritten (shown blank)");
 	else
 		fact(image, "loads", "In the game", "loads it");
-	image.palette = std::move(tga.palette);
-	image.indices = std::move(tga.indices);
-	if (!image.palette.empty()) fact(image, "palette", "Palette", std::to_string(image.palette_size()) + " colours");
 	image.upside_down = h.top_first();
 	fact(image, "rows", "Rows",
 	     h.top_first() ? "top row first: the game reads every TGA bottom row first, so it shows upside down"

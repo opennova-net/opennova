@@ -396,28 +396,30 @@ bool texture_arg_role(int32_t loader_arg, TextureRoleId &role) {
 	return true;
 }
 
-bool texture_role_renderer_loader(TextureRoleId role, renderer::TextureLoader &out) {
+bool texture_role_renderer_loader(TextureRoleId role, renderer::TextureLoader &out, TextureLoader loader, int alpha_mode) {
 	using RL = renderer::TextureLoader;
-	switch (role) {
-	// The archive loader naming the file twice, a PCX taking its own palette's luminance as alpha.
-	case R::SkyCloud:
-	case R::TracerSmoke: out = RL::ArchiveSelfAlpha; return true;
-	case R::HudColour: out = RL::HudColor; return true;
-	case R::HudAlphaOnly: out = RL::HudAlpha; return true;
-	case R::CinematicFade: out = RL::CineFade; return true;
-	default: break;
+	if (loader == L::kCount) {
+		if (size_t(role) >= kTextureRoleCount) return false;
+		loader = texture_role_row(role).loader;
+		// The end-of-round cine's images go through their own loader, its two tries (texture_load_rules.h).
+		if (role == R::CinematicFade) {
+			out = RL::CineFade;
+			return true;
+		}
 	}
-	if (size_t(role) >= kTextureRoleCount) return false;
-	switch (texture_role_row(role).loader) {
+	switch (loader) {
 	case L::Stage: out = RL::Stage; return true;
 	case L::Plain: out = RL::Plain; return true;
-	case L::Archive: out = RL::Archive; return true;
+	// The archive loader naming the file twice for the sky maps and the tracer smoke, a PCX taking its
+	// own palette's luminance as alpha; once (an empty alpha name) for the others, a PCX opaque.
+	case L::Archive: out = role == R::SkyCloud || role == R::TracerSmoke ? RL::ArchiveSelfAlpha : RL::Archive; return true;
 	case L::File: out = RL::File; return true;
 	case L::Menu: out = RL::Menu; return true;
 	case L::Ptl: out = RL::Particle; return true;
 	case L::Tga: out = RL::Tga; return true;
 	case L::Pcx: out = RL::Pcx; return true;
-	case L::Hud: out = RL::HudColor; return true;
+	// The HUD loader in the caller's mode: the role's, alpha only for its alpha-only art.
+	case L::Hud: out = (alpha_mode >= 0 ? alpha_mode == 1 : role == R::HudAlphaOnly) ? RL::HudAlpha : RL::HudColor; return true;
 	case L::Normal:
 	case L::Producer:
 	case L::Chunk:
@@ -427,7 +429,6 @@ bool texture_role_renderer_loader(TextureRoleId role, renderer::TextureLoader &o
 	}
 	return false;
 }
-
 std::vector<std::string> texture_role_extensions(const TextureRoleRow &row) {
 	std::vector<std::string> out;
 	if (row.formats & kTextureTga) out.push_back(".tga");

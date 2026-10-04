@@ -82,7 +82,7 @@ func test_a_thumbnail_is_uploaded_as_the_cache_made_it() -> void:
 	var alpha: ImageTexture = _app.get_thumbnail_texture("textures/brick.tga", "alpha_only")
 	assert_not_null(alpha)
 	if alpha != null:
-		assert_eq(alpha.get_image().get_pixel(0, 1), Color8(0, 0, 0, 50), "black under its alpha")
+		assert_eq(alpha.get_image().get_pixel(0, 1), Color8(255, 255, 255, 50), "white under its alpha")
 	assert_null(_app.get_thumbnail_texture("notes.txt", "none"), "a file that is no texture has none")
 	# The wire's picture: the same, as a PNG.
 	var answer: Dictionary = _seam.query("texture_thumbnail", {"path": "textures/brick.tga"})

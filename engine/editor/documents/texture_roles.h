@@ -173,10 +173,13 @@ bool texture_arg_role(int32_t loader_arg, TextureRoleId &role);
 inline bool texture_arg_gates(int32_t loader_arg) { return loader_arg > 0 && (loader_arg & kTextureArgGates) != 0; }
 
 // The game's loader a role's file goes through (runtime/renderer/texture_load_rules.h, which names the
-// files it opens and the reader): false for a role no such loader reads, a model row's normal map,
-// producer or chunk (its row's type picks: renderer::material_texture_source), a map read by its own
-// name (a foliage or char map), a cube map.
-bool texture_role_renderer_loader(TextureRoleId role, renderer::TextureLoader &out);
+// files it opens and the reader): the role's own, or loader where a use goes through another (a fixed
+// name's: the night vision's scale through FILE), the HUD's in lpha_mode (1 alpha only, 0 colour; -1
+// the role's). False for a role no such loader reads: a model row's normal map, producer or chunk (its
+// row's type picks: renderer::material_texture_source), a map read by its own name (a foliage or char
+// map), a cube map.
+bool texture_role_renderer_loader(TextureRoleId role, renderer::TextureLoader &out, TextureLoader loader = TextureLoader::kCount,
+                                  int alpha_mode = -1);
 
 // What a model texture row says of its use beyond its type (FieldUse::use_context, GraphEdge::use_context):
 // its slot, its flags (the flipbook bit), its material's flags (alpha test, inverted) and alpha-test

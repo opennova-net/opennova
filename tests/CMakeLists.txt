@@ -1109,15 +1109,9 @@ target_link_libraries(dds_write_test PRIVATE opennova_formats)
 target_include_directories(dds_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME dds_write COMMAND dds_write_test)
 
-# What the game's readers make of a texture file (ADR 0046 S18, the texture document): the TGA
-# reader's decode (its forms, the rows always bottom up, what it zeroes or leaves unset), D3DX's DDS
-# loader (its pixel-format table, the levels, what it refuses) and the PCX reader's indices and
-# palette, each over files minted by our writers or here.
-add_executable(tga_decode_test tga/tga_decode_test.cpp)
-target_link_libraries(tga_decode_test PRIVATE opennova_formats)
-target_include_directories(tga_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tga_decode COMMAND tga_decode_test)
-
+# What the game's readers make of a texture file (ADR 0046 S18, the texture document; the TGA reader's
+# is tga_read): D3DX's DDS loader (its pixel-format table, the levels, what it refuses) and the PCX
+# reader's indices and palette, each over files minted by our writers or here.
 add_executable(dds_read_test dds/dds_read_test.cpp)
 target_link_libraries(dds_read_test PRIVATE opennova_formats)
 target_include_directories(dds_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

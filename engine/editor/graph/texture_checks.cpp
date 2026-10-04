@@ -195,7 +195,7 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	if (graph.resolve(edge, &served) != ReferenceStatus::Present || served.empty()) return;
 	const TextureNameTest exists = [&graph](const std::string &name) { return graph.has_file(name); };
 	const TextureLoad load = edge.kind == ReferenceKind::Texture ? texture_reference_load(edge.value, edge.loader_arg, exists)
-	                                                             : texture_load(row.loader, edge.value, exists);
+	                                                             : texture_load(row.loader, edge.value, exists, 0, -1, role);
 	const std::string where = use_words(row, edge);
 	// A file of the name written that the loader passes over for another (a .tga beside the .dds a model
 	// row loads) [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B5C0]: on that file, once.

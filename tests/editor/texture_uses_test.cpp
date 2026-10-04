@@ -157,7 +157,7 @@ int test_uses() {
 
 	// The texture's picture as a use draws it: the .dds the alpha-tested diffuse loads, its texels cut out
 	// at the material's reference (alpha 200, above 128: kept, opaque); the scope crosshair's alpha alone (an A8,
-	// black where it is opaque);
+	// white under it);
 	// back to the file as it is.
 	const auto viewport_of = [&](const std::string &path) {
 		return static_cast<const TextureViewport *>(session.viewports().find(path, ViewportKind::Texture));
@@ -181,7 +181,7 @@ int test_uses() {
 	show_as("textures/scopexh.tga", 0);
 	const TextureViewport *scope_view = viewport_of("textures/scopexh.tga");
 	TEST_EXPECT(scope_view && scope_view->shown_use().transform == TextureLoadTransform::AlphaOnly && scope_view->image() &&
-	            scope_view->image()->levels[0].rgba[0] == 0 && scope_view->image()->levels[0].rgba[3] == 200);
+	            scope_view->image()->levels[0].rgba[0] == 255 && scope_view->image()->levels[0].rgba[3] == 200);
 	{
 		JsonValue state_args;
 		std::string state_error;

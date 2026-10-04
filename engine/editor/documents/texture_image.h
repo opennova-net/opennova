@@ -10,9 +10,10 @@ namespace opennova::editor {
 
 // A texture as the game reads it (ADR 0046 S18): the file's texels decoded by the reader the game
 // picks for its name (never by its bytes: renderer/material_texture.h), with what it is in a modder's
-// words. The decoders are the formats' (formats/tga tga_decode_game, formats/dds dds_read, formats/pcx
-// decode_pcx_game, the PNG reader of the menus' loader); this is what the texture document, its
-// viewport and the wire read of them.
+// words. The decoders are the game's own (formats/tga tga_decode_retail, the TGA reader; formats/pcx
+// decode_pcx_menu_rgba, the PCX reader, with decode_pcx_game for its indices and palette) and the
+// formats' (formats/dds dds_read, D3DX's DDS loader; the PNG reader of the menus' loader); this is what the
+// texture document, its viewport and the wire read of them.
 
 // The reader a texture file's name picks: a .tga or an .mdt the TGA reader (a model's normal map made
 // ahead is a TGA the object loader decodes so), a .pcx the PCX reader, a .dds D3DX's (which reads the

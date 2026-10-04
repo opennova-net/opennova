@@ -113,15 +113,20 @@ int test_names() {
 	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::WhiteAlphaFromBlue);
 	load = texture_load(TextureLoader::Plain, "mask.pcx", files_of({"mask.pcx"}));
 	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::None);
-	// ARCHIVE: the sibling at the LAST '.', else a PCX with its luminance alpha.
-	load = texture_load(TextureLoader::Archive, "cld.day.pcx", files_of({"cld.day.dds", "cld.day.pcx"}));
+	// ARCHIVE (renderer::texture_load_attempts): the .dds sibling first; else a PCX, its luminance its alpha
+	// where the caller names it twice (a sky map's), else opaque (a scar's).
+	load = texture_load(TextureLoader::Archive, "cld.day.pcx", files_of({"cld.day.dds", "cld.day.pcx"}), 0, -1,
+	                    TextureRoleId::SkyCloud);
 	TEST_EXPECT(load.file == "cld.day.dds" && load.reader == TextureFileReader::Dds);
-	load = texture_load(TextureLoader::Archive, "cloud01.pcx", files_of({"cloud01.pcx"}));
+	load = texture_load(TextureLoader::Archive, "cloud01.pcx", files_of({"cloud01.pcx"}), 0, -1, TextureRoleId::SkyCloud);
 	TEST_EXPECT(load.file == "cloud01.pcx" && load.reader == TextureFileReader::Pcx &&
 	            load.transform == TextureLoadTransform::LuminanceAlpha && load.alpha_source == "cloud01.pcx");
+	load = texture_load(TextureLoader::Archive, "scorch1.pcx", files_of({"scorch1.pcx"}), 0, -1, TextureRoleId::ImpactScar);
+	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::None);
 	load = texture_load(TextureLoader::Archive, "cloud01.bmp", files_of({"cloud01.bmp"}));
 	TEST_EXPECT(load.file.empty() && load.reader == TextureFileReader::None);
-	// HUD: the suffix decides the mode; nothing unless the file is there; a PCX white with alpha from blue.
+	// HUD: the suffix decides the mode; a PCX white with alpha from blue; a file the project lacks, the name it
+	// would open.
 	load = texture_load(TextureLoader::Hud, "stance.tga.FULL", files_of({"stance.tga"}), 1);
 	TEST_EXPECT(load.file == "stance.tga" && load.reader == TextureFileReader::Tga && load.transform == TextureLoadTransform::None);
 	load = texture_load(TextureLoader::Hud, "frame.tga.alpha", files_of({"frame.tga"}), 0);
@@ -129,7 +134,7 @@ int test_names() {
 	load = texture_load(TextureLoader::Hud, "pip.pcx", files_of({"pip.pcx"}), 0);
 	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::WhiteAlphaFromBlue);
 	load = texture_load(TextureLoader::Hud, "gone.tga", files_of({}), 0);
-	TEST_EXPECT(load.file.empty());
+	TEST_EXPECT(load.reader == TextureFileReader::Tga && !files_of({})(load.file));
 	// FILE: .TGA through the TGA reader, any other name the PCX reader.
 	TEST_EXPECT(texture_load(TextureLoader::File, "TSDicon.tga", files_of({})).reader == TextureFileReader::Tga);
 	TEST_EXPECT(texture_load(TextureLoader::File, "NVGScale.bmp", files_of({})).reader == TextureFileReader::Pcx);
@@ -160,9 +165,9 @@ int test_transforms() {
 	// White, alpha from blue.
 	out = apply_load_transform(image, TextureLoadTransform::WhiteAlphaFromBlue);
 	TEST_EXPECT(out->levels[0].rgba == std::vector<uint8_t>({255, 255, 255, 90, 255, 255, 255, 0}));
-	// Alpha only: black under the alpha.
+	// Alpha only: white under the alpha, the form an A8 takes under the HUD's alpha material.
 	out = apply_load_transform(image, TextureLoadTransform::AlphaOnly);
-	TEST_EXPECT(out->levels[0].rgba == std::vector<uint8_t>({0, 0, 0, 255, 0, 0, 0, 255}));
+	TEST_EXPECT(out->levels[0].rgba == std::vector<uint8_t>({255, 255, 255, 255, 255, 255, 255, 255}));
 	// None: the texels as read.
 	out = apply_load_transform(image, TextureLoadTransform::None);
 	TEST_EXPECT(out->levels[0].rgba == image.levels[0].rgba);

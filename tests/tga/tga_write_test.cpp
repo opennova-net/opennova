@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <formats/tga/tga.h>
+#include <formats/tga/tga_read.h>
 
 #include "common/test_expect.h"
 
@@ -57,12 +58,20 @@ int main() {
 	const std::vector<uint8_t> rgb = {32, 31, 30, 42, 41, 40, 52, 51, 50, 2, 1, 0, 12, 11, 10, 22, 21, 20};
 	TEST_EXPECT(std::vector<uint8_t>(out.begin() + TGA_HEADER_SIZE, out.end()) == rgb);
 	TgaImage game;
-	TEST_EXPECT(tga_decode_game(out.data(), out.size(), game, error) && game.pixels == TgaPixels::Decoded &&
-	            game.width == 3 && game.height == 2);
+	TEST_EXPECT(tga_decode_retail(out.data(), out.size(), game, error) && game.width == 3 && game.height == 2);
 	for (size_t i = 0; i < 6 && game.rgba.size() == 24; ++i)
 		TEST_EXPECT(game.rgba[i * 4] == rgba[i * 4] && game.rgba[i * 4 + 1] == rgba[i * 4 + 1] &&
 		            game.rgba[i * 4 + 2] == rgba[i * 4 + 2] && game.rgba[i * 4 + 3] == 255);
 	TEST_EXPECT(!tga_write_rgb24(rgba.data(), 3, 0, out, error) && out.empty());
+
+	// The header's fields as the file states them (tga_read_header: the editor's facts of a file).
+	TEST_EXPECT(tga_write_rgba32(rgba.data(), 3, 2, out, error));
+	TgaHeader fields;
+	TEST_EXPECT(tga_read_header(out.data(), out.size(), fields) && fields.image_type == 2 && fields.bits == 32 &&
+	            fields.width == 3 && fields.height == 2 && fields.alpha_bits() == 8 && !fields.top_first() && !fields.run_length());
+	out[17] |= 0x20;
+	TEST_EXPECT(tga_read_header(out.data(), out.size(), fields) && fields.top_first());
+	TEST_EXPECT(!tga_read_header(out.data(), TGA_HEADER_SIZE - 1, fields));
 
 	// The header's size.
 	TEST_EXPECT(tga_write_rgba32(rgba.data(), 3, 2, out, error));
