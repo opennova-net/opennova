@@ -3404,6 +3404,8 @@ add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
 add_executable(npruntime_host_file_test npruntime/host_file_test.cpp)
 target_link_libraries(npruntime_host_file_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(npruntime_host_file_test PRIVATE
+    OPENNOVA_EXAMPLE_HOST="${CMAKE_SOURCE_DIR}/apps/serve/example.host")
 add_test(NAME npruntime_host_file COMMAND npruntime_host_file_test)
 # The one host boot (ADR 0051 d4, inmatch/host_boot.h): the two phases over a
 # synthetic mount -- score.ini, the .til, the .env water, gametext.bin's Server

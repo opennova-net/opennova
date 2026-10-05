@@ -1,0 +1,55 @@
+// example.host -- a host file for opennova-serve (ADR 0051).
+//
+//   opennova-serve --resource-dir <Joint Operations install> /HOST example.host
+//
+// This is the text form of the game's host screen that retail's dedicated
+// server reads (ServerConfig_ApplyHostSetting). One `Key value` per line;
+// keys match without regard to case; a value with spaces is quoted; `//` or
+// `;` starts a comment. A key the server does not know changes nothing (it
+// logs a warning). Settings this file leaves out keep the host screen's
+// defaults, which are the values written below. The server type is always
+// Serve Only: the server has no player of its own.
+
+// --- The session ---------------------------------------------------------
+GameName            "Untitled"                // GAME_NAME, up to 31 characters
+ServerMessage       "Put your message here."  // SERVER_MESSAGE, up to 127 characters
+MPHostGamePassword  ""                        // SERVER_PASSWORD, empty = none (up to 16)
+MPHostSidePasswordA ""                        // BLUE_PW: the blue side's password
+MPHostSidePasswordB ""                        // RED_PW: the red side's password
+GameLocation        "USA"                     // GAME_LOCATION, the first three letters count
+ConnectionSpeed     5                         // CONNECTIONSPEED, the host screen's list value
+MaxPlayers          64                        // MAX_PLAYERS (the file is not held to the
+                                              // screen's 64; the server adds its own slot)
+UseLineUpQueue      1                         // game.cfg mpuselineupqueue
+LineUpQueueSize     100                       // game.cfg mplineupqueuesize
+GameType            0                         // game.cfg mp_gametype; the session plays the
+                                              // starting map's own mode whatever this says
+
+// --- The rules -----------------------------------------------------------
+Replay              1                         // REPLAY: 1 = run the rotation again at its end
+Delay               0                         // DELAY: the pre-round delay
+Respawn             5                         // RESPAWN
+Time_Limit          30                        // TIME
+KillLimit           50                        // KILL_LIMIT (500 is the screen's no-limit value)
+MaxScore            5                         // MAX_SCORE (500 is the screen's no-limit value)
+MaxFFKills          3                         // MAX_FF_KILLS
+TakeoverTime        15                        // TAKEOVER_TIME: seconds to take a zone
+
+// --- The rule switches: 1 = on, 0 = off ----------------------------------
+TeamFF              0                         // TEAM_FF: friendly fire
+FriendlyTag         1                         // FRIENDLY_TAG: tags over teammates
+FFWarning           1                         // FF_WARNING: the friendly-fire warning
+TeamChoose          0                         // TEAM_CHOOSE: players pick their side
+ClaymorePref        0                         // CLAYMORE_PREF
+Tracers             1                         // TRACERS
+
+// --- The map rotation ----------------------------------------------------
+// `Mission <file> <launch option>`: one line per map, in rotation order. The
+// file is a mission the install lists (a .bms in its archives or a loose one
+// in the install folder); a name it does not list is skipped with a warning.
+// The LAST Mission line is the map the server starts on. The launch option
+// is the mission list's per-map word (0 for most maps); the server clears it
+// for a co-op or a non-team map. Replace these placeholder names with
+// missions from your install.
+Mission             EXAMPLE01.BMS 0
+Mission             EXAMPLE02.BMS 0

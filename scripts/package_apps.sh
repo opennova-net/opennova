@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Package the native apps under apps/ for Windows: build every app (Release)
-# and zip the executables flat, with the NovaWorld server's migrations and seed
-# and opennova-nw-lister's example listing beside them and a README.txt naming
-# each tool.
+# and zip the executables flat, with the NovaWorld server's migrations and seed,
+# opennova-nw-lister's example listing and opennova-serve's example host file
+# beside them and a README.txt naming each tool.
 #
 #   scripts/package_apps.sh [out.zip]
 #
@@ -15,7 +15,7 @@ build="$root/build/apps-package"
 
 # The apps/ directory of each shipped executable. An app in apps/<dir> builds
 # target opennova_<dir> as opennova-<dir, kebab-cased> (DEVELOPING.md).
-apps=(3di extract lan_probe novaworld_server nw_lister wire)
+apps=(3di extract lan_probe novaworld_server nw_lister serve wire)
 
 # The static MSVC runtime keeps the zip free of a VC++ runtime install, and a
 # separate build tree keeps it apart from development builds. No app links the
@@ -75,6 +75,14 @@ opennova-nw-lister.exe
     with --admin. Stopping it removes the row. It sends to 127.0.0.0/8
     only unless given --allow-public.
 
+opennova-serve.exe
+    The headless game server: the game's Serve Only host with no window,
+    configured by a host file, retail's dedicated-server format
+    (example.host documents every key). Run
+    "opennova-serve --resource-dir <game folder> /HOST example.host".
+    It answers LAN browsers and admits joiners on the retail LAN port
+    range. For now it plays one round and exits (code 3).
+
 opennova-wire.exe
     Decodes NovaWorld in-game traffic from a .pcap/.pcapng capture, a .sph
     server log or a hexcap text file.
@@ -85,6 +93,7 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     for exe in exes:
         z.write(exe, os.path.basename(exe))
     z.write(os.path.join(root, "apps", "nw_lister", "listing.example.json"), "listing.example.json")
+    z.write(os.path.join(root, "apps", "serve", "example.host"), "example.host")
     for sub in ("migrations", "seed"):
         src = os.path.join(root, "backend", sub)
         for name in sorted(os.listdir(src)):
