@@ -1505,21 +1505,23 @@ void test_files_window() {
 	ui.frames(2);
 	CHECK(modal_open("New file") && ui.drain().empty(), "a terrain's name asked first");
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"New terrain from images", "Heightmap", "Colour map", "Detail", "Tile set", "Height of white",
-	                      "Water level", "Layout", "Create"}),
+	CHECK(in_order(text, {"New terrain from images", "Heightmap", "Colour map", "Detail", "Tile set", "Surface map",
+	                      "Height of white", "Water level", "Layout", "Create"}),
 	      "the terrain's images and numbers asked");
 	type_into(ui, item_id(prompt, {"Name"}), "isle");
 	ui.activate(item_id(prompt, {"Create"}));
 	CHECK(ui.drain().empty() && modal_open("New file"), "Create waits for the heightmap and the colour map");
 	type_into(ui, item_id(pushed(prompt, 0), {"Heightmap (1024 x 1024 PNG or .raw)"}), "C:/art/h.png");
 	type_into(ui, item_id(pushed(prompt, 1), {"Colour map (1024 x 1024 image)"}), "C:/art/c.png");
-	type_into(ui, item_id(pushed(prompt, 5), {"Water level (world units, 0 none)"}), "12");
+	type_into(ui, item_id(pushed(prompt, 4), {"Surface map (optional, square 256..1024)"}), "C:/art/m.png");
+	type_into(ui, item_id(pushed(prompt, 6), {"Water level (world units, 0 none)"}), "12");
 	ui.frames(2);
 	ui.activate(item_id(prompt, {"Create"}));
 	requests = ui.drain();
 	ui.frames(2);
 	CHECK(one(requests, EditorRequestKind::NewTerrain) && requests[0].path == "isle" &&
-	              requests[0].values == Values({{"colormap", "C:/art/c.png"}, {"heightmap", "C:/art/h.png"}, {"water", "12"}}) &&
+	              requests[0].values == Values({{"colormap", "C:/art/c.png"}, {"heightmap", "C:/art/h.png"},
+	                                            {"surface", "C:/art/m.png"}, {"water", "12"}}) &&
 	              !modal_open("New file"),
 	      "Create: new_terrain with the terrain's name and its values by their tokens");
 }
