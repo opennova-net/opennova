@@ -6,7 +6,9 @@
      control; the original game leaves the first two inert. Literal strings,
      hex colors and one named font, so the menu needs no string table or
      stylesheet. The font is uppercase-only, and its comma reads as a period at
-     menu size, so the text avoids commas. -->
+     menu size, so the text avoids commas. MAIN's CURSOR names the mouse
+     pointer: the original game hides the system pointer, so a screen naming
+     none has no pointer at all (docs/mnu/menu-re.md). -->
 <SCREEN>
 	<NAME>STARTUP</NAME>
 	<WINDOW type="window" name="MAIN">
@@ -24,6 +26,10 @@
 			<SELECTED_FG>FFFF8000</SELECTED_FG>
 			<DISABLED_FG>FF545252</DISABLED_FG>
 		</FONT>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
 		<WINDOW type="static" name="TITLE">
 			<FONT>
 				<NAME>opennova.fnt</NAME>
