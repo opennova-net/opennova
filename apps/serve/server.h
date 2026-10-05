@@ -2,26 +2,24 @@
 
 // opennova-serve's server: the game's Serve Only host with no Godot (ADR 0051).
 // It reads the retail host file (inmatch/host_file.h), mounts the game data the
-// way the game does, boots the starting mission through the engine's one
-// mission kernel as a DedicatedHost over inmatch::HostRole, binds the retail
-// LAN port range and runs the in-match session. Everything below the config,
-// the socket and the wall clock is the engine's, the same calls the game's
-// Serve Only path makes.
+// way the game does, binds the retail LAN port range, boots the starting
+// mission as a DedicatedHost through the engine's one host boot
+// (inmatch/host_boot.h, the two phases the game's hosts run) and runs the
+// in-match session. Everything below the config, the mount, the socket and
+// the wall clock is the engine's.
 
 #include <base/resource_index/resource_index.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_catalog.h>
 #include <runtime/mission/mission_kernel.h>
-#include <runtime/mission/mission_text.h>
-#include <runtime/terrain_query/surface_type_map.h>
 
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
 
-#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -87,13 +85,10 @@ private:
 	inmatch::HostScreenState host_;
 	inmatch::MissionRotation rotation_;
 	inmatch::HostFileReport report_;
-	inmatch::ServerTextTable server_text_;
-	mission::MissionText mission_text_;
-	std::vector<terrain::SurfaceTileEntry> surface_tiles_;
-	std::array<uint8_t, 256> tile_surface_table_{};
 	std::unique_ptr<mission::MissionKernel> kernel_;
 	std::unique_ptr<inmatch::HostRole> role_;
 	std::unique_ptr<inmatch::Session> session_;
+	inmatch::HostBoot boot_;
 	net::Socket socket_;
 	std::unique_ptr<net::NetDatagramSocket> datagrams_;
 	uint16_t bound_port_ = 0;
