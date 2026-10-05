@@ -2,4 +2,48 @@
 
 ammo AT_NULL
 end
+ammo AMMO_ON_556
+	penetration_impact 20
+	penetration_kz 20
+	drag 0.255
+	bullet_radius 0.00278
+	kz_minradius 2.5
+	kz_maxradius 2.5
+	scar_type 1
+	tumble_error 0.01
+	weight_in_grains 62
+	tracerrate 3
+	velocity 854
+	max_age 3
+	recoil 8 9 11
+	kztype rounds_kz_c4
+	mf_light 100
+	tracer_type 1 2
+	effects_table
+		move none none 0
+		obj none ON_IMP_DIRT 15
+		dirt none ON_IMP_DIRT 15
+		grass none ON_IMP_GRASS 15
+		snow none ON_IMP_DIRT 1
+		cement none ON_IMP_CEMENT 15
+		packeddirt none ON_IMP_DIRT 15
+		water none ON_IMP_WATER 5
+		railroad none ON_IMP_METAL 15
+		mud none ON_IMP_MUD 15
+		ice none ON_IMP_MUD 15
+		sand none ON_IMP_SAND 15
+		quicksand none ON_IMP_SAND 15
+		stone none ON_IMP_CEMENT 15
+		wood none ON_IMP_WOOD 5
+		metal none ON_IMP_METAL 15
+		glass none ON_IMP_GLASS 5
+		cloth none ON_IMP_CLOTH 3
+		foliage none ON_IMP_FOLIAGE 3
+		hmetal none ON_IMP_ARMOR 15
+		flesh none ON_IMP_FLESH 3
+		player none ON_IMP_PLAYER 10
+		zip none ON_BULLET_BY 10
+	end
+end
+
 
