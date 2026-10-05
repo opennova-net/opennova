@@ -1,4 +1,4 @@
-// nw-lister's admin poll thread (apps/nw_lister/admin_feed.h) against an in-test remote-admin
+// opennova-nw-lister's admin poll thread (apps/nw_lister/admin_feed.h) against an in-test remote-admin
 // server that plays the retail one over loopback TCP: the challenge, the login it decrypts and
 // checks, one reply per command in the server's formats, and the QUIT the feed ends with (a FIN
 // would leak the server's slot). [orig: CAdminServer_AcceptConnection @0x405580;
@@ -152,9 +152,9 @@ int main() {
 	opennova::net::Endpoint endpoint;
 	endpoint.ip = {127, 0, 0, 1};
 	endpoint.port = ntohs(addr.sin_port);
-	opennova::lister::AdminFeed feed;
+	opennova::nw_lister::AdminFeed feed;
 	feed.start(endpoint, "boss", "pw");
-	opennova::lister::AdminSnapshot snapshot;
+	opennova::nw_lister::AdminSnapshot snapshot;
 	for (int i = 0; i < 300 && snapshot.seq == 0; ++i) {
 		std::this_thread::sleep_for(10ms);
 		snapshot = feed.snapshot();

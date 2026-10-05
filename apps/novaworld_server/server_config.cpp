@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <string>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 namespace {
 
@@ -84,4 +84,4 @@ ServerConfig ServerConfig::from_env() {
 	return c;
 }
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

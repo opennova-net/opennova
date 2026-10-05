@@ -3,7 +3,7 @@
 
 Each argument is a run-summary.json that scripts/net/run_parity_topology.ps1
 wrote for a -Scenario run. For every run this decodes the evidence capture
-with `nw_pp --scenario-events`, keeps the events between the scenario's start
+with `opennova-wire --scenario-events`, keeps the events between the scenario's start
 and the end of its settle, and names the actor and its pool-0 index: a joiner
 by its first C2S 0x0C uplink's handle, the host by roster slot 0's.
 
@@ -19,7 +19,7 @@ scenario's cited `expect.mask` fields.
 Pattern fields: a string must equal the event's value, "actor" names the
 actor's handle or pool-0 index, and a list accepts any of its values.
 
-usage: compare_scenario.py [--nw-pp EXE] [--scenario FILE] [--out REPORT.json]
+usage: compare_scenario.py [--wire EXE] [--scenario FILE] [--out REPORT.json]
                            SUMMARY.json...
 Exit status 0 when every run passes and agrees with the reference.
 """
@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-DEFAULT_NW_PP = REPO / "build" / "apps" / "nw_pp" / "Release" / "nw_pp.exe"
+DEFAULT_WIRE = REPO / "build" / "apps" / "wire" / "Release" / "opennova-wire.exe"
 # Fields that differ between captures of the same play: capture order and
 # clock, the client port, and world positions (each topology spawns anew).
 CAPTURE_LOCAL = {"frame", "ts_ns", "session", "decode", "pos"}
@@ -59,11 +59,11 @@ def parse_utc_ns(text: str) -> int:
     return int(stamp.timestamp()) * 1_000_000_000 + int(fraction)
 
 
-def decode_events(nw_pp: Path, capture: Path) -> list[dict[str, str]]:
-    result = subprocess.run([str(nw_pp), str(capture), "--scenario-events"],
+def decode_events(wire: Path, capture: Path) -> list[dict[str, str]]:
+    result = subprocess.run([str(wire), str(capture), "--scenario-events"],
                             capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        raise RuntimeError(f"nw_pp failed on {capture}: {result.stderr.strip()}")
+        raise RuntimeError(f"opennova-wire failed on {capture}: {result.stderr.strip()}")
     events = []
     for line in result.stdout.splitlines():
         if not line.startswith("SCENARIO_EVENT "):
@@ -128,7 +128,7 @@ def match_sequence(patterns: list[dict], events: list[dict[str, str]]) -> list:
     return found
 
 
-def analyze(summary_path: Path, nw_pp: Path, expectations: Path | None) -> dict:
+def analyze(summary_path: Path, wire: Path, expectations: Path | None) -> dict:
     summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
     witness = summary.get("scenario_witness")
     if not witness:
@@ -140,7 +140,7 @@ def analyze(summary_path: Path, nw_pp: Path, expectations: Path | None) -> dict:
     played = json.loads(played_path.read_text(encoding="utf-8"))
     source = expectations or Path(witness["source"])
     scenario = json.loads(source.read_text(encoding="utf-8"))
-    events = decode_events(nw_pp, Path(summary["evidence_capture"]))
+    events = decode_events(wire, Path(summary["evidence_capture"]))
     actor = actor_of(events, played.get("actor", "joiner"))
     start = parse_utc_ns(witness["started_utc"])
     stop = parse_utc_ns(witness["settled_utc"])
@@ -196,13 +196,13 @@ def compare(reference: dict, cell: dict) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("summaries", nargs="+", type=Path)
-    parser.add_argument("--nw-pp", type=Path, default=DEFAULT_NW_PP)
+    parser.add_argument("--wire", type=Path, default=DEFAULT_WIRE)
     parser.add_argument("--scenario", type=Path,
                         help="expectations file (default: each run's scenario source)")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
 
-    cells = [analyze(path, args.nw_pp, args.scenario) for path in args.summaries]
+    cells = [analyze(path, args.wire, args.scenario) for path in args.summaries]
     if any(cell["played"] != cells[0]["played"] for cell in cells):
         raise SystemExit("the runs played different scripts")
     reference = next((cell for cell in cells if cell["topology"] == "RR"), cells[0])

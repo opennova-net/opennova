@@ -7,7 +7,7 @@
 
 // Canonical catalog of in-game NAPI message tags (mirrors the §4 dispatch tables
 // + §5.x field maps in docs/net/novaworld-net-re.md). Single source of truth for
-// nw_pp's human labels AND the nw_message_coverage CI gate, so a tag can't be
+// opennova-wire's human labels AND the nw_message_coverage CI gate, so a tag can't be
 // handled in one place and silently forgotten in the other. Header-only (the data
 // is a function-local static) so the app and the test share one definition.
 //
@@ -15,10 +15,10 @@
 // fidelity. See docs/net/retail-message-dispatch-audit.md for consumer gaps.
 //
 // Coverage classes:
-//   Decoded     — a structured decode_* exists (`note` names it) and nw_pp prints
+//   Decoded     — a structured decode_* exists (`note` names it) and opennova-wire prints
 //                 its fields; the coverage test asserts the decoder consumes a
 //                 representative body to the byte.
-//   PrinterOnly — nw_pp labels + hex-dumps it; no structured decoder yet.
+//   PrinterOnly — opennova-wire labels + hex-dumps it; no structured decoder yet.
 //   Unhandled   — a known tag not yet characterized (the grill tail); `note` is the
 //                 reason. Carried here so new work surfaces it instead of guessing.
 
@@ -33,7 +33,7 @@ enum class MsgCoverage : uint8_t {
 struct MsgCatalogEntry {
 	char        dir;   // 'S' = server->client, 'C' = client->server
 	uint8_t     tag;   // NAPI message id
-	const char *name;  // short label used by nw_pp output
+	const char *name;  // short label used by opennova-wire output
 	MsgCoverage coverage;
 	const char *note;  // Decoded: "§5.x decode_*"; PrinterOnly: section ref; Unhandled: reason
 };
@@ -252,7 +252,7 @@ inline const MsgCatalogEntry *lookup_ingame_message(char dir, uint8_t tag) {
 	return nullptr;
 }
 
-// Short label for nw_pp output, or nullptr for an uncatalogued tag.
+// Short label for opennova-wire output, or nullptr for an uncatalogued tag.
 inline const char *ingame_message_name(char dir, uint8_t tag) {
 	const MsgCatalogEntry *e = lookup_ingame_message(dir, tag);
 	return e ? e->name : nullptr;

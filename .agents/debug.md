@@ -12,7 +12,7 @@ behavior.
   and `5173/tcp`.
 - Confirm `ADMIN_API_TOKEN` before using admin endpoints.
 - Confirm `tshark`/Npcap only when converting or acquiring captures outside
-  the native `nw_pp` reader.
+  the native `opennova-wire` reader.
 
 ## Performance Build Invariant
 
@@ -48,7 +48,7 @@ scripts/test_godot.sh
 Packet tools:
 
 ```bash
-nw_pp capture.pcapng --stream --items /path/to/items.def
+opennova-wire capture.pcapng --stream --items /path/to/items.def
 ```
 
 ## Env-Gated Witnesses

@@ -28,7 +28,7 @@ struct PcapDatagram {
 // non-null it receives the count (loopback MTU 65535 → not expected).
 //
 // Supported link types: NULL/LOOP (BSD/OpenBSD loopback), Ethernet II, RAW,
-// IPv4 — the slice nw_pp and the in-game decoders consume.
+// IPv4 — the slice opennova-wire and the in-game decoders consume.
 //
 // Spec sources: pcap-savefile(5); the pcapng block-format spec
 // (github.com/pcapng/pcapng) — SHB/IDB/EPB/SPB; tcpdump.org/linktypes.html.

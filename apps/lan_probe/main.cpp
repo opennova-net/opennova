@@ -1,4 +1,4 @@
-// nw-lan-probe -- wait for a retail-compatible JO LAN host to answer the
+// opennova-lan-probe -- wait for a retail-compatible JO LAN host to answer the
 // stateless 0x41 discovery probe. This is an automation/readiness tool: it
 // deliberately stops before 0x42 admission and therefore never consumes a
 // player slot or mutates the host session.
@@ -15,7 +15,7 @@ namespace {
 
 void print_usage() {
 	std::fprintf(stderr,
-			"usage: nw-lan-probe [--host A.B.C.D] [--port N] [--timeout-ms N] "
+			"usage: opennova-lan-probe [--host A.B.C.D] [--port N] [--timeout-ms N] "
 			"[--interval-ms N] [--expect-name NAME]\n");
 }
 
@@ -52,7 +52,7 @@ std::string one_line(std::string value) {
 
 int main(int argc, char *argv[]) {
 	using namespace opennova;
-	lanprobe::Options options;
+	lan_probe::Options options;
 	options.client_index = static_cast<uint32_t>(
 			std::chrono::steady_clock::now().time_since_epoch().count());
 	if (options.client_index == 0) options.client_index = 1;
@@ -71,29 +71,29 @@ int main(int argc, char *argv[]) {
 		int parsed = 0;
 		if (std::strcmp(arg, "--host") == 0) {
 			if (!parse_ipv4(value, options.endpoint)) {
-				std::fprintf(stderr, "nw-lan-probe: --host must be a dotted IPv4 address\n");
+				std::fprintf(stderr, "opennova-lan-probe: --host must be a dotted IPv4 address\n");
 				return 2;
 			}
 		} else if (std::strcmp(arg, "--port") == 0) {
 			if (!parse_bounded_int(value, 1, 65535, parsed)) {
-				std::fprintf(stderr, "nw-lan-probe: --port must be from 1 through 65535\n");
+				std::fprintf(stderr, "opennova-lan-probe: --port must be from 1 through 65535\n");
 				return 2;
 			}
 			options.endpoint.port = static_cast<uint16_t>(parsed);
 		} else if (std::strcmp(arg, "--timeout-ms") == 0) {
 			if (!parse_bounded_int(value, 1, 300000, options.timeout_ms)) {
-				std::fprintf(stderr, "nw-lan-probe: --timeout-ms must be from 1 through 300000\n");
+				std::fprintf(stderr, "opennova-lan-probe: --timeout-ms must be from 1 through 300000\n");
 				return 2;
 			}
 		} else if (std::strcmp(arg, "--interval-ms") == 0) {
 			if (!parse_bounded_int(value, 10, 60000, options.retry_interval_ms)) {
-				std::fprintf(stderr, "nw-lan-probe: --interval-ms must be from 10 through 60000\n");
+				std::fprintf(stderr, "opennova-lan-probe: --interval-ms must be from 10 through 60000\n");
 				return 2;
 			}
 		} else if (std::strcmp(arg, "--expect-name") == 0) {
 			options.expected_server_name = value;
 		} else {
-			std::fprintf(stderr, "nw-lan-probe: unknown option: %s\n", arg);
+			std::fprintf(stderr, "opennova-lan-probe: unknown option: %s\n", arg);
 			print_usage();
 			return 2;
 		}
@@ -103,17 +103,17 @@ int main(int argc, char *argv[]) {
 		std::fprintf(stderr, "LAN_READY=0\nLAN_ERROR=socket_startup\n");
 		return 3;
 	}
-	const lanprobe::Result result = lanprobe::wait_for_server(options);
+	const lan_probe::Result result = lan_probe::wait_for_server(options);
 	net::shutdown();
 
-	std::printf("LAN_READY=%d\n", result.status == lanprobe::Status::Ready ? 1 : 0);
+	std::printf("LAN_READY=%d\n", result.status == lan_probe::Status::Ready ? 1 : 0);
 	std::printf("LAN_ENDPOINT=%s\n", net::endpoint_to_string(options.endpoint).c_str());
 	std::printf("LAN_PROBES_SENT=%d\n", result.probes_sent);
-	if (result.status != lanprobe::Status::Ready) {
-		const char *reason = result.status == lanprobe::Status::Timeout ? "timeout" :
-				result.status == lanprobe::Status::SendError ? "send_error" : "socket_error";
+	if (result.status != lan_probe::Status::Ready) {
+		const char *reason = result.status == lan_probe::Status::Timeout ? "timeout" :
+				result.status == lan_probe::Status::SendError ? "send_error" : "socket_error";
 		std::printf("LAN_ERROR=%s\n", reason);
-		return result.status == lanprobe::Status::Timeout ? 1 : 3;
+		return result.status == lan_probe::Status::Timeout ? 1 : 3;
 	}
 
 	std::printf("LAN_SERVER_NAME=%s\n", one_line(result.server.server_name).c_str());

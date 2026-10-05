@@ -1,5 +1,5 @@
 // Reads back the .3di opennova-3di minted from fixtures/threedi/o3d/
-// spinner.o3d, skinned.o3d or building.o3d (the threedi_cli_build* ctests run
+// spinner.o3d, skinned.o3d or building.o3d (the opennova_3di_build* ctests run
 // first) and checks the scene -> model conversions the CLI owns: mission ->
 // model axes, the counter-clockwise-in-model render winding and the
 // counter-clockwise-about-the-normal collision winding retail uses, the
@@ -55,17 +55,23 @@ static int check_skinned(const char *path) {
 	// Authored on part 2, owned by the root ROBJ; the bounds stay on part 2.
 	CHECK(lod.render_objects[0].num_strips == 1 && lod.render_objects[2].num_strips == 0);
 	CHECK(lod.render_objects[0].bounding_radius == 0.0f && lod.render_objects[2].bounding_radius > 0.0f);
+	// The table lists the parts in the order the triangles first name them.
 	CHECK(lod.strips[0].bone_table_length == 2 && lod.strips[0].bone_table[0] == 0 && lod.strips[0].bone_table[1] == 1);
-	// The second vertex rides part 1 through its fourth slot, which takes the
-	// rest of the weight (threedi_skin_influences).
-	CHECK(lod.vertices.count == 4 && lod.vertices.items[1].bone_indices[3] == 1 &&
-			near(lod.vertices.items[1].bone_weights[0], 0.5f) && lod.vertices.items[1].bone_weights[1] == 0.0f);
+	// The second vertex's pairs (part 0 half, part 1 half): slot 0 its
+	// primary, slot 1 the other, the unused slots repeating slot 0 at no
+	// weight (slot 3 takes the rest, 1 - (w0 + w1 + w2): none).
+	CHECK(lod.vertices.count == 4 && lod.vertices.items[1].bone_indices[0] == 0 &&
+			lod.vertices.items[1].bone_indices[1] == 1 && lod.vertices.items[1].bone_indices[3] == 0 &&
+			near(lod.vertices.items[1].bone_weights[0], 0.5f) && near(lod.vertices.items[1].bone_weights[1], 0.5f) &&
+			lod.vertices.items[1].bone_weights[2] == 0.0f);
 	if (lod.vertices.count == 4) {
 		ThreediSkinInfluence influences[4];
 		threedi_skin_influences(&lod.vertices.items[1], lod.strips[0].bone_table, lod.strips[0].bone_table_length,
 				influences);
-		CHECK(influences[0].part == 0 && influences[0].weight == 0.5f && influences[3].part == 1 &&
-				influences[3].weight == 0.5f);
+		CHECK(influences[0].part == 0 && influences[0].weight == 0.5f && influences[1].part == 1 &&
+				influences[1].weight == 0.5f && influences[3].part == 0 && influences[3].weight == 0.0f);
+		// The third vertex's primary is part 1, lit through slot 1.
+		CHECK(lod.vertices.items[2].bone_indices[0] == 1 && lod.vertices.items[2].bone_weights[0] == 1.0f);
 	}
 	for (int t = 0; t < lod.strips[0].num_triangles; ++t) CHECK(facing(lod, lod.strips[0], t) > 0.0f);
 	CHECK(m.collision != nullptr);

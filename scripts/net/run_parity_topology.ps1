@@ -274,7 +274,7 @@ $CaptureScript = Join-Path $Repo "scripts\net\capture.ps1"
 $HostScript = Join-Path $Repo "scripts\net\host_opennova.ps1"
 $JoinScript = Join-Path $Repo "scripts\net\join_opennova.ps1"
 $NetLib = Join-Path $Repo "scripts\net\lib.ps1"
-$ProbeExe = Join-Path $Repo "build\apps\nw_lan_probe\Release\nw-lan-probe.exe"
+$ProbeExe = Join-Path $Repo "build\apps\lan_probe\Release\opennova-lan-probe.exe"
 $InputExerciseScript = Join-Path $Repo "scripts\net\exercise_retail_input.ps1"
 $WireReadyScript = Join-Path $Repo "scripts\net\wait_parity_wire_ready.ps1"
 

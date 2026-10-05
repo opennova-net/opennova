@@ -5,7 +5,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 namespace {
 
@@ -65,4 +65,4 @@ std::string render_template_file(const std::string &templates_dir,
 	return render_template(os.str(), vars);
 }
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

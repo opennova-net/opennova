@@ -736,12 +736,12 @@ function Wait-OpenNovaRuntimeChild {
 # Native stateless 0x41/0x81 LAN responder probe. An explicit override is
 # useful for non-default build directories; otherwise prefer the Release tool
 # produced by the ordinary CMake build, then Debug.
-function Find-NwLanProbe {
+function Find-LanProbe {
     $root = Get-RepoRoot
     foreach ($candidate in @(
-        (Join-Path $root "build\apps\nw_lan_probe\Release\nw-lan-probe.exe"),
-        (Join-Path $root "build\apps\nw_lan_probe\Debug\nw-lan-probe.exe"),
-        (Join-Path $root "build\apps\nw_lan_probe\nw-lan-probe")
+        (Join-Path $root "build\apps\lan_probe\Release\opennova-lan-probe.exe"),
+        (Join-Path $root "build\apps\lan_probe\Debug\opennova-lan-probe.exe"),
+        (Join-Path $root "build\apps\lan_probe\opennova-lan-probe")
     )) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) {
             return (Resolve-Path -LiteralPath $candidate).Path

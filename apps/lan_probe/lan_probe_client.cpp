@@ -5,7 +5,7 @@
 #include <chrono>
 #include <vector>
 
-namespace opennova::lanprobe {
+namespace opennova::lan_probe {
 
 Result wait_for_server(const Options &options) {
 	Result result;
@@ -77,4 +77,4 @@ Result wait_for_server(const Options &options) {
 	return result;
 }
 
-} // namespace opennova::lanprobe
+} // namespace opennova::lan_probe

@@ -2,11 +2,11 @@
 //
 // Input vectors are real bytes extracted from
 // ~/Desktop/host_and_join_game_on_opennovaworld_loopback_threeplayers_more_gameplay.pcapng
-// (the 3-player loopback capture) via nw_pp. No capture dependency at test
+// (the 3-player loopback capture) via opennova-wire. No capture dependency at test
 // time — vectors are embedded — so the test runs unconditionally in CI.
 //
 // The frames witnessed here drive the §5.10 cross-witness in
-// docs/net/novaworld-net-re.md and let nw_pp regress on either side.
+// docs/net/novaworld-net-re.md and let opennova-wire regress on either side.
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -33,7 +33,7 @@ namespace {
 // landing. vehHdl=0xFFFF, position in WORLD coords + map origin (the host's
 // case-4 path adds origin on the unmounted branch). Anti-cheat counters
 // already non-zero (this is mid-game, ~30 s after the load). Bytes copied
-// verbatim from nw_pp's hex dump of the 3-player capture's f=1905 datagram.
+// verbatim from opennova-wire's hex dump of the 3-player capture's f=1905 datagram.
 const uint8_t kFrame1905_full[] = {
 	0x02, 0x00, 0xb9, 0x14, 0x0a, // header: handle=0x0002 typeId=0x14b9 sub_op=0x0a
 	0xff, 0xff,                   // body[0..1]  carrier_handle = none

@@ -20,7 +20,7 @@ extern "C" {
 #undef snprintf
 #endif
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 namespace {
 
@@ -447,4 +447,4 @@ MutationResult update_game_access(opennova::db::Database &db, int64_t user_id,
 	}
 }
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server
