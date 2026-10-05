@@ -1,6 +1,6 @@
 // opennova-3di anim build: mint a `.adm` table and every `.bad` clip it names
 // (or one lone `.bad`) from the `.o3a` clip-set text a DCC exporter writes. The
-// reader and the mint are the engine's (formats/bad/bad_o3a_read.h,
+// reader and the mint for the retail target are the engine's (formats/bad/bad_o3a_read.h,
 // bad_build_mint_set); this command opens the file, prints the findings as
 // `path:line: message` and writes every file whole, or none.
 
@@ -31,8 +31,8 @@ int cmd_anim_build(const char *scene_path, const char *out_path) {
 	}
 	BadBuildSet set;
 	std::vector<opennova::threedi::SceneFinding> findings;
-	std::vector<int> clip_lines;
-	const bool read = bad_o3a_read(file, opennova::anim::adm_slot_index, set, findings, &clip_lines);
+	BadO3aLines lines;
+	const bool read = bad_o3a_read(file, set, findings, &lines);
 	if (!print_findings(scene_path, findings) || !read) return 1;
 
 	const std::filesystem::path out = std::filesystem::path(out_path);
@@ -42,15 +42,17 @@ int cmd_anim_build(const char *scene_path, const char *out_path) {
 		std::fprintf(stderr, "opennova-3di: note: the set names its table '%s'; -o writes %s\n", set.adm_name.c_str(),
 				out_path);
 
-	// Every clip and the table are minted in memory and read back before any
-	// file is written: a set that fails anywhere writes nothing.
+	// Every clip and the table are minted in memory for the retail target and
+	// read back before any file is written: a set that fails anywhere writes
+	// nothing, and every problem the target finds names its line (a bone's, a
+	// clip's, a row's).
 	std::vector<BadMintedFile> files;
-	std::string error;
-	int failed_clip = -1;
-	if (!bad_build_mint_set(set, out.filename().string(), files, &error, &failed_clip)) {
-		// A clip's refusal names the line the clip opens on.
-		if (failed_clip >= 0) std::fprintf(stderr, "%s:%d: %s\n", scene_path, clip_lines[failed_clip], error.c_str());
-		else std::fprintf(stderr, "opennova-3di: %s\n", error.c_str());
+	std::vector<BadBuildProblem> problems;
+	if (!bad_build_mint_set(set, out.filename().string(), bad_retail_limits(), opennova::anim::adm_slot_index, files,
+				problems)) {
+		std::vector<opennova::threedi::SceneFinding> refused;
+		bad_o3a_findings(lines, problems, refused);
+		print_findings(scene_path, refused);
 		return 1;
 	}
 	size_t total = 0;
