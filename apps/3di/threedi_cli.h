@@ -4,14 +4,12 @@
 // (info.cpp) prints a model, `compare` (compare.cpp) tells whether two models
 // are the same model, and `catalog` (main.cpp) prints the engine's tables a
 // front end offers: the CTRL registers, the generator styles, the shader tags,
-// the anim slot keys, the weapon actions and the event trigger bits; `texture`
-// (texture.cpp) writes an image as a model's texture file. The
+// the anim slot keys, the weapon actions and the event trigger bits. The
 // `anim` commands keep their own surface (anim_cli.h), and the `weapon`
 // commands theirs (weapon_timing.h).
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -63,18 +61,5 @@ int cmd_scene(const char *model_path, const char *out_path);
 // `strict`: drift (a heuristic derived value, or a move within tolerance)
 // counts as a difference too.
 int cmd_compare(const char *expected_path, const char *actual_path, bool strict = false);
-
-// `texture` (texture.cpp): an image written as a model's texture file, by the
-// output's extension a .dds (`format` auto, dxt1, dxt5 or argb, "" auto: DXT1
-// when every texel is opaque, else DXT5; `mips` full or none, "" full), a .tga
-// or an .mdt; halved while a side exceeds `max_size` (0: no cap); its alpha
-// made as `alpha` says ("" the source's: opaque, luminance, threshold:<n>,
-// key:#RRGGBB as the image import takes them: renderer::apply_image_alpha).
-struct TextureCommand {
-	std::string input, output;
-	std::string format, mips, alpha;
-	uint32_t max_size = 0;
-};
-int cmd_texture(const TextureCommand &command);
 
 } // namespace opennova::threedi_cli
