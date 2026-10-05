@@ -86,6 +86,11 @@ bool image_target_size(const std::string &size, uint32_t width, uint32_t height,
 RgbaImage resize_image(const RgbaImage &image, uint32_t width, uint32_t height);
 bool apply_image_alpha(RgbaImage &image, const std::string &alpha, std::string &why);
 void flip_image_green(RgbaImage &image);
+// The texels an import of `settings` encodes from a decoded source (an 8-bit PCX's indices kept aside):
+// resized to the size it asks for, its green flipped, its height into its alpha (`normal height` of a TGA)
+// or its alpha made as asked; false, with `why` and the option at fault in `field`, for a value it cannot
+// use. What run_image_import writes, and what a texture's compare reads an import's output against.
+bool image_import_texels(RgbaImage &image, const ImageImportSettings &settings, std::string &why, std::string &field);
 // The image written as `settings` say (format, palette, dds, mips): its bytes, or false with `why`; a
 // warning (a PCX dropping a translucent source's alpha) in `note`.
 bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, std::vector<uint8_t> &out,

@@ -508,6 +508,23 @@ bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, s
 	return false;
 }
 
+bool image_import_texels(RgbaImage &image, const ImageImportSettings &settings, std::string &why, std::string &field) {
+	uint32_t width = 0, height = 0;
+	if (!image_target_size(settings.size, uint32_t(image.width), uint32_t(image.height), width, height, why)) {
+		field = "size";
+		return false;
+	}
+	image = resize_image(image, width, height);
+	if (settings.green == "flip") flip_image_green(image);
+	if (settings.format == "tga" && settings.normal == "height") height_into_alpha(image);
+	else if (settings.format != "tga24" && settings.format != "pcx" && settings.format != "pcx24" &&
+	         !apply_image_alpha(image, settings.alpha, why)) {
+		field = "alpha";
+		return false;
+	}
+	return true;
+}
+
 bool run_image_import(ImportContext &context, ImportProduct &out) {
 	const std::string &source_name = context.source_name();
 	const ImageImportSettings settings = image_import_settings(context.options());
@@ -554,12 +571,9 @@ bool run_image_import(ImportContext &context, ImportProduct &out) {
 		out.outputs.push_back(std::move(output));
 		return true;
 	}
-	image = resize_image(image, width, height);
-	if (settings.green == "flip") flip_image_green(image);
-	if (settings.format == "tga" && settings.normal == "height") height_into_alpha(image);
-	else if (settings.format != "tga24" && settings.format != "pcx" && settings.format != "pcx24" &&
-	         !apply_image_alpha(image, settings.alpha, error))
-		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", "alpha");
+	std::string field;
+	if (!image_import_texels(image, settings, error, field))
+		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", field);
 	std::string note;
 	if (!encode_image(image, settings, output.bytes, error, note))
 		return refuse(CoreFinding::ImportEncode, "Could not write " + name + ": " + error + ".");

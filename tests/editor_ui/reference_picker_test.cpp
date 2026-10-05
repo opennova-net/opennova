@@ -7,7 +7,7 @@
 // nothing when it does not. A missing value's picker offers the fixes Problems offers for it. S18: a texture
 // field's picture and its picker's; a texture an import makes shows how it is made in its tab, and under a
 // model row's use what the texture costs the game; the texture's toolbar shows its object texture detail and
-// its alpha as the use shown reads it.
+// its alpha as the use shown reads it; a texture's compare says its DXT error under the toolbar.
 #include <cstring>
 #include <string>
 #include <utility>
@@ -653,6 +653,44 @@ void test_texture_game_view_toolbar() {
 	      "the alpha as the Phong use reads it");
 }
 
+// S18, the compare: a texture's picture beside the DXT texture made of it, its error at the level shown said
+// under the toolbar (documents/texture_compare).
+void test_texture_compare_line() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	std::vector<uint8_t> rgba(size_t(64) * 64 * 4);
+	for (size_t i = 0; i < rgba.size(); ++i) rgba[i] = uint8_t((i * 7) / 4);
+	std::vector<uint8_t> file;
+	std::string error;
+	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 64, 64, file, error) &&
+	              editor_test::write_bytes(view.project.root + "/textures/ramp.tga", file),
+	      "a 64 x 64 texture");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("textures/ramp.tga"));
+	project.session.handle(request::set_viewport("textures/ramp.tga", "{\"kind\":\"texture\",\"options\":{\"compare\":\"split\"}}"));
+	// The Shell's devices, which the texture's viewport follows its document by.
+	DrawnDevices devices;
+	Ui ui;
+	ui.pump = [&project, &devices] {
+		project.session.poll();
+		devices.sync(project.session.viewports(), project.session.view());
+	};
+	ui.windows.set_view(&project.session.view());
+	ui.windows.set_devices(&devices.cache);
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Before | DXT") != std::string::npos, "the compare's view in the toolbar");
+	CHECK(text.find("DXT5 (") != std::string::npos && text.find("against its own texels: PSNR ") != std::string::npos &&
+	              text.find("worst block at") != std::string::npos,
+	      "under the toolbar, what the DXT texture's error is at the level shown");
+}
+
 // S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., ask first
 // (preview_texture_source of that texture); the dialog the preview opens shows the texture before and after
 // and replaces only on its Replace, Cancel closing it; an image dropped on a texture field's value asks for
@@ -807,6 +845,7 @@ void run_reference_picker_tests() {
 	test_texture_import_section();
 	test_texture_budget_line();
 	test_texture_game_view_toolbar();
+	test_texture_compare_line();
 	test_texture_drop_replaces();
 }
 
