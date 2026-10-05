@@ -3,7 +3,9 @@
      them, a pick enables ACCEPT and ACCEPT starts it
      (docs/required-resources.md, "Reaching a mission from the menu"). BACK
      returns to the main menu. Literal strings, hex colors and opennova.fnt, as
-     main.mnu. -->
+     main.mnu. MAIN's CURSOR names the mouse pointer, as main.mnu's does: the
+     original game hides the system pointer, so a screen naming none has no
+     pointer at all (docs/mnu/menu-re.md). -->
 <SCREEN>
 	<NAME>SINGLE_PLAYER</NAME>
 	<WINDOW type="window" name="MAIN">
@@ -21,6 +23,10 @@
 			<SELECTED_FG>FFFF8000</SELECTED_FG>
 			<DISABLED_FG>FF545252</DISABLED_FG>
 		</FONT>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
 		<WINDOW type="static" name="TITLE">
 			<FONT>
 				<NAME>opennova.fnt</NAME>
