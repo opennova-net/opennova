@@ -293,6 +293,26 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     poly_collision_lod: IntProperty(name="Collision LOD", default=0, min=0,
                                     description="The render LOD whose part meshes also become the bullet faces (the OED "
                                                 ".3dp poly_collision_lod); 0 = the most detailed")
+    # On a model root: the texture files it writes (materials.py ModelMaterials.plan).
+    texture_files: EnumProperty(name="Texture files", default="DDS", items=[
+        ("DDS", "DDS", "A diffuse or detail texture written as a DXT .dds with its full mip chain (DXT1 for an opaque "
+                       "image, DXT5 for one with alpha), the form of the game's own model textures, beside the .tga "
+                       "its row names: the game reads the .dds of the name first. A texture whose sides are not "
+                       "powers of two, a normal map and a colour swatch stay TGAs"),
+        ("TGA", "TGA", "Every texture written as an uncompressed 32-bit TGA, as large as its texels: a 4096 x 4096 "
+                       "image is 64 MB")])
+    texture_max_size: EnumProperty(name="Max texture size", default="0", items=[
+        ("0", "No limit", "Textures are written at their images' sizes"),
+        ("256", "256", "No side past 256"),
+        ("512", "512", "No side past 512, the size the game halves a normal map to"),
+        ("1024", "1024", "No side past 1024"),
+        ("2048", "2048", "No side past 2048"),
+        ("4096", "4096", "No side past 4096")],
+        description="The largest side a texture of this model is written at: the game, a 32-bit program, holds "
+                    "every texture it loads in its address space, a 4096 x 4096 TGA's texels 64 MB of it")
+    texture_oversize: EnumProperty(name="Larger textures", default="HALVE", items=[
+        ("HALVE", "Halve", "Halved until they fit, each texel the mean of 2 x 2, as the game halves a texture"),
+        ("REFUSE", "Refuse", "Export refuses the model, naming each texture past the max")])
     attach_points: EnumProperty(name="Attach points", default="PARTS", items=[
         ("PARTS", "One per part", "A CXLT row for every collision section after the root (every section on a "
                                   "skinned model), at its part's _attach Empty or its pivot: the table nearly every "
@@ -398,8 +418,8 @@ class O3DTexture(bpy.types.PropertyGroup):
     frame: IntProperty(name="Frame", default=0, min=0, max=255, description="The row's flipbook frame")
     image: PointerProperty(name="Image", type=bpy.types.Image)
     write: BoolProperty(name="Write", default=True,
-                        description="Write the image as a 32-bit TGA file under this name beside the .3di once it "
-                                    "is built")
+                        description="Write the image under this name beside the .3di once it is built: a 32-bit TGA, "
+                                    "or for a diffuse or detail .tga row of a model writing DDS textures, its .dds")
 
 
 class O3DMaterialProps(bpy.types.PropertyGroup):
@@ -1563,6 +1583,11 @@ def draw_model(layout, model):
         layout.label(text=f"Writes //{rig.clean_name(model.name)}.3di")
     layout.prop(p, "poly_collision_lod")
     layout.prop(p, "export_bullet_faces")
+    row = layout.row(align=True)
+    row.prop(p, "texture_files")
+    row.prop(p, "texture_max_size", text="Max")
+    if p.texture_max_size != "0":
+        layout.prop(p, "texture_oversize")
     if p.attach_points != "PARTS":
         layout.prop(p, "attach_points")
     arm = rig.rig_of(model)
