@@ -38,6 +38,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
+#include <formats/lwf/lwf.h>
 
 namespace editor_test {
 
@@ -176,6 +177,28 @@ inline bool write_bytes(const std::string &path, const std::vector<uint8_t> &byt
 	if (!out) return false;
 	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 	return static_cast<bool>(out);
+}
+
+// A sound bank minted through the engine's writer (formats/lwf) holding a set of each name, each with one
+// layer heard in both views and no member: what a project's sound names resolve against (the sound
+// lane), a test's game.lwf.
+inline std::vector<uint8_t> sound_bank_of(const std::vector<std::string> &sets) {
+	opennova::lwf::File bank;
+	for (const std::string &name : sets) {
+		opennova::lwf::Multi set;
+		set.name = name;
+		set.pitch_base = opennova::lwf::kAuthoredSetPitchBase;
+		set.target_id = 10000;
+		set.playlist_indices.push_back(uint32_t(bank.playlists.size()));
+		opennova::lwf::Playlist layer;
+		layer.flags = opennova::lwf::kFlagInternal | opennova::lwf::kFlagExternal;
+		bank.playlists.push_back(layer);
+		bank.multis.push_back(set);
+	}
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::lwf::encode_lwf(bank, out, error);
+	return out;
 }
 
 // `text` with every line ending in CR LF, the last one included: the one break the retail walk of a

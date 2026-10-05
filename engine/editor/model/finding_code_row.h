@@ -81,6 +81,8 @@ enum class FindingGroup {
 	Shaders,
 	Missions,
 	Textures,
+	SoundBanks,
+	SoundProfiles,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -239,6 +241,7 @@ enum class CoreFinding {
 	BlankMenu,
 	BlankMission,
 	BlankStrings,
+	BlankSound,
 	BlankStyle,
 	BlankTexture,
 	BlankUnavailable,

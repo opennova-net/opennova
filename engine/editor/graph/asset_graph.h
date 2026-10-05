@@ -254,6 +254,12 @@ public:
 	// file's own); null for none, and for a file kind.
 	const GraphSymbol *resolve_symbol(ReferenceKind kind, const std::string &name,
 	                                  const std::string &scope = std::string()) const;
+	// Whether the game's search for a sound set by name reaches the bank `file` (a path or a logical
+	// name): one of the global chain's banks (audio::global_bank_chain over the project's expansion:
+	// <exp>L.lwf, <exp>.lwf, gamelocl.lwf, game.lwf, game3.lwf, game2.lwf) [orig: Game_StartMission @
+	// 0x525443 over the slot table @ 0x82A5B0]; and its place in that search (SIZE_MAX: none).
+	bool on_bank_chain(const std::string &file) const { return bank_rank(file) != SIZE_MAX; }
+	size_t bank_rank(const std::string &file) const;
 	// A menu-style %NAME% through the stylesheets the game reads: its value, or the input
 	// unchanged.
 	std::string resolve_style(const std::string &value) const;
@@ -404,6 +410,12 @@ private:
 
 	GraphIndex index_;
 	std::shared_ptr<const GraphLayer> base_;
+	// The banks the game searches for a sound set, in its order, their names upper case (the update's
+	// project's chain: bank_rank).
+	std::vector<std::string> bank_chain_;
+	// A sound set by name as the game finds one (an unscoped Sound lookup): the definition in the
+	// chain's first bank holding the name, the project's before the base layer's; null for none.
+	const GraphSymbol *sound_binding(const std::string &name) const;
 	std::vector<std::string> base_names_; // set_base_names
 	std::map<std::string, Binding> bindings_; // upper-case name -> the definition the game reads
 	std::vector<Diagnostic> diagnostics_;

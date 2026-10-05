@@ -13,6 +13,7 @@
 #include <editor/ui/model_inspector_view.h>
 #include <editor/ui/outline_view.h>
 #include <editor/ui/script_view.h>
+#include <editor/ui/sound_inspector.h>
 #include <editor/ui/styles_view.h>
 #include <editor/ui/texture_view.h>
 
@@ -91,6 +92,10 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Text, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	// A texture's picture fills the tab beside what it is and what uses it (S18, ui/texture_view).
 	{DocumentTypeId::Texture, DocumentViewRole::MainViewport, nullptr, make_texture_view},
+	// A bank's waves and sets as a tree (a set holding its layers, a layer its members), a profile's slots
+	// under it; each heads the Inspector with what plays it and a Play (ui/sound_inspector).
+	{DocumentTypeId::SoundBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_bank_inspector},
+	{DocumentTypeId::SoundProfiles, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_profile_inspector},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

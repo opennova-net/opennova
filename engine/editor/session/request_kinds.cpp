@@ -14,6 +14,7 @@
 #include <editor/session/problems_service.h>
 #include <editor/session/rename_controller.h>
 #include <editor/session/session_core.h>
+#include <editor/session/sound_play.h>
 #include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
 #include <editor/session/workspace_parts.h>
@@ -226,7 +227,7 @@ void serve_set_workspace(SessionCore &core, const EditorRequest &request) {
 	set_workspace(core, request.workspace);
 }
 void serve_play_sound(SessionCore &core, const EditorRequest &request) {
-	play_sound(core, request.path);
+	serve_sound_play(core, request);
 }
 void serve_stop_sound(SessionCore &core, const EditorRequest &) {
 	stop_sound(core);
@@ -940,12 +941,20 @@ constexpr RequestKindRow kRows[] = {
 	// The sound is the session's state, the Shell playing what it says and reporting how it goes
 	// (ProjectSession::report_sound), so a play is seen in the workspace section.
 	Request(K::PlaySound, "play_sound", serve_play_sound,
-			"The project's wave at path (a project-relative path or a logical name) played by the editor as "
-			"the game decodes it, once, in place of any sound it plays: the workspace section's sound says how "
-			"it stands (starting until the Shell has decoded it, playing, ended, stopped, failed with why; a "
-			"headless editor plays nothing, its sound staying starting). Refused (workspace.refused): a name no "
-			"wave of the project has, a wave past what a card reads.")
-			.takes(request_params({ F::Path }))
+			"A sound played by the editor as the game plays it, once, in place of any sound it plays: the "
+			"workspace section's sound says how it stands (starting until the Shell has decoded it, playing, "
+			"ended, stopped, failed with why; a headless editor plays nothing, its sound staying starting), "
+			"and for a set its set, bank, words and voices (each a wave at the pitch and volume the game's pick "
+			"gave it). With no values: the project's wave at path (a project-relative path or a logical name) "
+			"as recorded. values {set}: the sound set of that name, from the bank path names, else from the "
+			"first bank of the game's search holding it (an expansion's <n>L.lwf and <n>.lwf, gamelocl.lwf, "
+			"game.lwf, game3.lwf, game2.lwf), each layer's member picked and its pitch composed as the game "
+			"does. values {profile?, slot}: the SndProf.def profile's slot (its keyword or 0 to 50; profile "
+			"left out: default). values {profile?, surface, foot?}: the footstep that profile plays on a "
+			"surface (ground, snow, object, water) with that foot (left, right), the slot the game's test "
+			"picks. Refused (workspace.refused): a name no wave of the project has, a set no bank searched "
+			"holds, an empty slot, waves the project lacks, a wave past what a card reads.")
+			.takes(request_params({}, { F::Path, F::Values }))
 			.row,
 	Request(K::StopSound, "stop_sound", serve_stop_sound,
 			"The sound the editor plays stopped (the workspace section's sound: stopped).")
