@@ -92,6 +92,13 @@ int main() {
 		      << "VAR \"FIRE\" 7\r\n"
 		      << "VAR \"ENEMYKILL\" 9\r\n";
 	}
+	// charattr.def: class 2 is the medic. The authority's class attribute table
+	// must carry it (the game's own host never loads the file, D-NET-345).
+	{
+		std::ofstream charattr(dir / "charattr.def", std::ios::binary);
+		charattr << "[CHARACTER1]\r\nATTRIBUTES\t= AutoScope\r\n"
+		         << "[CHARACTER2]\r\nATTRIBUTES\t= Medic\r\n";
+	}
 	{
 		std::ofstream host(dir / "test.host", std::ios::binary);
 		host << "// opennova-serve test host file\r\n"
@@ -148,6 +155,11 @@ int main() {
 	CHECK(match.rules().score_values && (*match.rules().score_values)[0] == 7);
 	CHECK(match.rules().score_values && (*match.rules().score_values)[3] == 9);
 	CHECK(match.rules().score_fields.size() == 1);
+	// The authority's class attributes came from charattr.def.
+	const world::MissionTables &tables = server.kernel().world.tables;
+	CHECK(tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
+	CHECK(!tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
+	CHECK(tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
 	// Serve Only: the dedicated role, no player of the host's own, no local client.
 	CHECK(server.role().kind() == inmatch::RoleKind::DedicatedHost);
 	CHECK(!server.role().state.host_owner.serve_and_play);

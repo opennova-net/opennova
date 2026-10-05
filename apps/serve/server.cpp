@@ -15,6 +15,7 @@
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/water_frame.h>
 #include <runtime/environment/weather_seed.h>
+#include <runtime/inmatch/charattr_challenge.h>
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/session_status.h>
 #include <runtime/mission/mission_text.h>
@@ -372,6 +373,20 @@ bool Server::boot_mission(std::string &error) {
 	kernel_->world.tables.surface_map.tile_surface = tile_surface_table_.data();
 	// The gametext "Server" strings the host's handlers print through.
 	inmatch::set_server_text(role_->state.host_owner.ctx, server_text_);
+	// The per-class ATTRIBUTES words (Medic, KnifeBonus, ...) the authority's
+	// medic heal, knife reach and medic-filtered sends read. Retail loads
+	// charattr.def at boot on every peer, a missing or empty file leaving the
+	// cleared all-zero table (D-NET-345: the game's own host never loads it).
+	// [orig: Game_Run @0x4A7FE3 -> CharAttr_LoadFromDef @0x412140]
+	{
+		inmatch::CharAttrChallengeTable charattr;
+		std::vector<uint8_t> charattr_bytes;
+		if (index_.read_file("charattr.def", charattr_bytes) && !charattr_bytes.empty())
+			(void)inmatch::parse_charattr_challenge_table(charattr_bytes.data(),
+					charattr_bytes.size(), charattr);
+		kernel_->world.tables.class_attribute_flags =
+				inmatch::charattr_class_attribute_rows(charattr);
+	}
 
 	// The environment: the mission's .env with the BMS override layer, the
 	// water plane by its witnessed precedence, then the weather seed and the
