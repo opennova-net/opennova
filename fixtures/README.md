@@ -152,6 +152,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   one-entry case. The shipped
   string tables are read from the reference tree by the gated
   `rtxt_jo_install_sweep` and the menu-driven GUT tests.
+- `gamecfg/synth_game.cfg` — `tests/fixtures/minimal_gamecfg_gen.cpp`: a `game.cfg`
+  through `gamecfg::write` (CR LF, Game_SaveConfig's layout) from
+  `tests/gamecfg/gamecfg_synth.h`, every written key off its default and a four-row weapon
+  roster. No retail file stands behind it: the game writes `game.cfg` on the player's
+  machine, with the player's hardware names in it.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
 - `mus/synth_gamemus.bin`, `mus/synth_menumus.bin`, `mus/golden_synth_gamemus.mus.txt` —
   `tests/fixtures/synth_mus_gen.cpp`: two music-director programs authored in the
