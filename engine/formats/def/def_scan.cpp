@@ -52,12 +52,9 @@ void to_lower_buf(char *dst, const char *src, size_t len) {
     dst[len] = '\0';
 }
 
+/* The CRT's atol on a token span (io::retail_atol_n: 32 bits, saturating). */
 int parse_int_n(const char *s, size_t len) {
-    char buf[32];
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, s, len);
-    buf[len] = '\0';
-    return (int)strtol(buf, NULL, 10);
+    return io::retail_atol_n(s, len);
 }
 
 /* ItemDef healthMax and the two armor classes are signed WORD stores in retail.
@@ -71,11 +68,7 @@ int signed_i16_value(int value) {
 /* The CRT's atof on a token span (io::retail_atof: decimal only, an exponent
    marked e, E, d or D), narrowed to float. */
 float parse_float_n(const char *s, size_t len) {
-    char buf[64];
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, s, len);
-    buf[len] = '\0';
-    return (float)io::retail_atof(buf);
+    return (float)io::retail_atof_n(s, len);
 }
 
 /* The engine debris-type table row names, in table order — index = the byte
@@ -378,11 +371,7 @@ void parse_pos_align3(Token *vals, int n, int *out) {
 
 
 double hud_double(const char *s, size_t len) {
-    char buf[64];
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, s, len);
-    buf[len] = '\0';
-    return io::retail_atof(buf);
+    return io::retail_atof_n(s, len);
 }
 
 int hud_number(const char *s, size_t len) {
@@ -391,9 +380,11 @@ int hud_number(const char *s, size_t len) {
 
 int parse_fixed16_digits_n(const char *s, size_t len) {
     size_t i = 0;
-    int integer_part = 0;
+    // 32-bit arithmetic that wraps, as the original's imul/lea do on a long
+    // digit run.
+    uint32_t integer_part = 0;
     while (i < len && s[i] >= '0' && s[i] <= '9') {
-        integer_part = s[i] + 10 * integer_part - '0';
+        integer_part = static_cast<uint32_t>(s[i]) + 10u * integer_part - '0';
         ++i;
     }
     int frac_accum = 127;
@@ -406,7 +397,7 @@ int parse_fixed16_digits_n(const char *s, size_t len) {
             ++i;
         }
     }
-    return (integer_part << 16) + (frac_accum >> 8);
+    return static_cast<int>((integer_part << 16) + static_cast<uint32_t>(frac_accum >> 8));
 }
 
 }  // namespace opennova::defscan

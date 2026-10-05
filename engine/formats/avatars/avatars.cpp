@@ -11,6 +11,7 @@
  */
 
 #include <formats/avatars/avatars.h>
+#include <base/io/crt_ftol.h>
 
 #include <base/io/ascii_config.h>
 
@@ -97,9 +98,9 @@ static void tok_copy(const char *t, char *dst, size_t dst_size) {
     safe_copy(dst, dst_size, t, strlen(t));
 }
 
-/* atol [orig: j__atol @ 0x76ab1b]. */
+/* atol [orig: j__atol @ 0x76ab1b] (io::retail_atol: 32 bits, saturating). */
 static int tok_int(const char *t) {
-    return (int)strtol(t, NULL, 10);
+    return io::retail_atol(t);
 }
 
 /* The byte the part fields store. */

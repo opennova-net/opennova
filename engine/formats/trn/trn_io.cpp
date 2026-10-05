@@ -1,9 +1,12 @@
 #include <formats/trn/trn_io.h>
 
+#include <base/io/ascii_config.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <iterator>
 #include <sstream>
 
 // [orig: PolyTrn_LoadTerrainConfig @0x60e3d0 -> Terrain_ParseConfigCallback @0x60f330 — the .trn
@@ -12,188 +15,153 @@
 
 namespace opennova {
 
-namespace {
-
-using opennova::strutil::unquote;
-
-static void parse_foliage_attribs(std::istringstream &iss, FoliageDef &def) {
-	std::string token;
-	while (iss >> token) {
-		token = unquote(token);
-		if (token == "forceon") {
-			def.attrib_flags = static_cast<uint8_t>(def.attrib_flags | FOLIAGE_ATTRIB_FORCE_ON);
-		} else if (token == "shadow") {
-			def.attrib_flags = static_cast<uint8_t>(def.attrib_flags | FOLIAGE_ATTRIB_SHADOW);
-		}
-	}
-}
-
-} // namespace
-
 bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 	int seen_sector_rows = 0;
+	// The parser's state: inside a `foliage` block, and the blocks an `end`
+	// has closed [orig: dword_31BC904, dword_31BC900].
+	bool in_foliage = false;
+	int foliage_closed = 0;
+	FoliageDef def;
 
-	std::string line;
-	while (std::getline(f, line)) {
-		auto sc = line.find(';');
-		if (sc != std::string::npos) {
-			line = line.substr(0, sc);
-		}
+	// The lines and tokens are the shared retail walk's (io::for_each_config_line:
+	// a CR LF pair ends a line and nothing else does, an unterminated last line
+	// loses its final byte, `;` or `//` outside quotes cuts a line, and space,
+	// comma or tab separates tokens) [orig: File_ParseASCIIFile @0x53D810]. A key
+	// compares without case and reads its values by token, numbers through the
+	// CRT's atol and atof (io::retail_atol, io::retail_atof), whatever the line's
+	// count [orig: Terrain_ParseConfigCallback @0x60f330, the stricmp of
+	// tokens[1] in every arm].
+	const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+	io::for_each_config_line(text.data(), text.size(), [&](const io::ConfigTokens &tokens) {
+		const std::string key = strutil::to_lower(tokens.tokens[0]);
+		const char *value = tokens.token(1);
 
-		std::istringstream iss(line);
-		std::string key;
-		if (!(iss >> key)) {
-			continue;
+		// Inside a block every line is the block's (a `foliage` line too): the
+		// first four blocks read their keys into their slots, and from the fifth
+		// on nothing closes the block, so the rest of the file is read by no arm
+		// [orig: the dword_31BC904 test, then `dword_31BC900 < 4` around every
+		// block key, `end` bumping the count].
+		if (in_foliage) {
+			if (foliage_closed >= 4) return;
+			if (key == "end") {
+				out.foliage_defs.push_back(foliage_normalize_def(def));
+				++foliage_closed;
+				in_foliage = false;
+			} else if (key == "graphic") {
+				def.graphic = value;
+			} else if (key == "color_lower") {
+				def.color_lower = io::retail_atol(value);
+			} else if (key == "color_upper") {
+				def.color_upper = io::retail_atol(value);
+			} else if (key == "match") {
+				// Up to 7 args as bytes, to the line's count; only the first
+				// FOLIAGE_MATCH_CODES are ever consumed (foliage.h), so the rest
+				// are read and dropped here [orig: the match arm, `idx < 8` and
+				// `idx >= count` @0x60f330].
+				def.match.fill(FOLIAGE_MATCH_UNSET);
+				for (int i = 1; i < tokens.count && i < 8; ++i)
+					if (i - 1 < FOLIAGE_MATCH_CODES)
+						def.match[static_cast<size_t>(i - 1)] =
+								static_cast<uint8_t>(io::retail_atol(tokens.tokens[i]));
+			} else if (key == "attrib") {
+				// Each arg ORs its flag; nothing clears them [orig: the attrib
+				// arm, "forceon" @0x60f58b ORs 1 and "shadow" 2].
+				for (int i = 1; i < tokens.count && i < 8; ++i) {
+					if (strutil::iequals(tokens.tokens[i], "forceon"))
+						def.attrib_flags = static_cast<uint8_t>(def.attrib_flags | FOLIAGE_ATTRIB_FORCE_ON);
+					if (strutil::iequals(tokens.tokens[i], "shadow"))
+						def.attrib_flags = static_cast<uint8_t>(def.attrib_flags | FOLIAGE_ATTRIB_SHADOW);
+				}
+			}
+			return;
 		}
 
 		if (key == "foliage") {
-			if (out.foliage_defs.size() < 4) {
-				FoliageDef def;
-				std::string fline;
-				while (std::getline(f, fline)) {
-					auto fsc = fline.find(';');
-					if (fsc != std::string::npos) {
-						fline = fline.substr(0, fsc);
-					}
-					std::istringstream fiss(fline);
-					std::string fk;
-					if (!(fiss >> fk)) {
-						continue;
-					}
-					if (fk == "end") {
-						break;
-					}
-					std::string fv;
-					if (!(fiss >> fv)) {
-						continue;
-					}
-					if (fk == "graphic") {
-						def.graphic = unquote(fv);
-					} else if (fk == "color_lower") {
-						def.color_lower = std::atoi(fv.c_str());
-					} else if (fk == "color_upper") {
-						def.color_upper = std::atoi(fv.c_str());
-					} else if (fk == "match") {
-						// Retail stores up to 7 args as bytes; only the first
-						// FOLIAGE_MATCH_CODES are ever consumed (foliage.h), so
-						// the rest are read and dropped here.
-						def.match.fill(FOLIAGE_MATCH_UNSET);
-						int idx = 0;
-						std::string tok = fv;
-						do {
-							if (idx < FOLIAGE_MATCH_CODES) {
-								def.match[static_cast<size_t>(idx)] = static_cast<uint8_t>(std::atoi(tok.c_str()));
-							}
-							++idx;
-						} while (idx < 7 && (fiss >> tok));
-					} else if (fk == "attrib") {
-						def.attrib_flags = 0;
-						def.attrib_flags = static_cast<uint8_t>(def.attrib_flags | (
-							fv == "forceon" ? FOLIAGE_ATTRIB_FORCE_ON :
-							fv == "shadow" ? FOLIAGE_ATTRIB_SHADOW : 0));
-						parse_foliage_attribs(fiss, def);
-					}
-				}
-				out.foliage_defs.push_back(foliage_normalize_def(def));
-			}
-			continue;
-		}
-
-		std::string val;
-		if (!(iss >> val)) {
-			continue;
-		}
-
-		if (key == "terrain_name") {
-			out.name = unquote(val);
+			in_foliage = true;
+			def = FoliageDef();
+		} else if (key == "terrain_name") {
+			out.name = value;
 		} else if (key == "polytrn_colormap") {
-			out.colormap = unquote(val);
+			out.colormap = value;
 		} else if (key == "polytrn_detailmap_c1") {
-			out.detailmap_c1 = unquote(val);
+			out.detailmap_c1 = value;
 		} else if (key == "polytrn_detailmap_c2") {
-			out.detailmap_c2 = unquote(val);
+			out.detailmap_c2 = value;
 		} else if (key == "polytrn_detailmap_c3") {
-			out.detailmap_c3 = unquote(val);
+			out.detailmap_c3 = value;
 		} else if (key == "polytrn_detailblendmap") {
-			out.detailblendmap = unquote(val);
+			out.detailblendmap = value;
 		} else if (key == "polytrn_polydata") {
-			out.polydata = unquote(val);
+			out.polydata = value;
 		} else if (key == "polytrn_detailmap") {
-			out.detailmap = unquote(val);
+			out.detailmap = value;
 		} else if (key == "polytrn_detailmap2") {
-			out.detailmap2 = unquote(val);
+			out.detailmap2 = value;
 		} else if (key == "polytrn_detailmapdist") {
-			out.detailmapdist = unquote(val);
+			out.detailmapdist = value;
 		} else if (key == "polytrn_detailmapdist2") {
-			out.detailmapdist2 = unquote(val);
+			out.detailmapdist2 = value;
 		} else if (key == "polytrn_detaildensity") {
-			out.detail_density = std::atoi(val.c_str());
+			out.detail_density = io::retail_atol(value);
 		} else if (key == "polytrn_detaildensity2") {
-			out.detail_density2 = std::atoi(val.c_str());
+			out.detail_density2 = io::retail_atol(value);
 		} else if (key == "polytrn_sectorcount") {
-			out.sector_count = std::atoi(val.c_str());
+			out.sector_count = io::retail_atol(value);
 		} else if (key == "polytrn_wrapx") {
-			out.wrap_x = std::atoi(val.c_str());
+			out.wrap_x = io::retail_atol(value);
 		} else if (key == "polytrn_wrapy") {
-			out.wrap_y = std::atoi(val.c_str());
+			out.wrap_y = io::retail_atol(value);
 		} else if (key == "lock_topleft") {
-			out.lock_topleft.x = std::atoi(val.c_str());
-			std::string val2;
-			if (iss >> val2) {
-				out.lock_topleft.y = std::atoi(val2.c_str());
-			}
+			out.lock_topleft.x = io::retail_atol(value);
+			out.lock_topleft.y = io::retail_atol(tokens.token(2));
 		} else if (key == "lock_topright") {
-			out.lock_topright.x = std::atoi(val.c_str());
-			std::string val2;
-			if (iss >> val2) {
-				out.lock_topright.y = std::atoi(val2.c_str());
-			}
+			out.lock_topright.x = io::retail_atol(value);
+			out.lock_topright.y = io::retail_atol(tokens.token(2));
 		} else if (key == "lock_bottomleft") {
-			out.lock_bottomleft.x = std::atoi(val.c_str());
-			std::string val2;
-			if (iss >> val2) {
-				out.lock_bottomleft.y = std::atoi(val2.c_str());
-			}
+			out.lock_bottomleft.x = io::retail_atol(value);
+			out.lock_bottomleft.y = io::retail_atol(tokens.token(2));
 		} else if (key == "lock_bottomright") {
-			out.lock_bottomright.x = std::atoi(val.c_str());
-			std::string val2;
-			if (iss >> val2) {
-				out.lock_bottomright.y = std::atoi(val2.c_str());
-			}
+			out.lock_bottomright.x = io::retail_atol(value);
+			out.lock_bottomright.y = io::retail_atol(tokens.token(2));
 		} else if (key == "horizon") {
-			out.horizon = std::atof(val.c_str());
+			out.horizon = io::retail_atof(value);
 		} else if (key == "polytrn_origin") {
-			out.origin_x = std::atoi(val.c_str());
-			std::string val2;
-			if (iss >> val2) {
-				out.origin_y = std::atoi(val2.c_str());
-			}
+			out.origin_x = io::retail_atol(value);
+			out.origin_y = io::retail_atol(tokens.token(2));
 		} else if (key == "polytrn_sectors") {
-			// Retail counts every row line (+5960) and rejects > 16 below; the
-			// grid itself only has 16 rows, so the extra lines are counted, not
-			// stored.
+			// A row reads polytrn_sectorcount columns (16 at most) whatever the
+			// line's count, a short line's missing ones from the slots an earlier
+			// line left; every row line counts (+5960), and the gate below
+			// rejects more than 16, which the grid has no room for, so they are
+			// counted, not stored [orig: the polytrn_sectors arm @0x60f330,
+			// dword_31BCB30].
 			++seen_sector_rows;
 			if (out.sector_rows < 16) {
-				int col = 0;
-				out.sector_grid[out.sector_rows][col++] = std::atoi(val.c_str());
-				std::string tok;
-				while (col < 16 && col < out.sector_count && (iss >> tok)) {
-					out.sector_grid[out.sector_rows][col++] = std::atoi(tok.c_str());
-				}
+				for (int col = 0; col < 16 && col < out.sector_count; ++col)
+					out.sector_grid[out.sector_rows][col] = io::retail_atol(tokens.token(1 + col));
 				out.sector_rows++;
 			}
 		} else if (key == "water_height") {
-			out.water_height = std::atoi(val.c_str());
+			out.water_height = io::retail_atol(value);
 		} else if (key == "polytrn_charmap") {
-			out.charmap = unquote(val);
+			out.charmap = value;
 		} else if (key == "polytrn_foliagemap") {
-			out.foliagemap = unquote(val);
+			out.foliagemap = value;
 		} else if (key == "polytrn_tilestrip") {
-			out.tilestrip = unquote(val);
+			out.tilestrip = value;
 		} else if (key == "polytrn_tileinfo") {
-			out.tileinfo = unquote(val);
+			out.tileinfo = value;
 		}
-	}
+	});
+	// A block no `end` closed (the file ran out, or its `end` is the
+	// unterminated last line, read `en`) still wrote its keys into its slot, and
+	// the runtime takes all four slots whose graphic is named, not the closed
+	// count, so the block is a definition [orig: the block keys write slot
+	// dword_31BC900 directly; Terrain_Init copies all four 0x218-byte slots
+	// @0x60FD11..0x60FD16 (sub_5FF4C0); Foliage_RemapPixelToDefMask @0x5FF4E0
+	// gates each slot on its graphic's first byte]. JO:CA's Dvxi4.trn and
+	// Dvxi4_c.trn end on such a block.
+	if (in_foliage && foliage_closed < 4) out.foliage_defs.push_back(foliage_normalize_def(def));
 
 	// The admission gate [orig: Terrain_LoadEnvironmentConfig @0x610940 tail]:
 	// the config is rejected (returns 0) when the colormap (+256), detailmap

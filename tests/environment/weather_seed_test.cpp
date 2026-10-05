@@ -58,9 +58,9 @@ void test_resource_values_reach_the_real_wire_projection() {
 	header.start_time = 0x0A80; // 10.5 hours in the BMS Q8.8 clock
 	header.minutes_per_day = 123;
 	CHECK(seed_from_env(
-			"enviro_name \"Parity\"\n"
-			"fog_level 733\n"
-			"sky_speed 37\n",
+			"enviro_name \"Parity\"\r\n"
+			"fog_level 733\r\n"
+			"sky_speed 37\r\n",
 			header, world));
 	CHECK(world.weather.valid);
 
@@ -89,7 +89,7 @@ void test_bms_fog_override_precedes_the_environment_resource() {
 	header.attrib_flags = opennova::bms::AttribFlags::FogDistanceOverrideEnable;
 	header.fog_override = 811;
 	header.minutes_per_day = 60;
-	CHECK(seed_from_env("fog_level 733\nsky_speed 19\n", header, world));
+	CHECK(seed_from_env("fog_level 733\r\nsky_speed 19\r\n", header, world));
 	nw::FrameUpdate frame;
 	CHECK(ns::test::emit_phase2(world, frame));
 	CHECK(frame.env.fog_dist == 811);
@@ -101,7 +101,7 @@ void test_mission_start_prewarms_255_environment_ticks() {
 	opennova::bms::Header header{};
 	header.start_time = 0x0540;
 	header.minutes_per_day = 60;
-	CHECK(seed_from_env("fog_level 733\nsky_speed 19\n", header, world));
+	CHECK(seed_from_env("fog_level 733\r\nsky_speed 19\r\n", header, world));
 	const uint32_t start = world.weather.tod_fixed24;
 	const uint32_t rate = (24u << 24) / (3720u * 60u);
 	w::WeatherTickEvents events;

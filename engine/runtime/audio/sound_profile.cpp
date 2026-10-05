@@ -134,7 +134,7 @@ size_t SoundProfileTable::parse(const char *text, size_t len) {
             cur->set_names[slot].assign(set);
             cur->param2_q16[slot] = parse_q16(t.token(2));
             cur->param3_q16[slot] = parse_q16(t.token(3));
-            cur->param4[slot] = static_cast<int32_t>(std::strtol(t.token(4), nullptr, 10));
+            cur->param4[slot] = io::retail_atol(t.token(4));
             return;
         }
         for (int i = 0; i < 12; ++i) {

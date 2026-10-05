@@ -219,7 +219,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             // rotor_parts @0x49EF5D..0x49EFB6, aux_parts @0x49EFF3..0x49F04C]
             uint8_t bytes[4];
             for (int i = 0; i < 4; ++i)
-                bytes[i] = static_cast<uint8_t>(strtol(tokens.token(i + 1), NULL, 10));
+                bytes[i] = static_cast<uint8_t>(io::retail_atol(tokens.token(i + 1)));
             if (key_is(key, "rotor_parts")) {
                 set_def_byte(current.deathtime_ticks, 0, bytes[0]);
                 set_def_byte(current.deathtime_ticks, 1, bytes[1]);
@@ -237,7 +237,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             // [orig: door_type @0x49F7F0..0x49F86C, door_dir @0x49F872..0x49F8EE]
             uint32_t bits = 0;
             for (int i = 1; i < tokens.count && i <= 30; ++i)
-                if (strtol(tokens.tokens[i], NULL, 10) != 0) bits |= 1u << i;
+                if (io::retail_atol(tokens.tokens[i]) != 0) bits |= 1u << i;
             if (key_is(key, "door_type")) current.door_type = bits;
             else current.clipsize = static_cast<int32_t>(bits);
             parsed = 1;
@@ -272,7 +272,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             /* Every token past the key [orig: @0x4A0255..0x4A02DE] */
             current.vehicle_spawn_mask = 0;
             for (int i = 1; i < tokens.count; ++i) {
-                const int id = static_cast<int>(strtol(tokens.tokens[i], NULL, 10));
+                const int id = io::retail_atol(tokens.tokens[i]);
                 int slot = 0;
                 while (slot < out->vehicle_spawn_id_count && out->vehicle_spawn_ids[slot] != id)
                     ++slot;
@@ -343,7 +343,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                (+0x6F3), -6 sounddeath (+0x6DB). From -7 down the copy straddles
                the weapon userpoint names and then leaves the record; the port
                writes nothing there (D-ITEMDEF-9). */
-            const long slot = strtol(key + 10, NULL, 10);
+            const int32_t slot = io::retail_atol(key + 10);
             char *target = nullptr;
             if (slot >= 1 && slot <= 7) {
                 target = current.soundloops[slot - 1];

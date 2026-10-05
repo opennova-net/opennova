@@ -125,48 +125,19 @@ constexpr NamedValue kNamedValues[] = {
 	{"CurTOD", Builtin::CurTOD},
 };
 
-// The CRT atol the resolver calls: strtol base 10, saturating.
-// [orig: _atol @0x76AB0A -> strtol @0x76B2D9]
+// The CRT atol the resolver calls: strtol base 10, saturating at 32 bits
+// (io::retail_atol). [orig: _atol @0x76AB0A -> strtol @0x76B2D9]
 int32_t crt_atol(const char *s) {
-	while (*s == ' ' || (*s >= '\t' && *s <= '\r')) ++s;
-	bool negative = false;
-	if (*s == '+' || *s == '-') negative = *s++ == '-';
-	int64_t value = 0;
-	while (*s >= '0' && *s <= '9') {
-		value = value * 10 + (*s++ - '0');
-		if (value > 0x80000000LL) value = 0x80000000LL;
-	}
-	if (negative) value = -value;
-	if (value > INT32_MAX) return INT32_MAX;
-	if (value < INT32_MIN) return INT32_MIN;
-	return static_cast<int32_t>(value);
+	return io::retail_atol(s);
 }
 
-// The CRT atof: blanks, a sign, digits with an optional fraction, then an
-// exponent the CRT also accepts after D or d. No hexadecimal, infinity or
-// NaN forms. [orig: _atof @0x76B6A1 -> __strgtold12_l @0x779FBE, the
-// exponent markers @0x77A0D8..0x77A0EE]
+// The CRT atof (io::retail_atof): blanks, a sign, digits with an optional
+// fraction, then an exponent the CRT also accepts after D or d. No
+// hexadecimal, infinity or NaN forms, whatever the process locale.
+// [orig: _atof @0x76B6A1 -> __strgtold12_l @0x779FBE, the exponent markers
+// @0x77A0D8..0x77A0EE]
 double crt_atof(const char *s) {
-	while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') ++s;
-	std::string number;
-	if (*s == '+' || *s == '-') number.push_back(*s++);
-	bool digits = false;
-	while (*s >= '0' && *s <= '9') { number.push_back(*s++); digits = true; }
-	if (*s == '.') {
-		number.push_back(*s++);
-		while (*s >= '0' && *s <= '9') { number.push_back(*s++); digits = true; }
-	}
-	if (!digits) return 0.0;
-	if (*s == 'e' || *s == 'E' || *s == 'd' || *s == 'D') {
-		const char *exponent = s + 1;
-		std::string suffix = "e";
-		if (*exponent == '+' || *exponent == '-') suffix.push_back(*exponent++);
-		if (*exponent >= '0' && *exponent <= '9') {
-			while (*exponent >= '0' && *exponent <= '9') suffix.push_back(*exponent++);
-			number += suffix;
-		}
-	}
-	return std::strtod(number.c_str(), nullptr);
+	return io::retail_atof(s);
 }
 
 constexpr size_t kTokenMax = 64;             // [orig: `cmp edi, 40h` @0x4F335A / @0x4F3457]

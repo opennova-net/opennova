@@ -34,21 +34,17 @@ namespace opennova::def {
    @0x5438CF, the scalar reads of tokens[2] throughout);
    ActionDef_ParseScriptLine @0x4023C0 ("action" @0x4023F3, "end" @0x40251B)] */
 
-/* abs of a 32-bit atol, wrapping as the original's cdq/xor/sub does
-   (abs(INT_MIN) stays INT_MIN). */
-static int abs32_of(long value) {
+/* abs of a 32-bit atol (io::retail_atol, saturating), wrapping as the
+   original's cdq/xor/sub does (abs(INT_MIN) stays INT_MIN). */
+static int abs32_of(int32_t value) {
     const uint32_t bits = static_cast<uint32_t>(value);
-    return static_cast<int>(static_cast<int32_t>(value) < 0 ? 0u - bits : bits);
+    return static_cast<int>(value < 0 ? 0u - bits : bits);
 }
 
 /* CRT atof on a token span: the double the retail parse multiplies before its
    ftol, kept unnarrowed (parse_float_n rounds through a float). */
 static double parse_double_n(const char *s, size_t len) {
-    char buf[64];
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, s, len);
-    buf[len] = '\0';
-    return io::retail_atof(buf);
+    return io::retail_atof_n(s, len);
 }
 
 // Keep the decimal-digit angle parser ahead of BAM promotion; a float degree
@@ -104,7 +100,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             memset(&carry, 0, sizeof(carry));
             safe_copy(carry.name, sizeof(carry.name), v, vl);
             const char *cap = tokens.token(2);
-            carry.cap = abs32_of(strtol(cap, NULL, 10));
+            carry.cap = abs32_of(io::retail_atol(cap));
             DA_PUSH(out->ammo_class_carries, out->ammo_class_carries_count, carry_cap, carry);
             return;
         }
@@ -211,7 +207,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             } else if (key_is(key, "ammobucket")) {
                 /* abs(atol) [orig: the cdq/xor/sub @0x544037 -> +0xDC] */
-                cw.ammobucket = abs32_of(strtol(v, NULL, 10));
+                cw.ammobucket = abs32_of(io::retail_atol(v));
                 parsed = 1;
             } else if (key_is(key, "sameas")) {
                 /* [orig: @0x544056..0x544072 -- strncpy(AdmDef+0x34, value, 0x20):
@@ -225,7 +221,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    abs(atol) of token 2, read whether or not the line carries it
                    [orig: parse @0x5441CB, the count @0x54422E..0x544242] */
                 copy_token(cw.ammo_class, sizeof(cw.ammo_class), tokens, 1);
-                cw.ammo_class_count = abs32_of(strtol(tokens.token(2), NULL, 10));
+                cw.ammo_class_count = abs32_of(io::retail_atol(tokens.token(2)));
                 parsed = 1;
             } else if (key_is(key, "attachtextid")) {
                 /* The attach-label text key; the original resolves it against the
@@ -539,10 +535,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                     DefSightEntry se;
                     memset(&se, 0, sizeof(se));
                     copy_token(se.texture, sizeof(se.texture), tokens, 1);
-                    se.x1 = (int)strtol(tokens.token(2), NULL, 10);
-                    se.y1 = (int)strtol(tokens.token(3), NULL, 10);
-                    se.x2 = (int)strtol(tokens.token(4), NULL, 10);
-                    se.y2 = (int)strtol(tokens.token(5), NULL, 10);
+                    se.x1 = io::retail_atol(tokens.token(2));
+                    se.y1 = io::retail_atol(tokens.token(3));
+                    se.x2 = io::retail_atol(tokens.token(4));
+                    se.y2 = io::retail_atol(tokens.token(5));
                     /* By position: the blend mode is token 6 (a name the
                        material maker does not know, or none, is `blend`), and
                        token 7 the one `scale` or `slide` flag, `slide`'s frame
@@ -564,7 +560,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                         if (strutil::iequals(flag, "scale")) se.scale = 1;
                         if (strutil::iequals(flag, "slide")) {
                             se.slide = 1;
-                            se.slide_frames = (int)strtol(tokens.token(8), NULL, 10);
+                            se.slide_frames = io::retail_atol(tokens.token(8));
                         }
                     }
                     DA_PUSH(cw.sights, cw.sights_count, cw_sight_cap, se);

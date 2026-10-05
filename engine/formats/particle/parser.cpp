@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 namespace opennova::particle {
@@ -46,12 +47,17 @@ std::vector<std::string> split(std::string_view value, char delim) {
 
 // ------------------------------------------------------------ scalar parsers
 
+// The CRT's atof and atol as the game links them (io::retail_atof: decimal
+// only, a d exponent, no hex, infinity or NaN, whatever the process locale;
+// io::retail_atol: 32 bits, saturating) [orig: CParticleDef_ParseProperties
+// @0x5ea320, its _atof (@0x76B6A1) and j__atol (@0x76AB1B) calls]. The line
+// walk around them stays the port's own (D-PTL-32).
 float parse_float(const std::string &text) {
-	return text.empty() ? 0.0f : static_cast<float>(std::atof(text.c_str()));
+	return static_cast<float>(io::retail_atof(text.c_str()));
 }
 
 int parse_int(const std::string &text) {
-	return text.empty() ? 0 : std::atoi(text.c_str());
+	return io::retail_atol(text.c_str());
 }
 
 std::uint8_t parse_byte(const std::string &text) {
@@ -377,7 +383,7 @@ void apply_particle_key(ParticleDef &particle, const std::string &authored_key,
 				break;
 			}
 		}
-		const int slot = digits_only ? std::atoi(suffix.c_str()) : -1;
+		const int slot = digits_only ? io::retail_atol(suffix.c_str()) : -1;
 		if (slot >= 0 && static_cast<std::size_t>(slot) < particle.collide_sounds.size()) {
 			particle.collide_sounds[static_cast<std::size_t>(slot)] = raw_value;
 		} else {

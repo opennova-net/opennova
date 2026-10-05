@@ -1,4 +1,5 @@
 #include <formats/def/def.h>
+#include <base/io/crt_ftol.h>
 
 // POWERUP.DEF: the pickup rows the Powerup items bind (world/powerup.h).
 //
@@ -33,7 +34,7 @@ bool key_is(const char *key, const char *name) { return strutil::iequals(key, na
 
 // `auto` -> -1, else atol [orig: ActionDef_ParseScriptLine @0x40279A / @0x402B2C]
 int parse_delay(const char *v) {
-    return strutil::iequals(std::string_view(v), "auto") ? -1 : (int)strtol(v, nullptr, 10);
+    return strutil::iequals(std::string_view(v), "auto") ? -1 : io::retail_atol(v);
 }
 
 // One in-ACTION line. The keys the two powerup handlers read land in the row;
@@ -65,7 +66,7 @@ void parse_action_line(DefPowerupAction &action, const io::ConfigTokens &tokens)
     } else if (key_is(key, "texttoken")) {
         safe_copy(action.texttoken, sizeof(action.texttoken), v, vl);
     } else if (key_is(key, "action_value")) {
-        action.action_value = (int)strtol(v, nullptr, 10);
+        action.action_value = io::retail_atol(v);
     }
 }
 
@@ -148,13 +149,13 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out) 
             return;
         }
         if (key_is(key, "respawn_time")) {
-            current.respawn_time = (int)strtol(v, nullptr, 10); // @0x443103
+            current.respawn_time = io::retail_atol(v); // @0x443103
         } else if (key_is(key, "max_respawns")) {
-            current.max_respawns = (int)strtol(v, nullptr, 10); // @0x44312C
+            current.max_respawns = io::retail_atol(v); // @0x44312C
         } else if (key_is(key, "hp")) {
-            current.hp = (int)strtol(v, nullptr, 10); // @0x443155
+            current.hp = io::retail_atol(v); // @0x443155
         } else if (key_is(key, "mana")) {
-            current.mana = (int)strtol(v, nullptr, 10); // @0x44317E
+            current.mana = io::retail_atol(v); // @0x44317E
         } else if (key_is(key, "weapon")) {
             // The name resolves against the weapon table at runtime; `all`
             // is the -1 sentinel; a name the table lacks logs "Weapon not
@@ -168,7 +169,7 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out) 
             DefPowerupAmmo row;
             memset(&row, 0, sizeof(row));
             safe_copy(row.class_name, sizeof(row.class_name), v, vl);
-            row.count = (int)strtol(tokens.token(2), nullptr, 10);
+            row.count = io::retail_atol(tokens.token(2));
             DA_PUSH(current.ammo, current.ammo_count, ammo_cap, row);
         }
         // else: "unrecognized token" [orig: @0x44328C]

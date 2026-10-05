@@ -3,6 +3,8 @@
 
 #include <atomic>
 #include <climits>
+#include <clocale>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -13,6 +15,7 @@
 #include <base/io/bit_stream.h>
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/bam.h>
 #include <base/io/log.h>
 #include <base/io/log_ring.h>
@@ -500,8 +503,57 @@ static int test_byte_reader_truncation_latch()
     return 0;
 }
 
+// The CRT's atol on a 32-bit long, as the game links it: a value past int32
+// saturates on every host, where an LP64 strtol reads 64 bits and a cast
+// wraps (`ammobucket 3000000000` read 1294967296 on Linux). [orig: _atol
+// @0x76AB0A = strtol(s, NULL, 10)]
+static int test_retail_atol_saturates()
+{
+    TEST_EXPECT(io::retail_atol("3000000000") == INT32_MAX);
+    TEST_EXPECT(io::retail_atol("4294967376") == INT32_MAX);
+    TEST_EXPECT(io::retail_atol("-3000000000") == INT32_MIN);
+    TEST_EXPECT(io::retail_atol("-2147483648") == INT32_MIN);
+    TEST_EXPECT(io::retail_atol("2147483647") == INT32_MAX);
+    TEST_EXPECT(io::retail_atol(" \t+42x") == 42);
+    TEST_EXPECT(io::retail_atol("-") == 0);
+    TEST_EXPECT(io::retail_atol("") == 0);
+    TEST_EXPECT(io::retail_atol_n("123456", 3) == 123);
+    return 0;
+}
+
+// The CRT's atof reads no locale: the game pins LC_NUMERIC to "C" [orig:
+// System_InitTimerAndLocale @0x762A6E, the setlocale @0x762A7A], so `1.5` is
+// 1.5 whatever decimal point the embedder's locale uses; a comma is no point.
+static int test_retail_atof_ignores_the_locale()
+{
+    TEST_EXPECT(io::retail_atof("1.5") == 1.5);
+    TEST_EXPECT(io::retail_atof("1d1") == 10.0);
+    TEST_EXPECT(io::retail_atof("0x10") == 0.0);
+    TEST_EXPECT(io::retail_atof("1e999") == HUGE_VAL);
+    const char *saved = std::setlocale(LC_NUMERIC, nullptr);
+    const std::string restore = saved != nullptr ? saved : "C";
+    bool comma_locale = false;
+    for (const char *name : {"de-DE", "de_DE.UTF-8", "de_DE.utf8", "de_DE", "German"}) {
+        if (std::setlocale(LC_NUMERIC, name) != nullptr) {
+            comma_locale = true;
+            break;
+        }
+    }
+    if (comma_locale) {
+        TEST_EXPECT(io::retail_atof("1.5") == 1.5);
+        TEST_EXPECT(io::retail_atof("-0.25e1") == -2.5);
+        TEST_EXPECT(io::retail_atof("1,5") == 1.0);
+    } else {
+        std::printf("io_test: no comma-decimal locale on this host; the locale leg is skipped\n");
+    }
+    std::setlocale(LC_NUMERIC, restore.c_str());
+    return 0;
+}
+
 int main()
 {
+    if (test_retail_atol_saturates()) return 1;
+    if (test_retail_atof_ignores_the_locale()) return 1;
     if (test_le_primitives()) return 1;
     if (test_bam_wrap_arithmetic()) return 1;
     if (test_fixed_point()) return 1;

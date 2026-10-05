@@ -1,4 +1,5 @@
 #include <formats/def/def.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/tick_rate.h>
 
 // AMMO.DEF: one record per ammunition type.
@@ -85,6 +86,17 @@ static int ammo_tracer_type_from_name(const char *s, size_t len) {
  * (62 * fp16 + 0x8000) >> 16] */
 static int parse_age_ticks_n(const char *s, size_t len) {
     return (int)(((long long)opennova::io::kTicksPerSecondInt * parse_fixed16_digits_n(s, len) + 0x8000) >> 16);
+}
+
+/* A packed RGB from slots 2..4: ((atol(r) << 8) + atol(g)) * 256 + atol(b) in
+   32-bit arithmetic that wraps, so an out-of-range component bleeds into the
+   next with no clamp [orig: the light_move / light_impact arms of
+   AmmoDef_ParseProperty @0x40a2d0]. */
+static int32_t packed_rgb(const io::ConfigTokens &tokens) {
+    const uint32_t r = static_cast<uint32_t>(io::retail_atol(tokens.token(2)));
+    const uint32_t g = static_cast<uint32_t>(io::retail_atol(tokens.token(3)));
+    const uint32_t b = static_cast<uint32_t>(io::retail_atol(tokens.token(4)));
+    return static_cast<int32_t>(((r << 8) + g) * 256u + b);
 }
 
 /* A fresh def as AmmoDef_AllocateSlot opens it, over the table LoadAll zeroed:
@@ -199,7 +211,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
                 copy_token(e.surface_type, sizeof(e.surface_type), tokens, 0);
                 copy_token(e.hit_effect, sizeof(e.hit_effect), tokens, 1);
                 copy_token(e.impact_sound, sizeof(e.impact_sound), tokens, 2);
-                e.value = static_cast<int>(strtol(tokens.token(3), NULL, 10));
+                e.value = io::retail_atol(tokens.token(3));
                 staged.push_back(e);
             }
             return;
@@ -238,7 +250,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
         } else if (key_is(key, "armor_density")) {
             // atol of tokens 1..3, unconditionally [orig: AmmoDef_ParseProperty @0x40ac29..0x40ac74]
             for (int c = 0; c < 3; ++c)
-                current.armor_density[c] = static_cast<int>(strtol(tokens.token(c + 1), NULL, 10));
+                current.armor_density[c] = io::retail_atol(tokens.token(c + 1));
             parsed = 1;
         } else if (key_is(key, "secondary_effect")) {
             /* The blast's per-victim effect [orig: @0x40aa15..0x40aa36
@@ -259,7 +271,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
         } else if (key_is(key, "recoil")) {
             // atol of tokens 1..3, unconditionally [orig: AmmoDef_ParseProperty, the recoil arm]
             for (int c = 0; c < 3; ++c)
-                current.recoil[c] = static_cast<int>(strtol(tokens.token(c + 1), NULL, 10));
+                current.recoil[c] = io::retail_atol(tokens.token(c + 1));
             parsed = 1;
         } else if (key_is(key, "flag")) {
             /* OR the named bit; first table match wins [orig: @0x813500 walk]. An
@@ -391,10 +403,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
                default @0x40b005]. */
             const char *radius = tokens.token(1);
             current.light_impact_radius_fp16 = parse_fixed16_digits_n(radius, strlen(radius));
-            current.light_impact_color =
-                    ((static_cast<int>(strtol(tokens.token(2), NULL, 10)) << 8) +
-                     static_cast<int>(strtol(tokens.token(3), NULL, 10))) * 256 +
-                    static_cast<int>(strtol(tokens.token(4), NULL, 10));
+            current.light_impact_color = packed_rgb(tokens);
             const char *fade = tokens.token(5);
             current.light_impact_ticks = parse_age_ticks_n(fade, strlen(fade));
             if (current.light_impact_ticks == 0) current.light_impact_ticks = 10;
@@ -407,10 +416,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
                components upward [orig: ((r<<8)+g)<<8 + b @0x40a2d0]. */
             const char *radius = tokens.token(1);
             current.light_move_radius_fp16 = parse_fixed16_digits_n(radius, strlen(radius));
-            current.light_move_color =
-                    ((static_cast<int>(strtol(tokens.token(2), NULL, 10)) << 8) +
-                     static_cast<int>(strtol(tokens.token(3), NULL, 10))) * 256 +
-                    static_cast<int>(strtol(tokens.token(4), NULL, 10));
+            current.light_move_color = packed_rgb(tokens);
             parsed = 1;
         } else if (key_is(key, "turnrate_maxpit")) {
             /* deg/s (fractional allowed) -> BAM/tick:

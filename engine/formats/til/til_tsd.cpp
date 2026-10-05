@@ -1,4 +1,5 @@
 #include <formats/til/til_tsd.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/ascii_config.h>
 #include <base/io/strutil.h>
 
@@ -32,7 +33,7 @@ void apply_row(const char *key, const char *value, TilSurfaceTable &out) {
 	// [orig: @ 0x604c46/@ 0x604c62]. Out-of-range slots are skipped where
 	// retail writes out of bounds (reimpl guard).
 	if (!strutil::starts_with_icase(key, "INDEX_")) return;
-	const long slot = std::strtol(key + 6, nullptr, 10);
+	const int32_t slot = io::retail_atol(key + 6);
 	if (slot < 0 || slot > 255) return;
 	out.map[slot] = ordinal;
 }
