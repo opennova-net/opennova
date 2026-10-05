@@ -84,43 +84,43 @@ add_test(NAME threedi_ctrl_catalog COMMAND threedi_ctrl_catalog_test)
 
 # opennova-3di (the Blender add-on's CLI): build the fixture scenes, read the
 # minted models back and check the conversions the CLI owns.
-add_test(NAME threedi_cli_build
+add_test(NAME opennova_3di_build
          COMMAND opennova_3di build ${CMAKE_SOURCE_DIR}/fixtures/threedi/o3d/spinner.o3d
                  -o ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
-set_tests_properties(threedi_cli_build PROPERTIES FIXTURES_SETUP threedi_cli_spinner)
+set_tests_properties(opennova_3di_build PROPERTIES FIXTURES_SETUP opennova_3di_spinner)
 add_executable(threedi_o3d_cli_test threedi/o3d_cli_test.cpp)
 target_link_libraries(threedi_o3d_cli_test PRIVATE opennova_formats)
 add_test(NAME threedi_o3d_cli COMMAND threedi_o3d_cli_test ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
-set_tests_properties(threedi_o3d_cli PROPERTIES FIXTURES_REQUIRED threedi_cli_spinner)
-add_test(NAME threedi_cli_build_skinned
+set_tests_properties(threedi_o3d_cli PROPERTIES FIXTURES_REQUIRED opennova_3di_spinner)
+add_test(NAME opennova_3di_build_skinned
          COMMAND opennova_3di build ${CMAKE_SOURCE_DIR}/fixtures/threedi/o3d/skinned.o3d
                  -o ${CMAKE_CURRENT_BINARY_DIR}/skinned.3di)
-set_tests_properties(threedi_cli_build_skinned PROPERTIES FIXTURES_SETUP threedi_cli_skinned)
+set_tests_properties(opennova_3di_build_skinned PROPERTIES FIXTURES_SETUP opennova_3di_skinned)
 add_test(NAME threedi_o3d_skinned COMMAND threedi_o3d_cli_test --skinned ${CMAKE_CURRENT_BINARY_DIR}/skinned.3di)
-set_tests_properties(threedi_o3d_skinned PROPERTIES FIXTURES_REQUIRED threedi_cli_skinned)
-add_test(NAME threedi_cli_build_building
+set_tests_properties(threedi_o3d_skinned PROPERTIES FIXTURES_REQUIRED opennova_3di_skinned)
+add_test(NAME opennova_3di_build_building
          COMMAND opennova_3di build ${CMAKE_SOURCE_DIR}/fixtures/threedi/o3d/building.o3d
                  -o ${CMAKE_CURRENT_BINARY_DIR}/building.3di)
-set_tests_properties(threedi_cli_build_building PROPERTIES FIXTURES_SETUP threedi_cli_building)
+set_tests_properties(opennova_3di_build_building PROPERTIES FIXTURES_SETUP opennova_3di_building)
 add_test(NAME threedi_o3d_building COMMAND threedi_o3d_cli_test --building ${CMAKE_CURRENT_BINARY_DIR}/building.3di)
-set_tests_properties(threedi_o3d_building PROPERTIES FIXTURES_REQUIRED threedi_cli_building)
+set_tests_properties(threedi_o3d_building PROPERTIES FIXTURES_REQUIRED opennova_3di_building)
 # `scene` is build's inverse: build -> scene -> build re-mints each fixture
 # byte for byte.
 foreach(fixture spinner skinned building)
-    add_test(NAME threedi_cli_scene_${fixture}
+    add_test(NAME opennova_3di_scene_${fixture}
              COMMAND opennova_3di scene ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.3di
                      -o ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.o3d)
-    add_test(NAME threedi_cli_rebuild_${fixture}
+    add_test(NAME opennova_3di_rebuild_${fixture}
              COMMAND opennova_3di build ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.o3d
                      -o ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.3di)
-    add_test(NAME threedi_cli_roundtrip_${fixture}
+    add_test(NAME opennova_3di_roundtrip_${fixture}
              COMMAND ${CMAKE_COMMAND} -E compare_files ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.3di
                      ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.3di)
-    set_tests_properties(threedi_cli_scene_${fixture} PROPERTIES
-                         FIXTURES_REQUIRED threedi_cli_${fixture} FIXTURES_SETUP threedi_scene_${fixture})
-    set_tests_properties(threedi_cli_rebuild_${fixture} PROPERTIES
+    set_tests_properties(opennova_3di_scene_${fixture} PROPERTIES
+                         FIXTURES_REQUIRED opennova_3di_${fixture} FIXTURES_SETUP threedi_scene_${fixture})
+    set_tests_properties(opennova_3di_rebuild_${fixture} PROPERTIES
                          FIXTURES_REQUIRED threedi_scene_${fixture} FIXTURES_SETUP threedi_rebuild_${fixture})
-    set_tests_properties(threedi_cli_roundtrip_${fixture} PROPERTIES FIXTURES_REQUIRED threedi_rebuild_${fixture})
+    set_tests_properties(opennova_3di_roundtrip_${fixture} PROPERTIES FIXTURES_REQUIRED threedi_rebuild_${fixture})
 endforeach()
 # The anim commands over the same handlers the CLI dispatches: the clip-set
 # round trip, what compare calls the same animation, and the scenes build refuses.
@@ -149,14 +149,14 @@ endif()
 # `catalog` prints the 252 anim slot keys, the weapon actions an author times
 # with their slot keys, and the event trigger bits a front end offers (the
 # Blender add-on parses them), and `info` refuses a flag it does not take.
-add_test(NAME threedi_cli_catalog_anim COMMAND opennova_3di catalog)
-set_tests_properties(threedi_cli_catalog_anim PROPERTIES PASS_REGULAR_EXPRESSION
+add_test(NAME opennova_3di_catalog_anim COMMAND opennova_3di catalog)
+set_tests_properties(opennova_3di_catalog_anim PROPERTIES PASS_REGULAR_EXPRESSION
     "animslot 0 anim_reset[\r\n]+.*animslot 140 anim_guard[\r\n]+.*animslot 239 anim_death_bullet_leftfoot_left[\r\n]+.*animslot 251 anim_wpn_scopedown[\r\n]+weaponaction idle 241 anim_wpn_idle[\r\n]+weaponaction emptyidle 242 anim_wpn_empty_idle[\r\n]+.*weaponaction scopedown 251 anim_wpn_scopedown[\r\n]+trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
-add_test(NAME threedi_cli_anim_info_flag COMMAND opennova_3di anim info unread.adm --bogus)
-set_tests_properties(threedi_cli_anim_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
+add_test(NAME opennova_3di_anim_info_flag COMMAND opennova_3di anim info unread.adm --bogus)
+set_tests_properties(opennova_3di_anim_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
     "anim info takes --verbose or --keys")
-add_test(NAME threedi_cli_info_flag COMMAND opennova_3di info unread.3di --bogus)
-set_tests_properties(threedi_cli_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
+add_test(NAME opennova_3di_info_flag COMMAND opennova_3di info unread.3di --bogus)
+set_tests_properties(opennova_3di_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
     "info takes --verbose, --planes or --verts")
 
 # Command regressions, including invalid inputs and semantic differences.
@@ -175,7 +175,7 @@ add_test(NAME threedi_o3d_build
 add_executable(threedi_o3d_unicode_test threedi/o3d_unicode_test.cpp)
 target_compile_features(threedi_o3d_unicode_test PRIVATE cxx_std_17)
 if(MSVC)
-    target_sources(threedi_o3d_unicode_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/threedi_cli/utf8.manifest)
+    target_sources(threedi_o3d_unicode_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/3di/utf8.manifest)
 endif()
 add_test(NAME threedi_o3d_unicode
          COMMAND threedi_o3d_unicode_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
@@ -3332,16 +3332,16 @@ target_include_directories(nwmsg_codec_parity_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_definitions(nwmsg_codec_parity_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
 opennova_add_mixed_test(nwmsg_codec_parity COMMAND nwmsg_codec_parity_test)
 
-# nw_pp --scenario-events: the decoded event lines the network-parity scenario
+# opennova-wire --scenario-events: the decoded event lines the network-parity scenario
 # comparator (scripts/net/compare_scenario.py) consumes.
-add_executable(nw_pp_scenario_events_test
-    novaworld/nw_pp_scenario_events_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/nw_pp/scenario_events.cpp)
-target_link_libraries(nw_pp_scenario_events_test PRIVATE opennova_net opennova_base)
-target_include_directories(nw_pp_scenario_events_test PRIVATE
+add_executable(opennova_wire_scenario_events_test
+    novaworld/wire_scenario_events_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/wire/scenario_events.cpp)
+target_link_libraries(opennova_wire_scenario_events_test PRIVATE opennova_net opennova_base)
+target_include_directories(opennova_wire_scenario_events_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/apps/nw_pp)
-add_test(NAME nw_pp_scenario_events COMMAND nw_pp_scenario_events_test)
+    ${CMAKE_SOURCE_DIR}/apps/wire)
+add_test(NAME opennova_wire_scenario_events COMMAND opennova_wire_scenario_events_test)
 
 # Host-row staleness backstop sweep (prune_stale_hosts).
 add_executable(host_prune_test novaworld/host_prune_test.cpp)
@@ -3783,7 +3783,7 @@ target_link_libraries(admin_protocol_test PRIVATE opennova_net)
 target_include_directories(admin_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/admin)
 add_test(NAME admin_protocol COMMAND admin_protocol_test)
 
-# nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
+# opennova-nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
 # end over real loopback UDP against the real NwUdpListener and an in-test gate (the row, a roster
 # edit keeping the other slot, the refresh, the stop).
 add_executable(novaworld_nw_lister_listing_test novaworld/nw_lister_listing_test.cpp)
