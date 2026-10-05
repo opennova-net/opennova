@@ -366,7 +366,7 @@ _Avoid_: fixtures (test-only data), retail data
 Hosting a match without being a player: retail's Serve Only server type (`SERVERTYPE`
 = 1, saved as `game.cfg` `dedicated`), a host with no player of its own
 (`RoleKind::DedicatedHost`, HostOnly). The game runs it from the host screen;
-`opennova-serve` runs it with no shell (ADR 0051, proposed). One implementation below
+`opennova-serve` runs it with no shell (ADR 0051). One implementation below
 the config, riding the one in-match seam (ADR 0043).
 _Avoid_: dedicated server product, server exe, opennova-server (the binary is
 `opennova-serve`)
