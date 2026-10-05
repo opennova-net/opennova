@@ -945,6 +945,48 @@ event 0 0 0 0x0 0.9 1.7
 event 0 0 0 0x0 0.9 1.7
 )";
 
+// A clip whose `flip` turns the pelvis half round from frame 1, so what stands above it swings below:
+// the model posed away from its rest sphere (as a first-person clip poses its rig: the demo round's bug 4).
+constexpr const char *kFlipClips = R"(o3a 1
+adm FLIP.adm
+row anim_reset "frest"
+row anim_idle "flip"
+clip frest
+fps 30
+flags 0x1
+frames 1
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+clip flip
+fps 30
+flags 0x1
+frames 2
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 1 0 0 0
+ k 1 0 0 0
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+)";
+
 struct RecordedRequests final : CanvasRequests {
 	std::vector<EditorRequest> raised;
 	void request(EditorRequest request) override { raised.push_back(std::move(request)); }
@@ -977,9 +1019,10 @@ static int test_clip_preview() {
 	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
 	TEST_EXPECT(editor_test::write_text(source + "/step.o3a", kStepClips));
 	TEST_EXPECT(editor_test::write_text(source + "/bend.o3a", kBendClips));
+	TEST_EXPECT(editor_test::write_text(source + "/flip.o3a", kFlipClips));
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}, {source + "/step.o3a", {}},
-	                  {source + "/bend.o3a", {}}};
+	                  {source + "/bend.o3a", {}}, {source + "/flip.o3a", {}}};
 	session.handle(import);
 	session.run_operations();
 	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def",
@@ -1130,6 +1173,25 @@ static int test_clip_preview() {
 	const PreviewVec3 carried = preview_joint_carry(joints[1], spine_rest);
 	TEST_EXPECT(near(carried.x, joints[1].at.x, 1e-4) && near(carried.y, joints[1].at.y, 1e-4) &&
 	            near(carried.z, joints[1].at.z, 1e-4));
+	// The demo round's bug 4: the camera frames the model as the clip poses it over its frames, never its
+	// rest sphere alone (a first-person clip poses its rig away from it): the bend swings the spine off its rest,
+	// the framed target follows the posed sphere, and every joint of every frame stands within it.
+	{
+		PreviewVec3 posed;
+		float reach = 0.0f;
+		TEST_EXPECT(bend->posed_sphere(posed, reach));
+		const OrbitCamera framed = bend->framed(800, 600);
+		TEST_EXPECT(near(framed.target.x, posed.x, 1e-4) && near(framed.target.y, posed.y, 1e-4) &&
+		            near(framed.target.z, posed.z, 1e-4));
+		for (int frame = 0; frame <= int(bend->clip_frame_count()); ++frame) {
+			PreviewClock at;
+			at.seek_ticks(bend->tick_of_frame_shown(frame));
+			for (const PreviewJoint &joint : bend->joints(at)) {
+				const float dx = joint.at.x - posed.x, dy = joint.at.y - posed.y, dz = joint.at.z - posed.z;
+				TEST_EXPECT(std::sqrt(dx * dx + dy * dy + dz * dz) <= reach);
+			}
+		}
+	}
 	TEST_EXPECT(rig.set(R"({"clock": {"playing": false, "ticks": 0}})"));
 	shown = rig.json();
 	const JsonValue *bones = shown.get("body")->get("animation")->get("bones");
@@ -1169,6 +1231,51 @@ static int test_clip_preview() {
 		            out.raised.size() == 1 && clicked.raised[0] == out.raised[0]);
 		TEST_EXPECT(!bend->click(context, jx, jy, SelectMode::Add, added, click_error) && added.raised.empty() &&
 		            click_error.find("replaces the selection") != std::string::npos);
+	}
+
+	// The demo round's bug 4, in the picture: `flip` swings what stands above the pelvis below it. The model's
+	// bounds as each bone carries them (the rest sphere's six extremes, each bone's deform at every frame)
+	// all project into a 800 x 600 picture under the posed framing, and some of them out of it under a
+	// framing of the rest sphere from the same angles (the framing before the fix).
+	{
+		session.handle(request::open_document("anims/flip.bad"));
+		TEST_EXPECT(rig.set(R"({"options": {"rig_model": "skinned.3di"}})"));
+		rig.pump();
+		const ModelViewport *flip = rig.viewport();
+		const std::vector<uint8_t> bytes = test_io::read_file(view.project.root + "/models/skinned.3di");
+		const opennova::assets::Model rest_model = opennova::assets::parse_model(bytes.data(), bytes.size());
+		TEST_EXPECT(flip && flip->view_status() == ModelViewStatus::Ready && rest_model);
+		if (flip && rest_model) {
+			PreviewVec3 rest;
+			float rest_radius = 0.0f;
+			model_preview_sphere(*rest_model, rest, rest_radius);
+			const OrbitCamera posed = flip->framed(800, 600);
+			OrbitCamera old = posed;
+			old.frame(rest, rest_radius, 800, 600);
+			const auto inside = [](const OrbitCamera &camera, const PreviewVec3 &point) {
+				float x = 0.0f, y = 0.0f;
+				return camera.project(point, 800, 600, x, y) && x >= 0.0f && x <= 800.0f && y >= 0.0f && y <= 600.0f;
+			};
+			size_t points = 0, out_posed = 0, out_old = 0;
+			for (int frame = 0; frame <= int(flip->clip_frame_count()); ++frame) {
+				PreviewClock at;
+				at.seek_ticks(flip->tick_of_frame_shown(frame));
+				for (const PreviewJoint &joint : flip->joints(at))
+					for (const PreviewVec3 &offset : {PreviewVec3{rest_radius, 0, 0}, PreviewVec3{-rest_radius, 0, 0},
+					                                  PreviewVec3{0, rest_radius, 0}, PreviewVec3{0, -rest_radius, 0},
+					                                  PreviewVec3{0, 0, rest_radius}, PreviewVec3{0, 0, -rest_radius}}) {
+						const PreviewVec3 carried = preview_joint_carry(
+								joint, PreviewVec3{rest.x + offset.x, rest.y + offset.y, rest.z + offset.z});
+						++points;
+						out_posed += inside(posed, carried) ? 0 : 1;
+						out_old += inside(old, carried) ? 0 : 1;
+					}
+			}
+			TEST_EXPECT(points > 0 && out_posed == 0 && out_old > 0);
+			if (out_posed != 0 || out_old == 0)
+				std::printf("flip: %zu points, %zu out of the posed framing, %zu out of the rest one\n", points, out_posed,
+				            out_old);
+		}
 	}
 
 	// From the model to its animations: the maps the items pairing it play; an item by its name.

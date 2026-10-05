@@ -38,6 +38,10 @@ inline bool operator==(const NodeAddress &a, const NodeAddress &b) {
 }
 inline bool operator!=(const NodeAddress &a, const NodeAddress &b) { return !(a == b); }
 
+// A field's Value by its type: a whole number (int64_t) for the four whole types, a double for Real, a
+// string for Text; but a whole number in units its record does not store whole (a catalog's scaled
+// member whose stored word no whole number of the file's line makes: an item's default climb speed,
+// 1/293 km/h) reads that real, and a Set of it changes nothing.
 enum class FieldType { Integer, Unsigned, Byte, Count, Real, Text };
 
 // What a field names outside its own record: a file, a name some file defines, or another record

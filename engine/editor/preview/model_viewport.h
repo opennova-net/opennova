@@ -147,8 +147,13 @@ public:
 			float x, float y, int width, int height, float snap, uint64_t gesture,
 			const PreviewClock &clock, std::vector<Edit> &out,
 			const std::vector<ModelOverlay> *others = nullptr) const;
-	// The camera looking at the whole model on a picture `width` x `height` (from its angles now).
+	// The camera looking at the whole model on a picture `width` x `height` (from its angles now): the model
+	// as the clip playing poses it over its frames where one plays (posed_sphere), else as it stands.
 	OrbitCamera framed(int width, int height) const;
+	// The sphere the rig's model takes over every frame of the clip playing (a first-person clip poses
+	// its rig away from the model's own sphere: the 357's, 0.9 m off): the model's sphere carried by each
+	// bone's deform at each frame, since each part rides one bone rigidly. False when no clip plays.
+	bool posed_sphere(PreviewVec3 &center, float &radius) const;
 	// The camera looking at the marker `overlay` (a light's reach around it, else a share of the
 	// model).
 	OrbitCamera framed_on(const ModelOverlay &overlay, int width, int height) const;
@@ -275,6 +280,8 @@ private:
 	uint64_t drawn_hash_ = 0;
 	bool drawn_hashed_ = false;
 	std::string framed_; // the model the camera last framed
+	std::string framed_clip_;   // the rig's model, clip and variant the animation's camera last followed
+	OrbitCamera framed_camera_; // where the last framing put the camera
 	// The animation's.
 	bool animating_ = false;
 	PreviewRig rig_;
