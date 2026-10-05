@@ -111,6 +111,10 @@ Error WeaponDatabase::load(const String &path) {
 	last_error = String();
 	release_native_weapons();
 
+	// A loose file read with no mount: the parser takes every named file as
+	// present (DefFileProbe), so a SIGHTS, crosshair or HUD-graphic row whose
+	// texture the game lacks is kept here; the game's own load is
+	// load_from_resource_root, which probes the mount.
 	if (def_parse_weapons(path.utf8().get_data(), &weapons_file_) != 0) {
 		last_error = String("def_parse_weapons failed for ") + path;
 		return ERR_CANT_OPEN;

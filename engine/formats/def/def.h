@@ -517,11 +517,24 @@ typedef struct DefWeaponDef {
        [orig: emplacedstance @0x544174..0x54419B, HUD @0x4B8539..0x4B8549] */
     int emplacedstance;
     /* Where the entry stands in the parsed text: the 0-based index of its
-       `weapon` line and of the `end` that closed it (an entry the text never
-       closes is not parsed). See DefWeaponAction::open_line for the line
-       numbering. */
+       `weapon` line and of the `end` that closed it. See
+       DefWeaponAction::open_line for the line numbering. */
     size_t open_line;
     size_t end_line;
+    /* 1 when no `end` closed the entry: the file ran out, or the walk stopped
+       at a `weapon` line inside it (DefWeaponsFile::stopped). end_line is then
+       where the walk ended (that line, or one past the last), and an action
+       block left open is a row too, its end_line the same. The game claims the
+       entry's slot at its `weapon` line, so the entry is in the weapon table,
+       but only `end` binds its actions [orig: WeaponDefs_ParseLineCallback
+       @0x543680, the slot @0x5436E7..0x543737 (AdmDef_FindFreeSlot,
+       AdmDef_InitEntryDefaults, the name strncpy), `end` @0x5437CF..0x5437DC
+       (Anim_InitActions, WeaponDefs_ResetParseState); the action row at its
+       `action` line, ActionDef_ParseScriptLine @0x4024A1..0x4024DA]; the
+       PLAYER_INFO list counts a row only at `end` [orig: WeaponDef_ParseProperty
+       @0x54D730, the END compare against off_7D3EE0], so the entry is in no
+       loadout list. */
+    int unclosed;
 } DefWeaponDef;
 
 /* One `ammoclass_max_carry <class> <n>` row: the class token and the carry cap,
@@ -541,6 +554,13 @@ typedef struct DefWeaponsFile {
     size_t ammo_class_carries_count;
     DefWeaponDef *entries;
     size_t count;
+    /* 1 when the walk stopped at line stop_line, a `weapon` line inside an
+       entry no `end` closed: the game logs "weapon didn't have an end" and
+       returns 1, which ends File_ParseASCIIFile's walk, so no line from there
+       on is read [orig: WeaponDefs_ParseLineCallback @0x5436AD..0x5436D2; the
+       walk's exit @0x53D942]. */
+    int stopped;
+    size_t stop_line;
 } DefWeaponsFile;
 
 /* ========================================================================= */
@@ -1276,9 +1296,11 @@ void def_free_ammo(DefAmmoFile *f);
 
 /* Whether a name resolves to a file the game could open, for the readers that
    refuse a row on a missing file: a SIGHTS row whose texture does not exist is
-   no row [orig: WeaponDefs_ParseLineCallback's sights arm, FileSystem_FileExists
-   @0x75AA50 called @0x544AE2]. A reader given no probe (a tool with no game
-   mount) takes every name as present. */
+   no row, and a crosshair, hudclipgfx or hudrndgfx line naming one stores
+   nothing [orig: WeaponDefs_ParseLineCallback, FileSystem_FileExists @0x75AA50
+   called @0x544AE2 (sights), @0x54493E / @0x544983 (crosshair), @0x544295
+   (hudclipgfx), @0x544316 (hudrndgfx)]. A reader given no probe (a tool with
+   no game mount) takes every name as present. */
 typedef bool (*DefFileExistsFn)(const void *ctx, const char *name);
 typedef struct DefFileProbe {
     DefFileExistsFn exists;

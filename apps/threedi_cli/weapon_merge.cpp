@@ -103,17 +103,16 @@ bool reads_end(const std::vector<Line> &lines, size_t l) {
 
 // The def's structure as the engine's parser read it: each entry's `weapon`
 // and `end` lines and each live ACTION block's `action` and `end` lines are
-// the parser's own records (an entry the text never closes is not parsed;
-// of repeated blocks only the last is a row, the earlier ones dead data the
-// merge leaves as it is). The key lines of a block and the pos/tpos lines of
-// an entry are the lines between them the parser reads a key from: a pos or
-// tpos line inside ANY action ... end span, a dead block's too, is forwarded to
-// the action parser, which reads no such key, so it is no view line;
-// `ammoclass_max_carry` is a table row wherever it stands.
-// The parser keeps an unterminated tail line whole, where the game drops its
-// last byte (a final `end` with no CR LF reads `en` and closes nothing), so
-// every recorded `end` line is checked against the game's own reading of it
-// (the retail walk): an entry whose `end` the game does not read is not closed.
+// the parser's own records (of repeated blocks only the last is a row, the
+// earlier ones dead data the merge leaves as it is). The key lines of a block
+// and the pos/tpos lines of an entry are the lines between them the parser
+// reads a key from: a pos or tpos line inside ANY action ... end span, a dead
+// block's too, is forwarded to the action parser, which reads no such key, so
+// it is no view line; `ammoclass_max_carry` is a table row wherever it stands.
+// An entry or block no `end` closed (the file ran out first, a final `end`
+// with no CR LF reading `en`, or the walk stopped at a `weapon` line inside
+// the entry) is a record the parser marks unclosed, ending where the walk
+// ended; such an entry is not closed.
 // [orig: WeaponDefs_ParseLineCallback @ 0x543680, the in-block forward
 //  @ 0x54388D, the block flag set @ 0x54393B and cleared at `end` @ 0x543790;
 //  ActionDef_ParseScriptLine @ 0x4023c0; File_ParseASCIIFile's tail leg
@@ -128,7 +127,7 @@ std::vector<Entry> entries_of(const opennova::def::DefWeaponsFile &parsed, const
 		entry.weapon_line = def.open_line;
 		entry.end_line = def.end_line;
 		entry.first_action_line = def.end_line;
-		entry.closed = reads_end(lines, def.end_line);
+		entry.closed = def.unclosed == 0 && reads_end(lines, def.end_line);
 		for (size_t a = 0; a < def.actions_count; ++a) {
 			const opennova::def::DefWeaponAction &row = def.actions[a];
 			Block block;
@@ -162,12 +161,15 @@ std::vector<Entry> entries_of(const opennova::def::DefWeaponsFile &parsed, const
 	return entries;
 }
 
-// Whether the retail walk holds a `weapon <name>` line: the game allocates the
-// entry's slot at that line, whether or not an `end` ever closes it
-// [orig: WeaponDefs_ParseLineCallback @ 0x5436D3..0x543737].
-bool opens_entry(const std::string &def, const std::vector<Line> &lines, const std::string &name) {
-	for (const Line &line : lines)
-		if (line.key == "weapon" && strutil::iequals(token_text(def, line, 1), name)) return true;
+// Whether a `weapon <name>` line stands where the game stopped reading: the
+// walk ends at a `weapon` line inside an entry no `end` closed, so a name
+// from there on is no entry of the game's
+// [orig: WeaponDefs_ParseLineCallback @ 0x5436AD..0x5436D2].
+bool named_past_stop(const std::string &def, const std::vector<Line> &lines,
+                     const opennova::def::DefWeaponsFile &parsed, const std::string &name) {
+	if (!parsed.stopped) return false;
+	for (size_t l = parsed.stop_line; l < lines.size(); ++l)
+		if (lines[l].key == "weapon" && strutil::iequals(token_text(def, lines[l], 1), name)) return true;
 	return false;
 }
 
@@ -467,11 +469,11 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 		}
 		if (!ok) break;
 		if (!found) {
-			// The game allocates an entry at its `weapon` line; one the text
-			// never closes is an entry with no `end`, not a missing one.
-			// [orig: WeaponDefs_ParseLineCallback @ 0x5436D3..0x543737]
-			ok = fail(error, opens_entry(def, lines, edit.name)
-			                         ? edit.name + " has no `end` in the weapon.def"
+			ok = fail(error, named_past_stop(def, lines, before, edit.name)
+			                         ? "the game stops reading the weapon.def at line " +
+			                                   std::to_string(before.stop_line + 1) +
+			                                   " (a `weapon` line inside an entry with no `end`), before " +
+			                                   edit.name
 			                         : "the weapon.def holds no entry " + edit.name);
 			break;
 		}

@@ -15,6 +15,8 @@
 #include <runtime/world/weapon_table_build.h>
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/inmatch/loadout_submit.h>
+#include <runtime/mission/mission_kernel.h>
+#include <runtime/mission/runtime_boot.h>
 
 #include <formats/def/def.h>
 #include <base/resource_index/resource_index.h>
@@ -83,6 +85,35 @@ static int live_weapon_oracle(const std::string &install, const std::string &exp
 	return 0;
 }
 
+// The install's own mount answers the SIGHTS arm's file check: JO:CA's Colt
+// .45 authors `sights clt45aim.tga`, which no archive carries, so the weapon
+// the kernel loads has no SIGHTS row, while weapons whose cards exist keep
+// theirs [orig: WeaponDefs_ParseLineCallback's sights arm,
+// FileSystem_FileExists @0x544AE2, the return @0x544B10].
+static int colt_sights_through_the_mount(const std::string &install) {
+	ResourceIndex index;
+	if (!index.scan(install)) {
+		std::fprintf(stderr, "FAIL: the base mount of %s does not scan\n", install.c_str());
+		return 1;
+	}
+	const mission::BootFileSource files = mission::boot_files_from_index(index);
+	mission::MissionKernel kernel;
+	CHECK(kernel.load_weapon_table(files, nullptr));
+	const DefWeaponDef *colt = nullptr;
+	size_t rows = 0;
+	for (size_t i = 0; i < kernel.weapon_defs.count; ++i) {
+		const DefWeaponDef &w = kernel.weapon_defs.entries[i];
+		rows += w.sights_count;
+		if (std::strcmp(w.weapon_name, "WPN_colt45") == 0) colt = &w;
+	}
+	CHECK(colt != nullptr);
+	if (colt != nullptr) CHECK(colt->sights_count == 0);
+	CHECK(rows > 0);
+	std::printf("mounted weapon.def: WPN_colt45 has %zu SIGHTS rows, the table %zu\n",
+	            colt != nullptr ? colt->sights_count : (size_t)0, rows);
+	return 0;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     // Authored/default stability survives DEF -> runtime-table promotion.
@@ -148,10 +179,37 @@ int main(int argc, char **argv) {
         def_free_weapons(&parsed);
     }
 
+    // An entry no `end` closed is in the table, but only `end` binds its
+    // actions: its FIRE row stays the unbound default (no id stamped, no
+    // delay) where the closed twin's carries the block's delay [orig:
+    // WeaponDefs_ParseLineCallback,
+    // the slot at the `weapon` line @0x5436E7..0x543737, `end` ->
+    // Anim_InitActions @0x5437D0].
+    {
+        static const char kUnclosed[] =
+            "weapon \"WPN_SHUT\"\r\nACTION \"FIRE\"\r\nDELAYEND 3\r\nEND\r\nend\r\n"
+            "weapon \"WPN_OPEN\"\r\nclipsize 7\r\nACTION \"FIRE\"\r\nDELAYEND 3\r\nEND\r\nend";
+        DefWeaponsFile parsed{};
+        CHECK(def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kUnclosed),
+                sizeof(kUnclosed) - 1, &parsed) == 0);
+        const world::WeaponTable table = world::build_weapon_table(parsed);
+        const world::WeaponTableEntry *shut = table.by_index(1);
+        const world::WeaponTableEntry *open = table.by_index(2);
+        CHECK(shut != nullptr && open != nullptr && open->name == "WPN_OPEN");
+        if (shut != nullptr && open != nullptr) {
+            CHECK(open->clipsize == 7);
+            CHECK(shut->action_fsm.actions[world::weapon_action::kFire].delay_end == 3);
+            CHECK(open->action_fsm.actions[world::weapon_action::kFire].delay_end == 0);
+            CHECK(open->action_fsm.actions[world::weapon_action::kFire].id == -1);
+        }
+        def_free_weapons(&parsed);
+    }
+
 	if (const std::string install = retail::install(); !install.empty()) {
 		if (live_weapon_oracle(install, std::string()) != 0) return 1;
 		for (const std::string &expansion : retail::expansions())
 			if (live_weapon_oracle(install, expansion) != 0) return 1;
+		if (colt_sights_through_the_mount(install) != 0) return 1;
 	} else {
 		retail::skip_leg("OPENNOVA_JO_DIR (the live weapon.def oracle over the install's expansions)");
 	}

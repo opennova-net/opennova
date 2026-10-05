@@ -1299,6 +1299,177 @@ int main(int argc, char **argv) {
         printf("sameas OK\n");
     }
 
+    /* An entry no `end` closes keeps the slot its `weapon` line claimed: a
+       final `end` with no CR LF reads `en` and the last weapon stays, marked
+       unclosed and ending where the walk ended; an action block left open is a
+       row of its entry too [orig: WeaponDefs_ParseLineCallback @0x543680, the
+       slot @0x5436E7..0x543737, `end` @0x5437CF; ActionDef_ParseScriptLine's
+       row at its `action` line @0x4024A1..0x4024DA; File_ParseASCIIFile's tail
+       leg @0x53D8E9 / @0x53D8EC]. */
+    {
+        static const char kTailDef[] =
+            "weapon \"WPN_SHUT\"\r\n"
+            "\tclipsize 5\r\n"
+            "end\r\n"
+            "weapon \"WPN_TAIL\"\r\n"
+            "\tclipsize 7\r\n"
+            "\taction \"FIRE\"\r\n"
+            "\t\tdelayend 3\r\n"
+            "\tEND\r\n"
+            "end";
+        static const char kOpenActionDef[] =
+            "weapon \"WPN_OPEN_ACTION\"\r\n"
+            "\taction \"FIRE\"\r\n"
+            "\t\tdelayend 4\r\n";
+        DefWeaponsFile tf, of;
+        memset(&tf, 0, sizeof(tf));
+        memset(&of, 0, sizeof(of));
+        const bool parsed =
+            def_parse_weapons_memory((const unsigned char *)kTailDef, sizeof(kTailDef) - 1, &tf) == 0 &&
+            def_parse_weapons_memory((const unsigned char *)kOpenActionDef, sizeof(kOpenActionDef) - 1,
+                                     &of) == 0;
+        const bool ok = parsed && tf.count == 2 && tf.entries[0].unclosed == 0 &&
+                tf.entries[0].end_line == 2 && tf.entries[1].unclosed == 1 &&
+                strcmp(tf.entries[1].weapon_name, "WPN_TAIL") == 0 && tf.entries[1].clipsize == 7 &&
+                tf.entries[1].end_line == 9 && tf.entries[1].actions_count == 1 &&
+                tf.entries[1].actions[0].delayend == 3 && !tf.stopped &&
+                of.count == 1 && of.entries[0].unclosed == 1 && of.entries[0].actions_count == 1 &&
+                strcmp(of.entries[0].actions[0].name, "FIRE") == 0 &&
+                of.entries[0].actions[0].delayend == 4 && of.entries[0].actions[0].end_line == 3;
+        if (!ok) {
+            fprintf(stderr, "FAIL: unclosed entries: %zu entries (last unclosed %d, end_line %zu), "
+                            "open action: %zu entries, %zu actions\n",
+                    tf.count, tf.count > 1 ? tf.entries[1].unclosed : -1,
+                    tf.count > 1 ? tf.entries[1].end_line : (size_t)0, of.count,
+                    of.count > 0 ? of.entries[0].actions_count : (size_t)0);
+            def_free_weapons(&tf);
+            def_free_weapons(&of);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&tf);
+        def_free_weapons(&of);
+        printf("unclosed entries keep their slot OK\n");
+    }
+
+    /* A `weapon` line inside an open entry, its action block included, logs
+       "weapon didn't have an end" and returns 1, which ends the walk: the
+       open entry stays unclosed and nothing after the line is read
+       [orig: WeaponDefs_ParseLineCallback @0x5436AD..0x5436D2; the walk's exit
+       @0x53D942]. */
+    {
+        static const char kNestedDef[] =
+            "weapon \"WPN_OPEN\"\r\n"
+            "\tclipsize 3\r\n"
+            "\taction \"FIRE\"\r\n"
+            "\tweapon \"WPN_LATER\"\r\n"
+            "\tclipsize 9\r\n"
+            "\tend\r\n"
+            "end\r\n"
+            "weapon \"WPN_AFTER\"\r\n"
+            "end\r\n";
+        DefWeaponsFile nf;
+        memset(&nf, 0, sizeof(nf));
+        const bool ok = def_parse_weapons_memory((const unsigned char *)kNestedDef,
+                                                 sizeof(kNestedDef) - 1, &nf) == 0 &&
+                nf.count == 1 && nf.stopped == 1 && nf.stop_line == 3 &&
+                nf.entries[0].unclosed == 1 && nf.entries[0].clipsize == 3 &&
+                nf.entries[0].end_line == 3 && nf.entries[0].actions_count == 1 &&
+                nf.entries[0].actions[0].raw_lines_count == 0;
+        if (!ok) {
+            fprintf(stderr, "FAIL: nested weapon line: %zu entries, stopped %d at %zu, clipsize %d\n",
+                    nf.count, nf.stopped, nf.stop_line, nf.count > 0 ? nf.entries[0].clipsize : -1);
+            def_free_weapons(&nf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&nf);
+        printf("a weapon line inside an open entry ends the walk OK\n");
+    }
+
+    /* A short line reads every slot its arm reads, past the line's count:
+       slots 1 and 2 reset to "" each line and slots 3 on keep what an earlier,
+       longer line left (io::ConfigTokens::slot). stability reads slots 1..3,
+       error 1..6, heat_values and heat_effect 1..2, classrounds 1..2 and
+       scope_max_zero 1..3 (slot 4 only on a line carrying it) [orig:
+       WeaponDefs_ParseLineCallback — stability @0x54412A..0x544169, error
+       @0x543B37..0x543BB5, heat_effect @0x543E48..0x543E7A, heat_values
+       @0x543EC9..0x543F1B, classrounds @0x543AC4..0x543B16, scope_max_zero
+       @0x544E9D..0x544EFD]. crosshair, hudclipgfx and hudrndgfx store only
+       when their texture is a file; hudclipgfx's texture is slot 3 and
+       hudrndgfx's slot 6, whatever the count [orig: FileSystem_FileExists
+       @0x54493E, @0x544295, @0x544316]. */
+    {
+        static const char kSlotsDef[] =
+            "weapon \"WPN_SLOTS\"\r\n"
+            "\terror 1 2 3 4 5 6\r\n"
+            "\tstability 9\r\n"
+            "\terror 7\r\n"
+            "\theat_values 200 6200\r\n"
+            "\theat_values 100\r\n"
+            "\theat_effect hot 3\r\n"
+            "\theat_effect glow\r\n"
+            "\tclassrounds medic 5\r\n"
+            "\tclassrounds medic\r\n"
+            "\tscope_max_zero 10 20 30 40\r\n"
+            "\tscope_max_zero 11\r\n"
+            "\tcrosshair a.tga b.tga\r\n"
+            "\tcrosshair missing.tga\r\n"
+            "\tcrosshair c.tga missing.tga\r\n"
+            "\thudclipgfx 1 2 clip.tga\r\n"
+            "\thudclipgfx 5 6 missing.tga\r\n"
+            "\thudrndgfx 1 2 3 4 5 rnd.tga\r\n"
+            "\thudrndgfx 1 2 3 4 5 missing.tga\r\n"
+            "end\r\n";
+        const DefFileProbe probe = {
+                [](const void *, const char *name) { return strcmp(name, "missing.tga") != 0; },
+                nullptr};
+        DefWeaponsFile sf;
+        memset(&sf, 0, sizeof(sf));
+        if (def_parse_weapons_memory((const unsigned char *)kSlotsDef, sizeof(kSlotsDef) - 1, &sf,
+                                     &probe) != 0 || sf.count != 1) {
+            fprintf(stderr, "FAIL: slot-read inline parse failed\n");
+            def_free_weapons(&sf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefWeaponDef &w = sf.entries[0];
+        /* stability 9: slot 1 "9", slot 2 "", slot 3 the first error line's
+           pointer, at offset 10, where this line wrote "9". error 7: slot 3
+           still "9", slots 4..6 the first error line's "4".."6". heat_values
+           100: slot 2 "" -> 0. heat_effect glow: slot 2 "" -> 0. classrounds
+           medic: slot 2 "" -> 0. scope_max_zero 11: slot 3 is the previous
+           line's "30", past this line's end; the fourth value stays 40. */
+        const bool ok = w.stability_fp16[0] == 9 * 65536 && w.stability_fp16[1] == 0 &&
+                w.stability_fp16[2] == 9 * 65536 &&
+                w.error_fp16[0] == 7 * 65536 && w.error_fp16[1] == 0 && w.error_fp16[2] == 9 * 65536 &&
+                w.error_fp16[3] == 4 * 65536 && w.error_fp16[5] == 6 * 65536 &&
+                w.heat_per_shot == (100 * 65536) / 100 && w.heat_decay_per_tick == 0 &&
+                strcmp(w.heat_effect, "glow") == 0 && w.heat_glow_threshold == 0 &&
+                w.classrounds[1] == 0 &&
+                w.scope_max_zero_steps == 11 && w.scope_zero_step == 0 && w.scope_zero_default == 30 &&
+                w.scope_zero_extra == 40 &&
+                strcmp(w.crosshair, "c.tga") == 0 && strcmp(w.crosshair_secondary, "b.tga") == 0 &&
+                w.hudclipgfx_offset[0] == 1 && strcmp(w.hudclipgfx_texture, "clip.tga") == 0 &&
+                w.hudrndgfx_offset[0] == 1 && strcmp(w.hudrndgfx_texture, "rnd.tga") == 0;
+        if (!ok) {
+            fprintf(stderr,
+                    "FAIL: slot reads: stability %d/%d/%d, error %d/%d/%d/%d, heat %d/%d '%s' %d, "
+                    "classrounds %d, zero %d/%d/%d/%d, crosshair '%s'/'%s', clip %d '%s', rnd %d '%s'\n",
+                    w.stability_fp16[0], w.stability_fp16[1], w.stability_fp16[2], w.error_fp16[0],
+                    w.error_fp16[1], w.error_fp16[2], w.error_fp16[5], w.heat_per_shot,
+                    w.heat_decay_per_tick, w.heat_effect, w.heat_glow_threshold, w.classrounds[1],
+                    w.scope_max_zero_steps, w.scope_zero_step, w.scope_zero_default,
+                    w.scope_zero_extra, w.crosshair, w.crosshair_secondary, w.hudclipgfx_offset[0],
+                    w.hudclipgfx_texture, w.hudrndgfx_offset[0], w.hudrndgfx_texture);
+            def_free_weapons(&sf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&sf);
+        printf("short lines read retail's slots; crosshair/hudclipgfx/hudrndgfx file gates OK\n");
+    }
+
     def_free_weapons(&wf);
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def (the shipped weapon table)");

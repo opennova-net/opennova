@@ -230,6 +230,10 @@ void weapon_slot_indices(const DefWeaponDef *rows, size_t count, int slot,
     for (size_t i = 0; i < count; ++i) {
         const DefWeaponDef &w = rows[i];
         if (w.weapon_class_slot != slot) continue;
+        // The list's producer counts a row only at its `end` [orig:
+        // WeaponDef_ParseProperty @0x54D730, the END compare]; an entry no
+        // `end` closed is no row (DefWeaponDef::unclosed).
+        if (w.unclosed != 0) continue;
         // [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430] gate.
         if (w.loadout_selectable == 0) continue;
         if ((w.charfilter_mask & class_mask) == 0) continue;

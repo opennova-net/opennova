@@ -509,6 +509,14 @@ int main(int argc, char **argv) {
 		CHECK(parse_weapon_edits("weapon_edits 1\nentry WPN_OPEN auto\naction fire delayend 3\n", open_edits, error));
 		const std::string open = "weapon \"WPN_OPEN\"\r\n\tFLAGS\tAUTO\r\n\tACTION\t\"FIRE\"\r\n\tEND\r\n";
 		CHECK(!merge_weapon_def(open, open_edits, merged, notes, error) && contains(error, "WPN_OPEN has no `end`"));
+		// A `weapon` line inside that open entry ends the game's walk, so the
+		// entry it names is none of the game's. [orig: WeaponDefs_ParseLineCallback
+		// @ 0x5436AD..0x5436D2]
+		std::vector<WeaponEditEntry> next_edits;
+		CHECK(parse_weapon_edits("weapon_edits 1\nentry WPN_NEXT auto\naction fire delayend 3\n", next_edits, error));
+		const std::string next = open + "weapon \"WPN_NEXT\"\r\n\tFLAGS\tAUTO\r\nend\r\n";
+		CHECK(!merge_weapon_def(next, next_edits, merged, notes, error) &&
+		      contains(error, "stops reading the weapon.def at line 5"));
 	}
 	// A pos line inside a dead ACTION block (an earlier block of a name a later
 	// one replaces) is forwarded to the action parser, which reads no pos, so

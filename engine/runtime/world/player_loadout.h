@@ -164,8 +164,9 @@ int32_t player_info_class_mask(int playerclass_value);
 
 // The weapons that belong in `slot` for the class + team masks, in table
 // order [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430]: a row is included only
-// when loadout_selectable != 0 AND (charfilter & class_mask) AND
-// (teamfilter & team_mask). The caller prepends its own "NONE" row.
+// when an `end` closed it (DefWeaponDef::unclosed is 0) AND loadout_selectable
+// != 0 AND (charfilter & class_mask) AND (teamfilter & team_mask). The caller
+// prepends its own "NONE" row.
 void weapon_slot_indices(const opennova::def::DefWeaponDef *rows, size_t count, int slot,
                          int32_t class_mask, int32_t team_mask,
                          std::vector<int32_t> &out);
