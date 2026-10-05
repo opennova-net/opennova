@@ -1,0 +1,7 @@
+// Item definitions
+
+begin "Null"
+	id 100000
+	type marker
+end
+
