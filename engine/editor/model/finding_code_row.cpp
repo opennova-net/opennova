@@ -57,6 +57,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BlankMenu, code("blank.menu", G::NewFiles) },
 	{ C::BlankMission, code("blank.mission", G::NewFiles) },
 	{ C::BlankStrings, code("blank.strings", G::NewFiles) },
+	{ C::BlankSound, code("blank.sound", G::NewFiles) },
 	{ C::BlankStyle, code("blank.style", G::NewFiles) },
 	{ C::BlankTexture, code("blank.texture", G::NewFiles) },
 	{ C::BlankUnavailable, code("blank.unavailable", G::NewFiles) },

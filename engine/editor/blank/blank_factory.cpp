@@ -51,6 +51,15 @@ const BlankFactory k_factories[] = {
 	{ "font_impac38b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	// Mission: the rows the factories can already fill (the rest wait for their writers).
 	{ "ammo_def", AssetKind::AmmoDefs, make_blank_ammo_def, "an ammo table holding only the null round", true },
+	// The mission's sound banks, each slot of the bank loop that loads what it finds (the sound lane):
+	// an empty bank, which the editor's bank document fills.
+	{ "game_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the global sound bank, no set yet", false },
+	{ "gamelocl_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the localized sound bank, no set yet", false },
+	{ "game2_lwf", AssetKind::SoundBank, make_blank_sound_bank, "a further global sound bank, no set yet", false },
+	{ "game3_lwf", AssetKind::SoundBank, make_blank_sound_bank, "a further global sound bank, no set yet", false },
+	{ "expansion_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the expansion's sound bank, no set yet", false },
+	{ "expansion_locl_lwf", AssetKind::SoundBank, make_blank_sound_bank,
+	  "the expansion's localized sound bank, no set yet", false },
 	// An expansion's own (ADR 0046 S16): its text table, naming it in the Mods list, and its version text.
 	{ "expansion_table", AssetKind::Strings, make_blank_expansion_table,
 	  "the expansion's text table: its name in the Mods list (the project's title) and an empty description", false },
@@ -71,6 +80,7 @@ const BlankFactory k_factories[] = {
 	  "a mission's text table: its title and an empty briefing", false, k_mission_text_params,
 	  sizeof(k_mission_text_params) / sizeof(k_mission_text_params[0]) },
 	{ "", AssetKind::Script, make_blank_script, "an empty script", true },
+	{ "", AssetKind::SoundBank, make_blank_sound_bank, "a sound bank with no set yet", true },
 };
 
 const size_t k_factory_count = sizeof(k_factories) / sizeof(k_factories[0]);

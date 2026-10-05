@@ -58,6 +58,8 @@ enum class DocumentTypeId {
 	Shader,      // a .fx: the SCR form the shader loader takes, held as its text
 	Text,        // a configuration or a text, as the file stores it
 	Texture,     // a .tga .mdt .pcx .dds .png: its texels as the game reads them (ADR 0046 S18)
+	SoundBank,     // a .lwf: its waves and its sets, their layers and members (the sound lane)
+	SoundProfiles, // SndProf.def: its profiles and each one's 51 slots (the sound lane)
 	kCount, // the number of values, None among them
 };
 

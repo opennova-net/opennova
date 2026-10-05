@@ -42,6 +42,9 @@ bool make_blank_charattr_def(const BlankRequest &, std::vector<uint8_t> &out, Di
 // SndProf.def: the one "default" profile every item binds, every slot silent
 bool make_blank_sound_profiles(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
+// lwf (blank_sound.cpp): a sound bank of no wave and no set
+bool make_blank_sound_bank(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+
 // coo (blank_coo.cpp)
 bool make_blank_coo(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
