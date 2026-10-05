@@ -347,7 +347,8 @@ _Avoid_: plugin, DCC pipeline (the Python/DCC authoring layer ADR 0038 retired)
 
 **Godot product**:
 The OpenNova game runtime built with Godot (ADR 0045, ADR 0048). Backend
-services and development tools are outside this taxonomy (ADR 0015).
+services and development tools are outside this taxonomy (ADR 0015); so is
+`opennova-serve` (ADR 0051).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
 (as a product name)
 
@@ -362,10 +363,25 @@ filesystem before boot (ADR 0049).
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:
-`opennova.exe` hosting a match without being a player: the host screen's retail Serve Only
-server type (`SERVERTYPE` = 1); retail has no command-line auto-host to port. A mode of the game product, never a separate binary,
-riding the one in-match seam (ADR 0015).
-_Avoid_: dedicated server product, server exe, opennova-server
+Hosting a match without being a player: retail's Serve Only server type (`SERVERTYPE`
+= 1, saved as `game.cfg` `dedicated`), a host with no player of its own
+(`RoleKind::DedicatedHost`, HostOnly). The game runs it from the host screen;
+`opennova-serve` runs it with no shell (ADR 0051, proposed). One implementation below
+the config, riding the one in-match seam (ADR 0043).
+_Avoid_: dedicated server product, server exe, opennova-server (the binary is
+`opennova-serve`)
+
+**`opennova-serve`**:
+The headless game server (`apps/serve`, ADR 0051): the game's Serve Only host with no
+Godot, configured by a host file. A product, not a Godot product.
+_Avoid_: dedicated server (for the binary), server exe, opennova-server
+
+**Host file**:
+Retail's dedicated-server config, the file `/HOST <file>` names: `<Key> <value>` lines of
+`ServerConfig_ApplyHostSetting`'s keys (a text form of the host screen) and
+`Mission <file> <launch option>` lines that seed the map rotation. Retail never reaches
+its reader; `opennova-serve` reads it (`engine/runtime/inmatch/host_file.h`).
+_Avoid_: server config, server.cfg, dedicated.cfg
 
 **Title**:
 A NovaLogic game identity (JO, DFX2, BHD...) — near-identical engine skins over different
