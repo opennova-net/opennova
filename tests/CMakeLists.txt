@@ -503,6 +503,24 @@ target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(score_roundtrip COMMAND score_roundtrip_test)
 
+# game.cfg: the minted fixtures/gamecfg/synth_game.cfg (Game_SaveConfig's
+# layout through gamecfg::write), its byte-exact load/write round trip, and the
+# reader's edge cases over hand-authored text.
+add_executable(minimal_gamecfg_gen_test fixtures/minimal_gamecfg_gen.cpp)
+target_link_libraries(minimal_gamecfg_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_gamecfg_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_gamecfg_gen COMMAND minimal_gamecfg_gen_test)
+
+add_executable(gamecfg_roundtrip_test gamecfg/gamecfg_roundtrip_test.cpp)
+target_link_libraries(gamecfg_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(gamecfg_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gamecfg_roundtrip COMMAND gamecfg_roundtrip_test)
+
+add_executable(gamecfg_parse_test gamecfg/gamecfg_parse_test.cpp)
+target_link_libraries(gamecfg_parse_test PRIVATE opennova_formats)
+target_include_directories(gamecfg_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gamecfg_parse COMMAND gamecfg_parse_test)
+
 # DBF dialog bank: byte-exact round-trip + dlg-id -> def-id mapping over the
 # minted fixtures/dbf/synth_bank.dbf, plus the shipped 00TRg.DBF as an
 # OPENNOVA_JO_ASSETS reference-fixture leg.

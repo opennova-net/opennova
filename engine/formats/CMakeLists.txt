@@ -48,6 +48,9 @@ add_library(opennova_formats STATIC
     # foliage — foliage defs + placement map
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/foliage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/runtime.cpp
+    # gamecfg — game.cfg, the persisted settings (the key model, reader, writer)
+    ${CMAKE_CURRENT_SOURCE_DIR}/gamecfg/game_cfg.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gamecfg/game_cfg_write.cpp
     # grm — facial texture mesh and gesture offsets
     ${CMAKE_CURRENT_SOURCE_DIR}/grm/grm.cpp
     # lwf — sound profiles (+ the .wav payload decode the profiles reference)
