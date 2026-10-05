@@ -73,6 +73,13 @@ public:
 		(void)created;
 		return ProcessLiveness::Unknown;
 	}
+	// Whether a process holds the named semaphore `name`, the gate the game install's game runs one at
+	// a time by (kInstallInstanceSemaphore, run/launch_plan.h): Alive while the semaphore is there (a
+	// game holds it), Dead when it is not, Unknown where the platform cannot tell (the default).
+	virtual ProcessLiveness semaphore_held(const std::string &name) {
+		(void)name;
+		return ProcessLiveness::Unknown;
+	}
 	virtual int64_t now_ms() = 0;
 	// Yield between two observations of a blocking wait (PlaySession::wait); the
 	// per-frame poll never calls it.

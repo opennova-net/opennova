@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -81,6 +83,56 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 // The game install's own program, which Play in the game install starts (and the install check looks for).
 inline constexpr const char *kInstallExecutable = "Jointops.exe";
 
+// The game install's game runs one at a time, machine-wide: it takes the first of its numbered
+// semaphores ("semaphore:NOVALOGIC JOINT OPERATIONS:<n>", n from 1) no other process holds, and one
+// that took any but the first brings the running game's window forward and quits at once with code 0,
+// before it loads its data, unless it was started /HOST, /MANY or /SERVEONLY [orig:
+// Game_ParseCommandLineAndInit @ 0x4a7325 the name, @ 0x4a7336 -> CSessionId_AcquireUnique @ 0x4a67c0
+// (CreateSemaphoreA, a wait of 0, the next number on WAIT_TIMEOUT); the flags @ 0x4a7743, @ 0x4a7779,
+// @ 0x4a79b8; the gate @ 0x4a7c03 (n > 1, none of them), FindWindowA("NLGAMECLASS") @ 0x4a7c17,
+// crt_exit(0) @ 0x4a7c3f]. The first one held is a game running; Play passes none of those flags.
+inline constexpr const char *kInstallInstanceSemaphore = "semaphore:NOVALOGIC JOINT OPERATIONS:1";
+
+// The game install's own file log, `_filelog.txt` in its working directory, which `/FRISK` turns on
+// [orig: Game_ParseCommandLineAndInit @ 0x4a768c -> File_SetLoggingEnabled @ 0x75a470]: a line for
+// every file the game's file layer OPENED, appended as it opens it [orig: File_LogFileAccess @
+// 0x75a480]: "PFF LOADED FILE: <name>" for an entry an archive served [orig: PFF_OpenFile @
+// 0x7688da], "LOADED FILE: <path>" for a file opened from disk, an archive itself among them [orig:
+// File_OpenRead @ 0x75a639 (the archives through PFF_Open @ 0x768330, the saves through
+// PlayerProfile_LoadAllFromDisk @ 0x54f5a0); FileSystem_OpenFile @ 0x75b2d6; FileSystem_GetFileSize @
+// 0x75b436; FileSystem_ReadFileEx @ 0x75b91b], so one file may be logged more than once. Only an open
+// that succeeded is logged (each call follows a handle that is not -1, an entry PFF_FindEntry found):
+// a file the game looked for and did not find never is, so the log cannot say what the game lacked. A
+// file the game opens outside that layer is not logged either: its configuration, read through the C
+// runtime's fopen [orig: File_ParseASCIIFileWithCallback @ 0x53d980, from Game_LoadConfig @ 0x551499].
+//
+// The game opens the log exclusively for each line (`_lopen(OF_WRITE | OF_SHARE_EXCLUSIVE)`, then
+// `_llseek` to its end) and, when that open fails, makes the file anew with `_lcreat`, which
+// truncates it; its first line deletes the log a run before left [orig: File_LogFileAccess @
+// 0x75a4c2 DeleteFileA, @ 0x75a4d2 _lopen(0x11), @ 0x75a4e8 _lcreat]. A reader holding the file
+// open while the game appends (a tail) therefore cuts the log to its last line: the editor reads it
+// once the game has exited, never while it runs.
+inline constexpr const char *kInstallFileLogName = "_filelog.txt";
+
+// What a file log says the game loaded, each name once (the first spelling, compared without case
+// as the game's file calls compare them), in the order the game first opened it.
+struct FileAccessLog {
+	size_t lines = 0;                       // the log's lines
+	std::vector<std::string> archives;      // the archives the game opened from disk (a .pff)
+	std::vector<std::string> from_archives; // the files the archives served
+	std::vector<std::string> from_disk;     // the files opened from disk but the archives themselves
+	bool operator==(const FileAccessLog &o) const {
+		return lines == o.lines && archives == o.archives && from_archives == o.from_archives &&
+		       from_disk == o.from_disk;
+	}
+};
+
+// One line of a file log added to `log` (its line end already cut, a '\r' too); a line neither form
+// starts is counted and nothing else.
+void add_file_access_line(FileAccessLog &log, const std::string &line);
+// A whole file log's text read into a FileAccessLog (lines ended by "\n", the game's, or "\r\n").
+FileAccessLog parse_file_access_log(const std::string &text);
+
 // The historical Jointops.exe /w /d /FRISK launch in `run_dir`: the game install's game opens its
 // archives and, under /d, its loose files from its working directory [orig: PFF_OpenAllArchives @
 // 0x4a4310, CWD-relative _lopen; docs/vfs/vfs-pff-mount-re.md] and writes there (game.cfg, its
@@ -93,11 +145,52 @@ inline constexpr const char *kInstallExecutable = "Jointops.exe";
 // is copied, so a missing one launches nothing. The game install and the build directory are only
 // read. A build of the expansion `expansion` (ADR 0046 S16) is staged as prepare_expansion_run
 // stages it, the install's own game.cfg and saves beside it, and the game launched `/w /d /exp
-// <expansion> /FRISK`.
+// <expansion> /FRISK`. `link` gives a file a second name, as prepare_expansion_run's.
 bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
                                 const std::string &run_dir, LaunchPlan &out, Diagnostic &error,
                                 const std::string &expansion = std::string(),
-                                const std::string &copy_cache = std::string());
+                                const std::string &copy_cache = std::string(), const FileLink &link = link_file);
+
+// Strict Play in the game install: the game as a player who dropped the install's Jointops.exe into
+// the build's folder runs it. The run directory gets the build's files (one the game only reads linked,
+// copied where the file system cannot link it; every other copied, as prepare_retail_launch_plan stages
+// them, so no write reaches the build) and the install's executable and Bink DLL (copied), nothing else
+// of the install: no configuration, save, score table, early error text or admin configuration (a
+// game.cfg the build holds is the project's own and is staged with the rest), so the game boots on the
+// build alone and writes its own. Launched `/w /FRISK`, without `/d`: the game reads its archives
+// first, as a player's launch does [orig: Game_ParseCommandLineAndInit @ 0x4a7667 sets the /d flag;
+// Game_InitSubsystems turns on loose-first resolution after the archives mount, @ 0x4a6fa3 ->
+// FileSystem_SetSearchLooseFirst @ 0x75a5a0; docs/vfs/vfs-pff-mount-re.md]. The executable and the
+// Bink DLL are checked before anything is staged. An expansion (`expansion` not "") is refused
+// (play.strict_expansion, strict_expansion_refusal): it would play over the install's archives, not
+// over its base game's build, which a project cannot name yet.
+bool prepare_strict_install_launch_plan(const std::string &install, const std::string &build_dir,
+                                        const std::string &run_dir, const std::string &expansion, LaunchPlan &out,
+                                        Diagnostic &error, const FileLink &link = link_file);
+
+// Why strict Play of the expansion `expansion` is refused (play.strict_expansion): the one finding
+// Play's refusal before a build and the staging both give.
+Diagnostic strict_expansion_refusal(const std::string &expansion);
+
+// Strict Play's first run. With no game.cfg beside it, the game's adapter name and GUID are empty, so it
+// opens its device dialog (VIDEO_TEST: the adapters, OK and Cancel), modal, waiting on the player, before
+// its menu [orig: Game_InitSubsystems @ 0x4a711c the compare (Mission_HasMapOrNameChanged @ 0x53de40, a
+// misnomer), @ 0x4a7125 -> Game_RunVideoTestDialog @ 0x53ec10, DialogBoxParamA "VIDEO_TEST"]. OK saves
+// game.cfg and boots on [@ 0x53edb6 Game_SaveConfig]; Cancel ends the dialog with 0, Game_InitSubsystems
+// returns 0 [@ 0x4a712c -> @ 0x4a6d1f], and Game_Run skips the main loop, saves game.cfg anyway and
+// returns: exit code 0, game.cfg written, no menu [orig: Game_Run @ 0x4a7fb0, Game_SaveConfig after the
+// loop @ 0x4a7fff; WinMain returns 0, play_session.h]. Any quit at the menu (its window closed, a blank
+// menu's one EXIT control) likewise writes game.cfg and exits with 0. So a first run may write its own
+// game.cfg and quit before a player sees the game, and was seen to (2026-10-05, the hand-staged runs;
+// and the editor's, the dialog answered OK and the window closed as the menu came up: 25 log lines,
+// a game.cfg of 5552 bytes, exit code 0), and seen not to. Strict Play starts it once more when, and only
+// when, the first run exited on its own with code 0 within this window of its start (the dialog and the
+// device's set-up take tens of seconds: the menu came up ~36 s in, the dialog answered at ~8 s), and the
+// run directory, which held no game.cfg before it started, holds one now. A game.cfg a Cancel wrote
+// still names no adapter, so the game started again opens its device dialog again.
+inline constexpr int64_t kStrictFirstRunWindowMs = 60000;
+bool strict_first_run_starts_again(bool had_config, bool has_config, bool exited_on_its_own, int64_t exit_code,
+                                   int64_t ran_ms, bool started_again);
 
 // The plan as one line for a log or the Output window (arguments quoted when needed).
 std::string launch_plan_command_line(const LaunchPlan &plan);

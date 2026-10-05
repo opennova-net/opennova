@@ -952,6 +952,7 @@ static int test_settings_json() {
 	every.game_install = "C:/games/Joint Operations";
 	every.runtime_executable = "";
 	every.play_in_install = true;
+	every.play_in_install_strict = true;
 	const EditorRequest all = request::apply_project_settings(every);
 	JsonValue parsed;
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(all)).c_str(), parsed));
@@ -962,7 +963,8 @@ static int test_settings_json() {
 	TEST_EXPECT(read.serial == 12 && read.title == std::optional<std::string>("Harbor") && read.mission == std::optional<bool>(true) &&
 	            read.multiplayer == std::optional<bool>(false) &&
 	            read.game_install == std::optional<std::string>("C:/games/Joint Operations") &&
-	            read.runtime_executable == std::optional<std::string>("") && read.play_in_install == std::optional<bool>(true));
+	            read.runtime_executable == std::optional<std::string>("") && read.play_in_install == std::optional<bool>(true) &&
+	            read.play_in_install_strict == std::optional<bool>(true));
 	const JsonValue *written = parsed.get("settings");
 	TEST_EXPECT(written && written->get("game_install") && written->get("play_in_install") &&
 	            !written->get("retail_directory") && !written->get("play_retail") && !written->get("expansion") &&
@@ -981,7 +983,7 @@ static int test_settings_json() {
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_in_install\":false}}", back).empty());
 	TEST_EXPECT(back.settings.play_in_install == std::optional<bool>(false) && back.settings.serial == 0 && !back.settings.title &&
 	            !back.settings.mission && !back.settings.multiplayer && !back.settings.game_install &&
-	            !back.settings.runtime_executable);
+	            !back.settings.runtime_executable && !back.settings.play_in_install_strict);
 	// The settings must be named (an empty object sets nothing); the keys before S13 A4 name nothing.
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\"}", back).find("needs \"settings\"") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{}}", back).empty() && !back.settings.title &&
