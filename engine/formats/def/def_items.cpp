@@ -322,14 +322,34 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             parsed = 1;
         } else if (strutil::starts_with_icase(key, "soundloop_")) {
             /* [orig: ItemDef_ParseProperty @ 0x49eb00 -- the "soundloop_" strnicmp
-               @ 0x49fec4, then atol of the key past the prefix, 1..7 taking
-               strncpy(.., tokens[2], 0x18); the 7-slot range matches the
-               engine's Soundloop_1..7 sound-type table @ 0x7d0788]. A slot
-               atol reads as 0 or past 7 writes nothing (a negative one would
-               land in the shot names before the table; nothing authors it). */
+               @ 0x49fec4, then atol of the key past the prefix and
+               strncpy(def+0x76B + 24n, tokens[2], 0x18); the 7-slot range matches
+               the engine's Soundloop_1..7 sound-type table @ 0x7d0788]. The only
+               bounds are n != 0 and n <= 7, signed [orig: `jz` @0x49FEE7, `cmp
+               eax, 7; jg` @0x49FEED..0x49FEF0; the address @0x49FF08..0x49FF0D],
+               so a negative n lands on the 24-byte sound names ahead of the
+               table: -1 duskshot (+0x753), -2 dayshot (+0x73B), -3 dawnshot
+               (+0x723), -4 door_close_sound_id (+0x70B), -5 door_open_sound_id
+               (+0x6F3), -6 sounddeath (+0x6DB). From -7 down the copy straddles
+               the weapon userpoint names and then leaves the record; the port
+               writes nothing there (D-ITEMDEF-9). */
             const long slot = strtol(key + 10, NULL, 10);
+            char *target = nullptr;
             if (slot >= 1 && slot <= 7) {
-                copy_token(current.soundloops[slot - 1], 25, tokens, 1);
+                target = current.soundloops[slot - 1];
+            } else {
+                switch (slot) {
+                case -1: target = current.duskshot; break;
+                case -2: target = current.dayshot; break;
+                case -3: target = current.dawnshot; break;
+                case -4: target = current.door_close_sound; break;
+                case -5: target = current.door_open_sound; break;
+                case -6: target = current.sounddeath; break;
+                default: break;
+                }
+            }
+            if (target != nullptr) {
+                copy_token(target, 25, tokens, 1);
                 parsed = 1;
             }
         } else if (key_is(key, "destroy_timing")) {

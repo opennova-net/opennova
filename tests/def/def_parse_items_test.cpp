@@ -807,6 +807,48 @@ static int test_atof_is_the_crt_atof(void) {
     return bad;
 }
 
+/* soundloop_N writes def+0x76B + 24N for any N other than 0 up to 7: a negative N
+   lands on the sound names ahead of the soundloop table (-1 duskshot ... -6
+   sounddeath), and from -7 down the port writes nothing (D-ITEMDEF-9).
+   [orig: ItemDef_ParseProperty, the soundloop_ arm @0x49FEC4..0x49FF15] */
+static int test_soundloop_slots_below_one(void) {
+    static const char text[] =
+        "begin Loops\r\n"
+        "  id 106192\r\n"
+        "  soundloop_1 LOOP_ONE\r\n"
+        "  soundloop_-1 DUSK_NAME\r\n"
+        "  soundloop_-2 DAY_NAME\r\n"
+        "  soundloop_-3 DAWN_NAME\r\n"
+        "  soundloop_-4 CLOSE_NAME\r\n"
+        "  soundloop_-5 OPEN_NAME\r\n"
+        "  soundloop_-6 DEATH_NAME\r\n"
+        "  soundloop_0 ZERO_NAME\r\n"
+        "  soundloop_8 EIGHT_NAME\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: soundloop snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *d = &items.entries[0];
+    int bad = strcmp(d->soundloops[0], "LOOP_ONE") != 0 || strcmp(d->duskshot, "DUSK_NAME") != 0 ||
+              strcmp(d->dayshot, "DAY_NAME") != 0 || strcmp(d->dawnshot, "DAWN_NAME") != 0 ||
+              strcmp(d->door_close_sound, "CLOSE_NAME") != 0 ||
+              strcmp(d->door_open_sound, "OPEN_NAME") != 0 ||
+              strcmp(d->sounddeath, "DEATH_NAME") != 0 || d->nightshot[0] != '\0';
+    for (int i = 1; i < 7; ++i)
+        if (d->soundloops[i][0] != '\0') bad = 1;
+    if (bad)
+        fprintf(stderr, "FAIL: soundloop slots: 1 '%s' dusk '%s' day '%s' dawn '%s' close '%s' "
+                "open '%s' death '%s' night '%s'\n", d->soundloops[0], d->duskshot, d->dayshot,
+                d->dawnshot, d->door_close_sound, d->door_open_sound, d->sounddeath, d->nightshot);
+    def_free_items(&items);
+    return bad;
+}
+
 /* A line's values are the tokenizer's 29 past the key, not 16, and the 29th runs
    on to the line's end: 27 unknown attrib tokens then `Door Takeable` set both
    (tokens 28 and 29), 28 then `Door Takeable` set neither (token 29 is the run-on
@@ -855,6 +897,7 @@ int main(int argc, char **argv) {
     if (test_items_read_the_retail_tokens() != 0) return 1;
     if (test_tab_separated_keys() != 0) return 1;
     if (test_atof_is_the_crt_atof() != 0) return 1;
+    if (test_soundloop_slots_below_one() != 0) return 1;
     if (test_attrib_reads_the_29_values() != 0) return 1;
     if (test_regional_sound_delays() != 0) return 1;
     if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;
