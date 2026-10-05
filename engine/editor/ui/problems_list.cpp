@@ -19,51 +19,10 @@ namespace opennova::editor {
 
 namespace {
 
-// What a Fix all's confirmation ends with (every fix acts on the files).
-constexpr const char *kNotUndoable = "What this does to the files cannot be undone with Undo.";
-
-std::string joined(const std::vector<std::string> &names, const char *between) {
-	std::string out;
-	for (const std::string &name : names) out += (out.empty() ? "" : between) + name;
-	return out;
-}
-
-// What a finding is about, whatever its place among the findings: its code, its file, the
-// record (its address and name), the field, the line and what it names (the file or symbol,
-// the role). Findings alike in all of it are told apart by their order (refresh()).
-std::string identity(const Diagnostic &d) {
-	static const std::string none;
-	const RequirementSubject *requirement = requirement_subject(d);
-	std::string out = d.code();
-	for (const std::string *part :
-	     {&d.asset, &d.record, &d.field, &subject_target(d), requirement ? &requirement->role : &none})
-		out += '\x1f' + *part;
-	for (const uint64_t number :
-	     {uint64_t(d.row_id), uint64_t(d.record_kind), uint64_t(d.child_id), uint64_t(d.line)})
-		out += '\x1f' + std::to_string(number);
-	return out;
-}
-
 // A fix's request as a press saw it, for its release to be on the same: its wire form, every
 // field its kind takes (S13 A4).
 std::string signature(const EditorRequest &request) {
 	return io::json_write(editor_request_to_json(request));
-}
-
-// The file a CreateMissing role makes: its requirement row's name.
-std::string role_file(const SessionView &view, const std::string &role) {
-	for (const RequirementRow &row : view.project.requirements->rows)
-		if (row.role == role) return row.name;
-	return role;
-}
-
-// The placeholder textures a Fix all makes (each its own CreateFile), in one line.
-std::string placeholder_textures(const std::vector<std::string> &files) {
-	const char *what =
-	        "the checkerboard the game draws for a missing texture, to replace with your own art.";
-	if (files.size() == 1) return "Create a placeholder " + files[0] + ": " + what;
-	return "Create " + counted(files.size(), "placeholder texture") + ": " + joined(files, ", ") +
-	       ". Each is " + what;
 }
 
 } // namespace
@@ -111,10 +70,6 @@ size_t ProblemsList::fixes_asked() const {
 	return caches_->fixes.size();
 }
 
-bool ProblemsList::asks_first(const ProblemFix &fix) {
-	return fix.request.kind == EditorRequestKind::AssignRequirement;
-}
-
 const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	Caches &caches = *caches_;
 	const ProblemAnswer &answer = caches.answers.answer(caches.query, view);
@@ -135,7 +90,7 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	index_.clear();
 	std::unordered_map<std::string, size_t> alike;
 	for (const Diagnostic &d : view.findings.diagnostics) {
-		const std::string id = identity(d);
+		const std::string id = problem_finding_identity(d);
 		std::string key = id + '\x1e' + std::to_string(alike[id]++);
 		std::replace(key.begin(), key.end(), '#', '\x1d'); // a key is an ImGui id: no "###" in it
 		index_.emplace(key, keys_.size());
@@ -182,10 +137,7 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	} else {
 		for (const size_t finding : answer.rows) lines_.push_back({false, 0, finding});
 	}
-	required_.clear();
-	for (size_t i = 0; i < view.findings.diagnostics.size(); ++i)
-		if (view.findings.diagnostics[i].row() == &finding_code(CoreFinding::RequirementMissing))
-			required_.push_back(i);
+	required_ = required_findings(view);
 	required_fixes_ = propose(view, fix_all_of(view, required_));
 	return answer;
 }
@@ -240,45 +192,23 @@ ProblemsList::Confirmation ProblemsList::use_fix(const SessionView &view, size_t
 	return use;
 }
 
+// Its findings found again by their keys, then the session's proposal of them (session/problem_confirmation.h:
+// what the wire's confirmation proposes and applies).
 ProblemsList::Proposal ProblemsList::propose(const SessionView &view,
                                              const Confirmation &confirmation) {
-	Proposal out;
 	if (confirmation.of == Confirmation::Of::Fix) {
 		const std::string key = confirmation.keys.empty() ? std::string() : confirmation.keys[0];
 		const size_t finding = resolve(view, {confirmation.root, key});
-		if (finding == SIZE_MAX) return out;
-		for (const ProblemFix &fix : caches_->fixes.fixes(view, finding))
-			if (fix.label == confirmation.label) {
-				out.lines = {fix.label, fix.detail};
-				out.requests = {fix.request};
-				out.findings = 1;
-				break;
-			}
-		return out;
+		if (finding == SIZE_MAX) return Proposal();
+		return propose_fix(view, caches_->fixes, finding, confirmation.label);
 	}
-	std::vector<ProblemFix> firsts;
+	std::vector<size_t> findings;
 	for (const std::string &key : confirmation.keys) {
 		const size_t finding = resolve(view, {confirmation.root, key});
-		if (finding == SIZE_MAX) continue;
-		std::vector<ProblemFix> bulk = caches_->fixes.bulk(view, finding);
-		if (bulk.empty()) continue;
-		firsts.push_back(std::move(bulk.front()));
-		++out.findings;
+		if (finding != SIZE_MAX) findings.push_back(finding);
 	}
-	for (EditorRequest &request : merge_fixes(firsts))
-		if (confirmation.of == Confirmation::Of::FixAll || request.kind == confirmation.kind)
-			out.requests.push_back(std::move(request));
-	std::vector<std::string> placeholders;
-	for (const EditorRequest &request : out.requests) {
-		if (request.kind == EditorRequestKind::CreateFile &&
-		    request.file_kind == asset_kind_token(AssetKind::Texture))
-			placeholders.push_back(request.path);
-		else
-			out.lines.push_back(describe(view, request));
-	}
-	if (!placeholders.empty()) out.lines.push_back(placeholder_textures(placeholders));
-	if (!out.requests.empty()) out.lines.push_back(kNotUndoable);
-	return out;
+	return propose_fix_all(view, caches_->fixes, findings,
+	                       confirmation.of == Confirmation::Of::Kind ? &confirmation.kind : nullptr);
 }
 
 void ProblemsList::ask(const SessionView &view, Confirmation confirmation) {
@@ -354,44 +284,6 @@ ProblemsList::Summary ProblemsList::summary(const RequirementReport &report) {
 		                             part + " will not work.";
 	}
 	return out;
-}
-
-std::string ProblemsList::describe(const SessionView &view, const EditorRequest &request) {
-	switch (request.kind) {
-	case EditorRequestKind::CreateMissing: {
-		std::vector<std::string> files;
-		for (const std::string &role : request.roles) files.push_back(role_file(view, role));
-		if (files.size() == 1)
-			return "Create " + files[0] +
-			       ". It starts as placeholder content, to replace with your own.";
-		return "Create " + counted(files.size(), "file") + ": " + joined(files, ", ") +
-		       ". They start as placeholder content, to replace with your own.";
-	}
-	case EditorRequestKind::PreviewInstallImport: {
-		const std::string needs = request.with_dependencies ? ", with the files they need" : "";
-		if (request.names.size() == 1)
-			return "Import " + request.names[0] +
-			       " from the game data: the import dialog opens on it" +
-			       (request.with_dependencies ? ", with the files it needs." : ".");
-		return "Import " + counted(request.names.size(), "file") + " from the game data: " +
-		       joined(request.names, ", ") + ". The import dialog opens on them" + needs + ".";
-	}
-	case EditorRequestKind::Reimport: return "Import " + basename_of(request.path) + " again.";
-	case EditorRequestKind::Save: return "Rewrite " + request.path + ".";
-	case EditorRequestKind::CreateFile: return "Create " + request.path + ".";
-	default: return std::string();
-	}
-}
-
-std::string ProblemsList::fix_all_label(const EditorRequest &request) {
-	switch (request.kind) {
-	case EditorRequestKind::CreateMissing: return "Create " + counted(request.roles.size(), "placeholder");
-	case EditorRequestKind::PreviewInstallImport:
-		return "Import " + std::to_string(request.names.size()) + " from the game data...";
-	case EditorRequestKind::Reimport: return "Import " + basename_of(request.path) + " again";
-	case EditorRequestKind::Save: return "Rewrite " + basename_of(request.path);
-	default: return "Apply";
-	}
 }
 
 } // namespace opennova::editor

@@ -42,9 +42,23 @@ struct MenuViewportOptions {
 	// True when the forced window is held some way.
 	bool forcing() const { return force_state >= 0 || checked || popup_open || focused; }
 };
+// How the menu's canvas shows the picture (the MCP gaps lane: options its toolbar's Zoom and Snap set, which
+// change no picture): the zoom, Fit (the design fitted to the canvas), Scale (`scale` of the design: the
+// Zoom list's steps, Ctrl+wheel's) or Device (the device's own size), and whether a drag snaps to the
+// 8-unit grid.
+enum class MenuZoom : uint8_t { Fit, Scale, Device };
+struct MenuCanvasShow {
+	MenuZoom zoom = MenuZoom::Fit;
+	float scale = 1.0f;
+	bool snap = true;
+	bool operator==(const MenuCanvasShow &other) const {
+		return zoom == other.zoom && scale == other.scale && snap == other.snap;
+	}
+	bool operator!=(const MenuCanvasShow &other) const { return !(*this == other); }
+};
 // The options on the wire (the envelope's `options`, a SetViewport's): {show_hidden, force_id,
-// force_state, checked, popup_open, focus}.
-io::JsonValue menu_options_to_json(const MenuViewportOptions &options);
+// force_state, checked, popup_open, focus, zoom: fit, scale or device, scale, snap}.
+io::JsonValue menu_options_to_json(const MenuViewportOptions &options, const MenuCanvasShow &show);
 
 // "normal", "mouseover", "selected", "disabled": a forced state's token (-1 = normal), and back;
 // false for another token.
@@ -107,6 +121,9 @@ public:
 
 	MenuScreenStatus screen_status() const { return reason_; }
 	const MenuViewportOptions &options() const { return options_; }
+	// How its canvas shows the picture (its zoom and its snap): options that change no picture, the
+	// device's configure not asked again for them.
+	const MenuCanvasShow &show() const { return show_; }
 	// The screen row it shows (0 none).
 	NodeId screen_row() const { return part_; }
 	// What the device configures (null unless ready): the menu image, which the device holds while
@@ -146,6 +163,11 @@ public:
 	// its root windows), in the compiled screen's order.
 	std::vector<ViewportHit> box(const ViewportContext &context, float x0, float y0, float x1,
 			float y1) const override;
+	// A click (ViewportModel::click, its canvas driven: the primary's resize handles first, then the window
+	// the game's hit test finds there): taken in every join while the picture is the menu's as it is, at the
+	// design size (the click's point in its units).
+	bool click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
+			std::string &error) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
@@ -165,7 +187,7 @@ protected:
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
-	void report_(const ViewportDeviceReport &report) override;
+	bool report_(const ViewportDeviceReport &report) override;
 
 private:
 	ViewportAction stop_(MenuScreenStatus reason, const std::string &detail);
@@ -185,6 +207,7 @@ private:
 	ViewportAction kept_(const MnuDocument &document);
 
 	MenuViewportOptions options_;
+	MenuCanvasShow show_;
 	uint64_t options_serial_ = 0;
 	MenuScreenStatus reason_ = MenuScreenStatus::NoProject;
 	std::string detail_;

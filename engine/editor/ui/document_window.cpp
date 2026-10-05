@@ -1,6 +1,7 @@
 #include <editor/ui/document_window.h>
 
 #include <algorithm>
+#include <cstring>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -220,7 +221,23 @@ void DocumentWindow::draw_modals() {
 void DocumentWindow::open_find() {
 	find_.open = true;
 	find_.focus = true;
+	send_find("open", io::JsonValue::make_bool(true));
 	request_focus();
+}
+
+void DocumentWindow::follow_find(const SessionView &view) {
+	const WorkspaceView::Find &held = view.workspace.find;
+	if (find_.open_held.follow(held.open)) {
+		// Opened from elsewhere (the wire): the keyboard goes to its text, as Ctrl+F's does.
+		if (held.open && !find_.open) find_.focus = true;
+		find_.open = held.open;
+	}
+	find_.text.follow(held.text);
+	if (find_.case_held.follow(held.match_case)) find_.match_case = held.match_case;
+}
+
+void DocumentWindow::send_find(const char *member, io::JsonValue value) {
+	window_requests::set_workspace(workspace_, "find", member, std::move(value));
 }
 
 void DocumentWindow::show_hit(const Document &document, size_t index) {
@@ -239,11 +256,12 @@ void DocumentWindow::show_hit(const Document &document, size_t index) {
 // hit shown of how many, a close; the hits listed under it, each its record and field and the
 // value as shown.
 void DocumentWindow::draw_find(const Document &document) {
+	follow_find(workspace_.view());
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_F)) open_find();
 	if (!find_.open) return;
 	// Found again when the text, the option or the document moved.
 	FindCursor &cursor = find_.cursor;
-	cursor.refresh(document, find_.text, find_.match_case);
+	cursor.refresh(document, find_.text.sent(), find_.match_case);
 	const size_t count = cursor.hits().size();
 	const bool on_hit = cursor.on_hit();
 	const auto step = [&](bool forward) {
@@ -253,7 +271,7 @@ void DocumentWindow::draw_find(const Document &document) {
 	ImGui::PushID("find");
 	const ImGuiStyle &style = ImGui::GetStyle();
 	const std::string of = std::to_string(cursor.current() + 1) + " of " + std::to_string(count);
-	const std::string where = !find_.text[0] ? std::string()
+	const std::string where = !find_.text.text[0] ? std::string()
 	                          : !count       ? std::string("No match")
 	                          : on_hit       ? of
 	                                         : std::to_string(count) + (count == 1 ? " match" : " matches");
@@ -264,18 +282,26 @@ void DocumentWindow::draw_find(const Document &document) {
 		ImGui::SetKeyboardFocusHere();
 		find_.focus = false;
 	}
-	const bool entered = ImGui::InputTextWithHint("##text", "Find in this file", find_.text, sizeof(find_.text),
+	// Escape closes the bar, the text typed kept (the session's too: review X14): the text box, which has the
+	// keyboard, would put back the text it had when it took it.
+	char typed[sizeof(find_.text.text)];
+	std::memcpy(typed, find_.text.text, sizeof(typed));
+	const bool entered = ImGui::InputTextWithHint("##text", "Find in this file", find_.text.text, sizeof(find_.text.text),
 	                                              ImGuiInputTextFlags_EnterReturnsTrue);
+	const bool edited = ImGui::IsItemEdited();
 	const bool typing = ImGui::IsItemActive();
 	if (entered) {
 		step(!ImGui::GetIO().KeyShift);
 		ImGui::SetKeyboardFocusHere(-1); // the keyboard stays in the text
 	}
 	const bool escape = (typing || ImGui::IsItemDeactivated()) && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+	if (escape) std::memcpy(find_.text.text, typed, sizeof(typed));
+	if (edited && !escape && find_.text.sent() != workspace_.view().workspace.find.text)
+		send_find("text", io::JsonValue::make_string(find_.text.sent()));
 	ui_kit::tooltip("Every field whose value, as the Inspector shows it, holds the text. Enter: the next; Shift+Enter: "
 	                "the previous; Escape closes.");
 	ImGui::SameLine();
-	ImGui::Checkbox("Aa", &find_.match_case);
+	if (ImGui::Checkbox("Aa", &find_.match_case)) send_find("match_case", io::JsonValue::make_bool(find_.match_case));
 	ui_kit::tooltip(find_.match_case ? "Case matters. Untick to find any case." : "Any case. Tick to match the case.");
 	ImGui::SameLine();
 	ImGui::BeginDisabled(!count);
@@ -289,7 +315,10 @@ void DocumentWindow::draw_find(const Document &document) {
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", where.c_str());
 	ImGui::SameLine();
-	if (ImGui::Button("x") || escape) find_.open = false;
+	if (ImGui::Button("x") || escape) {
+		find_.open = false;
+		send_find("open", io::JsonValue::make_bool(false));
+	}
 	ui_kit::tooltip("Close the find bar (Escape).");
 	// The hits, a few lines of them at most: each its record, its field and the value as shown.
 	if (find_.open && count) {

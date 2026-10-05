@@ -296,6 +296,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },
 	{ C::UnsavedNone, code("unsaved.none", G::UnsavedChanges) },
 	{ C::ViewportRefused, code("viewport.refused", G::Viewports) },
+	// A set_workspace the session cannot take (the MCP gaps lane): a card of a file the project lacks.
+	{ C::WorkspaceRefused, code("workspace.refused", G::Workspace) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");
