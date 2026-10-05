@@ -7,7 +7,6 @@
 #include <variant>
 
 #include <base/io/bam.h>
-#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <base/vfs/file_source.h>
 #include <editor/assets/asset_registry.h>
@@ -32,10 +31,7 @@
 
 namespace opennova::editor {
 
-float mission_settled_fog_level(float level) {
-	const float most = float(env::EnvScalarChannels::kMissionFogMax) / io::kFp16One;
-	return std::min(level, most);
-}
+float mission_settled_fog_level(float level) { return env::EnvScalarChannels::settled_fog_level(level); }
 
 float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header) {
 	if (header.environment.empty()) return 0.0f;

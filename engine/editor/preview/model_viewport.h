@@ -272,6 +272,8 @@ private:
 	uint64_t drawn_hash_ = 0;
 	bool drawn_hashed_ = false;
 	std::string framed_; // the model the camera last framed
+	std::string framed_clip_;   // the rig's model, clip and variant the animation's camera last followed
+	OrbitCamera framed_camera_; // where the last framing put the camera
 	// The animation's.
 	bool animating_ = false;
 	PreviewRig rig_;

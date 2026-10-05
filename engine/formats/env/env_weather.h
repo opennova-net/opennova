@@ -132,6 +132,13 @@ struct EnvScalarChannels {
 	// then the recovered default clamps. Retail runs this once per mission
 	// start, never on a network apply (whose currents keep chasing).
 	void mission_start_init();
+	// A mission's fog distance (world units) as its start leaves it with no WAC
+	// command: the level its target and current alike (the seed,
+	// weather_seed_from_config), mission_start_init, then the start's 255
+	// complete ticks [orig: Environment_MissionStartInit @ 0x57f878..0x57f880],
+	// whose clamp holds the current within kMissionFogMax (00TRe's 1500 is
+	// 1000 from its first tick). For a view that runs no weather (the editor's).
+	static float settled_fog_level(float level);
 	// Apply the scalar subset of an S2C 0x0A phase-2 sample in WIRE units:
 	// fog distance is an integer, fog acceleration/rain/overcast are unsigned
 	// 8.8. The authority serializes its rain/overcast CURRENTS, but the retail

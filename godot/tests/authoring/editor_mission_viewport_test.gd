@@ -14,7 +14,8 @@ extends GutTest
 ## entity's move is an Update (the build generation stands); a hit at a mark's pixel names its
 ## record and a box the records inside. The ground is the terrain's: a move with `stick` keeps the
 ## entity's height over TerrainData.get_height_world_bilinear. A file the mission names that the
-## project lacks is a note, the picture standing without it; the mission kind keeps two devices,
+## project lacks is a note, the picture standing without it (a terrain gone missing taking the ground
+## drawn before with it); the mission kind keeps two devices,
 ## the third mission giving up the least recently used mission's (D3).
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
@@ -482,6 +483,53 @@ func test_a_missing_file_is_a_note() -> void:
 	assert_eq(int(state.get("body", {}).get("missing", 0)), names.size())
 	assert_not_null(_device_node(state, "MissionEnvironment"))
 	assert_eq(state.get("items", []).size(), 14, "the marks are the document's, terrain or not")
+
+
+## The demo round's bug 5: the mission's terrain set to a name the project lacks drops the ground the
+## device drew before (its Terrain holds nothing built), never the old terrain under the note that the
+## new one is missing.
+func test_a_terrain_gone_missing_drops_its_ground() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_true(bool(state.get("body", {}).get("ground", false)), "the terrain built")
+	var terrain: Terrain = _device_node(state, "Terrain")
+	assert_not_null(terrain)
+	if terrain == null:
+		return
+	assert_true(terrain.is_built(), "the terrain drawn")
+	var page: Dictionary = _seam.query("document", {"path": MISSION_PATH, "limit": 1})
+	var rows: Array = page.get("rows", [])
+	assert_false(rows.is_empty(), str(page).left(300))
+	if rows.is_empty():
+		return
+	var header_id := int((rows[0] as Dictionary).get("id", 0))
+	var builds := int(state.get("builds", 0))
+	var edited: Dictionary = _ask({"kind": "edit_record", "path": MISSION_PATH,
+			"edits": [{"op": "set", "id": header_id, "field": "terrain", "value": "nightisle"}]})
+	assert_true(bool(edited.get("outcome", {}).get("done", false)), str(edited).left(300))
+	# The header's terrain is a Rebuild: ready again once the device has built anew.
+	for _frame in 900:
+		state = _state()
+		if String(state.get("status", "")) == "ready" and int(state.get("builds", 0)) > builds:
+			break
+		await get_tree().process_frame
+	_app.pump()
+	state = _state()
+	assert_gt(int(state.get("builds", 0)), builds, "built again")
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	assert_false(bool(state.get("body", {}).get("ground", true)), "no terrain: no ground")
+	var names: PackedStringArray = []
+	for note: Variant in state.get("notes", []):
+		if String((note as Dictionary).get("code", "")) == "file.missing":
+			names.append(String((note as Dictionary).get("name", "")))
+	assert_true(names.has("nightisle.trn"), str(names))
+	terrain = _device_node(state, "Terrain")
+	assert_not_null(terrain)
+	if terrain != null:
+		assert_false(terrain.is_built(), "the ground drawn before is gone")
+		assert_eq(terrain.get_patches_active(), 0, "no patch of the old terrain drawn")
 
 
 ## S14 (D3): the mission kind keeps two devices. Three missions opened in turn, each ready on its

@@ -29,6 +29,12 @@ using io::json_number;
 using io::json_string;
 using io::json_whole_in;
 
+// Two cameras at one place looking one way (what a framing set, which nothing moved since).
+bool same_camera(const OrbitCamera &a, const OrbitCamera &b) {
+	return a.target.x == b.target.x && a.target.y == b.target.y && a.target.z == b.target.z && a.yaw == b.yaw &&
+	       a.pitch == b.pitch && a.distance == b.distance;
+}
+
 JsonValue vec3(const PreviewVec3 &v) {
 	JsonValue out = JsonValue::make_array();
 	out.push(json_number(v.x));
@@ -827,11 +833,18 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	reason_ = ModelViewStatus::Ready;
 	detail_ = skeleton_ ? std::string() : "The rig does not load: " + (rig_.table.empty() ? rig_.clip : rig_.table) + ".";
 	shown(document);
-	if (framed_ != model_file_) {
+	// Framed on the rig's model, and again on another clip of it while the camera stands where the last
+	// framing put it (the posed sphere is the clip's: the review of the demo round's bug 4); a camera moved
+	// since keeps its place.
+	const std::string framing = model_file_ + '\n' + clip_key_ + '\n' + std::to_string(clip_variant_);
+	const bool clip_moved = framed_ == model_file_ && framed_clip_ != framing && same_camera(camera_, framed_camera_);
+	if (framed_ != model_file_ || clip_moved) {
 		framed_ = model_file_;
 		frame_();
+		framed_camera_ = camera_;
 		state_moved();
 	}
+	framed_clip_ = framing;
 	const bool options = options_moved_;
 	options_moved_ = false;
 	if (rebuild || !scene_) {
