@@ -277,13 +277,13 @@ static int test_columns() {
 	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size",
 	                     "texture.mfd_not_pow2", "texture.normal_map_halved", "texture.particle_too_big",
 	                     "texture.tile_atlas_cells", "texture.wrong_reader" }));
+	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
-	            Tokens({ "animation_map.ignored_input", "catalog.ignored_input", "credits.line_ending",
+	            Tokens({ "animation_map.ignored_input", "credits.line_ending",
 	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
 	                     "shader.form", "strings.regrouped", "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
-		{ "catalog.ignored_input", "without the input the game ignores" },
 		{ "credits.line_ending", "with every line ending CR LF" },
 		{ "menu.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },

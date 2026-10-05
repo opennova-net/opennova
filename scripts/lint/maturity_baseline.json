@@ -31,7 +31,8 @@
     "formats/def/def_schema_records.cpp",
     "formats/def/def_schema_properties.cpp",
     "formats/def/def_write.cpp",
-    "formats/def/def_write_record.cpp"
+    "formats/def/def_write_record.cpp",
+    "formats/def/def_compose.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,

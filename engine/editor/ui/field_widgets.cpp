@@ -152,7 +152,11 @@ Edited number(const FieldSchema &field, Value &value, bool unit) {
 	const bool after = unit && !field.unit.empty();
 	const float full = ImGui::CalcItemWidth();
 	ImGui::SetNextItemWidth(std::max(1.0f, full - (after ? style.ItemInnerSpacing.x + ui_kit::text_width(field.unit.c_str()) : 0.0f)));
-	if (field.type == FieldType::Real) {
+	// A whole-number field holding a real (a scaled number whose stored word is no multiple of its scale shows
+	// the quotient: an item's default climb speed, 1/293 km/h) shows the real; a whole number typed in its
+	// place is that number.
+	const bool real_in_whole = field.type != FieldType::Real && std::holds_alternative<double>(value);
+	if (field.type == FieldType::Real || real_in_whole) {
 		double number = std::holds_alternative<double>(value) ? std::get<double>(value) : double(whole(value));
 		if (field.ranged) {
 			const double lo = field.min, hi = field.max;
@@ -162,7 +166,10 @@ Edited number(const FieldSchema &field, Value &value, bool unit) {
 		} else {
 			out.changed = ImGui::InputDouble("##value", &number, 0, 0, "%.9g");
 		}
-		if (out.changed) value = number;
+		if (out.changed) {
+			if (real_in_whole && std::trunc(number) == number && std::fabs(number) < 9.0e15) value = int64_t(number);
+			else value = number;
+		}
 	} else {
 		int64_t number = whole(value);
 		if (field.ranged) {
