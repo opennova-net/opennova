@@ -1,0 +1,25 @@
+{
+  "importer": "terrain",
+  "inputs": [
+    "onisle1_heightmap.png",
+    "onisle1_colormap.png",
+    "onisle1_detail.png"
+  ],
+  "options": {
+    "layout": "island",
+    "top": "90",
+    "water": "12"
+  },
+  "outputs": [
+    "onisle1.cpt",
+    "onisle1_c.tga",
+    "onisle1_dt.tga",
+    "onisle1_dm.tga",
+    "onisle1_d1.tga",
+    "onisle1.til",
+    "onisle1.trn"
+  ],
+  "schema_version": 1,
+  "source_hash": "85bdb2b38bd60901",
+  "version": 1
+}

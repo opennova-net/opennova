@@ -31,7 +31,10 @@ OpenNova show it alike.
 | Specular | in the diffuse alpha | `VS_PHONGT` and the other Phong shaders read it there |
 | Detail | a tiling texture on the second UV map | The `FF_MT` and `*2` shaders multiply it in at 2x |
 | Triangles | LOD 0 about 3 to 5 times the original's; keep the LOD chain | Retail lights fixed-function shaders per vertex; more vertices light better |
-| Strips and materials | near the original's count | Each is a draw call |
+| Vertices per LOD | at most 2 MiB of vertex data: 52,428 static, 32,768 static with tangents (the bump shaders), 37,449 skinned, 26,214 skinned with tangents | Retail uploads a LOD into one 2 MiB pool buffer and drops a larger one (`allocate_lod_gpu_buffers @ 0x5B2610`); strides 40, 64, 56, 80 bytes |
+| Indices per LOD | at most 262,144 (512 KiB) | The index pool's smallest buffer |
+| LODs | at most 8 | The loader's eight-slot tables |
+| Strips and materials | near the original's count (materials have no hard limit) | Each is a draw call |
 | Names | model names at most 8 characters, starting `on` (`oncrate1`), so the add-on's texture names `<model>_<i>.tga` and `<model>_<i>n.mdt` fit the 15 characters a game archive holds | Longer names are cut to a shared stem (`on_crate1` gave `on_crate_0.tga`) |
 
 ## Shaders

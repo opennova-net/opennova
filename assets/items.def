@@ -4,4 +4,14 @@ begin "Null"
 	id 100000
 	type marker
 end
+begin "Wooden supply crate"
+	graphic oncrate1
+	ai_function gnrl
+	move_function genx
+	id 100010
+	hp 100
+	type decoration
+	armor 10 10
+end
+
 
