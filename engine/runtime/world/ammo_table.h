@@ -142,7 +142,9 @@ struct AmmoTableEntry {
     float kz_minradius = 0.0f;      // +52 (fp16 -> units) — linear-falloff start
     float kz_maxradius = 0.0f;      // +56 (fp16 -> units) — the blast radius when the
                                     // queue entry carries no float override
-    int32_t kz_pieslice_bam = 0;    // +60 (deg -> BAM) — nonzero = cone blast
+    int32_t kz_pieslice_bam = 0;    // +60 (deg -> BAM) — the cone's half-angle: 0
+                                    // skips the gate, the allocator's unauthored
+                                    // 0x7FFFFFFF passes every bearing
     int32_t tracer_rate = 0;        // byte +226 (`tracerRate`)
     std::string notarmmed_ammo;     // +241 — the not-armed child ammo name
     // The per-surface impact rows by canonical tag id. Bake rules per the witnessed
@@ -181,7 +183,8 @@ struct AmmoTableEntry {
     int32_t light_impact_ticks = 0;   // +136 fade duration in 62 Hz ticks
     // The guided-pursuit turn clamps in BAM/tick (`turnrate_maxpit`/`maxyaw`
     // deg/s, (192426 * fp16 + 0x8000) >> 16 [orig: AmmoDef_ParseTurnRate -> +0x50/+0x54];
-    // 0 = the integrator default).
+    // unauthored is the allocator's -1, and the integrator takes any value <= 0
+    // as its default).
     int32_t turnrate_maxpit = 0;      // +80
     int32_t turnrate_maxyaw = 0;      // +84
     // Permanent terrain-cache scorch selector (`scorch_id`, word +0x74).

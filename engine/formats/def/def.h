@@ -121,8 +121,9 @@ typedef struct DefAmmoDef {
     /* The guided-pursuit turn clamps, 'turnrate_maxpit'/'turnrate_maxyaw'
      * (deg/s -> BAM/tick: (192426 * fp16 + 0x8000) >> 16 [orig:
      * AmmoDef_ParseProperty -> AmmoDef_ParseTurnRate @0x40a130, stored +0x50/+0x54];
-     * 0 = the flight integrator's 6734910 default —
-     * world/guided_missile_flight.h). */
+     * an unauthored def holds the allocator's -1 [orig: AmmoDef_AllocateSlot
+     * @0x409A20], and the flight integrator takes any value <= 0 as its 6734910
+     * default — world/guided_missile_flight.h). */
     int turnrate_maxpit; /* +80 */
     int turnrate_maxyaw; /* +84 */
     DefEffectTableEntry *effects_table;
@@ -131,8 +132,9 @@ typedef struct DefAmmoDef {
     size_t raw_lines_count;
     /* Kill-zone blast geometry (appended; layout stability). The explosion
      * queue's blast radius is kz_maxradius (or the entry's float override); the
-     * linear damage falloff starts at kz_minradius; kz_pieslice != 0 makes the
-     * blast a cone around the entry direction. [orig: AmmoDef_ParseProperty
+     * linear damage falloff starts at kz_minradius; kz_pieslice is the half-angle
+     * of a cone around the entry direction: 0 skips the gate, and the
+     * allocator's unauthored 0x7FFFFFFF passes every bearing. [orig: AmmoDef_ParseProperty
      * 'kz_minradius'/'kz_maxradius' -> +52/+56 fp16, 'kz_pieslice' -> +60
      * deg * 11930464 BAM; consumers Projectile_ProcessExplosionQueue @0x4ead80,
      * Entity_ApplyWeaponDamage @0x4e6931/@0x4e695a] */

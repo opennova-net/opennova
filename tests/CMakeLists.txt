@@ -2037,8 +2037,8 @@ target_compile_features(round_debug_trail_test PRIVATE cxx_std_17)
 opennova_add_gated_test(round_debug_trail COMMAND round_debug_trail_test)
 
 # Throwables (world/throwables.h; world-wac-ai-re §27): PowerThrow charge,
-# grenade bounce/fuse, satchel place/detonator, claymore cone + fan, AV-mine
-# data-dead proximity, owner-death cleanup.
+# grenade bounce/fuse, satchel place/detonator, claymore cone + fan, the AV
+# mine's moving-vehicle cone, owner-death cleanup.
 add_executable(throwables_test world/throwables_test.cpp)
 target_link_libraries(throwables_test PRIVATE opennova_runtime)
 target_include_directories(throwables_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
