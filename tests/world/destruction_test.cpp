@@ -555,17 +555,21 @@ void test_organic_blast_los_is_unlifted() {
     CHECK(w.registry.get(victim)->health == 120);
 }
 
-// The cone is a wrapped BAM interval around the entry direction. The exact
-// opposite direction must be rejected, while targets one degree across either
-// side of the +/-pi seam remain inside a five-degree cone.
+// The cone is a wrapped BAM interval around the entry direction: targets one
+// degree across either side of the +/-pi seam remain inside a five-degree
+// cone, and one ten degrees off is outside it. The compare is signed, abs by
+// cdq/xor/sub then `jg` [orig: the pool 1 gate @0x4EB528..0x4EB52F], so the
+// exact antipode (atan2 = pi scales to 0x80000000, whose abs stays INT_MIN)
+// passes the narrowest cone: retail hits a victim directly behind the blast.
 void test_explosion_cone_wrap() {
-    auto health_after = [](double direction_deg, double target_deg) {
+    const int32_t five_deg = static_cast<int32_t>(5.0 * kBamPerDegree);
+    auto health_after = [five_deg](double direction_deg, double target_deg,
+                                   int32_t half_bam = 0) {
         auto w_heap = std::make_unique<World>();
         World &w = *w_heap;
         seed_ammo(w);
         w.registry.configure_pool(1, 4);
-        w.tables.ammo.entries[1].kz_pieslice_bam =
-                static_cast<int32_t>(5.0 * kBamPerDegree);
+        w.tables.ammo.entries[1].kz_pieslice_bam = half_bam != 0 ? half_bam : five_deg;
 
         const double radians = target_deg * 3.14159265358979323846 / 180.0;
         Entity seed;
@@ -590,9 +594,15 @@ void test_explosion_cone_wrap() {
     };
 
     CHECK(health_after(0.0, 0.0) < 120);
-    CHECK(health_after(0.0, 180.0) == 120);
+    CHECK(health_after(0.0, 10.0) == 120);
+    CHECK(health_after(0.0, 170.0) == 120);
+    CHECK(health_after(0.0, 180.0) < 120);
     CHECK(health_after(179.0, -179.0) < 120);
     CHECK(health_after(-179.0, 179.0) < 120);
+    // The allocator's unauthored half-angle 0x7FFFFFFF (every def without
+    // kz_pieslice) passes every bearing, the antipode included.
+    CHECK(health_after(0.0, 180.0, 0x7FFFFFFF) < 120);
+    CHECK(health_after(0.0, 90.0, 0x7FFFFFFF) < 120);
 }
 
 // Kill credit resolves a dead intermediary's last-attacker chain before the

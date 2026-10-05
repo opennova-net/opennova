@@ -342,17 +342,24 @@ bool runs_tree_death_body(const World &world, const Entity &target) {
 }
 
 // The cone gate [orig: @ 0x4eafe0..0x4eaffa — atan2(dy, dx) in BAM vs the entry
-// direction, |delta| <= the ammo kz_pieslice half-angle].
+// direction, |delta| <= the ammo kz_pieslice half-angle]. The compare is
+// signed: abs is cdq/xor/sub and the reject is `jg` [orig: pool 0
+// @0x4EAFF1..0x4EAFFA, pool 1 @0x4EB528..0x4EB52F, pool 2 @0x4EB6EE..0x4EB6F7],
+// so a victim at the exact antipode (delta 0x80000000, whose abs stays
+// INT_MIN) passes even the narrowest cone, and a negative half-angle rejects
+// every other bearing.
 bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_target) {
     if (cone_half_bam == 0) return true;
     const int64_t scaled = static_cast<int64_t>(
             std::atan2(static_cast<double>(to_target.y), static_cast<double>(to_target.x)) *
             io::kBamPerRadian);
     const uint32_t ang = static_cast<uint32_t>(scaled);
-    const uint32_t delta = ang - static_cast<uint32_t>(e.dir_bam);
-    const uint32_t neg_delta = 0u - delta;
-    const uint32_t distance = delta < neg_delta ? delta : neg_delta;
-    return distance <= static_cast<uint32_t>(cone_half_bam);
+    const int32_t diff = static_cast<int32_t>(ang - static_cast<uint32_t>(e.dir_bam));
+    const int32_t sign = diff < 0 ? -1 : 0;
+    const int32_t abs_diff = static_cast<int32_t>(
+            (static_cast<uint32_t>(diff) ^ static_cast<uint32_t>(sign)) -
+            static_cast<uint32_t>(sign));
+    return !(abs_diff > cone_half_bam);
 }
 
 // Shared health drain for a non-organic victim + the item death notify. It
