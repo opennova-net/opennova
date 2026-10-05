@@ -55,6 +55,9 @@ enum class ViewConcern : uint8_t {
 	// document, the selection or a changed model or clip (a menu's held window, a model framed, a
 	// clip's clock sought); never the clock running as the Shell's frames pass.
 	Viewports,
+	// WorkspaceView: what the windows show of their own (the MCP gaps lane): a card, a panel or a dialog
+	// open and its fields, the sound the editor plays.
+	Workspace,
 	kCount,
 };
 
@@ -76,6 +79,7 @@ inline constexpr ViewConcernRow kViewConcernRows[] = {
 	{ViewConcern::DocumentSet, "document_set"},
 	{ViewConcern::ActiveDocument, "active_document"},
 	{ViewConcern::Viewports, "viewports"},
+	{ViewConcern::Workspace, "workspace"},
 };
 
 static_assert(std::size(kViewConcernRows) == kViewConcernCount,

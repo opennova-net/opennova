@@ -260,7 +260,7 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     for line in plan.get("summary", [])[:8]:
         say(f"     {line.get('kind')}: {line.get('files')} files, {line.get('bytes', 0) / 1e6:.1f} MB")
     started = time.monotonic()
-    request(client, "import_files", wait_s=args.timeout, planned=True)
+    request(client, "import_files", wait_s=args.timeout, planned=True, plan=plan.get("plan", 0))
     held = query(client, "files", limit=1).get("count", 0)
     say(f"   imported in {time.monotonic() - started:.1f} s; the project holds {held} files")
     expect(held > 0, "the import wrote nothing")

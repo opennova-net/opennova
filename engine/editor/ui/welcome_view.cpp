@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cstring>
 
+#include <base/io/json.h>
 #include <editor/project/local_settings.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -160,55 +162,67 @@ void InstallFieldCheck::forget() {
 
 bool NewProjectForm::draw(Workspace &workspace) {
 	const SessionView &v = workspace.view();
+	const WorkspaceView::NewProject &form = v.workspace.new_project;
+	const auto set = [&workspace](const char *member, io::JsonValue value) {
+		window_requests::set_workspace(workspace, "new_project", member, std::move(value));
+	};
 	// A new project is refused while an operation that cannot be cancelled runs: its Browse... and
 	// Create wait with it (the busy gate's answer, SessionView::allows).
 	const bool allowed = v.allows(EditorRequestKind::NewProject);
-	ImGui::InputText("Name", title_, sizeof(title_));
-	if (path_field("Folder", folder_, sizeof(folder_), "Browse...##folder", allowed).browse)
-		workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
+	title_.follow(form.title);
+	folder_.follow(form.dir);
+	// The install, the editor's own until the author names one (never another project's: an open project's
+	// install may be its own, or a session's); checked once it is not being typed.
+	install_.follow(form.install_named ? form.game_install : v.project.editor_install);
+	if (ImGui::InputText("Name", title_.text, sizeof(title_.text))) set("title", io::JsonValue::make_string(title_.sent()));
+	const PathField folder = path_field("Folder", folder_.text, sizeof(folder_.text), "Browse...##folder", allowed);
+	if (folder.edited) set("dir", io::JsonValue::make_string(folder_.sent()));
+	if (folder.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
 	ImGui::PushTextWrapPos(0.0f);
 	ImGui::TextDisabled("The folder is made if it does not exist; it must not hold a project already.");
 	ImGui::PopTextWrapPos();
-	// The install, the editor's own until the author names one (never another project's: an open project's
-	// install may be its own, or a session's); checked once it is not being typed.
-	if (!install_named_) copy_into(install_, v.project.editor_install);
-	const PathField field = path_field("Game install", install_, sizeof(install_), "Browse...##install", allowed);
-	if (field.edited) install_named_ = true;
+	const PathField field = path_field("Game install", install_.text, sizeof(install_.text), "Browse...##install", allowed);
+	if (field.edited) set("game_install", io::JsonValue::make_string(install_.sent()));
 	if (field.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectInstall));
 	ui_kit::tooltip("The game's folder: the project imports its files from it and plays in it. Kept with the project.");
 	bool found = false;
-	const std::string words = check_.words(workspace, install_, field.typing, v.project.editor_install, found);
-	install_line(words.empty() ? std::string("Checking the folder...") : words, found, install_[0] != '\0' && !words.empty());
+	const std::string words = check_.words(workspace, install_.text, field.typing, v.project.editor_install, found);
+	install_line(words.empty() ? std::string("Checking the folder...") : words, found, install_.text[0] != '\0' && !words.empty());
 	// What it builds on: the expansions of the install named, once it is checked.
 	std::vector<ProjectView::InstallExpansion> installed;
-	if (const InstallCheck *check = found ? check_.answer(install_) : nullptr)
+	if (const InstallCheck *check = found ? check_.answer(install_.text) : nullptr)
 		for (const InstallCheck::Expansion &each : check->expansions) installed.push_back({ each.name, each.title, std::string() });
-	const bool expansion_ok = expansion_.draw(install_[0] ? installed : v.project.new_project_expansions);
+	ExpansionChoice choice{ form.builds_on, form.as_expansion, form.expansion };
+	bool changed = false;
+	const bool expansion_ok =
+			expansion_.draw(choice, install_.text[0] ? installed : v.project.new_project_expansions, ProjectExpansion(), changed);
+	if (changed) {
+		io::JsonValue members = io::JsonValue::make_object();
+		members.set("builds_on", io::JsonValue::make_string(choice.builds_on));
+		members.set("as_expansion", io::JsonValue::make_bool(choice.as_expansion));
+		members.set("expansion", io::JsonValue::make_string(choice.name));
+		window_requests::set_workspace(workspace, "new_project", std::move(members));
+	}
 	// A folder named that holds no install refuses the project (the session says why, as it checks the
 	// folder again); none at all is a project of the files from the disk; one not checked yet is the session's
 	// to check.
-	const bool install_ok = install_[0] == '\0' || found || words.empty();
-	const bool ready = title_[0] != '\0' && folder_[0] != '\0' && allowed && expansion_ok && install_ok;
+	const bool install_ok = install_.text[0] == '\0' || found || words.empty();
+	// Create raises what the session holds of the form (what a client set, whole), not the fields' copies.
+	const std::string install = form.install_named ? form.game_install : v.project.editor_install;
+	const bool ready = !form.title.empty() && !form.dir.empty() && allowed && expansion_ok && install_ok;
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create project") && ready;
 	ImGui::EndDisabled();
 	if (!install_ok && !words.empty()) ui_kit::tooltip("Name a folder that holds the game, or none.");
 	if (create) {
-		const ProjectExpansion expansion = expansion_.value();
-		EditorRequest made = expansion.standalone() ? request::new_project(folder_, title_)
-		                                            : request::new_expansion_project(folder_, title_, expansion.name,
+		const ProjectExpansion expansion = choice.value();
+		EditorRequest made = expansion.standalone() ? request::new_project(form.dir, form.title)
+		                                            : request::new_expansion_project(form.dir, form.title, expansion.name,
 		                                                                             expansion.builds_on);
-		made.game_install = install_;
+		made.game_install = install;
 		workspace.request(std::move(made));
 	}
 	return create;
-}
-
-void NewProjectForm::set_folder(const std::string &path) { copy_into(folder_, path); }
-
-void NewProjectForm::set_install(const std::string &path) {
-	copy_into(install_, path);
-	install_named_ = true;
 }
 
 bool aside_for_welcome(const SessionView &view, bool &asked) {

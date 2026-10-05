@@ -15,10 +15,8 @@ namespace opennova::editor {
 // Which findings Problems shows (ADR 0046 S11b), one query the window and the editor MCP
 // share: the severities, a text matched without case against the message, the file, the
 // record, the field and the code, where they sit (the whole project, the active document,
-// the open documents), only those with a fix (problem_fixes.h), and how they group.
-enum class ProblemScope { Project, ActiveFile, OpenFiles };
-enum class ProblemGrouping { None, File, Kind };
-
+// the open documents: ProblemScope, session/view/workspace_view.h, where the window's part keeps
+// them), only those with a fix (problem_fixes.h), and how they group (ProblemGrouping).
 struct ProblemQuery {
 	bool errors = true;
 	bool warnings = true;
