@@ -90,9 +90,16 @@ std::string free_form_screen_xml(const std::string &screen) {
 	       "</SCREEN>\n";
 }
 
+} // namespace
+
+const char *blank_menu_font() {
+	return k_main_font;
+}
+
 // Through the document model: the authored screen parses, and the serializer's
 // canonical form (CRLF on disk) is what lands in the project.
-bool menu_bytes(const std::string &xml, const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+bool blank_menu_bytes(const std::string &xml, const BlankRequest &request, std::vector<uint8_t> &out,
+                      Diagnostic &error) {
 	mnu::Document doc;
 	std::string parse_error;
 	if (!mnu::parse(xml, doc, parse_error)) {
@@ -104,17 +111,15 @@ bool menu_bytes(const std::string &xml, const BlankRequest &request, std::vector
 	return true;
 }
 
-} // namespace
-
 bool make_blank_main_menu(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	const std::string title = request.project_title.empty() ? std::string("NEW GAME") : request.project_title;
-	return menu_bytes(startup_screen_xml(title), request, out, error);
+	return blank_menu_bytes(startup_screen_xml(title), request, out, error);
 }
 
 bool make_blank_menu(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	std::string screen = strutil::to_upper(utf8_of(path_of(request.logical_name).stem()));
 	if (screen.empty()) screen = "MAIN";
-	return menu_bytes(free_form_screen_xml(screen), request, out, error);
+	return blank_menu_bytes(free_form_screen_xml(screen), request, out, error);
 }
 
 } // namespace opennova::editor
