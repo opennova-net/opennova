@@ -111,7 +111,7 @@ bool set_name(char *field, size_t capacity, const Value &v, std::string &error) 
 	return true;
 }
 
-// A texture name as build takes one (threedi_o3d_read): printable ASCII and a
+// A texture name as build takes one (threedi_o3d_lower, the retail target): printable ASCII and a
 // file name alone, since the loader looks its file up by that string.
 bool set_texture_name(ThreediMaterialTexture &texture, const Value &v, std::string &error) {
 	const std::string &name = text(v);

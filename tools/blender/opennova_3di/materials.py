@@ -562,8 +562,8 @@ def check_pixels(image, what):
 
 # --- texture names ------------------------------------------------------------
 
-# A texture row's name field holds 16 characters and a NUL (the MTRL row,
-# formats/threedi/threedi_3di3.h ThreediMaterialTexture); a file the export
+# A texture row's name holds what the retail target takes (16 bytes, its MTRL
+# row: opennova-3di's lowering says so at the row); a file the export
 # writes is named in at most export.FILE_NAME_BYTES (15), as every texture
 # retail packs is (a PFF entry's 16-byte name field, formats/pff/pff.h). The
 # game asks for a row's name cut three characters past its first dot
@@ -572,7 +572,6 @@ def check_pixels(image, what):
 # Texture_LoadByNameWithChannel @ 0x58B4E1..0x58B598;
 # renderer::material_texture_query, material_dds_sibling]: a written file's
 # name has one dot.
-ROW_NAME_BYTES = 16
 WRITTEN_EXTENSIONS = (".tga", ".mdt")
 # The files the game reads a texture from: .tga and .mdt through its TGA
 # reader, .pcx through its PCX reader, a .dds sibling [orig:
@@ -584,16 +583,14 @@ MATERIAL_ROWS = 24
 
 
 def check_row_name(name, what):
-    """An ExportError unless `name` is a texture row name opennova-3di takes:
-    printable ASCII, at most 16 bytes, a file name without a folder. An empty
+    """An ExportError unless `name` is a texture row name the game reads:
+    printable ASCII, a file name without a folder (its length is the CLI's to
+    check, against the target it builds for). An empty
     name is a row that names no file, which the format holds: 63 rows of the
     JO models are empty (M24_1st's VS_BMTXMIRRT material keeps one in slot 2,
     Chair3's FF_ST_OP one in slot 1)."""
     if any(not " " <= c <= "~" for c in name):
         raise ExportError(f"{what}: the texture name '{name}' is not printable ASCII")
-    if len(name) > ROW_NAME_BYTES:
-        raise ExportError(f"{what}: the texture name '{name}' exceeds {ROW_NAME_BYTES} characters (its row's "
-                          "field)")
     if any(c in name for c in "/\\"):
         raise ExportError(f"{what}: the texture name '{name}' names a folder; the game finds a texture by its "
                           "file name alone")
