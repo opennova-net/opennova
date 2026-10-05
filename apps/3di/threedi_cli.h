@@ -67,10 +67,12 @@ int cmd_compare(const char *expected_path, const char *actual_path, bool strict 
 // `texture` (texture.cpp): an image written as a model's texture file, by the
 // output's extension a .dds (`format` auto, dxt1, dxt5 or argb, "" auto: DXT1
 // when every texel is opaque, else DXT5; `mips` full or none, "" full), a .tga
-// or an .mdt; halved while a side exceeds `max_size` (0: no cap).
+// or an .mdt; halved while a side exceeds `max_size` (0: no cap); its alpha
+// made as `alpha` says ("" the source's: opaque, luminance, threshold:<n>,
+// key:#RRGGBB as the editor's import takes them).
 struct TextureCommand {
 	std::string input, output;
-	std::string format, mips;
+	std::string format, mips, alpha;
 	uint32_t max_size = 0;
 };
 int cmd_texture(const TextureCommand &command);

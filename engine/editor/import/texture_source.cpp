@@ -406,9 +406,10 @@ TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &s
 		plan.changes.push_back(plan.source + "'s import writes " + dds + " in place of " + entry->logical_name + ".");
 		return plan;
 	}
-	// A plain file: its source made once, a copy of the TGA in art/ under a name of its own (as Edit externally
-	// makes it), the plain file set aside.
-	const std::string name = free_source_name(scan, stem_of(entry->logical_name) + ".tga", entry->logical_name, std::string());
+	// A plain file: its source made once, a copy of the TGA in art/ (as Edit externally makes it), the plain file
+	// set aside. Its own name where nothing else holds it, the .dds its output: the plain file it replaces leaves
+	// the name free.
+	const std::string name = free_source_name(scan, entry->logical_name, dds, entry->relative_path);
 	if (name.empty()) return refuse("No source could be made for " + entry->logical_name + ".", entry->relative_path);
 	plan.replaced = entry->relative_path;
 	plan.bytes = std::move(bytes);

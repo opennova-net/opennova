@@ -801,7 +801,7 @@ constexpr RequestKindRow kRows[] = {
 			"The .tga texture path stored as the .dds of its name, which the loader of every use of it opens "
 			"first (a model's diffuse, detail or flipbook row), so its referrers keep naming the .tga: DXT1 "
 			"for a texture of no alpha, DXT5 for one with alpha, every level to 1 x 1. A plain file becomes an "
-			"import's output (its copy in art/ under a name of its own, its record writing the .dds, the plain "
+			"import's output (its copy in art/ under its own name, its record writing the .dds, the plain "
 			"file set aside under .opennova/replaced/, never deleted), then imported, a refresh; an import's "
 			"output's own record takes the form. Refused, nothing written (texture.store_dds): no .tga, a use "
 			"that reads the .tga itself (a terrain map, a model's plain row, the HUD's art), a .dds of the "

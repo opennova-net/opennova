@@ -88,7 +88,7 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 // (renderer::material_texture_source [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B598]), so every
 // referrer keeps naming the .tga: DXT1 for a texture of no alpha, DXT5 for one with alpha, every level to
 // 1 x 1 (import/dxt_encode.h). A plain .tga becomes an import's output as Edit externally makes it one (its
-// copy in art/ under a name of its own, the plain file set aside), its record writing `<stem>.dds`; an
+// copy in art/ under its own name where that is free, the plain file set aside), its record writing `<stem>.dds`; an
 // import's output's own record takes the same options (`source` its source, no bytes: the session sets
 // them). `reads_tga` holds, in words, each use of the texture whose loader opens the .tga itself and never
 // its .dds (a terrain's colour map, a model's plain row, the HUD's art): any refuses it, the texture lost

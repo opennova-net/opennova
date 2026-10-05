@@ -614,12 +614,15 @@ model.
 ## Texture files on the command line
 
 `opennova-3di texture <in.png|in.tga|in.mdt|in.pcx> -o <out.dds|out.tga|out.mdt>
-[--format auto|dxt1|dxt5|argb] [--mips full|none] [--max-size N]` writes an
-image as a model's texture file, as export does: a `.dds` (auto, the default:
-DXT1 for an opaque image, DXT5 otherwise; argb: uncompressed, one level; the
-full chain to 1 x 1 unless `--mips none`), or a 32-bit `.tga` or `.mdt`,
-halved while a side exceeds `--max-size`. A `.dds` whose sides are not powers
-of two is refused. Converting the textures of an existing model is this, once
+[--format auto|dxt1|dxt5|argb] [--mips full|none] [--max-size N] [--alpha ...]`
+writes an image as a model's texture file, as export does: a `.dds` (auto, the
+default: DXT1 for an opaque image, DXT5 otherwise; argb: uncompressed, one
+level; the full chain to 1 x 1 unless `--mips none`), or a 32-bit `.tga` or
+`.mdt`, halved while a side exceeds `--max-size`. `--alpha` makes the alpha as
+the editor's import does (`opaque`, `luminance`, `threshold:N`, `key:#RRGGBB`):
+an image whose alpha no shader of its material reads (a bake's stray alpha
+under `FF_ST_OP`) written `--alpha opaque` is DXT1, half DXT5's size. A `.dds`
+whose sides are not powers of two is refused. Converting the textures of an existing model is this, once
 per `<stem>.tga` its rows name, the `.tga` then removed:
 
 ```text

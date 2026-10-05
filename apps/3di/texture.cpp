@@ -70,6 +70,11 @@ int cmd_texture(const TextureCommand &command) {
 		while (uint32_t(image.width) > command.max_size || uint32_t(image.height) > command.max_size)
 			image = editor::resize_image(image, std::max(1u, uint32_t(image.width) / 2), std::max(1u, uint32_t(image.height) / 2));
 	const uint32_t width = uint32_t(image.width), height = uint32_t(image.height);
+	// Its alpha as the import makes it (an image whose stray alpha no shader reads written opaque: DXT1).
+	if (!command.alpha.empty() && !editor::apply_image_alpha(image, strutil::to_lower(command.alpha), error)) {
+		std::fprintf(stderr, "opennova-3di: --alpha: %s\n", error.c_str());
+		return 2;
+	}
 	editor::ImageImportSettings settings = editor::image_import_settings({});
 	std::string form;
 	if (out_extension == ".dds") {

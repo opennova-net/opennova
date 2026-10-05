@@ -8,7 +8,7 @@
 //   opennova-3di anim    build|scene|info|compare  (the .bad/.adm clip set)
 //   opennova-3di weapon  timing|merge  (the weapon.def keys the clips need)
 //   opennova-3di texture <in.png|tga|pcx> -o <out.dds|tga|mdt> [--format ...]
-//                        [--mips ...] [--max-size N]
+//                        [--mips ...] [--max-size N] [--alpha ...]
 //   opennova-3di catalog
 //
 // The DCC front ends (the Blender add-on under tools/blender/opennova_3di is
@@ -57,6 +57,7 @@ int usage(const char *why) {
 			"       opennova-3di weapon merge  <weapon.def> <edits.txt> -o <out.def>\n"
 			"       opennova-3di texture <in.png|in.tga|in.pcx> -o <out.dds|out.tga|out.mdt>\n"
 			"                            [--format auto|dxt1|dxt5|argb] [--mips full|none] [--max-size N]\n"
+			"                            [--alpha source|opaque|luminance|threshold:N|key:#RRGGBB]\n"
 			"       opennova-3di catalog\n");
 	return 2;
 }
@@ -134,11 +135,13 @@ int main(int argc, char **argv) {
 		texture.output = argv[4];
 		for (int i = 5; i < argc; i += 2) {
 			const std::string flag = argv[i];
-			if (i + 1 >= argc || (flag != "--format" && flag != "--mips" && flag != "--max-size"))
-				return usage("texture takes --format <auto|dxt1|dxt5|argb>, --mips <full|none> or --max-size <N>");
+			if (i + 1 >= argc || (flag != "--format" && flag != "--mips" && flag != "--max-size" && flag != "--alpha"))
+				return usage("texture takes --format <auto|dxt1|dxt5|argb>, --mips <full|none>, --max-size <N> or "
+				             "--alpha <source|opaque|...>");
 			const std::string value = argv[i + 1];
 			if (flag == "--format") texture.format = value;
 			else if (flag == "--mips") texture.mips = value;
+			else if (flag == "--alpha") texture.alpha = value;
 			else {
 				char *end = nullptr;
 				const unsigned long size = std::strtoul(value.c_str(), &end, 10);

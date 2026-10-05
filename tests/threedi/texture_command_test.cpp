@@ -55,13 +55,14 @@ std::string write_tga(const std::string &dir, const std::string &name, const std
 }
 
 int run(const std::string &in, const std::string &out, const std::string &format = "", const std::string &mips = "",
-        uint32_t max_size = 0) {
+        uint32_t max_size = 0, const std::string &alpha = "") {
 	threedi_cli::TextureCommand command;
 	command.input = in;
 	command.output = out;
 	command.format = format;
 	command.mips = mips;
 	command.max_size = max_size;
+	command.alpha = alpha;
 	return threedi_cli::cmd_texture(command);
 }
 
@@ -109,6 +110,11 @@ int main(int argc, char **argv) {
 	check(run(graded, dir + "/argb.dds", "argb") == 0 && read_dds(dir + "/argb.dds", image) &&
 	              std::string(image.format.name) == "A8R8G8B8" && image.levels.size() == 1 && image.levels[0].rgba == picture(32, 32, -1),
 	      "argb writes the texels as they are");
+	// Its alpha made opaque (a stray alpha no shader reads): DXT1 by the auto rule.
+	check(run(graded, dir + "/flat.dds", "", "", 0, "opaque") == 0 && read_dds(dir + "/flat.dds", image) &&
+	              std::string(image.format.name) == "DXT1",
+	      "--alpha opaque writes an image with alpha as DXT1");
+	check(run(graded, dir + "/bad.dds", "", "", 0, "half") == 2, "--alpha takes the import's alpha forms");
 	check(run(opaque, dir + "/forced.dds", "dxt5") == 0 && read_dds(dir + "/forced.dds", image) &&
 	              std::string(image.format.name) == "DXT5",
 	      "--format dxt5 is DXT5 whatever the alpha");

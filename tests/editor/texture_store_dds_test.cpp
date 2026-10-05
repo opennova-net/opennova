@@ -120,7 +120,10 @@ int main() {
 	TEST_EXPECT(session.outcome().done() && !session.outcome().refused);
 	session.run_operations();
 	const AssetEntry *body = view.project.scan->find("body.dds");
-	TEST_EXPECT(body && body->imported_from == "art/body_src.tga" && !fs::exists(t + "body.tga") && !view.project.scan->find("body.tga"));
+	// Its source keeps its name in art/, an import source the build leaves out.
+	const AssetEntry *source = view.project.scan->find("body.tga");
+	TEST_EXPECT(body && body->imported_from == "art/body.tga" && !fs::exists(t + "body.tga") && source &&
+	            source->kind == AssetKind::ImportSource);
 	dds::DdsImage image;
 	TEST_EXPECT(body && read_dds(root + "/" + body->relative_path, image) && std::string(image.format.name) == "DXT1" &&
 	            image.levels.size() == 4);
@@ -168,7 +171,7 @@ int main() {
 	TEST_EXPECT(!resource.empty() && pff::pff_open(&archive, resource.c_str()) == 0);
 	const auto packed = [&](const char *name) { return pff::pff_find(&archive, name) != nullptr; };
 	TEST_EXPECT(packed("body.dds") && packed("glass.dds") && packed("grain.dds") && packed("skin.dds") && packed("thing.3di"));
-	TEST_EXPECT(!packed("body.tga") && !packed("body_src.tga") && !packed("skin_src.tga") && !packed("skin.tga"));
+	TEST_EXPECT(!packed("body.tga") && !packed("skin_src.tga") && !packed("skin.tga"));
 	pff::pff_close(&archive);
 	std::printf("texture_store_dds: all checks passed\n");
 	return 0;
