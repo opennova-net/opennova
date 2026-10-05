@@ -348,6 +348,18 @@ inline EditorRequest reveal_path(std::string path) {
 	request.path = std::move(path);
 	return request;
 }
+// Back (Forward) `steps` places of the navigation history: the nearest, or one further down Back's
+// (Forward's) list.
+inline EditorRequest navigate_back(uint32_t steps = 1) {
+	EditorRequest request = of(EditorRequestKind::NavigateBack);
+	request.steps = steps;
+	return request;
+}
+inline EditorRequest navigate_forward(uint32_t steps = 1) {
+	EditorRequest request = of(EditorRequestKind::NavigateForward);
+	request.steps = steps;
+	return request;
+}
 
 // --- records -----------------------------------------------------------------------------------
 

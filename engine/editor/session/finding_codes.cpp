@@ -43,6 +43,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::UnsavedChanges, "unsaved", "Unsaved changes" },
 	{ G::Viewports, "viewport", "Viewports" },
 	{ G::Workspace, "workspace", "Windows" },
+	{ G::Navigation, "navigation", "Navigation" },
 	{ G::Catalogs, "catalog", "Catalogs" },
 	{ G::StringTables, "strings", "String tables" },
 	{ G::Menus, "menu", "Menus" },

@@ -215,10 +215,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/run_directory.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10):
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
-    # imports, renames, the unsaved guard, the preferences over their store), what Problems
-    # shows of its findings and offers to do about them, the request and query tables (S13 A4,
-    # A5) and their wire forms (session_json, view_json), the selection (S13 D7), and the
-    # finding codes' lookup over every table (S13 A6)
+    # imports, renames, the unsaved guard, the navigation history, the preferences over their
+    # store), what Problems shows of its findings and offers to do about them, the request and
+    # query tables (S13 A4, A5) and their wire forms (session_json, view_json), the selection
+    # (S13 D7), and the finding codes' lookup over every table (S13 A6)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_result.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
@@ -233,6 +233,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_logic_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/model_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/navigation_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/navigation_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/operation_progress.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/original_bytes.cpp
@@ -263,11 +265,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/workspace_parts.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
-    # the documents, the findings, the activity, the dialogs, the workspace's own), the events a
-    # request posts, and the findings by file and record
+    # the documents, the findings, the activity, the dialogs, the workspace's own, the navigation
+    # history's places), the events a request posts, and the findings by file and record
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/activity_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/dialogs_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/findings_index.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/navigation_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/project_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/session_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/view_events.cpp
