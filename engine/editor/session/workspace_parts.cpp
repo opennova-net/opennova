@@ -1054,9 +1054,13 @@ bool apply_workspace_change(SessionView &view, const std::string &json, std::vec
 
 void set_workspace(SessionCore &core, const std::string &change) {
 	std::vector<WorkspaceRefusal> refusals;
+	const uint64_t events = core.view().events.next_seq();
 	const bool moved = apply_workspace_change(core.view(), change, refusals);
 	for (const WorkspaceRefusal &refusal : refusals) core.refuse_quietly(CoreFinding::WorkspaceRefused, refusal.message, refusal.asset);
 	if (moved) core.touch(ViewConcern::Workspace);
+	// A focus posted (a focus_window event): the events move with the dialogs' concern, as a request's ask does;
+	// the workspace holds nothing of it.
+	if (core.view().events.next_seq() != events) core.touch(ViewConcern::Dialogs);
 }
 
 void workspace_follows(SessionCore &core, const EditorRequest &request) {

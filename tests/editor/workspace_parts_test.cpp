@@ -560,9 +560,10 @@ int test_modals() {
 	TEST_EXPECT(session.handle(request::resolve_unsaved(UnsavedChoice::Cancel)));
 	TEST_EXPECT(!v.dialogs.unsaved_prompt.open && shown_modal(v).modal == HeldModal::None && v.project.root == root);
 	// focus: the window brought forward (an event), nothing of the workspace moved.
-	const uint64_t revision = v.revisions.of(ViewConcern::Workspace);
+	const uint64_t revision = v.revisions.of(ViewConcern::Workspace), dialogs = v.revisions.of(ViewConcern::Dialogs);
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"focus": "files"})")) && session.outcome().done() &&
-	            v.revisions.of(ViewConcern::Workspace) == revision);
+	            v.revisions.of(ViewConcern::Workspace) == revision && v.revisions.of(ViewConcern::Dialogs) > dialogs &&
+	            v.events.held().back().kind == ViewEventKind::FocusWindow);
 	// A refusal in the outcome alone.
 	const size_t rows = v.findings.diagnostics.size();
 	const std::string status = v.activity.status;
