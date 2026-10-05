@@ -87,6 +87,9 @@ constexpr WorkspaceMember kSettings[] = {
 	{ "game_install", J::String, "This computer's game install folder.", kPathLongest },
 	{ "runtime", J::String, "The OpenNova runtime Play runs (\"\" the one packaged beside the editor).", kPathLongest },
 	{ "play_in_install", J::Boolean, "Play in the game install." },
+	{ "play_in_install_strict", J::Boolean,
+			"Strict: Play in the game install stages the build and the install's program alone and launches "
+			"without /d, as a player who dropped the program into the build's folder." },
 };
 constexpr WorkspaceMember kNewFile[] = {
 	{ "kind", J::String,
@@ -399,7 +402,8 @@ bool set_new_project(Change &change, const JsonValue &part) {
 bool same_settings(const WorkspaceView::Settings &a, const WorkspaceView::Settings &b) {
 	return a.open == b.open && a.title == b.title && a.mission == b.mission && a.multiplayer == b.multiplayer &&
 	       a.builds_on == b.builds_on && a.as_expansion == b.as_expansion && a.expansion == b.expansion &&
-	       a.game_install == b.game_install && a.runtime == b.runtime && a.play_in_install == b.play_in_install;
+	       a.game_install == b.game_install && a.runtime == b.runtime && a.play_in_install == b.play_in_install &&
+	       a.play_in_install_strict == b.play_in_install_strict;
 }
 
 // Project settings: opened over the settings in effect (the project's document, the install in effect, the
@@ -423,6 +427,7 @@ bool set_settings(Change &change, const JsonValue &part) {
 		settings.game_install = view.project.retail_directory;
 		settings.runtime = view.project.runtime_setting;
 		settings.play_in_install = view.project.play_retail;
+		settings.play_in_install_strict = view.project.play_in_install_strict;
 	} else if (open) {
 		settings.open = open->boolean;
 	}
@@ -437,6 +442,7 @@ bool set_settings(Change &change, const JsonValue &part) {
 	if (const JsonValue *install = part.get("game_install")) settings.game_install = install->string;
 	if (const JsonValue *runtime = part.get("runtime")) settings.runtime = runtime->string;
 	if (const JsonValue *play = part.get("play_in_install")) settings.play_in_install = play->boolean;
+	if (const JsonValue *strict = part.get("play_in_install_strict")) settings.play_in_install_strict = strict->boolean;
 	if (!settings.builds_on.empty()) settings.as_expansion = true;
 	if (!settings.open) settings = WorkspaceView::Settings();
 	if (same_settings(settings, view.workspace.settings)) return false;
@@ -1266,6 +1272,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 		dialog.set("game_install", text(settings.game_install));
 		dialog.set("runtime", text(settings.runtime));
 		dialog.set("play_in_install", flag(settings.play_in_install));
+		dialog.set("play_in_install_strict", flag(settings.play_in_install_strict));
 	}
 	out.set("settings", std::move(dialog));
 	JsonValue prompt = JsonValue::make_object();
