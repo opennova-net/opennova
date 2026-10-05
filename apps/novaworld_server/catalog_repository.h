@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 // Read-only DB queries against the games catalogue. Lives at
 // apps/novaworld_server/ because it's purely HTTP-side state — the UDP
@@ -31,4 +31,4 @@ std::vector<GameRow> list_games(opennova::db::Database &db);
 
 } // namespace catalog
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

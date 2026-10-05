@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace opennova::lister {
+namespace opennova::nw_lister {
 
 // One listing, as the JSON file states it (README.md's table, one key per column). The
 // registration keys the session owns (LobbyName, AppId, HostKey, PCIDKey) are not the file's.
@@ -32,4 +32,4 @@ struct Credentials {
 };
 bool load_credentials(const std::string &path, Credentials &out, std::string &error);
 
-} // namespace opennova::lister
+} // namespace opennova::nw_lister

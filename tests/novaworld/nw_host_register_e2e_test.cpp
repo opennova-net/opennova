@@ -67,14 +67,14 @@ int main() {
 	// Stand up the real listener (no DB: snapshot_hosted reads the in-memory
 	// lobby state, so host registration is observable without SQLite).
 	opennova::ConnectionManager manager;
-	opennova::server::NwUdpListener listener(manager);
+	opennova::novaworld_server::NwUdpListener listener(manager);
 	manager.on_lost([&listener](
 				const opennova::Connection &connection,
 				opennova::DropReason reason) {
 		listener.erase_lobby_state(
 				connection.addr, opennova::drop_reason_name(reason));
 	});
-	opennova::server::ServerConfig config;
+	opennova::novaworld_server::ServerConfig config;
 	config.nw_udp_port = 0;
 	if (!listener.start(config)) {
 		std::fprintf(stderr, "FAIL: listener.start\n");
@@ -320,7 +320,7 @@ int main() {
 
 		// The listener processes the request on its worker thread; poll the
 		// hosted snapshot until the row appears (or time out).
-		std::vector<opennova::server::NwUdpListener::HostedSnapshot> hosted;
+		std::vector<opennova::novaworld_server::NwUdpListener::HostedSnapshot> hosted;
 		for (int i = 0; i < 100 && hosted.empty(); ++i) {
 			std::this_thread::sleep_for(20ms);
 			hosted = listener.snapshot_hosted();

@@ -18,7 +18,7 @@
 
 #include <formats/threedi/scene_text.h>
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 // A scene reader's findings on stderr as `path:line: message` (`path: message`
 // for the whole file), notes marked `note:`. True when none is an error.
@@ -62,4 +62,4 @@ int cmd_scene(const char *model_path, const char *out_path);
 // counts as a difference too.
 int cmd_compare(const char *expected_path, const char *actual_path, bool strict = false);
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

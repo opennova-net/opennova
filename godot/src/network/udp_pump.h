@@ -80,7 +80,7 @@ protected:
 private:
 	// SELF-CAPTURE. When a capture path is set, every datagram this pump moves
 	// is appended to a pcap in the shape the repo's own readers and
-	// `apps/nw_pp` consume — the same legacy/DLT_RAW shape the retail-side hook
+	// `apps/wire` consume — the same legacy/DLT_RAW shape the retail-side hook
 	// writes, so a session recorded here and one recorded from the original
 	// game can be decoded by the same tool and compared per (direction, tag).
 	//

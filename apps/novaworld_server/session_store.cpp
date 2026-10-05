@@ -5,7 +5,7 @@
 #include <random>
 #include <utility>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 namespace {
 
@@ -89,4 +89,4 @@ std::size_t SessionStore::evict_older_than(uint64_t max_age_ms) {
 	return dropped;
 }
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

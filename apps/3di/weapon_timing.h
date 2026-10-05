@@ -19,7 +19,7 @@
 
 #include <runtime/world/weapon_fsm.h>
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 // A weapon.def entry name's field: 31 characters and its terminator
 // [orig: WeaponDefs_ParseLineCallback, strncpy 32 into entry+0x14 @ 0x543737].
@@ -147,4 +147,4 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 int cmd_weapon_timing(const char *input, const char *output);
 int cmd_weapon_merge(const char *def_path, const char *edits_path, const char *output);
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

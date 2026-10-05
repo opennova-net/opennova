@@ -69,6 +69,26 @@ Windows/macOS hot path stays lean), and scope `ctest` to the net stack:
 ctest --test-dir build --output-on-failure -R "gate|lobby|novaworld|napi|nwu|crypto|pubcrypto|epask|url_cipher|session|gsb|protocol_message"
 ```
 
+### Naming an app
+
+Every executable under `apps/` takes one name, spelled the same way everywhere (ADR 0040):
+
+| | Form | Example |
+|---|---|---|
+| Directory | `apps/<name>` (snake case) | `apps/lan_probe` |
+| CMake target | `opennova_<name>` | `opennova_lan_probe` |
+| Shipped binary (`OUTPUT_NAME`) | `opennova-<name>`, kebab case | `opennova-lan-probe.exe` |
+| Usage, help and error text | the binary name | `usage: opennova-lan-probe ...` |
+| Companion libraries | `opennova_<name>_<role>` | `opennova_lan_probe_client` |
+| Namespace, when it has one | `opennova::<name>` | `opennova::lan_probe` |
+| ctest names for the app itself | `opennova_<name>_*` | `opennova_3di_build` |
+
+The entry point is `main.cpp`. `apps/3di` is the one spelling exception: an identifier
+cannot start with a digit and `opennova::threedi` is the format library, so its namespace
+is `opennova::threedi_cli`. `scripts/package_apps.sh` lists only the directories and
+derives the rest, so a new app ships by adding its directory there and its exe to the
+`package-apps-windows.yml` smoke list.
+
 ## Build the GDExtension
 
 This is the native library that registers our C++ classes (`NovaWorldClient`,
@@ -174,11 +194,11 @@ checkout from the repo root with no setup:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
 cmake --build build --config Release --target opennova_novaworld_server
 # run from the repo root so the default relative paths resolve:
-ONNET_PUBLIC_HOST=127.0.0.1 ADMIN_API_TOKEN=dev-admin-token ./build/apps/novaworld_server/opennova-novaworld
+ONNET_PUBLIC_HOST=127.0.0.1 ADMIN_API_TOKEN=dev-admin-token ./build/apps/novaworld_server/opennova-novaworld-server
 ```
 
 On Windows multi-config generators, the executable is under the selected config directory
-and has `.exe`, for example `build/apps/novaworld_server/Release/opennova-novaworld.exe`.
+and has `.exe`, for example `build/apps/novaworld_server/Release/opennova-novaworld-server.exe`.
 
 Overridable env vars (defaults in parentheses): `ONNET_PUBLIC_HOST` (`127.0.0.1`),
 `ONNET_GATE_UDP_PORT` (`7597`), `ONNET_NW_UDP_PORT` (`64206`), `ONNET_HTTP_PORT` (`8080`),

@@ -26,7 +26,7 @@ class World;
 }
 }
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 // Per-connection state owned by NwUdpListener (in addition to the wire-level
 // info ConnectionRegistry tracks). Keyed by peer address.
@@ -207,4 +207,4 @@ private:
 	opennova::UnknownTracker *tracker_ = nullptr;
 };
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

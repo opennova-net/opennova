@@ -1,4 +1,4 @@
-// nw-lister end to end: the app's Lister (apps/nw_lister) over real loopback UDP against the real
+// opennova-nw-lister end to end: the app's Lister (apps/nw_lister) over real loopback UDP against the real
 // apps/novaworld_server NwUdpListener and an in-test gate. The row appears with the listing's
 // players; a listing edit removes one player while the other keeps its slot; a renamed column
 // rides the next 1860-tick refresh; the stop removes the row.
@@ -72,11 +72,11 @@ int main() {
 	}
 
 	opennova::ConnectionManager manager;
-	opennova::server::NwUdpListener listener(manager);
+	opennova::novaworld_server::NwUdpListener listener(manager);
 	manager.on_lost([&listener](const opennova::Connection &connection, opennova::DropReason reason) {
 		listener.erase_lobby_state(connection.addr, opennova::drop_reason_name(reason));
 	});
-	opennova::server::ServerConfig config;
+	opennova::novaworld_server::ServerConfig config;
 	config.nw_udp_port = 0;
 	if (!listener.start(config)) {
 		std::fprintf(stderr, "FAIL: listener.start\n");
@@ -93,11 +93,11 @@ int main() {
 	write_listing(listing, R"({"server_name": "Lister E2E", "mission": "ASH_G11A", "players": ["Alpha", "Bravo"]})",
 	              0);
 
-	opennova::lister::ListerOptions options;
+	opennova::nw_lister::ListerOptions options;
 	options.listing_path = listing.string();
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = gate_port;
-	opennova::lister::Lister lister(options);
+	opennova::nw_lister::Lister lister(options);
 	expect(lister.start(), "the lister loads the listing and binds");
 
 	// The owner's loop, on a synthetic clock.
@@ -149,7 +149,7 @@ int main() {
 	       "the 1860-tick refresh carries the renamed column");
 
 	lister.stop();
-	expect(lister.exit_code() == opennova::lister::kExitStopped, "a stop exits 0");
+	expect(lister.exit_code() == opennova::nw_lister::kExitStopped, "a stop exits 0");
 	bool gone = false;
 	for (int i = 0; i < 100 && !gone; ++i) {
 		std::this_thread::sleep_for(20ms);
@@ -163,7 +163,7 @@ int main() {
 	opennova::net::shutdown();
 	std::filesystem::remove(listing);
 	if (g_failures == 0) {
-		std::printf("OK: nw-lister lists, edits and deregisters through the real listener\n");
+		std::printf("OK: opennova-nw-lister lists, edits and deregisters through the real listener\n");
 		return 0;
 	}
 	std::fprintf(stderr, "%d assertion(s) failed\n", g_failures);

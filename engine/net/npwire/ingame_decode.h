@@ -10,7 +10,7 @@
 //
 // Single decoder shared between:
 //   - tests/novaworld (the inline-pcap and fixture replays)
-//   - apps/nw_pp                                   (pretty-printer)
+//   - apps/wire                                   (pretty-printer)
 //   - engine/runtime/inmatch + engine/runtime/replication                 (the in-match runtime's fold paths)
 //   - any future replay tool                       (re-emit captured C2S)
 //
@@ -1025,7 +1025,7 @@ struct FrameUpdate {
 };
 
 // Walk a S2C 0x0A body into a FrameUpdate — the single, complete decode of the
-// message (the same walk nw_pp's printer renders). Captures the anchor + header
+// message (the same walk opennova-wire's printer renders). Captures the anchor + header
 // flags, the env sub-block (case 2), the local-player tail, the conditional
 // phase-8 mounted-ammo record, every tag==1 per-entity compact record, AND every
 // tag==2 fired-round record (§5.9.1). `class_of` maps a wire type_id to its compact

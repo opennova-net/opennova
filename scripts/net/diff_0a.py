@@ -17,7 +17,7 @@
 #                             populated (non-zero / non-sentinel). A field golden
 #                             always fills but we always leave 0 is an under-send.
 #
-# It parses the repo's own `nw_pp --stream` labelled output (the stable decode
+# It parses the repo's own `opennova-wire --stream` labelled output (the stable decode
 # contract), so it tracks the decoders automatically. The golden's parsed profile
 # is cached to <golden>.0a.json so re-runs during iteration are instant; delete
 # the cache (or pass --refresh) to re-decode.
@@ -38,16 +38,16 @@ import subprocess
 import sys
 from collections import Counter, defaultdict
 
-NW_PP = os.path.join("build", "apps", "nw_pp", "Release", "nw_pp.exe")
+WIRE = os.path.join("build", "apps", "wire", "Release", "opennova-wire.exe")
 
-# --- line patterns (match nw_pp --stream 0x0A output) -----------------------
+# --- line patterns (match opennova-wire --stream 0x0A output) -----------------------
 RE_FRAME = re.compile(r"tag=0x0a\[per-frame-update\]")
 RE_HDR = re.compile(r"\[0x0A\].*flags1=(0x[0-9a-f]+)\s+flags2=(0x[0-9a-f]+)\s+sub=(\d+)")
 RE_HEADER = re.compile(r"^\s+header:\s+(.*)$")
 RE_REC = re.compile(r"^\s+rec \d+ hdl=(0x[0-9a-f]+) p(\d)\([^)]*\)/s\d+ type=(0x[0-9a-f]+).*class=(\w+)")
 RE_BODY = re.compile(r"^\s+(player|vehicle|infantry|guided):\s+(.*)$")
 # key=value tokens: keys are word chars; values are hex (either case), dec,
-# (tuples), or bare words. Hex must be case-insensitive: nw_pp prints 0xFFFF
+# (tuples), or bare words. Hex must be case-insensitive: opennova-wire prints 0xFFFF
 # uppercase, and a lowercase-only class would spill the "=none" suffix into a
 # bogus token.
 RE_KV = re.compile(r"(\w+)=(\([^)]*\)|0x[0-9a-fA-F]+|-?\d+|[A-Za-z]+)")
@@ -64,8 +64,8 @@ EMPTY_VALUES = {"0", "0x0", "0x00", "0x0000", "0xffff", "0xFFFF", "none", "-1", 
 
 
 def decode_stream(cap, items):
-    """Run nw_pp --stream and yield lines (text)."""
-    cmd = [NW_PP, cap, "--stream"]
+    """Run opennova-wire --stream and yield lines (text)."""
+    cmd = [WIRE, cap, "--stream"]
     if items:
         cmd += ["--items", items]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -209,8 +209,8 @@ def main():
     ap.add_argument("--refresh", action="store_true", help="ignore cached golden profile")
     args = ap.parse_args()
 
-    if not os.path.exists(NW_PP):
-        sys.exit(f"nw_pp not built at {NW_PP} (run scripts/build.sh)")
+    if not os.path.exists(WIRE):
+        sys.exit(f"opennova-wire not built at {WIRE} (run scripts/build.sh)")
 
     print(f"profiling OURS   : {args.ours}", file=sys.stderr)
     ours = load_or_profile(args.ours, args.items, args.refresh)

@@ -12,7 +12,7 @@
 #include <set>
 #include <system_error>
 
-namespace opennova::lister {
+namespace opennova::nw_lister {
 
 using io::LogLevel;
 
@@ -512,4 +512,4 @@ void Lister::teardown() {
 	admin_.stop();
 }
 
-} // namespace opennova::lister
+} // namespace opennova::nw_lister

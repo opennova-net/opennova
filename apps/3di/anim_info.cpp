@@ -14,7 +14,7 @@
 
 using namespace opennova::bad;
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 namespace {
 
@@ -135,4 +135,4 @@ int cmd_anim_info(const char *in_path, int verbose) {
 	return 0;
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

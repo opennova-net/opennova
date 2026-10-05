@@ -18,7 +18,7 @@ class UnknownTracker;
 namespace db { class Database; }
 } // namespace opennova
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 struct ServerConfig;
 class SessionStore;
@@ -100,4 +100,4 @@ private:
 	std::string gsb_url_;
 };
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

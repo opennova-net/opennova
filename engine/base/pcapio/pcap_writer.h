@@ -18,7 +18,7 @@ namespace opennova::net {
 // the same legacy header and synthesizes the same IPv4+UDP wrapper around each
 // payload. That symmetry is the point: a capture taken from our client and one
 // taken from the original game decode through the SAME pipeline (pcap_reader ->
-// npwire decode_capture_to_messages -> apps/nw_pp), so the two are directly
+// npwire decode_capture_to_messages -> apps/wire), so the two are directly
 // comparable per (direction, wire tag) instead of merely similar.
 //
 // Synthetic, not observed: the IP header is manufactured around a payload the
