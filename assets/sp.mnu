@@ -1,0 +1,72 @@
+<!-- OpenNova's single-player screen, authored from scratch. The game fills any
+     screen named SINGLE_PLAYER with its single-player missions: IA_LIST lists
+     them, a pick enables ACCEPT and ACCEPT starts it
+     (docs/required-resources.md, "Reaching a mission from the menu"). BACK
+     returns to the main menu. Literal strings, hex colors and opennova.fnt, as
+     main.mnu. -->
+<SCREEN>
+	<NAME>SINGLE_PLAYER</NAME>
+	<WINDOW type="window" name="MAIN">
+		<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>0</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<FONT>
+			<NAME>opennova.fnt</NAME>
+			<DEFAULT_FG>FFD8DEE4</DEFAULT_FG>
+			<MOUSEOVER_FG>FFFFC040</MOUSEOVER_FG>
+			<SELECTED_FG>FFFF8000</SELECTED_FG>
+			<DISABLED_FG>FF545252</DISABLED_FG>
+		</FONT>
+		<WINDOW type="static" name="TITLE">
+			<FONT>
+				<NAME>opennova.fnt</NAME>
+				<DEFAULT_FG>FFFFC040</DEFAULT_FG>
+			</FONT>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>110</TOP>
+				<RIGHT>800</RIGHT>
+				<BOTTOM>130</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">SINGLE PLAYER</STRING>
+		</WINDOW>
+		<WINDOW type="list" name="IA_LIST">
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<POSITION>
+				<LEFT>200</LEFT>
+				<TOP>150</TOP>
+				<RIGHT>600</RIGHT>
+				<BOTTOM>420</BOTTOM>
+			</POSITION>
+		</WINDOW>
+		<WINDOW type="button" name="ACCEPT">
+			<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+			<POSITION>
+				<LEFT>410</LEFT>
+				<TOP>440</TOP>
+				<RIGHT>600</RIGHT>
+				<BOTTOM>468</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">START</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="BACK">
+			<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+			<ACTION type="POP_SCREEN"></ACTION>
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+			<POSITION>
+				<LEFT>200</LEFT>
+				<TOP>440</TOP>
+				<RIGHT>390</RIGHT>
+				<BOTTOM>468</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">BACK</STRING>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>

@@ -1,0 +1,33 @@
+<SCREEN>
+  <NAME>NW_MULTI_PLAYER</NAME>
+  <WINDOW type="window" name="MAIN">
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>800</RIGHT>
+      <BOTTOM>600</BOTTOM>
+    </POSITION>
+    <APPEARANCE type="custom" state="default"></APPEARANCE>
+    <FONT>
+      <NAME>%DEF_FONTNAME_LG%</NAME>
+      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+      <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+      <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+    </FONT>
+    <WINDOW type="button" name="BACK">
+      <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+      <ACTION type="POP_SCREEN"></ACTION>
+      <POSITION>
+        <LEFT>340</LEFT>
+        <TOP>540</TOP>
+        <RIGHT>460</RIGHT>
+      </POSITION>
+      <APPEARANCE state="default"></APPEARANCE>
+      <APPEARANCE state="mouseover"></APPEARANCE>
+      <APPEARANCE state="selected"></APPEARANCE>
+      <APPEARANCE state="disabled"></APPEARANCE>
+      <STRING justify="CENTER">Back</STRING>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
