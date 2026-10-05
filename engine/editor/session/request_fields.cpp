@@ -99,8 +99,10 @@ constexpr RequestField kFields[] = {
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
 			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
-			"game_install?, runtime_executable?, play_in_install?, build_folder?}, each left out as it is "
-			"(expansion \"\" a standalone project, builds_on \"\" the base game)." },
+			"game_install?, runtime_executable?, play_in_install?, play_in_install_strict?, build_folder?}, each "
+			"left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game; "
+			"play_in_install_strict: Play in the game install stages the build and the install's program alone "
+			"and launches without /d, as a player's drop-in)." },
 	{ F::Viewport, "viewport", J::Object,
 			"A viewport's change, {kind?, device?, clock?, options?, camera?}: kind its kind's token "
 			"(menu, model, script; left out, the kind the document shows in: the Preview's kind that shows "
