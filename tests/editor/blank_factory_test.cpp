@@ -447,6 +447,9 @@ static int test_mission_start_files() {
 		const opennova::wac::Program program = opennova::wac::compile_source(text_of(script), opennova::wac::CompileEnv());
 		TEST_EXPECT(program.ok() && program.diagnostics.empty() && program.event_count == 0);
 	}
+	return 0;
+}
+
 // The pointer the blank menus name: a 32-bit TGA in the form the menus' and the splash's readers
 // take (the 18-byte header, type 2, 8 alpha bits, the rows from the bottom up), 32 by 32 as the
 // shipped one, its tip the top-left pixel (where the game draws the texture from), opaque where

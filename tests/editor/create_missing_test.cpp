@@ -199,8 +199,9 @@ static int test_mission_rows_are_all_filled() {
 	        create_missing_requirements(paths, doc, before.scan, before.report, unmet_required_roles(before.report));
 	for (const std::string &name : result.unavailable) std::fprintf(stderr, "  unavailable: %s\n", name.c_str());
 	TEST_EXPECT(result.diagnostics.empty() && result.unavailable.empty());
-	TEST_EXPECT(static_cast<int>(result.created.size()) == before.report.required_total);
-	for (const char *path : {"defs/ammo.def", "defs/powerup.def", "menus/cmap.mnu", "menus/game.mnu", "menus/weapon.mnu",
+	// Every required file, and the pointer the startup screen names, made with it.
+	TEST_EXPECT(static_cast<int>(result.created.size()) == before.report.required_total + 1);
+	for (const char *path : {"textures/newarow1.tga", "defs/ammo.def", "defs/powerup.def", "menus/cmap.mnu", "menus/game.mnu", "menus/weapon.mnu",
 	                         "menus/vehicle.mnu", "menus/stat.mnu", "menus/death.mnu", "menus/mp.mnu"}) {
 		bool created = false;
 		for (const std::string &made : result.created) created = created || made == path;

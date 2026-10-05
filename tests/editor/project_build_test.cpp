@@ -289,7 +289,7 @@ static int test_mission_project_builds_clean() {
 	{
 		const AssetScan scan = scan_project_assets(p.paths, p.doc);
 		const CreateMissingResult extras = create_missing_requirements(
-		        p.paths, p.doc, evaluate_requirements(p.doc, scan),
+		        p.paths, p.doc, scan, evaluate_requirements(p.doc, scan),
 		        {"font_arials18", "font_arial22", "font_couri20b", "game_wac", "server_wac", "loadscrn_pcx", "monogram_tga",
 		         "boxtile_tga", "border_tga"});
 		TEST_EXPECT(extras.diagnostics.empty() && extras.unavailable.empty() && extras.created.size() == 9);
