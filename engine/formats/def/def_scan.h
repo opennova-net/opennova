@@ -129,4 +129,10 @@ void parse_pos_align3(Token *vals, int n, int *out);
 
 int parse_fixed16_digits_n(const char *s, size_t len);
 
+// A hudpos number: every value HUD_ParseHudposToken reads is the CRT's atof of
+// its token, converted by _ftol2_sse where the slot is an integer [orig:
+// HUD_ParseHudposToken @0x59F370, e.g. HUDSPINMAPX1 @0x59F7E4..0x59F7EC].
+double hud_double(const char *s, size_t len);
+int hud_number(const char *s, size_t len);
+
 }  // namespace opennova::defscan

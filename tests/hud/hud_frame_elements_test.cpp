@@ -264,7 +264,7 @@ void test_health_bar_death_arm(const fnt_font_t *font) {
 // from HUDLS_SLOT 6, the (0,0) stall, the MOREAV marker, the OR'd colour.
 void test_slot_bar(const fnt_font_t *font) {
 	HudLayout layout;
-	layout.alpha_fade_base = 40.0f; // 102
+	layout.alpha_fade_base_alpha = 102; // alphafade 40
 	layout.stance_tint = 0x00123456u;
 	layout.hudls.key_ofst_x = 2;
 	layout.hudls.key_ofst_y = 20;
@@ -426,9 +426,9 @@ void test_squad_colors() {
 void test_flash_key(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.clip_pos = {32, 700, 0, 0, true};
-	layout.alpha_fade_seconds = 1.0f; // 62-tick ramp
-	layout.alpha_fade_base = 25.0f;
-	layout.alpha_fade_max = 100.0f;
+	layout.alpha_fade_ramp_ticks = 62; // alphafade 25 100 1
+	layout.alpha_fade_base_alpha = 63;
+	layout.alpha_fade_max_alpha = 255;
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;

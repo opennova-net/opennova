@@ -1,4 +1,5 @@
 // Test parsing hudpos.def — check fonts, rects, colors, stances.
+#include <cstdint>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -155,10 +156,51 @@ static int value_cap_legs() {
     return ok ? 0 : 1;
 }
 
+/* Every hudpos number is the CRT's atof of its token, then _ftol2_sse for an
+   integer slot [orig: HUD_ParseHudposToken @0x59F370, e.g. HUDSPINMAPX1
+   @0x59F7E4..0x59F7EC; _atof @0x76B6A1]: an exponent counts, a value past the
+   int range is the integer indefinite, a hex spelling reads 0, and a declutter
+   flag is set by any value atof does not read as 0.0 [orig: the `fcomp
+   dbl_7D0188` (0.0) @0x5A2174]. ALPHAFADE keeps atof's double for the layout's
+   x2.55 / x62 converts. */
+static int atof_legs() {
+    const char *text =
+        "HUDSPINMAPX1 1e2\r\n"
+        "HUDSPINMAPX2 3000000000\r\n"
+        "HUDSPINMAPY1 0x40\r\n"
+        "HUDSPINMAPY2 -7.9\r\n"
+        "HUDDECLUT_SPINMAP 0.5 0 2d1 0\r\n"
+        "alphafade 20 100.5 0.5\r\n";
+    DefHudPosFile f;
+    memset(&f, 0, sizeof(f));
+    if (def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &f) != 0 ||
+        f.hud.declutter_count != 1) {
+        fprintf(stderr, "FAIL: atof snippet did not parse\n");
+        def_free_hudpos(&f);
+        return 1;
+    }
+    const DefDeclutterEntry &d = f.hud.declutter[0];
+    const bool ok = f.hud.spinmap_x1 == 100 && f.hud.spinmap_x2 == INT32_MIN &&
+            f.hud.spinmap_y1 == 0 && f.hud.spinmap_y2 == -7 && d.flags[0] == 1 &&
+            d.flags[1] == 0 && d.flags[2] == 1 && d.flags[3] == 0 &&
+            f.hud.alpha_fade[0] == 20.0 && f.hud.alpha_fade[1] == 100.5 &&
+            f.hud.alpha_fade[2] == 0.5;
+    if (!ok)
+        fprintf(stderr, "FAIL: atof reads: spinmap %d %d %d %d declutter %d%d%d%d alphafade "
+                "%g %g %g\n", f.hud.spinmap_x1, f.hud.spinmap_x2, f.hud.spinmap_y1,
+                f.hud.spinmap_y2, d.flags[0], d.flags[1], d.flags[2], d.flags[3],
+                (double)f.hud.alpha_fade[0], (double)f.hud.alpha_fade[1],
+                (double)f.hud.alpha_fade[2]);
+    def_free_hudpos(&f);
+    if (ok) printf("hudpos atof reads OK\n");
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     if (synthetic_legs() != 0) return 1;
     if (tokenizer_legs() != 0) return 1;
+    if (atof_legs() != 0) return 1;
     if (value_cap_legs() != 0) return 1;
     /* Every remaining leg reads the shipped hudpos.def (the memory legs compare
        against its path parse), so they gate on the reference fixture set

@@ -464,10 +464,13 @@ struct HudLayout {
 	static constexpr bool kCrosshairSpreadDefault = true;
 	uint32_t crosshair_color = 0xFF000000u | kCrosshairColorDefault;
 	bool crosshair_spread_enabled = kCrosshairSpreadDefault;
-	// ALPHAFADE (percent, percent, seconds) [orig: parse @ 0x5a086c].
-	float alpha_fade_base = 0.0f;
-	float alpha_fade_max = 0.0f;
-	float alpha_fade_seconds = 0.0f;
+	// ALPHAFADE as the original stores it: the base and max alphas
+	// (percent x kPercentToAlpha) and the ramp in ticks (seconds x 62), each
+	// _ftol2_sse of the double product [orig: parse @ 0x5a086c..0x5a08c2,
+	// dword_2723614 / dword_2723618 / dword_272361C].
+	int alpha_fade_base_alpha = 0;
+	int alpha_fade_max_alpha = 0;
+	int alpha_fade_ramp_ticks = 0;
 	int chat_lines = 8;
 	std::vector<HudSightsRow> sights;
 };

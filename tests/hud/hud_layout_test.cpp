@@ -160,8 +160,8 @@ static void synthetic() {
 	CHECK(layout.spinmap_wp_dist_off == 17);
 	CHECK(layout.map_coords_x == 530.0f && layout.map_coords_y == 720.0f &&
 			layout.map_coords_off == 1);
-	CHECK(layout.alpha_fade_base == 30.0f && layout.alpha_fade_max == 50.0f &&
-			layout.alpha_fade_seconds == 3.0f);
+	CHECK(layout.alpha_fade_base_alpha == 76 && layout.alpha_fade_max_alpha == 127 &&
+			layout.alpha_fade_ramp_ticks == 186);
 	// An unauthored HUDCHLINE keeps the 8-line default.
 	CHECK(layout.chat_lines == 8);
 	// HUDSTANCE by id: a later record for the same id replaces the earlier
@@ -234,6 +234,24 @@ static void synthetic() {
 // without the line restores the reset's, as the mission-start reset runs
 // before every parse [orig: HUD_ParseHudposToken @0x59F981..0x59FA0C;
 // CNetQuality_Reset @0x4C5908..0x4C591E via Game_StartMission @0x5243B4].
+// ALPHAFADE's converts are the original's: atof times dbl_7D9A20 (2.55 rounded
+// up) for the two alphas and times 62.0 for the ramp, each through _ftol2_sse
+// [orig: @0x5A0882..0x5A08C2].
+static void alphafade_converts() {
+	DefHudPosFile file;
+	if (!parse("alphafade 20 100.5 0.5\r\n", file)) {
+		std::printf("FAIL: alphafade parse\n");
+		++failures;
+		return;
+	}
+	HudLayout layout;
+	HudLayoutAssets assets;
+	hud_layout_from_hudpos(file, layout, assets);
+	CHECK(layout.alpha_fade_base_alpha == 51 && layout.alpha_fade_max_alpha == 256 &&
+			layout.alpha_fade_ramp_ticks == 31);
+	def_free_hudpos(&file);
+}
+
 static void network_indicator() {
 	DefHudPosFile file;
 	if (!parse("NETWORKINDICATOR\t6,7 30,7 70,8\r\n", file)) {
@@ -283,8 +301,8 @@ static void retail_leg() {
 	CHECK(assets.stance_textures[0] == "stance_1.tga");
 	CHECK(layout.game_info.x == 1013 && layout.game_info.y == 430 && layout.game_info.hidden == 0 &&
 			layout.game_info.align == 0);
-	CHECK(layout.alpha_fade_base == 30.0f && layout.alpha_fade_max == 50.0f &&
-			layout.alpha_fade_seconds == 3.0f);
+	CHECK(layout.alpha_fade_base_alpha == 76 && layout.alpha_fade_max_alpha == 127 &&
+			layout.alpha_fade_ramp_ticks == 186);
 	CHECK(layout.chat_lines == 8);
 	CHECK(layout.veh_stance_pos.x == 0 && layout.veh_stance_pos.y == 272);
 	CHECK(layout.lfp_anchor_x == 1020 && layout.lfp_anchor_y == 27);
@@ -296,6 +314,7 @@ static void retail_leg() {
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	synthetic();
+	alphafade_converts();
 	network_indicator();
 	retail_leg();
 	if (failures != 0) {

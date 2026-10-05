@@ -157,9 +157,9 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 	};
 	// Weapon and control-seat silhouettes share the original flash stamp.
 	// [orig: HUD_RenderOverlays @0x5A7CBE..0x5A7D64; sub_59A710 @0x59A710]
-	const int ramp = int(layout_.alpha_fade_seconds * 62.0f);
-	const int base = int(layout_.alpha_fade_base * 2.55f);
-	const int maximum = int(layout_.alpha_fade_max * 2.55f);
+	const int ramp = layout_.alpha_fade_ramp_ticks;
+	const int base = layout_.alpha_fade_base_alpha;
+	const int maximum = layout_.alpha_fade_max_alpha;
 	auto tint = [&]() {
 		return layout_.stance_tint |
 				(uint32_t(hud_silhouette_alpha(s.ticks - silhouette_stamp_, ramp, base, maximum))

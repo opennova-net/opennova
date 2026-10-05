@@ -63,7 +63,10 @@ BorderedQuadUv bordered_quad_uv(int tex_w, int tex_h, double left, double top, d
 // fade = 255 - u8(u16((elapsed<<16)/ticks - 1) >> 8), elapsed-0 wrap quirk
 // included (one 62 Hz tick of latency).
 
-inline constexpr double kPercentToAlpha = 2.55;
+// dbl_7D9A20 is the double 2.55 rounded UP (0x4004666666666667,
+// 2.5500000000000003), so a whole percent whose product with 2.55 is an integer
+// (20, 40, 60, 80, 100) lands on that integer.
+inline constexpr double kPercentToAlpha = 0x1.4666666666667p+1;
 inline constexpr double kSecondsToTicks = io::kTicksPerSecondInt;
 
 int fade_decay(int elapsed_ticks, int ramp_ticks);

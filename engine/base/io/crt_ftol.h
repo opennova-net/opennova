@@ -1,6 +1,7 @@
 #pragma once
 
-// The retail float-to-int conversions, shared by the formats and the runtime:
+// The retail number conversions, shared by the formats and the runtime: the
+// CRT's atof (retail_atof below) and its float-to-int conversions:
 // the CRT's _ftol2_sse (the items.def parser's scaled properties, the WAC
 // compiler's literals and VM power folds) and the inline x87 `fistp qword`
 // a parser compiles for itself (the items.def scale).
@@ -14,8 +15,47 @@
 // behind the flag is dead on that hardware.
 // [orig: _ftol2_sse @0x76BC00 (the flag test), @0x76BC15 (cvttsd2si)]
 #include <cstdint>
+#include <cstdlib>
+#include <string>
 
 namespace opennova::io {
+
+// The CRT's atof as the game links it [orig: _atof @0x76B6A1 -> _atof_l ->
+// _fltin2]: leading white space, an optional sign, decimal digits with at most
+// one '.', then an optional exponent marked e, E, d or D. The longest such
+// prefix is the value, and a string with no digit reads 0.0. There is no hex,
+// infinity or NaN spelling (later CRTs' strtod reads those, so the prefix is cut
+// here before strtod converts it).
+inline double retail_atof(const char *s) {
+	if (s == nullptr) return 0.0;
+	while (*s == ' ' || (*s >= '\t' && *s <= '\r')) ++s;
+	std::string number;
+	const char *p = s;
+	if (*p == '+' || *p == '-') number.push_back(*p++);
+	size_t digits = 0;
+	while (*p >= '0' && *p <= '9') {
+		number.push_back(*p++);
+		++digits;
+	}
+	if (*p == '.') {
+		number.push_back(*p++);
+		while (*p >= '0' && *p <= '9') {
+			number.push_back(*p++);
+			++digits;
+		}
+	}
+	if (digits == 0) return 0.0;
+	if (*p == 'e' || *p == 'E' || *p == 'd' || *p == 'D') {
+		const char *q = p + 1;
+		std::string exponent = "e";
+		if (*q == '+' || *q == '-') exponent.push_back(*q++);
+		if (*q >= '0' && *q <= '9') {
+			while (*q >= '0' && *q <= '9') exponent.push_back(*q++);
+			number += exponent;
+		}
+	}
+	return std::strtod(number.c_str(), nullptr);
+}
 
 inline int32_t retail_ftol_sse2(double value) {
 	if (!(value > -2147483649.0 && value < 2147483648.0)) return INT32_MIN;

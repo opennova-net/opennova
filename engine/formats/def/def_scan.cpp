@@ -1,5 +1,7 @@
 #include "def_scan.h"
 
+#include <base/io/crt_ftol.h>
+
 #include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_ITEM_ATTRIB_* (the tables initialize from them)
 
 #include <base/io/strutil.h>
@@ -313,14 +315,15 @@ static int parse_alignment(const char *s, size_t len) {
     return 0;
 }
 
-/* Parse HudColor from RGB values */
+/* Parse HudColor from RGB values (hudpos only; each channel is atof then
+   ftol, e.g. hud_textcolor @0x5A0F4D..0x5A0F82) */
 DefHudColor parse_hud_color(Token *vals, int n) {
     DefHudColor c = {0, 0, 0, 255};
     if (n >= 3) {
-        c.r = parse_int_n(vals[0].s, vals[0].len);
-        c.g = parse_int_n(vals[1].s, vals[1].len);
-        c.b = parse_int_n(vals[2].s, vals[2].len);
-        if (n >= 4) c.a = parse_int_n(vals[3].s, vals[3].len);
+        c.r = hud_number(vals[0].s, vals[0].len);
+        c.g = hud_number(vals[1].s, vals[1].len);
+        c.b = hud_number(vals[2].s, vals[2].len);
+        if (n >= 4) c.a = hud_number(vals[3].s, vals[3].len);
     }
     return c;
 }
@@ -329,10 +332,10 @@ DefHudColor parse_hud_color(Token *vals, int n) {
 DefHudColor parse_hud_color_argb(Token *vals, int n) {
     DefHudColor c = {0, 0, 0, 255};
     if (n >= 4) {
-        c.a = parse_int_n(vals[0].s, vals[0].len);
-        c.r = parse_int_n(vals[1].s, vals[1].len);
-        c.g = parse_int_n(vals[2].s, vals[2].len);
-        c.b = parse_int_n(vals[3].s, vals[3].len);
+        c.a = hud_number(vals[0].s, vals[0].len);
+        c.r = hud_number(vals[1].s, vals[1].len);
+        c.g = hud_number(vals[2].s, vals[2].len);
+        c.b = hud_number(vals[3].s, vals[3].len);
     }
     return c;
 }
@@ -347,9 +350,9 @@ DefHudColor parse_hud_color_argb(Token *vals, int n) {
    HUD_ParseTextAlignment @0x59d6b0 on field 4; the draws gate on the hidden
    dword @0x5939f3] */
 void parse_pos_aligned(Token *vals, int n, int *out) {
-    if (n >= 1) out[0] = parse_int_n(vals[0].s, vals[0].len);
-    if (n >= 2) out[1] = parse_int_n(vals[1].s, vals[1].len);
-    if (n >= 3) out[2] = parse_int_n(vals[2].s, vals[2].len);
+    if (n >= 1) out[0] = hud_number(vals[0].s, vals[0].len);
+    if (n >= 2) out[1] = hud_number(vals[1].s, vals[1].len);
+    if (n >= 3) out[2] = hud_number(vals[2].s, vals[2].len);
     if (n >= 4) {
         char low[16];
         size_t ll = vals[3].len < 15 ? vals[3].len : 15;
@@ -361,8 +364,8 @@ void parse_pos_aligned(Token *vals, int n, int *out) {
 /* [orig: HUD_ParseHudposToken's BREATHTIME arm @0x59FB3B..0x59FB84 -- atof x,
    atof y, then HUD_ParseTextAlignment on the THIRD token] */
 void parse_pos_align3(Token *vals, int n, int *out) {
-    if (n >= 1) out[0] = parse_int_n(vals[0].s, vals[0].len);
-    if (n >= 2) out[1] = parse_int_n(vals[1].s, vals[1].len);
+    if (n >= 1) out[0] = hud_number(vals[0].s, vals[0].len);
+    if (n >= 2) out[1] = hud_number(vals[1].s, vals[1].len);
     if (n >= 3) {
         char low[16];
         size_t ll = vals[2].len < 15 ? vals[2].len : 15;
@@ -371,6 +374,18 @@ void parse_pos_align3(Token *vals, int n, int *out) {
     }
 }
 
+
+double hud_double(const char *s, size_t len) {
+    char buf[64];
+    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    return io::retail_atof(buf);
+}
+
+int hud_number(const char *s, size_t len) {
+    return io::retail_ftol_sse2(hud_double(s, len));
+}
 
 int parse_fixed16_digits_n(const char *s, size_t len) {
     size_t i = 0;
