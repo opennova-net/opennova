@@ -27,6 +27,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_menu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_mission.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_mission_menus.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_style.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_texture.cpp
