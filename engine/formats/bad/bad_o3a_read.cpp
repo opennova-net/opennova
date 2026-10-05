@@ -19,12 +19,11 @@ namespace {
 struct Parser {
 	std::vector<SceneFinding> &findings;
 	int line = 0;
-	// The line each clip opens on, in set order: a seam refusal names it.
-	std::vector<int> clip_lines;
+	// Where each clip, bone and row opens: a set problem names its line.
+	BadO3aLines lines;
 
 	void error(const std::string &what) { error_at(line, what); }
 	void error_at(int at, const std::string &what) { findings.push_back(SceneFinding{at, true, what}); }
-	void set_error(const std::string &what) { findings.push_back(SceneFinding{0, true, what}); }
 	bool failed() const {
 		for (const SceneFinding &f : findings)
 			if (f.error) return true;
@@ -93,9 +92,11 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			}
 			if (row.variants.empty()) ps.error("row '" + row.key + "' names no clip");
 			set.rows.push_back(row);
+			ps.lines.rows.push_back(ps.line);
 		} else if (key == "clip") {
 			set.clips.push_back(BadBuildClip{});
-			ps.clip_lines.push_back(ps.line);
+			ps.lines.clips.push_back(ps.line);
+			ps.lines.bones.emplace_back();
 			clip = &set.clips.back();
 			bone = nullptr;
 			if (!in.name(clip->name) || clip->name.empty() || in.more())
@@ -128,6 +129,7 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			row.length = length;
 			row.name = name;
 			clip->bones.push_back(row);
+			ps.lines.bones.back().push_back(ps.line);
 			bone = &clip->bones.back();
 			bone_keys.push_back(BoneKeys{set.clips.size() - 1, clip->bones.size() - 1, ps.line});
 		} else if (key == "k" || key == "tr" || key == "bonepos") {
@@ -141,17 +143,18 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 					ps.error("k needs four quaternion components");
 					continue;
 				}
-				// A duration states how long the key holds; a bone that gives
-				// one gives it on every key, and keeps a table only then.
+				// A duration states how long the key holds, in frames; a bone
+				// that gives one gives it on every key, and keeps a table only
+				// then. How long a key may hold is the target's.
 				long long duration = 0;
 				const bool stated = in.more();
-				if (stated && (!in.integer(duration, 1, 0xFFFF) || in.more())) {
-					ps.error("a key duration is one whole number from 1 to 65535");
+				if (stated && (!in.integer(duration, 1, kWordMax) || in.more())) {
+					ps.error("a key duration is one whole number of frames, 1 or more (a 32-bit word)");
 					continue;
 				}
 				bone->keys.push_back(BadBuildQuat{q[0], q[1], q[2], q[3]});
 				if (stated) {
-					bone->durations.push_back(static_cast<uint16_t>(duration));
+					bone->durations.push_back(static_cast<uint32_t>(duration));
 					++bone_keys.back().with;
 				} else {
 					++bone_keys.back().without;
@@ -210,62 +213,69 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 		}
 		if (b.keys.size() != static_cast<size_t>(c.frame_count) + 1) continue;
 		bool uniform = true;
-		for (const uint16_t d : b.durations) uniform = uniform && d == 1;
+		for (const uint32_t d : b.durations) uniform = uniform && d == 1;
 		if (uniform) b.durations.clear();
 	}
 }
 
 // What no single record can see: a row naming a clip the set lacks, two
-// clips under one name (they would write the same file), a clip name or a
+// clips under one name (they would write the same file), and a clip name or a
 // variant that is not a bare file stem (`build` writes each clip beside the
-// table, so a path there would write outside it), a row whose key names no
-// anim slot, and the set's own checks (bad_build_check_set: every clip file
-// packs, translations only over a translated reset).
-void validate(Parser &ps, BadSlotLookup slots, const BadBuildSet &set) {
-	// The game registers a row only under the slot its key names past the
-	// first five characters and drops any other without a word.
-	// [orig: AnimMap_ParseConfigLine @0x40CB60, AnimMap_FindSlotByName
-	//  @0x40CFA0 returns -1 @0x40CFCE and the row registers nothing @0x40CBA4]
-	for (const BadBuildRow &row : set.rows) {
-		if (slots == nullptr || slots(row.key) < 0)
-			ps.set_error("row '" + row.key + "' names no anim slot (past its first five characters the key is none "
-					"of the 252 slot names `opennova-3di catalog` lists), and the game drops such a row");
-	}
-	std::vector<std::string> problems;
-	bad_build_check_set(set, problems);
-	for (const std::string &problem : problems) ps.set_error(problem);
-	for (const BadBuildClip &clip : set.clips) {
-		if (!bad_build_bare_stem(clip.name)) ps.set_error("clip '" + clip.name + "' is not a bare file name");
-	}
-	for (size_t i = 0; i < set.clips.size(); ++i) {
-		for (size_t j = i + 1; j < set.clips.size(); ++j) {
-			if (strutil::iequals(set.clips[i].name, set.clips[j].name))
-				ps.set_error("two clips are named '" + set.clips[i].name + "'");
+// table, so a path there would write outside it). What the target holds (anim
+// slots, packed names, bones, durations) is the set check's
+// (bad_build_check_set, which bad_build_mint_set runs).
+void validate(Parser &ps, const BadBuildSet &set) {
+	for (size_t c = 0; c < set.clips.size(); ++c) {
+		const BadBuildClip &clip = set.clips[c];
+		if (!bad_build_bare_stem(clip.name))
+			ps.error_at(ps.lines.clips[c], "clip '" + clip.name + "' is not a bare file name");
+		for (size_t j = c + 1; j < set.clips.size(); ++j) {
+			if (strutil::iequals(clip.name, set.clips[j].name))
+				ps.error_at(ps.lines.clips[j], "two clips are named '" + clip.name + "'");
 		}
 	}
-	for (const BadBuildRow &row : set.rows) {
+	for (size_t r = 0; r < set.rows.size(); ++r) {
+		const BadBuildRow &row = set.rows[r];
 		for (const std::string &variant : row.variants) {
 			const std::string stem = bad_build_clip_stem(variant);
 			if (!bad_build_bare_stem(stem)) {
-				ps.set_error("row '" + row.key + "' names '" + variant + "', which is not a bare file name");
+				ps.error_at(ps.lines.rows[r], "row '" + row.key + "' names '" + variant + "', which is not a bare "
+						"file name");
 				continue;
 			}
 			bool found = false;
 			for (const BadBuildClip &clip : set.clips) found = found || strutil::iequals(clip.name, stem);
-			if (!found) ps.set_error("row '" + row.key + "' names '" + variant + "', which the set does not hold");
+			if (!found)
+				ps.error_at(ps.lines.rows[r], "row '" + row.key + "' names '" + variant + "', which the set does not "
+						"hold");
 		}
 	}
 }
 
 } // namespace
 
-bool bad_o3a_read(std::istream &text, BadSlotLookup slots, BadBuildSet &set, std::vector<SceneFinding> &findings,
-		std::vector<int> *clip_lines) {
+bool bad_o3a_read(std::istream &text, BadBuildSet &set, std::vector<SceneFinding> &findings, BadO3aLines *lines) {
 	Parser ps{findings};
 	parse_set(ps, text, set);
-	if (!ps.failed()) validate(ps, slots, set);
-	if (clip_lines != nullptr) *clip_lines = ps.clip_lines;
+	if (!ps.failed()) validate(ps, set);
+	if (lines != nullptr) *lines = ps.lines;
 	return !ps.failed();
+}
+
+int bad_o3a_line(const BadO3aLines &lines, const BadBuildProblem &problem) {
+	const auto in = [](int i, size_t n) { return i >= 0 && static_cast<size_t>(i) < n; };
+	if (in(problem.clip, lines.clips.size())) {
+		const std::vector<int> &bones = lines.bones[static_cast<size_t>(problem.clip)];
+		return in(problem.bone, bones.size()) ? bones[static_cast<size_t>(problem.bone)]
+											  : lines.clips[static_cast<size_t>(problem.clip)];
+	}
+	return in(problem.row, lines.rows.size()) ? lines.rows[static_cast<size_t>(problem.row)] : 0;
+}
+
+void bad_o3a_findings(const BadO3aLines &lines, const std::vector<BadBuildProblem> &problems,
+		std::vector<SceneFinding> &findings) {
+	for (const BadBuildProblem &problem : problems)
+		findings.push_back(SceneFinding{bad_o3a_line(lines, problem), true, problem.what});
 }
 
 } // namespace opennova::bad

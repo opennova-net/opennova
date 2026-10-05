@@ -1053,7 +1053,7 @@ static int test_scene_imports() {
 	TEST_EXPECT(!has_error(r.diagnostics) && r.imported.empty());
 
 	// A scene that does not read names its line and writes nothing.
-	TEST_EXPECT(editor_test::write_text(source + "/broken.o3d", "o3d 1\nmodel broken\nlod 0\nbogus 1\n"));
+	TEST_EXPECT(editor_test::write_text(source + "/broken.o3d", "o3d 2\nmodel broken\nlod 0\nbogus 1\n"));
 	r = import_assets({{source + "/broken.o3d", {}}}, paths, document, false);
 	bool line = false;
 	for (const Diagnostic &d : r.diagnostics) line = line || (d.code() == "import.scene" && d.line == 4);

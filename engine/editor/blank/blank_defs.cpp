@@ -29,6 +29,19 @@ bool make_blank_ammo_def(const BlankRequest &, std::vector<uint8_t> &out, Diagno
 	def::DefAmmoFile file{}; file.entries = &ammo; file.count = 1;
 	return emit(def::def_write_ammo(file), out, error);
 }
+// powerup.def: no powerup yet. A file the loader reads [orig: PowerUpDef_LoadFromFile @ 0x443350]
+// rather than none, which Game_StartMission logs as "Unable to load powerup.def" [orig: @ 0x5256cd];
+// a comment line first, so the file is not empty (the shared reader allocates the file's size
+// [orig: File_ParseASCIIFile @ 0x53d810]) and skips it as a comment.
+bool make_blank_powerup_def(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+	if (!emit(def::def_write_powerup({}), out, error)) return false;
+	std::vector<uint8_t> header;
+	blank_text_to_bytes("// Powerups of " +
+		(request.project_title.empty() ? std::string("the project") : request.project_title) +
+		". Each is a powerup \"<name>\" .. end block.\n", header);
+	out.insert(out.begin(), header.begin(), header.end());
+	return true;
+}
 // One profile, "default", with no sound in any slot. The game reads its profile table from
 // memory it never clears, and every item definition binds "default", whose miss is the table's
 // first slot: with no profile there, a mission's items take their sounds from that uncleared

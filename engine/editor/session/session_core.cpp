@@ -104,6 +104,7 @@ void SessionCore::start() {
 	read_recent_details();
 	show_installs();
 	view_.project.play_retail = settings.play_in_install;
+	view_.project.play_in_install_strict = settings.play_in_install_strict;
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
 	show_recent_items();
@@ -353,8 +354,8 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		std::vector<std::string> roles{ expansion_file_row(ExpansionFileRole::Version).manifest_role };
 		if (doc.expansion.builds_on.empty()) roles.push_back(expansion_file_row(ExpansionFileRole::Table).manifest_role);
 		const ProjectPaths paths = ProjectPaths::for_root(dir);
-		const CreateMissingResult made =
-				create_missing_requirements(paths, doc, evaluate_requirements(doc, scan_project_assets(paths, doc)), roles);
+		const AssetScan scan = scan_project_assets(paths, doc);
+		const CreateMissingResult made = create_missing_requirements(paths, doc, scan, evaluate_requirements(doc, scan), roles);
 		for (const std::string &path : made.created) note("Created " + path);
 		for (const Diagnostic &d : made.diagnostics) report(d);
 	}
@@ -815,13 +816,16 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	if (install) editor.game_install = *install;
 	if (change.runtime_executable) editor.runtime_executable = *change.runtime_executable;
 	if (change.play_in_install) editor.play_in_install = *change.play_in_install;
+	if (change.play_in_install_strict) editor.play_in_install_strict = *change.play_in_install_strict;
 	bool editor_changed = editor.game_install != settings.game_install ||
 	                      editor.runtime_executable != settings.runtime_executable ||
-	                      editor.play_in_install != settings.play_in_install;
+	                      editor.play_in_install != settings.play_in_install ||
+	                      editor.play_in_install_strict != settings.play_in_install_strict;
 	if (editor_changed) {
 		Diagnostic error;
 		if (preferences_.write(editor, error)) {
 			view_.project.play_retail = preferences_.values().play_in_install;
+			view_.project.play_in_install_strict = preferences_.values().play_in_install_strict;
 			view_.project.runtime_setting = preferences_.values().runtime_executable;
 			view_.activity.runtime_executable = play().resolve_runtime_executable();
 		} else {
@@ -881,7 +885,7 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	const ProjectDocument &doc = *view_.project.document;
 	AssetScan now = scan_project_assets(paths_, doc);
 	now.set_import_findings(view_.project.scan->import_findings());
-	const CreateMissingResult result = create_missing_requirements(paths_, doc, requirements_of(doc, now), roles);
+	const CreateMissingResult result = create_missing_requirements(paths_, doc, now, requirements_of(doc, now), roles);
 	for (const std::string &path : result.created) note("Created " + path);
 	for (const std::string &name : result.unavailable) {
 		note("The editor cannot create " + name + " yet: no writer exists for this kind of file.");
@@ -1208,6 +1212,7 @@ void SessionCore::save_preferences() {
 	read_recent_details(); // a root new to the list read, the others kept
 	show_installs();
 	view_.project.play_retail = settings.play_in_install;
+	view_.project.play_in_install_strict = settings.play_in_install_strict;
 	view_.project.import_dependencies = settings.import_dependencies;
 	show_recent_items();
 	touch(ViewConcern::Preferences);
