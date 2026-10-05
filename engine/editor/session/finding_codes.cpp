@@ -116,6 +116,7 @@ const char *finding_fix_token(FindingFix fixes) {
 	case F::Rewrite: return "rewrite";
 	case F::TextureRows: return "texture_rows";
 	case F::ImportFitsUse: return "import_fits_use";
+	case F::NormalRowType: return "normal_row_type";
 	}
 	return "none";
 }

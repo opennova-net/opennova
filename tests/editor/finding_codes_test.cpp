@@ -274,9 +274,11 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::TextureRows) == Tokens({ "texture.tga_upside_down" }));
 	TEST_EXPECT(fixed_by(FindingFix::ImportFitsUse) ==
 	            Tokens({ "texture.alpha_not_loaded", "texture.blend_map_size", "texture.colormap_size", "texture.foliage_map_overrun",
-	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size",
+	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size", "texture.memory",
 	                     "texture.mfd_not_pow2", "texture.normal_map_halved", "texture.particle_too_big",
 	                     "texture.tile_atlas_cells", "texture.wrong_reader" }));
+	// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4.
+	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));
 	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
 	            Tokens({ "animation_map.ignored_input", "credits.line_ending",

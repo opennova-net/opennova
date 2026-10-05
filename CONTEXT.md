@@ -936,6 +936,14 @@ its palette entry), never a record. Its device draws the texels the portable dec
 texel where a texel covers a pixel or more.
 _Avoid_: image viewer, preview (the Preview window, or the role)
 
+**Texture budget**:
+What a model texture costs the game (ADR 0046 S18): the device texture its row's loader makes of the file it
+opens (its sides after the game's halvings, its levels, its format, and every level's bytes, which the game keeps
+in its own memory) at each of the four **object texture detail** levels (game.cfg's `object_texdetail`, 0 the
+lowest to 3 full: one or two halvings of a diffuse or detail texture), and what the `.dds` its loader reads first
+would cost instead. Said under each use in the texture's tab and on the wire; past 16 MB it is a warning.
+_Avoid_: footprint, VRAM (the game keeps every level in its own process too), file size (what the disk holds)
+
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
 its milliseconds, a clip by its game ticks, and a menu's frame clock by its milliseconds, which a

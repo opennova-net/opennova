@@ -34,6 +34,8 @@ enum class FindingFix {
 	Rewrite,           // input a rewrite drops or normalizes: Rewrite the file (rewrite_does)
 	TextureRows,       // a TGA stored top first (S18): Save it bottom first (texture_operation)
 	ImportFitsUse,     // what a use asks of a texture an import makes (S18): Make the import fit the use
+	NormalRowType,     // a finished normal map (.mdt) in a normal-map slot loaded as a diffuse: its row
+	                   // given the normal map's type (edit_record)
 };
 
 // Where Problems takes a finding of the code: what the file holds (its document opened on the
@@ -403,8 +405,10 @@ enum class CoreFinding {
 	TextureFoliageMapShape,
 	TextureHeightWrap,
 	TextureLoadingScreenSize,
+	TextureMemory,
 	TextureMfdNotPowerOfTwo,
 	TextureNormalMapHalved,
+	TextureNormalSlotLoader,
 	TextureOperation,
 	TextureParticleTooBig,
 	TextureReplace,

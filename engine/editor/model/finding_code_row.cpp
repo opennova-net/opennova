@@ -286,8 +286,14 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::TextureFoliageMapShape, code("texture.foliage_map_shape", G::Textures, F::ImportFitsUse) },
 	{ C::TextureHeightWrap, code("texture.height_wrap", G::Textures, F::ImportFitsUse) },
 	{ C::TextureLoadingScreenSize, code("texture.loading_screen_size", G::Textures, F::ImportFitsUse) },
+	// What a model texture costs the game past kTextureMemoryWarnBytes (documents/texture_budget): where an
+	// import makes the file, the import made as its uses ask (a model row's DXT5 .dds).
+	{ C::TextureMemory, code("texture.memory", G::Textures, F::ImportFitsUse) },
 	{ C::TextureMfdNotPowerOfTwo, code("texture.mfd_not_pow2", G::Textures, F::ImportFitsUse) },
 	{ C::TextureNormalMapHalved, code("texture.normal_map_halved", G::Textures, F::ImportFitsUse) },
+	// A normal-map slot's row of a type the stage or plain loader reads: its row given type 4 where the file
+	// is a finished normal map (.mdt).
+	{ C::TextureNormalSlotLoader, code("texture.normal_slot_loader", G::Textures, F::NormalRowType) },
 	{ C::TextureOperation, code("texture.operation", G::Textures) },
 	{ C::TextureParticleTooBig, code("texture.particle_too_big", G::Textures, F::ImportFitsUse) },
 	{ C::TextureReplace, code("texture.replace", G::Textures) },
