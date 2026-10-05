@@ -9,6 +9,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
+#include <editor/blank/blank_factory.h>
 #include <editor/model/field_text.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/project/project_files.h>
@@ -121,7 +122,9 @@ ConfirmationProposal propose_fix_all(const SessionView &view, ProblemFixCache &f
 		if (!only || request.kind == *only) out.requests.push_back(std::move(request));
 	std::vector<std::string> placeholders;
 	for (const EditorRequest &request : out.requests) {
-		if (request.kind == EditorRequestKind::CreateFile && request.file_kind == asset_kind_token(AssetKind::Texture))
+		// The pointer's name makes the pointer (find_blank_factory), never the checkerboard.
+		if (request.kind == EditorRequestKind::CreateFile && request.file_kind == asset_kind_token(AssetKind::Texture) &&
+		    find_blank_factory("", request.path, AssetKind::Texture) == find_blank_factory_for_kind(AssetKind::Texture))
 			placeholders.push_back(request.path);
 		else
 			out.lines.push_back(fix_request_words(view, request));
