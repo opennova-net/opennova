@@ -43,6 +43,28 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(!parse_launch_flags({"game.exe"}).no_hud);
 }
 
+// `/mod` is `/exp`: one arm of the game's walk, the value token stepped over,
+// the last copy winning, 32 bytes kept [orig: Game_ParseCommandLineAndInit
+// @ 0x4a76ac / 0x4a76c1 / 0x4a76cf].
+void test_mod_is_exp_and_the_name_keeps_32_bytes() {
+    CHECK(parse_launch_flags({"game.exe", "/mod", "jox01"}).expansion == "jox01");
+    CHECK(parse_launch_flags({"game.exe", "/MOD", "jox01"}).expansion == "jox01");
+    // Both spellings copy over the one before.
+    CHECK(parse_launch_flags({"game.exe", "/exp", "a", "/mod", "b"}).expansion == "b");
+    CHECK(parse_launch_flags({"game.exe", "/mod", "a", "/exp", "b"}).expansion == "b");
+    CHECK(parse_launch_flags({"game.exe", "/exp", "a", "/exp", "b"}).expansion == "b");
+    // A last flag with no token after it copies nothing over the earlier name.
+    CHECK(parse_launch_flags({"game.exe", "/exp", "a", "/mod"}).expansion == "a");
+    // The token after the flag is its value, never a flag of its own.
+    CHECK(parse_launch_flags({"game.exe", "/exp", "/mod", "b"}).expansion == "/mod");
+    // strncpy(g_ExpansionName, token, 0x20): 32 bytes kept, the rest dropped.
+    const std::string name32 = "abcdefghijklmnopqrstuvwxyz012345";
+    CHECK(parse_launch_flags({"game.exe", "/mod", name32}).expansion == name32);
+    CHECK(parse_launch_flags({"game.exe", "/exp", name32 + "6789ABCD"}).expansion == name32);
+    CHECK(launch_expansion_name(" " + name32 + "XY ") == name32);
+    CHECK(launch_expansion_name("jox01") == "jox01");
+}
+
 void test_runtime_launch_flags_parse() {
     const LaunchFlags f = parse_launch_flags(
         {"game.exe", "--", "--Mission", " 00TRa.bms ", "--lan-host", "ASH_I5A.BMS",
@@ -132,6 +154,7 @@ void test_path_join() {
 
 int main() {
     test_flags_parse_case_insensitively_with_values();
+    test_mod_is_exp_and_the_name_keeps_32_bytes();
     test_runtime_launch_flags_parse();
     test_lan_fallbacks_and_join_endpoint();
     test_flags_win_over_fallbacks_and_jo_is_the_default_game();

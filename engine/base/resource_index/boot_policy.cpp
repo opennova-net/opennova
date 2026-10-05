@@ -25,6 +25,24 @@ std::string value_after(const std::vector<std::string> &args, const char *flag) 
     return std::string();
 }
 
+// `/mod` and `/exp` share one arm of the game's walk [orig:
+// Game_ParseCommandLineAndInit @ 0x4a7310, the two `stricmp`s @ 0x4a76ac]: with
+// a next token the walk steps onto it (@ 0x4a76c1), so that token is never read
+// as a flag, and copies it into the 32-byte `g_ExpansionName @ 0xb4c584` with
+// `strncpy(.., 0x20)` (@ 0x4a76cf), padding a shorter name with NULs. Every
+// later `/mod` or `/exp` copies over the one before; a last one with no token
+// after it copies nothing.
+std::string expansion_after(const std::vector<std::string> &args) {
+    std::string name;
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        if (!strutil::iequals(args[i], "/mod") && !strutil::iequals(args[i], "/exp")) continue;
+        if (i + 1 >= args.size()) continue;
+        ++i;
+        name = launch_expansion_name(args[i]);
+    }
+    return name;
+}
+
 // A whole decimal or 0x-prefixed integer, or `fallback` for an empty,
 // non-numeric or trailing-garbage token.
 long parse_long(const std::string &text, long fallback) {
@@ -49,7 +67,7 @@ int int_after(const std::vector<std::string> &args, const char *flag, long lo, l
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     LaunchFlags f;
     f.loose_override = has_flag(args, "/d");
-    f.expansion = value_after(args, "/exp");
+    f.expansion = expansion_after(args);
     f.game = strutil::to_lower(value_after(args, "/game"));
     f.resource_dir = value_after(args, "--resource-dir");
     f.resource_dir_given = has_flag(args, "--resource-dir");
@@ -98,6 +116,12 @@ LanEndpoint launch_lan_join_endpoint(const LaunchFlags &flags, int default_port)
     const long port = parse_long(strutil::trim(target.substr(colon + 1)), 0);
     if (port >= 1 && port <= 65535) endpoint.port = static_cast<int>(port);
     return endpoint;
+}
+
+std::string launch_expansion_name(const std::string &token) {
+    const std::string name = strutil::trim(token);
+    // [orig: Game_ParseCommandLineAndInit @ 0x4a76cf] strncpy(g_ExpansionName, token, 0x20)
+    return name.size() > kExpansionNameBytes ? name.substr(0, kExpansionNameBytes) : name;
 }
 
 std::string launch_expansion(const LaunchFlags &flags, const std::string &fallback) {

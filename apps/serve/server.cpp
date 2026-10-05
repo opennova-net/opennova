@@ -4,6 +4,7 @@
 #include <base/io/fixed.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <formats/env/env.h>
 #include <formats/mission/bms.h>
@@ -41,7 +42,8 @@ const char kUsage[] =
 		"  /HOST            the host file: retail's `/HOST <file>` format, one `Key value` per line\n"
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
 		"                   line per rotation entry; the last Mission line is the starting map\n"
-		"  /exp, /d, /game  mount the expansion, prefer loose files, pick the data's game code\n"
+		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
+		"                   data's game code\n"
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
 		"  --lan-port       the first port of the bind scan (default: the head of the retail\n"
 		"                   LAN server range, game.cfg mplanserverportmin)\n"
@@ -112,8 +114,12 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			if (!value(out.resource_dir)) return 1;
 		} else if (strutil::iequals(a, "/HOST")) {
 			if (!value(out.host_file)) return 1;
-		} else if (strutil::iequals(a, "/exp")) {
-			if (!value(out.expansion)) return 1;
+		} else if (strutil::iequals(a, "/exp") || strutil::iequals(a, "/mod")) {
+			// The game's one `/mod`/`/exp` arm: the last one wins, its first 32
+			// bytes kept [orig: Game_ParseCommandLineAndInit @ 0x4a76ac].
+			std::string name;
+			if (!value(name)) return 1;
+			out.expansion = launch_expansion_name(name);
 		} else if (strutil::iequals(a, "/game")) {
 			if (!value(out.game)) return 1;
 		} else if (a == "--lan-port") {

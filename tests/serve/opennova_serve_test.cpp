@@ -126,6 +126,13 @@ int main() {
 		serve::ServeOptions missing;
 		CHECK(serve::parse_serve_options({"--resource-dir", dir.string()}, missing, error) == 1);
 		CHECK(serve::parse_serve_options({"--help"}, missing, error) == -1);
+		// `/mod` is `/exp`; the last one wins and keeps 32 bytes [orig:
+		// Game_ParseCommandLineAndInit @ 0x4a76ac / 0x4a76cf].
+		serve::ServeOptions mod;
+		CHECK(serve::parse_serve_options({"--resource-dir", dir.string(), "/host", "x.host", "/exp",
+						"a", "/MOD", "abcdefghijklmnopqrstuvwxyz0123456789"},
+				mod, error) == 0);
+		CHECK(mod.expansion == "abcdefghijklmnopqrstuvwxyz012345");
 	}
 
 	// The probed port is released before the server binds it, and a parallel
