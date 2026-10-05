@@ -97,7 +97,9 @@ const char *compose_entity_sound_set(int anim_slot, int type, char *out, size_t 
 // (@ 0x5274DD), so the lines and tokens are the shared walk's
 // (io::for_each_config_line: CR LF only, the tokenizer's quotes, commas and
 // comments); SoundProfile_ParseLineCallback reads each line's tokens by
-// position, a token past the line's count reading "" (D-ITEMDEF-8).
+// position with no count check, so a short line's tokens[4] and [5] are what
+// an earlier, longer line left (io::ConfigTokens::token): JO:CA's
+// SndProf.def gives some 190 bare slot lines a param3 of 1.2 that way.
 size_t SoundProfileTable::parse(const char *text, size_t len) {
     const size_t before = entries_.size();
     if (text == nullptr) return 0;

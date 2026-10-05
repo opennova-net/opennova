@@ -113,6 +113,27 @@ int main(int argc, char **argv) {
         TEST_EXPECT(p.loop_params[0] == 20 * 655);
     }
 
+    // A short line reads the slots a longer one left: tokens 0..2 reset each line,
+    // 3..29 keep their pointers into the reused line buffer [orig:
+    // Terrain_TokenizeConfigLine @0x53CB71..0x53CB81], and the callback reads
+    // tokens[4] and tokens[5] with no count check (@0x52714b, @0x52718b). So a
+    // bare `soundloop_3 V_B` after `soundloop_2 V_A .8 1.2 3` keeps param2 0
+    // (token 2, reset) but takes 1.2 and 3, which outlive the shorter line.
+    {
+        static const char kStale[] =
+            "begin Stale\r\n"
+            "soundloop_2 V_A .8 1.2 3\r\n"
+            "soundloop_3 V_B\r\n"
+            "end\r\n";
+        SoundProfileTable t;
+        TEST_EXPECT(t.parse(kStale, sizeof(kStale) - 1) == 1);
+        const SoundProfile &p = t.entries()[0];
+        TEST_EXPECT(p.set_names[2] == "V_B");
+        TEST_EXPECT(p.param2_q16[2] == 0);
+        TEST_EXPECT(p.param3_q16[2] == static_cast<int32_t>(1.2 * 65536.0));
+        TEST_EXPECT(p.param4[2] == 3);
+    }
+
     // Empty table: null / -1.
     {
         SoundProfileTable t;

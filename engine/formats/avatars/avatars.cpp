@@ -80,8 +80,9 @@ static void push_raw_line(char (**raw)[512], size_t *count, const char *line, si
 /* Avatars-specific helpers                                                  */
 /* ========================================================================= */
 
-/* A token as the retail tokenizer hands it; one past the line's count reads
- * "" (D-ITEMDEF-8: retail's tokens 3.. keep the previous lines' pointers). */
+/* A token as the retail tokenizer hands it, one past the line's count
+ * included (io::ConfigTokens::token: tokens 0..2 reset, 3.. what the walk's
+ * earlier lines left). */
 static const char *tok(const io::ConfigTokens &t, int index) {
     return t.token(index);
 }

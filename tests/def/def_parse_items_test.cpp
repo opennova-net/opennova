@@ -1552,7 +1552,12 @@ int main(int argc, char **argv) {
 
     /* The authored ground-shadow blob decal 'shadow <name> <w> <l> <ox> <oy>'
        [orig: ItemDef_ParseProperty @ 0x49f3a5..0x49f44c — name +0xA0, atof
-       floats +0x11C..+0x128; absent tokens read as 0]. */
+       floats +0x11C..+0x128, read with no count check]. A missing width is
+       token 2, which every line resets to "", so 0; a missing length and
+       offsets are tokens 3..5, which keep what the last line that had them
+       left in the line buffer [orig: Terrain_TokenizeConfigLine @0x53CB71..
+       0x53CB81]: Jeep's bare `shadow` reads Hind's 8.5, 0 and -1.25 (Hind's
+       line is longer, so those bytes outlive the shorter lines between). */
     static const char shadow_def[] =
         "begin Hind\r\n id 1\r\n shadow hindshdw.tga 6 8.5 0 -1.25\r\nend\r\n"
         "begin Jeep\r\n id 2\r\n shadow jeepshdw.tga\r\nend\r\n"
@@ -1574,8 +1579,8 @@ int main(int argc, char **argv) {
         s0->shadow_width != 6.0f || s0->shadow_length != 8.5f ||
         s0->shadow_offset_x != 0.0f || s0->shadow_offset_y != -1.25f ||
         strcmp(s1->shadow_texture, "jeepshdw.tga") != 0 ||
-        s1->shadow_width != 0.0f || s1->shadow_length != 0.0f ||
-        s1->shadow_offset_x != 0.0f || s1->shadow_offset_y != 0.0f ||
+        s1->shadow_width != 0.0f || s1->shadow_length != 8.5f ||
+        s1->shadow_offset_x != 0.0f || s1->shadow_offset_y != -1.25f ||
         s2->shadow_texture[0] != '\0' ||
         /* The 16-byte slot keeps 15 chars + NUL (retail copies unguarded into
            ItemDef+0xA0; no shipped items.def authors a name that long). */

@@ -16,7 +16,9 @@
 // line and space, comma or tab ends a token; '"' toggles quoting and ends a
 // token either way, so a token is a quoted run's contents (spaces and commas
 // included) and quoting is not recorded. The comment cut writes no terminator,
-// so a token in progress there runs to the end of the line. At most 30 tokens:
+// so a token in progress there runs to the end of the line. Each line resets
+// tokens 0..2 and leaves 3..29 pointing where earlier lines put them (the
+// ConfigTokens::token note). At most 30 tokens:
 // the walk stops at the 30th without cutting it, so that one also runs to the
 // end of the line (its separators, quotes and comment included).
 // [orig: Terrain_TokenizeConfigLine @0x53CB60 — the skip @0x53CB90..0x53CB9E,
@@ -44,18 +46,27 @@ struct ConfigTokens {
 	size_t skip = 0;
 	size_t cut = 0;
 
-	// A token past the count reads as the empty string. Retail resets only
-	// tokens 0..2 each line [orig: Terrain_TokenizeConfigLine @0x53CB71..
-	// 0x53CB81]; its tokens 3..29 keep pointers into the static line buffer
-	// at what earlier lines of any file left there, process-wide, which the
-	// port does not reproduce (D-ITEMDEF-8; no shipped def reads one).
+	// A token past the count reads as retail's does. Each line resets tokens
+	// 0..2 to the empty string and leaves 3..29 where the last line that had
+	// them put them, pointing into the reused line buffer, so a short line
+	// reads whatever an earlier, longer one left at that offset (the current
+	// line's bytes up to its terminator, the older bytes past it)
+	// [orig: Terrain_TokenizeConfigLine @0x53CB71..0x53CB81; the static buffer
+	// byte_24E5DF0 and slots dword_24E61E4]. One ConfigTokens per walk keeps
+	// that state across its lines; retail's is the process's, across every file
+	// it tokenized, so a slot no line of this walk has set reads "" here
+	// (D-ITEMDEF-8).
 	const char *token(int index) const {
-		return index >= 0 && index < count ? tokens[index] : "";
+		if (index < 0 || index >= kConfigMaxTokens) return "";
+		if (index < count) return tokens[index];
+		if (index < 3 || tokens[index] == nullptr) return "";
+		return tokens[index];
 	}
 };
 
 inline void tokenize_config_line(const char *line, ConfigTokens &out) {
 	out.count = 0;
+	out.tokens[0] = out.tokens[1] = out.tokens[2] = "";
 	out.skip = 0;
 	out.cut = 0;
 	if (line == nullptr) return;
@@ -64,6 +75,7 @@ inline void tokenize_config_line(const char *line, ConfigTokens &out) {
 		++out.skip;
 	}
 	size_t length = std::strlen(line);
+	if (length == 0) return; // the buffer keeps the last line [orig: `if (lineLen)` @0x53CBB5]
 	if (length > kConfigMaxLineChars) length = kConfigMaxLineChars;
 	std::memcpy(out.buffer, line, length);
 	out.buffer[length] = 0;
