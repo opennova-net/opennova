@@ -623,6 +623,44 @@ int main(int argc, char **argv) {
         printf("positional sight rows OK\n");
     }
     {
+        /* `charfilter` and `teamfilter` read token 1 only, one class or team a
+           line, and `ammobucket` and the `ammoclass` count are abs(atol)
+           [orig: WeaponDefs_ParseLineCallback @0x543680 — charfilter's table walk
+           over tokens[2] @0x543F40..0x543F6E, teamfilter's @0x543FB5..0x543FE3,
+           ammobucket's cdq/xor/sub @0x544037, the ammoclass count's @0x54423D]. */
+        static const char kFilterDef[] =
+            "weapon \"WPN_FILTER_TEST\"\n"
+            "\tcharfilter medic sniper\n"
+            "\tteamfilter blue red\n"
+            "\tammobucket -3\n"
+            "\tammoclass CLASS_TEST -2\n"
+            "end\n";
+        DefWeaponsFile ff;
+        memset(&ff, 0, sizeof(ff));
+        if (def_parse_weapons_memory((const unsigned char *)kFilterDef, sizeof(kFilterDef) - 1,
+                                     &ff) != 0 || ff.count != 1) {
+            fprintf(stderr, "FAIL: filter inline parse failed\n");
+            def_free_weapons(&ff);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefWeaponDef &w = ff.entries[0];
+        const bool ok = w.charfilter_count == 1 && strcmp(w.charfilter[0], "medic") == 0 &&
+                w.teamfilter_count == 1 && strcmp(w.teamfilter[0], "blue") == 0 &&
+                w.charfilter_mask == 1 && w.teamfilter_mask == 2 && w.ammobucket == 3 &&
+                w.ammo_class_count == 2;
+        if (!ok) {
+            fprintf(stderr, "FAIL: filters read %zu/%zu tokens, masks %d/%d, bucket %d, class count %d\n",
+                    w.charfilter_count, w.teamfilter_count, w.charfilter_mask, w.teamfilter_mask,
+                    w.ammobucket, w.ammo_class_count);
+            def_free_weapons(&ff);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&ff);
+        printf("charfilter/teamfilter token 1 and the abs values OK\n");
+    }
+    {
         /* The scope-zero table's token forms [orig: 'scope_max_zero'
            @ 0x544e8b..0x544efd]: three values store +0x84/+0x9C/+0xA0; a fourth stores
            +0x88 only when the line carries four (`cmp dword ptr [esi],4; jle`

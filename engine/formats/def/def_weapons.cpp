@@ -33,6 +33,13 @@ namespace opennova::def {
    @0x5438CF, the scalar reads of tokens[2] throughout);
    ActionDef_ParseScriptLine @0x4023C0 ("action" @0x4023F3, "end" @0x40251B)] */
 
+/* abs of a 32-bit atol, wrapping as the original's cdq/xor/sub does
+   (abs(INT_MIN) stays INT_MIN). */
+static int abs32_of(long value) {
+    const uint32_t bits = static_cast<uint32_t>(value);
+    return static_cast<int>(static_cast<int32_t>(value) < 0 ? 0u - bits : bits);
+}
+
 /* CRT atof on a token span: the double the retail parse multiplies before its
    ftol, kept unnarrowed (parse_float_n rounds through a float). */
 static double parse_double_n(const char *s, size_t len) {
@@ -95,9 +102,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             memset(&carry, 0, sizeof(carry));
             safe_copy(carry.name, sizeof(carry.name), v, vl);
             const char *cap = tokens.token(2);
-            const long value = strtol(cap, NULL, 10);
-            const uint32_t bits = static_cast<uint32_t>(value);
-            carry.cap = static_cast<int>(value < 0 ? 0u - bits : bits); // abs32
+            carry.cap = abs32_of(strtol(cap, NULL, 10));
             DA_PUSH(out->ammo_class_carries, out->ammo_class_carries_count, carry_cap, carry);
             return;
         }
@@ -198,7 +203,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 cw.maxclips = parse_int_n(v, vl);
                 parsed = 1;
             } else if (key_is(key, "ammobucket")) {
-                cw.ammobucket = parse_int_n(v, vl);
+                /* abs(atol) [orig: the cdq/xor/sub @0x544037 -> +0xDC] */
+                cw.ammobucket = abs32_of(strtol(v, NULL, 10));
                 parsed = 1;
             } else if (key_is(key, "sameas")) {
                 /* [orig: @0x544056..0x544072 -- strncpy(AdmDef+0x34, value, 0x20):
@@ -208,11 +214,11 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 safe_copy(cw.sameas, sizeof(cw.sameas), v, vl);
                 parsed = 1;
             } else if (key_is(key, "ammoclass")) {
-                /* ammoclass <CLASS_NAME> <pool-units-per-round> [orig: parse @0x5441CB] */
-                Token tok[kMaxValueTokens];
-                int n = value_tokens(tokens, tok, kMaxValueTokens);
-                if (n >= 1) safe_copy(cw.ammo_class, sizeof(cw.ammo_class), tok[0].s, tok[0].len);
-                if (n >= 2) cw.ammo_class_count = parse_int_n(tok[1].s, tok[1].len);
+                /* ammoclass <CLASS_NAME> <pool-units-per-round>: the count is
+                   abs(atol) of token 2, read whether or not the line carries it
+                   [orig: parse @0x5441CB, the count @0x54422E..0x544242] */
+                copy_token(cw.ammo_class, sizeof(cw.ammo_class), tokens, 1);
+                cw.ammo_class_count = abs32_of(strtol(tokens.token(2), NULL, 10));
                 parsed = 1;
             } else if (key_is(key, "attachtextid")) {
                 /* The attach-label text key; the original resolves it against the
@@ -238,16 +244,14 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 else if (strutil::iequals(v, "grenade")) cw.weapon_class_slot = 3;
                 parsed = 1;
             } else if (key_is(key, "charfilter")) {
-                /* Repeatable, one soldier-type token per line: the mask bit comes
-                   from the first value token [orig: parse @0x543F6E reads tokens[2]].
-                   Also packs the original producer's class-mask bit
-                   [orig: WeaponDef_ParseProperty @ 0x54d730]. */
-                Token tok[kMaxValueTokens];
-                int n = value_tokens(tokens, tok, kMaxValueTokens);
-                for (int ti = 0; ti < n; ++ti) {
-                    if (cw.charfilter_count >= 8) break;
-                    safe_copy(cw.charfilter[cw.charfilter_count], sizeof(cw.charfilter[0]),
-                              tok[ti].s, tok[ti].len);
+                /* Repeatable, one soldier-type token per line: only token 1 is
+                   read, its bit ORed in, any further token ignored [orig: the
+                   table walk over tokens[2] @0x543F40..0x543F6E]. Also packs the
+                   original producer's class-mask bit [orig: WeaponDef_ParseProperty
+                   @ 0x54d730]. */
+                if (tokens.count >= 2 && cw.charfilter_count < 8) {
+                    copy_token(cw.charfilter[cw.charfilter_count], sizeof(cw.charfilter[0]),
+                               tokens, 1);
                     ++cw.charfilter_count;
                 }
                 if (strutil::iequals(v, "medic")) cw.charfilter_mask |= 1;
@@ -257,15 +261,13 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 else if (strutil::iequals(v, "engineer")) cw.charfilter_mask |= 16;
                 parsed = 1;
             } else if (key_is(key, "teamfilter")) {
-                /* Repeatable, one team token per line [orig: parse @0x543FE3 reads
-                   tokens[2]]. Also packs the original producer's team-mask bit
+                /* Repeatable, one team token per line: only token 1 is read
+                   [orig: the table walk over tokens[2] @0x543FB5..0x543FE3]. Also
+                   packs the original producer's team-mask bit
                    [orig: WeaponDef_ParseProperty @ 0x54d730]. */
-                Token tok[kMaxValueTokens];
-                int n = value_tokens(tokens, tok, kMaxValueTokens);
-                for (int ti = 0; ti < n; ++ti) {
-                    if (cw.teamfilter_count >= 4) break;
-                    safe_copy(cw.teamfilter[cw.teamfilter_count], sizeof(cw.teamfilter[0]),
-                              tok[ti].s, tok[ti].len);
+                if (tokens.count >= 2 && cw.teamfilter_count < 4) {
+                    copy_token(cw.teamfilter[cw.teamfilter_count], sizeof(cw.teamfilter[0]),
+                               tokens, 1);
                     ++cw.teamfilter_count;
                 }
                 if (strutil::iequals(v, "blue") || strutil::iequals(v, "yellow"))
