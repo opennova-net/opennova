@@ -236,9 +236,11 @@ void normalize_x87(float v[3]) {
 // smoothed-vector walk sub_457360 (ModSuperOed.exe)] (the retired port's
 // compute_face_plane, 5fc5b4f6a^:engine/formats/oed/convert_internal.cpp, and
 // smooth_vertex_basis, rdta.cpp). The map is linear, so working in model axes
-// yields the model-axis vectors OED writes.
+// yields the model-axis vectors OED writes. A strip whose frames the author
+// gave (`given`) keeps them and takes no part in the sums.
 void derive_tangents(std::vector<ThreediVertex> &verts, const std::vector<uint16_t> &indices,
-		const std::vector<ThreediTriangleStrip> &strips, const std::vector<int> &strip_part, float carry[6]) {
+		const std::vector<ThreediTriangleStrip> &strips, const std::vector<int> &strip_part, const std::vector<bool> &given,
+		float carry[6]) {
 	struct Key {
 		int part;
 		float p[3], n[3];
@@ -260,6 +262,7 @@ void derive_tangents(std::vector<ThreediVertex> &verts, const std::vector<uint16
 		for (int k = 0; k < 3; ++k) acc[k] = static_cast<float>(static_cast<double>(acc[k]) + static_cast<double>(add[k]));
 	};
 	for (size_t s = 0; s < strips.size(); ++s) {
+		if (given[s]) continue;
 		const ThreediTriangleStrip &rec = strips[s];
 		for (int t = 0; t + 2 < rec.num_indices; t += 3) {
 			const ThreediVertex *c[3];
@@ -286,6 +289,7 @@ void derive_tangents(std::vector<ThreediVertex> &verts, const std::vector<uint16
 		}
 	}
 	for (size_t s = 0; s < strips.size(); ++s) {
+		if (given[s]) continue;
 		const ThreediTriangleStrip &rec = strips[s];
 		for (int i = 0; i < rec.num_vertices; ++i) {
 			ThreediVertex &v = verts[static_cast<size_t>(rec.start_vertex + i)];
@@ -577,6 +581,7 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 		std::vector<ThreediTriangleStrip> &strips = out.lod_strips[li];
 		std::vector<ThreediRenderObject> &parts = out.lod_parts[li];
 		std::vector<int> strip_part; // the part each strip record was authored on
+		std::vector<bool> strip_given; // each strip record's tangent frames are the author's
 		for (size_t pi = 0; pi < src.parts.size(); ++pi) {
 			const ThreediBuildPart &part = src.parts[pi];
 			ThreediRenderObject ro{};
@@ -647,6 +652,7 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 					indices.insert(indices.end(), strip.indices.begin(), strip.indices.end());
 					strips.push_back(rec);
 					strip_part.push_back(static_cast<int>(pi));
+					strip_given.push_back(strip.tangents_given);
 					if (strip.alpha) ++ro.num_alpha_strips;
 					else ++ro.num_strips;
 				}
@@ -674,9 +680,9 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 						rec.start_vertex = static_cast<int32_t>(verts.size());
 						rec.num_vertices = static_cast<int32_t>(strip.vertices.size());
 						if (!strip.bone_table.empty()) {
-							const size_t n = std::min<size_t>(strip.bone_table.size(), sizeof(rec.bone_table));
-							for (size_t b = 0; b < n; ++b) rec.bone_table[b] = strip.bone_table[b];
-							rec.bone_table_length = static_cast<int32_t>(n);
+							// threedi_build_check holds the table to the 16 entries STRP stores.
+							for (size_t b = 0; b < strip.bone_table.size(); ++b) rec.bone_table[b] = strip.bone_table[b];
+							rec.bone_table_length = static_cast<int32_t>(strip.bone_table.size());
 						} else {
 							rec.bone_table[0] = static_cast<uint8_t>(strip.bone < 0 ? static_cast<int>(pi) : strip.bone);
 							rec.bone_table_length = 1;
@@ -685,13 +691,14 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 						indices.insert(indices.end(), strip.indices.begin(), strip.indices.end());
 						strips.push_back(rec);
 						strip_part.push_back(static_cast<int>(pi));
+						strip_given.push_back(strip.tangents_given);
 						if (strip.alpha) ++parts[0].num_alpha_strips;
 						else ++parts[0].num_strips;
 					}
 				}
 			}
 		}
-		if (m.tangents) derive_tangents(verts, indices, strips, strip_part, tangent_carry);
+		if (m.tangents) derive_tangents(verts, indices, strips, strip_part, strip_given, tangent_carry);
 		const uint32_t vertex_flags = 1u | (m.skinned ? THREEDI_VERTEX_FLAG_SKINNED : 0u) |
 				(m.tangents ? THREEDI_VERTEX_FLAG_TANGENTS : 0u);
 		for (ThreediVertex &v : verts) {
@@ -1030,6 +1037,8 @@ int ThreediBuildModel::add_part(int lod, int parent, ThreediBuildVec3 pivot) {
 
 int ThreediBuildModel::add_material(const char *shader, const char *texture, uint8_t slot) {
 	ThreediMaterial m{};
+	if (std::strlen(shader) >= sizeof(m.shader_name)) return -1;
+	if (texture != nullptr && std::strlen(texture) >= sizeof(m.textures[0].name)) return -1;
 	m.index = static_cast<int32_t>(materials.size());
 	std::snprintf(m.shader_name, sizeof(m.shader_name), "%s", shader);
 	if (texture != nullptr && texture[0] != '\0') {
@@ -1074,6 +1083,7 @@ int ThreediBuildModel::add_user_point(const char *point_name, ThreediBuildVec3 p
 	// 16.16, truncated as the exporter stores a point (to_fixed_16_16 in the
 	// retired port; 5fc5b4f6a^:engine/formats/oed/export_3di.cpp).
 	ThreediUserPoint p{};
+	if (std::strlen(point_name) >= sizeof(p.name)) return -1;
 	p.x = threedi_q16_trunc(pos.x);
 	p.y = threedi_q16_trunc(pos.y);
 	p.z = threedi_q16_trunc(pos.z);
@@ -1091,6 +1101,9 @@ int ThreediBuildModel::add_light(ThreediBuildVec3 pos, double atten_start, doubl
 		const int rgb_start[3], const int rgb_end[3], uint8_t flags, uint8_t phase, uint16_t rate, ThreediBuildVec3 dir,
 		double falloff) {
 	ThreediLight l{};
+	if (subobject < 0 || subobject > 255) return -1;
+	for (int k = 0; k < 3; ++k)
+		if (rgb_start[k] < 0 || rgb_start[k] > 255 || rgb_end[k] < 0 || rgb_end[k] > 255) return -1;
 	const ThreediBuildVec3 m = threedi_build_to_model(pos);
 	l.offset[0] = static_cast<float>(m.x);
 	l.offset[1] = static_cast<float>(m.y);
@@ -1314,7 +1327,8 @@ uint16_t ThreediBuildModel::add_collision_vertex(int cobj, ThreediBuildVec3 p) {
 
 bool ThreediBuildModel::add_occ_record(uint8_t type, int section_a, int section_b,
 		const std::vector<ThreediBuildVec3> &verts, const std::vector<std::array<int, 4>> &faces,
-		const std::vector<std::array<double, 4>> &explicit_planes, const ThreediBuildOccSphere *sphere) {
+		const std::vector<std::array<double, 4>> &explicit_planes, const ThreediBuildOccSphere *sphere,
+		size_t plane_limit) {
 	ThreediBuildOcclusionRecord rec;
 	for (const ThreediBuildVec3 &v : verts) rec.vertices.push_back(occ_vertex(v));
 	std::vector<int> face_plane(faces.size(), 0);
@@ -1335,7 +1349,7 @@ bool ThreediBuildModel::add_occ_record(uint8_t type, int section_a, int section_
 		OedPlaneTable table(p);
 		for (size_t f = 0; f < faces.size(); ++f) {
 			if (face_plane[f] >= 0) continue;
-			face_plane[f] = table.take(p[faces[f][0]], p[faces[f][1]], p[faces[f][2]], 32);
+			face_plane[f] = table.take(p[faces[f][0]], p[faces[f][1]], p[faces[f][2]], plane_limit);
 			if (face_plane[f] < 0) return false;
 		}
 		for (const OedPlaneTable::Plane &q : table.planes) plane(q.n[0], q.n[1], q.n[2], q.d);
@@ -1346,10 +1360,118 @@ bool ThreediBuildModel::add_occ_record(uint8_t type, int section_a, int section_
 	return true;
 }
 
-bool threedi_build_mint(const ThreediBuildModel &m, std::vector<uint8_t> &out, ThreediChunkOverflow *overflow) {
+namespace {
+
+// What a signed 16-bit index reaches: a bullet face names its corners and
+// its normal so (ThreediCollisionFace).
+constexpr size_t kSignedIndexReach = 32768;
+
+// A count with thousands separators, for messages: 65,535.
+std::string grouped(size_t n) {
+	std::string digits = std::to_string(n), out;
+	for (size_t i = 0; i < digits.size(); ++i) {
+		if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
+		out += digits[i];
+	}
+	return out;
+}
+
+} // namespace
+
+bool threedi_build_check(const ThreediBuildModel &m, std::string &why) {
+	const auto refuse = [&why](const std::string &what) {
+		why = what;
+		return false;
+	};
+	ThreediHeader header{};
+	if (m.name.size() >= sizeof(header.name))
+		return refuse("the model name '" + m.name + "' is " + std::to_string(m.name.size()) + " bytes: GHDR holds 16");
+	for (size_t li = 0; li < m.lods.size(); ++li) {
+		const ThreediBuildLod &lod = m.lods[li];
+		const std::string at = "lod " + std::to_string(li);
+		ThreediLod record{};
+		if (lod.type.size() >= sizeof(record.model_type))
+			return refuse(at + " type '" + lod.type + "' is " + std::to_string(lod.type.size()) + " bytes: RMDL holds 4");
+		for (size_t pi = 0; pi < lod.parts.size(); ++pi)
+			for (size_t si = 0; si < lod.parts[pi].strips.size(); ++si) {
+				const ThreediBuildStrip &strip = lod.parts[pi].strips[si];
+				const std::string where = at + " part " + std::to_string(pi) + " strip " + std::to_string(si);
+				if (strip.indices.size() > 65535)
+					return refuse(where + " holds " + grouped(strip.indices.size()) +
+							" indices: STRP counts them in a u16 (at most 65,535)");
+				if (strip.indices.size() % 3 != 0)
+					return refuse(where + " holds " + grouped(strip.indices.size()) +
+							" indices: a strip is a triangle list, three per triangle");
+				if (strip.vertices.size() > 65536)
+					return refuse(where + " holds " + grouped(strip.vertices.size()) +
+							" vertices: its u16 indices reach 65,536");
+				for (const uint16_t i : strip.indices)
+					if (i >= strip.vertices.size())
+						return refuse(where + " indexes vertex " + std::to_string(i) + " of its " +
+								grouped(strip.vertices.size()));
+				if (!m.skinned) continue;
+				if (strip.bone_table.size() > static_cast<size_t>(kThreediStripBoneTableMax))
+					return refuse(where + "'s bone table holds " + std::to_string(strip.bone_table.size()) +
+							" parts: STRP holds 16");
+				for (const uint8_t b : strip.bone_table)
+					if (b >= lod.parts.size())
+						return refuse(where + "'s bone table names part " + std::to_string(b) + " of the LOD's " +
+								std::to_string(lod.parts.size()));
+				if (strip.bone_table.empty() && strip.bone >= static_cast<int>(lod.parts.size()))
+					return refuse(where + " rides part " + std::to_string(strip.bone) + " of the LOD's " +
+							std::to_string(lod.parts.size()));
+			}
+	}
+	for (size_t mi = 0; mi < m.materials.size(); ++mi)
+		if (m.materials[mi].texture_count > 24)
+			return refuse("material " + std::to_string(mi) + " has " + std::to_string(m.materials[mi].texture_count) +
+					" texture rows: MTRL holds 24");
+	ThreediControlRegister reg{};
+	for (const std::string &name : m.control_registers)
+		if (name.size() >= sizeof(reg.name))
+			return refuse("the CTRL register '" + name + "' is " + std::to_string(name.size()) + " bytes: CTRL holds 24");
+	for (size_t oi = 0; oi < m.collision.size(); ++oi) {
+		const ThreediBuildCollisionObject &o = m.collision[oi];
+		const std::string at = "collision section " + std::to_string(oi);
+		if (o.vertices.size() > kSignedIndexReach)
+			return refuse(at + " holds " + grouped(o.vertices.size()) +
+					" vertices: a bullet face names its corners by signed 16-bit indices (32,768)");
+		if (o.normals.size() > kSignedIndexReach)
+			return refuse(at + " holds " + grouped(o.normals.size()) +
+					" bullet-face normals: a face names its normal by a signed 16-bit index (32,768)");
+		for (const ThreediCollisionFace &f : o.faces) {
+			for (const int16_t corner : f.vert_index)
+				if (corner < 0 || static_cast<size_t>(corner) >= o.vertices.size())
+					return refuse(at + " has a bullet face naming vertex " + std::to_string(corner) + " of its " +
+							grouped(o.vertices.size()));
+			if (f.normal_index < 0 || static_cast<size_t>(f.normal_index) >= o.normals.size())
+				return refuse(at + " has a bullet face naming normal " + std::to_string(f.normal_index) + " of its " +
+						grouped(o.normals.size()));
+		}
+	}
+	return true;
+}
+
+bool threedi_build_mint(const ThreediBuildModel &m, std::vector<uint8_t> &out, ThreediBuildRefusal *refusal) {
+	std::string why;
+	if (!threedi_build_check(m, why)) {
+		if (refusal != nullptr) refusal->what = why;
+		return false;
+	}
 	ThreediAssembled assembled;
 	assemble(m, assembled);
-	return threedi_3di3_write_memory(&assembled.model, out, overflow) == 0;
+	ThreediChunkOverflow overflow{};
+	if (threedi_3di3_write_memory(&assembled.model, out, &overflow) == 0) return true;
+	if (refusal != nullptr) {
+		refusal->overflow = overflow;
+		refusal->what = overflow.chunk[0] != '\0'
+				? "the model is too large to write: its " + std::string(overflow.chunk) + " chunk holds " +
+						grouped(overflow.bytes) + " bytes, past the " + grouped(THREEDI_3DI3_LENGTH_MASK) +
+						" a 3DI3 chunk's 24-bit length can say (ROOT holds the whole model and each RLOD one LOD: "
+						"use fewer vertices, triangles, LODs or collision faces)"
+				: "the writer refused the model";
+	}
+	return false;
 }
 
 } // namespace opennova::threedi

@@ -83,9 +83,9 @@ int test_uses() {
 	// normal map.
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
-	                                    "o3d 1\nmodel THING\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\n"
+	                                    "o3d 2\nmodel THING\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\n"
 	                                    "texture body.tga 1 0\ntexture grain.tga 2 0\nmaterial FF_ST_OP\n"
-	                                    "texture skin.mdt 3 4\nlod 0\npart 0 0 0 0\nstrip 0 0\n"
+	                                    "texture skin.mdt 3 4\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	const ImportResult imported =
 			import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false);
@@ -290,8 +290,8 @@ int test_show_use() {
 	const std::string root = view.project.root;
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
-	                                    "o3d 1\nmodel THING\nmaterial FF_ST_OP\ntexture body.tga 1 0\nlod 0\npart 0 0 0 0\n"
-	                                    "strip 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	                                    "o3d 2\nmodel THING\nmaterial FF_ST_OP\ntexture body.tga 1 0\nlod 0\npart 0 0 0 0\n"
+	                                    "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	TEST_EXPECT(import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false)
 	                    .imported == std::vector<std::string>({"models/thing.3di"}));
 	for (const char *name : {"body.tga", "map.tga", "grain.tga", "logo.tga", "stance.tga", "scopexh.tga", "puff.tga"})
