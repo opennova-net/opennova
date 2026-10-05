@@ -8,8 +8,6 @@
 //   opennova-3di compare [--strict] <expected.3di> <actual.3di>
 //   opennova-3di anim    build|scene|info|compare  (the .bad/.adm clip set)
 //   opennova-3di weapon  timing|merge  (the weapon.def keys the clips need)
-//   opennova-3di texture <in.png|tga|pcx> -o <out.dds|tga|mdt> [--format ...]
-//                        [--mips ...] [--max-size N] [--alpha ...]
 //   opennova-3di catalog
 //
 // The DCC front ends (the Blender add-on under tools/blender/opennova_3di is
@@ -23,7 +21,6 @@
 // with --strict, drift too), 2 usage.
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -57,9 +54,6 @@ int usage(const char *why) {
 			"       opennova-3di anim compare <expected.adm|.bad> <actual.adm|.bad>\n"
 			"       opennova-3di weapon timing <timing.txt> -o <edits.txt>\n"
 			"       opennova-3di weapon merge  <weapon.def> <edits.txt> -o <out.def>\n"
-			"       opennova-3di texture <in.png|in.tga|in.pcx> -o <out.dds|out.tga|out.mdt>\n"
-			"                            [--format auto|dxt1|dxt5|argb] [--mips full|none] [--max-size N]\n"
-			"                            [--alpha source|opaque|luminance|threshold:N|key:#RRGGBB]\n"
 			"       opennova-3di catalog\n");
 	return 2;
 }
@@ -128,31 +122,6 @@ int main(int argc, char **argv) {
 			return opennova::threedi_cli::cmd_weapon_merge(argv[3], argv[4], argv[6]);
 		}
 		return usage("weapon takes timing or merge");
-	}
-	if (cmd == "texture") {
-		if (argc < 5 || std::strcmp(argv[3], "-o") != 0)
-			return usage("texture needs <in.png|in.tga|in.pcx> -o <out.dds|out.tga|out.mdt>");
-		opennova::threedi_cli::TextureCommand texture;
-		texture.input = argv[2];
-		texture.output = argv[4];
-		for (int i = 5; i < argc; i += 2) {
-			const std::string flag = argv[i];
-			if (i + 1 >= argc || (flag != "--format" && flag != "--mips" && flag != "--max-size" && flag != "--alpha"))
-				return usage("texture takes --format <auto|dxt1|dxt5|argb>, --mips <full|none>, --max-size <N> or "
-				             "--alpha <source|opaque|...>");
-			const std::string value = argv[i + 1];
-			if (flag == "--format") texture.format = value;
-			else if (flag == "--mips") texture.mips = value;
-			else if (flag == "--alpha") texture.alpha = value;
-			else {
-				char *end = nullptr;
-				const unsigned long size = std::strtoul(value.c_str(), &end, 10);
-				if (value.empty() || *end != '\0' || size < 1 || size > 65536)
-					return usage("--max-size takes a side of 1 to 65536 texels");
-				texture.max_size = static_cast<uint32_t>(size);
-			}
-		}
-		return opennova::threedi_cli::cmd_texture(texture);
 	}
 	if (cmd == "info") {
 		const std::string flag = argc > 3 ? argv[3] : "";
