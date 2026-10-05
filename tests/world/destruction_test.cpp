@@ -2104,7 +2104,7 @@ void test_dead_item_water_splash() {
 
 	// Authored water impact overrides the fallback and uses the old hull pose,
 	// while the effect still uses the integrated crossing point.
-	static constexpr char profile[] = "begin \"Wreck\"\nsound_impactwater WRECK_WATER\nend\n";
+	static constexpr char profile[] = "begin \"Wreck\"\r\nsound_impactwater WRECK_WATER\r\nend\r\n";
 	CHECK(w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 	routed.sound_profile = "Wreck";
 	w.tables.item_death_traits.set(701, routed);

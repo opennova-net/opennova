@@ -24,21 +24,21 @@ namespace {
 constexpr int32_t kUnit = 65536;
 
 constexpr char kProfiles[] =
-    "begin \"default\"\n"
-    "     SSLFootGND     FSP_DIRT_L\n"
-    "     SSRFootGND     FSP_DIRT_R\n"
-    "end\n"
-    "begin \"SP_Man\"\n"
-    "     SSLFootGND     FSP_MAN_L\n"
-    "     SSRFootGND     FSP_MAN_R\n"
-    "     SSLFootOBJ     FSP_MAN_WOOD_L\n"
-    "     SSFootWater    FS_WATER\n"
-    "     ssaudio1       RUSTLE_M\n"
-    "     ssaudio3       GEAR_M\n"
-    "end\n"
-    "begin \"SP_Woman\"\n"
-    "     SSLFootGND     FSP_WOMAN_L\n"
-    "end\n";
+    "begin \"default\"\r\n"
+    "     SSLFootGND     FSP_DIRT_L\r\n"
+    "     SSRFootGND     FSP_DIRT_R\r\n"
+    "end\r\n"
+    "begin \"SP_Man\"\r\n"
+    "     SSLFootGND     FSP_MAN_L\r\n"
+    "     SSRFootGND     FSP_MAN_R\r\n"
+    "     SSLFootOBJ     FSP_MAN_WOOD_L\r\n"
+    "     SSFootWater    FS_WATER\r\n"
+    "     ssaudio1       RUSTLE_M\r\n"
+    "     ssaudio3       GEAR_M\r\n"
+    "end\r\n"
+    "begin \"SP_Woman\"\r\n"
+    "     SSLFootGND     FSP_WOMAN_L\r\n"
+    "end\r\n";
 
 void seed_world(World &w) {
     CHECK(w.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 3);

@@ -68,27 +68,27 @@ struct TestSource : IRootMotionSource {
 // A minimal profile table: "default" + one soldier profile, seeded straight on
 // the world (the host parses SndProf.def into the same table).
 const char kProfiles[] =
-    "begin \"default\"\n"
-    "     SSLFootGND     DEF_FOOT_L\n"
-    "end\n"
-    "begin \"SP_Test\"\n"
-    "     sounddeath     T_DEATH\n"
-    "     SSNightDead    T_DEATH_K\n"
-    "     SSFallDead     T_FALLDEAD\n"
-    "     SSFallAlive    T_LAND\n"
-    "     SSLFootGND     T_DIRT_L\n"
-    "     SSRFootGND     T_DIRT_R\n"
-    "     SSLFootSnow    T_SNOW_L\n"
-    "     SSRFootSnow    T_SNOW_R\n"
-    "     SSLFootOBJ     T_OBJ_L\n"
-    "     SSRFootOBJ     T_OBJ_R\n"
-    "     SSFootWater    T_WATER\n"
-    "     SSAudio1       T_AUD1\n"
-    "     SSAudio6       T_AUD6\n"
-    "end\n"
-    "begin \"SP_TestFemale\"\n"
-    "     SSLFootGND     T_FEMALE_DIRT_L\n"
-    "end\n";
+    "begin \"default\"\r\n"
+    "     SSLFootGND     DEF_FOOT_L\r\n"
+    "end\r\n"
+    "begin \"SP_Test\"\r\n"
+    "     sounddeath     T_DEATH\r\n"
+    "     SSNightDead    T_DEATH_K\r\n"
+    "     SSFallDead     T_FALLDEAD\r\n"
+    "     SSFallAlive    T_LAND\r\n"
+    "     SSLFootGND     T_DIRT_L\r\n"
+    "     SSRFootGND     T_DIRT_R\r\n"
+    "     SSLFootSnow    T_SNOW_L\r\n"
+    "     SSRFootSnow    T_SNOW_R\r\n"
+    "     SSLFootOBJ     T_OBJ_L\r\n"
+    "     SSRFootOBJ     T_OBJ_R\r\n"
+    "     SSFootWater    T_WATER\r\n"
+    "     SSAudio1       T_AUD1\r\n"
+    "     SSAudio6       T_AUD6\r\n"
+    "end\r\n"
+    "begin \"SP_TestFemale\"\r\n"
+    "     SSLFootGND     T_FEMALE_DIRT_L\r\n"
+    "end\r\n";
 
 struct Rig {
     Field field;

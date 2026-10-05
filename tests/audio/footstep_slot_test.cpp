@@ -61,16 +61,16 @@ void test_zero_water_plane_is_disabled_not_sea_level() {
 // authority path's fallback chain [orig: Entity_GetProfileSlotSound @0x528300;
 // the "default" seed @0x49e3f5; the find-miss base @0x526e30].
 constexpr char kProfiles[] =
-    "begin \"default\"\n"
-    "     SSLFootGND     FSP_DIRT_L\n"
-    "end\n"
-    "begin \"SP_Man\"\n"
-    "     SSLFootGND     FSP_MAN_L\n"
-    "     ssaudio1       RUSTLE_M\n"
-    "end\n"
-    "begin \"SP_Woman\"\n"
-    "     SSLFootGND     FSP_WOMAN_L\n"
-    "end\n";
+    "begin \"default\"\r\n"
+    "     SSLFootGND     FSP_DIRT_L\r\n"
+    "end\r\n"
+    "begin \"SP_Man\"\r\n"
+    "     SSLFootGND     FSP_MAN_L\r\n"
+    "     ssaudio1       RUSTLE_M\r\n"
+    "end\r\n"
+    "begin \"SP_Woman\"\r\n"
+    "     SSLFootGND     FSP_WOMAN_L\r\n"
+    "end\r\n";
 
 void test_organic_slot_set_resolve_chain() {
     SoundProfileTable profiles;

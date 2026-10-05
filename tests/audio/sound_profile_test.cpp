@@ -20,27 +20,27 @@ using opennova::audio::SoundProfileTable;
 namespace slot = opennova::audio;
 
 static const char kFixture[] =
-    "\n"
-    "begin \"default\"\t\t default\n"
-    "\tmedloopfadeinstart   \t20 \t\n"
-    "\tmedloopfadeinend    \t30 \t\n"
-    "\tcrslooppitchendp     \t100\n"
-    "end \n"
-    "\n"
-    "begin \"SP_Test1\"\t\t A soldier profile, trailing comment ignored\n"
-    "     sounddeath     BM1_DEATH\n"
-    "     SSNightDead    BM1_DEATH_K\n"
-    "     SSFallDead     FALLDEAD2\n"
-    "     SSFallAlive    JUMPLAND_DIRT\n"
-    "     SSLFootGND     FSP_DIRT_L\n"
-    "     SSRFootGND     FSP_DIRT_R\n"
-    "     SSFootWater    FS_WATER\n"
-    "     ssaudio1\t\tFSP_PRONE\n"
-    "     soundloop_2\t\tV_APACHE_ILP\t\t.8 1.2 \n"
-    "     rotor_impact\tIMP_ROTOR_FLESH .1\n"
-    "     notakeyword   IGNORED\n"
-    "end \n"
-    "orphan_line_outside_begin  ALSO_IGNORED\n";
+    "\r\n"
+    "begin \"default\"\t\t default\r\n"
+    "\tmedloopfadeinstart   \t20 \t\r\n"
+    "\tmedloopfadeinend    \t30 \t\r\n"
+    "\tcrslooppitchendp     \t100\r\n"
+    "end \r\n"
+    "\r\n"
+    "begin \"SP_Test1\"\t\t A soldier profile, trailing comment ignored\r\n"
+    "     sounddeath     BM1_DEATH\r\n"
+    "     SSNightDead    BM1_DEATH_K\r\n"
+    "     SSFallDead     FALLDEAD2\r\n"
+    "     SSFallAlive    JUMPLAND_DIRT\r\n"
+    "     SSLFootGND     FSP_DIRT_L\r\n"
+    "     SSRFootGND     FSP_DIRT_R\r\n"
+    "     SSFootWater    FS_WATER\r\n"
+    "     ssaudio1\t\tFSP_PRONE\r\n"
+    "     soundloop_2\t\tV_APACHE_ILP\t\t.8 1.2 \r\n"
+    "     rotor_impact\tIMP_ROTOR_FLESH .1\r\n"
+    "     notakeyword   IGNORED\r\n"
+    "end \r\n"
+    "orphan_line_outside_begin  ALSO_IGNORED\r\n";
 
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
@@ -85,6 +85,32 @@ int main(int argc, char **argv) {
         TEST_EXPECT(t.index_of("SP_TEST1") == 1);
         TEST_EXPECT(t.index_of("no_such_profile") == 0);
         TEST_EXPECT(t.find("default") == &def);
+    }
+
+    // The shared walk and the game's atof [orig: SoundProfile_LoadAll @0x527490
+    // -> File_ParseASCIIFile @0x5274DD; SoundProfile_ParseLineCallback]: a comma
+    // separates columns and `;` ends the line; an exponent may be marked d and a
+    // hex spelling reads 0; a begin name keeps its first 64 characters (the
+    // terminator at [64], @0x527045).
+    {
+        static const char kWalk[] =
+            "begin AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXYZ\r\n"
+            "soundloop_1,V_A,.5,1.5,3\r\n"
+            "rotor_impact IMP ;.5\r\n"
+            "SSFallDead X 0x10\r\n"
+            "medloopfadeinstart 2d1\r\n"
+            "end\r\n";
+        SoundProfileTable t;
+        TEST_EXPECT(t.parse(kWalk, sizeof(kWalk) - 1) == 1);
+        const SoundProfile &p = t.entries()[0];
+        TEST_EXPECT(p.name.size() == 64);
+        TEST_EXPECT(p.set_names[0] == "V_A");
+        TEST_EXPECT(p.param2_q16[0] == 0x8000 && p.param3_q16[0] == 0x18000 && p.param4[0] == 3);
+        TEST_EXPECT(p.set_names[slot::kSlotRotorImpact] == "IMP");
+        TEST_EXPECT(p.param2_q16[slot::kSlotRotorImpact] == 0);
+        TEST_EXPECT(p.set_names[slot::kSlotFallDead] == "X");
+        TEST_EXPECT(p.param2_q16[slot::kSlotFallDead] == 0);
+        TEST_EXPECT(p.loop_params[0] == 20 * 655);
     }
 
     // Empty table: null / -1.

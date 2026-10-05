@@ -376,9 +376,9 @@ void test_world_boarding() {
 	w.registry.configure_pool(0, 16);
 	w.registry.configure_pool(1, 16);
 	static const char kProfiles[] =
-			"begin \"default\"\nend\n"
-			"begin \"SP_Truck\"\n ssaudio1\tV_HORN\nend\n"
-			"begin \"SP_Quiet\"\n ssaudio1\tV_MISSING\nend\n";
+			"begin \"default\"\r\nend\r\n"
+			"begin \"SP_Truck\"\r\n ssaudio1\tV_HORN\r\nend\r\n"
+			"begin \"SP_Quiet\"\r\n ssaudio1\tV_MISSING\r\nend\r\n";
 	w.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1);
 	lwf::File bank;
 	bank.multis.resize(1);

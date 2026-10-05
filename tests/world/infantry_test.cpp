@@ -1251,10 +1251,10 @@ void test_local_player_jump_respects_world_state_flag_gates() {
 // A minimal profile so the landing thump is observable on the world's
 // slot-sound queue (the host parses SndProf.def into the same table).
 const char kLandingProfiles[] =
-    "begin \"default\"\n"
-    "     SSFallDead     T_FALLDEAD\n"
-    "     SSFallAlive    T_LAND\n"
-    "end\n";
+    "begin \"default\"\r\n"
+    "     SSFallDead     T_FALLDEAD\r\n"
+    "     SSFallAlive    T_LAND\r\n"
+    "end\r\n";
 
 // A motored body with a registry row on flat ground at 50 u: the org2 local
 // player by default, an org1 NPC otherwise.

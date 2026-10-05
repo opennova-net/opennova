@@ -220,11 +220,11 @@ bool run_in_match_spawn_edge() {
 bool run_in_match_spawn_binds_local_player_definition() {
 	Harness h;
 	static const char kProfiles[] =
-			"begin \"default\"\n"
-			"end\n"
-			"begin \"SP_JoinerSelf\"\n"
-			"     SSLFootGND     T_DIRT_L\n"
-			"end\n";
+			"begin \"default\"\r\n"
+			"end\r\n"
+			"begin \"SP_JoinerSelf\"\r\n"
+			"     SSLFootGND     T_DIRT_L\r\n"
+			"end\r\n";
 	if (!expect(h.kernel->world.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 2,
 			"profiles parsed")) return false;
 	std::vector<opennova::def::DefItemDef> rows(1);

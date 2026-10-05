@@ -369,12 +369,12 @@ void tank_airborne_fit_applies_corner_drop() {
 // The tank's contact cues: SSAudio2 (slot 25) and the three tumble strikes.
 VehicleTraits tank_with_contact_cues(Rig &r) {
     static constexpr char kProfile[] =
-            "begin \"SP_TankContact\"\n"
-            "  SSAudio2 TANK_SKID\n"
-            "  tumble_hithard TANK_HIT_HARD\n"
-            "  tumble_hitmed TANK_HIT_MED\n"
-            "  tumble_hitsoft TANK_HIT_SOFT\n"
-            "end\n";
+            "begin \"SP_TankContact\"\r\n"
+            "  SSAudio2 TANK_SKID\r\n"
+            "  tumble_hithard TANK_HIT_HARD\r\n"
+            "  tumble_hitmed TANK_HIT_MED\r\n"
+            "  tumble_hitsoft TANK_HIT_SOFT\r\n"
+            "end\r\n";
     CHECK(r.world.tables.sound_profiles.parse(kProfile, sizeof(kProfile) - 1) == 1);
     auto t = r.traits(VehicleFamily::Tank, true);
     t.sound_profile = "SP_TankContact";

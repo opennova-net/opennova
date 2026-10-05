@@ -211,7 +211,7 @@ void test_org1_climb_chase_runs_on_even_ticks_only() {
 
 // ---- the death edge (R3-2, R3-4, R3-5, R7-11) ----
 
-constexpr char kDeathProfile[] = "begin \"SP_Org1\"\n     sounddeath     T_DEATH\nend\n";
+constexpr char kDeathProfile[] = "begin \"SP_Org1\"\r\n     sounddeath     T_DEATH\r\nend\r\n";
 
 int death_screams(const World &w) {
     int n = 0;
