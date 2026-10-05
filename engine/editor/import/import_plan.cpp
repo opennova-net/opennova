@@ -1258,4 +1258,48 @@ bool same_import(const ImportPlan &a, const ImportPlan &b) {
 	return true;
 }
 
+std::string import_row_refusal(const ImportPlan &plan, size_t index) {
+	const ImportPlanRow &row = plan.rows[index];
+	if (!row.problem.empty()) return row.problem;
+	if (row.made_from.empty()) return std::string();
+	for (const ImportPlanRow &other : plan.rows)
+		if (!other.made_from.empty() && other.source == row.source && !other.problem.empty())
+			return other.name + ", made from " + row.made_from + " too: " + other.problem;
+	return std::string();
+}
+
+std::vector<bool> import_default_checks(const ImportPlan &plan, bool replace_existing) {
+	using State = ImportPlanRow::State;
+	// The converter sources one of whose files has a problem, once (a whole install's rows are thousands).
+	std::set<ImportChoice> refused;
+	for (const ImportPlanRow &row : plan.rows)
+		if (!row.made_from.empty() && !row.problem.empty()) refused.insert(row.source);
+	std::vector<bool> out(plan.rows.size(), false);
+	for (size_t i = 0; i < plan.rows.size(); ++i) {
+		const ImportPlanRow &row = plan.rows[i];
+		const bool takes = row.problem.empty() && (row.made_from.empty() || !refused.count(row.source));
+		out[i] = (row.selected && (row.state == State::Selected || takes)) || (row.held && replace_existing && takes);
+	}
+	return out;
+}
+
+ImportSelection import_selection(const ImportPlan &plan, const std::vector<bool> &checked, bool replace_existing) {
+	ImportSelection out;
+	out.replace = replace_existing;
+	std::set<ImportChoice> taken; // each source once, looked up in log time (a whole install's rows)
+	for (size_t i = 0; i < plan.rows.size() && i < checked.size(); ++i) {
+		if (!checked[i]) continue;
+		++out.checked;
+		const ImportPlanRow &row = plan.rows[i];
+		if (row.state == ImportPlanRow::State::NotFound) continue;
+		if (const std::string why = import_row_refusal(plan, i); !why.empty()) {
+			if (out.blocked.empty()) out.blocked = row.name + " cannot be imported: " + why + " Uncheck it to import the rest.";
+			continue;
+		}
+		out.replace = out.replace || row.held;
+		if (taken.insert(row.source).second) out.sources.push_back(row.source);
+	}
+	return out;
+}
+
 } // namespace opennova::editor

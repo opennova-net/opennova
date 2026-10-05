@@ -115,7 +115,7 @@ void StylesView::rebind(const DocumentBase &) {
 // keeping their match, and the places are made again from the rows' order.
 void StylesView::refresh_lines(const MnsDocument &document) {
 	const bool same = lines_.made && lines_.document == document.identity() &&
-	                  lines_.load == document.load_generation() && lines_.filter == filter_;
+	                  lines_.load == document.load_generation() && lines_.filter == filter_.text;
 	if (same && lines_.revision == document.revision()) return;
 	ChangeSet set;
 	const RowChanges *changes =
@@ -129,7 +129,7 @@ void StylesView::refresh_lines(const MnsDocument &document) {
 	lines_.document = document.identity();
 	lines_.load = document.load_generation();
 	lines_.revision = document.revision();
-	lines_.filter = filter_;
+	lines_.filter = filter_.text;
 	lines_.listed.clear();
 	lines_.shown.clear();
 	const auto &rows = document.rows();
@@ -137,7 +137,7 @@ void StylesView::refresh_lines(const MnsDocument &document) {
 		const Node &row = *rows[i];
 		if (row.kind == kComment || row.kind == kBlank) continue;
 		lines_.listed.push_back(i);
-		if (!filter_[0]) {
+		if (!filter_.text[0]) {
 			lines_.shown.push_back(i);
 			continue;
 		}
@@ -146,7 +146,7 @@ void StylesView::refresh_lines(const MnsDocument &document) {
 			Value value;
 			const std::string text =
 			        document.get({row.id, row.kind, 0}, "value", value) ? std::get<std::string>(value) : std::string();
-			kept = lines_.matched.insert_or_assign(row.id, matches(row.name(), filter_) || matches(text, filter_)).first;
+			kept = lines_.matched.insert_or_assign(row.id, matches(row.name(), filter_.text) || matches(text, filter_.text)).first;
 			++lines_matched_;
 		}
 		if (kept->second) lines_.shown.push_back(i);
@@ -221,7 +221,14 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 	findings_.follow(view);
 	draw_document_toolbar(workspace, *document);
 	ui_kit::empty_state(sheet_status(view, findings_, *document));
-	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter names and values", 0.0f, nullptr, false);
+	// The filter is the workspace's (the MCP gaps lane: workspace.document's filter).
+	filter_.follow(view.workspace.document(document->path()).filter);
+	if (ui_kit::filter_box("##filter", filter_.text, sizeof(filter_.text), "Filter names and values", 0.0f, nullptr, false)) {
+		io::JsonValue members = io::JsonValue::make_object();
+		members.set("path", io::JsonValue::make_string(document->path()));
+		members.set("filter", io::JsonValue::make_string(filter_.sent()));
+		window_requests::set_workspace(workspace, "document", std::move(members));
+	}
 	refresh_lines(*document);
 	const std::vector<size_t> &listed = lines_.listed;
 	const std::vector<size_t> &shown = lines_.shown;

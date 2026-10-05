@@ -23,8 +23,12 @@ bool mission_tool_from_token(const std::string &token, MissionTool &out);
 // (metres; 0: no limit), whether a move keeps each entity's height over the ground (stick), and the
 // time of day the device shows (hours, 0..24; below 0 the mission's own start time). S15: the tool a
 // click on its canvas takes, the item its Place tool places (an items.def id; 0 none picked) and the
-// path its Path tool adds stops to (1 to 122; 0 none picked), the toolbar's and the wire's alike. Set
-// by a SetViewport's `options` member (its wire form below), every member optional.
+// path its Path tool adds stops to (1 to 122; 0 none picked), the toolbar's and the wire's alike. The
+// MCP gaps lane: the grid a canvas's move, placed record and area edge snap to (metres on the file's
+// axes; 0 free; the toolbar's Snap), the steps a turned entity's heading snaps to (degrees; 0 whole
+// degrees; its Turn), and the Place palette's search text; like the tool, the canvas's alone (no
+// picture changes).
+// Set by a SetViewport's `options` member (its wire form below), every member optional.
 struct MissionViewportOptions {
 	bool terrain = true, sky = true, water = true, models = true, shadows = true;
 	bool items = true, buildings = true, markers = true, organics = true;
@@ -35,14 +39,21 @@ struct MissionViewportOptions {
 	MissionTool tool = MissionTool::Select;
 	int64_t item = 0;
 	int path = 0;
+	float snap = 1.0f;
+	float turn = 15.0f;
+	std::string palette;
 };
+
+// The toolbar's Snap steps (metres; 0 free) and Turn steps (degrees; 0 whole degrees), in its lists' order.
+inline constexpr float kMissionSnaps[] = { 0.0f, 0.25f, 1.0f, 5.0f, 10.0f };
+inline constexpr float kMissionTurns[] = { 0.0f, 5.0f, 15.0f, 45.0f, 90.0f };
 
 bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b);
 inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOptions &b) { return !(a == b); }
 
 // The wire form: {show: {terrain, sky, water, models, shadows}, marks: {items, buildings, markers,
 // organics, areas, paths, labels}, mark_range, stick, time (null: the mission's start time), tool
-// (its token), item, path}.
+// (its token), item, path, snap, turn, palette}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);
 // A SetViewport's options member set over `held`: every member checked before any applies; false,
 // nothing changed, with `error` naming the member and what it takes.
