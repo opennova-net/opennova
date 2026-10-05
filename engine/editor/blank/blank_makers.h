@@ -40,6 +40,9 @@ bool make_blank_weapon_def(const BlankRequest &, std::vector<uint8_t> &out, Diag
 bool make_blank_ammo_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_charattr_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
+// env (blank_environment.cpp): the environment writer's authoring template, named after the file
+bool make_blank_environment(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+
 // coo (blank_coo.cpp)
 bool make_blank_coo(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
