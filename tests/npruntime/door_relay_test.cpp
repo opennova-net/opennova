@@ -315,12 +315,12 @@ void test_static_batch_carries_door_sections() {
 //  Entity_SpawnFromBMSRecord @0x40F25D..0x40F2DA]
 void test_joiner_doors_open_from_the_record() {
 	static const char kItems[] =
-			"begin \"Gate\"\n"
-			"  id 100700\n"
-			"  type building\n"
-			"  attrib: Door\n"
-			"  num_doors 2\n"
-			"end\n";
+			"begin \"Gate\"\r\n"
+			"  id 100700\r\n"
+			"  type building\r\n"
+			"  attrib: Door\r\n"
+			"  num_doors 2\r\n"
+			"end\r\n";
 	def::DefItemsFile items = {};
 	CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
 			sizeof(kItems) - 1, &items) == 0);

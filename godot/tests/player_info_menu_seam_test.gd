@@ -674,7 +674,7 @@ end
 	var path := OS.get_cache_dir().path_join(
 			"opennova_playerinfo_type_lock_%d.def" % Time.get_ticks_usec())
 	var f := FileAccess.open(path, FileAccess.WRITE)
-	f.store_string(def_text)
+	f.store_string(TestFs.crlf(def_text))
 	f.close()
 	var wdb := WeaponDatabase.new()
 	assert_eq(wdb.load(path), OK)

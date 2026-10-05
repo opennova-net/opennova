@@ -17,17 +17,17 @@ using namespace opennova::def;
 static int synthetic_legs(void) {
     int failures = 0;
     static const char text[] =
-        "HUDLS_SYSTEM\t1\n"
-        "HUDLS_BRACKET\tls_brack.tga\n"
-        "HUDLS_KEYOFST\t4,-6\n"
-        "HUDLS_MOREAV\tls_more.tga 300 -2\n"
-        "HUDLS_SLOT\t6 100,700\n"
-        "HUDLS_SLOT\t10 180 700\n"
-        "HUDLS_SLOT\t0 11 12\n"
-        "HUDLS_SLOT\t11 13 14\n"
-        "ZONEINFO\t1013,386,Right\n"
-        "PAUSEDPOS\t980 12\n"
-        "NETWORKINDICATOR\t6,5 30,5 70,5\n";
+        "HUDLS_SYSTEM\t1\r\n"
+        "HUDLS_BRACKET\tls_brack.tga\r\n"
+        "HUDLS_KEYOFST\t4,-6\r\n"
+        "HUDLS_MOREAV\tls_more.tga 300 -2\r\n"
+        "HUDLS_SLOT\t6 100,700\r\n"
+        "HUDLS_SLOT\t10 180 700\r\n"
+        "HUDLS_SLOT\t0 11 12\r\n"
+        "HUDLS_SLOT\t11 13 14\r\n"
+        "ZONEINFO\t1013,386,Right\r\n"
+        "PAUSEDPOS\t980 12\r\n"
+        "NETWORKINDICATOR\t6,5 30,5 70,5\r\n";
     DefHudPosFile f;
     memset(&f, 0, sizeof(f));
     if (def_parse_hudpos_memory((const unsigned char *)text, sizeof(text) - 1, &f) != 0) {
@@ -103,12 +103,12 @@ static int synthetic_legs(void) {
    block keys @0x59F5CE..0x59F74E, the HUD chain from @0x59F7CE)]. */
 static int tokenizer_legs() {
     const char *text =
-        "fonthud1_hi,FontHi.fnt\n"
-        "HUDCLIP \"5\" \"579\"\n"
-        "VEHICLE_HUD\n"
-        "  sid dbuggy1\n"
-        "  HUDCHLINE 7\n"
-        "VEHICLE_END\n";
+        "fonthud1_hi,FontHi.fnt\r\n"
+        "HUDCLIP \"5\" \"579\"\r\n"
+        "VEHICLE_HUD\r\n"
+        "  sid dbuggy1\r\n"
+        "  HUDCHLINE 7\r\n"
+        "VEHICLE_END\r\n";
     DefHudPosFile tok;
     memset(&tok, 0, sizeof(tok));
     if (def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &tok) != 0) {
@@ -133,10 +133,10 @@ static int tokenizer_legs() {
    HUD_ParseHudposToken's seats arm @0x59F74E, eight pairs at most]. */
 static int value_cap_legs() {
     const char *text =
-        "VEHICLE_HUD\n"
-        "  sid dch471\n"
-        "  seats 8,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16\n"
-        "VEHICLE_END\n";
+        "VEHICLE_HUD\r\n"
+        "  sid dch471\r\n"
+        "  seats 8,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16\r\n"
+        "VEHICLE_END\r\n";
     DefHudPosFile f;
     memset(&f, 0, sizeof(f));
     if (def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &f) != 0 ||
@@ -236,7 +236,7 @@ int main(int argc, char **argv) {
        is an ==0 test. [orig: dword_27237C0 (.data, no file
        bytes); parse @0x59fc1f; read @0x5a7a6a] */
     {
-        static const char spinmap_text[] = "SPINMAPWPDISTOFF 17\n";
+        static const char spinmap_text[] = "SPINMAPWPDISTOFF 17\r\n";
         DefHudPosFile sf;
         memset(&sf, 0, sizeof(sf));
         if (def_parse_hudpos_memory((const unsigned char *)spinmap_text,
@@ -261,9 +261,9 @@ int main(int argc, char **argv) {
        the BSS-zero initializer (label LIVE). [orig: mapcoords parse @0x5a0920 ->
        screenX/screenY/dword_27236FC (.data, no file bytes)] */
     {
-        static const char mc_text[] = "MAPCOORDS 530,720,center\n";
-        static const char mc_short[] = "MAPCOORDS 10,20\n";
-        static const char mc_none[] = "HUDTIMECLOCK 98,32\n";
+        static const char mc_text[] = "MAPCOORDS 530,720,center\r\n";
+        static const char mc_short[] = "MAPCOORDS 10,20\r\n";
+        static const char mc_none[] = "HUDTIMECLOCK 98,32\r\n";
         DefHudPosFile sf;
         memset(&sf, 0, sizeof(sf));
         if (def_parse_hudpos_memory((const unsigned char *)mc_text,
@@ -333,7 +333,7 @@ int main(int argc, char **argv) {
        atof and the fraction feeds the x2.55/x62 converts [orig: @0x5a0882..0x5a08c2].
        An integer parse would truncate 1.5 s to a 62-tick ramp instead of 93. */
     {
-        static const char fade_text[] = "alphafade\t12.5 75.5 1.5\n";
+        static const char fade_text[] = "alphafade\t12.5 75.5 1.5\r\n";
         DefHudPosFile ff;
         memset(&ff, 0, sizeof(ff));
         if (def_parse_hudpos_memory((const unsigned char *)fade_text,
@@ -376,9 +376,9 @@ int main(int argc, char **argv) {
        @0x59d6b0] */
     {
         static const char pos_text[] =
-            "AMMOCOUNTPOS\t128,597,0,right\n"
-            "HUDWEAPONNAME\t11,630,1,left\n"
-            "HUDTIMECLOCK\t10 20 center\n";
+            "AMMOCOUNTPOS\t128,597,0,right\r\n"
+            "HUDWEAPONNAME\t11,630,1,left\r\n"
+            "HUDTIMECLOCK\t10 20 center\r\n";
         DefHudPosFile pf;
         memset(&pf, 0, sizeof(pf));
         if (def_parse_hudpos_memory((const unsigned char *)pos_text,
@@ -414,9 +414,9 @@ int main(int argc, char **argv) {
        breath bar. [orig: HUD_ParseHudposToken @0x59FB3B..0x59FB84 ->
        dword_2723810/14/18 via atof, atof, HUD_ParseTextAlignment] */
     {
-        static const char breath_center[] = "BREATHTIME\t\t512,70,center\n";
-        static const char breath_right[] = "BREATHTIME 10,20,RIGHT\n";
-        static const char breath_short[] = "BREATHTIME 30,40\n";
+        static const char breath_center[] = "BREATHTIME\t\t512,70,center\r\n";
+        static const char breath_right[] = "BREATHTIME 10,20,RIGHT\r\n";
+        static const char breath_short[] = "BREATHTIME 30,40\r\n";
         const char *texts[] = {breath_center, breath_right, breath_short};
         const size_t lens[] = {sizeof(breath_center) - 1, sizeof(breath_right) - 1,
                                sizeof(breath_short) - 1};
@@ -533,8 +533,8 @@ int main(int argc, char **argv) {
        drift under hud_static_frame_index(). */
     {
         const char *two_frames =
-            "StaticFrame\tH_BlkHLin.tga  512,720\n"
-            "StaticFrame\tCompMark.tga  508,685\n";
+            "StaticFrame\tH_BlkHLin.tga  512,720\r\n"
+            "StaticFrame\tCompMark.tga  508,685\r\n";
         DefHudPosFile multi;
         memset(&multi, 0, sizeof(multi));
         if (def_parse_hudpos_memory((const unsigned char *)two_frames,

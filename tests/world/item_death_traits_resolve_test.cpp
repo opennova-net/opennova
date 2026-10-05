@@ -235,16 +235,16 @@ static void test_final_only_husk_supplies_the_gate_but_no_kz_source() {
     const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
     const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
     const Items items(text_bytes(
-            "begin \"Final-only KZ witness\"\n"
-            "  id 105099\n"
-            "  type object\n"
-            "  graphic Barrel1\n"
-            "  sid final_only_kz\n"
-            "  huskfinal Barrel1XF\n"
-            "  hp 75\n"
-            "  kz 4.0\n"
-            "  unit_type 6\n"
-            "end\n"));
+            "begin \"Final-only KZ witness\"\r\n"
+            "  id 105099\r\n"
+            "  type object\r\n"
+            "  graphic Barrel1\r\n"
+            "  sid final_only_kz\r\n"
+            "  huskfinal Barrel1XF\r\n"
+            "  hp 75\r\n"
+            "  kz 4.0\r\n"
+            "  unit_type 6\r\n"
+            "end\r\n"));
     CHECK(!house.empty() && !armory.empty() && items.ok);
     if (house.empty() || armory.empty() || !items.ok) return;
     const TempRoot root("final");
@@ -290,12 +290,12 @@ static void test_retail_glass_model_maps_exact_userpoint_into_death_traits() {
     CHECK(expected_pos.size() == 1 && expected_dir.size() == 1);
     {
         const Items items(text_bytes(
-                "begin \"Retail glass witness\"\n"
-                "  id 105099\n"
-                "  type object\n"
-                "  graphic eurhr2\n"
-                "  hp 1000\n"
-                "end\n"));
+                "begin \"Retail glass witness\"\r\n"
+                "  id 105099\r\n"
+                "  type object\r\n"
+                "  graphic eurhr2\r\n"
+                "  hp 1000\r\n"
+                "end\r\n"));
         CHECK(items.ok);
         if (!items.ok) return;
         const TempRoot root("glass");
@@ -313,12 +313,12 @@ static void test_retail_glass_model_maps_exact_userpoint_into_death_traits() {
     {
         // A near-name is not in retail's static table, even with the same userpoint.
         const Items items(text_bytes(
-                "begin \"Near-name glass witness\"\n"
-                "  id 105098\n"
-                "  type object\n"
-                "  graphic eurhr2x\n"
-                "  hp 1000\n"
-                "end\n"));
+                "begin \"Near-name glass witness\"\r\n"
+                "  id 105098\r\n"
+                "  type object\r\n"
+                "  graphic eurhr2x\r\n"
+                "  hp 1000\r\n"
+                "end\r\n"));
         CHECK(items.ok);
         if (!items.ok) return;
         const TempRoot root("glassx");
@@ -342,24 +342,24 @@ static void test_class_init_seeds_the_brain_floors() {
     const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
     const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
     const Items items(text_bytes(
-            "begin \"Floor witness heli\"\n"
-            "  id 105098\n"
-            "  type vehicle\n"
-            "  graphic Floor1\n"
-            "  husk Floor1X\n"
-            "  ai_function chel\n"
-            "  move_function chel\n"
-            "  hp 100\n"
-            "end\n"
-            "begin \"Floor witness boat\"\n"
-            "  id 105097\n"
-            "  type vehicle\n"
-            "  graphic Floor1\n"
-            "  husk Floor1X\n"
-            "  ai_function cbot\n"
-            "  move_function cbot\n"
-            "  hp 100\n"
-            "end\n"));
+            "begin \"Floor witness heli\"\r\n"
+            "  id 105098\r\n"
+            "  type vehicle\r\n"
+            "  graphic Floor1\r\n"
+            "  husk Floor1X\r\n"
+            "  ai_function chel\r\n"
+            "  move_function chel\r\n"
+            "  hp 100\r\n"
+            "end\r\n"
+            "begin \"Floor witness boat\"\r\n"
+            "  id 105097\r\n"
+            "  type vehicle\r\n"
+            "  graphic Floor1\r\n"
+            "  husk Floor1X\r\n"
+            "  ai_function cbot\r\n"
+            "  move_function cbot\r\n"
+            "  hp 100\r\n"
+            "end\r\n"));
     CHECK(!house.empty() && !armory.empty() && items.ok);
     if (house.empty() || armory.empty() || !items.ok) return;
     const TempRoot root("floors");

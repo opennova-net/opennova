@@ -116,25 +116,6 @@ void copy_token(char *dst, size_t dst_size, const io::ConfigTokens &tokens, int 
     safe_copy(dst, dst_size, token, strlen(token));
 }
 
-int next_line(LineIter *it, const char **out, size_t *out_len) {
-    if (it->pos >= it->buf_len) return 0;
-    const char *start = it->buf + it->pos;
-    const char *nl = (const char *)memchr(start, '\n', it->buf_len - it->pos);
-    size_t len;
-    if (nl) {
-        len = (size_t)(nl - start);
-        it->pos += len + 1;
-    } else {
-        len = it->buf_len - it->pos;
-        it->pos = it->buf_len;
-    }
-    /* Strip \r */
-    if (len > 0 && start[len - 1] == '\r') --len;
-    *out = start;
-    *out_len = len;
-    return 1;
-}
-
 /* Weapon flags table — the FULL witnessed token set, both flag dwords.
    [orig: the 16-B-stride {name, 0, flags1 bit, flags2 bit} table @ 0x830bf0;
    tokens compare case-insensitively]. The previous 7-entry table aliased

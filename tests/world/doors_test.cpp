@@ -41,13 +41,13 @@ static EntityHandle door(World &w, int pool = 2, int group = 7, int count = 2,
 
 static void test_parse_and_bind() {
     const char source[] =
-        "begin \"door\"\n id 101998\n type building\n ai_function door\n move_function door\n"
-        " num_doors 2\n first_door 3\n open_rate 2\n max_angle 90\n"
-        " door_type 1 0 1\n door_dir 0 1 1\n"
-        " door_open_sound_id DOOR_OPN_MTL\n door_close_sound_id DOOR_CLS_MTL\nend\n"
-        "begin \"aliases\"\n id 101999\n type building\n num_doors 8\n first_door 4\n"
-        " deathtime 0\n door_dir 1 1\n clipsize 9\nend\n"
-        "begin \"clamps\"\n id 102000\n num_doors 80\n first_door -1\n open_rate 0\nend\n";
+        "begin \"door\"\r\n id 101998\r\n type building\r\n ai_function door\r\n move_function door\r\n"
+        " num_doors 2\r\n first_door 3\r\n open_rate 2\r\n max_angle 90\r\n"
+        " door_type 1 0 1\r\n door_dir 0 1 1\r\n"
+        " door_open_sound_id DOOR_OPN_MTL\r\n door_close_sound_id DOOR_CLS_MTL\r\nend\r\n"
+        "begin \"aliases\"\r\n id 101999\r\n type building\r\n num_doors 8\r\n first_door 4\r\n"
+        " deathtime 0\r\n door_dir 1 1\r\n clipsize 9\r\nend\r\n"
+        "begin \"clamps\"\r\n id 102000\r\n num_doors 80\r\n first_door -1\r\n open_rate 0\r\nend\r\n";
     def::DefItemsFile items{};
     CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(source),
             sizeof(source) - 1, &items) == 0);
@@ -226,9 +226,9 @@ static void test_retail_door_pose() {
     mission::CollisionResolveState resolve;
     World w;
     w.registry.configure_pool(2, 1);
-    const char source[] = "begin \"Iblock01\"\n id 101998\n type building\n"
-            " graphic Iblock01\n ai_function door\n move_function door\n"
-            " first_door 2\n num_doors 1\n open_rate 2\nend\n";
+    const char source[] = "begin \"Iblock01\"\r\n id 101998\r\n type building\r\n"
+            " graphic Iblock01\r\n ai_function door\r\n move_function door\r\n"
+            " first_door 2\r\n num_doors 1\r\n open_rate 2\r\nend\r\n";
     def::DefItemsFile items{};
     CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(source),
             sizeof(source) - 1, &items) == 0);

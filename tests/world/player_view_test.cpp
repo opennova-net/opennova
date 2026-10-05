@@ -144,8 +144,8 @@ void test_authored_pose_interp_keeps_original_snap_and_completion_rules() {
 void test_authored_pose_def_promotes_parser_precision_and_wrapping_bam() {
     using namespace opennova::def;
     const char text[] =
-            "weapon \"POSE\"\npos 1,2,3,179.99999,180.00001,359.99999\n"
-            "tpos 4,5,6,360,-0.1,356.750\nend\n";
+            "weapon \"POSE\"\r\npos 1,2,3,179.99999,180.00001,359.99999\r\n"
+            "tpos 4,5,6,360,-0.1,356.750\r\nend\r\n";
     DefWeaponsFile parsed{};
     CHECK(def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
                                   &parsed) == 0);

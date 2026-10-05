@@ -26,7 +26,7 @@ func _font_overlay() -> HudOverlay:
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir_path), OK)
 	_temp_dirs.append(dir_path)
 	var def_file := FileAccess.open(dir_path.path_join("hudpos.def"), FileAccess.WRITE)
-	def_file.store_string("fonthud1_hi Gunpl22b.fnt\nHUDCHATTEXT 142 , 711\n")
+	def_file.store_string("fonthud1_hi Gunpl22b.fnt\r\nHUDCHATTEXT 142 , 711\r\n")
 	def_file.close()
 	var fnt := FileAccess.open(dir_path.path_join("Gunpl22b.fnt"), FileAccess.WRITE)
 	fnt.store_buffer(FileAccess.get_file_as_bytes(FONT_FIXTURE))

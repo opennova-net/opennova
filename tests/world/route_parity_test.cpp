@@ -219,26 +219,25 @@ void test_player_pilot_holds_pretty() {
 //  ItemList_FindIndexByTypeId @0x49E100; ItemDef_AllocateWithDefaults bumps
 //  g_ItemCount @0x49E3BE]
 void test_item_type_index_is_the_first_row_ordinal() {
-    static const char kItems[] = R"(begin "Null"
-  id 100000
-end
-
-begin "Flyable"
-  id 100172
-end
-
-begin "Truck"
-  id 101294
-end
-
-begin "Flyable again"
-  id 100172
-end
-
-begin "Player"
-  id 105305
-end
-)";
+    static const char kItems[] = "begin \"Null\"\r\n"
+        "  id 100000\r\n"
+        "end\r\n"
+        "\r\n"
+        "begin \"Flyable\"\r\n"
+        "  id 100172\r\n"
+        "end\r\n"
+        "\r\n"
+        "begin \"Truck\"\r\n"
+        "  id 101294\r\n"
+        "end\r\n"
+        "\r\n"
+        "begin \"Flyable again\"\r\n"
+        "  id 100172\r\n"
+        "end\r\n"
+        "\r\n"
+        "begin \"Player\"\r\n"
+        "  id 105305\r\n"
+        "end\r\n";
     def::DefItemsFile items = {};
     CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
                                       sizeof(kItems) - 1, &items) == 0);

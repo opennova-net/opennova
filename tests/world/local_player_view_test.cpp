@@ -2532,8 +2532,8 @@ void test_scoped_aim_follows_local_view_clamps_and_leg_chase() {
 // [orig: HUD_BuildEntityInfo @0x4B8539..0x4B8786; Inset query @0x4DCCB0]
 void test_hud_context_tracks_mount_weapon_and_dismount() {
     static const char source[] =
-        "weapon \"WPN_HUD_GUN\"\ncategory 10\nclipsize 1\nEmplacedStance 2\nend\n"
-        "weapon \"WPN_HUD_FOOT\"\ncategory 4\nclipsize 1\nend\n";
+        "weapon \"WPN_HUD_GUN\"\r\ncategory 10\r\nclipsize 1\r\nEmplacedStance 2\r\nend\r\n"
+        "weapon \"WPN_HUD_FOOT\"\r\ncategory 4\r\nclipsize 1\r\nend\r\n";
     DefWeaponsFile defs{};
     CHECK(def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(source),
             sizeof(source) - 1, &defs) == 0);

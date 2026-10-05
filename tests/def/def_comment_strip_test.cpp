@@ -10,16 +10,16 @@ using namespace opennova::def;
 
 int main(void) {
     const char *test_def =
-        "\n"
-        "begin \"Test Item With Comments\"\n"
-        "  id 999999\n"
-        "  type person\n"
-        "  graphic TestModel\t\t\t// this comment should be stripped\n"
-        "  sid test_sid\t\t\t\t// another trailing comment\n"
-        "  anim_def TestAnim\t\t\t// yet another comment\n"
-        "  hp 100\t\t\t\t\t//was 150\n"
-        "  sound_profile SP_Test\t\t// Male Sound Profile\n"
-        "end\n";
+        "\r\n"
+        "begin \"Test Item With Comments\"\r\n"
+        "  id 999999\r\n"
+        "  type person\r\n"
+        "  graphic TestModel\t\t\t// this comment should be stripped\r\n"
+        "  sid test_sid\t\t\t\t// another trailing comment\r\n"
+        "  anim_def TestAnim\t\t\t// yet another comment\r\n"
+        "  hp 100\t\t\t\t\t//was 150\r\n"
+        "  sound_profile SP_Test\t\t// Male Sound Profile\r\n"
+        "end\r\n";
 
     char temp_path[4096];
     snprintf(temp_path, sizeof(temp_path), "%s/def_comment_strip_test_%ld.def", test_paths_temp_dir(), test_paths_pid());

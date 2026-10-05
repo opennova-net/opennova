@@ -80,14 +80,12 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out) 
     bool in_action = false;
     DefPowerupAction *action = nullptr;
 
-    // The shared ASCII walk cuts at CR LF only and drops the last byte of an
-    // unterminated tail line [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5,
-    //  the tail @0x53D8E9 / @0x53D8EC]; a lone LF is no line break there.
-    size_t line_index = (size_t)-1;
-    io::for_each_config_line_span(buf, file_len, [&](const io::ConfigTokens &tokens,
-                                                     const io::ConfigLineSpan &) {
-        ++line_index;
-        if (tokens.count == 0 || tokens.tokens[0][0] == '/') return;
+    // The one def walk (defscan::for_each_def_line): cut at CR LF only, the
+    // last byte of an unterminated tail line dropped [orig: File_ParseASCIIFile
+    // @0x53D8C7..0x53D8F5, the tail @0x53D8E9 / @0x53D8EC]; a lone LF is no
+    // line break there.
+    for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens, const char *,
+                                         size_t, size_t line_index) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1);
         const size_t vl = strlen(v);

@@ -10,10 +10,10 @@ using namespace opennova::world;
 // +0x160/+0x26C ammo words) come from the ai_function class row's init slot.
 // [orig: sub_448CE0 @0x448CE0 via def+0x148; the move table row @0x82AC88]
 static int test_squib_init_keys_on_ai_function() {
-    const char text[]="begin AiOnly\n id 106034\n type marker\n ai_function squib\n"
-        " move_function nade\n sqb_error 20\n end\n"
-        "begin MoveOnly\n id 106035\n type marker\n ai_function null\n"
-        " move_function squib\n sqb_error 20\n end\n";
+    const char text[]="begin AiOnly\r\n id 106034\r\n type marker\r\n ai_function squib\r\n"
+        " move_function nade\r\n sqb_error 20\r\n end\r\n"
+        "begin MoveOnly\r\n id 106035\r\n type marker\r\n ai_function null\r\n"
+        " move_function squib\r\n sqb_error 20\r\n end\r\n";
     opennova::def::DefItemsFile definitions{};
     CHECK(opennova::def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(text),
             sizeof(text)-1,&definitions)==0);
@@ -37,9 +37,9 @@ static int test_squib_init_keys_on_ai_function() {
 }
 int main() {
     if (test_squib_init_keys_on_ai_function()!=0) return 1;
-    const char text[]="begin Squib\n id 106031\n type marker\n ai_function squib\n"
-        " move_function squib\n sqb_rate 6\n sqb_distance 1.25\n sqb_error 20\n"
-        " ammo_marker3 BALL\n end\n";
+    const char text[]="begin Squib\r\n id 106031\r\n type marker\r\n ai_function squib\r\n"
+        " move_function squib\r\n sqb_rate 6\r\n sqb_distance 1.25\r\n sqb_error 20\r\n"
+        " ammo_marker3 BALL\r\n end\r\n";
     opennova::def::DefItemsFile definitions{};
     CHECK(opennova::def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(text),
             sizeof(text)-1,&definitions)==0);

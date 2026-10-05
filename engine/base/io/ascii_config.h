@@ -1,6 +1,7 @@
 #pragma once
 
-// The retail ASCII config-file reader the text formats share (.adm, .tsd):
+// The retail ASCII config-file reader the text formats share (.adm, .tsd, the
+// .def families):
 // File_ParseASCIIFile's line walk and the tokenizer it calls per line.
 //
 // Lines split STRICTLY on a CR LF pair; the line is terminated in place at the

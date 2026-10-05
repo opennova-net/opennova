@@ -26,208 +26,207 @@ static int failures = 0;
 
 namespace {
 
-const char kItemsDef[] = R"(begin "S5 Player"
-  id 105305
-  type person
-  graphic soldier
-  sid s5player
-  hp 100
-end
-
-begin "S5 Tank"
-  id 100500
-  type vehicle
-  graphic tank
-  sid s5tank
-  ai_function cveh
-  render_function cveh
-  move_function ctank
-  attrib: AIData PlayerControl
-  hp 40000
-  physics 2
-end
-
-begin "S5 APC"
-  id 100501
-  type vehicle
-  graphic apc
-  sid s5apc
-  ai_function cveh
-  render_function cveh
-  move_function catv
-  attrib: AIData PlayerControl
-  hp 1000
-  physics 1
-end
-
-begin "S5 Helo"
-  id 100502
-  type vehicle
-  graphic helo
-  sid s5helo
-  ai_function CHel
-  render_function CHel
-  move_function CHelScout
-  attrib: AIData PlayerControl
-  hp 2000
-end
-
-begin "S5 Truck NoPhys"
-  id 100503
-  type vehicle
-  graphic truck
-  sid s5truck
-  ai_function cveh
-  render_function cveh
-  move_function cveh
-  attrib: AIData
-  hp 800
-end
-
-begin "S5 Rifleman"
-  id 100510
-  type person
-  graphic rifleman
-  sid s5rifle
-  hp 30
-  clipsize 30
-  deathtime 5
-end
-
-begin "S5 Bunker"
-  id 100520
-  type building
-  graphic bunker
-  sid s5bunker
-  husk bunk_husk
-  huskfinal bunk_burn
-  music 65533
-end
-
-begin "S5 Bush"
-  id 100530
-  type decoration
-  graphic bush
-  sid s5bush
-  hp 5
-end
-
-begin "S5 Frag"
-  id 100600
-  type powerup
-  graphic frag
-  sid s5frag
-  ai_function nade
-  move_function nade
-  hp 25
-end
-
-begin "S5 ATMine"
-  id 100601
-  type powerup
-  graphic atmine
-  sid s5atmine
-  ai_function vmne
-  move_function schl
-  hp 10
-end
-
-begin "S5 Dup A"
-  id 100602
-  type powerup
-  graphic dupa
-  sid s5dupa
-  ai_function clym
-  move_function clym
-  hp 11
-end
-
-begin "S5 Dup B"
-  id 100602
-  type powerup
-  graphic dupb
-  sid s5dupb
-  ai_function nade
-  move_function nade
-  hp 12
-end
-
-begin "S5 Crate"
-  id 100540
-  type decoration
-  graphic crate
-  sid s5crate
-  ai_function gnrl
-  hp 104
-end
-
-begin "S5 Oil Tank"
-  id 100541
-  type decoration
-  graphic oiltank
-  sid s5oil
-  ai_function GNRC
-  hp 200
-end
-
-begin "S5 Pump"
-  id 100542
-  type decoration
-  graphic pump
-  sid s5pump
-  ai_function gnl2
-  hp 50
-end
-
-begin "S5 Gun"
-  id 100543
-  type decoration
-  graphic b50cal
-  sid s5gun
-  ai_function ewep
-  hp 10
-end
-
-begin "S5 Palm"
-  id 100544
-  type decoration
-  graphic palm
-  sid s5palm
-  ai_function tree
-  hp 10
-end
-
-begin "S5 Radar"
-  id 100545
-  type building
-  graphic radar
-  sid s5radar
-  ai_function bld2
-  hp 300
-end
-
-begin "S5 Typo"
-  id 100546
-  type decoration
-  graphic typo
-  sid s5typo
-  ai_function gnr1
-  hp 10
-end
-)";
+const char kItemsDef[] = "begin \"S5 Player\"\r\n"
+    "  id 105305\r\n"
+    "  type person\r\n"
+    "  graphic soldier\r\n"
+    "  sid s5player\r\n"
+    "  hp 100\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Tank\"\r\n"
+    "  id 100500\r\n"
+    "  type vehicle\r\n"
+    "  graphic tank\r\n"
+    "  sid s5tank\r\n"
+    "  ai_function cveh\r\n"
+    "  render_function cveh\r\n"
+    "  move_function ctank\r\n"
+    "  attrib: AIData PlayerControl\r\n"
+    "  hp 40000\r\n"
+    "  physics 2\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 APC\"\r\n"
+    "  id 100501\r\n"
+    "  type vehicle\r\n"
+    "  graphic apc\r\n"
+    "  sid s5apc\r\n"
+    "  ai_function cveh\r\n"
+    "  render_function cveh\r\n"
+    "  move_function catv\r\n"
+    "  attrib: AIData PlayerControl\r\n"
+    "  hp 1000\r\n"
+    "  physics 1\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Helo\"\r\n"
+    "  id 100502\r\n"
+    "  type vehicle\r\n"
+    "  graphic helo\r\n"
+    "  sid s5helo\r\n"
+    "  ai_function CHel\r\n"
+    "  render_function CHel\r\n"
+    "  move_function CHelScout\r\n"
+    "  attrib: AIData PlayerControl\r\n"
+    "  hp 2000\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Truck NoPhys\"\r\n"
+    "  id 100503\r\n"
+    "  type vehicle\r\n"
+    "  graphic truck\r\n"
+    "  sid s5truck\r\n"
+    "  ai_function cveh\r\n"
+    "  render_function cveh\r\n"
+    "  move_function cveh\r\n"
+    "  attrib: AIData\r\n"
+    "  hp 800\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Rifleman\"\r\n"
+    "  id 100510\r\n"
+    "  type person\r\n"
+    "  graphic rifleman\r\n"
+    "  sid s5rifle\r\n"
+    "  hp 30\r\n"
+    "  clipsize 30\r\n"
+    "  deathtime 5\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Bunker\"\r\n"
+    "  id 100520\r\n"
+    "  type building\r\n"
+    "  graphic bunker\r\n"
+    "  sid s5bunker\r\n"
+    "  husk bunk_husk\r\n"
+    "  huskfinal bunk_burn\r\n"
+    "  music 65533\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Bush\"\r\n"
+    "  id 100530\r\n"
+    "  type decoration\r\n"
+    "  graphic bush\r\n"
+    "  sid s5bush\r\n"
+    "  hp 5\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Frag\"\r\n"
+    "  id 100600\r\n"
+    "  type powerup\r\n"
+    "  graphic frag\r\n"
+    "  sid s5frag\r\n"
+    "  ai_function nade\r\n"
+    "  move_function nade\r\n"
+    "  hp 25\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 ATMine\"\r\n"
+    "  id 100601\r\n"
+    "  type powerup\r\n"
+    "  graphic atmine\r\n"
+    "  sid s5atmine\r\n"
+    "  ai_function vmne\r\n"
+    "  move_function schl\r\n"
+    "  hp 10\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Dup A\"\r\n"
+    "  id 100602\r\n"
+    "  type powerup\r\n"
+    "  graphic dupa\r\n"
+    "  sid s5dupa\r\n"
+    "  ai_function clym\r\n"
+    "  move_function clym\r\n"
+    "  hp 11\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Dup B\"\r\n"
+    "  id 100602\r\n"
+    "  type powerup\r\n"
+    "  graphic dupb\r\n"
+    "  sid s5dupb\r\n"
+    "  ai_function nade\r\n"
+    "  move_function nade\r\n"
+    "  hp 12\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Crate\"\r\n"
+    "  id 100540\r\n"
+    "  type decoration\r\n"
+    "  graphic crate\r\n"
+    "  sid s5crate\r\n"
+    "  ai_function gnrl\r\n"
+    "  hp 104\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Oil Tank\"\r\n"
+    "  id 100541\r\n"
+    "  type decoration\r\n"
+    "  graphic oiltank\r\n"
+    "  sid s5oil\r\n"
+    "  ai_function GNRC\r\n"
+    "  hp 200\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Pump\"\r\n"
+    "  id 100542\r\n"
+    "  type decoration\r\n"
+    "  graphic pump\r\n"
+    "  sid s5pump\r\n"
+    "  ai_function gnl2\r\n"
+    "  hp 50\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Gun\"\r\n"
+    "  id 100543\r\n"
+    "  type decoration\r\n"
+    "  graphic b50cal\r\n"
+    "  sid s5gun\r\n"
+    "  ai_function ewep\r\n"
+    "  hp 10\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Palm\"\r\n"
+    "  id 100544\r\n"
+    "  type decoration\r\n"
+    "  graphic palm\r\n"
+    "  sid s5palm\r\n"
+    "  ai_function tree\r\n"
+    "  hp 10\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Radar\"\r\n"
+    "  id 100545\r\n"
+    "  type building\r\n"
+    "  graphic radar\r\n"
+    "  sid s5radar\r\n"
+    "  ai_function bld2\r\n"
+    "  hp 300\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Typo\"\r\n"
+    "  id 100546\r\n"
+    "  type decoration\r\n"
+    "  graphic typo\r\n"
+    "  sid s5typo\r\n"
+    "  ai_function gnr1\r\n"
+    "  hp 10\r\n"
+    "end\r\n";
 
 // The minimal SndProf shape ("default" first, so a real profile lands at
 // index 1 and a miss falls back to 0 by the table's own rule).
 const char kProfiles[] =
-    "begin \"default\"\n"
-    "     SSLFootGND     DEF_FOOT_L\n"
-    "end\n"
-    "begin \"SP_Test\"\n"
-    "     SSLFootGND     T_DIRT_L\n"
-    "end\n"
-    "begin \"SP_TestFemale\"\n"
-    "     SSLFootGND     T_DIRT_L_F\n"
-    "end\n";
+    "begin \"default\"\r\n"
+    "     SSLFootGND     DEF_FOOT_L\r\n"
+    "end\r\n"
+    "begin \"SP_Test\"\r\n"
+    "     SSLFootGND     T_DIRT_L\r\n"
+    "end\r\n"
+    "begin \"SP_TestFemale\"\r\n"
+    "     SSLFootGND     T_DIRT_L_F\r\n"
+    "end\r\n";
 
 // FIRST entry with the id — the row the fold resolves, so post-parse stamps
 // land on the row the fold will read [orig: ItemList_FindIndexByTypeId

@@ -28,13 +28,6 @@ namespace opennova::defscan {
 // The scanner's own types and the caps/macros the family parsers use directly.
 typedef struct { const char *s; size_t len; } Token; // a value token's span
 
-/* Line iterator: walks through buf splitting on \n, stripping \r */
-typedef struct {
-    const char *buf;
-    size_t buf_len;
-    size_t pos;
-} LineIter;
-
 typedef struct { const char *name; size_t name_len; int bit; int bit2; } FlagEntry;
 
 /* Dynamic array helpers */
@@ -71,8 +64,6 @@ float parse_float_n(const char *s, size_t len);
 
 int death_piece_type_index(const char *name, size_t len);
 
-int next_line(LineIter *it, const char **out, size_t *out_len);
-
 // The value tokens a family parser reads off one line: every token the
 // tokenizer keeps past the key, 29 of its 30. The tokenizer stops at its 30th
 // token without cutting it, so the 29th value runs on to the line's end,
@@ -91,26 +82,23 @@ inline constexpr int kMaxValueTokens = io::kConfigMaxTokens - 1;
 //  @0x53CB60's tokens to the callback (@0x53D908), skipping a line with no
 //  token or whose first starts with '/' (@0x53D915 / @0x53D91E); the
 //  tokenizer's cuts are io::tokenize_config_line's]
-// The line split stays LF-tolerant (a CR before the LF dropped): retail cuts
-// at CR LF alone (io::for_each_config_line), and every shipped def is CR LF.
-// A line is read up to its first NUL, as the tokenizer's strlen reads it, so a
-// file's trailing NUL never sticks to its last key. `apply(tokens, line,
-// line_len, line_index)` gets the raw line for the parsers' raw_lines and its
-// index counting every line, the skipped ones included.
+// The lines are the shared walk's (io::for_each_config_line_span): split at a
+// CR LF pair and nowhere else, so an LF alone is a byte of the line and a file
+// with no CR LF is one line; a last line with no pair loses its final byte
+// [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5]. A line is read up to its
+// first NUL, as the tokenizer's strlen reads it. `apply(tokens, line, line_len,
+// line_index)` gets the line's bytes in `buf` (its CR LF excluded) for the
+// parsers' raw_lines and its index counting every line the walk cuts, the
+// skipped ones included.
 template <typename Apply>
 void for_each_def_line(const char *buf, size_t len, Apply &&apply) {
-    LineIter it = {buf, len, 0};
-    const char *line;
-    size_t line_len;
     size_t line_index = (size_t)-1;
-    io::ConfigTokens tokens;
-    while (next_line(&it, &line, &line_len)) {
+    io::for_each_config_line_span(buf, len, [&](const io::ConfigTokens &tokens,
+                                                 const io::ConfigLineSpan &span) {
         ++line_index;
-        const std::string copy(line, line_len);
-        io::tokenize_config_line(copy.c_str(), tokens);
-        if (tokens.count == 0 || tokens.tokens[0][0] == '/') continue;
-        apply(static_cast<const io::ConfigTokens &>(tokens), line, line_len, line_index);
-    }
+        if (tokens.count == 0 || tokens.tokens[0][0] == '/') return;
+        apply(tokens, buf + span.begin, span.end - span.begin, line_index);
+    });
 }
 
 // The key compare every family parser makes [orig: _stricmp @0x76FDF6].

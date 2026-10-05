@@ -16,7 +16,7 @@ using namespace opennova::def;
 static int type_of(const char *type_token) {
     char buf[256];
     // One minimal begin/end block whose only body line is the `type` token.
-    int n = snprintf(buf, sizeof(buf), "begin \"probe\"\n  type %s\nend\n", type_token);
+    int n = snprintf(buf, sizeof(buf), "begin \"probe\"\r\n  type %s\r\nend\r\n", type_token);
 
     DefItemsFile items;
     memset(&items, 0, sizeof(items));

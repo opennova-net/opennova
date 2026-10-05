@@ -24,10 +24,11 @@ const MINIMAL_MISSION := "mnml.bms"
 const CACHE_ROOT := "world_fixture"
 
 
+## A `.def` is written with CR LF line ends (TestFs.crlf).
 static func write_file(path: String, text: String) -> void:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	assert(file != null, "fixture file should be writable: %s" % path)
-	file.store_string(text)
+	file.store_string(TestFs.crlf(text) if path.get_extension().to_lower() == "def" else text)
 	file.close()
 
 
@@ -296,7 +297,7 @@ static func shell_archive_entries(test: GutTest, filenames: Array) -> Array:
 			source = BOOT_FIXTURE_DIR.path_join("main.mnu")
 		var bytes := FileAccess.get_file_as_bytes(source)
 		if filename == "weapon.def":
-			bytes = SHELL_WEAPON_DEF.to_utf8_buffer()
+			bytes = TestFs.crlf(SHELL_WEAPON_DEF).to_utf8_buffer()
 		test.assert_false(bytes.is_empty(),
 				"%s is available in the committed fixture" % filename)
 		entries.append({"name": filename, "bytes": bytes})

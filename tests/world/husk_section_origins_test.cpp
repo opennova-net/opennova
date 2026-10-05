@@ -119,15 +119,15 @@ static void test_primary_husk_supplies_the_section_pivots() {
     const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
     const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
     const Items items(
-            "begin \"Tower witness\"\n"
-            "  id 105050\n"
-            "  type object\n"
-            "  graphic Barrel1\n"
-            "  sid tower_witness\n"
-            "  husk Barrel1X\n"
-            "  huskfinal Barrel1XF\n"
-            "  hp 100\n"
-            "end\n");
+            "begin \"Tower witness\"\r\n"
+            "  id 105050\r\n"
+            "  type object\r\n"
+            "  graphic Barrel1\r\n"
+            "  sid tower_witness\r\n"
+            "  husk Barrel1X\r\n"
+            "  huskfinal Barrel1XF\r\n"
+            "  hp 100\r\n"
+            "end\r\n");
     CHECK(!house.empty() && !armory.empty() && items.ok);
     if (house.empty() || armory.empty() || !items.ok) return;
     const TempRoot root("both");
@@ -148,14 +148,14 @@ static void test_final_only_husk_stands_in_for_the_null_primary() {
     const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
     const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
     const Items items(
-            "begin \"Final-only tower witness\"\n"
-            "  id 105051\n"
-            "  type object\n"
-            "  graphic Barrel1\n"
-            "  sid tower_final_only\n"
-            "  huskfinal Barrel1XF\n"
-            "  hp 100\n"
-            "end\n");
+            "begin \"Final-only tower witness\"\r\n"
+            "  id 105051\r\n"
+            "  type object\r\n"
+            "  graphic Barrel1\r\n"
+            "  sid tower_final_only\r\n"
+            "  huskfinal Barrel1XF\r\n"
+            "  hp 100\r\n"
+            "end\r\n");
     CHECK(!house.empty() && !armory.empty() && items.ok);
     if (house.empty() || armory.empty() || !items.ok) return;
     const TempRoot root("final");

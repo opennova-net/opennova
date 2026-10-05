@@ -98,9 +98,9 @@ int main() {
     const std::vector<uint8_t> gun = test_io::read_file(repo_path("fixtures/threedi/synth/gun.3di"));
     CHECK(!crate.empty() && !gun.empty());
     const Items items(
-            "begin \"Render Crate\"\n  id 106501\n  type object\n  graphic crate\nend\n"
-            "begin \"Render Gun\"\n  id 106502\n  type object\n  graphic gun\nend\n"
-            "begin \"Render Missing\"\n  id 106503\n  type object\n  graphic nosuch\nend\n");
+            "begin \"Render Crate\"\r\n  id 106501\r\n  type object\r\n  graphic crate\r\nend\r\n"
+            "begin \"Render Gun\"\r\n  id 106502\r\n  type object\r\n  graphic gun\r\nend\r\n"
+            "begin \"Render Missing\"\r\n  id 106503\r\n  type object\r\n  graphic nosuch\r\nend\r\n");
     if (crate.empty() || gun.empty() || !items.ok) return 1;
     const TempRoot root;
     root.put("crate.3di", crate);

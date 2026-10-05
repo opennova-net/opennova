@@ -45,12 +45,12 @@ func before_all() -> void:
 	# weapon properties participate. One authored row makes index 1 explicit.
 	var weapons := FileAccess.open(_flat_dir.path_join("weapon.def"), FileAccess.WRITE)
 	assert(weapons != null)
-	weapons.store_string("""weapon "WIRE_TEST_PISTOL"
+	weapons.store_string(TestFs.crlf("""weapon "WIRE_TEST_PISTOL"
 category 0
 rank 0
 gfx3 M9K_3rd
 end
-""")
+"""))
 	weapons.close()
 
 

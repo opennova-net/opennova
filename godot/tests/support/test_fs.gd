@@ -80,12 +80,24 @@ static func write_bytes(test: GutTest, path: String, bytes: PackedByteArray) -> 
 		file.close()
 
 
-## Write text to `path`, asserting on the test that the file opens.
+## `text` with every line ending in CR LF, the last one included: the one break
+## the retail .def walk splits at, which drops the last byte of a line left
+## without it (File_ParseASCIIFile; engine/base/io/ascii_config.h). A test
+## writes its def text with LF and stages it through this.
+static func crlf(text: String) -> String:
+	var lf := text.replace("\r\n", "\n")
+	if not lf.is_empty() and not lf.ends_with("\n"):
+		lf += "\n"
+	return lf.replace("\n", "\r\n")
+
+
+## Write text to `path`, asserting on the test that the file opens. A `.def`
+## is written with CR LF line ends (crlf above).
 static func write_text(test: GutTest, path: String, text: String) -> void:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	test.assert_not_null(file, "Fixture should be writable: %s" % path)
 	if file != null:
-		file.store_string(text)
+		file.store_string(crlf(text) if path.get_extension().to_lower() == "def" else text)
 		file.close()
 
 

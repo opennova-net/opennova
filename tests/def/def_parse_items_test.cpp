@@ -27,21 +27,21 @@ static int expect_str(const char *what, const char *got, const char *want) {
    [orig: ItemDef_ParseProperty @0x4a19fd..0x4a1a50] */
 static int test_light_transfer(void) {
     static const char snippet[] =
-        "begin \"Absent\"\n"
-        "  id 1\n"
-        "end\n"
-        "begin \"Ihq01\"\n"
-        "  id 101216\n"
-        "  light_transfer 20\n"
-        "end\n"
-        "begin \"Clamped Low\"\n"
-        "  id 3\n"
-        "  LIGHT_TRANSFER -7\n"
-        "end\n"
-        "begin \"Clamped High\"\n"
-        "  id 4\n"
-        "  light_transfer 107\n"
-        "end\n";
+        "begin \"Absent\"\r\n"
+        "  id 1\r\n"
+        "end\r\n"
+        "begin \"Ihq01\"\r\n"
+        "  id 101216\r\n"
+        "  light_transfer 20\r\n"
+        "end\r\n"
+        "begin \"Clamped Low\"\r\n"
+        "  id 3\r\n"
+        "  LIGHT_TRANSFER -7\r\n"
+        "end\r\n"
+        "begin \"Clamped High\"\r\n"
+        "  id 4\r\n"
+        "  light_transfer 107\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
@@ -78,23 +78,23 @@ static int test_light_transfer(void) {
    @0x4FD422] */
 static int test_score_word(void) {
     static const char snippet[] =
-        "begin \"Player #1, Single player\"\n"
-        "  id 105310\n"
-        "  type person\n"
-        "end\n"
-        "begin \"Indonesian Soldier #1 with AK47\"\n"
-        "  id 101798\n"
-        "  type person\n"
-        "  score 10\n"
-        "end\n"
-        "begin \"Two Values\"\n"
-        "  id 3\n"
-        "  SCORE 0 155\n"
-        "end\n"
-        "begin \"Wrapped\"\n"
-        "  id 4\n"
-        "  score 70000\n"
-        "end\n";
+        "begin \"Player #1, Single player\"\r\n"
+        "  id 105310\r\n"
+        "  type person\r\n"
+        "end\r\n"
+        "begin \"Indonesian Soldier #1 with AK47\"\r\n"
+        "  id 101798\r\n"
+        "  type person\r\n"
+        "  score 10\r\n"
+        "end\r\n"
+        "begin \"Two Values\"\r\n"
+        "  id 3\r\n"
+        "  SCORE 0 155\r\n"
+        "end\r\n"
+        "begin \"Wrapped\"\r\n"
+        "  id 4\r\n"
+        "  score 70000\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
@@ -128,35 +128,35 @@ static int test_score_word(void) {
    snippet mirrors the retail "Drivable Dune Buggy" rows (JOX ITEMS.DEF). */
 static int test_particle_keys(void) {
     static const char snippet[] =
-        "begin \"Drivable Dune Buggy\"\n"
-        "  id 101291\n"
-        "  sid dbuggy1\n"
-        "  type vehicle\n"
+        "begin \"Drivable Dune Buggy\"\r\n"
+        "  id 101291\r\n"
+        "  sid dbuggy1\r\n"
+        "  type vehicle\r\n"
         /* Leading tab + multi-space separator + trailing spaces, exactly as the
            retail rows are formatted. */
-        "\tparticlefx   Effect_whiteExhaust FX00 stray_token\n"
-        "  ParticleFXW1 Effect_W1 FX03 Effect_W1S\n"
-        "\tparticlefxw2 Effect_DirtWake FX01  \n"
-        "  particlefxw3 Effect_W3 FX02 Effect_IgnoredW3\n"
-        "  particlefxw4 Effect_W4 FX04\n"
-        "  particlefxs Effect_DirtWakeS FX01 Effect_DirtWakeS2\n"
-        "  particledeath Effect_Fuelxp3\n"
-        "  particleh2odeath Effect_H2OVeExp\n"
-        "  particlefire Effect_VehFire extra junk\n"
-        "  particleother Effect_SmkNStemNP\n"
-        "  particlespawn Effect_Spawn\n"
-        "  particlefinale Effect_VehDrtPuftrk\n"
-        "end\n"
-        "begin \"No Particles\"\n"
-        "  id 5\n"
-        "  sid plain1\n"
-        "  type object\n"
-        "end\n"
-        "begin \"FXS Two Arg\"\n"
-        "  id 6\n"
-        "  sid fxs2\n"
-        "  particlefxs Effect_OnlyTwo FX07\n"
-        "end\n";
+        "\tparticlefx   Effect_whiteExhaust FX00 stray_token\r\n"
+        "  ParticleFXW1 Effect_W1 FX03 Effect_W1S\r\n"
+        "\tparticlefxw2 Effect_DirtWake FX01  \r\n"
+        "  particlefxw3 Effect_W3 FX02 Effect_IgnoredW3\r\n"
+        "  particlefxw4 Effect_W4 FX04\r\n"
+        "  particlefxs Effect_DirtWakeS FX01 Effect_DirtWakeS2\r\n"
+        "  particledeath Effect_Fuelxp3\r\n"
+        "  particleh2odeath Effect_H2OVeExp\r\n"
+        "  particlefire Effect_VehFire extra junk\r\n"
+        "  particleother Effect_SmkNStemNP\r\n"
+        "  particlespawn Effect_Spawn\r\n"
+        "  particlefinale Effect_VehDrtPuftrk\r\n"
+        "end\r\n"
+        "begin \"No Particles\"\r\n"
+        "  id 5\r\n"
+        "  sid plain1\r\n"
+        "  type object\r\n"
+        "end\r\n"
+        "begin \"FXS Two Arg\"\r\n"
+        "  id 6\r\n"
+        "  sid fxs2\r\n"
+        "  particlefxs Effect_OnlyTwo FX07\r\n"
+        "end\r\n";
 
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
@@ -260,17 +260,17 @@ static int test_particle_keys(void) {
    [orig: ItemDef_ParseProperty @ 0x49f9db..0x49fa0a] */
 static int test_phrase_set_presence(void) {
     static const char snippet[] =
-        "begin \"Absent\"\n"
-        "  id 1\n"
-        "end\n"
-        "begin \"Explicit Zero\"\n"
-        "  id 2\n"
-        "  phrase_set 0\n"
-        "end\n"
-        "begin \"Signed Value\"\n"
-        "  id 3\n"
-        "  PHRASE_SET -2\n"
-        "end\n";
+        "begin \"Absent\"\r\n"
+        "  id 1\r\n"
+        "end\r\n"
+        "begin \"Explicit Zero\"\r\n"
+        "  id 2\r\n"
+        "  phrase_set 0\r\n"
+        "end\r\n"
+        "begin \"Signed Value\"\r\n"
+        "  id 3\r\n"
+        "  PHRASE_SET -2\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
@@ -307,20 +307,20 @@ static int test_phrase_set_presence(void) {
     ItemDef_ParseProperty @0x49eb00 default_aip + `attrib |= 0x100000`] */
 static int test_weathervane_minai_default_aip(void) {
     static const char snippet[] =
-        "begin \"Flyable Blackhawk\"\n"
-        "  id 102010\n"
-        "  type vehicle\n"
-        "  move_function chel\n"
-        "    weathervane 30\n"
-        "    minai\t\t1\n"
-        "    hand_brake 0\n"
-        "    tire_slip 7\n"
-        "  default_aip H_BHawk\n"
-        "  sound_profile SP_Blackhawk1\n"
-        "end\n"
-        "begin \"No AI Keys\"\n"
-        "  id 2\n"
-        "end\n";
+        "begin \"Flyable Blackhawk\"\r\n"
+        "  id 102010\r\n"
+        "  type vehicle\r\n"
+        "  move_function chel\r\n"
+        "    weathervane 30\r\n"
+        "    minai\t\t1\r\n"
+        "    hand_brake 0\r\n"
+        "    tire_slip 7\r\n"
+        "  default_aip H_BHawk\r\n"
+        "  sound_profile SP_Blackhawk1\r\n"
+        "end\r\n"
+        "begin \"No AI Keys\"\r\n"
+        "  id 2\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet,
@@ -382,15 +382,15 @@ static int test_weathervane_minai_default_aip(void) {
     at ItemDef_ParseProperty @0x0049EB00] */
 static int test_item_def_allocator_defaults(void) {
     static const char snippet[] =
-        "begin \"Declares Nothing\"\n"
-        "  id 900001\n"
-        "end\n"
-        "begin \"Overrides Some\"\n"
-        "  id 900002\n"
-        "  spring_comp 55\n"
-        "  mass 11\n"
-        "  flip 10\n"
-        "end\n";
+        "begin \"Declares Nothing\"\r\n"
+        "  id 900001\r\n"
+        "end\r\n"
+        "begin \"Overrides Some\"\r\n"
+        "  id 900002\r\n"
+        "  spring_comp 55\r\n"
+        "  mass 11\r\n"
+        "  flip 10\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
@@ -435,19 +435,19 @@ static int test_item_def_allocator_defaults(void) {
    def+0xD0 / def+0xE0; @0x49F650 -> def+0x168] */
 static int test_virtual_display_and_input_function(void) {
     static const char snippet[] =
-        "begin \"Drivable M1A1 Tank\"\n"
-        "  id 100164\n"
-        "  type vehicle\n"
-        "  graphic Dm1a1\n"
-        "\n"
-        "  Virtualdisplay tankdrvr  camera\n"
-        "  input_function tank\t\t\n"
-        "  render_function tank\n"
-        "end\n"
-        "begin \"Plain\"\n"
-        "  id 100001\n"
-        "  type vehicle\n"
-        "end\n";
+        "begin \"Drivable M1A1 Tank\"\r\n"
+        "  id 100164\r\n"
+        "  type vehicle\r\n"
+        "  graphic Dm1a1\r\n"
+        "\r\n"
+        "  Virtualdisplay tankdrvr  camera\r\n"
+        "  input_function tank\t\t\r\n"
+        "  render_function tank\r\n"
+        "end\r\n"
+        "begin \"Plain\"\r\n"
+        "  id 100001\r\n"
+        "  type vehicle\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1, &items) != 0 ||
@@ -572,14 +572,14 @@ static int test_retail_particlefx_rows(void) {
    @0x53CC93]. Forty authored ids on one line are 28 ids, then "200028 200029 ...",
    which reads as 200028. The 32-slot group table fills across lines. */
 static int test_vehicle_spawn_lists() {
-	std::string source = "begin First\n id 1\n pcvehicle_spawnlist 100042 100043 100042\nend\n"
-						 "begin Second\n id 2\n PCVEHICLE_SPAWNLIST 100043\nend\n"
-						 "begin Capacity\n id 3\n pcvehicle_spawnlist";
+	std::string source = "begin First\r\n id 1\r\n pcvehicle_spawnlist 100042 100043 100042\r\nend\r\n"
+						 "begin Second\r\n id 2\r\n PCVEHICLE_SPAWNLIST 100043\r\nend\r\n"
+						 "begin Capacity\r\n id 3\r\n pcvehicle_spawnlist";
 	for (int id = 0; id < 40; ++id)
 		source += " " + std::to_string(200000 + id);
-	source += "\nend\nbegin Replace\n id 4\n pcvehicle_spawnlist 100042\n"
-			  " pcvehicle_spawnlist 100043\nend\n"
-			  "begin Overflow\n id 5\n pcvehicle_spawnlist 300000 300001 300002\nend\n";
+	source += "\r\nend\r\nbegin Replace\r\n id 4\r\n pcvehicle_spawnlist 100042\r\n"
+			  " pcvehicle_spawnlist 100043\r\nend\r\n"
+			  "begin Overflow\r\n id 5\r\n pcvehicle_spawnlist 300000 300001 300002\r\nend\r\n";
 	DefItemsFile file{};
 	if (def_parse_items_memory(
 				reinterpret_cast<const uint8_t *>(source.data()), source.size(), &file) != 0 ||
@@ -601,10 +601,10 @@ static int test_vehicle_spawn_lists() {
 
 static int test_regional_sound_delays() {
     const char text[] =
-        "begin Env\n id 1\n dawnshot Bird 1.25 -0.125\n dayshot Day 0.016129032258 2\n"
-        " duskshot Evening 3.9 4.1\n nightshot Night 0 5.5\n end\n"
-        "begin Emit\n id 2\n dawnshot Bird 9 8\n particletesttime 0.5 0.25\n"
-        " destroy_timing 1.5 0.016129032258 -0.25\n end\n";
+        "begin Env\r\n id 1\r\n dawnshot Bird 1.25 -0.125\r\n dayshot Day 0.016129032258 2\r\n"
+        " duskshot Evening 3.9 4.1\r\n nightshot Night 0 5.5\r\n end\r\n"
+        "begin Emit\r\n id 2\r\n dawnshot Bird 9 8\r\n particletesttime 0.5 0.25\r\n"
+        " destroy_timing 1.5 0.016129032258 -0.25\r\n end\r\n";
     DefItemsFile items{};
     if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
             sizeof(text) - 1, &items) != 0 || items.count != 2) return 1;
@@ -631,8 +631,8 @@ static int test_regional_sound_delays() {
 // destroy_timing, @0x49FCA3 for the dawnshot delay); _ftol2_sse @0x76BC15]
 static int test_out_of_range_values_take_the_sse2_leg() {
     const char text[] =
-        "begin Door\n id 1\n max_angle 270\n sqb_rate 0\n end\n"
-        "begin Timed\n id 2\n destroy_timing 40000000 -40000000 1\n dawnshot Bird 1 40000000\n end\n";
+        "begin Door\r\n id 1\r\n max_angle 270\r\n sqb_rate 0\r\n end\r\n"
+        "begin Timed\r\n id 2\r\n destroy_timing 40000000 -40000000 1\r\n dawnshot Bird 1 40000000\r\n end\r\n";
     DefItemsFile items{};
     if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
             sizeof(text) - 1, &items) != 0 || items.count != 2) return 1;
@@ -655,11 +655,11 @@ static int test_out_of_range_values_take_the_sse2_leg() {
 // @0x49F710, `fistp qword` @0x49F728, the store @0x49F736)]
 static int test_scale_keeps_the_low_dword_of_the_fistp() {
     const char text[] =
-        "begin A\n id 1\n scale 40000\n end\n"
-        "begin B\n id 2\n scale -40000\n end\n"
-        "begin C\n id 3\n scale 123456.789\n end\n"
-        "begin D\n id 4\n scale 32767.99999\n end\n"
-        "begin E\n id 5\n scale 1e400\n end\n";
+        "begin A\r\n id 1\r\n scale 40000\r\n end\r\n"
+        "begin B\r\n id 2\r\n scale -40000\r\n end\r\n"
+        "begin C\r\n id 3\r\n scale 123456.789\r\n end\r\n"
+        "begin D\r\n id 4\r\n scale 32767.99999\r\n end\r\n"
+        "begin E\r\n id 5\r\n scale 1e400\r\n end\r\n";
     DefItemsFile items{};
     if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
             sizeof(text) - 1, &items) != 0 || items.count != 5) return 1;
@@ -685,23 +685,23 @@ static int test_scale_keeps_the_low_dword_of_the_fistp() {
     attrib loop @0x4A06A8..0x4A0F52)] */
 static int test_items_read_the_retail_tokens(void) {
     static const char text[] =
-        "begin Plain Name\n"
-        "  graphic Dm1a1 extra\n"
-        "  anim_def Anim1 ; a semicolon comment\n"
-        "  particlefxs \"\" FX00 Smoke\n"
-        "  virtualdisplay tankdrvr,camera\n"
-        "  hp,150\n"
-        "  sid \"Long Alias Name Here\"\n"
-        "  type vehicle\n"
-        "  type bogus\n"
-        "  husk run//on\n"
-        "  attrib: Door\n"
-        "  attrib: Takeable VehicleBay\n"
-        "begin \"Nested Opens\"\n"
-        "  attrib:Door\n"
-        "end\0trailing bytes\n" /* the line is read up to its NUL: `end` */
-        "begin Unclosed\n"
-        "  id 7\n";
+        "begin Plain Name\r\n"
+        "  graphic Dm1a1 extra\r\n"
+        "  anim_def Anim1 ; a semicolon comment\r\n"
+        "  particlefxs \"\" FX00 Smoke\r\n"
+        "  virtualdisplay tankdrvr,camera\r\n"
+        "  hp,150\r\n"
+        "  sid \"Long Alias Name Here\"\r\n"
+        "  type vehicle\r\n"
+        "  type bogus\r\n"
+        "  husk run//on\r\n"
+        "  attrib: Door\r\n"
+        "  attrib: Takeable VehicleBay\r\n"
+        "begin \"Nested Opens\"\r\n"
+        "  attrib:Door\r\n"
+        "end\0trailing bytes\r\n" /* the line is read up to its NUL: `end` */
+        "begin Unclosed\r\n"
+        "  id 7\r\n";
     const std::string source(text, sizeof(text) - 1);
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
@@ -751,6 +751,37 @@ static int test_items_read_the_retail_tokens(void) {
     return bad;
 }
 
+/* A tab separates a key from its value as a space does: the key is the whole
+   first token, so `hp`, `id`, `husk` and `score` read with tabs as with spaces.
+   [orig: Terrain_TokenizeConfigLine @0x53CB60, the separators space, comma and
+   tab @0x53CC33..0x53CC4C; ItemDef_ParseProperty @0x49EB00, _stricmp on
+   tokens[1]] */
+static int test_tab_separated_keys(void) {
+    static const char text[] =
+        "begin\t\"Tabbed\"\r\n"
+        "\tid\t106190\r\n"
+        "\thp\t\t250\r\n"
+        "\thusk\tTabHusk\r\n"
+        "\tscore\t7\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: tab snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *d = &items.entries[0];
+    const int bad = d->id != 106190 || d->hp != 250 || strcmp(d->husk, "TabHusk") != 0 ||
+                    d->score != 7 || strcmp(d->display_name, "Tabbed") != 0;
+    if (bad)
+        fprintf(stderr, "FAIL: tab keys: '%s' id %d hp %d husk '%s' score %d\n",
+                d->display_name, d->id, d->hp, d->husk, d->score);
+    def_free_items(&items);
+    return bad;
+}
+
 /* A line's values are the tokenizer's 29 past the key, not 16, and the 29th runs
    on to the line's end: 27 unknown attrib tokens then `Door Takeable` set both
    (tokens 28 and 29), 28 then `Door Takeable` set neither (token 29 is the run-on
@@ -758,13 +789,13 @@ static int test_items_read_the_retail_tokens(void) {
    cap @0x53CC8C..0x53CC93; ItemDef_ParseProperty's attrib loop to the count
    @0x4A0F42..0x4A0F52] */
 static int test_attrib_reads_the_29_values(void) {
-    std::string text = "begin Reads29\n attrib:";
+    std::string text = "begin Reads29\r\n attrib:";
     for (int i = 0; i < 27; ++i) text += " x";
-    text += " Door Takeable\nend\nbegin RunsOn\n attrib:";
+    text += " Door Takeable\r\nend\r\nbegin RunsOn\r\n attrib:";
     for (int i = 0; i < 28; ++i) text += " x";
-    text += " Door Takeable\nend\nbegin Seventeen\n husk_sub_part_types";
+    text += " Door Takeable\r\nend\r\nbegin Seventeen\r\n husk_sub_part_types";
     for (int i = 0; i < 16; ++i) text += " 99_HULL";
-    text += " 3_WHEEL\nend\n";
+    text += " 3_WHEEL\r\nend\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text.data()), text.size(),
@@ -797,6 +828,7 @@ static int test_attrib_reads_the_29_values(void) {
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     if (test_items_read_the_retail_tokens() != 0) return 1;
+    if (test_tab_separated_keys() != 0) return 1;
     if (test_attrib_reads_the_29_values() != 0) return 1;
     if (test_regional_sound_delays() != 0) return 1;
     if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;
@@ -1209,23 +1241,23 @@ int main(int argc, char **argv) {
        has no character items, so pin the parse on an inline JOX-shaped block
        (retail "Indonesian Soldier #1 with AK47", id 101798). */
     static const char rifleman_def[] =
-        "begin \"Indonesian Soldier #1 with AK47\"\n"
-        "  id 101798\n"
-        "  type person\n"
-        "  ai_function org1\n"
-        "  move_function org1\n"
-        "  clipsize 30\n"
-        "  ammo_closeattack    AMMO_AK47_556MM\n"
-        "  ammo_easyrocket     AMMO_EASY\n"
-        "  ammo_advancedrocket AMMO_ADVANCED\n"
-        "  ammo_marker3        AMMO_MARKER\n"
-        "  launchups_closeattack    mflash01\n"
-        "  launchups_rocket         rocket01\n"
-        "  launchups_marker3        marker03\n"
-        "  weaprbup   gunfire_r\n"
-        "  weaplmup   flash_l\n"
-        "  weaprcup2  casing_r2\n"
-        "end\n";
+        "begin \"Indonesian Soldier #1 with AK47\"\r\n"
+        "  id 101798\r\n"
+        "  type person\r\n"
+        "  ai_function org1\r\n"
+        "  move_function org1\r\n"
+        "  clipsize 30\r\n"
+        "  ammo_closeattack    AMMO_AK47_556MM\r\n"
+        "  ammo_easyrocket     AMMO_EASY\r\n"
+        "  ammo_advancedrocket AMMO_ADVANCED\r\n"
+        "  ammo_marker3        AMMO_MARKER\r\n"
+        "  launchups_closeattack    mflash01\r\n"
+        "  launchups_rocket         rocket01\r\n"
+        "  launchups_marker3        marker03\r\n"
+        "  weaprbup   gunfire_r\r\n"
+        "  weaplmup   flash_l\r\n"
+        "  weaprcup2  casing_r2\r\n"
+        "end\r\n";
     DefItemsFile rifle_items;
     memset(&rifle_items, 0, sizeof(rifle_items));
     if (def_parse_items_memory((const uint8_t *)rifleman_def, sizeof(rifleman_def) - 1,
@@ -1320,18 +1352,18 @@ int main(int argc, char **argv) {
     /* Vehicle child-emplacement attachments retain authored order, optional
        down/up/right/left limits, and the G/C key variants. */
     static const char attachment_def[] =
-        "begin AttachmentCarrier\n"
-        "  id 100164\n"
-        "  addeweap abcdefghijklmnopq 100166\n"
-        "  addeweapG ewep02 100183 70 10 100 100\n"
-        "  addeweapC ewep03 100182\n"
-        "  addeweapC ewep04 100184 0 0 0 0\n"
-        "  addeweapG ignored05 100185\n"
-        "end\n"
-        "begin PartialAngles\n"
-        "  id 100200\n"
-        "  addeweap ewep01 100201 15 37\n"
-        "end\n";
+        "begin AttachmentCarrier\r\n"
+        "  id 100164\r\n"
+        "  addeweap abcdefghijklmnopq 100166\r\n"
+        "  addeweapG ewep02 100183 70 10 100 100\r\n"
+        "  addeweapC ewep03 100182\r\n"
+        "  addeweapC ewep04 100184 0 0 0 0\r\n"
+        "  addeweapG ignored05 100185\r\n"
+        "end\r\n"
+        "begin PartialAngles\r\n"
+        "  id 100200\r\n"
+        "  addeweap ewep01 100201 15 37\r\n"
+        "end\r\n";
     DefItemsFile attachment_items;
     memset(&attachment_items, 0, sizeof(attachment_items));
     if (def_parse_items_memory((const uint8_t *)attachment_def,
@@ -1380,10 +1412,10 @@ int main(int argc, char **argv) {
     def_free_items(&attachment_items);
 
     static const char damage_def[] =
-        "begin A\n id 1\n armor 7 11\n damage_reduc_pp .25\nend\n"
-        "begin B\n id 2\n armor 5\n damage_reduc_pp .25 .60\nend\n"
-        "begin C\n id 3\nend\n"
-        "begin D\n id 4\n hp 65535\n armor 32768 65534\nend\n";
+        "begin A\r\n id 1\r\n armor 7 11\r\n damage_reduc_pp .25\r\nend\r\n"
+        "begin B\r\n id 2\r\n armor 5\r\n damage_reduc_pp .25 .60\r\nend\r\n"
+        "begin C\r\n id 3\r\nend\r\n"
+        "begin D\r\n id 4\r\n hp 65535\r\n armor 32768 65534\r\nend\r\n";
     DefItemsFile damage_items;
     memset(&damage_items, 0, sizeof(damage_items));
     if (def_parse_items_memory((const uint8_t *)damage_def, sizeof(damage_def) - 1,
@@ -1413,10 +1445,10 @@ int main(int argc, char **argv) {
        [orig: ItemDef_ParseProperty @ 0x49f3a5..0x49f44c — name +0xA0, atof
        floats +0x11C..+0x128; absent tokens read as 0]. */
     static const char shadow_def[] =
-        "begin Hind\n id 1\n shadow hindshdw.tga 6 8.5 0 -1.25\nend\n"
-        "begin Jeep\n id 2\n shadow jeepshdw.tga\nend\n"
-        "begin Crate\n id 3\nend\n"
-        "begin Long\n id 4\n shadow averyverylongshadowname.tga 1 2 3 4\nend\n";
+        "begin Hind\r\n id 1\r\n shadow hindshdw.tga 6 8.5 0 -1.25\r\nend\r\n"
+        "begin Jeep\r\n id 2\r\n shadow jeepshdw.tga\r\nend\r\n"
+        "begin Crate\r\n id 3\r\nend\r\n"
+        "begin Long\r\n id 4\r\n shadow averyverylongshadowname.tga 1 2 3 4\r\nend\r\n";
     DefItemsFile shadow_items;
     memset(&shadow_items, 0, sizeof(shadow_items));
     if (def_parse_items_memory((const uint8_t *)shadow_def, sizeof(shadow_def) - 1,

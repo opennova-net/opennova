@@ -20,9 +20,9 @@ int main(int argc, char **argv) {
     // drift. Each authored column retains Math_ParseFixedPoint16 precision.
     {
         static const char kStability[] =
-            "weapon \"WPN_DEFAULT_STABILITY\"\nend\n"
-            "weapon \"WPN_CUSTOM_STABILITY\"\nStability 0.5, 2, 1.5\nend\n"
-            "weapon \"WPN_ZERO_STABILITY\"\nstability 0, 0, 0\nend\n";
+            "weapon \"WPN_DEFAULT_STABILITY\"\r\nend\r\n"
+            "weapon \"WPN_CUSTOM_STABILITY\"\r\nStability 0.5, 2, 1.5\r\nend\r\n"
+            "weapon \"WPN_ZERO_STABILITY\"\r\nstability 0, 0, 0\r\nend\r\n";
         DefWeaponsFile parsed{};
         if (def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(kStability),
                 sizeof(kStability) - 1, &parsed) != 0 || parsed.count != 3) return 1;
@@ -543,16 +543,16 @@ int main(int argc, char **argv) {
            previously dropped spellings. A weapon record holds four SIGHTS
            rows, so the six spellings span two weapons. */
         static const char kSightBlendDef[] =
-            "weapon \"WPN_SIGHT_BLEND_TEST\"\n"
-            "\tsights blend.tga 0 0 8 8 blend\n"
-            "\tsights add.tga 0 0 8 8 add\n"
-            "\tsights blendat.tga 0 0 8 8 blendat\n"
-            "end\n"
-            "weapon \"WPN_SIGHT_BLEND_TEST_2\"\n"
-            "\tsights multiply.tga 0 0 8 8 multiply\n"
-            "\tsights addat.tga 0 0 8 8 addat\n"
-            "\tsights multiplyat.tga 0 0 8 8 multiplyat\n"
-            "end\n";
+            "weapon \"WPN_SIGHT_BLEND_TEST\"\r\n"
+            "\tsights blend.tga 0 0 8 8 blend\r\n"
+            "\tsights add.tga 0 0 8 8 add\r\n"
+            "\tsights blendat.tga 0 0 8 8 blendat\r\n"
+            "end\r\n"
+            "weapon \"WPN_SIGHT_BLEND_TEST_2\"\r\n"
+            "\tsights multiply.tga 0 0 8 8 multiply\r\n"
+            "\tsights addat.tga 0 0 8 8 addat\r\n"
+            "\tsights multiplyat.tga 0 0 8 8 multiplyat\r\n"
+            "end\r\n";
         static const int expected[] = {
             DEF_SIGHT_BLEND_BLEND,
             DEF_SIGHT_BLEND_ADD,
@@ -595,12 +595,12 @@ int main(int argc, char **argv) {
            @0x544B3F, the `cmp [esi],8; jl` @0x544B7A, "scale" @0x544B86 and
            "slide" @0x544BA2 against tokens[8], atol(tokens[9]) @0x544BC3]. */
         static const char kSightOrderDef[] =
-            "weapon \"WPN_SIGHT_ORDER_TEST\"\n"
-            "\tsights a.tga 0 0 8 8 slide 33\n"       /* `slide` is the blend name */
-            "\tsights b.tga 0 0 8 8 add blend scale\n" /* token 7 is `blend` */
-            "\tsights c.tga 0 0 8 8 add scale\n"
-            "\tsights d.tga 0 0 8 8 blendat slide 12\n"
-            "end\n";
+            "weapon \"WPN_SIGHT_ORDER_TEST\"\r\n"
+            "\tsights a.tga 0 0 8 8 slide 33\r\n"       /* `slide` is the blend name */
+            "\tsights b.tga 0 0 8 8 add blend scale\r\n" /* token 7 is `blend` */
+            "\tsights c.tga 0 0 8 8 add scale\r\n"
+            "\tsights d.tga 0 0 8 8 blendat slide 12\r\n"
+            "end\r\n";
         DefWeaponsFile of;
         memset(&of, 0, sizeof(of));
         if (def_parse_weapons_memory((const unsigned char *)kSightOrderDef,
@@ -634,12 +634,12 @@ int main(int argc, char **argv) {
            over tokens[2] @0x543F40..0x543F6E, teamfilter's @0x543FB5..0x543FE3,
            ammobucket's cdq/xor/sub @0x544037, the ammoclass count's @0x54423D]. */
         static const char kFilterDef[] =
-            "weapon \"WPN_FILTER_TEST\"\n"
-            "\tcharfilter medic sniper\n"
-            "\tteamfilter blue red\n"
-            "\tammobucket -3\n"
-            "\tammoclass CLASS_TEST -2\n"
-            "end\n";
+            "weapon \"WPN_FILTER_TEST\"\r\n"
+            "\tcharfilter medic sniper\r\n"
+            "\tteamfilter blue red\r\n"
+            "\tammobucket -3\r\n"
+            "\tammoclass CLASS_TEST -2\r\n"
+            "end\r\n";
         DefWeaponsFile ff;
         memset(&ff, 0, sizeof(ff));
         if (def_parse_weapons_memory((const unsigned char *)kFilterDef, sizeof(kFilterDef) - 1,
@@ -673,14 +673,14 @@ int main(int argc, char **argv) {
            tokens[3..6] @0x544B48..0x544B6C, the count @+0x258 after four 36-byte
            rows from +0x1C8 @0x544B11..0x544B32]. */
         static const char kRowsDef[] =
-            "weapon \"WPN_SIGHT_ROWS_TEST\"\n"
-            "\tsights short.tga 7\n"
-            "\tsights missing.tga 0 0 8 8\n"
-            "\tsights two.tga 1 2 3 4\n"
-            "\tsights three.tga 1 2 3 4\n"
-            "\tsights four.tga 1 2 3 4\n"
-            "\tsights five.tga 1 2 3 4\n"
-            "end\n";
+            "weapon \"WPN_SIGHT_ROWS_TEST\"\r\n"
+            "\tsights short.tga 7\r\n"
+            "\tsights missing.tga 0 0 8 8\r\n"
+            "\tsights two.tga 1 2 3 4\r\n"
+            "\tsights three.tga 1 2 3 4\r\n"
+            "\tsights four.tga 1 2 3 4\r\n"
+            "\tsights five.tga 1 2 3 4\r\n"
+            "end\r\n";
         const DefFileProbe probe = {
                 [](const void *, const char *name) { return strcmp(name, "missing.tga") != 0; },
                 nullptr};
@@ -718,21 +718,21 @@ int main(int argc, char **argv) {
            a case-insensitive match (stricmp), atof * 65535.0 then ftol, so `2.0`
            stores 131070 and `-.5` truncates -32767.5 toward zero to -32767. */
         static const char kZeroDef[] =
-            "weapon \"WPN_ZERO_FOUR\"\n"
-            "\tscope_max_zero 10 100 200 1\n"
-            "end\n"
-            "weapon \"WPN_ZERO_THREE\"\n"
-            "\tscope_max_zero  1 300 300\n"
-            "end\n"
-            "weapon \"WPN_ZERO_NONE\"\n"
-            "end\n"
-            "weapon \"WPN_ZERO_PARALAX\"\n"
-            "\tscope_max_zero 10 100 300 1\n"
-            "\tScope_Paralax_Distance\t\t2.0\n"
-            "end\n"
-            "weapon \"WPN_ZERO_PARALAX_NEG\"\n"
-            "\tscope_paralax_distance -.5\n"
-            "end\n";
+            "weapon \"WPN_ZERO_FOUR\"\r\n"
+            "\tscope_max_zero 10 100 200 1\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZERO_THREE\"\r\n"
+            "\tscope_max_zero  1 300 300\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZERO_NONE\"\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZERO_PARALAX\"\r\n"
+            "\tscope_max_zero 10 100 300 1\r\n"
+            "\tScope_Paralax_Distance\t\t2.0\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZERO_PARALAX_NEG\"\r\n"
+            "\tscope_paralax_distance -.5\r\n"
+            "end\r\n";
         DefWeaponsFile zf;
         memset(&zf, 0, sizeof(zf));
         if (def_parse_weapons_memory((const unsigned char *)kZeroDef,
@@ -788,9 +788,9 @@ int main(int argc, char **argv) {
     }
     {
         static const char kFovDef[] =
-            "weapon \"WPN_FOVTEST\"\n"
-            "\trenderfov 40\n"
-            "end\n";
+            "weapon \"WPN_FOVTEST\"\r\n"
+            "\trenderfov 40\r\n"
+            "end\r\n";
         DefWeaponsFile ff;
         memset(&ff, 0, sizeof(ff));
         if (def_parse_weapons_memory((const unsigned char *)kFovDef, sizeof(kFovDef) - 1, &ff) != 0 ||
@@ -820,22 +820,22 @@ int main(int argc, char **argv) {
        shifts the per-shot tick count and therefore the whole overheat curve. */
     {
         static const char kHeatDef[] =
-            "weapon \"WPN_HEAT_50\"\n"
-            "\theat_values 2,4\n"
-            "\theat_effect heat, .5, 30, 60\n"
-            "end\n"
-            "weapon \"WPN_HEAT_MINI\"\n"
-            "\theat_values  .8,5\n"
-            "end\n"
-            "weapon \"WPN_HEAT_GRND\"\n"
-            "\theat_values  7,5\n"
-            "end\n"
-            "weapon \"WPN_HEAT_QUAD\"\n"
-            "\theat_values .5,7\n"
-            "end\n"
-            "weapon \"WPN_HEAT_NONE\"\n"
-            "\tclipsize 30\n"
-            "end\n";
+            "weapon \"WPN_HEAT_50\"\r\n"
+            "\theat_values 2,4\r\n"
+            "\theat_effect heat, .5, 30, 60\r\n"
+            "end\r\n"
+            "weapon \"WPN_HEAT_MINI\"\r\n"
+            "\theat_values  .8,5\r\n"
+            "end\r\n"
+            "weapon \"WPN_HEAT_GRND\"\r\n"
+            "\theat_values  7,5\r\n"
+            "end\r\n"
+            "weapon \"WPN_HEAT_QUAD\"\r\n"
+            "\theat_values .5,7\r\n"
+            "end\r\n"
+            "weapon \"WPN_HEAT_NONE\"\r\n"
+            "\tclipsize 30\r\n"
+            "end\r\n";
         struct { int per_shot, decay; } expect[5] = {
             { 1310, 42 },  /* 2 -> 131072/100,  4 -> 262144/6200 */
             {  524, 52 },  /* .8 -> 52429/100,  5 -> 327680/6200 */
@@ -890,9 +890,9 @@ int main(int argc, char **argv) {
        helper cannot pass silently. [orig: Math_ParseFixedPoint16 @ 0x6131f0] */
     {
         static const char kLsbDef[] =
-            "weapon \"WPN_HEAT_LSB\"\n"
-            "\theat_values 0.07,0.07\n"
-            "end\n";
+            "weapon \"WPN_HEAT_LSB\"\r\n"
+            "\theat_values 0.07,0.07\r\n"
+            "end\r\n";
         DefWeaponsFile lf;
         memset(&lf, 0, sizeof(lf));
         if (def_parse_weapons_memory((const unsigned char *)kLsbDef, sizeof(kLsbDef) - 1, &lf) != 0 ||
@@ -917,9 +917,9 @@ int main(int argc, char **argv) {
     }
     {
         static const char kThrDef[] =
-            "weapon \"WPN_HEAT_THR\"\n"
-            "\theat_effect heat, 0.07\n"
-            "end\n";
+            "weapon \"WPN_HEAT_THR\"\r\n"
+            "\theat_effect heat, 0.07\r\n"
+            "end\r\n";
         DefWeaponsFile tf;
         memset(&tf, 0, sizeof(tf));
         if (def_parse_weapons_memory((const unsigned char *)kThrDef, sizeof(kThrDef) - 1, &tf) != 0 ||
@@ -999,22 +999,22 @@ int main(int argc, char **argv) {
        (= delayend) [orig: @ 0x40279a / @ 0x402b2c]. */
     {
         static const char mixed[] =
-            "weapon \"WPN_MIXED\"\n"
-            "\tflags auto\n"
-            "\taction \"idle\"\n"
-            "\t\tdelayend auto\n"
-            "\t\tanim anim_wpn_idle\n"
-            "\taction \"emptyidle\"\n"
-            "\t\tdelayend auto\n"
-            "\t\tanim anim_wpn_idle\n"
-            "\taction \"fire\"\n"
-            "\t\tdelayend 6\n"
-            "\t\tanim anim_wpn_fire\n"
-            "\tend\n"
-            "\taction \"recoil\"\n"
-            "\t\tdelay 4\n"
-            "\tend\n"
-            "end\n";
+            "weapon \"WPN_MIXED\"\r\n"
+            "\tflags auto\r\n"
+            "\taction \"idle\"\r\n"
+            "\t\tdelayend auto\r\n"
+            "\t\tanim anim_wpn_idle\r\n"
+            "\taction \"emptyidle\"\r\n"
+            "\t\tdelayend auto\r\n"
+            "\t\tanim anim_wpn_idle\r\n"
+            "\taction \"fire\"\r\n"
+            "\t\tdelayend 6\r\n"
+            "\t\tanim anim_wpn_fire\r\n"
+            "\tend\r\n"
+            "\taction \"recoil\"\r\n"
+            "\t\tdelay 4\r\n"
+            "\tend\r\n"
+            "end\r\n";
         DefWeaponsFile wx;
         if (def_parse_weapons_memory((const uint8_t *)mixed, sizeof(mixed) - 1, &wx) != 0) {
             fprintf(stderr, "FAIL: mixed-terminator parse errored\n");
@@ -1077,12 +1077,12 @@ int main(int argc, char **argv) {
        @0x4024DA] */
     {
         static const char twice[] =
-            "weapon \"WPN_TWICE\"\n"
-            "\tACTION \"FIRE\"\n\t\tANIM anim_wpn_fire\n\t\tDELAYSTART 4\n\t\tDELAYEND 6\n"
-            "\t\tSOUNDSETEND GS_ONE\n\tEND\n"
-            "\tACTION \"RELOAD\"\n\t\tDELAYEND 9\n\tEND\n"
-            "\taction \"fire\"\n\t\tdelayend 2\n\tend\n"
-            "end\n";
+            "weapon \"WPN_TWICE\"\r\n"
+            "\tACTION \"FIRE\"\r\n\t\tANIM anim_wpn_fire\r\n\t\tDELAYSTART 4\r\n\t\tDELAYEND 6\r\n"
+            "\t\tSOUNDSETEND GS_ONE\r\n\tEND\r\n"
+            "\tACTION \"RELOAD\"\r\n\t\tDELAYEND 9\r\n\tEND\r\n"
+            "\taction \"fire\"\r\n\t\tdelayend 2\r\n\tend\r\n"
+            "end\r\n";
         DefWeaponsFile wt;
         int ok = def_parse_weapons_memory((const uint8_t *)twice, sizeof(twice) - 1, &wt) == 0 &&
                 wt.count == 1 && wt.entries[0].actions_count == 2;
@@ -1102,9 +1102,9 @@ int main(int argc, char **argv) {
 
     {
         const char text[] =
-                "weapon TEST_SOUNDS\n"
-                " soundhead MINI_HEAD\n soundfireloop MINI_LOOP\n"
-                " soundtrailoff MINI_TAIL\n soundlockedtone TARGET_LOCK\nend\n";
+                "weapon TEST_SOUNDS\r\n"
+                " soundhead MINI_HEAD\r\n soundfireloop MINI_LOOP\r\n"
+                " soundtrailoff MINI_TAIL\r\n soundlockedtone TARGET_LOCK\r\nend\r\n";
         DefWeaponsFile parsed{};
         if (def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(text),
                 sizeof(text) - 1, &parsed) != 0 || parsed.count != 1) return 1;
@@ -1126,23 +1126,23 @@ int main(int argc, char **argv) {
        `8 8` + `scope_min_mag 2`, the common `2`). */
     {
         static const char kScopeDef[] =
-            "weapon \"WPN_ZOOM_TURRET\"\n"
-            "\tscope_max_mag\t10\t2\n"
-            "end\n"
-            "weapon \"WPN_ZOOM_EMP\"\n"
-            "\tscope_max_mag\t8 8\n"
-            "\tscope_min_mag\t2\n"
-            "end\n"
-            "weapon \"WPN_ZOOM_PLAIN\"\n"
-            "\tscope_max_mag\t2\n"
-            "end\n"
-            "weapon \"WPN_ZOOM_FLOOR\"\n"
-            "\tscope_max_mag\t16\n"
-            "\tscope_min_mag\t4\n"
-            "end\n"
-            "weapon \"WPN_ZOOM_NONE\"\n"
-            "\tclipsize 30\n"
-            "end\n";
+            "weapon \"WPN_ZOOM_TURRET\"\r\n"
+            "\tscope_max_mag\t10\t2\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZOOM_EMP\"\r\n"
+            "\tscope_max_mag\t8 8\r\n"
+            "\tscope_min_mag\t2\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZOOM_PLAIN\"\r\n"
+            "\tscope_max_mag\t2\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZOOM_FLOOR\"\r\n"
+            "\tscope_max_mag\t16\r\n"
+            "\tscope_min_mag\t4\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZOOM_NONE\"\r\n"
+            "\tclipsize 30\r\n"
+            "end\r\n";
         struct { float max; int arg2; int min; } expect[5] = {
             { 10.0f, 2, 2 }, { 8.0f, 8, 2 }, { 2.0f, 0, 2 }, { 16.0f, 0, 4 }, { 0.0f, 0, 2 },
         };
@@ -1179,15 +1179,15 @@ int main(int argc, char **argv) {
        @0x543680, pos gate @0x5445EE..0x544613, tpos gate @0x544735..0x54475A] */
     {
         static const char kShortPoseDef[] =
-            "weapon \"WPN_SHORT_POSE\"\n"
-            "\tpos 1.5, 2.5, 3.5, 10, 20, 30\n"
-            "\ttpos 4.5, 5.5, 6.5, 40, 50, 60\n"
-            "\tpos 9, 9, 9, 9, 9\n"
-            "\ttpos 8, 8\n"
-            "end\n"
-            "weapon \"WPN_LONG_POSE\"\n"
-            "\tpos 1, 2, 3, 4, 5, 6, 7\n"
-            "end\n";
+            "weapon \"WPN_SHORT_POSE\"\r\n"
+            "\tpos 1.5, 2.5, 3.5, 10, 20, 30\r\n"
+            "\ttpos 4.5, 5.5, 6.5, 40, 50, 60\r\n"
+            "\tpos 9, 9, 9, 9, 9\r\n"
+            "\ttpos 8, 8\r\n"
+            "end\r\n"
+            "weapon \"WPN_LONG_POSE\"\r\n"
+            "\tpos 1, 2, 3, 4, 5, 6, 7\r\n"
+            "end\r\n";
         DefWeaponsFile pf;
         memset(&pf, 0, sizeof(pf));
         if (def_parse_weapons_memory((const unsigned char *)kShortPoseDef, sizeof(kShortPoseDef) - 1, &pf) != 0 ||
@@ -1223,14 +1223,14 @@ int main(int argc, char **argv) {
        [orig: WeaponDefs_ParseLineCallback @0x544056..0x544072] */
     {
         static const char kSameAsDef[] =
-            "weapon \"WPN_A\"\n"
-            "\tsameas WPN_M4AUTO\n"
-            "end\n"
-            "weapon \"WPN_B\"\n"
-            "\tsameas WPN_0123456789012345678901234567890123\n"
-            "end\n"
-            "weapon \"WPN_C\"\n"
-            "end\n";
+            "weapon \"WPN_A\"\r\n"
+            "\tsameas WPN_M4AUTO\r\n"
+            "end\r\n"
+            "weapon \"WPN_B\"\r\n"
+            "\tsameas WPN_0123456789012345678901234567890123\r\n"
+            "end\r\n"
+            "weapon \"WPN_C\"\r\n"
+            "end\r\n";
         DefWeaponsFile sf;
         memset(&sf, 0, sizeof(sf));
         if (def_parse_weapons_memory((const unsigned char *)kSameAsDef, sizeof(kSameAsDef) - 1,

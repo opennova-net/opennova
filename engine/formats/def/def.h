@@ -215,11 +215,9 @@ typedef struct DefWeaponAction {
 	/* Where the row's live block stands in the parsed text: the 0-based index
 	   of the `action` line that opened it and of the `end` that closed it. A
 	   later block of the same name replaces the row, lines included. Lines are
-	   numbered as the parser splits them, at LF with a CR before it dropped;
-	   for CR LF text that is the retail walk's numbering (File_ParseASCIIFile
-	   @0x53D810 cuts at CR LF only), but the parser keeps an unterminated tail
-	   line whole where retail drops its last byte (@0x53D8E9 / @0x53D8EC).
-	   A tool that rewrites the file in place (opennova-3di weapon merge) maps
+	   numbered as the retail walk cuts them, at CR LF only (File_ParseASCIIFile
+	   @0x53D810; an unterminated tail line loses its last byte, @0x53D8E9 /
+	   @0x53D8EC). A tool that rewrites the file in place (opennova-3di weapon merge) maps
 	   them back onto the text and checks the retail reading of those lines. */
 	size_t open_line;
 	size_t end_line;

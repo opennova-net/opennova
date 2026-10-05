@@ -161,7 +161,7 @@ func _fast_rope_item_db() -> ItemDatabase:
 	# The part-anim channels live in an AI brain, which a placed item owns when
 	# its row carries AIData and a brain-class ai_function (the attrib test in
 	# Entity_SpawnFromBMSRecord, then the class init).
-	file.store_string("""begin "Fast Rope Control Fixture"
+	file.store_string(TestFs.crlf("""begin "Fast Rope Control Fixture"
   id 105006
   type vehicle
   graphic StaticCrate1
@@ -172,7 +172,7 @@ func _fast_rope_item_db() -> ItemDatabase:
   hp 50
   attrib: AIData FastRope
 end
-""")
+"""))
 	file.close()
 	var result := ItemDatabase.new()
 	assert_eq(result.load(path), OK)
@@ -188,7 +188,7 @@ func _vehicle_ctrl_item_db() -> ItemDatabase:
 	assert_not_null(file)
 	if file == null:
 		return null
-	file.store_string("""begin "CTRL Vehicle Fixture"
+	file.store_string(TestFs.crlf("""begin "CTRL Vehicle Fixture"
   id 105007
   type vehicle
   graphic tank
@@ -206,7 +206,7 @@ func _vehicle_ctrl_item_db() -> ItemDatabase:
   physics 1
   torque 3
 end
-""")
+"""))
 	file.close()
 	var result := ItemDatabase.new()
 	assert_eq(result.load(path), OK)
@@ -221,7 +221,7 @@ func _physicsless_air_item_db() -> ItemDatabase:
 	assert_not_null(file)
 	if file == null:
 		return null
-	file.store_string("""begin "CHel without ground selector A"
+	file.store_string(TestFs.crlf("""begin "CHel without ground selector A"
   id 105008
   type vehicle
   graphic StaticCrate1
@@ -275,7 +275,7 @@ begin "cpln without ground selector"
   turn_roll 25
   speed_pitch 15
 end
-""")
+"""))
 	file.close()
 	var result := ItemDatabase.new()
 	assert_eq(result.load(path), OK)

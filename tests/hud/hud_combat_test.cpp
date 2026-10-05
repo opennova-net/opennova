@@ -490,8 +490,8 @@ static void world_feeds() {
 
 static void parser_and_received_feedback() {
 	const char text[] =
-			"weapon HUD_TEST\n crosshair primary.tga secondary.tga\n commandersX commander.tga\n "
-			"hud_loadout_select bar.tga\n hudicon gun.tga\n splash 17\nend\n";
+			"weapon HUD_TEST\r\n crosshair primary.tga secondary.tga\r\n commandersX commander.tga\r\n "
+			"hud_loadout_select bar.tga\r\n hudicon gun.tga\r\n splash 17\r\nend\r\n";
 	def::DefWeaponsFile defs{};
 	CHECK(def::def_parse_weapons_memory(
 				  reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1, &defs) == 0);

@@ -85,8 +85,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
     size_t cw_raw_cap = 0, cw_act_cap = 0, cw_sight_cap = 0;
     size_t ca_raw_cap = 0;
 
-    // Every line counts: split at LF, a CR before it dropped, which for CR LF
-    // text is the retail walk's numbering [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5].
+    // Every line counts, numbered as the retail walk cuts them at CR LF
+    // [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5].
     for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens, const char *line,
                                          size_t line_len, size_t line_index) {
         const char *key = tokens.tokens[0];

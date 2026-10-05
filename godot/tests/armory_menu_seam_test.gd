@@ -60,7 +60,7 @@ func _load_weapons_with_weight(weapon_name: String, weight: float) -> WeaponData
 	assert_not_null(output, "temporary weapon.def variant opens for writing")
 	if output == null:
 		return WeaponDatabase.new()
-	output.store_string(source)
+	output.store_string(TestFs.crlf(source))
 	output.close()
 	var wdb := WeaponDatabase.new()
 	var err := wdb.load(temp_path)
