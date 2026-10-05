@@ -36,9 +36,11 @@ fixtures/**/*.wac -text -eol filter= diff= merge= whitespace=cr-at-eol
 # assets/ is the game's own bundled data (ADR 0048), shipped beside
 # opennova.exe and stored byte-for-byte. Small hand-written or minted files
 # (the menu, its font, animation tables) are plain git blobs, so no test needs
-# an LFS pull; the models, clips and textures (and the images a terrain set
-# imports from) ride LFS, and the package jobs pull them. The README is
-# ordinary LF text. Last-match precedence: these rules follow assets/**.
+# an LFS pull; the models, clips, textures and sounds (and the images a
+# terrain set imports from) ride LFS, and the package jobs pull them. A sound
+# bank (.lwf) is a small index naming its waves, so it stays a plain blob like
+# a mission. The README is ordinary LF text. Last-match precedence: these
+# rules follow assets/**.
 assets/** -text -eol
 assets/**/*.3di filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.bad filter=lfs diff=lfs merge=lfs -text -eol
@@ -47,9 +49,11 @@ assets/**/*.mdt filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.pcx filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.png filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.tga filter=lfs diff=lfs merge=lfs -text -eol
+assets/**/*.wav filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.md text eol=lf
 
-# art/ holds the authoring sources (Blender scenes and their textures) whose
-# exports land in assets/. Every file rides LFS but Markdown.
+# art/ holds the authoring sources (Blender scenes and their textures, the
+# sounds' recordings) whose exports land in assets/. Every file rides LFS but
+# Markdown.
 art/** filter=lfs diff=lfs merge=lfs -text -eol
 art/**/*.md text eol=lf filter= diff= merge=
