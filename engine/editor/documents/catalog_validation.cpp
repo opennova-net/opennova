@@ -13,7 +13,9 @@ using namespace def;
 namespace {
 constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
 	{ CatalogFinding::InvalidInput, { "catalog.invalid_input", FindingFix::None, nullptr, true } },
-	{ CatalogFinding::IgnoredInput, { "catalog.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
+	// Input the game ignores, which a save writes as the file has it (the file's modeled layout,
+	// def_notes.h): said, nothing to fix.
+	{ CatalogFinding::IgnoredInput, { "catalog.ignored_input" } },
 	{ CatalogFinding::Unserializable, { "catalog.unserializable", FindingFix::None, nullptr, true } },
 	// A record with no name, an item of type 0: the editor's own rules, no refusal of the game's
 	// witnessed (the gate follows retail, ADR 0046 S14): listed.
@@ -109,7 +111,7 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 		diagnostic.child_id = found->second.child;
 		diagnostic.record_kind = found->second.kind;
 	};
-	// Input the game ignores is dropped on save: a warning. Input the typed model cannot
+	// Input the game ignores is kept on save: a warning. Input the typed model cannot
 	// carry blocks the file: an error. On the record the issue names, found by its name.
 	source_issue_findings(
 			*catalog, finding_code(CatalogFinding::InvalidInput),

@@ -179,10 +179,10 @@ static int test_query() {
 	TEST_EXPECT(rows_of(query, view) == std::vector<size_t>({3, 0}));
 	query.scope = ProblemScope::Project;
 	TEST_EXPECT(rows_of(query, view) == all.rows);
-	// Only the fixable: the missing font (Create), the stylesheet and the catalog (Rewrite);
-	// the requirement has no row in this view to fix.
+	// Only the fixable: the missing font (Create), the stylesheet (Rewrite); the requirement has
+	// no row in this view to fix, and the catalog's ignored input none (a save keeps it).
 	query.fixable = true;
-	TEST_EXPECT(rows_of(query, view) == std::vector<size_t>({3, 4, 5}));
+	TEST_EXPECT(rows_of(query, view) == std::vector<size_t>({3, 4}));
 
 	// By file: a group per file (the project's own findings first here), in the order its
 	// first finding shows, the rows group after group.
@@ -423,7 +423,7 @@ static int test_fixes() {
 	std::vector<std::string> rewrite_tokens;
 	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
-	TEST_EXPECT(rewrite_tokens == std::vector<std::string>({"animation_map.ignored_input", "catalog.ignored_input",
+	TEST_EXPECT(rewrite_tokens == std::vector<std::string>({"animation_map.ignored_input",
 	                                                        "credits.line_ending", "menu.ignored_input",
 	                                                        "mission.event_order", "mission.rewrite_differs",
 	                                                        "script.line_ending", "shader.form",
@@ -489,16 +489,16 @@ static int test_fixes() {
 static int test_rewrite_unserializable() {
 	SessionView view;
 	view.project.open = true;
-	view.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "A key the game ignores.", "defs/weapon.def"),
-	                    finding(DiagnosticSeverity::Error, "catalog.unserializable", "It cannot be written.", "defs/weapon.def"),
-	                    finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "A key the game ignores.", "defs/ammo.def"),
+	view.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "menu.ignored_input", "A key the game ignores.", "menus/a.mnu"),
+	                    finding(DiagnosticSeverity::Error, "menu.unserializable", "It cannot be written.", "menus/a.mnu"),
+	                    finding(DiagnosticSeverity::Warning, "menu.ignored_input", "A key the game ignores.", "menus/b.mnu"),
 	                    finding(DiagnosticSeverity::Warning, "strings.regrouped", "A section read twice.", "strings/menu.bin"),
 	                    finding(DiagnosticSeverity::Error, "strings.invalid_input", "A string it cannot hold.", "strings/menu.bin")};
 	for (const size_t blocked : {size_t(0), size_t(3)}) {
 		const Diagnostic &d = view.findings.diagnostics[blocked];
 		TEST_EXPECT(fixes_for(d, view).empty() && !has_fixes(d, view) && bulk_fixes_for(d, view).empty());
 	}
-	TEST_EXPECT(labels_of(fixes_for(view.findings.diagnostics[2], view)) == std::vector<std::string>({"Rewrite ammo.def"}));
+	TEST_EXPECT(labels_of(fixes_for(view.findings.diagnostics[2], view)) == std::vector<std::string>({"Rewrite b.mnu"}));
 	TEST_EXPECT(bulk_fixes_for(view.findings.diagnostics[2], view).size() == 1 && has_fixes(view.findings.diagnostics[2], view));
 	ProblemQuery fixable;
 	fixable.fixable = true;
@@ -683,16 +683,16 @@ static int test_fix_index() {
 	SessionView view;
 	view.project.open = true;
 	for (size_t i = 0; i < 3000; ++i) {
-		const std::string file = "defs/f" + std::to_string(i % 30) + ".def";
-		view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "An unknown key.", file.c_str()));
+		const std::string file = "menus/f" + std::to_string(i % 30) + ".mnu";
+		view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "menu.ignored_input", "An unknown key.", file.c_str()));
 	}
-	view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Error, "catalog.unserializable", "It cannot be written.", "defs/f7.def"));
+	view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Error, "menu.unserializable", "It cannot be written.", "menus/f7.mnu"));
 	const ProblemFixIndex index(view);
-	TEST_EXPECT(index.unserializable.size() == 1 && index.unserializable.count("defs/f7.def"));
+	TEST_EXPECT(index.unserializable.size() == 1 && index.unserializable.count("menus/f7.mnu"));
 	ProblemFixCache cache;
 	for (size_t i : {size_t(0), size_t(7), size_t(8), size_t(37), size_t(2999), size_t(3000)}) {
 		const Diagnostic &d = view.findings.diagnostics[i];
-		const bool fixable = d.asset != "defs/f7.def" && d.code() == "catalog.ignored_input";
+		const bool fixable = d.asset != "menus/f7.mnu" && d.code() == "menu.ignored_input";
 		TEST_EXPECT(has_fixes(d, view) == fixable && has_fixes(d, view, &index) == fixable);
 		TEST_EXPECT(labels_of(fixes_for(d, view, &index)) == labels_of(fixes_for(d, view)));
 		TEST_EXPECT(labels_of(cache.fixes(view, i)) == labels_of(fixes_for(d, view)));
@@ -1570,8 +1570,35 @@ static int test_plan_refusals_are_rows() {
 	return 0;
 }
 
+// The demo round's bug 10: the required files landing take their "required file missing" rows out of
+// Problems at once, while the validation the change left due has yet to run (an import's 27 such rows
+// stood until the validation after it ended); the other rows wait for it, which then composes them.
+static int test_requirements_at_once() {
+	editor_test::TempProjectDir dir("opennova_editor_problems_requirements");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "At once"));
+	const SessionView &v = session.view();
+	const auto missing = [&v] {
+		size_t n = 0;
+		for (const Diagnostic &d : v.findings.diagnostics) n += d.code() == "requirement.missing" ? 1 : 0;
+		return n;
+	};
+	TEST_EXPECT(missing() > 0);
+	const size_t compositions = session.problems_compositions();
+	session.handle(request::create_missing(unmet_required_roles(*v.project.requirements)));
+	TEST_EXPECT(session.outcome().done() && v.activity.validation.running && missing() == 0 &&
+	            session.problems_compositions() == compositions);
+	session.run_operations();
+	TEST_EXPECT(!v.activity.validation.running && missing() == 0 && session.problems_compositions() > compositions);
+	std::printf("requirements: their rows follow the files at once\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_requirements_at_once();
 	failures += test_original_marks();
 	failures += test_blocking();
 	failures += test_fix_all_served_whole();
