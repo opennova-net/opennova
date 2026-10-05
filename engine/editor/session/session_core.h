@@ -136,6 +136,9 @@ public:
 	void record_outcome(const Diagnostic &d);
 	// A request that cannot run now: a warning, and the request did nothing.
 	void refuse_now(CoreFinding code, const std::string &message, const std::string &asset = std::string());
+	// A request refused that says nothing about the project (a set_workspace of what the windows show): the
+	// request's outcome alone, no Problems row, no Output line, the status line as it was.
+	void refuse_quietly(CoreFinding code, const std::string &message, const std::string &asset = std::string());
 
 	// --- the operation slot ----------------------------------------------------------------
 
@@ -307,8 +310,12 @@ public:
 	// inside the project but in its cache or its export folder refused); `rehash`, every file read
 	// again, the build cache set aside (BuildPlan::rehash).
 	// With the Export that waits on it (`exported`, ADR 0046 S16: the folder it lands in, refused
-	// before anything is built when it lies inside the project but its export folder).
-	void start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash, const ExportIntent &exported);
+	// before anything is built when it lies inside the project but its export folder). `panel`: its result's
+	// panel opens as it ends (a build asked with report false leaves the person's work as it is).
+	void start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash, const ExportIntent &exported,
+	                 bool panel = true);
+	// A Build joined onto the running build that asks its panel: it opens as the build ends.
+	void report_build() { build_reports_ = true; }
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,
 	// the game started on it, in the Play's mission, when a Play waits and it is good; what the export
 	// that waited on it came to (`shipped`: its ExportRun's report, or what refused it; null when none ran).
@@ -385,6 +392,7 @@ private:
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's
 	std::string refusal_status_; // the status line the last refused request left, until a request is served
+	bool build_reports_ = true;  // the running build's result panel opens as it ends (start_build's report)
 	bool recent_items_unsaved_ = false; // the recently placed items changed since the store kept them
 };
 

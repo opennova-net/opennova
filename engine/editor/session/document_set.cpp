@@ -23,6 +23,7 @@
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
+#include <editor/session/workspace_parts.h>
 #include <runtime/mission/mission_sidecars.h>
 
 namespace fs = std::filesystem;
@@ -440,6 +441,12 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		remembered_.erase(asset.relative_path); // read again: its records have new identities
 		forget_file_state(asset.relative_path);
 		end_gesture_in(asset.relative_path, true); // and a gesture open in it is over
+		// A screen whose Remove waited on its prompt is named by an id of the old read: the prompt goes.
+		if (const auto shown = view_.workspace.documents.find(asset.relative_path);
+		    shown != view_.workspace.documents.end() && shown->second.remove_screen) {
+			shown->second.remove_screen = 0;
+			core_.touch(ViewConcern::Workspace);
+		}
 		documents_.push_back(document);
 		activate(document->path());
 		select_named(*document);
@@ -464,12 +471,13 @@ void DocumentSet::show_in_files(const EditorRequest &request) {
 	reveal.kind = ViewEventKind::RevealFile;
 	reveal.path = asset->relative_path;
 	reveal.flag = request.ask_name;
-	// AboutFile: its card opens too (the UX round's project lane).
-	reveal.tag = request.kind == EditorRequestKind::AboutFile ? 1 : 0;
 	view_.events.post(std::move(reveal));
 	// Files selects it, as a click there does (S18).
 	select_file(asset->relative_path);
 	core_.touch(ViewConcern::Selection);
+	// AboutFile: its card opens too (the UX round's project lane), the workspace's.
+	if (request.kind == EditorRequestKind::AboutFile && show_card(view_.workspace, asset->relative_path))
+		core_.touch(ViewConcern::Workspace);
 }
 
 void DocumentSet::select_file(const std::string &path) {
@@ -510,6 +518,8 @@ void DocumentSet::close_document(const std::string &requested) {
 	remembered_.erase(path);
 	forget_file_state(path);
 	end_gesture_in(path, true);
+	// What its views showed of it (its outline's filter, ...) goes with it.
+	if (forget_document_workspace(view_.workspace, path)) core_.touch(ViewConcern::Workspace);
 	if (view_.documents.active == path) {
 		activate(documents_.empty() ? "" : documents_.back()->path());
 		core_.touch(ViewConcern::Selection);
@@ -911,9 +921,10 @@ void DocumentSet::close_all() {
 	stale_.clear();
 	conflicts_.clear();
 	end_gestures(false);
-	// No file of a project closed is selected in Files any more.
+	// No file of a project closed is selected in Files any more, and no document's views hold anything.
 	view_.documents.file_selected = FileSelection();
 	view_.documents.files_lead = false;
+	view_.workspace.documents.clear();
 }
 
 bool DocumentSet::position_after(const Document &document, const NodeAddress &record, NodeId &parent, size_t &position) {

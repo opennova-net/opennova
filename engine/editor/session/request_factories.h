@@ -111,12 +111,18 @@ inline EditorRequest import_files(std::vector<ImportChoice> imports, bool replac
 	request.replace = replace;
 	return request;
 }
-// The open import preview's rows imported as its plan has them (each the project can take).
-inline EditorRequest import_planned(bool replace = false) {
+// The open import preview's checked rows imported as the dialog's Import takes them, of the plan `plan`
+// (DialogsView::ImportPreview::plan_serial).
+inline EditorRequest import_planned(uint64_t plan, bool replace = false) {
 	EditorRequest request = of(EditorRequestKind::ImportFiles);
 	request.planned = true;
+	request.plan = plan;
 	request.replace = replace;
 	return request;
+}
+// Problems' confirmation applied as its Apply applies it.
+inline EditorRequest apply_confirmation() {
+	return of(EditorRequestKind::ApplyConfirmation);
 }
 inline EditorRequest cancel_import() {
 	return of(EditorRequestKind::CancelImport);
@@ -234,10 +240,11 @@ inline EditorRequest build(std::string out_dir = std::string(), bool rehash = fa
 	return request;
 }
 // A build, then the game run on it: at its menu, or in `mission` (a .bms of the project by its
-// logical name; S14).
-inline EditorRequest play(std::string mission = std::string()) {
+// logical name; S14); `behind`, its window behind every other (the MCP gaps lane).
+inline EditorRequest play(std::string mission = std::string(), bool behind = false) {
 	EditorRequest request = of(EditorRequestKind::Play);
 	request.mission = std::move(mission);
+	request.behind = behind;
 	return request;
 }
 // A build, then the build copied into `export_dir` ("" the project's export folder) as what ships
@@ -303,7 +310,7 @@ inline EditorRequest about_file(std::string path) {
 	request.path = std::move(path);
 	return request;
 }
-// The project's wave at `path` played by the Shell, and stopped.
+// The project's wave at `path` played (the workspace's sound, the Shell's player), and stopped.
 inline EditorRequest play_sound(std::string path) {
 	EditorRequest request = of(EditorRequestKind::PlaySound);
 	request.path = std::move(path);
@@ -397,6 +404,13 @@ inline EditorRequest set_viewport(std::string path, std::string viewport) {
 	EditorRequest request = of(EditorRequestKind::SetViewport);
 	request.path = std::move(path);
 	request.viewport = std::move(viewport);
+	return request;
+}
+// What the windows show of their own changed as `workspace` says: the JSON text of an object
+// {<part>: {<member>: value}, focus?} (the MCP gaps lane, session/workspace_parts.h).
+inline EditorRequest set_workspace(std::string workspace) {
+	EditorRequest request = of(EditorRequestKind::SetWorkspace);
+	request.workspace = std::move(workspace);
 	return request;
 }
 // A drag, or a command, in the viewport over the document at `path` ("" the active one), planned by

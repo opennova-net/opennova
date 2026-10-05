@@ -88,9 +88,8 @@ std::string seconds_text(double seconds) {
 
 } // namespace
 
-// What the view keeps of its own: the snap.
+// What the view keeps of its own (the snap is the viewport's option).
 struct ModelViewportView::Tools {
-	int snap = 2; // kModelHandleSnaps: 1/16 m
 	// The Plays on choice's filter, and the models items animate, made again when the graph moves.
 	char rig_filter[64] = {};
 	// A press on an event's mark, held: the clock stays on the event's tick until it is let go.
@@ -169,7 +168,7 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 	const int lod = model.lod();
 	if (lod >= 0 && size_t(lod) < model.model()->lod_count && model.model()->lods[lod].render_object_count == 0)
 		ImGui::TextDisabled("LOD %d holds no part: there is nothing to draw at it.", lod);
-	snap = kModelHandleSnaps[std::clamp(tools_->snap, 0, 4)];
+	snap = model.options().snap;
 	context.snap = snap;
 	const float timeline =
 			model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + ImGui::GetFontSize() * 2.0f + 16.0f : 0.0f;
@@ -469,10 +468,20 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 		}
 		ImGui::EndPopup();
 	}
+	// The snap is the viewport's option (the MCP gaps lane); one the wire set off the list shown as its value.
 	static const char *const kSnapNames[] = {"Free", "1/64 m", "1/16 m", "1/4 m", "1 m"};
 	row.next(ui_kit::field_width(unit * 5.0f, "Snap"));
 	ImGui::SetNextItemWidth(unit * 5.0f);
-	ImGui::Combo("Snap", &snap, kSnapNames, IM_ARRAYSIZE(kSnapNames));
+	int snap = -1;
+	for (int i = 0; i < IM_ARRAYSIZE(kSnapNames); ++i)
+		if (kModelHandleSnaps[i] == options.snap) snap = i;
+	char custom[32];
+	std::snprintf(custom, sizeof(custom), "%g m", double(options.snap));
+	if (ImGui::BeginCombo("Snap", snap >= 0 ? kSnapNames[snap] : custom)) {
+		for (int i = 0; i < IM_ARRAYSIZE(kSnapNames); ++i)
+			if (ImGui::Selectable(kSnapNames[i], i == snap)) options.snap = kModelHandleSnaps[i];
+		ImGui::EndCombo();
+	}
 	ui_kit::tooltip("A dragged marker's place snaps to this grid on each of the file's axes. Hold "
 	                "Alt to place freely.");
 	row.next(ui_kit::button_width("Frame"));
