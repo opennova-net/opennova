@@ -46,7 +46,7 @@
 #include <editor/session/editor_queries.h>
 #include <editor/session/editor_request.h>
 
-namespace opennova::project_cli {
+namespace opennova::project {
 
 enum class CliVerb : uint8_t {
 	New,
@@ -104,4 +104,4 @@ bool cli_verb_from_token(const std::string &token, CliVerb &out);
 // the findings of its requests and its other notes go to `err`.
 int run_project_command(int argc, const char *const *argv, std::FILE *out, std::FILE *err);
 
-} // namespace opennova::project_cli
+} // namespace opennova::project
