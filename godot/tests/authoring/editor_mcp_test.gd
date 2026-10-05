@@ -351,8 +351,8 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 ## takes, and one it must carry left out is refused. The edits' schema is the session's batch table
 ## (S13 D9: the catalog's batch): its op enum the table's ops, apply among them, one property per
 ## member, an apply's payload the one token it takes and a span's line from 1. The game install's words: the settings take
-## game_install and play_in_install (the retail keys refused), the run section says in_install
-## and game_install, the import section install_files, and an import from an install that holds
+## game_install, play_in_install and play_in_install_strict (the retail keys refused), the run section
+## says in_install, strict and game_install (file_log null before a game install's game ran), the import section install_files, and an import from an install that holds
 ## no archives is import.install.
 func test_request_table_on_the_wire() -> void:
 	if _client == null:
@@ -454,11 +454,13 @@ func test_request_table_on_the_wire() -> void:
 	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Words"})).get("ok", false)))
 	var install := dir.path_join("no install here")
 	var applied := await _call("editor_request", {"kind": "apply_project_settings",
-			"settings": {"serial": 1, "game_install": install, "play_in_install": true}})
+			"settings": {"serial": 1, "game_install": install, "play_in_install": true,
+				"play_in_install_strict": true}})
 	assert_true(bool(applied.get("ok", false)) and bool(applied.get("outcome", {}).get("done", false)), str(applied))
 	var state := await _state(["run", "import"])
 	var play: Dictionary = state.get("run", {})
 	assert_true(bool(play.get("in_install", false)), str(play))
+	assert_true(bool(play.get("strict", false)) and play.has("file_log") and play["file_log"] == null, str(play))
 	assert_true(String(play.get("game_install", "")).ends_with("no install here"), str(play))
 	assert_false(play.has("retail") or play.has("retail_directory"), str(play))
 	var import: Dictionary = state.get("import", {})
