@@ -10,6 +10,8 @@
 #include <vector>
 
 #include <runtime/terrain_query/height_field.h>
+#include <formats/def/def.h>
+#include <runtime/world/ammo_table_build.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/round_sim.h>
@@ -240,20 +242,37 @@ void seed_ammo(World &w) {
     shrap.min_damage = 55;
     shrap.max_damage = 55;
 
-    auto &avmine = w.tables.ammo.entries[kAmmoAvMine];
-    avmine.name = "AV_Mine";
-    avmine.valid = true;
-    avmine.flags = kUseOwnMove | kNoAge | kForceTracer;
-    avmine.velocity = 6;
-    avmine.max_age_ticks = 62;
-    avmine.drag_fp16 = 0x10000;
-    avmine.kz_minradius = 5.0f;
-    avmine.kz_maxradius = 5.0f;
-    // Retail data authors none, so the half-angle is the allocator's 0x7FFFFFFF
-    // [orig: AmmoDef_AllocateSlot @0x409A93].
-    avmine.kz_pieslice_bam = 0x7FFFFFFF;
-    avmine.tracer_item_friendly = kItemAvMine;
-    avmine.tracer_item_enemy = kItemAvMine;
+    // The AV_Mine row takes the load chain the game takes: JO:CA's def (its
+    // effects table aside) through the def parser and the table builder. It
+    // authors no kz_pieslice, so the vehicle cone's half-angle is the
+    // allocator's 0x7FFFFFFF [orig: AmmoDef_AllocateSlot @0x409A93].
+    {
+        static const char kAvMineDef[] =
+                "ammo AV_Mine\t\r\n"
+                "\tfrndlyTrcrID\t\t0368   \r\n"
+                "\tfoeTrcrID\t\t\t0368   \r\n"
+                "\tmax_age\t\t\t\t1     \r\n"
+                "\tarm_age\t\t\t\t0      \r\n"
+                "\tvelocity\t\t\t6\t\t\r\n"
+                "\tdrag\t\t\t\t1\r\n"
+                "\tkztype\t\t\t\trounds_kz_C4  \r\n"
+                "\tkz_damage\t\t\t2000\r\n"
+                "\tkz_minradius\t\t5\r\n"
+                "\tkz_maxradius\t\t5\r\n"
+                "\trecoil\t\t0 0 0\r\n"
+                "\tflag\tuseownmove\r\n"
+                "\tflag\tnoage\r\n"
+                "\tflag\tforcetracer\r\n"
+                "\tflag\tpriority\t\r\n"
+                "end\r\n";
+        opennova::def::DefAmmoFile parsed{};
+        const int rc = opennova::def::def_parse_ammo_memory(
+                reinterpret_cast<const uint8_t *>(kAvMineDef), sizeof(kAvMineDef) - 1, &parsed);
+        const AmmoTable built = build_ammo_table(parsed);
+        opennova::def::def_free_ammo(&parsed);
+        CHECK(rc == 0 && built.entries.size() == 1);
+        if (built.entries.size() == 1) w.tables.ammo.entries[kAmmoAvMine] = built.entries[0];
+    }
 
     auto &avkz = w.tables.ammo.entries[kAmmoAvMineKz];
     avkz.name = "AV_Minekillzone";
@@ -1296,7 +1315,8 @@ void test_claymore_sector_los_blocks_trigger() {
 }
 
 // AV mine: the retail data authors no kz_pieslice, so the vehicle cone's
-// half-angle is the allocator's 0x7FFFFFFF and every bearing passes: a moving
+// half-angle is the allocator's 0x7FFFFFFF (seed_ammo parses the def) and
+// every bearing passes: a moving
 // enemy vehicle within kz_minradius trips it, a stopped one does not, and
 // damage detonates it too [orig: Entity_AVMineThink @ 0x443BB0 (the cone call
 // @0x443CC7 reads +0x34 / +0x3C); Entity_FindEnemyVehicleInCone @ 0x43c9f0
@@ -1344,6 +1364,82 @@ void test_avmine_trips_on_a_moving_vehicle() {
             if (q.ammo_index == kAmmoAvMineKz) saw_kz = true;
         CHECK(saw_kz);
     }
+}
+
+// An armed AV mine with an enemy vehicle moving 4 u off, for the sweep's gates.
+struct ArmedAvMine {
+    Rig rig;
+    Vec3 landed{};
+    bool ok = false;
+    ArmedAvMine() : rig(0) {
+        rig.throw_ammo(kAmmoAvMine, Vec3{20.0f, 20.0f, 0.8f}, 0, 0);
+        rig.tick(240); // place, then past the 62-tick arm delay
+        ok = rig.w.throwables.devices.size() == 1;
+        if (ok) landed = rig.w.throwables.devices[0].pos;
+    }
+    EntityHandle spawn_vehicle(uint32_t engine_flags, int32_t health) {
+        Entity veh_seed;
+        veh_seed.kind = EntityKind::Item;
+        veh_seed.item_type = 1; // vehicle def kind
+        veh_seed.team = 1;
+        veh_seed.health = health;
+        veh_seed.engine_flags = engine_flags;
+        veh_seed.position = Vec3{landed.x, landed.y + 4.0f, 0.0f};
+        veh_seed.veh.speed = 20000;
+        return rig.w.registry.spawn(1, veh_seed);
+    }
+};
+
+// The vehicle sweep traces from 0.3 u above the device to 1.0 u above the
+// candidate's origin [orig: Entity_FindEnemyVehicleInCone @0x43c9f0, the eye
+// +0x4CCC @0x43CA29, `add eax, 10000h` @0x43CB52 into the end point pushed
+// @0x43CB44]. A kerb 0.4 u tall halfway to the vehicle hides it at the
+// device's own height but not at its 1.0 u point, so the mine trips; a wall
+// 1.5 u tall hides both.
+void test_avmine_sees_one_unit_above_the_vehicle() {
+    for (int tall = 0; tall < 2; ++tall) {
+        ArmedAvMine mine;
+        CHECK(mine.ok);
+        if (!mine.ok) return;
+        mine.spawn_vehicle(0, 500);
+
+        Entity wall_seed;
+        wall_seed.kind = EntityKind::Building;
+        wall_seed.health = 100;
+        wall_seed.position = Vec3{mine.landed.x, mine.landed.y + 2.0f, 0.0f};
+        wall_seed.yaw = 90; // mission yaw 90 -> identity collision basis
+        const EntityHandle wall = mine.rig.w.registry.spawn(2, wall_seed);
+        CollisionWorld collision;
+        collision.terrain = &mine.rig.flat.field;
+        const int32_t model = collision.add_model(solid_box_model(1.5, 0.25, tall ? 1.5 : 0.4));
+        const Entity *wall_entity = mine.rig.w.registry.get(wall);
+        CHECK(wall_entity != nullptr);
+        collision.assign_entity(wall, model,
+                                wall_entity != nullptr ? wall_entity->registry_spawn_id : 0);
+
+        step_devices(mine.rig.w, &collision, &mine.rig.flat.field);
+        CHECK(mine.rig.w.throwables.devices.empty() == (tall == 0));
+    }
+}
+
+// A wreck is no target: the vehicle sweep skips Flags bits 0 and 1, the dead
+// bit with the inactive one [orig: `test byte [esi+24h], 3` @0x43CA61], so a
+// destroyed enemy vehicle still sliding within range leaves the mine armed;
+// the same body alive trips it.
+void test_avmine_ignores_a_moving_wreck() {
+    ArmedAvMine mine;
+    CHECK(mine.ok);
+    if (!mine.ok) return;
+    const EntityHandle wreck = mine.spawn_vehicle(kEntityFlagDead, 0);
+    mine.rig.tick(4);
+    CHECK(mine.rig.w.throwables.devices.size() == 1);
+    Entity *body = mine.rig.w.registry.get(wreck);
+    CHECK(body != nullptr);
+    if (body == nullptr) return;
+    body->engine_flags &= ~kEntityFlagDead;
+    body->health = 500;
+    mine.rig.tick(1);
+    CHECK(mine.rig.w.throwables.devices.empty());
 }
 
 // The owner's death alone leaves its devices armed: the pool-1 visit reads no
@@ -1525,6 +1621,8 @@ int main() {
     test_claymore_cone_trigger();
     test_claymore_sector_los_blocks_trigger();
     test_avmine_trips_on_a_moving_vehicle();
+    test_avmine_sees_one_unit_above_the_vehicle();
+    test_avmine_ignores_a_moving_wreck();
     test_owner_death_keeps_devices_armed();
     test_placed_device_cap_evicts_oldest_armed();
     test_placed_device_cap_claymore_is_four_and_type_scoped();
