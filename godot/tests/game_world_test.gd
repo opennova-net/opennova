@@ -2303,10 +2303,30 @@ func _stage_viewmodel_fixture(name: String, with_character: bool) -> String:
 	return root_dir
 
 
+# With no equipped weapon nothing first-person draws and no model is named:
+# there is no default gun [orig: Player_RenderFirstPersonViewModel @0x4ded60
+# returns with no equipped slot @0x4dedb6 or no def @0x4dedc1]. The weapon.def
+# here has no rows, which is still a loaded, empty table [orig: WeaponDef_LoadAll
+# @0x54dd10], so the spawn equips nothing.
+func test_no_equipped_weapon_draws_no_viewmodel() -> void:
+	var root_dir := _staged(WorldFixture.stage_minimal_root("no_equipped_weapon"))
+	WorldFixture.write_file(root_dir.path_join("weapon.def"), "// Weapon definitions\r\n\r\n")
+	var world := WorldFixture.boot_minimal(self, root_dir)
+	var weapons: WeaponDatabase = world.get_weapon_database()
+	assert_not_null(weapons, "a weapon.def with no rows is a loaded table")
+	if weapons != null:
+		assert_eq(weapons.get_count(), 0, "with no rows")
+	assert_eq(world.local_player_weapon_name(), "", "the spawn equips nothing")
+	assert_null(world.local_player_viewmodel_def(), "no equipped weapon resolves no def")
+	assert_null(world.build_local_player_viewmodel(), "and builds no viewmodel")
+	assert_true(world.local_player_viewmodel_parts().is_empty(), "so no gun or arms part")
+	assert_false(world.local_player_first_person_model_available())
+
+
 func test_valid_emplaced_def_without_gfx1_builds_no_fallback_gun() -> void:
 	# AVENGER has a valid retail weapon definition but no fpModel. That means an
-	# intentionally empty FP pass, not the bring-up AK fallback used when no
-	# definition resolves at all.
+	# intentionally empty FP pass: no gun and no arms [orig: def+0x16C null
+	# returns before both submits @0x4dedc7].
 	var root_dir := _stage_viewmodel_fixture("emplaced_no_gfx1", false)
 	var world := WorldFixture.boot_minimal(self, root_dir)
 	assert_true(world.set_local_player_weapon_by_name("WPN_AVENGER"),

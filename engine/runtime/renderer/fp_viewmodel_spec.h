@@ -26,18 +26,17 @@ struct Threedi3di3;
 namespace opennova::renderer {
 
 struct FpViewmodelSpec {
-	// Empty gun = a RESOLVED def with no fpModel intentionally submits no
-	// first-person gun.
+	// The equipped def's fpModel (gfx1). Empty = nothing is submitted: with no
+	// equipped def, or a def with no fpModel, neither gun nor arms draw.
 	std::string gun;
 	// The selected character's arms graphic; empty = no arms submit.
 	std::string arms;
-	// The clip set. Empty for a RESOLVED def with no animadm (retail loads no
-	// anim map and draws the rig at the root matrix); the bring-up adm rides
-	// only the no-def path.
+	// The clip set. Empty for a def with no animadm (retail loads no anim map
+	// and draws the rig at the root matrix).
 	std::string adm;
-	// False when the mount is emplaced (Flags 0x80) or no character arms
-	// resolved — retail submits no arms in either case.
-	bool show_arms = true;
+	// False when nothing is submitted, the mount is emplaced (Flags 0x80) or
+	// no character arms resolved: retail submits no arms in any of these.
+	bool show_arms = false;
 };
 
 // weapon.def viewmodel placement units: the parser stores pos/tpos POSITIONS
@@ -45,8 +44,9 @@ struct FpViewmodelSpec {
 // handler @ 0x54471f) and the camera ftol's the stored float straight onto
 // g_view_pos, so the net WORLD offset is file_value / 256.
 inline constexpr float kWeaponDefPosScale = 256.0f;
-// The witnessed JOX WPN_AK47AUTO def line — the no-def bring-up fallback
-// placement trio (pos hip / tpos ADS / rot-bias cant degrees).
+// The witnessed JOX WPN_AK47AUTO def line's placement trio (pos hip / tpos
+// ADS / rot-bias cant degrees): the viewmodel rig's initial tunables until an
+// equipped def's own rows replace them (nothing draws without one).
 inline constexpr float kFallbackPosUnits[3] = {-19.46f, 21.19f, -161.31f};
 inline constexpr float kFallbackTposUnits[3] = {-62.33f, 29.19f, -152.56f};
 inline constexpr float kFallbackRotBiasDeg[3] = {5.0f, 3.75f, 353.0f};
@@ -108,18 +108,19 @@ inline int viewmodel_team_byte(int team) {
     return t;
 }
 
-// The no-definition BRING-UP fallback (ours, not retail): before any def
-// resolves, the AK set keeps the FP pipeline exercisable. A resolved def never
-// rides it: its empty animadm is no clip set, as retail's empty-name
-// AnimMap_LoadAdmFile return leaves no anim map.
-inline constexpr const char *kBringupFallbackModel = "ak47_1st";
-// The matching weapon.def entry name the shell resolves until first equip.
-inline constexpr const char *kBringupFallbackWeapon = "WPN_AK47AUTO";
-// [orig: the Flags 0x80 emplaced test @ 0x4dedc7]
+// [orig: the def Flags 0x80 emplaced test @ 0x4deddf]
 inline constexpr uint32_t kWeaponFlagEmplaced = 0x80u;
 
-// `character_arms` is the local player's resolved combo arms graphic (empty
-// when the character carries no arms part).
+// `has_def` is whether the local player has an equipped def (its mounted
+// slot's), `gfx1` that def's fpModel, `character_arms` the local player's
+// resolved combo arms graphic (empty when the character carries no arms
+// part). Without an equipped def, or with a def whose fpModel is empty, the
+// spec submits nothing: there is no default model [orig:
+// Player_RenderFirstPersonViewModel @ 0x4ded60 returns with no equipped slot
+// @ 0x4dedb6, no def @ 0x4dedc1, no fpModel @ 0x4dedc7 (def+0x16C, which the
+// gfx1 arm stores only for a model that loaded, WeaponDefs_ParseLineCallback
+// @ 0x54506c; the load is at the def load @ 0x544fce, and a model that fails
+// is reported there once, "load failed" @ 0x544fdc, then never drawn)].
 FpViewmodelSpec fp_viewmodel_spec(bool has_def, const std::string &gfx1,
 		const std::string &character_arms, const std::string &animadm,
 		uint32_t flags);
