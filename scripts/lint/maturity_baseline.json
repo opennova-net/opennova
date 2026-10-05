@@ -14,6 +14,7 @@
     "runtime/terrain/terrain_tile_composition_worker.cpp",
     "formats/lwf/wav_pcm.cpp",
     "formats/bad/bad_o3a_read.cpp",
+    "formats/threedi/threedi_o3d_read.cpp",
     "formats/threedi/scene_text.cpp",
     "formats/threedi/threedi.cpp",
     "formats/threedi/threedi_3di3_ground_anchor.cpp",
