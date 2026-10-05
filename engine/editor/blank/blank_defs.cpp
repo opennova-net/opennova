@@ -33,7 +33,7 @@ bool make_blank_ammo_def(const BlankRequest &, std::vector<uint8_t> &out, Diagno
 // memory it never clears, and every item definition binds "default", whose miss is the table's
 // first slot: with no profile there, a mission's items take their sounds from that uncleared
 // memory and the game hangs or crashes once one plays (docs/required-resources.md, the
-// SndProf.def row). A profile's slots start cleared and resolve to no sound, so this one
+// SndProf.def row; docs/audio/lwf-dbf-sound-re.md D-SND-31). A profile's slots start cleared and resolve to no sound, so this one
 // profile makes every item silent instead.
 bool make_blank_sound_profiles(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	opennova::audio::SoundProfile profile;
