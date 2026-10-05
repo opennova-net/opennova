@@ -801,6 +801,91 @@ bool test_spawn_spread_then_recoil() {
 	return true;
 }
 
+// A def with no `recoil` key keeps the allocator's 24 per stance [orig:
+// AmmoDef_AllocateSlot @0x409A20, the recoil bytes @0x409AAF..0x409ABB], and
+// RoundData_SpawnRound adds the stance's byte << 18 to the shooter once the
+// round flies: JO:CA's Stinger and Javelin author none, so each shot kicks a
+// standing shooter 24 << 18. An instantkillzone def (the knife, both land mines,
+// AI_CLOSEKZ) queues its kill zone and returns first [orig: @0x4EC1F3..0x4EC230,
+// ahead of the recoil adds @0x4EC334 / @0x4EC85F], so it never kicks.
+bool test_unauthored_recoil_kicks_a_flying_round_only() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::PlayerSpawn seed;
+	seed.net_id = 42;
+	seed.equipped_adm_index = 1;
+	const w::EntityHandle shooter = w::spawn_player(world, seed);
+	w::AiEntity *body = world.ai.for_handle(shooter);
+	if (!expect(shooter.valid() && body != nullptr, "recoil-default player spawned"))
+		return false;
+
+	// The base ammo.def's STINGER and AMMO_KNIFE01, effects tables, tracers,
+	// lights and AI keys aside.
+	static const char text[] =
+			"ammo STINGER\r\n"
+			"\tmax_age\t\t\t\t10     \r\n"
+			"\tarm_age\t\t\t\t.5      \r\n"
+			"\tvelocity\t\t\t85 \r\n"
+			"\terror\t\t\t\t0\r\n"
+			"\tdrag\t\t\t\t1\r\n"
+			"\tweight_in_grains\t16000\r\n"
+			"\tmin_damage\t\t\t3000\r\n"
+			"\tmax_damage\t\t\t3000\r\n"
+			"\tkztype\t\t\t\trounds_kz_C4\r\n"
+			"\tkz_minradius\t\t2.0\r\n"
+			"\tkz_maxradius\t\t10.0\r\n"
+			"\tkz_damage\t\t\t1500\r\n"
+			"\tturnrate_maxpit  120\r\n"
+			"\tturnrate_maxyaw  120\r\n"
+			"\tflag LAWR\r\n"
+			"\tflag NoGravity\r\n"
+			"end\r\n"
+			"ammo AMMO_KNIFE01\r\n"
+			"\tmax_age\t\t\t\t1     \r\n"
+			"\tvelocity\t\t\t1\t\t\r\n"
+			"\tmin_damage\t\t\t100\r\n"
+			"\tmax_damage\t\t\t100\r\n"
+			"\tflag instantkillzone\r\n"
+			"\tkztype rounds_kz_Knife\r\n"
+			"\tkz_damage 300\r\n"
+			"\tkz_minradius 1.0\r\n"
+			"\tkz_maxradius 2.0\r\n"
+			"\tkz_pieslice\t 35\t\t\r\n"
+			"end\r\n";
+	DefAmmoFile parsed{};
+	const int rc = def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text),
+	                                     sizeof(text) - 1, &parsed);
+	world.tables.ammo = w::build_ammo_table(parsed);
+	def_free_ammo(&parsed);
+	if (!expect(rc == 0 && world.tables.ammo.entries.size() == 2 &&
+	                    world.tables.ammo.entries[0].recoil[2] == 24 &&
+	                    world.tables.ammo.entries[1].recoil[2] == 24,
+	            "STINGER and the knife parse with the allocator's recoil 24"))
+		return false;
+	world.tables.weapons.entries.resize(2);
+	world.tables.weapons.entries[1].valid = true;
+
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.adm_index = 1;
+	params.ammo_index = 0;
+	body->inf.recoil_pitch = 0;
+	if (!expect(world.round_sim.spawn(world, params) >= 0 &&
+	                    body->inf.recoil_pitch == (24 << 18),
+	            "a STINGER shot kicks a standing shooter 24 << 18"))
+		return false;
+
+	world.round_sim.reset();
+	body->inf.recoil_pitch = 0;
+	params.ammo_index = 1;
+	world.round_sim.spawn(world, params);
+	if (!expect(body->inf.recoil_pitch == 0 && world.explosions.queue.size() == 1,
+	            "the instantkillzone knife queues its kill zone and never kicks"))
+		return false;
+	return true;
+}
+
 struct DismembermentRig {
 	w::World world;
 	w::AiSystem &ai = world.ai;
@@ -1227,6 +1312,7 @@ int main() {
 	if (!test_respawned_vehicle_takes_projectile_damage()) return 1;
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
+	if (!test_unauthored_recoil_kicks_a_flying_round_only()) return 1;
 	if (!test_spawn_aimed_row_and_zero_elevation()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
 	if (!test_person_hit_presentation_legs_run_on_every_hit()) return 1;
