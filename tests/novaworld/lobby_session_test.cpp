@@ -271,12 +271,13 @@ int test_host_port_override_when_positive() {
 	return 0;
 }
 
-// Retail's Host list carries no address (Port = "-1"); the host player's own
-// slot-0 PlayerIpAndPort is the game endpoint [orig: Server_PlayerAdd
-// @0x51d45c]. Service policy: slot 0 first, then a positive Port, then the
-// observed source; an empty ip half (an OpenNova host with no advertised
-// address) takes the observed source address.
-int test_slot0_ip_and_port_selects_game_endpoint() {
+// No retail list carries the host's own reachable address (D-NET-346): the
+// Host list's Port is "-1", a dedicated host publishes no slot 0 and a listen
+// host's slot 0 is its loopback's unset address [orig: Server_PlayerAdd
+// @0x51d45c formats the slot's connection ip:port]. The lobby session rides the
+// host's game socket, so the observed source of the registration is the game
+// endpoint; a PlayerList slot 0, whatever it says, never moves it.
+int test_observed_source_is_game_endpoint() {
 	LobbySession sess;
 	sess.set_gsid_generator([](const std::string &) { return std::string("FIXED"); });
 	{
@@ -286,23 +287,23 @@ int test_slot0_ip_and_port_selects_game_endpoint() {
 		for (const auto &v : player_slot_vars(1, "bob",  "10.0.0.6:32768", "", "2", "0")) players.push_back(v);
 		auto r = sess.dispatch(make_retail_host_request("777", players), state, "10.0.0.1", 64500);
 		TEST_EXPECT(r.reply_containers.size() == 1);
-		TEST_EXPECT(state.host_ip == "10.0.0.5");
-		TEST_EXPECT(state.host_port == 32780);
+		TEST_EXPECT(state.host_ip == "10.0.0.1");
+		TEST_EXPECT(state.host_port == 64500);
+		TEST_EXPECT(state.roster.size() == 2);
 	}
 	{
-		// No advertised address: ":port" keeps the observed source address.
+		// A listen host's loopback slot 0 ("0.0.0.0:0") is a roster row, not an endpoint.
 		LobbyState state;
 		std::vector<test_novaworld::IndexedVar> players;
-		for (const auto &v : player_slot_vars(0, "Host", ":32780", "", "1", "0")) players.push_back(v);
+		for (const auto &v : player_slot_vars(0, "Host", "0.0.0.0:0", "", "1", "0")) players.push_back(v);
 		auto r = sess.dispatch(make_retail_host_request("778", players), state, "10.0.0.1", 64500);
 		TEST_EXPECT(r.reply_containers.size() == 1);
 		TEST_EXPECT(state.host_ip == "10.0.0.1");
-		TEST_EXPECT(state.host_port == 32780);
+		TEST_EXPECT(state.host_port == 64500);
 	}
 	{
-		// A registration without a roster (the pre-mission ClientHostRequest)
-		// falls back to the observed source; the host's own ClientHostPlayerAdded
-		// for slot 0 then resolves the endpoint and the roster follows the deltas.
+		// A dedicated registration has no roster at the request; the joiners'
+		// ClientHostPlayerAdded / Removed then follow without moving the endpoint.
 		LobbyState state;
 		auto r = sess.dispatch(make_retail_host_request("779"), state, "10.0.0.1", 64500);
 		TEST_EXPECT(r.reply_containers.size() == 1);
@@ -316,7 +317,7 @@ int test_slot0_ip_and_port_selects_game_endpoint() {
 		put("PlayerPCID", ""); put("PlayerTeam", "1"); put("PlayerType", "0");
 		auto ra = sess.dispatch(added, state, "10.0.0.1", 64500);
 		TEST_EXPECT(ra.label == "ClientHostPlayerAdded" && ra.reply_containers.empty());
-		TEST_EXPECT(state.host_ip == "10.0.0.5" && state.host_port == 32780);
+		TEST_EXPECT(state.host_ip == "10.0.0.1" && state.host_port == 64500);
 		TEST_EXPECT(state.roster.size() == 1 && state.player_count == 1);
 		added.fields.clear();
 		put("PlayerNumber", "1"); put("PlayerName", "carol"); put("PlayerIpAndPort", "10.0.0.7:32768");
@@ -330,8 +331,7 @@ int test_slot0_ip_and_port_selects_game_endpoint() {
 		auto rr = sess.dispatch(removed, state, "10.0.0.1", 64500);
 		TEST_EXPECT(rr.label == "ClientHostPlayerRemoved");
 		TEST_EXPECT(state.roster.size() == 1 && state.player_count == 1);
-		// The host endpoint survives a joiner leaving.
-		TEST_EXPECT(state.host_ip == "10.0.0.5" && state.host_port == 32780);
+		TEST_EXPECT(state.host_ip == "10.0.0.1" && state.host_port == 64500);
 	}
 	return 0;
 }
@@ -595,7 +595,7 @@ int test_bad_numbers_are_results() {
 	TEST_EXPECT(prefixed.gsid.rfind("GSID-10-000004d2-", 0) == 0);
 	TEST_EXPECT(prefixed.player_count == 5);
 	TEST_EXPECT(prefixed.max_players == 12);
-	TEST_EXPECT(prefixed.host_ip == "10.0.0.5" && prefixed.host_port == 32780);
+	TEST_EXPECT(prefixed.host_ip == "10.0.0.1" && prefixed.host_port == 64500);
 
 	NapiMessage list;
 	list.name = "ClientHostUpdate";
@@ -633,7 +633,7 @@ int main() {
 	if (test_client_request_verify_result_returns_server_verify_result() != 0) return 1;
 	if (test_retail_host_request_returns_server_host_result_with_gsid() != 0) return 1;
 	if (test_host_port_override_when_positive() != 0) return 1;
-	if (test_slot0_ip_and_port_selects_game_endpoint() != 0) return 1;
+	if (test_observed_source_is_game_endpoint() != 0) return 1;
 	if (test_two_hosts_with_colliding_app_ids_get_distinct_rids() != 0) return 1;
 	if (test_legacy_host_request_extracts_gsb_fields() != 0) return 1;
 	if (test_client_host_update_silent_with_state_refresh() != 0) return 1;

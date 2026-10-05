@@ -171,8 +171,7 @@ bool load_listing(const std::string &path, Listing &out, std::string &error) {
 	r.locked = as_bool(root.get("locked"), false);
 	r.tracers = as_bool(root.get("tracers"), true);
 	r.skins = as_bool(root.get("skins"), false);
-	r.dedicated_server = as_bool(root.get("dedicated"), true);
-	r.listen_host = !r.dedicated_server;
+	r.listen_host = !as_bool(root.get("dedicated"), true);
 	r.country = as_str(root.get("country"), r.country);
 	// Whole minutes survive the Host list's / 3720; no key (or a negative one) is untimed.
 	const int minutes = as_int(root.get("time_left_minutes"), -1);

@@ -3698,6 +3698,11 @@ add_executable(opennova_serve_game_cfg_test serve/opennova_serve_game_cfg_test.c
 target_link_libraries(opennova_serve_game_cfg_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_game_cfg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_game_cfg COMMAND opennova_serve_game_cfg_test)
+# The one socket under the game's protocol and the NWU session (D-NET-346): the demux and the
+# lobby protocol's claim.
+add_executable(nwu_demux_test novaworld/nwu_demux_test.cpp)
+target_link_libraries(nwu_demux_test PRIVATE opennova_net)
+add_test(NAME nwu_demux COMMAND nwu_demux_test)
 
 # opennova-nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
 # end over real loopback UDP against the real NwUdpListener and an in-test gate (the row, a roster

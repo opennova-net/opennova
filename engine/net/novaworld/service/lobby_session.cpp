@@ -169,30 +169,21 @@ void refresh_host_keys(LobbyState &state, const VarList &host_info) {
 	if (var_has(host_info, "PCIDKey")) state.pcid_key = var_value(host_info, "PCIDKey");
 }
 
-// The joinable game endpoint. A retail Host list carries no address and its
-// Port is the literal "-1" [orig: Lobby_UpdateServerInfo @0x4fef6d]; the host's
-// own game endpoint is what its PlayerList slot 0 (the host player) reports as
-// PlayerIpAndPort [orig: Server_PlayerAdd @0x51d45c formats the slot's
-// connection ip:port]. Service policy for the stored endpoint, in precedence:
-// slot 0's PlayerIpAndPort (an empty ip half, as an OpenNova host without an
-// advertised address sends, takes the observed source address), then a
-// positive Port (an OpenNova host behind a port map), then the observed UDP
-// source.
+// The joinable game endpoint. No retail list carries the host's own reachable
+// address: the Host list's Port is the literal "-1" [orig: Lobby_UpdateServerInfo
+// @0x4fef6d], a dedicated host publishes no slot 0, and a listen host's slot-0
+// PlayerIpAndPort is its loopback connection's unset address [orig:
+// Server_PlayerAdd @0x51d45c formats the slot's connection ip:port] (D-NET-346).
+// What a retail host does give the service is the source of its NWU datagrams,
+// which is its game socket: the lobby session rides the game's NP manager and
+// its one socket [orig: CNapiGameSession_InitNPConnection @0x4d3be0
+// @0x4d3c6b..0x4d3c89; CNapiNetwork_OpenTransportSocket @0x4c6a40, the
+// NovaWorld quad @0x4c6af6..0x4c6b08]. Service policy for the stored endpoint:
+// a positive Port (an OpenNova-only override, a host behind a port map), else
+// the observed UDP source of the registration.
 void refresh_host_endpoint(LobbyState &state, const VarList &host_info,
-                           const std::vector<HostRosterSlot> &roster,
                            const std::string &remote_ip, uint16_t remote_port) {
 	if (state.host_ip.empty()) state.host_ip = remote_ip;
-	for (const auto &s : roster) {
-		if (s.slot != 0) continue;
-		const size_t colon = s.ip_and_port.rfind(':');
-		if (colon == std::string::npos) break;
-		const int port = parse_int_safe(s.ip_and_port.substr(colon + 1));
-		if (port <= 0) break;
-		const std::string ip = s.ip_and_port.substr(0, colon);
-		state.host_ip = ip.empty() ? remote_ip : ip;
-		state.host_port = port;
-		return;
-	}
 	if (const int port = parse_int_safe(var_value(host_info, "Port")); port > 0) {
 		state.host_port = port;
 	} else if (state.host_port == 0) {
@@ -346,9 +337,9 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 	//  PlayerName, PlayerIpAndPort, PlayerPCID, PlayerTeam, PlayerType) /
 	//  SendPlayerRemoved @0x4d01a0 (PlayerNumber only)]; neither expects a
 	// reply. The statement is the per-slot roster delta between two
-	// ClientHostUpdates: it lands in the roster (slot 0 also re-resolves the
-	// game endpoint) and the Players column follows the roster size, so
-	// /api/hosts and the GSB reflect the join before the next refresh.
+	// ClientHostUpdates: it lands in the roster and the Players column follows
+	// the roster size, so /api/hosts and the GSB reflect the join before the
+	// next refresh. No slot names the host's game endpoint (refresh_host_endpoint).
 	else if (name == "ClientHostPlayerAdded" || name == "ClientHostPlayerRemoved") {
 		const HostRosterSlot slot = roster_slot_from_statement(inner_message);
 		auto it = std::find_if(state.roster.begin(), state.roster.end(),
@@ -356,11 +347,6 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		if (name == "ClientHostPlayerAdded") {
 			if (it != state.roster.end()) *it = slot;
 			else state.roster.push_back(slot);
-			if (slot.slot == 0) {
-				refresh_host_endpoint(state, {}, state.roster, remote_ip, remote_port);
-				if (!reflect_ip_.empty()) state.host_ip   = reflect_ip_;
-				if (reflect_port_ != 0)   state.host_port = reflect_port_;
-			}
 		} else if (it != state.roster.end()) {
 			state.roster.erase(it);
 		}
@@ -473,7 +459,7 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	state.hosting = true;
 
 	state.roster = roster_from_player_list(var_lists["PlayerList"]);
-	refresh_host_endpoint(state, host_info, state.roster, remote_ip, remote_port);
+	refresh_host_endpoint(state, host_info, remote_ip, remote_port);
 	// Reflection override (dev/NAT): force a locally reachable host endpoint so
 	// joiners can connect, instead of the observed docker-gateway source.
 	if (!reflect_ip_.empty()) state.host_ip   = reflect_ip_;
@@ -566,7 +552,7 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 		state.roster = roster_from_player_list(state.last_host_update["PlayerList"]);
 	}
 
-	refresh_host_endpoint(state, host_vars, state.roster, remote_ip, /*remote_port=*/0);
+	refresh_host_endpoint(state, host_vars, remote_ip, /*remote_port=*/0);
 	// Reflection override (dev/NAT) — same as the host-request path.
 	if (!reflect_ip_.empty()) state.host_ip   = reflect_ip_;
 	if (reflect_port_ != 0)   state.host_port = reflect_port_;
