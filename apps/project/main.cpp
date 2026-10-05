@@ -34,9 +34,9 @@ int main(int argc, char **argv) {
 		LocalFree(wide);
 		std::vector<const char *> pointers;
 		for (const std::string &arg : args) pointers.push_back(arg.c_str());
-		return opennova::project_cli::run_project_command(count - 1, pointers.data() + 1, stdout, stderr);
+		return opennova::project::run_project_command(count - 1, pointers.data() + 1, stdout, stderr);
 	}
 	if (wide != nullptr) LocalFree(wide);
 #endif
-	return opennova::project_cli::run_project_command(argc - 1, argv + 1, stdout, stderr);
+	return opennova::project::run_project_command(argc - 1, argv + 1, stdout, stderr);
 }
