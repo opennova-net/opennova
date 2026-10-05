@@ -52,6 +52,7 @@ void BuildOperation::join(const EditorRequest &request) {
 	if (request.kind != EditorRequestKind::Play) return;
 	play_.wanted = true;
 	play_.mission = request.mission;
+	play_.behind = request.behind;
 }
 
 OperationOutcome BuildOperation::finish(SessionCore &core) {

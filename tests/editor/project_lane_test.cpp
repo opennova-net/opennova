@@ -155,8 +155,8 @@ int test_files_filter() {
 
 // A file's card: a sound bank names its waves (the one the project has a wave, the others missing) and is
 // packed into resource.pff; the wave decodes as the game decodes it, is named by the bank and packs into
-// localres.pff; about_file shows the card in Files (a RevealFile event, tag 1); play_sound and stop_sound
-// are the Shell's.
+// localres.pff; about_file shows the card in Files, the workspace's; play_sound and stop_sound are the
+// session's, the Shell reporting how the sound goes; the card closed stops its sound.
 int test_file_card() {
 	SoundProject project;
 	TEST_EXPECT(project.made);
@@ -186,14 +186,44 @@ int test_file_card() {
 	const JsonValue card = ask(session, "file_card", object_of({{"path", JsonValue::make_string("tone.wav")}}));
 	TEST_EXPECT(card.get_bool("found", false) && card.get("sound") && card.get("sound")->get_bool("decoded", false));
 	TEST_EXPECT(card.get("named_by") && !card.get("named_by")->array.empty());
-	// about_file: Files selects the file and opens its card.
+	// about_file: Files selects the file, and its card opens, the workspace's (the MCP gaps lane).
 	TEST_EXPECT(session.handle(request::about_file("tone.wav")));
 	const std::vector<ViewEvent> held(v.events.held().begin(), v.events.held().end());
-	TEST_EXPECT(!held.empty() && held.back().kind == ViewEventKind::RevealFile && held.back().path == "sounds/tone.wav" &&
-	            held.back().tag == 1);
-	// Playing is the Shell's.
-	TEST_EXPECT(!session.handle(request::play_sound("tone.wav")) && !session.handle(request::stop_sound()));
-	TEST_EXPECT(request_kind_row(EditorRequestKind::PlaySound).served_by == ServedBy::Shell);
+	TEST_EXPECT(!held.empty() && held.back().kind == ViewEventKind::RevealFile && held.back().path == "sounds/tone.wav");
+	TEST_EXPECT(v.workspace.card.path == "sounds/tone.wav" && v.documents.file_selected.path == "sounds/tone.wav");
+	// The sound is the session's (the MCP gaps lane): play_sound starts a play the Shell takes by its serial,
+	// what the Shell reports seen; a name no wave has, refused.
+	TEST_EXPECT(request_kind_row(EditorRequestKind::PlaySound).served_by == ServedBy::Session &&
+	            request_kind_row(EditorRequestKind::StopSound).served_by == ServedBy::Session);
+	TEST_EXPECT(session.handle(request::play_sound("tone.wav")) && session.outcome().done());
+	const uint64_t serial = v.workspace.sound.serial;
+	TEST_EXPECT(v.workspace.sound.path == "sounds/tone.wav" && v.workspace.sound.state == WorkspaceView::SoundState::Starting &&
+	            serial != 0);
+	session.report_sound(serial, WorkspaceView::SoundState::Playing);
+	TEST_EXPECT(v.workspace.sound.state == WorkspaceView::SoundState::Playing);
+	session.report_sound(serial + 7, WorkspaceView::SoundState::Failed, "a play no one asked");
+	TEST_EXPECT(v.workspace.sound.state == WorkspaceView::SoundState::Playing && v.workspace.sound.error.empty());
+	TEST_EXPECT(session.handle(request::stop_sound()) && v.workspace.sound.state == WorkspaceView::SoundState::Stopped);
+	session.report_sound(serial, WorkspaceView::SoundState::Ended);
+	TEST_EXPECT(v.workspace.sound.state == WorkspaceView::SoundState::Stopped); // a stopped play's report passed over
+	TEST_EXPECT(session.handle(request::play_sound("menu.lwf")) && !session.outcome().done() &&
+	            v.workspace.sound.serial == serial && v.workspace.sound.path == "sounds/tone.wav");
+	// The card closed (set_workspace): the sound it played stops.
+	TEST_EXPECT(session.handle(request::play_sound("tone.wav")) && v.workspace.sound.serial == serial + 1);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"card": {"path": ""}})")) && session.outcome().done());
+	TEST_EXPECT(v.workspace.card.path.empty() && v.workspace.sound.state == WorkspaceView::SoundState::Stopped);
+	// The wire's: the card and the sound in the workspace section.
+	session.handle(request::about_file("tone.wav"));
+	session.handle(request::play_sound("tone.wav"));
+	const JsonValue section = ask(session, "state", object_of({{"sections", [] {
+		JsonValue list = JsonValue::make_array();
+		list.push(JsonValue::make_string("workspace"));
+		return list;
+	}()}}));
+	const JsonValue *workspace = section.get("workspace");
+	TEST_EXPECT(workspace && workspace->get("card") && workspace->get("card")->get_string("path", "") == "sounds/tone.wav" &&
+	            workspace->get("sound") && workspace->get("sound")->get_string("state", "") == "starting" &&
+	            workspace->get("sound")->get_string("path", "") == "sounds/tone.wav");
 	// The review's L5: a sound read before is taken as it is while its file stands, read again once it moved,
 	// and a wave past the card's cap is said to be too large, nothing read.
 	FileCard::Sound known = wave.sound;
