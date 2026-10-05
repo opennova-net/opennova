@@ -98,8 +98,12 @@ struct ChatEntryFacts {
 
 // What one send attempt did. `Sent` stamps the debounce; `Flooded` asks the
 // embedder to echo the (truncated) line to the CHAT ring in the dispatch's
-// flood color; `Refused` does nothing.
-enum class ChatSendResult : uint8_t { Refused, Sent, Flooded };
+// flood color; `Refused` does nothing. `Broadcast` is the Global sender's
+// authority arm on a host with no client of its own: the line went out to
+// every player, and that arm stamps no debounce [orig: Chat_SendTeamMessage
+// (IDB misnomer — the GLOBAL sender) @0x49a9da..0x49aa2a; the stamp
+// @0x49a9be is the peer arm's alone].
+enum class ChatSendResult : uint8_t { Refused, Sent, Flooded, Broadcast };
 // The begin's stored sender [orig: dword_B3E1D4]: the dispatch picks the
 // C2S channel (chat_dispatch_channel); `text` is in/out — the flood check
 // cuts it to 59 characters in place.

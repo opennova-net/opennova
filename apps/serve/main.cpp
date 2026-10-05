@@ -2,9 +2,11 @@
 // host with no Godot and no window, configured by the retail host file over
 // the working directory's game.cfg, listed on NovaWorld when the cfg's network
 // type says so. The server's legs live in server.cpp; this file owns the
-// console, the stop signals, the socket layer and the wall clock.
+// console, the stop signals, the socket layer and the wall clock. The status
+// page and its chat input are status_console.cpp's.
 
 #include "server.h"
+#include "status_console.h"
 
 #include "console_log.h"
 #include "listing.h"
@@ -68,8 +70,14 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 	const auto period = std::chrono::nanoseconds(
 			static_cast<int64_t>(1e9 * world::TickAccumulator::kTickDt));
 	auto last = clock::now();
+	const auto started = last;
 	auto next = last + period;
 	int code = 0;
+	// The status page stands in for the scene a retail dedicated host draws;
+	// stdin is its chat input line (status_console.h).
+	serve::StatusConsole status(stdout);
+	serve::ConsoleInput input;
+	input.start();
 	while (!g_stop.load()) {
 		const auto now = clock::now();
 		const double delta = std::chrono::duration<double>(now - last).count();
@@ -88,6 +96,10 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 			}
 			break;
 		}
+		std::string line;
+		while (input.poll(line)) status.submit(server, line);
+		status.update(server, static_cast<uint32_t>(
+				std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count()));
 		std::this_thread::sleep_until(next);
 		next += period;
 	}

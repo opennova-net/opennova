@@ -6,6 +6,7 @@
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/entity_class.h>
 #include <runtime/environment/water_frame.h>
+#include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/session_status.h>
 
 #include <string_view>
@@ -83,6 +84,13 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	const mission::BootFileSource &files = request.files;
 	const std::string &basename = request.mission_basename;
 	HostConfig host_cfg = std::move(request.host_cfg);
+
+	// The /PROFILE log opens a fresh file for this mission, ahead of its load,
+	// headed by the map file name [orig: Game_StartMission @0x524475..0x524487
+	//  -> ServerLog_OpenForWrite(&g_ServerLog, g_ProfileLogPath), BEGN over
+	//  g_MapFileName @0x4e2067].
+	if (request.host != nullptr && host_cfg.logs.profile != nullptr)
+		(void)host_cfg.logs.profile->open(host_cfg.config.mission_file);
 
 	// The loose score.ini over the game type's default table, into the session
 	// config before the bring-up: start_host_session copies the score values
@@ -262,6 +270,14 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 	weather->run_mission_start_boundary(environment, &kernel.world.weather, kernel.mission.header,
 			device.bind_render ? device.bind_render : no_render_bind,
 			[&kernel] { (void)kernel.complete_mission_start(); });
+
+	// The /PROFILE roster of the started mission's pool 0, at the start's
+	// tail [orig: Game_StartMission @0x526135..0x52617b, after
+	//  SpawnWaveList_BuildFromMission @0x526130].
+	if (boot.host != nullptr) {
+		const NapiNPServerCtx &ctx = boot.host->state.host_owner.ctx;
+		if (ctx.logs.profile != nullptr) ctx.logs.profile->write_mission_roster(ctx, kernel.world);
+	}
 
 	// The authority's load end: the S2C 0x7B to every slot, and a map change's
 	// last pump [orig: Game_StartMission @0x52625F..0x526267].

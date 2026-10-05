@@ -10,10 +10,13 @@
 
 #include <functional>
 
+#include <runtime/inmatch/chat_flood.h>        // the console chat's flood table
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/server_ban_lists.h>  // banlist.txt / banned.txt (the join refusals)
+#include <runtime/inmatch/server_console.h>    // the client-less host's CHAT ring
 #include <runtime/inmatch/server_designations.h> // the designation table (S2C 0x6B)
+#include <runtime/inmatch/server_files.h>      // ServerLogs (the /PROFILE and punt log devices)
 #include <runtime/replication/net_quality.h>   // the CNetQuality window (the host send half)
 #include <runtime/world/entity.h>              // world::EntityHandle (the deployable spawner seam)
 
@@ -459,6 +462,21 @@ struct NapiNPServerCtx {
 	// handler refuses the spawn when unset. Returns the new pool-1 handle.
 	std::function<world::EntityHandle(world::World &, uint16_t item_id, uint8_t team,
 			const int32_t position[3])> deployable_spawner;
+
+	// The host process's log devices — the /PROFILE recorder and the punt
+	// logs — installed from HostConfig::logs at the session start; a null
+	// pointer is a device retail's switch left off (server_files.h).
+	ServerLogs logs;
+	// The host socket's bound address the /INOUT host lines print
+	// [orig: the protocol manager's socket +8 / +12, CNapiNPConnection_LogHostStarted
+	//  @0x61e6c6]; unknown prints retail's no-socket placeholder.
+	PeerAddr local_address{};
+	bool local_address_known = false;
+	// The CHAT ring of a host with no client of its own and the flood table its
+	// console chat checks (server_console.h) [orig: the raw slots byte_B3EA38;
+	//  Chat_CheckFloodControl's table @0xB3B788].
+	std::vector<ServerConsoleLine> console_chat;
+	ChatFloodTable console_chat_flood{};
 
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.

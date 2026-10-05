@@ -422,6 +422,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_ban_lists.cpp       # banlist.txt / banned.txt on the authority
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_console.cpp # the client-less host's CHAT ring, its console chat, the /INOUT lines
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_recorder.cpp # the /PROFILE .sph recorder
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/punt_log.cpp # _PUNT.TXT, _CHEAT.TXT and punt.log
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_idle_timers.cpp          # the every-32 player breath samples (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_routes.cpp       # the item events, crossings and guidance routes (split off server_tick.cpp)

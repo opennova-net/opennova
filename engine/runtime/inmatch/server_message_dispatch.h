@@ -37,6 +37,7 @@ namespace opennova::inmatch {
 struct HostRotation;
 
 struct NapiNPServerCtx;
+class ServerLogRecorder;
 
 using MissionMetadataBlob = std::array<uint8_t, 180>;
 
@@ -74,10 +75,12 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 // team's marker chain. Returns the private 0x5A/0x61/frontier bundle for the
 // owning connection; callers decide whether it is returned reactively or
 // staged on a transport.
+// `server_log` is the /PROFILE recorder (null = off), which marks the deploy.
 // [orig: Server_ProcessPlayerDeath deploy leg @0x517740]
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
-		world::World &world, world::EntityHandle target_zone);
+		world::World &world, world::EntityHandle target_zone,
+		ServerLogRecorder *server_log = nullptr);
 
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into

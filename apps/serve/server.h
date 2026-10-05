@@ -38,6 +38,7 @@
 #include "listing.h" // nw_lister::Credentials
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
+#include "server_logs.h"
 
 #include <atomic>
 #include <cstdint>
@@ -71,6 +72,7 @@ struct ServeOptions {
 	bool allow_public = false;                     // --allow-public
 	std::string credentials_path;                  // --credentials FILE
 	nw_lister::Credentials credentials;            // main() loads it and masks every value
+	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG (server_logs.h)
 };
 
 // Parses the command line (argv[1..]). Returns 0 when the options parsed, 1 on
@@ -117,6 +119,8 @@ public:
 	bool reset_exit() const { return reset_exit_; }
 
 	uint16_t bound_port() const { return bound_port_; }
+	bool running() const { return running_; }
+	const ResourceIndex &index() const { return index_; }
 	const std::string &end_message() const { return end_message_; }
 	bool rotation_ended() const { return rotation_ended_; }
 	// The missions the session has booted (the starting map is 1).
@@ -186,6 +190,7 @@ private:
 	bool exit_save_owed_ = false;
 	bool reset_exit_ = false;
 	std::string end_message_;
+	ServerLogDevices log_devices_; // the logs the switches armed (server_logs.h)
 };
 
 } // namespace opennova::serve

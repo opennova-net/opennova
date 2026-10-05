@@ -1,6 +1,7 @@
 #include <runtime/inmatch/host_role.h>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/log.h>
 #include <base/io/perf_clock.h>
 #include <formats/mission/bms.h>
 #include <net/npwire/ingame_encode.h>
@@ -10,7 +11,9 @@
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/null_datagram_socket.h>
+#include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/server_initial_state.h>
+#include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/mission/mission_kernel.h>
@@ -484,6 +487,12 @@ void HostRole::run_tick(const TickInput &input) {
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;
 	if (kernel.world.profile != nullptr)
 		kernel.world.profile->add(devtools::Slot::SIM_NET, last_net_us_);
+	// The /PROFILE frame leg closes the update, on a frame no mission exit
+	// cut short [orig: Game_ProcessMainFrame — the exit tests @0x526806..0x526860,
+	//  then the write @0x526879..0x5268e7].
+	if (ctx.logs.profile != nullptr && ctx.mission_exit_reason == 0 &&
+			kernel.world.mission_exit_reason == 0)
+		ctx.logs.profile->write_frame(ctx, kernel.world, kernel.world.logic_tick);
 }
 
 void HostRole::observe_frame_rate(int32_t fps) {
@@ -528,6 +537,10 @@ bool HostRole::session_lost(SessionError &error) const {
 //  CNapiNPConnection_Destroy @0x62a924 per connection, host_running cleared
 //  @0x62a95c) -> TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
 void HostRole::close() {
+	// The /PROFILE log closes first, before the post-mission pass and the
+	// slot disconnects, so their markers never reach the file
+	// [orig: Game_TeardownMission @0x5223e2..0x5223f0 -> CServerLog_CloseAndFree].
+	if (state.host_owner.ctx.logs.profile != nullptr) state.host_owner.ctx.logs.profile->close();
 	// The teardown's head: pools 0..2 go, then the authority's one-shot
 	// PostMission sweep, both ahead of the per-slot 0x25 walk below
 	// [orig: Game_TeardownMission — EventTrigger_UpdateAllWithFlag4 call
@@ -569,6 +582,9 @@ void HostRole::close() {
 		state.host_owner.pending_session_datagrams.erase(peer);
 	}
 	ctx.np_protocol.host_running = 0;
+	// [orig: NapiNPProtocol_StopServer -> CNapiNPConnection_LogHostStopped
+	//  @0x62a97b, after host_running clears @0x62a95c; D-NET-356]
+	io::logf(io::LogLevel::kInfo, "%s", inmatch::inout_host_line(ctx, /*started=*/false).c_str());
 }
 
 // The editor Stop/Start rewind: the kernel's own restore, then a fresh

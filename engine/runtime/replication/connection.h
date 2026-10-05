@@ -103,6 +103,15 @@ struct Connection {
 	//  Server_BuildEntityPriorityList @0x50e590]
 	std::array<uint16_t, 4> tracked_handle{{0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF}};
 	std::array<int32_t, 4> tracked_score{{0, 0, 0, 0}};
+	// The two frame statistics the owner's 0x0C extended uplink carries: the
+	// low bytes of its frame rate and CPU share. The host stores them as it
+	// parses the uplink, ahead of the pre-round apply gate; the /PROFILE
+	// server log writes the frame rate per player.
+	// [orig: NetPacket_SerializePlayerState case 4 — playerSlot+0x15F78
+	//  @0x4c1edd, +0x15F79 @0x4c1efa; read by CServerLog_WritePositionRecord
+	//  @0x4e1b6d]
+	uint8_t uplink_frame_rate = 0;
+	uint8_t uplink_cpu_percent = 0;
 
 	// Per-connection round-event watermark: the newest world.out.rounds sequence already swept
 	// into this connection's 0x0A tag-2 stream [orig: playerSlot+97544, stamped = stat_id after

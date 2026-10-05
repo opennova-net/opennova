@@ -1,5 +1,6 @@
 #pragma once
 
+#include <runtime/inmatch/chat_flood.h>
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
@@ -249,17 +250,6 @@ public:
 	// The frame's phases (SIM_CLIENT_SETUP/RECEIVE/MAINTENANCE/SEND) lap onto
 	// this profile (the embedder's, normally the world's; null = no clocks).
 	void set_profile(devtools::TickProfile *profile) { profile_ = profile; }
-	// The chat flood table's 16 recent lines `[u32 frame][char[64]]`: a repeat
-	// of a line within 0x500 main frames of its entry is refused, an older
-	// repeat is moved to the newest slot. The clock is the per-main-frame
-	// counter the talk debounce reads too, not wall time [orig:
-	// Chat_CheckFloodControl @0x498F60 — the 16 x 68-byte table @0xB3B788,
-	// `dword_A8705C - entry <= 0x500` @0x499028, the shift-down + append].
-	struct ChatFloodEntry {
-		uint32_t frame = 0;
-		std::string text;
-	};
-
 	// Typed gameplay seams used by the simulation; protocol tags/framing remain
 	// owned here. Fire is predicted locally before queueing C2S 0x06. The spent clip
 	// remains unchanged until the host's S2C 0x49 echo appears in the reload drain.
@@ -858,7 +848,7 @@ private:
 	replication::NetQualityWindow client_quality_window_;
 	int32_t observed_frame_rate_ = 0;                    // [orig: dword_24E1F10, 0 @0x52B727]
 	int32_t quality_update_countdown_ = 62;              // [orig: dword_24D1DDC]
-	std::array<ChatFloodEntry, 16> chat_flood_{};       // [orig: @0xB3B788]
+	ChatFloodTable chat_flood_{};                        // [orig: @0xB3B788] (chat_flood.h)
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)
 	// The host-dictated send period (CS dir-0 field 3, H:0x00 mask 8): the
 	// countdown re-arms from this at every open boundary [orig: cs_dir0.

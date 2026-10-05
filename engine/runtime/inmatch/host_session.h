@@ -23,6 +23,7 @@
 #include <runtime/inmatch/udp_session_transport.h> // replication::UdpSessionTransport
 
 #include <net/npwire/peer_addr.h> // opennova::PeerAddr
+#include <runtime/inmatch/server_files.h> // ServerLogs
 #include <net/npwire/protocol_message.h>
 
 #include <runtime/inmatch/napi_np_connection.h>
@@ -144,6 +145,12 @@ struct HostConfig {
 	// @0x551500]. Defaults to the stock fresh-profile seed; the shell replaces it
 	// from the mounted Avatars.def + weapon.sav.
 	CharacterJoinVars local_character_vars = retail_fresh_profile_character_vars();
+	// The host process's log devices (server_files.h) and its socket's bound
+	// address for the /INOUT lines; the session start installs both on the
+	// fresh context.
+	ServerLogs logs;
+	PeerAddr local_address{};
+	bool local_address_known = false;
 };
 
 // Stand `owner` up through the shared in-match host bring-up the Godot host uses. `serve_and_play` selects HostClient and registers the type-2 loopback; otherwise it selects

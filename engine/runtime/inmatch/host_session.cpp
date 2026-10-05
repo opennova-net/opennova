@@ -608,6 +608,12 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 
 void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.now_tick = 0;
+	// The process's log devices and the socket address, ahead of the session
+	// create whose server start logs HOST STARTED and whose round init clears
+	// the punt table.
+	owner.ctx.logs = cfg.logs;
+	owner.ctx.local_address = cfg.local_address;
+	owner.ctx.local_address_known = cfg.local_address_known;
 	owner.serve_and_play = cfg.serve_and_play; // the pump's step-5 loopback handling reads this
 	owner.pending_session_messages.clear();
 	owner.pending_session_datagrams.clear();

@@ -14,6 +14,8 @@
 #include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
 #include <net/npwire/ingame_encode.h>     // encode_team_assign
+#include <runtime/inmatch/punt_log.h>     // the punt table the round init clears
+#include <runtime/inmatch/server_log_recorder.h> // the /PROFILE PDEF of a player add
 #include <runtime/inmatch/server_squad.h> // Server_DissolveSquadOf
 #include <net/npwire/ingame_message_id.h> // s2c::FORMATTED_GAME_TEXT (the 0x51 convert notice)
 
@@ -238,6 +240,9 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// The designation table clears on every round init, authority or not
 	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
 	ctx.designations.fill(ServerDesignation{});
+	// The punt table clears on every round init too [orig: memset(&g_PuntLog,
+	//  0, 0x7000) @0x51c990, outside the authority test].
+	if (ctx.logs.punt != nullptr) ctx.logs.punt->clear_records();
 	// The LASTGAME toggle clears only here, at the session's create and
 	// destroy, so it holds across the map changes between them (§5.70.3)
 	// [orig: `mov g_LastGameToggle, 0` @0x51CAA4].
@@ -495,6 +500,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		conn.reply.state6_entry_host_ms_valid = true;
 	}
 	conn.reply.player_slot_reserved = false;
+	// The /PROFILE roster row, late in the add [orig: Server_PlayerAdd
+	//  @0x51d2fd..0x51d30f -> CServerLog_WritePlayerNameRecord].
+	if (ctx.logs.profile != nullptr) {
+		if (const world::Entity *added = world.registry.get(h)) ctx.logs.profile->write_player(*added);
+	}
 	return h;
 }
 

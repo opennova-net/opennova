@@ -15,6 +15,10 @@
 #include <net/npwire/session_ping.h> // the shared 0x45/0x85 body codec
 
 #include <runtime/inmatch/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
+#include <runtime/inmatch/server_console.h>    // the /INOUT player lines
+#include <runtime/inmatch/server_log_recorder.h> // the /PROFILE disconnect marker
+
+#include <base/io/log.h>
 
 #include <base/io/le.h>       // append_u32_le (the CS update dword)
 #include <base/io/strutil.h> // iequals (Napi_StrCaseEqual)
@@ -206,6 +210,13 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	if (it == list.end()) return false;
 
+	// The /INOUT line heads the teardown, ahead of the burst
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253d2 ->
+	//  CNapiNPConnection_LogPlayerRemoved; D-NET-356]. The listen host's own
+	// type-2 node is never torn down here.
+	if (it->type == NapiNPConnection::kTypeServerSide)
+		io::logf(io::LogLevel::kInfo, "%s", inout_player_removed_line(*it).c_str());
+
 	if (goodbye_out != nullptr) {
 		std::vector<std::vector<uint8_t>> burst = host_goodbye_burst(ctx, *it);
 		goodbye_out->insert(goodbye_out->end(),
@@ -236,6 +247,13 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			// [orig: Server_HandlePlayerDisconnect @0x51B5C0 -> SpawnWaveList_RemovePlayer
 			//  @0x52A410, the call @0x51b809 (before Server_RemoveEntityAndNotify @0x51b82e)]
 			ctx.world->zones.spawn_waves.remove_player(owned_entity);
+			// The /PROFILE disconnect marker, after the spawn-wave removal and
+			// before the entity goes [orig: Server_HandlePlayerDisconnect
+			//  @0x51b80e..0x51b822 -> CServerLog_WriteDisconnectMarker].
+			if (ctx.logs.profile != nullptr) {
+				if (const world::Entity *leaver = ctx.world->registry.get(owned_entity))
+					ctx.logs.profile->write_disconnect(*leaver);
+			}
 			ctx.world->vehicles.detach(owned_entity);
 			// The leaver's row goes through Server_RemoveEntityAndNotify, whose
 			// Player arm removes the placed devices the leaver owns, each through
@@ -864,6 +882,9 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// then SendSessionInit @0x6261fc].
 	const bool negotiated = negotiate_max_packet_bytes(conn, mps);
 	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
+	// The /INOUT line once the 0x82 is out [orig: CNapiNPConnection_OnStateChange
+	//  @0x626204 -> CNapiNPConnection_LogPlayerAdded; D-NET-356].
+	io::logf(io::LogLevel::kInfo, "%s", inout_player_added_line(conn).c_str());
 	if (negotiated) {
 		std::vector<uint8_t> initial_settings = frame_session_replies(
 				conn, make_game_session_initial_settings(conn.timeouts.max_packet_bytes));

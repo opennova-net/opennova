@@ -2,6 +2,7 @@
 #include <runtime/inmatch/server_status_feed.h>
 
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_console.h>
 #include <runtime/world/world.h>
 
 namespace opennova::inmatch {
@@ -66,6 +67,14 @@ void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServe
 	page.total_logins = ctx.total_logins; // ctx+0x11A8
 	page.frames = ctx.stats_frames_last_second; // dword_24C193C
 	page.cpu_percent = ctx.stats_cpu_percent;   // g_StatsCpuPercent
+	// A host with no client of its own shows its CHAT ring's four newest
+	// slots [orig: HUD_DrawServerConsoleLines @0x5ba0bd on a non-peer]; a
+	// listen host's rows are its HUD's.
+	page.console_rows.clear();
+	if (!page.mp_session_peer) {
+		for (const ServerConsoleLine &row : server_console_rows(ctx.console_chat))
+			page.console_rows.push_back(hud::ServerStatusConsoleRow{row.text, row.color});
+	}
 	if (world == nullptr) return;
 	for (uint8_t t = 0; t < 2; ++t) {
 		const world::MatchStats &stats = world->match.team_stats(static_cast<uint8_t>(t + 1));
