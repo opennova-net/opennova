@@ -157,6 +157,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   `tests/gamecfg/gamecfg_synth.h`, every written key off its default and a four-row weapon
   roster. No retail file stands behind it: the game writes `game.cfg` on the player's
   machine, with the player's hardware names in it.
+- `banlist/synth_banlist.txt`, `banlist/synth_banned.txt` — `tests/fixtures/minimal_banlist_gen.cpp`:
+  the two ban files through `banlist::write_pcid_list` (BanList_SaveToFileWithHeader's header,
+  CR LF) and `banlist::write_address_list` (`%20s   "%s"`, CR LF) from
+  `tests/banlist/banlist_synth.h`: invented PCIDs (one repeated, one nameless), addresses and
+  names. No retail file stands behind them: a server writes both on its operator's machine.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
 - `mus/synth_gamemus.bin`, `mus/synth_menumus.bin`, `mus/golden_synth_gamemus.mus.txt` —
   `tests/fixtures/synth_mus_gen.cpp`: two music-director programs authored in the

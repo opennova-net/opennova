@@ -127,9 +127,9 @@ public:
 	// Explicit send-holdoff override in ticks; -1 = derive from channel/lan_mode.
 	int get_send_holdoff_ticks() const;
 	void set_send_holdoff_ticks(int p_ticks);
-	bool get_fat_bullets() const { return config_.fat_bullets; }
+	bool get_fat_bullets() const { return config_.fat_bullets != 0; }
 	void set_fat_bullets(bool p_value) { config_.fat_bullets = p_value; }
-	bool get_one_shot_kill() const { return config_.one_shot_kill; }
+	bool get_one_shot_kill() const { return config_.one_shot_kill != 0; }
 	void set_one_shot_kill(bool p_value) { config_.one_shot_kill = p_value; }
 	// game.cfg `unlimited_vehicles` (GameConfig::unlimited_vehicles, stock on):
 	// a destroyed hull respawns and the vehicle-spawn limits are bypassed.

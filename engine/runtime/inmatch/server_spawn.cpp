@@ -229,6 +229,12 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// The team-change list starts every round empty
 	// [orig: CBufferList_Free(g_TeamChangeEntityList) @0x51C911..0x51C92A].
 	ctx.team_change_entities.clear();
+	// banlist.txt: freed, and reloaded on a NovaWorld authority session
+	// [orig: sub_436EB0 @0x51c92f -> BanList_InitFromMission @0x5098f0].
+	Server_ReloadPcidBanList(ctx);
+	// banned.txt: zeroed and re-read, authority or not
+	// [orig: @0x51cb25..0x51cb3b].
+	Server_ReloadAddressBanList(ctx);
 	// The designation table clears on every round init, authority or not
 	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
 	ctx.designations.fill(ServerDesignation{});

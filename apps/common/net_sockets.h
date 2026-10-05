@@ -67,6 +67,16 @@ bool tcp_send_all(Socket &s, const uint8_t *data, size_t len);
 int tcp_recv(Socket &s, uint8_t *buf, size_t cap);
 // Fill `buf` exactly. False when the peer closed first, or on an error or a timeout.
 bool tcp_recv_exact(Socket &s, uint8_t *buf, size_t len);
+// Open a non-blocking TCP listener on `port` (0: ephemeral; the bound port goes to `out_bound`)
+// with `backlog`, on every interface or on loopback alone. An invalid Socket when it fails.
+Socket tcp_listen(uint16_t port, int backlog, uint16_t *out_bound = nullptr, bool loopback_only = false);
+// Accept one waiting connection without blocking: an invalid Socket when none waits. The
+// accepted socket is non-blocking; `from` gets the peer's address.
+Socket tcp_accept(Socket &listener, Endpoint &from);
+// One recv on a non-blocking socket: the byte count, 0 when the peer closed,
+// TCP_RECV_WOULD_BLOCK when nothing waits, -1 on an error (a reset).
+inline constexpr int TCP_RECV_WOULD_BLOCK = -2;
+int tcp_recv_nonblocking(Socket &s, uint8_t *buf, size_t cap);
 // Shut both directions down, so a recv blocked on `s` in another thread returns; the socket
 // stays open for its owner to close.
 void shutdown_socket(const Socket &s);

@@ -81,8 +81,8 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play,
 		bool in_session) {
 	mission::MissionKernel &kernel = *kernel_;
-	kernel.world.rules.fat_bullets = config.fat_bullets;
-	kernel.world.rules.one_shot_kill = config.one_shot_kill;
+	kernel.world.rules.fat_bullets = config.fat_bullets != 0;
+	kernel.world.rules.one_shot_kill = config.one_shot_kill != 0;
 	// The mission-data block's unlimited-vehicles word, rebuilt from the host
 	// config at every mission start [orig: Client_BuildMissionDataRequestBlock
 	// @0x51E8C5..0x51E8CB from dword_24D2258 = unlimitedVehicles_4D0].

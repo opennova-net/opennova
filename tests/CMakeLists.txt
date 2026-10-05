@@ -3681,8 +3681,36 @@ add_test(NAME npruntime_lan_probe_client COMMAND npruntime_lan_probe_client_test
 # decrypt recovers, and the read-only replies in the server's formats.
 add_executable(admin_protocol_test admin/admin_protocol_test.cpp)
 target_link_libraries(admin_protocol_test PRIVATE opennova_net)
-target_include_directories(admin_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/admin)
 add_test(NAME admin_protocol COMMAND admin_protocol_test)
+# The remote-admin server (net/admin/admin_server, ADR 0051 PR5) and its console
+# (runtime/inmatch/admin_console) driven by the client codec over in-memory bytes: the
+# challenge, the login rules, QUERY, every verb's replies and effects, the rights gates.
+add_executable(admin_server_test admin/admin_server_test.cpp)
+target_link_libraries(admin_server_test PRIVATE opennova_runtime)
+target_include_directories(admin_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME admin_server COMMAND admin_server_test)
+# The same console over a real loopback TCP socket through apps/common's pump.
+add_executable(admin_server_tcp_test admin/admin_server_tcp_test.cpp)
+target_link_libraries(admin_server_tcp_test PRIVATE opennova_runtime opennova_app_common)
+add_test(NAME admin_server_tcp COMMAND admin_server_tcp_test)
+# admin.cfg (formats/admincfg): the users, the rights token, ip_restrict and the whitelist.
+add_executable(admin_cfg_test admincfg/admin_cfg_test.cpp)
+target_link_libraries(admin_cfg_test PRIVATE opennova_formats)
+add_test(NAME admin_cfg COMMAND admin_cfg_test)
+# The two ban files (formats/banlist): the minted fixtures' round-trip and each loader's rules.
+add_executable(minimal_banlist_gen_test fixtures/minimal_banlist_gen.cpp)
+target_link_libraries(minimal_banlist_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_banlist_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_banlist_gen COMMAND minimal_banlist_gen_test)
+add_executable(ban_list_roundtrip_test banlist/ban_list_roundtrip_test.cpp)
+target_link_libraries(ban_list_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(ban_list_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ban_list_roundtrip COMMAND ban_list_roundtrip_test)
+# The authority's ban lists (runtime/inmatch/server_ban_lists): the round-init loads and saves,
+# the console's BAN / UNBAN / PUNT / BANDWIDTH, the join's PCID (29) and name (31) refusals.
+add_executable(npruntime_ban_lists_test npruntime/ban_lists_test.cpp)
+target_link_libraries(npruntime_ban_lists_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_ban_lists COMMAND npruntime_ban_lists_test)
 
 # opennova-serve (apps/serve, ADR 0051): a loose directory with one synthetic mission and a
 # retail host file; the server boots it headless as a DedicatedHost, answers a LAN probe and
@@ -3736,11 +3764,10 @@ target_link_libraries(nw_lister_e2e_test
 target_include_directories(nw_lister_e2e_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME nw_lister_e2e COMMAND nw_lister_e2e_test)
 set_tests_properties(nw_lister_e2e PROPERTIES RUN_SERIAL TRUE)
-# The --admin poll thread against an in-test remote-admin server (the login it decrypts, the three
-# commands, the QUIT).
+# The --admin poll thread against the engine's remote-admin server over loopback TCP (the login it
+# decrypts, the three commands, the QUIT).
 add_executable(nw_lister_admin_feed_test novaworld/nw_lister_admin_feed_test.cpp)
 target_link_libraries(nw_lister_admin_feed_test PRIVATE opennova_nw_lister_core)
-target_include_directories(nw_lister_admin_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/admin)
 add_test(NAME nw_lister_admin_feed COMMAND nw_lister_admin_feed_test)
 # The destination policies: nw-lister's loopback-only, and opennova-serve's loopback and any host
 # off NovaLogic's domain, novaworld.net behind --allow-public (ADR 0051 d6).

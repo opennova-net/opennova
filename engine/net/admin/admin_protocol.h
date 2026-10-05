@@ -56,6 +56,14 @@ bool admin_challenge_valid(const std::vector<uint8_t> &payload);
 std::array<uint8_t, ADMIN_LOGIN_BYTES> admin_encode_login(const std::vector<uint8_t> &challenge,
                                                           std::string_view user, std::string_view password);
 
+// The cipher's inverse, as the server runs it over a login payload: the LCG stream off, the
+// progressive key off, the reverse when s3 is odd, the key off, each step over all `size` bytes;
+// the key is the challenge string (its 32 key bytes before the NUL). The server keeps 31
+// characters of each field by writing NULs at bytes 31 and 63 afterwards (AdminServer's login).
+// [orig: Crypto_DecryptBuffer @0x4375b0 -> Crypto_PRNGDecryptSub @0x4372a0,
+//  Crypto_SubProgressiveKey @0x4372f0, Buffer_ReverseInPlace2 @0x437330, sub_437370]
+void admin_decrypt_buffer(uint8_t *buf, size_t size, const uint8_t *key, size_t key_len);
+
 // A command packet's payload: the text and its NUL (the server closes on a command without it).
 std::vector<uint8_t> admin_encode_command(std::string_view command);
 // A reply payload's text without its NUL; false when it carries none.

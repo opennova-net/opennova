@@ -1,0 +1,29 @@
+//---------------------------------------------------
+// NovaLogic Ban List File
+//---------------------------------------------------
+
+// This file contains a list of PCID's (Public Customer ID's)
+// that you, as a game server host, chose to exclude from
+// joining your game server.
+//
+// This file loads into memory when the game is run, and
+// is modified by the game server when people are BANNED or UNBANNED using
+// the BAN and UNBAN commands on the ~ command line in the game.
+//
+// Do not modify this file while the game is running!
+//
+
+
+VERSION 1
+
+
+// Usage:  BAN "<pcid goes here>" "<optional player name>"
+//
+// Example:
+// BAN "A-MM-WXXIB2" "Knightmare"
+// BAN "A-WC-WXXIAD"
+
+BAN "A-SY-NTH001" "Spammer"
+BAN "A-SY-NTH002"
+BAN "A-SY-NTH003" "Two Words"
+BAN "A-SY-NTH001" "Again"

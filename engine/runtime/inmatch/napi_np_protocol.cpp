@@ -735,12 +735,12 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	// The ban compares the datagram's UDP source (conn+0x30, stored from the
 	// packet address at create), never the client-reported SIP TLV (conn+0x38 /
-	// session_keys+0x158, stored @0x62bf91/@0x62bf85 and read by nothing here).
-	// g_BannedIdList packs a.b.c.d as a | b<<8 | c<<16 | d<<24 -- PeerAddr::ip.
+	// session_keys+0x158, stored @0x62bf91/@0x62bf85 and read by nothing here),
+	// against banned.txt's g_BannedIdList, which packs a.b.c.d as
+	// a | b<<8 | c<<16 | d<<24 -- PeerAddr::ip.
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c6203..0x4c6217 reads conn+0x30 =
 	//  the datagram source stored @0x62bf28; BanList_ParseIPEntry @0x4fd5c9]
-	if (ctx.is_in_session && std::find(ctx.banned_join_addresses.begin(),
-	            ctx.banned_join_addresses.end(), peer.ip) != ctx.banned_join_addresses.end()) {
+	if (ctx.is_in_session && Server_AddressBanned(ctx, peer.ip)) {
 		reject_client_join(auth, peer, 14, 3, out);
 		return;
 	}

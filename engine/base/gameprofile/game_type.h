@@ -264,6 +264,16 @@ constexpr const char *overlay_label_key(uint32_t g) {
 	}
 }
 
+// GameType_GetAbbreviation(g, NULL)'s Overlays-section key — the long-name arm the admin
+// QUERY report prints. It is overlay_label_key's ladder save that the unnamed type 8
+// (FlagMe here) has no rung: "" [orig: GameType_GetAbbreviation @ 0x520fd0, the
+// `!hasSecondParam` arm; the waypoint family's STROVER28, or "&" under the debug word
+// dword_24C1930's 0x10000].
+constexpr const char *abbreviation_overlay_key(uint32_t g) {
+	if (g == kFlagMe) return "";
+	return overlay_label_key(g);
+}
+
 // A freshly added mission's rotation ("Switch") default: on for team games
 // without the objective bit [orig: the add branch @ 0x557e79..0x557e9f —
 // entry+4416 = (code & 0x10000) && !(code & 0x20000)].
