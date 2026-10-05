@@ -31,10 +31,13 @@ easier to relay than to rediscover.
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
   data and deployment stack (DEPLOY.md).
-- `assets/` — the game's own bundled data (no retail bytes), shipped beside `opennova.exe`
-  and mounted when no `--resource-dir` is given: the placeholder main menu whose PLAY
-  RETAIL picks and remembers a retail install, plus the add-on's exports of `art/`
-  (ADR 0048; `assets/README.md`). Models, clips and textures ride LFS.
+- `assets/` — the game's own base game (no retail bytes): an OpenNova Editor project
+  (`project.opennova`, files flat at the top level) shipped beside `opennova.exe` and
+  mounted when no `--resource-dir` is given: the placeholder main menu whose PLAY
+  RETAIL picks and remembers a retail install, every file the retail boot manifest
+  requires, plus the add-on's exports of `art/` (ADR 0048 d7; `assets/README.md`). The
+  editor's Build of it must boot in an unmodified `Jointops.exe` as well as OpenNova.
+  Models, clips and textures ride LFS.
 - `art/` — authoring sources (Blender scenes and their textures, all LFS) whose exports
   land in `assets/`.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
