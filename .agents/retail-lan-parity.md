@@ -147,7 +147,7 @@ artifact layout to each cell.
   port, responder/peer readiness, and mission state through MCP; every OpenNova
   endpoint reports its role through `game_state` and its readiness witness
   through the parity probes.
-- Captures decode with the native `nw_pp` application.
+- Captures decode with the native `opennova-wire` application.
 - Mismatches are recorded in `docs/net/novaworld-net-re.md`; absence of a
   decoder warning is not itself a parity verdict.
 - Only sanitized conclusions and structural fixtures enter Git. Raw local

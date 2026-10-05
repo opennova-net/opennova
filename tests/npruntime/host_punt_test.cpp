@@ -52,7 +52,7 @@ const std::string kServerScrk = "SERVER-PUNT-SCRK";
 // len_field_size 3 @0x628316]
 constexpr uint8_t kDescriptionFlags = 0xA0;
 
-// The kick exactly as captured off the wire (nw_pp prints it as tag=0x1103): a flat run of
+// The kick exactly as captured off the wire (opennova-wire prints it as tag=0x1103): a flat run of
 // NAME 0x00 [u16 LE size] [size bytes]. DSTR "t35" is sprintf("t%d", 35) and DPC 33 / DDSTR
 // "LogPuntEvent" are the two literals of the punt helper, so this body identifies its sender
 // exactly. [orig: Server_LogCRCMismatchPunt @0x517ed0 (the "t%d" format @0x7cfb9c, the 33 and

@@ -1,4 +1,4 @@
-// nw_pp — NovaWorld in-game packet pretty-printer.
+// opennova-wire — NovaWorld in-game packet pretty-printer.
 //
 // Reads a pcap/pcapng OR a hexcap (the format the committed
 // `fixtures/novaworld/*.hexcap` carry) and emits one line per outer datagram
@@ -21,11 +21,11 @@
 // land there and a printer for them lands here.
 //
 // CLI:
-//   nw_pp <capture-path>                # pcapng/pcap/hexcap all accepted
-//   nw_pp <capture-path> 0x0d 0x20      # filter to listed S2C tags
-//   nw_pp <capture-path> --sequencing   # packet-level seq/ACK timeline
-//   nw_pp <capture-path> --parity-events # stable packet/event verifier stream
-//   nw_pp <capture-path> --scenario-events # decoded scenario events (scenario_events.h)
+//   opennova-wire <capture-path>                # pcapng/pcap/hexcap all accepted
+//   opennova-wire <capture-path> 0x0d 0x20      # filter to listed S2C tags
+//   opennova-wire <capture-path> --sequencing   # packet-level seq/ACK timeline
+//   opennova-wire <capture-path> --parity-events # stable packet/event verifier stream
+//   opennova-wire <capture-path> --scenario-events # decoded scenario events (scenario_events.h)
 
 #include <formats/def/def.h>
 #include <formats/wac/command.h>
@@ -2271,7 +2271,7 @@ int main(int argc, char *argv[]) {
 	}
 	if (!path || !*path) {
 		std::fprintf(stderr,
-		             "usage: nw_pp <capture-path> [--items <items.def>] [--stream] "
+		             "usage: opennova-wire <capture-path> [--items <items.def>] [--stream] "
 		             "[--histogram] [--coverage] [--sequencing] [--parity-events] "
 		             "[--scenario-events] "
 		             "[--max-frames N] [--skip N] "
@@ -2324,7 +2324,7 @@ int main(int argc, char *argv[]) {
 	if (stream_mode && is_pcap_path(path)) {
 		opennova::CaptureDecoder decoder;
 		std::map<int, uint64_t> frame_timestamps;
-		nwpp::ScenarioEventTracker scenario_tracker;
+		wire::ScenarioEventTracker scenario_tracker;
 		long seen = 0, printed_through = 0;
 		bool stopped_early = false;
 		auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
@@ -2357,7 +2357,7 @@ int main(int argc, char *argv[]) {
 					continue;
 				}
 				if (scenario_events_mode) {
-					const std::string line = nwpp::format_scenario_event(
+					const std::string line = wire::format_scenario_event(
 							m, frame_timestamps[m.frame_index], scenario_tracker);
 					if (!line.empty()) std::printf("%s\n", line.c_str());
 					continue;

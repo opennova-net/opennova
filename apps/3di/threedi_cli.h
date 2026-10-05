@@ -18,7 +18,7 @@
 
 #include <formats/threedi/threedi_3di3.h>
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 // The seven PANM tracks in on-disk order and their .o3d target names.
 inline constexpr int kTrackCount = 7;
@@ -75,4 +75,4 @@ int cmd_scene(const char *model_path, const char *out_path);
 // counts as a difference too.
 int cmd_compare(const char *expected_path, const char *actual_path, bool strict = false);
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

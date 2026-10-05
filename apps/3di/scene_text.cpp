@@ -12,7 +12,7 @@
 #include <cstring>
 #include <limits>
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 SceneLine::SceneLine(const std::string &text, SceneNumbers numbers) : numbers_(numbers) {
 	const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\v' || c == '\f'; };
@@ -124,4 +124,4 @@ std::string name_field(const std::string &name, std::string &kept) {
 	return plain ? kept : "\"" + kept + "\"";
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

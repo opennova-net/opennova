@@ -1,4 +1,4 @@
-// nw-lister: lists one server on a NovaWorld master without running the game. The NWU session,
+// opennova-nw-lister: lists one server on a NovaWorld master without running the game. The NWU session,
 // the host role, the lobby HTTP machines and the remote-admin codec are the engine's
 // (net/novaworld, net/admin); this file is the command line, the stop signals and the loop.
 
@@ -27,7 +27,7 @@
 #include <string>
 #include <thread>
 
-using namespace opennova::lister;
+using namespace opennova::nw_lister;
 using opennova::io::LogLevel;
 
 namespace {
@@ -59,8 +59,8 @@ struct Args {
 
 void usage() {
 	std::fprintf(stderr,
-	             "nw-lister - list one server on a NovaWorld master without the game\n\n"
-	             "usage: nw-lister --listing FILE.json [options]\n"
+	             "opennova-nw-lister - list one server on a NovaWorld master without the game\n\n"
+	             "usage: opennova-nw-lister --listing FILE.json [options]\n"
 	             "  --credentials FILE      KEY=VALUE file: NOVAWORLD_USER / NOVAWORLD_PASS (the account\n"
 	             "                          login and HOSTKEY), ADMIN_USER / ADMIN_PASS (--admin)\n"
 	             "  --master-host HOST      the NovaWorld gate (default 127.0.0.1)\n"

@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 // Which numbers a text's reader takes.
 enum class SceneNumbers {
@@ -85,4 +85,4 @@ std::string name_field(SceneWriter &w, const std::string &name) {
 	return field;
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

@@ -33,7 +33,7 @@
 #include <string_view>
 #include <utility>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 namespace {
 
@@ -2177,4 +2177,4 @@ void HttpListener::stop() {
 	running_.store(false);
 }
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

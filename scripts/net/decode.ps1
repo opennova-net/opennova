@@ -1,7 +1,7 @@
-# Decode a capture (or .sph server log) with the repo's own nw_pp. Writes a
+# Decode a capture (or .sph server log) with the repo's own opennova-wire. Writes a
 # sidecar <capture>.txt.
 #
-# Locates nw_pp under build\ (Release preferred, Debug fallback) so it works
+# Locates opennova-wire under build\ (Release preferred, Debug fallback) so it works
 # whichever config was last built.
 #
 # Usage:
@@ -21,11 +21,13 @@ param(
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\lib.ps1"
 
-function Find-Tool {
-    param([string] $Name)
+# An app builds from apps\<dir> as opennova-<dir, kebab-cased>.exe.
+function Find-App {
+    param([string] $Dir)
     $build = Join-Path (Get-RepoRoot) "build"
+    $Name = "opennova-" + ($Dir -replace '_', '-')
     foreach ($cfg in @("Release", "Debug")) {
-        $p = Join-Path $build "apps\$Name\$cfg\$Name.exe"
+        $p = Join-Path $build "apps\$Dir\$cfg\$Name.exe"
         if (Test-Path $p) { return $p }
     }
     $hit = Get-ChildItem $build -Recurse -Filter "$Name.exe" -ErrorAction SilentlyContinue |
@@ -41,9 +43,9 @@ if (-not (Test-Path $Capture)) {
 $Capture = (Resolve-Path $Capture).Path
 if (-not $Items) { $Items = Get-OpenNovaRetailAssetFile -Name "ITEMS.DEF" }
 
-$nwpp = Find-Tool -Name "nw_pp"
-if (-not $nwpp) {
-    Write-Error "nw_pp.exe not found under build\; run scripts/build.sh first."
+$wire = Find-App -Dir "wire"
+if (-not $wire) {
+    Write-Error "opennova-wire.exe not found under build\; run scripts/build.sh first."
     exit 2
 }
 
@@ -53,6 +55,6 @@ if ($Items)  { $ppArgs += @("--items", $Items) }
 if ($Tags)   { $ppArgs += $Tags }
 
 $decodeFile = "$Capture.txt"
-& $nwpp @ppArgs | Tee-Object -FilePath $decodeFile | Select-Object -First 60
+& $wire @ppArgs | Tee-Object -FilePath $decodeFile | Select-Object -First 60
 Write-Host "DECODE_FILE=$decodeFile"
 exit 0

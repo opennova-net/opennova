@@ -329,7 +329,7 @@ it; `opennova-3di anim scene` writes a set, retail ones included, back out as it
 _Avoid_: animation file, clip file (a `.bad` is one clip)
 
 **`opennova-3di`**:
-The command-line tool (`apps/threedi_cli`) over the engine's one `.3di` reader and
+The command-line tool (`apps/3di`) over the engine's one `.3di` reader and
 writer: `build` / `scene` over the `.o3d` text, `info`, `compare` and `catalog`,
 `anim build|scene|info|compare` for a rig's `.bad` clips and `.adm` table over the
 `.o3a` text, and `weapon timing` / `weapon merge` (the timing request measured with the

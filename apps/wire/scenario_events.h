@@ -1,6 +1,6 @@
 #pragma once
 
-// nw_pp --scenario-events: one decoded SCENARIO_EVENT line per message a
+// opennova-wire --scenario-events: one decoded SCENARIO_EVENT line per message a
 // network-parity scenario asserts on (ADR 0050 R5; scripts/net/scenarios/).
 // The decode is the engine's own (ingame_decode.h); this only formats the
 // fields as stable key=value pairs for scripts/net/compare_scenario.py.
@@ -19,7 +19,7 @@
 #include <map>
 #include <string>
 
-namespace opennova::nwpp {
+namespace opennova::wire {
 
 struct ScenarioEventTracker {
 	// session -> the last C2S 0x0C ground carrier printed
@@ -31,4 +31,4 @@ struct ScenarioEventTracker {
 std::string format_scenario_event(const InGameMessage &message, uint64_t ts_nanos,
 		ScenarioEventTracker &tracker);
 
-} // namespace opennova::nwpp
+} // namespace opennova::wire
