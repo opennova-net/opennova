@@ -52,6 +52,7 @@
 #include <editor/session/texture_import_state.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view_json.h>
+#include <editor/session/workspace_parts.h>
 
 namespace opennova::editor {
 
@@ -1496,8 +1497,8 @@ constexpr EditorQueryRow kRows[] = {
 	Query(K::State, "state", answer_state, kStateParams, kEveryConcern,
 			"The view by section (the catalog's sections: the status line, the project, the "
 			"requirements, the open documents, the selection, the operation, Play, the import "
-			"dialog, the dialogs, the problem and graph counts, the preferences, the output lines "
-			"and the events held): `view_revision` the view's clock, `revisions` each concern's "
+			"dialog, the dialogs, the problem and graph counts, the preferences, the output lines, "
+			"the events held and what the windows show of their own): `view_revision` the view's clock, `revisions` each concern's "
 			"stamp (the clock value at which it last moved); with `since`, a view_revision an "
 			"earlier answer carried, the sections none of whose concerns moved since left out.")
 			.row,
@@ -1655,14 +1656,16 @@ constexpr EditorQueryRow kRows[] = {
 			.chooses(kViewportChoices)
 			.row,
 	Query(K::ImportPreview, "import_preview", answer_import_preview, kImportPreviewParams,
-			concern_set({ C::Dialogs, C::Preferences, C::Files }),
+			concern_set({ C::Dialogs, C::Preferences, C::Files, C::Workspace }),
 			"The import dialog's preview: open, with_dependencies, all (every file of the game "
 			"install chosen, with no walk), a page of its plan's rows in "
 			"its order, the chosen files first (state, name, kind, source, destination, size, "
 			"made_from, needed_by (with its words: the record and the field as the file's type "
 			"words them), found_in, selected, held (a chosen file the project has, kept unless the "
 			"import replaces) and held_same (whether the project's holds the same bytes, where the "
-			"plan compared them), problem, rivals, group; those of one kind alone "
+			"plan compared them), problem, rivals, group, index (its place in the plan, what the "
+			"workspace's import check and uncheck name) and checked (the dialog's check, the "
+			"workspace's: what Import and import_files planned take); those of one kind alone "
 			"with kind, count theirs), total_bytes (what the whole plan copies), summary (the "
 			"whole plan's files by kind, the largest first: kind, files, bytes) and groups (its rows "
 			"by what they come for: each chosen file, the kinds of the files it brings under it: "
@@ -1713,13 +1716,14 @@ constexpr EditorQueryRow kRows[] = {
 			"not weigh.")
 			.pages("blocking")
 			.row,
-	// Events are posted beside a Selection or a Dialogs change (view_revisions.h).
+	// Events are posted beside a Selection, a Dialogs or a Workspace change (view_revisions.h).
 	Query(K::Events, "events", answer_events, kCursorParams,
-			concern_set({ C::Selection, C::Dialogs }),
+			concern_set({ C::Selection, C::Dialogs, C::Workspace }),
 			"A page of the view events by seq (the one-shot asks a request makes of a window): "
 			"first, next, cursor, next_cursor and the items, each its seq, kind (reveal_record, "
-			"reveal_text, reveal_file, ask_rename, settings_applied, import_planned) and the fields "
-			"its kind sets (a reveal_text's locator, line:column). The last 64 are held: a client "
+			"reveal_text, reveal_file, ask_rename, settings_applied, import_planned, build_ended, "
+			"open_externally, reveal_preview, focus_window) and the fields its kind sets (a reveal_text's "
+			"locator, line:column; a focus_window's path, the window). The last 64 are held: a client "
 			"more than 64 behind misses the events dropped, the cursor coming back larger than it "
 			"asked.")
 			.pages("items")
@@ -1819,7 +1823,9 @@ constexpr EditorQueryRow kRows[] = {
 			"needs, who serves it and what it does; every request field; the batch form of a "
 			"request's edits (batch: its forms, its ops, each with the form it is read in, and the "
 			"members an edit takes, each with its JSON type, the forms that read it, its least "
-			"value or the one string it takes); every query with its "
+			"value or the one string it takes); what the windows show of their own (workspace: the parts a "
+			"set_workspace names, each with its members, their JSON types and docs, and the windows its "
+			"focus brings forward); every query with its "
 			"params, the list it pages and the concerns it reads; the state's sections; the view's "
 			"concerns; and every finding code the session and the document types know (the "
 			"editor's own table's, then each type's): its code, its table (core or the type's "
@@ -2166,6 +2172,35 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 	}
 	batch.set("members", std::move(members));
 	out.set("batch", std::move(batch));
+	// What the windows show of their own (session/workspace_parts.h): each part a set_workspace names, its
+	// members with their JSON types, and the windows its focus brings forward, from which the editor MCP
+	// makes the workspace field's schema.
+	JsonValue workspace = JsonValue::make_object();
+	JsonValue parts = JsonValue::make_array();
+	size_t part_count = 0;
+	const WorkspacePartRow *part_rows = workspace_parts(part_count);
+	for (size_t p = 0; p < part_count; ++p) {
+		const WorkspacePartRow &row = part_rows[p];
+		JsonValue entry = JsonValue::make_object();
+		entry.set("part", json_string(row.token));
+		JsonValue part_members = JsonValue::make_array();
+		for (size_t m = 0; m < row.member_count; ++m) {
+			JsonValue member = JsonValue::make_object();
+			member.set("name", json_string(row.members[m].token));
+			member.set("type", json_string(workspace_json_token(row.members[m].json)));
+			member.set("doc", json_string(row.members[m].doc));
+			if (row.members[m].longest) member.set("max_length", json_number(double(row.members[m].longest)));
+			part_members.push(std::move(member));
+		}
+		entry.set("members", std::move(part_members));
+		entry.set("doc", json_string(row.doc));
+		parts.push(std::move(entry));
+	}
+	workspace.set("parts", std::move(parts));
+	JsonValue windows = JsonValue::make_array();
+	for (size_t i = 0; const char *token = workspace_window_token(i); ++i) windows.push(json_string(token));
+	workspace.set("focus", std::move(windows));
+	out.set("workspace", std::move(workspace));
 	JsonValue queries = JsonValue::make_array();
 	for (const EditorQueryRow &row : kRows) {
 		JsonValue entry = JsonValue::make_object();

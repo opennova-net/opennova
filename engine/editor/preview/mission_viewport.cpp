@@ -399,21 +399,26 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	MissionViewportOptions options = options_;
 	if (const JsonValue *member = json.get("options");
 			member && mission_options_from_json(*member, options, error) && options != options_) {
-		// The tool, its item and its path are the canvas's alone: no Update of the device.
+		// The tool, its item and its path, the snaps and the palette's search are the canvas's alone: no
+		// Update of the device.
 		MissionViewportOptions drawn = options;
 		drawn.tool = options_.tool;
 		drawn.item = options_.item;
 		drawn.path = options_.path;
+		drawn.snap = options_.snap;
+		drawn.turn = options_.turn;
+		drawn.palette = options_.palette;
 		if (drawn != options_) options_moved_ = true;
 		options_ = options;
 	}
 	if (const JsonValue *member = json.get("camera")) mission_camera_from_json(*member, camera_, error);
 }
 
-void MissionViewport::report_(const ViewportDeviceReport &report) {
+bool MissionViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
 	missing_ = report.missing;
 	ground_ = report.surface;
+	return false;
 }
 
 int MissionViewport::mark_of_(const std::vector<MissionMark> &marks, NodeId id) const {
@@ -479,6 +484,16 @@ std::vector<ViewportHit> MissionViewport::box(const ViewportContext &context, fl
 		out.push_back(std::move(hit));
 	}
 	return out;
+}
+
+// Its canvas (MissionCanvas) takes every click while the picture is the mission's as it is: Shift adds, Ctrl
+// toggles, the tools and the primary's handles its own.
+bool MissionViewport::click_frame(const ViewportContext &context, SelectMode, int &width, int &height,
+		std::string &error) const {
+	if (!planned_(context, error)) return false;
+	width = context.width;
+	height = context.height;
+	return true;
 }
 
 const Document *MissionViewport::planned_(const ViewportContext &context, std::string &error) const {

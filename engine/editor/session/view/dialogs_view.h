@@ -59,6 +59,10 @@ struct DialogsView {
 		bool with_dependencies = false;
 		bool all = false;
 		std::shared_ptr<const ImportPlan> plan;
+		// Which plan it is (the MCP gaps lane): each plan the session makes for the dialog takes the next of the
+		// session's, never 0, so a row's index (what the workspace's checks name) is read with the plan it
+		// indexes, and a check or an import_files that names another plan is refused, not retargeted.
+		uint64_t plan_serial = 0;
 		bool changed = false;
 		bool planning = false;
 	};

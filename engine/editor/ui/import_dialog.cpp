@@ -15,6 +15,8 @@
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
+#include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -47,18 +49,6 @@ std::string origin_words(const ImportPlanRow &row, bool short_place) {
 	else if (short_place && !row.source.install && !row.source.entry.empty())
 		place = "the archive " + basename_of(row.source.path);
 	return row.made_from.empty() ? place : "made from " + row.made_from + ", " + place;
-}
-
-// Why the import cannot take a row: its file's problem, or that of another file its converter
-// source makes (the files of one source come together or not at all); "" when it can.
-std::string cannot_take(const ImportPlan &plan, size_t index) {
-	const ImportPlanRow &row = plan.rows[index];
-	if (!row.problem.empty()) return row.problem;
-	if (row.made_from.empty()) return std::string();
-	for (const ImportPlanRow &other : plan.rows)
-		if (!other.made_from.empty() && other.source == row.source && !other.problem.empty())
-			return other.name + ", made from " + row.made_from + " too: " + other.problem;
-	return std::string();
 }
 
 // What the plan does not follow, in one line, and each kind with its count in its tooltip.
@@ -161,31 +151,67 @@ std::pair<std::string, std::string> held_words(const ImportPlanRow &row) {
 
 } // namespace
 
+// The dialog's own as the workspace holds it (the MCP gaps lane): its filters, its kinds, Replace existing
+// files, taken where the session's moved, and its checks, taken again whenever their serial moves (a plan
+// made, a client's check). A new preview starts them afresh, the session's doing; one that stays open (an
+// Import the session refused, or that waits on the unsaved prompt) keeps them.
+void ImportDialog::follow(const SessionView &view) {
+	const WorkspaceView::Import &held = view.workspace.import;
+	// A member the session moved is the one sent last too (review X8): what the person sets after it, back to
+	// what the window sent before, differs from it and goes to the session.
+	if (held.filter != filter_.seen) sent_.filter = held.filter;
+	if (held.rows_filter != rows_filter_.seen) sent_.rows_filter = held.rows_filter;
+	filter_.follow(held.filter);
+	rows_filter_.follow(held.rows_filter);
+	if (choice_kind_held_.follow(held.choice_kind)) sent_.choice_kind = choice_kind_ = held.choice_kind;
+	if (kind_shown_held_.follow(held.kind_shown)) sent_.kind_shown = kind_shown_ = held.kind_shown;
+	if (replace_held_.follow(held.replace_existing)) sent_.replace_existing = replace_existing_ = held.replace_existing;
+	if (checks_held_.follow(held.serial)) retake_ = true;
+}
+
+// What the person changed of the dialog's own this frame, sent to the workspace: the filters, the kinds,
+// Replace existing files, and the checks that differ from the session's, of the plan they index (each
+// change once: what the session takes it follows, and a value it moved since is sent again).
+void ImportDialog::send(Workspace &workspace, const DialogsView::ImportPreview &preview) {
+	const WorkspaceView::Import &held = workspace.view().workspace.import;
+	io::JsonValue members = io::JsonValue::make_object();
+	const auto kind_text = [](AssetKind kind) { return io::JsonValue::make_string(kind == AssetKind::kCount ? "" : asset_kind_token(kind)); };
+	if (filter_.sent() != held.filter && filter_.sent() != sent_.filter) members.set("filter", io::JsonValue::make_string(filter_.sent()));
+	if (rows_filter_.sent() != held.rows_filter && rows_filter_.sent() != sent_.rows_filter)
+		members.set("rows_filter", io::JsonValue::make_string(rows_filter_.sent()));
+	if (choice_kind_ != held.choice_kind && choice_kind_ != sent_.choice_kind) members.set("choice_kind", kind_text(choice_kind_));
+	if (kind_shown_ != held.kind_shown && kind_shown_ != sent_.kind_shown) members.set("kind_shown", kind_text(kind_shown_));
+	if (replace_existing_ != held.replace_existing && replace_existing_ != sent_.replace_existing)
+		members.set("replace_existing", io::JsonValue::make_bool(replace_existing_));
+	if (preview.plan && held.checked.size() == checked_.size() && checked_ != sent_.checked) {
+		io::JsonValue check = io::JsonValue::make_array(), uncheck = io::JsonValue::make_array();
+		for (size_t i = 0; i < checked_.size(); ++i)
+			if (checked_[i] != held.checked[i]) (checked_[i] ? check : uncheck).push(io::JsonValue::make_number(double(i)));
+		// The plan its rows' indices are of: one made since refuses them, and the dialog takes the new one's.
+		if (!check.array.empty() || !uncheck.array.empty())
+			members.set("plan", io::JsonValue::make_number(double(preview.plan_serial)));
+		if (!check.array.empty()) members.set("check", std::move(check));
+		if (!uncheck.array.empty()) members.set("uncheck", std::move(uncheck));
+	}
+	if (members.object.empty()) return;
+	sent_.filter = filter_.sent();
+	sent_.rows_filter = rows_filter_.sent();
+	sent_.choice_kind = choice_kind_;
+	sent_.kind_shown = kind_shown_;
+	sent_.replace_existing = replace_existing_;
+	sent_.checked = checked_;
+	window_requests::set_workspace(workspace, "import", std::move(members));
+}
+
 void ImportDialog::draw(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	const DialogsView::ImportPreview &preview = v.dialogs.import_preview;
-	// A plan made since the dialog last drew (an ImportPlanned event): its checks are taken again.
-	for (const ViewEvent &event : events_.take())
-		retake_ = retake_ || event.kind == ViewEventKind::ImportPlanned;
-	// A new preview starts clean; one an Import found changed keeps what was asked of it. A
-	// preview that stays open (an Import the session refused, or that waits on the unsaved
-	// prompt) keeps its checks, its filter and Replace existing files.
-	if (preview.open && !previewing_) {
-		if (!preview.changed) {
-			filter_[0] = '\0';
-			rows_filter_[0] = '\0';
-			choice_kind_ = AssetKind::kCount;
-			kind_shown_ = AssetKind::kCount;
-			replace_existing_ = false;
-		}
-		retake_ = true;
-	}
-	previewing_ = preview.open;
+	follow(v);
 	// The unsaved prompt an Import raised (it writes over a file with unsaved edits) takes the
-	// dialog's place until it is answered: both are modals at the top level, where opening one
-	// closes the other.
-	if (v.dialogs.unsaved_prompt.open) return;
-	if (preview.open && !ImGui::IsPopupOpen("Import files")) ImGui::OpenPopup("Import files");
+	// dialog's place until it is answered: of the modals at the top level, where opening one
+	// closes the other, the session's order says which shows (shown_modal), the others waiting.
+	const bool shows = preview.open && modal_may_show(v, HeldModal::Import);
+	if (shows && !ImGui::IsPopupOpen("Import files")) ImGui::OpenPopup("Import files");
 	// As large as the editor's window allows (a plan of thousands of rows, a list of the game's nine
 	// thousand files), centred, as it opens; the author's resize holds while it stays open.
 	const float em = ImGui::GetFontSize();
@@ -195,14 +221,14 @@ void ImportDialog::draw(Workspace &workspace) {
 	                                std::max(viewport->WorkSize.y * 0.88f, std::min(viewport->WorkSize.y, em * 30.0f))),
 	                         ImGuiCond_Appearing);
 	if (!ImGui::BeginPopupModal("Import files")) return;
-	if (!preview.open) {
+	if (!shows) {
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
 	}
 	if (retake_ || checked_.size() != preview.plan->rows.size() ||
 			chosen_.size() != preview.choices.size())
-		take(preview);
+		take(v, preview);
 	if (grouped_ != preview.plan) group(preview);
 	if (preview.changed) {
 		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Warning));
@@ -225,17 +251,12 @@ void ImportDialog::draw(Workspace &workspace) {
 	draw_notes(preview);
 	ImGui::EndChild();
 
-	// A chosen file the project cannot take stays checked, and the import waits until it is
-	// unchecked (or its source fixed and planned again): the import would refuse it.
-	size_t count = 0;
-	std::string blocked;
-	for (size_t i = 0; i < checked_.size(); ++i) {
-		if (!checked_[i]) continue;
-		++count;
-		if (blocked.empty() && i < why_not_.size() && !why_not_[i].empty())
-			blocked = preview.plan->rows[i].name + " cannot be imported: " + why_not_[i] +
-			          " Uncheck it to import the rest.";
-	}
+	// What Import takes, by the one rule import_files planned takes it by (import_selection): a chosen file the
+	// project cannot take stays checked, and the import waits until it is unchecked (or its source fixed and
+	// planned again): the import would refuse it.
+	ImportSelection selection = import_selection(*preview.plan, checked_, replace_existing_);
+	const size_t count = selection.checked;
+	const std::string blocked = selection.blocked;
 	// Unsaved edits hold nothing here: an import that would write over an edited file asks to
 	// save it first (the session's unsaved prompt), one that writes over none goes ahead.
 	ui_kit::WrapRow actions;
@@ -258,15 +279,9 @@ void ImportDialog::draw(Workspace &workspace) {
 	                        : !allowed         ? "An import writes the project's files: it waits for the running operation."
 	                                           : "Copy the checked files into the project (Undo cannot take the copy back).";
 	if (ui_kit::tool(actions, label.c_str(), !preview.planning && count > 0 && blocked.empty() && allowed, why)) {
-		std::vector<ImportChoice> imports;
-		std::set<ImportChoice> sent; // each source once, looked up in log time (a whole install's rows)
-		bool replaces = replace_existing_; // a checked file the project holds is one asked to be replaced
-		for (size_t i = 0; i < checked_.size(); ++i) {
-			const ImportChoice &source = preview.plan->rows[i].source;
-			replaces = replaces || (checked_[i] && preview.plan->rows[i].held);
-			if (checked_[i] && sent.insert(source).second) imports.push_back(source);
-		}
-		EditorRequest request = request::import_files(std::move(imports), replaces);
+		// Replace existing files, or a checked file the project holds, asks to replace (import_selection).
+		EditorRequest request = request::import_files(std::move(selection.sources), selection.replace);
+		send(workspace, preview);
 		workspace.request(std::move(request));
 		ImGui::CloseCurrentPopup();
 	}
@@ -274,20 +289,21 @@ void ImportDialog::draw(Workspace &workspace) {
 		workspace.request(request::cancel_import());
 		ImGui::CloseCurrentPopup();
 	}
+	send(workspace, preview);
 	ImGui::EndPopup();
 }
 
-// The checks of a new plan: each row the plan takes (a chosen file whatever its problem, a
-// dependency only when the project can take it); each choice among the files chosen.
-void ImportDialog::take(const DialogsView::ImportPreview &preview) {
+// The checks of a plan, the workspace's (each plan made takes them anew: import_default_checks, a chosen
+// file whatever its problem, a dependency only when the project can take it), and why each row cannot be
+// imported; each choice among the files chosen.
+void ImportDialog::take(const SessionView &view, const DialogsView::ImportPreview &preview) {
 	retake_ = false;
 	const ImportPlan &plan = *preview.plan;
 	why_not_.assign(plan.rows.size(), std::string());
-	for (size_t i = 0; i < plan.rows.size(); ++i) why_not_[i] = cannot_take(plan, i);
-	checked_.assign(plan.rows.size(), false);
-	for (size_t i = 0; i < plan.rows.size(); ++i)
-		checked_[i] = (plan.rows[i].selected && (plan.rows[i].state == State::Selected || why_not_[i].empty())) ||
-		              (plan.rows[i].held && replace_existing_ && why_not_[i].empty());
+	for (size_t i = 0; i < plan.rows.size(); ++i) why_not_[i] = import_row_refusal(plan, i);
+	const std::vector<bool> &held = view.workspace.import.checked;
+	checked_ = held.size() == plan.rows.size() ? held : import_default_checks(plan, replace_existing_);
+	sent_.checked = checked_;
 	chosen_.assign(preview.choices.size(), false);
 	const std::set<ImportChoice> roots(preview.roots.begin(), preview.roots.end());
 	for (size_t i = 0; i < preview.choices.size(); ++i) chosen_[i] = roots.count(preview.choices[i]) > 0;
@@ -381,7 +397,7 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 	ui_kit::WrapRow controls;
 	const float filter_width = em * 18.0f;
 	controls.next(filter_width);
-	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter files", filter_width,
+	ui_kit::filter_box("##filter", filter_.text, sizeof(filter_.text), "Filter files", filter_width,
 	                   "A part of the name, or a kind (\"texture\", \"waves\"; \"kind:texture\" for that kind alone).");
 	// The kinds the list has, each with how many.
 	std::vector<size_t> counts(kAssetKindCount, 0);
@@ -404,9 +420,9 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 	ui_kit::tooltip(choice_kind_ == AssetKind::kCount ? "Only the files of one kind." : "Only the " + kind_label + " files: Every kind lists them all.");
 	// The files the filter and the kind show: a name holding the text, or a file of the kind it names.
 	std::vector<size_t> visible;
-	const std::string filter = normalized_logical_name(filter_);
+	const std::string filter = normalized_logical_name(filter_.text);
 	bool kind_only = false;
-	const AssetKind named = filter.empty() ? AssetKind::kCount : asset_kind_named_by(filter_, &kind_only);
+	const AssetKind named = filter.empty() ? AssetKind::kCount : asset_kind_named_by(filter_.text, &kind_only);
 	for (size_t i = 0; i < preview.choices.size(); ++i) {
 		if (choice_kind_ != AssetKind::kCount && fact(i).kind != choice_kind_) continue;
 		const bool by_name = !kind_only && normalized_logical_name(preview.choices[i].name()).find(filter) != std::string::npos;
@@ -651,7 +667,7 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	const ImportPlan &plan = *preview.plan;
 	size_t found = 0;
 	std::vector<size_t> rows;
-	const std::string wanted = normalized_logical_name(rows_filter_);
+	const std::string wanted = normalized_logical_name(rows_filter_.text);
 	const bool narrowed = !wanted.empty() || kind_shown_ != AssetKind::kCount;
 	for (size_t i = 0; i < plan.rows.size(); ++i) {
 		if (plan.rows[i].state == State::NotFound) continue;
@@ -715,7 +731,7 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	ui_kit::WrapRow controls;
 	const float filter_width = ImGui::GetFontSize() * 18.0f;
 	controls.next(filter_width);
-	ui_kit::filter_box("##rows_filter", rows_filter_, sizeof(rows_filter_), "Filter the rows", filter_width, nullptr,
+	ui_kit::filter_box("##rows_filter", rows_filter_.text, sizeof(rows_filter_.text), "Filter the rows", filter_width, nullptr,
 	                   preview.choices.empty());
 	// The rows the table shows: those the filter or the kind lists, or in the tree those of its open lines
 	// (a closed group's rows are not shown, so these buttons leave them as they are).

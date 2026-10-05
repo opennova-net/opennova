@@ -2305,12 +2305,17 @@ static int test_play_mission() {
 	session.poll();
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
 
-	session.handle(request::play());
+	// The MCP gaps lane: play {behind} starts the game's window behind every other (the plan the platform
+	// spawns says so, and the run section); a plain Play does not.
+	TEST_EXPECT(!platform.last_plan.behind && !view_section_to_json(v, ViewSection::Run).get_bool("behind", true));
+	session.handle(request::play(std::string(), true));
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 2 && v.activity.play_mission.empty() && v.activity.status == "Game running." &&
 	            !has_code(v.findings.diagnostics, "play.mission.failed"));
 	TEST_EXPECT(std::find(platform.last_plan.args.begin(), platform.last_plan.args.end(), "--mission") ==
 	            platform.last_plan.args.end());
+	TEST_EXPECT(platform.last_plan.behind && v.activity.play_behind &&
+	            view_section_to_json(v, ViewSection::Run).get_bool("behind", false));
 	session.handle(request::stop_play());
 	session.poll();
 
@@ -2320,6 +2325,7 @@ static int test_play_mission() {
 	TEST_EXPECT(session.outcome().done() && session.outcome().operation == v.activity.operation.id);
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 3 && v.activity.play_mission == "First.bms" && platform.last_plan.args.back() == "First.bms");
+	TEST_EXPECT(!platform.last_plan.behind && !v.activity.play_behind);
 	// A Play of an unknown mission onto a running build is refused, the build left to land alone.
 	session.handle(request::stop_play());
 	session.poll();

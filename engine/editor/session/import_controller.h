@@ -98,10 +98,11 @@ public:
 private:
 	void preview(std::vector<ImportChoice> choices, std::vector<ImportChoiceFacts> facts, std::vector<ImportChoice> roots,
 	             bool with_dependencies, bool all = false);
-	// What an ImportFiles takes: its imports, or with `planned` the open preview's rows as its plan
-	// has them (each the project can take, once per source); false, said why, with planned and no
-	// preview open.
-	bool sources_of(const EditorRequest &request, std::vector<ImportChoice> &imports);
+	// What an ImportFiles takes: its imports and its replace, or with `planned` the open preview's rows as
+	// the dialog's Import takes them (import_selection over the workspace's checks: the checked rows the project
+	// can take, once per source, replacing where Replace existing files or a checked held row says so, or the
+	// request does); false, said why, with planned and no preview open, or a plan named that is not the one shown.
+	bool sources_of(const EditorRequest &request, std::vector<ImportChoice> &imports, bool &replace);
 	// The open preview planned again as an operation (ImportPlanOperation): the dialog shows its
 	// files at once and the plan once it is made; a plan that runs gives way to the new one (the
 	// rows' Supersede).
@@ -121,6 +122,10 @@ private:
 	SessionCore &core_;
 	SessionView &view_;
 	const ProjectPaths &paths_;
+	// The plans made for the dialog, each the next serial (DialogsView::ImportPreview::plan_serial), and the plan
+	// the workspace's checks were of while another is planned (its checks carried over by row).
+	uint64_t plans_ = 0;
+	std::shared_ptr<const ImportPlan> checked_plan_;
 };
 
 } // namespace opennova::editor

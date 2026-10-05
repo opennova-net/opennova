@@ -28,6 +28,7 @@
 #include <editor/session/session_core.h>
 #include <editor/session/texture_import_state.h>
 #include <editor/session/view/view_events.h>
+#include <editor/session/workspace_parts.h>
 
 namespace opennova::editor {
 
@@ -130,7 +131,9 @@ void ImportController::preview_install(const EditorRequest &request) {
 
 void ImportController::cancel() {
 	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	forget_import_workspace(view_.workspace);
 	core_.touch(ViewConcern::Dialogs);
+	core_.touch(ViewConcern::Workspace);
 }
 
 // The refresh with the import pass forced over one source (or all), as an operation
@@ -364,6 +367,12 @@ void ImportController::refresh_changed_sources() {
 void ImportController::preview(std::vector<ImportChoice> choices, std::vector<ImportChoiceFacts> facts,
                                std::vector<ImportChoice> roots, bool with_dependencies, bool all) {
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	// A new preview starts the dialog's own afresh (its filters, Replace existing files); one open already
+	// keeps them (a choice planned again, an Import that found the files changed).
+	if (!preview.open) {
+		forget_import_workspace(view_.workspace);
+		core_.touch(ViewConcern::Workspace);
+	}
 	preview.choices = std::move(choices);
 	preview.facts = std::move(facts);
 	preview.facts.resize(preview.choices.size());
@@ -391,7 +400,10 @@ void ImportController::preview(std::vector<ImportChoice> choices, std::vector<Im
 // copies. The dialog shows its files at once, and no plan until the operation's is made.
 void ImportController::start_plan() {
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	// The plan the checks are of, kept while the next is made: what they checked carries over to it.
+	if (preview.plan && !preview.plan->rows.empty()) checked_plan_ = preview.plan;
 	preview.plan = std::make_shared<const ImportPlan>();
+	preview.plan_serial = ++plans_;
 	preview.changed = false;
 	preview.planning = false;
 	const uint64_t id = core_.start_operation(std::make_unique<ImportPlanOperation>(core_.problems(), paths_,
@@ -415,13 +427,20 @@ OperationOutcome ImportController::absorb_plan(ImportPlanOperation &operation) {
 // preview says it changed (`changed`, the event's flag) when the new plan is not that one.
 void ImportController::show_plan(std::shared_ptr<const ImportPlan> plan, const ImportPlan *shown) {
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	// The plan the checks were of: the one an Import was shown, else the one this plan takes the place of.
+	const std::shared_ptr<const ImportPlan> before = std::move(checked_plan_);
+	const ImportPlan *checked = shown ? shown : before.get();
 	preview.plan = std::move(plan);
 	preview.planning = false;
+	preview.plan_serial = ++plans_;
 	preview.changed = shown && !same_import(*shown, *preview.plan);
 	ViewEvent planned;
 	planned.kind = ViewEventKind::ImportPlanned;
 	planned.flag = preview.changed;
 	view_.events.post(std::move(planned));
+	// Its checks taken anew, the workspace's (what Import takes), a row the plan before had keeping its own.
+	take_import_checks(view_.workspace, *preview.plan, preview.open ? checked : nullptr);
+	core_.touch(ViewConcern::Workspace);
 	if (preview.open) {
 		size_t files = 0, found = 0, missing = 0, held = 0;
 		for (const ImportPlanRow &row : preview.plan->rows) {
@@ -488,7 +507,8 @@ void ImportController::import_files(const EditorRequest &request) {
 		                        "this one does neither.");
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
 	std::vector<ImportChoice> imports;
-	if (!sources_of(request, imports)) return;
+	bool replace = request.replace;
+	if (!sources_of(request, imports, replace)) return;
 	std::unique_ptr<ImportPlanOperation> replan;
 	std::shared_ptr<const ImportPlan> shown;
 	if (preview.open) {
@@ -502,14 +522,14 @@ void ImportController::import_files(const EditorRequest &request) {
 		return;
 	}
 	const uint64_t id = core_.start_operation(std::make_unique<ImportOperation>(paths_, *view_.project.document,
-			std::move(imports), request.replace, std::move(replan), std::move(shown)));
+			std::move(imports), replace, std::move(replan), std::move(shown)));
 	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
 	core_.outcome().operation = id;
 	view_.activity.status = "Importing...";
 	core_.touch(ViewConcern::Output);
 }
 
-bool ImportController::sources_of(const EditorRequest &request, std::vector<ImportChoice> &imports) {
+bool ImportController::sources_of(const EditorRequest &request, std::vector<ImportChoice> &imports, bool &replace) {
 	if (!request.planned) {
 		imports = request.imports;
 		return true;
@@ -523,18 +543,31 @@ bool ImportController::sources_of(const EditorRequest &request, std::vector<Impo
 		core_.touch(ViewConcern::Output);
 		return false;
 	}
-	// The rows the plan takes (the dialog's checks of a new plan): each source once, a converter's
-	// outputs sharing theirs; a row the project cannot take is left out, as the command line leaves
-	// it; a file the project holds is left as it is unless the request replaces (review F2).
-	std::set<std::string> taken;
-	for (const ImportPlanRow &row : preview.plan->rows) {
-		if (row.state == ImportPlanRow::State::NotFound || !(row.selected || (row.held && request.replace)) ||
-		    !row.problem.empty())
-			continue;
-		const std::string key = row.source.path + '\n' + row.source.entry + '\n' + (row.source.install ? '1' : '0') +
-		                        (row.source.native ? '1' : '0') + '\n' + row.source.as;
-		if (taken.insert(key).second) imports.push_back(row.source);
+	// The plan it means, the one shown: a plan made since (a dependency setting, a choice, the files changed) is
+	// another, its checks of other rows, and the import is refused rather than retargeted (review X7).
+	if (request.plan != preview.plan_serial) {
+		core_.report(make_finding(CoreFinding::ImportNotPlanned, DiagnosticSeverity::Error,
+		                          request.plan == 0
+		                                  ? "import_files planned names the plan it imports (plan: the import_preview "
+		                                    "query's plan, " + std::to_string(preview.plan_serial) + " now)."
+		                                  : "The import was planned again: plan " + std::to_string(request.plan) +
+		                                            " is gone, the dialog shows plan " + std::to_string(preview.plan_serial) +
+		                                            ". Check its rows again (import_preview), then import it."));
+		view_.activity.status = "The import was planned again: nothing was imported.";
+		core_.touch(ViewConcern::Output);
+		return false;
 	}
+	// The rows the dialog's checks take, as its Import takes them (the workspace's checks: a new plan's are the
+	// plan's own, then what the person or a client checked and unchecked; the MCP gaps lane): an unchecked row is
+	// never taken, whatever `replace` says (review X1); a checked row the project holds replaces it (X2); a row
+	// the project cannot take is left out, as the command line leaves it.
+	const std::vector<bool> &held = view_.workspace.import.checked;
+	const std::vector<bool> checks = held.size() == preview.plan->rows.size()
+	                                         ? held
+	                                         : import_default_checks(*preview.plan, view_.workspace.import.replace_existing);
+	ImportSelection selection = import_selection(*preview.plan, checks, view_.workspace.import.replace_existing);
+	imports = std::move(selection.sources);
+	replace = replace || selection.replace;
 	return true;
 }
 
@@ -557,6 +590,8 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 		if (!operation.refusals().empty()) return refused(operation.refusals().front());
 	}
 	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	forget_import_workspace(view_.workspace);
+	core_.touch(ViewConcern::Workspace);
 	if (operation.imports().empty()) {
 		view_.activity.status = "Nothing to import.";
 		core_.touch(ViewConcern::Dialogs);
@@ -625,22 +660,32 @@ void ImportController::set_install_files(std::vector<std::string> names, std::ve
 // what they need: that plan reads the scan alone, never the graph, so no validation runs first.
 void ImportController::unsaved_files(const EditorRequest &request, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
-	if (!view_.project.open || !request.replace || !documents.documents_dirty()) return;
+	if (!view_.project.open || !documents.documents_dirty()) return;
 	const DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
 	std::shared_ptr<const ImportPlan> plan = preview.open ? preview.plan : nullptr;
 	if (!plan) {
-		if (request.planned) return; // refused once it is served: no preview is open
+		if (request.planned || !request.replace) return; // refused once it is served: no preview is open
 		plan = std::make_shared<const ImportPlan>(plan_import(request.imports, false, paths_, *view_.project.document,
 				*view_.project.scan, core_.problems().graph(), core_.game_install(), SIZE_MAX));
 	}
-	// A row the request asks for (with planned, one the plan takes), which the plan finds: where
-	// its file lands. The places written, gathered once over the rows (a whole install's nine
-	// thousand, each source looked up in log time: review F7), then each unsaved document's.
-	const std::set<ImportChoice> asked(request.imports.begin(), request.imports.end());
-	const auto writes = [&request, &asked](const ImportPlanRow &row) {
-		if (row.state == ImportPlanRow::State::NotFound) return false;
-		if (request.planned) return (row.selected || (row.held && request.replace)) && row.problem.empty();
-		return asked.count(row.source) > 0;
+	// What it takes and whether it replaces: with planned, the rows the dialog's checks take (sources_of's rule).
+	std::set<ImportChoice> asked(request.imports.begin(), request.imports.end());
+	bool replace = request.replace;
+	if (request.planned) {
+		if (request.plan != preview.plan_serial) return; // refused once it is served: another plan
+		const std::vector<bool> &held = view_.workspace.import.checked;
+		const ImportSelection selection =
+				import_selection(*plan, held.size() == plan->rows.size() ? held : import_default_checks(*plan, view_.workspace.import.replace_existing),
+				                 view_.workspace.import.replace_existing);
+		asked = std::set<ImportChoice>(selection.sources.begin(), selection.sources.end());
+		replace = replace || selection.replace;
+	}
+	if (!replace) return;
+	// A row the request takes, which the plan finds: where its file lands. The places written, gathered once
+	// over the rows (a whole install's nine thousand, each source looked up in log time: review F7), then each
+	// unsaved document's.
+	const auto writes = [&asked](const ImportPlanRow &row) {
+		return row.state != ImportPlanRow::State::NotFound && asked.count(row.source) > 0;
 	};
 	std::set<std::string> written;
 	for (const ImportPlanRow &row : plan->rows)
@@ -651,6 +696,7 @@ void ImportController::unsaved_files(const EditorRequest &request, std::vector<s
 
 void ImportController::clear() {
 	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	forget_import_workspace(view_.workspace);
 	view_.project.imports = std::make_shared<const std::vector<ImportedSource>>();
 	view_.project.retail_files.clear();
 	view_.project.base_files.clear();

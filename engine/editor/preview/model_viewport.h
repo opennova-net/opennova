@@ -55,9 +55,12 @@ struct ModelViewportOptions {
 	// bones drawn over the picture, each named.
 	bool repeat = true;
 	bool bones = true;
+	// The grid a canvas's drag of a marker's place snaps to on each of the file's axes (metres; 0 free: the
+	// toolbar's Snap, kModelHandleSnaps; the MCP gaps lane), the canvas's alone: no picture changes.
+	float snap = 1.0f / 16.0f;
 	bool operator==(const ModelViewportOptions &other) const {
 		return lod == other.lod && ctrl == other.ctrl && overlays == other.overlays &&
-				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones;
+				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones && snap == other.snap;
 	}
 	bool operator!=(const ModelViewportOptions &other) const { return !(*this == other); }
 };
@@ -66,7 +69,7 @@ struct ModelViewportOptions {
 // pitch and distance): what an orbit, a pan, a dolly or a framing on its canvas sends.
 std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
-// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones}.
+// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones, snap}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
 
 // How long a repeated one-shot holds its last frame before it plays again, in game ticks (half a
@@ -210,6 +213,11 @@ public:
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
+	// A click (ViewportModel::click, its canvas driven: the marker there, else a joint of the clip's rig, its
+	// bone selected in the clip, else the collision shape): a click that replaces alone (Shift on the canvas
+	// pans, and it has no Ctrl click), at the picture's size.
+	bool click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
+			std::string &error) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
@@ -228,7 +236,7 @@ protected:
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
-	void report_(const ViewportDeviceReport &report) override;
+	bool report_(const ViewportDeviceReport &report) override;
 
 private:
 	// What a drag of the record `id` by its handle `token` holds: the handle and the record's marker

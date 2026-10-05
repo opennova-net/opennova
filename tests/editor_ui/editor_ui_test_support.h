@@ -34,6 +34,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_windows.h>
 #include "../editor/anim_test_support.h"
 #include "../editor/editor_test_support.h"
@@ -95,21 +96,43 @@ inline const devtools::Window *find_window(const devtools::ImGuiPass &pass, cons
 
 // The workspace over a 1920x1080 display unless a test sizes it, driven frame by frame; `pump`,
 // when a test sets it, runs before each frame as the Shell's pump does (its viewports' devices
-// following the view).
+// following the view). The set_workspace requests the windows raise (the MCP gaps lane: what a window
+// shows of its own is the workspace's) are served as the Shell serves them, before and after each frame
+// and before a drain: through `session` when a test names one, else applied to the view the windows draw
+// (a hand-made view, or a session's own), so the windows' other requests are what a test drains. A test
+// that looks at the set_workspace requests themselves turns `serve_workspace` off.
 struct Ui {
 	NullBackend backend;
 	EditorWindows windows;
 	uint64_t index = 0;
 	std::function<void()> pump;
+	bool serve_workspace = true;
+	ProjectSession *session = nullptr;
 	Ui() {
 		ImGui::GetIO().DisplaySize = ImVec2(1920.0f, 1080.0f);
 		windows.pass().attach_imgui(backend.context, test_alloc, test_free, nullptr);
 	}
 	~Ui() { windows.pass().detach_imgui(); }
+	void served() {
+		if (!serve_workspace) return;
+		for (const EditorRequest &request : windows.take_requests_of(EditorRequestKind::SetWorkspace)) {
+			if (session) {
+				session->handle(request);
+				continue;
+			}
+			SessionView &view = const_cast<SessionView &>(windows.view());
+			std::vector<WorkspaceRefusal> refusals;
+			if (apply_workspace_change(view, request.workspace, refusals)) view.revisions.touch(ViewConcern::Workspace);
+			for (const WorkspaceRefusal &refusal : refusals)
+				CHECK(false, ("a window's set_workspace applies: " + refusal.message + " (" + request.workspace + ")").c_str());
+		}
+	}
 	void frames(int count = 1) {
 		for (int i = 0; i < count; ++i) {
 			if (pump) pump();
+			served();
 			frame(windows, ++index);
+			served();
 		}
 	}
 	void focus(const char *title) {
@@ -118,6 +141,7 @@ struct Ui {
 		frames(3);
 	}
 	std::vector<EditorRequest> drain() {
+		served();
 		std::vector<EditorRequest> out;
 		EditorRequest request;
 		while (windows.take_request(request)) out.push_back(request);
@@ -159,6 +183,28 @@ struct Ui {
 		return window ? window->ID : 0;
 	}
 };
+
+// What a set_workspace changes (the MCP gaps lane): its `part`'s `member` as the request's change holds
+// it, null when the request is another kind's or names none.
+inline opennova::io::JsonValue workspace_member(const EditorRequest &request, const char *part, const char *member) {
+	opennova::io::JsonValue change;
+	std::string error;
+	if (request.kind != EditorRequestKind::SetWorkspace || !opennova::io::json_parse(request.workspace, change, error))
+		return {};
+	const opennova::io::JsonValue *in = change.get(part);
+	const opennova::io::JsonValue *value = in ? in->get(member) : nullptr;
+	return value ? *value : opennova::io::JsonValue();
+}
+// The set_workspace requests among `requests` that name `part`'s `member`, its values in order.
+inline std::vector<opennova::io::JsonValue> workspace_sets(const std::vector<EditorRequest> &requests, const char *part,
+                                                           const char *member) {
+	std::vector<opennova::io::JsonValue> out;
+	for (const EditorRequest &request : requests) {
+		opennova::io::JsonValue value = workspace_member(request, part, member);
+		if (!value.is_null()) out.push_back(std::move(value));
+	}
+	return out;
+}
 
 // An item's id as ImGui makes it: the window's, then each pushed step.
 inline ImGuiID item_id(ImGuiID seed, std::initializer_list<const char *> steps) {
@@ -235,7 +281,10 @@ inline std::string logged_frame(EditorWindows &windows, uint64_t index) {
 }
 inline std::string logged_frame(Ui &ui) {
 	if (ui.pump) ui.pump();
-	return logged_frame(ui.windows, ++ui.index);
+	ui.served();
+	std::string text = logged_frame(ui.windows, ++ui.index);
+	ui.served();
+	return text;
 }
 
 // Every window drawn in the last frame whose content is wider than what shows of it while it

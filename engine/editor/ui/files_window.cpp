@@ -22,6 +22,7 @@
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
@@ -66,56 +67,79 @@ RevisionKey tree_key(const SessionView &view) {
 
 } // namespace
 
-void NewFilePrompt::ask(AssetKind kind) {
-	ask_ = true;
-	kind_ = kind;
-	name_[0] = '\0';
-	values_.clear();
+void NewFilePrompt::ask(Workspace &workspace, AssetKind kind) {
+	window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(asset_kind_token(kind)));
 }
 
+namespace {
+
+// The prompt's values as the session takes them: each given value by its param's token.
+io::JsonValue values_json(const BlankFactory *factory, const std::vector<std::string> &values) {
+	io::JsonValue out = io::JsonValue::make_object();
+	for (size_t i = 0; factory && i < factory->param_count && i < values.size(); ++i)
+		if (!values[i].empty()) out.set(factory->params[i].token, io::JsonValue::make_string(values[i]));
+	return out;
+}
+
+} // namespace
+
 void NewFilePrompt::draw(Workspace &workspace) {
-	if (ask_) {
-		ask_ = false;
-		ImGui::OpenPopup("New file");
-	}
-	if (!ImGui::BeginPopupModal("New file", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	const SessionView &v = workspace.view();
-	if (!v.project.open) {
-		ImGui::CloseCurrentPopup();
-		ImGui::EndPopup();
+	const WorkspaceView::NewFile &held = v.workspace.new_file;
+	const AssetKind kind = held.kind;
+	const BlankFactory *factory = kind == AssetKind::kCount ? nullptr : find_blank_factory_for_kind(kind);
+	const size_t params = factory ? factory->param_count : 0;
+	// The fields take the session's values when they moved (the prompt opened on another kind, a value set
+	// over the wire).
+	name_.follow(held.name);
+	if (kind != kind_seen_ || held.values != values_seen_ || values_.size() != params) {
+		kind_seen_ = kind;
+		values_seen_ = held.values;
+		values_.assign(params, std::string());
+		for (size_t i = 0; i < params; ++i)
+			for (const auto &[token, value] : held.values)
+				if (token == factory->params[i].token) values_[i] = value;
+	}
+	// Held open, it shows when no dialog before it in the session's order is held (shown_modal).
+	const bool open = kind != AssetKind::kCount && v.project.open && modal_may_show(v, HeldModal::NewFile);
+	if (!popup_.begin("New file", open, true, ImGuiWindowFlags_AlwaysAutoResize, false, v.workspace.opened)) {
+		if (popup_.dismissed()) window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
 		return;
 	}
-	ImGui::Text("New file: %s", asset_kind_label(kind_));
+	ImGui::Text("New file: %s", asset_kind_label(kind));
 	if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
 	// The name a new file of the kind is offered: its row's (AssetKindRow::new_name).
-	const bool enter = ImGui::InputTextWithHint("Name", asset_kind_row(kind_).new_name, name_, sizeof(name_),
+	const bool enter = ImGui::InputTextWithHint("Name", asset_kind_row(kind).new_name, name_.text, sizeof(name_.text),
 	                                            ImGuiInputTextFlags_EnterReturnsTrue);
+	if (name_.sent() != held.name && ImGui::IsItemEdited())
+		window_requests::set_workspace(workspace, "new_file", "name", io::JsonValue::make_string(name_.sent()));
+	const char *name = name_.text;
 	// The project's name rules, as the session checks them again when it creates the file; a
 	// texture is the texture factory's placeholder, made only for a name it takes.
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
-	const bool named = name_[0] != '\0';
-	bool fits = named && check_file_name(name_, kind_, problem, message);
-	if (fits && kind_ == AssetKind::Texture) fits = can_make_blank_texture(name_, message);
-	const bool taken = named && v.project.scan->find(name_) != nullptr;
+	const bool named = name[0] != '\0';
+	bool fits = named && check_file_name(name, kind, problem, message);
+	if (fits && kind == AssetKind::Texture) fits = can_make_blank_texture(name, message);
+	const bool taken = named && v.project.scan->find(name) != nullptr;
 	if (named && !fits) ImGui::TextColored(kRefusalColor, "%s", message.c_str());
-	else if (taken) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", name_);
+	else if (taken) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", name);
 	// What the kind's blank takes beside its name (a mission's title, terrain and environment): a
 	// text, or one of the project's files its reference loads. A project is its own files, so a
 	// kind the project has no file of says to import one.
-	const BlankFactory *factory = find_blank_factory_for_kind(kind_);
-	const size_t params = factory ? factory->param_count : 0;
-	if (values_.size() != params) values_.assign(params, std::string());
-	bool given = true;
+	bool given = true, changed = false;
 	for (size_t i = 0; i < params; ++i) {
 		const BlankParam &param = factory->params[i];
 		ImGui::PushID(static_cast<int>(i));
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
 		if (param.reference == ReferenceKind::None) {
-			char text[64];
+			char text[kWorkspaceFileName];
 			std::snprintf(text, sizeof(text), "%s", values_[i].c_str());
-			if (ImGui::InputText(param.label, text, sizeof(text))) values_[i] = text;
+			if (ImGui::InputText(param.label, text, sizeof(text))) {
+				values_[i] = text;
+				changed = true;
+			}
 		} else {
 			const AssetKind wanted = reference_row(param.reference).file;
 			size_t offered = 0;
@@ -123,8 +147,10 @@ void NewFilePrompt::draw(Workspace &workspace) {
 				for (const AssetEntry &entry : v.project.scan->entries) {
 					if (entry.kind != wanted) continue;
 					++offered;
-					if (ImGui::Selectable(entry.logical_name.c_str(), entry.logical_name == values_[i]))
+					if (ImGui::Selectable(entry.logical_name.c_str(), entry.logical_name == values_[i])) {
 						values_[i] = entry.logical_name;
+						changed = true;
+					}
 				}
 				ImGui::EndCombo();
 			} else {
@@ -136,6 +162,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		ImGui::PopID();
 		given = given && (!param.required || !values_[i].empty());
 	}
+	if (changed) window_requests::set_workspace(workspace, "new_file", "values", values_json(factory, values_));
 	const bool ready = fits && !taken && given && v.allows(EditorRequestKind::CreateFile);
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create");
@@ -144,11 +171,17 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		std::vector<std::pair<std::string, std::string>> values;
 		for (size_t i = 0; i < params; ++i)
 			if (!values_[i].empty()) values.emplace_back(factory->params[i].token, values_[i]);
-		workspace.request(request::create_file(name_, asset_kind_token(kind_), std::move(values)));
-		ImGui::CloseCurrentPopup();
+		// The session closes the prompt as it takes the file it names (create_file alone, over the wire); the
+		// prompt's Create closes it too, as Cancel does.
+		workspace.request(request::create_file(name, asset_kind_token(kind), std::move(values)));
+		window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
+		popup_.close();
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+	if (ImGui::Button("Cancel")) {
+		window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
+		popup_.close();
+	}
 	ImGui::EndPopup();
 }
 
@@ -199,14 +232,27 @@ void FilesWindow::refresh(const SessionView &view) {
 	if (!entry_at(view, selected_)) selected_.clear();
 }
 
+void FilesWindow::follow_filter(const SessionView &view) {
+	filter_.follow(view.workspace.files.filter);
+	if (kind_held_.follow(view.workspace.files.kind)) kind_shown_ = view.workspace.files.kind;
+}
+
+void FilesWindow::send_filter(bool filter, bool kind) {
+	io::JsonValue members = io::JsonValue::make_object();
+	if (filter) members.set("filter", io::JsonValue::make_string(filter_.sent()));
+	if (kind) members.set("kind", io::JsonValue::make_string(kind_shown_ == AssetKind::kCount ? "" : asset_kind_token(kind_shown_)));
+	window_requests::set_workspace(workspace_, "files", std::move(members));
+}
+
 const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
-	if (filter_[0] == '\0' && kind_shown_ == AssetKind::kCount) {
+	const char *filter = filter_.text;
+	if (filter[0] == '\0' && kind_shown_ == AssetKind::kCount) {
 		matches_.clear();
 		matches_made_ = false;
 		return matches_;
 	}
 	const uint64_t generation = view.findings.graph ? view.findings.graph->generation() : 0;
-	const std::string asked = std::string(filter_) + '\n' + std::to_string(static_cast<int>(kind_shown_));
+	const std::string asked = std::string(filter) + '\n' + std::to_string(static_cast<int>(kind_shown_));
 	if (matches_made_ && matched_ == asked && matched_generation_ == generation) return matches_;
 	matches_made_ = true;
 	matched_ = asked;
@@ -214,16 +260,16 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 	via_.clear();
 	// The paths holding the text, then the files of a kind it names ("texture" lists the textures), each of
 	// the kind chosen (match_files, the files query's own rule).
-	matches_ = match_files(*view.project.scan, filter_, kind_shown_);
+	matches_ = match_files(*view.project.scan, filter, kind_shown_);
 	std::vector<bool> listed(view.project.scan->entries.size(), false);
 	for (const size_t i : matches_) listed[i] = true;
 	// Then the files a record naming them is found by, after them: a model by the item whose graphic it
 	// is (lack finds Dblkhwk1.3di through Flyable Blackhawk), from three letters on.
 	// Each once: a file its folder's name already lists is not listed again (the graph's search finds by
 	// record from three letters on).
-	if (view.findings.graph && filter_[0] != '\0') {
+	if (view.findings.graph && filter[0] != '\0') {
 		std::unordered_map<std::string, size_t> at;
-		for (const GraphSearchHit &hit : view.findings.graph->search(filter_)) {
+		for (const GraphSearchHit &hit : view.findings.graph->search(filter)) {
 			if (hit.symbol || hit.via.empty()) continue;
 			if (at.empty())
 				for (size_t i = 0; i < view.project.scan->entries.size(); ++i) at.emplace(view.project.scan->entries[i].relative_path, i);
@@ -243,8 +289,6 @@ bool FilesWindow::stands_aside() const { return aside_for_welcome(workspace_.vie
 void FilesWindow::receive(const ViewEvent &event) {
 	events_.post(event);
 	request_focus();
-	// An AboutFile's card opens now, Files drawn or not.
-	if (event.kind == ViewEventKind::RevealFile && event.tag == 1) open_card(event.path);
 }
 
 // The file an ask names, selected; a filter that hides it cleared; the folders on its way
@@ -253,18 +297,18 @@ void FilesWindow::show_revealed(const SessionView &view, const ViewEvent &event)
 	const AssetEntry *entry = entry_at(view, event.path);
 	if (!entry) return;
 	selected_ = entry->relative_path;
-	// A filter or a kind that hides it cleared.
+	// A filter or a kind that hides it cleared (the workspace's: the session's filter cleared too).
 	const std::vector<size_t> &shown = matching(view);
-	const bool hidden = (filter_[0] != '\0' || kind_shown_ != AssetKind::kCount) &&
+	const bool hidden = (filter_.text[0] != '\0' || kind_shown_ != AssetKind::kCount) &&
 	                    std::none_of(shown.begin(), shown.end(),
 	                                 [&](size_t i) { return view.project.scan->entries[i].relative_path == entry->relative_path; });
 	if (hidden) {
-		filter_[0] = '\0';
+		filter_.text[0] = '\0';
 		kind_shown_ = AssetKind::kCount;
+		send_filter(true, true);
 	}
 	scroll_to_ = entry->relative_path;
 	open_to_ = entry->imported_from.empty() ? entry->relative_path : entry->imported_from;
-	if (event.flag) start_rename(*entry);
 }
 
 void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
@@ -278,13 +322,12 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ui_kit::empty_state("No project open.", "Make one or open one in the Document window.");
 		return;
 	}
-	// Another project: its own filter, kind and selection (none yet).
+	// Another project: its own selection (none yet); the session starts its filter and kind afresh.
 	if (v.project.root != shown_root_) {
 		shown_root_ = v.project.root;
-		filter_[0] = '\0';
-		kind_shown_ = AssetKind::kCount;
 		selected_.clear();
 	}
+	follow_filter(v);
 	refresh(v);
 	const auto newest = std::find_if(reveals.rbegin(), reveals.rend(),
 			[](const ViewEvent &event) { return event.kind == ViewEventKind::RevealFile; });
@@ -302,7 +345,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	draw_toolbar(v);
 	// The filter and the kind beside it, then how many files the list shows (under them in a narrow dock).
 	const std::vector<size_t> &matches = matching(v);
-	const bool narrowed = filter_[0] != '\0' || kind_shown_ != AssetKind::kCount;
+	const bool narrowed = filter_.text[0] != '\0' || kind_shown_ != AssetKind::kCount;
 	const size_t count = narrowed ? matches.size() : v.project.scan->entries.size();
 	const std::string files = (narrowed ? grouped(count) + " of " + grouped(v.project.scan->entries.size()) : grouped(count)) +
 	                          (v.project.scan->entries.size() == 1 ? " file" : " files");
@@ -313,9 +356,10 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		                             ImGui::GetContentRegionAvail().x - kind - ui_kit::text_width(files.c_str()) - spacing * 2.0f);
 		ui_kit::WrapRow row;
 		row.next(field);
-		ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter files", field,
-		                   "A name, a folder, or a kind (texture, wave, model...): the files of the kind follow those "
-		                   "whose names hold the text.");
+		if (ui_kit::filter_box("##filter", filter_.text, sizeof(filter_.text), "Filter files", field,
+		                       "A name, a folder, or a kind (texture, wave, model...): the files of the kind follow those "
+		                       "whose names hold the text."))
+			send_filter(true, false);
 		row.next(kind);
 		draw_kind_filter(v, kind);
 		row.next(ui_kit::text_width(files.c_str()));
@@ -330,8 +374,8 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (v.project.scan->entries.empty()) {
 		ui_kit::empty_state("The project has no files yet.", "Import files, or make one with New.");
 	} else if (narrowed && matches.empty()) {
-		ui_kit::empty_state(kind_shown_ != AssetKind::kCount && filter_[0] == '\0' ? "The project has no file of this kind."
-		                                                                         : "No file matches the filter.");
+		ui_kit::empty_state(kind_shown_ != AssetKind::kCount && filter_.text[0] == '\0' ? "The project has no file of this kind."
+		                                                                              : "No file matches the filter.");
 	} else if (const bool kind_fits = ImGui::GetContentRegionAvail().x >= ImGui::GetFontSize() * kKindRoomEm;
 	           // "project_files": a table id of its own since the Kind column shows by default, so a layout an
 	           // earlier editor saved with it hidden (its default then) does not hide it (the UX round's project lane).
@@ -371,11 +415,8 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 
 void FilesWindow::draw_card_window() {
 	const SessionView &v = workspace_.view();
-	// The card is its project's: closed with it, and when another opens.
-	if (!v.project.open || (!card_path_.empty() && v.project.root != card_root_)) {
-		close_card();
-		return;
-	}
+	// The card is the workspace's (the session closes it with its project).
+	if (!v.project.open) return;
 	draw_card(v);
 }
 
@@ -388,6 +429,7 @@ void FilesWindow::draw_kind_filter(const SessionView &view, float width) {
 	                          : std::string(asset_kind_label(kind_shown_));
 	ImGui::SetNextItemWidth(width);
 	if (ImGui::BeginCombo("##kind", shown.c_str(), ImGuiComboFlags_HeightLarge)) {
+		const AssetKind before = kind_shown_;
 		if (ImGui::Selectable("Every kind", kind_shown_ == AssetKind::kCount)) kind_shown_ = AssetKind::kCount;
 		for (size_t i = 0; i < kAssetKindCount; ++i) {
 			if (!counts[i]) continue;
@@ -396,6 +438,7 @@ void FilesWindow::draw_kind_filter(const SessionView &view, float width) {
 			if (ImGui::Selectable(label.c_str(), kind_shown_ == kind)) kind_shown_ = kind;
 		}
 		ImGui::EndCombo();
+		if (kind_shown_ != before) send_filter(false, true);
 	}
 	ui_kit::tooltip(kind_shown_ == AssetKind::kCount ? "Only the files of one kind." : "Only the " + shown + " files: Every kind shows them all.");
 }
@@ -470,7 +513,7 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 			ImGui::PushID(static_cast<int>(i));
 			ImGui::BeginDisabled(!creates);
 			if (ImGui::Selectable((std::string(asset_kind_label(factory.kind)) + "...").c_str()) && creates)
-				new_file_.ask(factory.kind);
+				NewFilePrompt::ask(workspace_, factory.kind);
 			ImGui::EndDisabled();
 			ui_kit::tooltip(makes(factory));
 			ImGui::PopID();
@@ -538,7 +581,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		// A double click opens what the editor opens, and says what any other file is (its card: the UX
 		// round's project lane).
 		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-			if (!is_editable_kind(entry.kind)) open_card(entry.relative_path);
+			if (!is_editable_kind(entry.kind)) workspace_.request(request::about_file(entry.relative_path));
 			else if (view.allows(EditorRequestKind::OpenDocument)) workspace_.request(request::open_document(entry.relative_path));
 		}
 	}
@@ -617,13 +660,19 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 // A file's menu (a right click on its row).
 void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entry) {
 	if (!ImGui::BeginPopupContextItem("file_menu")) return;
-	selected_ = entry.relative_path;
+	// The file the menu is of is the one selected, the session's too (a right click selects it, as a click
+	// does).
+	if (ImGui::IsWindowAppearing()) {
+		selected_ = entry.relative_path;
+		if (view.documents.file_selected.path != entry.relative_path && view.allows(EditorRequestKind::SelectFile))
+			workspace_.request(request::select_file(entry.relative_path));
+	}
 	const bool opens = is_editable_kind(entry.kind) && view.allows(EditorRequestKind::OpenDocument);
 	if (ImGui::MenuItem("Open", nullptr, false, opens) && opens)
 		workspace_.request(request::open_document(entry.relative_path));
 	const bool renames = view.allows(EditorRequestKind::RenameAsset);
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
-	if (ImGui::MenuItem("About this file...")) open_card(entry.relative_path);
+	if (ImGui::MenuItem("About this file...")) workspace_.request(request::about_file(entry.relative_path));
 	ui_kit::tooltip("What it is, where a build puts it, what it names and who names it.");
 	const bool reveals = view.allows(EditorRequestKind::RevealPath);
 	if (ImGui::MenuItem("Show in folder", nullptr, false, reveals) && reveals)
@@ -636,41 +685,40 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 }
 
 void FilesWindow::start_rename(const AssetEntry &entry) {
-	renaming_ = entry.relative_path;
 	previewed_.clear();
-	const size_t n = std::min(entry.logical_name.size(), sizeof(rename_) - 1);
-	std::memcpy(rename_, entry.logical_name.data(), n);
-	rename_[n] = '\0';
-	open_rename_ = true;
+	window_requests::set_workspace(workspace_, "file_rename", "path", io::JsonValue::make_string(entry.relative_path));
 }
 
-// Rename...: the new name; every file naming the old one is rewritten, or the rename is
-// refused with the reasons in Problems.
+// Rename... (the workspace's file_rename): the new name; every file naming the old one is rewritten, or the
+// rename is refused with the reasons in Problems.
 void FilesWindow::draw_rename(const SessionView &view) {
-	if (open_rename_) {
-		open_rename_ = false;
-		ImGui::OpenPopup("Rename");
-	}
-	if (!ImGui::BeginPopup("Rename")) return;
-	const AssetEntry *entry = entry_at(view, renaming_);
-	if (!entry) {
-		ImGui::CloseCurrentPopup();
-		ImGui::EndPopup();
+	const WorkspaceView::FileRename &held = view.workspace.file_rename;
+	rename_.follow(held.name);
+	const AssetEntry *entry = held.path.empty() ? nullptr : entry_at(view, held.path);
+	const auto close = [this] { window_requests::set_workspace(workspace_, "file_rename", "path", io::JsonValue::make_string("")); };
+	// A popup at the top level, as the modals are: it shows when none before it in the session's order is held.
+	if (!rename_popup_.begin("Rename", entry != nullptr && modal_may_show(view, HeldModal::FileRename), false, 0, false,
+	                         view.workspace.opened)) {
+		if (rename_popup_.dismissed()) close();
 		return;
 	}
 	ImGui::Text("Rename %s to", entry->logical_name.c_str());
 	if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 17.0f);
-	const bool enter = ImGui::InputText("##name", rename_, sizeof(rename_), ImGuiInputTextFlags_EnterReturnsTrue);
-	const bool changed = rename_[0] != '\0' && entry->logical_name != rename_;
+	const bool enter = ImGui::InputText("##name", rename_.text, sizeof(rename_.text), ImGuiInputTextFlags_EnterReturnsTrue);
+	if (ImGui::IsItemEdited() && rename_.sent() != held.name)
+		window_requests::set_workspace(workspace_, "file_rename", "name", io::JsonValue::make_string(rename_.sent()));
+	const char *name = rename_.text;
+	const bool changed = name[0] != '\0' && entry->logical_name != name;
 	// What it would rewrite, or why it would be refused, planned as the name is typed (while the
 	// busy gate takes the plan; a rename, which writes the files, waits for a build).
-	if (changed && previewed_ != rename_ && view.allows(EditorRequestKind::PreviewRename)) {
-		previewed_ = rename_;
-		workspace_.request(request::preview_file_rename(entry->relative_path, previewed_));
+	const std::string asked = entry->relative_path + '\n' + name;
+	if (changed && previewed_ != asked && view.allows(EditorRequestKind::PreviewRename)) {
+		previewed_ = asked;
+		workspace_.request(request::preview_file_rename(entry->relative_path, name));
 	}
 	const DialogsView::RenamePreview &plan = view.dialogs.rename_preview;
-	if (changed && !plan.symbol && plan.path == entry->relative_path && plan.requested == rename_) {
+	if (changed && !plan.symbol && plan.path == entry->relative_path && plan.requested == name) {
 		for (const Diagnostic &refusal : plan.refusals) {
 			ui_kit::severity_marker(refusal.severity);
 			ImGui::SameLine();
@@ -699,34 +747,38 @@ void FilesWindow::draw_rename(const SessionView &view) {
 	ui_kit::tooltip(allowed ? "Every file naming it is rewritten, or the rename is refused (Problems says why)."
 	                        : "A rename rewrites the project's files: it waits for the running operation.");
 	if ((rename || enter) && changed && allowed) {
-		workspace_.request(request::rename_asset(entry->relative_path, rename_));
-		ImGui::CloseCurrentPopup();
+		// The session closes Rename... as it takes the rename (rename_asset alone, over the wire); its button
+		// closes it too.
+		workspace_.request(request::rename_asset(entry->relative_path, name));
+		close();
+		rename_popup_.close();
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+	if (ImGui::Button("Cancel")) {
+		close();
+		rename_popup_.close();
+	}
 	ImGui::EndPopup();
 }
 
-void FilesWindow::open_card(const std::string &path) {
-	if (card_path_ != path) close_card();
-	card_path_ = path;
-	card_root_ = workspace_.view().project.root;
-	card_.reset();
-	card_focus_ = true;
-}
-
-// The card closed: a sound its Play started stops with it.
+// The card closed (its X): the workspace's card closed, which stops the sound it played.
 void FilesWindow::close_card() {
-	if (card_played_ && workspace_.view().allows(EditorRequestKind::StopSound)) workspace_.request(request::stop_sound());
-	card_played_ = false;
-	card_path_.clear();
-	card_.reset();
+	if (card_closing_ == workspace_.view().workspace.card.path) return; // asked already
+	card_closing_ = workspace_.view().workspace.card.path;
+	window_requests::set_workspace(workspace_, "card", "path", io::JsonValue::make_string(""));
 }
 
-// The card (session/file_card.h), made again when the files, the graph or the project move, and when the
-// project's references start or end being read: a window of its own kept in the editor's, as the build
-// result is, until it is closed.
+// The card (session/file_card.h) of the file the workspace's card names, made again when that file, the
+// files, the graph or the project move, and when the project's references start or end being read: a
+// window of its own kept in the editor's, as the build result is, until it is closed.
 void FilesWindow::draw_card(const SessionView &view) {
+	const std::string &path = view.workspace.card.path;
+	if (path != card_path_) {
+		card_path_ = path;
+		card_.reset();
+		card_closing_.clear();
+		card_focus_ = !path.empty(); // a card opened comes forward
+	}
 	if (card_path_.empty()) return;
 	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Graph, ViewConcern::Project});
 	const bool reading = !view.activity.validation.read || view.activity.validation.files_unread; // file_card's
@@ -737,10 +789,8 @@ void FilesWindow::draw_card(const SessionView &view) {
 		card_ = std::make_shared<const FileCard>(file_card(view, card_path_, known));
 	}
 	const FileCard &card = *card_;
-	if (!card.found) {
-		close_card();
-		return;
-	}
+	// Its file gone: the session closes the card as the files lose it (workspace_tidies); nothing drawn meanwhile.
+	if (!card.found) return;
 	const ImGuiViewport *viewport = ImGui::GetMainViewport();
 	ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
 	ImGui::SetNextWindowViewport(viewport->ID);
@@ -778,13 +828,22 @@ void FilesWindow::draw_card(const SessionView &view) {
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted(words);
 			ImGui::SameLine();
-			if (ImGui::Button("Play##card")) {
-				workspace_.request(request::play_sound(card.path));
-				card_played_ = true;
-			}
+			if (ImGui::Button("Play##card")) workspace_.request(request::play_sound(card.path));
 			ui_kit::tooltip("Play it as the game decodes it.");
 			ImGui::SameLine();
 			if (ImGui::Button("Stop##card")) workspace_.request(request::stop_sound());
+			// How the sound goes, as the Shell reports it (the workspace's sound).
+			const WorkspaceView::Sound &sound = view.workspace.sound;
+			using State = WorkspaceView::SoundState;
+			if (sound.path == card.path && sound.state != State::Idle) {
+				const std::string said = sound.state == State::Starting  ? std::string("Starting...")
+				                         : sound.state == State::Playing ? std::string("Playing")
+				                         : sound.state == State::Ended   ? std::string("Played")
+				                         : sound.state == State::Stopped ? std::string("Stopped")
+				                                                         : "Does not play: " + sound.error;
+				ImGui::SameLine();
+				ImGui::TextDisabled("%s", said.c_str());
+			}
 		} else {
 			ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);
 			ImGui::TextWrapped("The game cannot play it: %s", card.sound.error.c_str());
@@ -840,10 +899,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 					}
 					ImGui::TableNextColumn();
 					if (named.wave) {
-						if (ImGui::SmallButton("Play")) {
-							workspace_.request(request::play_sound(named.file));
-							card_played_ = true;
-						}
+						if (ImGui::SmallButton("Play")) workspace_.request(request::play_sound(named.file));
 						ui_kit::tooltip("Play " + named.file + ".");
 					} else if (named.status != ReferenceStatus::NotAReference) {
 						ImGui::TextColored(ui_kit::reference_color(named.status), "%s", reference_status_words(named.status));
