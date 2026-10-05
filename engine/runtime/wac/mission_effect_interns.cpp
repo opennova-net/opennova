@@ -61,10 +61,10 @@ void intern_value(particle::EffectCatalogNames &effects, const io::ConfigTokens 
 // def is open returns 1, which ends the file walk.
 // [orig: File_ParseASCIIFile @0x53d942 (a nonzero callback return ends the
 //  walk); AmmoDef_ParseProperty @0x40A2D0 — `ammo` @0x40a34d..0x40a397, `end`
-//  @0x40a3bf..0x40a442 (the def's close resets the tags, CAIPathData_Init
-//  @0x409b5d..0x409b85), `effects_table` @0x40a5a3..0x40a5b2, the row
-//  @0x40a326..0x40a531, `ai_launcheffect` @0x40a8f6..0x40a91d,
-//  `secondary_effect` @0x40aa0f..0x40aa36]
+//  @0x40a3bf..0x40a442 (the def's close resets the tags,
+//  AmmoDef_ResetParseState (ex CAIPathData_Init) @0x409b5d..0x409b85),
+//  `effects_table` @0x40a5a3..0x40a5b2, the row @0x40a326..0x40a531,
+//  `ai_launcheffect` @0x40a8f6..0x40a91d, `secondary_effect` @0x40aa0f..0x40aa36]
 void scan_ammo(particle::EffectCatalogNames &effects, std::string_view text) {
 	bool in_def = false;
 	bool in_table = false;
