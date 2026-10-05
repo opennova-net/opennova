@@ -24,6 +24,7 @@
 #include <formats/pcx/pcx_io.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/tga/tga.h>
+#include <formats/tga/tga_read.h>
 #include <runtime/inmatch/charattr_challenge.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
@@ -230,12 +231,80 @@ static int test_startup_menu_compiles() {
 		for (const char *f : font_names) shipped = shipped || file == lower(f);
 		TEST_EXPECT(shipped);
 	}
-	TEST_EXPECT(compiler.texture_names().empty());
+	// The one texture it names is the pointer, which the root window's CURSOR names: the original
+	// game shows no system pointer (docs/mnu/menu-re.md), so a screen without one has none.
+	TEST_EXPECT(main_window.cursor.file == blank_pointer_name() && main_window.cursor.flags == "STANDARD_TRANSPARENT");
+	TEST_EXPECT(compiler.texture_names().size() == 1 && compiler.texture_names()[0] == blank_pointer_name());
 	TEST_EXPECT(compiler.widget_index("EXIT") >= 0);
 	opennova::menu::MenuFrameState state;
 	const opennova::menu::MenuDrawList &frame = compiler.compile(state, 1.0f, 1.0f);
 	TEST_EXPECT(!frame.font_runs.empty()); // the title and the button label draw text
+	// The pointer, loaded at its own size, draws last at the mouse, unscaled.
+	const std::vector<uint8_t> pointer = make(kBlankPointerRole, blank_pointer_name());
+	opennova::tga::TgaImage image;
+	std::string decode_error;
+	TEST_EXPECT(opennova::tga::tga_decode_retail(pointer.data(), pointer.size(), image, decode_error));
+	compiler.set_texture_size(0, image.width, image.height);
+	state.cursor_visible = true;
+	state.cursor_x = 100.0f;
+	state.cursor_y = 50.0f;
+	const opennova::menu::MenuDrawList &pointed = compiler.compile(state, 2.0f, 2.0f);
+	TEST_EXPECT(!pointed.quads.empty());
+	if (pointed.quads.empty()) return 1;
+	const opennova::menu::MenuQuad &last = pointed.quads.back();
+	TEST_EXPECT(last.texture == 0 && last.x0 == 100.0f && last.y0 == 50.0f && last.x1 == 132.0f && last.y1 == 82.0f);
 	opennova::fnt::fnt_free(&font);
+	return 0;
+}
+
+// The pointer the blank menus name: a 32-bit TGA in the form the menus' and the splash's readers
+// take (the 18-byte header, type 2, 8 alpha bits, the rows from the bottom up), 32 by 32 as the
+// shipped one, its tip the top-left pixel (where the game draws the texture from), opaque where
+// the arrow is and clear around it; made by its role, by its name as a new texture, and refused
+// for a name that is no TGA.
+static int test_pointer() {
+	const BlankFactory *factory = find_blank_factory_for_role(kBlankPointerRole);
+	TEST_EXPECT(factory != nullptr && factory->kind == AssetKind::Texture && !factory->free_form);
+	TEST_EXPECT(std::string(blank_pointer_name()) == "newarow1.tga");
+	const std::vector<uint8_t> bytes = make(kBlankPointerRole, blank_pointer_name());
+	TEST_EXPECT(bytes.size() == opennova::tga::TGA_HEADER_SIZE + 32u * 32u * 4u);
+	if (bytes.size() != opennova::tga::TGA_HEADER_SIZE + 32u * 32u * 4u) return 1;
+	TEST_EXPECT(bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 2 && bytes[16] == 32 && bytes[17] == 8);
+	opennova::tga::TgaImage image;
+	std::string reason;
+	TEST_EXPECT(opennova::tga::tga_decode_retail(bytes.data(), bytes.size(), image, reason));
+	TEST_EXPECT(image.width == 32 && image.height == 32);
+	const auto pixel = [&image](int x, int y) { return &image.rgba[(size_t(y) * 32 + size_t(x)) * 4]; };
+	TEST_EXPECT(pixel(0, 0)[3] == 0xFF && pixel(0, 0)[0] == 0);                      // the tip, outlined
+	TEST_EXPECT(pixel(1, 3)[3] == 0xFF && pixel(1, 3)[0] == 0xFF);                   // the body, white
+	TEST_EXPECT(pixel(31, 0)[3] == 0 && pixel(0, 31)[3] == 0 && pixel(31, 31)[3] == 0); // clear around it
+	int opaque = 0;
+	for (size_t i = 0; i < 32u * 32u; ++i) opaque += image.rgba[i * 4 + 3] == 0xFF ? 1 : 0;
+	TEST_EXPECT(opaque > 50 && opaque < 200);
+	// Asked as a new texture of its name, the pointer; any other name, the checkerboard.
+	BlankRequest request;
+	request.logical_name = "NEWAROW1.TGA";
+	std::vector<uint8_t> by_name;
+	Diagnostic error;
+	TEST_EXPECT(find_blank_factory("", request.logical_name, AssetKind::Texture) == factory);
+	TEST_EXPECT(make_blank(request, AssetKind::Texture, by_name, error) && by_name == bytes);
+	TEST_EXPECT(find_blank_factory("", "other.tga", AssetKind::Texture) == find_blank_factory_for_kind(AssetKind::Texture));
+	// The pointer is a TGA: its role refuses another format.
+	request.logical_name = "newarow1.dds";
+	request.role = kBlankPointerRole;
+	TEST_EXPECT(!make_blank(request, AssetKind::Texture, by_name, error) && error.code() == "blank.texture");
+	// A menu's blank names it and has it made with it, unless the project builds as an expansion.
+	ProjectDocument standalone;
+	std::string companion;
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("main_menu"), standalone, companion) == factory &&
+	            companion == blank_pointer_name());
+	companion.clear();
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_kind(AssetKind::Menu), standalone, companion) == factory &&
+	            companion == blank_pointer_name());
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("gametext"), standalone, companion) == nullptr);
+	ProjectDocument expansion;
+	expansion.expansion.name = "ptr";
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("main_menu"), expansion, companion) == nullptr);
 	return 0;
 }
 
@@ -256,6 +325,7 @@ static int test_free_form_menu() {
 	if (doc.screens.size() != 1 || doc.screens[0].roots.size() != 1) return 1;
 	const opennova::mnu::Window &main = doc.screens[0].roots.front();
 	TEST_EXPECT(main.name == "MAIN" && main.type == opennova::mnu::WindowType::Window && main.children.empty());
+	TEST_EXPECT(main.cursor.file == blank_pointer_name() && main.cursor.flags == "STANDARD_TRANSPARENT");
 	TEST_EXPECT(main.position.has_left && main.position.left == 0 && main.position.has_top && main.position.top == 0);
 	TEST_EXPECT(main.position.width() == 800 && main.position.height() == 600);
 	TEST_EXPECT(find_window(main, "EXIT") == nullptr && find_window(main, "TITLE") == nullptr);
@@ -495,6 +565,7 @@ int main() {
 	failures += test_style_and_fonts();
 	failures += test_defs_and_coo();
 	failures += test_placeholder_texture();
+	failures += test_pointer();
 	if (failures == 0) std::printf("editor_blank_factory: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

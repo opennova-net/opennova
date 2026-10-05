@@ -1,5 +1,7 @@
 #include <editor/blank/blank_factory.h>
 
+#include <base/io/strutil.h>
+
 #include "blank_makers.h"
 
 namespace opennova::editor {
@@ -37,7 +39,10 @@ const BlankFactory k_factories[] = {
 	  "a brand stylesheet with no variables yet, read after the menu stylesheet", false },
 	{ "nw_cdata", AssetKind::StringTableCoo, make_blank_coo, "an empty NovaWorld data table", true },
 	{ "main_menu", AssetKind::Menu, make_blank_main_menu,
-	  "the startup screen: the project's title and an Exit button", false },
+	  "the startup screen: the project's title, an Exit button and the game's mouse pointer", false },
+	// The pointer every blank menu names (kBlankPointerRole), made with the menu.
+	{ kBlankPointerRole, AssetKind::Texture, make_blank_pointer,
+	  "the game's mouse pointer, a white arrow outlined in black, which the menus name", false },
 	{ "menutxt", AssetKind::Strings, make_blank_menutxt,
 	  "a menu label table holding the common navigation labels", false },
 	{ "font_arial12b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
@@ -57,7 +62,8 @@ const BlankFactory k_factories[] = {
 	// Free-form: a new file of a kind whose required files are all specific (Create
 	// menu, Create table, a font of another name, a missing texture's placeholder).
 	{ "", AssetKind::Strings, make_blank_empty_strings, "an empty string table", true },
-	{ "", AssetKind::Menu, make_blank_menu, "a menu with one screen named after the file, empty", true },
+	{ "", AssetKind::Menu, make_blank_menu,
+	  "a menu with one screen named after the file, empty but for the game's mouse pointer", true },
 	{ "", AssetKind::Font, make_blank_font, "the built-in bitmap font", true },
 	{ "", AssetKind::Texture, make_blank_texture,
 	  "the checkerboard the game draws for a missing texture, 128 by 128 gray squares", true },
@@ -125,10 +131,22 @@ const BlankFactory *find_blank_factory_for_kind(AssetKind kind) {
 	return nullptr;
 }
 
+const BlankFactory *find_blank_factory(std::string_view role, const std::string &logical_name, AssetKind kind) {
+	if (const BlankFactory *factory = find_blank_factory_for_role(role)) return factory;
+	if (kind == AssetKind::Texture && strutil::iequals(logical_name, blank_pointer_name()))
+		return find_blank_factory_for_role(kBlankPointerRole);
+	return find_blank_factory_for_kind(kind);
+}
+
+const BlankFactory *blank_companion(const BlankFactory &factory, const ProjectDocument &doc, std::string &name) {
+	if (factory.kind != AssetKind::Menu || !doc.expansion.standalone()) return nullptr;
+	name = blank_pointer_name();
+	return find_blank_factory_for_role(kBlankPointerRole);
+}
+
 bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t> &out,
                 Diagnostic &error) {
-	const BlankFactory *factory = find_blank_factory_for_role(request.role);
-	if (factory == nullptr) factory = find_blank_factory_for_kind(kind);
+	const BlankFactory *factory = find_blank_factory(request.role, request.logical_name, kind);
 	if (factory == nullptr) {
 		error = make_finding(CoreFinding::BlankUnavailable, DiagnosticSeverity::Error,
 		                     "The editor cannot create " + request.logical_name +

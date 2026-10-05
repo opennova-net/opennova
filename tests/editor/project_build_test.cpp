@@ -184,7 +184,7 @@ struct Project {
 	bool fill() {
 		const AssetScan scan = scan_project_assets(paths, doc);
 		const RequirementReport report = evaluate_requirements(doc, scan);
-		const CreateMissingResult result = create_missing_requirements(paths, doc, report, unmet_required_roles(report));
+		const CreateMissingResult result = create_missing_requirements(paths, doc, scan, report, unmet_required_roles(report));
 		return result.unavailable.empty() && result.diagnostics.empty();
 	}
 	std::string output_root() const { return paths.build_dir + "/play"; }
@@ -214,7 +214,9 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(plan.archives.size() == 3);
 	TEST_EXPECT(plan.archives[0].file_name == "language.pff" && !plan.archives[0].entries.empty());
 	TEST_EXPECT(plan.archives[1].file_name == "localres.pff" && !plan.archives[1].entries.empty());
-	TEST_EXPECT(plan.archives[2].file_name == "resource.pff" && plan.archives[2].entries.empty());
+	// resource.pff holds the one texture the blanks make: the pointer the startup screen names.
+	TEST_EXPECT(plan.archives[2].file_name == "resource.pff" && plan.archives[2].entries.size() == 1 &&
+	            plan.archives[2].entries[0].logical_name == "newarow1.tga");
 	TEST_EXPECT(plan.loose.size() == 2); // menumus.sbf and nw_cdata.coo
 
 	const BuildReport report = run_build(plan, p.output_root());
@@ -227,7 +229,7 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(fs::is_directory(report.build_dir));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "language.pff"));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "localres.pff"));
-	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "resource.pff")); // empty, still present
+	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "resource.pff"));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "menumus.sbf"));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / kBuildRecordFileName));
 	TEST_EXPECT(!fs::exists(fs::path(p.output_root()) / (report.build_id + ".tmp")));
@@ -1625,7 +1627,7 @@ static int test_deep_output_root() {
 	{
 		const AssetScan scan = scan_project_assets(paths, doc);
 		const RequirementReport report = evaluate_requirements(doc, scan);
-		const CreateMissingResult made = create_missing_requirements(paths, doc, report, unmet_required_roles(report));
+		const CreateMissingResult made = create_missing_requirements(paths, doc, scan, report, unmet_required_roles(report));
 		TEST_EXPECT(made.unavailable.empty() && made.diagnostics.empty());
 	}
 	const std::string video = "a_long_intro_movie_name.bik";

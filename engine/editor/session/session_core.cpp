@@ -353,8 +353,8 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		std::vector<std::string> roles{ expansion_file_row(ExpansionFileRole::Version).manifest_role };
 		if (doc.expansion.builds_on.empty()) roles.push_back(expansion_file_row(ExpansionFileRole::Table).manifest_role);
 		const ProjectPaths paths = ProjectPaths::for_root(dir);
-		const CreateMissingResult made =
-				create_missing_requirements(paths, doc, evaluate_requirements(doc, scan_project_assets(paths, doc)), roles);
+		const AssetScan scan = scan_project_assets(paths, doc);
+		const CreateMissingResult made = create_missing_requirements(paths, doc, scan, evaluate_requirements(doc, scan), roles);
 		for (const std::string &path : made.created) note("Created " + path);
 		for (const Diagnostic &d : made.diagnostics) report(d);
 	}
@@ -881,7 +881,7 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	const ProjectDocument &doc = *view_.project.document;
 	AssetScan now = scan_project_assets(paths_, doc);
 	now.set_import_findings(view_.project.scan->import_findings());
-	const CreateMissingResult result = create_missing_requirements(paths_, doc, requirements_of(doc, now), roles);
+	const CreateMissingResult result = create_missing_requirements(paths_, doc, now, requirements_of(doc, now), roles);
 	for (const std::string &path : result.created) note("Created " + path);
 	for (const std::string &name : result.unavailable) {
 		note("The editor cannot create " + name + " yet: no writer exists for this kind of file.");
