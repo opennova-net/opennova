@@ -195,6 +195,16 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	bool in_install = held.play_in_install;
 	if (ImGui::Checkbox("Play in the game install", &in_install)) set("play_in_install", io::JsonValue::make_bool(in_install));
 	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
+	ImGui::Indent();
+	ImGui::BeginDisabled(!held.play_in_install);
+	bool strict = held.play_in_install_strict;
+	if (ImGui::Checkbox("Strict: as a player's install", &strict))
+		set("play_in_install_strict", io::JsonValue::make_bool(strict));
+	ImGui::EndDisabled();
+	ImGui::Unindent();
+	ui_kit::tooltip("The game runs on the build alone, as a player who dropped Jointops.exe into the build's folder "
+	                "runs it: nothing of the install but its program and Bink DLL, no /d. Off, the install's "
+	                "configuration and saves are beside it and loose files win (/d).");
 
 	if (!error_.empty()) {
 		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
@@ -229,6 +239,7 @@ void ProjectSettingsDialog::apply(Workspace &workspace) {
 	settings.game_install = held.game_install;
 	if (!v.activity.source_run) settings.runtime_executable = held.runtime;
 	settings.play_in_install = held.play_in_install;
+	settings.play_in_install_strict = held.play_in_install_strict;
 	waiting_ = true;
 	error_.clear();
 	workspace.request(std::move(request));

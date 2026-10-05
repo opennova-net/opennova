@@ -49,6 +49,10 @@ struct FakePlatform : opennova::editor::ProcessPlatform {
 	// started), by pid: Dead for any it does not list; and the creation time each ask named.
 	std::map<int64_t, opennova::editor::ProcessLiveness> elsewhere;
 	std::map<int64_t, std::string> asked_created;
+	// The named semaphores a game holds (semaphore_held answers Alive for these, Dead for any other), and
+	// how many times one was asked about.
+	std::vector<std::string> semaphores;
+	int semaphore_asks = 0;
 	std::vector<std::string> log;
 	opennova::editor::LaunchPlan last_plan;
 	int spawns = 0;
@@ -92,6 +96,12 @@ struct FakePlatform : opennova::editor::ProcessPlatform {
 		if (it == codes.end() || is_running(pid)) return false;
 		out = it->second;
 		return true;
+	}
+	opennova::editor::ProcessLiveness semaphore_held(const std::string &name) override {
+		++semaphore_asks;
+		for (const std::string &held : semaphores)
+			if (held == name) return opennova::editor::ProcessLiveness::Alive;
+		return opennova::editor::ProcessLiveness::Dead;
 	}
 	void release(int64_t pid) override { log.push_back("release " + std::to_string(pid)); }
 	int64_t now_ms() override { return clock; }
