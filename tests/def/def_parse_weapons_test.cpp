@@ -39,6 +39,36 @@ int main(int argc, char **argv) {
         def_free_weapons(&parsed);
     }
 
+    /* A weapon.def with no weapon rows is an empty table, never a failure: a
+       comment-only file and a zero-length one both parse to zero rows
+       [orig: WeaponDef_LoadAll @0x54dd10 seeds the "None" row and never reads
+       the walk's result]. */
+    {
+        static const char kCommentOnly[] = "// Weapon definitions\r\n\r\n";
+        DefWeaponsFile parsed{};
+        if (def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(kCommentOnly),
+                sizeof(kCommentOnly) - 1, &parsed) != 0 || parsed.count != 0) {
+            fprintf(stderr, "FAIL: a comment-only weapon.def is an empty table\n");
+            def_free_weapons(&parsed);
+            return 1;
+        }
+        def_free_weapons(&parsed);
+        DefWeaponsFile empty{};
+        if (def_parse_weapons_memory(nullptr, 0, &empty) != 0 || empty.count != 0) {
+            fprintf(stderr, "FAIL: a zero-length weapon.def is an empty table\n");
+            def_free_weapons(&empty);
+            return 1;
+        }
+        def_free_weapons(&empty);
+        DefWeaponsFile refused{};
+        if (def_parse_weapons_memory(nullptr, 4, &refused) == 0) {
+            fprintf(stderr, "FAIL: a null buffer with a length is refused\n");
+            def_free_weapons(&refused);
+            return 1;
+        }
+        def_free_weapons(&refused);
+    }
+
     /* The shipped weapon.def from the reference fixture set (OPENNOVA_JO_ASSETS):
        its field/pos/sights/actions pins and the memory-parse parity are the
        SKIP-LEG retail leg; the inline blocks run unconditionally. */
