@@ -384,12 +384,24 @@ _Avoid_: numbered hurt volume, damage tier 16/17/18
 ## Model and animation tools (ADR 0047)
 
 **`.o3d` scene text**:
-The line-based text form of one `.3di` model (`docs/threedi/o3d-scene-format.md`).
-`opennova-3di build` mints a `.3di` from it through the engine's construction API and
-parity writer; `opennova-3di scene` writes any `.3di`, retail ones included, back out
-as it (build's exact inverse).
+The line-based text form of one `.3di` model (`docs/threedi/o3d-scene-format.md`),
+carrying no native limit: meshes of any size, influences of any number, names of any
+length (ADR 0052). `opennova-3di build` mints a `.3di` from it through the engine's
+reader, its lowering to the retail target, the construction API and parity writer;
+`opennova-3di scene` writes any `.3di`, retail ones included, back out as it (build's
+exact inverse).
 _Avoid_: scene file (a Godot `.tscn` is a scene), ASE/OED (the retired authoring
 formats)
+
+**Lowering** (of a `.o3d` model to a **target**):
+The step that holds a scene text model to what a target game holds
+(`engine/formats/threedi/threedi_o3d_lower.h`): it splits a mesh into the strips a
+3DI3 stores, keeps the influences the game blends, and checks every name, count and
+fixed-point extent against the target's limits (`ThreediTargetLimits`; the retail
+target, `threedi_retail_limits`, is the only one), refusing what the target cannot
+hold and noting what it loads all the same.
+_Avoid_: validation (the reader validates the text; the lowering is the target's),
+export (the add-on exports; the CLI lowers)
 
 **`.o3a` clip-set text**:
 The text form of one rig's clip set: its `.adm` table and every `.bad` clip the table
