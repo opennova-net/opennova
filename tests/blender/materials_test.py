@@ -7,7 +7,9 @@ lands in a fresh temporary directory):
 Each case builds a one-triangle model, exports it through opennova-3di and
 reads the .3di back with `opennova-3di scene`.
 """
+import math
 import os
+import subprocess
 import sys
 import traceback
 
@@ -882,6 +884,88 @@ def blender_normal_maps_export_with_the_games_green():
     # BGRA: blue 255, green 0.75 -> 191 (straight: 255 - 191 = 64), red 64.
     assert first_pixel(root, "bumped_0n.mdt") == (255, 64, 64, 255), first_pixel(root, "bumped_0n.mdt")
     assert first_pixel(root, "bumped_1n.mdt") == (255, 191, 64, 255), first_pixel(root, "bumped_1n.mdt")
+
+
+def framed_face(ob, corners, uvs, name):
+    """`ob`'s mesh replaced by one face on its material, with a UV map."""
+    face = bpy.data.meshes.new(name)
+    face.from_pydata(corners, [], [tuple(range(len(corners)))])
+    layer = face.uv_layers.new(name="UVMap")
+    for loop, uv in zip(layer.data, uvs):
+        loop.uv = uv
+    face.materials.append(ob.data.materials[0])
+    ob.data = face
+
+
+def export_scene_text(root):
+    """(notes, the scene text lines the export hands the CLI)."""
+    held, written = export.export_text, []
+
+    def capture(context, command, text, *rest):
+        written.append(list(text))
+        return held(context, command, text, *rest)
+    export.export_text = capture
+    try:
+        notes, _ = export_model(root)
+    finally:
+        export.export_text = held
+    (text,) = written
+    return notes, text
+
+
+def stored_frames(path):
+    """The tangent frames a .3di stores, as `scene` writes them (`vt`)."""
+    out = path[:-4] + "_scene.o3d"
+    subprocess.run([CLI, "scene", path, "-o", out], check=True, capture_output=True)
+    with open(out, encoding="utf-8") as f:
+        return [[float(x) for x in line.split("#")[0].split()[1:7]] for line in f if line.startswith("vt ")]
+
+
+def count_records(text, key):
+    return sum(1 for line in text if line.split()[:1] == [key])
+
+
+@case
+def tangent_frames_are_blenders_own():
+    # Under a shader that reads tangents (a normal map's VS_DOT3DIFF) export
+    # writes Blender's own frame on every vertex (`vt`: MikkTSpace on the
+    # render UV map, D3D's v running down), the frame its Normal Map node draws
+    # with. On a planar quad, turned on the root and with its UVs turned a
+    # quarter, that frame points the way the CLI's rule for a mesh with no
+    # `vt` (OED's) points: the axes, the matrix and the v flip agree.
+    root, (ob,) = model("framed", normal_mapped("Framed", normal_image("framed_n")))
+    framed_face(ob, [(0.0, -0.1, 0.0), (0.1, -0.1, 0.0), (0.1, -0.1, 0.1), (0.0, -0.1, 0.1)],
+                [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)], "framed_quad")
+    ob.rotation_euler = (0.0, 0.0, math.radians(30.0))
+    _, text = export_scene_text(root)
+    assert count_records(text, "v") == 4 and count_records(text, "vt") == 4, text
+    # The CLI's frames for the same text with no `vt`, read back as `scene`
+    # writes the stored ones; then the export's own, read back the same way.
+    derived = os.path.join(folder(root), "derived")
+    with open(derived + ".o3d", "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(line for line in text if line.split()[:1] != ["vt"]) + "\n")
+    subprocess.run([CLI, "build", derived + ".o3d", "-o", derived + ".3di"], check=True, capture_output=True)
+    own, rule = stored_frames(root.o3d.output_path), stored_frames(derived + ".3di")
+    assert len(own) == 4 and len(rule) == 4, (own, rule)
+    for a, b in zip(own, rule):
+        for axis in (slice(0, 3), slice(3, 6)):
+            u, w = np.array(a[axis]), np.array(b[axis])
+            assert float(u @ w) / (np.linalg.norm(u) * np.linalg.norm(w)) > 0.99, (a, b)
+
+
+@case
+def a_face_blender_gives_no_frame_takes_the_clis():
+    # Blender computes tangent frames on triangles and quads only: a mesh
+    # holding a pentagon writes no `vt`, the CLI derives its frames (the file
+    # still stores them, the shader reads them) and export says so.
+    root, (ob,) = model("pentagon", normal_mapped("Pentagon", normal_image("pentagon_n")))
+    turn = [2.0 * math.pi * k / 5.0 for k in range(5)]
+    framed_face(ob, [(0.1 * math.cos(a), -0.1, 0.1 * math.sin(a)) for a in turn],
+                [(0.5 + 0.5 * math.cos(a), 0.5 + 0.5 * math.sin(a)) for a in turn], "framed_pentagon")
+    notes, text = export_scene_text(root)
+    assert count_records(text, "v") == 5 and count_records(text, "vt") == 0, text
+    assert any("01 Mesh0" in n and "triangles and quads only" in n for n in notes), notes
+    assert len(stored_frames(root.o3d.output_path)) == 5
 
 
 @case

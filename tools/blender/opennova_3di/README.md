@@ -51,7 +51,8 @@ new one, and never replaces a different file of that name.
 Import creates an editable authoring scene, and export never relies on
 anything import set up: collision volume planes, seam flags, tangents,
 bounds, glass, emissive and the alpha pass are recomputed from the scene on
-every export, by the rules the retired OED exporter used. Export rebuilds
+every export (tangents as Blender computes them, the rest by the rules the
+retired OED exporter used). Export rebuilds
 bullet faces from the selected render LOD (face surfaces and flags come from
 the materials, voted on import; a face that disagrees with its material's
 vote keeps its own on its polygon, on a rigid model), so retail face normals, zero-length or
@@ -262,8 +263,11 @@ one (only those move UVs), a normal map a bump one (`VS_DOT3DIFF`,
 `VS_SKBUMPDIFFT`), and export says what no shader of the kind draws. A shader
 named in the panel keeps OED's rule: `FFP_GLASS` draws no texture. Glass
 shaders are glass, `*_LUM` shaders emissive, blending shaders draw in the alpha
-pass, and a bump shader gets tangents derived from the render UV map, so its
-meshes need one with area. **Export order** is the material's index in the
+pass, and a bump shader's meshes carry Blender's own tangent frames
+(MikkTSpace on the render UV map, the frames its Normal Map node draws and
+bakes with), so they need a render UV map with area. Blender gives no frame
+on a face of more than four corners: a mesh holding one gets the CLI's frames
+(OED's rule) instead, and export says so; triangulate it to keep Blender's. **Export order** is the material's index in the
 model (import sets it; -1 sorts a material after the ordered ones, by first
 use). A material in a mesh's slots that no face draws with exports only with
 an Export order: 208 JO models keep such materials, and import puts them in

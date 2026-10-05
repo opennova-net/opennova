@@ -64,6 +64,7 @@ import re
 from array import array
 
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
 
 from . import assembly, materials
@@ -165,8 +166,10 @@ def shared_vertex(mesh, key, vert, corners):
 
 def mesh_of(meshes, mi, ob):
     """The scene mesh of material `mi` on a part (one per material), naming
-    the Blender objects that give it triangles."""
-    m = meshes.setdefault(mi, {"verts": [], "index": {}, "tris": [], "meshes": []})
+    the Blender objects that give it triangles and, under a shader that reads
+    tangents, those Blender computed no tangent frames for (`unframed`)."""
+    m = meshes.setdefault(mi, {"verts": [], "index": {}, "tris": [], "meshes": [], "framed": False,
+                               "unframed": []})
     if not m["meshes"] or m["meshes"][-1] != ob.name:
         m["meshes"].append(ob.name)
     return m
@@ -296,6 +299,7 @@ class Exporter(Notes):
         self.frames = []
         self.skinned = False
         self.uv1 = False
+        self.tangent_reads = {}  # material index -> whether its shader reads TANGENT
         self.bone_points = {}  # skinned LOD 0: part -> rest positions it moves
         self.sections = {}  # collision section -> its part and the meshes giving its faces
         self.notes = []
@@ -618,10 +622,63 @@ class Exporter(Notes):
             vert += (b[0], 1.0 - b[1])
         return vert
 
+    def reads_tangents(self, mi):
+        """Whether material index `mi` draws with a shader that reads the
+        TANGENT semantic (its catalog capability word)."""
+        if mi not in self.tangent_reads:
+            shader = self.materials.shader(self.materials.used[mi])
+            self.tangent_reads[mi] = bool(materials.shader_flags(shader) & materials.FLAG_TANGENT)
+        return self.tangent_reads[mi]
+
+    def loop_frames(self, mesh, mw):
+        """Each loop's tangent frame as the scene's `vt` gives it: Blender's
+        own (MikkTSpace on the render UV map, the frame its Normal Map node
+        and its bakes use), tangent then bitangent, in mission axes on D3D UVs
+        (v runs down, so the bitangent turns over). The frames are directions
+        in the object's space, so they go through its matrix itself, not the
+        normals' inverse transpose. None where Blender computes none (no UV
+        map; a face of more than four corners)."""
+        layers = mesh.uv_layers
+        if len(layers) == 0:
+            return None
+        render = next((l for l in layers if l.active_render), layers[0]).name
+        try:
+            mesh.calc_tangents(uvmap=render)
+        except RuntimeError:
+            return None
+        count = len(mesh.loops)
+        tangent = np.empty(count * 3, dtype=np.float64)
+        bitangent = np.empty(count * 3, dtype=np.float64)
+        mesh.loops.foreach_get("tangent", tangent)
+        mesh.loops.foreach_get("bitangent", bitangent)
+        # The object's matrix, then Blender's axes as mission axes (the basis
+        # change ModelSpace.mission is), on row vectors.
+        into = np.array(self.space.basis.transposed() @ mw.to_3x3(), dtype=np.float64).T
+        frames = []
+        for vectors, sign in ((tangent, 1.0), (bitangent, -1.0)):
+            mission = sign * (vectors.reshape(-1, 3) @ into)
+            length = np.linalg.norm(mission, axis=1, keepdims=True)
+            frames.append(np.divide(mission, length, out=np.zeros_like(mission), where=length > 1e-12))
+        return np.concatenate(frames, axis=1).astype(np.float32)  # the file stores float32
+
+    def framed_corner(self, s, mi, frames, li, ob, vert):
+        """`vert` with its loop's tangent frame when its material reads
+        tangents and Blender gave the object frames; an object it gave none
+        is named on the mesh, which then writes no frame at all."""
+        if not self.reads_tangents(mi):
+            return vert
+        if frames is None:
+            if ob.name not in s["unframed"]:
+                s["unframed"].append(ob.name)
+            return vert
+        s["framed"] = True
+        return vert + tuple(float(x) for x in frames[li])
+
     def mesh_triangles(self, ob, meshes):
         """A rigid part's mesh into the part's scene meshes (material index ->
         mesh), each of any size: the CLI's lowering splits a mesh into the
-        strips the game holds."""
+        strips the game holds. Under a shader that reads tangents a corner
+        carries its tangent frame (loop_frames)."""
         ev = self.evaluated(ob)
         mesh = ev.to_mesh()
         try:
@@ -632,11 +689,14 @@ class Exporter(Notes):
             normals = mesh.corner_normals
             uv0, uv1 = self.uv_layers(mesh)
             self.materials.record_mesh(ob, ev, mesh, uv0)
-            for tri in mesh.loop_triangles:
-                s = mesh_of(meshes, self.materials.index_of(slot_material(ev, tri.material_index)), ob)
+            mis = [self.materials.index_of(slot_material(ev, tri.material_index)) for tri in mesh.loop_triangles]
+            frames = self.loop_frames(mesh, mw) if any(self.reads_tangents(mi) for mi in set(mis)) else None
+            for tri, mi in zip(mesh.loop_triangles, mis):
+                s = mesh_of(meshes, mi, ob)
                 corners = []
                 for li in reversed(tri.loops) if mirrored else tri.loops:
                     vert = self.corner(mesh, mesh.loops[li], mw, nmat, normals, uv0, uv1)
+                    vert = self.framed_corner(s, mi, frames, li, ob, vert)
                     corners.append(shared_vertex(s, tuple(round(x, 5) for x in vert), vert, corners))
                 s["tris"].append(corners)
         finally:
@@ -718,12 +778,15 @@ class Exporter(Notes):
                     at = self.space.mission(mw @ mesh.vertices[vi].co)
                     for b, _ in influences[vi]:
                         self.bone_points.setdefault(b, []).append(at)
-            for tri in mesh.loop_triangles:
-                s = mesh_of(meshes, self.materials.index_of(slot_material(ev, tri.material_index)), ob)
+            mis = [self.materials.index_of(slot_material(ev, tri.material_index)) for tri in mesh.loop_triangles]
+            frames = self.loop_frames(mesh, mw) if any(self.reads_tangents(mi) for mi in set(mis)) else None
+            for tri, mi in zip(mesh.loop_triangles, mis):
+                s = mesh_of(meshes, mi, ob)
                 ids = []
                 for li in reversed(tri.loops) if mirrored else tri.loops:
                     loop = mesh.loops[li]
                     vert = self.corner(mesh, loop, mw, nmat, normals, uv0, uv1)
+                    vert = self.framed_corner(s, mi, frames, li, ob, vert)
                     infl = tuple(influences[loop.vertex_index])
                     key = tuple(round(x, 5) for x in vert) + tuple((b, round(w, 5)) for b, w in infl)
                     ids.append(shared_vertex(s, key, (vert, infl), ids))
@@ -733,12 +796,21 @@ class Exporter(Notes):
 
     def emit_mesh(self, s, mi, lines, skinned):
         lines.append(f"mesh {mi} {self.materials.strip_alpha(mi)}  # {', '.join(s['meshes'])}")
+        # A mesh gives a tangent frame on every vertex or none: one an object
+        # gave no frames to takes the CLI's rule for all of it.
+        framed = s["framed"] and not s["unframed"]
+        if s["unframed"]:
+            self.note(f"{', '.join(s['unframed'])}: Blender computes tangent frames on triangles and quads only, "
+                      "with a UV map, so the CLI derives this mesh's (triangulate it to export Blender's own)")
+        uv_end = 10 if self.uv1 else 8
         for v in s["verts"]:
+            vert, infl = v if skinned else (v, ())
+            line = "v " + fmt(*vert[:uv_end])
             if skinned:
-                vert, infl = v
-                lines.append("v " + fmt(*vert) + " " + " ".join(f"{b} {fmt(float(w))}" for b, w in infl))
-            else:
-                lines.append("v " + fmt(*v))
+                line += " " + " ".join(f"{b} {fmt(float(w))}" for b, w in infl)
+            lines.append(line)
+            if framed:
+                lines.append("vt " + fmt(*vert[uv_end:uv_end + 6]))
         for t in s["tris"]:
             lines.append(f"t {t[0]} {t[1]} {t[2]}")
 

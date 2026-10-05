@@ -793,7 +793,7 @@ std::map<std::string, Geometry> lod_geometry(Diff &d, const std::string &where, 
 }
 
 // The DRIFT of matched render corners: whatever moved within tolerance, and
-// the tangent frames, which the builder derives by a heuristic.
+// the tangent frames, which an author's tool or the builder derives.
 void render_drift(Diff &d, const std::string &label, const Geometry &x, const Geometry &y,
 		const std::vector<Pairing> &pairs) {
 	for (const Pairing &p : pairs)
@@ -815,8 +815,8 @@ void render_drift(Diff &d, const std::string &label, const Geometry &x, const Ge
 			if (a.tangents && b.tangents) {
 				const double g = gap(a.tangent, b.tangent);
 				if (g > kTangentNoise)
-					d.note("tangent/bitangent values (the builder derives them by the OED rule; retail's tool is unwitnessed)", g,
-							label, p.count);
+					d.note("tangent/bitangent values (a scene's 'vt' frames, else the builder's OED rule; retail's tool "
+							"is unwitnessed)", g, label, p.count);
 			}
 		}
 }
