@@ -28,7 +28,9 @@ std::string play_mission_for(const SessionView &view);
 // when the game is spawned (after its build lands, so the port of the game's MCP endpoint is
 // allocated then, not when Play was asked for), the mission it starts the game in (S14: a .bms of
 // the project, the runtime's --mission; the game install starts at its menu whatever was asked),
-// the game's log tailed into Output, its boot report (the files it did not find) and its launch
+// the game's log tailed into Output (the game install's file log read once its game exited, never
+// while it runs, and what it says the game loaded reported; Strict Play's first run started again
+// when it wrote its game.cfg and quit), its boot report (the files it did not find) and its launch
 // mission's (the mission that did not load, and why), how it ended (its exit code: a crash told
 // from a quit), its lease on the build it runs from (run/play_lease.h), which keeps a build from
 // pruning that directory while the game may still run, and the run directory it runs in
@@ -51,7 +53,8 @@ public:
 	std::string resolve_runtime_executable() const;
 
 	// Play refused before any build (no spawn on this platform, a game running, a `mission` that is
-	// no .bms of the project): true, said why.
+	// no .bms of the project, the game install's game running already when Play runs there, Strict
+	// Play of an expansion): true, said why.
 	bool refused(const std::string &mission = std::string());
 	// The game started on the last build (its lease written, the view's run block filled), in
 	// `mission` ("" its menu): the project's .bms of that name as the scan spells it, looked up
@@ -74,7 +77,20 @@ public:
 
 private:
 	void follow_launcher(const PlayLauncher &launcher);
-	void tail_game_log();
+	// The game spawned on `plan` in its run directory, staged already (its lease written, the run
+	// directory claimed, the view's run block filled, its Output line begun); false with `error`.
+	bool launch(const LaunchPlan &plan, Diagnostic &error);
+	// Whatever the game wrote to its log since the last read, line by line; false when there is no log
+	// to read.
+	bool tail_game_log();
+	// What the game install's file log said its game loaded, read as it exited (`read`: the log was
+	// there): the run section's file_log, and a line in Output.
+	void report_file_log(bool read);
+	// Strict Play's first run, gone: started once more when it wrote its game.cfg and quit
+	// (strict_first_run_starts_again), in the same run directory, once the game's one-at-a-time gate is
+	// let go (step_start_again, from the polls).
+	void start_again_if_first_run();
+	void step_start_again();
 	void absorb_boot_report(const std::string &line);
 	// The launch mission's report (gameprofile::kLaunchMissionFailedMarker): the mission that did
 	// not load and why, a Problems row (play.mission.failed) of the project the game was started in.
@@ -96,6 +112,18 @@ private:
 	std::string game_log_file_;
 	uint64_t game_log_offset_ = 0;
 	std::string game_log_partial_;
+	// The running (or last) game: its plan, whether it is the game install's (its log read once it
+	// exited) and strictly so, whether its run directory held a game.cfg before its first start, whether
+	// it was started again, when it started, and what its file log said it loaded.
+	LaunchPlan plan_;
+	bool install_run_ = false;
+	bool strict_run_ = false;
+	bool had_config_ = false;
+	bool started_again_ = false;
+	bool start_again_pending_ = false; // waiting for the game before to let its gate go
+	int64_t start_again_since_ = 0;
+	int64_t started_ms_ = 0;
+	FileAccessLog file_log_;
 	// The game's one Output line (its log folded under it): its index, what runs ("OpenNova", "the game
 	// install"), the lines its log held and how many of them were shown; game_words is its text.
 	std::string game_words() const;
