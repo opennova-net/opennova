@@ -9,7 +9,9 @@
 
 #include <formats/gamecfg/game_cfg.h>
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <cstdint>
 #include <cstdio>
 #include <limits>
@@ -259,6 +261,33 @@ int weapon_availability() {
 	options.weapons = many;
 	r = load_text(with_version("avail_wpn_W256 = 0\r\n"), options);
 	TEST_EXPECT(r.cfg.class_availability[1] == 0);
+
+	// Past the class words, retail's unchecked store would leave the record
+	// (D-GAMECFG-1): the port drops it, and nothing in the record changes.
+	WeaponRoster past(266);
+	for (size_t i = 0; i < past.size(); ++i) past[i].name = "WPN_W" + std::to_string(i);
+	options.weapons = past;
+	TEST_EXPECT(weapon_slot(r.cfg, 264) != nullptr);
+	TEST_EXPECT(weapon_slot(r.cfg, 265) == nullptr);
+	const GameCfg before = load_text(with_version(""), options).cfg;
+	r = load_text(with_version("avail_wpn_W265 = 0\r\n"), options);
+	TEST_EXPECT(std::equal(std::begin(r.cfg.class_availability), std::end(r.cfg.class_availability),
+			std::begin(before.class_availability)));
+	TEST_EXPECT(std::equal(std::begin(r.cfg.weapon_availability), std::end(r.cfg.weapon_availability),
+			std::begin(before.weapon_availability)));
+	return 0;
+}
+
+// fgets reads at most 1023 characters, so a longer line splits and its tail
+// is read as a line of its own: a commented-out line whose tail is a setting
+// applies that setting, as in retail.
+int long_line_splits() {
+	const std::string head = "//" + std::string(1021, 'x'); // exactly 1023 characters
+	const LoadResult r = load_text(with_version(head + "max_kills = 7\r\n"));
+	TEST_EXPECT(r.cfg.max_kills == 7);
+	// One character shorter, the whole line is the comment.
+	const LoadResult whole = load_text(with_version("//" + std::string(1020, 'x') + "max_kills = 7\r\n"));
+	TEST_EXPECT(whole.cfg.max_kills == defaults().max_kills);
 	return 0;
 }
 
@@ -313,6 +342,7 @@ int main() {
 	if (reset_and_lan_switch() != 0) return 1;
 	if (string_bounds() != 0) return 1;
 	if (weapon_availability() != 0) return 1;
+	if (long_line_splits() != 0) return 1;
 	if (duplicates_and_floats() != 0) return 1;
 	if (crt_fixed_print() != 0) return 1;
 	std::printf("OK: gamecfg parse\n");
