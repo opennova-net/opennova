@@ -71,6 +71,12 @@ void NwuHostRole::tick(uint32_t now_ms) {
 	}
 }
 
+void NwuHostRole::update_server_info() {
+	if (phase_ != Phase::Hosting) return;
+	send_host_update(/*full=*/false);
+	send_status_blob();
+}
+
 // The host-direction notices (ServerHostResult, ServerStopHosting, ServerCommand,
 // ServerPlayerEnterResult: the client msginfo rows ClientSession dispatches).
 bool NwuHostRole::handle_notice(const ClientSession::Notice &notice) {

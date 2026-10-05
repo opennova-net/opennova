@@ -5,14 +5,16 @@ Godot, configured by a host file, retail's own dedicated-server format, over the
 `game.cfg` in the directory it runs from. It mounts a Joint Operations install the way
 `opennova.exe` mounts it, boots the starting mission through the engine's one host boot
 (`engine/runtime/inmatch/host_boot.h`, the same two phases the game's hosts run), binds
-`game.cfg`'s LAN port range, answers LAN browsers and admits joiners, retail clients
-included. Pre-1.0 and experimental.
+`game.cfg`'s LAN port range (or its NovaWorld one, listing itself on a NovaWorld service),
+answers LAN browsers and admits joiners, retail clients included. Pre-1.0 and experimental.
 
 ## Usage
 
 ```text
 opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
                [/game <code>] [--loose-root] [--lan-port <n>] [--log-debug]
+               [--master-host <gate>] [--master-gate-port <n>]
+               [--credentials <file>] [--allow-public]
 ```
 
 | Option | Meaning |
@@ -25,9 +27,38 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
 | `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. |
 | `--log-debug` | Print the engine's debug log lines. |
+| `--master-host <gate>` | The NovaWorld gate to list on (default `127.0.0.1`). Given, the server lists whatever `game.cfg` says (below). |
+| `--master-gate-port <n>` | The gate's UDP port (default 7597). |
+| `--credentials <file>` | `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines: the account the listing logs in with to fetch its HOSTKEY, as the game's NovaWorld menu does. Without it the server hosts with no HOSTKEY, which an `opennova-novaworld-server` accepts. |
+| `--allow-public` | Allow NovaWorld destinations off `127.0.0.0/8` (a remote service, or a live master). |
 
-`--help` prints the usage. Ctrl+C stops the server: it sends every joiner the round
-reset and the session's STOP goodbye before it closes the socket.
+`--help` prints the usage. Ctrl+C, SIGTERM or closing the console window (Windows) stops
+the server: it sends every joiner the round reset and the session's STOP goodbye, and a
+listed server deregisters (ClientStopHosting and the goodbye), before it closes the socket.
+
+## NovaWorld
+
+`game.cfg`'s `networkconnecttype` picks the network, as retail's dedicated server reads it:
+`1`, the NovaWorld screen's and the default (so also with no `game.cfg`), lists the server on
+NovaWorld; `2`, the LAN screen's, serves LAN only. `--master-host` lists whatever the file
+says.
+
+A listed server binds `game.cfg`'s NovaWorld port range (`mpnovaworldportmin` / `max` /
+`delta`, 32768..65535 in a stock file) instead of the LAN one, and the NovaWorld session runs
+on that same socket: the service learns the server's address from the session's own
+datagrams, so joiners reach the game wherever the server's address is. Before the mission
+boots the server probes the gate, verifies its session (logging in and fetching the HOSTKEY
+when `--credentials` names an account) and hosts; a listing that does not host stops the
+start (exit code 1), as retail's does. While it serves, the listing carries the session's
+name, message and rules, the starting map, the time left and every joiner, and the service's
+commands (`PuntPlayer`, `SetServerName`, ...) run on the match. LAN browsers still find the
+server on the same socket.
+
+Every NovaWorld destination must be on `127.0.0.0/8` unless `--allow-public` is given (names
+do not resolve until then either), so by default the server lists only on an
+`opennova-novaworld-server` on this machine. A remote service, OpenNova's or NovaLogic's live
+master, needs `--allow-public`; a live master is a shared service, so use it sparingly. Account
+names, passwords and session tags are masked in the log.
 
 ## The host file
 
@@ -114,6 +145,6 @@ A `game.cfg` with `mpreset = "1"` stops the server before it writes anything, wi
 | Code | Meaning |
 |---|---|
 | 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset`, or the map rotation ran out (the end of the list with `Replay 0`). |
-| 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, or the mission did not boot. |
-| 2 | A usage error. |
-| 3 | The session ended otherwise: a later map that did not boot, or a mission exit that is not a round end. |
+| 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the login or the host request failed; `networkconnecttype = 2` serves LAN only), or the mission did not boot. |
+| 2 | A usage error, or the `--credentials` file did not open. |
+| 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting. |

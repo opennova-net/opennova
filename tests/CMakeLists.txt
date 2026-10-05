@@ -3694,10 +3694,34 @@ add_test(NAME opennova_serve_lan_join COMMAND opennova_serve_test)
 # opennova-serve's files in its working directory (ADR 0051 d2): game.cfg read under the host
 # file and rewritten as Serve Only, activesrvr.txt while serving and gone after a clean stop, the
 # no-game.cfg defaults, and mpreset's stop. Each run in a temp working directory.
-add_executable(opennova_serve_game_cfg_test serve/opennova_serve_game_cfg_test.cpp)
-target_link_libraries(opennova_serve_game_cfg_test PRIVATE opennova_serve_core)
-target_include_directories(opennova_serve_game_cfg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# The no-game.cfg run lists on NovaWorld (the default network type), against the real
+# NwUdpListener and an in-test gate on loopback.
+add_executable(opennova_serve_game_cfg_test
+    serve/opennova_serve_game_cfg_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(opennova_serve_game_cfg_test PRIVATE opennova_serve_core opennova_novaworld_service)
+target_include_directories(opennova_serve_game_cfg_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME opennova_serve_game_cfg COMMAND opennova_serve_game_cfg_test)
+set_tests_properties(opennova_serve_game_cfg PROPERTIES RUN_SERIAL TRUE)
+# opennova-serve listed on NovaWorld (ADR 0051 d6) against the real NwUdpListener and an in-test
+# gate over loopback: it hosts on the game socket before the boot, lists the Serve Only columns
+# with no slot 0, the advertised endpoint is the game socket a joiner plays on, and the stop
+# deregisters.
+add_executable(opennova_serve_novaworld_test
+    serve/opennova_serve_novaworld_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(opennova_serve_novaworld_test PRIVATE opennova_serve_core opennova_novaworld_service)
+target_include_directories(opennova_serve_novaworld_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
+set_tests_properties(opennova_serve_novaworld PROPERTIES RUN_SERIAL TRUE)
+# The Serve Only registration's var lists against the witnessed retail names and values.
+add_executable(serve_registration_parity_test serve/serve_registration_parity_test.cpp)
+target_link_libraries(serve_registration_parity_test PRIVATE opennova_serve_core)
+add_test(NAME serve_registration_parity COMMAND serve_registration_parity_test)
 # The one socket under the game's protocol and the NWU session (D-NET-346): the demux and the
 # lobby protocol's claim.
 add_executable(nwu_demux_test novaworld/nwu_demux_test.cpp)

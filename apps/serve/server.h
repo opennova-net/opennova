@@ -5,12 +5,15 @@
 // (gamecfg::load), the game data mounted the way the game mounts it, the
 // retail host file over the cfg block (inmatch/host_file.h), the directory
 // lock (activesrvr.txt) and the cfg saved as Serve Only, the session settings
-// from the block (inmatch/host_config.h), the cfg's LAN port range bound, the
-// starting mission booted as a DedicatedHost through the engine's one host
-// boot (inmatch/host_boot.h) and the in-match session run round after round
-// over the host file's rotation (the engine's map change,
-// inmatch/map_change.h, game.cfg saved at each); at a clean exit it saves
-// game.cfg again and deletes the lock. Everything below the config, the
+// from the block (inmatch/host_config.h), the one socket bound for the cfg's
+// network type (the LAN server range, or on NovaWorld the mpnovaworld range),
+// on NovaWorld the listing hosted on that socket before the mission boots (the
+// lister's session, ADR 0051 d6), the starting mission booted as a
+// DedicatedHost through the engine's one host boot (inmatch/host_boot.h) and
+// the in-match session run round after round over the host file's rotation
+// (the engine's map change, inmatch/map_change.h, game.cfg saved at each; the
+// listing and its socket kept across it); at a clean exit it deregisters,
+// saves game.cfg again and deletes the lock. Everything below the config, the
 // mount, the socket and the wall clock is the engine's.
 //
 // The files are the process's working directory's, as retail's: game.cfg and
@@ -27,14 +30,24 @@
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_catalog.h>
 #include <runtime/mission/mission_kernel.h>
+#include <formats/rtxt/rtxt.h>
+#include <net/novaworld/gate_probe.h>
+#include <net/novaworld/lobby_vars.h>
+#include <net/npwire/datagram_demux.h>
 
+#include "listing.h" // nw_lister::Credentials
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
+
+namespace opennova::nw_lister {
+class Lister;
+}
 
 namespace opennova::serve {
 
@@ -45,15 +58,28 @@ struct ServeOptions {
 	std::string game;         // /game <code>
 	bool loose_root = false;  // --loose-root: a directory with no archives mounts loose
 	std::string host_file;    // /HOST <file>
-	// The first port of the bind scan (--lan-port; 0 = game.cfg mplanserverportmin).
+	// The first port of the bind scan (--lan-port; 0 = the cfg range's head: game.cfg
+	// mplanserverportmin, or mpnovaworldportmin on the NovaWorld network type).
 	uint16_t port = 0;
 	bool log_debug = false;   // --log-debug
+	// NovaWorld listing (ADR 0051 d6), in opennova-nw-lister's spellings. The network type is
+	// game.cfg's `networkconnecttype` (1, NovaWorld, by default), as retail's dead auto-host
+	// takes it; a gate host on the command line lists whatever the cfg says. The gate host
+	// defaults to this machine: until --allow-public every NovaWorld destination must be on
+	// 127.0.0.0/8, so NovaLogic's live master is never reached by default.
+	std::string master_host;                       // --master-host (empty: 127.0.0.1, cfg-driven)
+	uint16_t master_gate_port = GATE_DEFAULT_PORT; // --master-gate-port
+	bool allow_public = false;                     // --allow-public
+	std::string credentials_path;                  // --credentials FILE
+	nw_lister::Credentials credentials;            // main() loads it and masks every value
 };
 
 // Parses the command line (argv[1..]). Returns 0 when the options parsed, 1 on
 // a usage error (`error` says why), -1 when help was asked for.
 int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error);
 const char *serve_usage();
+
+class ServeListing;
 
 class Server {
 public:
@@ -64,20 +90,24 @@ public:
 
 	// Read game.cfg, mount, read it again over weapon.def, read the host file,
 	// write the lock and save game.cfg, bind the socket, boot the starting
-	// mission and start the session. False with `error` when any leg fails;
-	// nothing is bound then, and stop() has run (so the exit's save and the
-	// lock's delete too, once the mount succeeded). The embedder starts the
-	// socket layer (net::startup) first and shuts it down after stop(): it is
-	// process-wide.
-	bool start(std::string &error);
+	// mission and start the session; on the NovaWorld network type, host on
+	// the gate's NovaWorld session between the bind and the boot, pumping it
+	// until it hosts or fails (or `cancel` is set). False with `error` when any
+	// leg fails; nothing is bound then, and stop() has run (so the exit's save
+	// and the lock's delete too, once the mount succeeded). The embedder starts
+	// the socket layer (net::startup) first and shuts it down after stop(): it
+	// is process-wide.
+	bool start(std::string &error, const std::atomic<bool> *cancel = nullptr);
 	// One outer frame of `delta_seconds` wall clock. A round end's mission exit
-	// runs the map change and boots the next map inside the session. False
-	// once the session has ended (end_message() says how; rotation_ended()
-	// when the rotation ran out), and stop() has run.
+	// runs the map change and boots the next map inside the session (a listed
+	// server's listing and socket kept). False once the session has ended
+	// (end_message() says how; rotation_ended() when the rotation ran out), and
+	// stop() has run.
 	bool frame(double delta_seconds);
 	// The host's exit: the round reset to every joiner, the STOP description,
-	// the final flush; then game.cfg saved, the socket closed and the lock
-	// deleted, as Game_Run's exit. Idempotent.
+	// the final flush; the NovaWorld deregistration (ClientStopHosting and the
+	// goodbye); then game.cfg saved, the socket closed and the lock deleted, as
+	// Game_Run's exit. Idempotent.
 	void stop();
 	// Game_SaveConfig: the cfg block to the working directory's game.cfg. The
 	// round-end map change calls it, as the PreMenu's init saves at every map
@@ -102,6 +132,10 @@ public:
 	const std::vector<mission_catalog::Row> &catalog() const { return catalog_; }
 	mission::MissionKernel &kernel() { return *kernel_; }
 	inmatch::HostRole &role() { return *role_; }
+	// True when the session runs on the NovaWorld network type (it is listed).
+	bool novaworld() const { return novaworld_; }
+	// The NovaWorld listing's lister (null when not listing).
+	nw_lister::Lister *lister() { return lister_.get(); }
 
 private:
 	bool read_boot_config(std::string &error);
@@ -116,6 +150,10 @@ private:
 	// an in-session one. False when the session ended.
 	bool route_mission_exit(int32_t reason);
 	bool open_socket(std::string &error);
+	bool host_on_novaworld(std::string &error, const std::atomic<bool> *cancel);
+	// The listing over the mission that just started (the first, or a map change's next).
+	void bind_listing();
+	HostRegistration listing_columns() const;
 
 	ServeOptions options_;
 	ResourceIndex index_;
@@ -130,8 +168,15 @@ private:
 	std::unique_ptr<inmatch::HostRole> role_;
 	std::unique_ptr<inmatch::Session> session_;
 	inmatch::HostBoot boot_;
+	rtxt::File gametext_;
+	bool have_gametext_ = false;
+	bool novaworld_ = false;
 	net::Socket socket_;
 	std::unique_ptr<net::NetDatagramSocket> datagrams_;
+	// The one socket under the game's protocol and the NWU session (D-NET-346).
+	std::unique_ptr<DatagramDemux> demux_;
+	std::unique_ptr<ServeListing> listing_;
+	std::unique_ptr<nw_lister::Lister> lister_;
 	uint16_t bound_port_ = 0;
 	bool running_ = false;
 	bool rotation_ended_ = false;

@@ -8,19 +8,29 @@
 //   1. a game.cfg with host keys off their defaults, some of which the host
 //      file overrides: the session config, the cfg port range, the rewritten
 //      game.cfg, the lock while serving and its delete at stop();
-//   2. no game.cfg: the defaults, and the file is created;
+//   2. no game.cfg: the defaults, and the file is created; the default
+//      network type (1) lists the server on NovaWorld (an in-test gate and
+//      NwUdpListener on loopback) before the mission boots;
 //   3. a game.cfg with mpreset set: the start stops before anything is
 //      written, as retail's load exits the process.
 #include "server.h"
 #include "serve_test_support.h"
 
+#include "lister.h"
+#include "nw_udp_listener.h"
+#include "server_config.h"
+
+#include <net/novaworld/connection/manager.h>
+
 #include <base/gameprofile/game_type.h>
 #include <formats/gamecfg/game_cfg.h>
 
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace opennova;
@@ -44,12 +54,13 @@ constexpr double kFrame = 1.0 / 62.5;
 // fails fast). With `cfg`, the working directory's game.cfg is written first,
 // its LAN server range the probed port alone, and no --lan-port is passed.
 std::unique_ptr<serve::Server> start_server(const fs::path &resource_dir, const fs::path &host_file,
-		const gamecfg::GameCfg *cfg, std::string &error) {
+		const gamecfg::GameCfg *cfg, std::string &error, const std::vector<std::string> &extra = {}) {
 	std::unique_ptr<serve::Server> server;
 	for (int attempt = 0; attempt < 5; ++attempt) {
 		const uint16_t port = serve_test::free_udp_port();
 		std::vector<std::string> args = {"--resource-dir", resource_dir.string(), "/HOST",
 				host_file.string(), "--loose-root"};
+		args.insert(args.end(), extra.begin(), extra.end());
 		if (cfg != nullptr) {
 			gamecfg::GameCfg written = *cfg;
 			written.mp_lan_server_port_min = port;
@@ -107,6 +118,7 @@ int main() {
 		cfg.remote_admin_port = 4711;            // the admin server's (ADR 0051 PR5)
 		cfg.music_volume = 77;                   // no host setting: round-trips
 		cfg.dedicated = 0;
+		cfg.networkconnecttype = 2;              // the LAN screen's: no NovaWorld listing
 		std::string error;
 		std::unique_ptr<serve::Server> server =
 				start_server(root, root / "override.host", &cfg, error);
@@ -164,14 +176,26 @@ int main() {
 		}
 	}
 
-	// --- 2. no game.cfg: the defaults, and the file is created.
+	// --- 2. no game.cfg: the defaults, and the file is created. The default
+	// network type is NovaWorld's (Config_SetDefaults @0x54D1D4), so the server
+	// lists on the gate on this machine, here an in-test one, before it boots.
 	{
+		ConnectionManager manager;
+		novaworld_server::NwUdpListener listener(manager);
+		novaworld_server::ServerConfig service;
+		service.nw_udp_port = 0;
+		CHECK(listener.start(service));
+		uint16_t gate_port = 0;
+		net::ScopedSocket gate(net::udp_bind(0, &gate_port));
+		std::atomic<bool> stop_gate{false};
+		std::thread gate_thread(
+				[&] { serve_test::serve_gate(gate.get(), listener.bound_port(), false, stop_gate); });
 		const fs::path work = serve_test::fresh_dir("game_cfg_fresh");
 		dirs.push_back(work);
 		serve_test::ScopedCwd cwd(work);
 		std::string error;
-		std::unique_ptr<serve::Server> server =
-				start_server(root, root / "mission_only.host", nullptr, error);
+		std::unique_ptr<serve::Server> server = start_server(root, root / "mission_only.host", nullptr,
+				error, {"--master-gate-port", std::to_string(gate_port)});
 		if (!server) std::printf("start: %s\n", error.c_str());
 		CHECK(server != nullptr);
 		if (server) {
@@ -190,6 +214,10 @@ int main() {
 			CHECK(on_disk.cfg.dedicated == 1);
 			CHECK(on_disk.cfg.mp_max_players == 64);
 			CHECK(on_disk.cfg.game_name == "!Untitled");
+			// The default network type listed it.
+			CHECK(on_disk.cfg.networkconnecttype == 1);
+			CHECK(server->novaworld() && server->lister() != nullptr && server->lister()->hosting());
+			CHECK(server->role().state.host_owner.ctx.transport_mode == inmatch::NetworkType::NovaWorld);
 			// Every other key as a load of no file leaves it (the defaults, then
 			// the graphics clamp).
 			gamecfg::GameCfg expected = gamecfg::load(nullptr, 0, {}).cfg;
@@ -199,6 +227,10 @@ int main() {
 			CHECK(!fs::exists(work / gamecfg::kActiveServerMarkerFileName));
 			CHECK(fs::exists(work / gamecfg::kFileName));
 		}
+		server.reset();
+		stop_gate = true;
+		gate_thread.join();
+		listener.stop();
 	}
 
 	// --- 3. mpreset: the start stops at the first read; nothing is written.

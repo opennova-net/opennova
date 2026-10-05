@@ -1,13 +1,25 @@
 // opennova-serve: the headless game server (ADR 0051). The game's Serve Only
 // host with no Godot and no window, configured by the retail host file over
-// the working directory's game.cfg. The server's legs live in server.cpp;
-// this file owns the console, the signals, the socket layer and the wall
-// clock.
+// the working directory's game.cfg, listed on NovaWorld when the cfg's network
+// type says so. The server's legs live in server.cpp; this file owns the
+// console, the stop signals, the socket layer and the wall clock.
 
 #include "server.h"
 
+#include "console_log.h"
+#include "listing.h"
+
 #include <base/io/log.h>
 #include <runtime/world/tick_accumulator.h>
+
+#include "net_sockets.h"
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -22,26 +34,33 @@ namespace {
 std::atomic<bool> g_stop{false};
 void on_signal(int) { g_stop.store(true); }
 
-bool g_log_debug = false;
-void console_log(opennova::io::LogLevel level, const char *message) {
-	if (level == opennova::io::LogLevel::kDebug && !g_log_debug) return;
-	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n", message);
-}
+#ifdef _WIN32
+HANDLE g_done = nullptr; // set once the server stopped (and deregistered)
 
-// Starts the server and runs it until a signal or the session's end. Returns
+// Closing the console window, a logoff or a shutdown ends the process when
+// this returns; hold it (Windows allows about 5 s) so the loop can stop the
+// session and deregister from NovaWorld first, as opennova-nw-lister does.
+BOOL WINAPI on_console_ctrl(DWORD type) {
+	g_stop.store(true);
+	if ((type == CTRL_CLOSE_EVENT || type == CTRL_LOGOFF_EVENT || type == CTRL_SHUTDOWN_EVENT) && g_done)
+		WaitForSingleObject(g_done, 4500);
+	return TRUE;
+}
+#endif
+
+// Starts the server and runs it until a stop or the session's end. Returns
 // the process exit code.
 int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 	using namespace opennova;
 	serve::Server server(options);
 	std::string error;
-	if (!server.start(error)) {
-		std::fprintf(stderr, "opennova-serve: %s\n", error.c_str());
+	if (!server.start(error, &g_stop)) {
+		io::logf(io::LogLevel::kError, "opennova-serve: %s", error.c_str());
 		// A game.cfg with mpreset set ends the process with code 0, as retail's
 		// load does [orig: Game_LoadConfig @0x5514A1..0x5514AC, crt_exit(0)].
 		return server.reset_exit() ? 0 : 1;
 	}
-	std::fprintf(stdout, "opennova-serve: serving on UDP %u (Ctrl+C stops)\n", server.bound_port());
-	std::fflush(stdout);
+	io::logf(io::LogLevel::kInfo, "opennova-serve: serving on UDP %u (Ctrl+C stops)", server.bound_port());
 
 	// The session banks the measured wall clock, as Game_MainLoop banks its
 	// GetTickCount deltas; the loop wakes once per logic quantum.
@@ -60,10 +79,10 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 			// arm (PostMenu_RouteMissionExit @0x56864F). Any other end of the
 			// session is an exit by itself.
 			if (server.rotation_ended()) {
-				std::fprintf(stdout, "opennova-serve: %s after %d mission(s)\n",
+				io::logf(io::LogLevel::kInfo, "opennova-serve: %s after %d mission(s)",
 						server.end_message().c_str(), server.missions_played());
 			} else {
-				std::fprintf(stderr, "opennova-serve: the session ended: %s\n",
+				io::logf(io::LogLevel::kError, "opennova-serve: the session ended: %s",
 						server.end_message().c_str());
 				code = 3;
 			}
@@ -73,7 +92,7 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 		next += period;
 	}
 	server.stop();
-	std::fprintf(stdout, "opennova-serve: stopped\n");
+	io::logf(io::LogLevel::kInfo, "opennova-serve: stopped");
 	return code;
 }
 
@@ -93,19 +112,38 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "opennova-serve: %s\n%s", error.c_str(), serve::serve_usage());
 		return 2;
 	}
-	g_log_debug = options.log_debug;
-	io::set_log_sink(&console_log);
-	// Installed before the boot, so a Ctrl+C during a long load stops cleanly.
+	// The log sink masks every registered secret, so an account name, a
+	// password or a session tag never reaches the console (opennova-nw-lister's).
+	nw_lister::install_console_log(std::string(), options.log_debug);
+	if (!options.credentials_path.empty()) {
+		if (!nw_lister::load_credentials(options.credentials_path, options.credentials, error)) {
+			io::logf(io::LogLevel::kError, "opennova-serve: --credentials: %s", error.c_str());
+			return 2;
+		}
+		const nw_lister::Credentials &c = options.credentials;
+		for (const std::string *secret : {&c.user, &c.pass, &c.admin_user, &c.admin_pass})
+			nw_lister::add_log_secret(*secret);
+	}
+	// Installed before the boot, so a stop during a long load or the
+	// NovaWorld hosting stops cleanly.
 	std::signal(SIGINT, on_signal);
 	std::signal(SIGTERM, on_signal);
+#ifdef _WIN32
+	g_done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+	SetConsoleCtrlHandler(on_console_ctrl, TRUE);
+#endif
 
 	// The process owns the socket layer, which is process-wide: the server's
-	// stop() closes its own socket and leaves the layer up.
+	// stop() closes its own sockets and leaves the layer up, and the lister
+	// never starts or stops it.
 	if (net::startup() != 0) {
-		std::fprintf(stderr, "opennova-serve: the socket layer did not start\n");
+		io::logf(io::LogLevel::kError, "opennova-serve: the socket layer did not start");
 		return 1;
 	}
 	const int code = serve_until_stopped(options);
 	net::shutdown();
+#ifdef _WIN32
+	SetEvent(g_done);
+#endif
 	return code;
 }

@@ -61,6 +61,10 @@ public:
 	bool tick(uint32_t now_ms);
 	// Deregister and finish: ClientStopHosting on one pump, then the goodbye burst.
 	void stop();
+	// The server-info update outside the refresh timer: the source's columns and roster at once,
+	// then the Host list's dirty delta (a mission start on a listed server). Nothing while not
+	// hosting.
+	void publish_server_info();
 
 	int exit_code() const { return exit_code_; }
 	bool hosting() const { return role_.is_hosting(); }

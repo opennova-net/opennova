@@ -194,6 +194,12 @@ bool Lister::tick(uint32_t now_ms) {
 	return phase_ != Phase::Done;
 }
 
+void Lister::publish_server_info() {
+	if (phase_ != Phase::Hosting || ending_) return;
+	refresh_listing(true);
+	role_.update_server_info();
+}
+
 void Lister::stop() {
 	if (phase_ == Phase::Done) return;
 	io::logf(LogLevel::kInfo, "[main] stopping");
