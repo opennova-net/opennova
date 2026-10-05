@@ -34,7 +34,7 @@ void check(bool ok, const std::string &what) {
 }
 
 const char kScene[] =
-		"o3d 1\nmodel UNICODE\nmaterial FF_ST_OP\ntexture skin.tga\nlod 0\npart 0 0 0 0\nstrip 0\n"
+		"o3d 2\nmodel UNICODE\nmaterial FF_ST_OP\ntexture skin.tga\nlod 0\npart 0 0 0 0\nmesh 0\n"
 		"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n";
 
 // UTF-8 names spelled as bytes, so the source stays ASCII whatever code page

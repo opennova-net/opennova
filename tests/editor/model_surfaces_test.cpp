@@ -33,10 +33,9 @@
 #include <base/vfs/vfs.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
-#include <formats/threedi/threedi_o3d_read.h>
+#include <formats/threedi/threedi_o3d_lower.h>
 #include <formats/threedi/threedi_strip_decode.h>
-#include <runtime/renderer/material_descriptor.h>
-#include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/model_target.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
@@ -133,7 +132,7 @@ int faces_find_their_materials() {
 // its own side's (the old rule, the nearest middle, gave both faces the later triangle's material). The
 // faces are listed back side first so a rule by order alone would also get them wrong.
 int two_sided_sheet() {
-	std::istringstream text(R"(o3d 1
+	std::istringstream text(R"(o3d 2
 model TWOSIDE
 material FF_MT_OP
 texture front.tga 1 0 0 0
@@ -141,12 +140,12 @@ material FF_MT_OP
 texture back.tga 1 0 0 0
 lod 200 two
 part 0 0 0 0
-strip 0 0
+mesh 0 0
 v 0 -1 0 1 0 0 0 1
 v 0 1 0 1 0 0 1 1
 v 0 1 2 1 0 0 1 0
 t 0 1 2
-strip 1 0
+mesh 1 0
 v 0 -1 0 -1 0 0 0 1
 v 0 1 0 -1 0 0 1 1
 v 0 1 2 -1 0 0 1 0
@@ -161,8 +160,7 @@ cf 0 1 2 14
 )");
 	std::vector<uint8_t> bytes;
 	std::vector<SceneFinding> findings;
-	const bool built = threedi_o3d_build(text, opennova::renderer::material_descriptor_tangent_lookup,
-	                                     opennova::renderer::material_texture_dds_only, bytes, findings);
+	const bool built = threedi_o3d_build(text, opennova::renderer::retail_model_target(), bytes, findings);
 	for (const SceneFinding &f : findings) std::printf("two-sided: line %d: %s\n", f.line, f.message.c_str());
 	TEST_EXPECT(built);
 	ModelDocument document;

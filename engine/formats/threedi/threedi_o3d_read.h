@@ -1,50 +1,36 @@
-// The `.o3d` model scene text (docs/threedi/o3d-scene-format.md) read into the
-// engine's construction API (threedi_build.h) and minted through the parity
-// writer, so a model authored in a DCC is written by the same writer every
-// fixture is (ADR 0003, ADR 0047 d1). The text carries geometry in MISSION axes
-// (x forward, y left, z up); the model-axis conversion is threedi_build's.
-// opennova-3di `build` and the editor's `.o3d` import both read through here.
+// The `.o3d` model scene text (docs/threedi/o3d-scene-format.md) read into
+// its parse, ThreediO3dModel (threedi_o3d_model.h). The text carries geometry
+// in MISSION axes (x forward, y left, z up) and none of a native file's
+// limits: a mesh of any size, influences of any number, names of any length.
+// The lowering (threedi_o3d_lower.h) turns the parse into a model a target
+// holds, and threedi_o3d_build there reads, lowers and mints in one call
+// (opennova-3di `build` and the editor's `.o3d` import).
 //
-// The reader is strict: a field that does not parse, a value its word cannot
-// hold, or a token past the record's fields is an error naming its line, so
-// nothing an exporter writes is silently wrapped or dropped. Authoring text,
-// not a port: the rules it enforces cite the retail loader where it has one.
+// The reader checks the text alone, strictly: a field that does not parse, a
+// value outside its word (the codes, flag words and quantized words the text
+// spells as the file stores them: a style byte, an int16 track, a 32-bit flag
+// word), a token past the record's fields, a record outside its container, an
+// index outside what it names (a triangle's vertex, a part's parent, a
+// declared register) or weights that do not blend to one is an error naming
+// its line. It looks nothing up and knows no target. Authoring text, not a
+// port.
 #pragma once
 
-#include <cstdint>
 #include <istream>
-#include <string>
 #include <vector>
 
 #include <formats/threedi/scene_text.h>
-#include <formats/threedi/threedi_build.h>
+#include <formats/threedi/threedi_o3d_model.h>
 
 namespace opennova::threedi {
 
-// Whether the engine's shader table knows `tag`, and whether that shader reads
-// the TANGENT semantic. The table is the renderer's
-// (runtime/renderer/material_descriptor.h, material_descriptor_tangent_lookup),
-// which a format library may not include, so the caller passes it.
-using ThreediShaderLookup = bool (*)(const char *tag, bool &reads_tangents);
+// The header the reader takes: `o3d 2`. A text of an earlier version fails on
+// its first line (version 1 carried strips, bone tables and four bone slots).
+inline constexpr int kThreediO3dVersion = 2;
 
-// Whether the game's texture loader reads a texture row (its name and authored
-// type) only as the `.dds` of its stem: true with `opens` the file it opens and
-// `loads` that `.dds`; false for a row it decodes itself, one another loader
-// reads, or an empty name. The rule is the renderer's
-// (runtime/renderer/material_texture.h, material_texture_dds_only), which a
-// format library may not include, so the caller passes it.
-using ThreediTextureLookup = bool (*)(const char *name, uint8_t type, std::string &opens, std::string &loads);
-
-// Read `.o3d` text into `model`. Every error and note lands in `findings`; true
-// when none is an error, and `model` is then complete and passes the
-// whole-model checks retail imposes.
-bool threedi_o3d_read(std::istream &text, ThreediShaderLookup shaders, ThreediTextureLookup textures,
-		ThreediBuildModel &model, std::vector<SceneFinding> &findings);
-
-// Read, mint (threedi_build_mint) and read the minted bytes back through the
-// retail-shape reader. True with `out` the model's bytes; false with why in
-// `findings` (a chunk too large for its length field named with its size).
-bool threedi_o3d_build(std::istream &text, ThreediShaderLookup shaders, ThreediTextureLookup textures,
-		std::vector<uint8_t> &out, std::vector<SceneFinding> &findings);
+// Read `.o3d` text into `model`. Every error lands in `findings` (the reader
+// notes nothing: what a target makes of the model is the lowering's); true
+// when there is none, and `model` is then the whole text.
+bool threedi_o3d_read(std::istream &text, ThreediO3dModel &model, std::vector<SceneFinding> &findings);
 
 } // namespace opennova::threedi
