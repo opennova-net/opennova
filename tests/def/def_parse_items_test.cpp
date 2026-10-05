@@ -782,6 +782,31 @@ static int test_tab_separated_keys(void) {
     return bad;
 }
 
+/* A float is the CRT's atof as the game links it: an exponent may be marked d,
+   and a hex spelling reads 0 [orig: ItemDef_ParseProperty @0x49EB00, its _atof
+   calls; _atof @0x76B6A1 -> _atof_l -> _fltin2]. */
+static int test_atof_is_the_crt_atof(void) {
+    static const char text[] =
+        "begin Floats\r\n"
+        "  id 106191\r\n"
+        "  kz 1d1\r\n"
+        "  scale 0x10\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: atof snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *d = &items.entries[0];
+    const int bad = d->kz != 10.0f || d->scale_q16 != 0;
+    if (bad) fprintf(stderr, "FAIL: atof reads kz %g scale_q16 %d\n", (double)d->kz, d->scale_q16);
+    def_free_items(&items);
+    return bad;
+}
+
 /* A line's values are the tokenizer's 29 past the key, not 16, and the 29th runs
    on to the line's end: 27 unknown attrib tokens then `Door Takeable` set both
    (tokens 28 and 29), 28 then `Door Takeable` set neither (token 29 is the run-on
@@ -829,6 +854,7 @@ int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     if (test_items_read_the_retail_tokens() != 0) return 1;
     if (test_tab_separated_keys() != 0) return 1;
+    if (test_atof_is_the_crt_atof() != 0) return 1;
     if (test_attrib_reads_the_29_values() != 0) return 1;
     if (test_regional_sound_delays() != 0) return 1;
     if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;

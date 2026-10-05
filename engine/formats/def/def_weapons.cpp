@@ -2,6 +2,7 @@
 
 // WEAPONS.DEF: one record per weapon.
 
+#include <base/io/crt_ftol.h>
 #include "def_scan.h"
 
 #include <base/io/ascii_config.h>
@@ -47,7 +48,7 @@ static double parse_double_n(const char *s, size_t len) {
     if (len >= sizeof(buf)) len = sizeof(buf) - 1;
     memcpy(buf, s, len);
     buf[len] = '\0';
-    return strtod(buf, NULL);
+    return io::retail_atof(buf);
 }
 
 // Keep the decimal-digit angle parser ahead of BAM promotion; a float degree
@@ -413,8 +414,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 cw.error_up_theta_fp16 = parse_fixed16_digits_n(v, vl);
                 parsed = 1;
             } else if (key_is(key, "renderfov")) {
-                /* [orig: weapon.def parser key 'renderfov' @ 0x54482a] */
-                cw.renderfov = parse_float_n(v, vl);
+                /* atol, then fild: the field of view is a whole number of
+                   degrees [orig: weapon.def parser key 'renderfov' @ 0x54482a,
+                   `call j__atol` @0x544840, `fild` @0x54484C] */
+                cw.renderfov = static_cast<float>(parse_int_n(v, vl));
                 parsed = 1;
             } else if (key_is(key, "scope_max_mag")) {
                 /* ADS zoom magnification; the scoped FOV = 80 / clamped zoom

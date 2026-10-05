@@ -587,6 +587,28 @@ int main(int argc, char **argv) {
         printf("sight blend-token map OK\n");
     }
     {
+        /* renderfov is atol then fild: a whole number of degrees [orig:
+           WeaponDefs_ParseLineCallback, `call j__atol` @0x544840, `fild`
+           @0x54484C]. */
+        static const char kFov[] =
+            "weapon \"WPN_FOV\"\r\n"
+            "\trenderfov 80.5\r\n"
+            "end\r\n";
+        DefWeaponsFile ff;
+        memset(&ff, 0, sizeof(ff));
+        const int rc = def_parse_weapons_memory((const unsigned char *)kFov, sizeof(kFov) - 1, &ff);
+        const bool correct = rc == 0 && ff.count == 1 && ff.entries[0].renderfov == 80.0f;
+        if (!correct)
+            fprintf(stderr, "FAIL: renderfov 80.5 read %g\n",
+                    ff.count == 1 ? (double)ff.entries[0].renderfov : -1.0);
+        def_free_weapons(&ff);
+        if (!correct) {
+            def_free_weapons(&wf);
+            return 1;
+        }
+        printf("renderfov atol OK\n");
+    }
+    {
         /* A weapon's name keeps its first 32 characters [orig:
            WeaponDefs_ParseLineCallback, strncpy(def+0x14, tokens[2], 0x20)
            @0x543737]. */

@@ -68,12 +68,14 @@ int signed_i16_value(int value) {
     return low < 0x8000u ? (int)low : (int)low - 0x10000;
 }
 
+/* The CRT's atof on a token span (io::retail_atof: decimal only, an exponent
+   marked e, E, d or D), narrowed to float. */
 float parse_float_n(const char *s, size_t len) {
     char buf[64];
     if (len >= sizeof(buf)) len = sizeof(buf) - 1;
     memcpy(buf, s, len);
     buf[len] = '\0';
-    return (float)strtod(buf, NULL);
+    return (float)io::retail_atof(buf);
 }
 
 /* The engine debris-type table row names, in table order — index = the byte

@@ -177,7 +177,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             // Each value goes through _ftol2_sse's SSE2 leg (io/crt_ftol.h).
             // [orig: ItemDef_ParseProperty @0x49EB00, squib arms @0x49F06F (the
             // _ftol2_sse calls @0x49F093 / @0x49F0DC / @0x49F125)]
-            const double number = atof(v);
+            const double number = io::retail_atof(v);
             if (key_is(key, "sqb_rate")) current.deathtime_ticks = io::retail_ftol_sse2(62.0 / number);
             else if (key_is(key, "sqb_distance")) current.clipsize = io::retail_ftol_sse2(number * 65536.0);
             else current.door_type = static_cast<uint32_t>(io::retail_ftol_sse2(number * 65536.0));
@@ -232,7 +232,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             else current.clipsize = static_cast<int32_t>(bits);
             parsed = 1;
         } else if (key_is(key, "open_rate") || key_is(key, "max_angle")) {
-            const double number = atof(v);
+            const double number = io::retail_atof(v);
             // [orig: ItemDef_ParseProperty @0x49EB00 (the _ftol2_sse calls
             // @0x49F91E for open_rate, @0x49F96D for max_angle)]
             if (key_is(key, "open_rate")) current.door_open_rate_q16 = io::retail_ftol_sse2(65536.0 / (number * 62.0));
@@ -337,7 +337,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 // [orig: ItemDef_ParseProperty @0x49EB00 (the _ftol2_sse calls
                 // @0x49EE7E / @0x49EEA5 / @0x49EECF)]
                 current.destroy_timing_ticks[column] =
-                        io::retail_ftol_sse2(atof(tokens.token(column + 1)) * 62.0);
+                        io::retail_ftol_sse2(io::retail_atof(tokens.token(column + 1)) * 62.0);
             }
             parsed = 1;
         } else if (key_is(key, "dawnshot") || key_is(key, "dayshot") || key_is(key, "duskshot") ||
@@ -357,7 +357,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 // [orig: ItemDef_ParseProperty @0x49EB00 (the _ftol2_sse calls
                 // @0x49FAD1 for particletesttime, @0x49FC79..0x49FE5C for the shots)]
                 current.shot_delay_ticks[region][column] =
-                        io::retail_ftol_sse2(atof(tokens.token(token)) * 62.0);
+                        io::retail_ftol_sse2(io::retail_atof(tokens.token(token)) * 62.0);
             }
             parsed = 1;
         } else if (key_is(key, "ai_function")) {
@@ -656,10 +656,10 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                @ 0x49f3a5..0x49f44c; consumer
                RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0] */
             copy_token(current.shadow_texture, sizeof(current.shadow_texture), tokens, 1);
-            current.shadow_width = (float)atof(tokens.token(2));
-            current.shadow_length = (float)atof(tokens.token(3));
-            current.shadow_offset_x = (float)atof(tokens.token(4));
-            current.shadow_offset_y = (float)atof(tokens.token(5));
+            current.shadow_width = (float)io::retail_atof(tokens.token(2));
+            current.shadow_length = (float)io::retail_atof(tokens.token(3));
+            current.shadow_offset_x = (float)io::retail_atof(tokens.token(4));
+            current.shadow_offset_y = (float)io::retail_atof(tokens.token(5));
             parsed = 1;
         /* --- the destruction/husk block [orig: ItemDef_ParseProperty @ 0x49eb00] --- */
         } else if (key_is(key, "huskfinal")) {
@@ -695,7 +695,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                @0x49F6E0..0x49F73D: the _atof call @0x49F6F9, fmul by
                dbl_7C3CC0 = 65536.0 @0x49F6FE, RC=truncate @0x49F710, `fistp
                qword` @0x49F728, the store @0x49F736)] */
-            current.scale_q16 = io::retail_fistp_truncate_low_dword(atof(v) * 65536.0);
+            current.scale_q16 = io::retail_fistp_truncate_low_dword(io::retail_atof(v) * 65536.0);
             parsed = 1;
         } else if (key_is(key, "debris_scale")) {
             current.debris_scale = (float)parse_float_n(v, vl); /* -> def+0x1BC */
