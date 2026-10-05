@@ -1,7 +1,8 @@
 // FNT reader/writer over the synthetic fixtures fixtures/fnt/synth_1page.fnt
 // and synth_3page.fnt (tests/fixtures/minimal_fnt_gen.cpp): header/page
 // parsing, the multi-page glyph lookup, the D-FNT-1/2 design-width
-// contract, and a deterministic blank-font write/reload.
+// contract, and a deterministic blank-font write/reload, its pages written
+// white (the default) or in their own colour (keep_page_rgb).
 #include <formats/fnt/fnt.h>
 
 #include "common/file_io.h"
@@ -127,6 +128,28 @@ int main() {
 	if (!expect(written[first_pixel + 0] == 255 && written[first_pixel + 1] == 255 && written[first_pixel + 2] == 255,
 	            "writer should normalize page RGB to white")) return 1;
 	if (!expect(written[first_pixel + 3] == 200, "writer should preserve alpha mask values")) return 1;
+	if (!expect(font.keep_page_rgb == 0, "a blank font writes white pages by default")) return 1;
+
+	// keep_page_rgb: the pages' colour written as given (a dark rim texel stays dark), every
+	// other byte as the default writes it.
+	font.keep_page_rgb = 1;
+	std::vector<uint8_t> coloured(fnt_calculate_file_size(font.num_pages));
+	size_t coloured_size = 0;
+	err = fnt_write(&font, coloured.data(), coloured.size(), &coloured_size);
+	if (!expect(err == FNT_OK && coloured_size == coloured.size(), "a font keeping its page colour should write")) return 1;
+	if (!expect(coloured[first_pixel + 0] == 12 && coloured[first_pixel + 1] == 34 && coloured[first_pixel + 2] == 56 &&
+	                    coloured[first_pixel + 3] == 200,
+	            "keep_page_rgb should write the texel's RGBA as given")) return 1;
+	if (!expect(std::memcmp(coloured.data(), written.data(), FNT_TOTAL_HEADER) == 0,
+	            "the header and glyph table should not depend on keep_page_rgb")) return 1;
+	if (!expect(std::memcmp(coloured.data() + first_pixel + 4, fnt_get_page_data_const(&font, 0) + 4, FNT_TEXTURE_SIZE - 4) == 0,
+	            "every other texel should be written as the page holds it")) return 1;
+	fnt_font_t coloured_back;
+	err = fnt_parse(coloured.data(), coloured.size(), &coloured_back);
+	if (!expect(err == FNT_OK && fnt_get_page_data_const(&coloured_back, 0)[0] == 12 && coloured_back.keep_page_rgb == 0,
+	            "a font with coloured pages should parse back with its colour")) return 1;
+	fnt_free(&coloured_back);
+	font.keep_page_rgb = 0;
 
 	fnt_font_t reparsed;
 	err = fnt_parse(written.data(), written.size(), &reparsed);

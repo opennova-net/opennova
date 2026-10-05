@@ -1205,7 +1205,9 @@ constexpr VerbRow kRows[] = {
 	     kImportRequests, kImportArgs, run_import,
 	     "copy files in (a loose file, PFF members, or the game install's files by --entry\n"
 	     "names), the whole selection or none of it; an .o3d (a model) or an .o3a (a clip\n"
-	     "set) the Blender add-on wrote converts to the .3di or the .adm and .bad;\n"
+	     "set) the Blender add-on wrote converts to the .3di or the .adm and .bad; a .fntset\n"
+	     "(a font set) comes into fonts/ with the glyph sheet it names beside it and imports\n"
+	     "to its .fnt;\n"
 	     "--with-dependencies also copies the files they need, found beside them or in the\n"
 	     "game install (a mission's closure is most of a game install); an .o3d's textures come only with\n"
 	     "--with-dependencies; --all copies every file of the game install (its archives' and\n"
