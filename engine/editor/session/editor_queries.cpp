@@ -1842,13 +1842,15 @@ constexpr EditorQueryRow kRows[] = {
 			"how many of the findings held now carry it (count); a row a held finding carries that "
 			"no table lists comes last, as table none.")
 			.row,
-	Query(K::FileCard, "file_card", answer_file_card, kFileCardParams, concern_set({ C::Files, C::Graph, C::Project }),
+	Query(K::FileCard, "file_card", answer_file_card, kFileCardParams,
+			concern_set({ C::Files, C::Graph, C::Project, C::Operation }),
 			"A project file as Files' card shows it (the UX round's project lane): found, its path, name, "
 			"kind and kind_label, about (what a file of its kind is to the game), size, build (where a build "
 			"puts it, in words), imported_from, opens (the editor opens a document of it), a wave's sound "
 			"as the game decodes it {decoded, error, rate, channels, seconds}, names (what it names: field, "
-			"record, value, status in words, the file it resolves to, whether that file is a wave) and "
-			"named_by (file, record, field).")
+			"record, value, status in words, the file it resolves to, whether that file is a wave), "
+			"named_by (file, record, field), and reading: true while the project's references are being read "
+			"(names and named_by then as far as the graph has read).")
 			.row,
 };
 

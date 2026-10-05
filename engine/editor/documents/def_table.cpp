@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -45,9 +46,13 @@ void made_item(void *record, const std::vector<const void *> &others, const std:
 
 // A copy of an item takes an id of its own as a new one does: the game's lookup by id finds the
 // first item of an id [orig: ItemList_FindIndexByTypeId @ 0x49e100], so a copy keeping its
-// original's would never be the one a mission places.
+// original's would never be the one a mission places. An alias the original's `end` gave it,
+// "S%06i" of its id, follows the copy's [orig: ItemDef_ParseProperty, the `end` arm
+// @0x49EB2F..0x49EB5F]; one its file names stays.
 void duplicated_item(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
-	static_cast<DefItemDef *>(record)->id = free_item_id(others, taken);
+	auto &item = *static_cast<DefItemDef *>(record);
+	item.id = free_item_id(others, taken);
+	if (item.sid_derived) std::snprintf(item.sid, 16, "S%06i", item.id);
 }
 
 // An item's attachment slots: the 1-based place of its last G and C attachment (zero: none).
@@ -516,14 +521,22 @@ const ItemsFileState *items_state(const FileState *state) { return dynamic_cast<
 bool parse_items(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
                  std::shared_ptr<const FileState> &state, DefParseReport &report) {
 	DefItemsFile file{};
-	def_parse_items_memory(bytes.data(), bytes.size(), &file, &report);
+	auto notes = std::make_shared<DefTextNotes>();
+	def_parse_items_memory(bytes.data(), bytes.size(), &file, &report, *notes);
 	auto spawn = std::make_shared<ItemsFileState>();
 	spawn->spawn_ids.assign(file.vehicle_spawn_ids, file.vehicle_spawn_ids + file.vehicle_spawn_id_count);
 	spawn->layout = file.layout;
+	spawn->notes = std::move(notes);
 	state = spawn;
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Item, &file.entries[i]);
 	std::free(file.entries); // each row took its record's arrays
 	return true;
+}
+
+// The notes a file was read with (none for a file made from nothing).
+const DefTextNotes *notes_of(const FileState *state) {
+	const auto *catalog = dynamic_cast<const CatalogFileState *>(state);
+	return catalog ? catalog->notes.get() : nullptr;
 }
 
 DefWriteResult write_items(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
@@ -538,13 +551,14 @@ DefWriteResult write_items(const std::vector<const CatalogRecord *> &rows, const
 		std::copy(spawn->spawn_ids.begin(), spawn->spawn_ids.end(), file.vehicle_spawn_ids);
 		file.layout = spawn->layout;
 	}
-	return def_write_items(file);
+	return def_write_items(file, notes_of(state));
 }
 
-// The layout a file of a family with no other file-wide state was read with.
-std::shared_ptr<const FileState> layout_state(const DefLayout &layout) {
+// The layout and the notes a file of a family with no other file-wide state was read with.
+std::shared_ptr<const FileState> layout_state(const DefLayout &layout, std::shared_ptr<const DefTextNotes> notes) {
 	auto state = std::make_shared<CatalogFileState>();
 	state->layout = layout;
+	state->notes = std::move(notes);
 	return state;
 }
 DefLayout layout_of(const FileState *state) {
@@ -579,14 +593,22 @@ bool same_spawn_registry(const FileState *a, const FileState *b) {
 // A file-wide spawn registry has no native home once the last item is removed.
 std::shared_ptr<const FileState> spawn_registry_after_remove(const std::shared_ptr<const FileState> &state,
                                                              size_t remaining) {
-	return remaining == 0 ? std::make_shared<ItemsFileState>() : state;
+	if (remaining != 0) return state;
+	// The file's layout and notes stand (its comments before and after the records).
+	auto empty = std::make_shared<ItemsFileState>();
+	if (const ItemsFileState *current = items_state(state.get())) {
+		empty->layout = current->layout;
+		empty->notes = current->notes;
+	}
+	return empty;
 }
 
 bool parse_weapons(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
                    std::shared_ptr<const FileState> &state, DefParseReport &report) {
 	DefWeaponsFile file{};
-	def_parse_weapons_memory(bytes.data(), bytes.size(), &file, &report);
-	state = layout_state(file.layout);
+	auto notes = std::make_shared<DefTextNotes>();
+	def_parse_weapons_memory(bytes.data(), bytes.size(), &file, &report, *notes);
+	state = layout_state(file.layout, std::move(notes));
 	for (size_t i = 0; i < file.ammo_classes_count; ++i) rows.emplace_back(R::Carry, &file.ammo_classes[i]);
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Weapon, &file.entries[i]);
 	std::free(file.entries);
@@ -607,36 +629,35 @@ DefWriteResult write_weapons(const std::vector<const CatalogRecord *> &rows, con
 	file.ammo_classes = carries.data();
 	file.ammo_classes_count = carries.size();
 	file.layout = layout_of(state);
-	return def_write_weapons(file);
+	return def_write_weapons(file, notes_of(state));
 }
 
-// A family whose file is its rows alone ({entries, count}), each a record of one kind.
-template <class File, class Entry, R Kind, int (*Parse)(const uint8_t *, size_t, File *, DefParseReport *),
-          DefWriteResult (*Write)(const File &)>
-struct RowsFamily {
-	static bool parse(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
-	                  std::shared_ptr<const FileState> &, DefParseReport &report) {
-		File file{};
-		Parse(bytes.data(), bytes.size(), &file, &report);
-		for (size_t i = 0; i < file.count; ++i) rows.emplace_back(Kind, &file.entries[i]);
-		std::free(file.entries);
-		return true;
-	}
-	static DefWriteResult write(const std::vector<const CatalogRecord *> &rows, const FileState *) {
-		std::vector<Entry> entries;
-		for (const CatalogRecord *row : rows) entries.push_back(row->as<Entry>());
-		File file{};
-		file.entries = entries.data();
-		file.count = entries.size();
-		return Write(file);
-	}
-};
-// ammo.def: its rows and the layout it was read with.
+// powerup.def: its rows and the notes it was read with.
+bool parse_powerup(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
+                   std::shared_ptr<const FileState> &state, DefParseReport &report) {
+	DefPowerupFile file{};
+	auto notes = std::make_shared<DefTextNotes>();
+	def_parse_powerup_memory(bytes.data(), bytes.size(), &file, &report, *notes);
+	state = layout_state(DefLayout{}, std::move(notes));
+	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Powerup, &file.entries[i]);
+	std::free(file.entries);
+	return true;
+}
+DefWriteResult write_powerup(const std::vector<const CatalogRecord *> &rows, const FileState *state) {
+	std::vector<DefPowerupDef> entries;
+	for (const CatalogRecord *row : rows) entries.push_back(row->as<DefPowerupDef>());
+	DefPowerupFile file{};
+	file.entries = entries.data();
+	file.count = entries.size();
+	return def_write_powerup(file, notes_of(state));
+}
+// ammo.def: its rows and the layout and notes it was read with.
 bool parse_ammo(const std::vector<uint8_t> &bytes, std::vector<CatalogRecord> &rows,
                 std::shared_ptr<const FileState> &state, DefParseReport &report) {
 	DefAmmoFile file{};
-	def_parse_ammo_memory(bytes.data(), bytes.size(), &file, &report);
-	state = layout_state(file.layout);
+	auto notes = std::make_shared<DefTextNotes>();
+	def_parse_ammo_memory(bytes.data(), bytes.size(), &file, &report, *notes);
+	state = layout_state(file.layout, std::move(notes));
 	for (size_t i = 0; i < file.count; ++i) rows.emplace_back(R::Ammo, &file.entries[i]);
 	std::free(file.entries);
 	return true;
@@ -648,10 +669,8 @@ DefWriteResult write_ammo(const std::vector<const CatalogRecord *> &rows, const 
 	file.entries = entries.data();
 	file.count = entries.size();
 	file.layout = layout_of(state);
-	return def_write_ammo(file);
+	return def_write_ammo(file, notes_of(state));
 }
-using PowerupFamily =
-        RowsFamily<DefPowerupFile, DefPowerupDef, R::Powerup, def_parse_powerup_memory, def_write_powerup>;
 
 constexpr CatalogFamily kFamilies[] = {
 	{AssetKind::ItemDefs, bit(C::Item) | bit(C::Attachment), C::Item, parse_items, write_items, set_spawn_slot,
@@ -660,7 +679,7 @@ constexpr CatalogFamily kFamilies[] = {
 	 write_weapons},
 	{AssetKind::AmmoDefs, bit(C::Ammo) | bit(C::Effect), C::Ammo, parse_ammo, write_ammo},
 	{AssetKind::PowerupDefs, bit(C::Powerup) | bit(C::PowerupAmmo) | bit(C::Pickup) | bit(C::Respawn), C::Powerup,
-	 PowerupFamily::parse, PowerupFamily::write},
+	 parse_powerup, write_powerup},
 };
 
 // Every family's kinds are kinds of the table, its first kind one of them and a row of its file, and

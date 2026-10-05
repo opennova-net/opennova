@@ -51,12 +51,14 @@ Document *DocumentSet::records_for(const std::string &path) {
 	return document ? records_of(*document) : nullptr;
 }
 
+// A request whose path names no open document, or one of no records: the request's own fault, refused
+// with no Problems row (refuse_request).
 void DocumentSet::refuse_records(const std::string &path, const char *not_open) {
 	if (!view_.project.open) return;
 	if (const DocumentBase *document = document_for(path))
-		return core_.refuse_now(CoreFinding::DocumentNoRecords, "This document holds no records.",
-		                        document->path());
-	core_.refuse_now(CoreFinding::DocumentNotOpen, not_open, path);
+		return core_.refuse_request(CoreFinding::DocumentNoRecords, "This document holds no records.",
+		                            document->path());
+	core_.refuse_request(CoreFinding::DocumentNotOpen, not_open, path);
 }
 
 bool DocumentSet::documents_dirty() const {
@@ -455,7 +457,14 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		say((request.kind == EditorRequestKind::ReloadDocument ? "Reloaded " : "Opened ") + document->path() + ".");
 		update_view(); core_.problems().validate_later(); return;
 	}
-	refuse(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
+	// A path the project has no file of: the request's own fault, no problem of the project's (no row).
+	core_.refuse_request(missing_file(path));
+}
+
+// A request's path that names no file of the project: what its refusal says.
+Diagnostic DocumentSet::missing_file(const std::string &path) const {
+	return make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error,
+	                    path.empty() ? std::string("No file was named.") : "The project has no file " + path + ".", path);
 }
 
 // Files shows the file (and asks its new name when the request says so): a RevealFile event,
@@ -463,10 +472,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 void DocumentSet::show_in_files(const EditorRequest &request) {
 	if (!view_.project.open) return;
 	const AssetEntry *asset = core_.project_file(request.path);
-	if (!asset) {
-		core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", request.path));
-		return;
-	}
+	if (!asset) return core_.refuse_request(missing_file(request.path));
 	ViewEvent reveal;
 	reveal.kind = ViewEventKind::RevealFile;
 	reveal.path = asset->relative_path;
@@ -485,10 +491,7 @@ void DocumentSet::select_file(const std::string &path) {
 	FileSelection selected;
 	if (!path.empty()) {
 		const AssetEntry *asset = core_.project_file(path);
-		if (!asset) {
-			core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
-			return;
-		}
+		if (!asset) return core_.refuse_request(missing_file(path));
 		selected.path = asset->relative_path;
 		selected.type = asset_kind_row(asset->kind).document;
 	}
@@ -529,22 +532,37 @@ void DocumentSet::close_document(const std::string &requested) {
 
 // The document's own path, however the request named it (a logical name included), so a
 // selection joined by path stays in one document; records of another document make it the
-// active one, the records named its selection. Only the records the document has are selected:
-// one it does not hold, or of another kind than named, is left out (a repair after an edit asks
-// only about the rows the edit changed).
+// active one, the records named its selection. The record named first, the primary, by its
+// identities (its row, its child): a kind its address leaves out, or gives wrong, is the document's
+// own record's of those identities (the demo round's bug 11: an address with no kind selected
+// nothing and answered done). Of the records named with it, only those the document holds as named
+// are selected: one it does not hold, or of another kind than named, is left out (a repair after an
+// edit asks only about the rows the edit changed), and a primary it does not hold gives way to them.
+// A primary that names no record, with none of the others held, is refused, the selection and the
+// active document as they were (the review: done with nothing selected told the caller nothing).
 void DocumentSet::select_record(const EditorRequest &request) {
 	const DocumentBase *document = document_for(request.path);
 	const std::string path = document ? document->path() : request.path.empty() ? view_.documents.active : request.path;
-	const bool elsewhere = path != view_.documents.active;
-	if (elsewhere) activate(path);
 	const Document *records = document ? records_of(*document) : nullptr;
 	const auto held = [records](const NodeAddress &address) {
 		return records && has_record(*records, address);
 	};
+	NodeAddress primary = request.address;
+	if (records && primary.row && !held(primary)) {
+		const NodeAddress found = records->address_of(primary.child ? primary.child : primary.row);
+		if (found.row == primary.row && found.child == primary.child) primary = found;
+	}
 	std::vector<NodeAddress> others;
 	for (const NodeAddress &address : request.records)
 		if (held(address)) others.push_back(address);
-	view_.documents.selection.select(path, held(request.address) ? request.address : NodeAddress(),
+	if (primary.row && !held(primary) && others.empty())
+		return core_.refuse_request(CoreFinding::DocumentSelection,
+		                            basename_of(path) + " holds no record " + std::to_string(primary.row) +
+		                                    (primary.child ? "/" + std::to_string(primary.child) : std::string()) + ".",
+		                            path);
+	const bool elsewhere = path != view_.documents.active;
+	if (elsewhere) activate(path);
+	view_.documents.selection.select(path, held(primary) ? primary : NodeAddress(),
 	                                 others, elsewhere ? SelectMode::Replace : request.mode);
 	core_.touch(ViewConcern::Selection);
 }
@@ -556,7 +574,7 @@ void DocumentSet::edit_record(const EditorRequest &request) {
 		open_document(request::open_document(request.path));
 	auto *document = document_for(request.path);
 	if (!document) {
-		if (view_.project.open) core_.refuse_now(CoreFinding::DocumentNotOpen, "Open the file before editing it.", request.path);
+		if (view_.project.open) core_.refuse_request(CoreFinding::DocumentNotOpen, "Open the file before editing it.", request.path);
 		return;
 	}
 	// A batch that asks nothing (a replace_list of an empty list by none, S13 A5) is done.
@@ -571,7 +589,7 @@ void DocumentSet::texture_operation(const EditorRequest &request) {
 	auto *texture = dynamic_cast<TextureDocument *>(document);
 	if (!texture) {
 		if (view_.project.open)
-			core_.refuse_now(document ? CoreFinding::TextureOperation : CoreFinding::DocumentNotOpen,
+			core_.refuse_request(document ? CoreFinding::TextureOperation : CoreFinding::DocumentNotOpen,
 			                 document ? basename_of(document->path()) + " is no texture." : "Open the texture before editing it.",
 			                 request.path);
 		return;
@@ -724,7 +742,7 @@ void DocumentSet::duplicate(const EditorRequest &request) {
 void DocumentSet::undo_redo(const EditorRequest &request) {
 	auto *document = document_for(request.path);
 	if (!document) {
-		if (view_.project.open) core_.refuse_now(CoreFinding::DocumentNotOpen, "Open the file before undoing or redoing in it.", request.path);
+		if (view_.project.open) core_.refuse_request(CoreFinding::DocumentNotOpen, "Open the file before undoing or redoing in it.", request.path);
 		return;
 	}
 	const uint64_t before = document->revision(), generation = document->load_generation();
@@ -761,7 +779,7 @@ void DocumentSet::save(const std::string &path) {
 		save_documents({document->path()}, true);
 	} else if (view_.project.open) {
 		// A file that is not open (a Rewrite fix names one) is rewritten closed.
-		if (path.empty()) core_.refuse_now(CoreFinding::DocumentNotOpen, "Open a file before saving it.");
+		if (path.empty()) core_.refuse_request(CoreFinding::DocumentNotOpen, "Open a file before saving it.");
 		else rewrite_file(path);
 	}
 }
@@ -837,7 +855,7 @@ size_t DocumentSet::note_save(const DocumentBase &document) {
 // files of one name, the one project_file picks: the path named, else the first of the name.
 void DocumentSet::rewrite_file(const std::string &path) {
 	const AssetEntry *asset = core_.project_file(path);
-	if (!asset) return core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
+	if (!asset) return core_.refuse_request(missing_file(path));
 	const std::string relative = asset->relative_path;
 	Diagnostic error;
 	const std::shared_ptr<DocumentBase> document = load(relative, asset->kind, error);

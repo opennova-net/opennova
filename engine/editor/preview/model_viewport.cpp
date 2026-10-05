@@ -29,6 +29,12 @@ using io::json_number;
 using io::json_string;
 using io::json_whole_in;
 
+// Two cameras at one place looking one way (what a framing set, which nothing moved since).
+bool same_camera(const OrbitCamera &a, const OrbitCamera &b) {
+	return a.target.x == b.target.x && a.target.y == b.target.y && a.target.z == b.target.z && a.yaw == b.yaw &&
+	       a.pitch == b.pitch && a.distance == b.distance;
+}
+
 JsonValue vec3(const PreviewVec3 &v) {
 	JsonValue out = JsonValue::make_array();
 	out.push(json_number(v.x));
@@ -449,9 +455,41 @@ OrbitCamera ModelViewport::framed(int width, int height) const {
 	if (!model_) return camera;
 	PreviewVec3 center;
 	float radius = 1.0f;
-	model_preview_sphere(*model_, center, radius);
+	if (!posed_sphere(center, radius)) model_preview_sphere(*model_, center, radius);
 	camera.frame(center, radius, width, height);
 	return camera;
+}
+
+bool ModelViewport::posed_sphere(PreviewVec3 &center, float &radius) const {
+	if (!model_ || !animating_ || !skeleton_ || clip_key_.empty()) return false;
+	const anim::SkeletalClips::LoadedClip *clip = skeleton_->find_clip_variant(clip_key_, clip_variant_);
+	if (!clip) return false;
+	PreviewVec3 rest;
+	float reach = 1.0f;
+	model_preview_sphere(*model_, rest, reach);
+	// Every frame the clip's clock shows (its first tick each), the rest pose's sphere carried by each bone.
+	std::vector<int32_t> ticks;
+	for (const int32_t tick : clip->clip.playback().first_ticks())
+		if (tick >= 0) ticks.push_back(tick);
+	if (ticks.empty()) ticks.push_back(0);
+	std::vector<PreviewVec3> centres;
+	for (const int32_t tick : ticks)
+		for (const PreviewJoint &joint : preview_posed_joints(*skeleton_, clip_key_, clip_variant_, tick))
+			centres.push_back(preview_joint_carry(joint, rest));
+	if (centres.empty()) return false;
+	PreviewVec3 lo = centres.front(), hi = centres.front();
+	for (const PreviewVec3 &at : centres) {
+		lo = PreviewVec3{std::min(lo.x, at.x), std::min(lo.y, at.y), std::min(lo.z, at.z)};
+		hi = PreviewVec3{std::max(hi.x, at.x), std::max(hi.y, at.y), std::max(hi.z, at.z)};
+	}
+	center = PreviewVec3{(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f};
+	float far = 0.0f;
+	for (const PreviewVec3 &at : centres) {
+		const float dx = at.x - center.x, dy = at.y - center.y, dz = at.z - center.z;
+		far = std::max(far, std::sqrt(dx * dx + dy * dy + dz * dz));
+	}
+	radius = far + reach;
+	return true;
 }
 
 OrbitCamera ModelViewport::framed_on(const ModelOverlay &overlay, int width, int height) const {
@@ -804,11 +842,18 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	reason_ = ModelViewStatus::Ready;
 	detail_ = skeleton_ ? std::string() : "The rig does not load: " + (rig_.table.empty() ? rig_.clip : rig_.table) + ".";
 	shown(document);
-	if (framed_ != model_file_) {
+	// Framed on the rig's model, and again on another clip of it while the camera stands where the last
+	// framing put it (the posed sphere is the clip's: the review of the demo round's bug 4); a camera moved
+	// since keeps its place.
+	const std::string framing = model_file_ + '\n' + clip_key_ + '\n' + std::to_string(clip_variant_);
+	const bool clip_moved = framed_ == model_file_ && framed_clip_ != framing && same_camera(camera_, framed_camera_);
+	if (framed_ != model_file_ || clip_moved) {
 		framed_ = model_file_;
 		frame_();
+		framed_camera_ = camera_;
 		state_moved();
 	}
+	framed_clip_ = framing;
 	const bool options = options_moved_;
 	options_moved_ = false;
 	if (rebuild || !scene_) {
