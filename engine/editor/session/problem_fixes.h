@@ -51,8 +51,8 @@ namespace opennova::editor {
 // lacks it. An import whose output is missing: import its source again. An open document
 // whose file changed outside the editor (document.conflict: its Save is refused): Reload
 // it, which asks about its unsaved edits first (not in bulk). Input a
-// rewrite drops or normalizes (a Rewrite row: style.line_ending, catalog.ignored_input,
-// menu.ignored_input, animation_map.ignored_input, strings.regrouped): Rewrite the file, the
+// rewrite drops or normalizes (a Rewrite row: style.line_ending, menu.ignored_input,
+// animation_map.ignored_input, strings.regrouped): Rewrite the file, the
 // row's rewrite_does saying what that does, unless a finding of the file says it does not
 // serialize (a blocks_save row: *.unserializable, *.invalid_input; its Save is refused).
 // Every other finding has none: Problems goes to its place.
