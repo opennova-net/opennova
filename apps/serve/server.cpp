@@ -260,6 +260,21 @@ bool Server::boot_mission(std::string &error) {
 	config.expansion_version_checksum =
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
 	config.session_channel = inmatch::GameSessionChannel::Lan;
+	// The loose score.ini over the game type's default table, before the
+	// bring-up: start_host_session copies the score values and FIELD rows into
+	// world.match (inmatch/host_session.cpp). The Godot host orders it the same
+	// way (mission_root.cpp -> Simulation::set_score_config_data).
+	// [orig: the load gated on File_IsSingleFile("score.ini") @0x436ED0;
+	//  GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile @0x52D8A0]
+	{
+		std::vector<uint8_t> score_bytes;
+		if (index_.read_file("score.ini", score_bytes, VfsLookupPolicy::ForceLooseFirst) &&
+				!score_bytes.empty() &&
+				!inmatch::load_session_score_config(config,
+						std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
+								score_bytes.size())))
+			io::logf(io::LogLevel::kWarn, "opennova-serve: score.ini rejected; the default table stands");
+	}
 
 	kernel_ = std::make_unique<mission::MissionKernel>();
 	kernel_->set_assets(assets_.get());
@@ -355,20 +370,8 @@ bool Server::boot_mission(std::string &error) {
 	kernel_->world.tables.surface_map.tiles = surface_tiles_.empty() ? nullptr : surface_tiles_.data();
 	kernel_->world.tables.surface_map.tile_count = static_cast<int32_t>(surface_tiles_.size());
 	kernel_->world.tables.surface_map.tile_surface = tile_surface_table_.data();
-	// The "Server" strings and the loose score.ini over the default table
-	// [orig: the score.ini load gated on File_IsSingleFile("score.ini")
-	//  @0x436ED0; GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile
-	//  @0x52D8A0].
+	// The gametext "Server" strings the host's handlers print through.
 	inmatch::set_server_text(role_->state.host_owner.ctx, server_text_);
-	{
-		std::vector<uint8_t> score_bytes;
-		if (index_.read_file("score.ini", score_bytes, VfsLookupPolicy::ForceLooseFirst) &&
-				!score_bytes.empty() &&
-				!inmatch::load_session_score_config(role_->state.host_owner.ctx.config,
-						std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
-								score_bytes.size())))
-			io::logf(io::LogLevel::kWarn, "opennova-serve: score.ini rejected; the default table stands");
-	}
 
 	// The environment: the mission's .env with the BMS override layer, the
 	// water plane by its witnessed precedence, then the weather seed and the

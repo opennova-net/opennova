@@ -82,6 +82,16 @@ int main() {
 					std::chrono::steady_clock::now().time_since_epoch().count()));
 	fs::create_directories(dir);
 	CHECK(write_bytes(dir / "SERVETST.BMS", deathmatch_mission()));
+	// A loose score.ini with a deathmatch row that is not the default table:
+	// it must reach world.match, which the bring-up configures.
+	{
+		std::ofstream score(dir / "score.ini", std::ios::binary);
+		score << "VERSION 40\r\n"
+		      << "GAMETYPE \"DM\"\r\n"
+		      << "FIELD \"NUMENEMYKILLS\" 1\r\n"
+		      << "VAR \"FIRE\" 7\r\n"
+		      << "VAR \"ENEMYKILL\" 9\r\n";
+	}
 	{
 		std::ofstream host(dir / "test.host", std::ios::binary);
 		host << "// opennova-serve test host file\r\n"
@@ -131,6 +141,13 @@ int main() {
 	CHECK(config.game_type == game_type::kDeathmatch);
 	CHECK(server.host_file_report().unknown_missions.size() == 1);
 	CHECK(server.rotation().entries.size() == 1);
+	// The score.ini row reached the match the bring-up configured: its values
+	// (FIRE status 0, ENEMYKILL status 3) and its one FIELD row.
+	const world::Match &match = server.kernel().world.match;
+	CHECK(match.rules().score_values.has_value());
+	CHECK(match.rules().score_values && (*match.rules().score_values)[0] == 7);
+	CHECK(match.rules().score_values && (*match.rules().score_values)[3] == 9);
+	CHECK(match.rules().score_fields.size() == 1);
 	// Serve Only: the dedicated role, no player of the host's own, no local client.
 	CHECK(server.role().kind() == inmatch::RoleKind::DedicatedHost);
 	CHECK(!server.role().state.host_owner.serve_and_play);

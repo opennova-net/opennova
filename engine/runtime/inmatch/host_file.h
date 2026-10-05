@@ -18,7 +18,7 @@
 // `Mission <file> <launch option>` appends the named catalog mission to the map
 // rotation. An unknown key, or a Mission naming no catalog row, changes nothing.
 // [orig: Game_ParseCommandLineAndInit @0x4A7743..0x4A7775 (`/HOST`: the next
-//  token to g_HostFileName @0xB4C5B4, dword_B4C5A8 = 1, a second instance
+//  token to g_HostFileName @0xB4C5B4, g_HostFileSwitch @0xB4C5A8 = 1, a second instance
 //  allowed); Game_HostMultiplayerSession @0x4A65A0 (no caller); the parse
 //  @0x4A65A0..0x4A65AA; ServerConfig_ApplyHostSetting @0x4A6000]
 
