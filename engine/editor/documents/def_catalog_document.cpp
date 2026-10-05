@@ -132,6 +132,7 @@ SerializeResult DefCatalogDocument::serialize() const {
 	DefWriteResult written = own->write(records, file_state());
 	result.text = std::move(written.text);
 	result.issues = source_issues(written.diagnostics);
+	for (const std::string &record : written.rewritten) result.notes.push_back(record);
 	for (const std::string &record : written.reordered)
 		result.notes.push_back(record + ": written in the table's order, as its lines in the file's order would read "
 		                                "back otherwise (an edit they cannot carry as they stand).");
@@ -139,17 +140,19 @@ SerializeResult DefCatalogDocument::serialize() const {
 }
 
 std::string DefCatalogDocument::save_words() const {
-	// What the writer keeps of the file it read (def.h's DefLineOrder and DefLayout) and what it does
-	// not: it writes from the records, never the file's text (ADR 0003, itemdef-re.md D-ITEMDEF-4).
+	// What the writer makes of the file's form (def_notes.h: the layout modeled as the file is read, def.h's
+	// DefLineOrder and DefLayout): it generates every line from the records and that data, never the file's
+	// bytes (ADR 0003, the maintainer's ruling of 2026-10-04; itemdef-re.md D-ITEMDEF-4).
 	const size_t ignored = ignored_lines();
-	std::string words = "Saving keeps each record's lines, in the order the file has them under the names it gives them, "
-	                    "and the file's indentation (a record whose edit that order cannot carry is written in the "
-	                    "table's order, and Output names it); the spacing inside a line, how a number or a word is "
-	                    "spelled (0.0 as 0, AIData as aidata), comments and blank lines are the editor's";
-	if (kind() == AssetKind::ItemDefs) words += ", an item's attributes go on attrib: lines of up to 16 words";
+	std::string words = "Saving writes the file in the form it was read in: its spacing, its comments, how each number "
+	                    "or word is spelled";
 	if (ignored)
-		words += ", and " + std::to_string(ignored) + (ignored == 1 ? " thing" : " things") +
-		         " in the file the game skips are left out (Problems lists each)";
+		words += ", and the " + std::to_string(ignored) + (ignored == 1 ? " thing" : " things") +
+		         " in it the game skips (Problems lists each)";
+	words += ". A changed line keeps its spacing and its comment, the words that changed in the editor's form; a new "
+	         "line or record is the editor's, after the lines of its record; a record whose edit its lines in the file's "
+	         "form cannot carry is written in the editor's form, its comment lines and the lines the game skips kept, "
+	         "and Output names it and what it does not keep";
 	return words + ". The game reads the same " + (kind() == AssetKind::ItemDefs ? "items" : kind() == AssetKind::WeaponDefs ? "weapons"
 	                                                     : kind() == AssetKind::AmmoDefs ? "ammo" : "rows") + ".";
 }
@@ -192,9 +195,15 @@ bool DefCatalogDocument::accept_step(const EditStep &step, const StagedRows &row
 	return false;
 }
 
+void DefCatalogDocument::prepare_record(const Node &, const ListChange &change, DetachedRecord &record) const {
+	if (change.operation == EditOperation::Duplicate && record.data) def_clear_notes(def_kind(record.kind), record.data.get());
+}
+
 void DefCatalogDocument::prepare_duplicate(Node &copy, const Node &,
                                            const std::vector<std::shared_ptr<const Node>> &rows) const {
 	auto &row = static_cast<CatalogRow &>(copy);
+	// A copy is written in the writer's own form: the file's modeled lines are its original's (def_notes.h).
+	def_clear_notes(row.native.kind(), row.native.data());
 	const CatalogKindRow &rules = catalog_kind_row(row.kind);
 	// The rows of its kind beside it (its original among them), whose ids and names it keeps apart from.
 	std::vector<const void *> others;

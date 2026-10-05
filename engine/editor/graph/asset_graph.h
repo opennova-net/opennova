@@ -293,8 +293,14 @@ public:
 	size_t missing_count() const { return index_.missing().size(); }
 	const std::vector<Diagnostic> &diagnostics() const { return diagnostics_; }
 	// The "reference.missing" finding about an edge nothing resolves (diagnostics' row, which a
-	// picker builds for a field's value too, for the fixes Problems would offer).
+	// picker builds for a field's value too, for the fixes Problems would offer): of a file an
+	// expansion's base game serves (base_names), its words say the game reads the base's, as the
+	// build's gate lets it through (reference_kinds.h's blocks_build over BaseNames).
 	Diagnostic missing_finding(const GraphEdge &edge) const;
+	// The names an expansion's base game serves (reference_kinds.h's BaseNames, sorted by their
+	// normalized form; none for a standalone project), which the missing findings' words read: each
+	// missing edge's finding worded again when they changed. True when a finding moved.
+	bool set_base_names(std::vector<std::string> names);
 
 	// Whether the project, or its base layer, has a file of this name (its logical name, or a
 	// path's file name).
@@ -398,6 +404,7 @@ private:
 
 	GraphIndex index_;
 	std::shared_ptr<const GraphLayer> base_;
+	std::vector<std::string> base_names_; // set_base_names
 	std::map<std::string, Binding> bindings_; // upper-case name -> the definition the game reads
 	std::vector<Diagnostic> diagnostics_;
 	GraphStats stats_;
