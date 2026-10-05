@@ -1125,7 +1125,7 @@ func _write_large_model(dir: String, stem: String, materials: int, parts: int, c
 		side: int) -> PackedStringArray:
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
 	var textures := PackedStringArray()
-	var lines := PackedStringArray(["o3d 1", "model %s" % stem.to_upper()])
+	var lines := PackedStringArray(["o3d 2", "model %s" % stem.to_upper()])
 	for index in materials:
 		var detail := index % 3 == 2
 		lines.append("material %s" % ("FF_MT_OP" if detail else "FF_ST_OP"))
@@ -1141,7 +1141,7 @@ func _write_large_model(dir: String, stem: String, materials: int, parts: int, c
 		lines.append("lod %d bldg" % (0 if level == levels - 1 else 400 >> level))
 		for part in parts:
 			lines.append("part 0 %d 0 0" % (part * 3))
-			lines.append("strip %d 0" % (part % materials))
+			lines.append("mesh %d 0" % (part % materials))
 			_sheet(lines, float(part * 3), maxi(cells >> level, 1))
 	lines.append("light 0 1 0 1.5 0 4 0 0 0 255 200 150 255 200 150 0")
 	lines.append("userpoint top 0 0 3 0 0 1 0 71")
