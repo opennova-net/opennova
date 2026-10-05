@@ -21,12 +21,14 @@ easier to relay than to rediscover.
   excluded from every export preset, ADR 0041; see `docs/mcp.md`),
   `web/` (the `OpenNova Web` export's page shell; the site image is
   `deploy/game/`, ADR 0049), `tests/` (GUT suite).
-- `apps/` — `novaworld_server/` (the NovaWorld service), `nw_lan_probe/`, `nw_pp/`,
-  `nw_lister/` (`nw-lister`: lists one server on a NovaWorld master without the game),
-  `extract/` (`opennova-extract`, ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047),
-  `project/` (`opennova-project`, the editor's session on the command line, ADR 0046 S13 A7),
-  `common/` (shared socket helpers, deliberately app-layer; pcap I/O lives in
-  `engine/base/pcapio`).
+- `apps/` — each app in `apps/<name>` builds target `opennova_<name>` as binary
+  `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"): `3di/` (`opennova-3di`,
+  ADR 0047), `extract/` (`opennova-extract`, ADR 0040), `lan_probe/`
+  (`opennova-lan-probe`), `novaworld_server/` (`opennova-novaworld-server`, the NovaWorld
+  service), `nw_lister/` (`opennova-nw-lister`: lists one server on a NovaWorld master
+  without the game), `project/` (`opennova-project`, the editor's session on the command
+  line, ADR 0046 S13 A7), `wire/` (`opennova-wire`, the capture decoder), and `common/`
+  (shared socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
