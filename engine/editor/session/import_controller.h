@@ -63,6 +63,11 @@ public:
 	// Shell opens it by; the texture_source dialog closed. Refused (texture.external): what the plan
 	// refuses, a texture or a source edited in place open with unsaved edits.
 	void edit_externally(const EditorRequest &request);
+	// StoreAsDds (S18): the .tga texture the request names stored as the .dds of its name, which every use of
+	// it reads first (import/texture_source.h's plan_texture_dds over its uses: texture_use_opens), then the
+	// refresh that imports it; a plain file's clean open document closed. Refused, nothing written
+	// (texture.store_dds): what the plan refuses, a texture open with unsaved edits.
+	void store_as_dds(const EditorRequest &request);
 	// OpenTextureSource (S18): an existing source opened alike, nothing written. Refused (texture.external):
 	// a texture with none yet, a source edited in place open with unsaved edits.
 	void open_texture_source(const EditorRequest &request);

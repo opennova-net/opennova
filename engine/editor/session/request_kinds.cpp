@@ -192,6 +192,9 @@ void serve_split_texture(SessionCore &core, const EditorRequest &request) {
 void serve_edit_externally(SessionCore &core, const EditorRequest &request) {
 	core.imports().edit_externally(request);
 }
+void serve_store_as_dds(SessionCore &core, const EditorRequest &request) {
+	core.imports().store_as_dds(request);
+}
 void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &) {
 	core.imports().refresh_changed_sources();
 }
@@ -789,6 +792,20 @@ constexpr RequestKindRow kRows[] = {
 			"refresh. The open_externally view event names the file on disk, which the Shell opens. Refused "
 			"(texture.external): a name the project lacks, a file that does not read, a texture open with "
 			"unsaved edits.")
+			.takes(request_params({ F::Path }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.row,
+	// A texture stored as its .dds is an import of it (S18), as edit_externally's source made once.
+	Request(K::StoreAsDds, "store_as_dds", serve_store_as_dds,
+			"The .tga texture path stored as the .dds of its name, which the loader of every use of it opens "
+			"first (a model's diffuse, detail or flipbook row), so its referrers keep naming the .tga: DXT1 "
+			"for a texture of no alpha, DXT5 for one with alpha, every level to 1 x 1. A plain file becomes an "
+			"import's output (its copy in art/ under a name of its own, its record writing the .dds, the plain "
+			"file set aside under .opennova/replaced/, never deleted), then imported, a refresh; an import's "
+			"output's own record takes the form. Refused, nothing written (texture.store_dds): no .tga, a use "
+			"that reads the .tga itself (a terrain map, a model's plain row, the HUD's art), a .dds of the "
+			"name already there, sides that are not powers of two, a texture open with unsaved edits.")
 			.takes(request_params({ F::Path }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
 			.ends_edit_groups()

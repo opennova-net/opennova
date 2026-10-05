@@ -4347,6 +4347,14 @@ target_link_libraries(editor_texture_external_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_external_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_external COMMAND editor_texture_external_test)
 
+# A .tga a model's rows name stored as the .dds of its name, which their loader reads first (ADR 0046
+# S18, store_as_dds): a plain file and an import's output; the uses that read the .tga itself refused;
+# the build packing the .dds alone.
+add_executable(editor_texture_store_dds_test editor/texture_store_dds_test.cpp)
+target_link_libraries(editor_texture_store_dds_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_store_dds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_store_dds COMMAND editor_texture_store_dds_test)
+
 # A file's rename through the native texts (ADR 0046 S18, graph/native_text_sites): a terrain's, an
 # environment's, a particle file's and the HUD layout's names rewritten as text, only the token the game
 # reads at each site; a flipbook's frame refused; a file in the SCR form written back as plain text. The

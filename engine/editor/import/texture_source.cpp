@@ -349,6 +349,80 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 	return plan;
 }
 
+TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &scan, const std::string &texture,
+                                   const std::vector<std::string> &reads_tga) {
+	TextureSourcePlan plan;
+	const auto refuse = [&](const std::string &message, const std::string &asset) {
+		plan.refusals.push_back(make_finding(CoreFinding::TextureStoreDds, DiagnosticSeverity::Error, message, asset));
+		return plan;
+	};
+	const AssetEntry *entry = scan.at_path(texture);
+	if (!entry) entry = scan.find(basename_of(texture));
+	if (!entry) return refuse("The project has no texture named '" + texture + "'.", texture);
+	plan.texture = entry->logical_name;
+	if (entry->kind != AssetKind::Texture) return refuse(entry->logical_name + " is no texture.", entry->relative_path);
+	if (extension_of(entry->logical_name) != ".tga")
+		return refuse(entry->logical_name + " is no .tga: only a .tga has a .dds its loaders read before it.", entry->relative_path);
+	const std::string dds = stem_of(entry->logical_name) + ".dds";
+	if (!reads_tga.empty())
+		return refuse(reads_tga.front() + " reads " + entry->logical_name + " itself, never " + dds + ": stored as a DDS, the texture would be lost there" +
+		                      (reads_tga.size() > 1 ? " (and " + std::to_string(reads_tga.size() - 1) + " more)." : std::string(".")),
+		              entry->relative_path);
+	const AssetEntry *taken = scan.find(dds);
+	if (taken && taken->relative_path != entry->relative_path)
+		return refuse("The project has " + dds + " already (" + taken->relative_path + "), which the game reads for " + entry->logical_name +
+		                      " now: rename or remove it first.",
+		              entry->relative_path);
+	std::vector<uint8_t> bytes;
+	std::string message;
+	if (!read_file_bytes(join_path(paths.root, entry->relative_path), bytes, message)) return refuse(message, entry->relative_path);
+	const std::shared_ptr<const TextureImage> image = decode_texture(entry->logical_name, bytes);
+	if (!image || !image->loads || !image->decoded || image->levels.empty())
+		return refuse(entry->logical_name + " does not read" + (image && !image->refusal.empty() ? ": " + image->refusal : std::string()) + ".",
+		              entry->relative_path);
+	const TextureLevel &level = image->levels.front();
+	const auto power_of_two = [](uint32_t side) { return side != 0 && (side & (side - 1)) == 0; };
+	if (!power_of_two(level.width) || !power_of_two(level.height))
+		return refuse(entry->logical_name + " is " + std::to_string(level.width) + " x " + std::to_string(level.height) +
+		                      ": the game pads a .dds whose sides are not powers of two to the next ones, so a model's UVs would "
+		                      "reach the padding. Make each side a power of two first.",
+		              entry->relative_path);
+	bool opaque = true;
+	for (size_t i = 3; i < level.rgba.size() && opaque; i += 4) opaque = level.rgba[i] == 255;
+	plan.before_words = texture_words(entry->logical_name, bytes);
+	ImportOptions options;
+	options["format"] = "dds";
+	options["dds"] = opaque ? "dxt1" : "dxt5";
+	if (!entry->imported_from.empty()) {
+		// An import's output: its own record takes the form (the session sets the options).
+		ImportSidecar record;
+		Diagnostic error;
+		if (!load_import_sidecar(join_path(paths.root, entry->imported_from + kImportSidecarSuffix), record, error) ||
+		    record.importer != "image")
+			return refuse(entry->logical_name + " is made by an import that does not write a DDS.", entry->relative_path);
+		plan.source = entry->imported_from;
+		options["name"] = dds;
+		plan.options = std::move(options);
+		plan.changes.push_back(plan.source + "'s import writes " + dds + " in place of " + entry->logical_name + ".");
+		return plan;
+	}
+	// A plain file: its source made once, a copy of the TGA in art/ under a name of its own (as Edit externally
+	// makes it), the plain file set aside.
+	const std::string name = free_source_name(scan, stem_of(entry->logical_name) + ".tga", entry->logical_name, std::string());
+	if (name.empty()) return refuse("No source could be made for " + entry->logical_name + ".", entry->relative_path);
+	plan.replaced = entry->relative_path;
+	plan.bytes = std::move(bytes);
+	plan.source = "art/" + name;
+	if (normalized_logical_name(stem_of(name) + ".dds") != normalized_logical_name(dds)) options["name"] = dds;
+	plan.options = std::move(options);
+	if (!make_output(paths, plan, name)) return plan;
+	plan.changes.push_back(entry->logical_name + " is stored as " + dds + " (" + plan.after_words + "), which every use of it reads first: "
+	                       "its referrers keep naming " + entry->logical_name + ".");
+	plan.changes.push_back(plan.source + ", a copy of it, makes " + dds + " from now on; " + plan.replaced + " is set aside in " +
+	                       std::string(kReplacedFolder) + "/, never deleted.");
+	return plan;
+}
+
 bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &plan, std::vector<Diagnostic> &findings) {
 	if (!plan.ok()) {
 		findings.insert(findings.end(), plan.refusals.begin(), plan.refusals.end());

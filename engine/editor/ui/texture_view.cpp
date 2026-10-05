@@ -200,6 +200,13 @@ void TextureView::draw_edits(Workspace &workspace, const DocumentBase &document,
 		if (extension == ".tga") {
 			if (ui_kit::tool(form, "32-bit", allowed, "Colour and alpha.")) operate("format", {{"format", "tga"}});
 			if (ui_kit::tool(form, "24-bit", allowed, "Colour alone: a terrain colour map's form.")) operate("format", {{"format", "tga24"}});
+			// Its .dds, which a model row's loader opens before the .tga its row names (store_as_dds).
+			if (ui_kit::tool(form, "DDS", view.allows(EditorRequestKind::StoreAsDds) && image.loads && image.decoded && !document.dirty(),
+			                 "Stored as the .dds of its name, DXT1 (DXT5 with alpha) with its mip chain, the form of the game's "
+			                 "own model textures, a fraction of the TGA's size: a model's rows keep naming the .tga, whose .dds "
+			                 "the game reads first. The TGA becomes the source in art/ its import makes the .dds from. Refused "
+			                 "where a use reads the .tga itself (a terrain map, the HUD)."))
+				workspace.request(request::store_as_dds(path));
 		} else {
 			if (ui_kit::tool(form, "DXT5 with mips", allowed, "The form of the game's own model textures."))
 				operate("format", {{"dds", "dxt5"}, {"mips", "full"}});

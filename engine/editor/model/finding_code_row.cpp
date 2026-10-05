@@ -293,6 +293,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::TextureReplace, code("texture.replace", G::Textures) },
 	{ C::TextureShowUse, code("texture.show_use", G::Textures) },
 	{ C::TextureSplit, code("texture.split", G::Textures) },
+	{ C::TextureStoreDds, code("texture.store_dds", G::Textures) },
 	{ C::TextureTileAtlasCells, code("texture.tile_atlas_cells", G::Textures, F::ImportFitsUse) },
 	{ C::TextureWrongReader, code("texture.wrong_reader", G::Textures, F::ImportFitsUse) },
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },

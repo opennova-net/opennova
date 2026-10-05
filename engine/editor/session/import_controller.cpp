@@ -10,6 +10,7 @@
 
 #include <base/io/file_time.h>
 #include <base/io/strutil.h>
+#include <editor/graph/texture_uses.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
 #include <editor/import/sidecar.h>
@@ -27,6 +28,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
 #include <editor/session/texture_import_state.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/session/view/view_events.h>
 #include <editor/session/workspace_parts.h>
 
@@ -344,6 +346,51 @@ void ImportController::edit_externally(const EditorRequest &request) {
 	}
 	close_texture_source();
 	post_open_externally(plan.source);
+}
+
+void ImportController::store_as_dds(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	// Each use whose loader opens the .tga itself: storing it as its .dds would lose the texture there.
+	std::vector<std::string> reads_tga;
+	const AssetEntry *entry = view_.project.scan->at_path(request.path);
+	if (!entry) entry = view_.project.scan->find(basename_of(request.path));
+	if (entry && view_.documents.texture_uses) {
+		const std::string dds = utf8_of(path_of(entry->logical_name).stem()) + ".dds";
+		for (const TextureUse &use : view_.documents.texture_uses->uses_of(view_, entry->relative_path))
+			if (!use.known() || !texture_use_opens(use, dds))
+				reads_tga.push_back(use.words.empty() ? std::string("A use of it") : use.words);
+	}
+	const TextureSourcePlan plan = plan_texture_dds(paths_, *view_.project.scan, request.path, reads_tga);
+	if (!plan.ok()) {
+		for (size_t i = 0; i + 1 < plan.refusals.size(); ++i) core_.report(plan.refusals[i]);
+		return core_.refuse_now(CoreFinding::TextureStoreDds, plan.refusals.back().message, plan.refusals.back().asset);
+	}
+	if (plan.bytes.empty()) {
+		// An import's output: its record takes the form, then imports again (set_options).
+		const auto value = [&](const char *key) {
+			const auto found = plan.options.find(key);
+			return found == plan.options.end() ? std::string() : found->second;
+		};
+		set_options(plan.source, {{"dds", value("dds")}, {"format", "dds"}, {"name", value("name")}});
+		return;
+	}
+	if (DocumentBase *open = core_.documents().document_for(plan.replaced)) {
+		if (open->dirty())
+			return core_.refuse_now(CoreFinding::TextureStoreDds,
+			                        plan.texture + " is open with unsaved edits: save or discard them before storing it as a DDS.",
+			                        plan.replaced);
+		core_.documents().close_document(plan.replaced);
+	}
+	std::vector<Diagnostic> findings;
+	if (!apply_texture_source(paths_, plan, findings)) {
+		for (size_t i = 0; i + 1 < findings.size(); ++i) core_.report(findings[i]);
+		return core_.refuse_now(CoreFinding::TextureStoreDds,
+		                        findings.empty() ? std::string("The texture could not be stored as a DDS.") : findings.back().message,
+		                        plan.texture);
+	}
+	core_.note("Stored " + plan.texture + " as " + plan.made_name + ", which every use of it reads first: " + plan.source +
+	           " makes it now; the file it replaced is kept under " + std::string(kReplacedFolder) + "/.");
+	reimport(plan.source, true);
 }
 
 // What a program saved of the watched files, refreshed alone (the sources imported again, the scan updated

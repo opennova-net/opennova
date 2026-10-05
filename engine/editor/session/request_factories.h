@@ -182,6 +182,13 @@ inline EditorRequest edit_externally(std::string path) {
 	request.path = std::move(path);
 	return request;
 }
+// The .tga `path` stored as the .dds of its name, which every use of it reads first (S18:
+// import/texture_source.h plan_texture_dds).
+inline EditorRequest store_as_dds(std::string path) {
+	EditorRequest request = of(EditorRequestKind::StoreAsDds);
+	request.path = std::move(path);
+	return request;
+}
 // What changed on disk among the import sources imported again (S18: the Shell's on its window's focus).
 inline EditorRequest refresh_changed_sources() { return of(EditorRequestKind::RefreshChangedSources); }
 // What a Replace of the texture `path` by the image `image` (none: an Edit externally) would do, asked in
