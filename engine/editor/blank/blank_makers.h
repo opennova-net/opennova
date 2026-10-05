@@ -39,6 +39,8 @@ bool make_blank_items_def(const BlankRequest &, std::vector<uint8_t> &out, Diagn
 bool make_blank_weapon_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_ammo_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_charattr_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+// SndProf.def: the one "default" profile every item binds, every slot silent
+bool make_blank_sound_profiles(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // coo (blank_coo.cpp)
 bool make_blank_coo(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);

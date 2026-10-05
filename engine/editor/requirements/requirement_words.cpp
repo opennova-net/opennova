@@ -20,7 +20,7 @@ constexpr RequirementWords kWords[] = {
 	{ "keyhelp", "The game shows \"Unable to load keyboard map strings\" and exits." },
 	{ "weapon_def", "The game starts with no weapons: its weapon list holds only \"None\"." },
 	{ "avatars_def", "The game starts without avatar definitions." },
-	{ "sndprof_def", "The game's sound profiles are empty." },
+	{ "sndprof_def", "A mission can hang or crash: with no profile, every item takes its sounds from memory the game never cleared. One empty \"default\" profile is enough." },
 	{ "items_def", "The game starts with no item definitions." },
 	{ "charattr_def", "The game logs \"Could not load charattr definitions\" and goes on without them." },
 	{ "loading_pcx", "The loading screen shows no picture." },
