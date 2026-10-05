@@ -332,13 +332,6 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_camera,
 			p_fov_y_deg, p_aspect, p_viewport_width, p_fog_dist_units,
 			p_water_z_units, p_force_indoors, kernel_->collision.local_player_blink_flags);
-	// Mirror the env view distance into the 0x0A priority score's global — the
-	// same value retail's env writes into word_26C681E for the render AND the
-	// priority builder to read (D-NET-139: the LOS gate + the +200 inside-view
-	// bonus). Headless embedders that never run an occlusion frame leave it 0,
-	// which disables both terms exactly like an unwritten retail global.
-	opennova::replication::set_view_distance_units(static_cast<int>(p_fog_dist_units));
-
 	// The main scene's collect runs over the main view's frame words.
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);
 	const uint64_t occl_build_start =

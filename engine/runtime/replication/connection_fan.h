@@ -56,16 +56,20 @@ bool apply_connection_uplink(world::World &world, Connection &conn,
 void set_entity_send_budget(int bytes);
 int entity_send_budget();
 
-// The environment draw/view distance in world units feeding the 0x0A priority
-// score's LOS gate and +200 inside-view bonus [orig: word_26C681E, env-written;
-// reads @0x50eabb/@0x50eb62]. Zero (the fresh-image default) disables both
-// terms exactly as an unwritten retail global does; the sim wires it from the
-// same env value the occlusion camera uses. (D-NET-139)
-void set_view_distance_units(int units);
-// The same global for its other reader, the client's own C2S 0x0C interest list
-// [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20 -- word_26C681E reads
-// @0x50E160 / @0x50E1F2].
-int view_distance_units();
+// The environment's view distance in world units, which the 0x0A priority
+// score's LOS gate and +200 inside-view bonus read, and the client's own C2S
+// 0x0C interest list too: retail's g_EnvFogDistCurrentHigh @0x26C681E (the
+// IDB's word_26C681E until 2026-10-05) is not a global of its own but the
+// high word of the smoothed fog distance g_EnvFogDistCurrent @0x26C681C, so
+// its one writer is the environment: the mission-start init,
+// then the weather tick's fog spring, on every peer (the WAC fog commands
+// move only the target the spring chases)
+// [orig: Environment_MissionStartInit @0x57F85A; Environment_UpdateWeatherTick
+//  @0x57E9B0, the stores @0x57EDFC / @0x57EE06 / @0x57EE12; WacCmd_FogDist
+//  @0x4EE100 writes g_EnvFogDistTarget]. The port reads the same state off the
+// peer's world (WeatherState's fog distance), whose weather tick runs inside
+// every role's tick. Zero disables both terms. (D-NET-139)
+int view_distance_units(const world::World &world);
 
 // Serialize the live world into ONE S2C 0x0A frame for `conn`, anchored to its
 // live owned entity, and host_send it onto that connection's transport. A
