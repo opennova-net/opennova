@@ -13,8 +13,8 @@ using namespace def;
 namespace {
 constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
 	{ CatalogFinding::InvalidInput, { "catalog.invalid_input", FindingFix::None, nullptr, true } },
-	// Input the game ignores, which a save keeps as the file has it (the file's notes, def_notes.h): said,
-	// nothing to fix.
+	// Input the game ignores, which a save writes as the file has it (the file's modeled layout,
+	// def_notes.h): said, nothing to fix.
 	{ CatalogFinding::IgnoredInput, { "catalog.ignored_input" } },
 	{ CatalogFinding::Unserializable, { "catalog.unserializable", FindingFix::None, nullptr, true } },
 	// A record with no name, an item of type 0: the editor's own rules, no refusal of the game's

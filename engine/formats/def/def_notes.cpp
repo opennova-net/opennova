@@ -1,5 +1,5 @@
-// A def file's notes (def_notes.h): its lines cut into their parts, what the family parsers made of each,
-// and the record each belongs to.
+// A def file's notes, its modeled layout (def_notes.h): its lines cut into their parts, what the family
+// parsers made of each, and the record each belongs to (def_compose.cpp models each record's lines).
 #include "def_notes.h"
 
 #include <atomic>
@@ -13,13 +13,6 @@ bool blank(char c) { return c == ' ' || c == '\t'; }
 bool separator(char c) { return c == ' ' || c == '\t' || c == ',' || c == '\r' || c == '\n'; }
 
 std::atomic<uint32_t> g_stamp{0};
-
-size_t line_footprint(const DefNotedLine &line) {
-	size_t bytes = sizeof(DefNotedLine) + line.indent.capacity() + line.tail.capacity() + line.eol.capacity();
-	for (const std::string &word : line.words) bytes += sizeof(std::string) + word.capacity();
-	for (const std::string &gap : line.gaps) bytes += sizeof(std::string) + gap.capacity();
-	return bytes;
-}
 
 } // namespace
 
@@ -93,18 +86,6 @@ const DefNotedRecord *DefTextNotes::record(uint64_t note, DefRecordKind kind) co
 	const size_t index = size_t(uint32_t(note)) - 1;
 	if (index >= records.size() || records[index].kind != kind) return nullptr;
 	return &records[index];
-}
-
-size_t DefTextNotes::footprint() const {
-	size_t bytes = sizeof(DefTextNotes);
-	for (const DefNotedLine &line : leading) bytes += line_footprint(line);
-	for (const DefNotedLine &line : trailing) bytes += line_footprint(line);
-	for (const DefNotedRecord &record : records) {
-		bytes += sizeof(DefNotedRecord) + record.baseline.header.capacity() + record.baseline.end.capacity();
-		for (const DefNotedLine &line : record.lines) bytes += line_footprint(line);
-		for (const auto &step : record.baseline.steps) bytes += sizeof(step) + step.second.capacity();
-	}
-	return bytes;
 }
 
 void def_clear_notes(DefRecordKind kind, void *record) {
@@ -254,6 +235,8 @@ void DefTextNoter::drop_nested(uint64_t note) {
 			std::vector<DefNotedLine> lines = std::move(record_at(note).lines);
 			record_at(note).lines.clear();
 			for (DefNotedLine &line : lines) {
+				// Its own lines would read again as a block (its comments and blanks would not).
+				line.superseded = line.role != DefNotedRole::Free;
 				line.role = DefNotedRole::Free;
 				line.step = 0;
 				line.nested = 0;

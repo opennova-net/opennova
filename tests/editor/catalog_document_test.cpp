@@ -147,6 +147,43 @@ static int collections() {
 	def_free_weapons(&parsed);
 	return 0;
 }
+// The review's Y2 through the catalog: a sight duplicated in its weapon is a record of its own (its copy
+// names none of the file's layout, prepare_record: written in the writer's form after its original), and
+// one moved follows the weapon's order; the comment above each stands with it, and no record is written
+// in the writer's form (the save says nothing).
+static int nested_rows_follow_the_record() {
+	editor_test::TempProjectDir dir("opennova_catalog_nested_rows");
+	const std::string text = "weapon \"WPN_S\"\n\t// the scope\n\tsights scope.tga 0 0 640 480 blend\n"
+	                         "\t// the dot\n\tsights reticle.tga 0 0 64 64 add\nend\n";
+	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), text));
+	DefCatalogDocument document; Diagnostic error;
+	TEST_EXPECT(document.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error));
+	const auto parent = document.rows()[0]->id;
+	const NodeAddress weapon_row{parent, node_kind(DefRecordKind::Weapon), 0};
+	std::vector<NodeId> sights;
+	for (const Document::Collection &collection : document.collections_of(weapon_row))
+		if (std::string(document.kind_token(collection.spec.kind)) == "sight") sights = collection.ids;
+	TEST_EXPECT(sights.size() == 2);
+	if (sights.size() != 2) return 1;
+	TEST_EXPECT(document.serialize().text == text);
+	Edit duplicate; duplicate.operation = EditOperation::Duplicate;
+	duplicate.address = {parent, node_kind(DefRecordKind::Sight), sights[0]};
+	TEST_EXPECT(document.apply(duplicate, error));
+	SerializeResult written = document.serialize();
+	TEST_EXPECT(written.ok() && written.notes.empty() &&
+	            written.text == "weapon \"WPN_S\"\n\t// the scope\n\tsights scope.tga 0 0 640 480 blend\n"
+	                            "\tsights scope.tga 0 0 640 480 blend\n\t// the dot\n\tsights reticle.tga 0 0 64 64 add\nend\n");
+	document.undo();
+	Edit move; move.operation = EditOperation::Move;
+	move.address = {parent, node_kind(DefRecordKind::Sight), sights[1]};
+	move.position = 0;
+	TEST_EXPECT(document.apply(move, error));
+	written = document.serialize();
+	TEST_EXPECT(written.ok() && written.notes.empty() &&
+	            written.text == "weapon \"WPN_S\"\n\t// the dot\n\tsights reticle.tga 0 0 64 64 add\n"
+	                            "\t// the scope\n\tsights scope.tga 0 0 640 480 blend\nend\n");
+	return 0;
+}
 static int session_gate() {
 	editor_test::TempProjectDir dir("opennova_catalog_session_test");
 	NoProcess platform;
@@ -814,7 +851,8 @@ static int unticked_line_saves_alone() {
 }
 
 int main() {
-	return unticked_line_saves_alone() || code_page_names() || history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
+	return unticked_line_saves_alone() || code_page_names() || history_and_save() || two_new_items() || collections() ||
+	       nested_rows_follow_the_record() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
 	       witnessed_enums() || powerup_weapon() || duplicates_apart() || plain_words();
 }

@@ -76,7 +76,7 @@ bool parse_action_line(DefPowerupAction &action, const io::ConfigTokens &tokens)
 
 // What the loader reads past without storing anything, reported to an authoring tool (the
 // other families' UnknownProperty): the writer alone drops it, which the game reads the same; over the
-// file's notes (def_notes.h) it stands as the file has it.
+// file's modeled layout (def_notes.h) it is generated as the tokens the file has.
 void ignored(DefPowerupFile *out, DefParseReport *report, size_t line, const char *record, const char *key) {
     authoring_issue(out->unmodeled_count, report, line + 1, record, key, strlen(key));
 }

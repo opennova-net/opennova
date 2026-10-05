@@ -635,8 +635,9 @@ int authored_catalog(const char *family, const char *text) {
 // speed at the word 1 its allocation gives it [orig: ItemDef_AllocateWithDefaults @0x49E3B0]) shows the
 // quotient in the line's units, never the number the parser's 32-bit wrap reads back to it (-2066861395
 // km/h for every item without a climb_speed line), and a set of what it shows changes nothing; swept over
-// every kind's defaults, each scaled member a whole number where one of the line makes its word (within one
-// round of the 32-bit product: a boresight's 360 degrees is the word -256, and shows 360).
+// every kind's defaults, each scaled member a whole number where one of the line makes its word (within 16
+// rounds of the 32-bit product: a boresight's 360 degrees is the word -256, and shows 360). A number set
+// in degrees that wraps the product more than once (540, 720, -720) shows as set, and the line writes it so.
 int scaled_defaults() {
 	int failures = 0;
 	size_t reals = 0;
@@ -657,10 +658,11 @@ int scaled_defaults() {
 			const int64_t word = std::get<int64_t>(def_get(record.data(), field));
 			DefValue shown;
 			const bool got = def_authored_get(member, record.data(), shown);
-			// A whole number of the line makes the word within one round of the 32-bit product.
+			// A whole number of the line makes the word within 16 rounds of the 32-bit product.
 			const double round = 4294967296.0;
-			const bool multiple = std::fmod(double(word), scale) == 0.0 || std::fmod(double(word) + round, scale) == 0.0 ||
-			                      std::fmod(double(word) - round, scale) == 0.0;
+			bool multiple = false;
+			for (int r = 0; r <= 16 && !multiple; ++r)
+				multiple = std::fmod(double(word) + r * round, scale) == 0.0 || std::fmod(double(word) - r * round, scale) == 0.0;
 			const bool right = got && (multiple ? std::holds_alternative<int64_t>(shown) &&
 			                                              uint32_t(int64_t(double(std::get<int64_t>(shown)) * scale)) == uint32_t(word)
 			                                    : std::holds_alternative<double>(shown) && std::get<double>(shown) == double(word) / scale);
@@ -687,6 +689,39 @@ int scaled_defaults() {
 		            std::holds_alternative<double>(climb) ? std::to_string(std::get<double>(climb)).c_str() : "a whole number");
 		++failures;
 	}
+	// Degrees past a turn: set, shown and written as set, read back to the same word.
+	const struct {
+		DefRecordKind kind;
+		const char *field, *key;
+	} wrapped[] = {{DefRecordKind::Ammo, "boresight_maxang", "boresight_maxang"},
+	               {DefRecordKind::Item, "max_slope", "max_slope"}};
+	for (const auto &w : wrapped)
+		for (const int64_t degrees : {int64_t(540), int64_t(720), int64_t(-720), int64_t(5760)}) {
+			const DefMember member = def_member(w.kind, w.field);
+			std::vector<uint64_t> record((def_record_size(w.kind) + 7) / 8);
+			def_init_record(w.kind, record.data());
+			std::string error;
+			DefValue shown;
+			const bool set = def_authored_set(member, record.data(), DefValue(degrees), error);
+			const bool got = set && def_authored_get(member, record.data(), shown);
+			const bool same = got && std::holds_alternative<int64_t>(shown) && std::get<int64_t>(shown) == degrees;
+			// The line the writer puts down for it.
+			DefRecordWriter writer;
+			std::string key;
+			std::vector<std::string> args;
+			std::vector<DefValue> values;
+			for (const DefField *field : member.line) values.push_back(def_get(record.data(), *field));
+			writer.property_args(w.kind, *member.property, record.data(), values, "", key, args);
+			const bool written = !args.empty() && args[0] == std::to_string(degrees);
+			if (!same || !written) {
+				std::printf("FAIL %s %lld degrees: %s, shows %s, the line writes '%s'\n", w.field, (long long)degrees,
+				            set ? "set" : error.c_str(),
+				            !got ? "nothing" : std::holds_alternative<int64_t>(shown) ? std::to_string(std::get<int64_t>(shown)).c_str()
+				                                                                      : std::to_string(std::get<double>(shown)).c_str(),
+				            args.empty() ? "" : args[0].c_str());
+				++failures;
+			}
+		}
 	return failures;
 }
 

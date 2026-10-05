@@ -11,11 +11,11 @@ namespace opennova::def {
 // their values cannot be authored in the native grammar.
 struct DefRecordWriter {
 	DefWriteResult result;
-	// What each line put down is (def_notes.h's roles), which a write over a file's notes lays the noted
-	// lines out by: the record it is of (a slot, one per record written; -1 for the file's own lines), its
-	// role and its step; a nested record's place in its parent, a Nested line of no text. `plain`: the
-	// record is written in the writer's form whatever its notes (one whose noted form the reparse check
-	// refused).
+	// What each line put down is (def_notes.h's roles), which a write over a file's modeled layout
+	// generates the file's lines from: the record it is of (a slot, one per record written; -1 for the
+	// file's own lines), its role and its step; a nested record's place in its parent, a Nested line of no
+	// text. `plain`: the record is written in the writer's form whatever its layout (one whose own form the
+	// reparse check refused).
 	struct Slot {
 		uint64_t note = 0;
 		DefRecordKind kind = DefRecordKind::Item;
@@ -90,12 +90,20 @@ private:
 	std::vector<Open> open_;
 };
 
-// The text a write over a file's notes puts down (def_notes.h): the noted lines where what the writer
-// puts down for them is what it put down for the record as read, the writer's lines elsewhere (a changed
-// line keeping its noted blanks, comment and unchanged words), in the order the file has them.
-std::string def_compose(const DefRecordWriter &writer, const DefTextNotes &notes);
-// What the writer put down for each record of the notes (DefNotedRecord::baseline).
+// The text a write over a file's modeled layout puts down (def_notes.h), generated in the order the file
+// has its lines: each record's line from the words the writer puts down for it now in the layout's shape
+// (its spellings while they spell those words, its tokens the game skips, its blanks, separators,
+// comment and ending), its lines the game reads nothing of from their tokens, a line the file did not
+// have in the writer's form after its record's. A record written in the writer's form (`plain`, the
+// reparse check refused its own) keeps its comment lines and the lines the game skips (but a block a later
+// one replaced, which would read again); what it does not keep is said in `lost`, a line per record.
+std::string def_compose(const DefRecordWriter &writer, const DefTextNotes &notes, std::vector<std::string> *lost = nullptr);
+// What the writer put down for each record of the notes (DefNotedRecord::baseline), and each record's lines
+// modeled against it (DefNotedShape).
 void def_note_baseline(const DefRecordWriter &writer, DefTextNotes &notes);
+// The words an `attrib:` line holds after its key (def_write_record.cpp's cap: the game's tokenizer's 29,
+// our parser's 16).
+size_t def_attrib_words_per_line();
 
 // The text of a squib's or a door's number as the writer puts it down: the shortest decimal the item
 // parser's arithmetic over its atof reading takes to the word at both of the game's FPU precisions (the

@@ -11,16 +11,19 @@
 
 namespace opennova::def {
 
-// What a save needs to put a def file back as it was read, beside the records the game reads (ADR 0003:
-// noted layout and parsed data, never the file's bytes passed through; the def catalogs' "one field
-// changed, one line changed"): each line's blanks before its first word, its words as the file spells
-// them (a key's case, a number's own spelling, the words the game skips), what stands between them, its
-// comment, its ending, and what the parser made of it: a line of a record's (its step, def.h's line order
-// steps), the record's header or its end, where a nested record (a sight, an action block) began, or a
-// line the game reads nothing of (a blank, a comment, a line the parser skips). A writer given the notes
-// writes each line as noted while what the writer would put down for it is what it put down for the
-// record as read (the baseline), and the line in its own form, keeping the noted blanks, comment and
-// unchanged words, where not.
+// The layout of a def file modeled beside the records the game reads (ADR 0003 holds: the maintainer's
+// ruling of 2026-10-04, "model it, generate it"; the def catalogs' "one field changed, one line changed"):
+// no line's text is kept to be put back. Each line is modeled as what the parser made of it (a line of a
+// record's, its step: def.h's line order steps; the record's header or its end; where a nested record (a
+// sight, an action block) began; or a line the game reads nothing of: a blank, a comment, a line the
+// parser skips), its blanks before its first word, the separators between its words, its comment, its
+// ending, and for a record's line its shape (DefNotedShape): each of its words one of the writer's words
+// in the file's spelling (a key's case, an alias, a number's own spelling) or a token the game skips, and
+// the writer's words it leaves out. A line the game reads nothing of keeps its tokens as tokens. The
+// writer generates every line from the records and this data: a record's line from the words it puts
+// down now, each in the file's spelling while it is the word it wrote for the record as read, so a file
+// read and written again comes out as it was because the writer makes it so. None of it is shown or
+// edited in the editor: it is carried for the save alone.
 
 enum class DefNotedRole : uint8_t {
 	Free,   // read for nothing: a blank, a comment, a line the game skips
@@ -30,15 +33,45 @@ enum class DefNotedRole : uint8_t {
 	End,    // the record's `end`
 };
 
+// A word of a record's line (a Header, a Line, an End) as the file has it, against the words the writer
+// puts down for the line (def_note_baseline): one of them (`index`), in the file's spelling, which stands
+// while the writer's word is the one it wrote for the record as read (`as_written`); or a token the game
+// reads nothing of (`neutral` on an `attrib:` line, a placeholder past an `addeweap`'s angles).
+struct DefNotedWord {
+	bool written = true;
+	size_t index = 0;
+	std::string as_written;
+	std::string spelling; // the file's spelling of the writer's word, or the token
+};
+
+// A record's line modeled against the writer's words for it as read: its words in the file's order, the
+// writer's words it leaves out (their places and the words as read: a default the file does not write),
+// and the entry it is (its key and first word as the writer writes them: what tells one line of a step of
+// several from another). `modeled` false: a line of the record's the writer puts nothing down for, kept as
+// tokens (`DefNotedLine::words`) while its step is as read.
+struct DefNotedShape {
+	bool modeled = false;
+	std::vector<DefNotedWord> words;
+	std::vector<std::pair<size_t, std::string>> left_out;
+	std::string entry;
+};
+
 struct DefNotedLine {
 	DefNotedRole role = DefNotedRole::Free;
 	uint8_t step = 0;    // Line, Nested: the record's step (a nested record's: DEF_LINE_ORDER_ROWS or _BLOCKS)
 	uint64_t nested = 0; // Nested: the note of the record that began there
+	// A Free line of a block a later one replaced (the weapon reader's earlier `action` of a name): read
+	// again on its own it would be a block, so a record written in the writer's form leaves it out, named.
+	bool superseded = false;
 	std::string indent;  // the blanks before the first word
+	// A Free line's tokens (and a record's line until def_note_baseline models it: its shape then, these
+	// cleared); a line read for nothing keeps them, written as the tokens they are.
 	std::vector<std::string> words;
-	std::vector<std::string> gaps; // gaps[i] stands between words[i] and words[i + 1]
+	std::vector<std::string> gaps; // gaps[i] stands between the line's word i and word i + 1
 	std::string tail;    // the blanks after the last word, then the comment
 	std::string eol;     // "\r\n", "\n", or "" (a last line with none)
+	DefNotedShape shape; // a record's line, modeled
+	// The line made of its tokens (a Free line's, or a record's line kept as tokens).
 	std::string text() const;
 };
 
@@ -48,12 +81,13 @@ struct DefNotedLine {
 // 0x53CC4E..0x53CC70]) and its comment (`//` or `;` outside quotes, where trim_def_line cuts the line).
 DefNotedLine def_noted_line(const char *text, size_t length);
 
-// What the writer put down for a record as read (the baseline): its header, its end, and each step's own
-// lines (a nested record's are its own).
+// What the writer put down for a record as read (the baseline): each step's own lines (a nested record's
+// are its own), which tell a step as read from a step changed, and which of its lines the file left out.
 struct DefNotedBaseline {
-	std::string header;
-	std::string end;
 	std::vector<std::pair<uint8_t, std::string>> steps;
+	// The writer's lines the file has no line for (a default the file leaves out), by step: left out while
+	// the writer puts them down as it did.
+	std::vector<std::pair<uint8_t, std::string>> left_out;
 	const std::string *step(uint8_t of) const;
 };
 
@@ -63,9 +97,9 @@ struct DefNotedRecord {
 	DefNotedBaseline baseline;
 };
 
-// A file's notes: its lines before its first record, each record's (a record's `note` names its own), the
-// lines after its last. `stamp` tells one file's notes from another's (a record pasted from another file
-// names none of these).
+// A file's notes, its modeled layout: its lines before its first record, each record's (a record's `note`
+// names its own), the lines after its last. `stamp` tells one file's notes from another's (a record pasted
+// from another file names none of these).
 struct DefTextNotes {
 	uint32_t stamp = 0;
 	std::vector<DefNotedLine> leading;
@@ -73,7 +107,6 @@ struct DefTextNotes {
 	std::vector<DefNotedLine> trailing;
 	// The record a note names, of `kind`, in these notes; null for none.
 	const DefNotedRecord *record(uint64_t note, DefRecordKind kind) const;
-	size_t footprint() const;
 };
 
 // A record's note: the notes' stamp and its place among their records.
@@ -81,7 +114,8 @@ inline constexpr uint64_t def_note_of(uint32_t stamp, size_t index) {
 	return (uint64_t(stamp) << 32) | uint64_t(uint32_t(index + 1));
 }
 
-// The parsers with notes taken (`notes` filled; a record's note names its noted lines and baseline).
+// The parsers with the layout modeled (`notes` filled; a record's note names its lines and baseline, each
+// line modeled by def_note_baseline, which the parsers run last).
 int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out, DefParseReport *report,
                            DefTextNotes &notes);
 int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out, DefParseReport *report,
@@ -138,7 +172,8 @@ private:
 	bool any_record_ = false;
 };
 
-// Each record's baseline (DefNotedRecord::baseline): the writer's form of it as read.
+// Each record's baseline (DefNotedRecord::baseline: the writer's form of it as read) and each of its lines
+// modeled against the writer's words for it (DefNotedLine::shape, its words then cleared).
 void def_note_baseline(const DefItemsFile &file, DefTextNotes &notes);
 void def_note_baseline(const DefWeaponsFile &file, DefTextNotes &notes);
 void def_note_baseline(const DefAmmoFile &file, DefTextNotes &notes);

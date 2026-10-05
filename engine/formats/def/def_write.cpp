@@ -61,8 +61,9 @@ DefWriteResult finish(DefRecordWriter &writer) {
 	return std::move(writer.result);
 }
 
-// How each record of a write is put down (a level a record: its noted lines in the file's order, 0; the
-// writer's lines in the file's order, 1; the writer's lines in the table's order, 2); the records whose
+// How each record of a write is put down (a level a record: its lines generated over the file's layout, 0;
+// the writer's lines in the file's order, its comment lines and the lines the game skips kept, 1; the
+// writer's lines in the table's order, 2); the records whose
 // write the reparse check refused (`refused`, out); and whether a record written in the table's order
 // though it has an order of its own is said (`report`, into DefWriteResult::reordered).
 struct WriteOrder {
@@ -76,8 +77,8 @@ struct WriteOrder {
 	bool plain(size_t record) const { return !notes || at(record) >= 1; }
 };
 
-// What the reparse of a write over a file's notes reads past as the file itself had it: the input the game
-// skips that the notes keep (a word or a line the game reads nothing of), reported again and never a
+// What the reparse of a write over a file's layout reads past as the file itself had it: the input the game
+// skips that the layout models (a word or a line the game reads nothing of), reported again and never a
 // blocker. A write of the writer's own form reads back with no finding at all.
 bool kept_input(const WriteOrder &order, const DefIssue &issue) { return order.notes && !issue.blocks(); }
 
@@ -102,17 +103,18 @@ template <class Check> void check_one(DefRecordWriter &writer, WriteOrder &order
 	if (writer.result.diagnostics.size() != before) order.refused.push_back(i);
 }
 
-// The text a write puts down: over the file's notes, the noted lines laid out with the writer's
-// (def_compose); else the writer's own.
+// The text a write puts down: over the file's modeled layout, every line generated from the records and
+// that data (def_compose), what a record written in the writer's form does not keep named (rewritten);
+// else the writer's own.
 void lay_out(DefRecordWriter &writer, const WriteOrder &order) {
-	if (order.notes) writer.result.text = def_compose(writer, *order.notes);
+	if (order.notes) writer.result.text = def_compose(writer, *order.notes, &writer.result.rewritten);
 }
 
-// A file written keeping each record's noted lines and order; where the reparse check refuses a record
-// (an edit its noted lines or its order cannot carry: a deceleration before the acceleration that
-// defaults it, a kept line an edit leaves it unable to carry), that record in the writer's lines, then in
-// the table's order, the rest as read; else the whole file in the table's. Each record written in the
-// table's order is named (reordered).
+// A file generated over its layout, each record's lines in the file's form and order; where the reparse
+// check refuses a record (an edit its lines or its order cannot carry: a deceleration before the
+// acceleration that defaults it, a block a later one replaced read again), that record in the writer's
+// lines (named with what it does not keep: rewritten), then in the table's order (reordered), the rest as
+// generated; else the whole file in the table's.
 template <class File, class Write>
 DefWriteResult write_in_order(const File &file, const DefTextNotes *notes, Write write) {
 	WriteOrder order;
@@ -237,55 +239,85 @@ DefWriteResult write_items(const DefItemsFile &file, WriteOrder &order) {
 	return finish(writer);
 }
 
+// The top level's records in the order they are put down, each a carry limit (true) or a weapon and its
+// index: the carry limits first, then the weapons; over a file's layout, a record of the file where the
+// file had it among the other kind's (a carry line after a weapon block stays after it: the two tables
+// read apart, so the order between them is the file's alone), one the layout does not name right after
+// the one before it of its kind.
+std::vector<std::pair<bool, size_t>> top_level(const DefWeaponsFile &file, const DefTextNotes *notes) {
+	const auto place = [notes](uint64_t note, DefRecordKind kind) -> int64_t {
+		return notes && notes->record(note, kind) ? int64_t(uint32_t(note)) : -1;
+	};
+	std::vector<std::pair<bool, size_t>> out;
+	size_t carry = 0, weapon = 0;
+	while (carry < file.ammo_classes_count || weapon < file.count) {
+		const int64_t c = carry < file.ammo_classes_count ? place(file.ammo_classes[carry].note, DefRecordKind::Carry) : -2;
+		const int64_t w = weapon < file.count ? place(file.entries[weapon].note, DefRecordKind::Weapon) : -2;
+		const bool take_carry = c != -2 && (w == -2 || c == -1 || (w != -1 && c < w));
+		if (take_carry) out.push_back({true, carry++});
+		else out.push_back({false, weapon++});
+	}
+	return out;
+}
+
+void put_weapon(DefRecordWriter &writer, const DefWeaponsFile &file, const WriteOrder &order, size_t i);
+
 void put_weapons(DefRecordWriter &writer, const DefWeaponsFile &file, const WriteOrder &order) {
 	writer.put("// Weapon definitions\r\n", DefNotedRole::Free);
 	writer.put("\r\n", DefNotedRole::Free);
 	incomplete(writer, file.unmodeled_count, "");
-	// The carry limits at the top level, as the file states them.
-	writer.depth = 0;
-	for (size_t i = 0; i < file.ammo_classes_count; ++i) {
+	for (const auto &[carry, i] : top_level(file, order.notes)) {
+		if (!carry) {
+			writer.depth = 1;
+			put_weapon(writer, file, order, i);
+			continue;
+		}
+		// A carry limit at the top level, as the file states it.
+		writer.depth = 0;
 		writer.begin_record(file.ammo_classes[i].note, DefRecordKind::Carry, 0, !order.notes);
 		writer.record(DefRecordKind::Carry, &file.ammo_classes[i], file.ammo_classes[i].name);
 		writer.end_record();
 	}
 	writer.depth = 1;
-	for (size_t i = 0; i < file.count; ++i) {
-		const auto &weapon = file.entries[i];
-		order_record(writer, order, i, weapon.line_order, weapon.weapon_name);
-		writer.begin_record(weapon.note, DefRecordKind::Weapon, 0, order.plain(i));
-		if (!header(writer, "weapon", weapon.weapon_name, sizeof(weapon.weapon_name), true)) {
-			writer.end_record();
-			continue;
-		}
-		incomplete(writer, weapon.unmodeled_count, weapon.weapon_name);
-		writer.record(DefRecordKind::Weapon, &weapon, weapon.weapon_name, [&](uint8_t step) {
-			if (step == DEF_LINE_ORDER_ROWS) {
-				for (size_t j = 0; j < weapon.sights_count; ++j) {
-					writer.begin_record(weapon.sights[j].note, DefRecordKind::Sight, step);
-					writer.record(DefRecordKind::Sight, &weapon.sights[j], weapon.weapon_name);
-					writer.end_record();
-				}
-				return;
-			}
-			// Each action block a level in, its lines a level further.
-			for (size_t j = 0; j < weapon.actions_count; ++j) {
-				const auto &action = weapon.actions[j];
-				writer.begin_record(action.note, DefRecordKind::Action, step);
-				if (!header(writer, "action", action.name, sizeof(action.name), true, writer.margin(1))) {
-					writer.end_record();
-					continue;
-				}
-				incomplete(writer, action.unmodeled_count, action.name);
-				writer.depth = 2;
-				writer.record(DefRecordKind::Action, &action, action.name);
-				writer.depth = 1;
-				close(writer, writer.margin(1), false);
+}
+
+// A weapon block: its lines, its sights and its action blocks.
+void put_weapon(DefRecordWriter &writer, const DefWeaponsFile &file, const WriteOrder &order, size_t i) {
+	const auto &weapon = file.entries[i];
+	order_record(writer, order, i, weapon.line_order, weapon.weapon_name);
+	writer.begin_record(weapon.note, DefRecordKind::Weapon, 0, order.plain(i));
+	if (!header(writer, "weapon", weapon.weapon_name, sizeof(weapon.weapon_name), true)) {
+		writer.end_record();
+		return;
+	}
+	incomplete(writer, weapon.unmodeled_count, weapon.weapon_name);
+	writer.record(DefRecordKind::Weapon, &weapon, weapon.weapon_name, [&](uint8_t step) {
+		if (step == DEF_LINE_ORDER_ROWS) {
+			for (size_t j = 0; j < weapon.sights_count; ++j) {
+				writer.begin_record(weapon.sights[j].note, DefRecordKind::Sight, step);
+				writer.record(DefRecordKind::Sight, &weapon.sights[j], weapon.weapon_name);
 				writer.end_record();
 			}
-		});
-		close(writer, std::string(), true);
-		writer.end_record();
-	}
+			return;
+		}
+		// Each action block a level in, its lines a level further.
+		for (size_t j = 0; j < weapon.actions_count; ++j) {
+			const auto &action = weapon.actions[j];
+			writer.begin_record(action.note, DefRecordKind::Action, step);
+			if (!header(writer, "action", action.name, sizeof(action.name), true, writer.margin(1))) {
+				writer.end_record();
+				continue;
+			}
+			incomplete(writer, action.unmodeled_count, action.name);
+			writer.depth = 2;
+			writer.record(DefRecordKind::Action, &action, action.name);
+			writer.depth = 1;
+			close(writer, writer.margin(1), false);
+			writer.end_record();
+		}
+	});
+	close(writer, std::string(), true);
+	writer.end_record();
 }
 
 DefWriteResult write_weapons(const DefWeaponsFile &file, WriteOrder &order) {
@@ -400,7 +432,14 @@ void put_powerup(DefRecordWriter &writer, const DefPowerupFile &file, const Writ
 			writer.end_record();
 		}
 		writer.put_step = DEF_LINE_ORDER_BLOCKS;
-		for (const auto &[name, action] : powerup_actions(row)) {
+		// Its two blocks are slots of the row, not a list: over a file's layout, in the order the file has them
+		// (a `respawn` block before its `pickup`), which the parser reads either way.
+		auto blocks = powerup_actions(row);
+		if (order.notes && order.notes->record(row.respawn.note, DefRecordKind::PowerupAction) &&
+		    order.notes->record(row.pickup.note, DefRecordKind::PowerupAction) &&
+		    uint32_t(row.respawn.note) < uint32_t(row.pickup.note))
+			std::swap(blocks[0], blocks[1]);
+		for (const auto &[name, action] : blocks) {
 			if (!action->present) continue;
 			writer.begin_record(action->note, DefRecordKind::PowerupAction, DEF_LINE_ORDER_BLOCKS);
 			writer.put(std::string("\taction \"") + name + "\"\r\n", DefNotedRole::Header);

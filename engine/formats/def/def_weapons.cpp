@@ -723,7 +723,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                         // The game keeps nothing of the earlier block, so none
                         // of its findings holds: one notice where it opened
                         // takes their place (the writer alone drops the block; over
-                        // the file's notes its lines stand, read for nothing), and the
+                        // the file's layout its lines are tokens read for nothing),
+                        // and the
                         // spans of the blocks after it move (a block's span
                         // lands at its `end`, so they follow in line order).
                         const ActionSource earlier = action_sources[row];

@@ -162,20 +162,25 @@ double whole_scale(const DefProperty &property) {
 	}
 }
 
-// A scaled whole number whose stored word no whole number of the line makes within the parser's 32 bits
-// (an item's climb speed left at the word 1 its allocation gives it [orig: ItemDef_AllocateWithDefaults
-// @0x49E3B0], in no item a whole km/h): what the game holds in the line's units, the quotient, a real
-// (1/293 km/h); the only whole number that reads it goes round the 32-bit product many times, a number
-// nobody writes (-2066861395 for the word 1). A product the 32 bits hold once round is a whole number
-// the file writes (a boresight's 360 degrees, the word -256).
+// How many times round the 32-bit product a whole number of the line may go and still show as one: the
+// editor's bound on a number a person writes (a degree line of 5760, sixteen turns, wraps 16 times; the
+// one whole number that reads an item's default climb speed, -2066861395, wraps 141 times).
+constexpr int kWholeRounds = 16;
+
+// A scaled whole number whose stored word no whole number of the line makes within kWholeRounds rounds of
+// the parser's 32-bit product (an item's climb speed left at the word 1 its allocation gives it [orig:
+// ItemDef_AllocateWithDefaults @0x49E3B0], in no item a whole km/h): what the game holds in the line's
+// units, the quotient, a real (1/293 km/h); the only whole number that reads it goes round the product
+// many times, a number nobody writes. A product within the rounds is a whole number the file writes (a
+// boresight's 360 degrees, the word -256; 720, the word -512; -720, the word 512).
 bool unscaled_real(const DefMember &member, const void *record, DefValue &out) {
 	if (member.authored != DefAuthored::Integer || !member.property) return false;
 	const double scale = whole_scale(*member.property);
 	const auto *word = scale > 0.0 ? std::get_if<int64_t>(&(out = def_get(record, *member.field))) : nullptr;
 	if (!word) return false;
 	const double w = double(*word), round = 4294967296.0;
-	if (std::fmod(w, scale) == 0.0 || std::fmod(w + round, scale) == 0.0 || std::fmod(w - round, scale) == 0.0)
-		return false;
+	for (int k = 0; k <= kWholeRounds; ++k)
+		if (std::fmod(w + k * round, scale) == 0.0 || std::fmod(w - k * round, scale) == 0.0) return false;
 	out = w / scale;
 	return true;
 }

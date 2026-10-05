@@ -46,16 +46,37 @@ std::string with_places(int64_t k, int places) {
 	return negative ? "-" + digits : digits;
 }
 
+// A whole number past what a double's places count exactly (a float's, 9e15 and up), by its significant
+// digits, the rest zeros: at each count of digits from one, the nearest and its two neighbours.
+template <class Reads> std::string shortest_whole(double near, Reads reads) {
+	const double size = std::fabs(near);
+	const int exponent = int(std::floor(std::log10(size)));
+	for (int digits = 1; digits <= 17; ++digits) {
+		const int zeros = exponent + 1 - digits;
+		if (zeros < 0) break;
+		const int64_t k = std::llround(size / std::pow(10.0, zeros));
+		for (const int64_t step : {int64_t(0), int64_t(-1), int64_t(1)}) {
+			if (k + step <= 0) continue;
+			const std::string text = (near < 0 ? "-" : "") + std::to_string(k + step) + std::string(size_t(zeros), '0');
+			if (reads(text)) return text;
+		}
+	}
+	return std::string();
+}
+
 // The shortest plain decimal that `reads` takes to the value it is to set, found near `near`: at each
 // count of places from none, the decimal nearest `near` and its two neighbours (what reads to a value
 // need not centre on the quotient: the digit walker's rounding, a truncation's interval), the fewest
-// places first; "" when none up to 17 places does. A number the parsers read is written in the form a
-// person writes it (bug 1 of the demo round: never the first hit of a bisection, never a float's whole
-// expansion, where a short decimal reads the same).
+// places first, up to 17 significant digits (a value below one its leading zeros' places more; one of 9e15
+// and up by its significant digits, shortest_whole); "" when none does. A number the parsers read is
+// written in the form a person writes it (bug 1 of the demo round: never the first hit of a bisection,
+// never a float's whole expansion, where a short decimal reads the same).
 template <class Reads> std::string shortest_text(double near, Reads reads) {
 	if (!std::isfinite(near)) return std::string();
+	if (std::fabs(near) >= 9.0e15) return shortest_whole(near, reads);
+	const int lead = near != 0.0 && std::fabs(near) < 1.0 ? int(std::floor(-std::log10(std::fabs(near)))) : 0;
 	double scale = 1.0;
-	for (int places = 0; places <= 17; ++places, scale *= 10.0) {
+	for (int places = 0; places <= 17 + lead; ++places, scale *= 10.0) {
 		const double scaled = near * scale;
 		if (std::fabs(scaled) > 9.0e15) break;
 		const int64_t k = std::llround(scaled);
@@ -71,11 +92,17 @@ template <class Reads> std::string shortest_text(double near, Reads reads) {
 // plain decimal that reads as the same float as the value does (5.4f as "5.4", not
 // "5.400000095367431640625"), else its whole expansion. What the game reads is the same; the form is the
 // one a person writes (the plain-words lane: a save after one edit no longer rewrites every real).
+// The same float, bit for bit (a negative zero is not zero's word).
+bool same_float(float a, float b) { return std::memcmp(&a, &b, sizeof(float)) == 0; }
+
 std::string float_decimal(double value) {
 	const float stored = float(value);
-	const std::string text = shortest_text(value, [stored](const std::string &candidate) {
-		return defscan::parse_float_n(candidate.data(), candidate.size()) == stored;
-	});
+	const auto reads = [stored](const std::string &candidate) {
+		return same_float(defscan::parse_float_n(candidate.data(), candidate.size()), stored);
+	};
+	// A negative zero is written with its sign, which atof keeps.
+	if (stored == 0.0f && std::signbit(stored) && reads("-0")) return "-0";
+	const std::string text = shortest_text(value, reads);
 	return text.empty() ? decimal(value) : text;
 }
 
@@ -188,7 +215,7 @@ std::string fixed(int64_t value) {
 std::string float_fixed(float value, int32_t bits) {
 	// Pick the shortest ordinary decimal that preserves BOTH native views.
 	const std::string text = shortest_text(value, [value, bits](const std::string &candidate) {
-		return defscan::parse_float_n(candidate.data(), candidate.size()) == value &&
+		return same_float(defscan::parse_float_n(candidate.data(), candidate.size()), value) &&
 		       defscan::parse_fixed16_digits_n(candidate.data(), candidate.size()) == bits;
 	});
 	return text.empty() ? decimal(value) : text; // the writer's reparse check reports unrepresentable pairs
@@ -253,7 +280,8 @@ std::string written_word(DefRecordKind kind, const DefValue &v) {
 }
 
 // Integer multiplication in the original 32-bit fields is modular. Prefer the
-// ordinary small inverse, then solve factor*x = value (mod 2^32).
+// ordinary small inverse, then solve factor*x = value (mod 2^32), the answer nearest zero (-720 degrees,
+// the word 512, as -720, not 134217008).
 int64_t unscale(int64_t value, int64_t factor) {
 	if (value % factor == 0) return value / factor;
 	int64_t a = factor, modulus = int64_t(1) << 32;
@@ -268,6 +296,7 @@ int64_t unscale(int64_t value, int64_t factor) {
 	modulus /= remainder;
 	t %= modulus; if (t < 0) t += modulus;
 	const uint64_t answer = (uint64_t(bits / remainder) * uint64_t(t)) % uint64_t(modulus);
+	if (modulus < (int64_t(1) << 32)) return int64_t(answer) > modulus / 2 ? int64_t(answer) - modulus : int64_t(answer);
 	return static_cast<int32_t>(static_cast<uint32_t>(answer));
 }
 
@@ -819,6 +848,7 @@ void DefRecordWriter::alias_line(const DefItemDef &item, uint8_t step, AliasCove
 	cover.door_type = cover.door_type || held.door_type;
 }
 
+size_t def_attrib_words_per_line() { return kDefAttribTokensPerLine; }
 std::string def_squib_rate_text(int32_t ticks) { return squib_rate(ticks); }
 std::string def_squib_q16_text(int32_t word) { return squib_q16(word); }
 std::string def_door_open_rate_text(int32_t rate) { return door_open_rate(rate); }
