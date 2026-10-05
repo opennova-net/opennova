@@ -6,9 +6,11 @@
 // never packed); the outputs read back through the engine's readers as the game reads them (the .trn
 // past the admission gate, the .cpt's CDEP and 341 tiles, the colour map 1024 x 1024, the blend map,
 // the empty .til); the runtime's own terrain load over them (the field store's heights, the frame
-// compiler's patches); the import rerun-stable (forced again, the same bytes); the blank environment
+// compiler's patches from afar, and near an eye standing on the slope the finest tile under it drawn
+// at the ground's height whichever way it looks); the import rerun-stable (forced again, the same bytes); the blank environment
 // a mission can be made under, and a blank mission made on the new terrain; and the refusals that
 // write nothing (a name taken, a colour map of another size, a value of no key).
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -108,6 +110,52 @@ std::vector<uint8_t> read(const std::string &path) {
 	std::string message;
 	read_file_bytes(path, bytes, message);
 	return bytes;
+}
+
+// A camera at `eye` looking along `fwd` (normalized here): the column-major world-to-view matrix the
+// frame compiler culls with, -Z forward, +Y up.
+opennova::TerrainViewInput camera_at(const float eye[3], float fwd[3]) {
+	opennova::TerrainViewInput camera;
+	camera.cam_x = eye[0];
+	camera.cam_y = eye[1];
+	camera.cam_z = eye[2];
+	const float length = std::sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
+	for (int i = 0; i < 3; ++i) fwd[i] /= length;
+	float right[3] = {-fwd[2], 0.0f, fwd[0]}; // fwd x up
+	const float side = std::sqrt(right[0] * right[0] + right[2] * right[2]);
+	for (float &r : right) r /= side;
+	const float up[3] = {right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2],
+	                     right[0] * fwd[1] - right[1] * fwd[0]};
+	const auto dot = [](const float *a, const float *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+	float *m = camera.view;
+	m[0] = right[0]; m[4] = right[1]; m[8] = right[2]; m[12] = -dot(right, eye);
+	m[1] = up[0]; m[5] = up[1]; m[9] = up[2]; m[13] = -dot(up, eye);
+	m[2] = -fwd[0]; m[6] = -fwd[1]; m[10] = -fwd[2]; m[14] = dot(fwd, eye);
+	m[3] = 0.0f; m[7] = 0.0f; m[11] = 0.0f; m[15] = 1.0f;
+	return camera;
+}
+
+// The drawn surface's height at sector-local (x, z): the triangle of the tile's LOD list (strip or
+// list, as the embedder converts it) that holds the point, interpolated; NAN when none does.
+float drawn_height(const std::vector<opennova::TerrainTileVertex> &vertices, const opennova::CptTileLOD &lod, float x,
+                   float z) {
+	const auto at = [&](uint16_t a, uint16_t b, uint16_t c) {
+		if (a == b || b == c || a == c || std::max({a, b, c}) >= vertices.size()) return NAN;
+		const auto &p0 = vertices[a].position, &p1 = vertices[b].position, &p2 = vertices[c].position;
+		const float det = (p1[0] - p0[0]) * (p2[2] - p0[2]) - (p2[0] - p0[0]) * (p1[2] - p0[2]);
+		if (det == 0.0f) return NAN;
+		const float l1 = ((x - p0[0]) * (p2[2] - p0[2]) - (p2[0] - p0[0]) * (z - p0[2])) / det;
+		const float l2 = ((p1[0] - p0[0]) * (z - p0[2]) - (x - p0[0]) * (p1[2] - p0[2])) / det;
+		const float l0 = 1.0f - l1 - l2;
+		if (l0 < -1e-4f || l1 < -1e-4f || l2 < -1e-4f) return NAN;
+		return l0 * p0[1] + l1 * p1[1] + l2 * p2[1];
+	};
+	const std::vector<uint16_t> &idx = lod.indices;
+	for (size_t i = 2; i < idx.size(); i += lod.is_strip ? 1 : 3) {
+		const float h = at(idx[i - 2], idx[i - 1], idx[i]);
+		if (!std::isnan(h)) return h;
+	}
+	return NAN;
 }
 
 int test_set_text() {
@@ -301,27 +349,55 @@ int test_new_terrain() {
 		TEST_EXPECT(centre > 48.0f && centre < 52.0f && shore < 2.0f);
 		const opennova::TerrainSceneSnapshot scene = opennova::build_terrain_scene_snapshot(cpt, trn);
 		TEST_EXPECT(scene.valid());
-		opennova::TerrainViewInput camera;
-		camera.cam_x = 0.0f;
-		camera.cam_y = 200.0f;
-		camera.cam_z = 600.0f;
-		// From the island's south, looking at its centre (column-major world-to-view, -Z forward).
-		const float eye[3] = {0.0f, 200.0f, 600.0f};
-		float fwd[3] = {0.0f - eye[0], 0.0f - eye[1], 0.0f - eye[2]};
-		const float length = std::sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
-		for (float &f : fwd) f /= length;
-		const float right[3] = {1.0f, 0.0f, 0.0f}; // fwd x up, up = +Y, fwd in the YZ plane
-		const float up[3] = {right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2],
-		                     right[0] * fwd[1] - right[1] * fwd[0]};
-		const auto dot = [](const float *a, const float *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
-		float *m = camera.view;
-		m[0] = right[0]; m[4] = right[1]; m[8] = right[2]; m[12] = -dot(right, eye);
-		m[1] = up[0]; m[5] = up[1]; m[9] = up[2]; m[13] = -dot(up, eye);
-		m[2] = -fwd[0]; m[6] = -fwd[1]; m[10] = -fwd[2]; m[14] = dot(fwd, eye);
-		m[3] = 0.0f; m[7] = 0.0f; m[11] = 0.0f; m[15] = 1.0f;
+		// From the island's south, looking at its centre.
+		const float far_eye[3] = {0.0f, 200.0f, 600.0f};
+		float at_centre[3] = {-far_eye[0], -far_eye[1], -far_eye[2]};
 		opennova::TerrainFrameCompiler compiler;
-		const opennova::TerrainDrawList &draws = compiler.compile(scene, camera);
-		TEST_EXPECT(!draws.patches.empty());
+		TEST_EXPECT(!compiler.compile(scene, camera_at(far_eye, at_centre)).patches.empty());
+
+		// Near the eye: the finest tiles all carry vertices and every LOD list a triangle, every leaf
+		// node the traversal reaches resolves to its tile, and an eye standing on the slope (1.7 over
+		// the ground, the island's sector grid putting world (x, z) at texel (512 + x, 512 + z)) draws
+		// the leaf tile under it, at the finest family, its surface there the ground's, whichever
+		// way it looks.
+		int leaves = 0;
+		for (const opennova::CptTile &tile : cpt.tiles) {
+			if (tile.tile_size != 64) continue;
+			++leaves;
+			TEST_EXPECT(tile.vertex_count > 0);
+			for (const opennova::CptTileLOD &lod : tile.lods) TEST_EXPECT(lod.indices.size() >= 3);
+		}
+		TEST_EXPECT(leaves == 256);
+		for (const auto &node : scene.quad_nodes)
+			if (node.is_leaf) TEST_EXPECT(node.size == 64 && node.tile_index >= 0);
+		const int eye_x = 60, eye_z = -40;
+		const float ground = cpt.depth_buffer[(512 + eye_z) * kSide + 512 + eye_x] / 256.0f;
+		TEST_EXPECT(ground > 35.0f && ground < 45.0f);
+		const float eye[3] = {float(eye_x), ground + 1.7f, float(eye_z)};
+		for (const float yaw : {0.0f, 90.0f, 180.0f, 270.0f}) {
+			for (const float pitch : {0.0f, -40.0f}) {
+				const float y = yaw * 3.14159265f / 180.0f, p = pitch * 3.14159265f / 180.0f;
+				float fwd[3] = {std::sin(y) * std::cos(p), std::sin(p), -std::cos(y) * std::cos(p)};
+				const opennova::TerrainDrawList &near = compiler.compile(scene, camera_at(eye, fwd));
+				TEST_EXPECT(near.debug.traversal.budget_drops == 0);
+				int under = 0;
+				for (const opennova::TerrainPatchDraw &draw : near.patches) {
+					const opennova::CptTile &tile = cpt.tiles[draw.tile_index];
+					const float local_x = eye[0] - draw.sector_ox, local_z = eye[2] - draw.sector_oz;
+					const int x0 = tile.tile_x & 0x1ff, z0 = tile.tile_y & 0x1ff;
+					if (draw.zero_height || local_x < x0 || local_x > x0 + tile.tile_size || local_z < z0 ||
+					    local_z > z0 + tile.tile_size)
+						continue;
+					++under;
+					TEST_EXPECT(draw.page_lod_level == 4 && draw.lod_family == 0 && tile.tile_size == 64);
+					const float drawn = drawn_height(
+					        opennova::build_terrain_tile_vertices(cpt, trn, draw.tile_index, false),
+					        tile.lods[draw.lod_family], local_x, local_z);
+					TEST_EXPECT(std::fabs(drawn - ground) < 0.25f);
+				}
+				TEST_EXPECT(under == 1);
+			}
+		}
 	}
 
 	// Rerun-stable: imported again with nothing changed, the same bytes.
