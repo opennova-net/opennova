@@ -40,8 +40,8 @@ void test_helicopter_ammo_seed_needs_a_resolved_byte() {
     kernel->world.tables.ammo.entries[1].name = "50CAL";
     kernel->world.tables.ammo.entries[1].valid = true;
     static const char kProfile[] =
-            "type HELO\nprimary_weap 50CAL\nprimary_ammo 5\n"
-            "secondary_weap AT_NULL\nsecondary_ammo 7\n";
+            "type HELO\r\nprimary_weap 50CAL\r\nprimary_ammo 5\r\n"
+            "secondary_weap AT_NULL\r\nsecondary_ammo 7\r\n";
     kernel->ai_profiles.push_back({"h_bhawkn",
             aip::parse_profile(reinterpret_cast<const uint8_t *>(kProfile),
                     sizeof(kProfile) - 1)});
@@ -74,7 +74,7 @@ void test_flyover_helicopter_keeps_its_spawn_heading() {
     kernel->set_items_table(&items);
     kernel->world.registry.configure_pool(0, 8);
     kernel->world.registry.configure_pool(1, 8);
-    static const char kProfile[] = "type HELO\n";
+    static const char kProfile[] = "type HELO\r\n";
     kernel->ai_profiles.push_back({"h_bhawkn",
             aip::parse_profile(reinterpret_cast<const uint8_t *>(kProfile),
                     sizeof(kProfile) - 1)});

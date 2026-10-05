@@ -37,7 +37,7 @@ func test_bms_helpers_receive_native_animation_and_presentation_on_retry() -> vo
 		"items.def": definitions,
 		"Medic01.adm": animation,
 		"Medic02.adm": animation,
-		"H_BHawkN.aip": "type HELO\nsubtype STD\n",
+		"H_BHawkN.aip": "type HELO\r\nsubtype STD\r\n",
 	})
 	staged_dirs.append(root_dir)
 	assert_eq(DirAccess.copy_absolute(clip_path, root_dir.path_join("BINOC.bad")), OK)
