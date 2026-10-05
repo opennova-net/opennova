@@ -28,5 +28,12 @@ begin "Wooden barrel"
 	type decoration
 	armor 10 10
 end
+begin "Mud-brick hut"
+	graphic onhut1
+	id 100012
+	type building
+	attrib: landable
+end
+
 
 

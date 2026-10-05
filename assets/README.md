@@ -30,13 +30,22 @@ the editor finds it anywhere in the project. Keep new files at the top level.
 | `Arial12b.fnt`, `Arial14n.fnt`, `Arial14b.fnt`, `Arial16n.fnt`, `Arial16b.fnt`, `Impac22b.fnt`, `Impac38b.fnt` | The seven fonts the game's main menu loads by name. The editor's blank font (the same art as `opennova.fnt`), made by Create Missing. |
 | `gametext.bin`, `gameerr.bin`, `vmacros.bin`, `keyhelp.bin`, `game.bin`, `menutxt.bin` | The string tables the game reads as it starts and the main menu reads. Blank tables from Create Missing. |
 | `nw_cdata.coo` | The NovaWorld screens' string table the main menu reads. Blank, from Create Missing. |
-| `items.def`, `weapon.def`, `charattr.def` | The item, weapon and character-attribute definitions the game reads as it starts. Blank (one `Null` marker item; no weapon or class yet), from Create Missing. |
+| `items.def`, `weapon.def`, `charattr.def` | The item, weapon and character-attribute definitions the game reads as it starts, from Create Missing and edited in the editor: `items.def` holds the `Null` marker first, the crate, the barrel, the hut and the insertion point; no weapon or class yet. |
 | `menu_style.mns`, `brand.mns` | The menu stylesheets: the `%NAME%` fonts and colours the screens use. From Create Missing. |
 | `on_ar15.3di` | A first-person AR-15-pattern carbine, 64 parts on one rig. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` and `on_arms*` file below. |
 | `on_arms.3di` | The first-person arms skinned to `on_ar15`'s rig (its first 55 parts). |
 | `on_ar15.adm` | `on_ar15`'s animation table: the eight weapon slots and the clip each plays. |
 | `on_ar15_{rst,i,f,r,e,swt,swf,swr}.bad` | The clips: reset, idle, fire, reload, empty, switch to, switch from and switch rank. |
 | `on_ar15_{0,1,2,3}_c.tga`, `on_arms_{0,1}_c.tga`, `on_arms_{0,1}_n.tga` | The models' diffuse textures and the arms' normal maps. |
+| `sp.mnu` | The `SINGLE_PLAYER` screen the main menu's SINGLE PLAYER button opens: the game lists the project's single-player missions in its `IA_LIST` and `ACCEPT` starts the chosen one. Hand-written. |
+| `ammo.def`, `powerup.def`, `SndProf.def` | Blanks from Create Missing. `SndProf.def` is one empty `default` profile: without it the original game binds every item's sounds to memory it never cleared and hangs the mission (PR #791). |
+| `game.wac`, `server.wac`, `cmap.mnu`, `game.mnu`, `weapon.mnu`, `vehicle.mnu`, `stat.mnu`, `death.mnu`, `mp.mnu`, `border.tga`, `boxtile.tga`, `monogram.tga`, `loadscrn.pcx` | What a mission's start loads: its scripts, the in-game screens, the board box and the loading screen. Blanks from Create Missing. |
+| `onjo_m1.bms`, `onjo_m1.bin` | "Indigo Shore", the base game's one mission, made in the editor: the camp's crates and barrels and the insertion point (`items.def` 106094). |
+| `art/terrain/onisle1.tset` and its images | The island terrain the mission plays on, made by the editor's terrain importer from a heightmap, a colour map, a detail map and a surface map. The surface map gives the island its classes (sea floor, mud, sand, stone, grass, dirt, the track) and a pad of all 20 classes, 5 m patches, west of the insertion point. Images made by throwaway scripts; the PNGs are the source. |
+| `onisle1.env`, `oncloud1.pcx`, `oncloud2.pcx` | The island's environment and its two cloud layers (our own tileable clouds; sources in `art/onjo1/sky/`). |
+| `oncrate1.3di`, `oncrate1_0.tga`, `oncrate1_0n.mdt` | A wooden supply crate (`items.def` 100010), exported from `art/onjo1/models/oncrate1/`. |
+| `onbarl1.3di`, `onbarl1_0.tga`, `onbarl1_0n.mdt` | A wooden barrel (`items.def` 100011), exported from `art/onjo1/models/onbarl1/`. |
+| `onhut1.3di`, `onhut1_0.tga`, `onhut1_{0..4}d.tga`, `onhut1_0n.mdt` | A plastered mud-brick hut (`items.def` 100012, a landable building), exported from `art/onjo1/models/onhut1/`: the base, the five materials' tiling details and the normal map. |
 
 Nothing references the `on_ar15` files yet. Re-export them by opening the
 scene with the add-on installed and running Export Model on `on_ar15` and
