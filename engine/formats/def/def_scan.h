@@ -73,9 +73,13 @@ int death_piece_type_index(const char *name, size_t len);
 
 int next_line(LineIter *it, const char **out, size_t *out_len);
 
-// The value tokens a family parser reads off one line: past the key, at most
-// this many.
-inline constexpr int kMaxValueTokens = 16;
+// The value tokens a family parser reads off one line: every token the
+// tokenizer keeps past the key, 29 of its 30. The tokenizer stops at its 30th
+// token without cutting it, so the 29th value runs on to the line's end,
+// separators, quotes and comment included, and nothing past it is a token of
+// its own. [orig: Terrain_TokenizeConfigLine @0x53CB60, the compare
+// @0x53CC8C and the exit @0x53CC93 that leaves the token unterminated]
+inline constexpr int kMaxValueTokens = io::kConfigMaxTokens - 1;
 
 // Every family parser reads a line the way the retail walk hands it to its
 // callback: cut into tokens by the shared ASCII tokenizer, the key the WHOLE

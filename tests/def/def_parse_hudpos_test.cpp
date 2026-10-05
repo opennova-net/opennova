@@ -127,10 +127,39 @@ static int tokenizer_legs() {
     return ok ? 0 : 1;
 }
 
+/* A line's values are the tokenizer's 29 past the key: an eight-seat VEHICLE_HUD
+   row is 17 values, and its last seat is the 16th and 17th [orig:
+   Terrain_TokenizeConfigLine @0x53CB60, the 30-token cap @0x53CC8C..0x53CC93;
+   HUD_ParseHudposToken's seats arm @0x59F74E, eight pairs at most]. */
+static int value_cap_legs() {
+    const char *text =
+        "VEHICLE_HUD\n"
+        "  sid dch471\n"
+        "  seats 8,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16\n"
+        "VEHICLE_END\n";
+    DefHudPosFile f;
+    memset(&f, 0, sizeof(f));
+    if (def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &f) != 0 ||
+        f.hud.vehicle_huds_count != 1) {
+        fprintf(stderr, "FAIL: eight-seat snippet did not parse\n");
+        def_free_hudpos(&f);
+        return 1;
+    }
+    const DefVehicleHudBlock &b = f.hud.vehicle_huds[0];
+    const bool ok = b.seat_count == 8 && b.seat_x[7] == 15 && b.seat_y[7] == 16;
+    if (!ok)
+        fprintf(stderr, "FAIL: eight seats read %d, the last at %d,%d\n", b.seat_count,
+                b.seat_x[7], b.seat_y[7]);
+    def_free_hudpos(&f);
+    if (ok) printf("hudpos 29-value lines OK\n");
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     if (synthetic_legs() != 0) return 1;
     if (tokenizer_legs() != 0) return 1;
+    if (value_cap_legs() != 0) return 1;
     /* Every remaining leg reads the shipped hudpos.def (the memory legs compare
        against its path parse), so they gate on the reference fixture set
        (OPENNOVA_JO_ASSETS). */

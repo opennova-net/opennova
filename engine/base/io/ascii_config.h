@@ -15,11 +15,13 @@
 // line and space, comma or tab ends a token; '"' toggles quoting and ends a
 // token either way, so a token is a quoted run's contents (spaces and commas
 // included) and quoting is not recorded. The comment cut writes no terminator,
-// so a token in progress there runs to the end of the line. At most 30 tokens.
+// so a token in progress there runs to the end of the line. At most 30 tokens:
+// the walk stops at the 30th without cutting it, so that one also runs to the
+// end of the line (its separators, quotes and comment included).
 // [orig: Terrain_TokenizeConfigLine @0x53CB60 — the skip @0x53CB90..0x53CB9E,
 //  clamp @0x53CBBB, "//" @0x53CC16..0x53CC28, ';' @0x53CC2A..0x53CC31,
 //  delimiters @0x53CC33..0x53CC4C, quote @0x53CC4E..0x53CC70, token start
-//  @0x53CC72..0x53CC83, the 30 cap @0x53CC8C]
+//  @0x53CC72..0x53CC83, the 30 cap @0x53CC8C..0x53CC93]
 
 #include <cstddef>
 #include <cstring>

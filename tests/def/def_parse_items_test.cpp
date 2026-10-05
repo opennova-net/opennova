@@ -746,9 +746,53 @@ static int test_items_read_the_retail_tokens(void) {
     return bad;
 }
 
+/* A line's values are the tokenizer's 29 past the key, not 16, and the 29th runs
+   on to the line's end: 27 unknown attrib tokens then `Door Takeable` set both
+   (tokens 28 and 29), 28 then `Door Takeable` set neither (token 29 is the run-on
+   "Door Takeable"). [orig: Terrain_TokenizeConfigLine @0x53CB60, the 30-token
+   cap @0x53CC8C..0x53CC93; ItemDef_ParseProperty's attrib loop to the count
+   @0x4A0F42..0x4A0F52] */
+static int test_attrib_reads_the_29_values(void) {
+    std::string text = "begin Reads29\n attrib:";
+    for (int i = 0; i < 27; ++i) text += " x";
+    text += " Door Takeable\nend\nbegin RunsOn\n attrib:";
+    for (int i = 0; i < 28; ++i) text += " x";
+    text += " Door Takeable\nend\nbegin Seventeen\n husk_sub_part_types";
+    for (int i = 0; i < 16; ++i) text += " 99_HULL";
+    text += " 3_WHEEL\nend\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text.data()), text.size(),
+                               &items) != 0 || items.count != 3) {
+        fprintf(stderr, "FAIL: 29-value snippet did not parse\n");
+        def_free_items(&items);
+        return 1;
+    }
+    int bad = 0;
+    const uint32_t both = DEF_ITEM_ATTRIB_DOOR | DEF_ITEM_ATTRIB_TAKEABLE;
+    if ((items.entries[0].attrib & both) != both) {
+        fprintf(stderr, "FAIL: attrib tokens 28/29 missed (0x%x)\n", items.entries[0].attrib);
+        bad = 1;
+    }
+    if ((items.entries[1].attrib & both) != 0) {
+        fprintf(stderr, "FAIL: the run-on 29th token matched an attrib (0x%x)\n",
+                items.entries[1].attrib);
+        bad = 1;
+    }
+    /* Sixteen unusable `99_` values, then slot 3 (the 17th value). */
+    if (items.entries[2].husk_sub_part_types[2] != 1) {
+        fprintf(stderr, "FAIL: husk_sub_part_types' 17th value missed (%d)\n",
+                items.entries[2].husk_sub_part_types[2]);
+        bad = 1;
+    }
+    def_free_items(&items);
+    return bad;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     if (test_items_read_the_retail_tokens() != 0) return 1;
+    if (test_attrib_reads_the_29_values() != 0) return 1;
     if (test_regional_sound_delays() != 0) return 1;
     if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;
     if (test_out_of_range_values_take_the_sse2_leg() != 0) return 1;
