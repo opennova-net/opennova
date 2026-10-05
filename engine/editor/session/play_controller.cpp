@@ -120,7 +120,7 @@ bool PlayController::refused(const std::string &mission) {
 		core_.touch(ViewConcern::Output);
 		return true;
 	}
-	if (play_.state() != PlayState::Stopped) {
+	if (play_.state() != PlayState::Stopped || start_again_pending_) {
 		core_.report(make_finding(CoreFinding::PlayAlreadyRunning, DiagnosticSeverity::Error,
 		                          "The game is already running; stop it before starting it again."));
 		return true;
@@ -142,6 +142,26 @@ bool PlayController::refused(const std::string &mission) {
 		core_.touch(ViewConcern::Output);
 		return true;
 	}
+	const Preferences &settings = core_.preferences().values();
+	if (!settings.play_in_install) return false;
+	// Strict Play stages the build alone, and an expansion's build plays over its base game, which the
+	// project cannot name yet: refused rather than played over the install's own archives.
+	if (settings.play_in_install_strict && view_.project.open && !view_.project.document->expansion.standalone()) {
+		core_.report(strict_expansion_refusal(view_.project.document->expansion.name));
+		view_.activity.status = "Strict Play of an expansion is not supported yet; see Problems.";
+		core_.touch(ViewConcern::Output);
+		return true;
+	}
+	// The game install's game runs one at a time: one started while another runs (a player's, one an
+	// earlier editor left) quits at once (kInstallInstanceSemaphore).
+	if (core_.platform().semaphore_held(kInstallInstanceSemaphore) == ProcessLiveness::Alive) {
+		core_.report(make_finding(CoreFinding::PlayInstallRunning, DiagnosticSeverity::Error,
+		                          "The game install's game is already running on this machine. It runs one at a "
+		                          "time: a second one quits at once, before it loads its data. Close it, then Play."));
+		view_.activity.status = "The game install's game is already running; see Problems.";
+		core_.touch(ViewConcern::Output);
+		return true;
+	}
 	return false;
 }
 
@@ -159,6 +179,7 @@ void PlayController::start(const std::string &mission, bool behind) {
 	// validation would make none); the game started now reports on this project.
 	view_.activity.boot_missing.clear();
 	view_.activity.play_mission.clear();
+	start_again_pending_ = false;
 	findings_.clear();
 	core_.problems().set_play_findings({});
 	const size_t rows = view_.findings.diagnostics.size();
@@ -187,6 +208,8 @@ void PlayController::start(const std::string &mission, bool behind) {
 		return;
 	}
 	const bool in_install = core_.preferences().values().play_in_install;
+	// Strict Play (Preferences::play_in_install_strict): the build and the install's program alone, no /d.
+	const bool strict = in_install && core_.preferences().values().play_in_install_strict;
 	// What Play launches, asked of its source now that the build has landed: one answer, which the
 	// plan takes whole (the executable, whether the run drives the source checkout, the Godot
 	// options) with the port of the game's MCP endpoint allocated now (none for the game install,
@@ -225,7 +248,11 @@ void PlayController::start(const std::string &mission, bool behind) {
 	const std::string &expansion = view_.activity.last_build->expansion;
 	const std::string &copy_cache = core_.paths().install_copy_dir;
 	if (in_install) {
-		if (!prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error, expansion, copy_cache)) {
+		const bool staged =
+		        strict ? prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan, error)
+		               : prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error, expansion,
+		                                            copy_cache);
+		if (!staged) {
 			core_.report(error);
 			view_.activity.status = "The game install could not be prepared; see Problems.";
 			core_.touch(ViewConcern::Output);
@@ -251,16 +278,35 @@ void PlayController::start(const std::string &mission, bool behind) {
 	}
 	// Behind the others when the request asked (the MCP gaps lane): how the platform starts it.
 	plan.behind = behind;
-	// The run directory is new (emptied), so the tail starts clean.
-	game_log_file_ = plan.log_file;
-	game_log_offset_ = 0;
-	game_log_partial_.clear();
-	if (!play_.start(plan, error)) {
+	install_run_ = in_install;
+	strict_run_ = strict;
+	// Strict Play's first run: whether the run directory (emptied, the build's files and the install's
+	// program in it) holds a game.cfg before the game starts, the build's own.
+	had_config_ = strict && fs::is_regular_file(system_path(join_path(plan.working_dir, "game.cfg")), ec);
+	started_again_ = false;
+	view_.activity.play_strict = strict;
+	view_.activity.play_started_again = false;
+	view_.activity.play_mission = in_install ? std::string() : in_mission;
+	if (!launch(plan, error)) {
+		view_.activity.play_mission.clear();
 		core_.report(error);
 		view_.activity.status = "The game could not be started.";
 		core_.touch(ViewConcern::Output);
-		return;
 	}
+}
+
+bool PlayController::launch(const LaunchPlan &plan, Diagnostic &error) {
+	// The run directory is new (emptied), or the first run's whose log was read as it exited (the game
+	// deletes the log a run before left as it writes its first line): the tail starts clean.
+	game_log_file_ = plan.log_file;
+	game_log_offset_ = 0;
+	game_log_partial_.clear();
+	file_log_ = FileAccessLog();
+	view_.activity.play_file_log_read = false;
+	view_.activity.play_file_log = FileAccessLog();
+	if (!play_.start(plan, error)) return false;
+	plan_ = plan;
+	started_ms_ = core_.platform().now_ms();
 	// The game's lease on the directory it runs from: a build leaves it alone while the game
 	// runs, this editor's and one started after the editor restarts (run/play_lease.h).
 	// The game as the OS knows it (the image it runs, when it was created): what tells it from
@@ -287,24 +333,32 @@ void PlayController::start(const std::string &mission, bool behind) {
 	view_.activity.play_state = play_.state();
 	view_.activity.play_pid = play_.pid();
 	view_.activity.play_mcp_port = plan.mcp_port;
-	view_.activity.play_mission = in_install ? std::string() : in_mission;
-	view_.activity.play_behind = behind;
+	view_.activity.play_behind = plan.behind;
 	view_.activity.play_command_line = launch_plan_command_line(plan);
 	view_.activity.play_exited_on_its_own = false;
 	view_.activity.play_exit_code = -1;
 	// One line for the game, its command line and its whole log folded under it; what matters of the log
-	// (an error, a warning, a file it lacks) shown below it as it comes (the UX round's problems lane).
-	game_name_ = in_install ? "the game install" : "OpenNova";
+	// (an error, a warning, a file it lacks) shown below it as it comes (the UX round's problems lane). The
+	// game install's log is folded under it once the game has exited.
+	game_name_ = !install_run_ ? "OpenNova" : strict_run_ ? "the game install (strict)" : "the game install";
 	game_lines_ = 0;
 	game_shown_ = 0;
 	game_line_ = core_.note_folded(game_words(), {"Command line: " + view_.activity.play_command_line});
-	view_.activity.status = in_install                          ? "Game install running."
+	view_.activity.status = install_run_                        ? "Game install running."
 	                        : view_.activity.play_mission.empty() ? "Game running."
 	                                                              : "Game running: " + view_.activity.play_mission + ".";
 	core_.touch(ViewConcern::Run);
+	return true;
 }
 
 void PlayController::stop() {
+	// A start again waiting for the game before to let its gate go is not made.
+	if (start_again_pending_) {
+		start_again_pending_ = false;
+		view_.activity.status = "The game was not started again.";
+		core_.note("Stop requested: the game is not started again.");
+		core_.touch(ViewConcern::Run);
+	}
 	if (play_.state() != PlayState::Running) return;
 	play_.stop();
 	view_.activity.play_state = play_.state();
@@ -316,20 +370,99 @@ void PlayController::stop() {
 void PlayController::poll() {
 	const PlayState before = play_.state();
 	const PlayState now = play_.poll();
-	if (now != PlayState::Stopped) tail_game_log();
+	// The game install's log is read once its game has exited, never while it runs: the game appends to it
+	// through an exclusive open and makes it anew, empty, when that open fails, so a read while it runs cuts
+	// it (kInstallFileLogName, run/launch_plan.h). OpenNova's own log is tailed as it comes.
+	if (now != PlayState::Stopped && !install_run_) tail_game_log();
 	if (before != now) {
 		if (now == PlayState::Stopped) {
-			tail_game_log();
+			const bool log_read = tail_game_log();
 			absorb_exit();
+			if (install_run_) report_file_log(log_read);
+			if (strict_run_) start_again_if_first_run();
 		}
-		view_.activity.play_state = now;
+		view_.activity.play_state = play_.state();
 		view_.activity.play_pid = play_.pid();
-		if (now == PlayState::Stopped) view_.activity.play_mcp_port = 0;
+		if (play_.state() == PlayState::Stopped) view_.activity.play_mcp_port = 0;
 		core_.touch(ViewConcern::Run);
+	}
+	if (start_again_pending_ && play_.state() == PlayState::Stopped) step_start_again();
+}
+
+// What the game install's file log says its game loaded, as it exited: the run section's file_log and a
+// line in Output, every name folded under it. A file the game did not find is never in the log (only an
+// open that succeeded is logged), so nothing is said of what the game lacked.
+void PlayController::report_file_log(bool read) {
+	view_.activity.play_file_log_read = read;
+	view_.activity.play_file_log = file_log_;
+	core_.touch(ViewConcern::Run);
+	if (!read) {
+		std::string line = std::string("The game left no file log (") + kInstallFileLogName +
+		                   "): it opened no archive and no file.";
+		// A game that quit at once on its own: the game runs one at a time (kInstallInstanceSemaphore).
+		if (view_.activity.play_exited_on_its_own && view_.activity.play_exit_code == 0)
+			line += " The game runs one at a time: one started while another runs quits at once, before it loads its data.";
+		core_.note(line);
+		return;
+	}
+	const FileAccessLog &log = file_log_;
+	std::vector<std::string> folded;
+	for (const std::string &name : log.archives) folded.push_back("archive: " + name);
+	for (const std::string &name : log.from_archives) folded.push_back("from the archives: " + name);
+	for (const std::string &name : log.from_disk) folded.push_back("from disk: " + name);
+	core_.note_folded("What the game loaded, from its file log: " + counted(log.archives.size(), "archive") + ", " +
+	                          counted(log.from_archives.size(), "file") + " from the archives, " +
+	                          (log.from_disk.empty() ? std::string("none") : counted(log.from_disk.size(), "file")) +
+	                          " from disk (a file the game did not find is never logged); open this line for the names.",
+	                  std::move(folded));
+}
+
+// Strict Play's first run, gone: with no game.cfg beside it, the game may write its own and quit before a
+// player sees its menu. Started once more, in the same run directory (the game.cfg it wrote kept), when
+// it exited on its own with code 0 soon after it started and wrote that game.cfg
+// (strict_first_run_starts_again); never for a game of a project closed since.
+void PlayController::start_again_if_first_run() {
+	std::error_code ec;
+	const bool has_config = fs::is_regular_file(system_path(join_path(plan_.working_dir, "game.cfg")), ec);
+	const int64_t ran_ms = core_.platform().now_ms() - started_ms_;
+	if (!strict_first_run_starts_again(had_config_, has_config, view_.activity.play_exited_on_its_own,
+	                                   view_.activity.play_exit_code, ran_ms, started_again_))
+		return;
+	if (!view_.project.open || view_.project.root != boot_project_) return;
+	started_again_ = true;
+	view_.activity.play_started_again = true;
+	core_.note("First run: the game wrote its game.cfg and quit; started again.");
+	start_again_pending_ = true;
+	start_again_since_ = core_.platform().now_ms();
+	step_start_again();
+}
+
+// The start again, once the game before has let the game's one-at-a-time gate go: a game started while
+// the gate is held quits at once (kInstallInstanceSemaphore). Waited for on the polls, up to the stop
+// deadline; still held then (another game runs), said and not made.
+void PlayController::step_start_again() {
+	if (core_.platform().semaphore_held(kInstallInstanceSemaphore) == ProcessLiveness::Alive) {
+		if (core_.platform().now_ms() - start_again_since_ < kPlayStopDeadlineMs) return;
+		start_again_pending_ = false;
+		core_.report(make_finding(CoreFinding::PlayInstallRunning, DiagnosticSeverity::Error,
+		                          "The game was not started again: another game of the install is running on this "
+		                          "machine, and the game runs one at a time. Close it, then Play."));
+		view_.activity.status = "The game was not started again; see Problems.";
+		core_.touch(ViewConcern::Output);
+		return;
+	}
+	start_again_pending_ = false;
+	Diagnostic error;
+	const LaunchPlan first = plan_; // the first run's plan, in the same run directory
+	if (!launch(first, error)) {
+		core_.report(error);
+		view_.activity.status = "The game could not be started again.";
+		core_.touch(ViewConcern::Output);
 	}
 }
 
 void PlayController::forget_project() {
+	start_again_pending_ = false;
 	view_.activity.boot_missing.clear();
 	boot_project_.clear();
 	findings_.clear();
@@ -348,14 +481,15 @@ ProtectedDirs PlayController::protected_dirs(const std::string &output_root) {
 	};
 }
 
-// Append whatever the game wrote to its log since the last poll, line by line.
-void PlayController::tail_game_log() {
-	if (game_log_file_.empty()) return;
+// Append whatever the game wrote to its log since the last poll, line by line (the game install's, once
+// its game has exited: what it says the game loaded kept too).
+bool PlayController::tail_game_log() {
+	if (game_log_file_.empty()) return false;
 	std::ifstream in(system_path(game_log_file_), std::ios::binary);
-	if (!in) return;
+	if (!in) return false;
 	in.seekg(0, std::ios::end);
 	const std::streamoff size = in.tellg();
-	if (size < 0 || static_cast<uint64_t>(size) <= game_log_offset_) return;
+	if (size < 0 || static_cast<uint64_t>(size) <= game_log_offset_) return true;
 	in.seekg(static_cast<std::streamoff>(game_log_offset_));
 	std::string chunk(static_cast<size_t>(static_cast<uint64_t>(size) - game_log_offset_), '\0');
 	in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
@@ -374,6 +508,7 @@ void PlayController::tail_game_log() {
 			++game_shown_;
 			core_.note("game: " + line);
 		}
+		if (install_run_) add_file_access_line(file_log_, line);
 		folded.push_back(line);
 		absorb_boot_report(line);
 		absorb_mission_report(line);
@@ -385,6 +520,7 @@ void PlayController::tail_game_log() {
 		game_line_ = core_.note_folded(game_words(), std::move(folded));
 	// The names the lines reported become their rows in the validation they left due
 	// (absorb_boot_report), which the polls step (S13 A3).
+	return true;
 }
 
 // "Running: OpenNova on the build. Its log: 412 lines, 3 shown below; open this line for all of it."

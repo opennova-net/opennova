@@ -784,7 +784,7 @@ void test_project_settings() {
 	              v.workspace.settings.open && v.workspace.settings.title == "Armory",
 	      "the dialog opens, the workspace's, over the settings in effect");
 	CHECK(in_order(logged_frame(ui), {"Armory", "Name", "Missions", "Multiplayer", "Game install folder", "OpenNova runtime",
-	                                  "Play in the game install", "Apply", "Cancel"}),
+	                                  "Play in the game install", "Strict: as a player's install", "Apply", "Cancel"}),
 	      "its fields");
 	ui.activate(item_id(dialog, {"Apply"}));
 	std::vector<EditorRequest> requests = serve(ui, session);
@@ -794,7 +794,8 @@ void test_project_settings() {
 	              apply->settings.multiplayer == std::optional<bool>(false) &&
 	              apply->settings.game_install == std::optional<std::string>("") &&
 	              apply->settings.runtime_executable == std::optional<std::string>("") &&
-	              apply->settings.play_in_install == std::optional<bool>(false),
+	              apply->settings.play_in_install == std::optional<bool>(false) &&
+	              apply->settings.play_in_install_strict == std::optional<bool>(false),
 	      "Apply: one request naming every setting as the dialog holds it");
 	CHECK(!modal_open("Project settings") && v.activity.status == "No setting changed.", "nothing changed: written nothing, closed");
 
@@ -1053,6 +1054,19 @@ void test_menus() {
 	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_in_install == std::optional<bool>(true) &&
 	              !r.settings.title && !r.settings.mission && !r.settings.game_install && !r.settings.runtime_executable,
 	      "Build > Play in the game install: that setting alone");
+	CHECK(choose(ui, "Build", {"Strict: as a player's install"}).empty(), "Build > Strict: only under Play in the game install");
+	v.project.play_retail = true;
+	v.revisions.touch(ViewConcern::Preferences);
+	ui.frames(2);
+	ui.drain();
+	r = raised("Build", {"Strict: as a player's install"}, EditorRequestKind::ApplyProjectSettings);
+	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_in_install_strict == std::optional<bool>(true) &&
+	              !r.settings.play_in_install && !r.settings.title,
+	      "Build > Strict: that setting alone");
+	v.project.play_retail = false;
+	v.revisions.touch(ViewConcern::Preferences);
+	ui.frames(2);
+	ui.drain();
 	r = raised("Build", {"Show build folder"}, EditorRequestKind::RevealPath);
 	CHECK(r.kind == EditorRequestKind::RevealPath && r.path == v.activity.last_build->build_dir, "Build > Show build folder");
 	v.activity.play_state = PlayState::Running;
