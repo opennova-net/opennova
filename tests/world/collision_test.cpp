@@ -5989,9 +5989,9 @@ struct RunOverRig {
 		VehicleTraits traits;
 		traits.sound_profile = "SP_Hull";
 		world.vehicles.traits.set(900, traits);
-		const std::string profile = std::string("begin \"SP_Hull\"\n  ") +
+		const std::string profile = std::string("begin \"SP_Hull\"\r\n  ") +
 				opennova::audio::sound_profile_slot_keyword(opennova::audio::kSlotImpactOrganic) +
-				" V_HULL_BUMP\nend\n";
+				" V_HULL_BUMP\r\nend\r\n";
 		CHECK(world.tables.sound_profiles.parse(profile.data(), profile.size()) == 1);
 		world.out.fire_sounds.set_listener(Vec3{12.0f, 10.0f, 0.0f});
 		for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);

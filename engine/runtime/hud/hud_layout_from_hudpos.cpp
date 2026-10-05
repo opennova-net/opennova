@@ -3,6 +3,7 @@
 // [orig: HUD_ParseHudposToken @0x59f370]
 
 #include <runtime/hud/hud_layout_from_hudpos.h>
+#include <base/io/crt_ftol.h>
 
 #include <formats/def/def.h>
 
@@ -200,9 +201,11 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.stance_middle = hud_color_argb(hud.stancecolor_middle);
 	out.stance_bad = hud_color_argb(hud.stancecolor_bad);
 
-	out.alpha_fade_base = hud.alpha_fade[0];
-	out.alpha_fade_max = hud.alpha_fade[1];
-	out.alpha_fade_seconds = hud.alpha_fade[2];
+	// [orig: the alphafade arm @0x5A0882..0x5A08C2 — atof x dbl_7D9A20,
+	// atof x dbl_7D9A20, atof x dbl_7C88C0 (62.0), each through _ftol2_sse]
+	out.alpha_fade_base_alpha = io::retail_ftol_sse2(hud.alpha_fade[0] * kPercentToAlpha);
+	out.alpha_fade_max_alpha = io::retail_ftol_sse2(hud.alpha_fade[1] * kPercentToAlpha);
+	out.alpha_fade_ramp_ticks = io::retail_ftol_sse2(hud.alpha_fade[2] * kSecondsToTicks);
 	out.chat_lines = hud.hud_chline > 0 ? hud.hud_chline : 8;
 
 	// HUDSTANCE's explicit id addresses the retail slot arrays; file order is

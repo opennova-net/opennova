@@ -7,8 +7,10 @@
 #include <vector>
 
 #include <base/crt/crt_rng.h>
+#include <formats/def/def.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/ammo_table_build.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/player_spawn.h>
@@ -299,6 +301,75 @@ void test_arming_dud_and_armed_damage() {
     CHECK(r.world.round_sim.hits[0].damage == 25);
     CHECK(r.world.round_sim.impacts.size() == 1);
     CHECK(r.world.round_sim.impacts[0].ammo_index == 0);
+}
+
+// JO:CA's base ammo.def ends on GRENADE_NOEXP's `end` and the file's NUL, with
+// no CR LF: the walk drops the tail line's last byte, the NUL, so the `end`
+// still closes that def and AmmoDef_InheritDefaults runs on it; the same file
+// without the NUL reads `en`, the def stays open and inherits nothing [orig:
+// File_ParseASCIIFile @0x53D810, the tail line @0x53D8E9..0x53D8EC; the
+// tokenizer's strlen @0x53CBA7; AmmoDef_InheritDefaults @0x409EB0 from the `end`
+// arm @0x40A3E5]. The dud here leaves its velocity unauthored, so it carries
+// the first def's 74 only when its `end` is read. It is the notarmmedammo of
+// the M203 and Mk19 grenades and the RPG and AT4 rockets, so a hit before
+// arming continues as the dud and deals nothing (the round's own kill zone
+// never queues). The defs below are the base file's M203 and its dud
+// (effects tables, tracers, lights and the dud's velocity aside).
+void test_base_game_m203_hit_before_arming_is_the_dud() {
+    Rig r;
+    static const char kText[] =
+            "ammo AMMO_M203_40MM_NADE\r\n"
+            "\tfrndlyTrcrID\t\t1874   \r\n"
+            "\tmax_age\t\t\t\t20\r\n"
+            "\tarm_age\t\t\t\t.30      \r\n"
+            "\tvelocity\t\t\t74\t\r\n"
+            "\tkztype\t\t\t\trounds_kz_C4\r\n"
+            "\tkz_minradius\t\t4.0\r\n"
+            "\tkz_maxradius\t\t10.0\r\n"
+            "\tkz_damage\t\t\t150\r\n"
+            "\tdrag\t\t\t\t0.5\r\n"
+            "\tweight_in_grains\t2000\r\n"
+            "\tmin_damage\t\t\t410\r\n"
+            "\tmax_damage\t\t\t410\r\n"
+            "\tnotarmmedammo\tGRENADE_NOEXP\t\r\n"
+            "end\r\n"
+            "ammo GRENADE_NOEXP\t\r\n"
+            "\tmax_age\t\t\t\t7    \r\n"
+            "\tarm_age\t\t\t\t.21\r\n"
+            "\tdrag\t\t\t\t0.5\r\n"
+            "\tweight_in_grains\t2000\r\n"
+            "end";
+    {
+        // Without the NUL the tail reads `en`: the dud is in the table (the
+        // file's end keeps an open def) with the allocator's -1 velocity.
+        opennova::def::DefAmmoFile open{};
+        CHECK(opennova::def::def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(kText),
+                                                   sizeof(kText) - 1, &open) == 0);
+        CHECK(open.count == 2 && open.entries[1].velocity == -1);
+        opennova::def::def_free_ammo(&open);
+    }
+    opennova::def::DefAmmoFile parsed{};
+    // sizeof keeps the literal's NUL: the file's last byte.
+    CHECK(opennova::def::def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(kText),
+                                               sizeof(kText), &parsed) == 0);
+    CHECK(parsed.count == 2 && parsed.entries[1].velocity == 74);
+    r.world.tables.ammo = build_ammo_table(parsed);
+    opennova::def::def_free_ammo(&parsed);
+    const int dud = r.world.tables.ammo.index_of("GRENADE_NOEXP");
+    CHECK(r.world.tables.ammo.entries.size() == 2 && dud == 1);
+    if (dud != 1) return;
+    CHECK(r.world.tables.ammo.entries[0].arm_age_ticks > 8);
+
+    CHECK(r.fire() >= 0);
+    for (int tick = 0; tick < 8 && r.world.round_sim.impacts.empty(); ++tick)
+        r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    CHECK(!r.world.round_sim.impacts.empty() &&
+          r.world.round_sim.impacts[0].ammo_index == dud);
+    CHECK(r.world.registry.get(r.target)->health == 100);
+    CHECK(r.world.round_sim.hits.empty());
+    CHECK(r.world.explosions.queue.empty());
+    CHECK(r.world.round_sim.active_count == 1);
 }
 
 // A def-less person takes no damage and, like every person, passes the round:
@@ -3639,6 +3710,8 @@ static const NamedTest kTests[] = {
     {"test_item_callbacks_receive_geometric_section_on_both_peers", test_item_callbacks_receive_geometric_section_on_both_peers},
     {"test_projectile_stamps_burn_before_death_dispatch", test_projectile_stamps_burn_before_death_dispatch},
     {"test_arming_dud_and_armed_damage", test_arming_dud_and_armed_damage},
+    {"test_base_game_m203_hit_before_arming_is_the_dud",
+     test_base_game_m203_hit_before_arming_is_the_dud},
     {"test_missing_item_def_person_takes_no_damage", test_missing_item_def_person_takes_no_damage},
     {"test_damage_uses_retail_signed_wrap_and_ftol_cap", test_damage_uses_retail_signed_wrap_and_ftol_cap},
     {"test_nodie_and_nontransparent_damage_gates", test_nodie_and_nontransparent_damage_gates},

@@ -21,8 +21,7 @@ void HudFrameCompiler::element_weapon_slot_bar(const HudFrameState &state, float
 	// One colour for every quad: the stance icon colour OR'd with the
 	// ALPHAFADE base alpha (an OR, not a replace) [orig: `dword_2723AE8 |
 	// (dword_2723614 << 24)` @0x599DA7].
-	const int base_alpha = static_cast<int>(layout_.alpha_fade_base *
-			static_cast<float>(kPercentToAlpha));
+	const int base_alpha = layout_.alpha_fade_base_alpha;
 	const uint32_t color = layout_.stance_tint | (static_cast<uint32_t>(base_alpha) << 24);
 	// The bordered quad at a design rect [orig: HUD_DrawTexturedQuadWithBorder
 	// @0x590C40 — the corners through Viewport_ScaleToVirtualCoords, the

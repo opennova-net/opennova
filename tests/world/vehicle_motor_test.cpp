@@ -53,13 +53,13 @@ VehicleTraits buggy_traits() {
 
 void load_transport_sound_profile(World &world) {
     static constexpr char kTransportProfile[] =
-            "begin \"SP_Transport\"\n"
-            "  Soundloop_1 V_TRUCK_ILP .8 1.2\n"
-            "  Soundloop_2 V_TRUCK_DLP .7 1.1\n"
-            "  Soundloop_3 V_TRUCK_REVSE .8 1.2\n"
-            "  enginestop V_TRUCK_STOP\n"
-            "  enginereverse V_TRUCK_SHIFT\n"
-            "end\n";
+            "begin \"SP_Transport\"\r\n"
+            "  Soundloop_1 V_TRUCK_ILP .8 1.2\r\n"
+            "  Soundloop_2 V_TRUCK_DLP .7 1.1\r\n"
+            "  Soundloop_3 V_TRUCK_REVSE .8 1.2\r\n"
+            "  enginestop V_TRUCK_STOP\r\n"
+            "  enginereverse V_TRUCK_SHIFT\r\n"
+            "end\r\n";
     CHECK(world.tables.sound_profiles.parse(kTransportProfile,
                                      sizeof(kTransportProfile) - 1) == 1);
 }
@@ -173,26 +173,26 @@ EntityHandle add_second_control_occupant(Rig &r) {
 // fields [orig: ItemDef_ParsePhysicsProperty @0x49d870 imuls].
 void test_def_physics_scaling() {
     const char *src =
-            "begin \"Drivable Dune Buggy\"\n"
-            "  id 101291\n"
-            "  type vehicle\n"
-            "  attrib: AIData noscar neutral PlayerControl forceasset DynamicShadow\n"
-            "  hp 3000\n"
-            "  criticalhp 300\n"
-            "  criticaldrain 15\n"
-            "  ai_function cveh\n"
-            "  move_function cveh\n"
-            "    turn_rate 65\n"
-            "\tturn_rate2 41\n"
-            "    acceleration 15\n"
-            "    deceleration 70\n"
-            "    slip_speed 0\n"
-            "    player_speed 94\n"
-            "    slip_slope\t50\n"
-            "    max_slope\t60\n"
-            "    physics     1\n"
-            "    torque 3\n"
-            "end\n";
+            "begin \"Drivable Dune Buggy\"\r\n"
+            "  id 101291\r\n"
+            "  type vehicle\r\n"
+            "  attrib: AIData noscar neutral PlayerControl forceasset DynamicShadow\r\n"
+            "  hp 3000\r\n"
+            "  criticalhp 300\r\n"
+            "  criticaldrain 15\r\n"
+            "  ai_function cveh\r\n"
+            "  move_function cveh\r\n"
+            "    turn_rate 65\r\n"
+            "\tturn_rate2 41\r\n"
+            "    acceleration 15\r\n"
+            "    deceleration 70\r\n"
+            "    slip_speed 0\r\n"
+            "    player_speed 94\r\n"
+            "    slip_slope\t50\r\n"
+            "    max_slope\t60\r\n"
+            "    physics     1\r\n"
+            "    torque 3\r\n"
+            "end\r\n";
     DefItemsFile file;
     std::memset(&file, 0, sizeof(file));
     CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(src), std::strlen(src),
@@ -221,8 +221,8 @@ void test_def_physics_scaling() {
 // [orig: @0x49da4b].
 void test_def_decel_default() {
     const char *src =
-            "begin \"accel only\"\n  id 100001\n  acceleration 10\nend\n"
-            "begin \"decel first\"\n  id 100002\n  deceleration 5\n  acceleration 10\nend\n";
+            "begin \"accel only\"\r\n  id 100001\r\n  acceleration 10\r\nend\r\n"
+            "begin \"decel first\"\r\n  id 100002\r\n  deceleration 5\r\n  acceleration 10\r\nend\r\n";
     DefItemsFile file;
     std::memset(&file, 0, sizeof(file));
     CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(src), std::strlen(src),
@@ -1011,10 +1011,10 @@ void test_forward_sound_gear_pitch_sawtooth() {
     t.player_speed = 32000;
     t.sound_profile = "SP_Geared";
     static constexpr char kGearedProfile[] =
-            "begin \"SP_Geared\"\n"
-            "  Soundloop_1 V_IDLE 1 1\n"
-            "  Soundloop_2 V_DRIVE .8 1.2 4\n"
-            "end\n";
+            "begin \"SP_Geared\"\r\n"
+            "  Soundloop_1 V_IDLE 1 1\r\n"
+            "  Soundloop_2 V_DRIVE .8 1.2 4\r\n"
+            "end\r\n";
     CHECK(r.w.tables.sound_profiles.parse(kGearedProfile,
                                    sizeof(kGearedProfile) - 1) == 1);
     r.drv().player_class = 0;
@@ -1319,10 +1319,10 @@ void test_vehicle_sound_extreme_ints_are_saturating() {
         t.player_speed = std::numeric_limits<int32_t>::min();
         t.sound_profile = "SP_Extreme";
         static constexpr char kExtremeProfile[] =
-                "begin \"SP_Extreme\"\n"
-                "  Soundloop_1 V_IDLE 1 1\n"
-                "  Soundloop_2 V_DRIVE .8 1.2 2147483647\n"
-                "end\n";
+                "begin \"SP_Extreme\"\r\n"
+                "  Soundloop_1 V_IDLE 1 1\r\n"
+                "  Soundloop_2 V_DRIVE .8 1.2 2147483647\r\n"
+                "end\r\n";
         CHECK(r.w.tables.sound_profiles.parse(kExtremeProfile,
                                        sizeof(kExtremeProfile) - 1) == 1);
         r.mount();
@@ -1344,10 +1344,10 @@ void test_vehicle_sound_extreme_ints_are_saturating() {
         t.player_speed = 1;
         t.sound_profile = "SP_ExtremeSpan";
         static constexpr char kExtremeSpanProfile[] =
-                "begin \"SP_ExtremeSpan\"\n"
-                "  Soundloop_1 V_IDLE 1 1\n"
-                "  Soundloop_2 V_DRIVE -32768 32767\n"
-                "end\n";
+                "begin \"SP_ExtremeSpan\"\r\n"
+                "  Soundloop_1 V_IDLE 1 1\r\n"
+                "  Soundloop_2 V_DRIVE -32768 32767\r\n"
+                "end\r\n";
         CHECK(r.w.tables.sound_profiles.parse(kExtremeSpanProfile,
                                        sizeof(kExtremeSpanProfile) - 1) == 1);
         r.mount();
@@ -1632,8 +1632,8 @@ void test_zero_speed_displacement_and_submerged_sound() {
 void test_engine_and_light_sound_edges() {
 	Rig r;
 	static constexpr char profile[] =
-			"begin \"SP_Edges\"\n"
-			"SSAudio1 V_LIGHT\nenginestart V_START\nenginestop V_STOP\nend\n";
+			"begin \"SP_Edges\"\r\n"
+			"SSAudio1 V_LIGHT\r\nenginestart V_START\r\nenginestop V_STOP\r\nend\r\n";
 	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 	VehicleTraits t = buggy_traits();
 	t.sound_profile = "SP_Edges";
@@ -1713,8 +1713,8 @@ void test_engine_and_light_sound_edges() {
 // lights @0x4714EA..0x471523, fold @0x471523..0x4715D7, tail @0x47166F]
 void test_selector_zero_sound_tails() {
 	static constexpr char profile[] =
-			"begin \"SP_Zero\"\n"
-			"SSAudio1 V_LIGHT\nenginestart V_START\nenginestop V_STOP\nend\n";
+			"begin \"SP_Zero\"\r\n"
+			"SSAudio1 V_LIGHT\r\nenginestart V_START\r\nenginestop V_STOP\r\nend\r\n";
 	Rig ground;
 	CHECK(ground.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 	VehicleTraits t = buggy_traits();
@@ -1789,7 +1789,7 @@ void test_selector_zero_sound_tails() {
 // [orig: Entity_UpdateVehiclePhysics @0x48B08C; Entity_UpdateAircraftPhysics
 //  @0x4904D7..0x4904F0]
 void test_warning_cadence_by_family() {
-	static constexpr char profile[] = "begin \"SP_Warn\"\nwarning V_WARN\nend\n";
+	static constexpr char profile[] = "begin \"SP_Warn\"\r\nwarning V_WARN\r\nend\r\n";
 	for (VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Helicopter }) {
 		Rig r;
 		CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
@@ -1929,10 +1929,10 @@ void test_tank_pivot_sound_latch_and_loop() {
 		t.family = VehicleFamily::Tank;
 		t.sound_profile = "SP_TankPivot";
 		static constexpr char profile[] =
-				"begin \"SP_TankPivot\"\n"
-				" Soundloop_1 TANK_IDLE 1 1\n"
-				" Soundloop_4 TANK_PIVOT 1 1\n"
-				" swivel_shift TANK_SHIFT\nend\n";
+				"begin \"SP_TankPivot\"\r\n"
+				" Soundloop_1 TANK_IDLE 1 1\r\n"
+				" Soundloop_4 TANK_PIVOT 1 1\r\n"
+				" swivel_shift TANK_SHIFT\r\nend\r\n";
 		CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 		auto &m = r.veh().veh;
 		m.yaw_bam = 0;
@@ -2202,7 +2202,7 @@ void test_tank_and_bike_ignore_physics_selector() {
 void test_prediction_keeps_player_control_tail() {
 	Rig r;
 	static constexpr char profile[] =
-			"begin \"SP_Pred\"\n Soundloop_1 IDLE 1 1\n enginestart V_START\nend\n";
+			"begin \"SP_Pred\"\r\n Soundloop_1 IDLE 1 1\r\n enginestart V_START\r\nend\r\n";
 	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 	auto t = buggy_traits();
 	t.family = VehicleFamily::Tank;
@@ -2352,7 +2352,7 @@ void test_mover_prologue_stamps_saved_live_pose() {
 // [orig: Entity_UpdateTankVehiclePhysics @0x48AE45..0x48AEA1]
 void test_tank_tread_sound_accumulates_even_ticks() {
 	Rig r;
-	static constexpr char profile[] = "begin \"SP_Tread\"\n drive_repeat V_TREADS\nend\n";
+	static constexpr char profile[] = "begin \"SP_Tread\"\r\n drive_repeat V_TREADS\r\nend\r\n";
 	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 	auto t = buggy_traits();
 	t.family = VehicleFamily::Tank;
@@ -2418,7 +2418,7 @@ void test_tank_tread_sound_accumulates_even_ticks() {
 void test_catch_up_ticks_skip_the_movement_fold() {
 	Rig r;
 	static constexpr char profile[] =
-			"begin \"SP_Gate\"\n Soundloop_1 IDLE 1 1\n swivel_shift SHIFT\nend\n";
+			"begin \"SP_Gate\"\r\n Soundloop_1 IDLE 1 1\r\n swivel_shift SHIFT\r\nend\r\n";
 	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 	auto t = buggy_traits();
 	t.family = VehicleFamily::Tank;
@@ -2450,7 +2450,7 @@ void test_catch_up_ticks_skip_the_movement_fold() {
 // jump @0x48AABE]
 void test_crash_settled_tank_keeps_lane_anchor() {
 	Rig r;
-	static constexpr char profile[] = "begin \"SP_Anchor\"\n Soundloop_1 IDLE 1 1\nend\n";
+	static constexpr char profile[] = "begin \"SP_Anchor\"\r\n Soundloop_1 IDLE 1 1\r\nend\r\n";
 	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 	auto t = buggy_traits();
 	t.family = VehicleFamily::Tank;
@@ -2556,7 +2556,7 @@ void test_skid_effects_and_sound_edges() {
 	r.tick(1, t);
 	CHECK(r.w.out.vehicle_effects.empty());
 
-	static constexpr char profile[] = "begin \"rev\"\n enginehighrev HIGH_REV\n end\n";
+	static constexpr char profile[] = "begin \"rev\"\r\n enginehighrev HIGH_REV\r\n end\r\n";
 	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 	t.sound_profile = "rev";
 	m.rev_sound_ticks = 124;

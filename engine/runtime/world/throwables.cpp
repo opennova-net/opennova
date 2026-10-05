@@ -18,6 +18,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 
 namespace opennova::world {
@@ -913,35 +914,54 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
     if (queries != nullptr) queries->terrain = terrain;
     const int pool = vehicles ? 1 : 0;
     const size_t cap = world.registry.pool_capacity(pool);
-    const int32_t eye[3] = {to_fixed(device.pos.x), to_fixed(device.pos.y),
-                            to_fixed(device.pos.z) + 19660}; // [orig: +0.3u]
+    // Both variants trace from 0.3 u above the device [orig: +0x4CCC @0x43CA29
+    // / @0x43CBD9].
+    const int32_t dev[3] = {to_fixed(device.pos.x), to_fixed(device.pos.y),
+                            to_fixed(device.pos.z)};
+    const int32_t eye[3] = {dev[0], dev[1], dev[2] + 0x4CCC};
+    const int32_t max_range = to_fixed(max_range_units);
     for (size_t s = 0; s < cap; ++s) {
         const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
         const Entity *e = world.registry.get(h);
         if (e == nullptr) continue;
-        if ((e->engine_flags & 0x02000001u) != 0) continue; // dead/inactive
-        if (h.packed == device.parent.packed && vehicles) continue;
+        // A slot with no items.def row, no def or no model is no candidate
+        // [orig: `cmp [esi+1Ch], 0` (ItemTypeIndex) @0x43CA5B / @0x43CC07, the
+        // def [esi+20h] @0x43CA67 / @0x43CC13, the graphic model [esi+30h]
+        // @0x43CA6E / @0x43CC19].
+        if (e->item_type_index == 0 || !e->has_item_def || !e->has_graphic_model) continue;
+        // The vehicle sweep skips Flags bits 0 and 1 (inactive, dead) [orig:
+        // `test byte [esi+24h], 3` @0x43CA61]; the person sweep bit 0 alone
+        // [orig: `test byte [esi+24h], 1` @0x43CC0D].
+        if ((e->engine_flags & (vehicles ? 0x3u : 0x1u)) != 0) continue;
         // [orig: same team skipped unless the TeamTriggerClaymore rule 0x8000]
         if (e->team == device.team && !team_trigger_claymore) continue;
         if (vehicles) {
-            if (e->item_type != 1) continue; // [orig: def kind +92 == 1]
-            // moving gate [orig: |entity+0x29C| >= 3276 = 0.05 u/t]
-            if (std::abs(e->veh.speed) < 3276) continue;
+            if (e->item_type != 1) continue; // [orig: def kind +92 == 1 @0x43CA8D]
+            // [orig: the device's own parent (+0x28) @0x43CA92]
+            if (h.packed == device.parent.packed) continue;
         }
-        const double dx = double(e->position.x) - double(device.pos.x);
-        const double dy = double(e->position.y) - double(device.pos.y);
-        const double dz = double(e->position.z) - double(device.pos.z);
-        const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist > double(max_range_units)) continue;
-        // The original's radians-to-BAM constant is negative, making its
-        // minus-Yaw-minus-converted expression equal bearing minus Yaw.
-        // Subtraction and absolute value wrap in 32 bits
-        // [orig: @ 0x43cc9d..0x43ccfd].
-        const int32_t bearing = static_cast<int32_t>(
-                static_cast<uint32_t>(std::llround(std::atan2(dy, dx) * kBamPerRad)));
+        // The distance is the fixed-point deltas' length, capped at
+        // 2147418112.0 and truncated, against the fixed range [orig:
+        // @0x43CA97..0x43CAE9 / @0x43CC38..0x43CC8B, _ftol2_sse].
+        const int32_t pos[3] = {to_fixed(e->position.x), to_fixed(e->position.y),
+                                to_fixed(e->position.z)};
+        const double dx = double(int32_t(uint32_t(pos[0]) - uint32_t(dev[0])));
+        const double dy = double(int32_t(uint32_t(pos[1]) - uint32_t(dev[1])));
+        const double dz = double(int32_t(uint32_t(pos[2]) - uint32_t(dev[2])));
+        double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist > 2147418112.0) dist = 2147418112.0; // [orig: flt_7C19E0]
+        if (io::retail_ftol_sse2(dist) > max_range) continue;
+        // atan2 scales by dbl_7C57B8 = -kBamPerRad under the round-toward-zero
+        // control word into a qword whose low dword is kept, and the angle is
+        // -Yaw minus that: bearing minus Yaw. The abs is cdq/xor/sub and the
+        // compare unsigned (`ja`), so 0x7FFFFFFF passes every bearing but the
+        // exact antipode [orig: @0x43CAEF..0x43CB31 / @0x43CC91..0x43CCD3, the
+        // person sweep's fpatan @0x43CC9D].
+        const int32_t converted = io::retail_fistp_truncate_low_dword(
+                std::atan2(dy, dx) * -kBamPerRad);
         const int32_t signed_diff = static_cast<int32_t>(
-                static_cast<uint32_t>(bearing) -
-                static_cast<uint32_t>(device.yaw_bam));
+                (0u - static_cast<uint32_t>(device.yaw_bam)) -
+                static_cast<uint32_t>(converted));
         const uint32_t diff = signed_diff < 0
                                       ? uint32_t(0) - static_cast<uint32_t>(signed_diff)
                                       : static_cast<uint32_t>(signed_diff);
@@ -950,11 +970,13 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
         // The retail query tests terrain plus sector solids, excluding the
         // device and candidate themselves. CollisionWorld::raycast_clear is
         // the shared full-query structural port; collision-less harnesses keep
-        // the terrain leaf as their host fallback.
-        // [orig: Entity_FindEnemyInCone @ 0x43cba0 ->
-        // Physics_RaycastSegment @ 0x415550]
-        const int32_t b[3] = {to_fixed(e->position.x), to_fixed(e->position.y),
-                              to_fixed(e->position.z) + 19660};
+        // the terrain leaf as their host fallback. The vehicle sweep aims 1.0 u
+        // above the candidate's origin [orig: `add eax, 10000h` @0x43CB52 into
+        // the end point pushed @0x43CB44], the person sweep at the origin itself
+        // [orig: `lea ebp, [esi+4]` @0x43CC4A, pushed @0x43CCD9].
+        // [orig: Physics_RaycastSegment @ 0x415550, a result of 1 or 2 clear;
+        // the person sweep's hit return @0x43CCFD]
+        const int32_t b[3] = {pos[0], pos[1], vehicles ? pos[2] + 0x10000 : pos[2]};
         if (queries != nullptr) {
             const CollisionWorld::RayDebugScope ray_scope(
                     queries, CollisionWorld::RayDebugCategory::kThrowable);
@@ -962,6 +984,9 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
         } else if (terrain != nullptr && los_terrain_blocked(*terrain, eye, b)) {
             continue;
         }
+        // Only then the moving gate [orig: |entity+0x29C| >= 0xCCC (0.05 u/t)
+        // @0x43CB70..0x43CB80].
+        if (vehicles && std::abs(e->veh.speed) < 0xCCC) continue;
         return true;
     }
     return false;
@@ -1011,7 +1036,9 @@ void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
     }
     case ThrowClass::kAVMine: {
         // [orig: Entity_AVMineThink @ 0x443BB0 — Health <= 0 or the moving
-        // vehicle cone (data-dead in retail JO: pieslice 0).]
+        // vehicle cone. AV_Mine authors no kz_pieslice, so its half-angle is
+        // the allocator's 0x7FFFFFFF: every bearing within kz_minradius
+        // (AmmoDef_AllocateSlot @0x409A93).]
         if (dead || enemy_in_cone(world, collision, terrain, d,
                                   ammo->kz_minradius,
                                   ammo->kz_pieslice_bam, true))

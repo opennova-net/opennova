@@ -28,28 +28,27 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-const char kItemsDef[] = R"(begin "Env building"
-  id 100001
-  type decoration
-  move_function envs
-  soundloop_1 BUILD_AMB
-  soundloop_2 DAY_AMB
-  soundloop_4 NIGHT_AMB
-end
-
-begin "Env marker upper"
-  id 100002
-  type marker
-  ai_function ENVS
-  soundloop_1 MARKER_AMB
-end
-
-begin "Not env"
-  id 100003
-  type marker
-  soundloop_1 IGNORED_AMB
-end
-)";
+const char kItemsDef[] = "begin \"Env building\"\r\n"
+    "  id 100001\r\n"
+    "  type decoration\r\n"
+    "  move_function envs\r\n"
+    "  soundloop_1 BUILD_AMB\r\n"
+    "  soundloop_2 DAY_AMB\r\n"
+    "  soundloop_4 NIGHT_AMB\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"Env marker upper\"\r\n"
+    "  id 100002\r\n"
+    "  type marker\r\n"
+    "  ai_function ENVS\r\n"
+    "  soundloop_1 MARKER_AMB\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"Not env\"\r\n"
+    "  id 100003\r\n"
+    "  type marker\r\n"
+    "  soundloop_1 IGNORED_AMB\r\n"
+    "end\r\n";
 
 bms::Entity placed(int32_t type_id, int32_t id, int32_t x_fixed) {
 	bms::Entity e{};

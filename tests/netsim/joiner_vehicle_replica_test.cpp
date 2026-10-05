@@ -225,7 +225,7 @@ bool run_remote_driver_is_the_claimant() {
 	bool ok = true;
 	w::World &world = h.kernel->world;
 	static constexpr char kProfile[] =
-			"begin \"SP_RemoteTank\"\n Soundloop_1 TANK_IDLE 1 1\n swivel_shift TANK_SHIFT\nend\n";
+			"begin \"SP_RemoteTank\"\r\n Soundloop_1 TANK_IDLE 1 1\r\n swivel_shift TANK_SHIFT\r\nend\r\n";
 	ok &= expect(world.tables.sound_profiles.parse(kProfile, sizeof(kProfile) - 1) == 1,
 	             "the tank sound profile parses");
 	w::VehicleTraits traits = *world.vehicles.traits.get(kTankType);

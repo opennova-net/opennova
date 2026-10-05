@@ -2536,9 +2536,9 @@ void test_launcher_reload_keeps_ammo_flash(const fnt_font_t *font) {
     using namespace opennova::hud;
     HudLayout layout;
     layout.clip_pos = {32, 700, 0, 0, true};
-    layout.alpha_fade_seconds = 1.0f;
-    layout.alpha_fade_base = 25.0f;
-    layout.alpha_fade_max = 100.0f;
+    layout.alpha_fade_ramp_ticks = 62;  // alphafade 25 100 1
+    layout.alpha_fade_base_alpha = 63;
+    layout.alpha_fade_max_alpha = 255;
     HudFrameCompiler compiler;
     compiler.configure(layout, font);
     HudFrameState state;
@@ -2571,8 +2571,8 @@ void test_stance_obeys_weapon_group_declutter(const fnt_font_t *font) {
     layout.stance_pos = {32, 700, 0, 0, true};
     layout.stance_texture_valid.fill(true);
     layout.stance_frame0_w = layout.stance_frame0_h = 64;
-    layout.alpha_fade_seconds = 1.0f;
-    layout.alpha_fade_base = 100.0f;
+    layout.alpha_fade_ramp_ticks = 62;  // alphafade 100 0 1
+    layout.alpha_fade_base_alpha = 255;
     HudFrameCompiler compiler;
     compiler.configure(layout, font);
     HudFrameState state;
@@ -2703,8 +2703,8 @@ void test_seat_weapon_and_stance_transitions(const fnt_font_t *font) {
 	layout.stance_texture_valid.fill(true);
 	layout.stance_frame0_w = 32;
 	layout.stance_frame0_h = 32;
-	layout.alpha_fade_seconds = 1.0f;
-	layout.alpha_fade_base = layout.alpha_fade_max = 100.0f;
+	layout.alpha_fade_ramp_ticks = 62;  // alphafade 100 100 1
+	layout.alpha_fade_base_alpha = layout.alpha_fade_max_alpha = 255;
 	layout.crosshair_texture_valid = true;
 	layout.crosshair_tex_w = layout.crosshair_tex_h = 32;
 	HudFrameCompiler compiler;

@@ -46,18 +46,18 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 			"user://player_visual_avatars_%d.def" % stamp)
 	var items := FileAccess.open(item_path, FileAccess.WRITE)
 	assert_not_null(items)
-	items.store_string(
+	items.store_string(TestFs.crlf(
 			"begin Player\n"
-			+ " id 105310\n type person\n graphic person\nend\n")
+			+ " id 105310\n type person\n graphic person\nend\n"))
 	items.close()
 	var avatars := FileAccess.open(avatar_path, FileAccess.WRITE)
 	assert_not_null(avatars)
-	avatars.store_string(
+	avatars.store_string(TestFs.crlf(
 			"define head HEAD\n{\n graphic person.3di\n camo 32 64 96\n voice 3\n sex m\n}\n"
 			+ "define body BODY\n{\n graphic person.3di\n camo 100 120 140\n}\n"
 			+ "define arms ARMS\n{\n graphic person.3di\n camo 200 210 220\n}\n"
 			+ "nationality 0 NAT\n{\n alignment good\n division 0 DIV\n {\n"
-			+ "  combo 2 HEAD BODY ARMS\n }\n}\n")
+			+ "  combo 2 HEAD BODY ARMS\n }\n}\n"))
 	avatars.close()
 
 	var item_db := ItemDatabase.new()
@@ -146,11 +146,11 @@ func test_raw_runtime_item_type_resolves_to_full_items_def_id() -> void:
 			"user://runtime_item_resolver_%d.def" % Time.get_ticks_usec())
 	var file := FileAccess.open(tmp, FileAccess.WRITE)
 	assert_not_null(file)
-	file.store_string(
+	file.store_string(TestFs.crlf(
 			"begin AttachedTurret\n"
 			+ "  id 100166\n"
 			+ "  graphic M1trret\n"
-			+ "end\n")
+			+ "end\n"))
 	file.close()
 	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)

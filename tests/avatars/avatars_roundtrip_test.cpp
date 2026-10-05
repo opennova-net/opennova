@@ -145,6 +145,28 @@ int main(int argc, char **argv) {
 
     avatars_free(&fp);
     avatars_free_buffer(fb);
+
+    // An empty field ahead of a filled one is refused, nothing written: the
+    // `""` the writer spells it with is no token to the game's tokenizer, so
+    // the flags would read back as the name key and the body as the head.
+    // [orig: Terrain_TokenizeConfigLine @0x53CB60, the quote arm
+    //  @0x53CC4E..0x53CC70]
+    {
+        char *rb = nullptr;
+        size_t rn = 0;
+        SETSTR(div.name_key, "");
+        TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 2 && rb == nullptr);
+        SETSTR(div.flags, "");
+        TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 0); // an empty tail is no shift
+        avatars_free_buffer(rb);
+        rb = nullptr;
+        SETSTR(div.name_key, "AV_DIV_TEST");
+        SETSTR(combo.head_name, "");
+        TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 2 && rb == nullptr);
+        SETSTR(combo.head_name, "TEST_HEAD");
+        SETSTR(nat.raw_id, "");
+        TEST_EXPECT(avatars_write(&fs, &rb, &rn) == 2 && rb == nullptr);
+    }
     // The retail leg: the shipped Avatars.def from the reference fixture set.
     const std::string retail = retail::reference_fixture("avatars/Avatars.def");
     if (retail.empty())

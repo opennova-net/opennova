@@ -34,58 +34,58 @@ static bool parse(const char *text, DefHudPosFile &file) {
 
 static void synthetic() {
 	static const char text[] =
-			"fonthud1_lo\tfontlo\n"
-			"HUDHEALTH\t2,739,141,757\n"
-			"HUDHEAT\t10,20,30,50\n"
-			"HUDPOWERBAR\t20,720,72,11\n"
-			"AMMOCOUNTPOS\t128,597,0,right\n"
-			"HUDWEAPONNAME\t11,630,1,left\n"
-			"GAMEINFO\t1013,430\n"
-			"HUDCHATTEXT\t8,600\n"
-			"HUDSYSTEXT\t8,640\n"
-			"LFP_FLAGS\t1020 , 27\n"
-			"HUDVEHSTANCEPOS\t0 272\n"
-			"HUDCLIP\t900,700\n"
-			"HUDSTANCEPOS\t5,760\n"
-			"HUDSCOPERANGEXY\t100,101\n"
-			"HUDSCOPEZEROXY\t102,103\n"
-			"HUDSCOPEMAGXY\t104,105\n"
-			"SHOWIMPACTDISTPOS\t200,201\n"
-			"HUDWPNICON\t202,203\n"
-			"HUDGEARTEXT\t204,205\n"
-			"CARGOPOS\t206,207\n"
-			"HUDAGLRADIUS\t7\n"
-			"HUDAGLTLRX\t300,301\n"
-			"HUDAGLYLEN\t302,303\n"
-			"AGLCOLOR\t1,2,3,4\n"
-			"hud_textcolor\t251,213,5\n"
-			"stancecolor_good\t200,5,249,12\n"
-			"tagcolor_bad\t300,-1,10\n"
-			"HUDSPINMAPX1\t810\n"
-			"HUDSPINMAPX2\t1020\n"
-			"HUDSPINMAPY1\t552\n"
-			"HUDSPINMAPY2\t762\n"
-			"SPINMAPWPDISTOFF\t17\n"
-			"MAPCOORDS\t530,720,1\n"
-			"alphafade\t30 50 3\n"
-			"HUDSTANCE\t0 1 2 stance_1.tga STAND\n"
-			"HUDSTANCE\t3 4 5 stance_4.tga PRONE\n"
-			"HUDSTANCE\t0 6 7 stance_x.tga STAND2\n"
-			"HUDSTANCE\t9 8 8 nope.tga NOPE\n"
-			"StaticFrame\tH_BlkHLin.tga  512,720\n"
-			"StaticFrame\tCompMark.tga  508,685\n"
-			"PARACHUTEICON\tchute.tga 400,401\n"
-			"ARMORICON\tarmor.tga 402,403\n"
-			"BREATHTIME\t\t512,70,center\n"
-			"HUDTIMECLOCK\t1020,27,0,right\n"
-			"HUDPLAYERCOUNT\t1015,49,0,right\n"
-			"HUDTEAMXY\t1015,5,1,center\n"
-			"ZONEINFO\t1013,386,Right\n"
-			"HUDLS_SYSTEM\t1\n"
-			"HUDLS_BRACKET\tbrack.tga\n"
-			"HUDLS_KEYOFST\t3,18\n"
-			"HUDLS_MOREAV\tmore.tga 20 -5\n"
-			"HUDLS_SLOT\t6 300 700\n";
+			"fonthud1_lo\tfontlo\r\n"
+			"HUDHEALTH\t2,739,141,757\r\n"
+			"HUDHEAT\t10,20,30,50\r\n"
+			"HUDPOWERBAR\t20,720,72,11\r\n"
+			"AMMOCOUNTPOS\t128,597,0,right\r\n"
+			"HUDWEAPONNAME\t11,630,1,left\r\n"
+			"GAMEINFO\t1013,430\r\n"
+			"HUDCHATTEXT\t8,600\r\n"
+			"HUDSYSTEXT\t8,640\r\n"
+			"LFP_FLAGS\t1020 , 27\r\n"
+			"HUDVEHSTANCEPOS\t0 272\r\n"
+			"HUDCLIP\t900,700\r\n"
+			"HUDSTANCEPOS\t5,760\r\n"
+			"HUDSCOPERANGEXY\t100,101\r\n"
+			"HUDSCOPEZEROXY\t102,103\r\n"
+			"HUDSCOPEMAGXY\t104,105\r\n"
+			"SHOWIMPACTDISTPOS\t200,201\r\n"
+			"HUDWPNICON\t202,203\r\n"
+			"HUDGEARTEXT\t204,205\r\n"
+			"CARGOPOS\t206,207\r\n"
+			"HUDAGLRADIUS\t7\r\n"
+			"HUDAGLTLRX\t300,301\r\n"
+			"HUDAGLYLEN\t302,303\r\n"
+			"AGLCOLOR\t1,2,3,4\r\n"
+			"hud_textcolor\t251,213,5\r\n"
+			"stancecolor_good\t200,5,249,12\r\n"
+			"tagcolor_bad\t300,-1,10\r\n"
+			"HUDSPINMAPX1\t810\r\n"
+			"HUDSPINMAPX2\t1020\r\n"
+			"HUDSPINMAPY1\t552\r\n"
+			"HUDSPINMAPY2\t762\r\n"
+			"SPINMAPWPDISTOFF\t17\r\n"
+			"MAPCOORDS\t530,720,1\r\n"
+			"alphafade\t30 50 3\r\n"
+			"HUDSTANCE\t0 1 2 stance_1.tga STAND\r\n"
+			"HUDSTANCE\t3 4 5 stance_4.tga PRONE\r\n"
+			"HUDSTANCE\t0 6 7 stance_x.tga STAND2\r\n"
+			"HUDSTANCE\t9 8 8 nope.tga NOPE\r\n"
+			"StaticFrame\tH_BlkHLin.tga  512,720\r\n"
+			"StaticFrame\tCompMark.tga  508,685\r\n"
+			"PARACHUTEICON\tchute.tga 400,401\r\n"
+			"ARMORICON\tarmor.tga 402,403\r\n"
+			"BREATHTIME\t\t512,70,center\r\n"
+			"HUDTIMECLOCK\t1020,27,0,right\r\n"
+			"HUDPLAYERCOUNT\t1015,49,0,right\r\n"
+			"HUDTEAMXY\t1015,5,1,center\r\n"
+			"ZONEINFO\t1013,386,Right\r\n"
+			"HUDLS_SYSTEM\t1\r\n"
+			"HUDLS_BRACKET\tbrack.tga\r\n"
+			"HUDLS_KEYOFST\t3,18\r\n"
+			"HUDLS_MOREAV\tmore.tga 20 -5\r\n"
+			"HUDLS_SLOT\t6 300 700\r\n";
 	DefHudPosFile file;
 	if (!parse(text, file)) {
 		std::printf("FAIL: synthetic parse\n");
@@ -160,8 +160,8 @@ static void synthetic() {
 	CHECK(layout.spinmap_wp_dist_off == 17);
 	CHECK(layout.map_coords_x == 530.0f && layout.map_coords_y == 720.0f &&
 			layout.map_coords_off == 1);
-	CHECK(layout.alpha_fade_base == 30.0f && layout.alpha_fade_max == 50.0f &&
-			layout.alpha_fade_seconds == 3.0f);
+	CHECK(layout.alpha_fade_base_alpha == 76 && layout.alpha_fade_max_alpha == 127 &&
+			layout.alpha_fade_ramp_ticks == 186);
 	// An unauthored HUDCHLINE keeps the 8-line default.
 	CHECK(layout.chat_lines == 8);
 	// HUDSTANCE by id: a later record for the same id replaces the earlier
@@ -184,7 +184,7 @@ static void synthetic() {
 	// A bare `fonthud1` line (the JOX hudpos.def's) is no key: HUD_ParseHudposToken
 	// compares whole tokens with _stricmp, so both names stay empty and the HUD
 	// slot takes the bold label font.
-	static const char bare_font[] = "fonthud1\tGunpb18b.fnt\nHUDCHLINE\t9\n";
+	static const char bare_font[] = "fonthud1\tGunpb18b.fnt\r\nHUDCHLINE\t9\r\n";
 	if (!parse(bare_font, file)) {
 		std::printf("FAIL: bare fonthud1 parse\n");
 		++failures;
@@ -198,13 +198,13 @@ static void synthetic() {
 
 	// A minimal file: no frame, no spinmap extent, a chline, the hi font.
 	static const char minimal[] =
-			"fonthud1_hi\tfonthi\n"
-			"fonthud1_lo\tfontlo\n"
-			"HUDCHLINE\t12\n"
-			"HUDSPINMAPX1\t100\n"
-			"HUDSPINMAPX2\t100\n"
-			"HUDSPINMAPY1\t50\n"
-			"HUDSPINMAPY2\t50\n";
+			"fonthud1_hi\tfonthi\r\n"
+			"fonthud1_lo\tfontlo\r\n"
+			"HUDCHLINE\t12\r\n"
+			"HUDSPINMAPX1\t100\r\n"
+			"HUDSPINMAPX2\t100\r\n"
+			"HUDSPINMAPY1\t50\r\n"
+			"HUDSPINMAPY2\t50\r\n";
 	if (!parse(minimal, file)) {
 		std::printf("FAIL: minimal parse\n");
 		++failures;
@@ -234,9 +234,27 @@ static void synthetic() {
 // without the line restores the reset's, as the mission-start reset runs
 // before every parse [orig: HUD_ParseHudposToken @0x59F981..0x59FA0C;
 // CNetQuality_Reset @0x4C5908..0x4C591E via Game_StartMission @0x5243B4].
+// ALPHAFADE's converts are the original's: atof times dbl_7D9A20 (2.55 rounded
+// up) for the two alphas and times 62.0 for the ramp, each through _ftol2_sse
+// [orig: @0x5A0882..0x5A08C2].
+static void alphafade_converts() {
+	DefHudPosFile file;
+	if (!parse("alphafade 20 100.5 0.5\r\n", file)) {
+		std::printf("FAIL: alphafade parse\n");
+		++failures;
+		return;
+	}
+	HudLayout layout;
+	HudLayoutAssets assets;
+	hud_layout_from_hudpos(file, layout, assets);
+	CHECK(layout.alpha_fade_base_alpha == 51 && layout.alpha_fade_max_alpha == 256 &&
+			layout.alpha_fade_ramp_ticks == 31);
+	def_free_hudpos(&file);
+}
+
 static void network_indicator() {
 	DefHudPosFile file;
-	if (!parse("NETWORKINDICATOR\t6,7 30,7 70,8\n", file)) {
+	if (!parse("NETWORKINDICATOR\t6,7 30,7 70,8\r\n", file)) {
 		std::printf("FAIL: NETWORKINDICATOR parse\n");
 		++failures;
 		return;
@@ -246,7 +264,7 @@ static void network_indicator() {
 	hud_layout_from_hudpos(file, layout, assets);
 	CHECK((layout.net_indicator_pos == std::array<int, 6>{6, 7, 30, 7, 70, 8}));
 	def_free_hudpos(&file);
-	if (!parse("PAUSEDPOS\t980 12\n", file)) {
+	if (!parse("PAUSEDPOS\t980 12\r\n", file)) {
 		std::printf("FAIL: second parse\n");
 		++failures;
 		return;
@@ -283,8 +301,8 @@ static void retail_leg() {
 	CHECK(assets.stance_textures[0] == "stance_1.tga");
 	CHECK(layout.game_info.x == 1013 && layout.game_info.y == 430 && layout.game_info.hidden == 0 &&
 			layout.game_info.align == 0);
-	CHECK(layout.alpha_fade_base == 30.0f && layout.alpha_fade_max == 50.0f &&
-			layout.alpha_fade_seconds == 3.0f);
+	CHECK(layout.alpha_fade_base_alpha == 76 && layout.alpha_fade_max_alpha == 127 &&
+			layout.alpha_fade_ramp_ticks == 186);
 	CHECK(layout.chat_lines == 8);
 	CHECK(layout.veh_stance_pos.x == 0 && layout.veh_stance_pos.y == 272);
 	CHECK(layout.lfp_anchor_x == 1020 && layout.lfp_anchor_y == 27);
@@ -296,6 +314,7 @@ static void retail_leg() {
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	synthetic();
+	alphafade_converts();
 	network_indicator();
 	retail_leg();
 	if (failures != 0) {

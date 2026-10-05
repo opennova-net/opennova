@@ -476,6 +476,11 @@ struct PlayerTemplate {
     // The Player row's items.def ordinal (entity+0x1C ItemTypeIndex); 0 until the
     // sweep resolves it [orig: Entity_SpawnFromBMSRecord @0x40EBFC].
     int32_t item_type_index = 0;
+    // Whether the Player row names a graphic (entity+0x30 graphicModel), the
+    // device sweeps' candidate gate; true for native harnesses like
+    // has_item_def [orig: Entity_InitFromModel @0x40df06; the gate
+    // @0x43CC19].
+    bool has_graphic_model = true;
     int32_t item_hp = 0;
     int32_t critical_hp = 0;
     // The rest of the same Player items.def template, cached for host/late-join

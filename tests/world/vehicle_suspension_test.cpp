@@ -45,15 +45,15 @@ int failures = 0;
 // only — retail never reads it past the parser.
 void test_def_keys_parse_raw() {
 	const char *src =
-			"begin \"Sprung\"\n"
-			"  id 101291\n"
-			"  type vehicle\n"
-			"  physics 1\n"
-			"  spring 8\n"
-			"  spring_comp 20\n"
-			"  shock 4\n"
-			"  top_heavy 3\n"
-			"end\n";
+			"begin \"Sprung\"\r\n"
+			"  id 101291\r\n"
+			"  type vehicle\r\n"
+			"  physics 1\r\n"
+			"  spring 8\r\n"
+			"  spring_comp 20\r\n"
+			"  shock 4\r\n"
+			"  top_heavy 3\r\n"
+			"end\r\n";
 	DefItemsFile file;
 	std::memset(&file, 0, sizeof(file));
 	CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(src),
@@ -583,11 +583,11 @@ void test_tank_wheel_suspension_forces() {
 	auto heap = make_world(true);
 	World &w = *heap;
 	static constexpr char kProfile[] =
-			"begin \"SP_TankHit\"\n"
-			"  tumble_hithard T_HARD\n"
-			"  tumble_hitmed T_MED\n"
-			"  tumble_hitsoft T_SOFT\n"
-			"end\n";
+			"begin \"SP_TankHit\"\r\n"
+			"  tumble_hithard T_HARD\r\n"
+			"  tumble_hitmed T_MED\r\n"
+			"  tumble_hitsoft T_SOFT\r\n"
+			"end\r\n";
 	CHECK(w.tables.sound_profiles.parse(kProfile, sizeof(kProfile) - 1) == 1, "profile parses");
 	EntityHandle h;
 	Entity &v = spawn_veh(w, h);
@@ -891,7 +891,7 @@ void test_mounted_action_recoil() {
 	CHECK(v.veh.chassis_impulse_amplitude == 0,
 			"wrapped negative round weight preserves the retail threshold");
 
-	const char *source = "weapon \"test\"\naction \"fire\"\naction_value 25\nend\nend\n";
+	const char *source = "weapon \"test\"\r\naction \"fire\"\r\naction_value 25\r\nend\r\nend\r\n";
 	DefWeaponsFile defs{};
 	CHECK(def_parse_weapons_memory(
 				  reinterpret_cast<const uint8_t *>(source), std::strlen(source), &defs) == 0,

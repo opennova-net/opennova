@@ -57,7 +57,7 @@ func _append_to_file(path: String, text: String) -> void:
 	if file == null:
 		return
 	file.seek_end(0)
-	file.store_string(text)
+	file.store_string(TestFs.crlf(text))
 	file.close()
 
 

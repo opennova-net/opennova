@@ -121,8 +121,9 @@ typedef struct DefAmmoDef {
     /* The guided-pursuit turn clamps, 'turnrate_maxpit'/'turnrate_maxyaw'
      * (deg/s -> BAM/tick: (192426 * fp16 + 0x8000) >> 16 [orig:
      * AmmoDef_ParseProperty -> AmmoDef_ParseTurnRate @0x40a130, stored +0x50/+0x54];
-     * 0 = the flight integrator's 6734910 default —
-     * world/guided_missile_flight.h). */
+     * an unauthored def holds the allocator's -1 [orig: AmmoDef_AllocateSlot
+     * @0x409A20], and the flight integrator takes any value <= 0 as its 6734910
+     * default — world/guided_missile_flight.h). */
     int turnrate_maxpit; /* +80 */
     int turnrate_maxyaw; /* +84 */
     DefEffectTableEntry *effects_table;
@@ -131,8 +132,9 @@ typedef struct DefAmmoDef {
     size_t raw_lines_count;
     /* Kill-zone blast geometry (appended; layout stability). The explosion
      * queue's blast radius is kz_maxradius (or the entry's float override); the
-     * linear damage falloff starts at kz_minradius; kz_pieslice != 0 makes the
-     * blast a cone around the entry direction. [orig: AmmoDef_ParseProperty
+     * linear damage falloff starts at kz_minradius; kz_pieslice is the half-angle
+     * of a cone around the entry direction: 0 skips the gate, and the
+     * allocator's unauthored 0x7FFFFFFF passes every bearing. [orig: AmmoDef_ParseProperty
      * 'kz_minradius'/'kz_maxradius' -> +52/+56 fp16, 'kz_pieslice' -> +60
      * deg * 11930464 BAM; consumers Projectile_ProcessExplosionQueue @0x4ead80,
      * Entity_ApplyWeaponDamage @0x4e6931/@0x4e695a] */
@@ -213,11 +215,9 @@ typedef struct DefWeaponAction {
 	/* Where the row's live block stands in the parsed text: the 0-based index
 	   of the `action` line that opened it and of the `end` that closed it. A
 	   later block of the same name replaces the row, lines included. Lines are
-	   numbered as the parser splits them, at LF with a CR before it dropped;
-	   for CR LF text that is the retail walk's numbering (File_ParseASCIIFile
-	   @0x53D810 cuts at CR LF only), but the parser keeps an unterminated tail
-	   line whole where retail drops its last byte (@0x53D8E9 / @0x53D8EC).
-	   A tool that rewrites the file in place (opennova-3di weapon merge) maps
+	   numbered as the retail walk cuts them, at CR LF only (File_ParseASCIIFile
+	   @0x53D810; an unterminated tail line loses its last byte, @0x53D8E9 /
+	   @0x53D8EC). A tool that rewrites the file in place (opennova-3di weapon merge) maps
 	   them back onto the text and checks the retail reading of those lines. */
 	size_t open_line;
 	size_t end_line;
@@ -517,11 +517,24 @@ typedef struct DefWeaponDef {
        [orig: emplacedstance @0x544174..0x54419B, HUD @0x4B8539..0x4B8549] */
     int emplacedstance;
     /* Where the entry stands in the parsed text: the 0-based index of its
-       `weapon` line and of the `end` that closed it (an entry the text never
-       closes is not parsed). See DefWeaponAction::open_line for the line
-       numbering. */
+       `weapon` line and of the `end` that closed it. See
+       DefWeaponAction::open_line for the line numbering. */
     size_t open_line;
     size_t end_line;
+    /* 1 when no `end` closed the entry: the file ran out, or the walk stopped
+       at a `weapon` line inside it (DefWeaponsFile::stopped). end_line is then
+       where the walk ended (that line, or one past the last), and an action
+       block left open is a row too, its end_line the same. The game claims the
+       entry's slot at its `weapon` line, so the entry is in the weapon table,
+       but only `end` binds its actions [orig: WeaponDefs_ParseLineCallback
+       @0x543680, the slot @0x5436E7..0x543737 (AdmDef_FindFreeSlot,
+       AdmDef_InitEntryDefaults, the name strncpy), `end` @0x5437CF..0x5437DC
+       (Anim_InitActions, WeaponDefs_ResetParseState); the action row at its
+       `action` line, ActionDef_ParseScriptLine @0x4024A1..0x4024DA]; the
+       PLAYER_INFO list counts a row only at `end` [orig: WeaponDef_ParseProperty
+       @0x54D730, the END compare against off_7D3EE0], so the entry is in no
+       loadout list. */
+    int unclosed;
 } DefWeaponDef;
 
 /* One `ammoclass_max_carry <class> <n>` row: the class token and the carry cap,
@@ -541,6 +554,13 @@ typedef struct DefWeaponsFile {
     size_t ammo_class_carries_count;
     DefWeaponDef *entries;
     size_t count;
+    /* 1 when the walk stopped at line stop_line, a `weapon` line inside an
+       entry no `end` closed: the game logs "weapon didn't have an end" and
+       returns 1, which ends File_ParseASCIIFile's walk, so no line from there
+       on is read [orig: WeaponDefs_ParseLineCallback @0x5436AD..0x5436D2; the
+       walk's exit @0x53D942]. */
+    int stopped;
+    size_t stop_line;
 } DefWeaponsFile;
 
 /* ========================================================================= */
@@ -625,8 +645,9 @@ inline constexpr uint32_t DEF_ITEM_ATTRIB_TAKEABLE = 0x00002000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_EASY = 0x00004000u;
 /* items.def token "S&D" (case-insensitive whole token; the tokenizer keeps the '&'):
    the S&D/A&D objective target, counted per team by the round census and immune to
-   same-team blast damage. The IDB types the token string as off_7C84E8; its bytes
-   are 53 26 44 00. [orig: ItemDef_ParseProperty @0x4a084e..0x4a086d, token @0x7C84E8;
+   same-team blast damage. The token string is aSD @0x7C84E8, bytes 53 26 44 00 (the
+   IDB typed it as the pointer off_7C84E8 until 2026-10-04). [orig:
+   ItemDef_ParseProperty @0x4a084e..0x4a086d, token @0x7C84E8;
    census Server_ResetRoundCounters @0x516d3d/@0x516d89] */
 inline constexpr uint32_t DEF_ITEM_ATTRIB_SD = 0x00008000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_4TEAM = 0x00010000u;
@@ -1170,11 +1191,11 @@ typedef struct DefHudPosDef {
     int hud_chline;
     int agl_radius;
     int roc_len;
-    /* ALPHAFADE raw file fields (base %, max %, seconds) kept as floats: the
-       original reads each via atof and the fraction survives into the x2.55 /
-       x2.55 / x62 converts before ftol [orig: alphafade parse @0x5a0882..0x5a08c2];
-       consumers apply that conversion. */
-    float alpha_fade[3];
+    /* ALPHAFADE file fields (base %, max %, seconds) as atof reads them: the
+       fraction survives into the original's x2.55 / x2.55 / x62 converts before
+       ftol [orig: alphafade parse @0x5a0882..0x5a08c2], which the HUD layout
+       makes (hud_layout_from_hudpos). */
+    double alpha_fade[3];
 
     int agl_tlrx[2];
     int agl_ylen[2];
@@ -1273,10 +1294,24 @@ int def_parse_ammo(const char *path, DefAmmoFile *out);
 int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out);
 void def_free_ammo(DefAmmoFile *f);
 
-int def_parse_weapons(const char *path, DefWeaponsFile *out);
+/* Whether a name resolves to a file the game could open, for the readers that
+   refuse a row on a missing file: a SIGHTS row whose texture does not exist is
+   no row, and a crosshair, hudclipgfx or hudrndgfx line naming one stores
+   nothing [orig: WeaponDefs_ParseLineCallback, FileSystem_FileExists @0x75AA50
+   called @0x544AE2 (sights), @0x54493E / @0x544983 (crosshair), @0x544295
+   (hudclipgfx), @0x544316 (hudrndgfx)]. A reader given no probe (a tool with
+   no game mount) takes every name as present. */
+typedef bool (*DefFileExistsFn)(const void *ctx, const char *name);
+typedef struct DefFileProbe {
+    DefFileExistsFn exists;
+    const void *ctx;
+} DefFileProbe;
+
+int def_parse_weapons(const char *path, DefWeaponsFile *out, const DefFileProbe *files = nullptr);
 /* Parse weapon.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_weapons as usual. Returns 0 on success, -1 on bad input. */
-int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out);
+int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out,
+                             const DefFileProbe *files = nullptr);
 void def_free_weapons(DefWeaponsFile *f);
 
 int def_parse_powerup(const char *path, DefPowerupFile *out);

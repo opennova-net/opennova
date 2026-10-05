@@ -137,8 +137,8 @@ int main() {
 	{
 		opennova::TrnConfig seven;
 		std::istringstream seven_input(
-				"polytrn_colormap c.tga\npolytrn_detailmap d.tga\npolytrn_polydata p.cpt\n"
-				"foliage\n  graphic bush.3di\n  match 1 2 3 4 5 6 7\nend\n");
+				"polytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\npolytrn_polydata p.cpt\r\n"
+				"foliage\r\n  graphic bush.3di\r\n  match 1 2 3 4 5 6 7\r\nend\r\n");
 		error.clear();
 		if (!expect(opennova::load_trn(seven_input, seven, error),
 				"a seven-arg match line should parse")) return 1;
@@ -157,8 +157,8 @@ int main() {
 	{
 		opennova::TrnConfig wrapped;
 		std::istringstream input_bytes(
-				"polytrn_colormap c.tga\npolytrn_detailmap d.tga\npolytrn_polydata p.cpt\n"
-				"foliage\n graphic bush.3di\n match -1 256 511 -256\nend\n");
+				"polytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\npolytrn_polydata p.cpt\r\n"
+				"foliage\r\n graphic bush.3di\r\n match -1 256 511 -256\r\nend\r\n");
 		error.clear();
 		if (!expect(opennova::load_trn(input_bytes, wrapped, error),
 				"byte-wrapped match codes should parse")) return 1;
@@ -167,12 +167,61 @@ int main() {
 				"authored match codes must wrap to bytes, without losing negative arguments")) return 1;
 	}
 
+	// The lines and tokens are the shared retail walk's: keys compare without case; a
+	// polytrn_sectors row reads polytrn_sectorcount columns whatever its count, the missing
+	// ones from the slots an earlier line left; `attrib` ORs its flags; the first four
+	// foliage blocks are read and a fifth never closes, so the rest of the file is read by
+	// no arm; and a block whose `end` is the unterminated last line (read `en`), or that
+	// no `end` follows, still wrote its slot, which the runtime takes like a closed one,
+	// so a `foliage` line inside it is one of its keys and opens nothing.
+	// [orig: Terrain_ParseConfigCallback @0x60f330 — stricmp on tokens[1], the
+	// polytrn_sectors arm, the attrib ORs, dword_31BC904 / dword_31BC900;
+	// File_ParseASCIIFile @0x53D810, the tail @0x53D8E9 / @0x53D8EC; Terrain_Init's
+	// four-slot copy @0x60FD16]
+	{
+		opennova::TrnConfig walked;
+		std::istringstream walked_input(
+				"POLYTRN_COLORMAP c.tga\r\npolytrn_detailmap d.tga\r\npolytrn_polydata p.cpt\r\n"
+				"polytrn_sectorcount 4\r\n"
+				"note aaaaaaaaaaaaaaaaaaaaaaaaa b 7 8\r\n"
+				"polytrn_sectors 1 2\r\n"
+				"foliage\r\n graphic a.3di\r\n attrib forceon\r\n attrib shadow\r\nend\r\n"
+				"foliage\r\n graphic b.3di\r\nend\r\n"
+				"foliage\r\n graphic c.3di\r\nend\r\n"
+				"foliage\r\n graphic d.3di\r\nend\r\n"
+				"foliage\r\n graphic e.3di\r\nend\r\n"
+				"polytrn_wrapx 1\r\n");
+		error.clear();
+		if (!expect(opennova::load_trn(walked_input, walked, error), "the walked config parses")) {
+			std::fprintf(stderr, "  error was: %s\n", error.c_str());
+			return 1;
+		}
+		if (!expect(walked.colormap == "c.tga" && walked.sector_grid[0][0] == 1 &&
+						walked.sector_grid[0][1] == 2 && walked.sector_grid[0][2] == 7 &&
+						walked.sector_grid[0][3] == 8 && walked.foliage_defs.size() == 4 &&
+						walked.foliage_defs[0].attrib_flags ==
+								(opennova::FOLIAGE_ATTRIB_FORCE_ON | opennova::FOLIAGE_ATTRIB_SHADOW) &&
+						walked.wrap_x == 0,
+				"keys without case, stale sector columns, attrib ORs and the fifth block's swallow"))
+			return 1;
+		opennova::TrnConfig tail;
+		std::istringstream tail_input(
+				"polytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\npolytrn_polydata p.cpt\r\n"
+				"foliage\r\n graphic a.3di\r\n"
+				"foliage\r\n graphic t.3di\r\nend");
+		error.clear();
+		if (!expect(opennova::load_trn(tail_input, tail, error) && tail.foliage_defs.size() == 1 &&
+						tail.foliage_defs[0].graphic == "t.3di",
+				"an unclosed block keeps its slot, a foliage line inside it opening nothing"))
+			return 1;
+	}
+
 	// A config with only the admission-gate minimum (colormap, detailmap,
 	// polydata) parses with default locks.
 	opennova::TrnConfig defaults;
 	std::istringstream defaults_input(
-			"terrain_name default_locks\npolytrn_colormap c.tga\npolytrn_detailmap d.tga\n"
-			"polytrn_polydata p.cpt\n");
+			"terrain_name default_locks\r\npolytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\n"
+			"polytrn_polydata p.cpt\r\n");
 	error.clear();
 	if (!expect(opennova::load_trn(defaults_input, defaults, error),
 			"TRN with omitted lock keys should parse")) return 1;

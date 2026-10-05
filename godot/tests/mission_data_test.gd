@@ -72,14 +72,14 @@ func test_item_database_exposes_retail_interior_light_transfer() -> void:
 			"user://light_transfer_items_%d.def" % Time.get_ticks_usec())
 	var file := FileAccess.open(tmp, FileAccess.WRITE)
 	assert_not_null(file)
-	file.store_string(
+	file.store_string(TestFs.crlf(
 			"begin \"Absent\"\n"
 			+ "  id 710010\n"
 			+ "end\n"
 			+ "begin \"Ihq01\"\n"
 			+ "  id 101216\n"
 			+ "  light_transfer 20\n"
-			+ "end\n")
+			+ "end\n"))
 	file.close()
 	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)
@@ -98,7 +98,7 @@ func test_item_database_duplicate_id_keeps_first_row() -> void:
 			"user://duplicate_items_%d.def" % Time.get_ticks_usec())
 	var file := FileAccess.open(tmp, FileAccess.WRITE)
 	assert_not_null(file)
-	file.store_string(
+	file.store_string(TestFs.crlf(
 			"begin \"Map Named Location\"\n"
 			+ "  id 102044\n"
 			+ "  type marker\n"
@@ -107,7 +107,7 @@ func test_item_database_duplicate_id_keeps_first_row() -> void:
 			+ "  id 102044\n"
 			+ "  type powerup\n"
 			+ "  graphic PwrMed\n"
-			+ "end\n")
+			+ "end\n"))
 	file.close()
 	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)

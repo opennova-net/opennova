@@ -71,11 +71,11 @@ func _three_slot_fixture_combo() -> AvatarComboRow:
 	var path := ProjectSettings.globalize_path("user://avatar_preview_three_slot.def")
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	assert_not_null(file)
-	file.store_string("define head HEAD\n{\n graphic person.3di\n}\n"
+	file.store_string(TestFs.crlf("define head HEAD\n{\n graphic person.3di\n}\n"
 			+ "define body BODY\n{\n graphic person.3di\n}\n"
 			+ "define arms ARMS\n{\n graphic person.3di\n}\n"
 			+ "nationality 0 NAT\n{\n alignment good\n division 0 DIV\n {\n"
-			+ "  combo 1 HEAD BODY ARMS\n }\n}\n")
+			+ "  combo 1 HEAD BODY ARMS\n }\n}\n"))
 	file.close()
 	var db := AvatarDatabase.new()
 	assert_eq(db.load(path), OK)

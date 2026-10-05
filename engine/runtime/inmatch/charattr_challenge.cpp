@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 namespace opennova::inmatch {
@@ -71,12 +72,14 @@ uint32_t read_u32(const CharAttrChallengeRow &row, std::size_t offset) {
 }
 
 // Retail's config reader converts a type-2 value with atof and stores the float; every
-// other numeric key goes through atol. strtod/strtol are the CRT equivalents.
-// [orig: ConfigFile_ReadKeyValue @0x75fc90 (the atof/atol split),
-//  ConfigFile_FindSectionAndReadValue @0x75ff00 (section reset + first matching key)]
+// other numeric key goes through atol: the CRT's own (io::retail_atof: decimal only,
+// whatever the process locale; io::retail_atol: 32 bits, saturating). This is the
+// ConfigFile reader, not the File_ParseASCIIFile walk, so its lines are its own.
+// [orig: ConfigFile_ReadKeyValue @0x75fc90 (the atof/atol split, _atof @0x76B6A1,
+//  j__atol @0x76AB1B), ConfigFile_FindSectionAndReadValue @0x75ff00 (section reset
+//  + first matching key)]
 void write_float(CharAttrChallengeRow &row, std::size_t offset, std::string_view value) {
-	const std::string terminated(value);
-	const double parsed = std::strtod(terminated.c_str(), nullptr);
+	const double parsed = io::retail_atof_n(value.data(), value.size());
 	const float stored = static_cast<float>(parsed);
 	static_assert(sizeof(stored) == sizeof(uint32_t), "retail charattr float is 32-bit");
 	uint32_t bits = 0;
@@ -85,9 +88,7 @@ void write_float(CharAttrChallengeRow &row, std::size_t offset, std::string_view
 }
 
 void write_integer(CharAttrChallengeRow &row, std::size_t offset, std::string_view value) {
-	const std::string terminated(value);
-	const long parsed = std::strtol(terminated.c_str(), nullptr, 10);
-	write_u32(row, offset, static_cast<uint32_t>(parsed));
+	write_u32(row, offset, static_cast<uint32_t>(io::retail_atol_n(value.data(), value.size())));
 }
 
 uint32_t attribute_flag(std::string_view token) {

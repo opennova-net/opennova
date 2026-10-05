@@ -122,15 +122,15 @@ int main() {
 	//    its END plays i2. After the file each plays once more: i1, then i2.
 	{
 		static const char kDefs[] =
-				"weapon \"WPN_A\"\n\tanimadm g\n"
-				"\taction \"idle\"\n\t\tdelaystart 0\n\t\tdelayend auto\n\t\tanim anim_wpn_idle\n\tend\n"
-				"end\n"
-				"weapon \"WPN_B\"\n\tanimadm G.ADM\n"
-				"\taction \"idle\"\n\t\tdelaystart auto\n\t\tdelayend auto\n\t\tanim anim_wpn_idle\n\tend\n"
-				"end\n"
-				"weapon \"WPN_C\"\n\tanimadm absent.adm\n"
-				"\taction \"idle\"\n\t\tdelaystart 0\n\t\tdelayend auto\n\t\tanim anim_wpn_idle\n\tend\n"
-				"end\n";
+				"weapon \"WPN_A\"\r\n\tanimadm g\r\n"
+				"\taction \"idle\"\r\n\t\tdelaystart 0\r\n\t\tdelayend auto\r\n\t\tanim anim_wpn_idle\r\n\tend\r\n"
+				"end\r\n"
+				"weapon \"WPN_B\"\r\n\tanimadm G.ADM\r\n"
+				"\taction \"idle\"\r\n\t\tdelaystart auto\r\n\t\tdelayend auto\r\n\t\tanim anim_wpn_idle\r\n\tend\r\n"
+				"end\r\n"
+				"weapon \"WPN_C\"\r\n\tanimadm absent.adm\r\n"
+				"\taction \"idle\"\r\n\t\tdelaystart 0\r\n\t\tdelayend auto\r\n\t\tanim anim_wpn_idle\r\n\tend\r\n"
+				"end\r\n";
 		def::DefWeaponsFile parsed{};
 		TEST_EXPECT(def::def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kDefs), sizeof(kDefs) - 1,
 				&parsed) == 0);

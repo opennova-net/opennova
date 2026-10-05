@@ -720,15 +720,15 @@ void test_helicopter_sound_curves_and_decay() {
 	// that the helicopter lanes must never consult: lanes 21/11/1 read itemDef
 	// soundLoopId[2]/[1]/[0] = Soundloop_3/2/1 (+2100/+2096/+2092
 	// @0x52919D/@0x5291ED/@0x529235), each with lifetime 15 (+16 @0x528F94).
-	const char profile[] = "begin Rotor\n"
-						   "Soundloop_2 V_APACHE_ILP .8 1.2\nSoundloop_3 V_APACHE_DLP .8 1.2\n"
-						   "Soundloop_5 Decoy5\nSoundloop_6 Decoy6\nSoundloop_7 Decoy7\n"
-						   "medloopfadeinstart 0\nmedloopfadeinend 50\n"
-						   "medloopfadeoutstart 75\nmedloopfadeoutend 100\n"
-						   "medlooppitchstart 0\nmedlooppitchend 100\n"
-						   "medlooppitchstartp 50\nmedlooppitchendp 100\n"
-						   "crsloopfadeinstart 50\ncrsloopfadeinend 100\n"
-						   "crslooppitchstartp 60\ncrslooppitchendp 120\nend\n";
+	const char profile[] = "begin Rotor\r\n"
+						   "Soundloop_2 V_APACHE_ILP .8 1.2\r\nSoundloop_3 V_APACHE_DLP .8 1.2\r\n"
+						   "Soundloop_5 Decoy5\r\nSoundloop_6 Decoy6\r\nSoundloop_7 Decoy7\r\n"
+						   "medloopfadeinstart 0\r\nmedloopfadeinend 50\r\n"
+						   "medloopfadeoutstart 75\r\nmedloopfadeoutend 100\r\n"
+						   "medlooppitchstart 0\r\nmedlooppitchend 100\r\n"
+						   "medlooppitchstartp 50\r\nmedlooppitchendp 100\r\n"
+						   "crsloopfadeinstart 50\r\ncrsloopfadeinend 100\r\n"
+						   "crslooppitchstartp 60\r\ncrslooppitchendp 120\r\nend\r\n";
 	CHECK(world.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1,
 			"rotor sound profile parses its authored curves");
 	helo.veh.part_spin.speed = kRotorSpeedMax;

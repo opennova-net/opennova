@@ -229,7 +229,7 @@ int main(int argc, char **argv) {
         smoke->frndly_trcr_type_id != 1875) {
         fprintf(stderr,
                 "FAIL: grenadesm want age/arm/velocity/item=1860/310/30/1875; "
-                "got found=%d %d/%d/%d/%d\n",
+                "got found=%d %d/%d/%d/%d\r\n",
                 smoke != NULL,
                 smoke ? smoke->max_age_ticks : -1,
                 smoke ? smoke->arm_age_ticks : -1,
@@ -319,27 +319,27 @@ int main(int argc, char **argv) {
        '-' terminates the walker's integer scan and yields 0, exactly like retail. */
     {
         static const char kWalkerBlock[] =
-            "ammo AMMO_WALKER_PIN\n"
-            "  error 0.07\n"
-            "  drag 0.07\n"
-            "  bullet_radius 0.07\n"
-            "  kz_minradius 0.07\n"
-            "  kz_maxradius 0.07\n"
-            "  tumble_error 0.07\n"
-            "  light_move 0.07 128 120 80\n"
-            "  max_age 0.07\n"
-            "end\n"
-            "ammo AMMO_WALKER_NEG\n"
-            "  drag -1.5\n"
-            "end\n"
+            "ammo AMMO_WALKER_PIN\r\n"
+            "  error 0.07\r\n"
+            "  drag 0.07\r\n"
+            "  bullet_radius 0.07\r\n"
+            "  kz_minradius 0.07\r\n"
+            "  kz_maxradius 0.07\r\n"
+            "  tumble_error 0.07\r\n"
+            "  light_move 0.07 128 120 80\r\n"
+            "  max_age 0.07\r\n"
+            "end\r\n"
+            "ammo AMMO_WALKER_NEG\r\n"
+            "  drag -1.5\r\n"
+            "end\r\n"
             /* The two forms the retail JO corpus actually shifts on (the
                2026-08-12 sweep: 1038 key values, 8 one-LSB shifts, all these
                two decimals): bullet_radius 0.00277 -> 181 (round-half-up 182),
                drag 0.292 -> 19136 (19137). */
-            "ammo AMMO_WALKER_CORPUS\n"
-            "  bullet_radius 0.00277\n"
-            "  drag 0.292\n"
-            "end\n";
+            "ammo AMMO_WALKER_CORPUS\r\n"
+            "  bullet_radius 0.00277\r\n"
+            "  drag 0.292\r\n"
+            "end\r\n";
         DefAmmoFile pin;
         if (def_parse_ammo_memory((const uint8_t *)kWalkerBlock, sizeof(kWalkerBlock) - 1,
                                   &pin) != 0 || pin.count != 3) {
@@ -389,7 +389,7 @@ int main(int argc, char **argv) {
 
 
     {
-        static const char text[] = "ammo ARMOR\n armor_density 125, 250, -3\nend\n";
+        static const char text[] = "ammo ARMOR\r\n armor_density 125, 250, -3\r\nend\r\n";
         DefAmmoFile parsed{};
         if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text)-1,
                                   &parsed) != 0 || parsed.count != 1)
@@ -405,7 +405,7 @@ int main(int argc, char **argv) {
         // The blast's per-victim presentation names [orig: AmmoDef_ParseProperty
         // @0x40aa15 'secondary_effect' -> +0x48, @0x40a92a 'kz_sound' -> +0x4C].
         static const char text[] =
-                "ammo BURN\n secondary_effect Effect_Burn\n kz_sound EXPLO_BURN\nend\n";
+                "ammo BURN\r\n secondary_effect Effect_Burn\r\n kz_sound EXPLO_BURN\r\nend\r\n";
         DefAmmoFile parsed{};
         if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text)-1,
                                   &parsed) != 0 || parsed.count != 1)
@@ -415,6 +415,193 @@ int main(int argc, char **argv) {
                 strcmp(row.kz_sound, "EXPLO_BURN") == 0;
         def_free_ammo(&parsed);
         if (!correct) { fprintf(stderr, "FAIL: secondary_effect / kz_sound\n"); return 1; }
+    }
+
+    {
+        // Every line as the retail tokenizer cuts it: the `ammo` name is token 1,
+        // a comment never sticks to it, a key is the whole first token (`flags`
+        // is not `flag`, `KEY,value` binds), a quoted value is one token, and a
+        // file's trailing NUL ends the text, so JO:CA's ammo.def, whose last
+        // line is `end` + NUL with no CR LF, closes its last def (GRENADE_NOEXP).
+        // An `ammo` line while a def is open ends the whole walk, and the def it
+        // interrupted stays in the table [orig: File_ParseASCIIFile @0x53D810 ->
+        // Terrain_TokenizeConfigLine @0x53CB60; AmmoDef_ParseProperty @0x40A2D0
+        // (`ammo` @0x40A347..0x40A397, the return 1 @0x40A37D; File_ParseASCIIFile
+        // @0x53D942)].
+        static const char text[] =
+                "ammo AMMO_A // the rifle round\r\n"
+                " flags shotgun\r\n"
+                " flag,silenced\r\n"
+                " secondary_effect \"Effect_Burn\"\r\n"
+                " tracer_type stdred\r\n"
+                " tracer_type\r\n"
+                "end\r\n"
+                "ammo AMMO_B\r\n"
+                " velocity 900\r\n"
+                "end";
+        std::string source(text, sizeof(text) - 1);
+        source.push_back('\0');
+        DefAmmoFile parsed{};
+        if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(source.data()), source.size(),
+                                  &parsed) != 0 || parsed.count != 2) {
+            fprintf(stderr, "FAIL: tokenizer snippet gave %zu defs, expected 2\n", parsed.count);
+            def_free_ammo(&parsed);
+            return 1;
+        }
+        const auto &a = parsed.entries[0];
+        const auto &b = parsed.entries[1];
+        const bool correct = strcmp(a.name, "AMMO_A") == 0 &&
+                a.flags == DEF_AMMO_FLAG_SILENCED &&
+                strcmp(a.secondary_effect, "Effect_Burn") == 0 &&
+                a.tracer_type_friendly == 0 && a.tracer_type_enemy == 0 &&
+                strcmp(b.name, "AMMO_B") == 0 && b.velocity == 900;
+        if (!correct)
+            fprintf(stderr, "FAIL: tokenizer snippet: name '%s' flags 0x%x effect '%s' tracer %d/%d, "
+                    "second '%s' velocity %d\n", a.name, a.flags, a.secondary_effect,
+                    a.tracer_type_friendly, a.tracer_type_enemy, b.name, b.velocity);
+        def_free_ammo(&parsed);
+        if (!correct) return 1;
+
+        static const char interrupted[] =
+                "ammo AMMO_A\r\n velocity 1\r\nammo AMMO_B\r\n velocity 2\r\nend\r\nammo AMMO_C\r\nend\r\n";
+        DefAmmoFile cut{};
+        if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(interrupted),
+                                  sizeof(interrupted) - 1, &cut) != 0) return 1;
+        const bool stopped = cut.count == 1 && strcmp(cut.entries[0].name, "AMMO_A") == 0 &&
+                cut.entries[0].velocity == 1;
+        if (!stopped)
+            fprintf(stderr, "FAIL: an `ammo` line inside a def must end the walk (%zu defs)\n",
+                    cut.count);
+        def_free_ammo(&cut);
+        if (!stopped) return 1;
+    }
+
+    {
+        // A def opens on the allocator's defaults, not zeros: drag 1.0 (0x10000),
+        // the kill-zone pie slice 0x7FFFFFFF (no cone: AV_Mine and the land mines
+        // author none), recoil 24 per stance, velocity / max_age / both turn
+        // rates / the boresight -1; at its `end` a velocity or max_age still -1
+        // takes def 0's (the table's first def is the template and keeps its own),
+        // and a def the walk stops in never reaches that `end`.
+        // [orig: AmmoDef_AllocateSlot @0x409A20 (the defaults @0x409A56..0x409AF6);
+        //  AmmoDef_InheritDefaults @0x409EB0, called from the `end` arm @0x40A3E5]
+        static const char text[] =
+                "ammo AT_NULL\r\n velocity 300\r\n max_age 5\r\nend\r\n"
+                "ammo BARE\r\nend\r\n"
+                "ammo OWN\r\n velocity 900\r\n max_age 2\r\n drag 0.5\r\n kz_pieslice 24\r\n"
+                " recoil 1 2 3\r\nend\r\n"
+                "ammo CUT\r\nammo NEVER\r\nend\r\n";
+        DefAmmoFile parsed{};
+        if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                                  &parsed) != 0 || parsed.count != 4) {
+            fprintf(stderr, "FAIL: defaults snippet gave %zu defs, expected 4\n", parsed.count);
+            def_free_ammo(&parsed);
+            return 1;
+        }
+        const auto &bare = parsed.entries[1];
+        const auto &own = parsed.entries[2];
+        const auto &cut = parsed.entries[3];
+        const bool correct =
+                bare.velocity == 300 && bare.max_age_ticks == 310 && bare.drag_fp16 == 0x10000 &&
+                bare.kz_pieslice_bam == 0x7FFFFFFF && bare.recoil[0] == 24 &&
+                bare.recoil[1] == 24 && bare.recoil[2] == 24 && bare.turnrate_maxpit == -1 &&
+                bare.turnrate_maxyaw == -1 && bare.boresight_maxang == -1 &&
+                own.velocity == 900 && own.max_age_ticks == 124 && own.drag_fp16 == 32768 &&
+                own.kz_pieslice_bam == 12 * 11930464 && own.recoil[2] == 3 &&
+                strcmp(cut.name, "CUT") == 0 && cut.velocity == -1 && cut.max_age_ticks == -1;
+        if (!correct)
+            fprintf(stderr, "FAIL: allocator defaults: bare vel %d age %d drag %d slice %d recoil "
+                    "%d/%d/%d turn %d/%d bore %d; cut vel %d age %d\n", bare.velocity,
+                    bare.max_age_ticks, bare.drag_fp16, bare.kz_pieslice_bam, bare.recoil[0],
+                    bare.recoil[1], bare.recoil[2], bare.turnrate_maxpit, bare.turnrate_maxyaw,
+                    bare.boresight_maxang, cut.velocity, cut.max_age_ticks);
+        def_free_ammo(&parsed);
+        if (!correct) return 1;
+    }
+
+    {
+        // A table's rows reach the def at the table's `end`, and only while the
+        // def has none yet: a second table gives nothing (not even a tag the
+        // first lacks), and a table the file never closes gives nothing.
+        // [orig: AmmoDef_InitEffectsTable @0x409F20, called only @0x40A433,
+        //  installs when def+0x68 and word +0x6C are both 0]
+        static const char text[] =
+                "ammo TWO_TABLES\r\n"
+                " effects_table\r\n"
+                "  dirt Effect_A IMP_A 20\r\n"
+                " end\r\n"
+                " effects_table\r\n"
+                "  dirt Effect_B IMP_B 20\r\n"
+                "  snow Effect_B IMP_B 20\r\n"
+                " end\r\n"
+                "end\r\n"
+                "ammo OPEN_TABLE\r\n"
+                " effects_table\r\n"
+                "  dirt Effect_C IMP_C 20\r\n";
+        DefAmmoFile parsed{};
+        const int rc = def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text),
+                                             sizeof(text) - 1, &parsed);
+        const bool correct = rc == 0 && parsed.count == 2 &&
+                parsed.entries[0].effects_table_count == 1 &&
+                strcmp(parsed.entries[0].effects_table[0].hit_effect, "Effect_A") == 0 &&
+                parsed.entries[1].effects_table_count == 0;
+        if (!correct)
+            fprintf(stderr, "FAIL: effects tables: %zu defs, rows %zu / %zu\n", parsed.count,
+                    parsed.count > 0 ? parsed.entries[0].effects_table_count : 0,
+                    parsed.count > 1 ? parsed.entries[1].effects_table_count : 0);
+        def_free_ammo(&parsed);
+        if (!correct) return 1;
+    }
+
+    {
+        // Lines split at CR LF and nowhere else: an LF alone is a byte of the
+        // line (no separator either, so `900\n` is one token and the max_age
+        // after it is no key), and a last line with no CR LF loses its final
+        // byte, so a closing `end` there reads `en` and closes nothing (TAIL
+        // never takes def 0's max_age). [orig: File_ParseASCIIFile @0x53D810,
+        //  the CR LF test @0x53D8C7..0x53D8F5, the tail @0x53D8E9 / @0x53D8EC]
+        static const char text[] =
+                "ammo AT_NULL\r\n max_age 5\r\nend\r\n"
+                "ammo LF\r\n velocity 900\n max_age 3\r\nend\r\n"
+                "ammo TAIL\r\nend";
+        DefAmmoFile parsed{};
+        const int rc = def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text),
+                                             sizeof(text) - 1, &parsed);
+        const bool correct = rc == 0 && parsed.count == 3 &&
+                parsed.entries[1].velocity == 900 && parsed.entries[1].max_age_ticks == 310 &&
+                strcmp(parsed.entries[2].name, "TAIL") == 0 &&
+                parsed.entries[2].max_age_ticks == -1;
+        if (!correct)
+            fprintf(stderr, "FAIL: line split: %zu defs, LF vel %d age %d, TAIL age %d\n",
+                    parsed.count, parsed.count > 1 ? parsed.entries[1].velocity : 0,
+                    parsed.count > 1 ? parsed.entries[1].max_age_ticks : 0,
+                    parsed.count > 2 ? parsed.entries[2].max_age_ticks : 0);
+        def_free_ammo(&parsed);
+        if (!correct) return 1;
+    }
+
+    {
+        // The first load walks the file twice, a count of its `ammo` lines and
+        // then the parse, so the parse's first lines read the slots the count
+        // pass left at the file's end: the last line's "77" in slot 3 is
+        // FIRST's third recoil (0 on a fresh tokenizer). [orig: AmmoDef_LoadAll
+        // @0x40B0B0, the count pass @0x40B0DE, the parse @0x40B116; the recoil
+        // arm's atol of tokens[2..4]]
+        static const char text[] =
+                "ammo FIRST\r\n recoil 5\r\nend\r\n"
+                "note aaaaaaaaaaaaaaaaaaaa b 77\r\n";
+        DefAmmoFile parsed{};
+        const int rc = def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text),
+                                             sizeof(text) - 1, &parsed);
+        const bool correct = rc == 0 && parsed.count == 1 && parsed.entries[0].recoil[0] == 5 &&
+                parsed.entries[0].recoil[1] == 0 && parsed.entries[0].recoil[2] == 77;
+        if (!correct)
+            fprintf(stderr, "FAIL: count pass tail: %zu defs, recoil %d/%d/%d\n", parsed.count,
+                    parsed.count > 0 ? parsed.entries[0].recoil[0] : 0,
+                    parsed.count > 0 ? parsed.entries[0].recoil[1] : 0,
+                    parsed.count > 0 ? parsed.entries[0].recoil[2] : 0);
+        def_free_ammo(&parsed);
+        if (!correct) return 1;
     }
 
     if (!have_retail)

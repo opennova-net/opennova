@@ -109,8 +109,8 @@ int main() {
 	// cases are raw text.
 	for (const char *count : {"17", "32", "64"}) {
 		const std::string text =
-				"terrain_name wide\npolytrn_colormap c.tga\npolytrn_detailmap d.tga\n"
-				"polytrn_polydata p.cpt\npolytrn_sectorcount " + std::string(count) + "\n";
+				"terrain_name wide\r\npolytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\n"
+				"polytrn_polydata p.cpt\r\npolytrn_sectorcount " + std::string(count) + "\r\n";
 		if (!expect_rejected(text, "polytrn_sectorcount",
 				"a sectorcount above 16 is rejected")) {
 			std::fprintf(stderr, "  sector_count = %s\n", count);
@@ -127,8 +127,8 @@ int main() {
 		}
 	}
 	// `((n - 1) & n) != 0` never fires for 0: a config with no sectorcount admits.
-	if (!expect(loads("terrain_name zero\npolytrn_colormap c.tga\npolytrn_detailmap d.tga\n"
-			"polytrn_polydata p.cpt\n", err),
+	if (!expect(loads("terrain_name zero\r\npolytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\n"
+			"polytrn_polydata p.cpt\r\n", err),
 			"a config without sector lines passes the power-of-two check as zero")) {
 		std::fprintf(stderr, "  err: %s\n", err.c_str());
 		return 1;

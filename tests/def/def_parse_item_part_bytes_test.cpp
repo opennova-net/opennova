@@ -32,31 +32,31 @@ static unsigned byte_of(int dword, int index) {
 
 int main(void) {
     const char *test_def =
-        "begin \"Fort piece\"\n"          // the JO Ijava05 shape: First_Door 4
-        "  id 2001\n"
-        "  type building\n"
-        "  First_Door 4\n"
-        "end\n"
-        "begin \"Sub objects\"\n"
-        "  id 2002\n"
-        "  type building\n"
-        "  num_doors 1\n"
-        "  first_door 3\n"
-        "  first_subobject 6\n"
-        "end\n"
-        "begin \"Clamps\"\n"
-        "  id 2003\n"
-        "  type building\n"
-        "  num_doors 200\n"                // low byte 0xC8 reads -56 -> 0
-        "  first_door 300\n"               // low byte 44, minus one -> 43 -> 30
-        "  first_subobject 0\n"            // -1 -> 0
-        "end\n"
-        "begin \"Helicopter\"\n"
-        "  id 2004\n"
-        "  type vehicle\n"
-        "  rotor_parts 1 2 3 4\n"
-        "  aux_parts 5 6 7 8\n"
-        "end\n";
+        "begin \"Fort piece\"\r\n"          // the JO Ijava05 shape: First_Door 4
+        "  id 2001\r\n"
+        "  type building\r\n"
+        "  First_Door 4\r\n"
+        "end\r\n"
+        "begin \"Sub objects\"\r\n"
+        "  id 2002\r\n"
+        "  type building\r\n"
+        "  num_doors 1\r\n"
+        "  first_door 3\r\n"
+        "  first_subobject 6\r\n"
+        "end\r\n"
+        "begin \"Clamps\"\r\n"
+        "  id 2003\r\n"
+        "  type building\r\n"
+        "  num_doors 200\r\n"                // low byte 0xC8 reads -56 -> 0
+        "  first_door 300\r\n"               // low byte 44, minus one -> 43 -> 30
+        "  first_subobject 0\r\n"            // -1 -> 0
+        "end\r\n"
+        "begin \"Helicopter\"\r\n"
+        "  id 2004\r\n"
+        "  type vehicle\r\n"
+        "  rotor_parts 1 2 3 4\r\n"
+        "  aux_parts 5 6 7 8\r\n"
+        "end\r\n";
 
     DefItemsFile items;
     memset(&items, 0, sizeof(items));

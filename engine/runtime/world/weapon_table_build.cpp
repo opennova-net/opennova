@@ -311,26 +311,32 @@ world::WeaponTable build_weapon_table(
 		// @0x40CD0C..0x40CD25, the cached entry @0x40CD45..0x40CD5C;
 		// Anim_InitActions @0x542180..0x542198, the load @0x541FEF;
 		// WeaponDefs_ResetParseState @0x53ff90; anim/adm_fallback.h]
-		std::string animadm = d.animadm;
-		const ResourceIndex *index = resources != nullptr ? resources->index() : nullptr;
-		if (index != nullptr && !animadm.empty()) {
-			std::string file = animadm;
-			const size_t dot = file.find_last_of('.');
-			if (dot != std::string::npos) file.resize(dot);
-			animadm = anim::adm_name_or_default(animadm, index->has_file(file + ".adm"));
+		// Only an entry's `end` runs this bind: an entry no `end` closed keeps
+		// its slot with no anim object and its actions unbound
+		// (DefWeaponDef::unclosed) [orig: WeaponDefs_ParseLineCallback, `end`
+		// -> Anim_InitActions @0x5437D0].
+		if (d.unclosed == 0) {
+			std::string animadm = d.animadm;
+			const ResourceIndex *index = resources != nullptr ? resources->index() : nullptr;
+			if (index != nullptr && !animadm.empty()) {
+				std::string file = animadm;
+				const size_t dot = file.find_last_of('.');
+				if (dot != std::string::npos) file.resize(dot);
+				animadm = anim::adm_name_or_default(animadm, index->has_file(file + ".adm"));
+			}
+			const bool has_adm = resources != nullptr && !animadm.empty() &&
+					table.rings.load(resources, animadm);
+			WeaponTableRingContext ring_ctx{&table.rings, animadm};
+			world::weapon_fsm_bake(
+					action_rows.data(), action_rows.size(),
+					has_adm ? table_clip_resolves : nullptr,
+					has_adm ? table_clip_seconds : nullptr,
+					has_adm ? &ring_ctx : nullptr, e.action_fsm);
+			// The bind ends by playing the idle slot on the weapon's table.
+			// [orig: Anim_InitActions, AnimMap_PlayAnimBySlot(adm, 241) @0x54225A]
+			if (has_adm) table.rings.serve(animadm, "anim_wpn_idle");
+			e.animadm = animadm;
 		}
-		const bool has_adm = resources != nullptr && !animadm.empty() &&
-				table.rings.load(resources, animadm);
-		WeaponTableRingContext ring_ctx{&table.rings, animadm};
-		world::weapon_fsm_bake(
-				action_rows.data(), action_rows.size(),
-				has_adm ? table_clip_resolves : nullptr,
-				has_adm ? table_clip_seconds : nullptr,
-				has_adm ? &ring_ctx : nullptr, e.action_fsm);
-		// The bind ends by playing the idle slot on the weapon's table.
-		// [orig: Anim_InitActions, AnimMap_PlayAnimBySlot(adm, 241) @0x54225A]
-		if (has_adm) table.rings.serve(animadm, "anim_wpn_idle");
-		e.animadm = animadm;
 		e.action_fsm.auto_fire = (d.flags & DEF_WEAPON_FLAG_AUTO) != 0;
 		e.action_fsm.burst3 = (d.flags & DEF_WEAPON_FLAG_BURST) != 0;
 		e.action_fsm.clip_capacity = e.clipsize;

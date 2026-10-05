@@ -27,21 +27,21 @@ static int expect_str(const char *what, const char *got, const char *want) {
    [orig: ItemDef_ParseProperty @0x4a19fd..0x4a1a50] */
 static int test_light_transfer(void) {
     static const char snippet[] =
-        "begin \"Absent\"\n"
-        "  id 1\n"
-        "end\n"
-        "begin \"Ihq01\"\n"
-        "  id 101216\n"
-        "  light_transfer 20\n"
-        "end\n"
-        "begin \"Clamped Low\"\n"
-        "  id 3\n"
-        "  LIGHT_TRANSFER -7\n"
-        "end\n"
-        "begin \"Clamped High\"\n"
-        "  id 4\n"
-        "  light_transfer 107\n"
-        "end\n";
+        "begin \"Absent\"\r\n"
+        "  id 1\r\n"
+        "end\r\n"
+        "begin \"Ihq01\"\r\n"
+        "  id 101216\r\n"
+        "  light_transfer 20\r\n"
+        "end\r\n"
+        "begin \"Clamped Low\"\r\n"
+        "  id 3\r\n"
+        "  LIGHT_TRANSFER -7\r\n"
+        "end\r\n"
+        "begin \"Clamped High\"\r\n"
+        "  id 4\r\n"
+        "  light_transfer 107\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
@@ -78,23 +78,23 @@ static int test_light_transfer(void) {
    @0x4FD422] */
 static int test_score_word(void) {
     static const char snippet[] =
-        "begin \"Player #1, Single player\"\n"
-        "  id 105310\n"
-        "  type person\n"
-        "end\n"
-        "begin \"Indonesian Soldier #1 with AK47\"\n"
-        "  id 101798\n"
-        "  type person\n"
-        "  score 10\n"
-        "end\n"
-        "begin \"Two Values\"\n"
-        "  id 3\n"
-        "  SCORE 0 155\n"
-        "end\n"
-        "begin \"Wrapped\"\n"
-        "  id 4\n"
-        "  score 70000\n"
-        "end\n";
+        "begin \"Player #1, Single player\"\r\n"
+        "  id 105310\r\n"
+        "  type person\r\n"
+        "end\r\n"
+        "begin \"Indonesian Soldier #1 with AK47\"\r\n"
+        "  id 101798\r\n"
+        "  type person\r\n"
+        "  score 10\r\n"
+        "end\r\n"
+        "begin \"Two Values\"\r\n"
+        "  id 3\r\n"
+        "  SCORE 0 155\r\n"
+        "end\r\n"
+        "begin \"Wrapped\"\r\n"
+        "  id 4\r\n"
+        "  score 70000\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
@@ -128,35 +128,35 @@ static int test_score_word(void) {
    snippet mirrors the retail "Drivable Dune Buggy" rows (JOX ITEMS.DEF). */
 static int test_particle_keys(void) {
     static const char snippet[] =
-        "begin \"Drivable Dune Buggy\"\n"
-        "  id 101291\n"
-        "  sid dbuggy1\n"
-        "  type vehicle\n"
+        "begin \"Drivable Dune Buggy\"\r\n"
+        "  id 101291\r\n"
+        "  sid dbuggy1\r\n"
+        "  type vehicle\r\n"
         /* Leading tab + multi-space separator + trailing spaces, exactly as the
            retail rows are formatted. */
-        "\tparticlefx   Effect_whiteExhaust FX00 stray_token\n"
-        "  ParticleFXW1 Effect_W1 FX03 Effect_W1S\n"
-        "\tparticlefxw2 Effect_DirtWake FX01  \n"
-        "  particlefxw3 Effect_W3 FX02 Effect_IgnoredW3\n"
-        "  particlefxw4 Effect_W4 FX04\n"
-        "  particlefxs Effect_DirtWakeS FX01 Effect_DirtWakeS2\n"
-        "  particledeath Effect_Fuelxp3\n"
-        "  particleh2odeath Effect_H2OVeExp\n"
-        "  particlefire Effect_VehFire extra junk\n"
-        "  particleother Effect_SmkNStemNP\n"
-        "  particlespawn Effect_Spawn\n"
-        "  particlefinale Effect_VehDrtPuftrk\n"
-        "end\n"
-        "begin \"No Particles\"\n"
-        "  id 5\n"
-        "  sid plain1\n"
-        "  type object\n"
-        "end\n"
-        "begin \"FXS Two Arg\"\n"
-        "  id 6\n"
-        "  sid fxs2\n"
-        "  particlefxs Effect_OnlyTwo FX07\n"
-        "end\n";
+        "\tparticlefx   Effect_whiteExhaust FX00 stray_token\r\n"
+        "  ParticleFXW1 Effect_W1 FX03 Effect_W1S\r\n"
+        "\tparticlefxw2 Effect_DirtWake FX01  \r\n"
+        "  particlefxw3 Effect_W3 FX02 Effect_IgnoredW3\r\n"
+        "  particlefxw4 Effect_W4 FX04\r\n"
+        "  particlefxs Effect_DirtWakeS FX01 Effect_DirtWakeS2\r\n"
+        "  particledeath Effect_Fuelxp3\r\n"
+        "  particleh2odeath Effect_H2OVeExp\r\n"
+        "  particlefire Effect_VehFire extra junk\r\n"
+        "  particleother Effect_SmkNStemNP\r\n"
+        "  particlespawn Effect_Spawn\r\n"
+        "  particlefinale Effect_VehDrtPuftrk\r\n"
+        "end\r\n"
+        "begin \"No Particles\"\r\n"
+        "  id 5\r\n"
+        "  sid plain1\r\n"
+        "  type object\r\n"
+        "end\r\n"
+        "begin \"FXS Two Arg\"\r\n"
+        "  id 6\r\n"
+        "  sid fxs2\r\n"
+        "  particlefxs Effect_OnlyTwo FX07\r\n"
+        "end\r\n";
 
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
@@ -260,17 +260,17 @@ static int test_particle_keys(void) {
    [orig: ItemDef_ParseProperty @ 0x49f9db..0x49fa0a] */
 static int test_phrase_set_presence(void) {
     static const char snippet[] =
-        "begin \"Absent\"\n"
-        "  id 1\n"
-        "end\n"
-        "begin \"Explicit Zero\"\n"
-        "  id 2\n"
-        "  phrase_set 0\n"
-        "end\n"
-        "begin \"Signed Value\"\n"
-        "  id 3\n"
-        "  PHRASE_SET -2\n"
-        "end\n";
+        "begin \"Absent\"\r\n"
+        "  id 1\r\n"
+        "end\r\n"
+        "begin \"Explicit Zero\"\r\n"
+        "  id 2\r\n"
+        "  phrase_set 0\r\n"
+        "end\r\n"
+        "begin \"Signed Value\"\r\n"
+        "  id 3\r\n"
+        "  PHRASE_SET -2\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
@@ -307,20 +307,20 @@ static int test_phrase_set_presence(void) {
     ItemDef_ParseProperty @0x49eb00 default_aip + `attrib |= 0x100000`] */
 static int test_weathervane_minai_default_aip(void) {
     static const char snippet[] =
-        "begin \"Flyable Blackhawk\"\n"
-        "  id 102010\n"
-        "  type vehicle\n"
-        "  move_function chel\n"
-        "    weathervane 30\n"
-        "    minai\t\t1\n"
-        "    hand_brake 0\n"
-        "    tire_slip 7\n"
-        "  default_aip H_BHawk\n"
-        "  sound_profile SP_Blackhawk1\n"
-        "end\n"
-        "begin \"No AI Keys\"\n"
-        "  id 2\n"
-        "end\n";
+        "begin \"Flyable Blackhawk\"\r\n"
+        "  id 102010\r\n"
+        "  type vehicle\r\n"
+        "  move_function chel\r\n"
+        "    weathervane 30\r\n"
+        "    minai\t\t1\r\n"
+        "    hand_brake 0\r\n"
+        "    tire_slip 7\r\n"
+        "  default_aip H_BHawk\r\n"
+        "  sound_profile SP_Blackhawk1\r\n"
+        "end\r\n"
+        "begin \"No AI Keys\"\r\n"
+        "  id 2\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet,
@@ -382,15 +382,15 @@ static int test_weathervane_minai_default_aip(void) {
     at ItemDef_ParseProperty @0x0049EB00] */
 static int test_item_def_allocator_defaults(void) {
     static const char snippet[] =
-        "begin \"Declares Nothing\"\n"
-        "  id 900001\n"
-        "end\n"
-        "begin \"Overrides Some\"\n"
-        "  id 900002\n"
-        "  spring_comp 55\n"
-        "  mass 11\n"
-        "  flip 10\n"
-        "end\n";
+        "begin \"Declares Nothing\"\r\n"
+        "  id 900001\r\n"
+        "end\r\n"
+        "begin \"Overrides Some\"\r\n"
+        "  id 900002\r\n"
+        "  spring_comp 55\r\n"
+        "  mass 11\r\n"
+        "  flip 10\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
@@ -410,6 +410,11 @@ static int test_item_def_allocator_defaults(void) {
     if (bare->lean != 5 || bare->lean_velocity != 5) { fprintf(stderr, "FAIL: default lean pair\n"); bad = 1; }
     if (bare->pitch != 1 || bare->pitch_velocity != 5) { fprintf(stderr, "FAIL: default pitch pair\n"); bad = 1; }
     if (bare->flip != 45) { fprintf(stderr, "FAIL: default flip %d != 45\n", bare->flip); bad = 1; }
+    /* bob (ex unk591) = 5 @0x49E4F0 is the field the "bob" key writes: the key's
+       string is aBob @0x7C7D78 (62 6F 62 00), once typed off_7C7D78
+       [orig: ItemDef_ParsePhysicsProperty @0x49DECE]. */
+    if (bare->bob != 5) { fprintf(stderr, "FAIL: default bob %d != 5\n", bare->bob); bad = 1; }
+    if (bare->hand_brake != 1 || bare->tire_slip != 5) { fprintf(stderr, "FAIL: default hand_brake/tire_slip\n"); bad = 1; }
     /* Retail sets spring/top_heavy to 0 explicitly - same observable as a
        zeroed record, asserted so a later change cannot drift them silently. */
     if (bare->spring != 0 || bare->top_heavy != 0) { fprintf(stderr, "FAIL: spring/top_heavy default\n"); bad = 1; }
@@ -430,19 +435,19 @@ static int test_item_def_allocator_defaults(void) {
    def+0xD0 / def+0xE0; @0x49F650 -> def+0x168] */
 static int test_virtual_display_and_input_function(void) {
     static const char snippet[] =
-        "begin \"Drivable M1A1 Tank\"\n"
-        "  id 100164\n"
-        "  type vehicle\n"
-        "  graphic Dm1a1\n"
-        "\n"
-        "  Virtualdisplay tankdrvr  camera\n"
-        "  input_function tank\t\t\n"
-        "  render_function tank\n"
-        "end\n"
-        "begin \"Plain\"\n"
-        "  id 100001\n"
-        "  type vehicle\n"
-        "end\n";
+        "begin \"Drivable M1A1 Tank\"\r\n"
+        "  id 100164\r\n"
+        "  type vehicle\r\n"
+        "  graphic Dm1a1\r\n"
+        "\r\n"
+        "  Virtualdisplay tankdrvr  camera\r\n"
+        "  input_function tank\t\t\r\n"
+        "  render_function tank\r\n"
+        "end\r\n"
+        "begin \"Plain\"\r\n"
+        "  id 100001\r\n"
+        "  type vehicle\r\n"
+        "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1, &items) != 0 ||
@@ -561,24 +566,33 @@ static int test_retail_particlefx_rows(void) {
     return rc;
 }
 
+/* A line carries 30 tokens at most: the key and 29 values, the 29th running on to
+   the line's end because the tokenizer stops before cutting it, so its atol reads
+   its first number only [orig: Terrain_TokenizeConfigLine @0x53CB60, the cap
+   @0x53CC93]. Forty authored ids on one line are 28 ids, then "200028 200029 ...",
+   which reads as 200028. The 32-slot group table fills across lines. */
 static int test_vehicle_spawn_lists() {
-	std::string source = "begin First\n id 1\n pcvehicle_spawnlist 100042 100043 100042\nend\n"
-						 "begin Second\n id 2\n PCVEHICLE_SPAWNLIST 100043\nend\n"
-						 "begin Capacity\n id 3\n pcvehicle_spawnlist";
+	std::string source = "begin First\r\n id 1\r\n pcvehicle_spawnlist 100042 100043 100042\r\nend\r\n"
+						 "begin Second\r\n id 2\r\n PCVEHICLE_SPAWNLIST 100043\r\nend\r\n"
+						 "begin Capacity\r\n id 3\r\n pcvehicle_spawnlist";
 	for (int id = 0; id < 40; ++id)
 		source += " " + std::to_string(200000 + id);
-	source += "\nend\nbegin Replace\n id 4\n pcvehicle_spawnlist 100042\n"
-			  " pcvehicle_spawnlist 100043\nend\n";
+	source += "\r\nend\r\nbegin Replace\r\n id 4\r\n pcvehicle_spawnlist 100042\r\n"
+			  " pcvehicle_spawnlist 100043\r\nend\r\n"
+			  "begin Overflow\r\n id 5\r\n pcvehicle_spawnlist 300000 300001 300002\r\nend\r\n";
 	DefItemsFile file{};
 	if (def_parse_items_memory(
 				reinterpret_cast<const uint8_t *>(source.data()), source.size(), &file) != 0 ||
-			file.count != 4)
+			file.count != 5)
 		return 1;
 	const bool ok = file.vehicle_spawn_id_count == 32 && file.vehicle_spawn_ids[0] == 100042 &&
 			file.vehicle_spawn_ids[1] == 100043 && file.entries[0].vehicle_spawn_mask == 3 &&
 			file.entries[1].vehicle_spawn_mask == 2 &&
-			file.entries[2].vehicle_spawn_mask == 0xFFFFFFFCu &&
-			file.entries[3].vehicle_spawn_mask == 2;
+			file.vehicle_spawn_ids[30] == 200028 &&
+			file.entries[2].vehicle_spawn_mask == 0x7FFFFFFCu &&
+			file.entries[3].vehicle_spawn_mask == 2 &&
+			file.vehicle_spawn_ids[31] == 300000 &&
+			file.entries[4].vehicle_spawn_mask == 0x80000000u;
 	def_free_items(&file);
 	if (!ok)
 		fprintf(stderr, "FAIL: vehicle spawn lists/cap/replacement\n");
@@ -587,10 +601,10 @@ static int test_vehicle_spawn_lists() {
 
 static int test_regional_sound_delays() {
     const char text[] =
-        "begin Env\n id 1\n dawnshot Bird 1.25 -0.125\n dayshot Day 0.016129032258 2\n"
-        " duskshot Evening 3.9 4.1\n nightshot Night 0 5.5\n end\n"
-        "begin Emit\n id 2\n dawnshot Bird 9 8\n particletesttime 0.5 0.25\n"
-        " destroy_timing 1.5 0.016129032258 -0.25\n end\n";
+        "begin Env\r\n id 1\r\n dawnshot Bird 1.25 -0.125\r\n dayshot Day 0.016129032258 2\r\n"
+        " duskshot Evening 3.9 4.1\r\n nightshot Night 0 5.5\r\n end\r\n"
+        "begin Emit\r\n id 2\r\n dawnshot Bird 9 8\r\n particletesttime 0.5 0.25\r\n"
+        " destroy_timing 1.5 0.016129032258 -0.25\r\n end\r\n";
     DefItemsFile items{};
     if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
             sizeof(text) - 1, &items) != 0 || items.count != 2) return 1;
@@ -617,8 +631,8 @@ static int test_regional_sound_delays() {
 // destroy_timing, @0x49FCA3 for the dawnshot delay); _ftol2_sse @0x76BC15]
 static int test_out_of_range_values_take_the_sse2_leg() {
     const char text[] =
-        "begin Door\n id 1\n max_angle 270\n sqb_rate 0\n end\n"
-        "begin Timed\n id 2\n destroy_timing 40000000 -40000000 1\n dawnshot Bird 1 40000000\n end\n";
+        "begin Door\r\n id 1\r\n max_angle 270\r\n sqb_rate 0\r\n end\r\n"
+        "begin Timed\r\n id 2\r\n destroy_timing 40000000 -40000000 1\r\n dawnshot Bird 1 40000000\r\n end\r\n";
     DefItemsFile items{};
     if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
             sizeof(text) - 1, &items) != 0 || items.count != 2) return 1;
@@ -641,11 +655,11 @@ static int test_out_of_range_values_take_the_sse2_leg() {
 // @0x49F710, `fistp qword` @0x49F728, the store @0x49F736)]
 static int test_scale_keeps_the_low_dword_of_the_fistp() {
     const char text[] =
-        "begin A\n id 1\n scale 40000\n end\n"
-        "begin B\n id 2\n scale -40000\n end\n"
-        "begin C\n id 3\n scale 123456.789\n end\n"
-        "begin D\n id 4\n scale 32767.99999\n end\n"
-        "begin E\n id 5\n scale 1e400\n end\n";
+        "begin A\r\n id 1\r\n scale 40000\r\n end\r\n"
+        "begin B\r\n id 2\r\n scale -40000\r\n end\r\n"
+        "begin C\r\n id 3\r\n scale 123456.789\r\n end\r\n"
+        "begin D\r\n id 4\r\n scale 32767.99999\r\n end\r\n"
+        "begin E\r\n id 5\r\n scale 1e400\r\n end\r\n";
     DefItemsFile items{};
     if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
             sizeof(text) - 1, &items) != 0 || items.count != 5) return 1;
@@ -659,8 +673,362 @@ static int test_scale_keeps_the_low_dword_of_the_fistp() {
     return ok ? 0 : 1;
 }
 
+/* Every line reaches the parser as the retail tokenizer cuts it: the key is the
+   whole first token, a single-text key takes its first value token (not the rest
+   of the line), a quoted run is one token without its quotes and `""` is no token
+   at all, space, tab and comma separate, `;` or `//` outside quotes ends the line
+   (a token already running there runs on to the end), and a trailing NUL is the
+   end of the text. A record is allocated at its `begin`, so a nested `begin` and
+   an unclosed block are both items. Repeated `attrib:` lines OR together.
+   [orig: File_ParseASCIIFile @0x53D810 -> Terrain_TokenizeConfigLine @0x53CB60;
+    ItemDef_ParseProperty @0x49EB00 (the begin arm @0x49EB88..0x49EBB3, the
+    attrib loop @0x4A06A8..0x4A0F52)] */
+static int test_items_read_the_retail_tokens(void) {
+    static const char text[] =
+        "begin Plain Name\r\n"
+        "  graphic Dm1a1 extra\r\n"
+        "  anim_def Anim1 ; a semicolon comment\r\n"
+        "  particlefxs \"\" FX00 Smoke\r\n"
+        "  virtualdisplay tankdrvr,camera\r\n"
+        "  hp,150\r\n"
+        "  sid \"Long Alias Name Here\"\r\n"
+        "  type vehicle\r\n"
+        "  type bogus\r\n"
+        "  husk run//on\r\n"
+        "  attrib: Door\r\n"
+        "  attrib: Takeable VehicleBay\r\n"
+        "begin \"Nested Opens\"\r\n"
+        "  attrib:Door\r\n"
+        "end\0trailing bytes\r\n" /* the line is read up to its NUL: `end` */
+        "begin Unclosed\r\n"
+        "  id 7\r\n";
+    const std::string source(text, sizeof(text) - 1);
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(source.data()), source.size(),
+                               &items) != 0) {
+        fprintf(stderr, "FAIL: tokenizer snippet did not parse\n");
+        return 1;
+    }
+    int bad = 0;
+    if (items.count != 3) {
+        fprintf(stderr, "FAIL: tokenizer snippet gave %zu items, expected 3\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *a = &items.entries[0];
+    if (strcmp(a->display_name, "Plain") != 0) { fprintf(stderr, "FAIL: begin name '%s'\n", a->display_name); bad = 1; }
+    if (strcmp(a->graphic, "Dm1a1") != 0) { fprintf(stderr, "FAIL: graphic '%s'\n", a->graphic); bad = 1; }
+    if (strcmp(a->anim_def, "Anim1") != 0) { fprintf(stderr, "FAIL: anim_def '%s'\n", a->anim_def); bad = 1; }
+    if (strcmp(a->particlefxs.effect, "FX00") != 0 || strcmp(a->particlefxs.userpoint, "Smoke") != 0) {
+        fprintf(stderr, "FAIL: particlefxs '%s' @ '%s'\n", a->particlefxs.effect, a->particlefxs.userpoint);
+        bad = 1;
+    }
+    if (strcmp(a->virtual_display, "tankdrvr") != 0 || strcmp(a->virtual_display_userpoint, "camera") != 0) {
+        fprintf(stderr, "FAIL: virtualdisplay '%s' '%s'\n", a->virtual_display, a->virtual_display_userpoint);
+        bad = 1;
+    }
+    if (a->hp != 150) { fprintf(stderr, "FAIL: hp,150 gave %d\n", a->hp); bad = 1; }
+    /* strncpy(alias, .., 15) [orig: @0x49EC8A] */
+    if (strcmp(a->sid, "Long Alias Name") != 0) { fprintf(stderr, "FAIL: sid '%s'\n", a->sid); bad = 1; }
+    if (a->type != DEF_ITEM_TYPE_VEHICLE) { fprintf(stderr, "FAIL: an unknown type token reset the type to %d\n", a->type); bad = 1; }
+    if (strcmp(a->husk, "run//on") != 0) { fprintf(stderr, "FAIL: husk '%s'\n", a->husk); bad = 1; }
+    if ((a->attrib & DEF_ITEM_ATTRIB_DOOR) == 0 || (a->attrib & DEF_ITEM_ATTRIB_TAKEABLE) == 0 ||
+        (a->attrib2 & DEF_ITEM_ATTRIB2_VEHICLEBAY) == 0) {
+        fprintf(stderr, "FAIL: repeated attrib: lines did not OR together (0x%x / 0x%x)\n",
+                a->attrib, a->attrib2);
+        bad = 1;
+    }
+    const DefItemDef *b = &items.entries[1];
+    if (strcmp(b->display_name, "Nested Opens") != 0) { fprintf(stderr, "FAIL: nested name '%s'\n", b->display_name); bad = 1; }
+    if (b->attrib & DEF_ITEM_ATTRIB_DOOR) { fprintf(stderr, "FAIL: `attrib:Door` is one token, not the attrib key\n"); bad = 1; }
+    const DefItemDef *c = &items.entries[2];
+    if (strcmp(c->display_name, "Unclosed") != 0 || c->id != 7) {
+        fprintf(stderr, "FAIL: the unclosed block: '%s' id %d\n", c->display_name, c->id);
+        bad = 1;
+    }
+    def_free_items(&items);
+    return bad;
+}
+
+/* A tab separates a key from its value as a space does: the key is the whole
+   first token, so `hp`, `id`, `husk` and `score` read with tabs as with spaces.
+   [orig: Terrain_TokenizeConfigLine @0x53CB60, the separators space, comma and
+   tab @0x53CC33..0x53CC4C; ItemDef_ParseProperty @0x49EB00, _stricmp on
+   tokens[1]] */
+static int test_tab_separated_keys(void) {
+    static const char text[] =
+        "begin\t\"Tabbed\"\r\n"
+        "\tid\t106190\r\n"
+        "\thp\t\t250\r\n"
+        "\thusk\tTabHusk\r\n"
+        "\tscore\t7\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: tab snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *d = &items.entries[0];
+    const int bad = d->id != 106190 || d->hp != 250 || strcmp(d->husk, "TabHusk") != 0 ||
+                    d->score != 7 || strcmp(d->display_name, "Tabbed") != 0;
+    if (bad)
+        fprintf(stderr, "FAIL: tab keys: '%s' id %d hp %d husk '%s' score %d\n",
+                d->display_name, d->id, d->hp, d->husk, d->score);
+    def_free_items(&items);
+    return bad;
+}
+
+/* A float is the CRT's atof as the game links it: an exponent may be marked d,
+   and a hex spelling reads 0 [orig: ItemDef_ParseProperty @0x49EB00, its _atof
+   calls; _atof @0x76B6A1 -> _atof_l -> _fltin2]. */
+static int test_atof_is_the_crt_atof(void) {
+    static const char text[] =
+        "begin Floats\r\n"
+        "  id 106191\r\n"
+        "  kz 1d1\r\n"
+        "  scale 0x10\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: atof snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *d = &items.entries[0];
+    const int bad = d->kz != 10.0f || d->scale_q16 != 0;
+    if (bad) fprintf(stderr, "FAIL: atof reads kz %g scale_q16 %d\n", (double)d->kz, d->scale_q16);
+    def_free_items(&items);
+    return bad;
+}
+
+/* soundloop_N writes def+0x76B + 24N for any N other than 0 up to 7: a negative N
+   lands on the sound names ahead of the soundloop table (-1 duskshot ... -6
+   sounddeath), and from -7 down the port writes nothing (D-ITEMDEF-9).
+   [orig: ItemDef_ParseProperty, the soundloop_ arm @0x49FEC4..0x49FF15] */
+static int test_soundloop_slots_below_one(void) {
+    static const char text[] =
+        "begin Loops\r\n"
+        "  id 106192\r\n"
+        "  soundloop_1 LOOP_ONE\r\n"
+        "  soundloop_-1 DUSK_NAME\r\n"
+        "  soundloop_-2 DAY_NAME\r\n"
+        "  soundloop_-3 DAWN_NAME\r\n"
+        "  soundloop_-4 CLOSE_NAME\r\n"
+        "  soundloop_-5 OPEN_NAME\r\n"
+        "  soundloop_-6 DEATH_NAME\r\n"
+        "  soundloop_0 ZERO_NAME\r\n"
+        "  soundloop_8 EIGHT_NAME\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: soundloop snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *d = &items.entries[0];
+    int bad = strcmp(d->soundloops[0], "LOOP_ONE") != 0 || strcmp(d->duskshot, "DUSK_NAME") != 0 ||
+              strcmp(d->dayshot, "DAY_NAME") != 0 || strcmp(d->dawnshot, "DAWN_NAME") != 0 ||
+              strcmp(d->door_close_sound, "CLOSE_NAME") != 0 ||
+              strcmp(d->door_open_sound, "OPEN_NAME") != 0 ||
+              strcmp(d->sounddeath, "DEATH_NAME") != 0 || d->nightshot[0] != '\0';
+    for (int i = 1; i < 7; ++i)
+        if (d->soundloops[i][0] != '\0') bad = 1;
+    if (bad)
+        fprintf(stderr, "FAIL: soundloop slots: 1 '%s' dusk '%s' day '%s' dawn '%s' close '%s' "
+                "open '%s' death '%s' night '%s'\n", d->soundloops[0], d->duskshot, d->dayshot,
+                d->dawnshot, d->door_close_sound, d->door_open_sound, d->sounddeath, d->nightshot);
+    def_free_items(&items);
+    return bad;
+}
+
+/* damage_reduc_pp's max is 1 less the double atof left on the x87 stack, not 1
+   less the float the arm stored: 0.058 gives (float)(1 - 0.058), one float step
+   below 1.0f - 0.058f [orig: ItemDef_ParseProperty, `fst` then `fld1; fsubrp`
+   @0x4A0089..0x4A0094]. */
+static int test_damage_reduc_max_from_the_double(void) {
+    static const char text[] =
+        "begin Reduc\r\n"
+        "  id 106194\r\n"
+        "  damage_reduc_pp 0.058\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: damage_reduc snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const float max = items.entries[0].damage_reduc_max;
+    const int bad = max != static_cast<float>(1.0 - 0.058) || max == 1.0f - 0.058f;
+    if (bad) fprintf(stderr, "FAIL: damage_reduc_max %.9g\n", (double)max);
+    def_free_items(&items);
+    return bad;
+}
+
+/* husk_sub_part_types walks the slots from 1 to the first NULL one, past the
+   line's count into what earlier lines left, and cuts each token at its '_' in
+   the line buffer itself, so a later stale read of that slot sees the cut
+   [orig: ItemDef_ParseProperty @0x49F31A..0x49F396 — strstr @0x49F343, the
+   cut @0x49F351, the NULL test @0x49F393]. The `note` line leaves "6_CHUNK_L"
+   in slot 3 at offset 40: HuskA's one-value line reads it (CHUNK_L, 4, at
+   slot 5) and cuts it, so HuskB's reads "6" and keeps its own ROCK_S (5). */
+static int test_husk_walks_the_slots(void) {
+    static const char text[] =
+        "note xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx yyy 6_CHUNK_L\r\n"
+        "begin HuskA\r\n"
+        "  husk_sub_part_types 1_HULL\r\n"
+        "end\r\n"
+        "begin HuskB\r\n"
+        "  husk_sub_part_types 6_ROCK_S\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 2) {
+        fprintf(stderr, "FAIL: husk snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const int a = items.entries[0].husk_sub_part_types[5];
+    const int b = items.entries[1].husk_sub_part_types[5];
+    const int bad = a != 4 || b != 5;
+    if (bad) fprintf(stderr, "FAIL: husk slot 5 reads %d then %d\n", a, b);
+    def_free_items(&items);
+    return bad;
+}
+
+/* `begin` cuts a name of 46 characters or more at 46 in the line buffer, so a
+   later line's stale slot over those bytes stops at the cut: the `note` line
+   leaves slot 4 at offset 50, the begin name puts "771234" there and the cut
+   leaves "77", which rotor_parts' fourth byte reads (0xA2 without the cut)
+   [orig: the begin arm's `mov byte ptr [edx+2Eh], 0` @0x49EBFB; rotor_parts
+   @0x49EF5D..0x49EFB6]. */
+static int test_begin_cut_reaches_stale_reads(void) {
+    static const char text[] =
+        "note xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 1 1 99999999\r\n"
+        "begin BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB771234\r\n"
+        "  rotor_parts 1\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: begin-cut snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *d = &items.entries[0];
+    const int byte3 = (d->clipsize >> 8) & 0xFF;
+    const int bad = byte3 != 77 || strlen(d->display_name) != 46;
+    if (bad) fprintf(stderr, "FAIL: begin cut: rotor byte %d, name %zu chars\n", byte3,
+                     strlen(d->display_name));
+    def_free_items(&items);
+    return bad;
+}
+
+/* `end` gives a record with no alias "S%06i" of its authored id; a record a
+   nested `begin` or the file's end closes keeps an empty one [orig: the `end`
+   arm @0x49EB2F..0x49EB5F, sprintf(alias, "S%06i", [esi+50h] + 186A0h), over
+   the `id` arm's id - 186A0h store @0x49EC54..0x49EC5A]. */
+static int test_end_alias_default(void) {
+    static const char text[] =
+        "begin Defaulted\r\n"
+        "  id 105310\r\n"
+        "end\r\n"
+        "begin Authored\r\n"
+        "  id 7\r\n"
+        "  sid mine\r\n"
+        "end\r\n"
+        "begin Negative\r\n"
+        "  id -200000\r\n"
+        "end\r\n"
+        "begin Nested\r\n"
+        "  id 8\r\n"
+        "begin Unclosed\r\n"
+        "  id 9\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 5) {
+        fprintf(stderr, "FAIL: alias snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const int bad = strcmp(items.entries[0].sid, "S105310") != 0 ||
+                    strcmp(items.entries[1].sid, "mine") != 0 ||
+                    strcmp(items.entries[2].sid, "S-200000") != 0 ||
+                    items.entries[3].sid[0] != '\0' || items.entries[4].sid[0] != '\0';
+    if (bad)
+        fprintf(stderr, "FAIL: end aliases '%s' '%s' '%s' '%s' '%s'\n", items.entries[0].sid,
+                items.entries[1].sid, items.entries[2].sid, items.entries[3].sid,
+                items.entries[4].sid);
+    def_free_items(&items);
+    return bad;
+}
+
+/* A line's values are the tokenizer's 29 past the key, not 16, and the 29th runs
+   on to the line's end: 27 unknown attrib tokens then `Door Takeable` set both
+   (tokens 28 and 29), 28 then `Door Takeable` set neither (token 29 is the run-on
+   "Door Takeable"). [orig: Terrain_TokenizeConfigLine @0x53CB60, the 30-token
+   cap @0x53CC8C..0x53CC93; ItemDef_ParseProperty's attrib loop to the count
+   @0x4A0F42..0x4A0F52] */
+static int test_attrib_reads_the_29_values(void) {
+    std::string text = "begin Reads29\r\n attrib:";
+    for (int i = 0; i < 27; ++i) text += " x";
+    text += " Door Takeable\r\nend\r\nbegin RunsOn\r\n attrib:";
+    for (int i = 0; i < 28; ++i) text += " x";
+    text += " Door Takeable\r\nend\r\nbegin Seventeen\r\n husk_sub_part_types";
+    for (int i = 0; i < 16; ++i) text += " 99_HULL";
+    text += " 3_WHEEL\r\nend\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text.data()), text.size(),
+                               &items) != 0 || items.count != 3) {
+        fprintf(stderr, "FAIL: 29-value snippet did not parse\n");
+        def_free_items(&items);
+        return 1;
+    }
+    int bad = 0;
+    const uint32_t both = DEF_ITEM_ATTRIB_DOOR | DEF_ITEM_ATTRIB_TAKEABLE;
+    if ((items.entries[0].attrib & both) != both) {
+        fprintf(stderr, "FAIL: attrib tokens 28/29 missed (0x%x)\n", items.entries[0].attrib);
+        bad = 1;
+    }
+    if ((items.entries[1].attrib & both) != 0) {
+        fprintf(stderr, "FAIL: the run-on 29th token matched an attrib (0x%x)\n",
+                items.entries[1].attrib);
+        bad = 1;
+    }
+    /* Sixteen unusable `99_` values, then slot 3 (the 17th value). */
+    if (items.entries[2].husk_sub_part_types[2] != 1) {
+        fprintf(stderr, "FAIL: husk_sub_part_types' 17th value missed (%d)\n",
+                items.entries[2].husk_sub_part_types[2]);
+        bad = 1;
+    }
+    def_free_items(&items);
+    return bad;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
+    if (test_items_read_the_retail_tokens() != 0) return 1;
+    if (test_tab_separated_keys() != 0) return 1;
+    if (test_atof_is_the_crt_atof() != 0) return 1;
+    if (test_soundloop_slots_below_one() != 0) return 1;
+    if (test_end_alias_default() != 0) return 1;
+    if (test_damage_reduc_max_from_the_double() != 0) return 1;
+    if (test_husk_walks_the_slots() != 0) return 1;
+    if (test_begin_cut_reaches_stale_reads() != 0) return 1;
+    if (test_attrib_reads_the_29_values() != 0) return 1;
     if (test_regional_sound_delays() != 0) return 1;
     if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;
     if (test_out_of_range_values_take_the_sse2_leg() != 0) return 1;
@@ -1072,23 +1440,23 @@ int main(int argc, char **argv) {
        has no character items, so pin the parse on an inline JOX-shaped block
        (retail "Indonesian Soldier #1 with AK47", id 101798). */
     static const char rifleman_def[] =
-        "begin \"Indonesian Soldier #1 with AK47\"\n"
-        "  id 101798\n"
-        "  type person\n"
-        "  ai_function org1\n"
-        "  move_function org1\n"
-        "  clipsize 30\n"
-        "  ammo_closeattack    AMMO_AK47_556MM\n"
-        "  ammo_easyrocket     AMMO_EASY\n"
-        "  ammo_advancedrocket AMMO_ADVANCED\n"
-        "  ammo_marker3        AMMO_MARKER\n"
-        "  launchups_closeattack    mflash01\n"
-        "  launchups_rocket         rocket01\n"
-        "  launchups_marker3        marker03\n"
-        "  weaprbup   gunfire_r\n"
-        "  weaplmup   flash_l\n"
-        "  weaprcup2  casing_r2\n"
-        "end\n";
+        "begin \"Indonesian Soldier #1 with AK47\"\r\n"
+        "  id 101798\r\n"
+        "  type person\r\n"
+        "  ai_function org1\r\n"
+        "  move_function org1\r\n"
+        "  clipsize 30\r\n"
+        "  ammo_closeattack    AMMO_AK47_556MM\r\n"
+        "  ammo_easyrocket     AMMO_EASY\r\n"
+        "  ammo_advancedrocket AMMO_ADVANCED\r\n"
+        "  ammo_marker3        AMMO_MARKER\r\n"
+        "  launchups_closeattack    mflash01\r\n"
+        "  launchups_rocket         rocket01\r\n"
+        "  launchups_marker3        marker03\r\n"
+        "  weaprbup   gunfire_r\r\n"
+        "  weaplmup   flash_l\r\n"
+        "  weaprcup2  casing_r2\r\n"
+        "end\r\n";
     DefItemsFile rifle_items;
     memset(&rifle_items, 0, sizeof(rifle_items));
     if (def_parse_items_memory((const uint8_t *)rifleman_def, sizeof(rifleman_def) - 1,
@@ -1183,18 +1551,18 @@ int main(int argc, char **argv) {
     /* Vehicle child-emplacement attachments retain authored order, optional
        down/up/right/left limits, and the G/C key variants. */
     static const char attachment_def[] =
-        "begin AttachmentCarrier\n"
-        "  id 100164\n"
-        "  addeweap abcdefghijklmnopq 100166\n"
-        "  addeweapG ewep02 100183 70 10 100 100\n"
-        "  addeweapC ewep03 100182\n"
-        "  addeweapC ewep04 100184 0 0 0 0\n"
-        "  addeweapG ignored05 100185\n"
-        "end\n"
-        "begin PartialAngles\n"
-        "  id 100200\n"
-        "  addeweap ewep01 100201 15 37\n"
-        "end\n";
+        "begin AttachmentCarrier\r\n"
+        "  id 100164\r\n"
+        "  addeweap abcdefghijklmnopq 100166\r\n"
+        "  addeweapG ewep02 100183 70 10 100 100\r\n"
+        "  addeweapC ewep03 100182\r\n"
+        "  addeweapC ewep04 100184 0 0 0 0\r\n"
+        "  addeweapG ignored05 100185\r\n"
+        "end\r\n"
+        "begin PartialAngles\r\n"
+        "  id 100200\r\n"
+        "  addeweap ewep01 100201 15 37\r\n"
+        "end\r\n";
     DefItemsFile attachment_items;
     memset(&attachment_items, 0, sizeof(attachment_items));
     if (def_parse_items_memory((const uint8_t *)attachment_def,
@@ -1243,10 +1611,10 @@ int main(int argc, char **argv) {
     def_free_items(&attachment_items);
 
     static const char damage_def[] =
-        "begin A\n id 1\n armor 7 11\n damage_reduc_pp .25\nend\n"
-        "begin B\n id 2\n armor 5\n damage_reduc_pp .25 .60\nend\n"
-        "begin C\n id 3\nend\n"
-        "begin D\n id 4\n hp 65535\n armor 32768 65534\nend\n";
+        "begin A\r\n id 1\r\n armor 7 11\r\n damage_reduc_pp .25\r\nend\r\n"
+        "begin B\r\n id 2\r\n armor 5\r\n damage_reduc_pp .25 .60\r\nend\r\n"
+        "begin C\r\n id 3\r\nend\r\n"
+        "begin D\r\n id 4\r\n hp 65535\r\n armor 32768 65534\r\nend\r\n";
     DefItemsFile damage_items;
     memset(&damage_items, 0, sizeof(damage_items));
     if (def_parse_items_memory((const uint8_t *)damage_def, sizeof(damage_def) - 1,
@@ -1274,12 +1642,17 @@ int main(int argc, char **argv) {
 
     /* The authored ground-shadow blob decal 'shadow <name> <w> <l> <ox> <oy>'
        [orig: ItemDef_ParseProperty @ 0x49f3a5..0x49f44c — name +0xA0, atof
-       floats +0x11C..+0x128; absent tokens read as 0]. */
+       floats +0x11C..+0x128, read with no count check]. A missing width is
+       token 2, which every line resets to "", so 0; a missing length and
+       offsets are tokens 3..5, which keep what the last line that had them
+       left in the line buffer [orig: Terrain_TokenizeConfigLine @0x53CB71..
+       0x53CB81]: Jeep's bare `shadow` reads Hind's 8.5, 0 and -1.25 (Hind's
+       line is longer, so those bytes outlive the shorter lines between). */
     static const char shadow_def[] =
-        "begin Hind\n id 1\n shadow hindshdw.tga 6 8.5 0 -1.25\nend\n"
-        "begin Jeep\n id 2\n shadow jeepshdw.tga\nend\n"
-        "begin Crate\n id 3\nend\n"
-        "begin Long\n id 4\n shadow averyverylongshadowname.tga 1 2 3 4\nend\n";
+        "begin Hind\r\n id 1\r\n shadow hindshdw.tga 6 8.5 0 -1.25\r\nend\r\n"
+        "begin Jeep\r\n id 2\r\n shadow jeepshdw.tga\r\nend\r\n"
+        "begin Crate\r\n id 3\r\nend\r\n"
+        "begin Long\r\n id 4\r\n shadow averyverylongshadowname.tga 1 2 3 4\r\nend\r\n";
     DefItemsFile shadow_items;
     memset(&shadow_items, 0, sizeof(shadow_items));
     if (def_parse_items_memory((const uint8_t *)shadow_def, sizeof(shadow_def) - 1,
@@ -1296,8 +1669,8 @@ int main(int argc, char **argv) {
         s0->shadow_width != 6.0f || s0->shadow_length != 8.5f ||
         s0->shadow_offset_x != 0.0f || s0->shadow_offset_y != -1.25f ||
         strcmp(s1->shadow_texture, "jeepshdw.tga") != 0 ||
-        s1->shadow_width != 0.0f || s1->shadow_length != 0.0f ||
-        s1->shadow_offset_x != 0.0f || s1->shadow_offset_y != 0.0f ||
+        s1->shadow_width != 0.0f || s1->shadow_length != 8.5f ||
+        s1->shadow_offset_x != 0.0f || s1->shadow_offset_y != -1.25f ||
         s2->shadow_texture[0] != '\0' ||
         /* The 16-byte slot keeps 15 chars + NUL (retail copies unguarded into
            ItemDef+0xA0; no shipped items.def authors a name that long). */

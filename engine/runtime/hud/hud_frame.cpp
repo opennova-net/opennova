@@ -1064,8 +1064,7 @@ void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
 	if (layout_.stance_pos.x == 0 && layout_.stance_pos.y == 0) {
 		return;
 	}
-	const int ramp = static_cast<int>(layout_.alpha_fade_seconds *
-			static_cast<float>(kSecondsToTicks));
+	const int ramp = layout_.alpha_fade_ramp_ticks;
 	if (ramp <= 0) {
 		return;
 	}
@@ -1079,8 +1078,7 @@ void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
 	if (q16 <= 0) {
 		return;
 	}
-	const int base_alpha = static_cast<int>(layout_.alpha_fade_base *
-			static_cast<float>(kPercentToAlpha));
+	const int base_alpha = layout_.alpha_fade_base_alpha;
 	const int elapsed = state.ticks - stance_.stamp;
 	const int cur_a = stance_current_alpha(elapsed, ramp, base_alpha);
 	const int prev_a = stance_prev_alpha(elapsed, ramp);
@@ -1166,8 +1164,7 @@ void HudFrameCompiler::element_clip_indicator(const HudFrameState &state,
 	if (layout_.clip_pos.x == 0 && layout_.clip_pos.y == 0) {
 		return;
 	}
-	const int ramp = static_cast<int>(layout_.alpha_fade_seconds *
-			static_cast<float>(kSecondsToTicks));
+	const int ramp = layout_.alpha_fade_ramp_ticks;
 	if (ramp <= 0 || wep.reserve == -1 || wep.clip == -1) {
 		return;
 	}
@@ -1186,10 +1183,8 @@ void HudFrameCompiler::element_clip_indicator(const HudFrameState &state,
 		flash_key_class_ = wep.ammo_class_id;
 		flash_stamp_ = state.ticks;
 	}
-	const int base_alpha = static_cast<int>(layout_.alpha_fade_base *
-			static_cast<float>(kPercentToAlpha));
-	const int max_alpha = static_cast<int>(layout_.alpha_fade_max *
-			static_cast<float>(kPercentToAlpha));
+	const int base_alpha = layout_.alpha_fade_base_alpha;
+	const int max_alpha = layout_.alpha_fade_max_alpha;
 	const int flash = fade_flash_alpha(state.ticks - flash_stamp_, ramp,
 			base_alpha, max_alpha);
 

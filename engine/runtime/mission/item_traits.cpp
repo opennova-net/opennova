@@ -149,6 +149,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     world.tables.player.has_item_def = player_def != nullptr;
     world.tables.player.item_type_index =
             player_def != nullptr ? static_cast<int32_t>(player_def - items.entries) : 0;
+    world.tables.player.has_graphic_model = player_def != nullptr && player_def->graphic[0] != '\0';
     world.tables.player.item_hp =
             world::retail_signed_i16(player_def != nullptr ? player_def->hp : 0);
     world.tables.player.critical_hp =

@@ -1,9 +1,12 @@
 #include <runtime/audio/sound_profile.h>
 
+#include <base/io/ascii_config.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace opennova::audio {
 
@@ -36,47 +39,15 @@ const char *const kLoopKeywords[12] = {
     "crsloopfadeinend",   "crslooppitchstartp", "crslooppitchendp",
 };
 
-// Whitespace-token scan with surrounding-quote strip (begin "<name>" carries a
-// quoted token; the engine's shared ASCII-file tokenizer hands the callback
-// unquoted column strings).
-struct LineTokens {
-    std::string_view tok[5]; // keyword + up to 4 value columns
-    int count = 0;
-};
-
-LineTokens tokenize(std::string_view line) {
-    LineTokens out;
-    size_t i = 0;
-    while (i < line.size() && out.count < 5) {
-        while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r')) ++i;
-        if (i >= line.size()) break;
-        size_t start = i;
-        size_t end;
-        if (line[i] == '"') {
-            ++start;
-            end = start;
-            while (end < line.size() && line[end] != '"') ++end;
-            i = (end < line.size()) ? end + 1 : end;
-        } else {
-            end = i;
-            while (end < line.size() && line[end] != ' ' && line[end] != '\t' && line[end] != '\r') ++end;
-            i = end;
-        }
-        out.tok[out.count++] = line.substr(start, end - start);
-    }
-    return out;
+// atof then x65536, through _ftol2_sse [orig: fmul dbl_7C3CC0 (65536.0) +
+// _ftol2_sse @ 0x527122..0x527140].
+int32_t parse_q16(const char *v) {
+    return io::retail_ftol_sse2(io::retail_atof(v) * 65536.0);
 }
 
-int32_t parse_q16(std::string_view v) {
-    if (v.empty()) return 0;
-    // atof then x65536 [orig: fmul dbl_7C3CC0 (65536.0) + ftol @ 0x527122].
-    return static_cast<int32_t>(std::atof(std::string(v).c_str()) * 65536.0);
-}
-
-int32_t parse_pct(std::string_view v) {
-    if (v.empty()) return 0;
-    // atof then x655 (~65536/100) [orig: the 655 * ftol stores @ 0x5270dd..].
-    return static_cast<int32_t>(std::atof(std::string(v).c_str())) * 655;
+// 655 x _ftol2_sse(atof) [orig: the stores @ 0x5270bd..0x5270dd and on].
+int32_t parse_pct(const char *v) {
+    return static_cast<int32_t>(655u * static_cast<uint32_t>(io::retail_ftol_sse2(io::retail_atof(v))));
 }
 
 } // namespace
@@ -123,60 +94,61 @@ const char *compose_entity_sound_set(int anim_slot, int type, char *out, size_t 
     return out;
 }
 
+// SoundProfile_LoadAll @ 0x527490 walks the file through File_ParseASCIIFile
+// (@ 0x5274DD), so the lines and tokens are the shared walk's
+// (io::for_each_config_line: CR LF only, the tokenizer's quotes, commas and
+// comments); SoundProfile_ParseLineCallback reads each line's tokens by
+// position with no count check, so a short line's tokens[4] and [5] are what
+// an earlier, longer line left (io::ConfigTokens::slot). In JO:CA that changes
+// 178 slot lines (79 in the base SndProf.def, 99 in jox01's) from a read of
+// "": 83 take a param3 of 1.2, the rest another param3 (1.1, 1.3, 1.4, 1.6,
+// -26) or a param4, among them 21 soundloop_1..3 rows (12 and 9), the loop
+// pitch and gear count the vehicle sound reads.
 size_t SoundProfileTable::parse(const char *text, size_t len) {
     const size_t before = entries_.size();
     if (text == nullptr) return 0;
-    std::string_view src(text, len);
     SoundProfile *cur = nullptr; // inside a begin..end block [orig: dword_24E0894]
-    size_t pos = 0;
-    while (pos <= src.size()) {
-        size_t eol = src.find('\n', pos);
-        if (eol == std::string_view::npos) eol = src.size();
-        const LineTokens t = tokenize(src.substr(pos, eol - pos));
-        pos = eol + 1;
-        if (t.count == 0) continue;
-        const std::string_view key = t.tok[0];
+    io::for_each_config_line(text, len, [&](io::ConfigTokens &t) {
+        const char *key = t.tokens[0];
         // "end" closes the block; every other keyword outside a begin is
-        // ignored [orig: the "end" stricmp first, then the in-block gate
-        // @ 0x526fe0/0x52707a].
+        // ignored [orig: the "end" stricmp first @ 0x526fe0, the in-block gate
+        // @ 0x52707a].
         if (strutil::iequals(key, "end")) {
             cur = nullptr;
-            continue;
+            return;
         }
         if (strutil::iequals(key, "begin")) {
             entries_.emplace_back();
             cur = &entries_.back();
-            // Name cap: the engine truncates a >=64-char begin name to the
-            // 64-byte profile name buffer [orig: the strlen >= 0x40 poke
-            // @ 0x527043]. Trailing columns are free comment text, unread.
-            std::string_view name = t.tok[1];
-            if (name.size() > 63) name = name.substr(0, 63);
+            // A name of 64 characters or more is cut to its first 64 in the
+            // line buffer itself, where a later short line's stale slot still
+            // reads the cut (io::ConfigTokens::terminate_at) [orig: the strlen
+            // >= 0x40 test @ 0x52703F..0x527043, the terminator stored at [64]
+            // @ 0x527045]. Further columns are free comment text, unread.
+            const char *name = t.token(1);
+            if (std::strlen(name) >= 64) t.terminate_at(name + 64);
             cur->name.assign(name);
-            continue;
+            return;
         }
-        if (cur == nullptr) continue;
-        bool matched = false;
+        if (cur == nullptr) return;
         for (int slot = 0; slot < kSoundProfileSlotCount; ++slot) {
             if (!strutil::iequals(key, kSlotKeywords[slot])) continue;
             // Column 1 = the sound-set name (24-byte engine slot), columns
             // 2/3 floats x65536, column 4 atol [orig: @ 0x5270f0-0x52718b].
-            std::string_view set = t.tok[1];
+            std::string_view set = t.token(1);
             if (set.size() > 23) set = set.substr(0, 23);
             cur->set_names[slot].assign(set);
-            cur->param2_q16[slot] = parse_q16(t.tok[2]);
-            cur->param3_q16[slot] = parse_q16(t.tok[3]);
-            cur->param4[slot] =
-                t.tok[4].empty() ? 0 : static_cast<int32_t>(std::atol(std::string(t.tok[4]).c_str()));
-            matched = true;
-            break;
+            cur->param2_q16[slot] = parse_q16(t.token(2));
+            cur->param3_q16[slot] = parse_q16(t.token(3));
+            cur->param4[slot] = io::retail_atol(t.token(4));
+            return;
         }
-        if (matched) continue;
         for (int i = 0; i < 12; ++i) {
             if (!strutil::iequals(key, kLoopKeywords[i])) continue;
-            cur->loop_params[i] = parse_pct(t.tok[1]);
-            break;
+            cur->loop_params[i] = parse_pct(t.token(1));
+            return;
         }
-    }
+    });
     return entries_.size() - before;
 }
 

@@ -1,9 +1,12 @@
 #include "def_scan.h"
 
+#include <base/io/crt_ftol.h>
+
 #include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_ITEM_ATTRIB_* (the tables initialize from them)
 
-// Split out of def.cpp (quality campaign W3-3). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
+#include <base/io/strutil.h>
+
+// Split out of def.cpp (quality campaign W3-3).
 //
 // The shared .def text scanner. Its lookup tables (flags, item attributes, death
 // pieces) stay private here; only what a family parser calls is declared.
@@ -43,66 +46,15 @@ void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len) {
     dst[src_len] = '\0';
 }
 
-/* Trim leading+trailing whitespace, return pointer and length (no alloc) */
-const char *trim_span(const char *s, size_t len, size_t *out_len) {
-    while (len > 0 && isspace((unsigned char)*s)) { ++s; --len; }
-    while (len > 0 && isspace((unsigned char)s[len - 1])) --len;
-    *out_len = len;
-    return s;
-}
-
 void to_lower_buf(char *dst, const char *src, size_t len) {
     for (size_t i = 0; i < len; ++i)
         dst[i] = (char)tolower((unsigned char)src[i]);
     dst[len] = '\0';
 }
 
-/* Extract quoted string from line: first "..." pair */
-size_t extract_quoted(const char *line, size_t line_len, char *dst, size_t dst_size) {
-    const char *q0 = (const char *)memchr(line, '"', line_len);
-    if (!q0) { dst[0] = '\0'; return 0; }
-    size_t rem = line_len - (size_t)(q0 - line) - 1;
-    const char *q1 = (const char *)memchr(q0 + 1, '"', rem);
-    if (!q1 || q1 <= q0 + 1) { dst[0] = '\0'; return 0; }
-    size_t slen = (size_t)(q1 - q0 - 1);
-    safe_copy(dst, dst_size, q0 + 1, slen);
-    return slen;
-}
-
-/* consume_value: skip key_len chars, trim, strip quotes, strip // comment */
-const char *consume_value_span(const char *line, size_t line_len, size_t key_len, size_t *out_len) {
-    if (key_len >= line_len) { *out_len = 0; return line; }
-    size_t vlen;
-    const char *v = trim_span(line + key_len, line_len - key_len, &vlen);
-    /* Strip surrounding quotes */
-    if (vlen >= 2 && v[0] == '"' && v[vlen - 1] == '"') {
-        ++v; vlen -= 2;
-    }
-    /* Strip trailing comment */
-    for (size_t i = 0; i + 1 < vlen; ++i) {
-        if (v[i] == '/' && v[i + 1] == '/') {
-            vlen = i;
-            /* re-trim */
-            while (vlen > 0 && isspace((unsigned char)v[vlen - 1])) --vlen;
-            break;
-        }
-    }
-    *out_len = vlen;
-    return v;
-}
-
-void consume_value_str(const char *line, size_t line_len, size_t key_len, char *dst, size_t dst_size) {
-    size_t vlen;
-    const char *v = consume_value_span(line, line_len, key_len, &vlen);
-    safe_copy(dst, dst_size, v, vlen);
-}
-
+/* The CRT's atol on a token span (io::retail_atol_n: 32 bits, saturating). */
 int parse_int_n(const char *s, size_t len) {
-    char buf[32];
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, s, len);
-    buf[len] = '\0';
-    return (int)strtol(buf, NULL, 10);
+    return io::retail_atol_n(s, len);
 }
 
 /* ItemDef healthMax and the two armor classes are signed WORD stores in retail.
@@ -113,29 +65,10 @@ int signed_i16_value(int value) {
     return low < 0x8000u ? (int)low : (int)low - 0x10000;
 }
 
+/* The CRT's atof on a token span (io::retail_atof: decimal only, an exponent
+   marked e, E, d or D), narrowed to float. */
 float parse_float_n(const char *s, size_t len) {
-    char buf[64];
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, s, len);
-    buf[len] = '\0';
-    return (float)strtod(buf, NULL);
-}
-
-/* Tokenize by whitespace, returns count. Stores start+len pairs. Max tokens. */
-
-int tokenize(const char *s, size_t len, Token *tokens, int max_tok) {
-    int n = 0;
-    size_t i = 0;
-    while (i < len && n < max_tok) {
-        while (i < len && isspace((unsigned char)s[i])) ++i;
-        if (i >= len) break;
-        size_t start = i;
-        while (i < len && !isspace((unsigned char)s[i])) ++i;
-        tokens[n].s = s + start;
-        tokens[n].len = i - start;
-        ++n;
-    }
-    return n;
+    return (float)io::retail_atof_n(s, len);
 }
 
 /* The engine debris-type table row names, in table order — index = the byte
@@ -161,54 +94,23 @@ int death_piece_type_index(const char *name, size_t len) {
     return 0; /* unknown -> HULL, the engine's zero-init read */
 }
 
-/* Split on commas and/or whitespace */
-int split_values(const char *s, size_t len, Token *tokens, int max_tok) {
+bool key_is(const char *key, const char *name) {
+    return strutil::iequals(key, name);
+}
+
+int value_tokens(const io::ConfigTokens &tokens, Token *out, int max_tok) {
     int n = 0;
-    size_t i = 0;
-    while (i < len && n < max_tok) {
-        while (i < len && (s[i] == ',' || isspace((unsigned char)s[i]))) ++i;
-        if (i >= len) break;
-        size_t start = i;
-        while (i < len && s[i] != ',' && !isspace((unsigned char)s[i])) ++i;
-        tokens[n].s = s + start;
-        tokens[n].len = i - start;
+    for (int i = 1; i < tokens.count && n < max_tok; ++i) {
+        out[n].s = tokens.tokens[i];
+        out[n].len = strlen(tokens.tokens[i]);
         ++n;
     }
     return n;
 }
 
-/* starts_with for known-length prefix against lowercase buffer */
-int lower_starts_with(const char *lower, size_t lower_len, const char *prefix, size_t prefix_len) {
-    if (lower_len < prefix_len) return 0;
-    return memcmp(lower, prefix, prefix_len) == 0;
-}
-
-/* Check prefix + next char is whitespace or end */
-int lower_match_key(const char *lower, size_t lower_len, const char *prefix, size_t prefix_len) {
-    if (!lower_starts_with(lower, lower_len, prefix, prefix_len)) return 0;
-    if (lower_len == prefix_len) return 1;
-    return isspace((unsigned char)lower[prefix_len]);
-}
-
-
-
-int next_line(LineIter *it, const char **out, size_t *out_len) {
-    if (it->pos >= it->buf_len) return 0;
-    const char *start = it->buf + it->pos;
-    const char *nl = (const char *)memchr(start, '\n', it->buf_len - it->pos);
-    size_t len;
-    if (nl) {
-        len = (size_t)(nl - start);
-        it->pos += len + 1;
-    } else {
-        len = it->buf_len - it->pos;
-        it->pos = it->buf_len;
-    }
-    /* Strip \r */
-    if (len > 0 && start[len - 1] == '\r') --len;
-    *out = start;
-    *out_len = len;
-    return 1;
+void copy_token(char *dst, size_t dst_size, const io::ConfigTokens &tokens, int index) {
+    const char *token = tokens.token(index);
+    safe_copy(dst, dst_size, token, strlen(token));
 }
 
 /* Weapon flags table — the FULL witnessed token set, both flag dwords.
@@ -408,23 +310,15 @@ static int parse_alignment(const char *s, size_t len) {
     return 0;
 }
 
-/* Parse N ints from value string */
-int parse_ints(const char *s, size_t len, int *out, int max_n) {
-    Token tok[MAX_TOKENS];
-    int n = split_values(s, len, tok, max_n < MAX_TOKENS ? max_n : MAX_TOKENS);
-    for (int i = 0; i < n && i < max_n; ++i)
-        out[i] = parse_int_n(tok[i].s, tok[i].len);
-    return n;
-}
-
-/* Parse HudColor from RGB values */
+/* Parse HudColor from RGB values (hudpos only; each channel is atof then
+   ftol, e.g. hud_textcolor @0x5A0F4D..0x5A0F82) */
 DefHudColor parse_hud_color(Token *vals, int n) {
     DefHudColor c = {0, 0, 0, 255};
     if (n >= 3) {
-        c.r = parse_int_n(vals[0].s, vals[0].len);
-        c.g = parse_int_n(vals[1].s, vals[1].len);
-        c.b = parse_int_n(vals[2].s, vals[2].len);
-        if (n >= 4) c.a = parse_int_n(vals[3].s, vals[3].len);
+        c.r = hud_number(vals[0].s, vals[0].len);
+        c.g = hud_number(vals[1].s, vals[1].len);
+        c.b = hud_number(vals[2].s, vals[2].len);
+        if (n >= 4) c.a = hud_number(vals[3].s, vals[3].len);
     }
     return c;
 }
@@ -433,10 +327,10 @@ DefHudColor parse_hud_color(Token *vals, int n) {
 DefHudColor parse_hud_color_argb(Token *vals, int n) {
     DefHudColor c = {0, 0, 0, 255};
     if (n >= 4) {
-        c.a = parse_int_n(vals[0].s, vals[0].len);
-        c.r = parse_int_n(vals[1].s, vals[1].len);
-        c.g = parse_int_n(vals[2].s, vals[2].len);
-        c.b = parse_int_n(vals[3].s, vals[3].len);
+        c.a = hud_number(vals[0].s, vals[0].len);
+        c.r = hud_number(vals[1].s, vals[1].len);
+        c.g = hud_number(vals[2].s, vals[2].len);
+        c.b = hud_number(vals[3].s, vals[3].len);
     }
     return c;
 }
@@ -451,9 +345,9 @@ DefHudColor parse_hud_color_argb(Token *vals, int n) {
    HUD_ParseTextAlignment @0x59d6b0 on field 4; the draws gate on the hidden
    dword @0x5939f3] */
 void parse_pos_aligned(Token *vals, int n, int *out) {
-    if (n >= 1) out[0] = parse_int_n(vals[0].s, vals[0].len);
-    if (n >= 2) out[1] = parse_int_n(vals[1].s, vals[1].len);
-    if (n >= 3) out[2] = parse_int_n(vals[2].s, vals[2].len);
+    if (n >= 1) out[0] = hud_number(vals[0].s, vals[0].len);
+    if (n >= 2) out[1] = hud_number(vals[1].s, vals[1].len);
+    if (n >= 3) out[2] = hud_number(vals[2].s, vals[2].len);
     if (n >= 4) {
         char low[16];
         size_t ll = vals[3].len < 15 ? vals[3].len : 15;
@@ -465,8 +359,8 @@ void parse_pos_aligned(Token *vals, int n, int *out) {
 /* [orig: HUD_ParseHudposToken's BREATHTIME arm @0x59FB3B..0x59FB84 -- atof x,
    atof y, then HUD_ParseTextAlignment on the THIRD token] */
 void parse_pos_align3(Token *vals, int n, int *out) {
-    if (n >= 1) out[0] = parse_int_n(vals[0].s, vals[0].len);
-    if (n >= 2) out[1] = parse_int_n(vals[1].s, vals[1].len);
+    if (n >= 1) out[0] = hud_number(vals[0].s, vals[0].len);
+    if (n >= 2) out[1] = hud_number(vals[1].s, vals[1].len);
     if (n >= 3) {
         char low[16];
         size_t ll = vals[2].len < 15 ? vals[2].len : 15;
@@ -476,11 +370,21 @@ void parse_pos_align3(Token *vals, int n, int *out) {
 }
 
 
+double hud_double(const char *s, size_t len) {
+    return io::retail_atof_n(s, len);
+}
+
+int hud_number(const char *s, size_t len) {
+    return io::retail_ftol_sse2(hud_double(s, len));
+}
+
 int parse_fixed16_digits_n(const char *s, size_t len) {
     size_t i = 0;
-    int integer_part = 0;
+    // 32-bit arithmetic that wraps, as the original's imul/lea do on a long
+    // digit run.
+    uint32_t integer_part = 0;
     while (i < len && s[i] >= '0' && s[i] <= '9') {
-        integer_part = s[i] + 10 * integer_part - '0';
+        integer_part = static_cast<uint32_t>(s[i]) + 10u * integer_part - '0';
         ++i;
     }
     int frac_accum = 127;
@@ -493,7 +397,7 @@ int parse_fixed16_digits_n(const char *s, size_t len) {
             ++i;
         }
     }
-    return (integer_part << 16) + (frac_accum >> 8);
+    return static_cast<int>((integer_part << 16) + static_cast<uint32_t>(frac_accum >> 8));
 }
 
 }  // namespace opennova::defscan

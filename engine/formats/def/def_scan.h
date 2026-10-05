@@ -1,9 +1,9 @@
 #pragma once
 
 // Internal to engine/formats/def — not part of def/def.h. Split out of def.cpp (quality
-// campaign W3-3); the bodies are unchanged.
+// campaign W3-3).
 //
-// The shared .def text scanner: line iteration, key matching, value tokenizing and
+// The shared .def text scanner: the retail line walk and its tokens, key matching and
 // the scalar conversions every family parser beside it uses.
 //
 // These were file-local statics when every parser lived in one file. They now cross
@@ -15,22 +15,18 @@
 
 #include <formats/def/def.h>
 
+#include <base/io/ascii_config.h>
+
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <string>
+
 namespace opennova::defscan {
 
 // The scanner's own types and the caps/macros the family parsers use directly.
-#define MAX_TOKENS 16
-typedef struct { const char *s; size_t len; } Token;
-
-/* Line iterator: walks through buf splitting on \n, stripping \r */
-typedef struct {
-    const char *buf;
-    size_t buf_len;
-    size_t pos;
-} LineIter;
+typedef struct { const char *s; size_t len; } Token; // a value token's span
 
 typedef struct { const char *name; size_t name_len; int bit; int bit2; } FlagEntry;
 
@@ -58,15 +54,7 @@ char *read_file(const char *path, size_t *out_len);
 
 void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len);
 
-const char *trim_span(const char *s, size_t len, size_t *out_len);
-
 void to_lower_buf(char *dst, const char *src, size_t len);
-
-size_t extract_quoted(const char *line, size_t line_len, char *dst, size_t dst_size);
-
-const char *consume_value_span(const char *line, size_t line_len, size_t key_len, size_t *out_len);
-
-void consume_value_str(const char *line, size_t line_len, size_t key_len, char *dst, size_t dst_size);
 
 int parse_int_n(const char *s, size_t len);
 
@@ -74,25 +62,71 @@ int signed_i16_value(int value);
 
 float parse_float_n(const char *s, size_t len);
 
-int tokenize(const char *s, size_t len, Token *tokens, int max_tok);
-
 int death_piece_type_index(const char *name, size_t len);
 
-int split_values(const char *s, size_t len, Token *tokens, int max_tok);
+// The value tokens a family parser reads off one line: every token the
+// tokenizer keeps past the key, 29 of its 30. The tokenizer stops at its 30th
+// token without cutting it, so the 29th value runs on to the line's end,
+// separators, quotes and comment included, and nothing past it is a token of
+// its own. [orig: Terrain_TokenizeConfigLine @0x53CB60, the compare
+// @0x53CC8C and the exit @0x53CC93 that leaves the token unterminated]
+inline constexpr int kMaxValueTokens = io::kConfigMaxTokens - 1;
 
-int lower_starts_with(const char *lower, size_t lower_len, const char *prefix, size_t prefix_len);
+// Every family parser reads a line the way the retail walk hands it to its
+// callback: cut into tokens by the shared ASCII tokenizer, the key the WHOLE
+// first token compared without case, each value a token (a quoted run is one
+// token and its quotes are not kept; `""` is no token at all; space, tab and
+// comma separate; `//` or `;` outside quotes ends the line). A line with no
+// token, or whose first token starts with '/', never reaches the callback.
+// [orig: File_ParseASCIIFile @0x53D810 hands Terrain_TokenizeConfigLine
+//  @0x53CB60's tokens to the callback (@0x53D908), skipping a line with no
+//  token or whose first starts with '/' (@0x53D915 / @0x53D91E); the
+//  tokenizer's cuts are io::tokenize_config_line's]
+// The lines are the shared walk's (io::for_each_config_line_span): split at a
+// CR LF pair and nowhere else, so an LF alone is a byte of the line and a file
+// with no CR LF is one line; a last line with no pair loses its final byte
+// [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5]. A line is read up to its
+// first NUL, as the tokenizer's strlen reads it. `apply(tokens, line, line_len,
+// line_index)` gets the line's bytes in `buf` (its CR LF excluded) for the
+// parsers' raw_lines and its index counting every line the walk cuts, the
+// skipped ones included. A callback that returns true ends the walk, as a
+// nonzero return ends retail's [orig: @0x53D942]. `tokens` carries the
+// tokenizer's slots across walks (io::ConfigTokens::slot). Returns the index of
+// the line that ended the walk, else the number of lines cut.
+template <typename Apply>
+size_t for_each_def_line(const char *buf, size_t len, io::ConfigTokens &tokens, Apply &&apply) {
+    size_t line_index = (size_t)-1;
+    return io::for_each_config_line_span(buf, len, tokens, [&](io::ConfigTokens &line,
+                                                               const io::ConfigLineSpan &span) {
+        ++line_index;
+        if (line.count == 0 || line.tokens[0][0] == '/') return false;
+        const char *text = buf + span.begin;
+        const size_t text_len = span.end - span.begin;
+        return io::detail::walk_apply(apply, line, text, text_len, line_index);
+    });
+}
 
-int lower_match_key(const char *lower, size_t lower_len, const char *prefix, size_t prefix_len);
+template <typename Apply>
+size_t for_each_def_line(const char *buf, size_t len, Apply &&apply) {
+    io::ConfigTokens tokens;
+    return for_each_def_line(buf, len, tokens, std::forward<Apply>(apply));
+}
 
-int next_line(LineIter *it, const char **out, size_t *out_len);
+// The key compare every family parser makes [orig: _stricmp @0x76FDF6].
+bool key_is(const char *key, const char *name);
+
+// The value tokens (token 1 on) as spans, at most `max_tok` of them.
+int value_tokens(const io::ConfigTokens &tokens, Token *out, int max_tok);
+
+// Token `index` into `dst`, truncated to `dst_size - 1`; a slot past the
+// line's count copies what io::ConfigTokens::token reads there.
+void copy_token(char *dst, size_t dst_size, const io::ConfigTokens &tokens, int index);
 
 const FlagEntry *lookup_flag(const char *name, size_t len);
 
 int lookup_item_attrib(const char *name, size_t len);
 
 int lookup_item_attrib2(const char *name, size_t len);
-
-int parse_ints(const char *s, size_t len, int *out, int max_n);
 
 opennova::def::DefHudColor parse_hud_color(Token *vals, int n);
 
@@ -105,5 +139,11 @@ void parse_pos_aligned(Token *vals, int n, int *out);
 void parse_pos_align3(Token *vals, int n, int *out);
 
 int parse_fixed16_digits_n(const char *s, size_t len);
+
+// A hudpos number: every value HUD_ParseHudposToken reads is the CRT's atof of
+// its token, converted by _ftol2_sse where the slot is an integer [orig:
+// HUD_ParseHudposToken @0x59F370, e.g. HUDSPINMAPX1 @0x59F7E4..0x59F7EC].
+double hud_double(const char *s, size_t len);
+int hud_number(const char *s, size_t len);
 
 }  // namespace opennova::defscan

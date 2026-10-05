@@ -1,17 +1,16 @@
 #include <formats/def/def.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/tick_rate.h>
 
-// Split out of def.cpp (quality campaign W3-3). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // AMMO.DEF: one record per ammunition type.
 
 #include "def_scan.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <vector>
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
@@ -89,7 +88,370 @@ static int parse_age_ticks_n(const char *s, size_t len) {
     return (int)(((long long)opennova::io::kTicksPerSecondInt * parse_fixed16_digits_n(s, len) + 0x8000) >> 16);
 }
 
-static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out);
+/* A packed RGB from slots 2..4: ((atol(r) << 8) + atol(g)) * 256 + atol(b) in
+   32-bit arithmetic that wraps, so an out-of-range component bleeds into the
+   next with no clamp [orig: the light_move / light_impact arms of
+   AmmoDef_ParseProperty @0x40a2d0]. */
+static int32_t packed_rgb(const io::ConfigTokens &tokens) {
+    const uint32_t r = static_cast<uint32_t>(io::retail_atol(tokens.token(2)));
+    const uint32_t g = static_cast<uint32_t>(io::retail_atol(tokens.token(3)));
+    const uint32_t b = static_cast<uint32_t>(io::retail_atol(tokens.token(4)));
+    return static_cast<int32_t>(((r << 8) + g) * 256u + b);
+}
+
+/* A fresh def as AmmoDef_AllocateSlot opens it, over the table LoadAll zeroed:
+   velocity, max_age, both turn rates and the boresight -1, drag 1.0, the
+   kill-zone pie slice 0x7FFFFFFF (no cone) and recoil 24 per stance; every
+   other field it writes is 0. [orig: AmmoDef_AllocateSlot @0x409A20, the
+   defaults @0x409A56..0x409AF6 (velocity +4 @0x409A69, max_age +8 @0x409A6F,
+   drag +0x1C @0x409A7B, the pie slice +0x3C @0x409A93, recoil +0xE3..+0xE5
+   @0x409AAF..0x409ABB, the turn rates and boresight +0x50/+0x54/+0x58
+   @0x409AC1..0x409AC7); AmmoDef_LoadAll's memset @0x40B106] */
+static void reset_ammo_def(DefAmmoDef *d) {
+    memset(d, 0, sizeof(*d));
+    d->velocity = -1;
+    d->max_age_ticks = -1;
+    d->drag_fp16 = 0x10000;
+    d->kz_pieslice_bam = 0x7FFFFFFF;
+    for (int &recoil : d->recoil) recoil = 24;
+    d->turnrate_maxpit = -1;
+    d->turnrate_maxyaw = -1;
+    d->boresight_maxang = -1;
+}
+
+/* At a def's `end`, a velocity or max_age still -1 takes the table's first
+   def's; that def is the template and keeps its own. The friendly / foe tracer
+   ids and the drag inherit too, but no parse leaves them -1 (the ids store an
+   index or nothing, the 16.16 drag reads a '-' as 0).
+   [orig: AmmoDef_InheritDefaults @0x409EB0, from the `end` arm @0x40A3E5] */
+static void inherit_ammo_defaults(DefAmmoDef *d, const DefAmmoFile *out) {
+    if (out->count == 0) return;
+    const DefAmmoDef &first = out->entries[0];
+    if (d->velocity == -1) d->velocity = first.velocity;
+    if (d->max_age_ticks == -1) d->max_age_ticks = first.max_age_ticks;
+}
+
+/* Every line reaches the parser as the retail tokenizer cuts it
+   (defscan::for_each_def_line); every key is the whole first token compared
+   without case, and a value is a token [orig: AmmoDef_ParseProperty @0x40A2D0,
+   _stricmp on tokens[1] throughout, tokens[2].. the values].
+
+   A def is allocated at its `ammo` line, named by token 1 (31 characters at
+   most), and closed by `end` [orig: `ammo` @0x40A347..0x40A397 ->
+   AmmoDef_AllocateSlot @0x409A20 (the name copy @0x409B01..0x409B24); `end`
+   @0x40A3B9..0x40A442 -> AmmoDef_ResetParseState @0x409B30 (@0x40A3F8), which
+   clears the open def]. An `ammo` line while a def is open logs "definition
+   missing end" and returns 1, which ends the whole file walk [orig:
+   @0x40A362..0x40A37D; File_ParseASCIIFile @0x53D942]; the def it interrupted,
+   and one the file never closes, were allocated already and stay in the table.
+   Lines outside a def are ignored (@0x40A30A..0x40A310). `effects_table` opens
+   a table, whose `end` closes the table and not the def [orig:
+   @0x40A5A3..0x40A5B2; @0x40A42D..0x40A433]. A table's rows are staged and
+   reach the def only at that `end`, and only while the def has no table yet
+   [orig: AmmoDef_InitEffectsTable @0x409F20, called only @0x40A433, installs
+   when def+0x68 and word +0x6C are both 0]: a second table in one def, and a
+   table the file never closes, give the def nothing. */
+static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out) {
+    size_t entries_cap = 0;
+    DefAmmoDef current;
+    memset(&current, 0, sizeof(current));
+    int in_block = 0, in_effects = 0, table_installed = 0;
+    size_t raw_cap = 0, eff_cap = 0;
+    std::vector<DefEffectTableEntry> staged;
+
+    /* The first load walks the file twice, a count of its `ammo` lines and
+       then the parse, so the parse's first lines read the slots the count
+       pass left at the file's end (io::ConfigTokens::slot) [orig:
+       AmmoDef_LoadAll @0x40B0B0 — the count pass @0x40B0DE
+       (AmmoDef_CountCallback @0x409E70, which reads only the key), the parse
+       @0x40B116]. The count sizes retail's table; ours grows. */
+    io::ConfigTokens tokens_state;
+    for_each_def_line(buf, file_len, tokens_state,
+                      [](const io::ConfigTokens &, const char *, size_t, size_t) {});
+    for_each_def_line(buf, file_len, tokens_state, [&](const io::ConfigTokens &tokens,
+                                                       const char *line, size_t line_len,
+                                                       size_t) {
+        const char *key = tokens.tokens[0];
+        const char *v = tokens.token(1); // the first value token, "" when none
+        const size_t vl = strlen(v);
+
+        if (key_is(key, "ammo")) {
+            if (in_block) return true; // "definition missing end": the walk ends
+            reset_ammo_def(&current);
+            raw_cap = 0; eff_cap = 0;
+            table_installed = 0;
+            copy_token(current.name, 32, tokens, 1);
+            in_block = 1;
+            return false;
+        }
+
+        if (key_is(key, "end")) {
+            if (!in_block) return false;
+            if (in_effects) {
+                in_effects = 0;
+                if (!table_installed) {
+                    for (const DefEffectTableEntry &e : staged)
+                        DA_PUSH(current.effects_table, current.effects_table_count, eff_cap, e);
+                    table_installed = 1;
+                }
+                staged.clear();
+                return false;
+            }
+            inherit_ammo_defaults(&current, out);
+            DA_PUSH(out->entries, out->count, entries_cap, current);
+            memset(&current, 0, sizeof(current));
+            raw_cap = 0; eff_cap = 0;
+            in_block = 0;
+            return false;
+        }
+
+        if (!in_block) return false;
+
+        /* Effects table rows: four tokens or more, tag / hit effect / impact
+           sound / value [orig: the table gate @0x40A316, `cmp [tokens],4`
+           @0x40A323, the row @0x40A46A..0x40A531] */
+        if (in_effects) {
+            if (tokens.count >= 4) {
+                DefEffectTableEntry e;
+                memset(&e, 0, sizeof(e));
+                copy_token(e.surface_type, sizeof(e.surface_type), tokens, 0);
+                copy_token(e.hit_effect, sizeof(e.hit_effect), tokens, 1);
+                copy_token(e.impact_sound, sizeof(e.impact_sound), tokens, 2);
+                e.value = io::retail_atol(tokens.token(3));
+                staged.push_back(e);
+            }
+            return false;
+        }
+
+        if (key_is(key, "effects_table")) {
+            in_effects = 1;
+            staged.clear();
+            return false;
+        }
+
+        int parsed = 0;
+        if (key_is(key, "velocity")) {
+            current.velocity = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "heat_det_range")) {
+            // [orig: AmmoDef_ParseProperty @0x40a2d0, heat_det_range]
+            current.heat_det_range = static_cast<int16_t>(parse_fixed16_digits_n(v, vl) >> 16);
+            parsed = 1;
+        } else if (key_is(key, "boresight_maxang")) {
+            current.boresight_maxang = static_cast<int32_t>(11930464u *
+                static_cast<uint32_t>(parse_int_n(v, vl)));
+            parsed = 1;
+        } else if (key_is(key, "min_damage")) {
+            current.min_damage = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "max_damage")) {
+            current.max_damage = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "penetration_impact")) {
+            current.penetration_impact = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "penetration_kz")) {
+            current.penetration_kz = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "armor_density")) {
+            // atol of tokens 1..3, unconditionally [orig: AmmoDef_ParseProperty @0x40ac29..0x40ac74]
+            for (int c = 0; c < 3; ++c)
+                current.armor_density[c] = io::retail_atol(tokens.token(c + 1));
+            parsed = 1;
+        } else if (key_is(key, "secondary_effect")) {
+            /* The blast's per-victim effect [orig: @0x40aa15..0x40aa36
+               CEffectWorld_InternEffectHandle -> +0x48]. */
+            copy_token(current.secondary_effect, sizeof(current.secondary_effect), tokens, 1);
+            parsed = 1;
+        } else if (key_is(key, "kz_sound")) {
+            /* The blast's per-victim sound set [orig: @0x40a92a..0x40a94b
+               SoundBank_FindSetByNameAnyBank -> +0x4C]. */
+            copy_token(current.kz_sound, sizeof(current.kz_sound), tokens, 1);
+            parsed = 1;
+        } else if (key_is(key, "secondary_anim")) {
+            current.secondary_anim = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "kz_physics")) {
+            current.kz_physics = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "recoil")) {
+            // atol of tokens 1..3, unconditionally [orig: AmmoDef_ParseProperty, the recoil arm]
+            for (int c = 0; c < 3; ++c)
+                current.recoil[c] = io::retail_atol(tokens.token(c + 1));
+            parsed = 1;
+        } else if (key_is(key, "flag")) {
+            /* OR the named bit; first table match wins [orig: @0x813500 walk]. An
+               unrecognized name is skipped (the original warns). */
+            char fl[64];
+            size_t fn = vl < sizeof(fl) - 1 ? vl : sizeof(fl) - 1;
+            to_lower_buf(fl, v, fn);
+            for (size_t fi = 0; fi < sizeof(k_ammo_flag_names) / sizeof(k_ammo_flag_names[0]); ++fi) {
+                if (strlen(k_ammo_flag_names[fi].name) == fn &&
+                    memcmp(k_ammo_flag_names[fi].name, fl, fn) == 0) {
+                    current.flags |= k_ammo_flag_names[fi].bit;
+                    break;
+                }
+            }
+            parsed = 1;
+        } else if (key_is(key, "max_age")) {
+            current.max_age_ticks = parse_age_ticks_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "arm_age")) {
+            current.arm_age_ticks = parse_age_ticks_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "error")) {
+            current.error_fp16 = parse_fixed16_digits_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "drag")) {
+            current.drag_fp16 = parse_fixed16_digits_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "bullet_radius")) {
+            current.bullet_radius_fp16 = parse_fixed16_digits_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "spread_count")) {
+            current.spread_count = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "kztype")) {
+            /* Full-name match against the 8-entry table; only 1..7 accepted
+               [orig: @0x40a2d0 rejects index 0/unknown as "bad kill zone type"]. */
+            char kz[48];
+            size_t kn = vl < sizeof(kz) - 1 ? vl : sizeof(kz) - 1;
+            to_lower_buf(kz, v, kn);
+            for (int ki = 1; ki < 8; ++ki) {
+                if (strlen(k_ammo_kz_names[ki]) == kn && memcmp(k_ammo_kz_names[ki], kz, kn) == 0) {
+                    current.kztype = ki;
+                    break;
+                }
+            }
+            parsed = 1;
+        } else if (key_is(key, "kz_damage")) {
+            current.kz_damage = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "kz_minradius")) {
+            current.kz_minradius_fp16 = parse_fixed16_digits_n(v, vl); /* +52 [orig: §5.60 map] */
+            parsed = 1;
+        } else if (key_is(key, "kz_maxradius")) {
+            current.kz_maxradius_fp16 = parse_fixed16_digits_n(v, vl); /* +56 */
+            parsed = 1;
+        } else if (key_is(key, "kz_pieslice")) {
+            /* HALF-angle: retail stores (deg / 2) x 11930464 BAM — the cone
+             * tests compare |angle diff| <= this half-angle.
+             * [orig: atol -> cdq/sub/sar signed div 2 -> imul 0xB60B60 @0x40ad51] */
+            current.kz_pieslice_bam = (parse_int_n(v, vl) / 2) * 11930464;
+            parsed = 1;
+        } else if (key_is(key, "scorch_id")) {
+            /* Permanent terrain scorch selector [orig: AmmoDef_ParseProperty
+             * stores atol into word +0x74; Projectile_HandleTerrainImpact
+             * reads it before the effect presenter]. */
+            current.scorch_id = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "scar_type")) {
+            /* The impact scar kind [orig: AmmoDef_ParseProperty @0x40aeea..0x40af11,
+             * atol -> word +0x76]. */
+            current.scar_type = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "min_stable_velocity")) {
+            current.min_stable_velocity = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "tumble_error")) {
+            current.tumble_error_fp16 = parse_fixed16_digits_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "weight_in_grains")) {
+            current.weight_in_grains = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "tracerrate")) {
+            current.tracer_rate = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "ai_launcheffect")) {
+            /* [orig: @0x40a8fc stricmp] */
+            copy_token(current.ai_launcheffect, sizeof(current.ai_launcheffect), tokens, 1);
+            parsed = 1;
+        } else if (key_is(key, "ai_launch")) {
+            /* The AI fire sound-set name; the original resolves the set pointer here
+               [orig: @0x40a8c8-0x40a8ef SoundBank_FindSetByNameAnyBank -> +64]. */
+            copy_token(current.ai_launch, sizeof(current.ai_launch), tokens, 1);
+            parsed = 1;
+        } else if (key_is(key, "mf_light")) {
+            /* Presence sets the +36 flag, the value lands beside it
+               [orig: @0x40a81b dword +36 = 1; @0x40a826-0x40a837 +40 = atol]. */
+            current.mf_light = 1;
+            current.mf_light_value = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "tracer_type")) {
+            /* 1-2 style names: a line with no value stores 0, and a single value
+               fills both slots [orig: @0x40a79d-0x40a7fa: count < 2 -> +232 = 0,
+               else the name; count < 3 -> +236 = +232, else the second name]. */
+            current.tracer_type_friendly =
+                    tokens.count < 2 ? 0 : ammo_tracer_type_from_name(v, vl);
+            current.tracer_type_enemy = current.tracer_type_friendly;
+            if (tokens.count >= 3) {
+                const char *enemy = tokens.tokens[2];
+                current.tracer_type_enemy = ammo_tracer_type_from_name(enemy, strlen(enemy));
+            }
+            parsed = 1;
+        } else if (key_is(key, "notarmmedammo")) {
+            copy_token(current.notarmmed_ammo, sizeof(current.notarmmed_ammo), tokens, 1);
+            parsed = 1;
+        } else if (key_is(key, "frndlytrcrid")) {
+            /* The tracer round's friendly item model, by ITEMS.DEF type id. The
+               original resolves to an item index here (name fallback, warning on
+               miss) [orig: @0x40a5f8-0x40a63f -> +16]; we keep the raw type id. */
+            current.frndly_trcr_type_id = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "foetrcrid")) {
+            /* [orig: @0x40a646-0x40a68d -> +20] */
+            current.foe_trcr_type_id = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "light_impact")) {
+            /* The impact flash light: radius (16.16) + packed RGB + fade
+               seconds -> 62 Hz ticks, 0 -> the witnessed 10-tick default; every
+               token read unconditionally [orig: @0x40af79 -> +132/+128/+136;
+               default @0x40b005]. */
+            const char *radius = tokens.token(1);
+            current.light_impact_radius_fp16 = parse_fixed16_digits_n(radius, strlen(radius));
+            current.light_impact_color = packed_rgb(tokens);
+            const char *fade = tokens.token(5);
+            current.light_impact_ticks = parse_age_ticks_n(fade, strlen(fade));
+            if (current.light_impact_ticks == 0) current.light_impact_ticks = 10;
+            parsed = 1;
+        } else if (key_is(key, "light_move")) {
+            /* The in-flight round glow: radius (16.16) + packed RGB, every token
+               read unconditionally [orig: @0x40a2d0 'light_move' -> +120 =
+               ParseFixedPoint16, +124 = (atol(r) << 16) | (atol(g) << 8) | atol(b)].
+               No range clamps — the original's shifted adds bleed out-of-range
+               components upward [orig: ((r<<8)+g)<<8 + b @0x40a2d0]. */
+            const char *radius = tokens.token(1);
+            current.light_move_radius_fp16 = parse_fixed16_digits_n(radius, strlen(radius));
+            current.light_move_color = packed_rgb(tokens);
+            parsed = 1;
+        } else if (key_is(key, "turnrate_maxpit")) {
+            /* deg/s (fractional allowed) -> BAM/tick:
+               (192426 * fp16 + 0x8000) >> 16 [orig: AmmoDef_ParseTurnRate @0x40a130,
+               stored +0x50 @0x40adf0]; the guided pursuit clamp
+               (world/guided_missile_flight.h). */
+            current.turnrate_maxpit =
+                (int)(((long long)192426 * parse_fixed16_digits_n(v, vl) + 0x8000) >> 16);
+            parsed = 1;
+        } else if (key_is(key, "turnrate_maxyaw")) {
+            /* [orig: AmmoDef_ParseTurnRate @0x40a130, stored +0x54 @0x40ae1e] */
+            current.turnrate_maxyaw =
+                (int)(((long long)192426 * parse_fixed16_digits_n(v, vl) + 0x8000) >> 16);
+            parsed = 1;
+        }
+
+        if (!parsed) {
+            DA_PUSH_RAW(current.raw_lines, current.raw_lines_count, raw_cap, line, line_len);
+        }
+        return false;
+    });
+
+    /* The def the walk stopped in, or that the file never closes, was allocated
+       at its `ammo` line and stays in the table [orig: AmmoDef_AllocateSlot
+       @0x409A20 from the `ammo` arm]. */
+    if (in_block) DA_PUSH(out->entries, out->count, entries_cap, current);
+
+    return 0;
+}
 
 int def_parse_ammo(const char *path, DefAmmoFile *out) {
     memset(out, 0, sizeof(*out));
@@ -105,371 +467,7 @@ int def_parse_ammo(const char *path, DefAmmoFile *out) {
 int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    char *buf = (char *)malloc(size + 1);
-    if (!buf) return -1;
-    memcpy(buf, data, size);
-    buf[size] = '\0';
-    int rc = parse_ammo_buffer(buf, size, out);
-    free(buf);
-    return rc;
-}
-
-static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
-
-    size_t entries_cap = 0;
-    LineIter it = {buf, file_len, 0};
-    const char *line; size_t line_len;
-
-    DefAmmoDef current;
-    memset(&current, 0, sizeof(current));
-    int in_block = 0, in_effects = 0;
-    size_t raw_cap = 0, eff_cap = 0;
-
-    char lower[1024];
-
-    while (next_line(&it, &line, &line_len)) {
-        size_t tlen;
-        const char *trimmed = trim_span(line, line_len, &tlen);
-        if (tlen == 0) continue;
-
-        size_t ll = tlen < sizeof(lower) - 1 ? tlen : sizeof(lower) - 1;
-        to_lower_buf(lower, trimmed, ll);
-
-        /* Effects table */
-        if (lower_starts_with(lower, ll, "effects_table", 13)) {
-            in_effects = 1;
-            continue;
-        }
-        if (in_effects) {
-            if (ll == 3 && memcmp(lower, "end", 3) == 0) {
-                in_effects = 0;
-                continue;
-            }
-            Token tok[MAX_TOKENS];
-            int n = tokenize(trimmed, tlen, tok, MAX_TOKENS);
-            if (n >= 4) {
-                DefEffectTableEntry e;
-                memset(&e, 0, sizeof(e));
-                safe_copy(e.surface_type, sizeof(e.surface_type), tok[0].s, tok[0].len);
-                safe_copy(e.hit_effect, sizeof(e.hit_effect), tok[1].s, tok[1].len);
-                safe_copy(e.impact_sound, sizeof(e.impact_sound), tok[2].s, tok[2].len);
-                e.value = parse_int_n(tok[3].s, tok[3].len);
-                DA_PUSH(current.effects_table, current.effects_table_count, eff_cap, e);
-            }
-            continue;
-        }
-
-        /* Block start */
-        if (!in_block && lower_starts_with(lower, ll, "ammo ", 5)) {
-            memset(&current, 0, sizeof(current));
-            raw_cap = 0; eff_cap = 0;
-            size_t nlen;
-            const char *nm = trim_span(trimmed + 5, tlen - 5, &nlen);
-            safe_copy(current.name, sizeof(current.name), nm, nlen);
-            in_block = 1;
-            continue;
-        }
-
-        if (!in_block) continue;
-
-        if (ll == 3 && memcmp(lower, "end", 3) == 0) {
-            DA_PUSH(out->entries, out->count, entries_cap, current);
-            memset(&current, 0, sizeof(current));
-            raw_cap = 0; eff_cap = 0;
-            in_block = 0;
-            continue;
-        }
-
-        int parsed = 0;
-        if (lower_starts_with(lower, ll, "velocity", 8)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-            current.velocity = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "heat_det_range", 14)) {
-            // [orig: AmmoDef_ParseProperty @0x40a2d0, heat_det_range]
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
-            current.heat_det_range = static_cast<int16_t>(parse_fixed16_digits_n(v, vl) >> 16);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "boresight_maxang", 16)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
-            current.boresight_maxang = static_cast<int32_t>(11930464u *
-                static_cast<uint32_t>(parse_int_n(v, vl)));
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "min_damage", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.min_damage = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "max_damage", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.max_damage = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "penetration_impact", 18)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
-            current.penetration_impact = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "penetration_kz", 14)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
-            current.penetration_kz = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "armor_density", 13)) {
-            // [orig: AmmoDef_ParseProperty @0x40ac29..0x40ac74]
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-            Token tok[3];
-            const int count = tokenize(v, vl, tok, 3);
-            for (int c = 0; c < count; ++c)
-                current.armor_density[c] = parse_int_n(tok[c].s, tok[c].len);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "secondary_effect", 16)) {
-            /* The blast's per-victim effect [orig: @0x40aa15..0x40aa36
-               CEffectWorld_InternEffectHandle -> +0x48]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
-            Token tok[1];
-            if (tokenize(v, vl, tok, 1) >= 1)
-                safe_copy(current.secondary_effect, sizeof(current.secondary_effect), tok[0].s,
-                          tok[0].len);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "kz_sound", 8)) {
-            /* The blast's per-victim sound set [orig: @0x40a92a..0x40a94b
-               SoundBank_FindSetByNameAnyBank -> +0x4C]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-            Token tok[1];
-            if (tokenize(v, vl, tok, 1) >= 1)
-                safe_copy(current.kz_sound, sizeof(current.kz_sound), tok[0].s, tok[0].len);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "secondary_anim", 14)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
-            current.secondary_anim = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "kz_physics", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.kz_physics = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "recoil", 6)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
-            parse_ints(v, vl, current.recoil, 3);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "flag", 4)) {
-            /* OR the named bit; first table match wins [orig: @0x813500 walk]. An
-               unrecognized name is skipped (the original warns). */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
-            Token tok[1];
-            if (tokenize(v, vl, tok, 1) >= 1) {
-                char fl[64];
-                size_t fn = tok[0].len < sizeof(fl) - 1 ? tok[0].len : sizeof(fl) - 1;
-                to_lower_buf(fl, tok[0].s, fn);
-                for (size_t fi = 0; fi < sizeof(k_ammo_flag_names) / sizeof(k_ammo_flag_names[0]); ++fi) {
-                    if (strlen(k_ammo_flag_names[fi].name) == fn &&
-                        memcmp(k_ammo_flag_names[fi].name, fl, fn) == 0) {
-                        current.flags |= k_ammo_flag_names[fi].bit;
-                        break;
-                    }
-                }
-            }
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "max_age", 7)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
-            current.max_age_ticks = parse_age_ticks_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "arm_age", 7)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
-            current.arm_age_ticks = parse_age_ticks_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "error", 5)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
-            current.error_fp16 = parse_fixed16_digits_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "drag", 4)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
-            current.drag_fp16 = parse_fixed16_digits_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "bullet_radius", 13)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-            current.bullet_radius_fp16 = parse_fixed16_digits_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "spread_count", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.spread_count = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "kztype", 6)) {
-            /* Full-name match against the 8-entry table; only 1..7 accepted
-               [orig: @0x40a2d0 rejects index 0/unknown as "bad kill zone type"]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
-            Token tok[1];
-            if (tokenize(v, vl, tok, 1) >= 1) {
-                char kz[48];
-                size_t kn = tok[0].len < sizeof(kz) - 1 ? tok[0].len : sizeof(kz) - 1;
-                to_lower_buf(kz, tok[0].s, kn);
-                for (int ki = 1; ki < 8; ++ki) {
-                    if (strlen(k_ammo_kz_names[ki]) == kn &&
-                        memcmp(k_ammo_kz_names[ki], kz, kn) == 0) {
-                        current.kztype = ki;
-                        break;
-                    }
-                }
-            }
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "kz_damage", 9)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.kz_damage = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "kz_minradius", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.kz_minradius_fp16 = parse_fixed16_digits_n(v, vl); /* +52 [orig: §5.60 map] */
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "kz_maxradius", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.kz_maxradius_fp16 = parse_fixed16_digits_n(v, vl); /* +56 */
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "kz_pieslice", 11)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            /* HALF-angle: retail stores (deg / 2) x 11930464 BAM — the cone
-             * tests compare |angle diff| <= this half-angle.
-             * [orig: atol -> cdq/sub/sar signed div 2 -> imul 0xB60B60 @0x40ad51] */
-            current.kz_pieslice_bam = (parse_int_n(v, vl) / 2) * 11930464;
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "scorch_id", 9)) {
-            /* Permanent terrain scorch selector [orig: AmmoDef_ParseProperty
-             * stores atol into word +0x74; Projectile_HandleTerrainImpact
-             * reads it before the effect presenter]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.scorch_id = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "scar_type", 9)) {
-            /* The impact scar kind [orig: AmmoDef_ParseProperty @0x40aeea..0x40af11,
-             * atol -> word +0x76]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.scar_type = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "min_stable_velocity", 19)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
-            current.min_stable_velocity = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "tumble_error", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.tumble_error_fp16 = parse_fixed16_digits_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "weight_in_grains", 16)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
-            current.weight_in_grains = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "tracerrate", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.tracer_rate = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "ai_launcheffect", 15)) {
-            /* Must precede "ai_launch" in this starts_with chain (prefix collision;
-               the original compares exact tokens [orig: @0x40a8fc stricmp]). */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 15, &vl);
-            Token tok[1];
-            if (tokenize(v, vl, tok, 1) >= 1)
-                safe_copy(current.ai_launcheffect, sizeof(current.ai_launcheffect), tok[0].s,
-                          tok[0].len);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "ai_launch", 9)) {
-            /* The AI fire sound-set name; the original resolves the set pointer here
-               [orig: @0x40a8c8-0x40a8ef SoundBank_FindSetByNameAnyBank -> +64]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            Token tok[1];
-            if (tokenize(v, vl, tok, 1) >= 1)
-                safe_copy(current.ai_launch, sizeof(current.ai_launch), tok[0].s, tok[0].len);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "mf_light", 8)) {
-            /* Presence sets the +36 flag, the value lands beside it
-               [orig: @0x40a81b dword +36 = 1; @0x40a826-0x40a837 +40 = atol]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-            current.mf_light = 1;
-            current.mf_light_value = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "tracer_type", 11)) {
-            /* 1-2 style names; a single value fills both slots
-               [orig: @0x40a79d-0x40a7fa: argc >= 2 -> +232, argc >= 3 -> +236,
-               else +236 = +232]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            Token tok[2];
-            int tn = tokenize(v, vl, tok, 2);
-            if (tn >= 1) {
-                current.tracer_type_friendly = ammo_tracer_type_from_name(tok[0].s, tok[0].len);
-                current.tracer_type_enemy =
-                        tn >= 2 ? ammo_tracer_type_from_name(tok[1].s, tok[1].len)
-                                : current.tracer_type_friendly;
-            }
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "notarmmedammo", 13)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-            Token tok[1];
-            if (tokenize(v, vl, tok, 1) >= 1)
-                safe_copy(current.notarmmed_ammo, sizeof(current.notarmmed_ammo), tok[0].s,
-                          tok[0].len);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "frndlytrcrid", 12)) {
-            /* The tracer round's friendly item model, by ITEMS.DEF type id. The
-               original resolves to an item index here (name fallback, warning on
-               miss) [orig: @0x40a5f8-0x40a63f -> +16]; we keep the raw type id. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.frndly_trcr_type_id = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "foetrcrid", 9)) {
-            /* [orig: @0x40a646-0x40a68d -> +20] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.foe_trcr_type_id = parse_int_n(v, vl);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "light_impact", 12)) {
-            /* The impact flash light: radius (16.16) + packed RGB + fade
-               seconds -> 62 Hz ticks, 0 -> the witnessed 10-tick default
-               [orig: @0x40af79 -> +132/+128/+136; default @0x40b005]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            Token tok[5];
-            int tn = tokenize(v, vl, tok, 5);
-            if (tn >= 1) current.light_impact_radius_fp16 = parse_fixed16_digits_n(tok[0].s, tok[0].len);
-            if (tn >= 4) {
-                current.light_impact_color =
-                        ((parse_int_n(tok[1].s, tok[1].len) << 8) +
-                         parse_int_n(tok[2].s, tok[2].len)) * 256 +
-                        parse_int_n(tok[3].s, tok[3].len);
-            }
-            if (tn >= 5) current.light_impact_ticks = parse_age_ticks_n(tok[4].s, tok[4].len);
-            if (current.light_impact_ticks == 0) current.light_impact_ticks = 10;
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "light_move", 10)) {
-            /* The in-flight round glow: radius (16.16) + packed RGB
-               [orig: @0x40a2d0 'light_move' -> +120 = ParseFixedPoint16,
-               +124 = (atol(r) << 16) | (atol(g) << 8) | atol(b)]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            Token tok[4];
-            int tn = tokenize(v, vl, tok, 4);
-            if (tn >= 1) current.light_move_radius_fp16 = parse_fixed16_digits_n(tok[0].s, tok[0].len);
-            if (tn >= 4) {
-                /* No range clamps — the original's shifted adds bleed out-of-range
-                   components upward [orig: ((r<<8)+g)<<8 + b @0x40a2d0]. */
-                current.light_move_color =
-                        ((parse_int_n(tok[1].s, tok[1].len) << 8) +
-                         parse_int_n(tok[2].s, tok[2].len)) * 256 +
-                        parse_int_n(tok[3].s, tok[3].len);
-            }
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "turnrate_maxpit", 15)) {
-            /* deg/s (fractional allowed) -> BAM/tick:
-               (192426 * fp16 + 0x8000) >> 16 [orig: AmmoDef_ParseTurnRate @0x40a130,
-               stored +0x50 @0x40adf0]; the guided pursuit clamp
-               (world/guided_missile_flight.h). */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 15, &vl);
-            current.turnrate_maxpit =
-                (int)(((long long)192426 * parse_fixed16_digits_n(v, vl) + 0x8000) >> 16);
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "turnrate_maxyaw", 15)) {
-            /* [orig: AmmoDef_ParseTurnRate @0x40a130, stored +0x54 @0x40ae1e] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 15, &vl);
-            current.turnrate_maxyaw =
-                (int)(((long long)192426 * parse_fixed16_digits_n(v, vl) + 0x8000) >> 16);
-            parsed = 1;
-        }
-
-        if (!parsed) {
-            DA_PUSH_RAW(current.raw_lines, current.raw_lines_count, raw_cap, line, line_len);
-        }
-    }
-
-    return 0;
+    return parse_ammo_buffer((const char *)data, size, out);
 }
 
 void def_free_ammo(DefAmmoFile *f) {

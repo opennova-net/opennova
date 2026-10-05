@@ -56,28 +56,46 @@ bool run_text_fallback() {
 	return true;
 }
 
+// The .aip walk is the shared one [orig: AIProfile_LoadOrFind -> File_ParseASCIIFile
+// @0x45FE45 -> AIProfile_ParseProperty @0x45de70]: a comma separates, `//` ends the
+// line, a key with no value reads "" (atol 0) rather than being skipped, and the
+// game's atof takes a `d` exponent.
+bool run_aip_walk() {
+	const std::string text =
+			"type GROUND\r\n"
+			"rank,7 // seven\r\n"
+			"radio_distance 300\r\n"
+			"radio_distance\r\n"
+			"react_time 1d1\r\n";
+	const auto prof = opennova::aip::parse_profile(
+			reinterpret_cast<const uint8_t *>(text.data()), text.size());
+	return expect(prof.type == 2 && prof.rank == 7 && prof.radio_distance == 0 &&
+						prof.react_ticks == 625,
+			"aip: the shared walk (comma, comment, bare key, d exponent)");
+}
+
 // .aip parse (engine/formats/aip): the witnessed GROUND key set — speeds,
 // tabs, case-insensitive keys, junk lines, the type gate, and the weapon
 // blocks with their exact conversions [orig: AIProfile_ParseProperty
 // @0x45de70].
 bool run_aip_parse() {
 	const std::string text =
-			"; comment line\n"
-			"type GROUND\n"
+			"; comment line\r\n"
+			"type GROUND\r\n"
 			"PATROL_speed\t5\r\n"
-			"combat_speed 12 trailing junk\n"
-			"unrelated 99\n"
-			"aim_skill 9\n"
-			"react_time 2\n"
-			"primary_weap 50cal\n"
-			"primary_ammo 200\n"
-			"primary_rate 0.5\n"
-			"primary_fov 45\n"
-			"primary_range 300\n"
-			"primary_facing 180\n"
-			"primary_flags WEAPON_TURRET WEAPON_SLOW\n"
-			"secondary_flags WEAPON_PITCHLOCKED_MINUS45\n"
-			"COMBAT_FLAGS FOLLOW_WP RC_FIRE\n";
+			"combat_speed 12 trailing junk\r\n"
+			"unrelated 99\r\n"
+			"aim_skill 9\r\n"
+			"react_time 2\r\n"
+			"primary_weap 50cal\r\n"
+			"primary_ammo 200\r\n"
+			"primary_rate 0.5\r\n"
+			"primary_fov 45\r\n"
+			"primary_range 300\r\n"
+			"primary_facing 180\r\n"
+			"primary_flags WEAPON_TURRET WEAPON_SLOW\r\n"
+			"secondary_flags WEAPON_PITCHLOCKED_MINUS45\r\n"
+			"COMBAT_FLAGS FOLLOW_WP RC_FIRE\r\n";
 	std::vector<uint8_t> bytes(text.begin(), text.end());
 	const opennova::aip::Profile row =
 			opennova::aip::parse_profile(bytes.data(), bytes.size());
@@ -107,7 +125,7 @@ bool run_aip_parse() {
 
 	// Keys BEFORE a type line (or with no type at all) are ignored — the
 	// dispatch is type-gated exactly like retail's +16 branch.
-	const std::string untyped = "patrol_speed 7\n";
+	const std::string untyped = "patrol_speed 7\r\n";
 	std::vector<uint8_t> ub(untyped.begin(), untyped.end());
 	const opennova::aip::Profile none =
 			opennova::aip::parse_profile(ub.data(), ub.size());
@@ -116,7 +134,7 @@ bool run_aip_parse() {
 		return false;
 
 	// ORGANIC parses nothing beyond type [orig: the type-3 early return].
-	const std::string organic = "type ORGANIC\npatrol_speed 7\n";
+	const std::string organic = "type ORGANIC\r\npatrol_speed 7\r\n";
 	std::vector<uint8_t> ob(organic.begin(), organic.end());
 	const opennova::aip::Profile org =
 			opennova::aip::parse_profile(ob.data(), ob.size());
@@ -131,24 +149,24 @@ bool run_aip_parse() {
 	// SHARED keys (view/radar) still apply, and the GROUND rows stay untouched.
 	// [orig: the type-1 arms of AIProfile_ParseProperty @0x45f684..0x45f9eb]
 	const std::string helo =
-			"type HELO\n"
-			"patrol_speed 30\n"
-			"patrol_altitude 40\n"
-			"patrol_climb 8\n"
-			"combat_speed 45\n"
-			"combat_altitude 60\n"
-			"combat_climb 12\n"
-			"turn_rate 45\n"
-			"accel_time 3\n"
-			"use_waypoint_z 1\n"
-			"min_agl 15\n"
-			"min_speed 10\n"
-			"view_dist 400\n";
+			"type HELO\r\n"
+			"patrol_speed 30\r\n"
+			"patrol_altitude 40\r\n"
+			"patrol_climb 8\r\n"
+			"combat_speed 45\r\n"
+			"combat_altitude 60\r\n"
+			"combat_climb 12\r\n"
+			"turn_rate 45\r\n"
+			"accel_time 3\r\n"
+			"use_waypoint_z 1\r\n"
+			"min_agl 15\r\n"
+			"min_speed 10\r\n"
+			"view_dist 400\r\n";
 	const std::string extended = helo +
-			"subtype plane\nflight_skill 9\ndefault_state helo_combat\n"
-			"hunt_flags MAINTAIN_SPEED\nhunt_limit 1.5\nalert RED\nrank 7\n"
-			"radio_distance 300\nradio_delay 10\ncheck_six_rate 2\ntarget_eval_rate 3\n"
-			"evade_flags COUNTER ATEAM RC_FIRE\n";
+			"subtype plane\r\nflight_skill 9\r\ndefault_state helo_combat\r\n"
+			"hunt_flags MAINTAIN_SPEED\r\nhunt_limit 1.5\r\nalert RED\r\nrank 7\r\n"
+			"radio_distance 300\r\nradio_delay 10\r\ncheck_six_rate 2\r\ntarget_eval_rate 3\r\n"
+			"evade_flags COUNTER ATEAM RC_FIRE\r\n";
 	const auto extra = opennova::aip::parse_profile(
 			reinterpret_cast<const uint8_t *>(extended.data()), extended.size());
 	if (!expect(extra.subtype == 2 && extra.drive_skill == 4 && extra.default_state == 8,
@@ -164,8 +182,8 @@ bool run_aip_parse() {
 				"aip: radio/evaluation conversions and evade-only flags"))
 		return false;
 	const std::string ground_extra =
-			"type GROUND\ndefault_state GROUND_FOLLOWWP\npatrol_speed 2.5\n"
-			"combat_speed 5.75\nturn_rate 30\naccel_time 2\ndrive_skill -2\nview_fov 360\n";
+			"type GROUND\r\ndefault_state GROUND_FOLLOWWP\r\npatrol_speed 2.5\r\n"
+			"combat_speed 5.75\r\nturn_rate 30\r\naccel_time 2\r\ndrive_skill -2\r\nview_fov 360\r\n";
 	const auto gp = opennova::aip::parse_profile(
 			reinterpret_cast<const uint8_t *>(ground_extra.data()), ground_extra.size());
 	if (!expect(gp.default_state == 17 && gp.has_ground_patrol_speed &&
@@ -224,9 +242,9 @@ bool run_aip_resolve() {
 	mission.organics.push_back(with_profile("empty"));  // keyless .aip
 
 	std::map<std::string, std::string> files;
-	files["helo1.aip"] = "type GROUND\npatrol_speed 7\ncombat_speed 9\n";
-	files["truck2.aip"] = "type GROUND\ncombat_speed 3\n";
-	files["empty.aip"] = "nothing_relevant 1\n";
+	files["helo1.aip"] = "type GROUND\r\npatrol_speed 7\r\ncombat_speed 9\r\n";
+	files["truck2.aip"] = "type GROUND\r\ncombat_speed 3\r\n";
+	files["empty.aip"] = "nothing_relevant 1\r\n";
 	const ms::BootFileSource src = source_over(&files);
 
 	const std::vector<ms::PromoteOptions::AiProfileRow> rows =
@@ -265,8 +283,8 @@ bool run_aip_fallback() {
 	mission.organics.push_back(soldier); // nameless organic: no fallback
 
 	std::map<std::string, std::string> files;
-	files["helo1.aip"] = "type HELO\npatrol_speed 30\n";
-	files["d_5ton.aip"] = "type GROUND\ncombat_speed 4\n";
+	files["helo1.aip"] = "type HELO\r\npatrol_speed 30\r\n";
+	files["d_5ton.aip"] = "type GROUND\r\ncombat_speed 4\r\n";
 	const ms::BootFileSource src = source_over(&files);
 	const auto defaults = [](int32_t type_id) {
 		ms::PromoteOptions::AiProfileDefaults d;
@@ -296,6 +314,7 @@ int main() {
 	bool ok = true;
 	ok &= run_text_fallback();
 	ok &= run_aip_parse();
+	ok &= run_aip_walk();
 	ok &= run_aip_resolve();
 	ok &= run_aip_fallback();
 	if (!ok) return 1;

@@ -87,6 +87,35 @@ int main() {
 			return 1;
 	}
 
+	// The lines and tokens are the shared retail walk's: a CR LF pair ends a line and an LF
+	// alone does not, so an LF-only file is one line whose first token is its key; keys
+	// compare without case; a value is a token, numbers the CRT's atol and atof (a `d`
+	// exponent); a time token reads by position; a color's blue is token 3, which a short
+	// line reads where an earlier, longer line left it; and a non-color key inside a block
+	// reads as it does outside one. [orig: Environment_LoadTimeOfDayConfig @ 0x57db30 ->
+	// File_ParseASCIIFile @ 0x53d810; TimeOfDay_ParseProperty @ 0x57c590, the stricmp of
+	// tokens[1] and atol of tokens[2..4]; Environment_ParseTimeString @ 0x57c500]
+	{
+		opennova::env::Config lf;
+		std::string err;
+		std::istringstream lf_text("fog_level 640\nfog_type 2\n");
+		if (!expect(opennova::env::load_env(lf_text, lf, err) && near(lf.fog_level, 640.0f) &&
+		                    lf.fog_type == opennova::env::Config().fog_type,
+		            "an LF-only file is one line"))
+			return 1;
+		opennova::env::Config walked;
+		std::istringstream text("enviro_name \"Named\" // a note\r\nENVSCALE 1d1\r\nFOG_TYPE 3\r\n"
+		                        "curtime 30\r\nnote aaaaaaaaaaaaaaa b 99\r\n"
+		                        "tod_begin 1200\r\n    sun_rgb 1,2\r\n    water_murk 0.5\r\ntod_end\r\n");
+		if (!expect(opennova::env::load_env(text, walked, err) && walked.name == "Named" &&
+		                    near(walked.envscale, 10.0f) && walked.fog_type == 3 && walked.curtime == 0 &&
+		                    walked.keyframes.size() == 1 && walked.keyframes[0].time == 1200 &&
+		                    near(walked.keyframes[0].sun.g, 2.0f / 255.0f) &&
+		                    near(walked.keyframes[0].sun.b, 99.0f / 255.0f) && near(walked.water_murk, 0.5f),
+		            "the retail walk's tokens, keys, numbers, times, stale blue and in-block globals"))
+			return 1;
+	}
+
 	// The scratch keyframe (env #39): a color line outside every tod_begin block lands there,
 	// packed with the envscale read before it [orig: Color_ScaleRGBAndPack @ 0x57f890], fog
 	// mirroring into the seeded skyfog; the writer puts those lines ahead of the envscale so

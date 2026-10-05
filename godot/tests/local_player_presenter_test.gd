@@ -122,7 +122,7 @@ func _stage_root() -> String:
 	var base_items := FileAccess.get_file_as_string(items_path)
 	var items := FileAccess.open(items_path, FileAccess.WRITE)
 	assert_not_null(items, "staged items.def is writable")
-	items.store_string("""begin "Player Character"
+	items.store_string(TestFs.crlf("""begin "Player Character"
   id 105310
   type person
   graphic person
@@ -137,14 +137,14 @@ begin "Night Vision Goggles"
   graphic person
 end
 
-""" + base_items)
+""" + base_items))
 	items.close()
 	# The player's character registry: retail's ONLY first-person arms source is
 	# the selected combo's arms part (weapon.def gfx1a is a discarded token), so
 	# one good-side combo binds the staged person head/body + the armsG arms.
 	var avatars := FileAccess.open(root_dir.path_join("Avatars.def"), FileAccess.WRITE)
 	assert_not_null(avatars, "staged Avatars.def is writable")
-	avatars.store_string("""define head STAGED_HEAD
+	avatars.store_string(TestFs.crlf("""define head STAGED_HEAD
 {
 	graphic person.3di
 	camo 0 0 0
@@ -169,7 +169,7 @@ nationality 0 STAGED_NAT
 		combo 1 STAGED_HEAD STAGED_BODY STAGED_ARMS
 	}
 }
-""")
+"""))
 	avatars.close()
 	for pair in [
 		["person.3di", PERSON_FIXTURE],

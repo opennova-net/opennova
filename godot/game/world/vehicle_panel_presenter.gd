@@ -29,8 +29,10 @@ func update(hud: HudOverlay, hud_pos: HudPos, item_db: ItemDatabase,
 	if view == null or not view.shown or hud_pos == null or item_db == null:
 		_hide(hud)
 		return
-	var sid := item_db.get_sid(view.item_id)
-	var block: VehicleHudBlock = hud_pos.get_vehicle_hud(sid) if not sid.is_empty() else null
+	# An item whose alias stayed empty (no `end` closed it) matches a block
+	# with no sid, as the hudpos commit's _stricmp does; an unknown item none.
+	var block: VehicleHudBlock = hud_pos.get_vehicle_hud(item_db.get_sid(view.item_id)) \
+			if item_db.has_item(view.item_id) else null
 	if block == null:
 		# No authored block for this vehicle: retail draws no panel for it
 		# (the shipped sid whose art is missing behaves the same).

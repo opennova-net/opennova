@@ -20,9 +20,9 @@ int main(int argc, char **argv) {
     // drift. Each authored column retains Math_ParseFixedPoint16 precision.
     {
         static const char kStability[] =
-            "weapon \"WPN_DEFAULT_STABILITY\"\nend\n"
-            "weapon \"WPN_CUSTOM_STABILITY\"\nStability 0.5, 2, 1.5\nend\n"
-            "weapon \"WPN_ZERO_STABILITY\"\nstability 0, 0, 0\nend\n";
+            "weapon \"WPN_DEFAULT_STABILITY\"\r\nend\r\n"
+            "weapon \"WPN_CUSTOM_STABILITY\"\r\nStability 0.5, 2, 1.5\r\nend\r\n"
+            "weapon \"WPN_ZERO_STABILITY\"\r\nstability 0, 0, 0\r\nend\r\n";
         DefWeaponsFile parsed{};
         if (def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(kStability),
                 sizeof(kStability) - 1, &parsed) != 0 || parsed.count != 3) return 1;
@@ -540,16 +540,19 @@ int main(int argc, char **argv) {
         /* WeaponDef_CreateBlendNamedMaterial recognizes all six tokens at
            0x5401b9..0x540257. Keep the established Blend/Add/BlendAt values
            stable while assigning distinct transport values to the three
-           previously dropped spellings. */
+           previously dropped spellings. A weapon record holds four SIGHTS
+           rows, so the six spellings span two weapons. */
         static const char kSightBlendDef[] =
-            "weapon \"WPN_SIGHT_BLEND_TEST\"\n"
-            "\tsights blend.tga 0 0 8 8 blend\n"
-            "\tsights add.tga 0 0 8 8 add\n"
-            "\tsights blendat.tga 0 0 8 8 blendat\n"
-            "\tsights multiply.tga 0 0 8 8 multiply\n"
-            "\tsights addat.tga 0 0 8 8 addat\n"
-            "\tsights multiplyat.tga 0 0 8 8 multiplyat\n"
-            "end\n";
+            "weapon \"WPN_SIGHT_BLEND_TEST\"\r\n"
+            "\tsights blend.tga 0 0 8 8 blend\r\n"
+            "\tsights add.tga 0 0 8 8 add\r\n"
+            "\tsights blendat.tga 0 0 8 8 blendat\r\n"
+            "end\r\n"
+            "weapon \"WPN_SIGHT_BLEND_TEST_2\"\r\n"
+            "\tsights multiply.tga 0 0 8 8 multiply\r\n"
+            "\tsights addat.tga 0 0 8 8 addat\r\n"
+            "\tsights multiplyat.tga 0 0 8 8 multiplyat\r\n"
+            "end\r\n";
         static const int expected[] = {
             DEF_SIGHT_BLEND_BLEND,
             DEF_SIGHT_BLEND_ADD,
@@ -562,17 +565,19 @@ int main(int argc, char **argv) {
         memset(&sf, 0, sizeof(sf));
         if (def_parse_weapons_memory((const unsigned char *)kSightBlendDef,
                                      sizeof(kSightBlendDef) - 1, &sf) != 0 ||
-            sf.count != 1 || sf.entries[0].sights_count != 6) {
+            sf.count != 2 || sf.entries[0].sights_count != 3 ||
+            sf.entries[1].sights_count != 3) {
             fprintf(stderr, "FAIL: sight blend-token inline parse failed\n");
             def_free_weapons(&sf);
             def_free_weapons(&wf);
             return 1;
         }
         for (size_t i = 0; i < 6; ++i) {
-            if (sf.entries[0].sights[i].blend != expected[i]) {
+            const int got = sf.entries[i / 3].sights[i % 3].blend;
+            if (got != expected[i]) {
                 fprintf(stderr,
                         "FAIL: sight blend token %zu mapped to %d, expected %d\n",
-                        i, sf.entries[0].sights[i].blend, expected[i]);
+                        i, got, expected[i]);
                 def_free_weapons(&sf);
                 def_free_weapons(&wf);
                 return 1;
@@ -580,6 +585,174 @@ int main(int argc, char **argv) {
         }
         def_free_weapons(&sf);
         printf("sight blend-token map OK\n");
+    }
+    {
+        /* renderfov is atol then fild: a whole number of degrees [orig:
+           WeaponDefs_ParseLineCallback, `call j__atol` @0x544840, `fild`
+           @0x54484C]. */
+        static const char kFov[] =
+            "weapon \"WPN_FOV\"\r\n"
+            "\trenderfov 80.5\r\n"
+            "end\r\n";
+        DefWeaponsFile ff;
+        memset(&ff, 0, sizeof(ff));
+        const int rc = def_parse_weapons_memory((const unsigned char *)kFov, sizeof(kFov) - 1, &ff);
+        const bool correct = rc == 0 && ff.count == 1 && ff.entries[0].renderfov == 80.0f;
+        if (!correct)
+            fprintf(stderr, "FAIL: renderfov 80.5 read %g\n",
+                    ff.count == 1 ? (double)ff.entries[0].renderfov : -1.0);
+        def_free_weapons(&ff);
+        if (!correct) {
+            def_free_weapons(&wf);
+            return 1;
+        }
+        printf("renderfov atol OK\n");
+    }
+    {
+        /* A weapon's name keeps its first 32 characters [orig:
+           WeaponDefs_ParseLineCallback, strncpy(def+0x14, tokens[2], 0x20)
+           @0x543737]. */
+        static const char kLongName[] =
+            "weapon \"WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789\"\r\n"
+            "end\r\n";
+        DefWeaponsFile nf;
+        memset(&nf, 0, sizeof(nf));
+        const int rc = def_parse_weapons_memory((const unsigned char *)kLongName,
+                                                sizeof(kLongName) - 1, &nf);
+        const bool correct = rc == 0 && nf.count == 1 &&
+                strcmp(nf.entries[0].weapon_name, "WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0") == 0;
+        if (!correct)
+            fprintf(stderr, "FAIL: long weapon name kept as '%s'\n",
+                    nf.count == 1 ? nf.entries[0].weapon_name : "");
+        def_free_weapons(&nf);
+        if (!correct) {
+            def_free_weapons(&wf);
+            return 1;
+        }
+        printf("weapon name cut to 32 OK\n");
+    }
+    {
+        /* A SIGHTS row reads by position: the blend mode is token 6 only, and
+           token 7 is the one `scale` or `slide` flag, `slide`'s frame count token
+           8, read only when the line carries 8 tokens or more; a flag word
+           anywhere else is nothing [orig: WeaponDefs_ParseLineCallback @0x543680,
+           the sights arm @0x544AC8: WeaponDef_CreateBlendNamedMaterial(tokens[7])
+           @0x544B3F, the `cmp [esi],8; jl` @0x544B7A, "scale" @0x544B86 and
+           "slide" @0x544BA2 against tokens[8], atol(tokens[9]) @0x544BC3]. */
+        static const char kSightOrderDef[] =
+            "weapon \"WPN_SIGHT_ORDER_TEST\"\r\n"
+            "\tsights a.tga 0 0 8 8 slide 33\r\n"       /* `slide` is the blend name */
+            "\tsights b.tga 0 0 8 8 add blend scale\r\n" /* token 7 is `blend` */
+            "\tsights c.tga 0 0 8 8 add scale\r\n"
+            "\tsights d.tga 0 0 8 8 blendat slide 12\r\n"
+            "end\r\n";
+        DefWeaponsFile of;
+        memset(&of, 0, sizeof(of));
+        if (def_parse_weapons_memory((const unsigned char *)kSightOrderDef,
+                                     sizeof(kSightOrderDef) - 1, &of) != 0 ||
+            of.count != 1 || of.entries[0].sights_count != 4) {
+            fprintf(stderr, "FAIL: positional sights inline parse failed\n");
+            def_free_weapons(&of);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefSightEntry *s = of.entries[0].sights;
+        const bool ok = s[0].blend == DEF_SIGHT_BLEND_BLEND && !s[0].slide && !s[0].scale &&
+                s[1].blend == DEF_SIGHT_BLEND_ADD && !s[1].scale &&
+                s[2].blend == DEF_SIGHT_BLEND_ADD && s[2].scale &&
+                s[3].blend == DEF_SIGHT_BLEND_BLEND_AT && s[3].slide && s[3].slide_frames == 12;
+        if (!ok) {
+            fprintf(stderr, "FAIL: positional sights: %d/%d/%d %d/%d %d/%d %d/%d/%d\n", s[0].blend,
+                    s[0].slide, s[0].scale, s[1].blend, s[1].scale, s[2].blend, s[2].scale,
+                    s[3].blend, s[3].slide, s[3].slide_frames);
+            def_free_weapons(&of);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&of);
+        printf("positional sight rows OK\n");
+    }
+    {
+        /* `charfilter` and `teamfilter` read token 1 only, one class or team a
+           line, and `ammobucket` and the `ammoclass` count are abs(atol)
+           [orig: WeaponDefs_ParseLineCallback @0x543680 — charfilter's table walk
+           over tokens[2] @0x543F40..0x543F6E, teamfilter's @0x543FB5..0x543FE3,
+           ammobucket's cdq/xor/sub @0x544037, the ammoclass count's @0x54423D]. */
+        static const char kFilterDef[] =
+            "weapon \"WPN_FILTER_TEST\"\r\n"
+            "\tcharfilter medic sniper\r\n"
+            "\tteamfilter blue red\r\n"
+            "\tammobucket -3\r\n"
+            "\tammoclass CLASS_TEST -2\r\n"
+            "end\r\n";
+        DefWeaponsFile ff;
+        memset(&ff, 0, sizeof(ff));
+        if (def_parse_weapons_memory((const unsigned char *)kFilterDef, sizeof(kFilterDef) - 1,
+                                     &ff) != 0 || ff.count != 1) {
+            fprintf(stderr, "FAIL: filter inline parse failed\n");
+            def_free_weapons(&ff);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefWeaponDef &w = ff.entries[0];
+        const bool ok = w.charfilter_count == 1 && strcmp(w.charfilter[0], "medic") == 0 &&
+                w.teamfilter_count == 1 && strcmp(w.teamfilter[0], "blue") == 0 &&
+                w.charfilter_mask == 1 && w.teamfilter_mask == 2 && w.ammobucket == 3 &&
+                w.ammo_class_count == 2;
+        if (!ok) {
+            fprintf(stderr, "FAIL: filters read %zu/%zu tokens, masks %d/%d, bucket %d, class count %d\n",
+                    w.charfilter_count, w.teamfilter_count, w.charfilter_mask, w.teamfilter_mask,
+                    w.ammobucket, w.ammo_class_count);
+            def_free_weapons(&ff);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&ff);
+        printf("charfilter/teamfilter token 1 and the abs values OK\n");
+    }
+    {
+        /* SIGHTS rows: a row whose texture is no file is refused, a short line is
+           a row whose missing corners read 0, and a weapon keeps four rows, the
+           record's room ahead of its count [orig: WeaponDefs_ParseLineCallback's
+           sights arm @0x544AC8 — FileSystem_FileExists @0x544AE2, atol of
+           tokens[3..6] @0x544B48..0x544B6C, the count @+0x258 after four 36-byte
+           rows from +0x1C8 @0x544B11..0x544B32]. */
+        static const char kRowsDef[] =
+            "weapon \"WPN_SIGHT_ROWS_TEST\"\r\n"
+            "\tsights short.tga 7\r\n"
+            "\tsights missing.tga 0 0 8 8\r\n"
+            "\tsights two.tga 1 2 3 4\r\n"
+            "\tsights three.tga 1 2 3 4\r\n"
+            "\tsights four.tga 1 2 3 4\r\n"
+            "\tsights five.tga 1 2 3 4\r\n"
+            "end\r\n";
+        const DefFileProbe probe = {
+                [](const void *, const char *name) { return strcmp(name, "missing.tga") != 0; },
+                nullptr};
+        DefWeaponsFile rf;
+        memset(&rf, 0, sizeof(rf));
+        if (def_parse_weapons_memory((const unsigned char *)kRowsDef, sizeof(kRowsDef) - 1, &rf,
+                                     &probe) != 0 || rf.count != 1) {
+            fprintf(stderr, "FAIL: sight rows inline parse failed\n");
+            def_free_weapons(&rf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefWeaponDef &w = rf.entries[0];
+        const bool ok = w.sights_count == 4 && strcmp(w.sights[0].texture, "short.tga") == 0 &&
+                w.sights[0].x1 == 7 && w.sights[0].y1 == 0 && w.sights[0].y2 == 0 &&
+                strcmp(w.sights[1].texture, "two.tga") == 0 &&
+                strcmp(w.sights[3].texture, "four.tga") == 0;
+        if (!ok) {
+            fprintf(stderr, "FAIL: sight rows: %zu rows, first '%s', second '%s'\n", w.sights_count,
+                    w.sights_count > 0 ? w.sights[0].texture : "",
+                    w.sights_count > 1 ? w.sights[1].texture : "");
+            def_free_weapons(&rf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&rf);
+        printf("sight rows: the texture check, short lines and the four-row record OK\n");
     }
     {
         /* The scope-zero table's token forms [orig: 'scope_max_zero'
@@ -590,21 +763,21 @@ int main(int argc, char **argv) {
            a case-insensitive match (stricmp), atof * 65535.0 then ftol, so `2.0`
            stores 131070 and `-.5` truncates -32767.5 toward zero to -32767. */
         static const char kZeroDef[] =
-            "weapon \"WPN_ZERO_FOUR\"\n"
-            "\tscope_max_zero 10 100 200 1\n"
-            "end\n"
-            "weapon \"WPN_ZERO_THREE\"\n"
-            "\tscope_max_zero  1 300 300\n"
-            "end\n"
-            "weapon \"WPN_ZERO_NONE\"\n"
-            "end\n"
-            "weapon \"WPN_ZERO_PARALAX\"\n"
-            "\tscope_max_zero 10 100 300 1\n"
-            "\tScope_Paralax_Distance\t\t2.0\n"
-            "end\n"
-            "weapon \"WPN_ZERO_PARALAX_NEG\"\n"
-            "\tscope_paralax_distance -.5\n"
-            "end\n";
+            "weapon \"WPN_ZERO_FOUR\"\r\n"
+            "\tscope_max_zero 10 100 200 1\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZERO_THREE\"\r\n"
+            "\tscope_max_zero  1 300 300\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZERO_NONE\"\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZERO_PARALAX\"\r\n"
+            "\tscope_max_zero 10 100 300 1\r\n"
+            "\tScope_Paralax_Distance\t\t2.0\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZERO_PARALAX_NEG\"\r\n"
+            "\tscope_paralax_distance -.5\r\n"
+            "end\r\n";
         DefWeaponsFile zf;
         memset(&zf, 0, sizeof(zf));
         if (def_parse_weapons_memory((const unsigned char *)kZeroDef,
@@ -660,9 +833,9 @@ int main(int argc, char **argv) {
     }
     {
         static const char kFovDef[] =
-            "weapon \"WPN_FOVTEST\"\n"
-            "\trenderfov 40\n"
-            "end\n";
+            "weapon \"WPN_FOVTEST\"\r\n"
+            "\trenderfov 40\r\n"
+            "end\r\n";
         DefWeaponsFile ff;
         memset(&ff, 0, sizeof(ff));
         if (def_parse_weapons_memory((const unsigned char *)kFovDef, sizeof(kFovDef) - 1, &ff) != 0 ||
@@ -692,22 +865,22 @@ int main(int argc, char **argv) {
        shifts the per-shot tick count and therefore the whole overheat curve. */
     {
         static const char kHeatDef[] =
-            "weapon \"WPN_HEAT_50\"\n"
-            "\theat_values 2,4\n"
-            "\theat_effect heat, .5, 30, 60\n"
-            "end\n"
-            "weapon \"WPN_HEAT_MINI\"\n"
-            "\theat_values  .8,5\n"
-            "end\n"
-            "weapon \"WPN_HEAT_GRND\"\n"
-            "\theat_values  7,5\n"
-            "end\n"
-            "weapon \"WPN_HEAT_QUAD\"\n"
-            "\theat_values .5,7\n"
-            "end\n"
-            "weapon \"WPN_HEAT_NONE\"\n"
-            "\tclipsize 30\n"
-            "end\n";
+            "weapon \"WPN_HEAT_50\"\r\n"
+            "\theat_values 2,4\r\n"
+            "\theat_effect heat, .5, 30, 60\r\n"
+            "end\r\n"
+            "weapon \"WPN_HEAT_MINI\"\r\n"
+            "\theat_values  .8,5\r\n"
+            "end\r\n"
+            "weapon \"WPN_HEAT_GRND\"\r\n"
+            "\theat_values  7,5\r\n"
+            "end\r\n"
+            "weapon \"WPN_HEAT_QUAD\"\r\n"
+            "\theat_values .5,7\r\n"
+            "end\r\n"
+            "weapon \"WPN_HEAT_NONE\"\r\n"
+            "\tclipsize 30\r\n"
+            "end\r\n";
         struct { int per_shot, decay; } expect[5] = {
             { 1310, 42 },  /* 2 -> 131072/100,  4 -> 262144/6200 */
             {  524, 52 },  /* .8 -> 52429/100,  5 -> 327680/6200 */
@@ -762,9 +935,9 @@ int main(int argc, char **argv) {
        helper cannot pass silently. [orig: Math_ParseFixedPoint16 @ 0x6131f0] */
     {
         static const char kLsbDef[] =
-            "weapon \"WPN_HEAT_LSB\"\n"
-            "\theat_values 0.07,0.07\n"
-            "end\n";
+            "weapon \"WPN_HEAT_LSB\"\r\n"
+            "\theat_values 0.07,0.07\r\n"
+            "end\r\n";
         DefWeaponsFile lf;
         memset(&lf, 0, sizeof(lf));
         if (def_parse_weapons_memory((const unsigned char *)kLsbDef, sizeof(kLsbDef) - 1, &lf) != 0 ||
@@ -789,9 +962,9 @@ int main(int argc, char **argv) {
     }
     {
         static const char kThrDef[] =
-            "weapon \"WPN_HEAT_THR\"\n"
-            "\theat_effect heat, 0.07\n"
-            "end\n";
+            "weapon \"WPN_HEAT_THR\"\r\n"
+            "\theat_effect heat, 0.07\r\n"
+            "end\r\n";
         DefWeaponsFile tf;
         memset(&tf, 0, sizeof(tf));
         if (def_parse_weapons_memory((const unsigned char *)kThrDef, sizeof(kThrDef) - 1, &tf) != 0 ||
@@ -871,22 +1044,22 @@ int main(int argc, char **argv) {
        (= delayend) [orig: @ 0x40279a / @ 0x402b2c]. */
     {
         static const char mixed[] =
-            "weapon \"WPN_MIXED\"\n"
-            "\tflags auto\n"
-            "\taction \"idle\"\n"
-            "\t\tdelayend auto\n"
-            "\t\tanim anim_wpn_idle\n"
-            "\taction \"emptyidle\"\n"
-            "\t\tdelayend auto\n"
-            "\t\tanim anim_wpn_idle\n"
-            "\taction \"fire\"\n"
-            "\t\tdelayend 6\n"
-            "\t\tanim anim_wpn_fire\n"
-            "\tend\n"
-            "\taction \"recoil\"\n"
-            "\t\tdelay 4\n"
-            "\tend\n"
-            "end\n";
+            "weapon \"WPN_MIXED\"\r\n"
+            "\tflags auto\r\n"
+            "\taction \"idle\"\r\n"
+            "\t\tdelayend auto\r\n"
+            "\t\tanim anim_wpn_idle\r\n"
+            "\taction \"emptyidle\"\r\n"
+            "\t\tdelayend auto\r\n"
+            "\t\tanim anim_wpn_idle\r\n"
+            "\taction \"fire\"\r\n"
+            "\t\tdelayend 6\r\n"
+            "\t\tanim anim_wpn_fire\r\n"
+            "\tend\r\n"
+            "\taction \"recoil\"\r\n"
+            "\t\tdelay 4\r\n"
+            "\tend\r\n"
+            "end\r\n";
         DefWeaponsFile wx;
         if (def_parse_weapons_memory((const uint8_t *)mixed, sizeof(mixed) - 1, &wx) != 0) {
             fprintf(stderr, "FAIL: mixed-terminator parse errored\n");
@@ -949,12 +1122,12 @@ int main(int argc, char **argv) {
        @0x4024DA] */
     {
         static const char twice[] =
-            "weapon \"WPN_TWICE\"\n"
-            "\tACTION \"FIRE\"\n\t\tANIM anim_wpn_fire\n\t\tDELAYSTART 4\n\t\tDELAYEND 6\n"
-            "\t\tSOUNDSETEND GS_ONE\n\tEND\n"
-            "\tACTION \"RELOAD\"\n\t\tDELAYEND 9\n\tEND\n"
-            "\taction \"fire\"\n\t\tdelayend 2\n\tend\n"
-            "end\n";
+            "weapon \"WPN_TWICE\"\r\n"
+            "\tACTION \"FIRE\"\r\n\t\tANIM anim_wpn_fire\r\n\t\tDELAYSTART 4\r\n\t\tDELAYEND 6\r\n"
+            "\t\tSOUNDSETEND GS_ONE\r\n\tEND\r\n"
+            "\tACTION \"RELOAD\"\r\n\t\tDELAYEND 9\r\n\tEND\r\n"
+            "\taction \"fire\"\r\n\t\tdelayend 2\r\n\tend\r\n"
+            "end\r\n";
         DefWeaponsFile wt;
         int ok = def_parse_weapons_memory((const uint8_t *)twice, sizeof(twice) - 1, &wt) == 0 &&
                 wt.count == 1 && wt.entries[0].actions_count == 2;
@@ -974,9 +1147,9 @@ int main(int argc, char **argv) {
 
     {
         const char text[] =
-                "weapon TEST_SOUNDS\n"
-                " soundhead MINI_HEAD\n soundfireloop MINI_LOOP\n"
-                " soundtrailoff MINI_TAIL\n soundlockedtone TARGET_LOCK\nend\n";
+                "weapon TEST_SOUNDS\r\n"
+                " soundhead MINI_HEAD\r\n soundfireloop MINI_LOOP\r\n"
+                " soundtrailoff MINI_TAIL\r\n soundlockedtone TARGET_LOCK\r\nend\r\n";
         DefWeaponsFile parsed{};
         if (def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(text),
                 sizeof(text) - 1, &parsed) != 0 || parsed.count != 1) return 1;
@@ -998,23 +1171,23 @@ int main(int argc, char **argv) {
        `8 8` + `scope_min_mag 2`, the common `2`). */
     {
         static const char kScopeDef[] =
-            "weapon \"WPN_ZOOM_TURRET\"\n"
-            "\tscope_max_mag\t10\t2\n"
-            "end\n"
-            "weapon \"WPN_ZOOM_EMP\"\n"
-            "\tscope_max_mag\t8 8\n"
-            "\tscope_min_mag\t2\n"
-            "end\n"
-            "weapon \"WPN_ZOOM_PLAIN\"\n"
-            "\tscope_max_mag\t2\n"
-            "end\n"
-            "weapon \"WPN_ZOOM_FLOOR\"\n"
-            "\tscope_max_mag\t16\n"
-            "\tscope_min_mag\t4\n"
-            "end\n"
-            "weapon \"WPN_ZOOM_NONE\"\n"
-            "\tclipsize 30\n"
-            "end\n";
+            "weapon \"WPN_ZOOM_TURRET\"\r\n"
+            "\tscope_max_mag\t10\t2\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZOOM_EMP\"\r\n"
+            "\tscope_max_mag\t8 8\r\n"
+            "\tscope_min_mag\t2\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZOOM_PLAIN\"\r\n"
+            "\tscope_max_mag\t2\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZOOM_FLOOR\"\r\n"
+            "\tscope_max_mag\t16\r\n"
+            "\tscope_min_mag\t4\r\n"
+            "end\r\n"
+            "weapon \"WPN_ZOOM_NONE\"\r\n"
+            "\tclipsize 30\r\n"
+            "end\r\n";
         struct { float max; int arg2; int min; } expect[5] = {
             { 10.0f, 2, 2 }, { 8.0f, 8, 2 }, { 2.0f, 0, 2 }, { 16.0f, 0, 4 }, { 0.0f, 0, 2 },
         };
@@ -1051,15 +1224,15 @@ int main(int argc, char **argv) {
        @0x543680, pos gate @0x5445EE..0x544613, tpos gate @0x544735..0x54475A] */
     {
         static const char kShortPoseDef[] =
-            "weapon \"WPN_SHORT_POSE\"\n"
-            "\tpos 1.5, 2.5, 3.5, 10, 20, 30\n"
-            "\ttpos 4.5, 5.5, 6.5, 40, 50, 60\n"
-            "\tpos 9, 9, 9, 9, 9\n"
-            "\ttpos 8, 8\n"
-            "end\n"
-            "weapon \"WPN_LONG_POSE\"\n"
-            "\tpos 1, 2, 3, 4, 5, 6, 7\n"
-            "end\n";
+            "weapon \"WPN_SHORT_POSE\"\r\n"
+            "\tpos 1.5, 2.5, 3.5, 10, 20, 30\r\n"
+            "\ttpos 4.5, 5.5, 6.5, 40, 50, 60\r\n"
+            "\tpos 9, 9, 9, 9, 9\r\n"
+            "\ttpos 8, 8\r\n"
+            "end\r\n"
+            "weapon \"WPN_LONG_POSE\"\r\n"
+            "\tpos 1, 2, 3, 4, 5, 6, 7\r\n"
+            "end\r\n";
         DefWeaponsFile pf;
         memset(&pf, 0, sizeof(pf));
         if (def_parse_weapons_memory((const unsigned char *)kShortPoseDef, sizeof(kShortPoseDef) - 1, &pf) != 0 ||
@@ -1095,14 +1268,14 @@ int main(int argc, char **argv) {
        [orig: WeaponDefs_ParseLineCallback @0x544056..0x544072] */
     {
         static const char kSameAsDef[] =
-            "weapon \"WPN_A\"\n"
-            "\tsameas WPN_M4AUTO\n"
-            "end\n"
-            "weapon \"WPN_B\"\n"
-            "\tsameas WPN_0123456789012345678901234567890123\n"
-            "end\n"
-            "weapon \"WPN_C\"\n"
-            "end\n";
+            "weapon \"WPN_A\"\r\n"
+            "\tsameas WPN_M4AUTO\r\n"
+            "end\r\n"
+            "weapon \"WPN_B\"\r\n"
+            "\tsameas WPN_0123456789012345678901234567890123\r\n"
+            "end\r\n"
+            "weapon \"WPN_C\"\r\n"
+            "end\r\n";
         DefWeaponsFile sf;
         memset(&sf, 0, sizeof(sf));
         if (def_parse_weapons_memory((const unsigned char *)kSameAsDef, sizeof(kSameAsDef) - 1,
@@ -1124,6 +1297,177 @@ int main(int argc, char **argv) {
         }
         def_free_weapons(&sf);
         printf("sameas OK\n");
+    }
+
+    /* An entry no `end` closes keeps the slot its `weapon` line claimed: a
+       final `end` with no CR LF reads `en` and the last weapon stays, marked
+       unclosed and ending where the walk ended; an action block left open is a
+       row of its entry too [orig: WeaponDefs_ParseLineCallback @0x543680, the
+       slot @0x5436E7..0x543737, `end` @0x5437CF; ActionDef_ParseScriptLine's
+       row at its `action` line @0x4024A1..0x4024DA; File_ParseASCIIFile's tail
+       leg @0x53D8E9 / @0x53D8EC]. */
+    {
+        static const char kTailDef[] =
+            "weapon \"WPN_SHUT\"\r\n"
+            "\tclipsize 5\r\n"
+            "end\r\n"
+            "weapon \"WPN_TAIL\"\r\n"
+            "\tclipsize 7\r\n"
+            "\taction \"FIRE\"\r\n"
+            "\t\tdelayend 3\r\n"
+            "\tEND\r\n"
+            "end";
+        static const char kOpenActionDef[] =
+            "weapon \"WPN_OPEN_ACTION\"\r\n"
+            "\taction \"FIRE\"\r\n"
+            "\t\tdelayend 4\r\n";
+        DefWeaponsFile tf, of;
+        memset(&tf, 0, sizeof(tf));
+        memset(&of, 0, sizeof(of));
+        const bool parsed =
+            def_parse_weapons_memory((const unsigned char *)kTailDef, sizeof(kTailDef) - 1, &tf) == 0 &&
+            def_parse_weapons_memory((const unsigned char *)kOpenActionDef, sizeof(kOpenActionDef) - 1,
+                                     &of) == 0;
+        const bool ok = parsed && tf.count == 2 && tf.entries[0].unclosed == 0 &&
+                tf.entries[0].end_line == 2 && tf.entries[1].unclosed == 1 &&
+                strcmp(tf.entries[1].weapon_name, "WPN_TAIL") == 0 && tf.entries[1].clipsize == 7 &&
+                tf.entries[1].end_line == 9 && tf.entries[1].actions_count == 1 &&
+                tf.entries[1].actions[0].delayend == 3 && !tf.stopped &&
+                of.count == 1 && of.entries[0].unclosed == 1 && of.entries[0].actions_count == 1 &&
+                strcmp(of.entries[0].actions[0].name, "FIRE") == 0 &&
+                of.entries[0].actions[0].delayend == 4 && of.entries[0].actions[0].end_line == 3;
+        if (!ok) {
+            fprintf(stderr, "FAIL: unclosed entries: %zu entries (last unclosed %d, end_line %zu), "
+                            "open action: %zu entries, %zu actions\n",
+                    tf.count, tf.count > 1 ? tf.entries[1].unclosed : -1,
+                    tf.count > 1 ? tf.entries[1].end_line : (size_t)0, of.count,
+                    of.count > 0 ? of.entries[0].actions_count : (size_t)0);
+            def_free_weapons(&tf);
+            def_free_weapons(&of);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&tf);
+        def_free_weapons(&of);
+        printf("unclosed entries keep their slot OK\n");
+    }
+
+    /* A `weapon` line inside an open entry, its action block included, logs
+       "weapon didn't have an end" and returns 1, which ends the walk: the
+       open entry stays unclosed and nothing after the line is read
+       [orig: WeaponDefs_ParseLineCallback @0x5436AD..0x5436D2; the walk's exit
+       @0x53D942]. */
+    {
+        static const char kNestedDef[] =
+            "weapon \"WPN_OPEN\"\r\n"
+            "\tclipsize 3\r\n"
+            "\taction \"FIRE\"\r\n"
+            "\tweapon \"WPN_LATER\"\r\n"
+            "\tclipsize 9\r\n"
+            "\tend\r\n"
+            "end\r\n"
+            "weapon \"WPN_AFTER\"\r\n"
+            "end\r\n";
+        DefWeaponsFile nf;
+        memset(&nf, 0, sizeof(nf));
+        const bool ok = def_parse_weapons_memory((const unsigned char *)kNestedDef,
+                                                 sizeof(kNestedDef) - 1, &nf) == 0 &&
+                nf.count == 1 && nf.stopped == 1 && nf.stop_line == 3 &&
+                nf.entries[0].unclosed == 1 && nf.entries[0].clipsize == 3 &&
+                nf.entries[0].end_line == 3 && nf.entries[0].actions_count == 1 &&
+                nf.entries[0].actions[0].raw_lines_count == 0;
+        if (!ok) {
+            fprintf(stderr, "FAIL: nested weapon line: %zu entries, stopped %d at %zu, clipsize %d\n",
+                    nf.count, nf.stopped, nf.stop_line, nf.count > 0 ? nf.entries[0].clipsize : -1);
+            def_free_weapons(&nf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&nf);
+        printf("a weapon line inside an open entry ends the walk OK\n");
+    }
+
+    /* A short line reads every slot its arm reads, past the line's count:
+       slots 1 and 2 reset to "" each line and slots 3 on keep what an earlier,
+       longer line left (io::ConfigTokens::slot). stability reads slots 1..3,
+       error 1..6, heat_values and heat_effect 1..2, classrounds 1..2 and
+       scope_max_zero 1..3 (slot 4 only on a line carrying it) [orig:
+       WeaponDefs_ParseLineCallback — stability @0x54412A..0x544169, error
+       @0x543B37..0x543BB5, heat_effect @0x543E48..0x543E7A, heat_values
+       @0x543EC9..0x543F1B, classrounds @0x543AC4..0x543B16, scope_max_zero
+       @0x544E9D..0x544EFD]. crosshair, hudclipgfx and hudrndgfx store only
+       when their texture is a file; hudclipgfx's texture is slot 3 and
+       hudrndgfx's slot 6, whatever the count [orig: FileSystem_FileExists
+       @0x54493E, @0x544295, @0x544316]. */
+    {
+        static const char kSlotsDef[] =
+            "weapon \"WPN_SLOTS\"\r\n"
+            "\terror 1 2 3 4 5 6\r\n"
+            "\tstability 9\r\n"
+            "\terror 7\r\n"
+            "\theat_values 200 6200\r\n"
+            "\theat_values 100\r\n"
+            "\theat_effect hot 3\r\n"
+            "\theat_effect glow\r\n"
+            "\tclassrounds medic 5\r\n"
+            "\tclassrounds medic\r\n"
+            "\tscope_max_zero 10 20 30 40\r\n"
+            "\tscope_max_zero 11\r\n"
+            "\tcrosshair a.tga b.tga\r\n"
+            "\tcrosshair missing.tga\r\n"
+            "\tcrosshair c.tga missing.tga\r\n"
+            "\thudclipgfx 1 2 clip.tga\r\n"
+            "\thudclipgfx 5 6 missing.tga\r\n"
+            "\thudrndgfx 1 2 3 4 5 rnd.tga\r\n"
+            "\thudrndgfx 1 2 3 4 5 missing.tga\r\n"
+            "end\r\n";
+        const DefFileProbe probe = {
+                [](const void *, const char *name) { return strcmp(name, "missing.tga") != 0; },
+                nullptr};
+        DefWeaponsFile sf;
+        memset(&sf, 0, sizeof(sf));
+        if (def_parse_weapons_memory((const unsigned char *)kSlotsDef, sizeof(kSlotsDef) - 1, &sf,
+                                     &probe) != 0 || sf.count != 1) {
+            fprintf(stderr, "FAIL: slot-read inline parse failed\n");
+            def_free_weapons(&sf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefWeaponDef &w = sf.entries[0];
+        /* stability 9: slot 1 "9", slot 2 "", slot 3 the first error line's
+           pointer, at offset 10, where this line wrote "9". error 7: slot 3
+           still "9", slots 4..6 the first error line's "4".."6". heat_values
+           100: slot 2 "" -> 0. heat_effect glow: slot 2 "" -> 0. classrounds
+           medic: slot 2 "" -> 0. scope_max_zero 11: slot 3 is the previous
+           line's "30", past this line's end; the fourth value stays 40. */
+        const bool ok = w.stability_fp16[0] == 9 * 65536 && w.stability_fp16[1] == 0 &&
+                w.stability_fp16[2] == 9 * 65536 &&
+                w.error_fp16[0] == 7 * 65536 && w.error_fp16[1] == 0 && w.error_fp16[2] == 9 * 65536 &&
+                w.error_fp16[3] == 4 * 65536 && w.error_fp16[5] == 6 * 65536 &&
+                w.heat_per_shot == (100 * 65536) / 100 && w.heat_decay_per_tick == 0 &&
+                strcmp(w.heat_effect, "glow") == 0 && w.heat_glow_threshold == 0 &&
+                w.classrounds[1] == 0 &&
+                w.scope_max_zero_steps == 11 && w.scope_zero_step == 0 && w.scope_zero_default == 30 &&
+                w.scope_zero_extra == 40 &&
+                strcmp(w.crosshair, "c.tga") == 0 && strcmp(w.crosshair_secondary, "b.tga") == 0 &&
+                w.hudclipgfx_offset[0] == 1 && strcmp(w.hudclipgfx_texture, "clip.tga") == 0 &&
+                w.hudrndgfx_offset[0] == 1 && strcmp(w.hudrndgfx_texture, "rnd.tga") == 0;
+        if (!ok) {
+            fprintf(stderr,
+                    "FAIL: slot reads: stability %d/%d/%d, error %d/%d/%d/%d, heat %d/%d '%s' %d, "
+                    "classrounds %d, zero %d/%d/%d/%d, crosshair '%s'/'%s', clip %d '%s', rnd %d '%s'\n",
+                    w.stability_fp16[0], w.stability_fp16[1], w.stability_fp16[2], w.error_fp16[0],
+                    w.error_fp16[1], w.error_fp16[2], w.error_fp16[5], w.heat_per_shot,
+                    w.heat_decay_per_tick, w.heat_effect, w.heat_glow_threshold, w.classrounds[1],
+                    w.scope_max_zero_steps, w.scope_zero_step, w.scope_zero_default,
+                    w.scope_zero_extra, w.crosshair, w.crosshair_secondary, w.hudclipgfx_offset[0],
+                    w.hudclipgfx_texture, w.hudrndgfx_offset[0], w.hudrndgfx_texture);
+            def_free_weapons(&sf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&sf);
+        printf("short lines read retail's slots; crosshair/hudclipgfx/hudrndgfx file gates OK\n");
     }
 
     def_free_weapons(&wf);

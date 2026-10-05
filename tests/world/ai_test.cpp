@@ -2534,9 +2534,9 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     w->registry.configure_pool(1, 4);
 
     static constexpr char kProfile[] =
-            "begin \"SP_JoinerTruck\"\n"
-            "  Soundloop_1 V_TRUCK_ILP .8 1.2\n"
-            "end\n";
+            "begin \"SP_JoinerTruck\"\r\n"
+            "  Soundloop_1 V_TRUCK_ILP .8 1.2\r\n"
+            "end\r\n";
     CHECK(w->tables.sound_profiles.parse(kProfile, sizeof(kProfile) - 1) == 1);
 
     Entity npc{};

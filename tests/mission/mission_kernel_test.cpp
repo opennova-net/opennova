@@ -385,7 +385,7 @@ static void test_vehicle_spawn_pose_is_captured_after_initial_wac() {
 // a table an embedder filled before the boot wins (the parse appends).
 static void test_sound_profiles_parse_once_and_keep_a_pre_boot_override() {
     std::map<std::string, std::string> files;
-    files["SndProf.def"] = "begin alpha\nend\nbegin beta\nend\n";
+    files["SndProf.def"] = "begin alpha\r\nend\r\nbegin beta\r\nend\r\n";
     {
         ms::MissionKernel kernel;
         kernel.open_document(bms::File{}, "synth", source_over(&files));
@@ -400,7 +400,7 @@ static void test_sound_profiles_parse_once_and_keep_a_pre_boot_override() {
     {
         ms::MissionKernel kernel;
         kernel.open_document(bms::File{}, "synth", source_over(&files));
-        const std::string pre = "begin embedder\nend\n";
+        const std::string pre = "begin embedder\r\nend\r\n";
         kernel.world.tables.sound_profiles.parse(pre.data(), pre.size());
         ms::KernelBootOptions options;
         options.playable = false;
@@ -463,7 +463,7 @@ static void test_board_walk_reaches_a_kernel_named_point() {
 	}
 	CHECK(!mount.empty() && test_io::write_file(root + "/NamedMount.3di", mount));
 	static const char kItems[] =
-			"begin \"Named mount\"\n id 100164\n type object\n graphic NamedMount\n hp 100\nend\n";
+			"begin \"Named mount\"\r\n id 100164\r\n type object\r\n graphic NamedMount\r\n hp 100\r\nend\r\n";
 	def::DefItemsFile items{};
 	CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
 			sizeof(kItems) - 1, &items) == 0);

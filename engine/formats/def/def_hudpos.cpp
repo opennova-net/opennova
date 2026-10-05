@@ -1,13 +1,11 @@
 #include <formats/def/def.h>
 
-// Split out of def.cpp (quality campaign W3-3). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // HUDPOS.DEF: the HUD element placement table.
 
 #include "def_scan.h"
 
-#include <ctype.h>
+#include <base/io/strutil.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,136 +60,116 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
     memset(&veh, 0, sizeof(veh));
     size_t raw_cap = 0, stance_cap = 0, declut_cap = 0, sf_cap = 0, veh_cap = 0;
 
-    LineIter it = {buf, file_len, 0};
-    const char *line; size_t line_len;
-    char lower[1024];
-
-    while (next_line(&it, &line, &line_len)) {
-        size_t tlen;
-        const char *trimmed = trim_span(line, line_len, &tlen);
-        if (tlen == 0) continue;
-
-        /* Skip full-line comments */
-        if (tlen >= 2 && trimmed[0] == '/' && trimmed[1] == '/') continue;
-
-        size_t ll = tlen < sizeof(lower) - 1 ? tlen : sizeof(lower) - 1;
-        to_lower_buf(lower, trimmed, ll);
+    /* Every line reaches the parser as the retail tokenizer cuts it
+       (defscan::for_each_def_line); every key is the whole first token compared
+       without case, and the values are the tokens after it (space, tab and comma
+       separate them) [orig: HUD_ParseHudposToken @0x59F370, _stricmp on
+       tokens[1] throughout, atof/strcpy of tokens[2]..]. */
+    for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens, const char *line,
+                                         size_t line_len, size_t) {
+        const char *key = tokens.tokens[0];
+        Token vals[kMaxValueTokens];
+        const int nvals = value_tokens(tokens, vals, kMaxValueTokens);
 
         /* VEHICLE_HUD blocks. Parsed IN PARALLEL with the raw_lines passthrough:
-           every line still goes to raw_lines so the writer round-trips the file
-           byte for byte, and the typed block is built alongside it. */
-        if (lower_starts_with(lower, ll, "vehicle_hud", 11)) {
+           every line of a block still goes to raw_lines, and the typed block is
+           built alongside it. */
+        if (key_is(key, "vehicle_hud")) {
             in_vehicle_block = 1;
             memset(&veh, 0, sizeof(veh));   /* [orig: the 0xDC memset reset] */
             DA_PUSH_RAW(hud->raw_lines, hud->raw_lines_count, raw_cap, line, line_len);
-            continue;
+            return;
         }
-        if (lower_starts_with(lower, ll, "vehicle_end", 11)) {
-            /* Commit. Retail resolves the sid against the item table here; the
-               parse keeps the sid string and leaves that join to the consumer.
-               A block with no sid never had a key, so it is dropped rather than
-               stored under an empty name. */
-            if (in_vehicle_block && veh.sid[0] != '\0')
+        if (key_is(key, "vehicle_end")) {
+            /* Commit. Retail copies the block into every item whose alias
+               matches its sid without case, an empty sid included (it matches
+               an item whose alias stayed empty: one a nested `begin` or the
+               file's end closed), and a later block overwrites an earlier one
+               [orig: the VEHICLE_END loop @0x59F3DA..0x59F40C, `_stricmp(alias,
+               byte_2723DC4)` @0x59F402]. The parse keeps every block in file
+               order and the consumer makes the join (HudPos::get_vehicle_hud
+               takes the last match). */
+            if (in_vehicle_block)
                 DA_PUSH(hud->vehicle_huds, hud->vehicle_huds_count, veh_cap, veh);
             in_vehicle_block = 0;
             memset(&veh, 0, sizeof(veh));
             DA_PUSH_RAW(hud->raw_lines, hud->raw_lines_count, raw_cap, line, line_len);
-            continue;
+            return;
         }
-        if (in_vehicle_block) {
+        /* The seven block keys fill the staging block; retail matches them on
+           every line, but outside a block the next VEHICLE_HUD wipes what they
+           wrote before any VEHICLE_END commits it, so only a block's count. Every
+           other key is the HUD's wherever it stands, inside a block too
+           [orig: VEHICLE_HUD @0x59F380, VEHICLE_END @0x59F3B8, the block keys
+           @0x59F5CE..0x59F74E, ahead of the HUD chain from @0x59F7CE]. */
+        const bool vehicle_key = key_is(key, "sid") || key_is(key, "icon") ||
+                key_is(key, "interface") || key_is(key, "statictexture") ||
+                key_is(key, "driver") || key_is(key, "emplace") || key_is(key, "seats");
+        if (in_vehicle_block)
             DA_PUSH_RAW(hud->raw_lines, hud->raw_lines_count, raw_cap, line, line_len);
-            {
-                /* Same split the rest of the file uses (whitespace and commas). */
-                size_t vsp = 0;
-                while (vsp < tlen && !isspace((unsigned char)trimmed[vsp])) ++vsp;
-                size_t vvl;
-                const char *vpart = trim_span(trimmed + vsp, tlen - vsp, &vvl);
-                for (size_t ci = 0; ci + 1 < vvl; ++ci) {
-                    if (vpart[ci] == '/' && vpart[ci + 1] == '/') {
-                        vvl = ci;
-                        while (vvl > 0 && isspace((unsigned char)vpart[vvl - 1])) --vvl;
-                        break;
-                    }
-                }
-                Token vv[MAX_TOKENS];
-                int nvv = split_values(vpart, vvl, vv, MAX_TOKENS);
-                if (lower_starts_with(lower, ll, "sid", 3)) {
+        if (vehicle_key) {
+            if (in_vehicle_block) {
+                const Token *vv = vals;
+                const int nvv = nvals;
+                if (key_is(key, "sid")) {
                     if (nvv >= 1) safe_copy(veh.sid, sizeof(veh.sid), vv[0].s, vv[0].len);
-                } else if (lower_starts_with(lower, ll, "icon", 4)) {
+                } else if (key_is(key, "icon")) {
                     if (nvv >= 1) safe_copy(veh.icon, sizeof(veh.icon), vv[0].s, vv[0].len);
-                } else if (lower_starts_with(lower, ll, "interface", 9)) {
+                } else if (key_is(key, "interface")) {
                     if (nvv >= 1)
                         safe_copy(veh.interface_texture, sizeof(veh.interface_texture),
                                   vv[0].s, vv[0].len);
-                } else if (lower_starts_with(lower, ll, "statictexture", 13)) {
+                } else if (key_is(key, "statictexture")) {
                     if (nvv >= 1)
                         safe_copy(veh.static_texture, sizeof(veh.static_texture),
                                   vv[0].s, vv[0].len);
-                } else if (lower_starts_with(lower, ll, "driver", 6)) {
+                } else if (key_is(key, "driver")) {
                     if (nvv >= 2) {
-                        veh.driver_x = parse_int_n(vv[0].s, vv[0].len);
-                        veh.driver_y = parse_int_n(vv[1].s, vv[1].len);
+                        veh.driver_x = hud_number(vv[0].s, vv[0].len);
+                        veh.driver_y = hud_number(vv[1].s, vv[1].len);
                     }
-                } else if (lower_starts_with(lower, ll, "emplace", 7)) {
+                } else if (key_is(key, "emplace")) {
                     /* [count][x y]... -- retail caps the COUNT, then reads that
                        many pairs; a short line yields fewer. */
                     if (nvv >= 1) {
-                        int n = parse_int_n(vv[0].s, vv[0].len);
+                        int n = hud_number(vv[0].s, vv[0].len);
                         if (n > DEF_VEHICLE_HUD_MAX_EMPLACE) n = DEF_VEHICLE_HUD_MAX_EMPLACE;
                         if (n < 0) n = 0;
                         int got = 0;
                         for (int i = 0; i < n && 1 + 2 * i + 1 < nvv; ++i) {
-                            veh.emplace_x[i] = parse_int_n(vv[1 + 2 * i].s, vv[1 + 2 * i].len);
-                            veh.emplace_y[i] = parse_int_n(vv[2 + 2 * i].s, vv[2 + 2 * i].len);
+                            veh.emplace_x[i] = hud_number(vv[1 + 2 * i].s, vv[1 + 2 * i].len);
+                            veh.emplace_y[i] = hud_number(vv[2 + 2 * i].s, vv[2 + 2 * i].len);
                             got = i + 1;
                         }
                         veh.emplace_count = got;
                     }
-                } else if (lower_starts_with(lower, ll, "seats", 5)) {
+                } else if (key_is(key, "seats")) {
                     if (nvv >= 1) {
-                        int n = parse_int_n(vv[0].s, vv[0].len);
+                        int n = hud_number(vv[0].s, vv[0].len);
                         if (n > DEF_VEHICLE_HUD_MAX_SEATS) n = DEF_VEHICLE_HUD_MAX_SEATS;
                         if (n < 0) n = 0;
                         int got = 0;
                         for (int i = 0; i < n && 1 + 2 * i + 1 < nvv; ++i) {
-                            veh.seat_x[i] = parse_int_n(vv[1 + 2 * i].s, vv[1 + 2 * i].len);
-                            veh.seat_y[i] = parse_int_n(vv[2 + 2 * i].s, vv[2 + 2 * i].len);
+                            veh.seat_x[i] = hud_number(vv[1 + 2 * i].s, vv[1 + 2 * i].len);
+                            veh.seat_y[i] = hud_number(vv[2 + 2 * i].s, vv[2 + 2 * i].len);
                             got = i + 1;
                         }
                         veh.seat_count = got;
                     }
                 }
+            } else {
+                DA_PUSH_RAW(hud->raw_lines, hud->raw_lines_count, raw_cap, line, line_len);
             }
-            continue;
+            return;
         }
-
-        /* Get value part */
-        size_t space_pos = 0;
-        while (space_pos < tlen && !isspace((unsigned char)trimmed[space_pos])) ++space_pos;
-        const char *val_part = trimmed + space_pos;
-        size_t val_len = tlen - space_pos;
-        /* Trim val_part */
-        size_t vl;
-        val_part = trim_span(val_part, val_len, &vl);
-        /* Strip comment from value */
-        for (size_t ci = 0; ci + 1 < vl; ++ci) {
-            if (val_part[ci] == '/' && val_part[ci + 1] == '/') {
-                vl = ci;
-                while (vl > 0 && isspace((unsigned char)val_part[vl - 1])) --vl;
-                break;
-            }
-        }
-
-        Token vals[MAX_TOKENS];
-        int nvals = split_values(val_part, vl, vals, MAX_TOKENS);
 
         int parsed = 0;
 
         /* Fonts */
-        if (lower_starts_with(lower, ll, "fonthud1_hi", 11)) {
+        if (key_is(key, "fonthud1_hi")) {
             if (nvals >= 1) safe_copy(hud->font_hi, sizeof(hud->font_hi), vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "fonthud1_lo", 11)) {
+        } else if (key_is(key, "fonthud1_lo")) {
             if (nvals >= 1) safe_copy(hud->font_lo, sizeof(hud->font_lo), vals[0].s, vals[0].len);
             parsed = 1;
         }
@@ -201,136 +179,136 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
            an unknown token, as it does in retail; the HUD slot then takes the
            bold label font (HUD_SelectHudposFont @0x591890, hud_frame.cpp). */
         /* Rects */
-        else if (lower_starts_with(lower, ll, "mrclippynormal", 14)) {
+        else if (key_is(key, "mrclippynormal")) {
             for (int i = 0; i < 4 && i < nvals; ++i)
-                hud->mrclippy_normal[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->mrclippy_normal[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "mrclippyalternate", 17)) {
+        } else if (key_is(key, "mrclippyalternate")) {
             for (int i = 0; i < 4 && i < nvals; ++i)
-                hud->mrclippy_alternate[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->mrclippy_alternate[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudhealth", 9) && !lower_starts_with(lower, ll, "hudhealthborder", 15)) {
+        } else if (key_is(key, "hudhealth")) {
             for (int i = 0; i < 4 && i < nvals; ++i)
-                hud->health[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->health[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudheat", 7) && !lower_starts_with(lower, ll, "hudheatborder", 13)) {
+        } else if (key_is(key, "hudheat")) {
             for (int i = 0; i < 4 && i < nvals; ++i)
-                hud->heat[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->heat[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudpowerbar", 11)) {
+        } else if (key_is(key, "hudpowerbar")) {
             for (int i = 0; i < 4 && i < nvals; ++i)
-                hud->powerbar[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->powerbar[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "starttimer", 10)) {
+        } else if (key_is(key, "starttimer")) {
             for (int i = 0; i < 4 && i < nvals; ++i)
-                hud->starttimer[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->starttimer[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
         }
         /* Border colors */
-        else if (lower_starts_with(lower, ll, "hudhealthborder", 15)) {
+        else if (key_is(key, "hudhealthborder")) {
             hud->health_border = parse_hud_color(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudheatborder", 13)) {
+        } else if (key_is(key, "hudheatborder")) {
             hud->heat_border = parse_hud_color(vals, nvals);
             parsed = 1;
         }
         /* Text colors */
-        else if (lower_starts_with(lower, ll, "hud_textcolor", 13)) {
+        else if (key_is(key, "hud_textcolor")) {
             hud->hud_textcolor = parse_hud_color(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "weapon_textcolor", 16)) {
+        } else if (key_is(key, "weapon_textcolor")) {
             hud->weapon_textcolor = parse_hud_color(vals, nvals);
             parsed = 1;
         }
         /* Tag colors */
-        else if (lower_starts_with(lower, ll, "tagcolor_blueteam", 17)) {
+        else if (key_is(key, "tagcolor_blueteam")) {
             hud->tagcolor_blueteam = parse_hud_color(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "tagcolor_redteam", 16)) {
+        } else if (key_is(key, "tagcolor_redteam")) {
             hud->tagcolor_redteam = parse_hud_color(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "tagcolor_good", 13)) {
+        } else if (key_is(key, "tagcolor_good")) {
             hud->tagcolor_good = parse_hud_color(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "tagcolor_middle", 15)) {
+        } else if (key_is(key, "tagcolor_middle")) {
             hud->tagcolor_middle = parse_hud_color(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "tagcolor_bad", 12)) {
+        } else if (key_is(key, "tagcolor_bad")) {
             hud->tagcolor_bad = parse_hud_color(vals, nvals);
             parsed = 1;
         }
         /* Stance colors (ARGB) */
-        else if (lower_starts_with(lower, ll, "stanceicon_color", 16)) {
+        else if (key_is(key, "stanceicon_color")) {
             hud->stanceicon_color = parse_hud_color_argb(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "stancecolor_good", 16)) {
+        } else if (key_is(key, "stancecolor_good")) {
             hud->stancecolor_good = parse_hud_color_argb(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "stancecolor_middle", 18)) {
+        } else if (key_is(key, "stancecolor_middle")) {
             hud->stancecolor_middle = parse_hud_color_argb(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "stancecolor_bad", 15)) {
+        } else if (key_is(key, "stancecolor_bad")) {
             hud->stancecolor_bad = parse_hud_color_argb(vals, nvals);
             parsed = 1;
         }
         /* AGL colors */
-        else if (lower_starts_with(lower, ll, "destaglcolor", 12)) {
+        else if (key_is(key, "destaglcolor")) {
             hud->dest_agl_color = parse_hud_color_argb(vals, nvals);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "aglcolor", 8)) {
+        } else if (key_is(key, "aglcolor")) {
             hud->agl_color = parse_hud_color_argb(vals, nvals);
             parsed = 1;
         }
         /* Spinmap */
-        else if (lower_starts_with(lower, ll, "hudspinmapx1", 12)) {
-            if (nvals >= 1) hud->spinmap_x1 = parse_int_n(vals[0].s, vals[0].len);
+        else if (key_is(key, "hudspinmapx1")) {
+            if (nvals >= 1) hud->spinmap_x1 = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudspinmapx2", 12)) {
-            if (nvals >= 1) hud->spinmap_x2 = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "hudspinmapx2")) {
+            if (nvals >= 1) hud->spinmap_x2 = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudspinmapy1", 12)) {
-            if (nvals >= 1) hud->spinmap_y1 = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "hudspinmapy1")) {
+            if (nvals >= 1) hud->spinmap_y1 = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudspinmapy2", 12)) {
-            if (nvals >= 1) hud->spinmap_y2 = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "hudspinmapy2")) {
+            if (nvals >= 1) hud->spinmap_y2 = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "spinmapwpdistoff", 16)) {
-            if (nvals >= 1) hud->spinmap_wp_dist_off = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "spinmapwpdistoff")) {
+            if (nvals >= 1) hud->spinmap_wp_dist_off = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
         }
         /* Positioned text with alignment */
-        else if (lower_starts_with(lower, ll, "hudflagcarrier", 14)) {
+        else if (key_is(key, "hudflagcarrier")) {
             parse_pos_aligned(vals, nvals, hud->flag_carrier);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "gameinfo", 8)) {
+        } else if (key_is(key, "gameinfo")) {
             parse_pos_aligned(vals, nvals, hud->game_info);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudwpdinfo", 10)) {
+        } else if (key_is(key, "hudwpdinfo")) {
             parse_pos_aligned(vals, nvals, hud->wpd_info);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "zoneinfo", 8)) {
+        } else if (key_is(key, "zoneinfo")) {
             /* x, y, alignment word [orig: @0x5A0642..0x5A0676] */
             parse_pos_align3(vals, nvals, hud->zone_info);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "exppoints", 9)) {
+        } else if (key_is(key, "exppoints")) {
             parse_pos_aligned(vals, nvals, hud->exp_points);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "connectstatus", 13)) {
+        } else if (key_is(key, "connectstatus")) {
             parse_pos_aligned(vals, nvals, hud->connect_status);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudteamxy", 9)) {
+        } else if (key_is(key, "hudteamxy")) {
             parse_pos_aligned(vals, nvals, hud->team_xy);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudplayercount", 14)) {
+        } else if (key_is(key, "hudplayercount")) {
             parse_pos_aligned(vals, nvals, hud->player_count);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "ammocountpos", 12)) {
+        } else if (key_is(key, "ammocountpos")) {
             parse_pos_aligned(vals, nvals, hud->ammo_count_pos);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudweaponname", 13)) {
+        } else if (key_is(key, "hudweaponname")) {
             parse_pos_aligned(vals, nvals, hud->weapon_name_pos);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "mapcoords", 9)) {
+        } else if (key_is(key, "mapcoords")) {
             parse_pos_aligned(vals, nvals, hud->map_coords);
             // The authored 3rd value is the grid-label suppressor; retail
             // atof()s a missing/word token to 0 (shown) — "center" in the
@@ -338,28 +316,28 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             //  screenY/dword_27236FC]
             if (nvals < 3) hud->map_coords[2] = 0;
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudtimeclock", 12)) {
+        } else if (key_is(key, "hudtimeclock")) {
             parse_pos_aligned(vals, nvals, hud->time_clock);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "breathtime", 10)) {
+        } else if (key_is(key, "breathtime")) {
             parse_pos_align3(vals, nvals, hud->breath_time);
             parsed = 1;
         }
         /* HUDLS — the weapon slot bar (def.h DefHudPosDef carries the field
            map). [orig: HUD_ParseHudposToken @0x59FE41..0x59FF9C] */
-        else if (lower_starts_with(lower, ll, "hudls_system", 12)) {
-            if (nvals >= 1) hud->hudls_system = parse_int_n(vals[0].s, vals[0].len); /* @0x59FE66 */
+        else if (key_is(key, "hudls_system")) {
+            if (nvals >= 1) hud->hudls_system = hud_number(vals[0].s, vals[0].len); /* @0x59FE66 */
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudls_bracket", 13)) {
+        } else if (key_is(key, "hudls_bracket")) {
             if (nvals >= 1)
                 safe_copy(hud->hudls_bracket, sizeof(hud->hudls_bracket), vals[0].s,
                           vals[0].len); /* the strcpy @0x59FE90 */
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudls_keyofst", 13)) {
+        } else if (key_is(key, "hudls_keyofst")) {
             for (int i = 0; i < 2 && i < nvals; ++i) /* @0x59FEC7 / @0x59FEDF */
-                hud->hudls_keyofst[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->hudls_keyofst[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudls_moreav", 12)) {
+        } else if (key_is(key, "hudls_moreav")) {
             if (nvals >= 1)
                 safe_copy(hud->hudls_moreav, sizeof(hud->hudls_moreav), vals[0].s,
                           vals[0].len); /* the strcpy @0x59FF05 */
@@ -367,157 +345,157 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
                @0x59FF21, `mov byte_2723734, al` @0x59FF39] */
             for (int i = 0; i < 2 && i + 1 < nvals; ++i)
                 hud->hudls_moreav_off[i] =
-                    (int8_t)(uint8_t)parse_int_n(vals[i + 1].s, vals[i + 1].len);
+                    (int8_t)(uint8_t)hud_number(vals[i + 1].s, vals[i + 1].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudls_slot", 10)) {
+        } else if (key_is(key, "hudls_slot")) {
             if (nvals >= 1) {
-                const int n = parse_int_n(vals[0].s, vals[0].len);
+                const int n = hud_number(vals[0].s, vals[0].len);
                 /* n outside 1..10 authors nothing [orig: `sub edi,1; cmp edi,9; ja`
                    @0x59FF6A..0x59FF70] */
                 if ((unsigned)(n - 1) <= 9u) {
-                    if (nvals >= 2) hud->hudls_slot[n - 1][0] = parse_int_n(vals[1].s, vals[1].len);
-                    if (nvals >= 3) hud->hudls_slot[n - 1][1] = parse_int_n(vals[2].s, vals[2].len);
+                    if (nvals >= 2) hud->hudls_slot[n - 1][0] = hud_number(vals[1].s, vals[1].len);
+                    if (nvals >= 3) hud->hudls_slot[n - 1][1] = hud_number(vals[2].s, vals[2].len);
                 }
             }
             parsed = 1;
         }
         /* XY positions */
-        else if (lower_starts_with(lower, ll, "hudtitlex", 9)) {
-            if (nvals >= 1) hud->title_x = parse_int_n(vals[0].s, vals[0].len);
+        else if (key_is(key, "hudtitlex")) {
+            if (nvals >= 1) hud->title_x = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudtitley", 9)) {
-            if (nvals >= 1) hud->title_y = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "hudtitley")) {
+            if (nvals >= 1) hud->title_y = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudpingx", 8)) {
-            if (nvals >= 1) hud->ping_x = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "hudpingx")) {
+            if (nvals >= 1) hud->ping_x = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudpingy", 8)) {
-            if (nvals >= 1) hud->ping_y = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "hudpingy")) {
+            if (nvals >= 1) hud->ping_y = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudpingright", 12)) {
-            if (nvals >= 1) hud->ping_right = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "hudpingright")) {
+            if (nvals >= 1) hud->ping_right = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudorders", 9)) {
+        } else if (key_is(key, "hudorders")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->orders[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->orders[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "specmode_label", 14)) {
+        } else if (key_is(key, "specmode_label")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->spec_mode_label[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->spec_mode_label[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "lfp_flags", 9)) {
+        } else if (key_is(key, "lfp_flags")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->lfp_flags[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->lfp_flags[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "lfp_takeoverdlg", 15)) {
+        } else if (key_is(key, "lfp_takeoverdlg")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->lfp_takeover_dlg[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->lfp_takeover_dlg[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "cargopos", 8)) {
+        } else if (key_is(key, "cargopos")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->cargo_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->cargo_pos[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "pausedpos", 9)) {
+        } else if (key_is(key, "pausedpos")) {
             /* [orig: @0x59FC8D..0x59FCC8 -> dword_272360C / dword_2723610] */
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->paused_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->paused_pos[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "networkindicator", 16)) {
+        } else if (key_is(key, "networkindicator")) {
             /* [orig: @0x59F981 _stricmp "NETWORKINDICATOR", six atof/ftol stores
                @0x59F9A8..0x59FA0C -> g_NetQuality +0x40..+0x54] */
             for (int i = 0; i < 6 && i < nvals; ++i)
-                hud->network_indicator[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->network_indicator[i] = hud_number(vals[i].s, vals[i].len);
             hud->network_indicator_present = 1;
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "roomtkpos", 9) && !lower_starts_with(lower, ll, "roomtktxtpos", 12)) {
+        } else if (key_is(key, "roomtkpos")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->roomtk_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->roomtk_pos[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "roomtktxtpos", 12)) {
+        } else if (key_is(key, "roomtktxtpos")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->roomtk_txt_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->roomtk_txt_pos[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudstancepos", 12)) {
+        } else if (key_is(key, "hudstancepos")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->stance_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->stance_pos[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudvehstancepos", 15)) {
+        } else if (key_is(key, "hudvehstancepos")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->veh_stance_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->veh_stance_pos[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudgeartext", 11)) {
+        } else if (key_is(key, "hudgeartext")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->gear_text[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->gear_text[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudwpnicon", 10)) {
+        } else if (key_is(key, "hudwpnicon")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->wpn_icon[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->wpn_icon[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudclip", 7) && !lower_starts_with(lower, ll, "hudclipgfx", 10)) {
+        } else if (key_is(key, "hudclip")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->clip_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->clip_pos[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudscoperangexy", 15)) {
+        } else if (key_is(key, "hudscoperangexy")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->scope_range[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->scope_range[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudscopezeroxy", 14)) {
+        } else if (key_is(key, "hudscopezeroxy")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->scope_zero[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->scope_zero[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudscopemagxy", 13)) {
+        } else if (key_is(key, "hudscopemagxy")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->scope_mag[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->scope_mag[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "showimpactdistpos", 17)) {
+        } else if (key_is(key, "showimpactdistpos")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->impact_dist_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->impact_dist_pos[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudchattext", 11)) {
+        } else if (key_is(key, "hudchattext")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->chat_text[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->chat_text[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudsystext", 10)) {
+        } else if (key_is(key, "hudsystext")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->sys_text[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->sys_text[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
         }
         /* Single values */
-        else if (lower_starts_with(lower, ll, "hudchline", 9)) {
-            if (nvals >= 1) hud->hud_chline = parse_int_n(vals[0].s, vals[0].len);
+        else if (key_is(key, "hudchline")) {
+            if (nvals >= 1) hud->hud_chline = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudaglradius", 12)) {
-            if (nvals >= 1) hud->agl_radius = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "hudaglradius")) {
+            if (nvals >= 1) hud->agl_radius = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudroclen", 9)) {
-            if (nvals >= 1) hud->roc_len = parse_int_n(vals[0].s, vals[0].len);
+        } else if (key_is(key, "hudroclen")) {
+            if (nvals >= 1) hud->roc_len = hud_number(vals[0].s, vals[0].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "alphafade", 9)) {
+        } else if (key_is(key, "alphafade")) {
             /* atof per field — fractional values survive into the original's
-               x2.55/x62 converts [orig: @0x5a0882..0x5a08c2]. */
+               x2.55/x62 converts [orig: @0x5a0882..0x5a08c2], which the HUD
+               layout makes (hud_layout_from_hudpos). */
             for (int i = 0; i < 3 && i < nvals; ++i)
-                hud->alpha_fade[i] = parse_float_n(vals[i].s, vals[i].len);
+                hud->alpha_fade[i] = hud_double(vals[i].s, vals[i].len);
             parsed = 1;
         }
         /* AGL settings */
-        else if (lower_starts_with(lower, ll, "hudagltlrx", 10)) {
+        else if (key_is(key, "hudagltlrx")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->agl_tlrx[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->agl_tlrx[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hudaglylen", 10)) {
+        } else if (key_is(key, "hudaglylen")) {
             for (int i = 0; i < 2 && i < nvals; ++i)
-                hud->agl_ylen[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->agl_ylen[i] = hud_number(vals[i].s, vals[i].len);
             parsed = 1;
         }
         /* HUDSTANCE */
-        else if (lower_starts_with(lower, ll, "hudstance", 9) && ll > 9 &&
-                 isspace((unsigned char)lower[9])) {
+        else if (key_is(key, "hudstance")) {
             if (nvals >= 5) {
                 DefHudStance st;
                 memset(&st, 0, sizeof(st));
-                st.id = parse_int_n(vals[0].s, vals[0].len);
-                st.offset_x = parse_int_n(vals[1].s, vals[1].len);
-                st.offset_y = parse_int_n(vals[2].s, vals[2].len);
+                st.id = hud_number(vals[0].s, vals[0].len);
+                st.offset_x = hud_number(vals[1].s, vals[1].len);
+                st.offset_y = hud_number(vals[2].s, vals[2].len);
                 safe_copy(st.texture, sizeof(st.texture), vals[3].s, vals[3].len);
                 safe_copy(st.name, sizeof(st.name), vals[4].s, vals[4].len);
                 DA_PUSH(hud->stances, hud->stances_count, stance_cap, st);
@@ -526,7 +504,8 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
         }
         /* HUDDECLUT_<TOKEN> v0 v1 v2 v3 — the declutter table rows. Retail
            parses one arm per known token and builds a mask byte where bit i
-           (1/2/4/8 for hud_detail level 0..3) is set iff value i != 0, stored
+           (1/2/4/8 for hud_detail level 0..3) is set iff atof(value i) != 0.0
+           [orig: `fcomp dbl_7D0188` (0.0) @0x5A2174], stored
            into the 24-slot table; a token WITHOUT an arm authors nothing (the
            retail JOX file ships a 25th row, HUDDECLUT_CTAPE, that is exactly
            such a dead token — the binary has no arm for it).
@@ -535,62 +514,53 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
            the consumer resolves token -> slot and drops unknown tokens
            (engine/runtime/hud/hud_declutter.cpp), which reproduces the
            no-arm behavior. */
-        else if (lower_starts_with(lower, ll, "huddeclut_", 10)) {
-            /* Extract name between _ and first whitespace */
-            size_t name_start = 10;
-            size_t name_end = name_start;
-            while (name_end < ll && !isspace((unsigned char)lower[name_end])) ++name_end;
+        else if (strutil::starts_with_icase(key, "huddeclut_")) {
+            /* The row's name is the key past the prefix, as authored. */
             if (nvals >= 4) {
                 DefDeclutterEntry de;
                 memset(&de, 0, sizeof(de));
-                safe_copy(de.name, sizeof(de.name), trimmed + name_start, name_end - name_start);
+                safe_copy(de.name, sizeof(de.name), key + 10, strlen(key + 10));
                 for (int i = 0; i < 4; ++i)
-                    de.flags[i] = parse_int_n(vals[i].s, vals[i].len) != 0 ? 1 : 0;
+                    de.flags[i] = hud_double(vals[i].s, vals[i].len) != 0.0 ? 1 : 0;
                 DA_PUSH(hud->declutter, hud->declutter_count, declut_cap, de);
             }
             parsed = 1;
         }
         /* Graphics */
-        else if (lower_starts_with(lower, ll, "staticframe", 11)) {
+        else if (key_is(key, "staticframe")) {
+            /* The texture is token 1 as the tokenizer cut it: a `//` there is a
+               comment, never part of the name [orig: the name copy @0x5a0a4e..0x5a0a62,
+               x @0x5a0a72, y @0x5a0a8a]. */
             if (nvals >= 1) {
                 DefHudGraphic gfx;
                 memset(&gfx, 0, sizeof(gfx));
-                int idx = 0;
-                /* Skip leading // in texture name */
-                if (vals[idx].len > 2 && vals[idx].s[0] == '/' && vals[idx].s[1] == '/') {
-                    safe_copy(gfx.texture, sizeof(gfx.texture), vals[idx].s + 2, vals[idx].len - 2);
-                    idx++;
-                } else if (!(vals[idx].len == 2 && vals[idx].s[0] == '/' && vals[idx].s[1] == '/')) {
-                    safe_copy(gfx.texture, sizeof(gfx.texture), vals[idx].s, vals[idx].len);
-                    idx++;
-                }
-                if (idx < nvals) gfx.x = parse_int_n(vals[idx].s, vals[idx].len), idx++;
-                if (idx < nvals) gfx.y = parse_int_n(vals[idx].s, vals[idx].len), idx++;
-                if (gfx.texture[0] != '\0') {
-                    DA_PUSH(hud->static_frames, hud->static_frames_count, sf_cap, gfx);
-                }
+                safe_copy(gfx.texture, sizeof(gfx.texture), vals[0].s, vals[0].len);
+                if (nvals >= 2) gfx.x = hud_number(vals[1].s, vals[1].len);
+                if (nvals >= 3) gfx.y = hud_number(vals[2].s, vals[2].len);
+                DA_PUSH(hud->static_frames, hud->static_frames_count, sf_cap, gfx);
             }
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "parachuteicon", 13)) {
+        } else if (key_is(key, "parachuteicon")) {
             if (nvals >= 3) {
                 safe_copy(hud->parachute_icon.texture, sizeof(hud->parachute_icon.texture), vals[0].s, vals[0].len);
-                hud->parachute_icon.x = parse_int_n(vals[1].s, vals[1].len);
-                hud->parachute_icon.y = parse_int_n(vals[2].s, vals[2].len);
+                hud->parachute_icon.x = hud_number(vals[1].s, vals[1].len);
+                hud->parachute_icon.y = hud_number(vals[2].s, vals[2].len);
             }
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "armoricon", 9)) {
+        } else if (key_is(key, "armoricon")) {
             if (nvals >= 3) {
                 safe_copy(hud->armor_icon.texture, sizeof(hud->armor_icon.texture), vals[0].s, vals[0].len);
-                hud->armor_icon.x = parse_int_n(vals[1].s, vals[1].len);
-                hud->armor_icon.y = parse_int_n(vals[2].s, vals[2].len);
+                hud->armor_icon.x = hud_number(vals[1].s, vals[1].len);
+                hud->armor_icon.y = hud_number(vals[2].s, vals[2].len);
             }
             parsed = 1;
         }
 
-        if (!parsed) {
+        /* A block's lines went to raw_lines above. */
+        if (!parsed && !in_vehicle_block) {
             DA_PUSH_RAW(hud->raw_lines, hud->raw_lines_count, raw_cap, line, line_len);
         }
-    }
+    });
 
     return 0;
 }

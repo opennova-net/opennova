@@ -81,11 +81,11 @@ int test_regional_sound() {
     opennova::audio::SoundSetIndex sets;
     sets.add_bank(0, bank);
     w.tables.sound_sets = &sets;
-    const char profiles[] = "begin P\n dawnshot Male .5 .25\n end\n"
-                            "begin F\n dawnshot Female .25 .125\n end\n";
+    const char profiles[] = "begin P\r\n dawnshot Male .5 .25\r\n end\r\n"
+                            "begin F\r\n dawnshot Female .25 .125\r\n end\r\n";
     CHECK(w.tables.sound_profiles.parse(profiles, sizeof(profiles)-1) == 2);
-    const char definitions[] = "begin Env\n id 100010\n sound_profile P\n"
-            " sound_profileFemale F\n dawnshot Explicit 2 3\n dayshot Missing 4 5\n end\n";
+    const char definitions[] = "begin Env\r\n id 100010\r\n sound_profile P\r\n"
+            " sound_profileFemale F\r\n dawnshot Explicit 2 3\r\n dayshot Missing 4 5\r\n end\r\n";
     opennova::def::DefItemsFile items{};
     CHECK(opennova::def::def_parse_items_memory(
             reinterpret_cast<const unsigned char *>(definitions), sizeof(definitions)-1, &items) == 0);
@@ -493,9 +493,9 @@ int test_tower_sections() {
 // A section piece is the memset template clone: the parent def's door, squib
 // and sway selectors never reach it, only the piece's own callbacks and models.
 int test_piece_spawn_clears_class_selectors() {
-    const char definitions[] = "begin Tower\n id 105050\n type building\n ai_function door\n"
-            " move_function squib\n render_function sway\n num_doors 2\n first_door 1\n"
-            " open_rate 2\n max_angle 90\n hp 100\n end\n";
+    const char definitions[] = "begin Tower\r\n id 105050\r\n type building\r\n ai_function door\r\n"
+            " move_function squib\r\n render_function sway\r\n num_doors 2\r\n first_door 1\r\n"
+            " open_rate 2\r\n max_angle 90\r\n hp 100\r\n end\r\n";
     opennova::def::DefItemsFile items{};
     CHECK(opennova::def::def_parse_items_memory(
             reinterpret_cast<const unsigned char *>(definitions), sizeof(definitions)-1, &items) == 0);

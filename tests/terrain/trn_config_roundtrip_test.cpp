@@ -59,7 +59,10 @@ bool test_retail_06tr_draws_from_its_mission_tile_set() {
                 "06TR.bms header parses")) {
         return false;
     }
-    std::ifstream trn_file(trn_path);
+    // Binary: the reader splits lines at CR LF as the game's walk does, and a
+    // text-mode stream would hand it LF alone [orig: File_ParseASCIIFile
+    // @0x53D8C7..0x53D8F5].
+    std::ifstream trn_file(trn_path, std::ios::binary);
     opennova::TrnConfig trn;
     if (!expect(opennova::load_trn(trn_file, trn, error), "G13.trn parses")) {
         return false;

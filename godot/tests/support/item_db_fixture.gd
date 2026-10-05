@@ -51,10 +51,8 @@ static func load_with(test: GutTest, file_name: String, base: String,
 	test.assert_not_null(file, "the staged items table opens for writing")
 	if file == null:
 		return null
-	file.store_string(base)
-	if not base.ends_with("\n"):
-		file.store_string("\n")
-	file.store_string(rows)
+	file.store_string(TestFs.crlf(base if base.ends_with("\n") else base + "\n"))
+	file.store_string(TestFs.crlf(rows))
 	file.close()
 	var db := ItemDatabase.new()
 	test.assert_eq(db.load(path), OK, "the staged items table loads")

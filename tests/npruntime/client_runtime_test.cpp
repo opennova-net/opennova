@@ -7148,16 +7148,16 @@ std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_
     inmatch::ClientRuntime runtime("ReplicaMoverAudio");
     w::World world;
     static const char kProfiles[] =
-            "begin \"default\"\n"
-            "end\n"
-            "begin \"SP_Remote\"\n"
-            "     SSFallDead     T_BODYDROP\n"
-            "     SSFallAlive    T_LAND\n"
-            "     ChuteOpen      T_CHUTE_OPEN\n"
-            "     ChuteClose     T_CHUTE_CLOSE\n"
-            "     ChuteFlap      T_CHUTE_FLAP\n"
-            "     FreeFall       T_FREEFALL\n"
-            "end\n";
+            "begin \"default\"\r\n"
+            "end\r\n"
+            "begin \"SP_Remote\"\r\n"
+            "     SSFallDead     T_BODYDROP\r\n"
+            "     SSFallAlive    T_LAND\r\n"
+            "     ChuteOpen      T_CHUTE_OPEN\r\n"
+            "     ChuteClose     T_CHUTE_CLOSE\r\n"
+            "     ChuteFlap      T_CHUTE_FLAP\r\n"
+            "     FreeFall       T_FREEFALL\r\n"
+            "end\r\n";
     world.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1);
     opennova::audio::OrganicSoundProfile binding;
     binding.primary = 1;

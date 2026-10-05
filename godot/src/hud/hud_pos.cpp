@@ -246,16 +246,17 @@ String HudPos::get_last_error() const {
 }
 
 // One VEHICLE_HUD block by items.def sid, case-insensitively -- matching the
-// _stricmp the original commits the block with. The witness for the block and
-// its grammar lives with the parse, in engine/formats/def/def.h; this only
-// hands the block out.
+// _stricmp the original commits the block with; the LAST matching block, since
+// each commit overwrites the item's copy, and an empty sid matches a block
+// with none (the commit and its witness live with the parse, def_hudpos.cpp).
+// This only hands the block out.
 //
 // An unknown sid returns NULL rather than a default-filled block: a vehicle
 // with no authored panel draws none.
 Ref<VehicleHudBlock> HudPos::get_vehicle_hud(const String &p_sid) const {
-	if (!loaded_ || p_sid.is_empty()) return Ref<VehicleHudBlock>();
+	if (!loaded_) return Ref<VehicleHudBlock>();
 	const String want = p_sid.to_lower();
-	for (size_t i = 0; i < file_.hud.vehicle_huds_count; ++i) {
+	for (size_t i = file_.hud.vehicle_huds_count; i-- > 0;) {
 		const DefVehicleHudBlock &v = file_.hud.vehicle_huds[i];
 		if (String::utf8(v.sid).to_lower() != want) continue;
 		Ref<VehicleHudBlock> out;

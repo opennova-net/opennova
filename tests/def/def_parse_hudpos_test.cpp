@@ -1,4 +1,5 @@
 // Test parsing hudpos.def — check fonts, rects, colors, stances.
+#include <cstdint>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,17 +18,17 @@ using namespace opennova::def;
 static int synthetic_legs(void) {
     int failures = 0;
     static const char text[] =
-        "HUDLS_SYSTEM\t1\n"
-        "HUDLS_BRACKET\tls_brack.tga\n"
-        "HUDLS_KEYOFST\t4,-6\n"
-        "HUDLS_MOREAV\tls_more.tga 300 -2\n"
-        "HUDLS_SLOT\t6 100,700\n"
-        "HUDLS_SLOT\t10 180 700\n"
-        "HUDLS_SLOT\t0 11 12\n"
-        "HUDLS_SLOT\t11 13 14\n"
-        "ZONEINFO\t1013,386,Right\n"
-        "PAUSEDPOS\t980 12\n"
-        "NETWORKINDICATOR\t6,5 30,5 70,5\n";
+        "HUDLS_SYSTEM\t1\r\n"
+        "HUDLS_BRACKET\tls_brack.tga\r\n"
+        "HUDLS_KEYOFST\t4,-6\r\n"
+        "HUDLS_MOREAV\tls_more.tga 300 -2\r\n"
+        "HUDLS_SLOT\t6 100,700\r\n"
+        "HUDLS_SLOT\t10 180 700\r\n"
+        "HUDLS_SLOT\t0 11 12\r\n"
+        "HUDLS_SLOT\t11 13 14\r\n"
+        "ZONEINFO\t1013,386,Right\r\n"
+        "PAUSEDPOS\t980 12\r\n"
+        "NETWORKINDICATOR\t6,5 30,5 70,5\r\n";
     DefHudPosFile f;
     memset(&f, 0, sizeof(f));
     if (def_parse_hudpos_memory((const unsigned char *)text, sizeof(text) - 1, &f) != 0) {
@@ -94,9 +95,144 @@ static int synthetic_legs(void) {
     return failures;
 }
 
+/* Every line as the retail tokenizer cuts it: the key is the whole first
+   token (`KEY,value` binds), a quoted value is one token without its quotes,
+   and a HUD key inside a VEHICLE_HUD block is the HUD's as anywhere else (the
+   block keys are matched ahead of the HUD chain, never instead of it)
+   [orig: File_ParseASCIIFile @0x53D810 -> Terrain_TokenizeConfigLine
+   @0x53CB60; HUD_ParseHudposToken @0x59F370 (VEHICLE_HUD @0x59F380, the
+   block keys @0x59F5CE..0x59F74E, the HUD chain from @0x59F7CE)]. */
+static int tokenizer_legs() {
+    const char *text =
+        "fonthud1_hi,FontHi.fnt\r\n"
+        "HUDCLIP \"5\" \"579\"\r\n"
+        "VEHICLE_HUD\r\n"
+        "  sid dbuggy1\r\n"
+        "  HUDCHLINE 7\r\n"
+        "VEHICLE_END\r\n";
+    DefHudPosFile tok;
+    memset(&tok, 0, sizeof(tok));
+    if (def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &tok) != 0) {
+        fprintf(stderr, "FAIL: tokenizer snippet did not parse\n");
+        return 1;
+    }
+    const bool ok = strcmp(tok.hud.font_hi, "FontHi.fnt") == 0 && tok.hud.clip_pos[0] == 5 &&
+            tok.hud.clip_pos[1] == 579 && tok.hud.hud_chline == 7 &&
+            tok.hud.vehicle_huds_count == 1;
+    if (!ok)
+        fprintf(stderr, "FAIL: tokenizer snippet: font '%s' clip %d,%d chline %d blocks %zu\n",
+                tok.hud.font_hi, tok.hud.clip_pos[0], tok.hud.clip_pos[1], tok.hud.hud_chline,
+                tok.hud.vehicle_huds_count);
+    def_free_hudpos(&tok);
+    if (ok) printf("hudpos tokenizer lines OK\n");
+    return ok ? 0 : 1;
+}
+
+/* A line's values are the tokenizer's 29 past the key: an eight-seat VEHICLE_HUD
+   row is 17 values, and its last seat is the 16th and 17th [orig:
+   Terrain_TokenizeConfigLine @0x53CB60, the 30-token cap @0x53CC8C..0x53CC93;
+   HUD_ParseHudposToken's seats arm @0x59F74E, eight pairs at most]. */
+static int value_cap_legs() {
+    const char *text =
+        "VEHICLE_HUD\r\n"
+        "  sid dch471\r\n"
+        "  seats 8,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16\r\n"
+        "VEHICLE_END\r\n";
+    DefHudPosFile f;
+    memset(&f, 0, sizeof(f));
+    if (def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &f) != 0 ||
+        f.hud.vehicle_huds_count != 1) {
+        fprintf(stderr, "FAIL: eight-seat snippet did not parse\n");
+        def_free_hudpos(&f);
+        return 1;
+    }
+    const DefVehicleHudBlock &b = f.hud.vehicle_huds[0];
+    const bool ok = b.seat_count == 8 && b.seat_x[7] == 15 && b.seat_y[7] == 16;
+    if (!ok)
+        fprintf(stderr, "FAIL: eight seats read %d, the last at %d,%d\n", b.seat_count,
+                b.seat_x[7], b.seat_y[7]);
+    def_free_hudpos(&f);
+    if (ok) printf("hudpos 29-value lines OK\n");
+    return ok ? 0 : 1;
+}
+
+/* Every hudpos number is the CRT's atof of its token, then _ftol2_sse for an
+   integer slot [orig: HUD_ParseHudposToken @0x59F370, e.g. HUDSPINMAPX1
+   @0x59F7E4..0x59F7EC; _atof @0x76B6A1]: an exponent counts, a value past the
+   int range is the integer indefinite, a hex spelling reads 0, and a declutter
+   flag is set by any value atof does not read as 0.0 [orig: the `fcomp
+   dbl_7D0188` (0.0) @0x5A2174]. ALPHAFADE keeps atof's double for the layout's
+   x2.55 / x62 converts. */
+static int atof_legs() {
+    const char *text =
+        "HUDSPINMAPX1 1e2\r\n"
+        "HUDSPINMAPX2 3000000000\r\n"
+        "HUDSPINMAPY1 0x40\r\n"
+        "HUDSPINMAPY2 -7.9\r\n"
+        "HUDDECLUT_SPINMAP 0.5 0 2d1 0\r\n"
+        "alphafade 20 100.5 0.5\r\n";
+    DefHudPosFile f;
+    memset(&f, 0, sizeof(f));
+    if (def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &f) != 0 ||
+        f.hud.declutter_count != 1) {
+        fprintf(stderr, "FAIL: atof snippet did not parse\n");
+        def_free_hudpos(&f);
+        return 1;
+    }
+    const DefDeclutterEntry &d = f.hud.declutter[0];
+    const bool ok = f.hud.spinmap_x1 == 100 && f.hud.spinmap_x2 == INT32_MIN &&
+            f.hud.spinmap_y1 == 0 && f.hud.spinmap_y2 == -7 && d.flags[0] == 1 &&
+            d.flags[1] == 0 && d.flags[2] == 1 && d.flags[3] == 0 &&
+            f.hud.alpha_fade[0] == 20.0 && f.hud.alpha_fade[1] == 100.5 &&
+            f.hud.alpha_fade[2] == 0.5;
+    if (!ok)
+        fprintf(stderr, "FAIL: atof reads: spinmap %d %d %d %d declutter %d%d%d%d alphafade "
+                "%g %g %g\n", f.hud.spinmap_x1, f.hud.spinmap_x2, f.hud.spinmap_y1,
+                f.hud.spinmap_y2, d.flags[0], d.flags[1], d.flags[2], d.flags[3],
+                (double)f.hud.alpha_fade[0], (double)f.hud.alpha_fade[1],
+                (double)f.hud.alpha_fade[2]);
+    def_free_hudpos(&f);
+    if (ok) printf("hudpos atof reads OK\n");
+    return ok ? 0 : 1;
+}
+
+/* Every VEHICLE_HUD block is kept, one with no sid included: retail commits it
+   to every item whose alias matches without case, an empty one included, and a
+   later block overwrites an earlier one [orig: the VEHICLE_END loop
+   @0x59F3DA..0x59F40C, `_stricmp(alias, byte_2723DC4)` @0x59F402]. */
+static int sidless_block_legs() {
+    const char *text =
+        "VEHICLE_HUD\r\n"
+        "  driver 1 2\r\n"
+        "VEHICLE_END\r\n"
+        "VEHICLE_HUD\r\n"
+        "  sid dup\r\n"
+        "  driver 3 4\r\n"
+        "VEHICLE_END\r\n"
+        "VEHICLE_HUD\r\n"
+        "  sid DUP\r\n"
+        "  driver 5 6\r\n"
+        "VEHICLE_END\r\n";
+    DefHudPosFile f;
+    memset(&f, 0, sizeof(f));
+    const bool ok = def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &f) == 0 &&
+            f.hud.vehicle_huds_count == 3 && f.hud.vehicle_huds[0].sid[0] == '\0' &&
+            f.hud.vehicle_huds[0].driver_x == 1 && f.hud.vehicle_huds[2].driver_x == 5;
+    if (!ok)
+        fprintf(stderr, "FAIL: sid-less and repeated VEHICLE_HUD blocks: %zu kept\n",
+                f.hud.vehicle_huds_count);
+    def_free_hudpos(&f);
+    if (ok) printf("hudpos VEHICLE_HUD blocks OK\n");
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     if (synthetic_legs() != 0) return 1;
+    if (tokenizer_legs() != 0) return 1;
+    if (atof_legs() != 0) return 1;
+    if (sidless_block_legs() != 0) return 1;
+    if (value_cap_legs() != 0) return 1;
     /* Every remaining leg reads the shipped hudpos.def (the memory legs compare
        against its path parse), so they gate on the reference fixture set
        (OPENNOVA_JO_ASSETS). */
@@ -173,7 +309,7 @@ int main(int argc, char **argv) {
        is an ==0 test. [orig: dword_27237C0 (.data, no file
        bytes); parse @0x59fc1f; read @0x5a7a6a] */
     {
-        static const char spinmap_text[] = "SPINMAPWPDISTOFF 17\n";
+        static const char spinmap_text[] = "SPINMAPWPDISTOFF 17\r\n";
         DefHudPosFile sf;
         memset(&sf, 0, sizeof(sf));
         if (def_parse_hudpos_memory((const unsigned char *)spinmap_text,
@@ -198,9 +334,9 @@ int main(int argc, char **argv) {
        the BSS-zero initializer (label LIVE). [orig: mapcoords parse @0x5a0920 ->
        screenX/screenY/dword_27236FC (.data, no file bytes)] */
     {
-        static const char mc_text[] = "MAPCOORDS 530,720,center\n";
-        static const char mc_short[] = "MAPCOORDS 10,20\n";
-        static const char mc_none[] = "HUDTIMECLOCK 98,32\n";
+        static const char mc_text[] = "MAPCOORDS 530,720,center\r\n";
+        static const char mc_short[] = "MAPCOORDS 10,20\r\n";
+        static const char mc_none[] = "HUDTIMECLOCK 98,32\r\n";
         DefHudPosFile sf;
         memset(&sf, 0, sizeof(sf));
         if (def_parse_hudpos_memory((const unsigned char *)mc_text,
@@ -270,7 +406,7 @@ int main(int argc, char **argv) {
        atof and the fraction feeds the x2.55/x62 converts [orig: @0x5a0882..0x5a08c2].
        An integer parse would truncate 1.5 s to a 62-tick ramp instead of 93. */
     {
-        static const char fade_text[] = "alphafade\t12.5 75.5 1.5\n";
+        static const char fade_text[] = "alphafade\t12.5 75.5 1.5\r\n";
         DefHudPosFile ff;
         memset(&ff, 0, sizeof(ff));
         if (def_parse_hudpos_memory((const unsigned char *)fade_text,
@@ -313,9 +449,9 @@ int main(int argc, char **argv) {
        @0x59d6b0] */
     {
         static const char pos_text[] =
-            "AMMOCOUNTPOS\t128,597,0,right\n"
-            "HUDWEAPONNAME\t11,630,1,left\n"
-            "HUDTIMECLOCK\t10 20 center\n";
+            "AMMOCOUNTPOS\t128,597,0,right\r\n"
+            "HUDWEAPONNAME\t11,630,1,left\r\n"
+            "HUDTIMECLOCK\t10 20 center\r\n";
         DefHudPosFile pf;
         memset(&pf, 0, sizeof(pf));
         if (def_parse_hudpos_memory((const unsigned char *)pos_text,
@@ -351,9 +487,9 @@ int main(int argc, char **argv) {
        breath bar. [orig: HUD_ParseHudposToken @0x59FB3B..0x59FB84 ->
        dword_2723810/14/18 via atof, atof, HUD_ParseTextAlignment] */
     {
-        static const char breath_center[] = "BREATHTIME\t\t512,70,center\n";
-        static const char breath_right[] = "BREATHTIME 10,20,RIGHT\n";
-        static const char breath_short[] = "BREATHTIME 30,40\n";
+        static const char breath_center[] = "BREATHTIME\t\t512,70,center\r\n";
+        static const char breath_right[] = "BREATHTIME 10,20,RIGHT\r\n";
+        static const char breath_short[] = "BREATHTIME 30,40\r\n";
         const char *texts[] = {breath_center, breath_right, breath_short};
         const size_t lens[] = {sizeof(breath_center) - 1, sizeof(breath_right) - 1,
                                sizeof(breath_short) - 1};
@@ -470,8 +606,8 @@ int main(int argc, char **argv) {
        drift under hud_static_frame_index(). */
     {
         const char *two_frames =
-            "StaticFrame\tH_BlkHLin.tga  512,720\n"
-            "StaticFrame\tCompMark.tga  508,685\n";
+            "StaticFrame\tH_BlkHLin.tga  512,720\r\n"
+            "StaticFrame\tCompMark.tga  508,685\r\n";
         DefHudPosFile multi;
         memset(&multi, 0, sizeof(multi));
         if (def_parse_hudpos_memory((const unsigned char *)two_frames,

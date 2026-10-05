@@ -101,15 +101,15 @@ func _attachment_items_db(anchor_name: String, ambiguous: bool) -> ItemDatabase:
 	assert_not_null(file)
 	if file == null:
 		return null
-	file.store_string("""begin "Attachment Fixture Carrier"
+	file.store_string(TestFs.crlf("""begin "Attachment Fixture Carrier"
   id 105004
   graphic mount
   primary_weapon WPN_EMPLCD50NA
   addeweap %s 101419
-""" % anchor_name)
+""" % anchor_name))
 	if ambiguous:
-		file.store_string("  addeweap missing 101419\n")
-	file.store_string("end\n")
+		file.store_string("  addeweap missing 101419\r\n")
+	file.store_string("end\r\n")
 	file.close()
 	var db := ItemDatabase.new()
 	assert_eq(db.load(path), OK)

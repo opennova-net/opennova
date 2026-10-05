@@ -302,7 +302,7 @@ func _make_install() -> String:
 	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "exptag.txt", "bytes": "EXP"},
 		{"name": HOST_MAP, "bytes": NOT_A_MISSION},
-		{"name": HOST_TERRAIN + ".trn", "bytes": HOST_TRN},
+		{"name": HOST_TERRAIN + ".trn", "bytes": TestFs.crlf(HOST_TRN)},
 		{"name": "mnml.cpt", "bytes": heightmap},
 		{"name": "mnml_dm.tga", "bytes": texture},
 		{"name": HOST_ENVIRONMENT + ".env", "bytes": "not an env"},

@@ -253,7 +253,26 @@ static void test_player_info_menu_policy() {
     CHECK(player_info_default_grenade_row(-1, 0) == 0);  // degenerate maxclips
 }
 
+// The PLAYER_INFO weapon list counts a row only at its `end` [orig:
+// WeaponDef_ParseProperty @0x54D730, the END compare], so an entry no `end`
+// closed is in the weapon table but in no list.
+static void test_slot_list_skips_an_unclosed_entry() {
+    using opennova::def::DefWeaponDef;
+    DefWeaponDef rows[2] = {};
+    for (DefWeaponDef &row : rows) {
+        row.weapon_class_slot = 1;
+        row.loadout_selectable = 1;
+        row.charfilter_mask = 1;
+        row.teamfilter_mask = 1;
+    }
+    rows[1].unclosed = 1;
+    std::vector<int32_t> indices;
+    weapon_slot_indices(rows, 2, 1, 1, 1, indices);
+    CHECK(indices.size() == 1 && indices[0] == 0);
+}
+
 int main() {
+    test_slot_list_skips_an_unclosed_entry();
     test_promotion_gate_skips_in_session();
     test_promotion_applies_availability_then_filters_kit();
     test_accept_requested_ammo_and_banned_validation();

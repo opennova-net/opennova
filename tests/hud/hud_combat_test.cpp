@@ -196,7 +196,7 @@ static void mortar_map_and_world_cues() {
 static void combat_text_font_slots() {
 	const fnt::fnt_font_t font = minimal_fnt::uniform_test_font();
 	HudLayout layout;
-	layout.alpha_fade_seconds = 1;
+	layout.alpha_fade_ramp_ticks = 62;
 	layout.combat.gear_x = 100;
 	layout.combat.gear_y = 150;
 	layout.combat.impact_x = 512;
@@ -490,8 +490,8 @@ static void world_feeds() {
 
 static void parser_and_received_feedback() {
 	const char text[] =
-			"weapon HUD_TEST\n crosshair primary.tga secondary.tga\n commandersX commander.tga\n "
-			"hud_loadout_select bar.tga\n hudicon gun.tga\n splash 17\nend\n";
+			"weapon HUD_TEST\r\n crosshair primary.tga secondary.tga\r\n commandersX commander.tga\r\n "
+			"hud_loadout_select bar.tga\r\n hudicon gun.tga\r\n splash 17\r\nend\r\n";
 	def::DefWeaponsFile defs{};
 	CHECK(def::def_parse_weapons_memory(
 				  reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1, &defs) == 0);

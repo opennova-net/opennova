@@ -39,3 +39,37 @@ func test_vehicle_hud_block() -> void:
 	if block != null:
 		assert_eq(block.interface_texture, "fixture_panel.tga")
 	assert_null(hud.get_vehicle_hud("no_such_sid"), "An unknown sid resolves to no block.")
+
+
+# Two blocks naming one sid: the later one is the item's, as each VEHICLE_HUD
+# commit walks every item and overwrites its panel; a block with no sid is the
+# panel of an item whose alias is empty (an item a nested `begin` or the
+# file's end closed) [orig: HUD_ParseHudposToken's VEHICLE_END commit, the
+# _stricmp of each item's alias against the block sid; hud-re VEHICLE_HUD].
+func test_vehicle_hud_last_block_and_empty_sid() -> void:
+	var dir := TestFs.cache_dir(self, "hudpos_vehicle_blocks")
+	var path := dir.path_join("hudpos.def")
+	TestFs.write_text(self, path, "\n".join(PackedStringArray([
+		"VEHICLE_HUD",
+		"  sid dup_vehicle",
+		"  interface first.tga",
+		"VEHICLE_END",
+		"VEHICLE_HUD",
+		"  sid dup_vehicle",
+		"  interface second.tga",
+		"VEHICLE_END",
+		"VEHICLE_HUD",
+		"  interface nameless.tga",
+		"VEHICLE_END",
+	])))
+	var hud := HudPos.new()
+	assert_eq(hud.load(path), OK, "the two-block layout loads")
+	var dup := hud.get_vehicle_hud("dup_vehicle")
+	assert_not_null(dup, "a repeated sid resolves")
+	if dup != null:
+		assert_eq(dup.interface_texture, "second.tga", "the later block wins")
+	var nameless := hud.get_vehicle_hud("")
+	assert_not_null(nameless, "an empty sid resolves to the sid-less block")
+	if nameless != null:
+		assert_eq(nameless.interface_texture, "nameless.tga")
+	TestFs.remove_dir_recursive(dir)
