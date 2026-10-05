@@ -59,10 +59,10 @@ divergences in its §8 catalog):
 
 - **Message catalog is the single source of truth**:
   `engine/net/npwire/ingame_message_catalog.h` maps `(dir, tag) → name →
-  coverage → decoder → doc §`, shared by `nw_pp` and the `nw_message_coverage` gate. Add a
-  message there first; `nw_pp --coverage <capture>` ranks the undecoded backlog by volume.
+  coverage → decoder → doc §`, shared by `opennova-wire` and the `nw_message_coverage` gate. Add a
+  message there first; `opennova-wire --coverage <capture>` ranks the undecoded backlog by volume.
 - **Capture → inspect loop**: host from the Godot game, `dumpcap`, then
-  `nw_pp --coverage <cap>` (undecoded backlog by volume) and `nw_pp --stream <cap>`.
+  `opennova-wire --coverage <cap>` (undecoded backlog by volume) and `opennova-wire --stream <cap>`.
   The CI wire gates are `nw_codec_identity` and `nw_self_capture` over the committed
   `fixtures/novaworld/` set (`docs/asset-gated-tests.md`, the two-tier gate). Full
   loop in `scripts/net/README.md`.

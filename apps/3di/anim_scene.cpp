@@ -30,7 +30,7 @@ using opennova::threedi::f17;
 using opennova::threedi::f9;
 using opennova::threedi::name_field;
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 namespace {
 
@@ -294,4 +294,4 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 	return 0;
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

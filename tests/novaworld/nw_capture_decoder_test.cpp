@@ -303,7 +303,7 @@ int main() {
 
 	// The detailed capture seam reports every decrypted 0x43/0x83 datagram,
 	// including its session header, independently of message reassembly. This is
-	// the deterministic sequence/ACK oracle used by nw_pp --sequencing and the
+	// the deterministic sequence/ACK oracle used by opennova-wire --sequencing and the
 	// retail/OpenNova semantic diff loop.
 	{
 		CaptureDecoder decoder;

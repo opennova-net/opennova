@@ -41,6 +41,7 @@ Preferences every_preference() {
 	preferences.runtime_executable = "C:/tools/opennova.exe";
 	preferences.game_install = "D:/Joint Operations";
 	preferences.play_in_install = true;
+	preferences.play_in_install_strict = true;
 	preferences.import_dependencies = false;
 	preferences.recent_items = {{"jo", {106100, 2044}}, {"dfx", {7}}};
 	return preferences;
@@ -49,7 +50,7 @@ Preferences every_preference() {
 bool same(const Preferences &a, const Preferences &b) {
 	return a.recent_projects == b.recent_projects && a.runtime_executable == b.runtime_executable &&
 	       a.game_install == b.game_install && a.play_in_install == b.play_in_install &&
-	       a.import_dependencies == b.import_dependencies && a.recent_items == b.recent_items;
+	       a.play_in_install_strict == b.play_in_install_strict && a.import_dependencies == b.import_dependencies && a.recent_items == b.recent_items;
 }
 
 // The settings file every_preference() is: the keys sorted, two spaces an indent, a newline last;
@@ -59,6 +60,7 @@ const char *const kSettingsFile = "{\n"
                                   "  \"game_install\": \"D:/Joint Operations\",\n"
                                   "  \"import_dependencies\": false,\n"
                                   "  \"play_in_install\": true,\n"
+                                  "  \"play_in_install_strict\": true,\n"
                                   "  \"recent_items_by_game\": {\n"
                                   "    \"dfx\": [\n"
                                   "      7\n"
@@ -147,6 +149,9 @@ static int test_memory_store_round_trips() {
 	one.play_in_install = true;
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	one = Preferences();
+	one.play_in_install_strict = true;
+	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
+	one = Preferences();
 	one.import_dependencies = false;
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	one = Preferences();
@@ -202,10 +207,12 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(editor_test::write_text(s15, kS15File));
 	Preferences kept = every_preference();
 	kept.recent_items.clear();
+	kept.play_in_install_strict = false; // a key added since S15 reads as its default where a file lacks it
 	loaded = Preferences();
 	Diagnostic two;
 	TEST_EXPECT(FilePreferencesStore(s15).load(loaded, two) && same(loaded, kept) && two.code().empty());
 	loaded.recent_items = every_preference().recent_items;
+	loaded.play_in_install_strict = true;
 	TEST_EXPECT(FilePreferencesStore(s15).save(loaded, error));
 	TEST_EXPECT(test_io::read_file_text(s15, written) && written == kSettingsFile);
 	// An item that is no whole number a double holds exactly is skipped, never cast: a fraction, one
@@ -223,7 +230,7 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(FilePreferencesStore(dir.file("missing.json")).load(loaded, error) && same(loaded, Preferences()));
 	TEST_EXPECT(editor_test::write_text(dir.file("bare.json"), "{\"schema_version\": 2}"));
 	TEST_EXPECT(FilePreferencesStore(dir.file("bare.json")).load(loaded, error) && loaded.import_dependencies &&
-	            loaded.game_install.empty() && !loaded.play_in_install);
+	            loaded.game_install.empty() && !loaded.play_in_install && !loaded.play_in_install_strict);
 	TEST_EXPECT(editor_test::write_text(dir.file("newer.json"), "{\"schema_version\": 99}"));
 	Diagnostic newer;
 	TEST_EXPECT(FilePreferencesStore(dir.file("newer.json")).load(loaded, newer) &&

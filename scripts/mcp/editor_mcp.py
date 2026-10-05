@@ -728,7 +728,8 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--purpose", default=None, help="the pickers' purpose (refused over MCP: pass paths)")
     request.add_argument("--settings", default=None,
                          help="apply_project_settings: the settings to set as a JSON object (title, mission, "
-                              "multiplayer, game_install, runtime_executable, play_in_install; one left out stays)")
+                              "multiplayer, game_install, runtime_executable, play_in_install, "
+                              "play_in_install_strict; one left out stays)")
     request.add_argument("--viewport", default=None,
                          help="set_viewport: the change as a JSON object {kind, device, clock, options, camera} "
                               "(without --path: the active document's viewport, or the clock alone whatever is "

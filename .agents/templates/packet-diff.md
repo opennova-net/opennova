@@ -14,7 +14,7 @@ Prove an exact byte/field mismatch or confirm parity for one protocol surface.
 
 ## Steps
 
-1. Decode with existing tools first: `nw_pp`, or the
+1. Decode with existing tools first: `opennova-wire`, or the
    nearest CTest fixture.
 2. Isolate the frame/message range.
 3. Compare retail vs OpenNova by decoded tag order, length, and field values.

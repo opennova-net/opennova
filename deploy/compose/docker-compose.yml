@@ -8,7 +8,7 @@
 
 services:
   novaworld:
-    image: ${SERVER_IMAGE:-opennova-novaworld:local}
+    image: ${SERVER_IMAGE:-opennova-novaworld-server:local}
     build:
       # Build context is the repo root (two levels up) so the Dockerfile
       # can reach engine/, backend/, third_party/, apps/.

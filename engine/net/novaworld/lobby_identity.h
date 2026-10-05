@@ -7,7 +7,7 @@
 namespace opennova {
 
 // The host-OS reads behind the verify Cookie's identity set, for any embedder (the game shell, the
-// nw-lister app). Each returns false, leaving `out` alone, where the platform has no such API
+// opennova-nw-lister app). Each returns false, leaving `out` alone, where the platform has no such API
 // (everything but Windows); the embedder then supplies its own values.
 
 // The locale trio the Cookie leads with: the English country and language names and the base

@@ -21,7 +21,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_operation.h>
 
-namespace opennova::project_cli {
+namespace opennova::project {
 
 namespace {
 
@@ -1433,4 +1433,4 @@ int run_project_command(int argc, const char *const *argv, std::FILE *out, std::
 	return row.run(cli, row.cli, args);
 }
 
-} // namespace opennova::project_cli
+} // namespace opennova::project

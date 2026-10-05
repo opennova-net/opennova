@@ -19,7 +19,7 @@
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_build.h>
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 // One clip of a loaded set: the bytes as read, and the parsed document.
 struct AnimLoadedClip {
@@ -71,4 +71,4 @@ int cmd_anim_scene(const char *in_path, const char *out_path);
 int cmd_anim_info(const char *in_path, int verbose);
 int cmd_anim_compare(const char *expected_path, const char *actual_path);
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

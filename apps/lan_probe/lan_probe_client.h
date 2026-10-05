@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <string>
 
-namespace opennova::lanprobe {
+namespace opennova::lan_probe {
 
 enum class Status {
 	Ready,
@@ -38,4 +38,4 @@ struct Result {
 // continuing to probe until the same bounded deadline.
 Result wait_for_server(const Options &options);
 
-} // namespace opennova::lanprobe
+} // namespace opennova::lan_probe

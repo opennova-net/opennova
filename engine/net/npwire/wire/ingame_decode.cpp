@@ -826,7 +826,7 @@ bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
 }
 
 // Walk a S2C 0x0A body into a FrameUpdate. Structural port of the retail handler
-// [orig: NapiNPClientMsg_0x00A @ 0x42FEC0] (the same walk nw_pp's print_tag_0a
+// [orig: NapiNPClientMsg_0x00A @ 0x42FEC0] (the same walk opennova-wire's print_tag_0a
 // performs, returning data instead of printing). Sub-block widths IDA-witnessed:
 // case 0 = 11 B, 1 = 6 B, 2 = 11 B (ENV), 3 = 0 B (objective-gametype gated).
 bool decode_frame_update(const uint8_t *body, size_t len,

@@ -493,7 +493,7 @@ Goldens (local, gitignored): the 2026-06-26 trio `retail-lan-host-join.pcapng`
 with the 01TR parity-round set (`retail-lan-01tr-join*`, `retail-gameplay-01tr`,
 `opennova-host-retail-client-01tr`) that the `NW_GOLDEN_*` env vars pointed at until they were
 retired (the bank table, `scripts/net/README.md` "Reference captures", was removed 2026-08-26).
-Decode best with `apps/nw_pp --items <ITEMS.DEF>`; each capture has a decode sidecar.
+Decode best with `opennova-wire --items <ITEMS.DEF>`; each capture has a decode sidecar.
 
 ## Key references
 

@@ -17,7 +17,7 @@ hash-bound parity verdict.
 | --- | --- |
 | `detect_capture.ps1` | Locate `dumpcap` and list usable capture interfaces. |
 | `capture.ps1` | Start or stop a tagged local packet capture. |
-| `decode.ps1` | Decode a capture with the native `nw_pp` application. |
+| `decode.ps1` | Decode a capture with the native `opennova-wire` application. |
 | `diff_0a.py` | Per-FIELD shape diff of the S2C 0x0A stream vs a retail-host golden (sub-block cycle, record-class mix, field population); caches `<golden>.0a.json` beside the input. |
 | `exercise_retail_input.ps1` | Drive the bounded Windows input trajectory used by live probes. |
 | `host_opennova.ps1` | Start an OpenNova LAN host on launch flags, await LAN discovery and its MCP endpoint. |
@@ -34,7 +34,7 @@ launched only through onhook-mcp.
 ## Build native helpers
 
 ```powershell
-cmake --build build --config Release --target nw_pp opennova_nw_lan_probe
+cmake --build build --config Release --target opennova_wire opennova_lan_probe
 ```
 
 The scripts locate binaries in the Release or Debug output directories.
@@ -87,7 +87,7 @@ sufficient.
 
 ## Coverage check
 
-`nw_pp --coverage <capture>` ranks a capture's undecoded backlog by volume; the
+`opennova-wire --coverage <capture>` ranks a capture's undecoded backlog by volume; the
 automated native coverage is the `nw_*`, `npruntime_*` and `netsim_*` ctests
 over the committed `fixtures/novaworld/` set and the inline-pcap unit tests.
 
@@ -139,7 +139,7 @@ python scripts/net/compare_scenario.py .scratch/runs/<rr>/run-summary.json .scra
 ```
 
 `compare_scenario.py` decodes each evidence capture with
-`nw_pp --scenario-events`, keeps the scenario's window, and names the actor: a
+`opennova-wire --scenario-events`, keeps the scenario's window, and names the actor: a
 joiner by the capture's first C2S 0x0C uplink, the host by roster slot 0
 (S2C 0x46). Each run must match the scenario's
 `expect.sequence` in order. Each run's matched fields and `expect.count_kinds`

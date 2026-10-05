@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <string>
 
-namespace opennova::nwpp {
+namespace opennova::wire {
 
 namespace {
 
@@ -181,4 +181,4 @@ std::string format_scenario_event(const InGameMessage &message, uint64_t ts_nano
 	       fields + (decoded ? " decode=1" : " decode=0");
 }
 
-} // namespace opennova::nwpp
+} // namespace opennova::wire

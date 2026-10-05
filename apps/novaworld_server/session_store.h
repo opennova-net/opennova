@@ -6,7 +6,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 // Per-tag in-memory state for the legacy NW*.dll login + join relay dance.
 // Follows onnet's `login_sessions` / `join_sessions` dicts in
@@ -86,4 +86,4 @@ private:
 	std::unordered_map<std::string, HostEntry>  host_;
 };
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

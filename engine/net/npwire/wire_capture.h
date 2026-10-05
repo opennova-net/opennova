@@ -2,7 +2,7 @@
 
 // The NovaWorld outer-decode pipeline, run over a whole capture.
 //
-// Every in-match consumer — nw_pp, the cross-validation harnesses, and the
+// Every in-match consumer — opennova-wire, the cross-validation harnesses, and the
 // replay-timeline builder — needs the same chain to get from raw UDP datagrams
 // to per-tag inner payloads: NAPI envelope (CRC strip) -> outer NWU transform
 // -> recover each side's SCRK from the ClientAuth/ServerAuth handshake -> 0x43/
@@ -65,7 +65,7 @@ struct CapturedDatagramResult {
 
 // One fully-decoded in-game protocol message: the reassembled inner body a
 // per-tag decoder (ingame_decode.h) consumes, tagged with its direction and the
-// capture frame the message STARTED on (the first fragment, matching nw_pp).
+// capture frame the message STARTED on (the first fragment, matching opennova-wire).
 struct InGameMessage {
 	int frame_index = 0;          // first-fragment capture order
 	char dir = '?';               // 'C' = client->server, 'S' = server->client
@@ -159,7 +159,7 @@ private:
 // the ordered stream of reassembled in-game messages. SCRK is recovered from the
 // handshake as it streams by, so the datagrams must include the ClientAuth /
 // ServerAuth packets for protocol messages to decrypt (a mid-session capture
-// without them yields no protocol messages — the same limitation nw_pp has).
+// without them yields no protocol messages — the same limitation opennova-wire has).
 std::vector<InGameMessage>
 decode_capture_to_messages(const std::vector<CaptureDatagram> &datagrams);
 

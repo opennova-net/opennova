@@ -1,7 +1,7 @@
 // weapon timing and weapon merge, from scratch: no retail models, BADs or
 // imported metadata. The timing is measured by the engine's weapon FSM; the
 // merge sets only the keys an edits file names, in a def the parser reads.
-#include "../../apps/threedi_cli/weapon_timing.h"
+#include "../../apps/3di/weapon_timing.h"
 #include "common/file_io.h"
 #include "common/retail_paths.h"
 
@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-using namespace threedi_cli;
+using namespace opennova::threedi_cli;
 namespace wa = opennova::world::weapon_action;
 namespace {
 int failures = 0;

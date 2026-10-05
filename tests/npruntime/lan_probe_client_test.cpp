@@ -66,18 +66,18 @@ int main() {
 				host.get(), client, reply.data(), reply.size()) == static_cast<int>(reply.size());
 	});
 
-	lanprobe::Options options;
+	lan_probe::Options options;
 	options.endpoint = {{127, 0, 0, 1}, host_port};
 	options.timeout_ms = 1500;
 	options.retry_interval_ms = 50;
 	options.client_index = 0x11223344u;
 	options.expected_server_name = "Expected Host";
-	const lanprobe::Result found = lanprobe::wait_for_server(options);
+	const lan_probe::Result found = lan_probe::wait_for_server(options);
 	responder.join();
 
 	bool ok = true;
 	ok = expect(responder_ok, "fake host answered the retail discovery probe") && ok;
-	ok = expect(found.status == lanprobe::Status::Ready,
+	ok = expect(found.status == lan_probe::Status::Ready,
 			"probe reports ready only after a valid game-server reply") && ok;
 	ok = expect(found.source.port == host_port && found.server.server_name == "Expected Host",
 			"probe returns the answering endpoint and advertised identity") && ok;
@@ -92,8 +92,8 @@ int main() {
 	options.timeout_ms = 60;
 	options.retry_interval_ms = 20;
 	options.expected_server_name.clear();
-	const lanprobe::Result absent = lanprobe::wait_for_server(options);
-	ok = expect(absent.status == lanprobe::Status::Timeout,
+	const lan_probe::Result absent = lan_probe::wait_for_server(options);
+	ok = expect(absent.status == lan_probe::Status::Timeout,
 			"an unanswered endpoint stops at the bounded deadline") && ok;
 
 	net::shutdown();
