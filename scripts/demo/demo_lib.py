@@ -32,6 +32,8 @@ from game_mcp import BehindLaunch, GameMcp, GameMcpError, port_open, text_of  # 
 STORYBOARD = HERE / "storyboard.json"
 SW_SHOWNORMAL = 1  # WINDOWPLACEMENT.showCmd of a window neither minimized nor maximized
 REHEARSE_PAUSE = 0.3  # a rehearsal's hold, in wall seconds (no movie to pace)
+HOLD_CEILING = 10.0  # a hold's frames must come within this many times its movie time, in wall time
+HOLD_FLOOR = 30.0  # and within this many wall seconds at least (a short hold over a slow frame)
 MARK_REF = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)([+-]\d+)?$")
 EM_DASH = chr(0x2014)  # the project's copy takes none (CLAUDE.md), captions included
 
@@ -317,14 +319,20 @@ class Editor:
         return count
 
     def hold(self, seconds: float) -> int:
-        """Wait until `seconds` of movie time pass (that many frames written), the editor idling."""
+        """Wait until `seconds` of movie time pass (that many frames written), the editor idling. A
+        movie that stops writing frames (a minimized window draws none, a lost device) fails the take
+        after HOLD_CEILING times the hold in wall time (and at least HOLD_FLOOR seconds)."""
         if not self.frames_dir:
             time.sleep(seconds)
             return 0
         target = self.frames() + int(round(seconds * self.fps))
+        deadline = time.monotonic() + max(HOLD_FLOOR, HOLD_CEILING * seconds)
         while self.frames() < target:
             if self.child and self.child.poll() is not None:
                 raise RuntimeError("editor exited")
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"no frames written for a {seconds:.1f} s hold ({self.frames()} of {target}): "
+                                   f"is the editor's window minimized?")
             time.sleep(0.02)
         return self._last_count
 

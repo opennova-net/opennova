@@ -22,7 +22,6 @@ Stdlib Python plus Pillow (the cut); a portable ffmpeg passed by path.
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
@@ -49,10 +48,11 @@ def existing_dir(text: str) -> str:
 
 
 def ffmpeg_of(text: str) -> str:
-    found = shutil.which(text) or (str(Path(text).resolve()) if Path(text).is_file() else None)
-    if not found:
-        raise SystemExit(f"ffmpeg not found: {text} (pass --ffmpeg <ffmpeg executable>)")
-    return found
+    # The file named, never one PATH finds (README: a portable build passed by path).
+    path = Path(text)
+    if not path.is_file():
+        raise SystemExit(f"no ffmpeg at {text}: pass --ffmpeg <the ffmpeg executable's path>")
+    return str(path.resolve())
 
 
 def parts_of(text: str) -> set[str]:
@@ -80,7 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
                              help="the retail game install whose data is imported (read, never written)")
         if ffmpeg:
             sub.add_argument("--ffmpeg", required=True,
-                             help="the ffmpeg executable (a portable build with libx264 and libass)")
+                             help="the ffmpeg executable's path (a portable build with libx264 and libass; "
+                                  "never looked up on PATH)")
         return sub
 
     sub = stage("prep", "earlier projects for the welcome page's recents, made from the game install",

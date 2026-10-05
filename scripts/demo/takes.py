@@ -350,11 +350,14 @@ def part_build(t: Take) -> None:
 def play(t: Take) -> None:
     """Play: the editor starts the game itself, so this client takes the foreground lock before
     raising `play` and tends the game's windows behind the others from the moment the `run` section
-    names its pid (game_mcp.BehindLaunch). The shot is the game's own `game_screenshot`."""
+    names its pid until its world has loaded (game_mcp.BehindLaunch: Godot raises a window it
+    restyles, which a load may do), then settles and lets the lock go. The shot is the game's own
+    `game_screenshot`."""
     ed = t.ed
     behind = BehindLaunch(False)
     run: dict = {}
     pid = 0
+    shell: dict = {}
     try:
         behind.prepare()
         ed.req("play", mission=MISSION_NAME)
@@ -369,24 +372,24 @@ def play(t: Take) -> None:
             time.sleep(0.05)
         else:
             raise RuntimeError(f"the game did not start: {json.dumps(run)[:500]}")
-        settling = time.monotonic()
-        while time.monotonic() - settling < 6:
+        game = GameMcp.for_port(run["mcp_port"], timeout=60)
+        # Tended through the world's load, the game's state asked every half second.
+        waited = time.monotonic()
+        asked = 0.0
+        while time.monotonic() - waited < 180:
             behind.tend(pid)
+            if time.monotonic() - asked >= 0.5:
+                asked = time.monotonic()
+                try:
+                    shell = game.structured("game_state", {}, timeout=10).get("shell") or {}
+                except GameMcpError:
+                    shell = {}
+                if shell.get("world_loaded"):
+                    break
             time.sleep(0.05)
         behind.settle(pid)
     finally:
         behind.release()
-    game = GameMcp.for_port(run["mcp_port"], timeout=60)
-    shell: dict = {}
-    waited = time.monotonic()
-    while time.monotonic() - waited < 180:
-        try:
-            shell = game.structured("game_state", {}).get("shell") or {}
-            if shell.get("world_loaded"):
-                break
-        except GameMcpError:
-            pass
-        time.sleep(0.5)
     t.mark("playing", mission=shell.get("mission_file"), loaded=bool(shell.get("world_loaded")))
     t.hold(1.5)
     shot = game.call("game_screenshot", {"format": "png", "max_dim": t.sb.size[0]})

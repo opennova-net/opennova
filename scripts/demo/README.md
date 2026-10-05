@@ -40,8 +40,8 @@ captions and cut points from the storyboard alone.
 - The packaged editor: `editor/opennova-editor.exe` from an `opennova-editor-windows-v<version>.zip`
   (CI's packaging, or `scripts/package_godot_windows.ps1`).
 - The retail game install (JO:CA with jox01 installed): its data is imported, never written.
-- A portable ffmpeg with libx264 and libass (a gyan.dev "essentials" build works), passed by
-  `--ffmpeg`. Do not install it system-wide or change PATH for it.
+- A portable ffmpeg with libx264 and libass (a gyan.dev "essentials" build works), passed by its
+  path as `--ffmpeg` (never looked up on PATH). Do not install it system-wide or change PATH for it.
 - Disk: the raw PNG frames run to gigabytes per take, and the import copies about 9,000 files into
   the project. Delete the frames once encoded (`clean`).
 
@@ -99,7 +99,8 @@ python scripts/demo/record_demo.py clean    --work <work>
   (`game_mcp.BehindLaunch`: the foreground lock taken for the start, the first window shown without
   activation, each window sent to the bottom of the z-order) and is driven through its MCP alone:
   nothing moves the mouse, sends OS input or brings a window to the front. Play's game window is
-  tended the same way from the moment the editor's `run` section names its pid. The frames are
+  tended the same way from the moment the editor's `run` section names its pid until its world has
+  loaded (Godot raises a window it restyles, which a load may do). The frames are
   Godot Movie Maker's (`--write-movie <take>/frame.png --fixed-fps 30`), never a screen grab; the
   Play scene's picture is the game's own `game_screenshot`. Never minimize the window to hide it:
   a minimized window draws nothing, and restoring it takes the foreground.
@@ -113,7 +114,8 @@ python scripts/demo/record_demo.py clean    --work <work>
   reads configuration from environment variables: every path is an argument.
 - **Movie time is frame time.** Movie Maker renders every frame at a fixed 30 fps whatever the
   wall time, so a hold of N seconds waits for N*30 more frames written (`Editor.hold`), never a
-  sleep. Operations (new project, import, build) are polled through the `operation` query until
+  sleep; frames that stop coming (a minimized window draws none) fail the take after ten times the
+  hold in wall time, 30 s at least. Operations (new project, import, build) are polled through the `operation` query until
   they end, never awaited through the request tool's own 300 s wait: under Movie Maker an
   operation's frames are slow in wall time.
 - **Only its own processes.** Each stage quits the editor it started (`editor_request quit`, the
