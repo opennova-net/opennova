@@ -18,6 +18,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 
 namespace opennova::editor {
 
@@ -104,6 +105,8 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		// one stays active there.
 		std::vector<std::pair<std::string, std::string>> moved{{plan.path, plan.new_path}};
 		for (const RenameOutput &companion : plan.companions) moved.emplace_back(companion.path, companion_path(companion));
+		// A card of a file it moved shows it where it went (the MCP gaps lane).
+		if (workspace_follows_moves(view_.workspace, moved)) core_.touch(ViewConcern::Workspace);
 		std::vector<std::string> reopen;
 		std::string active_now;
 		for (const auto &[from, to] : moved) {

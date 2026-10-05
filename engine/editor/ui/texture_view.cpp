@@ -209,6 +209,13 @@ void TextureView::draw_edits(Workspace &workspace, const DocumentBase &document,
 	}
 	// An 8-bit PCX's indices, which a foliage or char map reads as data.
 	if (extension == ".pcx" && !image.palette.empty()) {
+		// The two indices are the workspace's (the MCP gaps lane: workspace.document's remap_from and remap_to).
+		const WorkspaceView::DocumentView &held = view.workspace.document(path);
+		if (remap_held_.follow(std::make_pair(held.remap_from, held.remap_to))) {
+			remap_from_ = held.remap_from;
+			remap_to_ = held.remap_to;
+		}
+		const std::pair<int, int> before(remap_from_, remap_to_);
 		ImGui::TextDisabled("Move a palette index");
 		ImGui::BeginDisabled(!allowed);
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
@@ -221,6 +228,13 @@ void TextureView::draw_edits(Workspace &workspace, const DocumentBase &document,
 		ImGui::EndDisabled();
 		remap_from_ = std::clamp(remap_from_, 0, 255);
 		remap_to_ = std::clamp(remap_to_, 0, 255);
+		if (std::make_pair(remap_from_, remap_to_) != before) {
+			io::JsonValue members = io::JsonValue::make_object();
+			members.set("path", io::JsonValue::make_string(path));
+			members.set("remap_from", io::JsonValue::make_number(remap_from_));
+			members.set("remap_to", io::JsonValue::make_number(remap_to_));
+			window_requests::set_workspace(workspace, "document", std::move(members));
+		}
 		ui_kit::WrapRow move;
 		if (ui_kit::tool(move, "Move", allowed,
 		                 "Every texel of the first index takes the second, the palette as it is: a foliage map's codes."))

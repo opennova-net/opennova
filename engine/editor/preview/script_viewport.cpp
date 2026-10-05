@@ -7,6 +7,7 @@
 #include <editor/model/document_base.h>
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/text_burst.h>
+#include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/view/session_view.h>
@@ -32,7 +33,67 @@ int rank(DiagnosticSeverity severity) {
 // The size its device draws at where no canvas sizes it (a headless Shell's): the model's.
 constexpr ViewportState kHeadlessSize{ 800, 600 };
 
+// The `options` of a change read into `held`: {assist: {op, line?, column?}} (a place from 1; none for op
+// none). False with `error` for anything else.
+bool read_assist(const JsonValue &options, ScriptAssistAsk &held, std::string &error) {
+	if (!options.is_object()) {
+		error = "\"options\" is an object.";
+		return false;
+	}
+	for (const io::JsonMember &member : options.object) {
+		if (member.key != "assist") {
+			error = "Unknown script option \"" + member.key + "\" (it takes assist).";
+			return false;
+		}
+		const JsonValue &assist = member.value;
+		if (!assist.is_object()) {
+			error = "options.assist is an object {op, line, column}.";
+			return false;
+		}
+		ScriptAssistAsk out;
+		out.serial = held.serial;
+		const JsonValue *op = assist.get("op");
+		if (!op || !op->is_string() || !script_assist_op_from_token(op->string, out.op)) {
+			error = "options.assist.op is none, complete or hover.";
+			return false;
+		}
+		for (const io::JsonMember &place : assist.object) {
+			if (place.key == "op") continue;
+			int64_t value = 0;
+			if ((place.key != "line" && place.key != "column") || !io::json_whole_in(place.value, 1.0, 1e9, value)) {
+				error = "options.assist takes op, line and column (each a place from 1).";
+				return false;
+			}
+			(place.key == "line" ? out.line : out.column) = size_t(value);
+		}
+		if (out.op != ScriptAssistOp::None && (!out.line || !out.column)) {
+			error = "options.assist needs line and column (from 1) for " + op->string + ".";
+			return false;
+		}
+		held = out;
+	}
+	return true;
+}
+
 } // namespace
+
+const char *script_assist_op_token(ScriptAssistOp op) {
+	switch (op) {
+	case ScriptAssistOp::None: return "none";
+	case ScriptAssistOp::Complete: return "complete";
+	case ScriptAssistOp::Hover: return "hover";
+	}
+	return "none";
+}
+
+bool script_assist_op_from_token(const std::string &token, ScriptAssistOp &out) {
+	for (const ScriptAssistOp op : { ScriptAssistOp::None, ScriptAssistOp::Complete, ScriptAssistOp::Hover })
+		if (token == script_assist_op_token(op)) {
+			out = op;
+			return true;
+		}
+	return false;
+}
 
 std::string script_read_only_reason(const SessionView &view, const DocumentBase &document) {
 	if (document.blocked()) {
@@ -231,6 +292,24 @@ ViewportAction ScriptViewport::follow_(const ViewportInput &input, PreviewClock 
 		place_reveal_(*document);
 		moved();
 	}
+	// The help asked at a place: closed by an edit of the document (as typing on closes the list), else
+	// placed within the text once per ask.
+	if (assist_.op != ScriptAssistOp::None && !anew && input.change != ChangeClass::None) {
+		assist_ = ScriptAssistAsk{ ScriptAssistOp::None, 0, 0, 0, 0, assist_.serial + 1 };
+	}
+	if (assist_.serial != assist_placed_) {
+		assist_placed_ = assist_.serial;
+		if (assist_.op != ScriptAssistOp::None) {
+			assist_.line = std::min(std::max<size_t>(assist_.line, 1), document->line_count());
+			assist_.column = std::min(std::max<size_t>(assist_.column, 1), document->line(assist_.line).size() + 1);
+			size_t offset = 0, line_start = 0;
+			document->offset_of(assist_.line, assist_.column, offset);
+			document->offset_of(assist_.line, 1, line_start);
+			assist_.shown_line = assist_.line - 1;
+			assist_.shown_column = shown_.shown_at(offset) - shown_.shown_at(line_start);
+		}
+		moved();
+	}
 	shown(*document);
 	return action;
 }
@@ -307,7 +386,16 @@ bool ScriptViewport::command(const ViewportContext &, const std::string &name, c
 }
 
 io::JsonValue ScriptViewport::options_json() const {
-	return JsonValue::make_object();
+	JsonValue out = JsonValue::make_object();
+	JsonValue assist = JsonValue::make_object();
+	assist.set("op", json_string(script_assist_op_token(assist_.op)));
+	if (assist_.op != ScriptAssistOp::None) {
+		assist.set("line", json_number(double(assist_.line)));
+		assist.set("column", json_number(double(assist_.column)));
+	}
+	assist.set("serial", json_number(double(assist_.serial)));
+	out.set("assist", std::move(assist));
+	return out;
 }
 
 io::JsonValue ScriptViewport::body_json(const ViewportInput &input) const {
@@ -354,14 +442,33 @@ io::JsonValue ScriptViewport::items_json(const ViewportInput &) const {
 	return out;
 }
 
-bool ScriptViewport::takes_(const std::string &) const {
-	return false;
+bool ScriptViewport::takes_(const std::string &member) const {
+	return member == "options";
 }
 
-bool ScriptViewport::check_(const io::JsonValue &, std::string &) const {
+bool ScriptViewport::check_(const io::JsonValue &json, std::string &error) const {
+	const JsonValue *options = json.get("options");
+	ScriptAssistAsk held = assist_;
+	return !options || read_assist(*options, held, error);
+}
+
+// Each ask a new serial, the same place asked again too (the device shows it again).
+void ScriptViewport::apply_(const io::JsonValue &json, PreviewClock &) {
+	const JsonValue *options = json.get("options");
+	ScriptAssistAsk held = assist_;
+	std::string error;
+	if (!options || !options->get("assist") || !read_assist(*options, held, error)) return;
+	held.serial = assist_.serial + 1;
+	assist_ = held;
+}
+
+bool ScriptViewport::report_(const ViewportDeviceReport &report) {
+	// The device took this ask (placed by the last follow) and shows it no longer: closed, as the session says.
+	if (assist_.op == ScriptAssistOp::None || report.assist_serial != assist_.serial || assist_placed_ != assist_.serial ||
+	    report.assist_shown)
+		return false;
+	assist_ = ScriptAssistAsk{ ScriptAssistOp::None, 0, 0, 0, 0, assist_.serial + 1 };
 	return true;
 }
-
-void ScriptViewport::apply_(const io::JsonValue &, PreviewClock &) {}
 
 } // namespace opennova::editor

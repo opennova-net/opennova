@@ -81,13 +81,15 @@ enum class EditorRequestKind {
 	ClearOutput,
 	SetViewport,
 	EditInViewport,
+	SetWorkspace,
+	PlaySound,
+	StopSound,
+	ApplyConfirmation,
 	Quit,
 	// The shell's: the portable session cannot serve these.
 	PickDirectory,
 	PickFile,
 	RevealPath,
-	PlaySound,
-	StopSound,
 	kCount,
 };
 
@@ -198,7 +200,9 @@ inline bool operator!=(const ViewportDrag &a, const ViewportDrag &b) {
 // viewport of `kind` (kCount: the one the document shows in). What a command takes beside them (ADR
 // 0046 S15): `by`, a way in the kind's units (a mission's duplicate: metres east and north the copies
 // go; empty none), and `at`, a point of the picture in the viewport's units (a mission's paste: where
-// the copied records' middle lands; `has_at` false none).
+// the copied records' middle lands; `has_at` false none). The MCP gaps lane's "click" (every kind with a
+// canvas): a click of the picture at `at`, the selection it makes as the canvas's click makes it, joined
+// as `mode` says (a Shift or Ctrl click's: Add, Toggle); `mode` is the click's alone.
 struct ViewportCommand {
 	std::string name;
 	std::vector<NodeId> ids;
@@ -207,11 +211,12 @@ struct ViewportCommand {
 	bool has_at = false;
 	float at_x = 0.0f;
 	float at_y = 0.0f;
+	SelectMode mode = SelectMode::Replace;
 };
 
 inline bool operator==(const ViewportCommand &a, const ViewportCommand &b) {
 	return a.name == b.name && a.ids == b.ids && a.kind == b.kind && a.by == b.by && a.has_at == b.has_at &&
-			a.at_x == b.at_x && a.at_y == b.at_y;
+			a.at_x == b.at_x && a.at_y == b.at_y && a.mode == b.mode;
 }
 inline bool operator!=(const ViewportCommand &a, const ViewportCommand &b) {
 	return !(a == b);
@@ -310,6 +315,9 @@ struct EditorRequest {
 	ViewportDrag drag;
 	ViewportCommand command;
 	ViewportDrop drop;
+	// What the windows show of their own, changed (SetWorkspace, the MCP gaps lane): the JSON text of an
+	// object {<part>: {<member>: value}, focus?}, as session/workspace_parts.h reads it.
+	std::string workspace;
 	PickPurpose purpose = PickPurpose::None;
 	// An import brings the files the chosen ones need; it replaces the project's files of the
 	// names; a source imports again even when unchanged; and asks the new name (Files'
@@ -328,6 +336,15 @@ struct EditorRequest {
 	// an import takes the open preview's rows as its plan has them, in place of `imports`.
 	bool all = false;
 	bool planned = false;
+	// Play's game window starts behind every other, never taking the foreground (the MCP gaps lane: a client
+	// driving the editor while a person works at the machine).
+	bool behind = false;
+	// The import plan a planned import means (the import_preview query's plan): another one shown since is
+	// refused, not retargeted.
+	uint64_t plan = 0;
+	// A build's result panel opens as it ends (false: a build asked over the wire leaves the person's work as
+	// it is; the build section and the outcome say what it came to).
+	bool report = true;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -344,11 +361,11 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.paste_at == b.paste_at &&
 			a.mode == b.mode && a.choice == b.choice && a.settings == b.settings &&
 			a.viewport == b.viewport && a.drag == b.drag && a.command == b.command && a.drop == b.drop &&
-			a.purpose == b.purpose &&
+			a.workspace == b.workspace && a.purpose == b.purpose &&
 			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
-			a.all == b.all && a.planned == b.planned;
+			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.plan == b.plan && a.report == b.report;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);
