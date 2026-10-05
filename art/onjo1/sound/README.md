@@ -89,8 +89,24 @@ Spectra: cement and glass are cracks (centroid 5 and 7 kHz), metal a thunk
 under a ring (half the energy under 250 Hz), wood splinters a 8 kHz crackle,
 foliage a thump under a leaf rustle.
 
-What the engine does with the table (`AmmoDef_ParseProperty @ 0x40A2D0`): a
-`none` hit effect skips the effect intern (@ 0x40A51A) with no log; any other
+### The carbine (WPN_M4AUTO)
+
+Its `weapon.def` actions name `GS_M4` (fire), `GF_M4_RL` (reload), `DRY_OICW`
+(dry fire), `GF_M4_ST` and `GF_M4_SF` (switch to and from); the round's
+`ai_launch` names `GS_M4AI`, the fire others hear. One wav per layer, no
+variation:
+
+| Set | Layer falloff: wav, format, length | Volume (clamp) | Loudest 50 ms |
+|---|---|---|---|
+| `GS_M4` | 150: the close shot, 44100 Hz 16-bit, 0.64 s, centroid 1.3 kHz; 900: the far report, 22050 Hz 16-bit, 1.47 s | 245; 255 (110) | -2.9; -13.9 dB |
+| `GS_M4AI` | the same two at 80 (pitch 1.1) and 800 | 195; 255 (110) | |
+| `GF_M4_RL` | 25: 2.24 s, 22050 Hz 16-bit, 13 clicks (magazine out, in, bolt) | 190 (230) | -8.7 dB |
+| `DRY_OICW` | 25: 0.14 s, 22050 Hz 8-bit, one click (centroid 4.8 kHz) | 255 (180) | -9.0 dB |
+| `GF_M4_ST` / `_SF` | 25: 0.79 s / 0.65 s, 22050 Hz 8-bit, 5 to 7 handling clicks | 130 | -12.5 dB |
+
+### What the engine does with an impact table
+
+In `AmmoDef_ParseProperty @ 0x40A2D0`, a `none` hit effect skips the effect intern (@ 0x40A51A) with no log; any other
 name that resolves to nothing clones the engine's stock effect under that name
 or logs "unknown particle id" (@ 0x40A549). The sound resolves by set name
 across the loaded banks at parse (`SoundBank_FindSetByNameAnyBank`
@@ -121,6 +137,10 @@ Measured the same way (means per family; retail's in brackets):
 | Flesh | 3 | 0.14 s (0.02 to 0.14) | 0.5 kHz (1.3) | -8.0 dB (-7.9) |
 | Bullet pass | 8 | 0.16 to 0.72 s (0.15 to 0.75) | 3.7 kHz (4.2) | -6.8 dB (-6.9) |
 | Silent member | 1 | 50 ms | | |
+| Carbine fire, near and far | 1, 1 | 0.64 s, 1.47 s (0.64, 1.47) | 1.7, 1.3 kHz (1.3, 1.8) | -3.0, -8.0 dB (-2.9, -13.9) |
+| Carbine reload | 1 | 2.24 s (2.24) | 3.5 kHz (3.4) | -5.1 dB (-8.7) |
+| Carbine dry fire | 1 | 0.15 s (0.14) | 4.2 kHz (4.8) | -8.0 dB (-9.0) |
+| Carbine switch to, from | 1, 1 | 0.79 s, 0.65 s (0.79, 0.65) | 1.3, 1.5 kHz (3.1, 5.4) | -7.1, -6.9 dB (-12.5, -12.4) |
 
 The member volumes below match each family's loudness to retail's: retail's
 volume times the ratio of the two families' loudest-50 ms RMS, at most 255.
@@ -166,14 +186,21 @@ member's base, "jitter" its random range, both Q16.
 | `ON_IMP_FLESH` | 80 | `onimpfls1` to `3` | 0xFFFF | 0x7FFF | 200 |
 | `ON_IMP_PLAYER` | 100 | `onimpfls1` to `3` | 0xFFFF | 0x7FFF | 200 |
 | `ON_BULLET_BY` | 80 | `onbltby1` to `8` | 0xFFFF | 0x4CCC | 100 |
+| `GS_ONAR15` | 150 | `onar15f1` | 0xFFFF | 0 | 245 |
+| | 900 | `onar15f2` (clamp 110) | 0xFFFF | 0 | 130 |
+| `GS_ONAR15AI` | 80 | `onar15f1` | 0x11998 | 0 | 195 |
+| | 800 | `onar15f2` (clamp 110) | 0xFFFF | 0 | 130 |
+| `GF_ONAR15_RL` | 25 | `onar15rl` (clamp 230) | 0xFFFF | 0 | 125 |
+| `DRY_ONAR15` | 25 | `onar15dry` (clamp 180) | 0xFFFF | 0 | 225 |
+| `GF_ONAR15_ST` | 25 | `onar15st` | 0xFFFF | 0 | 70 |
+| `GF_ONAR15_SF` | 25 | `onar15sf` | 0xFFFF | 0 | 70 |
 
 A layer plays one member, chosen at random, and every layer of a set plays at
 once, so a silent `onnull` member is the chance that the second layer adds
-nothing (a ricochet on 3 of 8 dirt hits, as retail). Reserved for the carbine
-(the weapon's `weapon.def` row names them; made next): `GS_ONAR15` (fire),
-`GF_ONAR15_RL` (reload), `DRY_ONAR15` (dry fire), `GF_ONAR15_ST` (switch to),
-`GF_ONAR15_SF` (switch from), and `GS_ONAR15AI` for `AMMO_ON_556`'s
-`ai_launch` (the fire others hear).
+nothing (a ricochet on 3 of 8 dirt hits, as retail). The carbine's sets are
+the ones its `weapon.def` row names (`GS_ONAR15` fire, `GF_ONAR15_RL` reload,
+`DRY_ONAR15` dry fire, `GF_ONAR15_ST` and `GF_ONAR15_SF` switch to and from);
+`GS_ONAR15AI` is for `AMMO_ON_556`'s `ai_launch`, the fire others hear.
 
 The infantry profile `on_soldier` in `SndProf.def`, which the player and enemy
 person items name with `sound_profile on_soldier`:

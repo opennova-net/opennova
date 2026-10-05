@@ -44,10 +44,15 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05, and kept as downloaded
 | `freesound/fs138479_JustInvoke.ogg` | Bullet Blood 2 | JustInvoke | [freesound.org/s/138479](https://freesound.org/s/138479/) | CC0 1.0 |
 | `freesound/fs138481_JustInvoke.ogg` | Bullet Blood 4 | JustInvoke | [freesound.org/s/138481](https://freesound.org/s/138481/) | CC0 1.0 |
 | `freesound/fs182263_martian.ogg` | Foley bullet hit metal 02.wav | martian | [freesound.org/s/182263](https://freesound.org/s/182263/) | CC0 1.0 |
+| `freesound/fs427596_michorvath.ogg` | AR15 rifle shot | michorvath | [freesound.org/s/427596](https://freesound.org/s/427596/) | CC0 1.0 |
+| `freesound/fs427597_michorvath.ogg` | AR15 rifle shot from 50 yards away | michorvath | [freesound.org/s/427597](https://freesound.org/s/427597/) | CC0 1.0 |
 | `freesound/fs789388_modusmogulus.ogg` | Bullet impact ground (subsonic) SFX | modusmogulus | [freesound.org/s/789388](https://freesound.org/s/789388/) | CC0 1.0 |
 | `freesound/fs144444_pushkin.ogg` | bullet impacts | pushkin | [freesound.org/s/144444](https://freesound.org/s/144444/) | CC0 1.0 |
 | `freesound/fs565716_ralph.whitehead.ogg` | Footsteps Walking On Wooden Floor Medium Pace.wav | ralph.whitehead | [freesound.org/s/565716](https://freesound.org/s/565716/) | CC0 1.0 |
 | `freesound/fs565720_ralph.whitehead.ogg` | Footsteps Walking On Gravel Stones Medium Pace.wav | ralph.whitehead | [freesound.org/s/565720](https://freesound.org/s/565720/) | CC0 1.0 |
+| `freesound/fs725397_ser_ut_nin--depriv_d.ogg` | An M16 Rifle being reloaded while empty; full sequence | serøutōnin--deprivəd | [freesound.org/s/725397](https://freesound.org/s/725397/) | CC0 1.0 |
+| `freesound/fs725402_ser_ut_nin--depriv_d.ogg` | A rifle being dry fired once | serøutōnin--deprivəd | [freesound.org/s/725402](https://freesound.org/s/725402/) | CC0 1.0 |
+| `freesound/fs725403_ser_ut_nin--depriv_d.ogg` | A rifle being moved around and handled w/ magazine removals | serøutōnin--deprivəd | [freesound.org/s/725403](https://freesound.org/s/725403/) | CC0 1.0 |
 | `freesound/fs770112_Vrymaa.ogg` | Plants or ferns - Manipulation & Hit | Vrymaa | [freesound.org/s/770112](https://freesound.org/s/770112/) | CC0 1.0 |
 | `freesound/fs319223_worthahep88.ogg` | Single Rock Hitting wood 3.wav | worthahep88 | [freesound.org/s/319223](https://freesound.org/s/319223/) | CC0 1.0 |
 | `freesound/fs319226_worthahep88.ogg` | Single rock hitting wood.wav | worthahep88 | [freesound.org/s/319226](https://freesound.org/s/319226/) | CC0 1.0 |
@@ -172,3 +177,9 @@ Each file in `assets/`, what it was made from and how (PCM mono; the rate and bi
 | `onbltby7.wav` | 22050 Hz 16-bit | 0.160 s | -7.8 dB | synthesised: band noise gliding 6500->2600 Hz through the pass at 0.06 s, N-wave crack; 0.16 s; soft-clipped (tanh, 0.4 dB drive) toward its retail counterpart loudness |
 | `onbltby8.wav` | 22050 Hz 16-bit | 0.660 s | -11.9 dB | synthesised: band noise gliding 3800->1200 Hz through the pass at 0.06 s, whistle; 0.66 s |
 | `onnull.wav` | 22050 Hz 8-bit | 0.050 s | silent | 50 ms of silence (the silent member of a layer) |
+| `onar15f1.wav` | 44100 Hz 16-bit | 0.640 s | -6.5 dB | michorvath [#427596](https://freesound.org/s/427596/) (AR15 rifle shot) @0.04s; cut 0.64 s, high-pass 40 Hz, tail decay from 0.30 s; soft-clipped (tanh, 4.0 dB drive) toward its retail counterpart loudness |
+| `onar15f2.wav` | 22050 Hz 16-bit | 1.470 s | -13.0 dB | michorvath [#427597](https://freesound.org/s/427597/) (AR15 rifle shot from 50 yards away) @0.60s; cut 1.47 s, high-pass 60 Hz |
+| `onar15rl.wav` | 22050 Hz 16-bit | 2.240 s | -13.0 dB | serøutōnin--deprivəd [#725397](https://freesound.org/s/725397/) (M16 reloaded while empty) @0.15 s (0.62 s), @2.02 s (0.80 s) and @4.10 s (0.82 s) spliced end to end with 30 ms fades; 2.24 s, high-pass 80 Hz |
+| `onar15dry.wav` | 22050 Hz 8-bit | 0.150 s | -12.7 dB | serøutōnin--deprivəd [#725402](https://freesound.org/s/725402/) (a rifle dry fired once) @0.00s; cut 0.15 s, high-pass 150 Hz |
+| `onar15st.wav` | 22050 Hz 8-bit | 0.790 s | -12.1 dB | serøutōnin--deprivəd [#725403](https://freesound.org/s/725403/) (a rifle handled, magazine removals) @1.79s; cut 0.79 s, high-pass 100 Hz |
+| `onar15sf.wav` | 22050 Hz 8-bit | 0.650 s | -12.7 dB | serøutōnin--deprivəd [#725403](https://freesound.org/s/725403/) (a rifle handled, magazine removals) @0.59s; cut 0.65 s, high-pass 100 Hz |

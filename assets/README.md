@@ -40,6 +40,7 @@ the editor finds it anywhere in the project. Keep new files at the top level.
 | `ammo.def` | The rounds. `AMMO_ON_556`, the carbine's 5.56 mm round, with its per-surface impact table (every surface's sound set, no hit effect yet). Edited in the editor's catalog. |
 | `onfsgnd01.wav` to `onfsgnd14.wav`, `onfssnw1.wav` to `onfssnw8.wav`, `onfsobj1.wav` to `onfsobj9.wav`, `onfswat1.wav` to `onfswat6.wav` | Footsteps on the ground, snow, an object and in water (left foot first, then right), 22050 Hz 8-bit. |
 | `onimp*.wav`, `onricodt1.wav` to `3`, `onricohm1.wav`, `onricohm2.wav`, `onwdsplt1.wav` to `3`, `onbltby1.wav` to `8`, `onnull.wav` | Bullet impacts by surface (dirt, grass, cement, metal and its debris, armour, mud, sand, wood, glass, cloth, foliage, flesh), ricochets, wood splinters, the bullet passing by, and the silent member a set's layer draws to add nothing. Made from CC0 recordings and synthesis; `art/onjo1/sound/` has their sources and the sets they belong to. |
+| `onar15f1.wav`, `onar15f2.wav`, `onar15rl.wav`, `onar15dry.wav`, `onar15st.wav`, `onar15sf.wav` | The carbine's sounds: the shot close up and its far report, the reload, the dry fire, switching to it and from it. From CC0 recordings (`art/onjo1/sound/`). |
 
 Nothing references the `on_ar15` files yet. Re-export them by opening the
 scene with the add-on installed and running Export Model on `on_ar15` and
