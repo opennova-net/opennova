@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <vector>
+
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
 namespace opennova::def {
@@ -131,14 +133,19 @@ static void inherit_ammo_defaults(DefAmmoDef *d, const DefAmmoFile *out) {
    @0x40A362..0x40A37D; File_ParseASCIIFile @0x53D942]; the def it interrupted,
    and one the file never closes, were allocated already and stay in the table.
    Lines outside a def are ignored (@0x40A30A..0x40A310). `effects_table` opens
-   the def's table, whose `end` closes the table and not the def [orig:
-   @0x40A5A3..0x40A5B2; @0x40A42D..0x40A433]. */
+   a table, whose `end` closes the table and not the def [orig:
+   @0x40A5A3..0x40A5B2; @0x40A42D..0x40A433]. A table's rows are staged and
+   reach the def only at that `end`, and only while the def has no table yet
+   [orig: AmmoDef_InitEffectsTable @0x409F20, called only @0x40A433, installs
+   when def+0x68 and word +0x6C are both 0]: a second table in one def, and a
+   table the file never closes, give the def nothing. */
 static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out) {
     size_t entries_cap = 0;
     DefAmmoDef current;
     memset(&current, 0, sizeof(current));
-    int in_block = 0, in_effects = 0, stopped = 0;
+    int in_block = 0, in_effects = 0, stopped = 0, table_installed = 0;
     size_t raw_cap = 0, eff_cap = 0;
+    std::vector<DefEffectTableEntry> staged;
 
     for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens, const char *line,
                                          size_t line_len, size_t) {
@@ -154,6 +161,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
             }
             reset_ammo_def(&current);
             raw_cap = 0; eff_cap = 0;
+            table_installed = 0;
             copy_token(current.name, 32, tokens, 1);
             in_block = 1;
             return;
@@ -163,6 +171,12 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
             if (!in_block) return;
             if (in_effects) {
                 in_effects = 0;
+                if (!table_installed) {
+                    for (const DefEffectTableEntry &e : staged)
+                        DA_PUSH(current.effects_table, current.effects_table_count, eff_cap, e);
+                    table_installed = 1;
+                }
+                staged.clear();
                 return;
             }
             inherit_ammo_defaults(&current, out);
@@ -186,13 +200,14 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
                 copy_token(e.hit_effect, sizeof(e.hit_effect), tokens, 1);
                 copy_token(e.impact_sound, sizeof(e.impact_sound), tokens, 2);
                 e.value = static_cast<int>(strtol(tokens.token(3), NULL, 10));
-                DA_PUSH(current.effects_table, current.effects_table_count, eff_cap, e);
+                staged.push_back(e);
             }
             return;
         }
 
         if (key_is(key, "effects_table")) {
             in_effects = 1;
+            staged.clear();
             return;
         }
 

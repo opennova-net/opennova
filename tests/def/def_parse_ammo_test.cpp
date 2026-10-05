@@ -519,6 +519,40 @@ int main(int argc, char **argv) {
         if (!correct) return 1;
     }
 
+    {
+        // A table's rows reach the def at the table's `end`, and only while the
+        // def has none yet: a second table gives nothing (not even a tag the
+        // first lacks), and a table the file never closes gives nothing.
+        // [orig: AmmoDef_InitEffectsTable @0x409F20, called only @0x40A433,
+        //  installs when def+0x68 and word +0x6C are both 0]
+        static const char text[] =
+                "ammo TWO_TABLES\r\n"
+                " effects_table\r\n"
+                "  dirt Effect_A IMP_A 20\r\n"
+                " end\r\n"
+                " effects_table\r\n"
+                "  dirt Effect_B IMP_B 20\r\n"
+                "  snow Effect_B IMP_B 20\r\n"
+                " end\r\n"
+                "end\r\n"
+                "ammo OPEN_TABLE\r\n"
+                " effects_table\r\n"
+                "  dirt Effect_C IMP_C 20\r\n";
+        DefAmmoFile parsed{};
+        const int rc = def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text),
+                                             sizeof(text) - 1, &parsed);
+        const bool correct = rc == 0 && parsed.count == 2 &&
+                parsed.entries[0].effects_table_count == 1 &&
+                strcmp(parsed.entries[0].effects_table[0].hit_effect, "Effect_A") == 0 &&
+                parsed.entries[1].effects_table_count == 0;
+        if (!correct)
+            fprintf(stderr, "FAIL: effects tables: %zu defs, rows %zu / %zu\n", parsed.count,
+                    parsed.count > 0 ? parsed.entries[0].effects_table_count : 0,
+                    parsed.count > 1 ? parsed.entries[1].effects_table_count : 0);
+        def_free_ammo(&parsed);
+        if (!correct) return 1;
+    }
+
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/ammo.def (the shipped ammo table)");
     printf("PASS: ammo parsing OK\n");
