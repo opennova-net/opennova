@@ -67,6 +67,7 @@ enum class FindingGroup {
 	Operations,
 	UnsavedChanges,
 	Viewports,
+	Workspace,
 	Catalogs,
 	StringTables,
 	Menus,
@@ -412,6 +413,7 @@ enum class CoreFinding {
 	UnsavedDiscard,
 	UnsavedNone,
 	ViewportRefused,
+	WorkspaceRefused,
 	kCount
 };
 inline constexpr size_t kCoreFindingCount = static_cast<size_t>(CoreFinding::kCount);

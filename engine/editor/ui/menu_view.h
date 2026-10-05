@@ -3,8 +3,10 @@
 #include <string>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/record_tree.h>
+#include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
 
@@ -45,7 +47,13 @@ private:
 	// was (another screen's, S13 V8) keeps it.
 	void refresh_tree(const MnuDocument &document, const Node &screen);
 
+	// What the view shows of its own is the workspace's (the MCP gaps lane: workspace.document's
+	// new_window_type and remove_screen): the menu's path as last drawn, whose state it reads.
+	std::string path_;
+	void send(Workspace &workspace, const char *member, io::JsonValue value) const;
+
 	std::string add_type_ = "static"; // the type a new window takes
+	ui_kit::Held<std::string> add_type_held_;
 	RecordTree tree_;
 	std::vector<std::string> lines_; // per tree entry: the name and the type's name, after the change dot's room
 	std::vector<std::string> tips_;  // per tree entry: the type's name and how the file writes it
@@ -53,9 +61,7 @@ private:
 	NodeAddress revealed_;       // the selection the tree last opened its owners for
 	std::vector<NodeId> reveal_; // the windows to open this frame
 	NodeId scroll_to_ = 0;       // the window to scroll into view this frame
-	uint64_t removing_document_ = 0; // the menu the removal prompt asks about (its identity), and its screen
-	NodeId removing_screen_ = 0;
-	bool ask_remove_ = false;    // the prompt opens on its next draw
+	ui_kit::HeldPopup remove_popup_; // Remove screen...'s prompt, open while the workspace names its screen
 	NodeId anchor_ = 0;          // the window a Shift+click selects from (the last one clicked)
 	size_t trees_made_ = 0;
 };
