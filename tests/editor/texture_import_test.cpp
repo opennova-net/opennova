@@ -366,9 +366,9 @@ int test_project() {
 	// models pair them, which ask nothing of each other.
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
-	                                    "o3d 1\nmodel THING\nmaterial VS_SKBASIC\ntexture body.tga 1 0\nmaterial FF_ST_OP\n"
+	                                    "o3d 2\nmodel THING\nmaterial VS_SKBASIC\ntexture body.tga 1 0\nmaterial FF_ST_OP\n"
 	                                    "texture body.mdt 3 4\nlod 0\npart 0 0 0 0\n"
-	                                    "strip 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	                                    "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	TEST_EXPECT(import_assets({{scene + "/thing.o3d", {}}}, paths, *view.project.document, false).imported.size() == 1);
 	{
 		std::vector<uint8_t> mdt;
@@ -610,8 +610,8 @@ int test_fit_weighs_every_use() {
 	TEST_EXPECT(import_assets({skin}, paths, *view.project.document, false).imported.size() == 1);
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/cut.o3d",
-	                                    "o3d 1\nmodel CUT\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\ntexture skin.tga 1 0\n"
-	                                    "lod 0\npart 0 0 0 0\nstrip 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\n"
+	                                    "o3d 2\nmodel CUT\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\ntexture skin.tga 1 0\n"
+	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\n"
 	                                    "t 0 1 2\n"));
 	ImportChoice model;
 	model.path = scene + "/cut.o3d";

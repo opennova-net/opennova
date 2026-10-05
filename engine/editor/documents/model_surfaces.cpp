@@ -233,7 +233,7 @@ void lod_triangles(const Threedi3di3 &model, const ThreediLod &lod, TriangleGrid
 		for (size_t t = 0; t + 2 < tris.size(); t += 3) {
 			// Retail winds a triangle counter-clockwise in model axes and a face counter-clockwise in
 			// mission axes; model axes mirror mission, so the triangle's second and third corners swap to
-			// give its outward normal in mission axes (the o3d reader's swap, threedi_o3d_read.cpp).
+			// give its outward normal in mission axes (the .o3d lowering's swap, threedi_o3d_lower.cpp).
 			Point corner[3];
 			for (int k = 0; k < 3; ++k) {
 				const float *p = lod.vertices.items[strip.start_vertex + tris[t + size_t(k == 0 ? 0 : 3 - k)]].position;
