@@ -44,17 +44,43 @@ std::string unreadable_banner(const std::vector<std::string> &unreadable) {
 }
 
 // The viewport's options set (a SetViewport of them).
-void set_options(Workspace &workspace, const ViewportModel &model, const MenuViewportOptions &options) {
+void set_options(Workspace &workspace, const MenuViewport &menu, const MenuViewportOptions &options) {
 	workspace.request(request::set_viewport(
-			model.path(), viewport_change(ViewportKind::Menu, "options", menu_options_to_json(options))));
+			menu.path(), viewport_change(ViewportKind::Menu, "options", menu_options_to_json(options, menu.show()))));
+}
+
+// The canvas's zoom as the viewport's options hold it, and back.
+MenuCanvasShow show_of(const ViewportCanvas &canvas, bool snap) {
+	using Zoom = ViewportCanvas::Zoom;
+	MenuCanvasShow show;
+	show.zoom = canvas.zoom() == Zoom::Device ? MenuZoom::Device : canvas.zoom() == Zoom::Scale ? MenuZoom::Scale : MenuZoom::Fit;
+	show.scale = canvas.zoom() == Zoom::Scale ? canvas.scale() : 1.0f;
+	show.snap = snap;
+	return show;
+}
+void zoom_canvas(ViewportCanvas &canvas, const MenuCanvasShow &show) {
+	using Zoom = ViewportCanvas::Zoom;
+	canvas.set_zoom(show.zoom == MenuZoom::Device ? Zoom::Device : show.zoom == MenuZoom::Scale ? Zoom::Scale : Zoom::Fit, show.scale);
+}
+
+// The zoom and the snap set (a SetViewport of them alone: they change no picture).
+void set_show(Workspace &workspace, const MenuViewport &menu, const MenuCanvasShow &show) {
+	io::JsonValue options = io::JsonValue::make_object();
+	const io::JsonValue all = menu_options_to_json(MenuViewportOptions(), show);
+	for (const char *member : { "zoom", "scale", "snap" })
+		if (const io::JsonValue *value = all.get(member)) options.set(member, *value);
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "options", std::move(options))));
 }
 
 } // namespace
 
-// What the view keeps of its own: the snap, and where the mouse was on the picture in design units
-// at the last canvas pass (the toolbar's readout).
+// What the view keeps of its own: where the mouse was on the picture in design units at the last canvas
+// pass (the toolbar's readout); the zoom and the snap are the viewport's options (the MCP gaps lane), the
+// canvas following them and its own changes (the Zoom list, Ctrl+wheel, Snap) sent to them.
 struct MenuViewportView::Tools {
 	bool snap = true;
+	ui_kit::Held<MenuCanvasShow> held;
+	MenuCanvasShow sent; // the zoom and the snap last sent (each sent once)
 	bool mouse_on_picture = false;
 	int mouse_x = 0;
 	int mouse_y = 0;
@@ -236,6 +262,13 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 		ImGui::PopTextWrapPos();
 	}
 	const MenuClipboard board = menu_canvas_clipboard(frame, !view.documents.clipboard.empty());
+	// The zoom and the snap the viewport holds, taken where they moved (a client's set_viewport) before the
+	// toolbar and the canvas draw.
+	if (tools_->held.follow(menu.show())) {
+		zoom_canvas(canvas_ui(), menu.show());
+		tools_->snap = menu.show().snap;
+		tools_->sent = menu.show();
+	}
 	tools_->toolbar(workspace, *this, canvas_ui(), menu, frame);
 	snap = tools_->snap ? 1.0f : 0.0f;
 	context.snap = snap;
@@ -289,6 +322,13 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 					ImGui::EndPopup();
 				}
 			});
+	// The zoom (the Zoom list's, Ctrl+wheel's) and the snap as the canvas has them now: the viewport's, sent
+	// where they moved from what it holds, once.
+	const MenuCanvasShow now = show_of(canvas_ui(), tools_->snap);
+	if (now != menu.show() && now != tools_->sent) {
+		tools_->sent = now;
+		set_show(workspace, menu, now);
+	}
 
 	// The notes as a list, each cut to the window (whole in its tooltip); a click selects the
 	// record a note is on.

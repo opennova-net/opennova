@@ -2,6 +2,7 @@
 
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/session/problem_confirmation.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -95,7 +96,9 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 	Diagnostic finding;
 	popup.missing = view.findings.graph &&
 			missing_finding(*view.findings.graph, document, record, field, value, finding);
-	if (popup.missing) popup.fixes = fixes_for(finding, view);
+	// Those Problems raises at once alone: a fix that asks first (a Use fix's rename) waits in Problems'
+	// confirmation, which the picker has not (review X16).
+	if (popup.missing) popup.fixes = fixes_raised_at_once(fixes_for(finding, view));
 }
 
 void ReferencePicker::drop_list(Popup &popup) {
