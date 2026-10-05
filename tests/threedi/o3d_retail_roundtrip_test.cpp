@@ -5,18 +5,20 @@
 // boxes, a register-driven rgbgen, strips sharing a vertex window), Dblkhwk1
 // (register-driven rotors in MTRX frames, an empty LOD, tangents, rotor strips
 // of two parts sharing one window), US01 (the skinned person layout), ArmsG
-// and Mp5b_1st (the first-person rig; collision faces the 8.8 grid collapses).
+// and Mp5b_1st (the first-person rig; collision faces the 8.8 grid collapses)
+// and FSldr03 (a skinned person with tangents whose vertices weight bone slots
+// past their strip's table, which the scene cannot name).
 // The CXLT table the scene carries must also come back row for row (US01,
 // ArmsG and Mp5b_1st ship rows that are not their sections' offsets).
 //
 // Nothing is excused. Any line `compare` calls a difference fails the model,
 // and so does DRIFT (a value within its tolerance) outside the categories
-// below: the words the builder derives by a rule of ours where retail's tool is
-// unwitnessed (docs/threedi/o3d-scene-format.md): the tangent frames, and the
-// collision words it derives from the stored 8.8 corners where retail took
-// them from the authored floats the file does not keep. Everything else the
-// scene carries exactly, so drift there (a part pivot, a render corner, a part
-// sphere) is a regression, not noise.
+// below: the collision words the builder derives from the stored 8.8 corners
+// where retail took them from the authored floats the file does not keep
+// (docs/threedi/o3d-scene-format.md). Everything else the scene carries
+// exactly, the tangent frames included (`vt`), so drift there (a part pivot,
+// a render corner, a tangent, a skin weight, a part sphere) is a regression,
+// not noise.
 // Gated on OPENNOVA_JO_ASSETS (docs/asset-gated-tests.md).
 //
 //   o3d_retail_roundtrip_test <opennova-3di> <scratch dir>
@@ -37,7 +39,6 @@ using test_cmd::run;
 
 // The DRIFT categories a retail round trip may show (compare.cpp's names).
 const char *const kDerivedDrift[] = {
-		"tangent/bitangent values",
 		"bullet-face corners (m, 8.8)",
 		"bullet-face normals (degrees)",
 		"bullet-face planes at the face (m)",
@@ -104,7 +105,7 @@ int main(int argc, char **argv) {
 	const std::string cli = quoted(argv[1]);
 	const std::string dir = argv[2];
 	int failures = 0, ran = 0;
-	for (const char *name : {"Armry01", "Dblkhwk1", "US01", "ArmsG", "Mp5b_1st"}) {
+	for (const char *name : {"Armry01", "Dblkhwk1", "US01", "ArmsG", "Mp5b_1st", "FSldr03"}) {
 		const std::string model = retail::asset_file((std::string(name) + ".3di").c_str());
 		if (model.empty()) {
 			std::printf("SKIP-LEG: needs %s.3di in OPENNOVA_JO_ASSETS\n", name);
@@ -130,7 +131,8 @@ int main(int argc, char **argv) {
 			++failures;
 		}
 	}
-	if (ran == 0) return retail::skip("OPENNOVA_JO_ASSETS with Armry01.3di, Dblkhwk1.3di, US01.3di, ArmsG.3di, Mp5b_1st.3di");
+	if (ran == 0)
+		return retail::skip("OPENNOVA_JO_ASSETS with Armry01.3di, Dblkhwk1.3di, US01.3di, ArmsG.3di, Mp5b_1st.3di, FSldr03.3di");
 	if (failures == 0) std::printf("o3d_retail_roundtrip_test: ok (%d models)\n", ran);
 	return failures == 0 ? 0 : 1;
 }

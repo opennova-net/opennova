@@ -140,7 +140,8 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_read.cpp   # 3DI3 -> Threedi3di3
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_write.cpp  # Threedi3di3 -> 3DI3 (parity writer, ADR 0003)
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_build.cpp       # the construction API over the writer (recipe -> Threedi3di3)
-    ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_o3d_read.cpp    # the .o3d scene text -> the construction API
+    ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_o3d_read.cpp    # the .o3d scene text -> its parse
+    ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_o3d_lower.cpp   # the parse -> the construction API, for a target
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/scene_text.cpp          # the tokenizer the .o3d and .o3a texts share
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_ground_anchor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_ctrl_catalog.cpp

@@ -51,7 +51,8 @@ new one, and never replaces a different file of that name.
 Import creates an editable authoring scene, and export never relies on
 anything import set up: collision volume planes, seam flags, tangents,
 bounds, glass, emissive and the alpha pass are recomputed from the scene on
-every export, by the rules the retired OED exporter used. Export rebuilds
+every export (tangents as Blender computes them, the rest by the rules the
+retired OED exporter used). Export rebuilds
 bullet faces from the selected render LOD (face surfaces and flags come from
 the materials, voted on import; a face that disagrees with its material's
 vote keeps its own on its polygon, on a rigid model), so retail face normals, zero-length or
@@ -129,10 +130,12 @@ arrays), and its arms no more than the gun. **Add Animation Rig** turns a
 static model's `PN##` parts into such an armature, everything on a part
 parented to its bone, so clips can animate it.
 
-A skinned mesh deforms on up to four bones a vertex (Weights > Limit Total);
-export writes them dominant first, the way the game blends them, and refuses
-a vertex with more, one with no weight, and a weight on a bone that deforms
-but is no part (Root, a control bone). A mesh parented to a bone of a skinned
+A skinned vertex exports every bone it deforms on, dominant first: the game
+lights a vertex by that bone and blends four, so `opennova-3di build` keeps
+the dominant one and the three heaviest others of a vertex with more (and says
+how many it reduced; Weights > Limit Total sets four yourself). Export refuses
+a vertex with no weight, and a weight on a bone that deforms but is no part
+(Root, a control bone). A mesh parented to a bone of a skinned
 model is skinned wholly on that bone. A skinned model keeps its skinned
 geometry on its root part, or with **Mesh part** on (the retail layout of
 US01 and ArmsG) on a part of its own after the bones, whose pivot is the
@@ -186,8 +189,11 @@ Turn off **Generate bullet faces** on models such as first-person arms that
 do not need triangle collision. Render geometry, skin weights, bone bounds
 and authored collision volumes are still exported.
 
-Strips split when the 65,535-index limit (and, skinned, the 16-bone palette)
-is reached; large meshes need no manual splitting.
+Each part's geometry exports as one mesh a material, of any size: `opennova-3di
+build` splits it into the strips the game holds (21,845 triangles a strip and,
+skinned, a palette of 16 bones by OED's rule), so large meshes need no manual
+splitting. Names, counts and the other limits a retail model has are the
+CLI's to check, at the scene line the object wrote.
 
 To reuse retail animations, match the retail rig, since animations pair with
 parts by index: JO's people share one rig of 19 bones (plus the mesh part);
@@ -257,8 +263,11 @@ one (only those move UVs), a normal map a bump one (`VS_DOT3DIFF`,
 `VS_SKBUMPDIFFT`), and export says what no shader of the kind draws. A shader
 named in the panel keeps OED's rule: `FFP_GLASS` draws no texture. Glass
 shaders are glass, `*_LUM` shaders emissive, blending shaders draw in the alpha
-pass, and a bump shader gets tangents derived from the render UV map, so its
-meshes need one with area. **Export order** is the material's index in the
+pass, and a bump shader's meshes carry Blender's own tangent frames
+(MikkTSpace on the render UV map, the frames its Normal Map node draws and
+bakes with), so they need a render UV map with area. Blender gives no frame
+on a face of more than four corners: a mesh holding one gets the CLI's frames
+(OED's rule) instead, and export says so; triangulate it to keep Blender's. **Export order** is the material's index in the
 model (import sets it; -1 sorts a material after the ordered ones, by first
 use). A material in a mesh's slots that no face draws with exports only with
 an Export order: 208 JO models keep such materials, and import puts them in
