@@ -1135,6 +1135,7 @@ static int test_outcomes_and_refusals() {
 	if (menu.screens.size() == 1 && menu.screens[0].roots.size() == 1) {
 		const opennova::mnu::Window &main = menu.screens[0].roots.front();
 		TEST_EXPECT(main.name == "MAIN" && main.children.empty());
+		TEST_EXPECT(main.cursor.file == "newarow1.tga");
 		TEST_EXPECT(main.position.left == 0 && main.position.top == 0 && main.position.right == 800 &&
 		            main.position.bottom == 600);
 	}
@@ -1142,6 +1143,17 @@ static int test_outcomes_and_refusals() {
 	TEST_EXPECT(extra && !find_definition(AssetGraph(), *extra, "EXIT", found) &&
 			!find_definition(AssetGraph(), *extra, "STARTUP", found));
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "reference.missing"));
+	// Create Missing made the pointer the startup screen and this menu name (the original game
+	// shows no system pointer); a new menu makes it again where the project has none
+	// (blank_companion).
+	TEST_EXPECT(v.project.scan->find("newarow1.tga") != nullptr && fs::exists(root + "/textures/newarow1.tga"));
+	fs::remove(root + "/textures/newarow1.tga");
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(v.project.scan->find("newarow1.tga") == nullptr);
+	session.handle(request::create_file("other.mnu", "menu"));
+	TEST_EXPECT(session.outcome().done());
+	TEST_EXPECT(fs::exists(root + "/textures/newarow1.tga") && v.project.scan->find("newarow1.tga") != nullptr);
 	// The required name still gets its requirement's blank.
 	const AssetEntry *main_menu = v.project.scan->find("main.mnu");
 	TEST_EXPECT(main_menu != nullptr);
