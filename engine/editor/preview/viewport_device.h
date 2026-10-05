@@ -55,6 +55,11 @@ struct ViewportDeviceReport {
 	// Its picture holds a surface a ray lands on (surface_between and ground_at answer: a mission's
 	// terrain, built).
 	bool surface = false;
+	// A script's help as its device shows it (the viewport's assist, the MCP gaps lane): the serial of the ask
+	// it took last, and whether that help shows still (the completion list open, the words drawn): a person's
+	// Escape, a click, a key, the pointer moving on, or the control made again closed it.
+	uint64_t assist_serial = 0;
+	bool assist_shown = false;
 };
 
 // Where a canvas draws a device's picture this frame (ADR 0046 S13 V5), in the pixels the canvas

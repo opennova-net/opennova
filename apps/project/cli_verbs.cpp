@@ -701,14 +701,18 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		if (!cli.json) std::fprintf(cli.out, "nothing to import\n");
 		return 0;
 	}
-	// The whole install: the plan's rows as the editor holds them (planned), nine thousand sources
-	// not echoed back.
+	// The whole install: the plan's rows as the editor's dialog takes them (planned, of the plan shown), nine
+	// thousand sources not echoed back; --replace its Replace existing files, every file the project holds
+	// checked (an unchecked one is never written over).
 	JsonValue request = JsonValue::make_object();
 	request.set("kind", json_string(editor::request_kind_row(K::ImportFiles).token));
-	if (all)
+	if (all) {
+		if (replace) send(cli, editor::request::set_workspace(R"({"import": {"replace_existing": true}})"));
 		request.set("planned", boolean(true));
-	else
+		request.set("plan", io::json_number(plan.get_number("plan", 0.0)));
+	} else {
 		request.set("imports", std::move(taken));
+	}
 	request.set("replace", boolean(args.has("--replace")));
 	JsonValue outcome;
 	if (!send_wire(cli, request, outcome)) return 2;
@@ -1101,7 +1105,7 @@ constexpr K kReadRequests[] = { K::OpenProject, K::ApplyProjectSettings };
 constexpr K kCreateMissingRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::CreateMissing };
 // A source's plan, or the game install's files', then the import (none in a dry run).
 constexpr K kImportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::PlanImport, K::PreviewInstallImport,
-	                              K::ImportFiles };
+	                              K::SetWorkspace, K::ImportFiles };
 constexpr K kReimportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Reimport };
 constexpr K kBuildRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Build };
 constexpr K kExportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Export };
