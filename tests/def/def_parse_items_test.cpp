@@ -849,9 +849,10 @@ static int test_soundloop_slots_below_one(void) {
     return bad;
 }
 
-/* `end` gives a record with no alias "S%06i" of its id plus 100000; a record a
+/* `end` gives a record with no alias "S%06i" of its authored id; a record a
    nested `begin` or the file's end closes keeps an empty one [orig: the `end`
-   arm @0x49EB2F..0x49EB5F, sprintf(alias, "S%06i", id + 186A0h)]. */
+   arm @0x49EB2F..0x49EB5F, sprintf(alias, "S%06i", [esi+50h] + 186A0h), over
+   the `id` arm's id - 186A0h store @0x49EC54..0x49EC5A]. */
 static int test_end_alias_default(void) {
     static const char text[] =
         "begin Defaulted\r\n"
@@ -876,9 +877,9 @@ static int test_end_alias_default(void) {
         def_free_items(&items);
         return 1;
     }
-    const int bad = strcmp(items.entries[0].sid, "S205310") != 0 ||
+    const int bad = strcmp(items.entries[0].sid, "S105310") != 0 ||
                     strcmp(items.entries[1].sid, "mine") != 0 ||
-                    strcmp(items.entries[2].sid, "S-100000") != 0 ||
+                    strcmp(items.entries[2].sid, "S-200000") != 0 ||
                     items.entries[3].sid[0] != '\0' || items.entries[4].sid[0] != '\0';
     if (bad)
         fprintf(stderr, "FAIL: end aliases '%s' '%s' '%s' '%s' '%s'\n", items.entries[0].sid,
