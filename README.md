@@ -133,9 +133,9 @@ The add-on currently supports Windows x64.
 
 The native apps ship together in `opennova-apps-windows.zip` (on a PR's build
 comment) and `opennova-apps-windows-v<version>.zip` (on tagged releases): the
-`opennova-3di`, `opennova-extract`, `nw_pp`, `nw-lan-probe` and `nw-lister`
-command-line tools and the NovaWorld server, for Windows x64. Its `README.txt`
-describes each one.
+`opennova-3di`, `opennova-extract`, `opennova-lan-probe`, `opennova-nw-lister` and
+`opennova-wire` command-line tools and the NovaWorld server
+(`opennova-novaworld-server`), for Windows x64. Its `README.txt` describes each one.
 
 ## Documentation
 

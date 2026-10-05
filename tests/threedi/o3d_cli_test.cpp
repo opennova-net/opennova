@@ -1,5 +1,5 @@
 // Reads back the .3di opennova-3di minted from fixtures/threedi/o3d/
-// spinner.o3d, skinned.o3d or building.o3d (the threedi_cli_build* ctests run
+// spinner.o3d, skinned.o3d or building.o3d (the opennova_3di_build* ctests run
 // first) and checks the scene -> model conversions the CLI owns: mission ->
 // model axes, the counter-clockwise-in-model render winding and the
 // counter-clockwise-about-the-normal collision winding retail uses, the

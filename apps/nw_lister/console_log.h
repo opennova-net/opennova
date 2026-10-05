@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <string>
 
-namespace opennova::lister {
+namespace opennova::nw_lister {
 
 // The process's io::log sink: timestamped lines on stderr and, with a path, appended to a file.
 // Debug lines show only when `verbose`. Every registered secret is masked first, so an account
@@ -14,4 +14,4 @@ void add_log_secret(const std::string &secret);
 // "abcd...(48)": enough of a value to correlate log lines, never the whole of it.
 std::string mask_value(const std::string &value, size_t keep = 4);
 
-} // namespace opennova::lister
+} // namespace opennova::nw_lister

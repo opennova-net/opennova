@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 // Resolved player record returned by authenticate_user / get_user_by_*.
 struct UserRecord {
@@ -124,4 +124,4 @@ struct UpdateGameAccessParams {
 MutationResult update_game_access(opennova::db::Database &db, int64_t user_id,
                                   const UpdateGameAccessParams &p);
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

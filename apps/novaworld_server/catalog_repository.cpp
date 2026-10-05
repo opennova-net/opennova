@@ -1,6 +1,6 @@
 #include "catalog_repository.h"
 
-namespace opennova::server::catalog {
+namespace opennova::novaworld_server::catalog {
 
 namespace {
 
@@ -28,4 +28,4 @@ std::vector<GameRow> list_games(opennova::db::Database &db) {
 	return out;
 }
 
-} // namespace opennova::server::catalog
+} // namespace opennova::novaworld_server::catalog

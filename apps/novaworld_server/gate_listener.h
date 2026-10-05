@@ -10,7 +10,7 @@ class UnknownTracker;
 namespace db { class Database; }
 }
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 struct ServerConfig;
 
@@ -78,4 +78,4 @@ private:
 	opennova::db::Database *db_ = nullptr;
 };
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

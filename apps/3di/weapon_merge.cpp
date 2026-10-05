@@ -22,7 +22,7 @@
 
 #include "threedi_cli.h"
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 namespace {
 
@@ -578,4 +578,4 @@ int cmd_weapon_merge(const char *def_path, const char *edits_path, const char *o
 	return 0;
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

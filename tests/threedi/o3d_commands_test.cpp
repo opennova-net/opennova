@@ -19,10 +19,11 @@
 #include <formats/threedi/threedi.h>
 #include <formats/threedi/threedi_3di3.h>
 
-#include "../../apps/threedi_cli/threedi_cli.h"
+#include "../../apps/3di/threedi_cli.h"
 #include "../common/file_io.h"
 
 using namespace opennova::threedi;
+namespace threedi_cli = opennova::threedi_cli;
 
 namespace {
 int failures = 0;

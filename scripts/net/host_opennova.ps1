@@ -5,7 +5,7 @@
 # <1..64> [--lan-gametype <n>] [--integrity-profile <id>] [--resource-dir
 # <dir>] [/exp <name>]`, docs/dev-env-vars.md) and drives through its
 # opennova-game MCP endpoint (`--mcp-port`, docs/mcp.md). Readiness is the
-# JO LAN discovery answer (nw-lan-probe) AND the endpoint's game_state
+# JO LAN discovery answer (opennova-lan-probe) AND the endpoint's game_state
 # reporting the host role on the requested port.
 #
 # Usage:
@@ -121,9 +121,9 @@ if (-not [string]::IsNullOrWhiteSpace($LogFile)) {
 
 if (-not $SkipReadyCheck) {
     try {
-        $probe = Find-NwLanProbe
+        $probe = Find-LanProbe
         if (-not $probe) {
-            throw "nw-lan-probe was not found. Build it with: cmake --build build --config Release --target opennova_nw_lan_probe"
+            throw "opennova-lan-probe was not found. Build it with: cmake --build build --config Release --target opennova_lan_probe"
         }
         Write-Host "OPENNOVA_HOST_READY_WAIT_MS=$ReadyTimeoutMs"
         # Captured, not piped: with -PassThru the pipeline carries only the Process.

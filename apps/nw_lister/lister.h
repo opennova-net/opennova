@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-namespace opennova::lister {
+namespace opennova::nw_lister {
 
 // The process exit codes.
 enum ExitCode : int {
@@ -111,4 +111,4 @@ private:
 	std::string host_key_;
 };
 
-} // namespace opennova::lister
+} // namespace opennova::nw_lister

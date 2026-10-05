@@ -4,7 +4,7 @@
 // writer from scratch (ADR 0003) and re-minted byte-for-byte on every
 // platform. This is a construction seam, not an intermediate representation:
 // nothing at runtime walks a ThreediBuildModel, Threedi3di3 stays the one
-// model every consumer reads (ADR 0027). Consumers: apps/threedi_cli
+// model every consumer reads (ADR 0027). Consumers: apps/3di
 // (opennova-3di, the Blender exporter's CLI; ADR 0047) and the synthetic
 // fixture generator (tests/fixtures/minimal_3di_builder.h).
 //

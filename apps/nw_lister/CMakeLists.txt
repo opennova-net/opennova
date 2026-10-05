@@ -1,4 +1,4 @@
-# nw-lister: lists one server on a NovaWorld master without the game. The NWU session, the host
+# opennova-nw-lister: lists one server on a NovaWorld master without the game. The NWU session, the host
 # role, the lobby HTTP machines and the remote-admin codec are the engine's (net/novaworld,
 # net/admin); the app owns the sockets (apps/common), the listing file, the admin poll thread and
 # the log.
@@ -35,4 +35,4 @@ target_link_libraries(opennova_nw_lister
 )
 
 target_compile_features(opennova_nw_lister PRIVATE cxx_std_17)
-set_target_properties(opennova_nw_lister PROPERTIES OUTPUT_NAME "nw-lister")
+set_target_properties(opennova_nw_lister PROPERTIES OUTPUT_NAME "opennova-nw-lister")
