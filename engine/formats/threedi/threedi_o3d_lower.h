@@ -12,8 +12,7 @@
 //
 // Errors are what the target cannot hold or load, at the record's line.
 // Notes are what it loads all the same: a reduction (influences past what it
-// blends, vertices a split leaves no triangle for), a limit no witness shows
-// it failing past (`ThreediLimit::witnessed` false), the engine's notes. A
+// blends, vertices a split leaves no triangle for), the engine's notes. A
 // mesh's split into strips is silent: it is how a target holds any mesh.
 //
 // Only the retail target exists (threedi_retail_limits): a limit is a
@@ -48,12 +47,17 @@ using ThreediShaderLookup = bool (*)(const char *tag, bool &reads_tangents);
 // format library may not include, so the target carries it.
 using ThreediTextureLookup = bool (*)(const char *name, uint8_t type, std::string &opens, std::string &loads);
 
-// The most a target holds of one thing. Past a witnessed limit the lowering
-// refuses; past an unwitnessed one (a value only the corpus bounds, no code
-// read shows failing) it builds and notes it.
+// The most a target holds of one thing; past it the lowering refuses.
 struct ThreediLimit {
 	long long max = 0;
-	bool witnessed = true;
+};
+
+// The bytes one vertex takes in a target's vertex buffer, by layout.
+struct ThreediVertexStride {
+	int rigid = 0;
+	int rigid_tangents = 0;
+	int skinned = 0;
+	int skinned_tangents = 0;
 };
 
 // A target's limits. [field] marks a 3DI3 word's width, [engine] what the
@@ -65,9 +69,10 @@ struct ThreediTargetLimits {
 	ThreediLimit influences;      // [engine] influences a skinned vertex blends
 	ThreediLimit strip_triangles; // [field] triangles a strip's index count holds
 	ThreediLimit strip_vertices;  // [field] vertices a strip's indices reach
-	ThreediLimit lod_vertices;    // [engine] vertices in one LOD's vertex buffer
+	ThreediLimit lod_vertex_bytes; // [engine] bytes of one LOD's vertex buffer (its vertices at vertex_stride)
+	ThreediLimit lod_index_bytes;  // [engine] bytes of one LOD's index buffer (two an index)
+	ThreediVertexStride vertex_stride; // [engine] what one vertex takes in that buffer
 	ThreediLimit lods;            // [engine] render LODs
-	ThreediLimit materials;       // [engine] materials
 	ThreediLimit parts;           // [field] parts in a LOD (and sections)
 	// --- names and tables --------------------------------------------------
 	ThreediLimit model_name;      // [engine] characters of the GHDR name
@@ -91,7 +96,7 @@ struct ThreediTargetLimits {
 	// --- lights -----------------------------------------------------------
 	ThreediLimit light_rate; // [field] a colour generator's rate (exclusive)
 	ThreediLimit light_cone; // [field] a spot cone's half-angle in degrees (exclusive)
-	// --- what the engine reads of a list it loads whole (always notes) ------
+	// --- what the engine reads of a list it loads whole (notes, not errors) --
 	ThreediLimit user_point_scan; // [engine] user points the attach scan reads
 	ThreediLimit seat_scan;       // [engine] `sitex` seats the seat scan reads
 };

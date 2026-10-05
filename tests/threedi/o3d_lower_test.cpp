@@ -2,9 +2,9 @@
 // a mesh of any size splits into the strips a 3DI3 holds (21,845 triangles, a
 // skinned palette of 16 parts by OED's first-fit), influences past four reduce
 // to the primary and the heaviest three, authored tangent frames ride along
-// with derived ones beside them, and every name, count and fixed-point extent
-// the text leaves free is checked at its line (docs/threedi/o3d-scene-format.md,
-// "Lowering to retail").
+// with derived ones beside them, and every name, count, buffer size and
+// fixed-point extent the text leaves free is checked at its line
+// (docs/threedi/o3d-scene-format.md, "Lowering to retail").
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -67,18 +67,21 @@ std::string num(int v) { return std::to_string(v); }
 const std::string kRigid = "o3d 2\nmodel LOWER\nmaterial FF_ST_OP\ntexture lower.tga\nlod 0\npart 0 0 0 0\nmesh 0\n";
 
 void test_rigid_split() {
-	// 21,846 triangles of their own three vertices: a strip holds 21,845
-	// triangles (STRP's u16 index count), so the last one starts another,
-	// each strip holding the vertices its triangles use. One vertex no
-	// triangle uses goes, and a note says so.
+	// 21,846 triangles over 1,000 groups of three vertices: a strip holds
+	// 21,845 triangles (STRP's u16 index count), so the last one starts
+	// another, each strip holding the vertices its triangles use. One vertex
+	// no triangle uses goes, and a note says so.
 	std::string text = kRigid;
-	text.reserve(4 * 1024 * 1024);
-	const int tris = 21846;
-	for (int t = 0; t < tris; ++t)
+	text.reserve(1024 * 1024);
+	const int tris = 21846, groups = 1000;
+	for (int g = 0; g < groups; ++g)
 		for (int k = 0; k < 3; ++k)
-			text += "v " + num(t % 100) + " " + num(t / 100) + " " + num(k) + " 0 0 1 0 0\n";
+			text += "v " + num(g % 100) + " " + num(g / 100) + " " + num(k) + " 0 0 1 0 0\n";
 	text += "v 9 9 9 0 0 1 0 0\n";
-	for (int t = 0; t < tris; ++t) text += "t " + num(3 * t) + " " + num(3 * t + 1) + " " + num(3 * t + 2) + "\n";
+	for (int t = 0; t < tris; ++t) {
+		const int g = 3 * (t % groups);
+		text += "t " + num(g) + " " + num(g + 1) + " " + num(g + 2) + "\n";
+	}
 	std::vector<SceneFinding> findings;
 	Threedi3di3 m{};
 	check(build(text, findings, &m), "rigid-split: builds" + dump(findings));
@@ -86,7 +89,7 @@ void test_rigid_split() {
 		const ThreediLod &lod = m.lods[0];
 		check(lod.strip_count == 2 && lod.strips[0].num_triangles == 21845 && lod.strips[1].num_triangles == 1,
 				"rigid-split: 21,845 triangles, then one");
-		check(lod.strip_count == 2 && lod.strips[0].num_vertices == 65535 && lod.strips[1].num_vertices == 3,
+		check(lod.strip_count == 2 && lod.strips[0].num_vertices == 3000 && lod.strips[1].num_vertices == 3,
 				"rigid-split: each strip holds the vertices its triangles use");
 		check(lod.render_objects[0].num_strips == 2, "rigid-split: both strips the part's");
 	}
@@ -279,24 +282,41 @@ void test_limits() {
 	refuses_at("version-1", "o3d 1\nmodel L\nlod 0\n", 1, "this is version 1 of the scene text");
 }
 
-void test_unwitnessed() {
-	// Past a limit only the corpus bounds, a note, and the model builds: a
-	// LOD vertex buffer past 65,535 (two meshes of 40,000 vertices), eight
-	// LODs, 31 materials.
-	std::string text = "o3d 2\nmodel BIG\n";
-	for (int i = 0; i < 31; ++i) text += "material FF_ST_OP\n";
-	text += "lod 0\npart 0 0 0 0\n";
-	const int lod_line = 31 + 3;
-	for (int mesh = 0; mesh < 2; ++mesh) {
-		text += "mesh 0\n";
-		for (int i = 0; i < 40000; ++i) text += "v " + num(i % 200) + " " + num(i / 200) + " " + num(mesh) + " 0 0 1 0 0\n";
-	}
-	for (int i = 0; i < 7; ++i) text += "lod 0\n";
+void test_lod_buffers() {
+	// A LOD's vertices and indices go whole into one buffer of the game's GPU
+	// pools: 2 MiB of vertices (40 bytes a rigid one, 64 with tangents), 512
+	// KiB of u16 indices. The buffer bounds the LOD, not a u16: 52,428 rigid
+	// vertices fit, one more does not.
+	const auto lod_of = [](const std::string &shader, int vertices) {
+		std::string text = "o3d 2\nmodel BIG\nmaterial " + shader + "\nlod 0\npart 0 0 0 0\nmesh 0\n";
+		text.reserve(static_cast<size_t>(vertices) * 32);
+		for (int i = 0; i < vertices; ++i) text += "v " + num(i % 200) + " " + num(i / 200) + " 0 0 0 1 0 0\n";
+		return text;
+	};
 	std::vector<SceneFinding> findings;
-	check(build(text, findings), "unwitnessed: builds" + dump(findings));
-	check(said(findings, false, lod_line, "the LOD holds 80,000 vertices, past the 65,535"), "unwitnessed: the LOD's vertices" + dump(findings));
-	check(said(findings, false, 0, "the model holds 8 LODs, past the 7"), "unwitnessed: the LOD count" + dump(findings));
-	check(said(findings, false, 33, "the model declares 31 materials, past the 30"), "unwitnessed: the materials" + dump(findings));
+	check(build(lod_of("FF_ST_OP", 52428), findings), "lod-vertex-bytes: 2,097,120 bytes build" + dump(findings));
+	refuses_at("lod-vertex-bytes", lod_of("FF_ST_OP", 52429), 4,
+			"the LOD's vertex buffer takes 2,097,160 bytes (52,429 vertices of 40): the game uploads it whole into one "
+			"GPU pool buffer (at most 2,097,152)");
+	check(build(lod_of("VS_PHONGT", 32768), findings), "lod-vertex-bytes: 32,768 tangent vertices build" + dump(findings));
+	refuses_at("lod-vertex-bytes-tangents", lod_of("VS_PHONGT", 32769), 4, "(32,769 vertices of 64)");
+	// 87,381 triangles hold 262,143 indices; one more triangle passes 512 KiB.
+	std::string tris = "o3d 2\nmodel IDX\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
+			"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\n";
+	tris.reserve(87382 * 8 + tris.size());
+	for (int t = 0; t < 87381; ++t) tris += "t 0 1 2\n";
+	check(build(tris, findings), "lod-index-bytes: 524,286 bytes build" + dump(findings));
+	refuses_at("lod-index-bytes", tris + "t 0 1 2\n", 4, "the LOD's index buffer takes 524,292 bytes (262,146 indices)");
+	// Eight LODs fill the loader's tables; a ninth is refused at its line.
+	std::string lods = "o3d 2\nmodel LODS\n";
+	for (int i = 0; i < 8; ++i) lods += "lod 0\n";
+	check(build(lods, findings), "lods: eight build" + dump(findings));
+	refuses_at("lods", lods + "lod 0\n", 11, "the model holds 9 LODs: the loader's LOD tables hold that many (at most 8)");
+	// No count bounds the materials (one allocation of MTRL's count).
+	std::string mats = "o3d 2\nmodel MATS\n";
+	for (int i = 0; i < 64; ++i) mats += "material FF_ST_OP\n";
+	check(build(mats + "lod 0\n", findings) && !said(findings, false, 0, "materials"),
+			"materials: 64 build with no note" + dump(findings));
 }
 
 void test_parse() {
@@ -332,7 +352,7 @@ int main() {
 	test_influences();
 	test_tangents();
 	test_limits();
-	test_unwitnessed();
+	test_lod_buffers();
 	test_parse();
 	std::printf("o3d_lower_test: %d failures\n", failures);
 	return failures == 0 ? 0 : 1;

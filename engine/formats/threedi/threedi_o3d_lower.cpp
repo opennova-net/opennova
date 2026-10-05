@@ -25,6 +25,10 @@ namespace {
 // 2^15: what a signed 16-bit index reaches, and past what a 16.16 word's
 // whole part does not.
 constexpr long long kWholePartReach = 32768;
+// The smallest buffer of the GPU pools a LOD's vertices and indices go into
+// (threedi_retail_limits).
+constexpr long long kPoolVertexBuffer = 0x200000;
+constexpr long long kPoolIndexBuffer = 0x80000;
 
 } // namespace
 
@@ -38,64 +42,88 @@ ThreediTargetLimits threedi_retail_limits() {
 	// with three weights [orig: ThreediGp_ConvertVerticesToGPUFormat @
 	// 0x5B4C90; _BaseInc.fx CalcSkinWorldPosAndNormal]
 	// (docs/threedi/3di-gp-format-re.md, the retail skinned vertex blend).
-	l.strip_palette = {16, true};
-	l.influences = {4, true};
+	l.strip_palette = {16};
+	l.influences = {4};
 	// STRP counts a strip's indices in a u16 (three per triangle), and they
 	// index its vertex window in u16 words.
-	l.strip_triangles = {65535 / 3, true};
-	l.strip_vertices = {65535, true};
-	// No read of the loader's vertex buffer bounds these: what the 958 JO
-	// models reach (CarierU's LOD 0 holds 27,017 vertices, ChmLFPa 7 LODs,
-	// fx_med1 30 materials) is all that is known, so past it is a note.
-	l.lod_vertices = {65535, false};
-	l.lods = {7, false};
-	l.materials = {30, false};
+	l.strip_triangles = {65535 / 3};
+	l.strip_vertices = {65535};
+	// A LOD's vertices and indices are uploaded whole, each into one buffer
+	// of a GPU pool, at the offset the pool gives the LOD: vertices into the
+	// static pool's 0x200000-byte buffers or the dynamic pool's (at least as
+	// large: max(VRAM / 8, 8 MB) over at most eight), indices into the static
+	// pool's 0x100000-byte buffers or the dynamic pool's (at least 0x80000:
+	// max(VRAM / 64, 1.5 MB) over at most four). The lock refuses a range past
+	// its buffer, and the LOD is left unfilled [orig: allocate_lod_gpu_buffers
+	// @ 0x5B2610, the requests @0x5B26CC, @0x5B2752, @0x5B27F3, @0x5B2882;
+	// CParticleSystem_Init_Wrapper @ 0x5876D0, the pool sizes; GStaticVB_Lock
+	// @ 0x6840D0, the bound @0x6840E0; GStaticIB_Lock @ 0x684430, the bound
+	// @0x684440]. A vertex takes 40 bytes, 56 skinned, 24 more with tangents
+	// [orig: Model_GetRenderVertexStride @ 0x5B1480]. The draw's base vertex
+	// is the pool offset plus the strip's start vertex, in 32 bits, so 65,535
+	// bounds a strip's index window, never the LOD's buffer
+	// [orig: CRenderBatchQueue_FlushBatches @ 0x5D9F50, DrawIndexedPrimitive
+	// @0x5DAA07].
+	l.lod_vertex_bytes = {kPoolVertexBuffer};
+	l.lod_index_bytes = {kPoolIndexBuffer};
+	l.vertex_stride = {40, 64, 56, 80};
+	// The loader's LOD tables hold eight levels: eight render-model pointers,
+	// eight thresholds and eight RMDL words, then the material count, and
+	// eight 56-byte GPU blocks before the render-mode words; it never bounds
+	// GHDR's count, so a ninth LOD's pointer lands in the first threshold's
+	// slot [orig: ThreediGp_LoadFromFile @ 0x5B5B84..0x5B5BE5;
+	// GPM_LoadRenderModel @ 0x5B56F8, the block at loader + 0x204 + 56 x
+	// level; allocate_lod_gpu_buffers @ 0x5B2637]. A model's materials are one
+	// allocation of the MTRL count, each strip naming its own by a dword
+	// index, so no count bounds them [orig: ThreediGp_LoadFromFile @ 0x5B59C3;
+	// GPM_LoadRenderModel @ 0x5B5184].
+	l.lods = {8};
 	// A part is a byte wherever it is named (PANM part and parent, a STRP
 	// bone table entry, LGHT and OOBJ), and a PANM parent of -1 is the byte
 	// 255.
-	l.parts = {255, true};
+	l.parts = {255};
 	// GHDR and USRP give a name 16 bytes; 15 keeps the NUL the loader's C
 	// strings end on (no JO name is longer than 9, so nothing witnesses how
 	// an unterminated one reads).
-	l.model_name = {15, true};
-	l.user_point_name = {15, true};
-	l.shader = {32, true};
-	l.register_name = {24, true};
+	l.model_name = {15};
+	l.user_point_name = {15};
+	l.shader = {32};
+	l.register_name = {24};
 	// A register is named by a byte: a PANM track's param, a LGHT phase, a
 	// generator's phase byte above style 0x70.
-	l.register_index = {255, true};
-	l.lod_type = {4, true};
-	l.texture_rows = {24, true};
+	l.register_index = {255};
+	l.lod_type = {4};
+	l.texture_rows = {24};
 	// The MTRL row's 16-byte name, which retail fills with no NUL (124 names
 	// such as `bo105blur.dds.tg`).
-	l.texture_name = {16, true};
-	l.flipbook_frames = {255, true};
+	l.texture_name = {16};
+	l.flipbook_frames = {255};
 	// CVRT stores 8.8 in an int16; 16.16 words and Q14 normals are int32 and
 	// int16.
-	l.collision_extent = {128, true};
-	l.fixed16_extent = {kWholePartReach, true};
-	l.fixed14_extent = {2, true};
+	l.collision_extent = {128};
+	l.fixed16_extent = {kWholePartReach};
+	l.fixed14_extent = {2};
 	// A bullet face names its corners and its normal by signed 16-bit
 	// indices [orig: Physics_RaycastAgainstBoneCollision @ 0x4E5079].
-	l.section_vertices = {kWholePartReach, true};
-	l.section_normals = {kWholePartReach, true};
+	l.section_vertices = {kWholePartReach};
+	l.section_normals = {kWholePartReach};
 	// An occlusion record's edge words index its vertices in 7 bits, and the
 	// runtime's occlusion clip mask is a 32-bit word per record
 	// (runtime/world/occlusion.cpp).
-	l.occlusion_vertices = {128, true};
-	l.occlusion_planes = {32, true};
+	l.occlusion_vertices = {128};
+	l.occlusion_planes = {32};
 	// WriteLGHT packs the rate times 256 into a u16 and the cone into a byte
 	// of whole degrees [orig: WriteLGHT @ 0x456DF0 (ModSuperOed.exe)].
-	l.light_rate = {256, true};
-	l.light_cone = {256, true};
+	l.light_rate = {256};
+	l.light_cone = {256};
 	// The item-effect attach scan reads a model's first 16 user points
 	// [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]; the seat scan reads the
 	// `sitex` points without case, and a ninth takes the control seat and
 	// ends it (THREEDI_SITEX_SEAT_LIMIT) [orig: Entity_GetBoneSlotType @
 	// 0x434ED0; EntityDef_LoadModelsAndCallbacks, the store @ 0x43A4F0, the
 	// scan end @ 0x43A5AF]. The game loads such a model: notes.
-	l.user_point_scan = {THREEDI_USER_POINT_SCAN_LIMIT, true};
-	l.seat_scan = {THREEDI_SITEX_SEAT_LIMIT, true};
+	l.user_point_scan = {THREEDI_USER_POINT_SCAN_LIMIT};
+	l.seat_scan = {THREEDI_SITEX_SEAT_LIMIT};
 	return l;
 }
 
@@ -155,18 +183,12 @@ struct Lowering {
 			if (f.error) return true;
 		return false;
 	}
-	// `value` within `limit` (at most its max): true; past it, an error (a
-	// witnessed limit: false) or a note (an unwitnessed one: true). `what`
-	// says what holds `value`, `why` what imposes the limit.
+	// `value` within `limit` (at most its max): true; past it, an error and
+	// false. `what` says what holds `value`, `why` what imposes the limit.
 	bool within(const ThreediLimit &limit, long long value, int line, const std::string &what, const std::string &why) {
 		if (value <= limit.max) return true;
-		if (limit.witnessed) {
-			error_at(line, what + ": " + why + " (at most " + grouped(limit.max) + ")");
-			return false;
-		}
-		note_at(line, what + ", past the " + grouped(limit.max) + " " + why +
-				" (no witness shows the game failing past it; test the model in the game)");
-		return true;
+		error_at(line, what + ": " + why + " (at most " + grouped(limit.max) + ")");
+		return false;
 	}
 	// A value its fixed-point word must hold: finite, |v| < `limit`.
 	bool extent(const ThreediLimit &limit, double v, int line, const std::string &what, const std::string &word) {
@@ -253,9 +275,6 @@ void lower_texture(Lowering &lw, const ThreediO3dTexture &t, ThreediMaterial &m)
 // The materials, and whether a shader reads the TANGENT semantic.
 bool lower_materials(Lowering &lw) {
 	bool tangents = false;
-	if (!lw.in.materials.empty())
-		lw.within(lw.lim.materials, static_cast<long long>(lw.in.materials.size()), lw.in.materials.back().line,
-				"the model declares " + std::to_string(lw.in.materials.size()) + " materials", "the corpus reaches");
 	for (const ThreediO3dMaterial &src : lw.in.materials) {
 		if (!lw.name(lw.lim.shader, src.shader, src.line, "the shader tag", "MTRL holds that many bytes")) {
 			lw.out.materials.push_back(ThreediMaterial{}); // keeps the indices meshes name
@@ -545,7 +564,10 @@ void lower_lods(Lowering &lw) {
 	const ThreediO3dModel &in = lw.in;
 	if (!in.lods.empty())
 		lw.within(lw.lim.lods, static_cast<long long>(in.lods.size()), in.lods.back().line,
-				"the model holds " + std::to_string(in.lods.size()) + " LODs", "the corpus reaches");
+				"the model holds " + std::to_string(in.lods.size()) + " LODs", "the loader's LOD tables hold that many");
+	const ThreediVertexStride &st = lw.lim.vertex_stride;
+	const long long stride = lw.out.skinned ? (lw.out.tangents ? st.skinned_tangents : st.skinned)
+	                                        : (lw.out.tangents ? st.rigid_tangents : st.rigid);
 	for (const ThreediO3dLod &src : in.lods) {
 		lw.name(lw.lim.lod_type, src.type, src.line, "the LOD type", "RMDL holds that many bytes");
 		// The loader stores the threshold shifted left 16 in the level's own
@@ -557,7 +579,7 @@ void lower_lods(Lowering &lw) {
 				!lw.within(lw.lim.parts, static_cast<long long>(src.parts.size()), src.parts.back().line,
 						"the LOD holds " + std::to_string(src.parts.size()) + " parts", "a part index is a byte"))
 			continue;
-		long long lod_vertices = 0;
+		long long lod_vertices = 0, lod_indices = 0;
 		for (const ThreediO3dPart &p : src.parts) {
 			const int index = lw.out.add_part(lod, static_cast<int>(p.parent), p.pivot);
 			ThreediBuildPart &part = lw.out.lods[lod].parts[static_cast<size_t>(index)];
@@ -577,12 +599,19 @@ void lower_lods(Lowering &lw) {
 				if (!reach) continue;
 				const size_t before = part.strips.size();
 				lower_mesh(lw, mesh, part);
-				for (size_t s = before; s < part.strips.size(); ++s)
+				for (size_t s = before; s < part.strips.size(); ++s) {
 					lod_vertices += static_cast<long long>(part.strips[s].vertices.size());
+					lod_indices += static_cast<long long>(part.strips[s].indices.size());
+				}
 			}
 		}
-		lw.within(lw.lim.lod_vertices, lod_vertices, src.line,
-				"the LOD holds " + grouped(lod_vertices) + " vertices", "the corpus's largest LOD vertex buffer");
+		lw.within(lw.lim.lod_vertex_bytes, lod_vertices * stride, src.line,
+				"the LOD's vertex buffer takes " + grouped(lod_vertices * stride) + " bytes (" + grouped(lod_vertices) +
+						" vertices of " + std::to_string(stride) + ")",
+				"the game uploads it whole into one GPU pool buffer");
+		lw.within(lw.lim.lod_index_bytes, lod_indices * 2, src.line,
+				"the LOD's index buffer takes " + grouped(lod_indices * 2) + " bytes (" + grouped(lod_indices) + " indices)",
+				"the game uploads it whole into one GPU pool buffer");
 		for (const ThreediO3dPanm &pa : src.panm) {
 			if (!lw.part_byte(pa.parent < 0 ? 0 : pa.parent, pa.line, "panm's parent")) continue;
 			ThreediPartAnimation &row = lw.out.add_panm(lod, static_cast<int>(pa.part), static_cast<int>(pa.parent));
