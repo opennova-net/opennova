@@ -7,6 +7,7 @@
 #include <functional>
 #include <string>
 
+#include <editor/preview/script_viewport.h>
 #include <editor/preview/text_burst.h>
 #include <editor/preview/viewport_device.h>
 
@@ -112,6 +113,8 @@ private:
 	bool ending_ = false;        // the burst's end is deferred
 	opennova::editor::TextBurst burst_;
 	uint64_t marks_serial_ = 0, highlights_serial_ = 0, reveal_seq_ = 0, assist_serial_ = 0;
+	// What the assist it took last asked (what its report says shows still).
+	opennova::editor::ScriptAssistOp assist_op_ = opennova::editor::ScriptAssistOp::None;
 };
 
 } // namespace godot

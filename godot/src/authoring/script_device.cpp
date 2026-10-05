@@ -258,12 +258,19 @@ void ScriptDevice::take(opennova::editor::ViewportAction action, const opennova:
 		edit->set_caret_column(int(reveal.end_column), false);
 		edit->center_viewport_to_caret();
 	}
-	// The help asked at a place (the viewport's assist, the MCP gaps lane), once an ask.
+	// The help asked at a place (the viewport's assist, the MCP gaps lane), once an ask; and whether it shows
+	// still, reported (a person's Escape, a click, a key or the control made again closes it: the session's
+	// assist closes with it).
 	const opennova::editor::ScriptAssistAsk &assist = script.assist();
 	if (assist.serial != assist_serial_) {
 		assist_serial_ = assist.serial;
+		assist_op_ = assist.op;
 		show_assist_(assist);
 	}
+	report.assist_serial = assist_serial_;
+	report.assist_shown = assist_op_ == opennova::editor::ScriptAssistOp::Complete ? edit->get_code_completion_selected_index() >= 0
+	                      : assist_op_ == opennova::editor::ScriptAssistOp::Hover  ? !edit->get_hover_note().is_empty()
+	                                                                                : false;
 	report.width = int(edit->get_size().x);
 	report.height = int(edit->get_size().y);
 	report.canvas_sized = drawn_;
@@ -366,22 +373,24 @@ void ScriptDevice::lookup_(int line, int column) {
 	}
 }
 
-// The caret put at the place, then the completion list there as typing a word's character shows it, or the
-// word's words there in a box under it as the pointer shows them; with neither asked, both closed.
+// The completion list at the place as typing a word's character there shows it (the caret put there, as
+// typing there would), or the word's words there in a box under it as the pointer shows them (the caret and the
+// selection left as they are, the line scrolled to); with neither asked, both closed.
 void ScriptDevice::show_assist_(const opennova::editor::ScriptAssistAsk &assist) {
 	ScriptEdit *edit = this->edit();
 	if (!edit) return;
 	edit->cancel_code_completion();
 	edit->set_hover_note(String());
 	if (assist.op == opennova::editor::ScriptAssistOp::None) return;
-	edit->deselect();
-	edit->set_caret_line(int(assist.shown_line), false);
-	edit->set_caret_column(int(assist.shown_column), false);
-	edit->center_viewport_to_caret();
 	if (assist.op == opennova::editor::ScriptAssistOp::Complete) {
+		edit->deselect();
+		edit->set_caret_line(int(assist.shown_line), false);
+		edit->set_caret_column(int(assist.shown_column), false);
+		edit->center_viewport_to_caret();
 		complete_(true);
 		return;
 	}
+	edit->set_line_as_center_visible(int(assist.shown_line));
 	const std::string words = hover_(int(assist.shown_line), int(assist.shown_column));
 	edit->set_hover_note(opennova::to_gd(words.empty() ? std::string("Nothing the editor knows is here.") : words),
 			int(assist.shown_line), int(assist.shown_column));

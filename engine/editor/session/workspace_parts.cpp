@@ -3,12 +3,17 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <map>
 #include <optional>
+#include <set>
 #include <utility>
 #include <vector>
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/blank/blank_factory.h>
+#include <editor/documents/mnu_document.h>
+#include <editor/documents/mnu_table.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/import/import_plan.h>
 #include <editor/model/document.h>
@@ -16,6 +21,9 @@
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_card.h>
+#include <editor/session/problem_confirmation.h>
+#include <editor/session/problem_fixes.h>
+#include <editor/session/problem_query.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
@@ -29,105 +37,124 @@ using J = WorkspaceJson;
 
 JsonValue text(const std::string &value) { return JsonValue::make_string(value); }
 JsonValue flag(bool value) { return JsonValue::make_bool(value); }
+JsonValue number(double value) { return JsonValue::make_number(value); }
 
 // --- the table ----------------------------------------------------------------------------------
+
+constexpr size_t kTextLongest = kWorkspaceText - 1;
+constexpr size_t kPathLongest = kWorkspacePath - 1;
+constexpr size_t kFileNameLongest = kWorkspaceFileName - 1;
+constexpr size_t kExpansionLongest = kWorkspaceExpansion - 1;
 
 constexpr WorkspaceMember kCard[] = {
 	{ "path", J::String,
 			"The project file whose card shows (a project-relative path or a logical name; \"\" closes it, and stops "
 			"the sound it played): what it is, where a build puts it, what it names and who names it, a wave's "
-			"sound. about_file opens it too, Files coming forward." },
+			"sound. about_file opens it too, Files coming forward; the session closes it as the file goes, and a "
+			"rename of the file moves it." },
 };
 constexpr WorkspaceMember kBuildResult[] = {
 	{ "open", J::Boolean,
 			"The build result's panel shows (what the last build came to: its folder, what refused it). A build's "
-			"end opens it, unless a Play waits on the build." },
+			"end opens it, unless a Play waits on the build or the build was asked with report false." },
 };
 constexpr WorkspaceMember kNewProject[] = {
 	{ "open", J::Boolean,
 			"File > New project...'s modal is open (the welcome page shows the form whenever no project is "
-			"open). A new_project that makes the project closes it." },
-	{ "title", J::String, "The form's Name." },
-	{ "dir", J::String, "The form's Folder: where the project is made." },
+			"open). A new_project closes it as the session takes it." },
+	{ "title", J::String, "The form's Name.", kTextLongest },
+	{ "dir", J::String, "The form's Folder: where the project is made.", kPathLongest },
 	{ "game_install", J::String,
 			"The form's Game install, named (left unnamed, the form shows the editor's own); the window checks it "
-			"as typing stops (check_install), its words under the field." },
+			"as typing stops (check_install), its words under the field.", kPathLongest },
 	{ "builds_on", J::String,
 			"The installed expansion it builds on, by its folder's name (\"\" the base game); building on one "
 			"builds as an expansion." },
 	{ "as_expansion", J::Boolean, "Build as an expansion: the project builds as expansion\\<expansion>\\." },
-	{ "expansion", J::String, "The expansion's name, which the form checks as the game's rule takes it." },
+	{ "expansion", J::String, "The expansion's name, which the form checks as the game's rule takes it.", kExpansionLongest },
 };
 constexpr WorkspaceMember kSettings[] = {
 	{ "open", J::Boolean,
 			"File > Project settings... is open (a project open). Opening it fills its fields with the settings in "
 			"effect, before the other members the change names; its Apply is apply_project_settings with a "
 			"serial, which closes it once every setting is written." },
-	{ "title", J::String, "The project's name." },
+	{ "title", J::String, "The project's name.", kTextLongest },
 	{ "mission", J::Boolean, "Missions: the project holds missions." },
 	{ "multiplayer", J::Boolean, "Multiplayer." },
 	{ "builds_on", J::String, "The installed expansion it builds on (\"\" the base game); building on one builds as one." },
 	{ "as_expansion", J::Boolean, "Build as an expansion." },
-	{ "expansion", J::String, "The expansion's name." },
-	{ "game_install", J::String, "This computer's game install folder." },
-	{ "runtime", J::String, "The OpenNova runtime Play runs (\"\" the one packaged beside the editor)." },
+	{ "expansion", J::String, "The expansion's name.", kExpansionLongest },
+	{ "game_install", J::String, "This computer's game install folder.", kPathLongest },
+	{ "runtime", J::String, "The OpenNova runtime Play runs (\"\" the one packaged beside the editor).", kPathLongest },
 	{ "play_in_install", J::Boolean, "Play in the game install." },
 };
 constexpr WorkspaceMember kNewFile[] = {
 	{ "kind", J::String,
-			"The kind of file the prompt makes, an asset kind's token (Files' New > a kind...: a string table, a "
-			"menu, a font, a mission; \"\" closes it). Opening it empties its name and values." },
-	{ "name", J::String, "The new file's name, checked as it is typed." },
-	{ "values", J::Object, "What the kind's blank takes beside the name, by its params' tokens (a mission's title, terrain, environment)." },
+			"The kind of file the prompt makes, an asset kind's token among those Files' New asks a name of (a string "
+			"table, a menu, a font, a mission; \"\" closes it). Opening it empties its name and values." },
+	{ "name", J::String, "The new file's name, checked as it is typed.", kFileNameLongest },
+	{ "values", J::Object,
+			"What the kind's blank takes beside the name, by its params' tokens (a mission's title, terrain, "
+			"environment), each a string.", kFileNameLongest },
 };
 constexpr WorkspaceMember kFileRename[] = {
 	{ "path", J::String,
 			"The project file Files' Rename... renames (\"\" closes it; opening it starts its name as the file's). "
-			"show_in_files with ask_name opens it too." },
-	{ "name", J::String, "The new name typed; the window previews the rename as it changes (preview_rename)." },
+			"show_in_files with ask_name opens it too; the session closes it as the file goes." },
+	{ "name", J::String, "The new name typed; the window previews the rename as it changes (preview_rename).",
+			kFileNameLongest },
 };
 constexpr WorkspaceMember kRename[] = {
 	{ "open", J::Boolean,
-			"Rename everywhere is open over the rename preview_rename planned (a preview_rename with ask_name opens it)." },
-	{ "name", J::String, "The new name typed; the window plans the rename again as it changes (preview_rename)." },
+			"Rename everywhere is open over the rename preview_rename planned (a preview_rename with ask_name opens it; "
+			"another rename planned in its place closes it)." },
+	{ "name", J::String, "The new name typed; the window plans the rename again as it changes (preview_rename).",
+			kTextLongest },
 };
 constexpr WorkspaceMember kRenameBack[] = {
-	{ "open", J::Boolean, "Rename back is open over the plan preview_rename_back made (its ask_name opens it)." },
+	{ "open", J::Boolean,
+			"Rename back is open over the plan preview_rename_back made (its ask_name opens it; a plan that is no way "
+			"back in its place closes it)." },
 };
 constexpr WorkspaceMember kFind[] = {
 	{ "open", J::Boolean, "The Document window's find bar is open over the active document (Ctrl+F)." },
-	{ "text", J::String, "What it finds: its hits are the document_search query's; open_document at a hit shows it." },
+	{ "text", J::String, "What it finds: its hits are the document_search query's; open_document at a hit shows it.",
+			kTextLongest },
 	{ "match_case", J::Boolean, "Aa: case counts." },
 };
 constexpr WorkspaceMember kProjectFind[] = {
 	{ "open", J::Boolean, "Find in project is open (Ctrl+Shift+F; a project open)." },
-	{ "text", J::String, "What it finds: the project_search query's hits." },
+	{ "text", J::String, "What it finds: the project_search query's hits.", kTextLongest },
 };
 constexpr WorkspaceMember kFiles[] = {
 	{ "filter", J::String,
 			"Files' filter: the files whose paths hold the text, then those of a kind it names (\"texture\"), "
-			"listed flat; the files query with text lists the same." },
+			"listed flat; the files query with text lists the same.", kTextLongest },
 	{ "kind", J::String, "The kind Files lists alone, an asset kind's token (\"\" every kind)." },
 };
 constexpr WorkspaceMember kImport[] = {
 	{ "filter", J::String,
 			"The import dialog's filter of the files to choose from (a name, a folder, or a kind's word), with an "
-			"import preview open." },
+			"import preview open.", kTextLongest },
 	{ "choice_kind", J::String, "The kind of the files to choose from it lists alone, an asset kind's token (\"\" every kind)." },
-	{ "rows_filter", J::String, "Its filter of the plan's rows (a filter or a kind shown lists them flat)." },
+	{ "rows_filter", J::String, "Its filter of the plan's rows (a filter or a kind shown lists them flat).", kTextLongest },
 	{ "kind_shown", J::String, "The kind of the plan's rows it shows alone, an asset kind's token (\"\" every kind)." },
 	{ "replace_existing", J::Boolean,
 			"Replace existing files: every file the project holds already checked (each can be unchecked alone), "
 			"or unchecked again." },
-	{ "check", J::Strings,
+	{ "plan", J::Integer,
+			"The plan check and uncheck index (the import_preview query's plan): they need it, and one the dialog no "
+			"longer shows (planned again since) is refused, nothing changed." },
+	{ "check", J::Integers,
 			"The plan's rows checked, by their index (the import_preview query's index); a converter's outputs come "
 			"together: check one, check them all." },
-	{ "uncheck", J::Strings, "The plan's rows unchecked, by their index." },
+	{ "uncheck", J::Integers, "The plan's rows unchecked, by their index." },
 };
 constexpr WorkspaceMember kProblems[] = {
 	{ "severities", J::Strings, "The severities shown, of error, warning and info." },
-	{ "text", J::String, "Only the problems whose message, file, record, field or code holds it." },
-	{ "scope", J::String, "Whose problems: project, active_file or open_files." },
+	{ "text", J::String, "Only the problems whose message, file, record, field or code holds it.", kTextLongest },
+	{ "scope", J::String,
+			"Whose problems: project, active_file (none while no document is active) or open_files." },
 	{ "group", J::String, "How they group: none, file or kind." },
 	{ "fixable", J::Boolean, "Only fixable: the problems the editor offers a fix for." },
 	{ "blocking", J::Boolean,
@@ -135,21 +162,28 @@ constexpr WorkspaceMember kProblems[] = {
 			"is turned off)." },
 	{ "confirm", J::Object,
 			"The confirmation a Fix all or a Use fix waits in for Apply: {group} a group's Fix all by its key (the "
-			"problems query's groups, with this grouping), {required} the summary's Fix all of a request kind "
-			"(create_missing, preview_install_import), or {finding, label} the fix of that label of the finding at "
-			"that index (the problems query's index); {} closes it. Its Apply raises what it proposes." },
+			"problems query's groups, with this grouping and these filters), {required} the summary's Fix all of a "
+			"request kind (create_missing, preview_install_import), or {finding, label} the fix of that label of "
+			"the finding at that index (the problems query's index, a whole number); {} closes it. One that names "
+			"nothing Problems offers now is refused. The workspace section shows what it proposes; "
+			"apply_confirmation (or its Apply) raises that." },
 };
 constexpr WorkspaceMember kDocument[] = {
 	{ "path", J::String, "The document (its path or logical name; left out, the active one), open." },
-	{ "filter", J::String, "Its outline's filter (a stylesheet's lines' too): the rows and records whose words hold it." },
-	{ "kinds", J::Strings, "The kinds of row its outline lists, by their tokens (a mission's chips); every kind when all are named." },
+	{ "filter", J::String, "Its outline's filter (a stylesheet's lines' too): the rows and records whose words hold it.",
+			kTextLongest },
+	{ "kinds", J::Strings,
+			"The kinds of row its outline lists, by their tokens (a mission's chips: a mission's alone); every kind "
+			"when all are named." },
 	{ "all_rows", J::Boolean, "Its outline lists every row, those its type leaves out too (a mission's empty paths)." },
 	{ "sort", J::Boolean, "Its list sorted by name." },
 	{ "every", J::Boolean, "Master and detail: the filter over every row's detail records, not the selected row's alone." },
-	{ "inspector_filter", J::String, "The Inspector's filter over its fields and lists." },
-	{ "new_window_type", J::String, "A menu's type for the next Add window (its TYPE's name: static, button, ...)." },
-	{ "remove_screen", J::Integer, "A menu's screen whose Remove waits on its confirmation, by its record id (0: none)." },
-	{ "remap_from", J::Integer, "An 8-bit PCX's palette index to move (0 to 255)." },
+	{ "inspector_filter", J::String, "The Inspector's filter over its fields and lists.", kTextLongest },
+	{ "new_window_type", J::String, "A menu's type for the next Add window, one of its TYPE's names (static, button, ...)." },
+	{ "remove_screen", J::Integer,
+			"A menu's screen whose Remove waits on its confirmation, by its record id (0: none): a screen of the menu "
+			"while it keeps a second." },
+	{ "remap_from", J::Integer, "An 8-bit PCX's palette index to move (0 to 255): a .pcx texture's." },
 	{ "remap_to", J::Integer, "The palette index it moves to (0 to 255)." },
 };
 
@@ -204,6 +238,11 @@ std::string parts_taken() {
 	return out + ", focus";
 }
 
+bool whole(const JsonValue &value) {
+	return value.is_number() && value.number >= 0.0 && value.number == std::floor(value.number) &&
+	       value.number <= 9007199254740992.0;
+}
+
 bool typed(const JsonValue &value, WorkspaceJson json) {
 	switch (json) {
 		case J::String:
@@ -211,17 +250,21 @@ bool typed(const JsonValue &value, WorkspaceJson json) {
 		case J::Boolean:
 			return value.is_bool();
 		case J::Integer:
-			return value.is_number() && value.number >= 0.0 && value.number == std::floor(value.number) &&
-			       value.number <= 9007199254740992.0;
+			return whole(value);
 		case J::Strings:
 			if (!value.is_array()) return false;
 			for (const JsonValue &item : value.array)
 				if (!item.is_string()) return false;
 			return true;
+		case J::Integers:
+			if (!value.is_array()) return false;
+			for (const JsonValue &item : value.array)
+				if (!whole(item)) return false;
+			return true;
 		case J::Object:
 			if (!value.is_object()) return false;
 			for (const io::JsonMember &member : value.object)
-				if (!member.value.is_string()) return false;
+				if (!member.value.is_string() && !whole(member.value)) return false;
 			return true;
 	}
 	return false;
@@ -237,10 +280,20 @@ const char *type_words(WorkspaceJson json) {
 			return "a whole number, 0 or more";
 		case J::Strings:
 			return "an array of strings";
+		case J::Integers:
+			return "an array of whole numbers, 0 or more";
 		case J::Object:
-			return "an object of strings";
+			return "an object of strings and whole numbers";
 	}
 	return "a string";
+}
+
+// The longest string of a value (each string of an array or an object's).
+size_t longest_of(const JsonValue &value) {
+	size_t out = value.is_string() ? value.string.size() : 0;
+	for (const JsonValue &item : value.array) out = std::max(out, longest_of(item));
+	for (const io::JsonMember &member : value.object) out = std::max(out, longest_of(member.value));
+	return out;
 }
 
 // --- what each part does ------------------------------------------------------------------------
@@ -279,6 +332,30 @@ bool stop_sound(WorkspaceView::Sound &sound) {
 		return false;
 	sound.state = WorkspaceView::SoundState::Stopped;
 	return true;
+}
+
+// The factory Files' New asks a name of for `kind` (a free-form one of no role); null for a kind it offers none.
+const BlankFactory *new_file_factory(AssetKind kind) {
+	for (size_t i = 0; i < blank_factory_count(); ++i) {
+		const BlankFactory &factory = *blank_factory_at(i);
+		if (factory.free_form && factory.role[0] == '\0' && factory.kind == kind) return &factory;
+	}
+	return nullptr;
+}
+
+// The menu the document is, and whether `screen` is a screen of it its Remove may ask of: the menu keeps a
+// second screen.
+const MnuDocument *menu_of(const DocumentBase &document) { return dynamic_cast<const MnuDocument *>(records_of(document)); }
+bool removable_screen(const DocumentBase &document, uint64_t screen) {
+	const MnuDocument *menu = menu_of(document);
+	return menu && menu->row(NodeId(screen)) && menu->rows().size() >= 2;
+}
+
+// A menu window's TYPE choices (what Add window's type takes).
+const FieldSchema *window_type_field(const MnuDocument &menu) {
+	for (const FieldSchema &field : menu.fields(node_kind(MenuKind::Window)))
+		if (field.id == "type") return &field;
+	return nullptr;
 }
 
 bool set_card(Change &change, const JsonValue &part) {
@@ -386,21 +463,41 @@ bool kind_named(const std::string &token, AssetKind &out) {
 	return out != AssetKind::Unknown;
 }
 
-// The New file prompt: opened on a kind (its name and values emptied), its fields set while it is open.
+// The New file prompt: opened on a kind Files' New asks a name of (its name and values emptied), its fields set
+// while it is open, its values by its kind's params alone.
 bool set_new_file(Change &change, const JsonValue &part) {
 	WorkspaceView::NewFile prompt = change.workspace().new_file;
 	if (const JsonValue *kind = part.get("kind")) {
 		AssetKind wanted = AssetKind::kCount;
 		if (!kind_named(kind->string, wanted)) return change.refuse("No kind of file is \"" + kind->string + "\".");
 		if (wanted != AssetKind::kCount && !change.view.project.open) return change.closed("The project", "open or make one first");
+		if (wanted != AssetKind::kCount && !new_file_factory(wanted)) {
+			std::string offered;
+			for (size_t i = 0; i < blank_factory_count(); ++i) {
+				const BlankFactory &factory = *blank_factory_at(i);
+				if (factory.free_form && factory.role[0] == '\0') offered += (offered.empty() ? "" : ", ") + std::string(asset_kind_token(factory.kind));
+			}
+			return change.refuse("Files' New asks no name of a " + kind->string + " (it does of " + offered + ").");
+		}
 		if (wanted != prompt.kind) prompt = WorkspaceView::NewFile{ wanted, std::string(), {} };
 	}
 	if ((part.get("name") || part.get("values")) && prompt.kind == AssetKind::kCount)
 		return change.closed("The New file prompt", "name its kind first (new_file.kind)");
 	if (const JsonValue *name = part.get("name")) prompt.name = name->string;
 	if (const JsonValue *values = part.get("values")) {
+		const BlankFactory *factory = new_file_factory(prompt.kind);
+		std::string params;
+		for (size_t i = 0; factory && i < factory->param_count; ++i) params += (i ? ", " : "") + std::string(factory->params[i].token);
 		prompt.values.clear();
-		for (const io::JsonMember &value : values->object) prompt.values.emplace_back(value.key, value.value.string);
+		for (const io::JsonMember &value : values->object) {
+			bool known = false;
+			for (size_t i = 0; factory && i < factory->param_count; ++i) known = known || value.key == factory->params[i].token;
+			if (!known)
+				return change.refuse("A new " + std::string(asset_kind_token(prompt.kind)) + " takes no value \"" + value.key + "\" (" +
+				                     (params.empty() ? std::string("it takes none") : "it takes " + params) + ").");
+			if (!value.value.is_string()) return change.refuse("new_file.values." + value.key + " is a string.");
+			prompt.values.emplace_back(value.key, value.value.string);
+		}
 	}
 	WorkspaceView::NewFile &held = change.workspace().new_file;
 	if (prompt.kind == held.kind && prompt.name == held.name && prompt.values == held.values) return false;
@@ -445,6 +542,11 @@ void open_rename(WorkspaceView::Rename &rename, const DialogsView::RenamePreview
 bool same_rename(const WorkspaceView::Rename &a, const WorkspaceView::Rename &b) {
 	return a.open == b.open && a.path == b.path && a.locator == b.locator && a.field == b.field &&
 	       a.old_name == b.old_name && a.kind == b.kind && a.name == b.name;
+}
+
+// Whether the view's rename plan is the open Rename everywhere's: a name's (no way back) of its field.
+bool plan_of(const WorkspaceView::Rename &rename, const DialogsView::RenamePreview &plan) {
+	return plan.symbol && !plan.back && plan.path == rename.path && plan.locator == rename.locator && plan.field == rename.field;
 }
 
 bool set_rename(Change &change, const JsonValue &part) {
@@ -512,8 +614,8 @@ bool set_files(Change &change, const JsonValue &part) {
 }
 
 // The import dialog's own: refused with no import preview open. Replace existing files sets the check of
-// every file the project holds that the import can take; check and uncheck name rows by index, a
-// converter's outputs coming together.
+// every file the project holds that the import can take; check and uncheck name rows by index in the plan
+// they name (the one shown, else refused), a converter's outputs coming together.
 bool set_import(Change &change, const JsonValue &part) {
 	const DialogsView::ImportPreview &preview = change.view.dialogs.import_preview;
 	if (!preview.open || !preview.plan) return change.closed("The import dialog", "preview an import first");
@@ -526,6 +628,14 @@ bool set_import(Change &change, const JsonValue &part) {
 			return change.refuse("No kind of file is \"" + kind->string + "\".");
 	}
 	const ImportPlan &plan = *preview.plan;
+	const JsonValue *named_plan = part.get("plan");
+	if (named_plan && uint64_t(named_plan->number) != preview.plan_serial)
+		return change.refuse("The import was planned again: plan " + std::to_string(uint64_t(named_plan->number)) +
+		                     " is gone, the dialog shows plan " + std::to_string(preview.plan_serial) +
+		                     " (read import_preview again for its rows).");
+	if ((part.get("check") || part.get("uncheck")) && !named_plan)
+		return change.refuse("import.check and import.uncheck index a plan's rows: name the plan (import.plan, the "
+		                     "import_preview query's plan; it is " + std::to_string(preview.plan_serial) + " now).");
 	if (import.checked.size() != plan.rows.size()) import.checked = import_default_checks(plan, import.replace_existing);
 	bool checks = false;
 	if (const JsonValue *replace = part.get("replace_existing"); replace && replace->boolean != import.replace_existing) {
@@ -539,18 +649,21 @@ bool set_import(Change &change, const JsonValue &part) {
 		if (!rows) continue;
 		const bool on = std::string(member) == "check";
 		for (const JsonValue &token : rows->array) {
-			const std::optional<unsigned long> index = strutil::parse_ulong(token.string);
-			if (!index || *index >= plan.rows.size())
+			const size_t index = size_t(token.number);
+			if (index >= plan.rows.size())
 				return change.refuse("import." + std::string(member) + " names the plan's rows by their index (0 to " +
-				                     std::to_string(plan.rows.size()) + "), not \"" + token.string + "\".");
-			const ImportPlanRow &row = plan.rows[*index];
+				                     std::to_string(plan.rows.size() ? plan.rows.size() - 1 : 0) + "), not " +
+				                     std::to_string(index) + ".");
+			const ImportPlanRow &row = plan.rows[index];
+			if (row.state == ImportPlanRow::State::NotFound && on)
+				return change.refuse("import.check: " + row.name + " was found nowhere: nothing to import.");
 			// A row the project cannot take is not checked (a chosen one can only be unchecked).
-			if (on && !import_row_refusal(plan, *index).empty())
-				return change.refuse("import.check: " + row.name + " cannot be imported: " + import_row_refusal(plan, *index));
+			if (on && !import_row_refusal(plan, index).empty())
+				return change.refuse("import.check: " + row.name + " cannot be imported: " + import_row_refusal(plan, index));
 			// The files one converter source makes come together.
 			for (size_t i = 0; i < plan.rows.size(); ++i)
-				if (i == *index || (!row.made_from.empty() && plan.rows[i].made_from == row.made_from &&
-				                    plan.rows[i].source == row.source))
+				if (i == index || (!row.made_from.empty() && plan.rows[i].made_from == row.made_from &&
+				                   plan.rows[i].source == row.source))
 					import.checked[i] = on;
 			checks = true;
 		}
@@ -572,7 +685,8 @@ bool same_problems(const WorkspaceView::Problems &a, const WorkspaceView::Proble
 
 // Problems' filters and its confirmation. Blocks the build turned on sets aside the filters that could hide
 // a refusal (every severity, no text, the whole project, not only the fixable), kept until it is turned off,
-// when they come back as they were with what changed of them meanwhile.
+// when they come back as they were with what changed of them meanwhile. A confirmation is asked only of what
+// Problems offers now (propose_confirmation), its finding known by its key from then on.
 bool set_problems(Change &change, const JsonValue &part) {
 	WorkspaceView::Problems problems = change.workspace().problems;
 	if (const JsonValue *severities = part.get("severities")) {
@@ -615,12 +729,17 @@ bool set_problems(Change &change, const JsonValue &part) {
 	if (const JsonValue *confirm = part.get("confirm")) {
 		WorkspaceView::Problems::Confirm asked;
 		for (const io::JsonMember &member : confirm->object) {
-			std::string *slot = member.key == "group"      ? &asked.group
-			                    : member.key == "required" ? &asked.required
-			                    : member.key == "finding"  ? &asked.finding
-			                    : member.key == "label"    ? &asked.label
-			                                               : nullptr;
+			if (member.key == "finding") {
+				if (!whole(member.value))
+					return change.refuse("problems.confirm.finding is the index of a finding (the problems query's index), a whole number.");
+				asked.finding = std::to_string(uint64_t(member.value.number));
+				continue;
+			}
+			std::string *slot = member.key == "group" ? &asked.group : member.key == "required" ? &asked.required
+			                    : member.key == "label"                                        ? &asked.label
+			                                                                                    : nullptr;
 			if (!slot) return change.refuse("problems.confirm takes group, required, or finding and label, not \"" + member.key + "\".");
+			if (!member.value.is_string()) return change.refuse("problems.confirm." + member.key + " is a string.");
 			*slot = member.value.string;
 		}
 		const int asks = int(!asked.group.empty()) + int(!asked.required.empty()) + int(!asked.finding.empty());
@@ -628,16 +747,15 @@ bool set_problems(Change &change, const JsonValue &part) {
 		if (!asked.finding.empty() && asked.label.empty())
 			return change.refuse("problems.confirm names the fix of the finding by its label.");
 		if (asked.open() && !change.view.project.open) return change.closed("The project", "open one first");
-		if (!asked.required.empty()) {
-			EditorRequestKind kind = EditorRequestKind::CreateMissing;
-			if (!editor_request_kind_from_token(asked.required, kind))
-				return change.refuse("problems.confirm.required names a request kind, not \"" + asked.required + "\".");
-		}
-		if (!asked.finding.empty()) {
-			const std::optional<unsigned long> index = strutil::parse_ulong(asked.finding);
-			if (!index || *index >= change.view.findings.diagnostics.size())
-				return change.refuse("problems.confirm.finding is the index of a finding (the problems query's index), not \"" +
-				                     asked.finding + "\".");
+		if (asked.open()) {
+			if (!asked.finding.empty())
+				asked.finding_key = problem_finding_key(change.view, size_t(strutil::parse_ulong(asked.finding).value_or(0)));
+			// What Problems offers now, under the filters this change leaves: a confirmation of nothing is refused.
+			ProblemQueryCache answers;
+			ProblemFixCache fixes;
+			ConfirmationProposal proposal;
+			std::string why;
+			if (!propose_confirmation(change.view, asked, problems, answers, fixes, proposal, why)) return change.refuse(why);
 		}
 		problems.confirm = asked;
 		++problems.confirm_serial;
@@ -647,19 +765,24 @@ bool set_problems(Change &change, const JsonValue &part) {
 	return true;
 }
 
-// What a document's views show of it: the document named (the active one when none is), open; its kinds
-// by their tokens, every kind when all are named.
+// What a document's views show of it: the document named (the active one when none is), open; each member
+// what the document's views take of it (kinds and every row a mission's outline, a window type its menu's
+// TYPE, a Remove prompt a screen of its menu, a remap a PCX texture's).
 bool set_document(Change &change, const JsonValue &part) {
 	const JsonValue *path = part.get("path");
 	const std::string named = path ? path->string : std::string();
 	const DocumentBase *document = open_document(change.view, named);
 	if (!document)
 		return change.refuse(named.empty() ? std::string("No document is active.") : "No document is open at " + named + ".", named);
-	WorkspaceView::DocumentView shown = change.workspace().document(document->path());
+	const std::string &at = document->path();
+	WorkspaceView::DocumentView shown = change.workspace().document(at);
 	if (const JsonValue *filter = part.get("filter")) shown.filter = filter->string;
+	const bool mission = document->kind() == AssetKind::Mission;
+	if ((part.get("kinds") || part.get("all_rows")) && !mission)
+		return change.refuse(at + " lists no kinds of row to choose and no rows left out (a mission's outline does).", at);
 	if (const JsonValue *kinds = part.get("kinds")) {
 		const Document *records = records_of(*document);
-		if (!records) return change.refuse(document->path() + " lists no kinds of row.", document->path());
+		if (!records) return change.refuse(at + " lists no kinds of row.", at);
 		const std::vector<RecordKindRow> &rows = records->kinds();
 		const size_t count = std::min<size_t>(rows.size(), 64);
 		uint64_t mask = 0;
@@ -667,8 +790,7 @@ bool set_document(Change &change, const JsonValue &part) {
 			size_t found = count;
 			for (size_t i = 0; i < count; ++i)
 				if (token.string == rows[i].token) found = i;
-			if (found == count)
-				return change.refuse(document->path() + " has no kind of row \"" + token.string + "\".", document->path());
+			if (found == count) return change.refuse(at + " has no kind of row \"" + token.string + "\".", at);
 			mask |= uint64_t(1) << found;
 		}
 		const uint64_t all = count == 64 ? ~uint64_t(0) : (uint64_t(1) << count) - 1;
@@ -678,15 +800,38 @@ bool set_document(Change &change, const JsonValue &part) {
 	if (const JsonValue *sort = part.get("sort")) shown.sort = sort->boolean;
 	if (const JsonValue *every = part.get("every")) shown.every = every->boolean;
 	if (const JsonValue *filter = part.get("inspector_filter")) shown.inspector_filter = filter->string;
-	if (const JsonValue *type = part.get("new_window_type")) shown.new_window_type = type->string;
-	if (const JsonValue *screen = part.get("remove_screen")) shown.remove_screen = uint64_t(screen->number);
+	if (const JsonValue *type = part.get("new_window_type")) {
+		const MnuDocument *menu = menu_of(*document);
+		const FieldSchema *field = menu ? window_type_field(*menu) : nullptr;
+		if (!field) return change.refuse(at + " is no menu: a window type is a menu's.", at);
+		std::string names;
+		bool known = false;
+		for (const FieldChoice &choice : field->choices) {
+			known = known || choice.name == type->string;
+			names += (names.empty() ? "" : ", ") + choice.name;
+		}
+		if (!known) return change.refuse("A menu's window type is one of " + names + ", not \"" + type->string + "\".", at);
+		shown.new_window_type = type->string;
+	}
+	if (const JsonValue *screen = part.get("remove_screen")) {
+		const uint64_t id = uint64_t(screen->number);
+		if (id != 0 && !menu_of(*document)) return change.refuse(at + " is no menu: Remove screen is a menu's.", at);
+		if (id != 0 && !removable_screen(*document, id))
+			return change.refuse(menu_of(*document)->row(NodeId(id)) ? at + " keeps at least one screen: its last is not removed."
+			                                                          : at + " has no screen " + std::to_string(id) + ".",
+			                     at);
+		shown.remove_screen = id;
+	}
 	for (const char *member : { "remap_from", "remap_to" }) {
 		const JsonValue *index = part.get(member);
 		if (!index) continue;
-		if (index->number > 255.0) return change.refuse(std::string("document.") + member + " is a palette index, 0 to 255.", document->path());
+		const size_t dot = at.rfind('.');
+		if (document->kind() != AssetKind::Texture || dot == std::string::npos || strutil::to_lower(at.substr(dot)) != ".pcx")
+			return change.refuse(at + " is no 8-bit PCX texture: a palette remap is one's.", at);
+		if (index->number > 255.0) return change.refuse(std::string("document.") + member + " is a palette index, 0 to 255.", at);
 		(std::string(member) == "remap_from" ? shown.remap_from : shown.remap_to) = int(index->number);
 	}
-	WorkspaceView::DocumentView &held = change.workspace().documents[document->path()];
+	WorkspaceView::DocumentView &held = change.workspace().documents[at];
 	const bool moved = held.filter != shown.filter || held.kinds != shown.kinds || held.all_rows != shown.all_rows ||
 	                   held.sort != shown.sort || held.every != shown.every || held.inspector_filter != shown.inspector_filter ||
 	                   held.new_window_type != shown.new_window_type || held.remove_screen != shown.remove_screen ||
@@ -695,20 +840,58 @@ bool set_document(Change &change, const JsonValue &part) {
 	return moved;
 }
 
-// `focus`: the window it names brought forward (a focus_window view event the workspace takes).
+// `focus`: the window it names opened and brought forward (a focus_window view event the workspace takes). The
+// workspace holds nothing of it: the events concern moves with the post.
 bool focus_window(Change &change, const std::string &token) {
 	ViewEvent focus;
 	focus.kind = ViewEventKind::FocusWindow;
 	focus.path = token;
 	change.view.events.post(std::move(focus));
-	return true;
+	return false;
+}
+
+// What the workspace holds open, for telling a dialog opened (or opened on another target) since.
+struct Openings {
+	bool new_project = false, settings = false, project_find = false, rename_back = false;
+	AssetKind new_file = AssetKind::kCount;
+	std::string file_rename, rename;
+	uint64_t confirm = 0;
+	std::map<std::string, uint64_t> remove;
+};
+Openings openings_of(const WorkspaceView &w) {
+	Openings out;
+	out.new_project = w.new_project.open;
+	out.settings = w.settings.open;
+	out.project_find = w.project_find.open;
+	out.rename_back = w.rename_back.open;
+	out.new_file = w.new_file.kind;
+	out.file_rename = w.file_rename.path;
+	if (w.rename.open) out.rename = w.rename.path + '\n' + w.rename.locator + '\n' + w.rename.field;
+	out.confirm = w.problems.confirm.open() ? w.problems.confirm_serial : 0;
+	for (const auto &[path, shown] : w.documents)
+		if (shown.remove_screen) out.remove.emplace(path, shown.remove_screen);
+	return out;
+}
+bool opened_since(const Openings &before, const Openings &after) {
+	if ((after.new_project && !before.new_project) || (after.settings && !before.settings) ||
+	    (after.project_find && !before.project_find) || (after.rename_back && !before.rename_back))
+		return true;
+	if (after.new_file != AssetKind::kCount && after.new_file != before.new_file) return true;
+	if (!after.file_rename.empty() && after.file_rename != before.file_rename) return true;
+	if (!after.rename.empty() && after.rename != before.rename) return true;
+	if (after.confirm && after.confirm != before.confirm) return true;
+	for (const auto &[path, screen] : after.remove) {
+		const auto was = before.remove.find(path);
+		if (was == before.remove.end() || was->second != screen) return true;
+	}
+	return false;
 }
 
 JsonValue sound_json(const WorkspaceView::Sound &sound) {
 	JsonValue out = JsonValue::make_object();
 	out.set("path", text(sound.path));
 	out.set("state", text(sound_state_token(sound.state)));
-	out.set("serial", JsonValue::make_number(double(sound.serial)));
+	out.set("serial", number(double(sound.serial)));
 	if (!sound.error.empty()) out.set("error", text(sound.error));
 	return out;
 }
@@ -731,11 +914,17 @@ JsonValue document_json(const SessionView &view, const DocumentBase &document, c
 	out.set("every", flag(shown.every));
 	out.set("inspector_filter", text(shown.inspector_filter));
 	out.set("new_window_type", text(shown.new_window_type));
-	out.set("remove_screen", JsonValue::make_number(double(shown.remove_screen)));
-	out.set("remap_from", JsonValue::make_number(shown.remap_from));
-	out.set("remap_to", JsonValue::make_number(shown.remap_to));
+	out.set("remove_screen", number(double(shown.remove_screen)));
+	out.set("remap_from", number(shown.remap_from));
+	out.set("remap_to", number(shown.remap_to));
 	out.set("active", flag(document.path() == view.documents.active));
 	return out;
+}
+
+// A row's identity across plans: the source it comes from and where it lands.
+std::string row_identity(const ImportPlanRow &row) {
+	return row.source.path + '\n' + row.source.entry + '\n' + (row.source.install ? '1' : '0') + (row.source.native ? '1' : '0') +
+	       '\n' + row.source.as + '\n' + row.destination;
 }
 
 } // namespace
@@ -750,6 +939,8 @@ const char *workspace_json_token(WorkspaceJson json) {
 			return "integer";
 		case J::Strings:
 			return "string[]";
+		case J::Integers:
+			return "integer[]";
 		case J::Object:
 			return "object";
 	}
@@ -802,6 +993,12 @@ bool check_workspace_change(const JsonValue &json, std::string &error) {
 				error = "\"workspace." + member.key + "." + value.key + "\" must be " + type_words(row->json) + ".";
 				return false;
 			}
+			// What the window's field holds at most (its buffer): a longer text would show, and come back, cut.
+			if (row->longest && longest_of(value.value) > row->longest) {
+				error = "\"workspace." + member.key + "." + value.key + "\" is at most " + std::to_string(row->longest) +
+				        " characters (what its window's field holds).";
+				return false;
+			}
 		}
 	}
 	return true;
@@ -841,6 +1038,7 @@ bool apply_workspace_change(SessionView &view, const std::string &json, std::vec
 		{ "document", set_document },
 	};
 	static_assert(std::size(kSetters) == std::size(kParts), "a setter per part of the table");
+	const Openings before = openings_of(view.workspace);
 	bool moved = false;
 	for (const io::JsonMember &member : parsed.object) {
 		if (member.key == "focus") {
@@ -850,19 +1048,21 @@ bool apply_workspace_change(SessionView &view, const std::string &json, std::vec
 		for (const Part &part : kSetters)
 			if (member.key == part.token) moved = part.set(change, member.value) || moved;
 	}
+	if (moved && opened_since(before, openings_of(view.workspace))) ++view.workspace.opened;
 	return moved;
 }
 
 void set_workspace(SessionCore &core, const std::string &change) {
 	std::vector<WorkspaceRefusal> refusals;
 	const bool moved = apply_workspace_change(core.view(), change, refusals);
-	for (const WorkspaceRefusal &refusal : refusals) core.refuse_now(CoreFinding::WorkspaceRefused, refusal.message, refusal.asset);
+	for (const WorkspaceRefusal &refusal : refusals) core.refuse_quietly(CoreFinding::WorkspaceRefused, refusal.message, refusal.asset);
 	if (moved) core.touch(ViewConcern::Workspace);
 }
 
 void workspace_follows(SessionCore &core, const EditorRequest &request) {
 	SessionView &view = core.view();
 	WorkspaceView &workspace = view.workspace;
+	const Openings before = openings_of(workspace);
 	bool moved = false;
 	switch (request.kind) {
 		case EditorRequestKind::ShowInFiles:
@@ -880,8 +1080,7 @@ void workspace_follows(SessionCore &core, const EditorRequest &request) {
 			// One that asks the name opens Rename everywhere over it; a plan of the open one's name (typed, or
 			// asked over the wire) is the name typed.
 			if (request.ask_name) open_rename(rename, plan);
-			else if (rename.open && rename.path == plan.path && rename.locator == plan.locator && rename.field == plan.field)
-				rename.name = plan.requested;
+			else if (rename.open && plan_of(rename, plan)) rename.name = plan.requested;
 			moved = !same_rename(rename, workspace.rename);
 			workspace.rename = std::move(rename);
 			break;
@@ -895,6 +1094,7 @@ void workspace_follows(SessionCore &core, const EditorRequest &request) {
 		default:
 			break;
 	}
+	if (moved && opened_since(before, openings_of(workspace))) ++workspace.opened;
 	if (moved) core.touch(ViewConcern::Workspace);
 }
 
@@ -927,15 +1127,111 @@ void workspace_closes_for(SessionCore &core, const EditorRequest &request) {
 				moved = true;
 			}
 			break;
+		case EditorRequestKind::NewProject:
+			// Create project: the form's modal closes as the session takes it (made, refused, or waiting on the
+			// unsaved prompt, which then shows alone); its fields stay for File > New project... to open on again.
+			moved = workspace.new_project.open;
+			workspace.new_project.open = false;
+			break;
 		default:
 			break;
 	}
 	if (moved) core.touch(ViewConcern::Workspace);
 }
 
+void workspace_tidies(SessionCore &core) {
+	SessionView &view = core.view();
+	WorkspaceView &workspace = view.workspace;
+	bool moved = false;
+	if (!workspace.card.path.empty() && !project_file(view, workspace.card.path)) {
+		workspace.card.path.clear();
+		stop_sound(workspace.sound);
+		moved = true;
+	}
+	if (!workspace.file_rename.path.empty() && !project_file(view, workspace.file_rename.path)) {
+		workspace.file_rename = WorkspaceView::FileRename();
+		moved = true;
+	}
+	for (auto &[path, shown] : workspace.documents) {
+		if (!shown.remove_screen) continue;
+		const DocumentBase *document = open_document(view, path);
+		if (document && removable_screen(*document, shown.remove_screen)) continue;
+		shown.remove_screen = 0;
+		moved = true;
+	}
+	const DialogsView::RenamePreview &plan = view.dialogs.rename_preview;
+	if (workspace.rename.open && !plan_of(workspace.rename, plan)) {
+		workspace.rename = WorkspaceView::Rename();
+		moved = true;
+	}
+	if (workspace.rename_back.open && !plan.back) {
+		workspace.rename_back.open = false;
+		moved = true;
+	}
+	if (moved) core.touch(ViewConcern::Workspace);
+}
+
+bool workspace_follows_moves(WorkspaceView &workspace, const std::vector<std::pair<std::string, std::string>> &moved) {
+	for (const auto &[from, to] : moved)
+		if (!workspace.card.path.empty() && workspace.card.path == from) {
+			workspace.card.path = to;
+			return true;
+		}
+	return false;
+}
+
+ShownModal shown_modal(const SessionView &view) {
+	const WorkspaceView &w = view.workspace;
+	const bool project = view.project.open;
+	using M = HeldModal;
+	if (view.dialogs.unsaved_prompt.open) return { M::Unsaved, {} };
+	if (view.dialogs.import_preview.open) return { M::Import, {} };
+	if (view.dialogs.texture_source.open && project) return { M::TextureSource, {} };
+	if (w.settings.open && project) return { M::Settings, {} };
+	if (w.new_project.open) return { M::NewProject, {} };
+	if (w.new_file.kind != AssetKind::kCount && project) return { M::NewFile, {} };
+	if (!w.file_rename.path.empty() && project) return { M::FileRename, {} };
+	if (w.rename.open && project) return { M::Rename, {} };
+	if (w.rename_back.open && project && view.dialogs.rename_preview.back) return { M::RenameBack, {} };
+	if (w.project_find.open && project) return { M::ProjectFind, {} };
+	if (w.problems.confirm.open() && project) return { M::Confirm, {} };
+	for (const auto &[path, shown] : w.documents)
+		if (shown.remove_screen) return { M::RemoveScreen, path };
+	return {};
+}
+
+bool modal_may_show(const SessionView &view, HeldModal modal, const std::string &path) {
+	const ShownModal shown = shown_modal(view);
+	return shown.modal == HeldModal::None || (shown.modal == modal && shown.path == path);
+}
+
+const char *held_modal_token(HeldModal modal) {
+	switch (modal) {
+		case HeldModal::None: return "";
+		case HeldModal::Unsaved: return "unsaved";
+		case HeldModal::Import: return "import";
+		case HeldModal::TextureSource: return "texture_source";
+		case HeldModal::Settings: return "settings";
+		case HeldModal::NewProject: return "new_project";
+		case HeldModal::NewFile: return "new_file";
+		case HeldModal::FileRename: return "file_rename";
+		case HeldModal::Rename: return "rename";
+		case HeldModal::RenameBack: return "rename_back";
+		case HeldModal::ProjectFind: return "project_find";
+		case HeldModal::Confirm: return "confirm";
+		case HeldModal::RemoveScreen: return "remove_screen";
+	}
+	return "";
+}
+
 JsonValue workspace_to_json(const SessionView &view) {
 	const WorkspaceView &workspace = view.workspace;
 	JsonValue out = JsonValue::make_object();
+	// The dialog that shows of those that take the whole editor (shown_modal), "" none; a Remove prompt's menu.
+	const ShownModal modal = shown_modal(view);
+	out.set("modal", text(held_modal_token(modal.modal)));
+	if (!modal.path.empty()) out.set("modal_document", text(modal.path));
+	out.set("opened", number(double(workspace.opened)));
 	JsonValue card = JsonValue::make_object();
 	card.set("path", text(workspace.card.path));
 	out.set("card", std::move(card));
@@ -1010,7 +1306,8 @@ JsonValue workspace_to_json(const SessionView &view) {
 	files.set("filter", text(workspace.files.filter));
 	files.set("kind", kind_json(workspace.files.kind));
 	out.set("files", std::move(files));
-	// The import dialog's, with the checks counted (the import_preview query pages each row's).
+	// The import dialog's, with the checks counted (the import_preview query pages each row's) and the plan they
+	// index.
 	const WorkspaceView::Import &import = workspace.import;
 	JsonValue dialog_import = JsonValue::make_object();
 	dialog_import.set("filter", text(import.filter));
@@ -1020,8 +1317,9 @@ JsonValue workspace_to_json(const SessionView &view) {
 	dialog_import.set("replace_existing", flag(import.replace_existing));
 	size_t checked = 0;
 	for (const bool on : import.checked) checked += on ? 1 : 0;
-	dialog_import.set("checked", JsonValue::make_number(double(checked)));
-	dialog_import.set("serial", JsonValue::make_number(double(import.serial)));
+	dialog_import.set("checked", number(double(checked)));
+	dialog_import.set("serial", number(double(import.serial)));
+	dialog_import.set("plan", number(double(view.dialogs.import_preview.open ? view.dialogs.import_preview.plan_serial : 0)));
 	out.set("import", std::move(dialog_import));
 	const WorkspaceView::Problems &problems = workspace.problems;
 	JsonValue filters = JsonValue::make_object();
@@ -1038,10 +1336,35 @@ JsonValue workspace_to_json(const SessionView &view) {
 	filters.set("blocking", flag(problems.blocking));
 	JsonValue confirm = JsonValue::make_object();
 	for (const auto &[token, value] : { std::make_pair("group", &problems.confirm.group), std::make_pair("required", &problems.confirm.required),
-	                                    std::make_pair("finding", &problems.confirm.finding), std::make_pair("label", &problems.confirm.label) })
+	                                    std::make_pair("label", &problems.confirm.label) })
 		if (!value->empty()) confirm.set(token, text(*value));
+	if (!problems.confirm.finding.empty()) {
+		// The finding where it is now (a validation moves the findings: its key finds it).
+		const size_t at = problem_finding_at(view, problems.confirm.finding_key);
+		confirm.set("finding", number(double(at != SIZE_MAX ? at : strutil::parse_ulong(problems.confirm.finding).value_or(0))));
+	}
+	// What its Apply raises now (apply_confirmation), and what it says.
+	if (problems.confirm.open()) {
+		ProblemQueryCache answers;
+		ProblemFixCache fixes;
+		ConfirmationProposal proposal;
+		std::string why;
+		JsonValue proposed = JsonValue::make_object();
+		if (propose_confirmation(view, problems.confirm, problems, answers, fixes, proposal, why)) {
+			JsonValue lines = JsonValue::make_array();
+			for (const std::string &line : proposal.lines) lines.push(text(line));
+			proposed.set("lines", std::move(lines));
+			JsonValue requests = JsonValue::make_array();
+			for (const EditorRequest &request : proposal.requests) requests.push(editor_request_to_json(request));
+			proposed.set("requests", std::move(requests));
+			proposed.set("findings", number(double(proposal.findings)));
+		} else {
+			proposed.set("gone", text(why));
+		}
+		confirm.set("proposal", std::move(proposed));
+	}
 	filters.set("confirm", std::move(confirm));
-	filters.set("confirm_serial", JsonValue::make_number(double(problems.confirm_serial)));
+	filters.set("confirm_serial", number(double(problems.confirm_serial)));
 	out.set("problems", std::move(filters));
 	// Every open document's, the active one's marked.
 	JsonValue documents = JsonValue::make_array();
@@ -1091,8 +1414,20 @@ bool report_sound(WorkspaceView &workspace, uint64_t serial, WorkspaceView::Soun
 
 bool forget_document_workspace(WorkspaceView &workspace, const std::string &path) { return workspace.documents.erase(path) != 0; }
 
-void take_import_checks(WorkspaceView &workspace, const ImportPlan &plan) {
-	workspace.import.checked = import_default_checks(plan, workspace.import.replace_existing);
+void take_import_checks(WorkspaceView &workspace, const ImportPlan &plan, const ImportPlan *before) {
+	std::vector<bool> checks = import_default_checks(plan, workspace.import.replace_existing);
+	if (before && workspace.import.checked.size() == before->rows.size() && !before->rows.empty()) {
+		std::map<std::string, bool> held;
+		for (size_t i = 0; i < before->rows.size(); ++i) held.emplace(row_identity(before->rows[i]), bool(workspace.import.checked[i]));
+		for (size_t i = 0; i < plan.rows.size(); ++i) {
+			const auto was = held.find(row_identity(plan.rows[i]));
+			if (was == held.end()) continue;
+			// Unchecked stays unchecked; checked stays checked where the project can take it (a chosen file the
+			// project cannot take is checked as a plan's own are, so the import waits on it).
+			checks[i] = was->second && (checks[i] || import_row_refusal(plan, i).empty());
+		}
+	}
+	workspace.import.checked = std::move(checks);
 	++workspace.import.serial;
 }
 

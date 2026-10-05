@@ -39,7 +39,7 @@ private:
 	const std::vector<Usage> &usages(const SessionView &view, size_t hit);
 
 	ui_kit::HeldPopup popup_;
-	ui_kit::HeldText<128> text_;
+	ui_kit::HeldText<kWorkspaceText> text_;
 	// The hits, kept while what they read (the graph) and the text stand.
 	const SessionView *view_ = nullptr;
 	RevisionKey key_;

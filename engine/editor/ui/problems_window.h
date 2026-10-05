@@ -53,10 +53,8 @@ public:
 	// result's "Show them in Problems"): every one, whatever the scope, the severities, the text and Only
 	// fixable hid, which come back when "Blocks the build" is turned off.
 	void show_blocking();
-
-	// The filters and the confirmation are the workspace's (the MCP gaps lane: workspace.problems): the
-	// query a workspace's filters make.
-	static ProblemQuery query_of(const WorkspaceView::Problems &problems);
+	// The confirmation a Fix all or a Use fix waits in shows (drawn the frame before).
+	bool confirm_shown() const { return confirm_popup_.shown(); }
 
 private:
 	using Line = ProblemsList::Line;
@@ -92,7 +90,7 @@ private:
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	ProblemsList list_;
-	char text_[128]{}; // the filter box, the query's text
+	char text_[kWorkspaceText]{}; // the filter box, the query's text
 	ui_kit::Held<ProblemQuery> held_; // the workspace's filters, as last taken
 	// The filters "Blocks the build" set aside, as they were when it was turned on.
 	std::optional<WorkspaceView::Problems::Filters> before_blocking_;

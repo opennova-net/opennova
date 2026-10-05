@@ -93,7 +93,7 @@ private:
 	OutlineModel model_;
 	RecordReveal reveal_;
 	FindingsIndex findings_;
-	char filter_[128]{};  // the filter box's text: the model's filter
+	char filter_[kWorkspaceText]{};  // the filter box's text: the model's filter
 	ui_kit::Held<Shown> held_; // the workspace's, as last taken
 	NodeAddress editing_; // master and detail: the record whose cell had the keyboard last frame
 	struct Measured {

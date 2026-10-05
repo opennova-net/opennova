@@ -44,9 +44,9 @@ public:
 	bool draw(Workspace &workspace);
 
 private:
-	ui_kit::HeldText<128> title_;
-	ui_kit::HeldText<512> folder_;
-	ui_kit::HeldText<512> install_;
+	ui_kit::HeldText<kWorkspaceText> title_;
+	ui_kit::HeldText<kWorkspacePath> folder_;
+	ui_kit::HeldText<kWorkspacePath> install_;
 	InstallFieldCheck check_;
 	ExpansionFields expansion_;
 };

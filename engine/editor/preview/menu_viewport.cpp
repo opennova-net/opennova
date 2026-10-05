@@ -492,9 +492,10 @@ void MenuViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	++options_serial_;
 }
 
-void MenuViewport::report_(const ViewportDeviceReport &report) {
+bool MenuViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
 	device_rects_ = report.rects;
+	return false;
 }
 
 MenuCanvasFrame MenuViewport::canvas_frame(const ViewportContext &context) const {
@@ -535,21 +536,16 @@ ViewportHit MenuViewport::hit(const ViewportContext &context, float x, float y) 
 	return out;
 }
 
-bool MenuViewport::click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+bool MenuViewport::click_frame(const ViewportContext &context, SelectMode, int &width, int &height,
 		std::string &error) const {
-	const MenuCanvasFrame frame = canvas_frame(context);
-	if (!frame.current) {
+	if (!canvas_frame(context).current) {
 		const std::string why = message();
 		error = "The viewport shows no picture of the menu as it is now" + (why.empty() ? std::string(".") : ": " + why);
 		return false;
 	}
-	// The window the game's own hit test finds there (the front-most shown, the last drawn), selected as the
-	// canvas's click selects it (MenuCanvas::release_); on nothing, nothing changes.
-	const int index = render_.compiler().hit_widget(render_.state(), x, y, 1.0f, 1.0f);
-	const NodeId id = index < 0 ? 0 : frame.document->window_at(*frame.screen, size_t(index));
-	if (id)
-		out.request(request::select_record(frame.document->path(), NodeAddress{ frame.screen->id, node_kind(MenuKind::Window), id },
-		                                   mode));
+	// The click's point in design pixels: the canvas reads the picture at the design size (its scale 1).
+	width = menu::kMenuDesignWidth;
+	height = menu::kMenuDesignHeight;
 	return true;
 }
 

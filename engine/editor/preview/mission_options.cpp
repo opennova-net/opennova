@@ -2,6 +2,9 @@
 
 #include <cmath>
 #include <iterator>
+#include <string>
+
+#include <editor/session/view/workspace_view.h>
 
 namespace opennova::editor {
 
@@ -168,6 +171,11 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 		} else if (member.key == "palette") {
 			if (!value.is_string()) {
 				error = "options.palette is the Place palette's search text.";
+				return false;
+			}
+			// What the palette's search field holds at most (its buffer): a longer one would show, and come back, cut.
+			if (value.string.size() >= kWorkspaceText) {
+				error = "options.palette is at most " + std::to_string(kWorkspaceText - 1) + " characters (what its search field holds).";
 				return false;
 			}
 			read.palette = value.string;

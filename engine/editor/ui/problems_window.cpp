@@ -16,6 +16,7 @@
 #include <editor/session/problem_query.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
@@ -105,21 +106,10 @@ std::string fix_tip(const ProblemFix &fix, const std::string &note, bool allowed
 
 } // namespace
 
-ProblemQuery ProblemsWindow::query_of(const WorkspaceView::Problems &problems) {
-	ProblemQuery query;
-	query.errors = problems.errors;
-	query.warnings = problems.warnings;
-	query.infos = problems.infos;
-	query.text = problems.text;
-	query.scope = problems.scope;
-	query.fixable = problems.fixable;
-	query.grouping = problems.grouping;
-	query.blocking = problems.blocking;
-	return query;
-}
-
+// The filters and the confirmation are the workspace's (the MCP gaps lane: workspace.problems): the query its
+// filters make (problem_query_of), taken when it moved.
 void ProblemsWindow::follow_filters(const SessionView &view) {
-	const ProblemQuery wanted = query_of(view.workspace.problems);
+	const ProblemQuery wanted = problem_query_of(view.workspace.problems);
 	if (!held_.follow(wanted)) return;
 	list_.query() = wanted;
 	const size_t n = std::min(wanted.text.size(), sizeof(text_) - 1);
@@ -206,8 +196,8 @@ void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
 const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	const ProblemAnswer &counts = list_.answer(view); // every finding's, whatever it shows
 	ProblemQuery &query = list_.query();
-	if (query.scope == ProblemScope::ActiveFile && view.documents.active.empty()) query.scope = ProblemScope::Project;
-	// The filters as they stand before the controls: one the person changes goes to the workspace.
+	// The filters as they stand before the controls (the session's: an active file's scope with no document
+	// active stays as it is, lit as no active file, review X15): one the person changes goes to the workspace.
 	const ProblemQuery before = query;
 	ui_kit::WrapRow row;
 	// Your project's own counts (S15: the game's own data's are counted apart, under their group).
@@ -245,6 +235,9 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	if (!view.documents.active.empty())
 		scopes.push_back({basename_of(view.documents.active) + "###scope_active", ProblemScope::ActiveFile,
 		                  "Only the problems of " + view.documents.active + ", the active file."});
+	else if (query.scope == ProblemScope::ActiveFile)
+		scopes.push_back({"No active file###scope_active", ProblemScope::ActiveFile,
+		                  "Only the active file's problems: no document is active, so none shows until one is."});
 	scopes.push_back({"Open files###scope_open", ProblemScope::OpenFiles, "Only the problems of the files open in Document."});
 	float scopes_width = 0.0f;
 	for (const Scope &scope : scopes) scopes_width += ui_kit::button_width(scope.label.c_str()) + 1.0f;
@@ -301,7 +294,7 @@ void ProblemsWindow::draw_summary(const SessionView &view) {
 	std::stable_partition(offered.begin(), offered.end(),
 	                      [](const EditorRequest &request) { return request.kind == EditorRequestKind::PreviewInstallImport; });
 	for (const EditorRequest &request : offered) {
-		const std::string label = ProblemsList::fix_all_label(request);
+		const std::string label = fix_all_label(request);
 		row.next(ui_kit::button_width(label.c_str()));
 		ImGui::PushID(static_cast<int>(request.kind));
 		const bool allowed = view.allows(request.kind);
@@ -312,7 +305,7 @@ void ProblemsWindow::draw_summary(const SessionView &view) {
 			ask(view, confirm);
 		}
 		ImGui::EndDisabled();
-		ui_kit::tooltip_lazy([&] { return ProblemsList::describe(view, request) + (allowed ? "" : std::string("\n") + kWaits); });
+		ui_kit::tooltip_lazy([&] { return fix_request_words(view, request) + (allowed ? "" : std::string("\n") + kWaits); });
 		ImGui::PopID();
 	}
 	ImGui::PopID();
@@ -598,7 +591,9 @@ void ProblemsWindow::draw_confirm(const SessionView &view) {
 		confirming_ = false;
 		ask(none);
 	}
-	if (!confirm_popup_.begin(kConfirm, confirming_, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+	// Asked here it shows at once, unless a dialog before it in the session's order is held (shown_modal).
+	if (!confirm_popup_.begin(kConfirm, confirming_ && modal_may_show(view, HeldModal::Confirm), true,
+	                          ImGuiWindowFlags_AlwaysAutoResize, false, view.workspace.opened)) {
 		if (confirm_popup_.dismissed()) {
 			confirming_ = false;
 			ask(none);
@@ -653,7 +648,7 @@ bool ProblemsWindow::fix_pressed(const SessionView &view, size_t finding, const 
 }
 
 void ProblemsWindow::apply(const SessionView &view, size_t finding, const ProblemFix &fix) {
-	if (!ProblemsList::asks_first(fix)) return workspace_.request(fix.request);
+	if (!fix_asks_first(fix)) return workspace_.request(fix.request);
 	WorkspaceView::Problems::Confirm confirm;
 	confirm.finding = std::to_string(finding);
 	confirm.label = fix.label;
@@ -667,7 +662,8 @@ void ProblemsWindow::ask(const SessionView &view, const WorkspaceView::Problems:
 	io::JsonValue members = io::JsonValue::make_object();
 	if (!confirm.group.empty()) members.set("group", io::JsonValue::make_string(confirm.group));
 	if (!confirm.required.empty()) members.set("required", io::JsonValue::make_string(confirm.required));
-	if (!confirm.finding.empty()) members.set("finding", io::JsonValue::make_string(confirm.finding));
+	if (!confirm.finding.empty())
+		members.set("finding", io::JsonValue::make_number(double(strutil::parse_ulong(confirm.finding).value_or(0))));
 	if (!confirm.label.empty()) members.set("label", io::JsonValue::make_string(confirm.label));
 	ask(std::move(members));
 }

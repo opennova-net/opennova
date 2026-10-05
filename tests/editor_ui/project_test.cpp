@@ -402,11 +402,122 @@ void test_welcome_install_and_first_steps() {
 
 } // namespace
 
+// The dialogs that take the whole editor show one at a time, the session's order (review X3), over a real session:
+// a project with an unsaved edit; File > New project..., its Create: the session takes new_project, closing the
+// form's modal, and the unsaved prompt it waits on shows alone, frame after frame, its Cancel leaving neither
+// (nothing made, the edit kept); asked again, its Discard makes the project. Two held over the wire at once
+// (Project settings and New project...) show one at a time: the settings first, New project once they close, held
+// open the while (nothing dismissed).
+void test_modals_one_at_a_time() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_modals");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(request::new_project(dir.file("project"), "Modal")), "a project");
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	DrawnDevices devices;
+	session.viewports().set_devices(&devices.cache);
+	Ui ui;
+	ui.session = &session; // the set_workspace requests the windows raise served by the session
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	Run run{ session, devices, ui };
+	run.settle();
+	const auto shows = [](const char *title) {
+		const ImGuiWindow *window = ImGui::FindWindowByName(title);
+		return window && window->Active;
+	};
+	const AssetEntry *main = v.project.scan->find("main.mnu");
+	CHECK(main != nullptr, "the main menu");
+	if (!main) return;
+	const std::string menu_path = main->relative_path;
+	run.open(menu_path);
+	const Document *menu = session.document_for(menu_path);
+	if (!menu || menu->rows().empty()) {
+		CHECK(false, "the main menu's screen");
+		return;
+	}
+	Edit rename;
+	rename.operation = EditOperation::Set;
+	rename.address = { menu->rows().front()->id, menu->rows().front()->kind, 0 };
+	rename.field = "name";
+	rename.value = std::string("RENAMED");
+	session.handle(request::edit_record(menu_path, rename));
+	run.settle();
+	CHECK(menu->dirty(), "an unsaved edit");
+	// A held dialog a window draws comes forward with its window, so it never holds the dialogs after it unseen:
+	// Files closed, a client's Rename... opens it and shows.
+	devtools::Window *files = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Files") == 0) files = &ui.windows.pass().window(i);
+	if (!files) {
+		CHECK(false, "the Files window");
+		return;
+	}
+	files->open = false;
+	ui.frames(2);
+	session.handle(request::set_workspace("{\"file_rename\": {\"path\": \"" + menu_path + "\"}}"));
+	run.settle();
+	ui.frames(3);
+	CHECK(files->open && shown_modal(v).modal == HeldModal::FileRename &&
+	              logged_frame(ui).find("Rename main.mnu to") != std::string::npos,
+	      "Files closed: its Rename... opens it, and shows");
+	session.handle(request::set_workspace(R"({"file_rename": {"path": ""}})"));
+	run.settle();
+	// File > New project..., its folder and name, Create.
+	choose(ui, "File", {"New project..."});
+	run.settle();
+	CHECK(v.workspace.new_project.open && shows("New project"), "File > New project...: the form's modal");
+	session.handle(request::set_workspace("{\"new_project\": {\"dir\": \"" + dir.file("other") + "\", \"title\": \"Other\"}}"));
+	run.settle();
+	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
+	run.settle();
+	CHECK(v.dialogs.unsaved_prompt.open && !v.workspace.new_project.open && shown_modal(v).modal == HeldModal::Unsaved &&
+	              shows("Unsaved changes") && !shows("New project"),
+	      "Create with an unsaved edit: the session closes the form's modal, the prompt shows alone");
+	ui.frames(4);
+	CHECK(shows("Unsaved changes") && !shows("New project") && GImGui->OpenPopupStack.Size == 1,
+	      "and it stays alone, frame after frame");
+	ui.activate(item_id(ImHashStr("Unsaved changes"), {"Cancel"}));
+	run.settle();
+	CHECK(!v.dialogs.unsaved_prompt.open && !shows("Unsaved changes") && !shows("New project") &&
+	              v.project.document->title == "Modal" && menu->dirty(),
+	      "its Cancel: neither shows, nothing made, the edit kept");
+	// Asked again, the form as it was; the prompt's Discard makes the project.
+	choose(ui, "File", {"New project..."});
+	run.settle();
+	CHECK(shows("New project") && v.workspace.new_project.dir == dir.file("other"), "the form again, as it was");
+	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
+	run.settle();
+	CHECK(shows("Unsaved changes") && !shows("New project"), "the prompt again, alone");
+	ui.activate(item_id(ImHashStr("Unsaved changes"), {"Discard"}));
+	run.settle();
+	CHECK(v.project.open && v.project.document->title == "Other" && !shows("Unsaved changes") && !shows("New project"),
+	      "its Discard: the project made");
+	// Two held at once over the wire: the settings show first, New project waits, held.
+	session.handle(request::set_workspace(R"({"new_project": {"open": true}, "settings": {"open": true}})"));
+	run.settle();
+	ui.frames(3);
+	CHECK(shows("Project settings") && !shows("New project") && v.workspace.new_project.open && v.workspace.settings.open,
+	      "Project settings and New project held: the settings show, New project waits");
+	ui.activate(item_id(ImHashStr("Project settings"), {"Cancel"}));
+	run.settle();
+	ui.frames(2);
+	CHECK(!v.workspace.settings.open && v.workspace.new_project.open && shows("New project") && !shows("Project settings"),
+	      "the settings closed: New project shows, held the while");
+	ui.activate(item_id(ImHashStr("New project"), {"Cancel"}));
+	run.settle();
+	CHECK(!v.workspace.new_project.open && !shows("New project"), "its Cancel: none shows");
+}
+
 void run_project_tests() {
 	test_preview_room();
 	test_inspector_filter_per_document();
 	test_files_kind_and_card();
 	test_welcome_install_and_first_steps();
+	test_modals_one_at_a_time();
 }
 
 } // namespace editor_ui_test

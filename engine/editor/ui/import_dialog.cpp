@@ -15,6 +15,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
@@ -156,16 +157,21 @@ std::pair<std::string, std::string> held_words(const ImportPlanRow &row) {
 // Import the session refused, or that waits on the unsaved prompt) keeps them.
 void ImportDialog::follow(const SessionView &view) {
 	const WorkspaceView::Import &held = view.workspace.import;
+	// A member the session moved is the one sent last too (review X8): what the person sets after it, back to
+	// what the window sent before, differs from it and goes to the session.
+	if (held.filter != filter_.seen) sent_.filter = held.filter;
+	if (held.rows_filter != rows_filter_.seen) sent_.rows_filter = held.rows_filter;
 	filter_.follow(held.filter);
 	rows_filter_.follow(held.rows_filter);
-	if (choice_kind_held_.follow(held.choice_kind)) choice_kind_ = held.choice_kind;
-	if (kind_shown_held_.follow(held.kind_shown)) kind_shown_ = held.kind_shown;
-	if (replace_held_.follow(held.replace_existing)) replace_existing_ = held.replace_existing;
+	if (choice_kind_held_.follow(held.choice_kind)) sent_.choice_kind = choice_kind_ = held.choice_kind;
+	if (kind_shown_held_.follow(held.kind_shown)) sent_.kind_shown = kind_shown_ = held.kind_shown;
+	if (replace_held_.follow(held.replace_existing)) sent_.replace_existing = replace_existing_ = held.replace_existing;
 	if (checks_held_.follow(held.serial)) retake_ = true;
 }
 
 // What the person changed of the dialog's own this frame, sent to the workspace: the filters, the kinds,
-// Replace existing files, and the checks that differ from the session's (each change once).
+// Replace existing files, and the checks that differ from the session's, of the plan they index (each
+// change once: what the session takes it follows, and a value it moved since is sent again).
 void ImportDialog::send(Workspace &workspace, const DialogsView::ImportPreview &preview) {
 	const WorkspaceView::Import &held = workspace.view().workspace.import;
 	io::JsonValue members = io::JsonValue::make_object();
@@ -180,7 +186,10 @@ void ImportDialog::send(Workspace &workspace, const DialogsView::ImportPreview &
 	if (preview.plan && held.checked.size() == checked_.size() && checked_ != sent_.checked) {
 		io::JsonValue check = io::JsonValue::make_array(), uncheck = io::JsonValue::make_array();
 		for (size_t i = 0; i < checked_.size(); ++i)
-			if (checked_[i] != held.checked[i]) (checked_[i] ? check : uncheck).push(io::JsonValue::make_string(std::to_string(i)));
+			if (checked_[i] != held.checked[i]) (checked_[i] ? check : uncheck).push(io::JsonValue::make_number(double(i)));
+		// The plan its rows' indices are of: one made since refuses them, and the dialog takes the new one's.
+		if (!check.array.empty() || !uncheck.array.empty())
+			members.set("plan", io::JsonValue::make_number(double(preview.plan_serial)));
 		if (!check.array.empty()) members.set("check", std::move(check));
 		if (!uncheck.array.empty()) members.set("uncheck", std::move(uncheck));
 	}
@@ -199,10 +208,10 @@ void ImportDialog::draw(Workspace &workspace) {
 	const DialogsView::ImportPreview &preview = v.dialogs.import_preview;
 	follow(v);
 	// The unsaved prompt an Import raised (it writes over a file with unsaved edits) takes the
-	// dialog's place until it is answered: both are modals at the top level, where opening one
-	// closes the other.
-	if (v.dialogs.unsaved_prompt.open) return;
-	if (preview.open && !ImGui::IsPopupOpen("Import files")) ImGui::OpenPopup("Import files");
+	// dialog's place until it is answered: of the modals at the top level, where opening one
+	// closes the other, the session's order says which shows (shown_modal), the others waiting.
+	const bool shows = preview.open && modal_may_show(v, HeldModal::Import);
+	if (shows && !ImGui::IsPopupOpen("Import files")) ImGui::OpenPopup("Import files");
 	// As large as the editor's window allows (a plan of thousands of rows, a list of the game's nine
 	// thousand files), centred, as it opens; the author's resize holds while it stays open.
 	const float em = ImGui::GetFontSize();
@@ -212,7 +221,7 @@ void ImportDialog::draw(Workspace &workspace) {
 	                                std::max(viewport->WorkSize.y * 0.88f, std::min(viewport->WorkSize.y, em * 30.0f))),
 	                         ImGuiCond_Appearing);
 	if (!ImGui::BeginPopupModal("Import files")) return;
-	if (!preview.open) {
+	if (!shows) {
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
@@ -242,17 +251,12 @@ void ImportDialog::draw(Workspace &workspace) {
 	draw_notes(preview);
 	ImGui::EndChild();
 
-	// A chosen file the project cannot take stays checked, and the import waits until it is
-	// unchecked (or its source fixed and planned again): the import would refuse it.
-	size_t count = 0;
-	std::string blocked;
-	for (size_t i = 0; i < checked_.size(); ++i) {
-		if (!checked_[i]) continue;
-		++count;
-		if (blocked.empty() && i < why_not_.size() && !why_not_[i].empty())
-			blocked = preview.plan->rows[i].name + " cannot be imported: " + why_not_[i] +
-			          " Uncheck it to import the rest.";
-	}
+	// What Import takes, by the one rule import_files planned takes it by (import_selection): a chosen file the
+	// project cannot take stays checked, and the import waits until it is unchecked (or its source fixed and
+	// planned again): the import would refuse it.
+	ImportSelection selection = import_selection(*preview.plan, checked_, replace_existing_);
+	const size_t count = selection.checked;
+	const std::string blocked = selection.blocked;
 	// Unsaved edits hold nothing here: an import that would write over an edited file asks to
 	// save it first (the session's unsaved prompt), one that writes over none goes ahead.
 	ui_kit::WrapRow actions;
@@ -273,15 +277,8 @@ void ImportDialog::draw(Workspace &workspace) {
 	                        : !allowed         ? "An import writes the project's files: it waits for the running operation."
 	                                           : "Copy the checked files into the project (Undo cannot take the copy back).";
 	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty() && allowed, why)) {
-		std::vector<ImportChoice> imports;
-		std::set<ImportChoice> sent; // each source once, looked up in log time (a whole install's rows)
-		bool replaces = replace_existing_; // a checked file the project holds is one asked to be replaced
-		for (size_t i = 0; i < checked_.size(); ++i) {
-			const ImportChoice &source = preview.plan->rows[i].source;
-			replaces = replaces || (checked_[i] && preview.plan->rows[i].held);
-			if (checked_[i] && sent.insert(source).second) imports.push_back(source);
-		}
-		EditorRequest request = request::import_files(std::move(imports), replaces);
+		// Replace existing files, or a checked file the project holds, asks to replace (import_selection).
+		EditorRequest request = request::import_files(std::move(selection.sources), selection.replace);
 		send(workspace, preview);
 		workspace.request(std::move(request));
 		ImGui::CloseCurrentPopup();

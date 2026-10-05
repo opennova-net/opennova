@@ -114,7 +114,7 @@ private:
 		bool open = false;
 		ui_kit::Held<bool> open_held;
 		bool focus = false;
-		ui_kit::HeldText<128> text;
+		ui_kit::HeldText<kWorkspaceText> text;
 		bool match_case = false;
 		ui_kit::Held<bool> case_held;
 		FindCursor cursor;

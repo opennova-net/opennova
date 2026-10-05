@@ -3,6 +3,7 @@
 #include <editor/documents/mnu_clipboard.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/model/field_text.h>
@@ -125,8 +126,8 @@ const Node *MenuView::draw_screens(Workspace &workspace, const MnuDocument &docu
 // is about the menu it was asked in, that very document (one read again, or closed, closes
 // it), and a screen of it while the menu keeps a second one.
 void MenuView::draw_modals(Workspace &workspace) {
-	// Each open menu has its view, whose prompts share the one name: only the view of the menu whose
-	// workspace names a screen draws it.
+	// Each open menu has its view and its prompt, known by the menu's path; of the menus holding one, the session's
+	// order shows the first (shown_modal), the others waiting.
 	if (path_.empty()) return;
 	const SessionView &view = workspace.view();
 	const NodeId asked = NodeId(view.workspace.document(path_).remove_screen);
@@ -134,15 +135,11 @@ void MenuView::draw_modals(Workspace &workspace) {
 	for (const auto &open : view.documents.open)
 		if (open->path() == path_) document = dynamic_cast<const MnuDocument *>(open.get());
 	const Node *screen = document && asked ? document->row(asked) : nullptr;
-	const bool asks = screen && document->rows().size() >= 2;
-	// One that names no screen of the menu (gone, the last one) is no longer asked.
-	if (asked && !asks && document) {
-		send(workspace, "remove_screen", io::JsonValue::make_number(0.0));
-		if (!remove_popup_.shown()) return;
-	}
-	// The prompt's name is every menu view's: only the view asking (or closing it) begins it.
+	// One that names no screen of the menu (gone, the last one) the session closes (workspace_tidies).
+	const bool asks = screen && document->rows().size() >= 2 && modal_may_show(view, HeldModal::RemoveScreen, path_);
 	if (!asks && !remove_popup_.shown()) return;
-	if (!remove_popup_.begin(kRemovePrompt, asks, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+	const std::string id = std::string(kRemovePrompt) + "##" + path_;
+	if (!remove_popup_.begin(id.c_str(), asks, true, ImGuiWindowFlags_AlwaysAutoResize, false, view.workspace.opened)) {
 		if (remove_popup_.dismissed()) send(workspace, "remove_screen", io::JsonValue::make_number(0.0));
 		return;
 	}

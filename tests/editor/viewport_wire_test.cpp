@@ -1102,6 +1102,11 @@ static int test_viewport_click() {
 	TEST_EXPECT(done(click(menu, R"("at": [150, 150], "mode": "toggle")")) && selection.records.size() == 1 &&
 	            selection.records[0] == wired.other);
 	TEST_EXPECT(done(click(menu, R"("at": [750, 550])")) && selection.primary == named(*wired.menu, "MAIN"));
+	// A click on the selected window's resize handle (just past its corner, over MAIN) is the canvas's resize press:
+	// nothing selected (review X21).
+	session.handle(request::select_record(menu, wired.box));
+	TEST_EXPECT(done(click(menu, R"("at": [301, 201])")) && selection.primary == wired.box && selection.records.size() == 1);
+	TEST_EXPECT(done(click(menu, R"("at": [750, 550])")) && selection.primary == named(*wired.menu, "MAIN"));
 	// What a click's request takes, and what it does not.
 	JsonValue answer = click(menu, R"("at": [150, 150], "mode": "sideways")");
 	TEST_EXPECT(!answer.get_bool("ok", true) && answer.get_string("error", "").find("replace, add or toggle") != std::string::npos);
@@ -1160,6 +1165,66 @@ static int test_viewport_click() {
 	return 0;
 }
 
+// A mission's click is its canvas's own (review X5: ViewportModel::click drives MissionCanvas): under the Place
+// tool a placement where it is (the drop the canvas's release raises, one undo step), under the Area tool nothing
+// (its box is a drag's), under the Path tool with no path picked nothing; under Select a tap on the primary's yaw
+// handle (no mark under it) leaves the selection as it is, and a click on bare ground while another document's
+// record is selected leaves that selection (the canvas empties the mission's own alone).
+static int test_mission_click() {
+	NoProcess platform;
+	Wired wired("opennova_editor_viewport_wire_mission_click", platform, true);
+	ProjectSession &session = wired.session;
+	const SessionView &view = session.view();
+	TEST_EXPECT(wired.menu != nullptr);
+	if (!wired.menu) return 1;
+	session.handle(request::open_document("missions/synth_logic.bms"));
+	session.run_operations();
+	auto *document = dynamic_cast<MissionDocument *>(session.document_for("missions/synth_logic.bms"));
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const std::string path = document->path();
+	const auto *viewport = static_cast<const MissionViewport *>(session.viewports().follow_one(view, path, ViewportKind::Mission));
+	TEST_EXPECT(viewport != nullptr && viewport->status() == ViewportStatus::Ready);
+	if (!viewport) return 1;
+	const auto click = [&](float x, float y) {
+		return wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "command": {"name": "click", "at": [)" +
+		                  std::to_string(x) + ", " + std::to_string(y) + "]}}");
+	};
+	const float mx = float(viewport->size().width / 2), my = float(viewport->size().height / 2);
+	const std::string bytes = document->serialize().text;
+	const size_t buildings = document->rows_of(MissionKind::Building).size();
+	const size_t areas = document->rows_of(MissionKind::Area).size();
+	const Selection &selection = view.documents.selection;
+	// Place: one of the item where the click is.
+	TEST_EXPECT(session.handle(request::set_viewport(path, R"({"kind": "mission", "options": {"tool": "place", "item": 106101}})")));
+	TEST_EXPECT(done(click(mx, my)) && document->rows_of(MissionKind::Building).size() == buildings + 1);
+	session.handle(request::undo(path));
+	TEST_EXPECT(document->serialize().text == bytes && !document->can_undo());
+	// Area: a click makes nothing; Path with none picked: nothing.
+	TEST_EXPECT(session.handle(request::set_viewport(path, R"({"kind": "mission", "options": {"tool": "area"}})")));
+	TEST_EXPECT(done(click(mx, my)) && document->rows_of(MissionKind::Area).size() == areas && !document->can_undo());
+	TEST_EXPECT(session.handle(request::set_viewport(path, R"({"kind": "mission", "options": {"tool": "path", "path": 0}})")));
+	TEST_EXPECT(done(click(mx, my)) && !document->can_undo());
+	// Select: a tap on the primary's yaw handle leaves the selection.
+	TEST_EXPECT(session.handle(request::set_viewport(path, R"({"kind": "mission", "options": {"tool": "select"}})")));
+	const Node *first = document->rows_of(MissionKind::Item).front();
+	session.handle(request::select_record(path, NodeAddress{ first->id, first->kind, 0 }));
+	session.viewports().follow_one(view, path, ViewportKind::Mission);
+	float hx = 0.0f, hy = 0.0f;
+	std::string error;
+	TEST_EXPECT(viewport->handle_point(viewport_context(view, *viewport, 0.0f), first->id, "yaw", hx, hy, error));
+	const JsonValue under = session.query("viewport", parse(R"({"op": "hit", "path": ")" + path + R"(", "x": )" +
+	                                                       std::to_string(hx) + R"(, "y": )" + std::to_string(hy) + "}"),
+	                                      error);
+	TEST_EXPECT(under.get_number("index", 0) < 0);
+	TEST_EXPECT(done(click(hx, hy)) && selection.document == path && selection.primary.row == first->id && !document->can_undo());
+	// Bare ground, a menu's record selected: the menu's selection stands.
+	session.handle(request::select_record(wired.menu->path(), wired.box));
+	TEST_EXPECT(done(click(-5000.0f, -5000.0f)) && selection.document == wired.menu->path() && selection.primary == wired.box);
+	std::printf("test_mission_click passed\n");
+	return 0;
+}
+
 // What a canvas's toolbar held of its own is the viewport's options (the MCP gaps lane), set and read back
 // over the wire, none of it making the picture again: the menu's zoom (fit, scale with its scale, device)
 // and snap; the mission's snap, turn and Place palette's search; the model's snap. A value they do not
@@ -1193,24 +1258,37 @@ static int test_canvas_options() {
 	            viewport->show().zoom == MenuZoom::Scale && viewport->configures() == configures);
 	TEST_EXPECT(!done(set(menu, "menu", R"({"zoom": "huge"})")) && !done(set(menu, "menu", R"({"scale": 40})")) &&
 	            viewport->show().scale == 2.0f);
+	// What the device would do next, once what it was asked before is taken: a canvas option asks nothing of it
+	// (Keep: no Rebuild, no Update; review X23).
+	const auto next_action = [&session](const std::string &path, ViewportKind kind) {
+		session.viewports().follow_one(session.view(), path, kind);
+		return session.viewports().take_action(path, kind);
+	};
 	// The mission's snaps and its palette's search.
 	const std::string mission = "missions/synth_logic.bms";
 	session.handle(request::open_document(mission));
 	session.run_operations();
 	options = options_of(mission);
 	TEST_EXPECT(options.get_number("snap", -1) == 1.0 && options.get_number("turn", -1) == 15.0 && options.get_string("palette", "x").empty());
+	next_action(mission, ViewportKind::Mission);
+	TEST_EXPECT(next_action(mission, ViewportKind::Mission) == ViewportAction::Keep);
 	TEST_EXPECT(done(set(mission, "mission", R"({"snap": 5, "turn": 45, "palette": "truck"})")));
+	TEST_EXPECT(next_action(mission, ViewportKind::Mission) == ViewportAction::Keep);
 	options = options_of(mission);
 	TEST_EXPECT(options.get_number("snap", -1) == 5.0 && options.get_number("turn", -1) == 45.0 &&
 	            options.get_string("palette", "") == "truck");
 	TEST_EXPECT(!done(set(mission, "mission", R"({"snap": -1})")) && !done(set(mission, "mission", R"({"palette": 3})")) &&
+	            !done(set(mission, "mission", "{\"palette\": \"" + std::string(200, 'p') + "\"}")) &&
 	            options_of(mission).get_number("snap", -1) == 5.0);
 	// The model's snap.
 	session.handle(request::open_document("models/armory.3di"));
 	session.run_operations();
 	TEST_EXPECT(options_of("models/armory.3di").get_number("snap", -1) == 1.0 / 16.0);
+	next_action("models/armory.3di", ViewportKind::Model);
+	TEST_EXPECT(next_action("models/armory.3di", ViewportKind::Model) == ViewportAction::Keep);
 	TEST_EXPECT(done(set("models/armory.3di", "model", R"({"snap": 0.25})")) &&
 	            options_of("models/armory.3di").get_number("snap", -1) == 0.25);
+	TEST_EXPECT(next_action("models/armory.3di", ViewportKind::Model) == ViewportAction::Keep);
 	TEST_EXPECT(!done(set("models/armory.3di", "model", R"({"snap": "fine"})")));
 	std::printf("test_canvas_options passed\n");
 	return 0;
@@ -1219,6 +1297,7 @@ static int test_canvas_options() {
 int main() {
 	TEST_EXPECT(test_canvas_options() == 0);
 	TEST_EXPECT(test_viewport_click() == 0);
+	TEST_EXPECT(test_mission_click() == 0);
 	TEST_EXPECT(test_device_in_the_wire_context() == 0);
 	TEST_EXPECT(test_drop() == 0);
 	TEST_EXPECT(test_viewport_box() == 0);

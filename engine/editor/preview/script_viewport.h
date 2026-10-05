@@ -82,7 +82,10 @@ struct ScriptReveal {
 // script_assist): the completion list there (what typing a word's character shows), a word's words there
 // (what the pointer over it shows), or neither. Asked by the viewport's option `assist`, the place in the
 // document's lines and columns (from 1) and in the control's (from 0); `serial` moves with each ask (a device
-// takes each once). An edit of the document closes it.
+// takes each once). An edit of the document closes it, and so does its device once it no longer shows it (its
+// report: a person's Escape, a click, a key or the pointer moving on closed it, or the control was made again).
+// A completion list's ask takes the caret there, as typing there would; a word's words leave the caret and the
+// selection as they are.
 enum class ScriptAssistOp : uint8_t { None, Complete, Hover };
 // "none", "complete", "hover": an op's token, and back (false for another).
 const char *script_assist_op_token(ScriptAssistOp op);
@@ -174,6 +177,8 @@ protected:
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
+	// The device no longer showing the help asked (its report of the ask's serial): the assist closed.
+	bool report_(const ViewportDeviceReport &report) override;
 
 private:
 	void make_text_(const TextDocument &document);

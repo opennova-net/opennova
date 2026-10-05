@@ -9,6 +9,7 @@
 #include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/welcome_view.h>
@@ -23,12 +24,6 @@ constexpr const char *kTitle = "Project settings";
 
 // A path field's width: a few dozen characters of the font.
 float field_width() { return ImGui::GetFontSize() * 28.0f; }
-
-template <size_t N> void copy_into(char (&buffer)[N], const std::string &text) {
-	const size_t n = std::min(text.size(), N - 1);
-	std::memcpy(buffer, text.data(), n);
-	buffer[n] = '\0';
-}
 
 const char *game_display_name(const std::string &code) {
 	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.c_str());
@@ -101,10 +96,13 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		check_.forget();
 	}
 	shown_ = held.open;
-	if (held.open && !ImGui::IsPopupOpen(kTitle)) ImGui::OpenPopup(kTitle);
+	// Held open, it shows when no dialog before it in the session's order is held (shown_modal), and waits
+	// closed while one is.
+	const bool shows = held.open && v.project.open && modal_may_show(v, HeldModal::Settings);
+	if (shows && !ImGui::IsPopupOpen(kTitle)) ImGui::OpenPopup(kTitle);
 	if (!ImGui::BeginPopupModal(kTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-	// Closed another way (the session closes it with its project, the editor MCP).
-	if (!held.open || !v.project.open) {
+	// Closed another way (the session closes it with its project, the editor MCP), or another dialog shows.
+	if (!shows) {
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
@@ -203,7 +201,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s", error_.c_str());
 		ImGui::PopTextWrapPos();
 	}
-	const bool can_apply = !waiting_ && title_.text[0] != '\0' && expansion_ok;
+	const bool can_apply = !waiting_ && !held.title.empty() && expansion_ok;
 	ImGui::BeginDisabled(!can_apply);
 	if (ImGui::Button("Apply") && can_apply) apply(workspace);
 	ImGui::EndDisabled();
@@ -212,9 +210,9 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	ImGui::EndPopup();
 }
 
-// Every setting as the dialog holds it (the workspace's, the fields' text as shown), in one request: the
-// session writes what differs from the settings in effect (the runtime of a source run is not the dialog's
-// to set).
+// Every setting as the dialog holds it (the workspace's, whole: what a client set too, never the fields'
+// copies), in one request: the session writes what differs from the settings in effect (the runtime of a
+// source run is not the dialog's to set).
 void ProjectSettingsDialog::apply(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	const WorkspaceView::Settings &held = v.workspace.settings;
@@ -222,14 +220,14 @@ void ProjectSettingsDialog::apply(Workspace &workspace) {
 	ProjectSettingsChange &settings = request.settings;
 	serial_ = std::max(serial_, seen_) + 1;
 	settings.serial = serial_;
-	settings.title = std::string(title_.text);
+	settings.title = held.title;
 	settings.mission = held.mission;
 	settings.multiplayer = held.multiplayer;
 	const ProjectExpansion expansion = ExpansionChoice{ held.builds_on, held.as_expansion, held.expansion }.value();
 	settings.expansion = expansion.name;
 	settings.builds_on = expansion.builds_on;
-	settings.game_install = std::string(game_install_.text);
-	if (!v.activity.source_run) settings.runtime_executable = std::string(runtime_.text);
+	settings.game_install = held.game_install;
+	if (!v.activity.source_run) settings.runtime_executable = held.runtime;
 	settings.play_in_install = held.play_in_install;
 	waiting_ = true;
 	error_.clear();

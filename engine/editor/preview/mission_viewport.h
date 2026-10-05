@@ -113,9 +113,9 @@ public:
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
 	std::vector<ViewportHit> box(const ViewportContext &context, float x0, float y0, float x1,
 			float y1) const override;
-	// A click: the mark it takes (as a click picks, pick_mission_mark) selected as the canvas's click
-	// selects it, joined as `mode` says; on nothing, a click that replaces empties the selection.
-	bool click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+	// A click (ViewportModel::click, its canvas driven): taken in every join while the picture is the
+	// mission's as it is, at the picture's size.
+	bool click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
 			std::string &error) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
@@ -166,7 +166,7 @@ protected:
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
-	void report_(const ViewportDeviceReport &report) override;
+	bool report_(const ViewportDeviceReport &report) override;
 
 private:
 	ViewportAction stop_(MissionViewStatus reason);

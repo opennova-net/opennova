@@ -30,7 +30,7 @@ private:
 	void draw_back(Workspace &workspace);
 
 	ui_kit::HeldPopup popup_, back_popup_;
-	ui_kit::HeldText<128> name_;
+	ui_kit::HeldText<kWorkspaceText> name_;
 	std::string asked_; // the target and the name the last PreviewRename was raised for
 };
 

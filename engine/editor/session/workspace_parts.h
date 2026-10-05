@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <base/io/json.h>
@@ -21,15 +22,18 @@ struct SessionView;
 // request carries {<part>: {<member>: value, ...}, ...}: a part or a member left out stays as it is;
 // `focus` is no part but an ask, the window it names brought forward (a focus_window view event).
 // The catalog query lists the table, from which the editor MCP makes the request's schema.
-enum class WorkspaceJson : uint8_t { String, Boolean, Integer, Strings, Object };
+enum class WorkspaceJson : uint8_t { String, Boolean, Integer, Strings, Integers, Object };
 
-// A JSON type's word: "string", "boolean", "integer", "string[]", "object".
+// A JSON type's word: "string", "boolean", "integer", "string[]", "integer[]", "object".
 const char *workspace_json_token(WorkspaceJson json);
 
+// `longest` (the window's field's buffer, workspace_view.h's kWorkspaceText and the rest, less its
+// terminator): a string's (each string's of an array or an object) most characters, 0 for no bound.
 struct WorkspaceMember {
 	const char *token = "";
 	WorkspaceJson json = WorkspaceJson::String;
 	const char *doc = "";
+	size_t longest = 0;
 };
 
 struct WorkspacePartRow {
@@ -67,7 +71,8 @@ struct WorkspaceRefusal {
 // everywhere opened over the name's rename planned; Blocks the build setting aside the filters that could hide
 // a refusal, which come back as it is turned off; a confirmation asked moving its serial.
 bool apply_workspace_change(SessionView &view, const std::string &change, std::vector<WorkspaceRefusal> &refusals);
-// SetWorkspace: apply_workspace_change over the session's view, each refusal a workspace.refused warning.
+// SetWorkspace: apply_workspace_change over the session's view, each refusal a workspace.refused warning in the
+// request's outcome alone (view state, not the project's: no Problems row, no status line).
 void set_workspace(SessionCore &core, const std::string &change);
 // What a request just served opens of the workspace beside its own work, as a person's gesture does:
 // show_in_files with ask_name opens Rename... on the file, preview_rename with ask_name Rename everywhere (a
@@ -75,8 +80,50 @@ void set_workspace(SessionCore &core, const std::string &change);
 void workspace_follows(SessionCore &core, const EditorRequest &request);
 // What a request closes as the session takes it (past the busy gate, before an unsaved-changes prompt it
 // may wait on), as the dialog's own button does: rename_asset of Rename...'s file closes it, rename_symbol
-// Rename everywhere, rename_back Rename back, create_file of the name the New file prompt holds the prompt.
+// Rename everywhere, rename_back Rename back, create_file of the name the New file prompt holds the prompt,
+// new_project the New project form's modal.
 void workspace_closes_for(SessionCore &core, const EditorRequest &request);
+// What the workspace holds kept true to the project after anything moved it (each request served, each
+// operation's end): a card or Rename... whose file the files no longer have closes; a menu's Remove prompt
+// whose screen is gone (or is its menu's last) closes; Rename everywhere whose plan is no longer its name's
+// (another rename planned in its place) closes, and so does Rename back once the plan is no longer a way back.
+void workspace_tidies(SessionCore &core);
+// The files a rename moved (each from, to): a card of one shows it at its new path. True when the card moved.
+bool workspace_follows_moves(WorkspaceView &workspace, const std::vector<std::pair<std::string, std::string>> &moved);
+
+// The dialogs that take the whole editor while they show (ADR 0046, the MCP gaps lane): one shows at a time,
+// the first the session holds open in this order, and the others wait, held open still, until it closes (a
+// held dialog never opens itself over another). The unsaved-changes prompt (a request waits on its answer),
+// the import dialog, the texture source dialog, Project settings, File > New project..., Files' New file
+// prompt and Rename..., Rename everywhere, Rename back, Find in project, Problems' confirmation, a menu's
+// Remove screen prompt (the first menu holding one, by path).
+enum class HeldModal : uint8_t {
+	None,
+	Unsaved,
+	Import,
+	TextureSource,
+	Settings,
+	NewProject,
+	NewFile,
+	FileRename,
+	Rename,
+	RenameBack,
+	ProjectFind,
+	Confirm,
+	RemoveScreen,
+};
+// The one that shows, and for a Remove screen prompt its menu's path.
+struct ShownModal {
+	HeldModal modal = HeldModal::None;
+	std::string path;
+};
+ShownModal shown_modal(const SessionView &view);
+// Whether `modal` (of the document at `path`, a Remove screen prompt's) is the one that shows, or none does
+// (a window's own ask, shown at once, the frame it is made).
+bool modal_may_show(const SessionView &view, HeldModal modal, const std::string &path = std::string());
+// "" none; unsaved, import, texture_source, settings, new_project, new_file, file_rename, rename,
+// rename_back, project_find, confirm, remove_screen.
+const char *held_modal_token(HeldModal modal);
 
 // The workspace section: each part as the windows show it, the sound, and each open document's views.
 io::JsonValue workspace_to_json(const SessionView &view);
@@ -98,8 +145,11 @@ bool report_sound(WorkspaceView &workspace, uint64_t serial, WorkspaceView::Soun
 // A document closing: what its views showed of it goes with it. True when the workspace held any.
 bool forget_document_workspace(WorkspaceView &workspace, const std::string &path);
 // The import dialog's checks taken anew for a plan made (import_default_checks, with its Replace existing
-// files), its serial moved; and the dialog's own forgotten (a new preview's start, its close).
-void take_import_checks(WorkspaceView &workspace, const ImportPlan &plan);
+// files), its serial moved; a row the plan before it (`before`, the plan the checks were of) had too, the same
+// source to the same place, keeps its check (a row unchecked stays unchecked through a re-plan; one checked
+// stays checked where the project can take it). And the dialog's own forgotten (a new preview's start, its
+// close).
+void take_import_checks(WorkspaceView &workspace, const ImportPlan &plan, const ImportPlan *before);
 void forget_import_workspace(WorkspaceView &workspace);
 // The project closing: what its windows showed of it goes with it (its card, its build's panel, its dialogs
 // and prompts, a confirmation, its documents' views, Files' filter, the sound it played); the find bars close,

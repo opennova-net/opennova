@@ -884,8 +884,9 @@ void ModelViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 	if (frame) frame_();
 }
 
-void ModelViewport::report_(const ViewportDeviceReport &report) {
+bool ModelViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
+	return false;
 }
 
 NodeAddress ModelViewport::record_of(const ViewportInput &input, const ModelOverlay &overlay) const {
@@ -968,27 +969,22 @@ ViewportHit ModelViewport::hit(const ViewportContext &context, float x, float y)
 	return out;
 }
 
-bool ModelViewport::click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+bool ModelViewport::click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
 		std::string &error) const {
-	const auto *document =
-			dynamic_cast<const ModelDocument *>(context.input.document ? records_of(*context.input.document) : nullptr);
-	if (status() != ViewportStatus::Ready || !model_ || !document || !current(context.input)) {
+	// The picture its document's as it is (a model's, or a clip's on its rig, whose joints a click takes).
+	if (status() != ViewportStatus::Ready || !model_ || !context.input.document || !current(context.input)) {
 		const std::string why = message();
 		error = "The viewport shows no picture of the model as it is now" + (why.empty() ? std::string(".") : ": " + why);
 		return false;
 	}
-	// As ModelCanvas makes a click: the marker under it, else the collision shape the pixel is on.
-	const std::vector<ModelOverlay> marks = overlays(context.input.clock);
-	const int at = pick_model_overlay(marks, camera_, context.width, context.height, x, y);
-	NodeAddress record;
-	if (at >= 0) {
-		record = record_of(context.input, marks[size_t(at)]);
-	} else {
-		const ModelCollisionShapesPtr shapes = collision(context.input.clock, selected_collision(context.input));
-		const int shape = pick_model_collision(*shapes, camera_, context.width, context.height, x, y);
-		if (shape >= 0) record = model_collision_record(*document, (*shapes)[size_t(shape)]);
+	// ModelCanvas's clicks replace the selection: Shift on it pans, and it has no Ctrl click.
+	if (mode != SelectMode::Replace) {
+		error = "A model viewport's click replaces the selection (its canvas pans with Shift and has no Ctrl click): "
+		        "\"mode\" " + std::string(mode == SelectMode::Add ? "add" : "toggle") + " is none of its.";
+		return false;
 	}
-	if (record.row) out.request(request::select_record(document->path(), record, mode));
+	width = context.width;
+	height = context.height;
 	return true;
 }
 

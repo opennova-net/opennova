@@ -426,7 +426,14 @@ func test_request_table_on_the_wire() -> void:
 	assert_eq(String(parts.get("card", {}).get("properties", {}).get("path", {}).get("type", "")), "string", str(parts.get("card")))
 	assert_eq(String(parts.get("build_result", {}).get("properties", {}).get("open", {}).get("type", "")), "boolean")
 	assert_eq(parts.get("focus", {}).get("enum", []), table.get("focus", []))
-	assert_true(served.has("set_workspace") and served.has("play_sound") and served.has("stop_sound"))
+	# Review X19 and X13: the import checks are whole numbers, as import_preview's rows say them; a text carries the
+	# longest its window's field holds.
+	var import_members: Dictionary = parts.get("import", {}).get("properties", {})
+	assert_eq(String(import_members.get("check", {}).get("items", {}).get("type", "")), "integer", str(import_members.get("check")))
+	assert_eq(int(parts.get("problems", {}).get("properties", {}).get("text", {}).get("maxLength", 0)), 127,
+			str(parts.get("problems", {}).get("properties", {}).get("text")))
+	assert_true(served.has("set_workspace") and served.has("play_sound") and served.has("stop_sound") and
+			served.has("apply_confirmation"))
 	assert_false(served.has("pick_directory") or served.has("pick_file"), "the pickers need a person")
 	assert_true(served.has("preview_install_import") and not served.has("preview_retail_import"))
 	for kind: Variant in served:
@@ -435,7 +442,7 @@ func test_request_table_on_the_wire() -> void:
 	assert_true(String((await _call("editor_request", {"kind": "preview_retail_import"})).get("_error", "")).contains(
 			"Unknown request kind"), "the retail token names nothing")
 	assert_true(String((await _call("editor_request", {"kind": "build", "path": "x"})).get("_error", "")).contains(
-			"build takes no \"path\" (it takes out_dir, rehash)"))
+			"build takes no \"path\" (it takes out_dir, rehash, report)"))
 	assert_true(String((await _call("editor_request", {"kind": "open_project"})).get("_error", "")).contains(
 			"needs \"dir\""))
 	for retired in ["text", "flag", "edit", "unsaved_choice"]:

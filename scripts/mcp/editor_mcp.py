@@ -258,7 +258,8 @@ REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install
                  "purpose")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
-                    "planned", "behind")
+                    "planned", "behind", "report")
+REQUEST_NUMBERS = ("plan",)
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -272,6 +273,9 @@ def request_of(args: argparse.Namespace) -> dict:
     for field in REQUEST_SWITCHES:
         if getattr(args, field) is not None:
             request[field] = getattr(args, field) == "true"
+    for field in REQUEST_NUMBERS:
+        if getattr(args, field) is not None:
+            request[field] = getattr(args, field)
     if args.paths:
         request["paths"] = args.paths
     if args.imports:
@@ -458,6 +462,9 @@ def cmd_build(args: argparse.Namespace) -> int:
     request = {"kind": "build"}
     if args.out_dir is not None:
         request["out_dir"] = args.out_dir
+    # --no-report: the build result's panel stays closed as the build ends (the person's work left as it is).
+    if args.no_report:
+        request["report"] = False
     outcome, ended = raise_and_wait(client, request, args.timeout)
     if ended is None:
         return EXIT_NOT_DONE
@@ -502,9 +509,9 @@ def cmd_play(args: argparse.Namespace) -> int:
         request = {"kind": "play"}
         if args.mission:
             request["mission"] = args.mission
-        # The game's window behind every other, never taking the foreground, as a launch's is (--front: as
-        # usual).
-        if not args.front:
+        # --behind: the game's window starts behind every other, the editor keeping the foreground (Windows
+        # only); by default it starts as Play starts it, as the editor_play tool's does.
+        if args.behind:
             request["behind"] = True
         outcome, ended = raise_and_wait(client, request, args.timeout)
         if ended is None:
@@ -757,9 +764,16 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--all", choices=switch, default=None,
                          help="preview_install_import: every file of the game install chosen at once, with no walk")
     request.add_argument("--planned", choices=switch, default=None,
-                         help="import_files: the open preview's rows as its plan has them, in place of --imports")
+                         help="import_files: the open preview's checked rows as the dialog's Import takes them, in "
+                              "place of --imports (with --plan)")
+    request.add_argument("--plan", type=int, default=None,
+                         help="import_files --planned: the plan it imports (query import_preview's plan); a plan "
+                              "made since is refused")
     request.add_argument("--behind", choices=switch, default=None,
-                         help="play: the game's window starts behind every other and never takes the foreground")
+                         help="play: the game's window starts behind every other, the editor keeping the foreground "
+                              "(Windows only)")
+    request.add_argument("--report", choices=switch, default=None,
+                         help="build: false leaves the build result's panel closed as the build ends")
     request.add_argument("--wait", action="store_true",
                          help="await the operation the request starts or joins (open_project, new_project, rescan, "
                               "reimport, the import previews and import_files, the renames, build, play) and the "
@@ -841,6 +855,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_endpoint_options(build)
     build.add_argument("--out-dir", dest="out_dir", default=None,
                        help="where it lands, each build a directory under it (as request build's --out-dir)")
+    build.add_argument("--no-report", dest="no_report", action="store_true",
+                       help="the build result's panel stays closed as the build ends (build's report false)")
     build.add_argument("--timeout", type=float, default=300.0)
     build.set_defaults(func=cmd_build)
 
@@ -858,9 +874,10 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--mission", default=None,
                       help="start: a mission of the project by its logical name (04TR.bms), the one the game starts "
                            "in (left out: its menu)")
-    play.add_argument("--front", action="store_true",
-                      help="start: the game's window as usual (by default it starts behind every other window and "
-                           "never takes the foreground: play's behind)")
+    play.add_argument("--behind", action="store_true",
+                      help="start: the game's window starts behind every other, the editor keeping the foreground "
+                           "(play's behind; Windows only). Left out, it starts as Play starts it, as the editor_play "
+                           "tool's does")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 

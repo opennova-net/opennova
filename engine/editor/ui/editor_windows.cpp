@@ -51,9 +51,11 @@ bool enabled_button(const char *label, bool enabled) {
 // Discard / Cancel; Build and Play, which pack the files on disk, and an import or a rename, which
 // write over them: Save all and build (play, import, rename) / Cancel.
 void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt &prompt) {
-	if (prompt.open) ImGui::OpenPopup("Unsaved changes");
+	// The first of the dialogs that take the whole editor (shown_modal): it shows whenever it is asked.
+	const bool shows = prompt.open && modal_may_show(workspace.view(), HeldModal::Unsaved);
+	if (shows && !ImGui::IsPopupOpen("Unsaved changes")) ImGui::OpenPopup("Unsaved changes");
 	if (!ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-	if (!prompt.open) { // answered another way (the editor MCP)
+	if (!shows) { // answered another way (the editor MCP)
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
@@ -258,12 +260,16 @@ void EditorWindows::dispatch_events() {
 		case ViewEventKind::RevealPreview:
 			if (preview_window_) preview_window_->request_focus();
 			break;
-		// A set_workspace's focus (the MCP gaps lane): the window it names comes forward.
+		// A set_workspace's focus (the MCP gaps lane): the window it names comes forward, opened when the person
+		// had closed it (the Windows menu's).
 		case ViewEventKind::FocusWindow:
 			for (size_t i = 0; const char *token = workspace_window_token(i); ++i) {
 				if (event.path != token) continue;
 				for (int w = 0; w < pass_.window_count(); ++w)
-					if (std::strcmp(pass_.window(w).title(), workspace_window_title(i)) == 0) pass_.window(w).request_focus();
+					if (std::strcmp(pass_.window(w).title(), workspace_window_title(i)) == 0) {
+						pass_.window(w).open = true;
+						pass_.window(w).request_focus();
+					}
 			}
 			break;
 		case ViewEventKind::kCount: break;
@@ -366,7 +372,9 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	draw_file_menu(v);
 	draw_edit_menu(v, document);
 	draw_build_menu(v);
-	// The modals, every frame, whichever window or menu opened them.
+	// The modals, every frame, whichever window or menu opened them: the one the session's order shows
+	// (shown_modal) opens, the others held wait closed.
+	bring_modal_forward(v);
 	draw_unsaved_prompt(*this, v.dialogs.unsaved_prompt);
 	import_.draw(*this);
 	settings_.draw(*this);
@@ -616,14 +624,30 @@ void EditorWindows::draw_build_panel(const SessionView &v) {
 	ImGui::End();
 }
 
+void EditorWindows::bring_modal_forward(const SessionView &v) {
+	const HeldModal shown = shown_modal(v).modal;
+	if (int(shown) == brought_) return;
+	brought_ = int(shown);
+	// One that shows already (a person's own ask, drawn at once) is where the person is: focusing its window again
+	// would close it.
+	devtools::Window *owner = nullptr;
+	if (shown == HeldModal::FileRename && files_window_ && !files_window_->rename_shown()) owner = files_window_;
+	if (shown == HeldModal::Confirm && problems_window_ && !problems_window_->confirm_shown()) owner = problems_window_;
+	if (!owner) return;
+	owner->open = true;
+	owner->request_focus();
+}
+
 // File > New project...: the welcome view's form in a modal, open while the workspace's new_project says
-// (the session closes it as the project is made; Cancel closes it).
+// and no dialog before it in the session's order is held (shown_modal: it waits, held, while the unsaved
+// prompt or another shows); the session closes it as it takes the new_project its Create raises; Cancel
+// closes it.
 void EditorWindows::draw_new_project() {
 	const SessionView &v = view();
-	const bool wanted = v.workspace.new_project.open;
+	const bool wanted = v.workspace.new_project.open && modal_may_show(v, HeldModal::NewProject);
 	if (wanted && !ImGui::IsPopupOpen("New project")) ImGui::OpenPopup("New project");
 	if (!ImGui::BeginPopupModal("New project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-	if (!wanted) { // closed another way (made, the editor MCP)
+	if (!wanted) { // closed another way (made, the editor MCP), or another dialog shows in its place
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;

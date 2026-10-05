@@ -2,6 +2,7 @@
 
 #include <editor/graph/display_names.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/ui_kit.h>
@@ -61,8 +62,10 @@ void ProjectFind::draw(Workspace &workspace) {
 	};
 	const float em = ImGui::GetFontSize();
 	ImGui::SetNextWindowSize(ImVec2(em * 40.0f, em * 30.0f), ImGuiCond_Appearing);
-	const bool held = view.workspace.project_find.open && view.project.open && view.findings.graph;
-	if (!popup_.begin(kTitle, held, true, 0, true)) {
+	// Held open, it shows when no dialog before it in the session's order is held (shown_modal).
+	const bool held = view.workspace.project_find.open && view.project.open && view.findings.graph &&
+	                  modal_may_show(view, HeldModal::ProjectFind);
+	if (!popup_.begin(kTitle, held, true, 0, true, view.workspace.opened)) {
 		if (popup_.dismissed()) close();
 		return;
 	}

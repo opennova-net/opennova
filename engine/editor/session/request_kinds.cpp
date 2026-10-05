@@ -10,6 +10,7 @@
 #include <editor/session/document_set.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/play_controller.h>
+#include <editor/session/problem_confirmation.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/rename_controller.h>
 #include <editor/session/session_core.h>
@@ -81,7 +82,7 @@ void serve_create_missing(SessionCore &core, const EditorRequest &request) {
 }
 void serve_build(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent());
+		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent(), request.report);
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
@@ -226,6 +227,9 @@ void serve_play_sound(SessionCore &core, const EditorRequest &request) {
 }
 void serve_stop_sound(SessionCore &core, const EditorRequest &) {
 	stop_sound(core);
+}
+void serve_apply_confirmation(SessionCore &core, const EditorRequest &) {
+	apply_confirmation(core);
 }
 void serve_quit(SessionCore &core, const EditorRequest &) {
 	core.quit();
@@ -407,14 +411,16 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::WithDependencies }))
 			.row,
 	Request(K::ImportFiles, "import_files", serve_import_files,
-			"The import dialog's rows kept, imports (or, with planned, the open preview's rows as its "
-			"plan has them, each the project can take), copied into the project, every file checked "
-			"and "
+			"The import dialog's rows kept, imports (or, with planned and the plan it names, the open "
+			"preview's checked rows as the dialog's Import takes them: an unchecked row never, a checked "
+			"row the project holds replacing it), copied into the project, every file checked and "
 			"staged before any is published (replace: over the project's files of the names), then "
 			"the project's files read again, an operation (the outcome names it; it can be cancelled "
 			"until it writes); with a preview open the files are planned again first, and nothing is "
-			"written when that is not the plan shown (import.changed).")
-			.takes(request_params({}, { F::Imports, F::Replace, F::Planned }))
+			"written when that is not the plan shown (import.changed: the checks carried over to the "
+			"new plan, which a planned import names again). A planned import of a plan made since is "
+			"refused (import.not_planned).")
+			.takes(request_params({}, { F::Imports, F::Replace, F::Planned, F::Plan }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
 			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Import", "Save all and import")
@@ -442,8 +448,10 @@ constexpr RequestKindRow kRows[] = {
 			"relative; left out, the project's .opennova/build/play; refused inside the project "
 			"but in its cache or its export folder, build.out_dir_in_project), an operation (the "
 			"outcome names it); a build running already serves it, where it packs. rehash: every "
-			"file read again, the build cache set aside. Unsaved edits wait on the prompt first.")
-			.takes(request_params({}, { F::OutDir, F::Rehash }))
+			"file read again, the build cache set aside. report false: its result panel does not open as it "
+			"ends (a build asked over the wire, the person's work left as it is). Unsaved edits wait on "
+			"the prompt first.")
+			.takes(request_params({}, { F::OutDir, F::Rehash, F::Report }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Build", "Save all and build")
 			.acts_on_saved()
@@ -890,10 +898,16 @@ constexpr RequestKindRow kRows[] = {
 			"filters and the confirmation a Fix all or a Use fix waits in, and what a document's views show of "
 			"it (document {path, ...}: its outline's filter and kinds, the Inspector's filter, a menu's new "
 			"window type and Remove screen prompt, a texture's palette remap); focus brings a window forward "
-			"(a focus_window view event). Each part refused alone, nothing of it changed (workspace.refused): a "
-			"part or a member the table has not, a value of another type, a file or a document the project "
-			"lacks, a field of a part that is closed.")
+			"(a focus_window view event; a window closed opens). Each part refused alone, nothing of it changed "
+			"(workspace.refused, in the outcome alone: no Problems row, the status line as it was): a part or a "
+			"member the table has not, a value of another type, a text longer than its window's field holds, a "
+			"file or a document the project lacks, a value no window of it shows (a kind, a screen, a window "
+			"type, a confirmation of nothing Problems offers, an import plan made since), a field of a part that "
+			"is closed. Of the dialogs that take the whole editor one shows at a time (the section's modal), the "
+			"others held until it closes. A window's own changes are view state: the status line a refused "
+			"request left stays.")
 			.takes(request_params({ F::Workspace }))
+			.background()
 			.row,
 	// The sound is the session's state, the Shell playing what it says and reporting how it goes
 	// (ProjectSession::report_sound), so a play is seen in the workspace section.
@@ -907,6 +921,16 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::StopSound, "stop_sound", serve_stop_sound,
 			"The sound the editor plays stopped (the workspace section's sound: stopped).")
+			.row,
+	// Problems' Apply (the MCP gaps lane: session/problem_confirmation.h): what it raises are requests of their
+	// own, each through the busy gate and its guard as it is served.
+	Request(K::ApplyConfirmation, "apply_confirmation", serve_apply_confirmation,
+			"The confirmation Problems holds open (the workspace's problems.confirm: a Fix all, the summary's, a "
+			"Use fix) applied as its Apply applies it: what it proposes now (the workspace section's "
+			"problems.confirm.proposal: one create_missing naming every role, one import list naming every file, "
+			"a Use fix's assign_requirement), each request served in turn, and the confirmation closed. Refused "
+			"(workspace.refused), nothing raised: none open, or it proposes nothing now (the problems it was for "
+			"are gone).")
 			.row,
 	Request(K::Quit, "quit", serve_quit,
 			"The editor quits once the prompt has asked about unsaved edits; the running operation "
@@ -1051,6 +1075,7 @@ void join_operation(SessionCore &core, const EditorRequest &request) {
 		return;
 	core.operations().running()->join(request);
 	core.outcome().operation = core.operations().status().id;
+	if (request.kind != EditorRequestKind::Build || request.report) core.report_build();
 	if (request.kind == EditorRequestKind::Play) {
 		core.view().activity.status = "Building, then playing...";
 		core.note("Play starts the game when the build lands.");
@@ -1170,6 +1195,8 @@ bool serve_request(SessionCore &core, const EditorRequest &request) {
 		return true;
 	row.handler(core, request);
 	workspace_follows(core, request);
+	// What the workspace holds kept true to what the request changed (a file gone, a screen removed).
+	workspace_tidies(core);
 	return true;
 }
 

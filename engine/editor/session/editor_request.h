@@ -84,6 +84,7 @@ enum class EditorRequestKind {
 	SetWorkspace,
 	PlaySound,
 	StopSound,
+	ApplyConfirmation,
 	Quit,
 	// The shell's: the portable session cannot serve these.
 	PickDirectory,
@@ -338,6 +339,12 @@ struct EditorRequest {
 	// Play's game window starts behind every other, never taking the foreground (the MCP gaps lane: a client
 	// driving the editor while a person works at the machine).
 	bool behind = false;
+	// The import plan a planned import means (the import_preview query's plan): another one shown since is
+	// refused, not retargeted.
+	uint64_t plan = 0;
+	// A build's result panel opens as it ends (false: a build asked over the wire leaves the person's work as
+	// it is; the build section and the outcome say what it came to).
+	bool report = true;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -358,7 +365,7 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
-			a.all == b.all && a.planned == b.planned && a.behind == b.behind;
+			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.plan == b.plan && a.report == b.report;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

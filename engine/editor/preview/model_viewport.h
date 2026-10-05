@@ -208,9 +208,10 @@ public:
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
-	// A click: the marker there, else the collision shape the pixel is on, its record selected as the
-	// canvas's click selects it (joined as `mode` says); on nothing, nothing changes.
-	bool click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+	// A click (ViewportModel::click, its canvas driven: the marker there, else a joint of the clip's rig, its
+	// bone selected in the clip, else the collision shape): a click that replaces alone (Shift on the canvas
+	// pans, and it has no Ctrl click), at the picture's size.
+	bool click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
 			std::string &error) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
@@ -230,7 +231,7 @@ protected:
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
-	void report_(const ViewportDeviceReport &report) override;
+	bool report_(const ViewportDeviceReport &report) override;
 
 private:
 	// What a drag of the record `id` by its handle `token` holds: the handle and the record's marker

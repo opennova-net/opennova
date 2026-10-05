@@ -7,6 +7,7 @@
 #include <editor/model/document_base.h>
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/text_burst.h>
+#include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/view/session_view.h>
@@ -459,6 +460,15 @@ void ScriptViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	if (!options || !options->get("assist") || !read_assist(*options, held, error)) return;
 	held.serial = assist_.serial + 1;
 	assist_ = held;
+}
+
+bool ScriptViewport::report_(const ViewportDeviceReport &report) {
+	// The device took this ask (placed by the last follow) and shows it no longer: closed, as the session says.
+	if (assist_.op == ScriptAssistOp::None || report.assist_serial != assist_.serial || assist_placed_ != assist_.serial ||
+	    report.assist_shown)
+		return false;
+	assist_ = ScriptAssistAsk{ ScriptAssistOp::None, 0, 0, 0, 0, assist_.serial + 1 };
+	return true;
 }
 
 } // namespace opennova::editor

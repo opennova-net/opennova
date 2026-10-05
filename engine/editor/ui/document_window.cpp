@@ -1,6 +1,7 @@
 #include <editor/ui/document_window.h>
 
 #include <algorithm>
+#include <cstring>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -281,6 +282,10 @@ void DocumentWindow::draw_find(const Document &document) {
 		ImGui::SetKeyboardFocusHere();
 		find_.focus = false;
 	}
+	// Escape closes the bar, the text typed kept (the session's too: review X14): the text box, which has the
+	// keyboard, would put back the text it had when it took it.
+	char typed[sizeof(find_.text.text)];
+	std::memcpy(typed, find_.text.text, sizeof(typed));
 	const bool entered = ImGui::InputTextWithHint("##text", "Find in this file", find_.text.text, sizeof(find_.text.text),
 	                                              ImGuiInputTextFlags_EnterReturnsTrue);
 	const bool edited = ImGui::IsItemEdited();
@@ -290,6 +295,7 @@ void DocumentWindow::draw_find(const Document &document) {
 		ImGui::SetKeyboardFocusHere(-1); // the keyboard stays in the text
 	}
 	const bool escape = (typing || ImGui::IsItemDeactivated()) && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+	if (escape) std::memcpy(find_.text.text, typed, sizeof(typed));
 	if (edited && !escape && find_.text.sent() != workspace_.view().workspace.find.text)
 		send_find("text", io::JsonValue::make_string(find_.text.sent()));
 	ui_kit::tooltip("Every field whose value, as the Inspector shows it, holds the text. Enter: the next; Shift+Enter: "

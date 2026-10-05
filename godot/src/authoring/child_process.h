@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 
+#include <editor/run/behind_start.h>
 #include <editor/run/process_platform.h>
 
 namespace godot {
@@ -48,18 +49,18 @@ public:
 	void sleep_ms(int64_t ms) override;
 
 	// A child spawned behind (LaunchPlan::behind, the MCP gaps lane: play {behind}) kept behind while it
-	// starts: its first window was shown without activation (STARTUPINFO SW_SHOWNOACTIVATE) and the
-	// foreground was locked as it started (LockSetForegroundWindow, refused harmlessly when the editor holds
-	// no foreground rights, when the child gets none either); each call (the Shell's pump) sends each of its
-	// shown windows to the bottom of the z-order without activation and stops their taskbar flashing, for
-	// kBehindMs after the spawn, a window the person brought to the foreground left alone; then the lock goes.
+	// starts, as opennova::editor::BehindStarts decides (editor/run/behind_start.h): its first window was shown
+	// without activation (STARTUPINFO SW_SHOWNOACTIVATE) and the foreground locked at the spawn
+	// (LockSetForegroundWindow, refused harmlessly when the editor holds no foreground rights, when the child gets
+	// none either), the lock let go as soon as the child's first window has been sent back (or kLockMs passed);
+	// each call (the Shell's pump) sends its shown windows to the bottom of the z-order without activation and
+	// stops their taskbar flashing, until one is the foreground window (left alone from then on) or kTendMs.
 	void tend();
-	static constexpr int64_t kBehindMs = 20000;
 
 private:
 	std::mutex mutex_;
 	std::unordered_map<int64_t, void *> children_; // pid -> process handle
-	std::unordered_map<int64_t, int64_t> behind_;  // pid -> when it stops being tended (now_ms)
+	opennova::editor::BehindStarts behind_;        // the children started behind, tended
 	bool locked_ = false;                          // the foreground lock is held
 };
 

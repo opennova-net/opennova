@@ -2,8 +2,11 @@
 
 #include <cmath>
 #include <cstdint>
+#include <memory>
+#include <vector>
 
 #include <editor/model/document_base.h>
+#include <editor/preview/canvas_half.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewports.h>
 #include <editor/session/view/session_view.h>
@@ -230,9 +233,41 @@ io::JsonValue ViewportModel::palette_json(const SessionView &, const std::string
 	return io::JsonValue::make_null();
 }
 
-bool ViewportModel::click(const ViewportContext &, float, float, SelectMode, CanvasRequests &, std::string &error) const {
+bool ViewportModel::click_frame(const ViewportContext &, SelectMode, int &, int &, std::string &error) const {
 	error = std::string("A ") + viewport_kind_token(kind_) + " viewport has no canvas to click.";
 	return false;
+}
+
+bool ViewportModel::click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+		std::string &error) const {
+	int width = 0, height = 0;
+	if (!click_frame(context, mode, width, height, error)) return false;
+	std::unique_ptr<CanvasHalf> canvas = make_canvas();
+	if (!canvas) {
+		error = std::string("A ") + viewport_kind_token(kind_) + " viewport has no canvas to click.";
+		return false;
+	}
+	// The canvas the person clicks, driven as the person drives it: its frame followed, a press at the point,
+	// its release there (no travel: no drag), the gesture ended. What it raised is what the click makes.
+	struct Raised final : CanvasRequests {
+		std::vector<EditorRequest> requests;
+		void request(EditorRequest each) override { requests.push_back(std::move(each)); }
+	} raised;
+	canvas->follow(*this, context, raised);
+	CanvasInput in;
+	in.width = width;
+	in.height = height;
+	in.mouse = in.screen = CanvasPoint{ x, y };
+	in.hovered = true;
+	in.keys.shift = mode == SelectMode::Add;
+	in.keys.ctrl = mode == SelectMode::Toggle;
+	in.pressed = in.down = true;
+	canvas->input(context, in, raised);
+	in.pressed = in.down = false;
+	canvas->input(context, in, raised);
+	canvas->end(raised);
+	for (EditorRequest &each : raised.requests) out.request(std::move(each));
+	return true;
 }
 
 bool ViewportModel::drop(const ViewportContext &, const ViewportDrop &, CanvasRequests &, std::string &error) const {
@@ -380,8 +415,8 @@ void ViewportModel::detach() {
 bool ViewportModel::device_report(const ViewportDeviceReport &report) {
 	shown_size_ = ViewportState{ report.width, report.height };
 	canvas_sized_ = report.canvas_sized;
-	report_(report);
-	return device_build(report.build);
+	const bool moved = report_(report);
+	return device_build(report.build) || moved;
 }
 
 bool ViewportModel::device_build(const ViewportBuildReport &build) {

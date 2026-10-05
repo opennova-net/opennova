@@ -237,10 +237,12 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				std::string typed = mission.options().palette;
 				const int64_t picked = tools.palette.draw(graph, graph ? graph->generation() : 0, view.project.recent_items,
 						mission.options().item, mission.options().palette, &typed);
+				// The search alone (review X21): another option a client set in the same pump stays as it set it.
 				if (typed != mission.options().palette) {
-					MissionViewportOptions options = mission.options();
-					options.palette = typed;
-					set_options(workspace, mission, options);
+					io::JsonValue palette = io::JsonValue::make_object();
+					palette.set("palette", io::JsonValue::make_string(typed));
+					workspace.request(request::set_viewport(mission.path(), viewport_change(ViewportKind::Mission, "options",
+					                                                                        std::move(palette))));
 				}
 				if (picked != 0) set_tool(workspace, mission, MissionTool::Place, picked);
 			} else {

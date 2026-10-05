@@ -116,6 +116,10 @@ private:
 	void draw_new_project();
 	void draw_build_panel(const SessionView &v);
 	void shortcuts(const SessionView &v, const DocumentBase *document);
+	// The dialog the session's order shows (shown_modal), its window brought forward as it comes to show where a
+	// window draws it (Files' Rename..., Problems' confirmation): a held dialog no frame draws would hold the ones
+	// after it.
+	void bring_modal_forward(const SessionView &v);
 
 	void dispatch_events();
 
@@ -131,6 +135,7 @@ private:
 	// The texture a Replace with image... pick is for (S18), and the files the OS dropped, held for the
 	// item they land on (drop_files) for `frames` more end_frames.
 	std::string replace_target_;
+	int brought_ = 0; // the HeldModal last brought forward (bring_modal_forward)
 	struct Dropped {
 		std::vector<std::string> paths;
 		float x = 0.0f, y = 0.0f;

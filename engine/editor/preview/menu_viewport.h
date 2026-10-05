@@ -163,8 +163,10 @@ public:
 	// its root windows), in the compiled screen's order.
 	std::vector<ViewportHit> box(const ViewportContext &context, float x0, float y0, float x1,
 			float y1) const override;
-	// A click: the window the game's hit test finds there selected, as the canvas's click selects it.
-	bool click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+	// A click (ViewportModel::click, its canvas driven: the primary's resize handles first, then the window
+	// the game's hit test finds there): taken in every join while the picture is the menu's as it is, at the
+	// design size (the click's point in its units).
+	bool click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
 			std::string &error) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
@@ -185,7 +187,7 @@ protected:
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
-	void report_(const ViewportDeviceReport &report) override;
+	bool report_(const ViewportDeviceReport &report) override;
 
 private:
 	ViewportAction stop_(MenuScreenStatus reason, const std::string &detail);

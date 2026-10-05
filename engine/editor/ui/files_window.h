@@ -35,7 +35,7 @@ public:
 
 private:
 	ui_kit::HeldPopup popup_;
-	ui_kit::HeldText<64> name_;
+	ui_kit::HeldText<kWorkspaceFileName> name_;
 	// Per param of the kind's blank: the text typed, the file chosen (the session's values, as last taken).
 	std::vector<std::string> values_;
 	std::vector<std::pair<std::string, std::string>> values_seen_;
@@ -79,6 +79,8 @@ public:
 	// Files, Problems or the wire opens it, a set_workspace closes it), shown at once. The session closes it
 	// with its project, and stops the sound it played as it closes.
 	void draw_card_window();
+	// Rename... shows (drawn the frame before).
+	bool rename_shown() const { return rename_popup_.shown(); }
 
 	// The file a click selected (project-relative; "" = none).
 	const std::string &selected() const { return selected_; }
@@ -135,13 +137,13 @@ private:
 	// what the file is, where a build puts it, a wave's sound with Play and Stop (and how it goes), what it
 	// names and who names it, each a click away. The workspace's card (the MCP gaps lane): opened by an
 	// AboutFile (a double click on a file the editor opens no document of, its menu's About this file...),
-	// closed by a set_workspace (its X; its file gone).
+	// closed by a set_workspace (its X), and by the session as its file goes (workspace_tidies).
 	void draw_card(const SessionView &view);
 	void close_card();
 
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
-	ui_kit::HeldText<128> filter_;
+	ui_kit::HeldText<kWorkspaceText> filter_;
 	ui_kit::Held<AssetKind> kind_held_;
 	std::string selected_;
 	// What refresh() makes of the view, kept while what it reads stands (cache_key); the files the
@@ -178,7 +180,7 @@ private:
 	// Rename... (the workspace's file_rename: the file and the name typed), and the name its preview was
 	// last asked for.
 	ui_kit::HeldPopup rename_popup_;
-	ui_kit::HeldText<64> rename_;
+	ui_kit::HeldText<kWorkspaceFileName> rename_;
 	std::string previewed_;
 	// The RevealFile events held until Files draws, and then the file to scroll to and the place
 	// whose folders open on the way.

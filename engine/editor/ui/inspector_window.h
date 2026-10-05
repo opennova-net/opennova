@@ -125,7 +125,7 @@ private:
 	// a menu's window never hides an item's fields), by the document's path; a closed document's goes. It
 	// is the workspace's (the MCP gaps lane: workspace.document's inspector_filter): each taken where the
 	// session's moved, one changed as the Inspector drew (typed, cleared, a reveal) sent to it.
-	static constexpr size_t kFilterSize = 128;
+	static constexpr size_t kFilterSize = kWorkspaceText;
 	std::map<std::string, ui_kit::HeldText<kFilterSize>> filters_;
 	// The active document's filter, following the workspace's.
 	char *filter_of(const std::string &path);

@@ -76,11 +76,11 @@ private:
 	// Per plan row: why the import cannot take it ("" when it can), found once per plan.
 	std::vector<std::string> why_not_;
 	std::vector<bool> chosen_;  // per choice: among the files chosen
-	ui_kit::HeldText<128> filter_;
+	ui_kit::HeldText<kWorkspaceText> filter_;
 	AssetKind choice_kind_ = AssetKind::kCount; // the choices of one kind alone (kCount: every kind)
 	// The plan's rows shown: those of one kind (kCount: every kind) whose names hold the text.
 	AssetKind kind_shown_ = AssetKind::kCount;
-	ui_kit::HeldText<128> rows_filter_;
+	ui_kit::HeldText<kWorkspaceText> rows_filter_;
 	bool replace_existing_ = false;
 	// The workspace's, as last taken; what was last sent of it (each change sent once).
 	ui_kit::Held<AssetKind> choice_kind_held_, kind_shown_held_;

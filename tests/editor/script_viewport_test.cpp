@@ -764,6 +764,20 @@ int test_session() {
 		}
 		TEST_EXPECT(rig.session.handle(request::set_viewport(rig.script, R"({"kind": "script", "options": {}})")) &&
 		            rig.session.outcome().done());
+		// Its device no longer showing it (a person's Escape, a click, a key: its report of the ask's serial) closes it
+		// too (review X24): the viewport's state moves, its option none.
+		TEST_EXPECT(rig.session.handle(request::set_viewport(
+		                    rig.script, R"({"kind": "script", "options": {"assist": {"op": "complete", "line": 3, "column": 9}}})")));
+		rig.pump();
+		TEST_EXPECT(viewport->assist().op == ScriptAssistOp::Complete);
+		const uint64_t shown_serial = viewport->assist().serial;
+		const uint64_t viewports = rig.view().revisions.of(ViewConcern::Viewports);
+		device->assist_closed = true;
+		rig.pump();
+		rig.pump();
+		TEST_EXPECT(viewport->assist().op == ScriptAssistOp::None && viewport->assist().serial == shown_serial + 1 &&
+		            rig.view().revisions.of(ViewConcern::Viewports) > viewports);
+		device->assist_closed = false;
 	}
 	JsonValue unknown;
 	std::string parse_error, set_error;

@@ -178,13 +178,21 @@ constexpr RequestField kFields[] = {
 			"beside them: the music banks, the videos, the NovaWorld table), with no walk: the closure "
 			"of everything is everything." },
 	{ F::Planned, "planned", J::Boolean,
-			"An import takes the open import preview's checked rows (the workspace's import checks: a new plan's "
-			"own, then what was checked and unchecked; each the project can take, once per source) in place of "
-			"imports, so a client need not echo thousands of rows back; refused with no preview open." },
+			"An import takes the open import preview's checked rows as the dialog's Import takes them (the "
+			"workspace's import checks: a new plan's own, then what was checked and unchecked; each the project "
+			"can take, once per source; an unchecked row never, whatever replace says; a checked row the project "
+			"holds, or Replace existing files, replaces) in place of imports, so a client need not echo "
+			"thousands of rows back; it names the plan (plan). Refused with no preview open, or a plan made since." },
 	{ F::Behind, "behind", J::Boolean,
-			"Play's game window starts behind every other window and never takes the foreground (shown without "
-			"activation, kept at the bottom while it starts): a client driving the editor while a person works "
-			"at the machine." },
+			"Play's game window starts behind every other window, the editor keeping the foreground (shown without "
+			"activation, sent to the bottom while it starts, until the person brings it forward): a client driving "
+			"the editor while a person works at the machine. Windows only: elsewhere Play spawns nothing." },
+	{ F::Plan, "plan", J::Integer,
+			"The import plan a planned import means (the import_preview query's plan): the one the dialog shows, or "
+			"the import is refused (planned again since: its rows are others)." },
+	{ F::Report, "report", J::Boolean,
+			"A build's result panel opens over the editor as it ends (true when left out); false leaves the "
+			"person's work as it is (the build section and the operation say what it came to)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");
@@ -241,6 +249,8 @@ const char *request_json_token(RequestJson json) {
 			return "string";
 		case RequestJson::Boolean:
 			return "boolean";
+		case RequestJson::Integer:
+			return "integer";
 		case RequestJson::Strings:
 			return "string[]";
 		case RequestJson::Object:

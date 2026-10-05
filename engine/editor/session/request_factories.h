@@ -111,12 +111,18 @@ inline EditorRequest import_files(std::vector<ImportChoice> imports, bool replac
 	request.replace = replace;
 	return request;
 }
-// The open import preview's rows imported as its plan has them (each the project can take).
-inline EditorRequest import_planned(bool replace = false) {
+// The open import preview's checked rows imported as the dialog's Import takes them, of the plan `plan`
+// (DialogsView::ImportPreview::plan_serial).
+inline EditorRequest import_planned(uint64_t plan, bool replace = false) {
 	EditorRequest request = of(EditorRequestKind::ImportFiles);
 	request.planned = true;
+	request.plan = plan;
 	request.replace = replace;
 	return request;
+}
+// Problems' confirmation applied as its Apply applies it.
+inline EditorRequest apply_confirmation() {
+	return of(EditorRequestKind::ApplyConfirmation);
 }
 inline EditorRequest cancel_import() {
 	return of(EditorRequestKind::CancelImport);

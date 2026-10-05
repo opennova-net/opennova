@@ -207,17 +207,19 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	// folder again); none at all is a project of the files from the disk; one not checked yet is the session's
 	// to check.
 	const bool install_ok = install_.text[0] == '\0' || found || words.empty();
-	const bool ready = title_.text[0] != '\0' && folder_.text[0] != '\0' && allowed && expansion_ok && install_ok;
+	// Create raises what the session holds of the form (what a client set, whole), not the fields' copies.
+	const std::string install = form.install_named ? form.game_install : v.project.editor_install;
+	const bool ready = !form.title.empty() && !form.dir.empty() && allowed && expansion_ok && install_ok;
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create project") && ready;
 	ImGui::EndDisabled();
 	if (!install_ok && !words.empty()) ui_kit::tooltip("Name a folder that holds the game, or none.");
 	if (create) {
 		const ProjectExpansion expansion = choice.value();
-		EditorRequest made = expansion.standalone() ? request::new_project(folder_.text, title_.text)
-		                                            : request::new_expansion_project(folder_.text, title_.text, expansion.name,
+		EditorRequest made = expansion.standalone() ? request::new_project(form.dir, form.title)
+		                                            : request::new_expansion_project(form.dir, form.title, expansion.name,
 		                                                                             expansion.builds_on);
-		made.game_install = install_.text;
+		made.game_install = install;
 		workspace.request(std::move(made));
 	}
 	return create;

@@ -2187,6 +2187,7 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 			member.set("name", json_string(row.members[m].token));
 			member.set("type", json_string(workspace_json_token(row.members[m].json)));
 			member.set("doc", json_string(row.members[m].doc));
+			if (row.members[m].longest) member.set("max_length", json_number(double(row.members[m].longest)));
 			part_members.push(std::move(member));
 		}
 		entry.set("members", std::move(part_members));

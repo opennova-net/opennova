@@ -55,6 +55,8 @@ enum class RequestFieldId : uint8_t {
 	All,
 	Planned,
 	Behind,
+	Plan,
+	Report,
 	kCount,
 };
 
@@ -64,6 +66,7 @@ inline constexpr size_t kRequestFieldCount = static_cast<size_t>(RequestFieldId:
 enum class RequestJson : uint8_t {
 	String, // a string (a token for mode, choice and purpose)
 	Boolean, // true or false
+	Integer, // a whole number, 0 or more
 	Strings, // an array of strings
 	Object, // an object (address, paste_at, settings, viewport, drag, command, drop, workspace)
 	Objects, // an array of objects (imports, edits, records)

@@ -8,6 +8,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
+#include <editor/session/view/workspace_view.h>
 
 // ImGui's colour, which the colour functions below return: declared, not included, so this
 // header stays free of ImGui like every other header of the editor's windows.
@@ -113,15 +114,17 @@ template <class T> struct Held {
 };
 
 // A popup whose being open is the session's (a part of the workspace, the MCP gaps lane): opened while the
-// session holds it open (`held`), closed as the session closes it. begin() draws it (true: drawing, the
-// caller's EndPopup after; `modal` a modal, `flags` ImGui's window flags, `closable` a modal's title-bar
-// close button). `dismissed()` after a begin that did not draw: ImGui closed it itself (a click outside it,
-// the close button) while the session holds it open, and the caller asks the session to close it, once. A
-// close the caller makes itself (Cancel, Create: its own request asks the session) is close(), inside the
-// popup: it is not opened again until the session has closed it.
+// session holds it open (`held`: the caller passes it only while it may show, the session's shown_modal), closed
+// as the session closes it. begin() draws it (true: drawing, the caller's EndPopup after; `modal` a modal,
+// `flags` ImGui's window flags, `closable` a modal's title-bar close button; `opened` the workspace's
+// WorkspaceView::opened). `dismissed()` after a begin that did not draw: ImGui closed it itself (a click
+// outside it, the close button) while the session holds it open, and the caller asks the session to close
+// it, once. A close the caller makes itself (Cancel, Create: its own request asks the session) is close(),
+// inside the popup: it is not opened again until the session has closed it, or opened a dialog again since
+// (`opened` moved past the close: a client's open after it, never lost).
 class HeldPopup {
 public:
-	bool begin(const char *id, bool held, bool modal = false, int flags = 0, bool closable = false);
+	bool begin(const char *id, bool held, bool modal = false, int flags = 0, bool closable = false, uint64_t opened = 0);
 	bool dismissed() const { return dismissed_; }
 	// Drawn the frame before (a popup several owners share by its name begins only its asker's).
 	bool shown() const { return shown_; }
@@ -131,6 +134,8 @@ private:
 	bool shown_ = false;   // drawn the frame before
 	bool closing_ = false; // closed here, the session holding it open still
 	bool dismissed_ = false;
+	uint64_t opened_ = 0;    // the workspace's opened serial at the last begin
+	uint64_t closed_at_ = 0; // ... when the close was made
 };
 
 // A number of bytes as a list's cell says it: "512 B", "3.4 KB", "12.0 MB".

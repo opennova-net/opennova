@@ -157,9 +157,12 @@ bool filter_box(const char *id, char *text, size_t size, const char *hint, float
 	return changed;
 }
 
-bool HeldPopup::begin(const char *id, bool held, bool modal, int flags, bool closable) {
+bool HeldPopup::begin(const char *id, bool held, bool modal, int flags, bool closable, uint64_t opened) {
 	dismissed_ = false;
+	opened_ = opened;
 	if (!held) closing_ = false;
+	// A dialog opened again since its close was asked (a client's open served after it): it shows again.
+	if (closing_ && opened != closed_at_) closing_ = false;
 	if (held && !closing_ && !shown_ && !ImGui::IsPopupOpen(id)) ImGui::OpenPopup(id);
 	bool open = true;
 	const bool drawing = modal ? ImGui::BeginPopupModal(id, closable ? &open : nullptr, flags) : ImGui::BeginPopup(id, flags);
@@ -167,6 +170,7 @@ bool HeldPopup::begin(const char *id, bool held, bool modal, int flags, bool clo
 		// ImGui closed it while the session holds it open: the caller asks the session to close it.
 		if (shown_ && held && !closing_) {
 			closing_ = true;
+			closed_at_ = opened;
 			dismissed_ = true;
 		}
 		shown_ = false;
@@ -184,6 +188,7 @@ bool HeldPopup::begin(const char *id, bool held, bool modal, int flags, bool clo
 
 void HeldPopup::close() {
 	closing_ = true;
+	closed_at_ = opened_;
 	ImGui::CloseCurrentPopup();
 }
 

@@ -597,18 +597,20 @@ void test_view_prompt_outlives_its_tab() {
 	ui.away();
 	ui.drain();
 	// Remove screen... in the active menu's tab: the prompt open, nothing raised yet.
-	const auto ask = [&ui](const std::shared_ptr<MnuDocument> &menu) {
+	// The prompt is its menu's, known by its path (review X26: two menus' prompts never one window).
+	const std::string prompt = "Remove screen?##" + a->path();
+	const auto ask = [&ui, &prompt](const std::shared_ptr<MnuDocument> &menu) {
 		ui.activate(item_id(document_tab_id(menu->path()), {"Remove screen..."}));
 		ui.frames(2);
-		return modal_open("Remove screen?") && ui.drain().empty();
+		return modal_open(prompt.c_str()) && ui.drain().empty();
 	};
 	CHECK(ask(a), "Remove screen... asks first");
 	v.documents.active = b->path();
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
-	CHECK(document_tabs() && document_tabs()->SelectedTabId == document_tab_id(b->path()) && modal_open("Remove screen?"),
+	CHECK(document_tabs() && document_tabs()->SelectedTabId == document_tab_id(b->path()) && modal_open(prompt.c_str()),
 	      "its tab hidden, it still asks");
-	ui.activate(item_id(ImHashStr("Remove screen?"), {"Remove"}));
+	ui.activate(item_id(ImHashStr(prompt.c_str()), {"Remove"}));
 	std::vector<EditorRequest> requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::EditRecord) && requests[0].path == a->path() && requests[0].edits.size() == 1 &&
 	              requests[0].edits[0].operation == EditOperation::Remove && requests[0].edits[0].address.row == second,
@@ -627,7 +629,7 @@ void test_view_prompt_outlives_its_tab() {
 	v.revisions.touch(ViewConcern::Workspace);
 	select_in(v, {reread->rows()[1]->id, kScreen, 0});
 	ui.frames(3);
-	CHECK(!modal_open("Remove screen?") && ui.drain().empty(), "its menu read again: the prompt closes");
+	CHECK(!modal_open(prompt.c_str()) && ui.drain().empty(), "its menu read again: the prompt closes");
 	// Asked about the new one, which then closes: likewise.
 	CHECK(ask(reread), "asked about the menu read again");
 	v.documents.open = {b};
@@ -636,7 +638,7 @@ void test_view_prompt_outlives_its_tab() {
 	v.revisions.touch(ViewConcern::Documents);
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
-	CHECK(!modal_open("Remove screen?") && ui.drain().empty(), "its menu closed: the prompt closes");
+	CHECK(!modal_open(prompt.c_str()) && ui.drain().empty(), "its menu closed: the prompt closes");
 }
 
 // Thirty open documents: more tabs than the bar shows, the tab list lists every one, and
@@ -3061,7 +3063,7 @@ void test_view_event_mailboxes() {
 	// The import dialog's checks are the workspace's: each plan made takes them anew (the session's
 	// take_import_checks, here by hand), and an uncheck is the workspace's too.
 	v.dialogs.import_preview = planned_import("C:/assets");
-	take_import_checks(v.workspace, *v.dialogs.import_preview.plan);
+	take_import_checks(v.workspace, *v.dialogs.import_preview.plan, nullptr);
 	v.revisions.touch(ViewConcern::Dialogs);
 	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(4);
@@ -3077,7 +3079,7 @@ void test_view_event_mailboxes() {
 	ui.frames(4);
 	ui.away();
 	CHECK(import_count(ui) == 4, "no plan made: the checks kept");
-	take_import_checks(v.workspace, *v.dialogs.import_preview.plan);
+	take_import_checks(v.workspace, *v.dialogs.import_preview.plan, nullptr);
 	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(3);
 	ui.away();

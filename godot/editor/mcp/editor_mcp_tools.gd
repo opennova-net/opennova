@@ -109,10 +109,14 @@ func _tool_editor_request(args: Dictionary, ctx: McpToolContext) -> Variant:
 ## The build raised as the windows raise it, then frames awaited until its operation ends: the
 ## editor keeps drawing and answering the while. A build running already is joined, not started
 ## again.
-func _tool_editor_build(_args: Dictionary, ctx: McpToolContext) -> Variant:
+func _tool_editor_build(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if not _project_open():
 		return McpToolResult.error("No project is open: editor_request new_project or open_project first.")
-	var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify({"kind": "build"}))))
+	var build_request := {"kind": "build"}
+	# report false: the build result's panel stays closed as the build ends.
+	if args.has("report") and not bool(args.get("report", true)):
+		build_request["report"] = false
+	var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(build_request))))
 	var failed := _outcome_error(answer, "editor_build")
 	if failed != null:
 		return failed

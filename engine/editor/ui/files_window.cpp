@@ -22,6 +22,7 @@
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
@@ -99,8 +100,9 @@ void NewFilePrompt::draw(Workspace &workspace) {
 			for (const auto &[token, value] : held.values)
 				if (token == factory->params[i].token) values_[i] = value;
 	}
-	const bool open = kind != AssetKind::kCount && v.project.open;
-	if (!popup_.begin("New file", open, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+	// Held open, it shows when no dialog before it in the session's order is held (shown_modal).
+	const bool open = kind != AssetKind::kCount && v.project.open && modal_may_show(v, HeldModal::NewFile);
+	if (!popup_.begin("New file", open, true, ImGuiWindowFlags_AlwaysAutoResize, false, v.workspace.opened)) {
 		if (popup_.dismissed()) window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
 		return;
 	}
@@ -132,7 +134,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		ImGui::PushID(static_cast<int>(i));
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
 		if (param.reference == ReferenceKind::None) {
-			char text[64];
+			char text[kWorkspaceFileName];
 			std::snprintf(text, sizeof(text), "%s", values_[i].c_str());
 			if (ImGui::InputText(param.label, text, sizeof(text))) {
 				values_[i] = text;
@@ -694,7 +696,9 @@ void FilesWindow::draw_rename(const SessionView &view) {
 	rename_.follow(held.name);
 	const AssetEntry *entry = held.path.empty() ? nullptr : entry_at(view, held.path);
 	const auto close = [this] { window_requests::set_workspace(workspace_, "file_rename", "path", io::JsonValue::make_string("")); };
-	if (!rename_popup_.begin("Rename", entry != nullptr)) {
+	// A popup at the top level, as the modals are: it shows when none before it in the session's order is held.
+	if (!rename_popup_.begin("Rename", entry != nullptr && modal_may_show(view, HeldModal::FileRename), false, 0, false,
+	                         view.workspace.opened)) {
 		if (rename_popup_.dismissed()) close();
 		return;
 	}
@@ -757,7 +761,7 @@ void FilesWindow::draw_rename(const SessionView &view) {
 	ImGui::EndPopup();
 }
 
-// The card closed (its X; its file gone): the workspace's card closed, which stops the sound it played.
+// The card closed (its X): the workspace's card closed, which stops the sound it played.
 void FilesWindow::close_card() {
 	if (card_closing_ == workspace_.view().workspace.card.path) return; // asked already
 	card_closing_ = workspace_.view().workspace.card.path;
@@ -784,10 +788,8 @@ void FilesWindow::draw_card(const SessionView &view) {
 		card_ = std::make_shared<const FileCard>(file_card(view, card_path_, known));
 	}
 	const FileCard &card = *card_;
-	if (!card.found) {
-		close_card();
-		return;
-	}
+	// Its file gone: the session closes the card as the files lose it (workspace_tidies); nothing drawn meanwhile.
+	if (!card.found) return;
 	const ImGuiViewport *viewport = ImGui::GetMainViewport();
 	ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
 	ImGui::SetNextWindowViewport(viewport->ID);

@@ -185,6 +185,12 @@ void SessionCore::refuse_now(CoreFinding code, const std::string &message, const
 	view_.activity.status = message;
 }
 
+void SessionCore::refuse_quietly(CoreFinding code, const std::string &message, const std::string &asset) {
+	if (!in_request_) return;
+	outcome_.findings.push_back(make_finding(code, DiagnosticSeverity::Warning, message, asset));
+	outcome_.refused = true;
+}
+
 // --- the operation slot ------------------------------------------------------------------
 
 uint64_t SessionCore::start_operation(std::unique_ptr<SessionOperation> operation) {
@@ -243,6 +249,7 @@ void SessionCore::finish_operation() {
 	operations_.finish(*this);
 	problems().show_validation(); // a finish that read the files leaves their validation due
 	show_operation();
+	workspace_tidies(*this); // a refresh, an import or a rename moved the files the workspace names
 }
 
 // The slot as the view shows it: the running operation (none) and what the last one came to.
@@ -1380,7 +1387,7 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 }
 
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
-                              const ExportIntent &exported) {
+                              const ExportIntent &exported, bool panel) {
 	if (intent.wanted && play().refused(intent.mission)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
 	// Where it lands: out_dir taken from the project's folder when relative. One inside the project
@@ -1439,6 +1446,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	        }));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
 	outcome_.operation = id;
+	build_reports_ = panel;
 	view_.activity.status = intent.wanted     ? "Building, then playing..."
 	                        : exported.wanted ? "Building, then exporting..."
 	                                          : "Building...";
@@ -1500,9 +1508,10 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 	ended.tag = intent.wanted ? 1 : 0;
 	view_.events.post(std::move(ended));
 	touch(ViewConcern::Dialogs);
-	// Its panel opens with what it came to, unless the game follows a build that landed (the MCP gaps lane:
-	// the workspace's, which a set_workspace closes as the panel's Close does).
-	if (!(result.ok && intent.wanted)) {
+	// Its panel opens with what it came to, unless the game follows a build that landed or the build was asked
+	// with report false (the MCP gaps lane: the workspace's, which a set_workspace closes as the panel's Close
+	// does).
+	if (build_reports_ && !(result.ok && intent.wanted)) {
 		view_.workspace.build_result.open = true;
 		touch(ViewConcern::Workspace);
 	}

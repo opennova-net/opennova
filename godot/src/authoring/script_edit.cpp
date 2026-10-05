@@ -332,6 +332,16 @@ void ScriptEdit::on_gui_input_(const Ref<InputEvent> &p_event) {
 		accept_event();
 		return;
 	}
+	// A word's words asked over the wire (the hover note) go as the person moves on: a key, a press of a
+	// button, the pointer moving over the text, as a tooltip goes (its device then reports it closed).
+	if (!hover_note_.is_empty() && p_event.is_valid()) {
+		const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr());
+		const InputEventMouseButton *button = Object::cast_to<InputEventMouseButton>(p_event.ptr());
+		const InputEventMouseMotion *moved = Object::cast_to<InputEventMouseMotion>(p_event.ptr());
+		if ((key && key->is_pressed()) || (button && button->is_pressed()) ||
+		    (moved && moved->get_relative().length_squared() > 0.0f))
+			set_hover_note(String());
+	}
 	// Over the gutters: the findings of the line under the pointer, its tooltip. Over the text (S15):
 	// what the word there is, in words, then the line's findings.
 	const InputEventMouseMotion *motion = Object::cast_to<InputEventMouseMotion>(p_event.ptr());

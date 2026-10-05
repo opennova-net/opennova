@@ -42,9 +42,9 @@ private:
 
 	bool shown_ = false;      // open when it last drew: its waiting and its error are this opening's
 	std::string root_;        // the project it is for
-	ui_kit::HeldText<128> title_;
-	ui_kit::HeldText<512> game_install_;
-	ui_kit::HeldText<512> runtime_;
+	ui_kit::HeldText<kWorkspaceText> title_;
+	ui_kit::HeldText<kWorkspacePath> game_install_;
+	ui_kit::HeldText<kWorkspacePath> runtime_;
 	ExpansionFields expansion_;
 	PickPurpose pick_ = PickPurpose::None; // the Browse... the shell is answering
 	ViewEventMailbox<> events_;

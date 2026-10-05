@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -18,6 +19,15 @@ namespace opennova::editor {
 enum class ProblemScope { Project, ActiveFile, OpenFiles };
 enum class ProblemGrouping { None, File, Kind };
 
+// The text a window's field holds, its buffer's size (its terminator in it): a name, a filter or a find's
+// text; a folder or an executable; a file's name typed and a New file value; an expansion's name. The
+// workspace's table (workspace_parts.h) refuses a set_workspace text past its field's (the buffer less the
+// terminator), so no window shows, or sends back, a cut copy of what the session holds.
+inline constexpr size_t kWorkspaceText = 128;
+inline constexpr size_t kWorkspacePath = 512;
+inline constexpr size_t kWorkspaceFileName = 64;
+inline constexpr size_t kWorkspaceExpansion = 32;
+
 // What the workspace's windows show of their own, held by the session (ADR 0046, the MCP gaps lane; the
 // Workspace concern, CONTEXT.md "Workspace"): each card, panel and dialog open and what its fields hold,
 // and the sound the editor plays. The windows draw it and change it only by the set_workspace request
@@ -27,7 +37,8 @@ enum class ProblemGrouping { None, File, Kind };
 struct WorkspaceView {
 	// Files' card of a file (the UX round's project lane: session/file_card.h): its project-relative path,
 	// "" while none shows. An about_file opens it; a set_workspace closes it (its path ""), as the card's
-	// close does, and so does its project closing, its file going and another project opening.
+	// close does, and so does its project closing, its file going (the session closes it as the files it reads
+	// lose it: workspace_tidies) and another project opening; a rename of its file moves it to the new path.
 	struct Card {
 		std::string path;
 	};
@@ -185,8 +196,11 @@ struct WorkspaceView {
 			bool fixable = false;
 		};
 		std::optional<Filters> before_blocking;
+		// `finding_key`: the finding's identity as it was asked (problem_finding_key), what an Apply finds it by
+		// again once a validation has moved the findings (its index then names another, or none).
 		struct Confirm {
 			std::string group, required, finding, label;
+			std::string finding_key;
 			bool open() const { return !group.empty() || !required.empty() || !finding.empty(); }
 		};
 		Confirm confirm;
@@ -211,6 +225,12 @@ struct WorkspaceView {
 		int remap_from = 0, remap_to = 0;
 	};
 	std::map<std::string, DocumentView> documents;
+
+	// Moves with each dialog the workspace opens (a part opened, or opened on another target: a file, a kind, a
+	// screen, a confirmation): a window that closed its own dialog and asked the session to close it tells a
+	// dialog opened again since from its own close not served yet (ui_kit::HeldPopup).
+	uint64_t opened = 0;
+
 	// The document view's state at `path`, its defaults for one the session holds none of.
 	const DocumentView &document(const std::string &path) const {
 		static const DocumentView kDefaults;

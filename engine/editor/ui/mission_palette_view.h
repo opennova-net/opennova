@@ -36,7 +36,7 @@ public:
 	const MissionPalette &palette() const { return palette_; }
 
 private:
-	ui_kit::HeldText<64> filter_;
+	ui_kit::HeldText<kWorkspaceText> filter_;
 	bool made_ = false;
 	uint64_t generation_ = 0;
 	std::string made_filter_;

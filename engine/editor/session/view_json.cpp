@@ -231,6 +231,7 @@ JsonValue import_section(const SessionView &view) {
 	const ImportPlan &plan = *preview.plan;
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(preview.open));
+	out.set("plan", json_number(double(preview.open ? preview.plan_serial : 0)));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
 	if (preview.all) out.set("all", boolean(true));
 	if (preview.changed)
@@ -469,7 +470,7 @@ constexpr ViewSectionRow kSections[] = {
 			"the build directory), the files it reported missing at boot, and what Play runs (the "
 			"game install, in it or not, the runtime)." },
 	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,
-			"The import dialog in short (open, with_dependencies, its lists' counts; the "
+			"The import dialog in short (open, plan: which plan it shows, with_dependencies, its lists' counts; the "
 			"import_preview query pages its plan), the editor's import setting, the project's "
 			"import sources (each with the other files its import read, inputs, and the files it "
 			"made, outputs) and the game install's file count." },
@@ -492,9 +493,14 @@ constexpr ViewSectionRow kSections[] = {
 			"them)." },
 	{ S::Events, "events", concern_set({ C::Selection, C::Dialogs, C::Workspace }), events_section,
 			"The view events held, first and next by seq (the events query pages them)." },
-	{ S::Workspace, "workspace", concern_set({ C::Workspace, C::Preferences, C::DocumentSet, C::ActiveDocument }),
+	{ S::Workspace, "workspace",
+			concern_set({ C::Workspace, C::Preferences, C::DocumentSet, C::ActiveDocument, C::Dialogs, C::Findings, C::Files }),
 			workspace_to_json,
 			"What the windows show of their own (set_workspace sets it; the catalog's workspace lists the parts): "
+			"the dialog of those that take the whole editor that shows (modal: unsaved, import, texture_source, "
+			"settings, new_project, new_file, file_rename, rename, rename_back, project_find, confirm, "
+			"remove_screen with modal_document, \"\" none; the others held wait until it closes), opened (moves "
+			"with each dialog opened), "
 			"the file whose card shows (card {path}, \"\" none), the sound the editor plays (sound {path, state: "
 			"idle, starting, playing, ended, stopped or failed, serial, error}), the build result's panel "
 			"(build_result {open}), the new-project form (new_project {open: File > New project...'s modal, title, "
@@ -503,8 +509,11 @@ constexpr ViewSectionRow kSections[] = {
 			"closed, name, values}), Rename... (file_rename {path, name}), Rename everywhere (rename {open, path, "
 			"locator, field, old_name, kind, name}) and Rename back (rename_back {open}), the find bar (find {open, "
 			"text, match_case}), Find in project (project_find {open, text}), Files' filter (files {filter, kind}), "
+			"the import dialog's own (import {filter, choice_kind, rows_filter, kind_shown, replace_existing, "
+			"checked, serial, plan}), "
 			"Problems' filters and confirmation (problems {severities, text, scope, group, fixable, blocking, "
-			"confirm {group | required | finding, label}, confirm_serial}) and each open document's views "
+			"confirm {group | required | finding, label, proposal {lines, requests, findings} or {gone}: what "
+			"apply_confirmation raises}, confirm_serial}) and each open document's views "
 			"(documents [{path, active, filter, kinds, all_rows, sort, every, inspector_filter, new_window_type, "
 			"remove_screen, remap_from, remap_to}])." },
 };
@@ -834,6 +843,8 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, 
 	const ImportPlan &plan = *preview.plan;
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(preview.open));
+	// Which plan this is: what the workspace's checks and a planned import name (each plan made takes the next).
+	out.set("plan", json_number(double(preview.open ? preview.plan_serial : 0)));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
 	if (preview.all) out.set("all", boolean(true));
 	if (preview.changed)

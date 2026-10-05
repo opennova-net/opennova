@@ -36,7 +36,7 @@ public:
 	          const ProjectExpansion &current, bool &changed);
 
 private:
-	ui_kit::HeldText<32> name_;
+	ui_kit::HeldText<kWorkspaceExpansion> name_;
 };
 
 } // namespace opennova::editor

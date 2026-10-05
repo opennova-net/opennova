@@ -5,6 +5,7 @@
 #include <editor/graph/rename_transaction.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
@@ -41,7 +42,10 @@ void RenameDialog::draw(Workspace &workspace) {
 	const auto close = [&workspace] {
 		window_requests::set_workspace(workspace, "rename", "open", io::JsonValue::make_bool(false));
 	};
-	if (!popup_.begin(kTitle, held.open && view.project.open, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+	// Held open, it shows when no dialog before it in the session's order is held (shown_modal); another rename
+	// planned in its place closes it, the session's (workspace_tidies).
+	if (!popup_.begin(kTitle, held.open && view.project.open && modal_may_show(view, HeldModal::Rename), true,
+	                  ImGuiWindowFlags_AlwaysAutoResize, false, view.workspace.opened)) {
 		if (popup_.dismissed()) close();
 		return;
 	}
@@ -124,8 +128,10 @@ void RenameDialog::draw_back(Workspace &workspace) {
 	const auto close = [&workspace] {
 		window_requests::set_workspace(workspace, "rename_back", "open", io::JsonValue::make_bool(false));
 	};
-	if (!back_popup_.begin(kBackTitle, view.workspace.rename_back.open && view.project.open && plan.back, true,
-	                       ImGuiWindowFlags_AlwaysAutoResize)) {
+	if (!back_popup_.begin(kBackTitle,
+	                       view.workspace.rename_back.open && view.project.open && plan.back &&
+	                               modal_may_show(view, HeldModal::RenameBack),
+	                       true, ImGuiWindowFlags_AlwaysAutoResize, false, view.workspace.opened)) {
 		if (back_popup_.dismissed()) close();
 		return;
 	}

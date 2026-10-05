@@ -379,6 +379,20 @@ func test_the_wire_shows_the_help() -> void:
 	assert_true(assist.call("none"), "none asked")
 	await _frames()
 	assert_eq(String(edit.call("get_hover_note")), "", "nothing shown")
+	# The person moving on (a key on the control) closes the words, and the device reporting it closes the
+	# viewport's assist too (review X24): the session says none.
+	assert_true(assist.call("hover", 3, 4), "the words asked again")
+	await _frames()
+	assert_ne(String(edit.call("get_hover_note")), "", "shown")
+	var key := InputEventKey.new()
+	key.keycode = KEY_SHIFT
+	key.pressed = true
+	edit.emit_signal("gui_input", key)
+	await _frames(6)
+	assert_eq(String(edit.call("get_hover_note")), "", "a key closes the words")
+	var state: Dictionary = _seam.query("viewport", {"op": "state", "path": SCRIPT, "limit": 1})
+	assert_eq(String(state.get("options", {}).get("assist", {}).get("op", "")), "none",
+			"the viewport's assist closed with them: %s" % str(state.get("options", {})))
 
 
 ## The control alone (no device clearing its history) keeps the history Godot gives it, and Ctrl+Z

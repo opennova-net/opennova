@@ -310,4 +310,18 @@ std::string import_row_refusal(const ImportPlan &plan, size_t index);
 // project can take it), and with `replace_existing` each file the project holds that it can take.
 std::vector<bool> import_default_checks(const ImportPlan &plan, bool replace_existing);
 
+// What an Import of a plan takes by its checks: the one rule of the dialog's Import and of import_files planned
+// (the MCP gaps lane). Each checked row's source once, in the plan's order (a converter's outputs share it), a row
+// found nowhere or one the project cannot take left out; whether it replaces: Replace existing files, or a
+// checked row the project holds (a held file is written over only where its row is checked: an unchecked one's
+// source is never taken); how many rows are checked; and `blocked`, the first checked row the project cannot
+// take, in the dialog's words ("" none): the dialog's Import waits on it, a planned import leaves it out.
+struct ImportSelection {
+	std::vector<ImportChoice> sources;
+	bool replace = false;
+	size_t checked = 0;
+	std::string blocked;
+};
+ImportSelection import_selection(const ImportPlan &plan, const std::vector<bool> &checked, bool replace_existing);
+
 } // namespace opennova::editor

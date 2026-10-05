@@ -1283,4 +1283,23 @@ std::vector<bool> import_default_checks(const ImportPlan &plan, bool replace_exi
 	return out;
 }
 
+ImportSelection import_selection(const ImportPlan &plan, const std::vector<bool> &checked, bool replace_existing) {
+	ImportSelection out;
+	out.replace = replace_existing;
+	std::set<ImportChoice> taken; // each source once, looked up in log time (a whole install's rows)
+	for (size_t i = 0; i < plan.rows.size() && i < checked.size(); ++i) {
+		if (!checked[i]) continue;
+		++out.checked;
+		const ImportPlanRow &row = plan.rows[i];
+		if (row.state == ImportPlanRow::State::NotFound) continue;
+		if (const std::string why = import_row_refusal(plan, i); !why.empty()) {
+			if (out.blocked.empty()) out.blocked = row.name + " cannot be imported: " + why + " Uncheck it to import the rest.";
+			continue;
+		}
+		out.replace = out.replace || row.held;
+		if (taken.insert(row.source).second) out.sources.push_back(row.source);
+	}
+	return out;
+}
+
 } // namespace opennova::editor

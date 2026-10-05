@@ -560,8 +560,8 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
 			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, game_install, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
-			"Unknown request member \"flagg\" (build takes out_dir, rehash).");
-	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash).");
+			"Unknown request member \"flagg\" (build takes out_dir, rehash, report).");
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash, report).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"path\":\"C:/x\"}", back) ==
 	            "open_project takes no \"path\" (it takes dir, game_install, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\"}", back) ==
@@ -822,6 +822,8 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::All: out.all = true; break;
 		case F::Planned: out.planned = true; break;
 		case F::Behind: out.behind = true; break;
+		case F::Plan: out.plan = 7; break;
+		case F::Report: out.report = false; break; // its default is true
 		case F::kCount: break;
 		}
 	}
