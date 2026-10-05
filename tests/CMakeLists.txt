@@ -4159,6 +4159,11 @@ target_link_libraries(def_write_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(def_write COMMAND def_write_test)
 
+add_executable(def_noted_write_test def/def_noted_write_test.cpp)
+target_link_libraries(def_noted_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(def_noted_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(def_noted_write COMMAND def_noted_write_test)
+
 # The capture-point labels: the map-overlay slot walk and the marker types 8/9.
 add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)
 target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)

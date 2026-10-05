@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include "def_notes.h"
 #include "def_write.h"
 
 namespace opennova::def {
@@ -10,6 +11,34 @@ namespace opennova::def {
 // their values cannot be authored in the native grammar.
 struct DefRecordWriter {
 	DefWriteResult result;
+	// What each line put down is (def_notes.h's roles), which a write over a file's modeled layout
+	// generates the file's lines from: the record it is of (a slot, one per record written; -1 for the
+	// file's own lines), its role and its step; a nested record's place in its parent, a Nested line of no
+	// text. `plain`: the record is written in the writer's form whatever its layout (one whose own form the
+	// reparse check refused).
+	struct Slot {
+		uint64_t note = 0;
+		DefRecordKind kind = DefRecordKind::Item;
+		int parent = -1;
+		bool plain = false;
+	};
+	struct Written {
+		int slot = -1;
+		DefNotedRole role = DefNotedRole::Free;
+		uint8_t step = 0;
+		int nested = -1;
+		size_t begin = 0, end = 0; // its text in result.text
+	};
+	std::vector<Slot> slots;
+	std::vector<Written> written;
+	// The record a line put down now is of, and what it is (the record writer sets Line and the step).
+	DefNotedRole put_role = DefNotedRole::Free;
+	uint8_t put_step = 0;
+	// A record begins (its `note`, of `kind`; nested in the record open, at its `step` there): its slot.
+	int begin_record(uint64_t note, DefRecordKind kind, uint8_t step = 0, bool plain = false);
+	void end_record();
+	// One line, its ending included, as `role` (put_role: Line).
+	void put(const std::string &text, DefNotedRole role);
 	const DefItemsFile *items = nullptr;
 	// One property written as `replaced_key` with `replacement` for its arguments instead of
 	// what its members give, whether they differ from the defaults or not: the authored set's
@@ -51,7 +80,30 @@ struct DefRecordWriter {
 	// An item's line under one of the names sharing those words (def.h's DEF_LINE_ORDER_SQB_RATE..
 	// DEF_LINE_ORDER_DOOR_DIR), written from the words as they stand, and the bytes it holds.
 	void alias_line(const DefItemDef &item, uint8_t step, AliasCover &cover);
+
+private:
+	struct Open {
+		int slot;
+		DefNotedRole role;
+		uint8_t step;
+	};
+	std::vector<Open> open_;
 };
+
+// The text a write over a file's modeled layout puts down (def_notes.h), generated in the order the file
+// has its lines: each record's line from the words the writer puts down for it now in the layout's shape
+// (its spellings while they spell those words, its tokens the game skips, its blanks, separators,
+// comment and ending), its lines the game reads nothing of from their tokens, a line the file did not
+// have in the writer's form after its record's. A record written in the writer's form (`plain`, the
+// reparse check refused its own) keeps its comment lines and the lines the game skips (but a block a later
+// one replaced, which would read again); what it does not keep is said in `lost`, a line per record.
+std::string def_compose(const DefRecordWriter &writer, const DefTextNotes &notes, std::vector<std::string> *lost = nullptr);
+// What the writer put down for each record of the notes (DefNotedRecord::baseline), and each record's lines
+// modeled against it (DefNotedShape).
+void def_note_baseline(const DefRecordWriter &writer, DefTextNotes &notes);
+// The words an `attrib:` line holds after its key (def_write_record.cpp's cap: the game's tokenizer's 29,
+// our parser's 16).
+size_t def_attrib_words_per_line();
 
 // The text of a squib's or a door's number as the writer puts it down: the shortest decimal the item
 // parser's arithmetic over its atof reading takes to the word at both of the game's FPU precisions (the

@@ -1,6 +1,7 @@
 // The order and the indentation a def file was read with (def.h's DefLineOrder and DefLayout), which
 // an authoring writer keeps: no text of the file, a place in the property table per line and the
 // blanks one level of a block takes.
+#include "def_notes.h"
 #include "def_schema.h"
 
 #include <array>
@@ -94,20 +95,25 @@ const DefLineOrder *def_line_order(DefRecordKind kind, const void *record) {
 	return def_line_order(kind, const_cast<void *>(record));
 }
 
-void def_note_line(DefRecordKind kind, DefLineOrder &order, const char *line, size_t length) {
+int def_line_step(DefRecordKind kind, const char *line, size_t length) {
 	size_t start = 0;
 	while (start < length && blank(line[start])) ++start;
 	size_t end = start;
 	while (end < length && !blank(line[end]) && line[end] != '\r' && line[end] != '\n' && line[end] != '"' &&
 	       line[end] != ',')
 		++end;
-	if (end == start) return;
+	if (end == start) return -1;
 	const auto &steps = steps_of(kind);
 	const auto found = steps.find(lower(line + start, end - start));
-	if (found == steps.end()) return;
+	return found == steps.end() ? -1 : int(found->second);
+}
+
+void def_note_line(DefRecordKind kind, DefLineOrder &order, const char *line, size_t length) {
+	const int step = def_line_step(kind, line, length);
+	if (step < 0) return;
 	for (size_t i = 0; i < order.count; ++i)
-		if (order.steps[i] == found->second) return;
-	if (order.count < DEF_LINE_ORDER_MAX) order.steps[order.count++] = found->second;
+		if (order.steps[i] == uint8_t(step)) return;
+	if (order.count < DEF_LINE_ORDER_MAX) order.steps[order.count++] = uint8_t(step);
 }
 
 void def_note_indent(DefLayout &layout, bool &noted, const char *line, size_t length) {

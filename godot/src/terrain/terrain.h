@@ -243,6 +243,11 @@ public:
 
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	Ref<TerrainData> get_terrain_data() const;
+	// What the terrain built and draws dropped (its patches, its tile cache, its derived textures): a
+	// picture with no ground (the editor's mission device, where the mission's terrain names a file the
+	// project lacks: the demo round's bug 5, the old ground kept drawing). set_terrain_data leaves what a
+	// finished build drew until a build of the new data takes its place. C++ only.
+	void clear_built() { _clear_terrain(); }
 	void set_static_shadow_placer(
 			const Ref<MissionObjectPlacer> &p_placer);
 	// A caster graphic's static-shadow geometry resolved ahead of the placer
