@@ -250,15 +250,24 @@ void test_files_kind_and_card() {
 	      "the card, Files closed: what it is, its sound, where it goes, who names it");
 	if (files_window) files_window->open = true;
 	const ImGuiID card = ImHashStr("###file_card");
+	CHECK(v.workspace.card.path == "sounds/tone.wav", "the card is the workspace's");
 	ui.activate(item_id(card, {"Play##card"}));
 	const std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *play = only(raised, EditorRequestKind::PlaySound);
-	CHECK(play && play->path == "sounds/tone.wav", "Play: the Shell plays the wave");
-	// Closed, the card stops what its Play played (the review's L4).
+	CHECK(play && play->path == "sounds/tone.wav", "Play: the wave played");
+	if (play) session.handle(*play);
+	CHECK(v.workspace.sound.path == "sounds/tone.wav" && v.workspace.sound.state == WorkspaceView::SoundState::Starting,
+	      "the sound the session's: starting until the Shell reports it (none here)");
+	session.report_sound(v.workspace.sound.serial, WorkspaceView::SoundState::Playing);
+	run.settle();
+	CHECK(logged_frame(ui).find("Playing") != std::string::npos, "the card says it plays, as the Shell reports");
+	// Closed, the card stops what its Play played (the review's L4): its close the workspace's, which stops it.
 	ImGuiWindow *card_window = ImGui::FindWindowByName("###file_card");
 	if (card_window) ui.activate(card_window->GetID("#CLOSE"));
+	ui.session = &session; // the set_workspace it raises served by the session
 	const std::vector<EditorRequest> closed = ui.drain();
-	CHECK(card_window && only(closed, EditorRequestKind::StopSound) != nullptr, "the card closed: the sound stopped");
+	CHECK(card_window && closed.empty() && v.workspace.card.path.empty(), "the card closed: the workspace's");
+	CHECK(v.workspace.sound.state == WorkspaceView::SoundState::Stopped, "the card closed: the sound stopped");
 	// The bank's card: its waves named, the one the project has a Play of its own, the others missing.
 	session.handle(request::about_file("menu.lwf"));
 	run.settle();
@@ -285,6 +294,7 @@ void test_welcome_install_and_first_steps() {
 	v.project.editor_install = "C:/Games/JO";
 	v.project.retail_directory = "C:/Session/Other";
 	Ui ui;
+	ui.serve_workspace = false; // the set_workspace requests looked at, the view set by hand
 	ui.windows.set_view(&v);
 	ui.frames(4);
 	std::vector<EditorRequest> raised = ui.drain();
@@ -332,9 +342,19 @@ void test_welcome_install_and_first_steps() {
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("C:/mods/New holds a project already.") != std::string::npos, "the refusal said on the page");
 	v.project.refused.clear();
-	// A folder picked: checked; it holds no game: Create held back.
+	// A folder picked: checked; it holds no game: Create held back. The picks fill the form, the workspace's
+	// (the MCP gaps lane: set_workspace, which the session takes, here the view it would make).
 	ui.windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
 	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Empty");
+	raised = ui.drain();
+	CHECK(workspace_sets(raised, "new_project", "dir").size() == 1 &&
+	              !workspace_sets(raised, "new_project", "game_install").empty() &&
+	              workspace_sets(raised, "new_project", "game_install").back().string == "C:/Empty",
+	      "the picks fill the form, the workspace's");
+	v.workspace.new_project.dir = "C:/mods/New";
+	v.workspace.new_project.game_install = "C:/Empty";
+	v.workspace.new_project.install_named = true;
+	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(2);
 	raised = ui.drain();
 	check = only(raised, EditorRequestKind::CheckInstall);
@@ -348,6 +368,8 @@ void test_welcome_install_and_first_steps() {
 	ui.activate(item_id(welcome, {"Create project"}));
 	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");
 	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Games/JO");
+	v.workspace.new_project.game_install = "C:/Games/JO";
+	v.revisions.touch(ViewConcern::Workspace);
 	v.project.install_check.root = absolute_install_path("C:/Games/JO");
 	v.project.install_check.mounts = true;
 	v.revisions.touch(ViewConcern::Preferences);
@@ -380,11 +402,122 @@ void test_welcome_install_and_first_steps() {
 
 } // namespace
 
+// The dialogs that take the whole editor show one at a time, the session's order (review X3), over a real session:
+// a project with an unsaved edit; File > New project..., its Create: the session takes new_project, closing the
+// form's modal, and the unsaved prompt it waits on shows alone, frame after frame, its Cancel leaving neither
+// (nothing made, the edit kept); asked again, its Discard makes the project. Two held over the wire at once
+// (Project settings and New project...) show one at a time: the settings first, New project once they close, held
+// open the while (nothing dismissed).
+void test_modals_one_at_a_time() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_modals");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(request::new_project(dir.file("project"), "Modal")), "a project");
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	DrawnDevices devices;
+	session.viewports().set_devices(&devices.cache);
+	Ui ui;
+	ui.session = &session; // the set_workspace requests the windows raise served by the session
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	Run run{ session, devices, ui };
+	run.settle();
+	const auto shows = [](const char *title) {
+		const ImGuiWindow *window = ImGui::FindWindowByName(title);
+		return window && window->Active;
+	};
+	const AssetEntry *main = v.project.scan->find("main.mnu");
+	CHECK(main != nullptr, "the main menu");
+	if (!main) return;
+	const std::string menu_path = main->relative_path;
+	run.open(menu_path);
+	const Document *menu = session.document_for(menu_path);
+	if (!menu || menu->rows().empty()) {
+		CHECK(false, "the main menu's screen");
+		return;
+	}
+	Edit rename;
+	rename.operation = EditOperation::Set;
+	rename.address = { menu->rows().front()->id, menu->rows().front()->kind, 0 };
+	rename.field = "name";
+	rename.value = std::string("RENAMED");
+	session.handle(request::edit_record(menu_path, rename));
+	run.settle();
+	CHECK(menu->dirty(), "an unsaved edit");
+	// A held dialog a window draws comes forward with its window, so it never holds the dialogs after it unseen:
+	// Files closed, a client's Rename... opens it and shows.
+	devtools::Window *files = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Files") == 0) files = &ui.windows.pass().window(i);
+	if (!files) {
+		CHECK(false, "the Files window");
+		return;
+	}
+	files->open = false;
+	ui.frames(2);
+	session.handle(request::set_workspace("{\"file_rename\": {\"path\": \"" + menu_path + "\"}}"));
+	run.settle();
+	ui.frames(3);
+	CHECK(files->open && shown_modal(v).modal == HeldModal::FileRename &&
+	              logged_frame(ui).find("Rename main.mnu to") != std::string::npos,
+	      "Files closed: its Rename... opens it, and shows");
+	session.handle(request::set_workspace(R"({"file_rename": {"path": ""}})"));
+	run.settle();
+	// File > New project..., its folder and name, Create.
+	choose(ui, "File", {"New project..."});
+	run.settle();
+	CHECK(v.workspace.new_project.open && shows("New project"), "File > New project...: the form's modal");
+	session.handle(request::set_workspace("{\"new_project\": {\"dir\": \"" + dir.file("other") + "\", \"title\": \"Other\"}}"));
+	run.settle();
+	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
+	run.settle();
+	CHECK(v.dialogs.unsaved_prompt.open && !v.workspace.new_project.open && shown_modal(v).modal == HeldModal::Unsaved &&
+	              shows("Unsaved changes") && !shows("New project"),
+	      "Create with an unsaved edit: the session closes the form's modal, the prompt shows alone");
+	ui.frames(4);
+	CHECK(shows("Unsaved changes") && !shows("New project") && GImGui->OpenPopupStack.Size == 1,
+	      "and it stays alone, frame after frame");
+	ui.activate(item_id(ImHashStr("Unsaved changes"), {"Cancel"}));
+	run.settle();
+	CHECK(!v.dialogs.unsaved_prompt.open && !shows("Unsaved changes") && !shows("New project") &&
+	              v.project.document->title == "Modal" && menu->dirty(),
+	      "its Cancel: neither shows, nothing made, the edit kept");
+	// Asked again, the form as it was; the prompt's Discard makes the project.
+	choose(ui, "File", {"New project..."});
+	run.settle();
+	CHECK(shows("New project") && v.workspace.new_project.dir == dir.file("other"), "the form again, as it was");
+	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
+	run.settle();
+	CHECK(shows("Unsaved changes") && !shows("New project"), "the prompt again, alone");
+	ui.activate(item_id(ImHashStr("Unsaved changes"), {"Discard"}));
+	run.settle();
+	CHECK(v.project.open && v.project.document->title == "Other" && !shows("Unsaved changes") && !shows("New project"),
+	      "its Discard: the project made");
+	// Two held at once over the wire: the settings show first, New project waits, held.
+	session.handle(request::set_workspace(R"({"new_project": {"open": true}, "settings": {"open": true}})"));
+	run.settle();
+	ui.frames(3);
+	CHECK(shows("Project settings") && !shows("New project") && v.workspace.new_project.open && v.workspace.settings.open,
+	      "Project settings and New project held: the settings show, New project waits");
+	ui.activate(item_id(ImHashStr("Project settings"), {"Cancel"}));
+	run.settle();
+	ui.frames(2);
+	CHECK(!v.workspace.settings.open && v.workspace.new_project.open && shows("New project") && !shows("Project settings"),
+	      "the settings closed: New project shows, held the while");
+	ui.activate(item_id(ImHashStr("New project"), {"Cancel"}));
+	run.settle();
+	CHECK(!v.workspace.new_project.open && !shows("New project"), "its Cancel: none shows");
+}
+
 void run_project_tests() {
 	test_preview_room();
 	test_inspector_filter_per_document();
 	test_files_kind_and_card();
 	test_welcome_install_and_first_steps();
+	test_modals_one_at_a_time();
 }
 
 } // namespace editor_ui_test
