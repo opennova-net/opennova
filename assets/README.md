@@ -39,13 +39,26 @@ the editor finds it anywhere in the project. Keep new files at the top level.
 | `on_ar15_{0,1,2,3}_c.tga`, `on_arms_{0,1}_c.tga`, `on_arms_{0,1}_n.tga` | The models' diffuse textures and the arms' normal maps. |
 | `sp.mnu` | The `SINGLE_PLAYER` screen the main menu's SINGLE PLAYER button opens: the game lists the project's single-player missions in its `IA_LIST` and `ACCEPT` starts the chosen one. Hand-written. |
 | `ammo.def`, `powerup.def`, `SndProf.def` | Blanks from Create Missing. `SndProf.def` is one empty `default` profile: without it the original game binds every item's sounds to memory it never cleared and hangs the mission (PR #791). |
-| `game.wac`, `server.wac`, `cmap.mnu`, `game.mnu`, `weapon.mnu`, `vehicle.mnu`, `stat.mnu`, `death.mnu`, `mp.mnu`, `border.tga`, `boxtile.tga`, `monogram.tga`, `loadscrn.pcx` | What a mission's start loads: its scripts, the in-game screens, the board box and the loading screen. Blanks from Create Missing. |
+| `game.wac`, `server.wac`, `cmap.mnu`, `game.mnu`, `weapon.mnu`, `vehicle.mnu`, `stat.mnu`, `death.mnu`, `mp.mnu`, `loadscrn.pcx` | What a mission's start loads: its scripts, the in-game screens and the loading screen. Blanks from Create Missing. |
 | `onjo_m1.bms`, `onjo_m1.bin` | "Indigo Shore", the base game's one mission, made in the editor: the camp's crates and barrels and the insertion point (`items.def` 106094). |
 | `art/terrain/onisle1.tset` and its images | The island terrain the mission plays on, made by the editor's terrain importer from a heightmap, a colour map, a detail map and a surface map. The surface map gives the island its classes (sea floor, mud, sand, stone, grass, dirt, the track) and a pad of all 20 classes, 5 m patches, west of the insertion point. Images made by throwaway scripts; the PNGs are the source. |
 | `onisle1.env`, `oncloud1.pcx`, `oncloud2.pcx` | The island's environment and its two cloud layers (our own tileable clouds; sources in `art/onjo1/sky/`). |
 | `oncrate1.3di`, `oncrate1_0.tga`, `oncrate1_0n.mdt` | A wooden supply crate (`items.def` 100010), exported from `art/onjo1/models/oncrate1/`. |
 | `onbarl1.3di`, `onbarl1_0.tga`, `onbarl1_0n.mdt` | A wooden barrel (`items.def` 100011), exported from `art/onjo1/models/onbarl1/`. |
 | `onhut1.3di`, `onhut1_0.tga`, `onhut1_{0..4}d.tga`, `onhut1_0n.mdt` | A plastered mud-brick hut (`items.def` 100012, a landable building), exported from `art/onjo1/models/onhut1/`: the base, the five materials' tiling details and the normal map. |
+| `hudpos.def` | The HUD's layout in the 1024 x 768 design space: the soldier panel bottom left, the map bottom right, the readouts, its fonts, colours and detail levels. Hand-written. |
+| `onhudb18.fnt`, `onhud14.fnt` | The HUD's two fonts (above 640 wide, and at 640 and below). Made by the editor's font importer from the glyph sheets in `art/onjo1/hud/fonts/`. |
+| `onhframe.tga`, `onhstnc{0..5}.tga` | The soldier panel (hudpos `StaticFrame`) and the stance icons: stand, crouch, prone, sitting, emplaced, parachute. |
+| `h_onar15.tga`, `h_onclip.tga`, `h_onrnd.tga`, `onxhair.tga`, `m_onar15.tga` | The AR-15's HUD art, which its weapon.def entry names: its silhouette (`hudicon`), its magazine window and a round (`hudclipgfx`, `hudrndgfx`), its reticle (`crosshair`) and its armory picture (`loadout_menu_icon`). |
+| `cross01.tga` .. `cross25.tga` | The 25 crosshair styles the options offer (`cross01` the default, `cross25` none). |
+| `compring.tga`, `TSDicon.tga`, `WPIndctr.tga`, `dmgslice.tga`, `dmgslc_n.tga` | The map's compass bezel, its icon strip, the waypoint altitude nub and the two hit-direction slices. |
+| `border.tga`, `boxtile.tga`, `monogram.tga` | The HUD's window box (the scoreboard, objectives, help, briefing and message log): its frame and fill, the camouflage printed on the frame, and its glow pass (black: none). |
+| `border3.tga`, `k_tip.tga`, `g_tip.tga` | The tip panel and its two icons. |
+| `Binoculr.tga`, `BinoCH.tga`, `BNumbers.tga`, `NVG.tga`, `NVGScale.tga`, `vignette.tga` | The first-person view effects: the binocular mask, reticle and range digits, the night-vision mask and gain scale, the damage vignette. |
+| `neticon1.tga`, `neticon2.tga`, `neticon3.tga`, `JO_LFP.tga`, `R_LFP.tga`, `N_LFP.tga`, `lfp_alf.tga`, `lfp_dlf.tga`, `H_flag.tga`, `rockpip.tga`, `turrpip.tga`, `dirguide.tga` | The rest of the HUD's fixed-name art: the connection indicators, the objective tiles and marks, the carried flag, the vehicle pips. |
+
+Every HUD file above is our own art from `art/onjo1/hud/` (its `SOURCES.md`
+lists each one's source, size and drawing mode).
 
 Nothing references the `on_ar15` files yet. Re-export them by opening the
 scene with the add-on installed and running Export Model on `on_ar15` and
