@@ -1836,9 +1836,9 @@ static int test_model_texture_references() {
 	// chunk row among them); a particle file.
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/typed.o3d",
-	                                    "o3d 1\nmodel TYPED\nmaterial FF_ST_OP\ntexture wall.tga 1 0\ntexture plain.tga 1 1\n"
+	                                    "o3d 2\nmodel TYPED\nmaterial FF_ST_OP\ntexture wall.tga 1 0\ntexture plain.tga 1 1\n"
 	                                    "texture bump.tga 3 5\ntexture trim.tga 1 3\ntexture ready.mdt 3 4\n"
-	                                    "texture field.nq8 1 16\nlod 0\npart 0 0 0 0\nstrip 0 0\n"
+	                                    "texture field.nq8 1 16\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	const ImportResult imported = import_assets({{scene + "/typed.o3d", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/typed.3di"}));
@@ -1988,8 +1988,8 @@ static int test_rename_keeps_loader_spelling() {
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/relief.o3d",
-	                                    "o3d 1\nmodel RELIEF\nmaterial FF_ST_OP\ntexture bump.tga 3 4\ntexture bump.tga 3 5\n"
-	                                    "texture bump.tga 3 6\ntexture bump.tga 3 7\nlod 0\npart 0 0 0 0\nstrip 0 0\n"
+	                                    "o3d 2\nmodel RELIEF\nmaterial FF_ST_OP\ntexture bump.tga 3 4\ntexture bump.tga 3 5\n"
+	                                    "texture bump.tga 3 6\ntexture bump.tga 3 7\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	TEST_EXPECT(import_assets({{scene + "/relief.o3d", {}}}, paths, *view.project.document, false).imported ==
 	            std::vector<std::string>({"models/relief.3di"}));
