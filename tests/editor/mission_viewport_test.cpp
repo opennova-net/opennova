@@ -7,7 +7,8 @@
 // a Rebuild, a reload a Rebuild); a Rebuild held under an open gesture and issued at its end; a file
 // the device read moving its stamp a Rebuild, and the files it misses as notes; its camera (the
 // wire's yaw a compass heading against presentation_forward_from_angles, the first framing moving
-// the Viewports concern once, a SetViewport of its camera and options, refused members named); its
+// the Viewports concern once, a SetViewport of its camera and options, refused members named; a framing
+// within the mission's fog, the demo round's bug 12); its
 // hits and boxes (each entity at its projected pixel, the front-most, a kind's marks off and the
 // mark range dropping marks, a box's records); and its envelope (the body's counts, a page of items,
 // the notes). S14 V10: a drop's item facts and its one batch (on the plane, over a device's ground
@@ -1522,6 +1523,64 @@ static int test_retail() {
 	return 0;
 }
 
+// Files by name, for the fog reach's read.
+struct NamedFiles : opennova::FileSource {
+	std::vector<std::pair<std::string, std::string>> files;
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
+		for (const auto &[file, text] : files)
+			if (file == name) {
+				out.assign(text.begin(), text.end());
+				return true;
+			}
+		return false;
+	}
+	uint64_t stamp(const std::string &name) const override {
+		std::vector<uint8_t> bytes;
+		return read(name, bytes) ? 1 : 0;
+	}
+};
+
+// The demo round's bug 12: CP10 at 11:00, its fog ending 325 m off, framed from 400 m was the fog's
+// colour alone. The settled fog level (held within 1000, as the mission's start holds it), the reach a
+// framing stands within (half the fog's end, under the header's override; none with no .env), and a
+// framing of the rig's mission whose .env fogs at 60 m standing within 30 m.
+static int test_fog_reach() {
+	TEST_EXPECT(near(mission_settled_fog_level(1500.0f), 1000.0) && near(mission_settled_fog_level(325.0f), 325.0));
+	NamedFiles files;
+	MissionSceneHeader header;
+	header.environment = "fogged";
+	TEST_EXPECT(mission_fog_reach(files, header) == 0.0f);
+	files.files.push_back({ "fogged.env", "fog_level 600\nfog_type 1\n" });
+	TEST_EXPECT(near(mission_fog_reach(files, header), 300.0));
+	files.files[0].second = "fog_level 1500\nfog_type 1\n";
+	TEST_EXPECT(near(mission_fog_reach(files, header), 500.0));
+	header.attrib_flags = 0x2;
+	header.fog_override = 325;
+	TEST_EXPECT(near(mission_fog_reach(files, header), 162.5));
+	header.environment.clear();
+	TEST_EXPECT(mission_fog_reach(files, header) == 0.0f);
+
+	Rig plain("opennova_editor_mission_viewport_fog_plain");
+	TEST_EXPECT(plain.open());
+	const std::string environment = plain.viewport()->scene().header().environment;
+	TEST_EXPECT(!environment.empty());
+	const float wide = plain.viewport()->camera().distance;
+	TEST_EXPECT(wide > 30.0f);
+	Rig rig("opennova_editor_mission_viewport_fog");
+	TEST_EXPECT(rig.open(false));
+	const std::string root = rig.session.view().project.root;
+	TEST_EXPECT(editor_test::write_text(root + "/" + environment + ".env", "fog_level 60\nfog_type 1\n"));
+	rig.session.handle(request::rescan());
+	rig.session.run_operations();
+	rig.session.handle(request::open_document(kMission));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.path = rig.session.document_for(kMission)->path();
+	rig.devices.sync(rig.session);
+	TEST_EXPECT(rig.viewport()->camera().distance <= 30.0f + 1e-3f);
+	std::printf("test_fog_reach passed\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	TEST_EXPECT(test_kind_row() == 0);
@@ -1530,6 +1589,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_rebuild_held_for_a_gesture() == 0);
 	TEST_EXPECT(test_files() == 0);
 	TEST_EXPECT(test_camera_frame() == 0);
+	TEST_EXPECT(test_fog_reach() == 0);
 	TEST_EXPECT(test_hit_and_box() == 0);
 	TEST_EXPECT(test_sphere_picking() == 0);
 	TEST_EXPECT(test_envelope() == 0);
