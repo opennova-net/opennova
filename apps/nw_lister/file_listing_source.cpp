@@ -29,7 +29,8 @@ bool FileListingSource::start(int &exit_code) {
 	if (!options_.admin_host.empty()) {
 		net::Endpoint server;
 		server.port = options_.admin_port;
-		if (!resolve_destination(options_.admin_host, server, options_.allow_public, "admin server")) {
+		if (!resolve_destination(options_.admin_host, server, DestinationPolicy::LoopbackOnly, options_.allow_public,
+		                         "admin server")) {
 			exit_code = kExitNetwork;
 			return false;
 		}

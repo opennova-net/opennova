@@ -62,12 +62,11 @@ struct ServeOptions {
 	// mplanserverportmin, or mpnovaworldportmin on the NovaWorld network type).
 	uint16_t port = 0;
 	bool log_debug = false;   // --log-debug
-	// NovaWorld listing (ADR 0051 d6), in opennova-nw-lister's spellings. The network type is
-	// game.cfg's `networkconnecttype` (1, NovaWorld, by default), as retail's dead auto-host
-	// takes it; a gate host on the command line lists whatever the cfg says. The gate host
-	// defaults to this machine: until --allow-public every NovaWorld destination must be on
-	// 127.0.0.0/8, so NovaLogic's live master is never reached by default.
-	std::string master_host;                       // --master-host (empty: 127.0.0.1, cfg-driven)
+	// NovaWorld listing (ADR 0051 d6), in opennova-nw-lister's spellings. With a gate host the
+	// network type is game.cfg's `networkconnecttype` (1, NovaWorld, by default), as retail's
+	// dead auto-host takes it; without one the server serves LAN (D-NET-358). Loopback and any
+	// host off NovaLogic's domain are reachable by default; novaworld.net needs --allow-public.
+	std::string master_host;                       // --master-host (empty: LAN)
 	uint16_t master_gate_port = GATE_DEFAULT_PORT; // --master-gate-port
 	bool allow_public = false;                     // --allow-public
 	std::string credentials_path;                  // --credentials FILE
@@ -132,7 +131,8 @@ public:
 	const std::vector<mission_catalog::Row> &catalog() const { return catalog_; }
 	mission::MissionKernel &kernel() { return *kernel_; }
 	inmatch::HostRole &role() { return *role_; }
-	// True when the session runs on the NovaWorld network type (it is listed).
+	// True when the session runs on the NovaWorld network type (it is listed): a gate host was
+	// given and game.cfg's networkconnecttype is 1.
 	bool novaworld() const { return novaworld_; }
 	// The NovaWorld listing's lister (null when not listing).
 	nw_lister::Lister *lister() { return lister_.get(); }

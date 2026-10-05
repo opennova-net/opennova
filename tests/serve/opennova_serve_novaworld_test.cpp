@@ -1,11 +1,10 @@
 // opennova-serve listed on NovaWorld (ADR 0051 d6), with no retail data and
 // nothing off loopback: the real apps/novaworld_server NwUdpListener and an
 // in-test gate, and the loose game directory of the LAN test plus a
-// gametext.bin. No game.cfg: the default network type (1) lists the server on
-// the gate on this machine. The server binds its one socket from the NovaWorld
-// range, hosts on the gate's NovaWorld session BEFORE the mission boots, then
-// boots and serves. The service lists
-// it with the witnessed Serve Only columns (Dedicated = STRNOVA11, MaxPlayers
+// gametext.bin. No game.cfg, and --master-host names the gate on this machine:
+// the default network type (1) lists the server there. The server binds its one
+// socket from the NovaWorld range, hosts on the gate's NovaWorld session BEFORE
+// the mission boots, then boots and serves. The service lists it with the witnessed Serve Only columns (Dedicated = STRNOVA11, MaxPlayers
 // without the dedicated slot, Players without the host, Port "-1", no slot 0)
 // at the endpoint it observed, which is the game socket (D-NET-346); a LAN
 // probe on that socket is answered; a joiner dialing the advertised endpoint
@@ -107,7 +106,8 @@ int main() {
 		std::string parse_error;
 		CHECK(serve::parse_serve_options(
 				{"--resource-dir", dir.string(), "/HOST", (dir / "test.host").string(), "--loose-root",
-						"--lan-port", std::to_string(serve_test::free_udp_port()), "--master-gate-port",
+						"--lan-port", std::to_string(serve_test::free_udp_port()), "--master-host", "127.0.0.1",
+						"--master-gate-port",
 						std::to_string(gate_port)},
 				options, parse_error) == 0);
 		holder = std::make_unique<serve::Server>(options);

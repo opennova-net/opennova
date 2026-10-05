@@ -100,7 +100,8 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
 	          env.random_u32 = [this]() { return static_cast<uint32_t>(rng_()); };
 	          env.resolve_ipv4 = [this](const std::string &host, PeerAddr &out) {
 		          net::Endpoint endpoint;
-		          if (!resolve_destination(host, endpoint, options_.allow_public, "NovaWorld host")) return false;
+		          if (!resolve_destination(host, endpoint, options_.destinations, options_.allow_public, "NovaWorld host"))
+			          return false;
 		          out.ip = net::NetDatagramSocket::to_peer(endpoint).ip;
 		          return true;
 	          };
@@ -148,17 +149,19 @@ bool Lister::start() {
 		return false;
 	}
 	gate_raw_ = std::make_unique<net::NetDatagramSocket>(gate_udp_.get());
-	gate_socket_ = std::make_unique<PolicySocket>(*gate_raw_, options_.allow_public);
+	gate_socket_ = std::make_unique<PolicySocket>(*gate_raw_, options_.destinations, options_.allow_public);
 	IDatagramSocket *session = shared_session_socket_;
 	if (session == nullptr) {
 		session_raw_ = std::make_unique<net::NetDatagramSocket>(session_udp_.get());
 		session = session_raw_.get();
 	}
-	session_socket_ = std::make_unique<PolicySocket>(*session, options_.allow_public);
+	session_socket_ = std::make_unique<PolicySocket>(*session, options_.destinations, options_.allow_public);
 	lobby_.open(*gate_socket_, *session_socket_);
 	lobby_.probe(options_.master_host, options_.master_gate_port);
 	io::logf(LogLevel::kInfo, "[gate] probing %s:%u (%s)", options_.master_host.c_str(), options_.master_gate_port,
-	         options_.allow_public ? "public destinations allowed" : "loopback only");
+	         options_.allow_public                                          ? "public destinations allowed"
+	         : options_.destinations == DestinationPolicy::NovaLogicGated ? "NovaLogic's NovaWorld refused"
+	                                                                        : "loopback only");
 	return true;
 }
 
@@ -278,11 +281,12 @@ void Lister::ship(const HttpRequestSpec &spec) {
 		if (const std::string *value = flow_.cookies().find(tag)) add_log_secret(*value);
 	}
 	const bool allow_public = options_.allow_public;
+	const DestinationPolicy destinations = options_.destinations;
 	io::logf(LogLevel::kDebug, "[http] %s %s", spec.method == HttpMethod::Post ? "POST" : "GET", spec.url.c_str());
-	http_ = std::async(std::launch::async, [spec, allow_public]() {
+	http_ = std::async(std::launch::async, [spec, allow_public, destinations]() {
 		return net::http_exchange(spec.method == HttpMethod::Post, spec.url, spec.headers, spec.body, kHttpTimeoutMs,
-		                          [allow_public](const std::string &host, net::Endpoint &out) {
-			                          return resolve_destination(host, out, allow_public, "web host");
+		                          [allow_public, destinations](const std::string &host, net::Endpoint &out) {
+			                          return resolve_destination(host, out, destinations, allow_public, "web host");
 		                          });
 	});
 }

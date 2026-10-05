@@ -3,6 +3,7 @@
 #include "admin_feed.h"
 #include "listing.h"
 #include "listing_source.h"
+#include "policy.h"
 
 #include "net_datagram_socket.h"
 #include "net_http.h"
@@ -28,8 +29,10 @@ struct ListerOptions {
 	std::string listing_path;
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;
-	// Until set, every destination must be on 127.0.0.0/8 and names do not resolve.
+	// Until set, the destination policy holds: opennova-nw-lister's LoopbackOnly (every destination
+	// on 127.0.0.0/8, names unresolved), or an embedder's (policy.h).
 	bool allow_public = false;
+	DestinationPolicy destinations = DestinationPolicy::LoopbackOnly;
 	// With an account, the host leg logs in and fetches the HOSTKEY first, as the game's menu does.
 	Credentials credentials;
 	std::string admin_host; // empty: the listing file alone

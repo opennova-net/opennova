@@ -3694,17 +3694,10 @@ add_test(NAME opennova_serve_lan_join COMMAND opennova_serve_test)
 # opennova-serve's files in its working directory (ADR 0051 d2): game.cfg read under the host
 # file and rewritten as Serve Only, activesrvr.txt while serving and gone after a clean stop, the
 # no-game.cfg defaults, and mpreset's stop. Each run in a temp working directory.
-# The no-game.cfg run lists on NovaWorld (the default network type), against the real
-# NwUdpListener and an in-test gate on loopback.
-add_executable(opennova_serve_game_cfg_test
-    serve/opennova_serve_game_cfg_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
-target_link_libraries(opennova_serve_game_cfg_test PRIVATE opennova_serve_core opennova_novaworld_service)
-target_include_directories(opennova_serve_game_cfg_test
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_executable(opennova_serve_game_cfg_test serve/opennova_serve_game_cfg_test.cpp)
+target_link_libraries(opennova_serve_game_cfg_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_game_cfg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_game_cfg COMMAND opennova_serve_game_cfg_test)
-set_tests_properties(opennova_serve_game_cfg PROPERTIES RUN_SERIAL TRUE)
 # opennova-serve listed on NovaWorld (ADR 0051 d6) against the real NwUdpListener and an in-test
 # gate over loopback: it hosts on the game socket before the boot, lists the Serve Only columns
 # with no slot 0, the advertised endpoint is the game socket a joiner plays on, and the stop
@@ -3749,6 +3742,11 @@ add_executable(nw_lister_admin_feed_test novaworld/nw_lister_admin_feed_test.cpp
 target_link_libraries(nw_lister_admin_feed_test PRIVATE opennova_nw_lister_core)
 target_include_directories(nw_lister_admin_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/admin)
 add_test(NAME nw_lister_admin_feed COMMAND nw_lister_admin_feed_test)
+# The destination policies: nw-lister's loopback-only, and opennova-serve's loopback and any host
+# off NovaLogic's domain, novaworld.net behind --allow-public (ADR 0051 d6).
+add_executable(nw_lister_destination_policy_test novaworld/nw_lister_destination_policy_test.cpp)
+target_link_libraries(nw_lister_destination_policy_test PRIVATE opennova_nw_lister_core)
+add_test(NAME nw_lister_destination_policy COMMAND nw_lister_destination_policy_test)
 
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)

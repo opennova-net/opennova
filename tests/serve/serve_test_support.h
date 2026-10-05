@@ -4,7 +4,6 @@
 // and activesrvr.txt in the process's working directory, ADR 0051 d2).
 #pragma once
 
-#include <formats/gamecfg/game_cfg.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/rtxt/rtxt.h>
@@ -129,16 +128,6 @@ inline fs::path fresh_dir(const std::string &tag) {
 					std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 	fs::create_directories(dir);
 	return dir;
-}
-
-// A game.cfg in the working directory that serves LAN only: the defaults with
-// the LAN screen's network type, 2 (the default, 1, lists on NovaWorld)
-// [orig: UI_InitLANMultiplayerScreen @0x5569E1].
-inline bool write_lan_game_cfg() {
-	opennova::gamecfg::GameCfg cfg = opennova::gamecfg::defaults();
-	cfg.networkconnecttype = 2;
-	std::string error;
-	return opennova::gamecfg::save_file(opennova::gamecfg::kFileName, cfg, {}, error);
 }
 
 // The process's working directory moved for a scope and restored after it.

@@ -54,9 +54,6 @@ int main() {
 	const fs::path dir = serve_test::fresh_dir("lan_join");
 	const fs::path work = serve_test::fresh_dir("lan_join_cwd");
 	serve_test::ScopedCwd cwd(work);
-	// A LAN server: the LAN screen's network type (a stock game.cfg's 1 lists
-	// on NovaWorld, opennova_serve_novaworld's case).
-	CHECK(serve_test::write_lan_game_cfg());
 	CHECK(write_bytes(dir / "SERVETST.BMS", deathmatch_mission()));
 	CHECK(write_bytes(dir / "SERVETS2.BMS", deathmatch_mission("Serve Test Map Two")));
 	// A loose score.ini with a deathmatch row that is not the default table:

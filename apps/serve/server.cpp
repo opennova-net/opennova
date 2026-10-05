@@ -43,16 +43,17 @@ const char kUsage[] =
 		"                   the head of the retail LAN server range; mpnovaworldportmin when\n"
 		"                   listing on NovaWorld)\n"
 		"  --log-debug      print the engine's debug log lines\n"
-		"  --master-host    the NovaWorld gate to list on (default 127.0.0.1, an\n"
-		"                   opennova-novaworld-server on this machine). game.cfg's\n"
+		"  --master-host    the NovaWorld gate to list on (127.0.0.1 for an\n"
+		"                   opennova-novaworld-server on this machine). With it, game.cfg's\n"
 		"                   networkconnecttype picks the network: 1 (the default) lists on\n"
-		"                   NovaWorld, 2 serves LAN only; --master-host lists either way\n"
+		"                   NovaWorld, 2 serves LAN only. Without it the server serves LAN\n"
 		"  --master-gate-port  the gate's UDP port (default: the NovaWorld gate port)\n"
 		"  --credentials    KEY=VALUE file: NOVAWORLD_USER / NOVAWORLD_PASS, the account the\n"
 		"                   listing logs in with for its HOSTKEY (none: no HOSTKEY, which an\n"
 		"                   opennova-novaworld-server accepts)\n"
-		"  --allow-public   allow NovaWorld destinations off 127.0.0.0/8 (a remote service; a\n"
-		"                   live master is a shared service, so use it sparingly)\n"
+		"  --allow-public   allow NovaLogic's NovaWorld (novaworld.net and its hosts), a live\n"
+		"                   shared service: use it sparingly. Loopback and any other host are\n"
+		"                   allowed without it\n"
 		"The server reads and writes game.cfg in the directory it runs from (the process's\n"
 		"working directory, as retail), with the host file's settings over it, and marks\n"
 		"itself running there with activesrvr.txt, which a clean exit deletes.\n";
@@ -88,7 +89,7 @@ std::string listing_failure(int code) {
 			: code == nw_lister::kExitStoppedByService ? "the NovaWorld service stopped the hosting"
 			: "the NovaWorld session, the login, the HOSTKEY or the host request failed";
 	return std::string("the NovaWorld listing did not host: ") + what +
-			" (game.cfg networkconnecttype = 2 serves LAN only)";
+			" (game.cfg networkconnecttype = 2 serves LAN only, as does a start without --master-host)";
 }
 
 } // namespace
@@ -287,8 +288,9 @@ bool Server::read_config_over_weapons(std::string &error) {
 // one), 1 by default [orig: SetNetworkType(networkConnectType_480)
 // @0x4A6609..0x4A6614; UI_InitLANMultiplayerScreen @0x5569E1 (2), @0x556AA0
 // (1); Config_SetDefaults @0x54D050 / @0x54D1D4 (1); Config_ParseSettingsLine
-// `networkconnecttype` @0x550CA1..0x550CC4]; a gate host on the command line
-// lists whatever the cfg says.
+// `networkconnecttype` @0x550CA1..0x550CC4]. Without a gate host on the command
+// line the server serves LAN whatever the cfg says, where retail's default would
+// host on NovaLogic's gs.novaworld.net (D-NET-358, ADR 0051 d6).
 bool Server::read_host_file(std::string &error) {
 	std::ifstream in(options_.host_file, std::ios::binary);
 	if (!in) {
@@ -309,7 +311,10 @@ bool Server::read_host_file(std::string &error) {
 	cfg_.dedicated = 1;
 	(void)save_config();
 	host_ = inmatch::host_session_settings(cfg_);
-	novaworld_ = !options_.master_host.empty() || cfg_.networkconnecttype == 1;
+	novaworld_ = !options_.master_host.empty() && cfg_.networkconnecttype == 1;
+	if (options_.master_host.empty() && cfg_.networkconnecttype == 1)
+		io::logf(io::LogLevel::kInfo,
+				"opennova-serve: serving LAN; NovaWorld listing needs --master-host <gate>");
 	if (rotation_.list.current() == nullptr) {
 		error = "the host file names no mission the catalog lists";
 		return false;
@@ -532,9 +537,11 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	demux_->set_game_attached(false);
 	listing_ = std::make_unique<ServeListing>(listing_columns());
 	nw_lister::ListerOptions lister_options;
-	lister_options.master_host = options_.master_host.empty() ? std::string("127.0.0.1") : options_.master_host;
+	lister_options.master_host = options_.master_host;
 	lister_options.master_gate_port = options_.master_gate_port;
 	lister_options.allow_public = options_.allow_public;
+	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.
+	lister_options.destinations = nw_lister::DestinationPolicy::NovaLogicGated;
 	lister_options.credentials = options_.credentials;
 	lister_ = std::make_unique<nw_lister::Lister>(lister_options, *listing_, &demux_->session());
 	const NwuLobbySession &lobby = lister_->lobby();
