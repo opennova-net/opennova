@@ -14,4 +14,19 @@ begin "Wooden supply crate"
 	armor 10 10
 end
 
+begin "Insertion point"
+	id 106094
+	type marker
+end
+
+begin "Wooden barrel"
+	graphic onbarl1
+	ai_function gnrl
+	move_function genx
+	id 100011
+	hp 100
+	type decoration
+	armor 10 10
+end
+
 

@@ -17,7 +17,8 @@ The stencil marks are our own text in Blender's built-in font.
 | `Metal021` (1K JPG: Color, Metalness, NormalGL, Roughness) | [ambientCG](https://ambientcg.com/view?id=Metal021) | ambientCG (Lennart Demes) | CC0 1.0 | Corner caps, bolts, nails |
 | `Rope002` (1K JPG: Color, NormalGL, Roughness) | [ambientCG](https://ambientcg.com/view?id=Rope002) | ambientCG (Lennart Demes) | CC0 1.0 | Rope handles |
 
-The source maps sit under `textures/src/` as downloaded (2026-10-05). They are
+The source maps are shared by every model and sit under
+`art/onjo1/materials/ambientcg/` as downloaded (2026-10-05). They are
 regraded in the materials (`crate_wood`, `crate_steel`, `crate_rope`) toward the
 original game's muted grey-brown, with per-board variation, edge wear, crevice
 darkening and dirt at the base made in the node trees.
