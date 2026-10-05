@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <base/crt/crt_rng.h>
 #include <runtime/terrain_query/height_field.h>
@@ -348,8 +349,7 @@ bool runs_tree_death_body(const World &world, const Entity &target) {
 // so a victim at the exact antipode (delta 0x80000000, whose abs stays
 // INT_MIN) passes even the narrowest cone, and a negative half-angle rejects
 // every other bearing.
-bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_target) {
-    if (cone_half_bam == 0) return true;
+bool cone_compare(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_target) {
     const int64_t scaled = static_cast<int64_t>(
             std::atan2(static_cast<double>(to_target.y), static_cast<double>(to_target.x)) *
             io::kBamPerRadian);
@@ -360,6 +360,25 @@ bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_ta
             (static_cast<uint32_t>(diff) ^ static_cast<uint32_t>(sign)) -
             static_cast<uint32_t>(sign));
     return !(abs_diff > cone_half_bam);
+}
+
+// The gate every type but the knife runs: a zero half-angle passes every
+// bearing [orig: pool 0 `cmp [esp+0C0h+var_98], 0; jz` @0x4EAFD2..0x4EAFD7].
+bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_target) {
+    if (cone_half_bam == 0) return true;
+    return cone_compare(e, cone_half_bam, to_target);
+}
+
+// The fixed-point length of a victim's offset: the fixed deltas' length,
+// capped at 2147418112.0 and truncated [orig: pool 0 @0x4EAF66..0x4EAF97,
+// flt_7C19E0, _ftol2_sse].
+int32_t fixed_distance(const Vec3 &a, const Vec3 &b) {
+    const double dx = double(int32_t(uint32_t(to_fixed(a.x)) - uint32_t(to_fixed(b.x))));
+    const double dy = double(int32_t(uint32_t(to_fixed(a.y)) - uint32_t(to_fixed(b.y))));
+    const double dz = double(int32_t(uint32_t(to_fixed(a.z)) - uint32_t(to_fixed(b.z))));
+    double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (dist > 2147418112.0) dist = 2147418112.0;
+    return io::retail_ftol_sse2(dist);
 }
 
 // Shared health drain for a non-organic victim + the item death notify. It
@@ -871,7 +890,21 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 const float dist = vec_len(d);
                 if (dist > reach) continue;
                 if (t->health <= 0 && (t->engine_flags & kEntityFlagDead) != 0) continue;
-                if (!cone_gate(e, cone_half, d)) continue;
+                // The knife's zone (kztype 1, rounds_kz_Knife) skips the cone in
+                // a session for a victim within its kz_minradius, and otherwise
+                // runs the compare even at a zero half-angle; every other type
+                // passes a zero half-angle unasked. Pools 1 and 2 have no knife
+                // leg. [orig: `cmp ebp, 1` @0x4EAFB8, is_in_session @0x4EAFBD,
+                // the fixed distance against [ammo+34h] (kz_minradius)
+                // @0x4EAFC6..0x4EAFCE, `jmp loc_4EAFD9` @0x4EAFD0; kztype table
+                // @0x8133E0]
+                if (e.type == ammo_kz::kKnife) {
+                    const bool within = world.rules.mp_session &&
+                            fixed_distance(t->position, e.pos) <= to_fixed(ammo->kz_minradius);
+                    if (!within && !cone_compare(e, cone_half, d)) continue;
+                } else if (!cone_gate(e, cone_half, d)) {
+                    continue;
+                }
                 float surface = dist - bound;
                 if (surface < 0.0f) surface = 0.0f;
                 // The OUTER-BAND flinch, ahead of the blast-radius cut: an

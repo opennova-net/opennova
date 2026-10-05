@@ -4189,6 +4189,64 @@ void test_knife_kill_zone() {
     CHECK(w.registry.get(item)->health == 120);
 }
 
+// The knife's zone gates its cone apart from every other type's: in a session
+// a victim within the ammo's kz_minradius takes the cut off the cone, and
+// otherwise the compare runs even at a zero half-angle, which admits only the
+// exact bearing. [orig: Projectile_ProcessExplosionQueue pool 0 — `cmp ebp, 1`
+// @0x4EAFB8, is_in_session @0x4EAFBD, the fixed distance against [ammo+34h]
+// @0x4EAFC6..0x4EAFCE, `jmp loc_4EAFD9` @0x4EAFD0; the others' zero test
+// @0x4EAFD2..0x4EAFD7]
+void test_knife_cone_session_and_zero_half_angle() {
+    auto victim_health = [](bool session, int32_t half_bam, Vec3 at) {
+        auto storage = std::make_unique<World>();
+        World &w = *storage;
+        w.rules.mp_session = session;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 2);
+        w.tables.ammo.entries.resize(2);
+        AmmoTableEntry &knife = w.tables.ammo.entries[1];
+        knife.name = "KNIFE";
+        knife.valid = true;
+        knife.kztype = ammo_kz::kKnife;
+        knife.kz_damage = 150;
+        knife.kz_minradius = 1.0f;
+        knife.kz_maxradius = 1.5f;
+        knife.kz_pieslice_bam = half_bam;
+        Entity attacker_seed;
+        attacker_seed.kind = EntityKind::Organic;
+        attacker_seed.has_item_def = true;
+        attacker_seed.item_type = 3;
+        attacker_seed.health = 100;
+        attacker_seed.bound_radius = 0.6f;
+        attacker_seed.team = 1;
+        attacker_seed.position = Vec3{0.0f, -50.0f, 0.0f};
+        const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
+        Entity victim_seed = attacker_seed;
+        victim_seed.team = 2;
+        victim_seed.position = at;
+        const EntityHandle victim = w.registry.spawn(0, victim_seed);
+        ExplosionEntry e;
+        e.pos = Vec3{};
+        e.dir_bam = 0;
+        e.type = ammo_kz::kKnife;
+        e.ammo_index = 1;
+        e.owner = attacker;
+        run_blast(w, e);
+        return w.registry.get(victim)->health;
+    };
+    const int32_t half = static_cast<int32_t>(17.5 * kBamPerDegree);
+    const Vec3 side{0.0f, 0.8f, 0.0f};  // 0.8 u off, 90 degrees off the swing
+    CHECK(victim_health(true, half, side) == -50);
+    CHECK(victim_health(false, half, side) == 100);
+    // Past kz_minradius the session leg runs the cone too.
+    CHECK(victim_health(true, half, Vec3{0.0f, 1.2f, 0.0f}) == 100);
+    // A zero half-angle admits the exact bearing only.
+    const Vec3 ahead{0.8f, 0.0f, 0.0f};
+    const Vec3 slant{0.8f, 0.1f, 0.0f};
+    CHECK(victim_health(false, 0, ahead) == -50);
+    CHECK(victim_health(false, 0, slant) == 100);
+}
+
 // The kind-3 (medic kit) kill zone: per same-team person in radius other than
 // the medic, a dead one not already being revived queues a revive and a live
 // one below its def hp queues a heal, in sweep order; a full-health teammate
@@ -4259,6 +4317,7 @@ int main() {
     test_dead_unattributed_source_credits_no_one();
     test_session_peer_without_authority_applies_no_blast();
     test_knife_kill_zone();
+    test_knife_cone_session_and_zero_half_angle();
     test_player_blast_and_knife_run_the_waypoint_tail();
     test_blast_breaks_flagged_sections_at_transformed_box_centers();
     test_mounted_blast_protection_follows_seat_type();
