@@ -207,6 +207,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirements.cpp
     # run — the Play launch plan, the run directory the game runs in, and the one managed child
     # over the platform seam
+    ${CMAKE_CURRENT_SOURCE_DIR}/run/behind_start.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/launch_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_lease.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
@@ -238,6 +239,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_confirmation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_fixes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problems_service.cpp
@@ -258,9 +260,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_use_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/unsaved_guard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/workspace_parts.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
-    # the documents, the findings, the activity, the dialogs), the events a request posts, and
-    # the findings by file and record
+    # the documents, the findings, the activity, the dialogs, the workspace's own), the events a
+    # request posts, and the findings by file and record
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/activity_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/dialogs_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/findings_index.cpp
@@ -268,6 +271,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/session_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/view_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/viewport_kind.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/workspace_view.cpp
 )
 
 # ui — the Dear ImGui windows on the engine's ImGui pass (ADR 0046 d11). Built when the

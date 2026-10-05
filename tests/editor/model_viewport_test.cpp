@@ -1160,6 +1160,16 @@ static int test_clip_preview() {
 	TEST_EXPECT(clip_row && out.raised.size() == 1 && out.raised[0].kind == EditorRequestKind::SelectRecord &&
 	            out.raised[0].path == "anims/bend.bad" &&
 	            out.raised[0].address == NodeAddress({clip_row->id, node_kind(AnimationKind::Bone), clip_row->collections[0][1]}));
+	// The wire's click (the command "click": ViewportModel::click drives the canvas itself) makes the same request
+	// there, the bone in the clip; a Shift or a Ctrl click is none of the model canvas's, refused (review X6).
+	{
+		RecordedRequests clicked, added;
+		std::string click_error;
+		TEST_EXPECT(bend->click(context, jx, jy, SelectMode::Replace, clicked, click_error) && clicked.raised.size() == 1 &&
+		            out.raised.size() == 1 && clicked.raised[0] == out.raised[0]);
+		TEST_EXPECT(!bend->click(context, jx, jy, SelectMode::Add, added, click_error) && added.raised.empty() &&
+		            click_error.find("replaces the selection") != std::string::npos);
+	}
 
 	// From the model to its animations: the maps the items pairing it play; an item by its name.
 	session.handle(request::open_document("models/skinned.3di"));

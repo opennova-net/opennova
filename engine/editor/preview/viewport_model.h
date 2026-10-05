@@ -213,8 +213,22 @@ public:
 	// A command whole (session/editor_request.h's ViewportCommand: its name and records, and what it
 	// takes beside them, ADR 0046 S15: `by` a way, `at` a point of the picture), planned into requests:
 	// by default the command of its name over its records, refusing a `by` or an `at` the kind does not
-	// read (a mission's duplicate reads `by`, its paste `at`).
+	// read (a mission's duplicate reads `by`, its paste `at`); "click" (the MCP gaps lane) at its `at`,
+	// joined as its `mode` says, is click's, whatever the kind.
 	virtual bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const;
+	// A click of the picture at (x, y) in its units (the MCP gaps lane), planned by the kind's own canvas
+	// (make_canvas): a press and a release there with no drag between, Shift held for an Add and Ctrl for a
+	// Toggle, and what the canvas raises of it is the click's, whatever it is (a selection; under a mission's
+	// Place or Path tool a placement, under its Area tool nothing; a tap on a handle nothing; a model's joint
+	// its bone in the clip). False, with why, as click_frame refuses it.
+	bool click(const ViewportContext &context, float x, float y, SelectMode mode, CanvasRequests &out,
+			std::string &error) const;
+	// Whether the kind's canvas takes a click asked now, joined as `mode` says, and the picture's size its
+	// canvas reads the click's point in (the click's units: a menu's design pixels, a mission's or a model's
+	// picture). False, with why: a kind whose canvas makes no click to ask (the default), a picture that is
+	// not its document's own now, a join its canvas does not make (a model's has no Shift or Ctrl click).
+	virtual bool click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
 			std::string &error) const;
 	// A drop on the picture (S14, EditInViewport: session/editor_request.h's ViewportDrop: a project
 	// file or a reference kind's name let go at a point of it) planned into requests: what it makes
@@ -330,8 +344,12 @@ protected:
 	// The kind's members checked (false, with `error`, for one it refuses), then applied.
 	virtual bool check_(const io::JsonValue &json, std::string &error) const = 0;
 	virtual void apply_(const io::JsonValue &json, PreviewClock &clock) = 0;
-	// The device's report, the kind's part of it.
-	virtual void report_(const ViewportDeviceReport &report) { (void)report; }
+	// The device's report, the kind's part of it: true when it moved what the viewport says of itself (a script's
+	// assist closed on the device).
+	virtual bool report_(const ViewportDeviceReport &report) {
+		(void)report;
+		return false;
+	}
 	// The document state the picture shows from now on.
 	void shown(const DocumentBase &document);
 	void shown_none();

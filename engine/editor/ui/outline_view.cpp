@@ -185,6 +185,40 @@ void OutlineView::filter_box(const char *hint, float width, const char *tip) {
 	model_.set_filter(filter_);
 }
 
+OutlineView::Shown OutlineView::shown() const {
+	return Shown{ model_.filter(), model_.kinds(), model_.all_rows(), model_.sort(), model_.every() };
+}
+
+void OutlineView::follow_workspace(const SessionView &view, const Document &document) {
+	const WorkspaceView::DocumentView &held = view.workspace.document(document.path());
+	if (!held_.follow(Shown{ held.filter, held.kinds, held.all_rows, held.sort, held.every })) return;
+	model_.set_filter(held.filter);
+	model_.set_kinds(held.kinds);
+	model_.set_all_rows(held.all_rows);
+	model_.set_sort(held.sort);
+	model_.set_every(held.every);
+}
+
+void OutlineView::send_workspace(Workspace &workspace, const Document &document, const Shown &before) {
+	const Shown now = shown();
+	if (now == before) return;
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("path", io::JsonValue::make_string(document.path()));
+	if (now.filter != before.filter) members.set("filter", io::JsonValue::make_string(now.filter));
+	if (now.kinds != before.kinds) {
+		// By the kinds' tokens, in the document's kinds() order (the model's bits).
+		io::JsonValue kinds = io::JsonValue::make_array();
+		const std::vector<RecordKindRow> &rows = document.kinds();
+		for (size_t i = 0; i < rows.size() && i < 64; ++i)
+			if (now.kinds & (uint64_t(1) << i)) kinds.push(io::JsonValue::make_string(rows[i].token));
+		members.set("kinds", std::move(kinds));
+	}
+	if (now.all_rows != before.all_rows) members.set("all_rows", io::JsonValue::make_bool(now.all_rows));
+	if (now.sort != before.sort) members.set("sort", io::JsonValue::make_bool(now.sort));
+	if (now.every != before.every) members.set("every", io::JsonValue::make_bool(now.every));
+	window_requests::set_workspace(workspace, "document", std::move(members));
+}
+
 void OutlineView::draw(Workspace &workspace, const DocumentBase &base) {
 	// A RevealRecord taken: the selection shown again, where it was already too.
 	for (const ViewEvent &event : take_events()) {
@@ -193,6 +227,8 @@ void OutlineView::draw(Workspace &workspace, const DocumentBase &base) {
 	}
 	const Document *document = records_of(base);
 	if (!document) return ui_kit::empty_state("This file holds no records to list.");
+	follow_workspace(workspace.view(), *document);
+	const Shown before = shown();
 	reveal_.follow(workspace.view(), *document);
 	draw_document_toolbar(workspace, *document);
 	switch (spec_.mode) {
@@ -200,6 +236,7 @@ void OutlineView::draw(Workspace &workspace, const DocumentBase &base) {
 	case OutlineMode::Tree: draw_tree(workspace, *document); break;
 	case OutlineMode::MasterDetail: draw_master_detail(workspace, *document); break;
 	}
+	send_workspace(workspace, *document, before);
 }
 
 // The kinds of row the outline lists (OutlineSpec::by_kind): a chip per kind of row the file holds,

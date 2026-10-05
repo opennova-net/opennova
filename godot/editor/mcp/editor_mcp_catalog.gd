@@ -125,8 +125,12 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 			+ "while; a build running already is joined); refused while required files are missing; with "
 			+ "unsaved documents it waits on the unsaved-changes prompt (editor_request resolve_unsaved save "
 			+ "writes them and builds). Returns the build (ok, dir, archives, diagnostics) with the operation it "
-			+ "waited on (id, end, findings).",
-			{}, [], true, BUILD_TIMEOUT_MS),
+			+ "waited on (id, end, findings). With report false, the build result's panel stays closed as it ends "
+			+ "(the person's work left as it is).",
+			{
+				"report": {"type": "boolean", "description": "The build result's panel opens over the editor as "
+						+ "the build ends (true when left out)."},
+			}, [], true, BUILD_TIMEOUT_MS),
 		McpToolDef.make("editor_play",
 			"op=start: build, waiting as editor_build does, then run the game on the build (the runtime beside "
 			+ "the editor, or this Godot binary in a source run) with its own MCP endpoint, its port allocated as "
@@ -134,11 +138,14 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 			+ "game_probe on that port drive it, mission, exit_code). With mission (op=start), a .bms of the "
 			+ "project by its logical name, the game starts in that mission instead of at its menu (one the "
 			+ "project does not hold is refused, play.mission.unknown; one that does not load is a "
-			+ "play.mission.failed Problems row). op=stop ends the game and waits; op=state reads the run "
-			+ "section.",
+			+ "play.mission.failed Problems row). With behind (op=start; Windows only), the game's window starts "
+			+ "behind every other window, the editor keeping the foreground, until the person brings it forward "
+			+ "(the run section's behind). op=stop ends the game and waits; op=state reads the run section.",
 			{
 				"op": {"type": "string", "enum": PLAY_OPS},
 				"mission": {"type": "string", "description": "op=start: the mission the game starts in (04TR.bms)"},
+				"behind": {"type": "boolean", "description": "op=start: the game's window behind every other, the "
+						+ "editor keeping the foreground (Windows only; false when left out)"},
 			}, ["op"], true, BUILD_TIMEOUT_MS),
 		_viewport_tool(catalog),
 		McpToolDef.make("editor_screenshot",
@@ -249,6 +256,30 @@ static func edit_schema(catalog: Dictionary) -> Dictionary:
 	return {"type": "object", "properties": properties}
 
 
+## editor_request's `workspace` (set_workspace), made from the session's workspace table (the catalog's
+## workspace: engine/editor/session/workspace_parts.h, the MCP gaps lane): a property per part, each an object
+## of its members with their JSON types and docs, and focus, the windows it brings forward.
+static func workspace_schema(catalog: Dictionary) -> Dictionary:
+	var table: Dictionary = catalog.get("workspace", {})
+	var properties := {}
+	for row: Variant in table.get("parts", []):
+		var part: Dictionary = row
+		var members := {}
+		for item: Variant in part.get("members", []):
+			var member: Dictionary = item
+			var schema := _json_schema(String(member.get("type", "string")))
+			schema["description"] = String(member.get("doc", ""))
+			# The longest text its window's field holds: a longer one is refused.
+			if member.has("max_length") and String(schema.get("type", "")) == "string":
+				schema["maxLength"] = int(member.get("max_length", 0))
+			members[String(member.get("name", ""))] = schema
+		properties[String(part.get("part", ""))] = {"type": "object", "description": String(part.get("doc", "")),
+				"properties": members, "additionalProperties": false}
+	properties["focus"] = {"type": "string", "enum": table.get("focus", []),
+			"description": "A window brought forward (a focus_window view event), as a click on its tab brings it."}
+	return {"type": "object", "properties": properties, "additionalProperties": false}
+
+
 static func _json_schema(type: String) -> Dictionary:
 	match type:
 		"integer":
@@ -259,6 +290,8 @@ static func _json_schema(type: String) -> Dictionary:
 			return {"type": "boolean"}
 		"string[]":
 			return {"type": "array", "items": {"type": "string"}}
+		"integer[]":
+			return {"type": "array", "items": {"type": "integer", "minimum": 0}}
 		"object":
 			return {"type": "object"}
 		"object[]":
@@ -310,6 +343,8 @@ static func _request_tool(catalog: Dictionary) -> McpToolDef:
 		var schema: Dictionary
 		if name == "edits":
 			schema = {"type": "array", "items": edit_schema(catalog)}
+		elif name == "workspace":
+			schema = workspace_schema(catalog)
 		else:
 			schema = FIELD_SCHEMAS.get(name, _json_schema(String(field.get("type", "string")))).duplicate(true)
 		schema["description"] = String(field.get("doc", ""))

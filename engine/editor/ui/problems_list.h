@@ -10,6 +10,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/problem_confirmation.h>
 #include <editor/session/view/view_revisions.h>
 
 namespace opennova::editor {
@@ -70,12 +71,9 @@ public:
 		EditorRequestKind kind = EditorRequestKind::CreateMissing;
 		std::string label;
 	};
-	// What a confirmation says and what its Apply raises, and how many findings gave a fix.
-	struct Proposal {
-		std::vector<std::string> lines;
-		std::vector<EditorRequest> requests;
-		size_t findings = 0;
-	};
+	// What a confirmation says and what its Apply raises, and how many findings gave a fix: the session's
+	// proposal (session/problem_confirmation.h), which the wire's confirmation shows and applies too.
+	using Proposal = ConfirmationProposal;
 	// A control's press held until its release: a mouse click counts only when the release is
 	// on what the press was on (`id`: a fix of a finding, a confirmation's version), since the
 	// view can move between the two and put another under the mouse; an activation pressed and
@@ -156,9 +154,6 @@ public:
 	size_t fixes_asked() const;
 	// What a fix's control is known by for a press: its project, its finding's key, its request.
 	std::string fix_id(const SessionView &view, size_t finding, const ProblemFix &fix) const;
-	// Whether a fix waits in a confirmation before it acts (a Use fix renames a file and
-	// rewrites what names it); any other fix is raised as it is, its detail in its tooltip.
-	static bool asks_first(const ProblemFix &fix);
 	// The confirmations: a Fix all over findings (a group's), the summary's of one kind, a Use fix.
 	Confirmation fix_all_of(const SessionView &view, const std::vector<size_t> &findings) const;
 	Confirmation required_fix(const SessionView &view, EditorRequestKind kind) const;
@@ -188,10 +183,6 @@ public:
 	static std::string location_of(const Diagnostic &diagnostic, bool whole_path);
 	// "2 errors, 1 warning, 3 info": a group's counts, the zero ones left out.
 	static std::string severity_counts(size_t errors, size_t warnings, size_t infos);
-	// What a request of a Fix all does, in its confirmation's words.
-	static std::string describe(const SessionView &view, const EditorRequest &request);
-	// A Fix all's button in the summary: what it does and to how many files.
-	static std::string fix_all_label(const EditorRequest &request);
 
 private:
 	// The query, the caches of its answer and of the fixes, and the query refresh() last made
