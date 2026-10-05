@@ -235,8 +235,9 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	// A name alone cannot say what a new `.bin` is; the request's file_kind may name the kind.
 	const AssetKind kind = request.file_kind.empty() ? classify_asset(request.path, nullptr)
 	                                                 : asset_kind_from_token(request.file_kind);
-	// A required name gets its requirement's blank (main.mnu, the STARTUP screen); any
-	// other name the kind's free-form one (blank_factory.h). A kind with neither cannot
+	// A required name gets its requirement's blank (main.mnu, the STARTUP screen), the pointer's
+	// name the pointer; any other name the kind's free-form one (blank_factory.h:
+	// find_blank_factory). A kind with neither cannot
 	// be made; one the editor does not edit (a font) is made and not opened.
 	BlankRequest blank;
 	blank.logical_name = request.path;
@@ -251,8 +252,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		view_.activity.status = request.path + " was not created: see Problems.";
 		core_.touch(ViewConcern::Output);
 	};
-	const BlankFactory *factory = find_blank_factory_for_role(blank.role);
-	if (!factory) factory = find_blank_factory_for_kind(kind);
+	const BlankFactory *factory = find_blank_factory(blank.role, blank.logical_name, kind);
 	if (!factory) {
 		refuse(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "The editor cannot create this kind of file.", request.path));
 		return;
@@ -335,6 +335,37 @@ void DocumentSet::create_file(const EditorRequest &request) {
 					const std::string &reason = !message.empty() ? message : error.message;
 					core_.report(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Warning,
 					                          "The mission's text table " + table + " was not made" +
+					                                  (reason.empty() ? std::string(".") : ": " + reason),
+					                          request.path));
+				}
+			}
+		}
+		// A new menu comes with the pointer its windows name (blank_companion: the original game shows
+		// no system pointer), where the project has no file of that name: made beside the textures. One
+		// on disk since the scan is left as it is; one that cannot be made leaves the menu made, and
+		// says so.
+		std::string companion;
+		const BlankFactory *beside = blank_companion(*factory, *view_.project.document, companion);
+		if (beside && !view_.project.scan->find(companion)) {
+			const std::string beside_relative = join_path(asset_kind_row(beside->kind).folder, companion);
+			const auto beside_target = path_of(paths_.root) / path_of(beside_relative);
+			if (!fs::exists(system_path(utf8_of(beside_target)), ec) && !ec) {
+				BlankRequest beside_blank;
+				beside_blank.logical_name = companion;
+				beside_blank.role = beside->role;
+				beside_blank.project_title = blank.project_title;
+				std::vector<uint8_t> beside_bytes;
+				Diagnostic beside_error;
+				std::string reason;
+				if (beside->make(beside_blank, beside_bytes, beside_error) &&
+				    ensure_directory(utf8_of(beside_target.parent_path()), reason) &&
+				    write_file_atomic(utf8_of(beside_target), beside_bytes.data(), beside_bytes.size(), reason)) {
+					made.push_back(beside_relative);
+					core_.note("Created " + beside_relative);
+				} else {
+					if (reason.empty()) reason = beside_error.message;
+					core_.report(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Warning,
+					                          "The pointer " + companion + " the menu names was not made" +
 					                                  (reason.empty() ? std::string(".") : ": " + reason),
 					                          request.path));
 				}
