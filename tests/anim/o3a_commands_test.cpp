@@ -11,8 +11,10 @@
 #include <string>
 #include <vector>
 
-#include "../../apps/threedi_cli/anim_cli.h"
+#include "../../apps/3di/anim_cli.h"
 #include "../common/file_io.h"
+
+namespace threedi_cli = opennova::threedi_cli;
 
 namespace {
 using test_io::read_file;

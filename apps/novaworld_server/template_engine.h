@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 // Tiny `{{VAR}}` substitution renderer for the legacy NW*.dll templates.
 //
@@ -37,4 +37,4 @@ std::string render_template_file(const std::string &templates_dir,
                                  const std::string &filename,
                                  const TemplateVars &vars);
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 namespace {
 
@@ -310,4 +310,4 @@ void GateListener::run_loop() {
 	std::printf("[gate] loop exiting\n");
 }
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

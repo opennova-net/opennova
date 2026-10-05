@@ -1,6 +1,6 @@
 # Multi-stage build of the standalone NovaWorld server (gate UDP, NW UDP,
 # HTTP via Crow). Build context is the repo root:
-#   docker build -f apps/novaworld_server/Dockerfile -t opennova-novaworld .
+#   docker build -f apps/novaworld_server/Dockerfile -t opennova-novaworld-server .
 #
 # The runtime image needs only the server binary plus its data dirs
 # (migrations, seed, retail templates/static). SQLite lives in a mounted
@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=build /src/build/apps/novaworld_server/opennova-novaworld /app/opennova-novaworld
+COPY --from=build /src/build/apps/novaworld_server/opennova-novaworld-server /app/opennova-novaworld-server
 COPY --from=build /src/backend/migrations /app/backend/migrations
 COPY --from=build /src/backend/seed /app/backend/seed
 COPY --from=build /src/apps/novaworld_server/templates /app/templates
@@ -60,4 +60,4 @@ EXPOSE 7597/udp 64206/udp 8080/tcp
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8080/api/health || exit 1
 
-ENTRYPOINT ["/app/opennova-novaworld"]
+ENTRYPOINT ["/app/opennova-novaworld-server"]

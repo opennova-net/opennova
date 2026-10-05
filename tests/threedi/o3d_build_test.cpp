@@ -22,6 +22,7 @@
 #include "../common/file_io.h"
 
 using namespace opennova::threedi;
+namespace threedi_cli = opennova::threedi_cli;
 
 namespace {
 

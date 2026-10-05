@@ -98,7 +98,7 @@ int main() {
 	g_log_debug_enabled = std::getenv("NW_LOG_DEBUG") != nullptr;
 	opennova::io::set_log_sink(&app_log_sink);
 	using namespace opennova;
-	using namespace opennova::server;
+	using namespace opennova::novaworld_server;
 
 	// Force unbuffered stdout/stderr so log lines actually flush when
 	// running under a non-tty parent (background pipe, file redirect,
@@ -109,7 +109,7 @@ int main() {
 
 	const ServerConfig config = ServerConfig::from_env();
 
-	std::printf("==== opennova-novaworld booting ====\n");
+	std::printf("==== opennova-novaworld-server booting ====\n");
 	std::printf("  public_host=%s\n", config.public_host.c_str());
 	std::printf("  gate_udp=:%u  nw_udp=:%u  http=:%u\n",
 	            config.gate_udp_port, config.nw_udp_port, config.http_port);
@@ -260,6 +260,6 @@ int main() {
 	gate.stop();
 	nwudp.stop();
 	manager.shutdown();
-	std::printf("==== opennova-novaworld stopped ====\n");
+	std::printf("==== opennova-novaworld-server stopped ====\n");
 	return 0;
 }

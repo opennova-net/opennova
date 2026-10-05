@@ -3,7 +3,7 @@
 // Each case crafts a tiny in-memory pcap (base/pcapio build_pcap_udp), encodes
 // a known pool batch through the FULL S2C stack (inner encoder -> 0x83 protocol
 // frame -> SCRK -> outer NWU -> NAPI envelope -> UDP datagram), then reads that
-// pcap back through the shared reader and the exact decode pipeline nw_pp and
+// pcap back through the shared reader and the exact decode pipeline opennova-wire and
 // the real-capture harness use, asserting the decoded records equal the crafted
 // input. Exercises build_pcap_udp + read_pcap_udp + envelope + NWU + SCRK +
 // protocol reassembly + the §5.11 / §5.12 pool decoders end to end, on a few
@@ -44,7 +44,7 @@ constexpr std::string_view kScrk = "UNIT_TEST_SCRK_0";
 
 // Wrap an inner S2C protocol-message body (e.g. a 0x0D batch) into the exact
 // on-wire UDP payload a server emits: 0x83 protocol frame (SCRK-encrypted) ->
-// outer NWU -> NAPI envelope. Mirror of the test/nw_pp decode_outer +
+// outer NWU -> NAPI envelope. Mirror of the test/opennova-wire decode_outer +
 // process_protocol path, run backwards.
 std::vector<uint8_t> make_s2c_udp_payload(uint8_t tag,
                                           const std::vector<uint8_t> &inner) {

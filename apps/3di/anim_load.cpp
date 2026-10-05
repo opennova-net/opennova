@@ -15,7 +15,7 @@
 
 using namespace opennova::bad;
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 namespace {
 
@@ -150,4 +150,4 @@ bool anim_load(const std::string &path, AnimLoadedSet &out, std::string &error) 
 	return true;
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

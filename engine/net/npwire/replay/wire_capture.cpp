@@ -19,7 +19,7 @@ namespace {
 // session opcode in `opcode` and the post-opcode body in `body`. The outer
 // transform DECRYPTS via nwu_encrypt (the names are swapped — see
 // reference_nwu_names_swapped). Identical to the decode_outer that lived in
-// nw_pp / the cross-validation tests before this was factored out.
+// opennova-wire / the cross-validation tests before this was factored out.
 bool decode_outer(const std::vector<uint8_t> &raw, uint8_t &opcode,
                   std::vector<uint8_t> &body) {
 	std::vector<uint8_t> stripped(raw.size());
@@ -37,7 +37,7 @@ bool decode_outer(const std::vector<uint8_t> &raw, uint8_t &opcode,
 
 // Per-direction reassembly state + the "pending" bookkeeping that lets a message
 // fragmented across datagrams be reported under its FIRST fragment's tag/frame
-// (the convention nw_pp established).
+// (the convention opennova-wire established).
 struct DirState {
 	ProtocolReassemblyState rs;
 	bool have_pending = false;

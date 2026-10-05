@@ -105,12 +105,12 @@ int main(int argc, char **argv) {
 		if (sub == "timing") {
 			if (argc != 6 || std::strcmp(argv[4], "-o") != 0)
 				return usage("weapon timing needs <timing.txt> -o <edits.txt>");
-			return threedi_cli::cmd_weapon_timing(argv[3], argv[5]);
+			return opennova::threedi_cli::cmd_weapon_timing(argv[3], argv[5]);
 		}
 		if (sub == "merge") {
 			if (argc != 7 || std::strcmp(argv[5], "-o") != 0)
 				return usage("weapon merge needs <weapon.def> <edits.txt> -o <out.def>");
-			return threedi_cli::cmd_weapon_merge(argv[3], argv[4], argv[6]);
+			return opennova::threedi_cli::cmd_weapon_merge(argv[3], argv[4], argv[6]);
 		}
 		return usage("weapon takes timing or merge");
 	}
@@ -119,20 +119,20 @@ int main(int argc, char **argv) {
 		if (argc > 4 || (!flag.empty() && flag != "--verbose" && flag != "--planes" && flag != "--verts"))
 			return usage("info takes --verbose, --planes or --verts");
 		const int verbose = flag == "--verts" ? 3 : flag == "--planes" ? 2 : flag == "--verbose" ? 1 : 0;
-		return threedi_cli::cmd_info(argv[2], verbose);
+		return opennova::threedi_cli::cmd_info(argv[2], verbose);
 	}
 	if (cmd == "build") {
 		if (argc != 5 || std::strcmp(argv[3], "-o") != 0) return usage("build needs <scene.o3d> -o <out.3di>");
-		return threedi_cli::cmd_build(argv[2], argv[4]);
+		return opennova::threedi_cli::cmd_build(argv[2], argv[4]);
 	}
 	if (cmd == "scene") {
 		if (argc != 5 || std::strcmp(argv[3], "-o") != 0) return usage("scene needs <model.3di> -o <scene.o3d>");
-		return threedi_cli::cmd_scene(argv[2], argv[4]);
+		return opennova::threedi_cli::cmd_scene(argv[2], argv[4]);
 	}
 	if (cmd == "compare") {
 		const bool strict = argc == 5 && std::strcmp(argv[2], "--strict") == 0;
 		if (argc != (strict ? 5 : 4)) return usage("compare needs [--strict] <expected.3di> <actual.3di>");
-		return threedi_cli::cmd_compare(argv[strict ? 3 : 2], argv[strict ? 4 : 3], strict);
+		return opennova::threedi_cli::cmd_compare(argv[strict ? 3 : 2], argv[strict ? 4 : 3], strict);
 	}
 	if (cmd == "anim") {
 		const std::string sub = argv[2];
@@ -142,21 +142,21 @@ int main(int argc, char **argv) {
 			if (argc > 5 || (!flag.empty() && flag != "--verbose" && flag != "--keys"))
 				return usage("anim info takes --verbose or --keys");
 			const int verbose = flag == "--keys" ? 2 : flag == "--verbose" ? 1 : 0;
-			return threedi_cli::cmd_anim_info(argv[3], verbose);
+			return opennova::threedi_cli::cmd_anim_info(argv[3], verbose);
 		}
 		if (sub == "build") {
 			if (argc != 6 || std::strcmp(argv[4], "-o") != 0)
 				return usage("anim build needs <set.o3a> -o <out.adm|out.bad>");
-			return threedi_cli::cmd_anim_build(argv[3], argv[5]);
+			return opennova::threedi_cli::cmd_anim_build(argv[3], argv[5]);
 		}
 		if (sub == "scene") {
 			if (argc != 6 || std::strcmp(argv[4], "-o") != 0)
 				return usage("anim scene needs <in.adm|in.bad> -o <set.o3a>");
-			return threedi_cli::cmd_anim_scene(argv[3], argv[5]);
+			return opennova::threedi_cli::cmd_anim_scene(argv[3], argv[5]);
 		}
 		if (sub == "compare") {
 			if (argc != 5) return usage("anim compare needs <expected> <actual>");
-			return threedi_cli::cmd_anim_compare(argv[3], argv[4]);
+			return opennova::threedi_cli::cmd_anim_compare(argv[3], argv[4]);
 		}
 		return usage("anim takes build, scene, info or compare");
 	}

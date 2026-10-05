@@ -66,7 +66,7 @@
 
 using namespace opennova::threedi;
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 namespace {
 
@@ -1522,4 +1522,4 @@ int cmd_compare(const char *expected_path, const char *actual_path, bool strict)
 	return same ? 0 : 1;
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli
