@@ -540,12 +540,15 @@ int main(int argc, char **argv) {
         /* WeaponDef_CreateBlendNamedMaterial recognizes all six tokens at
            0x5401b9..0x540257. Keep the established Blend/Add/BlendAt values
            stable while assigning distinct transport values to the three
-           previously dropped spellings. */
+           previously dropped spellings. A weapon record holds four SIGHTS
+           rows, so the six spellings span two weapons. */
         static const char kSightBlendDef[] =
             "weapon \"WPN_SIGHT_BLEND_TEST\"\n"
             "\tsights blend.tga 0 0 8 8 blend\n"
             "\tsights add.tga 0 0 8 8 add\n"
             "\tsights blendat.tga 0 0 8 8 blendat\n"
+            "end\n"
+            "weapon \"WPN_SIGHT_BLEND_TEST_2\"\n"
             "\tsights multiply.tga 0 0 8 8 multiply\n"
             "\tsights addat.tga 0 0 8 8 addat\n"
             "\tsights multiplyat.tga 0 0 8 8 multiplyat\n"
@@ -562,17 +565,19 @@ int main(int argc, char **argv) {
         memset(&sf, 0, sizeof(sf));
         if (def_parse_weapons_memory((const unsigned char *)kSightBlendDef,
                                      sizeof(kSightBlendDef) - 1, &sf) != 0 ||
-            sf.count != 1 || sf.entries[0].sights_count != 6) {
+            sf.count != 2 || sf.entries[0].sights_count != 3 ||
+            sf.entries[1].sights_count != 3) {
             fprintf(stderr, "FAIL: sight blend-token inline parse failed\n");
             def_free_weapons(&sf);
             def_free_weapons(&wf);
             return 1;
         }
         for (size_t i = 0; i < 6; ++i) {
-            if (sf.entries[0].sights[i].blend != expected[i]) {
+            const int got = sf.entries[i / 3].sights[i % 3].blend;
+            if (got != expected[i]) {
                 fprintf(stderr,
                         "FAIL: sight blend token %zu mapped to %d, expected %d\n",
-                        i, sf.entries[0].sights[i].blend, expected[i]);
+                        i, got, expected[i]);
                 def_free_weapons(&sf);
                 def_free_weapons(&wf);
                 return 1;
@@ -659,6 +664,50 @@ int main(int argc, char **argv) {
         }
         def_free_weapons(&ff);
         printf("charfilter/teamfilter token 1 and the abs values OK\n");
+    }
+    {
+        /* SIGHTS rows: a row whose texture is no file is refused, a short line is
+           a row whose missing corners read 0, and a weapon keeps four rows, the
+           record's room ahead of its count [orig: WeaponDefs_ParseLineCallback's
+           sights arm @0x544AC8 — FileSystem_FileExists @0x544AE2, atol of
+           tokens[3..6] @0x544B48..0x544B6C, the count @+0x258 after four 36-byte
+           rows from +0x1C8 @0x544B11..0x544B32]. */
+        static const char kRowsDef[] =
+            "weapon \"WPN_SIGHT_ROWS_TEST\"\n"
+            "\tsights short.tga 7\n"
+            "\tsights missing.tga 0 0 8 8\n"
+            "\tsights two.tga 1 2 3 4\n"
+            "\tsights three.tga 1 2 3 4\n"
+            "\tsights four.tga 1 2 3 4\n"
+            "\tsights five.tga 1 2 3 4\n"
+            "end\n";
+        const DefFileProbe probe = {
+                [](const void *, const char *name) { return strcmp(name, "missing.tga") != 0; },
+                nullptr};
+        DefWeaponsFile rf;
+        memset(&rf, 0, sizeof(rf));
+        if (def_parse_weapons_memory((const unsigned char *)kRowsDef, sizeof(kRowsDef) - 1, &rf,
+                                     &probe) != 0 || rf.count != 1) {
+            fprintf(stderr, "FAIL: sight rows inline parse failed\n");
+            def_free_weapons(&rf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefWeaponDef &w = rf.entries[0];
+        const bool ok = w.sights_count == 4 && strcmp(w.sights[0].texture, "short.tga") == 0 &&
+                w.sights[0].x1 == 7 && w.sights[0].y1 == 0 && w.sights[0].y2 == 0 &&
+                strcmp(w.sights[1].texture, "two.tga") == 0 &&
+                strcmp(w.sights[3].texture, "four.tga") == 0;
+        if (!ok) {
+            fprintf(stderr, "FAIL: sight rows: %zu rows, first '%s', second '%s'\n", w.sights_count,
+                    w.sights_count > 0 ? w.sights[0].texture : "",
+                    w.sights_count > 1 ? w.sights[1].texture : "");
+            def_free_weapons(&rf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&rf);
+        printf("sight rows: the texture check, short lines and the four-row record OK\n");
     }
     {
         /* The scope-zero table's token forms [orig: 'scope_max_zero'

@@ -1274,10 +1274,22 @@ int def_parse_ammo(const char *path, DefAmmoFile *out);
 int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out);
 void def_free_ammo(DefAmmoFile *f);
 
-int def_parse_weapons(const char *path, DefWeaponsFile *out);
+/* Whether a name resolves to a file the game could open, for the readers that
+   refuse a row on a missing file: a SIGHTS row whose texture does not exist is
+   no row [orig: WeaponDefs_ParseLineCallback's sights arm, FileSystem_FileExists
+   @0x75AA50 called @0x544AE2]. A reader given no probe (a tool with no game
+   mount) takes every name as present. */
+typedef bool (*DefFileExistsFn)(const void *ctx, const char *name);
+typedef struct DefFileProbe {
+    DefFileExistsFn exists;
+    const void *ctx;
+} DefFileProbe;
+
+int def_parse_weapons(const char *path, DefWeaponsFile *out, const DefFileProbe *files = nullptr);
 /* Parse weapon.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_weapons as usual. Returns 0 on success, -1 on bad input. */
-int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out);
+int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out,
+                             const DefFileProbe *files = nullptr);
 void def_free_weapons(DefWeaponsFile *f);
 
 int def_parse_powerup(const char *path, DefPowerupFile *out);

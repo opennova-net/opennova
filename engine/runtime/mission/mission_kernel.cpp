@@ -452,7 +452,14 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	std::vector<uint8_t> bytes;
 	if (!files.valid() || !files.read_file(name, bytes)) return false;
 	DefWeaponsFile file = {};
-	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file) != 0) return false;
+	// A SIGHTS row whose texture the mount lacks is no row [orig: the sights
+	// arm's FileSystem_FileExists @0x544AE2].
+	const DefFileProbe probe = {
+			[](const void *ctx, const char *name) {
+				return static_cast<const BootFileSource *>(ctx)->has_file(name);
+			},
+			&files};
+	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file, &probe) != 0) return false;
 	world.tables.weapons = w::build_weapon_table(file,
 			table_assets != nullptr ? table_assets : &assets());
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);

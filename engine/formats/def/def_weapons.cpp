@@ -74,7 +74,8 @@ static int parse_delay(const char *v, size_t vl) {
 }
 
 /* Shared buffer parser for weapon.def, used by both the path and memory entry points. */
-static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out) {
+static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out,
+                             const DefFileProbe *files) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
     int state = ST_TOP;
 
@@ -512,16 +513,28 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parse_view_pose(tokens, cw.tpos, cw.tpos_rotation_deg_q16);
                 parsed = 1;
             } else if (key_is(key, "sights")) {
-                Token tok[kMaxValueTokens];
-                int n = value_tokens(tokens, tok, kMaxValueTokens);
-                if (n >= 5) {
+                /* A row is refused when its texture is no file the game can
+                   open (a warning, no row) [orig: FileSystem_FileExists(tokens[2])
+                   @0x544AE2, the return @0x544B10]; otherwise the row is taken
+                   whatever the line's count, a corner past it reading as atol("")
+                   [orig: atol of tokens[3..6] @0x544B48..0x544B6C]. The record
+                   holds four 36-byte rows ahead of their count (+0x1C8..+0x257,
+                   the count @+0x258), so a fifth row lands on the count itself and
+                   corrupts the record; rows past the fourth are not kept
+                   (D-ITEMDEF-7) [orig: the count bump @0x544B11..0x544B20, the row
+                   address @0x544B2F..0x544B32]. */
+                const char *texture = tokens.token(1);
+                const bool exists = texture[0] != '\0' &&
+                        (files == nullptr || files->exists == nullptr ||
+                         files->exists(files->ctx, texture));
+                if (exists && cw.sights_count < 4) {
                     DefSightEntry se;
                     memset(&se, 0, sizeof(se));
-                    safe_copy(se.texture, sizeof(se.texture), tok[0].s, tok[0].len);
-                    se.x1 = parse_int_n(tok[1].s, tok[1].len);
-                    se.y1 = parse_int_n(tok[2].s, tok[2].len);
-                    se.x2 = parse_int_n(tok[3].s, tok[3].len);
-                    se.y2 = parse_int_n(tok[4].s, tok[4].len);
+                    copy_token(se.texture, sizeof(se.texture), tokens, 1);
+                    se.x1 = (int)strtol(tokens.token(2), NULL, 10);
+                    se.y1 = (int)strtol(tokens.token(3), NULL, 10);
+                    se.x2 = (int)strtol(tokens.token(4), NULL, 10);
+                    se.y2 = (int)strtol(tokens.token(5), NULL, 10);
                     /* By position: the blend mode is token 6 (a name the
                        material maker does not know, or none, is `blend`), and
                        token 7 the one `scale` or `slide` flag, `slide`'s frame
@@ -635,20 +648,21 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
     return 0;
 }
 
-int def_parse_weapons(const char *path, DefWeaponsFile *out) {
+int def_parse_weapons(const char *path, DefWeaponsFile *out, const DefFileProbe *files) {
     memset(out, 0, sizeof(*out));
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_weapons_buf(buf, file_len, out);
+    int rc = parse_weapons_buf(buf, file_len, out, files);
     free(buf);
     return rc;
 }
 
-int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out) {
+int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out,
+                             const DefFileProbe *files) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    return parse_weapons_buf((const char *)data, size, out);
+    return parse_weapons_buf((const char *)data, size, out, files);
 }
 
 void def_free_weapons(DefWeaponsFile *f) {

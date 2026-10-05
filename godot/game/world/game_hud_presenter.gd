@@ -754,7 +754,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# The scoped-view circle mask. retail: the scene frame's overlay fork picks
 	# binoculars, then the Sighted card, then the Scoped card -- and only the
 	# Scoped arm chains the mask, unconditionally, with one argument saying the
-	# card drew no AUTHORED row (a missing texture does not change that count).
+	# record holds no SIGHTS row (the def parser never adds a row whose texture
+	# is not on the mount, so JO:CA's Colt .45 has none).
 	# The fork itself is the engine's (HudPos.scoped_view_overlay ->
 	# runtime/hud/scope_circle_mask.h); the vehicle-attack context clears both
 	# selector bytes before it. See docs/interface/hud-re.md. Under the NVG

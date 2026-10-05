@@ -138,7 +138,15 @@ Error WeaponDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resourc
 	}
 	source_path = file_name;
 
-	if (def_parse_weapons_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &weapons_file_) != 0) {
+	// A SIGHTS row whose texture the resource root lacks is no row (the def
+	// parser's sights arm, def_weapons.cpp, cites the original).
+	const DefFileProbe probe = {
+			[](const void *ctx, const char *name) {
+				return static_cast<const ResourceRoot *>(ctx)->has_file(String::utf8(name));
+			},
+			p_resource_root.ptr()};
+	if (def_parse_weapons_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &weapons_file_,
+				&probe) != 0) {
 		last_error = String("def_parse_weapons_memory failed for ") + file_name;
 		return ERR_CANT_OPEN;
 	}
