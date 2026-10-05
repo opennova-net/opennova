@@ -37,11 +37,10 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/threedi/threedi_3di3.h>
-#include <formats/threedi/threedi_o3d_read.h>
+#include <formats/threedi/threedi_o3d_lower.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/assets/asset_store.h>
-#include <runtime/renderer/material_descriptor.h>
-#include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/model_target.h>
 #include <runtime/world/infantry.h>
 
 #include "common/file_io.h"
@@ -1463,8 +1462,7 @@ static int test_auto_lod() {
 		std::ifstream text(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/o3d/" + name);
 		std::vector<uint8_t> bytes;
 		std::vector<opennova::threedi::SceneFinding> findings;
-		TEST_EXPECT(opennova::threedi::threedi_o3d_build(text, opennova::renderer::material_descriptor_tangent_lookup,
-		                                                 opennova::renderer::material_texture_dds_only, bytes, findings));
+		TEST_EXPECT(opennova::threedi::threedi_o3d_build(text, opennova::renderer::retail_model_target(), bytes, findings));
 		const opennova::assets::Model parsed = opennova::assets::parse_model(bytes.data(), bytes.size());
 		TEST_EXPECT(parsed && parsed->lod_count == 2);
 		OrbitCamera camera;
