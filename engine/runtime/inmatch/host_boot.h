@@ -23,7 +23,12 @@
 //   start_host_mission (B): the water plane, the mission-start environment
 //     boundary (the weather seed, the embedder's render bind, the kernel's
 //     complete_mission_start: the eager WAC, the 255-tick settle, the
-//     vehicles, the baseline), then Session::complete_load.
+//     vehicles, the baseline), the authority's load end (the S2C 0x7B to
+//     every slot), then Session::complete_load.
+//
+// A map change (inmatch/map_change.h) boots the next map through the same
+// two phases with HostBootRequest::next_mission: the role's bring-up
+// continues the kept session instead of starting one.
 //
 // Retail's whole sequence is Game_StartMission @0x524360 inside the Game Loop
 // mode's initialize, which the loop's clock never banks (session.cpp carries
@@ -84,6 +89,10 @@ struct HostBootRequest {
 	// Overlay the loose score.ini onto host_cfg.config (an in-session host:
 	// start_host_session copies the score table into world.match).
 	bool session_score_ini = false;
+	// The map change's boot (inmatch/map_change.h): the host continues its
+	// kept session on the new kernel instead of starting one, and phase B's
+	// load end pumps the socket for the reloading joiners.
+	bool next_mission = false;
 	// The .til bytes when the embedder has them (a joiner's S2C 0x45 stream,
 	// which must never fall back to a same-named local file); unset = the
 	// boot reads <basename>.til loose-first.
@@ -126,6 +135,9 @@ struct HostBoot {
 
 	mission::MissionKernel *kernel = nullptr;
 	Session *session = nullptr;
+	// The authority role the boot ran (null for a joiner): phase B ends its
+	// load (HostRole::finish_mission_load).
+	HostRole *host = nullptr;
 	// The tables the boot read, for the embedder to retain.
 	mission::MissionText mission_text;
 	std::vector<uint8_t> terrain_til;

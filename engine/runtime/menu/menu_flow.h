@@ -49,12 +49,23 @@ public:
 	void remove_selected(MenuRuntime &menu);
 	bool can_start() const { return !selected_.empty(); }
 	std::vector<std::string> selected_missions() const;
+	// The Switch cell (column 2) of a SELECTED_MISSIONS row: a click toggles
+	// the row's launch option, only on a team, non-objective row, and the
+	// cell redraws "1" / "0". The option is the catalog row's word, which
+	// START hands the rotation with the files (selected_launch_options, one
+	// per selected row). [orig: HostDialog_SelectedMissionsTableEvent
+	// @0x557FB0 -- the column test @0x557FEF, the eligibility and the toggle
+	// @0x558061..0x558086, CTableWnd_SetCellText @0x5580AB]
+	void toggle_switch(MenuRuntime &menu, int row);
+	std::vector<int32_t> selected_launch_options() const;
 	static void select_location(MenuRuntime &menu, int id, const std::string &country);
 
 private:
 	void sync_start(MenuRuntime &menu) const;
 	std::vector<MissionChoice> pool_;
 	std::vector<int> visible_, selected_;
+	std::vector<int32_t> launch_options_; // one per selected row
+
 };
 
 } // namespace opennova::menu

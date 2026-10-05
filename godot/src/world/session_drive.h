@@ -121,8 +121,19 @@ public:
 	// One teardown for everything this drive staged or stood up, called from
 	// the world's unload(): the preload sim/root, the policy's windows +
 	// notification latches, the typed request staging, and the NovaWorld
-	// session unless the shell took it back first.
+	// session unless the shell took it back first or a kept session rides
+	// through the reload with it.
 	void reset();
+	// The map change (D-NET-331, inmatch/map_change.h): the live session's
+	// simulation, taken out of the departing runtime (keep_session) and across
+	// the world's unload into the next load. load_next_host_mission boots the
+	// rotation's next map inside it; reload_as_joiner re-runs the joiner's
+	// preload over its kept connection, with no window: a stock joiner's reload
+	// legs have no deadline (net-re §5.70.7).
+	bool keep_session(MissionRoot *p_runtime);
+	bool has_kept_session() const { return kept_sim_.is_valid(); }
+	int load_next_host_mission(const String &p_bms_name);
+	int reload_as_joiner();
 	// The NovaWorld session (a NovaWorldClient), handed over by the shell with a
 	// joiner or host load: retail keeps the NWU session playing or hosting
 	// through the match (the N icon's input, the NovaWorld exit, the hosted
@@ -216,6 +227,10 @@ private:
 	// is never restarted.
 	Ref<Simulation> join_preload_sim_;
 	Ref<ResourceRoot> join_preload_root_;
+	// The map change's kept session and the join it came from.
+	Ref<Simulation> kept_sim_;
+	Ref<JoinTarget> last_join_target_;
+	bool reloading_join_ = false;
 	Ref<ConnectionError> last_connection_error_;
 };
 

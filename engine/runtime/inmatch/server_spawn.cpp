@@ -1,5 +1,7 @@
 #include <runtime/inmatch/server_spawn.h>
 
+#include <runtime/inmatch/mission_rotation.h> // HostRotation (LASTGAME, the side-to-team map)
+
 #include <runtime/world/ai.h>           // AiEntity / AiSystem
 #include <runtime/world/angle.h>        // bam_heading_from_mission_yaw_deg
 #include <runtime/world/entity_spawn.h> // entity_reset_to_spawn_state
@@ -39,7 +41,8 @@ namespace {
 // The submitted JSP credential selects a matching protected side before balancing.
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection &joining, const world::World &world) {
+		const NapiNPConnection &joining, const world::World &world,
+		const std::array<uint8_t, 2> &side_team) {
 	// A spectator is a roster player on neutral team zero, bypassing the team
 	// password/selection path. Retail gates the early return on being in a
 	// live MP session; a non-session add ignores the flag and takes team 1.
@@ -71,16 +74,19 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// Password matches precede the two/four-team split and team preference.
 	// If both side passwords match, side A wins the ordered comparison.
 	// [orig: Server_AssignPlayerTeam @0x4FE424..0x4FE4AD]
+	// Each side arm answers with the side's team through the side-to-team map
+	// [orig: byte_82F240 @0x4FE456, byte_82F241 @0x4FE492].
 	if (side_a_locked && opennova::strutil::iequals(
-			config.side_a_password.c_str(), submitted_password.c_str())) return 1;
+			config.side_a_password.c_str(), submitted_password.c_str())) return side_team[0];
 	if (side_b_locked && opennova::strutil::iequals(
-			config.side_b_password.c_str(), submitted_password.c_str())) return 2;
+			config.side_b_password.c_str(), submitted_password.c_str())) return side_team[1];
 	// Without a match, two-team mode selects an unlocked side or fails.
-	// [orig: @0x4FE4AE..0x4FE519]
+	// [orig: @0x4FE4AE..0x4FE519 -- side B's team @0x4FE56D, side A's
+	//  @0x4FE507]
 	if (active_teams == 2) {
 		if (side_a_locked && side_b_locked) return 0;
-		if (side_a_locked) return 2;
-		if (side_b_locked) return 1;
+		if (side_a_locked) return side_team[1];
+		if (side_b_locked) return side_team[0];
 	}
 
 	// jsp[60] is signed at the original call site: 0/1 request side A/B and
@@ -96,8 +102,9 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	if (gt == opennova::game_type::kTeamDeathmatch && (side_a_locked || side_b_locked))
 		team_request = 0xFF;
 	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) {
-		if (team_request == 0 && !side_a_locked) return 1;
-		if (team_request == 1 && !side_b_locked) return 2;
+		// [orig: side A's team @0x4FE543, side B's @0x4FE56D]
+		if (team_request == 0 && !side_a_locked) return side_team[0];
+		if (team_request == 1 && !side_b_locked) return side_team[1];
 	}
 
 	std::array<uint32_t, 4> counts{};
@@ -196,10 +203,12 @@ std::optional<uint8_t> Server_ReservePlayerSlot(
 
 uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		const world::World &world) {
+		const world::World &world, const HostRotation *rotation) {
 	if (!conn.assigned_team_valid) {
 		conn.assigned_team =
-				assign_player_team(config, is_in_session, roster, conn, world);
+				assign_player_team(config, is_in_session, roster, conn, world,
+						rotation != nullptr ? rotation->side_team
+											: std::array<uint8_t, 2>{1, 2});
 		conn.assigned_team_valid = true;
 	}
 	return conn.assigned_team;
@@ -213,6 +222,10 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// The designation table clears on every round init, authority or not
 	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
 	ctx.designations.fill(ServerDesignation{});
+	// The LASTGAME toggle clears only here, at the session's create and
+	// destroy, so it holds across the map changes between them (§5.70.3)
+	// [orig: `mov g_LastGameToggle, 0` @0x51CAA4].
+	if (ctx.rotation != nullptr) ctx.rotation->last_game = false;
 	if (!ctx.is_authority) return;
 	// Server_ResetRoundCounters copies the configured StartDelay seconds into the
 	// one live pre-round timer. Keep the timer on World: it is the authority
@@ -249,7 +262,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// Server_PositionPlayerForSpawn's team switch @0x50d266]
 	spawn.team = Server_ReservePlayerTeam(
 			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
-			conn, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
+			conn, world, ctx.rotation); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	// The join spawn enters the no-pick arm (Server_OnPlayerJoin passes spawn
 	// handle low word 0, which Server_ResolveSpawnTargetHandle rejects), where
 	// a spectator slot is POSITIONED with the substitute team (Co-op 1; team

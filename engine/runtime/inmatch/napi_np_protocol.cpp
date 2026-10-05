@@ -1381,7 +1381,7 @@ std::vector<TickOut> tick_connections(
 			std::vector<ProtocolMessage> spawn_metadata =
 					build_spawn_pump_metadata(
 							ctx.config, conn,
-							ctx.np_protocol.connection_list, ctx.world);
+							ctx.np_protocol.connection_list, ctx.world, ctx.rotation);
 			std::vector<uint8_t> datagram =
 					frame_session_replies(conn, spawn_metadata);
 			if (!datagram.empty()) {

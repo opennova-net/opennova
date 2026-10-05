@@ -761,6 +761,12 @@ PackedStringArray MenuDriver::selected_host_missions() const {
 	return to_gd_strings(host_dialog_.selected_missions());
 }
 
+PackedInt32Array MenuDriver::selected_host_launch_options() const {
+	PackedInt32Array out;
+	for (const int32_t option : host_dialog_.selected_launch_options()) out.push_back(option);
+	return out;
+}
+
 void MenuDriver::select_host_location(int p_id, const String &p_country) {
 	opennova::menu::HostDialog::select_location(runtime_, p_id, to_std(p_country));
 }
@@ -929,6 +935,10 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_host_missions"), &MenuDriver::remove_host_missions);
 	ClassDB::bind_method(D_METHOD("can_start_host"), &MenuDriver::can_start_host);
 	ClassDB::bind_method(D_METHOD("selected_host_missions"), &MenuDriver::selected_host_missions);
+	ClassDB::bind_method(D_METHOD("toggle_host_mission_switch", "row"),
+			&MenuDriver::toggle_host_mission_switch);
+	ClassDB::bind_method(D_METHOD("selected_host_launch_options"),
+			&MenuDriver::selected_host_launch_options);
 	ClassDB::bind_method(D_METHOD("select_host_location", "id", "country"), &MenuDriver::select_host_location);
 	ClassDB::bind_method(D_METHOD("prepare_options", "controls"), &MenuDriver::prepare_options);
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);

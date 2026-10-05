@@ -7,8 +7,10 @@
 // lock (activesrvr.txt) and the cfg saved as Serve Only, the session settings
 // from the block (inmatch/host_config.h), the cfg's LAN port range bound, the
 // starting mission booted as a DedicatedHost through the engine's one host
-// boot (inmatch/host_boot.h) and the in-match session run; at a clean exit it
-// saves game.cfg again and deletes the lock. Everything below the config, the
+// boot (inmatch/host_boot.h) and the in-match session run round after round
+// over the host file's rotation (the engine's map change,
+// inmatch/map_change.h, game.cfg saved at each); at a clean exit it saves
+// game.cfg again and deletes the lock. Everything below the config, the
 // mount, the socket and the wall clock is the engine's.
 //
 // The files are the process's working directory's, as retail's: game.cfg and
@@ -21,6 +23,7 @@
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/host_role.h>
+#include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_catalog.h>
 #include <runtime/mission/mission_kernel.h>
@@ -67,8 +70,10 @@ public:
 	// socket layer (net::startup) first and shuts it down after stop(): it is
 	// process-wide.
 	bool start(std::string &error);
-	// One outer frame of `delta_seconds` wall clock. False once the session has
-	// ended (end_message() says how).
+	// One outer frame of `delta_seconds` wall clock. A round end's mission exit
+	// runs the map change and boots the next map inside the session. False
+	// once the session has ended (end_message() says how; rotation_ended()
+	// when the rotation ran out), and stop() has run.
 	bool frame(double delta_seconds);
 	// The host's exit: the round reset to every joiner, the STOP description,
 	// the final flush; then game.cfg saved, the socket closed and the lock
@@ -84,12 +89,15 @@ public:
 
 	uint16_t bound_port() const { return bound_port_; }
 	const std::string &end_message() const { return end_message_; }
+	bool rotation_ended() const { return rotation_ended_; }
+	// The missions the session has booted (the starting map is 1).
+	int missions_played() const { return missions_played_; }
 	// The cfg block (game.cfg, the host file over it; remote_admin_port is
 	// the admin server's) and the weapon table its avail_wpn rows address.
 	const gamecfg::GameCfg &game_cfg() const { return cfg_; }
 	const gamecfg::WeaponRoster &weapon_roster() const { return roster_; }
 	const inmatch::HostScreenState &host_screen() const { return host_; }
-	const inmatch::MissionRotation &rotation() const { return rotation_; }
+	const inmatch::HostRotation &rotation() const { return rotation_; }
 	const inmatch::HostFileReport &host_file_report() const { return report_; }
 	const std::vector<mission_catalog::Row> &catalog() const { return catalog_; }
 	mission::MissionKernel &kernel() { return *kernel_; }
@@ -100,7 +108,13 @@ private:
 	bool mount(std::string &error);
 	bool read_config_over_weapons(std::string &error);
 	bool read_host_file(std::string &error);
-	bool boot_mission(std::string &error);
+	// The rotation's current map through the host boot: the starting map, or
+	// with `next_mission` the map change's next one inside the kept session.
+	bool boot_mission(bool next_mission, std::string &error);
+	// The round end's mission exit on the authority: the main frame's verdict
+	// and the Post Menu's route (inmatch/mission_exit.h), the map change for
+	// an in-session one. False when the session ended.
+	bool route_mission_exit(int32_t reason);
 	bool open_socket(std::string &error);
 
 	ServeOptions options_;
@@ -110,7 +124,7 @@ private:
 	gamecfg::GameCfg cfg_;
 	gamecfg::WeaponRoster roster_;
 	inmatch::HostScreenState host_;
-	inmatch::MissionRotation rotation_;
+	inmatch::HostRotation rotation_;
 	inmatch::HostFileReport report_;
 	std::unique_ptr<mission::MissionKernel> kernel_;
 	std::unique_ptr<inmatch::HostRole> role_;
@@ -120,6 +134,8 @@ private:
 	std::unique_ptr<net::NetDatagramSocket> datagrams_;
 	uint16_t bound_port_ = 0;
 	bool running_ = false;
+	bool rotation_ended_ = false;
+	int missions_played_ = 0;
 	// Game_Run's exit tail is owed: the save and the lock's delete, on every
 	// return once the subsystems are up [orig: Game_Run @0x4A7FFF..0x4A800E].
 	bool exit_save_owed_ = false;

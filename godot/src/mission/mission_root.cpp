@@ -269,9 +269,11 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			has_trace_stats_sampling_ = false;
 			return 0;
 		}
-	} else {
+	} else if (!sim_->is_host_listening()) {
 		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. Live
 		// play reaches this branch only through GameWorld. The host player auto-spawns at bring-up.
+		// A host's map change brings its live session (its role, its bound socket and its
+		// connections) in the simulation the drive kept, and boots the next map inside it.
 		sim_->enable_listen_server(true);
 	}
 	// S9 (ADR 0028): the ordered mission boot. The sequence, its gates, and the
@@ -954,6 +956,14 @@ void MissionRoot::for_each_present_node(const std::function<void(ObjectModel *)>
 // container is this root's child and unload() queue_free()s it FIRST, so the
 // teardown below finds the container's nodes already gone exactly as it did
 // when the container was the world's own child.
+Ref<Simulation> MissionRoot::release_simulation() {
+	Ref<Simulation> sim = sim_;
+	if (sim.is_valid()) sim->set_runtime_profiling_enabled(false);
+	sim_.unref();
+	has_trace_stats_sampling_ = false;
+	return sim;
+}
+
 void MissionRoot::_exit_tree() {
 	if (frame_stats_.is_valid()) {
 		const Callable capture_changed(this, kOnCaptureChanged);

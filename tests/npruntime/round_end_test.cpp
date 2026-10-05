@@ -9,6 +9,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/end_round_protocol.h>
 
@@ -376,8 +377,12 @@ void test_tdm_round_wire_and_linger() {
 	expect(ctx.is_in_session == 1 && ctx.round_end_linger_ticks == 1,
 			"MP session remains live through linger tick 2789");
 	inmatch::Server_TickUpdate(ctx);
-	expect(ctx.is_in_session == 0 && ctx.round_end_linger_ticks == 0,
-			"MP session closes at exactly 2790 post-announcement ticks");
+	// The linger's end stores the map change's exit and leaves the session up:
+	// 3 with REPLAY off (and 4 under REPLAY with LASTGAME off).
+	// [orig: Server_TickUpdate @0x51DB47..0x51DB63]
+	expect(ctx.is_in_session == 1 && ctx.round_end_linger_ticks == 0 &&
+					ctx.mission_exit_reason == inmatch::kMissionExitMapCycle,
+			"the round end stores mission exit 3 at exactly 2790 post-announcement ticks");
 }
 
 // The DM/KOTH-family 0x1D: an in-session non-team round end serializes the

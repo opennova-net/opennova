@@ -41,14 +41,14 @@ inline std::string read_text(const fs::path &path) {
 
 // A deathmatch mission: the two placed entities every kernel test boots, and
 // the solo start marker (6002) a deathmatch player spawns at.
-inline std::vector<uint8_t> deathmatch_mission() {
+inline std::vector<uint8_t> deathmatch_mission(const char *name = "Serve Test Map") {
 	using namespace opennova;
 	bms::File m = test_mission::two_entity_mission();
 	m.header.magic[0] = 'B';
 	m.header.magic[1] = 'M';
 	m.header.magic[2] = 'S';
 	m.header.magic[3] = static_cast<char>(bms::kMinVersion);
-	std::snprintf(m.header.mission_name, sizeof(m.header.mission_name), "Serve Test Map");
+	std::snprintf(m.header.mission_name, sizeof(m.header.mission_name), "%s", name);
 	m.header.attrib_flags = bms::AttribFlags::Deathmatch;
 	bms::Entity marker{};
 	marker.type = bms::ItemType::Marker;

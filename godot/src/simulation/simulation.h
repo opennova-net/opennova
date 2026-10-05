@@ -1193,9 +1193,6 @@ public:
 	// matching Game_Run's continue-after-error behavior.
 	bool load_charattr_challenge(
 			const Ref<class ResourceRoot> &p_resource_root);
-	// Ship the 0x46 ClientGoodBye burst now (idempotent; joiner-only no-op otherwise). The
-	// destructor calls this too, so explicit calls are only needed when the socket must close
-	// before the sim is freed.
 	// Retail connects before constructing the wire-header world: drive only the socket/session
 	// legs until the terminal pre-world sync marker has been received and ACKed
 	// (S2C 0x7B identifies the mission earlier), then resume the same connection
@@ -1247,6 +1244,10 @@ public:
 	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record,
 	// else the world's (the SP end screens' timeout, the round-over keys, the in-game RESTART).
 	int get_mission_exit_reason() const;
+	// The map rotation (D-NET-331, inmatch/map_change.h; simulation_rotation.cpp): the host's
+	// map change (the next map's file; empty when the rotation ended) and the joiner's reload.
+	String begin_host_map_change();
+	bool begin_joiner_reload();
 	// The round-over leg of the special-key chain (inmatch::round_over_key): the
 	// hud_round_over bits for a Windows VK and the RESTART key.
 	int round_over_key(int p_vk, int p_restart_vk);

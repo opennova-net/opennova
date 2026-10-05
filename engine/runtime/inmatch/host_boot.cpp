@@ -69,6 +69,7 @@ void load_environment_and_water(const mission::BootFileSource &files,
 bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &error) {
 	boot.kernel = nullptr;
 	boot.session = request.session;
+	boot.host = request.host;
 	boot.mission_text = mission::MissionText{};
 	boot.terrain_til.clear();
 	boot.server_text = ServerTextTable{};
@@ -170,6 +171,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		bringup.terrain_til_data = boot.terrain_til;
 		bringup.mission_text = boot.mission_text;
 		bringup.server_text = boot.server_text;
+		bringup.next_mission = request.next_mission;
 		request.host->stage_bringup(std::move(bringup));
 	}
 
@@ -261,6 +263,9 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 			device.bind_render ? device.bind_render : no_render_bind,
 			[&kernel] { (void)kernel.complete_mission_start(); });
 
+	// The authority's load end: the S2C 0x7B to every slot, and a map change's
+	// last pump [orig: Game_StartMission @0x52625F..0x526267].
+	if (boot.host != nullptr) boot.host->finish_mission_load();
 	// The load ends with the mission start: the Game Loop reads its clock only
 	// after Game_StartMission returns (Session::complete_load carries it).
 	if (!boot.session->complete_load().applied()) {

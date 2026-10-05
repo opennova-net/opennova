@@ -56,9 +56,17 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 		const double delta = std::chrono::duration<double>(now - last).count();
 		last = now;
 		if (!server.frame(delta)) {
-			std::fprintf(stderr, "opennova-serve: the session ended: %s\n",
-					server.end_message().c_str());
-			code = 3;
+			// The rotation's end is the session's own end: the router's miss
+			// arm (PostMenu_RouteMissionExit @0x56864F). Any other end of the
+			// session is an exit by itself.
+			if (server.rotation_ended()) {
+				std::fprintf(stdout, "opennova-serve: %s after %d mission(s)\n",
+						server.end_message().c_str(), server.missions_played());
+			} else {
+				std::fprintf(stderr, "opennova-serve: the session ended: %s\n",
+						server.end_message().c_str());
+				code = 3;
+			}
 			break;
 		}
 		std::this_thread::sleep_until(next);

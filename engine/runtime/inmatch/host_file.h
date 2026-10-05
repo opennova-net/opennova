@@ -24,6 +24,7 @@
 //  @0x4A65A0..0x4A65AA; ServerConfig_ApplyHostSetting @0x4A6000]
 
 #include <runtime/inmatch/game_config.h>
+#include <runtime/inmatch/mission_rotation.h>
 #include <runtime/mission/mission_catalog.h>
 
 #include <cstddef>
@@ -69,31 +70,6 @@ struct HostScreenState {
 	int32_t lineup_queue_size = 100; // [orig: dword_2550AB4]
 };
 
-// The map rotation the Mission lines seed (g_MissionRotation @0xC86FDC:
-// (catalog index, flag) pairs with a cursor and an alternate cursor). The
-// round-end advance over it is D-NET-331, unported; this is the seed.
-// `launch_options` is the catalog entries' +0x1140 word, kept beside the
-// catalog it indexes (0 for a row no line named).
-struct MissionRotationEntry {
-	size_t catalog_index = 0;
-	uint32_t flag = 0;
-};
-struct MissionRotation {
-	std::vector<MissionRotationEntry> entries;
-	int32_t cursor = -1;
-	int32_t alt_cursor = -1;
-	std::vector<int32_t> launch_options;
-	// What the last accepted Mission line stamped: g_MapFileName, the loose
-	// word and the launch option the mission starts with, and the session code
-	// word from its catalog row [orig: @0x4A6537..0x4A658D].
-	std::string map_file;
-	bool map_source_is_loose = false;
-	uint8_t map_launch_option = 0;
-	uint32_t map_game_type = 0;
-	// The entry the cursor names, else null.
-	const MissionRotationEntry *current() const;
-};
-
 // The result of one read: what the file changed and what it named that
 // matched nothing (retail ignores both kinds silently; the embedder may log).
 struct HostFileReport {
@@ -105,12 +81,12 @@ struct HostFileReport {
 // One tokenized line onto the cfg block and the rotation, retail's per-key
 // arms in their order. False for a key no arm owns.
 bool apply_host_file_line(const io::ConfigTokens &line, gamecfg::GameCfg &cfg,
-		MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
+		HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
 		HostFileReport *report = nullptr);
 
 // The whole file through the game.cfg walk, over the block as it stands (the
 // game.cfg the process read, else its defaults).
 HostFileReport read_host_file(const char *text, size_t size, gamecfg::GameCfg &cfg,
-		MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog);
+		HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog);
 
 } // namespace opennova::inmatch

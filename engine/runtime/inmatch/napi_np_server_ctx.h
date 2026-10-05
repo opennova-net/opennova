@@ -31,6 +31,7 @@ struct File;
 namespace opennova::inmatch {
 
 class ClientRuntime;
+struct HostRotation;
 
 // [orig +0x5C] The host/client connection mode written by [orig: CGameSession_SetConnectionMode
 // @0x4c49f0] (§5.0 / §6.3). It decomposes into the two booleans is_authority (is_host) and
@@ -278,6 +279,12 @@ struct NapiNPServerCtx {
 	// C2S drain / S2C fan) is owned by Server_TickUpdate over connection_list — there is no separate
 	// NetSystem (retired P8): the drain/emit primitives live in runtime/replication/connection_fan.h.
 	world::World *world = nullptr;
+	// The session-level rotation state the embedder owns for its whole run
+	// (inmatch/mission_rotation.h): the round end's LASTGAME read, the team
+	// assignment's side-to-team map, the round count. Non-owning; null (a
+	// test context, the SP listen server) reads as LASTGAME off and sides
+	// 1, 2.
+	HostRotation *rotation = nullptr;
 	// The host process's own client half (the listen host's loopback
 	// ClientRuntime; null on a dedicated host): the client-side state a host
 	// handler reads through the process globals retail shares, here the

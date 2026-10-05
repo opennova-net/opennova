@@ -8,6 +8,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // DisconnectEvent
 #include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/null_datagram_socket.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -42,7 +43,10 @@ HostRole::HostRole(RoleKind kind,
 // (the HostClient view follows on serve-and-play, taking the catalog this
 // role holds).
 bool HostRole::bring_up() {
-	bring_up(staged_bringup_);
+	if (staged_bringup_.next_mission)
+		bring_up_next_mission(staged_bringup_);
+	else
+		bring_up(staged_bringup_);
 	return false;
 }
 
@@ -69,6 +73,14 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	state.host_owner.ctx.world = &kernel.world;
 	state.host_owner.ctx.mission = &kernel.mission;
 	state.host_owner.ctx.mission_text_loaded = false;
+	state.host_owner.ctx.rotation = rotation_;
+	map_change = HostMapChange{};
+	apply_rule_words(config, serve_and_play, in_session);
+}
+
+void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play,
+		bool in_session) {
+	mission::MissionKernel &kernel = *kernel_;
 	kernel.world.rules.fat_bullets = config.fat_bullets;
 	kernel.world.rules.one_shot_kill = config.one_shot_kill;
 	// The mission-data block's unlimited-vehicles word, rebuilt from the host
@@ -153,6 +165,9 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	ctx.mission_briefing3 = bringup.mission_text.briefing3;
 	ctx.mission_briefing2 = bringup.mission_text.briefing2;
 	inmatch::install_mission_location_names(ctx, kernel.mission, bringup.mission_text.location_texts);
+	// A host session's start zeroes the round count [orig: UI_HandleHostSessionStart
+	// @0x556EAB; HostDialog_StartSession @0x5587BD].
+	if (rotation_ != nullptr) rotation_->round_count = 0;
 	inmatch::start_host_session(state.host_owner, host_cfg);
 	if (host_cfg.serve_and_play) {
 		make_client_runtime(host_cfg.config.game_type);
@@ -160,6 +175,61 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	} else {
 		state.client_runtime.reset();
 	}
+}
+
+// The map change's bring-up, inside the next mission's kernel boot where a
+// fresh session's starts: the kept session onto the new World (the context
+// keeps its connections; the per-mission tables, the streams and the rule
+// words are the next map's), the CRT stream carried over, the host's own
+// client view rebuilt over the cleared loopback, then the round init over
+// the kept slots and a pump of the rebuilt streams.
+// [orig: Game_StartMission's authority arm @0x524492..0x52452B, the stream
+//  rebuild @0x5247EB, the pumps @0x524813 / @0x52481D, the mission-data
+//  block @0x5248A7, Server_InitAllPlayerEntitiesForRound @0x525BAF]
+void HostRole::bring_up_next_mission(const HostBringup &bringup) {
+	mission::MissionKernel &kernel = *kernel_;
+	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	state.client_runtime.reset();
+	local_round_reset_seen_ = kernel.local.round_reset_revision;
+	state.host_loop.clear();
+	ctx.world = &kernel.world;
+	ctx.mission = &kernel.mission;
+	ctx.rotation = rotation_;
+	ctx.host_client = nullptr;
+	apply_rule_words(host_cfg.config, host_cfg.serve_and_play, /*in_session=*/true);
+	kernel.world.crt_rand = map_change.crt_rand;
+	inmatch::set_server_text(ctx, bringup.server_text);
+	ctx.terrain_til_data = bringup.terrain_til_data;
+	ctx.mission_text_loaded = bringup.mission_text.loaded;
+	ctx.mission_briefing3 = bringup.mission_text.briefing3;
+	ctx.mission_briefing2 = bringup.mission_text.briefing2;
+	inmatch::install_mission_location_names(ctx, kernel.mission, bringup.mission_text.location_texts);
+	inmatch::continue_host_session(state.host_owner, host_cfg);
+	map_change.torn_down = false;
+	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);
+	pump_load();
+	init_all_player_entities_for_round(*this);
+	if (host_cfg.serve_and_play) {
+		// The host's own client takes its load-time stream over the loopback,
+		// as a fresh session's bring-up queues it.
+		(void)tick_connections(ctx, /*elapsed_ms=*/0, state.host_owner.now_tick);
+		kernel.local.reset_local_player_input_to_player_facing();
+	}
+}
+
+void HostRole::pump_load() {
+	opennova::IDatagramSocket &socket =
+			socket_ != nullptr ? *socket_ : null_datagram_socket();
+	inmatch::host_session_load_pump(state.host_owner, socket);
+}
+
+void HostRole::finish_mission_load() {
+	if (state.host_owner.ctx.is_authority == 0) return;
+	inmatch::Server_BroadcastPlayerInfoToAll(state.host_owner.ctx);
+	if (!map_change.pending) return;
+	map_change.pending = false;
+	pump_load();
 }
 
 void HostRole::drain_host_client_gameplay_requests() {
@@ -434,16 +504,8 @@ bool HostRole::session_lost(SessionError &error) const {
 	// Game_ProcessMainFrame @0x526806..0x526867 after the frame's update].
 	const int32_t reason = ctx.mission_exit_reason != 0 ? ctx.mission_exit_reason
 			: kernel_ != nullptr ? kernel_->world.mission_exit_reason : 0;
-	if (reason != 0) {
-		error = {SessionErrorCode::SessionLost, "mission exit " + std::to_string(reason)};
-		return true;
-	}
-	if (ctx.connection_mode != ConnectionMode::HostOnly) return false;
-	if (!ctx.round_end_announced || ctx.round_end_linger_ticks != 0 ||
-			ctx.is_in_session != 0)
-		return false;
-	error = {SessionErrorCode::RoundEnded,
-			"round ended: the post-round linger expired and the session closed"};
+	if (reason == 0) return false;
+	error = {SessionErrorCode::SessionLost, "mission exit " + std::to_string(reason)};
 	return true;
 }
 
@@ -470,7 +532,9 @@ void HostRole::close() {
 	// PostMission sweep, both ahead of the per-slot 0x25 walk below
 	// [orig: Game_TeardownMission — EventTrigger_UpdateAllWithFlag4 call
 	//  @0x52266C precedes Server_DisconnectAndResetAllPlayerSlots @0x52269B].
-	if (kernel_ != nullptr) kernel_->run_post_mission_pass(/*is_authority=*/true);
+	// A map change's teardown already ran both on this kernel (map_change.h).
+	if (kernel_ != nullptr && !map_change.torn_down)
+		kernel_->run_post_mission_pass(/*is_authority=*/true);
 	opennova::IDatagramSocket &socket =
 			socket_ != nullptr ? *socket_ : null_datagram_socket();
 	NapiNPServerCtx &ctx = state.host_owner.ctx;

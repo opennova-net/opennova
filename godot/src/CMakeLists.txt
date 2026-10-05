@@ -226,6 +226,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_player_loadout.cpp
     simulation/simulation_deploy_screen.cpp
     simulation/simulation_end_round.cpp
+    simulation/simulation_rotation.cpp
     simulation/simulation_player_view.cpp
     simulation/simulation_player_weapon.cpp
     simulation/effect_section_source.cpp
