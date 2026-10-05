@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <editor/preview/mission_palette.h>
+#include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
 
@@ -20,12 +21,14 @@ inline constexpr const char *kItemDragPayload = "OPENNOVA_ITEM";
 // file muted after it and its id in its tooltip. A click picks the item, which every click on the
 // picture then places; a row dragged over the picture places one where it is let go. It keeps the
 // palette it made until the graph, the filter or the recent items move (a JO catalog holds some
-// thousand items).
+// thousand items). The search is the viewport's (the MCP gaps lane: the mission options' palette).
 class MissionPaletteView {
 public:
 	// Draws in the current window's room; the item picked this frame (0: none). `picked` the item the
-	// tool places now (its row shown selected).
-	int64_t draw(const AssetGraph *graph, uint64_t generation, const std::vector<int64_t> &recent, int64_t picked);
+	// tool places now (its row shown selected); `search` the search text the viewport holds (taken when it
+	// moved), what the person typed this frame set in `typed`.
+	int64_t draw(const AssetGraph *graph, uint64_t generation, const std::vector<int64_t> &recent, int64_t picked,
+			const std::string &search, std::string *typed);
 
 	// The name of an item the palette lists ("" when it does not).
 	std::string name_of(int64_t item) const;
@@ -33,7 +36,7 @@ public:
 	const MissionPalette &palette() const { return palette_; }
 
 private:
-	char filter_[64] = {};
+	ui_kit::HeldText<kWorkspaceText> filter_;
 	bool made_ = false;
 	uint64_t generation_ = 0;
 	std::string made_filter_;

@@ -8,6 +8,7 @@
 #include <base/io/json.h>
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/view/workspace_view.h>
 
 namespace opennova::editor {
 
@@ -137,6 +138,10 @@ public:
 	Viewports &viewports();
 	// `seconds` of the Shell's frames pass: the preview clock runs while it plays.
 	void advance(double seconds);
+	// What the Shell's player made of the sound play `serial` asked (the workspace's sound, play_sound): it
+	// plays, it played through, it failed (`error` why). A report of a play stopped or replaced since is passed
+	// over; one that moves the sound moves the Workspace concern.
+	void report_sound(uint64_t serial, WorkspaceView::SoundState state, const std::string &error = std::string());
 
 private:
 	struct Impl;

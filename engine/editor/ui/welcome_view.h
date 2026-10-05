@@ -35,24 +35,18 @@ private:
 // imports from and plays in (the UX round's project lane: prefilled with the one the editor last chose,
 // Browse..., and checked as it is named, CheckInstall, what it holds said under it), what it builds on and
 // whether it builds as an expansion (ADR 0046 S16: ExpansionFields, over the expansions of the install
-// named), and Create, which raises NewProject with the install. The welcome page and File > New project...
-// draw the one form, so the shell's picks land in it wherever it shows.
+// named), and Create, which raises NewProject with the install. What it holds is the workspace's
+// (new_project, the MCP gaps lane): each field draws it and a person's change is a set_workspace, so the
+// editor MCP fills it as a person does; the welcome page and File > New project... draw the one form.
 class NewProjectForm {
 public:
 	// True when Create raised the request.
 	bool draw(Workspace &workspace);
-	void set_folder(const std::string &path);
-	// The install a pick chose (PickPurpose::NewProjectInstall), checked at the next draw.
-	void set_install(const std::string &path);
-	const char *title() const { return title_; }
-	const char *folder() const { return folder_; }
-	const char *install() const { return install_; }
 
 private:
-	char title_[128] = "My Game";
-	char folder_[512] = "";
-	char install_[512] = "";
-	bool install_named_ = false; // the author named one: no longer the editor's last
+	ui_kit::HeldText<kWorkspaceText> title_;
+	ui_kit::HeldText<kWorkspacePath> folder_;
+	ui_kit::HeldText<kWorkspacePath> install_;
 	InstallFieldCheck check_;
 	ExpansionFields expansion_;
 };
