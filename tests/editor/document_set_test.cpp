@@ -8,6 +8,7 @@
 // Duplicate and whose removal are one step each, the primary's copy the primary; records the
 // document does not hold never selected; and the Selection concern moving with the selection
 // alone.
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
@@ -227,8 +228,16 @@ static int test_selection_over_rows() {
 	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({title}) && v.documents.selection.primary == title);
 	menus.session.handle(request::select_record("main.mnu", stale, SelectMode::Replace, {other}));
 	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({other}) && v.documents.selection.primary == other);
+	// A primary it does not hold with nothing else held: refused, the selection as it was, no Problems row
+	// (the demo round's review).
 	menus.session.handle(request::select_record("main.mnu", stale, SelectMode::Add));
-	TEST_EXPECT(v.documents.selection.records.empty() && !v.documents.selection.primary.row);
+	TEST_EXPECT(!menus.session.outcome().done() && v.documents.selection.records == std::vector<NodeAddress>({other}) &&
+	            v.documents.selection.primary == other);
+	TEST_EXPECT(std::none_of(v.findings.diagnostics.begin(), v.findings.diagnostics.end(),
+	                         [](const Diagnostic &d) { return d.code() == "document.selection"; }));
+	menus.session.handle(request::select_record("main.mnu", NodeAddress{999999, 0, 0}));
+	TEST_EXPECT(!menus.session.outcome().done() && v.documents.selection.primary == other &&
+	            v.activity.status == "main.mnu holds no record 999999.");
 	// The demo round's bug 11: a primary named by its identities alone (no kind, as the wire leaves it out,
 	// or a wrong one) is the document's record of them: selected, as its own address.
 	for (const NodeKind kind : {NodeKind(0), NodeKind(title.kind + 7)}) {

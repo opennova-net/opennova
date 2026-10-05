@@ -729,7 +729,7 @@ void FilesWindow::close_card() {
 void FilesWindow::draw_card(const SessionView &view) {
 	if (card_path_.empty()) return;
 	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Graph, ViewConcern::Project});
-	const bool reading = view.activity.validation.running || !view.activity.validation.read;
+	const bool reading = !view.activity.validation.read || view.activity.validation.files_unread; // file_card's
 	if (!card_ || card_key_ != key || card_->reading != reading) {
 		card_key_ = key;
 		// A wave's sound as it was read, while its file stands (file_card reads it again when it moved).

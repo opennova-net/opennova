@@ -833,7 +833,11 @@ static int test_rename() {
 	{
 		EditorRequest assign = request::assign_requirement(missing_role, "spare.pcx");
 		editor_test::handle_to_end(session, assign);
-		TEST_EXPECT(view.findings.diagnostics.back().code() == "requirement.kind");
+		// The request's own fault: refused in its outcome, no Problems row.
+		TEST_EXPECT(!session.outcome().done() && !session.outcome().findings.empty() &&
+		            session.outcome().findings.back().code() == "requirement.kind");
+		TEST_EXPECT(std::none_of(view.findings.diagnostics.begin(), view.findings.diagnostics.end(),
+		                         [](const Diagnostic &d) { return d.code() == "requirement.kind"; }));
 		TEST_EXPECT(view.project.requirements->required_missing == 1);
 	}
 	// A table of the right kind, copied from another required table.

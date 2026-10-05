@@ -85,7 +85,9 @@ FileCard file_card(const SessionView &view, const std::string &path, const FileC
 		card.sound = known && known->modified != 0 && known->size == entry->size_bytes && known->modified == entry->modified_ticks
 		                     ? *known
 		                     : decode_sound(join_path(view.project.root, entry->relative_path), *entry);
-	card.reading = view.activity.validation.running || !view.activity.validation.read;
+	// Until the graph has read the project's references, or while it has not read the files as the scan
+	// lists them now (an import's): not during an edit's validation, which the graph keeps up with.
+	card.reading = !view.activity.validation.read || view.activity.validation.files_unread;
 	const AssetGraph *graph = view.findings.graph.get();
 	if (!graph) return card;
 	for (const GraphEdge *edge : graph->references_of(entry->relative_path)) {

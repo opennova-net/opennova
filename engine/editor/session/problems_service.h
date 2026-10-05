@@ -192,6 +192,8 @@ private:
 	SessionCore &core_;
 	SessionView &view_;
 	bool read_once_ = false; // a validation has ended since the project opened (ValidationStatus::read)
+	// The scan the graph's last update read (ValidationStatus::files_unread while the view's is another).
+	std::shared_ptr<const AssetScan> graph_scan_;
 	std::shared_ptr<AssetGraph> graph_ = std::make_shared<AssetGraph>();
 	std::shared_ptr<ProjectAssetSource> assets_ = std::make_shared<ProjectAssetSource>();
 	// The document types' project checks, one per type that has one (S13 V9): what each keeps

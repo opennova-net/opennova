@@ -183,6 +183,11 @@ void SessionCore::refuse_request(const Diagnostic &d) {
 	note(std::string(diagnostic_severity_label(d.severity)) + ": " + d.message);
 }
 
+void SessionCore::refuse_request(CoreFinding code, const std::string &message, const std::string &asset,
+                                 DiagnosticSeverity severity) {
+	refuse_request(make_finding(code, severity, message, asset));
+}
+
 // A request that cannot run now (a build is packing the project's files, the document it
 // names is not open): nothing is wrong with the project, so the row is a warning, but the
 // request did nothing and its outcome says so.
@@ -821,6 +826,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 			view_.project.requirements =
 					std::make_shared<const RequirementReport>(requirements_of(*view_.project.document, *view_.project.scan));
 			touch(ViewConcern::Files);
+			problems().show_requirements(); // the rows they lead with, at once
 			problems().validate_later();
 		}
 	}
@@ -1007,7 +1013,8 @@ void SessionCore::set_viewport(const std::string &path, const std::string &chang
 	} else if (viewports_->set(view_, at, json, error)) {
 		touch(ViewConcern::Viewports);
 	}
-	if (!error.empty()) report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, at));
+	// The change's own fault: refused, no Problems row (the demo round's review).
+	if (!error.empty()) refuse_request(CoreFinding::ViewportRefused, error, at, DiagnosticSeverity::Error);
 }
 
 SessionCore::WireDrag *SessionCore::wire_drag(const std::string &path) {
@@ -1094,7 +1101,7 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 		}
 	}
 	if (!error.empty()) {
-		report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, at));
+		refuse_request(CoreFinding::ViewportRefused, error, at, DiagnosticSeverity::Error);
 		// A refused last sample of an open gesture ends it all the same.
 		if (going && asked.end) end_wire_gesture(at);
 		return;

@@ -122,6 +122,7 @@ bool ProblemsService::step_pass(uint64_t bytes) {
 			pass.graph_shown = true;
 			core_.touch(ViewConcern::Graph);
 		}
+		if (pass.validation.graph_read()) graph_scan_ = pass.scan;
 		return false;
 	}
 	// After the last file's own findings, the project checks in the registry's order (a check reads
@@ -248,6 +249,7 @@ void ProblemsService::show_validation() {
 	// waits for it too, and the menu bar says "Validating" meanwhile.
 	status.running = validating() || (view_.project.open && originals_needed_ && !originals_->settled());
 	status.read = read_once_;
+	status.files_unread = view_.project.open && view_.project.scan && graph_scan_ != view_.project.scan;
 	if (pass_) {
 		status.done = pass_->validation.files_done();
 		status.total = pass_->validation.files_total();
@@ -397,6 +399,7 @@ void ProblemsService::clear() {
 	reported_.clear();
 	validation_due_ = false;
 	read_once_ = false;
+	graph_scan_.reset();
 	pass_.reset();
 	moved_since_composed_ = false;
 	readings_.clear();

@@ -344,30 +344,32 @@ void RenameController::rename_symbol(const EditorRequest &request) {
 }
 
 // A requirement satisfied by renaming a project file of the expected kind to the name
-// the engine demands.
+// the engine demands. A role or a file the request names that does not fit is the request's own fault:
+// refused, so whoever asked learns the assignment did not happen, and no Problems row.
 void RenameController::assign_requirement(const std::string &role, const std::string &file) {
 	if (!view_.project.open) return;
 	const RequirementRow *row = core_.requirement_row(role);
 	if (!row) {
-		core_.report(make_finding(CoreFinding::RequirementUnknown, DiagnosticSeverity::Error, "No requirement has the role '" + role + "'."));
+		core_.refuse_request(CoreFinding::RequirementUnknown, "No requirement has the role '" + role + "'.", std::string(),
+		                     DiagnosticSeverity::Error);
 		return;
 	}
-	// Nothing is renamed: a refusal, so whoever asked learns the assignment did not happen.
 	if (row->state == RequirementState::Present) {
-		core_.report(make_finding(CoreFinding::RequirementAssigned, DiagnosticSeverity::Error,
-		                          row->name + " is already in the project: nothing was assigned.", row->asset_path));
+		core_.refuse_request(CoreFinding::RequirementAssigned, row->name + " is already in the project: nothing was assigned.",
+		                     row->asset_path, DiagnosticSeverity::Error);
 		return;
 	}
 	const AssetEntry *asset = core_.project_file(file);
 	if (!asset) {
-		core_.report(make_finding(CoreFinding::RequirementUnknownFile, DiagnosticSeverity::Error, "The project has no file named '" + file + "'.", file));
+		core_.refuse_request(CoreFinding::RequirementUnknownFile, "The project has no file named '" + file + "'.", file,
+		                     DiagnosticSeverity::Error);
 		return;
 	}
 	if (asset->kind != row->expected_kind) {
-		core_.report(make_finding(CoreFinding::RequirementKind, DiagnosticSeverity::Error,
-		                          asset->logical_name + " is " + asset_kind_label(asset->kind) + ", and " + row->name +
-		                                  " must be " + asset_kind_label(row->expected_kind) + ".",
-		                          asset->relative_path));
+		core_.refuse_request(CoreFinding::RequirementKind,
+		                     asset->logical_name + " is " + asset_kind_label(asset->kind) + ", and " + row->name +
+		                             " must be " + asset_kind_label(row->expected_kind) + ".",
+		                     asset->relative_path, DiagnosticSeverity::Error);
 		return;
 	}
 	rename_asset(asset->relative_path, row->name);

@@ -140,6 +140,10 @@ public:
 	// outcome, the status line and Output say why; Problems, which lists the project's problems, gets no
 	// row (the demo round's bug 7: an about_file of a missing path left a document.missing error there).
 	void refuse_request(const Diagnostic &d);
+	// The same, of `code` (a warning unless `severity` says otherwise): a path that names no open document or
+	// one of no records, a requirement's role or file that names none, a viewport change that does not read.
+	void refuse_request(CoreFinding code, const std::string &message, const std::string &asset = std::string(),
+	                    DiagnosticSeverity severity = DiagnosticSeverity::Warning);
 
 	// --- the operation slot ----------------------------------------------------------------
 

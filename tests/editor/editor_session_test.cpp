@@ -1083,6 +1083,64 @@ static int test_requests_that_cannot_run() {
 	return 0;
 }
 
+// The demo round's bug 7 and its review: a request whose own argument names nothing (a path the project
+// lacks or no open document has, a record no document holds, a requirement's role or file that fits none,
+// a viewport change that does not read) is refused in its outcome, says why on the status line, and leaves
+// no Problems row, whatever kind of request names it.
+static int test_request_faults_leave_no_rows() {
+	editor_test::TempProjectDir dir("opennova_editor_session_request_faults");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Faults"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	session.handle(request::open_document("main.mnu"));
+	session.run_operations();
+	const SessionView &v = session.view();
+	const Document *menu = session.document_for("main.mnu");
+	TEST_EXPECT(menu != nullptr && !v.project.requirements->rows.empty());
+	if (!menu || v.project.requirements->rows.empty()) return 1;
+	const std::string role = v.project.requirements->rows.front().role;
+	EditorRequest edit = request::edit_record("nowhere.def", Edit());
+	edit.edits[0].field = "hp";
+	edit.edits[0].value = int64_t(1);
+	const EditorRequest faults[] = {
+		request::open_document("nowhere.mnu"),
+		request::show_in_files("nowhere.mnu"),
+		request::about_file("nowhere.mnu"),
+		request::select_file("nowhere.mnu"),
+		request::save("nowhere.mnu"),
+		edit,
+		request::undo("nowhere.mnu"),
+		request::redo("nowhere.mnu"),
+		request::copy("nowhere.mnu"),
+		request::paste("nowhere.mnu"),
+		request::duplicate("nowhere.mnu"),
+		request::revert_to_saved("nowhere.mnu", {Edit()}),
+		request::select_record(menu->path(), NodeAddress{999999, 0, 0}),
+		request::set_viewport(menu->path(), R"({"kind": "menu", "options": {"bogus": 1}})"),
+		request::assign_requirement("no_such_role", "main.mnu"),
+		request::assign_requirement(role, "nowhere.bin"),
+	};
+	for (const EditorRequest &fault : faults) {
+		const std::string status = v.activity.status;
+		session.handle(fault);
+		const ActionOutcome &outcome = session.outcome();
+		TEST_EXPECT(!outcome.done() && !outcome.findings.empty());
+		if (outcome.findings.empty()) {
+			std::printf("  %s: no finding in its outcome\n", editor_request_kind_token(fault.kind));
+			continue;
+		}
+		const std::string code = outcome.findings.front().code();
+		const bool row = std::any_of(v.findings.diagnostics.begin(), v.findings.diagnostics.end(),
+		                             [&](const Diagnostic &d) { return d.code() == code; });
+		TEST_EXPECT(!row && v.activity.status == outcome.findings.front().message);
+		if (row) std::printf("  %s left a Problems row (%s)\n", editor_request_kind_token(fault.kind), code.c_str());
+	}
+	return 0;
+}
+
 // A request's words are its own: Play over the command line's process seam (NullProcessPlatform,
 // which starts no game) says that session starts none, never that Play is Windows-only; an Open,
 // a Reload and a Create say on the status line what they did, or that they did not, never the line
@@ -4314,6 +4372,7 @@ int main() {
 	failures += test_outcomes_and_refusals();
 	failures += test_validation_cost();
 	failures += test_requests_that_cannot_run();
+	failures += test_request_faults_leave_no_rows();
 	failures += test_status_says_the_request();
 	failures += test_rename_keeps_the_active_document();
 	failures += test_preview_target();
