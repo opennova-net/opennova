@@ -13,10 +13,42 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const ProjectDocument &doc,
+CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const ProjectDocument &doc, const AssetScan &scan,
                                                 const RequirementReport &report, const std::vector<std::string> &roles) {
 	CreateMissingResult result;
 	const auto named = [&roles](const std::string &role) { return std::find(roles.begin(), roles.end(), role) != roles.end(); };
+	// A file a made blank names (blank_companion), made under its kind's folder where the project has
+	// none of that name and none was made this run, and its target is free; one that is not made
+	// leaves the blank made, and says why.
+	const auto make_companion = [&](const BlankFactory &made_by, const std::string &made) {
+		std::string name;
+		const BlankFactory *factory = blank_companion(made_by, doc, name);
+		if (factory == nullptr || scan.find(name)) return;
+		const std::string dir = asset_kind_row(factory->kind).folder;
+		const std::string relative = dir.empty() ? name : dir + "/" + name;
+		if (std::find(result.created.begin(), result.created.end(), relative) != result.created.end()) return;
+		const fs::path target = path_of(paths.root) / path_of(relative);
+		std::error_code ec;
+		if (fs::exists(system_path(utf8_of(target)), ec) || ec) return; // the scan is older than the tree
+		BlankRequest request;
+		request.logical_name = name;
+		request.role = factory->role;
+		request.project_title = doc.title;
+		std::vector<uint8_t> bytes;
+		Diagnostic error;
+		std::string io_error;
+		if (!factory->make(request, bytes, error)) {
+			result.diagnostics.push_back(error);
+			return;
+		}
+		if (!ensure_directory(utf8_of(target.parent_path()), io_error) ||
+		    !write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), io_error)) {
+			result.diagnostics.push_back(make_finding(CoreFinding::CreateMissingWrite, DiagnosticSeverity::Error,
+			                                          made + " names " + name + ", which was not made: " + io_error, name));
+			return;
+		}
+		result.created.push_back(relative);
+	};
 	for (const RequirementRow &row : report.rows) {
 		if (!named(row.role)) continue;
 		if (row.state == RequirementState::Present) {
@@ -73,6 +105,7 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 			continue;
 		}
 		result.created.push_back(relative);
+		make_companion(*factory, row.name);
 	}
 	// A role no row has (none of that name, or a row of a phase the project leaves off),
 	// reported once however often it is named.
