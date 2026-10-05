@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "dds",
+    "name": "onsold1_0.dds"
+  },
+  "outputs": [
+    "onsold1_0.dds"
+  ],
+  "schema_version": 1,
+  "source_hash": "fe754ebd72cbf776",
+  "version": 2
+}

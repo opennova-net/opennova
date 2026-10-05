@@ -541,6 +541,17 @@ The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
 the tree is organization only. Uniqueness and length are checked on output names.
 _Avoid_: path (when the engine-facing identity is meant), resource name
 
+**Font set**:
+A bitmap font made from a picture by the editor's font importer: `<name>.fntset`, a short text naming
+its **glyph sheet**, a PNG of 16 x 14 equal cells holding the bytes 0x20..0xFF in reading order, each
+glyph its cell's alpha. The sheet is the import's input; the import record's options are the font's
+metrics (`advance`: `ink`, `left` or `cell`; `tracking`; `space`; `spacing`; `design_width`) and
+`color` (`white`, a mask the text's colour tints, or `sheet`, the sheet's own colour kept). The
+import makes `<name>.fnt` through the FNT writer, every glyph the cell's height and as wide as its
+advance (the format has no advance table). An import of the set from the disk brings its sheet beside
+it into `fonts/`.
+_Avoid_: font project, atlas (the `.fnt`'s pages are the packer's layout, not the sheet's)
+
 **Import / sidecar**:
 Bringing a non-native source (an image, a terrain set; later a sound bank's manifest, a font)
 into the project the Godot way: a committed `<file>.import` sidecar records the
@@ -567,13 +578,15 @@ image source (the kind's name before S13 A8)
 **Terrain set**:
 A terrain made from ordinary images (ADR 0046 S20): `<name>.tset`, a short text in `art/terrain/`
 naming its heightmap (a 1024 x 1024 PNG at any depth, or TrnGen's own `.raw`), its colour map
-(1024 x 1024) and, if wanted, a detail and a tile set, each an import input; its import record's
-options are the terrain's numbers in world units (the heightmap white's height, the water level, the
-layout). The terrain importer bakes it with TrnGen.exe's own bake (the port in `engine/editor/terrain`)
-into the files the game reads for a terrain, each named after the set: `<name>.trn`, `.cpt`, `.til`
-and the colour, detail, blend and tile-set textures. Files' New > Terrain from images..., the
-`new_terrain` request and `opennova-project new-terrain` make one; a change to an image imports it
-again.
+(1024 x 1024) and, if wanted, a detail, a tile set and a surface map, each an import input; its import
+record's options are the terrain's numbers in world units (the heightmap white's height, the water
+level, the layout). The terrain importer bakes it with TrnGen.exe's own bake (the port in
+`engine/editor/terrain`) into the files the game reads for a terrain, each named after the set:
+`<name>.trn`, `.cpt`, `.til`, the colour, detail, blend and tile-set textures, and `<name>_m.pcx`, the
+**surface map** (the `.trn`'s char map: each texel's index the surface class the game reads there,
+painted as indices or in the char map legend's colours, `formats/trn/charmap_legend.h`). Files' New >
+Terrain from images..., the `new_terrain` request and `opennova-project new-terrain` make one; a change
+to an image imports it again.
 _Avoid_: terrain project (TrnGen's `.tpj`), heightfield document
 
 **Import closure**:
