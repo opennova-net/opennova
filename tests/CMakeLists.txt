@@ -3632,6 +3632,14 @@ target_link_libraries(admin_protocol_test PRIVATE opennova_net)
 target_include_directories(admin_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/admin)
 add_test(NAME admin_protocol COMMAND admin_protocol_test)
 
+# opennova-serve (apps/serve, ADR 0051): a loose directory with one synthetic mission and a
+# retail host file; the server boots it headless as a DedicatedHost, answers a LAN probe and
+# admits a ClientRuntime joiner over real loopback UDP. No retail data.
+add_executable(opennova_serve_test serve/opennova_serve_test.cpp)
+target_link_libraries(opennova_serve_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_lan_join COMMAND opennova_serve_test)
+
 # opennova-nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
 # end over real loopback UDP against the real NwUdpListener and an in-test gate (the row, a roster
 # edit keeping the other slot, the refresh, the stop).
