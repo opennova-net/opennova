@@ -7,10 +7,9 @@
 #include <editor/project/project_files.h>
 #include <formats/bad/bad_build.h>
 #include <formats/bad/bad_o3a_read.h>
-#include <formats/threedi/threedi_o3d_read.h>
+#include <formats/threedi/threedi_o3d_lower.h>
 #include <runtime/anim/adm_clip_index.h>
-#include <runtime/renderer/material_descriptor.h>
-#include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/model_target.h>
 
 
 namespace opennova::editor {
@@ -35,14 +34,14 @@ bool failed(const ImportProduct &out) {
 	return false;
 }
 
-// `.o3d`: the model through the engine's reader and mint (threedi_o3d_build).
+// `.o3d`: the model through the engine's reader, its lowering to the retail target and
+// the mint (threedi_o3d_build over renderer::retail_model_target).
 bool run_o3d(const std::string &source_name, const std::vector<uint8_t> &bytes, ImportProduct &out) {
 	std::istringstream text(std::string(bytes.begin(), bytes.end()));
 	std::vector<threedi::SceneFinding> findings;
 	ImportOutput model;
 	model.name = utf8_of(path_of(source_name).stem()) + ".3di";
-	const bool built = threedi::threedi_o3d_build(text, renderer::material_descriptor_tangent_lookup,
-	                                              renderer::material_texture_dds_only, model.bytes, findings);
+	const bool built = threedi::threedi_o3d_build(text, renderer::retail_model_target(), model.bytes, findings);
 	add_findings(source_name, findings, out);
 	if (!built || failed(out)) {
 		out.outputs.clear();
