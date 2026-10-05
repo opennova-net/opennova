@@ -188,12 +188,13 @@ struct PinnedRows {
 // texture finding: their art/logo.tga holds no TGA header, which the game cannot load
 // (texture.unloadable; the former rows gave 8a3d7521 and 626d6c86); and drops the fixtures' item's
 // missing shadow texture (atvshdw.tga), a name the game stores and never loads (the former 239 rows gave
-// 80169f08).
+// 80169f08). The demo round's bug 3 keeps what the game ignores in an item table on a save, so its rows
+// no longer say a save drops it ("; saving drops it." gone from the fixture items' eight; 72af48e4 before).
 static int test_rows_as_before() {
 	const PinnedRows pinned[] = {
 		// Master's D-3DI-8 fixture (threedi/synth/person_part9_trigger_scale.3di) adds one row: its
 		// texture person.tga, which the project does not have (the 238 rows before it gave 71c5737d).
-		{ "fixtures", fixture_files, false, 239, 0x72af48e41c46f276ull },
+		{ "fixtures", fixture_files, false, 239, 0x6289b82a14ca1222ull },
 		{ "styles", style_files, false, 15, 0xe39ad4219139a453ull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
 		{ "open", style_and_item_files, true, 19, 0x80eb2caf43356608ull },

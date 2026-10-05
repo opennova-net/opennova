@@ -268,15 +268,17 @@ void ImportDialog::draw(Workspace &workspace) {
 			if (preview.plan->rows[i].held && why_not_[i].empty()) checked_[i] = replace_existing_;
 	ui_kit::tooltip("Check every file the project has already, to write it over; left unchecked, the project's file "
 	                "stays as it is.");
-	const std::string label = "Import " + counted(count, "file") + "###import";
+	// While the plan is being made there is nothing to count yet: Import waits for it.
+	const std::string label = (preview.planning ? std::string("Import") : "Import " + counted(count, "file")) + "###import";
 	// An import writes the project's files: while an operation holds them (a build packing
 	// them), the busy gate refuses it, and Import waits with it (SessionView::allows).
 	const bool allowed = workspace.view().allows(EditorRequestKind::ImportFiles);
-	const std::string why = count == 0        ? "Check the files to import first."
+	const std::string why = preview.planning ? "The import is being planned: Import waits for its plan."
+	                        : count == 0      ? "Check the files to import first."
 	                        : !blocked.empty() ? blocked
 	                        : !allowed         ? "An import writes the project's files: it waits for the running operation."
 	                                           : "Copy the checked files into the project (Undo cannot take the copy back).";
-	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty() && allowed, why)) {
+	if (ui_kit::tool(actions, label.c_str(), !preview.planning && count > 0 && blocked.empty() && allowed, why)) {
 		// Replace existing files, or a checked file the project holds, asks to replace (import_selection).
 		EditorRequest request = request::import_files(std::move(selection.sources), selection.replace);
 		send(workspace, preview);
@@ -691,6 +693,16 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	                (preview.all ? std::string("Every file of the game install is chosen: there is nothing more to look for.")
 	                             : std::string("Look for the files the chosen ones name (fonts, textures, models...) beside them "
 	                                           "and in the game install, and import those found too. The editor remembers it.")));
+	// While its plan is being made, the dialog says so and how far it is (the operation's progress), never
+	// "Nothing to import" over the empty plan it holds meanwhile.
+	if (preview.planning) {
+		const OperationStatus &operation = workspace.view().activity.operation;
+		const std::string far = operation.running() && operation.total > 0
+		                                ? grouped(size_t(operation.done)) + " of " + counted(size_t(operation.total), "file") + " looked at."
+		                                : std::string();
+		ui_kit::empty_state("Planning the import...", far.empty() ? nullptr : far.c_str());
+		return;
+	}
 	if (plan.file_count() == 0) {
 		if (preview.roots.empty()) ui_kit::empty_state("No file chosen.", "Choose the files to import above.");
 		else ui_kit::empty_state("Nothing to import.", plan.diagnostics.empty() ? nullptr : "See why below.");
