@@ -36,7 +36,7 @@ struct ServeOptions {
 	std::string game;         // /game <code>
 	bool loose_root = false;  // --loose-root: a directory with no archives mounts loose
 	std::string host_file;    // /HOST <file>
-	// The first port of the bind scan (--lan-port; else mplanserverportmin's 32768).
+	// The first port of the bind scan (--lan-port; 0 = kRetailLanPortMin, mplanserverportmin).
 	uint16_t port = 0;
 	bool log_debug = false;   // --log-debug
 };

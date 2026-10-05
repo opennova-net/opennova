@@ -42,8 +42,8 @@ const char kUsage[] =
 		"                   line per rotation entry; the last Mission line is the starting map\n"
 		"  /exp, /d, /game  mount the expansion, prefer loose files, pick the data's game code\n"
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
-		"  --lan-port       the first port of the bind scan (default 32768, the retail range\n"
-		"                   32768..32787)\n"
+		"  --lan-port       the first port of the bind scan (default: the head of the retail\n"
+		"                   LAN server range, game.cfg mplanserverportmin)\n"
 		"  --log-debug      print the engine's debug log lines\n";
 
 // The one-token switches, retail-spelled ones matched case-insensitively.
