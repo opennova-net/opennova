@@ -481,8 +481,8 @@ static int test_plan_competition() {
 // rows, and the build packs both (a file of no kind the game knows it would leave out).
 static int test_plan_material_sources() {
 	Project project("opennova_editor_plan_material_sources");
-	const std::string relief = "o3d 1\nmodel RELIEF\nmaterial FF_ST_OP\ntexture ready.mdt 3 4\ntexture field.nq8 1 16\n"
-	                           "texture other.nq8 1 17\nlod 0\npart 0 0 0 0\nstrip 0 0\n"
+	const std::string relief = "o3d 2\nmodel RELIEF\nmaterial FF_ST_OP\ntexture ready.mdt 3 4\ntexture field.nq8 1 16\n"
+	                           "texture other.nq8 1 17\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                           "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n";
 	const std::string scene = project.dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/relief.o3d", relief) && editor_test::write_text(scene + "/ready.mdt", "mdt") &&
@@ -563,8 +563,8 @@ static int test_plan_missing_lookups() {
 	Project project("opennova_editor_plan_missing_lookups");
 	const std::string a = project.dir.file("a"), b = project.dir.file("b");
 	TEST_EXPECT(editor_test::write_text(a + "/glow.o3d",
-	                                    "o3d 1\nmodel GLOW\nmaterial FF_ST_OP\ntexture glow.tga 1 0\ntexture glow.tga 1 1\n"
-	                                    "lod 0\npart 0 0 0 0\nstrip 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\n"
+	                                    "o3d 2\nmodel GLOW\nmaterial FF_ST_OP\ntexture glow.tga 1 0\ntexture glow.tga 1 1\n"
+	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\n"
 	                                    "v 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	const ImportPlan alone = project.plan({{a + "/glow.o3d", {}}});
 	const ImportPlanRow *missing = row_named(alone, "glow.tga");
