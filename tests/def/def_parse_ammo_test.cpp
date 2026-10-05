@@ -476,6 +476,49 @@ int main(int argc, char **argv) {
         if (!stopped) return 1;
     }
 
+    {
+        // A def opens on the allocator's defaults, not zeros: drag 1.0 (0x10000),
+        // the kill-zone pie slice 0x7FFFFFFF (no cone: AV_Mine and the land mines
+        // author none), recoil 24 per stance, velocity / max_age / both turn
+        // rates / the boresight -1; at its `end` a velocity or max_age still -1
+        // takes def 0's (the table's first def is the template and keeps its own),
+        // and a def the walk stops in never reaches that `end`.
+        // [orig: AmmoDef_AllocateSlot @0x409A20 (the defaults @0x409A56..0x409AF6);
+        //  AmmoDef_InheritDefaults @0x409EB0, called from the `end` arm @0x40A3E5]
+        static const char text[] =
+                "ammo AT_NULL\n velocity 300\n max_age 5\nend\n"
+                "ammo BARE\nend\n"
+                "ammo OWN\n velocity 900\n max_age 2\n drag 0.5\n kz_pieslice 24\n"
+                " recoil 1 2 3\nend\n"
+                "ammo CUT\nammo NEVER\nend\n";
+        DefAmmoFile parsed{};
+        if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                                  &parsed) != 0 || parsed.count != 4) {
+            fprintf(stderr, "FAIL: defaults snippet gave %zu defs, expected 4\n", parsed.count);
+            def_free_ammo(&parsed);
+            return 1;
+        }
+        const auto &bare = parsed.entries[1];
+        const auto &own = parsed.entries[2];
+        const auto &cut = parsed.entries[3];
+        const bool correct =
+                bare.velocity == 300 && bare.max_age_ticks == 310 && bare.drag_fp16 == 0x10000 &&
+                bare.kz_pieslice_bam == 0x7FFFFFFF && bare.recoil[0] == 24 &&
+                bare.recoil[1] == 24 && bare.recoil[2] == 24 && bare.turnrate_maxpit == -1 &&
+                bare.turnrate_maxyaw == -1 && bare.boresight_maxang == -1 &&
+                own.velocity == 900 && own.max_age_ticks == 124 && own.drag_fp16 == 32768 &&
+                own.kz_pieslice_bam == 12 * 11930464 && own.recoil[2] == 3 &&
+                strcmp(cut.name, "CUT") == 0 && cut.velocity == -1 && cut.max_age_ticks == -1;
+        if (!correct)
+            fprintf(stderr, "FAIL: allocator defaults: bare vel %d age %d drag %d slice %d recoil "
+                    "%d/%d/%d turn %d/%d bore %d; cut vel %d age %d\n", bare.velocity,
+                    bare.max_age_ticks, bare.drag_fp16, bare.kz_pieslice_bam, bare.recoil[0],
+                    bare.recoil[1], bare.recoil[2], bare.turnrate_maxpit, bare.turnrate_maxyaw,
+                    bare.boresight_maxang, cut.velocity, cut.max_age_ticks);
+        def_free_ammo(&parsed);
+        if (!correct) return 1;
+    }
+
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/ammo.def (the shipped ammo table)");
     printf("PASS: ammo parsing OK\n");

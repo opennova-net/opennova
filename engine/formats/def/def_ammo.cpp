@@ -85,6 +85,38 @@ static int parse_age_ticks_n(const char *s, size_t len) {
     return (int)(((long long)opennova::io::kTicksPerSecondInt * parse_fixed16_digits_n(s, len) + 0x8000) >> 16);
 }
 
+/* A fresh def as AmmoDef_AllocateSlot opens it, over the table LoadAll zeroed:
+   velocity, max_age, both turn rates and the boresight -1, drag 1.0, the
+   kill-zone pie slice 0x7FFFFFFF (no cone) and recoil 24 per stance; every
+   other field it writes is 0. [orig: AmmoDef_AllocateSlot @0x409A20, the
+   defaults @0x409A56..0x409AF6 (velocity +4 @0x409A69, max_age +8 @0x409A6F,
+   drag +0x1C @0x409A7B, the pie slice +0x3C @0x409A93, recoil +0xE3..+0xE5
+   @0x409AAF..0x409ABB, the turn rates and boresight +0x50/+0x54/+0x58
+   @0x409AC1..0x409AC7); AmmoDef_LoadAll's memset @0x40B106] */
+static void reset_ammo_def(DefAmmoDef *d) {
+    memset(d, 0, sizeof(*d));
+    d->velocity = -1;
+    d->max_age_ticks = -1;
+    d->drag_fp16 = 0x10000;
+    d->kz_pieslice_bam = 0x7FFFFFFF;
+    for (int &recoil : d->recoil) recoil = 24;
+    d->turnrate_maxpit = -1;
+    d->turnrate_maxyaw = -1;
+    d->boresight_maxang = -1;
+}
+
+/* At a def's `end`, a velocity or max_age still -1 takes the table's first
+   def's; that def is the template and keeps its own. The friendly / foe tracer
+   ids and the drag inherit too, but no parse leaves them -1 (the ids store an
+   index or nothing, the 16.16 drag reads a '-' as 0).
+   [orig: AmmoDef_InheritDefaults @0x409EB0, from the `end` arm @0x40A3E5] */
+static void inherit_ammo_defaults(DefAmmoDef *d, const DefAmmoFile *out) {
+    if (out->count == 0) return;
+    const DefAmmoDef &first = out->entries[0];
+    if (d->velocity == -1) d->velocity = first.velocity;
+    if (d->max_age_ticks == -1) d->max_age_ticks = first.max_age_ticks;
+}
+
 /* Every line reaches the parser as the retail tokenizer cuts it
    (defscan::for_each_def_line); every key is the whole first token compared
    without case, and a value is a token [orig: AmmoDef_ParseProperty @0x40A2D0,
@@ -120,7 +152,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
                 stopped = 1;
                 return;
             }
-            memset(&current, 0, sizeof(current));
+            reset_ammo_def(&current);
             raw_cap = 0; eff_cap = 0;
             copy_token(current.name, 32, tokens, 1);
             in_block = 1;
@@ -133,6 +165,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
                 in_effects = 0;
                 return;
             }
+            inherit_ammo_defaults(&current, out);
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
             raw_cap = 0; eff_cap = 0;

@@ -1011,7 +1011,9 @@ void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
     }
     case ThrowClass::kAVMine: {
         // [orig: Entity_AVMineThink @ 0x443BB0 — Health <= 0 or the moving
-        // vehicle cone (data-dead in retail JO: pieslice 0).]
+        // vehicle cone. AV_Mine authors no kz_pieslice, so its half-angle is
+        // the allocator's 0x7FFFFFFF: every bearing within kz_minradius
+        // (AmmoDef_AllocateSlot @0x409A93).]
         if (dead || enemy_in_cone(world, collision, terrain, d,
                                   ammo->kz_minradius,
                                   ammo->kz_pieslice_bam, true))

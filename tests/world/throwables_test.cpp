@@ -1,7 +1,7 @@
 // Throwable tests (world/throwables.h; docs/world/world-wac-ai-re.md §27):
 // the PowerThrow charge curve + spawn speed scale, the grenade motor's bounce
 // and fuse, the satchel stick/convert chain, the detonator, the claymore cone
-// trigger + shrapnel fan, AV-mine data-dead proximity, and the owner-death
+// trigger + shrapnel fan, the AV mine's moving-vehicle proximity, and the owner-death
 // cleanup. Driven by a manual World, the destruction-test harness pattern.
 #include <cmath>
 #include <cstdio>
@@ -249,7 +249,9 @@ void seed_ammo(World &w) {
     avmine.drag_fp16 = 0x10000;
     avmine.kz_minradius = 5.0f;
     avmine.kz_maxradius = 5.0f;
-    avmine.kz_pieslice_bam = 0; // retail data authors none — proximity is dead
+    // Retail data authors none, so the half-angle is the allocator's 0x7FFFFFFF
+    // [orig: AmmoDef_AllocateSlot @0x409A93].
+    avmine.kz_pieslice_bam = 0x7FFFFFFF;
     avmine.tracer_item_friendly = kItemAvMine;
     avmine.tracer_item_enemy = kItemAvMine;
 
@@ -1293,39 +1295,55 @@ void test_claymore_sector_los_blocks_trigger() {
     CHECK(rig.w.throwables.devices.empty());
 }
 
-// AV mine: the retail data authors no kz_pieslice, so the vehicle cone can
-// never pass — only damage detonates it [orig: think @ 0x443BB0; the 0-angle
-// gate in Entity_FindEnemyVehicleInCone @ 0x43c9f0].
-void test_avmine_proximity_is_data_dead() {
-    Rig rig(0);
-    const int slot = rig.throw_ammo(kAmmoAvMine, Vec3{20.0f, 20.0f, 0.8f}, 0, 0);
-    CHECK(slot >= 0);
-    rig.tick(160);
-    CHECK(rig.w.throwables.devices.size() == 1);
-    if (rig.w.throwables.devices.empty()) return;
-    CHECK(rig.w.throwables.devices[0].think == ThrowClass::kAVMine);
+// AV mine: the retail data authors no kz_pieslice, so the vehicle cone's
+// half-angle is the allocator's 0x7FFFFFFF and every bearing passes: a moving
+// enemy vehicle within kz_minradius trips it, a stopped one does not, and
+// damage detonates it too [orig: Entity_AVMineThink @ 0x443BB0 (the cone call
+// @0x443CC7 reads +0x34 / +0x3C); Entity_FindEnemyVehicleInCone @ 0x43c9f0
+// (the unsigned angle compare, the speed floor 3276); AmmoDef_AllocateSlot
+// @0x409A93].
+void test_avmine_trips_on_a_moving_vehicle() {
+    for (int moving = 0; moving < 2; ++moving) {
+        Rig rig(0);
+        const int slot = rig.throw_ammo(kAmmoAvMine, Vec3{20.0f, 20.0f, 0.8f}, 0, 0);
+        CHECK(slot >= 0);
+        rig.tick(160);
+        CHECK(rig.w.throwables.devices.size() == 1);
+        if (rig.w.throwables.devices.empty()) return;
+        CHECK(rig.w.throwables.devices[0].think == ThrowClass::kAVMine);
 
-    Entity veh_seed;
-    veh_seed.kind = EntityKind::Item;
-    veh_seed.item_type = 1; // vehicle def kind
-    veh_seed.team = 1;
-    veh_seed.health = 500;
-    veh_seed.position = Vec3{23.0f, 20.0f, 0.0f};
-    veh_seed.veh.speed = 20000; // moving
-    rig.w.registry.spawn(1, veh_seed);
-    rig.tick(8);
-    CHECK(rig.w.throwables.devices.size() == 1); // never trips
+        Entity veh_seed;
+        veh_seed.kind = EntityKind::Item;
+        veh_seed.item_type = 1; // vehicle def kind
+        veh_seed.team = 1;
+        veh_seed.health = 500;
+        // Three units off the device's landed spot, square to its yaw: any bearing.
+        const Vec3 landed = rig.w.throwables.devices[0].pos;
+        veh_seed.position = Vec3{landed.x, landed.y + 3.0f, 0.0f};
+        veh_seed.veh.speed = moving ? 20000 : 1000;
+        rig.w.registry.spawn(1, veh_seed);
+        rig.tick(80); // past the 62-tick arm delay [orig: the +684 countdown]
+        bool saw_kz = false;
+        for (const ExplosionEntry &q : rig.w.explosions.queue)
+            if (q.ammo_index == kAmmoAvMineKz) saw_kz = true;
+        if (moving) {
+            CHECK(rig.w.throwables.devices.empty()); // the moving vehicle trips it
+            CHECK(saw_kz);
+            continue;
+        }
+        CHECK(rig.w.throwables.devices.size() == 1); // a stopped one does not
+        CHECK(!saw_kz);
 
-    // shooting it (health <= 0) detonates
-    Entity *dev = rig.w.registry.get(rig.w.throwables.devices[0].entity);
-    CHECK(dev != nullptr);
-    dev->health = 0;
-    rig.tick(2);
-    CHECK(rig.w.throwables.devices.empty());
-    bool saw_kz = false;
-    for (const ExplosionEntry &q : rig.w.explosions.queue)
-        if (q.ammo_index == kAmmoAvMineKz) saw_kz = true;
-    CHECK(saw_kz);
+        // shooting it (health <= 0) detonates
+        Entity *dev = rig.w.registry.get(rig.w.throwables.devices[0].entity);
+        CHECK(dev != nullptr);
+        dev->health = 0;
+        rig.tick(2);
+        CHECK(rig.w.throwables.devices.empty());
+        for (const ExplosionEntry &q : rig.w.explosions.queue)
+            if (q.ammo_index == kAmmoAvMineKz) saw_kz = true;
+        CHECK(saw_kz);
+    }
 }
 
 // The owner's death alone leaves its devices armed: the pool-1 visit reads no
@@ -1506,7 +1524,7 @@ int main() {
     test_detonator_chain();
     test_claymore_cone_trigger();
     test_claymore_sector_los_blocks_trigger();
-    test_avmine_proximity_is_data_dead();
+    test_avmine_trips_on_a_moving_vehicle();
     test_owner_death_keeps_devices_armed();
     test_placed_device_cap_evicts_oldest_armed();
     test_placed_device_cap_claymore_is_four_and_type_scoped();
