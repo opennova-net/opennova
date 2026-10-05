@@ -36,7 +36,7 @@
 #include "editor/test_platform.h"
 #include "editor/png_test_support.h"
 
-using opennova::project_cli::run_project_command;
+using opennova::project::run_project_command;
 namespace fs = std::filesystem;
 
 static int run(std::initializer_list<std::string> args) {
