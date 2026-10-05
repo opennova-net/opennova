@@ -87,10 +87,11 @@ static void set_def_byte(int32_t &dword, int byte_index, uint8_t value) {
    while our zeroed record gave travel 0, which pinned every wheel oscillator's
    amplitude to 0 and froze the compressions for the whole run.
 
-   `bob` is the IDB's unk591: the key ItemDef_ParsePhysicsProperty compares
-   for it is the string inline at 0x7C7D78, bytes 62 6F 62 00 = "bob", which
-   Hex-Rays renders as the pointer off_7C7D78 [orig: the compare @0x49DEA4..0x49DEAA,
-   the store to +0x93C @0x49DECE; the allocator's 5 to the same +0x93C @0x49E4F0]. */
+   `bob` is ItemDef +0x93C (the IDB's `bob`, ex unk591): the key
+   ItemDef_ParsePhysicsProperty compares for it is the string aBob @0x7C7D78
+   (62 6F 62 00; the IDB typed it as the pointer off_7C7D78 until 2026-10-04)
+   [orig: the compare @0x49DEA4..0x49DEAA, the store to +0x93C @0x49DECE; the
+   allocator's 5 to the same +0x93C @0x49E4F0]. */
 static void apply_item_def_defaults(DefItemDef *d) {
     d->climb_speed = 1;    /* [orig: @0x0049E3B0 climbSpeed] */
     d->torque = 3;         /* [orig: torque] */
@@ -103,7 +104,7 @@ static void apply_item_def_defaults(DefItemDef *d) {
     d->lean_velocity = 5;  /* [orig: leanVelocity] */
     d->pitch = 1;          /* [orig: pitch] */
     d->pitch_velocity = 5; /* [orig: pitchVelocity] */
-    d->bob = 5;            /* [orig: unk591 @0x49E4F0] */
+    d->bob = 5;            /* [orig: bob @0x49E4F0] */
     d->flip = 45;          /* [orig: flip] */
     d->hand_brake = 1;     /* [orig: handBrake] */
     d->tire_slip = 5;      /* [orig: tireSlip] */

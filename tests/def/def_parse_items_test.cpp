@@ -410,8 +410,8 @@ static int test_item_def_allocator_defaults(void) {
     if (bare->lean != 5 || bare->lean_velocity != 5) { fprintf(stderr, "FAIL: default lean pair\n"); bad = 1; }
     if (bare->pitch != 1 || bare->pitch_velocity != 5) { fprintf(stderr, "FAIL: default pitch pair\n"); bad = 1; }
     if (bare->flip != 45) { fprintf(stderr, "FAIL: default flip %d != 45\n", bare->flip); bad = 1; }
-    /* unk591 = 5 @0x49E4F0 is the field the "bob" key writes: the key's string
-       sits inline at 0x7C7D78 (62 6F 62 00), which Hex-Rays renders off_7C7D78
+    /* bob (ex unk591) = 5 @0x49E4F0 is the field the "bob" key writes: the key's
+       string is aBob @0x7C7D78 (62 6F 62 00), once typed off_7C7D78
        [orig: ItemDef_ParsePhysicsProperty @0x49DECE]. */
     if (bare->bob != 5) { fprintf(stderr, "FAIL: default bob %d != 5\n", bare->bob); bad = 1; }
     if (bare->hand_brake != 1 || bare->tire_slip != 5) { fprintf(stderr, "FAIL: default hand_brake/tire_slip\n"); bad = 1; }

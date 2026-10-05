@@ -625,8 +625,9 @@ inline constexpr uint32_t DEF_ITEM_ATTRIB_TAKEABLE = 0x00002000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_EASY = 0x00004000u;
 /* items.def token "S&D" (case-insensitive whole token; the tokenizer keeps the '&'):
    the S&D/A&D objective target, counted per team by the round census and immune to
-   same-team blast damage. The IDB types the token string as off_7C84E8; its bytes
-   are 53 26 44 00. [orig: ItemDef_ParseProperty @0x4a084e..0x4a086d, token @0x7C84E8;
+   same-team blast damage. The token string is aSD @0x7C84E8, bytes 53 26 44 00 (the
+   IDB typed it as the pointer off_7C84E8 until 2026-10-04). [orig:
+   ItemDef_ParseProperty @0x4a084e..0x4a086d, token @0x7C84E8;
    census Server_ResetRoundCounters @0x516d3d/@0x516d89] */
 inline constexpr uint32_t DEF_ITEM_ATTRIB_SD = 0x00008000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_4TEAM = 0x00010000u;
