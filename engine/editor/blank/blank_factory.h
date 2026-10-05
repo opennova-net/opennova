@@ -10,6 +10,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_document.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace opennova::editor {
@@ -65,6 +66,26 @@ inline constexpr const char *kBlankMissionTextRole = "mission_text";
 // The title a new mission and its text table carry: the request's `title`, else its file's stem.
 std::string blank_mission_title(const BlankRequest &request);
 
+// The game's mouse pointer (blank_texture.cpp). The original game hides the system pointer for
+// good as it starts [orig: Game_InitSubsystems @ 0x4a725a -> Game_HideCursorLoop @ 0x7612e0], so
+// a menu's only pointer is the texture a CURSOR of the current screen's windows names, drawn last
+// at the mouse [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60 over scene_end_frame @ 0x63e600's
+// pick]: a screen whose windows name none, or name one that does not load, has no pointer at all.
+// The blank menus name the game's own pointer file, the one its start-mission splash draws by
+// name (hud::kSplashArrowImage, newarow1.tga, which every shipped screen's CURSOR names too), and
+// it is made with them where the project has no file of that name (blank_companion). No manifest
+// row has the role: the menus name the file, the game does not.
+inline constexpr const char *kBlankPointerRole = "pointer";
+// The pointer's file name: hud::kSplashArrowImage.
+const char *blank_pointer_name();
+
+// The file a blank names that the editor makes with it in `doc`'s project, where the project has
+// none of that name: a menu's blank names the pointer (its root window's CURSOR), made by the
+// pointer's factory; no other blank names a file it does not make. Null for none, else `name` is
+// the file's name. A project that builds as an expansion takes none: its base game serves the
+// pointer, which a file of the expansion's would replace.
+const BlankFactory *blank_companion(const BlankFactory &factory, const ProjectDocument &doc, std::string &name);
+
 // Whether `request`'s values fit the factory's params: each a param of it, every required one
 // given. False with `why` in plain words. (A reference param's value is checked against the
 // project by whoever makes the file: the factory reads no project.)
@@ -76,8 +97,13 @@ const BlankFactory *blank_factory_at(size_t index);
 const BlankFactory *find_blank_factory_for_role(std::string_view role);
 // The kind's free-form factory (a new file of the kind), or nullptr.
 const BlankFactory *find_blank_factory_for_kind(AssetKind kind);
+// The factory a file of `kind` named `logical_name` takes, as make_blank picks it: its role's,
+// else the one a blank's name asks for (the pointer's name, a texture: the pointer), else the
+// kind's free-form one; nullptr when nothing makes it.
+const BlankFactory *find_blank_factory(std::string_view role, const std::string &logical_name, AssetKind kind);
 
-// Dispatch by role, then by kind; false with `error` when nothing can make it.
+// Dispatch by role, then by the pointer's name, then by kind (find_blank_factory); false with
+// `error` when nothing can make it.
 bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t> &out,
                 Diagnostic &error);
 
