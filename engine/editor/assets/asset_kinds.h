@@ -93,7 +93,8 @@ struct AssetKindRow {
 	// The kind's folder in a project laid out by kind ("menus", "fonts"; "" for the root), where a
 	// file of the kind the editor makes, created or imported, goes when the project has none of the
 	// kind yet (assets/project_layout.h: a flat project keeps it at the top level): organization
-	// only, the engine sees the flat name (a loose kind's build copy takes the name alone too). The kinds the game reads from its own folder by a
+	// only, the engine sees the flat name (a loose kind's build copy takes the name alone too). Read
+	// only by the placement rule: whatever writes a new file into the project asks placement_path. The kinds the game reads from its own folder by a
 	// fixed name (a configuration, the score table, a text) stay at the root, as the install keeps them.
 	const char *folder = "";
 	// The name Files offers a new file of the kind (New > Menu...: "newmenu.mnu"); "" for a kind
