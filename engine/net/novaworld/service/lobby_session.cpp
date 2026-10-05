@@ -255,8 +255,10 @@ VarLists extract_var_lists(const NapiMessage &container) {
 	return out;
 }
 
-std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list) {
-	std::vector<HostRosterSlot> roster;
+// A PlayerList's vars onto `roster`, slot by VarFNum: a ClientHostUpdate's list
+// carries only the vars whose values changed (below), so a slot it leaves out
+// keeps its row; a slot leaves with ClientHostPlayerRemoved.
+void apply_player_list(std::vector<HostRosterSlot> &roster, const VarList &player_list) {
 	auto slot_for = [&roster](int fnum) -> HostRosterSlot & {
 		for (auto &s : roster) if (s.slot == fnum) return s;
 		roster.push_back({});
@@ -270,7 +272,28 @@ std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list) 
 		else if (strutil::iequals(e.name, "PlayerTeam"))      slot_for(e.fnum).team = e.value;
 		else if (strutil::iequals(e.name, "PlayerType"))      slot_for(e.fnum).type = e.value;
 	}
+}
+
+std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list) {
+	std::vector<HostRosterSlot> roster;
+	apply_player_list(roster, player_list);
 	return roster;
+}
+
+// A ClientHostUpdate's list into the kept one by (VarFNum, VarName): a retail
+// host's update carries only the vars whose values changed since the last one
+// (its whole list only right after the host result), so the service keeps the
+// union [orig: CNapiVarEntry_SetValue @0x630590 dirties a var only on a changed
+// value; NapiStatement_SerializeVarList @0x4d0660 writes `includeAll || dirty`;
+// CNapiGameSession_SendHostUpdate @0x4d3860].
+void merge_var_list(VarList &kept, const VarList &update) {
+	for (const VarEntry &e : update) {
+		auto it = std::find_if(kept.begin(), kept.end(), [&e](const VarEntry &k) {
+			return k.fnum == e.fnum && strutil::iequals(k.name, e.name);
+		});
+		if (it != kept.end()) it->value = e.value;
+		else kept.push_back(e);
+	}
 }
 
 LobbySession::LobbySession()
@@ -347,8 +370,16 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		if (name == "ClientHostPlayerAdded") {
 			if (it != state.roster.end()) *it = slot;
 			else state.roster.push_back(slot);
-		} else if (it != state.roster.end()) {
-			state.roster.erase(it);
+		} else {
+			if (it != state.roster.end()) state.roster.erase(it);
+			// The slot's vars leave the kept PlayerList with it: the host's
+			// later updates carry only changed vars, never the removal.
+			auto pl = state.last_host_update.find("PlayerList");
+			if (pl != state.last_host_update.end()) {
+				VarList &vars = pl->second;
+				vars.erase(std::remove_if(vars.begin(), vars.end(),
+						[&slot](const VarEntry &e) { return e.fnum == slot.slot; }), vars.end());
+			}
 		}
 		state.player_count = static_cast<int>(state.roster.size());
 		opennova::io::logf(opennova::io::LogLevel::kInfo,
@@ -459,6 +490,11 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	state.hosting = true;
 
 	state.roster = roster_from_player_list(var_lists["PlayerList"]);
+	// The kept lists the updates merge into (the Cookie, the login's, is not kept).
+	state.last_host_update.clear();
+	for (const char *list : {"Host", "HostSetup", "PlayerList"}) {
+		if (var_lists.count(list)) state.last_host_update[list] = var_lists[list];
+	}
 	refresh_host_endpoint(state, host_info, remote_ip, remote_port);
 	// Reflection override (dev/NAT): force a locally reachable host endpoint so
 	// joiners can connect, instead of the observed docker-gateway source.
@@ -526,11 +562,15 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	return {{std::move(reply)}, "ClientHostRequest"};
 }
 
-// ClientHostUpdate is silent: refresh the Host / PlayerList snapshot. Retail
-// resends the whole Host list on every refresh, so every column is re-read.
+// ClientHostUpdate is silent: the changed vars merge into the kept Host /
+// HostSetup lists and the roster (merge_var_list says why), and every column
+// is re-read from the merged lists.
 LobbyDispatchResult LobbySession::handle_client_host_update(
 		const NapiMessage &msg, LobbyState &state, const std::string &remote_ip) {
-	state.last_host_update = extract_var_lists(msg);
+	VarLists update = extract_var_lists(msg);
+	for (const char *list : {"Host", "HostSetup", "PlayerList"}) {
+		if (update.count(list)) merge_var_list(state.last_host_update[list], update[list]);
+	}
 	const VarList &host_vars  = state.last_host_update["Host"];
 	const VarList &host_setup = state.last_host_update["HostSetup"];
 	refresh_host_keys(state, host_vars);
@@ -548,9 +588,7 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 	if (var_has(host_vars, "Region"))          state.region       = var_value(host_vars, "Region");
 	else if (var_has(host_vars, "Country"))    state.region       = var_value(host_vars, "Country");
 	refresh_gsb_fields(state, host_setup, host_vars);
-	if (state.last_host_update.count("PlayerList")) {
-		state.roster = roster_from_player_list(state.last_host_update["PlayerList"]);
-	}
+	if (update.count("PlayerList")) apply_player_list(state.roster, update["PlayerList"]);
 
 	refresh_host_endpoint(state, host_vars, remote_ip, /*remote_port=*/0);
 	// Reflection override (dev/NAT) — same as the host-request path.

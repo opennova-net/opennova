@@ -442,6 +442,24 @@ int test_client_host_update_silent_with_state_refresh() {
 	TEST_EXPECT(var_value(state.last_host_update["Host"], "HostKey") == "ABC123");
 	TEST_EXPECT(state.roster.size() == 1);
 	TEST_EXPECT(state.roster[0].slot == 2 && state.roster[0].player_name == "dave");
+
+	// The next update carries only the vars that changed (a retail host's dirty
+	// delta, CNapiVarEntry_SetValue @0x630590): the kept lists and the roster
+	// keep everything else.
+	NapiMessage delta;
+	delta.name = "ClientHostUpdate";
+	delta.children.push_back(make_client_var_list("Host", {
+		{"MissionName", "Next Map"},
+		{"TimeLeft", "30"},
+	}));
+	delta.children.push_back(make_indexed_var_list("PlayerList", {}));
+	sess.dispatch(delta, state, "1.2.3.4", 99);
+	TEST_EXPECT(var_value(state.last_host_update["Host"], "ServerName") == "Renamed");
+	TEST_EXPECT(var_value(state.last_host_update["Host"], "MissionName") == "Next Map");
+	TEST_EXPECT(state.server_name == "Renamed");
+	TEST_EXPECT(state.mission_name == "Next Map");
+	TEST_EXPECT(state.time_left == "30");
+	TEST_EXPECT(state.roster.size() == 1 && state.roster[0].player_name == "dave");
 	return 0;
 }
 

@@ -7,8 +7,10 @@
 // the mission boots, then boots and serves. The service lists it with the witnessed Serve Only columns (Dedicated = STRNOVA11, MaxPlayers
 // without the dedicated slot, Players without the host, Port "-1", no slot 0)
 // at the endpoint it observed, which is the game socket (D-NET-346); a LAN
-// probe on that socket is answered; a joiner dialing the advertised endpoint
-// plays and reaches the PlayerList as its UDP source; the stop deregisters.
+// probe on that socket is answered; a round end's map change keeps the listing
+// and its socket and republishes the next map's mission at its start; a joiner
+// dialing the advertised endpoint plays and reaches the PlayerList as its UDP
+// source; the stop deregisters.
 #include "server.h"
 #include "serve_test_support.h"
 
@@ -25,6 +27,7 @@
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/lan_discovery.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/server_admin_command.h>
 
 
 #include <atomic>
@@ -80,6 +83,7 @@ int main() {
 	const fs::path work = serve_test::fresh_dir("novaworld_cwd");
 	serve_test::ScopedCwd cwd(work);
 	CHECK(serve_test::write_bytes(dir / "SERVETST.BMS", serve_test::deathmatch_mission()));
+	CHECK(serve_test::write_bytes(dir / "SERVETS2.BMS", serve_test::deathmatch_mission("Serve Test Map Two")));
 	// The Host list's tokens come from the mounted gametext, as the game's do.
 	CHECK(serve_test::write_bytes(dir / "gametext.bin",
 			serve_test::gametext({
@@ -93,6 +97,10 @@ int main() {
 		host << "GameName \"Serve NW\"\r\n"
 		     << "ServerMessage \"listed by the test\"\r\n"
 		     << "MaxPlayers 8\r\n"
+		     // The rotation: the last line names the starting map, the first
+		     // entry; the round end takes SERVETS2.BMS.
+		     << "Mission servetst.bms\r\n"
+		     << "Mission servets2.bms\r\n"
 		     << "Mission servetst.bms\r\n";
 	}
 
@@ -178,6 +186,35 @@ int main() {
 		}
 		CHECK(answered);
 		CHECK(found.server_name == "Serve NW");
+	}
+
+	// --- a round end's map change: the listing and its socket survive it, and
+	// the next map's mission start republishes the Host list at once
+	// [orig: Game_StartMission @0x5248f5 -> Lobby_UpdateServerInfo]. The Cycle
+	// command ends the round with the 620-tick linger.
+	{
+		inmatch::NapiNPServerCtx &live = server.role().state.host_owner.ctx;
+		CHECK(inmatch::Server_ExecuteServerCommand(live, &server.kernel().world, "Cycle", "", {}).handled);
+		for (int f = 0; f < 4000 && server.missions_played() < 2; ++f) {
+			if (!server.frame(kFrame)) break;
+		}
+		CHECK(server.missions_played() == 2);
+		CHECK(server.role().state.host_owner.ctx.config.mission_name == "Serve Test Map Two");
+		CHECK(server.lister() != nullptr && server.lister()->hosting());
+		std::optional<LobbyState> after;
+		for (int f = 0; f < 300; ++f) {
+			CHECK(server.frame(kFrame));
+			std::this_thread::sleep_for(2ms);
+			after = row();
+			if (after && after->mission_name == "Serve Test Map Two") break;
+		}
+		CHECK(after.has_value());
+		if (after) {
+			CHECK(after->mission_name == "Serve Test Map Two");
+			CHECK(var(after->last_host_update["Host"], "MissionName") == "Serve Test Map Two");
+			// The same socket: the endpoint the service observed is unchanged.
+			CHECK(after->host_port == server.bound_port());
+		}
 	}
 
 	// --- a joiner dials the advertised endpoint and plays.
