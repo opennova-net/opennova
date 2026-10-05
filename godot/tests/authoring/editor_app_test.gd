@@ -187,9 +187,10 @@ func _wave_bytes(seconds: float) -> PackedByteArray:
 	return head
 
 
-## The UX round's project lane (its review's test gap): play_sound, served by the Shell, plays a project's
-## wave once its worker has decoded it as the game decodes it; the project closing stops it; a name the
-## project has no wave of plays nothing.
+## The workspace's sound (the MCP gaps lane): play_sound, served by the session, asks a play the Shell takes,
+## decoding the project's wave as the game decodes it and playing it, then reporting it so the workspace
+## section says it plays; the card closing (set_workspace) stops it, and so does the project closing; a name
+## the project has no wave of is refused, nothing played.
 func test_play_sound_plays_and_stops() -> void:
 	if _app == null:
 		return
@@ -203,20 +204,37 @@ func test_play_sound_plays_and_stops() -> void:
 	file.close()
 	assert_true(_run_operation({"kind": "rescan"}))
 	var answer := _request({"kind": "play_sound", "path": "beep.wav"})
-	assert_true(bool(answer.get("ok", false)) and not bool(answer.get("served", true)), str(answer))
+	assert_true(bool(answer.get("ok", false)) and bool(answer.get("served", false))
+			and bool(answer.get("outcome", {}).get("done", false)), str(answer))
 	var deadline := Time.get_ticks_msec() + 5000
-	while String(_app.get_sound_state()) != "playing" and Time.get_ticks_msec() < deadline:
+	while _sound().get("state", "") != "playing" and Time.get_ticks_msec() < deadline:
 		OS.delay_msec(20)
 		_app.pump()
+	assert_eq(String(_sound().get("state", "")), "playing", str(_sound()))
+	assert_eq(String(_sound().get("path", "")), "sounds/beep.wav")
 	assert_eq(String(_app.get_sound_state()), "playing")
-	assert_eq(String(_app.get_sound_path()), "sounds/beep.wav")
+	# The card of the wave opened, then closed: the sound it played stops.
+	_request({"kind": "about_file", "path": "beep.wav"})
+	_request({"kind": "set_workspace", "workspace": {"card": {"path": ""}}})
+	_app.pump()
+	assert_eq(String(_sound().get("state", "")), "stopped")
+	assert_eq(String(_app.get_sound_state()), "idle", "the card closed: the sound stopped")
+	_request({"kind": "play_sound", "path": "beep.wav"})
+	_app.pump()
 	_seam.close_project()
 	_app.pump()
 	assert_eq(String(_app.get_sound_state()), "idle", "the project closed: the sound stopped")
 	assert_true(_seam.open_project(root))
-	_request({"kind": "play_sound", "path": "nothing.wav"})
+	answer = _request({"kind": "play_sound", "path": "nothing.wav"})
 	_app.pump()
+	assert_false(bool(answer.get("outcome", {}).get("done", true)), "no wave of that name: refused")
 	assert_eq(String(_app.get_sound_state()), "idle", "no wave of that name: nothing plays")
+
+
+# The workspace section's sound (the MCP gaps lane).
+func _sound() -> Dictionary:
+	var state: Variant = JSON.parse_string(_app.query_json("state", JSON.stringify({"sections": ["workspace"]})))
+	return state.get("workspace", {}).get("sound", {}) if state is Dictionary else {}
 
 
 ## A switch that fails leaves the open project open, and new_project and open_project answer
