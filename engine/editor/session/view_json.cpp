@@ -216,11 +216,26 @@ JsonValue run_section(const SessionView &view) {
 			activity.play_exit_code >= 0 ? json_number(double(activity.play_exit_code))
 										 : JsonValue::make_null());
 	out.set("in_install", boolean(view.project.play_retail));
+	out.set("strict", boolean(view.project.play_in_install_strict));
 	out.set("game_install", json_string(view.project.retail_directory));
 	out.set("source_run", boolean(activity.source_run));
 	out.set("runtime_executable", json_string(activity.runtime_executable));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("boot_missing", strings_to_json(activity.boot_missing));
+	// The game install's game: whether it ran strictly, whether its first run was started again, and what its
+	// file log said it loaded once it exited (null before one was read).
+	out.set("ran_strict", boolean(activity.play_strict));
+	out.set("started_again", boolean(activity.play_started_again));
+	if (activity.play_file_log_read) {
+		JsonValue log = JsonValue::make_object();
+		log.set("lines", json_number(double(activity.play_file_log.lines)));
+		log.set("archives", strings_to_json(activity.play_file_log.archives));
+		log.set("from_archives", strings_to_json(activity.play_file_log.from_archives));
+		log.set("from_disk", strings_to_json(activity.play_file_log.from_disk));
+		out.set("file_log", std::move(log));
+	} else {
+		out.set("file_log", JsonValue::make_null());
+	}
 	return out;
 }
 
@@ -405,6 +420,7 @@ JsonValue preferences_section(const SessionView &view) {
 	out.set("recent_projects", std::move(recent));
 	out.set("game_install", json_string(view.project.retail_directory));
 	out.set("play_in_install", boolean(view.project.play_retail));
+	out.set("play_in_install_strict", boolean(view.project.play_in_install_strict));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("import_dependencies", boolean(view.project.import_dependencies));
 	out.set("build_folder", json_string(view.project.build_folder));
