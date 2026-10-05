@@ -4,8 +4,8 @@
 
 [CmdletBinding()]
 param(
-    [Alias('NwPpPath')]
-    [string] $NwPp = '',
+    [Alias('WirePath')]
+    [string] $Wire = '',
     [string] $Capture = '',
     [Alias('ItemsPath')]
     [string] $Items = '',
@@ -330,7 +330,7 @@ function ConvertFrom-ParityLines {
             })
             continue
         }
-        throw "Malformed or unsupported nw_pp parity line: $line"
+        throw "Malformed or unsupported opennova-wire parity line: $line"
     }
 
     $packetIndex = @{}
@@ -360,7 +360,7 @@ function ConvertFrom-ParityLines {
             $actual = if ($eventCountByOwnerTag.ContainsKey($countKey)) {
                 [int]$eventCountByOwnerTag[$countKey]
             } else { 0 }
-            # --parity-events deliberately omits records that nw_pp has no
+            # --parity-events deliberately omits records that opennova-wire has no
             # material decoder for.  It must never invent more decoded events
             # than the packet declares, but an undecoded packet tag is valid.
             if ($actual -gt $tagGroup.Count) {
@@ -766,7 +766,7 @@ function ConvertTo-WindowsArgument {
     return $builder.ToString()
 }
 
-function Invoke-NwPpSnapshot {
+function Invoke-WireSnapshot {
     param([string] $Executable, [string] $Snapshot, [string] $ItemsPath)
     $arguments = @($Snapshot, '--items', $ItemsPath, '--parity-events') |
         ForEach-Object { ConvertTo-WindowsArgument "$_" }
@@ -780,19 +780,19 @@ function Invoke-NwPpSnapshot {
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
     try {
-        if (-not $process.Start()) { throw 'Could not start nw_pp.' }
+        if (-not $process.Start()) { throw 'Could not start opennova-wire.' }
         $stdoutRead = $process.StandardOutput.ReadToEndAsync()
         $stderrRead = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit(60000)) {
             $process.Kill(); $null = $process.WaitForExit(5000)
-            throw 'nw_pp exceeded the 60-second snapshot decode limit.'
+            throw 'opennova-wire exceeded the 60-second snapshot decode limit.'
         }
         $stdout = $stdoutRead.Result
         $stderr = $stderrRead.Result
-        if ($process.ExitCode -ne 0) { throw "nw_pp exited $($process.ExitCode): $($stderr.Trim())" }
+        if ($process.ExitCode -ne 0) { throw "opennova-wire exited $($process.ExitCode): $($stderr.Trim())" }
         $itemMatch = [regex]::Match($stderr, '(?m)^loaded (\d+) item names from .+$')
         if (-not $itemMatch.Success -or [int]$itemMatch.Groups[1].Value -le 0) {
-            throw "nw_pp did not load a nonempty --items classifier: $($stderr.Trim())"
+            throw "opennova-wire did not load a nonempty --items classifier: $($stderr.Trim())"
         }
         return [pscustomobject]@{
             lines = @([regex]::Split($stdout, '\r?\n') | Where-Object { $_.Length -gt 0 })
@@ -916,7 +916,7 @@ function New-SyntheticParityLines {
     # accepting and ignoring the inverse pair.
     $null = Add-SyntheticEvent $builder 'S' '57' 1600000000 'efbeadde01' 5
     $null = Add-SyntheticEvent $builder 'C' '2c' 1610000000 'efbeadde00' 5
-    # nw_pp reports every outer tag in PARITY_PACKET but only materializes
+    # opennova-wire reports every outer tag in PARITY_PACKET but only materializes
     # PARITY_EVENT lines for tags with supported event decoders.
     $builder.frame = [int]$builder.frame + 1
     $builder.lines.Add(
@@ -955,7 +955,7 @@ function New-SyntheticParityLines {
 }
 
 function Invoke-WireReadinessSelfTest {
-    # Match nw_pp's current event schema, including the participant column.
+    # Match opennova-wire's current event schema, including the participant column.
     $participantFacts = ConvertFrom-ParityLines @(
         'PARITY_PACKET frame=5 ts_ns=1789006567605281900 dir=S session=32776 sid=0x22222222 seq=5 ack=0 flags=0x00 records=1 tags=0x100 wire=0x100:0xa0:9:-'
         'PARITY_EVENT frame=5 ts_ns=1789006567605281900 dir=S session=32776 participant=1 tag=0x00 settings=1 len=9 body=000020000014050000'
@@ -974,7 +974,7 @@ function Invoke-WireReadinessSelfTest {
         try { $null = ConvertFrom-ParityLines @($malformedEvent) }
         catch {
             $rejected = $_.Exception.Message -match
-                'Malformed or unsupported nw_pp parity line|body length does not match'
+                'Malformed or unsupported opennova-wire parity line|body length does not match'
         }
         if (-not $rejected) { throw 'Malformed participant event was accepted.' }
     }
@@ -1170,13 +1170,13 @@ foreach ($entry in @(
 )) {
     Assert-ExpectedAscii $entry.Value $entry.Name
 }
-if ([string]::IsNullOrWhiteSpace($NwPp)) {
-    $NwPp = Join-Path $PSScriptRoot '..\..\build\apps\nw_pp\Release\nw_pp.exe'
+if ([string]::IsNullOrWhiteSpace($Wire)) {
+    $Wire = Join-Path $PSScriptRoot '..\..\build\apps\wire\Release\opennova-wire.exe'
 }
-$NwPp = (Resolve-Path -LiteralPath $NwPp -ErrorAction Stop).Path
+$Wire = (Resolve-Path -LiteralPath $Wire -ErrorAction Stop).Path
 $Items = (Resolve-Path -LiteralPath $Items -ErrorAction Stop).Path
-if ((Get-Item -LiteralPath $NwPp).PSIsContainer -or (Get-Item -LiteralPath $Items).PSIsContainer) {
-    throw '-NwPp and -Items must identify files.'
+if ((Get-Item -LiteralPath $Wire).PSIsContainer -or (Get-Item -LiteralPath $Items).PSIsContainer) {
+    throw '-Wire and -Items must identify files.'
 }
 $MissionArtifact = (Resolve-Path -LiteralPath $MissionArtifact -ErrorAction Stop).Path
 if ((Get-Item -LiteralPath $MissionArtifact).PSIsContainer -or
@@ -1232,9 +1232,9 @@ try {
             Start-Sleep -Milliseconds $PollMilliseconds
             continue
         }
-        try { $decode = Invoke-NwPpSnapshot $NwPp $snapshot $Items }
+        try { $decode = Invoke-WireSnapshot $Wire $snapshot $Items }
         catch {
-            if ($_.Exception.Message -match '^nw_pp exited ') {
+            if ($_.Exception.Message -match '^opennova-wire exited ') {
                 $reason = "snapshot decode incomplete: $($_.Exception.Message)"
                 if ($reason -ne $lastReason) {
                     Write-Host "PARITY_WIRE_READY_WAIT=$reason"; $lastReason = $reason
@@ -1278,8 +1278,8 @@ try {
                 capture = $Capture; capture_prefix_bytes = [int64]$prefixBytes
                 capture_prefix_sha256 = $snapshotHash
                 capture_last_write_utc = $captureItem.LastWriteTimeUtc.ToString('o')
-                nw_pp = $NwPp
-                nw_pp_sha256 = (Get-FileHash -LiteralPath $NwPp -Algorithm SHA256).Hash.ToLowerInvariant()
+                wire = $Wire
+                wire_sha256 = (Get-FileHash -LiteralPath $Wire -Algorithm SHA256).Hash.ToLowerInvariant()
                 items = $Items
                 items_sha256 = (Get-FileHash -LiteralPath $Items -Algorithm SHA256).Hash.ToLowerInvariant()
                 loaded_item_count = [int]$decode.item_count

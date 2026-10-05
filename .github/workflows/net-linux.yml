@@ -3,7 +3,7 @@ name: Net stack (Linux)
 # The Linux net leg the NovaWorld images workflow gates its image builds on:
 # the standalone novaworld server with the Crow HTTP layer ON plus the
 # net-scoped ctests, on the deploy target's OS and flag set, and a Linux
-# compile of the mission-kernel embedders (extract, nw_pp) with the kernel's
+# compile of the mission-kernel embedders (extract, wire) with the kernel's
 # ungated ctests. ci.yml's test-linux job builds the same tree (same
 # directory, same flags, so the two share the linux-root compiler cache) and
 # runs the whole core suite over it on every push and PR.
@@ -59,7 +59,7 @@ jobs:
             db_sqlite_test session_hello_roundtrip_test lobby_session_test \
             backend_schema_test nw_codec_identity_test nw_self_capture_test \
             unknown_tracker_test nwmsg_replay_test nwmsg_codec_parity_test \
-            opennova_extract nw_pp \
+            opennova_extract opennova_wire \
             mission_kernel_test mission_kernel_lifecycle_test host_role_test \
             inspect_test terrain_field_store_test
 
