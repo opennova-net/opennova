@@ -34,6 +34,19 @@ std::string mission_view_status_message(MissionViewStatus status);
 // to while the canvas snaps.
 inline constexpr float kMissionFrameDistance = 400.0f;
 inline constexpr float kMissionFramePitch = 0.610865f;
+
+// A mission's fog level as its start settles it, with no weather ticking it here: the engine's own settle
+// (env::EnvScalarChannels::settled_fog_level, the start's ticks holding the current within 1000), as the
+// game draws a mission whose level is past it (00TRe's 1500, TKH_C1B's 1024) from its first ticks. The
+// mission device fogs by it.
+float mission_settled_fog_level(float level);
+// How far a framing sees through a mission's fog (world units, metres): the editor's framing choice, not
+// the game's (as kMissionFrameDistance is), half the fog's end at the settled level as the game sets it
+// [orig: Render_SetFogState @ 0x58a950 via env::compute_fog_params], the level the .env's under the
+// header's overrides [orig: Game_StartMission @ 0x525371..0x525383] (no overcast at the start); 0 when the
+// project lacks the .env the header names or its fog is off. A framing stands no farther (CP10's fog ends
+// at 325 m: framed 400 m off, the picture was the fog's colour alone, as a game camera there would show it).
+float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header);
 inline constexpr float kMissionFrameRadius = 10.0f;
 inline constexpr float kMissionTurnSnap = 15.0f;
 // A framing of everything on a mission whose marks spread past kMissionFrameSpread metres from their
@@ -96,7 +109,8 @@ public:
 	// False for a handle the mark has not (an area has no height or yaw, an entity no edge).
 	bool handle_at(const MissionMark &mark, MissionHandle handle, PreviewVec3 &out) const;
 	// The camera looking at the marks `of` (the indexes into `marks`; none: every entity and area) on
-	// a picture `width` x `height`, from its angles now, no farther than kMissionFrameDistance.
+	// a picture `width` x `height`, from its angles now, no farther than kMissionFrameDistance nor the
+	// mission's fog reach (mission_fog_reach; kMissionFrameRadius at least).
 	OrbitCamera framed(const std::vector<MissionMark> &marks, const std::vector<int> &of, int width, int height) const;
 
 	// What a canvas maps of it in a frame (mission_canvas.h): its marks and, while the mission is the
@@ -192,6 +206,7 @@ private:
 	bool options_moved_ = false;
 	OrbitCamera camera_;
 	bool framed_ = false; // the camera framed a document's entities once
+	float fog_reach_ = 0.0f; // mission_fog_reach of the scene's header over the files read, 0 for none
 	MissionViewStatus reason_ = MissionViewStatus::NoProject;
 	std::string detail_;
 	PreviewFollow picture_;

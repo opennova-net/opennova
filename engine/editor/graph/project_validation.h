@@ -80,6 +80,8 @@ public:
 	bool moved() const { return moved_; }
 	// Whether the graph's update changed it.
 	bool graph_moved() const;
+	// Whether the graph's update has run (the graph holds the input's files).
+	bool graph_read() const { return phase_ == Phase::Files || phase_ == Phase::Done; }
 	// Where it stands, in files: those read for the graph (a reading kept from a validation before
 	// counted read) and asked for their own findings, of those to read and to ask (known once the
 	// reading starts and once the graph's update ran), and the file last read or asked.
