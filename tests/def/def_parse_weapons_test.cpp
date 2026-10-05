@@ -587,6 +587,29 @@ int main(int argc, char **argv) {
         printf("sight blend-token map OK\n");
     }
     {
+        /* A weapon's name keeps its first 32 characters [orig:
+           WeaponDefs_ParseLineCallback, strncpy(def+0x14, tokens[2], 0x20)
+           @0x543737]. */
+        static const char kLongName[] =
+            "weapon \"WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789\"\r\n"
+            "end\r\n";
+        DefWeaponsFile nf;
+        memset(&nf, 0, sizeof(nf));
+        const int rc = def_parse_weapons_memory((const unsigned char *)kLongName,
+                                                sizeof(kLongName) - 1, &nf);
+        const bool correct = rc == 0 && nf.count == 1 &&
+                strcmp(nf.entries[0].weapon_name, "WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0") == 0;
+        if (!correct)
+            fprintf(stderr, "FAIL: long weapon name kept as '%s'\n",
+                    nf.count == 1 ? nf.entries[0].weapon_name : "");
+        def_free_weapons(&nf);
+        if (!correct) {
+            def_free_weapons(&wf);
+            return 1;
+        }
+        printf("weapon name cut to 32 OK\n");
+    }
+    {
         /* A SIGHTS row reads by position: the blend mode is token 6 only, and
            token 7 is the one `scale` or `slide` flag, `slide`'s frame count token
            8, read only when the line carries 8 tokens or more; a flag word

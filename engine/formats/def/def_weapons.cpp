@@ -119,7 +119,12 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 cw.scope_min_mag = 2;
                 /* [orig: AdmDef_InitEntryDefaults @ 0x53FF61/0x53FF67/0x53FF6D] */
                 for (int &stability : cw.stability_fp16) stability = 0x10000;
-                safe_copy(cw.weapon_name, sizeof(cw.weapon_name), v, vl);
+                /* The name is strncpy'd 32 bytes into the record [orig:
+                   WeaponDefs_ParseLineCallback, strncpy(def+0x14, tokens[2], 0x20)
+                   @0x543737], so a longer name keeps its first 32 characters. Past
+                   32 retail's copy has no terminator and reads on into +0x34; the
+                   port cuts there (no shipped name exceeds 21). */
+                safe_copy(cw.weapon_name, 33, v, vl);
                 cw.open_line = line_index;
                 state = ST_WEAPON;
             }
