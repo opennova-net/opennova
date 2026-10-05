@@ -277,6 +277,42 @@ static int test_filled_project_builds_and_mounts() {
 	return 0;
 }
 
+// A project with missions on, filled by Create missing (every Required row, and the optional
+// mission-start rows a factory fills), validates without an error or a warning, builds, and its
+// build's own mount resolves every name a mission's start and its screens read.
+static int test_mission_project_builds_clean() {
+	Project p("opennova_editor_build_mission_test");
+	TEST_EXPECT(p.create());
+	p.doc.features.mission = true;
+	TEST_EXPECT(p.fill());
+	{
+		const AssetScan scan = scan_project_assets(p.paths, p.doc);
+		const CreateMissingResult extras = create_missing_requirements(
+		        p.paths, p.doc, scan, evaluate_requirements(p.doc, scan),
+		        {"font_arials18", "font_arial22", "font_couri20b", "game_wac", "server_wac", "loadscrn_pcx", "monogram_tga",
+		         "boxtile_tga", "border_tga"});
+		TEST_EXPECT(extras.diagnostics.empty() && extras.unavailable.empty() && extras.created.size() == 9);
+	}
+	const BuildPlan plan = p.plan();
+	for (const Diagnostic &d : plan.diagnostics)
+		if (d.severity != DiagnosticSeverity::Info)
+			std::fprintf(stderr, "  %s: %s (%s)\n", d.code().c_str(), d.message.c_str(), d.asset.c_str());
+	TEST_EXPECT(plan.ok);
+	for (const Diagnostic &d : plan.diagnostics) TEST_EXPECT(d.severity == DiagnosticSeverity::Info);
+	const BuildReport report = run_build(plan, p.output_root());
+	TEST_EXPECT(report.ok);
+	opennova::Vfs vfs;
+	TEST_EXPECT(vfs.mount_game(report.build_dir, std::string(), opennova::VfsMountMode::Packed,
+	                           opennova::VfsArchiveDiscovery::RetailTable));
+	for (const char *name : {"ammo.def", "powerup.def", "cmap.mnu", "game.mnu", "weapon.mnu", "vehicle.mnu", "stat.mnu",
+	                         "death.mnu", "mp.mnu", "Arials18.fnt", "Arial22.fnt", "couri20b.fnt", "game.wac", "server.wac",
+	                         "loadscrn.pcx", "monogram.tga", "boxtile.tga", "border.tga"}) {
+		if (!vfs.has_file(name)) std::fprintf(stderr, "  not in the build: %s\n", name);
+		TEST_EXPECT(vfs.has_file(name));
+	}
+	return 0;
+}
+
 static int test_protected_build_survives_and_archives_are_refused() {
 	Project p("opennova_editor_build_protect_test");
 	TEST_EXPECT(p.create());
@@ -1713,6 +1749,7 @@ int main() {
 	failures += test_new_kinds_land_where_their_rows_say();
 	failures += test_empty_project_is_blocked();
 	failures += test_filled_project_builds_and_mounts();
+	failures += test_mission_project_builds_clean();
 	failures += test_protected_build_survives_and_archives_are_refused();
 	failures += test_long_names_bind_packed_files_only();
 	failures += test_unknown_kinds_are_left_out();

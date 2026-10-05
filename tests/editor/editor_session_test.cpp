@@ -725,8 +725,14 @@ static int test_retail_play() {
 	TEST_EXPECT(!fs::exists(fs::path(built) / "Jointops.exe") && !fs::exists(fs::path(built) / "binkw32.dll") &&
 	            !fs::exists(fs::path(built) / "game.cfg"));
 	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "adjusted in the game") &&
-	            editor_test::write_text(run + "/_filelog.txt", "LOADED FILE: resource.pff\r\n"));
+	            editor_test::write_text(run + "/_filelog.txt", "LOADED FILE: resource.pff\r\nPFF LOADED FILE: gametext.bin\n"));
 	TEST_EXPECT(editor_test::tree_digest(built) == build_tree);
+	// The game install's log is never read while its game runs (the game appends to it through an
+	// exclusive open and makes it anew when that fails: a read cuts it, File_LogFileAccess @ 0x75a480).
+	session.poll();
+	session.poll();
+	TEST_EXPECT(!output_has(session.view(), "PFF LOADED FILE: gametext.bin") && !session.view().activity.play_file_log_read &&
+	            view_section_to_json(session.view(), ViewSection::Run).get("file_log")->is_null());
 	{
 		FakePlatform other;
 		FilePreferencesStore reopened_preferences(dir.file("settings.json"));
@@ -740,6 +746,17 @@ static int test_retail_play() {
 	session.handle(request::stop_play());
 	session.poll();
 	TEST_EXPECT(session.view().activity.play_state == PlayState::Stopped);
+	// Read once the game is gone: folded under the game's line, and what it loaded on the run section.
+	TEST_EXPECT(output_has(session.view(), "PFF LOADED FILE: gametext.bin") && session.view().activity.play_file_log_read &&
+	            output_has(session.view(), "What the game loaded, from its file log: 1 archive, 1 file from the archives, "
+	                                       "none from disk"));
+	{
+		const opennova::io::JsonValue run_json = view_section_to_json(session.view(), ViewSection::Run);
+		const opennova::io::JsonValue *log = run_json.get("file_log");
+		TEST_EXPECT(log && log->is_object() && log->get_int("lines", 0) == 2 && !run_json.get_bool("ran_strict", true) &&
+		            log->get("archives")->array.size() == 1 && log->get("archives")->array[0].string == "resource.pff" &&
+		            log->get("from_archives")->array.size() == 1 && log->get("from_disk")->array.empty());
+	}
 
 	// Ordinary installs use the plain Bink DLL. A game.cfg the project holds is this machine's
 	// configuration, never the project's: the build leaves it out and says so (ADR 0046 S14,
@@ -791,6 +808,158 @@ static int test_retail_play() {
 	TEST_EXPECT(!fs::exists(run + "/Jointops.exe") && !fs::exists(run + "/localres.pff"));
 	TEST_EXPECT(editor_test::tree_digest(rebuilt) == rebuilt_tree);
 	TEST_EXPECT(read_file_text(install + "/game.cfg", copied, io_error) && copied == "video settings");
+	return 0;
+}
+
+// Strict Play in the game install (the editor's play_in_install_strict, set by apply_project_settings and
+// kept): the run directory holds the build's files and the install's program and Bink DLL alone, the game
+// launched /w /FRISK with no /d. Its file log is read once the game exits, never while it runs. The first
+// run, which found no game.cfg, writing one and quitting on its own with code 0 soon after it started, is
+// started once more in the same run directory, said in Output (and on the run section), once the game's
+// one-at-a-time gate is let go; a second such exit, a stop, or a first run that wrote nothing is not. Play
+// is refused before a build while the gate is held (another game of the install runs), and for a project
+// that builds as an expansion (play.strict_expansion).
+static int test_strict_play() {
+	editor_test::TempProjectDir dir("opennova_editor_strict_play_test");
+	FakePlatform platform;
+	FilePreferencesStore preferences(dir.file("settings.json"));
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	session.handle(request::new_project(dir.file("project"), "Strict test"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const std::string install = dir.file("install");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable") &&
+	            editor_test::write_text(install + "/binkw32.dll", "Bink") &&
+	            editor_test::write_text(install + "/game.cfg", "install settings") &&
+	            editor_test::write_text(install + "/player.sav", "install player") &&
+	            editor_test::write_text(install + "/score.ini", "install scores"));
+	editor_test::set_game_install(session, install);
+	ProjectSettingsChange strict;
+	strict.play_in_install = true;
+	strict.play_in_install_strict = true;
+	editor_test::apply_settings(session, strict);
+	TEST_EXPECT(v.project.play_retail && v.project.play_in_install_strict &&
+	            view_section_to_json(v, ViewSection::Run).get_bool("strict", false) &&
+	            view_section_to_json(v, ViewSection::Preferences).get_bool("play_in_install_strict", false));
+	{
+		FakePlatform other;
+		FilePreferencesStore reopened_preferences(dir.file("settings.json"));
+		ProjectSession reopened(other, reopened_preferences);
+		TEST_EXPECT(reopened.view().project.play_in_install_strict); // the editor's setting, kept
+	}
+
+	// Another game of the install runs (its gate held): refused before anything is built.
+	platform.semaphores = {kInstallInstanceSemaphore};
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 0 && !v.activity.has_build && v.findings.diagnostics.back().code() == "play.install_running");
+	platform.semaphores.clear();
+
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running && v.activity.play_strict);
+	const std::string project = v.project.root;
+	const std::string run = project + "/.opennova/run/1";
+	const std::string built = v.activity.last_build->build_dir;
+	TEST_EXPECT(platform.last_plan.args == std::vector<std::string>({"/w", "/FRISK"}) &&
+	            platform.last_plan.executable == run + "/Jointops.exe" && platform.last_plan.working_dir == run &&
+	            platform.last_plan.log_file == run + "/_filelog.txt" && platform.last_plan.mcp_port == 0);
+	for (const char *absent : {"game.cfg", "player.sav", "score.ini", "build.json"})
+		TEST_EXPECT(!fs::exists(run + "/" + absent));
+	for (const char *present : {"Jointops.exe", "binkw32.dll", "language.pff", "localres.pff", "resource.pff", "nw_cdata.coo"})
+		TEST_EXPECT(fs::is_regular_file(run + "/" + present));
+	TEST_EXPECT(output_has(v, "Running: the game install (strict) on the build."));
+	const std::string build_tree = editor_test::tree_digest(built), install_tree = editor_test::tree_digest(install);
+
+	// The first run writes its game.cfg and its log, and quits on its own (code 0) two seconds in, while
+	// another game holds the gate a moment: the log is not read while it runs, then read as it exits; the
+	// game is started again in the same run directory once the gate is let go.
+	const int64_t first = v.activity.play_pid;
+	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "written by the game") &&
+	            editor_test::write_text(run + "/_filelog.txt", "LOADED FILE: language.pff\nPFF LOADED FILE: gameerr.bin\n"));
+	session.poll();
+	TEST_EXPECT(!output_has(v, "PFF LOADED FILE: gameerr.bin"));
+	platform.clock += 2000;
+	platform.codes[first] = 0;
+	platform.exit_child(first);
+	platform.semaphores = {kInstallInstanceSemaphore};
+	session.poll();
+	TEST_EXPECT(platform.spawns == 1 && output_has(v, "PFF LOADED FILE: gameerr.bin") &&
+	            output_has(v, "First run: the game wrote its game.cfg and quit; started again.") &&
+	            v.activity.play_started_again && v.activity.play_file_log_read &&
+	            v.activity.play_file_log.from_archives == std::vector<std::string>({"gameerr.bin"}));
+	platform.clock += 100;
+	session.poll(); // the gate is still held: waits
+	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Stopped);
+	platform.semaphores.clear();
+	session.poll();
+	TEST_EXPECT(platform.spawns == 2 && v.activity.play_state == PlayState::Running && v.activity.play_pid != first &&
+	            platform.last_plan.working_dir == run && fs::is_regular_file(run + "/run.json") &&
+	            !v.activity.play_file_log_read && view_section_to_json(v, ViewSection::Run).get_bool("started_again", false));
+	std::string text, io_error;
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game"); // kept
+	// The second run quitting the same way is not started again; its log (written anew) is reported, and
+	// is the run section's file_log.
+	const int64_t second = v.activity.play_pid;
+	TEST_EXPECT(editor_test::write_text(run + "/_filelog.txt", "LOADED FILE: language.pff\nLOADED FILE: localres.pff\n"
+	                                                           "LOADED FILE: resource.pff\nPFF LOADED FILE: gametext.bin\n"
+	                                                           "PFF LOADED FILE: main.mnu\nPFF LOADED FILE: main.mnu\n"));
+	platform.clock += 1000;
+	platform.codes[second] = 0;
+	platform.exit_child(second);
+	session.poll();
+	session.poll();
+	TEST_EXPECT(platform.spawns == 2 && v.activity.play_state == PlayState::Stopped);
+	{
+		const opennova::io::JsonValue run_json = view_section_to_json(v, ViewSection::Run);
+		const opennova::io::JsonValue *log = run_json.get("file_log");
+		TEST_EXPECT(run_json.get_bool("ran_strict", false) && log && log->is_object() && log->get_int("lines", 0) == 6 &&
+		            log->get("archives")->array.size() == 3 && log->get("from_archives")->array.size() == 2 &&
+		            log->get("from_archives")->array[1].string == "main.mnu" && log->get("from_disk")->array.empty());
+	}
+	TEST_EXPECT(editor_test::tree_digest(built) == build_tree && editor_test::tree_digest(install) == install_tree);
+
+	// A first run that wrote no game.cfg, or that ran past the window, or that was stopped, is not
+	// started again; one that quit with code 0 having opened nothing is said to (the gate: another runs).
+	const auto first_run_ends = [&](bool writes_config, int64_t after_ms, bool stopped) {
+		const int spawns = platform.spawns;
+		session.handle(request::play());
+		session.run_operations();
+		if (platform.spawns != spawns + 1) return false;
+		const std::string here = v.activity.play_run_dir;
+		if (fs::exists(here + "/game.cfg")) return false;
+		if (writes_config && !editor_test::write_text(here + "/game.cfg", "written")) return false;
+		platform.clock += after_ms;
+		if (stopped) {
+			session.handle(request::stop_play());
+		} else {
+			platform.codes[v.activity.play_pid] = 0;
+			platform.exit_child(v.activity.play_pid);
+		}
+		session.poll();
+		session.poll();
+		return platform.spawns == spawns + 1 && v.activity.play_state == PlayState::Stopped && !v.activity.play_started_again;
+	};
+	TEST_EXPECT(first_run_ends(false, 2000, false));
+	TEST_EXPECT(output_has(v, "The game left no file log (_filelog.txt): it opened no archive and no file. The game runs one "
+	                          "at a time"));
+	TEST_EXPECT(first_run_ends(true, kStrictFirstRunWindowMs + 1, false));
+	TEST_EXPECT(first_run_ends(true, 2000, true));
+
+	// A project that builds as an expansion: strict Play is refused before anything is built.
+	ProjectSettingsChange as_expansion;
+	as_expansion.expansion = "jxm";
+	editor_test::apply_settings(session, as_expansion);
+	TEST_EXPECT(v.project.document->expansion.name == "jxm");
+	const int spawns = platform.spawns;
+	const std::string last_build = v.activity.last_build->build_id;
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == spawns && v.activity.last_build->build_id == last_build &&
+	            v.findings.diagnostics.back().code() == "play.strict_expansion" &&
+	            v.findings.diagnostics.back().message.find("Strict Play of an expansion needs its base game's build; "
+	                                                       "not yet supported") == 0);
 	return 0;
 }
 
@@ -4384,6 +4553,7 @@ int main() {
 	failures += test_selection_memory();
 	failures += test_import_dependencies_setting();
 	failures += test_retail_play();
+	failures += test_strict_play();
 	failures += test_import();
 	failures += test_lifecycle();
 	failures += test_utf8_project_path();

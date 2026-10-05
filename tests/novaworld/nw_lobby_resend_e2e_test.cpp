@@ -95,11 +95,11 @@ int main() {
 		return 1;
 	}
 	opennova::ConnectionManager manager;
-	opennova::server::NwUdpListener listener(manager);
+	opennova::novaworld_server::NwUdpListener listener(manager);
 	manager.on_lost([&listener](const opennova::Connection &connection, opennova::DropReason reason) {
 		listener.erase_lobby_state(connection.addr, opennova::drop_reason_name(reason));
 	});
-	opennova::server::ServerConfig config;
+	opennova::novaworld_server::ServerConfig config;
 	config.nw_udp_port = 0;
 	if (!listener.start(config) || listener.bound_port() == 0) {
 		std::fprintf(stderr, "FAIL: listener.start\n");

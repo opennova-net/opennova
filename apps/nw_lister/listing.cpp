@@ -8,7 +8,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace opennova::lister {
+namespace opennova::nw_lister {
 
 namespace {
 
@@ -230,4 +230,4 @@ bool load_credentials(const std::string &path, Credentials &out, std::string &er
 	return true;
 }
 
-} // namespace opennova::lister
+} // namespace opennova::nw_lister

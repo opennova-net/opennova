@@ -1,4 +1,4 @@
-// nw_pp --scenario-events: the SCENARIO_EVENT lines the network-parity
+// opennova-wire --scenario-events: the SCENARIO_EVENT lines the network-parity
 // scenario comparator (scripts/net/compare_scenario.py) consumes. The bodies
 // are the retail self-nade suicide (S2C 0x13 -> 0x61 -> 0x52 -> 0x1E, the
 // joiner at handle 0x005D) and our own encoders' output.
@@ -44,9 +44,9 @@ std::vector<uint8_t> uplink(uint16_t handle, uint16_t carrier) {
 } // namespace
 
 int main() {
-	nwpp::ScenarioEventTracker tracker;
+	wire::ScenarioEventTracker tracker;
 	const auto line = [&](const InGameMessage &m) {
-		return nwpp::format_scenario_event(m, 1791065947917321000ull, tracker);
+		return wire::format_scenario_event(m, 1791065947917321000ull, tracker);
 	};
 
 	// The suicide tail, in retail's emission order.
@@ -103,6 +103,6 @@ int main() {
 	settings.settings_update = true;
 	TEST_EXPECT(line(settings).empty());
 
-	std::printf("nw_pp scenario events: ok\n");
+	std::printf("opennova-wire scenario events: ok\n");
 	return 0;
 }

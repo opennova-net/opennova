@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-namespace opennova::lister {
+namespace opennova::nw_lister {
 
 // The retail admin client's default port (the server has none: remote_admin_port is 0, off, until
 // set).
@@ -60,4 +60,4 @@ private:
 	AdminSnapshot snapshot_;
 };
 
-} // namespace opennova::lister
+} // namespace opennova::nw_lister

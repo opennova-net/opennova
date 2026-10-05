@@ -1,4 +1,4 @@
-// nw-lister's listing + credentials readers: the JSON a mirrored server's listing is written in,
+// opennova-nw-lister's listing + credentials readers: the JSON a mirrored server's listing is written in,
 // folded onto the HostRegistration the host leg sends, and the KEY=VALUE credentials file.
 
 #include "listing.h"
@@ -11,7 +11,7 @@
 
 namespace {
 
-using namespace opennova::lister;
+using namespace opennova::nw_lister;
 
 int g_failures = 0;
 

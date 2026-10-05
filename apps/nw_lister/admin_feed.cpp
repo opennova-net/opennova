@@ -4,7 +4,7 @@
 
 #include <chrono>
 
-namespace opennova::lister {
+namespace opennova::nw_lister {
 
 namespace {
 
@@ -194,4 +194,4 @@ void AdminFeed::run() {
 	if (socket.is_valid()) close(socket, logged_in);
 }
 
-} // namespace opennova::lister
+} // namespace opennova::nw_lister

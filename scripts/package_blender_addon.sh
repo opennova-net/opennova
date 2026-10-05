@@ -26,8 +26,8 @@ cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF > /dev/null
 cmake --build "$build" --config Release --target opennova_3di
 
-exe="$build/apps/threedi_cli/Release/opennova-3di.exe"
-[ -f "$exe" ] || exe="$build/apps/threedi_cli/opennova-3di.exe"
+exe="$build/apps/3di/Release/opennova-3di.exe"
+[ -f "$exe" ] || exe="$build/apps/3di/opennova-3di.exe"
 [ -f "$exe" ] || { echo "opennova-3di was not built" >&2; exit 1; }
 
 python - "$root/tools/blender/opennova_3di" "$exe" "$out" "$version" <<'EOF'

@@ -22,7 +22,7 @@
 
 #include "threedi_cli.h"
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 namespace {
 
@@ -508,4 +508,4 @@ int cmd_weapon_timing(const char *input, const char *output) {
 	return 0;
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

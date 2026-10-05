@@ -4,8 +4,14 @@
 // exports again. Only records `build` reads are written, in the order it
 // requires; every conversion is the exact inverse of build's (model ->
 // mission axes, the render and collision winding flips), so
-// `build(scene(x))` re-mints a builder-made model byte for byte. What the
-// scene text cannot carry is listed as `#` comments and on stderr.
+// `build(scene(x))` re-mints a builder-made model byte for byte. Each strip
+// is one `mesh`: the lowering's split of a mesh is a fixed point on the
+// strips it made (a strip's triangles all fit the strip again, its table
+// listing its parts in the same first-use order), where merging a part's
+// strips and splitting them again need not land each triangle where it was.
+// A skinned vertex's slots and weights become `part weight` pairs, its tangent
+// frame a `vt`. What the scene text cannot carry is listed as `#` comments
+// and on stderr.
 //
 // `texfile <name> <type> <path|->` records name the file each texture row,
 // by its name and type, loads beside the model: the one file the loader its
@@ -37,7 +43,7 @@
 
 using namespace opennova::threedi;
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 namespace {
 
@@ -189,17 +195,67 @@ std::vector<int> strip_vertices(const ThreediLod &lod, const ThreediTriangleStri
 	return out;
 }
 
-void write_strip(Writer &w, const Threedi3di3 &m, const ThreediLod &lod, const ThreediTriangleStrip &st, bool alpha,
-		bool uv1, bool skinned, bool shared) {
-	const int material = threedi_material_array_index_for_id(m, st.material_index);
-	w.line("strip " + std::to_string(material < 0 ? 0 : material) + " " + (alpha ? "1" : "0"));
-	if (material < 0) w.note("a strip names material id " + std::to_string(st.material_index) + " the model lacks");
-	if (skinned) {
-		std::string s = "bones";
-		for (int b = 0; b < st.bone_table_length && b < 16; ++b) s += " " + std::to_string(st.bone_table[b]);
-		w.line(s);
+// A skinned vertex's influences as the text gives them: `part weight` pairs,
+// its first slot's part first (the bone the lit skinned shaders light it by,
+// IndexArray[0], even at weight 0), then each other slot's part in slot order
+// with the weight the shader blends it by (slot 3 takes 1 - (w0 + w1 + w2),
+// threedi_skin_influences). A slot repeating an earlier slot's byte (retail's
+// padding) or part adds its weight to that part's; a slot past the strip's
+// bone table names no part, so its weight goes and the rest is renormalized
+// (`stray` counts such vertices: retail FSldr03 weights slot 255). A weight
+// below zero (the hair retail's four-decimal weights leave slot 3, ArmGlovD)
+// stays out, so the stored three come back as they are.
+std::string influence_pairs(const ThreediVertex &v, const ThreediTriangleStrip &st, size_t &stray) {
+	const float rest = 1.0f - (v.bone_weights[0] + v.bone_weights[1] + v.bone_weights[2]);
+	const float weight[4] = {v.bone_weights[0], v.bone_weights[1], v.bone_weights[2], rest};
+	const int32_t table = std::min(st.bone_table_length, kThreediStripBoneTableMax);
+	std::vector<std::pair<int, double>> pairs;
+	std::vector<int> slot_of; // each pair's slot byte
+	double dropped = 0.0;
+	for (int k = 0; k < 4; ++k) {
+		const int slot = v.bone_indices[k];
+		const double w = weight[k];
+		if (slot >= table) {
+			if (w > 1e-6) dropped += w;
+			continue;
+		}
+		const int part = st.bone_table[slot];
+		size_t at = 0;
+		while (at < pairs.size() && slot_of[at] != slot && pairs[at].first != part) ++at;
+		if (at < pairs.size()) {
+			if (w > 1e-6) pairs[at].second += w;
+			continue;
+		}
+		pairs.push_back({part, std::max(0.0, w)});
+		slot_of.push_back(slot);
 	}
-	// Each written vertex's number in the scene's strip.
+	if (dropped > 0.0) {
+		++stray;
+		double total = 0.0;
+		for (const auto &p : pairs) total += p.second;
+		if (pairs.empty()) pairs.push_back({table > 0 ? st.bone_table[0] : 0, 1.0});
+		else if (total > 0.0)
+			for (auto &p : pairs) p.second /= total;
+		else pairs[0].second = 1.0;
+	}
+	std::string s;
+	for (auto &p : pairs) {
+		// A weight the file stores prints as its float; a sum or a
+		// renormalized one as the double it is, no more than the whole
+		// vertex (two floats can sum a hair past 1 in double).
+		p.second = std::min(1.0, p.second);
+		const bool single = p.second == static_cast<double>(static_cast<float>(p.second));
+		s += " " + std::to_string(p.first) + " " + (single ? f9(p.second) : f17(p.second));
+	}
+	return s;
+}
+
+void write_mesh(Writer &w, const Threedi3di3 &m, const ThreediLod &lod, const ThreediTriangleStrip &st, bool alpha,
+		bool uv1, bool skinned, bool shared, size_t &stray) {
+	const int material = threedi_material_array_index_for_id(m, st.material_index);
+	w.line("mesh " + std::to_string(material < 0 ? 0 : material) + " " + (alpha ? "1" : "0"));
+	if (material < 0) w.note("a strip names material id " + std::to_string(st.material_index) + " the model lacks");
+	// Each written vertex's number in the scene's mesh.
 	const std::vector<int> vertices = strip_vertices(lod, st, shared);
 	std::vector<int> number(static_cast<size_t>(std::max(0, st.num_vertices)), -1);
 	for (size_t k = 0; k < vertices.size(); ++k) number[static_cast<size_t>(vertices[k])] = static_cast<int>(k);
@@ -207,13 +263,10 @@ void write_strip(Writer &w, const Threedi3di3 &m, const ThreediLod &lod, const T
 		const ThreediVertex &v = lod.vertices.items[st.start_vertex + i];
 		std::string s = "v " + vec9(v.position) + " " + vec9(v.normal) + " " + f9(v.uv0[0]) + " " + f9(v.uv0[1]);
 		if (uv1) s += " " + f9(v.uv1[0]) + " " + f9(v.uv1[1]);
-		// Skinned: the four slots, then the three weights (slot i3 takes the
-		// rest, threedi_skin_influences).
-		if (skinned) {
-			for (int k = 0; k < 4; ++k) s += " " + std::to_string(v.bone_indices[k]);
-			for (int k = 0; k < 3; ++k) s += " " + f9(v.bone_weights[k]);
-		}
+		if (skinned) s += influence_pairs(v, st, stray);
 		w.line(s);
+		// The stored tangent frame, which build keeps (mission axes).
+		if (v.has_tangents) w.line("vt " + vec9(v.tangent) + " " + vec9(v.bitangent));
 	}
 	if (st.num_indices == 0) return; // vertices and no triangle: build writes the same
 	std::vector<uint16_t> tris;
@@ -233,7 +286,7 @@ void write_strip(Writer &w, const Threedi3di3 &m, const ThreediLod &lod, const T
 				std::to_string(number[tris[t + 1]]));
 }
 
-void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
+void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1, size_t &stray) {
 	const ThreediLod &lod = m.lods[li];
 	const bool skinned = m.header.mesh_type == THREEDI_MESH_SKINNED;
 	w.line("lod " + std::to_string(lod.lod_threshold) + " " + (lod.model_type[0] != '\0' ? lod.model_type : "gnrc") +
@@ -308,7 +361,7 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 		w.line("part " + std::to_string(ro.parent_index) + " " + vec9(ro.abs) + (seeded ? " " + vec9(ro.bounding_center) : "") +
 				"  # part " + std::to_string(p));
 		for (const auto &entry : owned[p])
-			write_strip(w, m, lod, lod.strips[entry.first], entry.second, uv1, skinned, shared[entry.first]);
+			write_mesh(w, m, lod, lod.strips[entry.first], entry.second, uv1, skinned, shared[entry.first], stray);
 	}
 	for (size_t a = 0; a < lod.part_animation_count; ++a) {
 		const ThreediPartAnimation &pa = lod.part_animations[a];
@@ -481,7 +534,7 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	Writer w;
 	std::error_code ec;
 	const opennova::TextureFolder folder = opennova::list_texture_folder(std::filesystem::absolute(std::filesystem::path(model_path), ec).parent_path());
-	w.line("o3d 1");
+	w.line("o3d 2");
 	w.line(std::string("# scene of ") + model_path + " (opennova-3di scene)");
 	w.line("model " + name_field(w, m.header.name[0] != '\0' ? m.header.name : "MODEL"));
 	if (m.header.name[0] == '\0') w.note("the model has no name (written as MODEL)");
@@ -495,10 +548,8 @@ int cmd_scene(const char *model_path, const char *out_path) {
 			uv1 = lod.vertices.items[i].uv1[0] != lod.vertices.items[i].uv0[0] ||
 					lod.vertices.items[i].uv1[1] != lod.vertices.items[i].uv0[1];
 	}
-	if (tangents) {
-		w.line("tangents 1");
-		w.note("tangent and bitangent values (the scene keeps only the vertex layout)");
-	}
+	// The layout, and every vertex's stored frame as a `vt` after it.
+	if (tangents) w.line("tangents 1");
 	if (uv1) w.line("uv1 1");
 	for (uint32_t i = 0; i < m.ctrl.count; ++i) w.line("register " + name_field(w, m.ctrl.registers[i].name));
 	// MTRX row 0 is the identity build always writes; rows 1.. are frames.
@@ -527,7 +578,11 @@ int cmd_scene(const char *model_path, const char *out_path) {
 		if (!same) w.note("mtrx 0 is not the identity");
 	}
 	write_materials(w, m, folder);
-	for (size_t li = 0; li < m.lod_count; ++li) write_lod(w, m, li, uv1);
+	size_t stray = 0;
+	for (size_t li = 0; li < m.lod_count; ++li) write_lod(w, m, li, uv1, stray);
+	if (stray > 0)
+		w.note(std::to_string(stray) + " vertices' weights on bone slots past their strip's bone table (no part to "
+				"name: the rest of each vertex renormalized)");
 	for (size_t i = 0; i < m.user_point_count; ++i) {
 		const ThreediUserPoint &u = m.user_points[i];
 		w.line("userpoint " + name_field(w, u.name) + " " + f17(u.x / 65536.0) + " " + f17(u.y / 65536.0) + " " + f17(u.z / 65536.0) + " " +
@@ -545,4 +600,4 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	return 0;
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

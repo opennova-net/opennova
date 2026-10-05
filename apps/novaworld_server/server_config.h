@@ -6,7 +6,7 @@
 #include <filesystem>
 #include <string>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 // Standalone novaworld server configuration. All fields populate from env
 // vars at startup (see ServerConfig::from_env), with sensible defaults so a
@@ -125,4 +125,4 @@ struct ServerConfig {
 	static ServerConfig from_env();
 };
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server

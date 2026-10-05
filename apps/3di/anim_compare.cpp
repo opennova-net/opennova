@@ -26,7 +26,7 @@
 
 using namespace opennova::bad;
 
-namespace threedi_cli {
+namespace opennova::threedi_cli {
 
 namespace {
 
@@ -302,4 +302,4 @@ int cmd_anim_compare(const char *expected_path, const char *actual_path) {
 	return 1;
 }
 
-} // namespace threedi_cli
+} // namespace opennova::threedi_cli

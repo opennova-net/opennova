@@ -1,10 +1,11 @@
-o3d 1
+o3d 2
 # A three-part skinned fixture (tests/threedi/o3d_cli_test.cpp --skinned):
-# part 0 the root bone, part 1 a child bone, part 2 the mesh part the strip is
+# part 0 the root bone, part 1 a child bone, part 2 the mesh part the mesh is
 # authored on. The builder moves strip ownership to the root ROBJ and keeps
-# the bounds on part 2 (the retail skinned layout). A skinned vertex gives
-# four bone-table slots and three weights; slot i3 takes the rest (the
-# second vertex rides bones 0 and 1 half and half through slots 0 and 3).
+# the bounds on part 2 (the retail skinned layout). A skinned vertex gives its
+# influences as part weight pairs, the primary first; the lowering makes the
+# strip's bone table from them (the second vertex rides parts 0 and 1 half and
+# half).
 model SKIN
 skinned 1
 material VS_SKBASIC
@@ -13,12 +14,11 @@ lod 128 gnrc
 part 0 0 0 0
 part 0 0 0 1
 part 0 0 0 -1
-strip 0 0
-bones 0 1
-v 1 1 0 0 0 1 0 0 0 1 0 0 1 0 0
-v -1 1 0 0 0 1 0 1 0 0 0 1 0.5 0 0
-v -1 -1 1 0 0 1 1 1 1 0 0 0 1 0 0
-v 1 -1 1 0 0 1 1 0 1 0 0 0 0.75 0.25 0
+mesh 0 0
+v 1 1 0 0 0 1 0 0 0 1
+v -1 1 0 0 0 1 0 1 0 0.5 1 0.5
+v -1 -1 1 0 0 1 1 1 1 1
+v 1 -1 1 0 0 1 1 0 1 0.75 0 0.25
 t 0 1 2
 t 0 2 3
 panm 0 0

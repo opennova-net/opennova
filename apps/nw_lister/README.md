@@ -1,4 +1,4 @@
-# nw-lister
+# opennova-nw-lister
 
 Lists one server on a NovaWorld master without running the game. It drives the
 engine's own NovaWorld session, the code the game's NovaWorld menu uses
@@ -17,7 +17,7 @@ advertises a server, it does not route joins to one.
 ## Usage
 
 ```
-nw-lister --listing listing.json --credentials creds.txt \
+opennova-nw-lister --listing listing.json --credentials creds.txt \
           --master-host <gate host> --allow-public
 ```
 
@@ -25,10 +25,10 @@ nw-lister --listing listing.json --credentials creds.txt \
 - `--credentials FILE` holds `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines. With
   them, the lister logs in and fetches the HOSTKEY before the host request, as the
   game's menu does. Without them, it hosts with no HOSTKEY; a local
-  `opennova-novaworld` accepts that.
+  `opennova-novaworld-server` accepts that.
 - Every destination must be on `127.0.0.0/8` unless `--allow-public` is given.
   Until then, name lookups are off as well. Run it against a local
-  `opennova-novaworld` first. A live master is a shared service, so use it
+  `opennova-novaworld-server` first. A live master is a shared service, so use it
   sparingly.
 - `--admin HOST[:PORT]` reads the game server's remote-admin port every 15 s.
   The port is the server's `remote_admin_port` (game.cfg; 0, the default, turns
@@ -49,7 +49,7 @@ nw-lister --listing listing.json --credentials creds.txt \
 - Stop it with Ctrl+C, by closing its console window (Windows), with SIGTERM, or
   with `--stop-file PATH`. All of them deregister before it exits.
 
-`nw-lister` with no arguments prints every option.
+`opennova-nw-lister` with no arguments prints every option.
 
 Exit codes:
 

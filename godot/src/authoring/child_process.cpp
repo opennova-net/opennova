@@ -380,6 +380,28 @@ opennova::editor::ProcessLiveness ChildProcessPlatform::process_liveness(int64_t
 #endif
 }
 
+opennova::editor::ProcessLiveness ChildProcessPlatform::semaphore_held(const std::string &name) {
+	using opennova::editor::ProcessLiveness;
+#ifdef _WIN32
+	// Opened by its name in this session's namespace, where the game makes it (CreateSemaphoreA with no
+	// Global\ prefix), for SYNCHRONIZE alone, and let go at once: one that will not be opened for that
+	// right is there all the same.
+	HANDLE handle = OpenSemaphoreW(SYNCHRONIZE, FALSE, to_wide(name).c_str());
+	if (handle != nullptr) {
+		CloseHandle(handle);
+		return ProcessLiveness::Alive;
+	}
+	const DWORD error = GetLastError();
+	if (error == ERROR_FILE_NOT_FOUND) {
+		return ProcessLiveness::Dead;
+	}
+	return error == ERROR_ACCESS_DENIED ? ProcessLiveness::Alive : ProcessLiveness::Unknown;
+#else
+	(void)name;
+	return ProcessLiveness::Unknown;
+#endif
+}
+
 int64_t ChildProcessPlatform::now_ms() {
 	return static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
 }

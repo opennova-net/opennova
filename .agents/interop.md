@@ -51,7 +51,7 @@ Godot direct-launch flags, passed after `--` (the full table is
   `.agents/retail-lan-parity.md`.
 - API polling through `/api/health`, `/api/hosts`, `/api/lobbies`, and
   `/api/unknowns`.
-- Packet decode with `nw_pp`.
+- Packet decode with `opennova-wire`.
 
 Direct LAN host/join no longer requires menu navigation: the debug hook's
 cfg-driven driver uses the witnessed stock transitions and fails closed to a
@@ -72,14 +72,14 @@ and version-gated.
 
 Supported inputs:
 
-- `nw_pp <capture.pcapng>` or `nw_pp <capture.pcap>`
-- `nw_pp <capture.hexcap>`
-- `nw_pp <host.sph>` or `nw_pp <client.sph>`
+- `opennova-wire <capture.pcapng>` or `opennova-wire <capture.pcap>`
+- `opennova-wire <capture.hexcap>`
+- `opennova-wire <host.sph>` or `opennova-wire <client.sph>`
 
 No ctest reads a machine-local capture: the wire witnesses that ride CI are the
 committed `fixtures/novaworld/` set (`nw204_lobby_decode`, `nw_self_capture`, the
 `.nwmsg` replays) and the inline-pcap unit tests; a fresh capture is inspected by
-hand with `nw_pp` and, when it earns a place, promoted as a sanitized fixture.
+hand with `opennova-wire` and, when it earns a place, promoted as a sanitized fixture.
 
 ## Packet-Diff Matrix
 
@@ -90,7 +90,7 @@ Capture comparable runs for:
 - Retail host + OpenNova joiner
 - OpenNova host + OpenNova joiner
 
-Decode with `nw_pp --stream --items <items.def>` and compare decoded direction,
+Decode with `opennova-wire --stream --items <items.def>` and compare decoded direction,
 frame, session, tag, length, and fields. Do not compare encrypted raw bytes as
 the primary signal.
 

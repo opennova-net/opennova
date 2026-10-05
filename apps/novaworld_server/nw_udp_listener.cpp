@@ -41,7 +41,7 @@
 #include <utility>
 #include <vector>
 
-namespace opennova::server {
+namespace opennova::novaworld_server {
 
 namespace {
 
@@ -1016,4 +1016,4 @@ void NwUdpListener::run_loop() {
 	std::printf("[nwudp] loop exiting\n");
 }
 
-} // namespace opennova::server
+} // namespace opennova::novaworld_server
