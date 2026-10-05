@@ -34,12 +34,18 @@ struct ListenHostState {
 };
 
 // What a shell hands the general bring-up beyond the host config: the S2C
-// 0x45 terrain-tile source and the mission text the initial-state burst
-// streams (the briefing pages and the location-name table).
+// 0x45 terrain-tile source, the mission text the initial-state burst streams
+// (the briefing pages and the location-name table), and the gametext
+// "Server" strings the host's handlers print through, which the bring-up
+// installs on the fresh server context (D-NET-344: every host carries them,
+// a Serve Only host too) [orig: Game_InitSubsystems @0x4A6CD0 loads
+// gametext.bin; Server_BroadcastMedicRequest @0x5153C9; the team change's
+// GameText_GetString("server", "C2Blue" / "C2Red") @0x51902E / @0x51909C].
 struct HostBringup {
 	inmatch::HostConfig host_cfg;
 	std::vector<uint8_t> terrain_til_data;
 	mission::MissionText mission_text;
+	ServerTextTable server_text;
 };
 
 // The SP listen server's session config: SINGLEPLAYERGAME, the literal
