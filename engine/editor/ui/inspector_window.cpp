@@ -1221,9 +1221,18 @@ char *InspectorWindow::filter_of(const std::string &path) {
 		                              [&](const std::shared_ptr<const DocumentBase> &d) { return d->path() == kept->first; });
 		kept = open ? std::next(kept) : filters_.erase(kept);
 	}
-	auto found = filters_.find(path);
-	if (found == filters_.end()) found = filters_.emplace(path, std::array<char, kFilterSize>{}).first;
-	return found->second.data();
+	ui_kit::HeldText<kFilterSize> &filter = filters_[path];
+	filter.follow(view.workspace.document(path).inspector_filter);
+	return filter.text;
+}
+
+void InspectorWindow::send_filter(const std::string &path, const std::string &before) {
+	const auto found = filters_.find(path);
+	if (found == filters_.end() || found->second.sent() == before) return;
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("path", io::JsonValue::make_string(path));
+	members.set("inspector_filter", io::JsonValue::make_string(found->second.sent()));
+	window_requests::set_workspace(workspace_, "document", std::move(members));
 }
 
 void InspectorWindow::nothing_matches(char *filter, const char *what) {
@@ -1250,6 +1259,13 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	}
 	const NodeAddress selection = view.documents.selection.primary;
 	char *filter = filter_of(document->path());
+	// What the filter was before the Inspector drew: one changed as it drew goes to the workspace.
+	const std::string filter_before = filter;
+	struct Sent {
+		InspectorWindow &self;
+		const std::string &path, &before;
+		~Sent() { self.send_filter(path, before); }
+	} sent{*this, document->path(), filter_before};
 	// A field a request asks to show (a Problems row's): each ask on the record selected now, in
 	// this document, shown once, the filter cleared so nothing hides it; the same row clicked
 	// again is another ask, shown again. An ask about a record no longer selected shows nothing,
@@ -1299,6 +1315,9 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ImGui::BeginDisabled(!editable);
 		draw_together(*document, together);
 		ImGui::EndDisabled();
+		// The shared form shows no one record's field: a reveal's scroll is spent, not kept for when one
+		// record is selected again.
+		reveal_scroll_ = false;
 		return;
 	}
 	if (together.size() > 1) {

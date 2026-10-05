@@ -12,6 +12,7 @@
 // proposed again as the findings go, its version moving (an Apply pressed on the old one counts
 // for nothing) and another project closing it; and the fixes planned only for the findings
 // asked, never for every one a refresh lists.
+#include <algorithm>
 #include <cstdio>
 #include <memory>
 #include <set>
@@ -338,8 +339,8 @@ int test_proposals() {
 	list.refresh(v);
 	const std::vector<EditorRequest> &summary = list.required_fixes().requests;
 	// The placeholders first, the import's preview last (the window draws the import's button first).
-	TEST_EXPECT(summary.size() == 2 && ProblemsList::fix_all_label(summary[0]) == "Create 1 placeholder" &&
-	            ProblemsList::fix_all_label(summary[1]) == "Import 2 from the game data...");
+	TEST_EXPECT(summary.size() == 2 && fix_all_label(summary[0]) == "Create 1 placeholder" &&
+	            fix_all_label(summary[1]) == "Import 2 from the game data...");
 	const ProblemsList::Summary said = ProblemsList::summary(*v.project.requirements);
 	TEST_EXPECT(said.stops == "The game will not start: 2 required files are missing." &&
 	            said.more == "1 more file the game reads is missing: part of it will not work.");
@@ -356,7 +357,13 @@ int test_proposals() {
 	const ProblemFix *use = nullptr;
 	for (const ProblemFix &fix : fixes)
 		if (fix.label == "Use spare.bin as gametext.bin") use = &fix;
-	TEST_EXPECT(use && ProblemsList::asks_first(*use) && !ProblemsList::asks_first(fixes.front()));
+	TEST_EXPECT(use && fix_asks_first(*use) && !fix_asks_first(fixes.front()));
+	// What a field's picker offers of the same finding: the fixes raised at once alone, never one that asks first
+	// (review X16: the picker has no confirmation to wait in).
+	const std::vector<ProblemFix> at_once = fixes_raised_at_once(fixes);
+	const size_t asking = size_t(std::count_if(fixes.begin(), fixes.end(), [](const ProblemFix &fix) { return fix_asks_first(fix); }));
+	TEST_EXPECT(asking >= 1 && at_once.size() + asking == fixes.size() &&
+	            std::none_of(at_once.begin(), at_once.end(), [](const ProblemFix &fix) { return fix_asks_first(fix); }));
 	const ProblemsList::Proposal rename = list.propose(v, list.use_fix(v, 0, *use));
 	TEST_EXPECT(rename.findings == 1 && rename.lines.size() == 2 &&
 	            rename.lines[0] == "Use spare.bin as gametext.bin" &&

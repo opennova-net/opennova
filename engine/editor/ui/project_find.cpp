@@ -2,6 +2,7 @@
 
 #include <editor/graph/display_names.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/ui_kit.h>
@@ -49,50 +50,56 @@ const std::vector<ProjectFind::Usage> &ProjectFind::usages(const SessionView &vi
 	return usages_.emplace(hit, std::move(out)).first->second;
 }
 
-void ProjectFind::open() {
-	ask_ = true;
+void ProjectFind::open(Workspace &workspace) {
+	window_requests::set_workspace(workspace, "project_find", "open", io::JsonValue::make_bool(true));
 }
 
 void ProjectFind::draw(Workspace &workspace) {
 	const SessionView &view = workspace.view();
-	if (ask_) {
-		ask_ = false;
-		ImGui::OpenPopup(kTitle);
-	}
+	text_.follow(view.workspace.project_find.text);
+	const auto close = [&] {
+		window_requests::set_workspace(workspace, "project_find", "open", io::JsonValue::make_bool(false));
+	};
 	const float em = ImGui::GetFontSize();
 	ImGui::SetNextWindowSize(ImVec2(em * 40.0f, em * 30.0f), ImGuiCond_Appearing);
-	bool open = true;
-	if (!ImGui::BeginPopupModal(kTitle, &open)) return;
-	if (!view.project.open || !view.findings.graph) {
-		ImGui::CloseCurrentPopup();
-		ImGui::EndPopup();
+	// Held open, it shows when no dialog before it in the session's order is held (shown_modal).
+	const bool held = view.workspace.project_find.open && view.project.open && view.findings.graph &&
+	                  modal_may_show(view, HeldModal::ProjectFind);
+	if (!popup_.begin(kTitle, held, true, 0, true, view.workspace.opened)) {
+		if (popup_.dismissed()) close();
 		return;
 	}
 	if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 	// Escape closes the modal, the text typed kept: the text box, which has the keyboard, would
 	// put back the text it had when it took it.
 	const bool escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-	char typed[sizeof(text_)];
-	std::memcpy(typed, text_, sizeof(typed));
+	char typed[sizeof(text_.text)];
+	std::memcpy(typed, text_.text, sizeof(typed));
 	ImGui::SetNextItemWidth(-FLT_MIN);
-	ImGui::InputTextWithHint("##text", "A file, a name the files define, or an item's name", text_, sizeof(text_));
+	const bool edited = ImGui::InputTextWithHint("##text", "A file, a name the files define, or an item's name", text_.text,
+	                                             sizeof(text_.text));
 	if (escape) {
-		std::memcpy(text_, typed, sizeof(typed));
-		ImGui::CloseCurrentPopup();
+		std::memcpy(text_.text, typed, sizeof(typed));
+		close();
+		popup_.close();
+	} else if (edited) {
+		window_requests::set_workspace(workspace, "project_find", "text", io::JsonValue::make_string(text_.sent()));
 	}
-	if (view_ != &view || key_ != cache_key(view) || searched_ != text_) {
+	const std::string text = text_.sent();
+	if (view_ != &view || key_ != cache_key(view) || searched_ != text) {
 		view_ = &view;
 		key_ = cache_key(view);
-		searched_ = text_;
+		searched_ = text;
 		hits_ = view.findings.graph->search(searched_);
 		usages_.clear();
 	}
 	// Somewhere to go: the modal closes as it goes.
 	const auto go = [&](const ReferenceTarget &target) {
 		window_requests::go_to(workspace, target);
-		ImGui::CloseCurrentPopup();
+		close();
+		popup_.close();
 	};
-	if (!text_[0]) ui_kit::empty_state("Type part of a file's name, of a name a file defines, or of the record that names a file (an item's name finds its model).");
+	if (text.empty()) ui_kit::empty_state("Type part of a file's name, of a name a file defines, or of the record that names a file (an item's name finds its model).");
 	else if (hits_.empty()) ui_kit::empty_state("No file or name holds it.");
 	else if (hits_.size() > kShownMax)
 		ImGui::TextDisabled("%zu results; the first %zu listed. Type more to narrow them.", hits_.size(), kShownMax);
@@ -141,7 +148,10 @@ void ProjectFind::draw(Workspace &workspace) {
 		ImGui::PopID();
 	}
 	ImGui::EndChild();
-	if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+	if (ImGui::Button("Close")) {
+		close();
+		popup_.close();
+	}
 	ImGui::EndPopup();
 }
 

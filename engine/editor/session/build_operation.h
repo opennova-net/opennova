@@ -18,6 +18,8 @@ namespace opennova::editor {
 struct PlayIntent {
 	bool wanted = false;
 	std::string mission;
+	// The game's window started behind the others (play's behind, the MCP gaps lane: LaunchPlan::behind).
+	bool behind = false;
 };
 
 // The Export that waits on a build (ADR 0046 S16): whether one does, and the folder it lands in (""

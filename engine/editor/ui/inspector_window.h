@@ -11,6 +11,7 @@
 #include <editor/session/view/view_revisions.h>
 #include <editor/ui/workspace.h>
 #include <editor/ui/reference_picker.h>
+#include <editor/ui/ui_kit.h>
 #include <editor/ui/view_event_mailbox.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -121,11 +122,15 @@ private:
 	size_t users_made_ = 0;
 	FindingsIndex findings_; // the record's Problems rows, found without a scan of every finding
 	// The filter over the fields, one per open document (the UX round's project lane: a filter typed on
-	// a menu's window never hides an item's fields), by the document's path; a closed document's goes.
-	static constexpr size_t kFilterSize = 128;
-	std::map<std::string, std::array<char, kFilterSize>> filters_;
-	// The active document's filter (made empty the first time it is asked for).
+	// a menu's window never hides an item's fields), by the document's path; a closed document's goes. It
+	// is the workspace's (the MCP gaps lane: workspace.document's inspector_filter): each taken where the
+	// session's moved, one changed as the Inspector drew (typed, cleared, a reveal) sent to it.
+	static constexpr size_t kFilterSize = kWorkspaceText;
+	std::map<std::string, ui_kit::HeldText<kFilterSize>> filters_;
+	// The active document's filter, following the workspace's.
 	char *filter_of(const std::string &path);
+	// The document's filter sent to the workspace where it changed from `before` as the Inspector drew.
+	void send_filter(const std::string &path, const std::string &before);
 	// The filter's empty state: what matched nothing, and Clear.
 	void nothing_matches(char *filter, const char *what);
 	// The RevealRecord events held until it draws, then the field the last one asked to show, on
