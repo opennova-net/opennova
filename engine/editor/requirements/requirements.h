@@ -55,8 +55,13 @@ const char *requirement_phase_label(int phase);
 // G<n>.sbf for an expansion, MENUMUS.SBF and GAMEMUS.SBF for the base game [orig: Expansion_LoadAssets
 // @ 0x4a4798/@ 0x4a4906..0x4a4936]), and an expansion's base music scripts, MENUMUS.BIN and GAMEMUS.BIN,
 // which the game reads M<n>.bin and G<n>.bin in place of under /exp [orig: @ 0x4a491d, @ 0x4a494a].
+// `base_names`: for a project that builds as an expansion, the names its base game serves (sorted as
+// reference_kinds.h's BaseNames reads them): a required file the project lacks that the base serves is
+// said so (the game reads the base's; the build's gate lets it through), never what the game does
+// without it.
 RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetScan &scan,
-                                        const std::vector<std::string> *install_expansions = nullptr);
+                                        const std::vector<std::string> *install_expansions = nullptr,
+                                        const std::vector<std::string> *base_names = nullptr);
 
 // The roles of the Required rows the project does not meet (missing, or of the wrong
 // kind), in manifest order: what "create every missing required file" names (the command
