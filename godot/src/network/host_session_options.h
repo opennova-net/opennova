@@ -8,27 +8,30 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <runtime/inmatch/game_config.h>
+#include <runtime/inmatch/host_file.h> // host_screen_default_config, HostScreenState
 #include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType
 
 namespace godot {
 
 // The hosted-session request as the Simulation takes it
-// (Simulation.configure_host_session) and reports it back
-// (Simulation.get_host_session_config): the user-facing half of the engine's
-// inmatch::GameConfig — identity, the g_GameType word, the S2C 0x08 rule globals,
-// the send cadence, the projectile options, the advertised spawn — plus the
-// binding-side bind port, lobby cap, serve-and-play selector and the install
-// root the expansion checksum is CRC'd from. Every field is read-write and
-// defaults to the engine's GameConfig default; the sim-owned fields (the
-// mission header blob, the score tables, the PCID) are not carried here.
-// Field witnesses live on inmatch::GameConfig.
+// (Simulation.configure_host_session, which copies the whole config) and
+// reports it back (Simulation.get_host_session_config): the engine's
+// inmatch::GameConfig — identity, the g_GameType word, the S2C 0x08 rule
+// globals, the send cadence, the projectile options, the advertised spawn —
+// plus the binding-side bind port, lobby cap, serve-and-play selector and the
+// install root the expansion checksum is CRC'd from. Every field is
+// read-write and defaults to the host screen's engine baseline
+// (inmatch::host_screen_default_config, the Config_SetDefaults rule values;
+// HostScreenState's cap and server type), the one set opennova-serve's host
+// file starts from too; the sim-owned mission header blob is not carried
+// here. Field witnesses live on inmatch::GameConfig.
 class HostSessionOptions : public RefCounted {
 	GDCLASS(HostSessionOptions, RefCounted)
 
-	opennova::inmatch::GameConfig config_;
+	opennova::inmatch::GameConfig config_ = opennova::inmatch::host_screen_default_config();
 	int bind_port_ = 64220;
-	int max_players_ = 16;
-	bool serve_and_play_ = true;
+	int max_players_ = opennova::inmatch::HostScreenState{}.player_limit;
+	bool serve_and_play_ = opennova::inmatch::HostScreenState{}.serve_and_play;
 	bool game_type_auto_ = false;
 	String game_root_;
 	// The request-only facts the world's host entry reads (ADR 0043 slice

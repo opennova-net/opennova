@@ -155,8 +155,10 @@ func test_start_game_emits_host_config() -> void:
 	assert_eq(config.spectator_slots, -1,
 			"checked ALLOW_SPECTATORS retains retail's shared-capacity sentinel")
 	assert_eq(config.spectator_password, "watch")
-	assert_eq(config.game_type, HostSessionConfig.GAME_TYPE_COOP,
-		"the session uses the witnessed retail Co-op g_GameType, not an AS capture value")
+	assert_true(config.game_type_auto,
+		"the selected mission's mode owns g_GameType, not a recorded default")
+	assert_eq(config.game_type, 0,
+		"the record keeps the host block's zeroed mp_gametype (Config_SetDefaults)")
 	assert_eq(config.game_type_attr, "", "no GAME_TYPE spin in the stand-in menu")
 	assert_eq(config.expansion, "",
 		"a base/unmounted root advertises no expansion instead of captured jox01")
@@ -190,8 +192,10 @@ func test_start_game_defaults() -> void:
 	assert_eq(driver.get_widget_text(driver.widget_id("GAME_NAME")), "!Untitled",
 			"the populate seeds GAME_NAME from the Menu/UNTITLED gametext")
 	assert_eq(driver.get_widget_text(driver.widget_id("MAX_PLAYERS")),
-			str(HostSessionConfig.DEFAULT_MAX_PLAYERS),
-			"the populate seeds MAX_PLAYERS from the record's cap")
+			str(HostSessionOptions.new().max_players),
+			"the populate seeds MAX_PLAYERS from the engine's host-screen cap")
+	assert_eq(HostSessionOptions.new().max_players, 64,
+			"the cfg table's mpmaxplayers default")
 	assert_false(driver.is_widget_checked(driver.widget_id("ALLOW_SPECTATORS")),
 			"the populate seeds ALLOW_SPECTATORS off (spectator_slots 0)")
 	# An empty rotation never starts [orig: the START_GAME interactive gate on
@@ -209,7 +213,7 @@ func test_start_game_defaults() -> void:
 	_press(driver, "START_GAME")
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
 	assert_eq(config.server_name, "!Untitled", "an untouched host screen hosts under the seeded name")
-	assert_eq(config.max_players, HostSessionConfig.DEFAULT_MAX_PLAYERS,
+	assert_eq(config.max_players, 64,
 			"an untouched host screen hosts with the seeded cap")
 	assert_eq(config.spectator_slots, 0,
 			"unchecked ALLOW_SPECTATORS disables spectator admission")

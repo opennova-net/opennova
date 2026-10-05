@@ -257,21 +257,9 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		if (options->get_resource_root().is_valid()) {
 			session_options->set_game_root(options->get_resource_root()->get_root_dir());
 		}
+		// The loose score.ini overlays the session's score table inside the
+		// boot, ahead of the bring-up (inmatch/host_boot.h).
 		sim_->configure_host_session(session_options);
-		// Retail builds the active game-type score table, then overlays the loose
-		// VERSION 40 score.ini before answering C2S 0x2D with S2C 0x58. This
-		// caller is explicitly loose-first even in a packed runtime: retail opens
-		// score.ini from the game directory rather than resolving it from a PFF
-		// [orig: the load is gated on File_IsSingleFile("score.ini") @0x436ED0, a
-		// FindFirstFileA check on disk].
-		if (options->get_resource_root().is_valid()) {
-			const PackedByteArray score_ini_bytes = options->get_resource_root()->read_file(
-					"score.ini", ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
-			if (!score_ini_bytes.is_empty() && !sim_->set_score_config_data(score_ini_bytes)) {
-				UtilityFunctions::push_warning(
-						"MissionRoot: rejected score.ini; session status uses zero score values.");
-			}
-		}
 		if (!sim_->enable_host_listen(host_session->get_bind_port())) {
 			// A requested LAN host that cannot own its UDP endpoint is not a host.
 			// Never degrade into the visually-identical socketless SP/listen path:
@@ -310,6 +298,9 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		has_trace_stats_sampling_ = false;
 		return 0;
 	}
+	// The world's load runs the boot's phase B after its device stages; an
+	// isolated root (tests, tools) ends the load here, the start pending.
+	if (!options->get_mission_start_deferred()) sim_->finish_load_without_environment();
 	// The shared render/PANM presentation DWORD — re-stamped after the boot
 	// because the load reset cleared it (an order-free scalar, not a boot step).
 	if (presentation_time_ms_ >= 0) {

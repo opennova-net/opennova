@@ -56,12 +56,14 @@ public:
 	// environment's standalone weather home without touching the sim.
 	void release_simulation();
 	opennova::world::IWeatherRenderTick *render_tick_interface() { return this; }
-	// The mission-start environment boundary: seed the World's weather from
-	// the loaded .env + the mission clock (the ONE derivation,
-	// env::weather_seed_from_config), the authority's eager WAC execution,
-	// the initializer + 255-tick settle (both roles), the baseline seal.
-	void run_mission_start_boundary(Object *p_sim, int p_start_time_q8_8,
-			int p_minutes_per_day);
+	// The mission-start environment boundary over this weather device: the
+	// sim's phase B of the one host boot (Simulation::start_mission ->
+	// inmatch::start_host_mission) seeds the World's weather from the loaded
+	// .env + the mission clock, binds this node as its render owner, then
+	// completes the mission start (the authority's eager WAC, the initializer
+	// + 255-tick settle, the baseline) and the session's load. With no sim the
+	// standalone home prewarms.
+	void run_mission_start_boundary(Object *p_sim);
 
 	void set_world_tick_driven(bool p_enabled);
 	void prepare_world_driven();
