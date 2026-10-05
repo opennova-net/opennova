@@ -954,17 +954,25 @@ static int test_retail_source() {
 		TEST_EXPECT(preview.open && preview.all && !preview.with_dependencies && view.activity.last_operation.id == planned);
 		// Without Replace existing files: the bank comes, the project's own files stay as they are, no
 		// refusal.
-		editor_test::handle_to_end(session, request::import_planned());
+		editor_test::handle_to_end(session, request::import_planned(preview.plan_serial));
 		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open &&
 		            count_code(view.activity.last_operation.findings, "import.exists") == 0);
 		const AssetEntry *music = view.project.scan->find("MENUMUS.SBF");
 		TEST_EXPECT(music && music->kind == AssetKind::MusicBank && !view.project.scan->find("player.sav"));
 		TEST_EXPECT(music && read_file_text(view.project.root + "/" + music->relative_path, text, message) && text == "music");
 		TEST_EXPECT(read_file_text(note_path, text, message) && text == "edited in the project");
-		// With Replace: the held files are written over (the edited one too).
+		// With replace and the held rows unchecked (the plan's own checks): an unchecked row is never taken, so the
+		// edited file stays as it is (review X1).
 		editor_test::handle_to_end(session, request::import_whole_install());
 		TEST_EXPECT(preview.open && preview.plan->rows.size() == 5);
-		editor_test::handle_to_end(session, request::import_planned(true));
+		editor_test::handle_to_end(session, request::import_planned(preview.plan_serial, true));
+		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open);
+		TEST_EXPECT(read_file_text(note_path, text, message) && text == "edited in the project");
+		// Replace existing files checked (the dialog's checkbox, the workspace's): the held files are written over,
+		// the edited one too, with no replace asked (the checked held rows replace: review X2).
+		editor_test::handle_to_end(session, request::import_whole_install());
+		TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"replace_existing": true}})")) && session.outcome().done());
+		editor_test::handle_to_end(session, request::import_planned(preview.plan_serial));
 		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open);
 		TEST_EXPECT(read_file_text(note_path, text, message) && text == "retail");
 		// The same bytes imported again without Replace: held, not an error (the source is read
@@ -976,7 +984,7 @@ static int test_retail_source() {
 		TEST_EXPECT(session.outcome().done() && view.activity.last_operation.end == OperationEnd::Done &&
 		            count_code(view.activity.last_operation.findings, "import.exists") == 0);
 		// Nothing planned: a planned import is refused.
-		editor_test::handle_to_end(session, request::import_planned());
+		editor_test::handle_to_end(session, request::import_planned(0));
 		TEST_EXPECT(!session.outcome().done() && view.findings.diagnostics.back().code() == "import.not_planned");
 		// A request asking for two things at once is refused, never served in part (review F14): every
 		// file and some by name, every file and a walk; an import naming nothing and planning nothing.

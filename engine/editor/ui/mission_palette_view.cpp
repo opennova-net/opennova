@@ -25,19 +25,22 @@ std::string MissionPaletteView::name_of(int64_t item) const {
 }
 
 int64_t MissionPaletteView::draw(const AssetGraph *graph, uint64_t generation, const std::vector<int64_t> &recent,
-		int64_t picked) {
-	ui_kit::filter_box("##palette_filter", filter_, sizeof(filter_), "Search items", 0.0f,
-			"Find an item by its name, its id or its model's file.", false);
+		int64_t picked, const std::string &search, std::string *typed) {
+	filter_.follow(search);
+	if (ui_kit::filter_box("##palette_filter", filter_.text, sizeof(filter_.text), "Search items", 0.0f,
+			"Find an item by its name, its id or its model's file.", false) && typed)
+		*typed = filter_.sent();
 	if (!graph) {
 		ui_kit::empty_state("No item catalog yet.", "The project's items.def lists what can be placed.");
 		return 0;
 	}
 	// Made again only when what it reads moved.
-	if (!made_ || generation_ != generation || made_filter_ != filter_ || made_recent_ != recent) {
-		palette_ = mission_palette(*graph, filter_, recent);
+	const std::string filter = filter_.sent();
+	if (!made_ || generation_ != generation || made_filter_ != filter || made_recent_ != recent) {
+		palette_ = mission_palette(*graph, filter, recent);
 		made_ = true;
 		generation_ = generation;
-		made_filter_ = filter_;
+		made_filter_ = filter;
 		made_recent_ = recent;
 	}
 	if (palette_.count == 0) {

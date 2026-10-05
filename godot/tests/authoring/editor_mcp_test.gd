@@ -361,11 +361,13 @@ func test_request_table_on_the_wire() -> void:
 	var kinds: Array = []
 	var queries: Array = []
 	var edit: Dictionary = {}
+	var workspace: Dictionary = {}
 	var viewport: Dictionary = {}
 	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
 		if String(tool["name"]) == "editor_request":
 			kinds = tool["inputSchema"]["properties"]["kind"].get("enum", [])
 			edit = tool["inputSchema"]["properties"]["edits"].get("items", {})
+			workspace = tool["inputSchema"]["properties"].get("workspace", {})
 		if String(tool["name"]) == "editor_query":
 			queries = tool["inputSchema"]["properties"]["query"].get("enum", [])
 		if String(tool["name"]) == "editor_viewport":
@@ -416,6 +418,22 @@ func test_request_table_on_the_wire() -> void:
 	assert_eq(members.get("payload", {}).get("enum", []), ["text.span"], str(members.get("payload")))
 	assert_eq(int(members.get("line", {}).get("minimum", 0)), 1, str(members.get("line")))
 	assert_true(String(members.get("text", {}).get("description", "")).contains("spans"), str(members.get("text")))
+	# The MCP gaps lane: set_workspace's workspace is the catalog's workspace table, a property per part (its
+	# members, each typed) and focus the windows it brings forward.
+	var parts: Dictionary = workspace.get("properties", {})
+	var table: Dictionary = catalog.get("workspace", {})
+	assert_eq(parts.size(), (table.get("parts", []) as Array).size() + 1, "a property per part, and focus")
+	assert_eq(String(parts.get("card", {}).get("properties", {}).get("path", {}).get("type", "")), "string", str(parts.get("card")))
+	assert_eq(String(parts.get("build_result", {}).get("properties", {}).get("open", {}).get("type", "")), "boolean")
+	assert_eq(parts.get("focus", {}).get("enum", []), table.get("focus", []))
+	# Review X19 and X13: the import checks are whole numbers, as import_preview's rows say them; a text carries the
+	# longest its window's field holds.
+	var import_members: Dictionary = parts.get("import", {}).get("properties", {})
+	assert_eq(String(import_members.get("check", {}).get("items", {}).get("type", "")), "integer", str(import_members.get("check")))
+	assert_eq(int(parts.get("problems", {}).get("properties", {}).get("text", {}).get("maxLength", 0)), 127,
+			str(parts.get("problems", {}).get("properties", {}).get("text")))
+	assert_true(served.has("set_workspace") and served.has("play_sound") and served.has("stop_sound") and
+			served.has("apply_confirmation"))
 	assert_false(served.has("pick_directory") or served.has("pick_file"), "the pickers need a person")
 	assert_true(served.has("preview_install_import") and not served.has("preview_retail_import"))
 	for kind: Variant in served:
@@ -424,7 +442,7 @@ func test_request_table_on_the_wire() -> void:
 	assert_true(String((await _call("editor_request", {"kind": "preview_retail_import"})).get("_error", "")).contains(
 			"Unknown request kind"), "the retail token names nothing")
 	assert_true(String((await _call("editor_request", {"kind": "build", "path": "x"})).get("_error", "")).contains(
-			"build takes no \"path\" (it takes out_dir, rehash)"))
+			"build takes no \"path\" (it takes out_dir, rehash, report)"))
 	assert_true(String((await _call("editor_request", {"kind": "open_project"})).get("_error", "")).contains(
 			"needs \"dir\""))
 	for retired in ["text", "flag", "edit", "unsaved_choice"]:

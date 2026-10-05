@@ -25,7 +25,8 @@ namespace opennova::editor {
 // that file (a model, whose item the viewport finds). The right button's click opens what applies
 // there (Place here, Paste here, Frame, Drop to ground, Duplicate, Delete, Select same item, Go to in
 // outline, Show events using this). Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste (Ctrl+V over the
-// picture pastes there). Every change is a request: the options a SetViewport, the camera's gestures
+// picture pastes there). Every change is a request: the options a SetViewport (the snaps and the
+// palette's search too, the MCP gaps lane: preview/mission_options), the camera's gestures
 // SetViewports, a drag's samples EditRecord batches under one gesture, a click or a marquee a
 // SelectRecord, a placing click, a drop or a command an EditInViewport. Under the canvas, what a click
 // does now (the canvas's hint) and the files the picture asked the project for and did not find (an
@@ -42,9 +43,5 @@ private:
 	struct Tools;
 	std::unique_ptr<Tools> tools_;
 };
-
-// The snaps the toolbar offers (metres; 0 free) and the turns (degrees; 0 whole degrees).
-inline constexpr float kMissionSnaps[] = { 0.0f, 0.25f, 1.0f, 5.0f, 10.0f };
-inline constexpr float kMissionTurns[] = { 0.0f, 5.0f, 15.0f, 45.0f, 90.0f };
 
 } // namespace opennova::editor
