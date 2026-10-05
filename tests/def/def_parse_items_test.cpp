@@ -849,6 +849,45 @@ static int test_soundloop_slots_below_one(void) {
     return bad;
 }
 
+/* `end` gives a record with no alias "S%06i" of its id plus 100000; a record a
+   nested `begin` or the file's end closes keeps an empty one [orig: the `end`
+   arm @0x49EB2F..0x49EB5F, sprintf(alias, "S%06i", id + 186A0h)]. */
+static int test_end_alias_default(void) {
+    static const char text[] =
+        "begin Defaulted\r\n"
+        "  id 105310\r\n"
+        "end\r\n"
+        "begin Authored\r\n"
+        "  id 7\r\n"
+        "  sid mine\r\n"
+        "end\r\n"
+        "begin Negative\r\n"
+        "  id -200000\r\n"
+        "end\r\n"
+        "begin Nested\r\n"
+        "  id 8\r\n"
+        "begin Unclosed\r\n"
+        "  id 9\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 5) {
+        fprintf(stderr, "FAIL: alias snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const int bad = strcmp(items.entries[0].sid, "S205310") != 0 ||
+                    strcmp(items.entries[1].sid, "mine") != 0 ||
+                    strcmp(items.entries[2].sid, "S-100000") != 0 ||
+                    items.entries[3].sid[0] != '\0' || items.entries[4].sid[0] != '\0';
+    if (bad)
+        fprintf(stderr, "FAIL: end aliases '%s' '%s' '%s' '%s' '%s'\n", items.entries[0].sid,
+                items.entries[1].sid, items.entries[2].sid, items.entries[3].sid,
+                items.entries[4].sid);
+    def_free_items(&items);
+    return bad;
+}
+
 /* A line's values are the tokenizer's 29 past the key, not 16, and the 29th runs
    on to the line's end: 27 unknown attrib tokens then `Door Takeable` set both
    (tokens 28 and 29), 28 then `Door Takeable` set neither (token 29 is the run-on
@@ -898,6 +937,7 @@ int main(int argc, char **argv) {
     if (test_tab_separated_keys() != 0) return 1;
     if (test_atof_is_the_crt_atof() != 0) return 1;
     if (test_soundloop_slots_below_one() != 0) return 1;
+    if (test_end_alias_default() != 0) return 1;
     if (test_attrib_reads_the_29_values() != 0) return 1;
     if (test_regional_sound_delays() != 0) return 1;
     if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;

@@ -196,11 +196,42 @@ static int atof_legs() {
     return ok ? 0 : 1;
 }
 
+/* Every VEHICLE_HUD block is kept, one with no sid included: retail commits it
+   to every item whose alias matches without case, an empty one included, and a
+   later block overwrites an earlier one [orig: the VEHICLE_END loop
+   @0x59F3DA..0x59F40C, `_stricmp(alias, byte_2723DC4)` @0x59F402]. */
+static int sidless_block_legs() {
+    const char *text =
+        "VEHICLE_HUD\r\n"
+        "  driver 1 2\r\n"
+        "VEHICLE_END\r\n"
+        "VEHICLE_HUD\r\n"
+        "  sid dup\r\n"
+        "  driver 3 4\r\n"
+        "VEHICLE_END\r\n"
+        "VEHICLE_HUD\r\n"
+        "  sid DUP\r\n"
+        "  driver 5 6\r\n"
+        "VEHICLE_END\r\n";
+    DefHudPosFile f;
+    memset(&f, 0, sizeof(f));
+    const bool ok = def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &f) == 0 &&
+            f.hud.vehicle_huds_count == 3 && f.hud.vehicle_huds[0].sid[0] == '\0' &&
+            f.hud.vehicle_huds[0].driver_x == 1 && f.hud.vehicle_huds[2].driver_x == 5;
+    if (!ok)
+        fprintf(stderr, "FAIL: sid-less and repeated VEHICLE_HUD blocks: %zu kept\n",
+                f.hud.vehicle_huds_count);
+    def_free_hudpos(&f);
+    if (ok) printf("hudpos VEHICLE_HUD blocks OK\n");
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     if (synthetic_legs() != 0) return 1;
     if (tokenizer_legs() != 0) return 1;
     if (atof_legs() != 0) return 1;
+    if (sidless_block_legs() != 0) return 1;
     if (value_cap_legs() != 0) return 1;
     /* Every remaining leg reads the shipped hudpos.def (the memory legs compare
        against its path parse), so they gate on the reference fixture set

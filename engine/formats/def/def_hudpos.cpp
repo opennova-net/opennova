@@ -81,11 +81,15 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             return;
         }
         if (key_is(key, "vehicle_end")) {
-            /* Commit. Retail resolves the sid against the item table here; the
-               parse keeps the sid string and leaves that join to the consumer.
-               A block with no sid never had a key, so it is dropped rather than
-               stored under an empty name. */
-            if (in_vehicle_block && veh.sid[0] != '\0')
+            /* Commit. Retail copies the block into every item whose alias
+               matches its sid without case, an empty sid included (it matches
+               an item whose alias stayed empty: one a nested `begin` or the
+               file's end closed), and a later block overwrites an earlier one
+               [orig: the VEHICLE_END loop @0x59F3DA..0x59F40C, `_stricmp(alias,
+               byte_2723DC4)` @0x59F402]. The parse keeps every block in file
+               order and the consumer makes the join (HudPos::get_vehicle_hud
+               takes the last match). */
+            if (in_vehicle_block)
                 DA_PUSH(hud->vehicle_huds, hud->vehicle_huds_count, veh_cap, veh);
             in_vehicle_block = 0;
             memset(&veh, 0, sizeof(veh));

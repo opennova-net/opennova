@@ -146,6 +146,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
 
         if (key_is(key, "end")) {
             if (in_block) {
+                /* A record closed with no alias takes "S%06i" of its id plus
+                   100000 [orig: the `end` arm @0x49EB2F..0x49EB5F, `cmp
+                   [esi+30h], bl` then sprintf(alias, "S%06i", id + 186A0h)]; a
+                   record a nested `begin` or the file's end closes keeps it
+                   empty. */
+                if (current.sid[0] == '\0')
+                    snprintf(current.sid, sizeof(current.sid), "S%06i",
+                             static_cast<int>(static_cast<uint32_t>(current.id) + 100000u));
                 DA_PUSH(out->entries, out->count, entries_cap, current);
                 reset_item_def(&current);
                 raw_cap = 0;
