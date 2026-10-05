@@ -3381,6 +3381,12 @@ add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+# The retail host file opennova-serve reads (ADR 0051): the game.cfg walk, the
+# ServerConfig_ApplyHostSetting arms and the Mission lines' rotation seed.
+add_executable(npruntime_host_file_test npruntime/host_file_test.cpp)
+target_link_libraries(npruntime_host_file_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_host_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_file COMMAND npruntime_host_file_test)
 
 # P3: the World-driven host-side spawn pipeline (Server_InitNewRoundState ->
 # ProcessPendingPlayerSpawns -> Server_BuildPlayerInfoAndAdd) — spawns the pool-0 player in World,

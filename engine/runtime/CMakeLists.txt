@@ -390,6 +390,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_weapon_replay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_file.cpp              # the retail /HOST host file (opennova-serve, ADR 0051)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp

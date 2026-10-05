@@ -13,6 +13,14 @@ const std::vector<std::string_view>& host_dialog_controls();
 bool apply_host_dialog_control(GameConfig& config, int32_t& player_limit,
                                bool& serve_and_play, std::string_view control,
                                const std::string& value);
+// The two arms of that read, for a writer that parses its own values (the
+// host file reads with atol): the seven text edits and their byte caps, and
+// every numeric control. False for a control the arm does not own.
+bool apply_host_dialog_text(GameConfig& config, std::string_view control,
+                            const std::string& value);
+bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
+                              bool& serve_and_play, std::string_view control,
+                              int32_t number);
 // The inverse: the value the host screen shows for a control before the user
 // touches it -- edit text, or the spin/checkbox item value as a decimal
 // string; GAME_LOCATION yields the country the shell matches against the
