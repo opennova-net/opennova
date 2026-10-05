@@ -27,6 +27,7 @@
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/unsaved_guard.h>
+#include <editor/session/workspace_parts.h>
 
 namespace opennova::editor {
 
@@ -257,6 +258,11 @@ Viewports &ProjectSession::viewports() {
 
 void ProjectSession::advance(double seconds) {
 	impl_->core.viewports().advance(seconds);
+}
+
+void ProjectSession::report_sound(uint64_t serial, WorkspaceView::SoundState state, const std::string &error) {
+	if (::opennova::editor::report_sound(impl_->core.view().workspace, serial, state, error))
+		impl_->core.touch(ViewConcern::Workspace);
 }
 
 // --- what is asked without a request -------------------------------------------------------------
