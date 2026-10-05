@@ -214,6 +214,24 @@ public:
 		replica_peer_scratch_count_ = 0;
 		replica_peer_scratch_tick_ = 0;
 	}
+	// The in-place reload into the host's next mission (ClientRuntime::
+	// begin_mission_reload): the connection and this role stay, the replica
+	// starts over, so the receive-side cursors re-baseline with it (the hello
+	// latch kept) and L respawns in the next world. False when the runtime is
+	// not in a session.
+	bool begin_mission_reload() {
+		if (!runtime || !runtime->begin_mission_reload()) return false;
+		local_spawned_ = false;
+		weather_revision_seen_ = 0;
+		weapon_availability_revision_seen_ = 0;
+		mounted_ammo_revision_seen_ = 0;
+		world_state_revision_seen_ = 0;
+		track_seen_ = ReplicaTrackSeen{};
+		replica_peer_scratch_src_ = nullptr;
+		replica_peer_scratch_count_ = 0;
+		replica_peer_scratch_tick_ = 0;
+		return true;
+	}
 	// Stop/Start restart with a live wire-header world: force one exact
 	// rematerialization fold; the portal tables persist by design (their
 	// handles remain identical and the weld records are one-shot mutable).

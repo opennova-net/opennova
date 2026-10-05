@@ -450,6 +450,41 @@ std::vector<uint8_t> ClientRuntime::start() {
 	return joiner_->start();
 }
 
+bool ClientRuntime::begin_mission_reload() {
+	if (role_ != Role::Joiner || joiner_ == nullptr) return false;
+	std::vector<uint8_t> first = joiner_->begin_mission_reload();
+	if (first.empty()) return false;
+	// The exit the main frame read is spent; the reload's mission start
+	// clears the rest [orig: Game_StartMission].
+	mission_exit_reason_ = kMissionExitNone;
+	pending_reload_notifications_.clear();
+	zone_states_.clear();
+	tracked_window_ = TrackedCaptureWindow{};
+	authoritative_loadout_ = WeaponLoadout{};
+	authoritative_ammo_pools_.fill(0);
+	deployed_ = false;
+	authoritative_spawn_released_ = false;
+	cleared_player_slots_.clear();
+	// The previous mission's replica goes with its world. The round gate the
+	// 0x25 raised holds until the reload's mission start clears it
+	// (JoinerConnection's mission_started) [orig: g_SpawnSuccessGate, cleared
+	// by Game_StartMission @0x524A1F]; the frame clock runs on.
+	const auto clock = view_.state().local_clock_ms;
+	view_.state() = replication::ClientState{};
+	view_.state().local_clock_ms = clock;
+	view_.state().spawn_success_gate = true;
+	view_.reset_minimap_overlays();
+	view_.drain_round_events();
+	view_.drain_game_events();
+	view_.drain_weapon_reloads();
+	view_.drain_weapon_pickups();
+	view_.drain_script_remote_commands();
+	view_.drain_objective_notifications();
+	view_.drain_effect_commands();
+	framed_send_queue_.push_back(std::move(first));
+	return true;
+}
+
 void ClientRuntime::receive(const uint8_t *raw, std::size_t len) {
 	if (role_ != Role::Joiner || raw == nullptr || len == 0) return;
 	recv_fifo_.emplace_back(raw, raw + len);
@@ -705,8 +740,15 @@ bool ClientRuntime::queue_team_change_request() {
 int32_t ClientRuntime::mission_exit_reason() const {
 	if (mission_exit_reason_ != kMissionExitNone) return mission_exit_reason_;
 	if (joiner_ != nullptr && joiner_->has_disconnect_event()) {
-		return mission_exit_reason_for_disconnect(joiner_->last_disconnect_event());
+		const int32_t reason = mission_exit_reason_for_disconnect(joiner_->last_disconnect_event());
+		if (reason != kMissionExitNone) return reason;
 	}
+	// A reload wait that loses its link returns into the Post Menu with exit
+	// 1, which takes the main menu [orig: Game_StartMission
+	// @0x524E87..0x524ECD; g_LoadingTimeoutFlag, set by
+	// CNapiNetwork_OnDisconnectedFromServer @0x4C64A4].
+	if (joiner_ != nullptr && joiner_->reloading() && joiner_->session_lost())
+		return kMissionExitQuit;
 	return kMissionExitNone;
 }
 

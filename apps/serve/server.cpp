@@ -9,6 +9,8 @@
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/net_ports.h>
 #include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/map_change.h>
+#include <runtime/inmatch/mission_exit.h>
 #include <runtime/mission/runtime_boot.h>
 
 #include <cstdlib>
@@ -111,7 +113,8 @@ bool Server::start(std::string &error) {
 	// CNapiGameSession_BuildAndCreateSession before Game_MainLoop] and the
 	// game's host listens before its boot (mission_root.cpp enable_host_listen).
 	if (!read_boot_config(error) || !mount(error) || !read_config_over_weapons(error) ||
-			!read_host_file(error) || !open_socket(error) || !boot_mission(error)) {
+			!read_host_file(error) || !open_socket(error) ||
+			!boot_mission(/*next_mission=*/false, error)) {
 		stop();
 		return false;
 	}
@@ -227,44 +230,46 @@ bool Server::read_host_file(std::string &error) {
 	cfg_.dedicated = 1;
 	(void)save_config();
 	host_ = inmatch::host_session_settings(cfg_);
-	if (rotation_.current() == nullptr) {
+	if (rotation_.list.current() == nullptr) {
 		error = "the host file names no mission the catalog lists";
 		return false;
 	}
 	return true;
 }
 
-bool Server::boot_mission(std::string &error) {
-	const mission_catalog::Row &row = catalog_[rotation_.current()->catalog_index];
-	// The starting map is the catalog row's file, loaded from disk when the row
+bool Server::boot_mission(bool next_mission, std::string &error) {
+	const inmatch::MissionRotation &list = rotation_.list;
+	// The map is the rotation's output, loaded from disk when its catalog row
 	// is a loose find and from the archives otherwise
 	// [orig: Game_StartMission @0x524769..0x524774 passes g_MapFileName and
 	//  g_MissionSourceIsLoose to the BMS load; Mission_LoadBMSFile
 	//  @0x40F51A..0x40F527 fopens a loose one].
+	const std::string map_file = list.map_file;
 	std::vector<uint8_t> bms_bytes;
-	if (!index_.read_file(row.file, bms_bytes,
-				row.loose ? VfsLookupPolicy::ForceLooseFirst : VfsLookupPolicy::ForceArchiveOnly)) {
-		error = "the mission '" + row.file + "' does not read";
+	if (!index_.read_file(map_file, bms_bytes,
+				list.map_source_is_loose ? VfsLookupPolicy::ForceLooseFirst
+										 : VfsLookupPolicy::ForceArchiveOnly)) {
+		error = "the mission '" + map_file + "' does not read";
 		return false;
 	}
 	bms::File doc;
 	std::string parse_error;
 	if (!bms::parse(bms_bytes.data(), bms_bytes.size(), doc, parse_error)) {
-		error = "the mission '" + row.file + "' did not parse: " + parse_error;
+		error = "the mission '" + map_file + "' did not parse: " + parse_error;
 		return false;
 	}
-	std::string basename = row.file;
+	std::string basename = map_file;
 	const size_t dot = basename.rfind('.');
 	if (dot != std::string::npos) basename.resize(dot);
 
 	// The session config: the cfg block's (the published player cap with the
-	// dedicated slot among it), the session game type from the starting row
+	// dedicated slot among it), the session game type from the rotation's row
 	// [orig: Game_StartMission @0x5244DE..0x52452B sets g_GameType from the
 	//  rotation's current catalog entry +0x1128 on the authority, over the
 	//  file's GameType], the mission identity and the expansion check.
 	inmatch::GameConfig config = host_.config;
-	config.game_type = rotation_.map_game_type;
-	config.mission_file = rotation_.map_file;
+	config.game_type = list.map_game_type;
+	config.mission_file = map_file;
 	config.mission_name = doc.get_mission_name();
 	config.expansion = index_.mounted_expansion();
 	config.expansion_version_checksum =
@@ -272,10 +277,14 @@ bool Server::boot_mission(std::string &error) {
 	config.session_channel = inmatch::GameSessionChannel::Lan;
 
 	// Serve Only: the dedicated role over the bound socket, no player of the
-	// host's own, the session coming up inside the boot.
-	role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
-	role_->set_socket(datagrams_.get());
-	session_ = std::make_unique<inmatch::Session>(*role_);
+	// host's own, the session coming up inside the boot. The role, its session
+	// and the rotation live for the whole run; a map change keeps them.
+	if (!next_mission) {
+		role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
+		role_->set_socket(datagrams_.get());
+		role_->set_rotation(&rotation_);
+		session_ = std::make_unique<inmatch::Session>(*role_);
+	}
 
 	// The engine's one host boot (ADR 0051 d4), the game's own order.
 	inmatch::HostBootRequest request;
@@ -292,6 +301,7 @@ bool Server::boot_mission(std::string &error) {
 	request.host_cfg.serve_and_play = host_.serve_and_play;
 	request.host_cfg.game_root = options_.resource_dir;
 	request.session_score_ini = true;
+	request.next_mission = next_mission;
 	mission::KernelBootOptions &options = request.boot_options;
 	options.playable = false; // Serve Only: no player of the host's own
 	options.mp_session = true;
@@ -301,17 +311,52 @@ bool Server::boot_mission(std::string &error) {
 	options.player_limit = static_cast<int32_t>(config.max_players);
 	options.team_count = config.num_teams;
 	request.fresh_kernel = [this]() -> mission::MissionKernel & {
-		kernel_ = std::make_unique<mission::MissionKernel>();
+		auto fresh = std::make_unique<mission::MissionKernel>();
+		if (kernel_) fresh->carry_across_load_from(*kernel_);
+		kernel_ = std::move(fresh);
 		return *kernel_;
 	};
 	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) return false;
 	// No device stages run between the phases on a headless host.
 	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
+	++missions_played_;
 	io::logf(io::LogLevel::kInfo,
 			"opennova-serve: '%s' (%s) up: %d entities, terrain %s, WAC %s, %u player slot(s)",
-			row.file.c_str(), config.mission_name.c_str(), kernel_->promo.spawned,
+			map_file.c_str(), config.mission_name.c_str(), kernel_->promo.spawned,
 			kernel_->terrain_store.valid() ? "loaded" : "absent",
 			kernel_->wac_loaded ? "loaded" : "absent", config.max_players);
+	return true;
+}
+
+// The authority's mission exit, as the main frame and the Post Menu route it:
+// a round end in the session (3, or 4 under REPLAY with LASTGAME off) is the
+// map change; the end of the rotation, and any other exit, ends the session.
+// The map change re-applies the cfg block to the session settings, and the
+// PreMenu's init saves game.cfg before the next map loads.
+// [orig: Game_ProcessMainFrame @0x526806..0x526867; PostMenu_RouteMissionExit
+//  @0x5685C2..0x56864F; PreMenu_Init @0x5693E0 -> Game_SaveConfig @0x5693F4;
+//  Game_StartMission @0x524662]
+bool Server::route_mission_exit(int32_t reason) {
+	if (!role_) return false;
+	inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
+	const bool in_session = ctx.is_in_session != 0;
+	if (inmatch::main_frame_exit(reason, in_session, /*authority=*/true) !=
+					inmatch::MainFrameExit::PostMenu ||
+			!in_session ||
+			(reason != inmatch::kMissionExitMapCycle && reason != inmatch::kMissionExitRoundOver))
+		return false;
+	if (inmatch::begin_host_map_change(*role_, catalog_, &cfg_, &host_) ==
+			inmatch::MapChangeStep::RotationEnded) {
+		rotation_ended_ = true;
+		end_message_ = "the map rotation ended";
+		return false;
+	}
+	(void)save_config();
+	std::string error;
+	if (!boot_mission(/*next_mission=*/true, error)) {
+		end_message_ = "the next mission did not boot: " + error;
+		return false;
+	}
 	return true;
 }
 
@@ -346,12 +391,14 @@ bool Server::frame(double delta_seconds) {
 	const inmatch::FrameOutcome outcome = session_->advance(input);
 	// No presenter drains the presentation half of the outbox.
 	kernel_->world.out.discard_presentation();
-	if (outcome.terminal()) {
-		end_message_ = outcome.error.message;
-		running_ = false;
-		return false;
-	}
-	return true;
+	if (!outcome.terminal()) return true;
+	end_message_ = outcome.error.message;
+	if (route_mission_exit(role_->state.host_owner.ctx.mission_exit_reason)) return true;
+	// The session ends here: the rotation's end takes StopServer's goodbye,
+	// as the router's miss arm does through CNapiGameSession_FullDestroy
+	// [orig: PostMenu_RouteMissionExit @0x568683].
+	stop();
+	return false;
 }
 
 void Server::stop() {

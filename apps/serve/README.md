@@ -67,6 +67,22 @@ keeps its `game.cfg` value. The settings the host screen has no host-file key fo
 (time-of-day continuity), and the rest of the session rules (`time_limit`, `koth_limit`,
 `max_team_lives`, the vote, autobalance and ping settings, `lanmode`, ...).
 
+## The map rotation
+
+The server plays round after round, as a retail host does (D-NET-331). When a round's
+post-round linger runs out (about 45 seconds), the server loads the next `Mission` line's
+map inside the same session: every joiner stays connected and reloads into it. Before each
+map change the server saves `game.cfg`, and the next map takes the session settings from the
+`game.cfg` block again. After the last line the list starts over when `Replay` is 1; with
+`Replay 0` the session ends there, every joiner receives the session's STOP goodbye, and the
+server exits with 0. Because the last `Mission` line is the starting map, the second round
+plays the first line's map.
+
+A map whose launch option is set (the line's second value, `1`; the server clears it on a
+co-op or non-team map) plays twice, as the two halves of Attack and Defend: the second half
+swaps every player's team and the side passwords' teams, and the swap undoes itself at the
+second half's end.
+
 The server also reads, from the install as the game does: the loose `score.ini` (the
 session's score table), `gametext.bin` (the default game name and the "Server" chat
 lines) and `charattr.def` (the class attributes the medic heal and knife reach read).
@@ -85,7 +101,8 @@ the directory you want). It never writes into `--resource-dir` unless it runs fr
 3. It writes `activesrvr.txt` ("This directory has a server running in it that did not exit
    cleanly or is running"), then saves `game.cfg` with `dedicated = 1` and the host file's
    settings in it.
-4. On a clean exit (Ctrl+C, or the session's end) it saves `game.cfg` again and deletes
+4. It saves `game.cfg` again at every map change.
+5. On a clean exit (Ctrl+C, or the session's end) it saves `game.cfg` again and deletes
    `activesrvr.txt`. A server that is killed or crashes leaves `activesrvr.txt` behind;
    nothing reads it.
 
@@ -96,7 +113,7 @@ A `game.cfg` with `mpreset = "1"` stops the server before it writes anything, wi
 
 | Code | Meaning |
 |---|---|
-| 0 | `--help`, stopped by Ctrl+C, or `game.cfg` sets `mpreset`. |
+| 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset`, or the map rotation ran out (the end of the list with `Replay 0`). |
 | 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, or the mission did not boot. |
 | 2 | A usage error. |
-| 3 | The session ended by itself. Until the map rotation's round-end advance lands (D-NET-331), a server plays one round and exits with 3. |
+| 3 | The session ended otherwise: a later map that did not boot, or a mission exit that is not a round end. |

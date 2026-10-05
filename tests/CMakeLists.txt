@@ -3413,6 +3413,24 @@ add_executable(npruntime_host_config_test npruntime/host_config_test.cpp)
 target_link_libraries(npruntime_host_config_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_config_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_config COMMAND npruntime_host_config_test)
+# The host's map rotation (D-NET-331): the list ops and cursor rules, the
+# round-end advance and its REPLAY wrap, the host screen's seed, the round end's
+# exit reason under REPLAY / LASTGAME, and the map change's router over the
+# Attack-and-Defend halves and the SETNEXT latch.
+add_executable(npruntime_mission_rotation_test npruntime/mission_rotation_test.cpp)
+target_link_libraries(npruntime_mission_rotation_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_mission_rotation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_mission_rotation COMMAND npruntime_mission_rotation_test)
+# The host's round-end map change over REAL UDP: a dedicated host booted through
+# the one host boot runs a two-map rotation (a launch-option TDM map's two halves,
+# then the next map) while a LAN joiner keeps its one connection and reloads in
+# place; its team swaps for the second half and swaps back. opennova_app_common
+# for net_sockets + net_datagram_socket (ws2_32 on WIN32).
+add_executable(npruntime_map_change_test npruntime/map_change_test.cpp)
+target_include_directories(npruntime_map_change_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(npruntime_map_change_test
+    PRIVATE opennova_net opennova_runtime opennova_app_common opennova_base)
+add_test(NAME npruntime_map_change COMMAND npruntime_map_change_test)
 # The one host boot (ADR 0051 d4, inmatch/host_boot.h): the two phases over a
 # synthetic mount -- score.ini, the .til, the .env water, gametext.bin's Server
 # strings and charattr.def -- and the order the fixes ride (the placed tiles

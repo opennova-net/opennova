@@ -77,7 +77,7 @@ int main() {
 	{
 		gamecfg::GameCfg cfg = gamecfg::defaults();
 		cfg.country = "Germany"; // GameLocation's strncpy 3 leaves the tail
-		MissionRotation rotation;
+		HostRotation rotation;
 		const std::string text =
 				"gamename \"A server name well past the thirty-two byte cap\"\n"
 				"MPHostGamePassword secret\n"
@@ -135,7 +135,7 @@ int main() {
 		TEST_EXPECT(cfg.mp_host_side_password_b == "abcdefghijklmnop"); // strncpy 0x11 into [17]
 		TEST_EXPECT(cfg.mp_gametype == 65540);
 		TEST_EXPECT(cfg.dedicated == 0); // the file never writes SERVERTYPE
-		TEST_EXPECT(rotation.entries.empty() && rotation.current() == nullptr);
+		TEST_EXPECT(rotation.list.count == 0 && rotation.list.current() == nullptr);
 
 		// A short text value copies its NUL: the old tail is gone.
 		const std::string short_location = "GameLocation UK\n";
@@ -148,7 +148,7 @@ int main() {
 	//     cursor; the launch option survives only on a team, non-objective row.
 	{
 		gamecfg::GameCfg cfg = gamecfg::defaults();
-		MissionRotation rotation;
+		HostRotation rotation;
 		const std::string text =
 				"Mission ctf_a.bms 1\n"
 				"Mission MISSING.BMS 1\n"
@@ -158,30 +158,35 @@ int main() {
 				"Mission COOP_B.BMS 1\n";
 		const HostFileReport report = read_host_file(text.data(), text.size(), cfg, rotation, catalog);
 		TEST_EXPECT(report.unknown_missions.size() == 1 && report.unknown_missions[0] == "MISSING.BMS");
-		TEST_EXPECT(rotation.entries.size() == 5);
-		TEST_EXPECT(rotation.entries[0].catalog_index == 0 && rotation.entries[1].catalog_index == 1 &&
-				rotation.entries[2].catalog_index == 2 && rotation.entries[3].catalog_index == 0 &&
-				rotation.entries[4].catalog_index == 1);
+		TEST_EXPECT(rotation.list.count == 5);
+		const MissionRotation &list = rotation.list;
+		TEST_EXPECT(list.entry(0).catalog_index == 0 && list.entry(1).catalog_index == 1 &&
+				list.entry(2).catalog_index == 2 && list.entry(3).catalog_index == 0 &&
+				list.entry(4).catalog_index == 1);
+		TEST_EXPECT(list.entry(0).flag == 0 && list.entry(4).flag == 0);
 		// The cursor lands on the FIRST rotation entry with the last line's name.
-		TEST_EXPECT(rotation.cursor == 1 && rotation.current() == &rotation.entries[1]);
-		TEST_EXPECT(rotation.alt_cursor == -1);
-		TEST_EXPECT(rotation.map_file == "COOP_B.BMS");
-		TEST_EXPECT(rotation.map_source_is_loose);
-		TEST_EXPECT(rotation.map_game_type == game_type::kObjectiveCoop);
+		TEST_EXPECT(list.cursor == 1 && list.current() == &list.entry(1));
+		TEST_EXPECT(list.alt_cursor == -1);
+		TEST_EXPECT(list.map_file == "COOP_B.BMS");
+		TEST_EXPECT(list.map_source_is_loose);
+		TEST_EXPECT(list.map_game_type == game_type::kObjectiveCoop);
+		// The starting row's mode is the previous-mode word auto-balance reads
+		// [orig: @0x4A658D].
+		TEST_EXPECT(rotation.previous_game_type == game_type::kObjectiveCoop);
 		// CTF (team, no objective bit) keeps its option -- the last CTF line set
 		// it to 0; objective Co-op and solo DM lose theirs.
-		TEST_EXPECT(rotation.launch_options.size() == catalog.size());
-		TEST_EXPECT(rotation.launch_options[0] == 0);
-		TEST_EXPECT(rotation.launch_options[1] == 0 && rotation.map_launch_option == 0);
-		TEST_EXPECT(rotation.launch_options[2] == 0);
+		TEST_EXPECT(list.launch_options.size() == catalog.size());
+		TEST_EXPECT(list.launch_options[0] == 0);
+		TEST_EXPECT(list.launch_options[1] == 0 && list.map_launch_option == 0);
+		TEST_EXPECT(list.launch_options[2] == 0);
 
 		gamecfg::GameCfg cfg2 = gamecfg::defaults();
-		MissionRotation rotation2;
+		HostRotation rotation2;
 		const std::string ctf = "Mission CTF_A.BMS 1\n";
 		read_host_file(ctf.data(), ctf.size(), cfg2, rotation2, catalog);
-		TEST_EXPECT(rotation2.launch_options[0] == 1 && rotation2.map_launch_option == 1);
-		TEST_EXPECT(rotation2.map_game_type == game_type::kCaptureTheFlag);
-		TEST_EXPECT(!rotation2.map_source_is_loose);
+		TEST_EXPECT(rotation2.list.launch_options[0] == 1 && rotation2.list.map_launch_option == 1);
+		TEST_EXPECT(rotation2.list.map_game_type == game_type::kCaptureTheFlag);
+		TEST_EXPECT(!rotation2.list.map_source_is_loose);
 	}
 
 	// --- the sample host file the apps zip ships (apps/serve/example.host):
@@ -202,7 +207,7 @@ int main() {
 		gamecfg::GameCfg cfg = gamecfg::defaults(texts);
 		gamecfg::GameCfg expected = gamecfg::defaults(texts);
 		expected.country = "USA";
-		MissionRotation rotation;
+		HostRotation rotation;
 		const HostFileReport report =
 				read_host_file(text.data(), text.size(), cfg, rotation, sample_catalog);
 		TEST_EXPECT(report.unknown_keys.empty());
@@ -210,8 +215,8 @@ int main() {
 		// The block writes back to the same text: no field the file names moved.
 		TEST_EXPECT(gamecfg::write(cfg, {}) == gamecfg::write(expected, {}));
 		// Two rotation entries; the last line names the starting map.
-		TEST_EXPECT(rotation.entries.size() == 2);
-		TEST_EXPECT(rotation.map_file == "EXAMPLE02.BMS");
+		TEST_EXPECT(rotation.list.count == 2);
+		TEST_EXPECT(rotation.list.map_file == "EXAMPLE02.BMS");
 	}
 	std::printf("host_file: ok\n");
 	return 0;

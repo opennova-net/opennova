@@ -102,39 +102,6 @@ constexpr FlagKey kFlagKeys[] = {
 	{"Tracers", GameConfig::kMpAttribNoTracers, true},
 };
 
-// MissionRotation_Append: the pair joins the end, and a row whose code word
-// carries the objective bit or lacks the team bit loses its launch option
-// [orig: MissionRotation_Append @0x5019D0 -- the bounds test
-//  @0x5019D5..0x5019E3, the append @0x501A86..0x501AA0, the clear
-//  @0x501AA8..0x501AC1].
-void append_to_rotation(MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
-		size_t index, uint32_t flag) {
-	if (index >= catalog.size()) return;
-	rotation.entries.push_back(MissionRotationEntry{index, flag});
-	const uint32_t code = game_type::for_mission_mode(catalog[index].game_mode);
-	if ((code & game_type::kObjectiveBit) != 0 || (code & game_type::kTeamBit) == 0)
-		rotation.launch_options[index] = 0;
-}
-
-// MissionList_FindByName: the cursor to the first entry whose catalog file
-// matches, case-insensitively; the alternate cursor cleared on a hit. Retail
-// walks to the list's capacity, not its count; this caller always finds the
-// entry it has just appended within the count.
-// [orig: MissionList_FindByName @0x4FC4C0 -- the cursor reset @0x4FC4D0,
-//  the walk @0x4FC4F0..0x4FC51B, the hit @0x4FC521..0x4FC52F]
-void find_in_rotation(MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
-		const std::string &name) {
-	rotation.cursor = -1;
-	for (size_t i = 0; i < rotation.entries.size(); ++i) {
-		const size_t row = rotation.entries[i].catalog_index;
-		if (row < catalog.size() && strutil::iequals(catalog[row].file, name)) {
-			rotation.cursor = static_cast<int32_t>(i);
-			rotation.alt_cursor = -1;
-			return;
-		}
-	}
-}
-
 } // namespace
 
 GameConfig host_screen_default_config() {
@@ -161,13 +128,8 @@ GameConfig host_screen_default_config() {
 	return config;
 }
 
-const MissionRotationEntry *MissionRotation::current() const {
-	if (cursor < 0 || static_cast<size_t>(cursor) >= entries.size()) return nullptr;
-	return &entries[static_cast<size_t>(cursor)];
-}
-
 bool apply_host_file_line(const io::ConfigTokens &line, GameCfg &cfg,
-		MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
+		HostRotation &host_rotation, const std::vector<mission_catalog::Row> &catalog,
 		HostFileReport *report) {
 	const std::string key = line.token(0);
 	const std::string value = line.token(1);
@@ -210,17 +172,17 @@ bool apply_host_file_line(const io::ConfigTokens &line, GameCfg &cfg,
 	//  entry+0x1140) @0x4A6562..0x4A6569, MissionList_FindByName @0x4A6572,
 	//  g_GameType (entry+0x1128) @0x4A6577..0x4A658D]
 	if (strutil::iequals(key, "Mission")) {
-		if (rotation.launch_options.size() != catalog.size())
-			rotation.launch_options.resize(catalog.size(), 0);
+		MissionRotation &rotation = host_rotation.list;
 		for (size_t i = 0; i < catalog.size(); ++i) {
 			if (!strutil::iequals(catalog[i].file, value)) continue;
-			rotation.launch_options[i] = io::retail_atol(line.token(2));
-			append_to_rotation(rotation, catalog, i, 0);
+			const int32_t row = static_cast<int32_t>(i);
+			rotation.launch_option(catalog, row) = io::retail_atol(line.token(2));
+			rotation.append(catalog, row, 0);
+			rotation.take_row(catalog, row);
+			// g_MapFileName takes the line's own token, not the row's spelling.
 			rotation.map_file = value;
-			rotation.map_source_is_loose = catalog[i].loose;
-			rotation.map_launch_option = static_cast<uint8_t>(rotation.launch_options[i]);
-			find_in_rotation(rotation, catalog, value);
-			rotation.map_game_type = game_type::for_mission_mode(catalog[i].game_mode);
+			rotation.find_by_name(catalog, value);
+			host_rotation.previous_game_type = rotation.map_game_type; // [orig: @0x4A658D]
 			return true;
 		}
 		if (report != nullptr) report->unknown_missions.push_back(value);
@@ -231,12 +193,12 @@ bool apply_host_file_line(const io::ConfigTokens &line, GameCfg &cfg,
 }
 
 HostFileReport read_host_file(const char *text, size_t size, GameCfg &cfg,
-		MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog) {
+		HostRotation &host_rotation, const std::vector<mission_catalog::Row> &catalog) {
 	HostFileReport report;
 	// The callback returns 0 for every line, so the walk never stops early
 	// [orig: every arm's `xor eax, eax` before its ret, e.g. @0x4A6035].
 	report.lines = io::for_each_config_file_line(text, size, [&](io::ConfigTokens &line) {
-		apply_host_file_line(line, cfg, rotation, catalog, &report);
+		apply_host_file_line(line, cfg, host_rotation, catalog, &report);
 	});
 	return report;
 }

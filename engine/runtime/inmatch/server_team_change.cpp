@@ -4,11 +4,15 @@
 
 #include <net/npwire/ingame_encode.h>     // encode_chat_broadcast
 #include <net/npwire/ingame_message_id.h>
+#include <runtime/inmatch/mission_rotation.h> // HostRotation::previous_game_type
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
 #include <runtime/inmatch/server_tick.h>  // Server_ProcessPlayerDeath
 #include <runtime/world/entity.h>
 #include <runtime/world/round_sim.h>      // RoundDeath
 #include <runtime/world/world.h>
+
+#include <algorithm>
+#include <vector>
 
 namespace opennova::inmatch {
 
@@ -45,9 +49,10 @@ bool Server_ShouldAutoBalance(const NapiNPServerCtx &ctx) {
 	if (ctx.is_authority == 0 || ctx.is_in_session == 0 ||
 			(game_type & kGameTypeCoopBit) != 0 || (game_type & kGameTypeTeamBit) == 0)
 		return false;
-	// dword_24D212C: the type the running round was set up under, the live
-	// g_GameType here (see the header).
-	const uint32_t round_game_type = game_type;
+	// dword_24D212C: the type the previous mission was set up under (the
+	// round init re-stamps it after this test, @0x516AD5).
+	const uint32_t round_game_type =
+			ctx.rotation != nullptr ? ctx.rotation->previous_game_type : game_type;
 	if ((round_game_type & kGameTypeTeamBit) == 0 || (round_game_type & kGameTypeCoopBit) != 0)
 		return true;
 	if (!ctx.config.auto_balance_enabled) return false;
@@ -55,6 +60,73 @@ bool Server_ShouldAutoBalance(const NapiNPServerCtx &ctx) {
 	if (imbalance < 0) imbalance = -imbalance;
 	if (imbalance <= 1 || imbalance < ctx.config.auto_balance_min_difference) return false;
 	return imbalance >= ctx.config.auto_balance_trigger_difference;
+}
+
+void Server_AutoBalanceTeams(NapiNPServerCtx &ctx, world::World *world) {
+	// The pair list: (time in the server, slot) for every active slot that is
+	// not the host's own, in slot order. The connection's join stamp stands
+	// in for the slot's +94384 connect time.
+	struct Pair {
+		int32_t key;
+		NapiNPConnection *slot;
+	};
+	std::vector<NapiNPConnection *> slots;
+	for (NapiNPConnection &c : ctx.np_protocol.connection_list)
+		if (c.phase >= ConnectionPhase::PlayerAdded && c.type != NapiNPConnection::kTypeClientSide)
+			slots.push_back(&c);
+	std::stable_sort(slots.begin(), slots.end(), [](const NapiNPConnection *a,
+			const NapiNPConnection *b) { return a->reply.player_slot < b->reply.player_slot; });
+	std::vector<Pair> pairs;
+	const uint32_t now_ms = ctx.np_protocol.host_run_duration_ms;
+	for (NapiNPConnection *c : slots)
+		pairs.push_back({static_cast<int32_t>(now_ms - c->join_validated_host_ms), c});
+	// CPairList_ShellSort: Knuth's gaps, descending by key, 1-based indexes.
+	const int count = static_cast<int>(pairs.size());
+	int gap = 1;
+	if (count / 9 >= 1) {
+		do gap = 3 * gap + 1;
+		while (gap <= count / 9);
+	}
+	for (; gap > 0; gap /= 3) {
+		for (int i = gap + 1; i <= count; ++i) {
+			const Pair insert = pairs[static_cast<size_t>(i - 1)];
+			int j = i;
+			while (j > gap && pairs[static_cast<size_t>(j - gap - 1)].key >= insert.key) {
+				pairs[static_cast<size_t>(j - 1)] = pairs[static_cast<size_t>(j - gap - 1)];
+				j -= gap;
+			}
+			pairs[static_cast<size_t>(j - 1)] = insert;
+		}
+	}
+	int32_t imbalance = Server_CalcTeamImbalance(ctx);
+	int32_t magnitude = imbalance < 0 ? -imbalance : imbalance;
+	for (const Pair &pair : pairs) {
+		if (magnitude < 2 || magnitude < ctx.config.auto_balance_min_difference) return;
+		NapiNPConnection &slot = *pair.slot;
+		const uint8_t team = slot.assigned_team_valid ? slot.assigned_team : uint8_t{0};
+		uint8_t moved_to = 0;
+		if (team == 1 && imbalance > 0) {
+			moved_to = 2;
+			imbalance -= 2;
+		} else if (team == 2 && imbalance < 0) {
+			moved_to = 1;
+			imbalance += 2;
+		} else {
+			continue;
+		}
+		magnitude -= 2;
+		slot.assigned_team = moved_to;
+		slot.assigned_team_valid = true;
+		world::Entity *entity = world != nullptr && slot.link.owned_entity.valid()
+				? world->registry.get(slot.link.owned_entity)
+				: nullptr;
+		if (entity == nullptr) continue;
+		entity->team = moved_to;
+		const auto listed = std::find(ctx.team_change_entities.begin(),
+				ctx.team_change_entities.end(), entity->handle);
+		if (listed == ctx.team_change_entities.end())
+			ctx.team_change_entities.push_back(entity->handle);
+	}
 }
 
 void Server_BroadcastSystemMessage(NapiNPServerCtx &ctx, const std::string &message) {

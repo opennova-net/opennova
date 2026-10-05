@@ -76,6 +76,17 @@ public:
 	// Begin the handshake; returns the framed ClientHello to ship (Idle->Hello). Empty for HostClient.
 	std::vector<uint8_t> start();
 
+	// The joiner's in-place reload into the host's next mission, which the
+	// shell runs when the main frame's verdict on the stored exit (4, in
+	// session, not the authority) is the Game Loop (inmatch::main_frame_exit):
+	// the connection stays, the exit reason clears, the replica and the
+	// per-mission runtime state start over with the round gate held, and the
+	// reload's first legs queue (JoinerConnection::begin_mission_reload).
+	// False for HostClient or out of a session.
+	// [orig: Game_ProcessMainFrame @0x52681F..0x526841 pushes the Game Loop;
+	//  GameLoop_Init @0x526370 -> Game_StartMission(0)]
+	bool begin_mission_reload();
+
 	// Deposit one received FRAMED datagram (off the socket) for the next frame's recv pump to drain.
 	// Mirrors CNapiNetwork_PumpManagerReceive feeding the byte recv FIFO ahead of the frame's recv
 	// pump. No-op for HostClient (it reads its loopback transport directly).

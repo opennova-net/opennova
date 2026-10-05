@@ -1,6 +1,8 @@
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/end_round_protocol.h>
+#include <runtime/inmatch/mission_exit.h>         // the round end's exit reasons 3 / 4
+#include <runtime/inmatch/mission_rotation.h>     // HostRotation::last_game
 #include <runtime/inmatch/server_idle_timers.h>      // the every-32 breath samples
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
 #include <runtime/inmatch/server_net_quality.h>      // the host CNetQuality sample + the 0x46 quality resend
@@ -2255,13 +2257,23 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Retail holds the multiplayer post-round state for 2790 server ticks. Its
 	// drain precedes automatic win checks, so only an outcome already present at
 	// that phase (including a WAC/BMS result from this tick) consumes the first
-	// count; automatic multiplayer announcements start draining next tick. At expiry,
-	// the session replication gate closes while the frozen result stays readable.
-	// [orig: store @0x5166C4; phase/drain @0x51DA04; exit reason 3 @0x51DA91]
+	// count; automatic multiplayer announcements start draining next tick. At expiry
+	// the authority stores its mission exit: 4 when REPLAY is on and the LASTGAME
+	// toggle off, else 3. Both take the map change (inmatch/map_change.h); the
+	// session stays up through it (§5.70.3).
+	// [orig: store @0x5166C4; Server_TickUpdate -- the session and gate tests
+	//  @0x51D9A5..0x51D9B7, the drain @0x51D9BD..0x51D9CC, the reason
+	//  @0x51DB47..0x51DB63 (`cmp g_ReplayEnabled` @0x51DB47, `cmp
+	//  g_LastGameToggle` @0x51DB50, 4 @0x51DB57, 3 @0x51DB63)]
 	if ((round_was_announced || round_ended_at_retail_linger_phase) &&
 			ctx.round_end_linger_ticks > 0) {
 		--ctx.round_end_linger_ticks;
-		if (ctx.round_end_linger_ticks == 0) ctx.is_in_session = 0;
+		if (ctx.round_end_linger_ticks == 0 && ctx.mission_exit_reason == kMissionExitNone) {
+			const bool last_game = ctx.rotation != nullptr && ctx.rotation->last_game;
+			ctx.mission_exit_reason = ctx.config.replay_enabled != 0 && !last_game
+					? kMissionExitRoundOver
+					: kMissionExitMapCycle;
+		}
 	}
 	Server_RouteGuidance(ctx, world);
 
