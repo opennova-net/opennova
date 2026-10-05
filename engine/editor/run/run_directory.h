@@ -14,7 +14,7 @@ namespace opennova::editor {
 // writes beside itself (the game install's game.cfg and _filelog.txt, its saves), and an Export
 // ships that directory. Play in the game install puts there what the install's game needs beside
 // it (prepare_retail_launch_plan, run/launch_plan.h): the build's archives and loose files and the
-// install's binaries. A run directory records the game it runs (its pid, image and creation time,
+// install's binaries (Strict Play's, prepare_strict_install_launch_plan: those and nothing else). A run directory records the game it runs (its pid, image and creation time,
 // as the platform reports them) from the spawn until the game stops. A Play takes the first
 // numbered one that is not there, records no game, or records one the platform says is gone
 // (Dead), emptied; it passes one whose game may still run (Alive, or Unknown: a game the platform
