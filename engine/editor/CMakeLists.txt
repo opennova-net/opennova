@@ -111,9 +111,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_import_needs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
-    # import — the importers (a PNG to the texture file its uses read, S18) and what they read (the import
-    # context), the sidecars, the import pass, and the plan of an import with the files it needs
+    # import — the importers (a PNG to the texture file its uses read, S18; a font set's glyph sheet to a
+    # .fnt) and what they read (the import context), the sidecars, the import pass, and the plan of an
+    # import with the files it needs
     ${CMAKE_CURRENT_SOURCE_DIR}/import/converter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/font_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_context.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/importers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_pass.cpp

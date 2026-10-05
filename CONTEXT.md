@@ -529,6 +529,16 @@ The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
 the tree is organization only. Uniqueness and length are checked on output names.
 _Avoid_: path (when the engine-facing identity is meant), resource name
 
+**Font set**:
+A bitmap font made from a picture by the editor's font importer: `<name>.fntset`, a short text naming
+its **glyph sheet**, a PNG of 16 x 14 equal cells holding the bytes 0x20..0xFF in reading order, each
+glyph its cell's alpha. The sheet is the import's input; the import record's options are the font's
+metrics (`advance`: `ink`, `left` or `cell`; `tracking`; `space`; `spacing`; `design_width`). The
+import makes `<name>.fnt` through the FNT writer, every glyph the cell's height and as wide as its
+advance (the format has no advance table). An import of the set from the disk brings its sheet beside
+it into `fonts/`.
+_Avoid_: font project, atlas (the `.fnt`'s pages are the packer's layout, not the sheet's)
+
 **Import / sidecar**:
 Bringing a non-native source (an image; later a sound bank's manifest, a font, a terrain's
 images) into the project the Godot way: a committed `<file>.import` sidecar records the

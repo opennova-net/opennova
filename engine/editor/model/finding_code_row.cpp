@@ -161,6 +161,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportEncode, code("import.encode", G::Imports) },
 	{ C::ImportExists, code("import.exists", G::Imports) },
 	{ C::ImportFolder, code("import.folder", G::Imports) },
+	// A font made from a glyph sheet (import/font_import): a set or a sheet the importer cannot make into a
+	// font, a sheet with no clear texel.
+	{ C::ImportFont, code("import.font", G::Imports) },
 	{ C::ImportInput, code("import.input", G::Imports) },
 	{ C::ImportInstall, code("import.install", G::Imports) },
 	{ C::ImportKind, code("import.kind", G::Imports) },
