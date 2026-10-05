@@ -1,7 +1,8 @@
 // opennova-serve: the headless game server (ADR 0051). The game's Serve Only
-// host with no Godot and no window, configured by the retail host file. The
-// server's legs live in server.cpp; this file owns the console, the signals,
-// the socket layer and the wall clock.
+// host with no Godot and no window, configured by the retail host file over
+// the working directory's game.cfg. The server's legs live in server.cpp;
+// this file owns the console, the signals, the socket layer and the wall
+// clock.
 
 #include "server.h"
 
@@ -35,7 +36,9 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 	std::string error;
 	if (!server.start(error)) {
 		std::fprintf(stderr, "opennova-serve: %s\n", error.c_str());
-		return 1;
+		// A game.cfg with mpreset set ends the process with code 0, as retail's
+		// load does [orig: Game_LoadConfig @0x5514A1..0x5514AC, crt_exit(0)].
+		return server.reset_exit() ? 0 : 1;
 	}
 	std::fprintf(stdout, "opennova-serve: serving on UDP %u (Ctrl+C stops)\n", server.bound_port());
 	std::fflush(stdout);

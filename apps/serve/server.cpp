@@ -4,10 +4,11 @@
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/net_ports.h>
-#include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/host_config.h>
 #include <runtime/mission/runtime_boot.h>
 
 #include <cstdlib>
@@ -28,9 +29,12 @@ const char kUsage[] =
 		"                   line per rotation entry; the last Mission line is the starting map\n"
 		"  /exp, /d, /game  mount the expansion, prefer loose files, pick the data's game code\n"
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
-		"  --lan-port       the first port of the bind scan (default: the head of the retail\n"
-		"                   LAN server range, game.cfg mplanserverportmin)\n"
-		"  --log-debug      print the engine's debug log lines\n";
+		"  --lan-port       the first port of the bind scan (default: game.cfg mplanserverportmin,\n"
+		"                   the head of the retail LAN server range)\n"
+		"  --log-debug      print the engine's debug log lines\n"
+		"The server reads and writes game.cfg in the directory it runs from (the process's\n"
+		"working directory, as retail), with the host file's settings over it, and marks\n"
+		"itself running there with activesrvr.txt, which a clean exit deletes.\n";
 
 // The one-token switches, retail-spelled ones matched case-insensitively.
 bool parse_port(const std::string &text, uint16_t &out) {
@@ -39,17 +43,6 @@ bool parse_port(const std::string &text, uint16_t &out) {
 	if (text.empty() || end == nullptr || *end != '\0' || value == 0 || value > 0xFFFF) return false;
 	out = static_cast<uint16_t>(value);
 	return true;
-}
-
-// The retail GameText lookup with its default: the string a mounted
-// gametext.bin carries for section/key, else the caller's default
-// [orig: Config_SetDefaults @0x54D0FF..0x54D11E pushes ("Menu", "UNTITLED",
-//  "!Untitled") for the default game name].
-std::string game_text(const rtxt::File *table, const char *section, const char *key,
-		const std::string &fallback) {
-	if (table == nullptr) return fallback;
-	const std::string value = table->get_in_section(section, key);
-	return value.empty() ? fallback : value;
 }
 
 } // namespace
@@ -110,16 +103,34 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {}
 Server::~Server() { stop(); }
 
 bool Server::start(std::string &error) {
-	// The socket binds before the mission loads, as the dead path creates the
-	// session before its Game Loop starts the mission [orig:
-	// Game_HostMultiplayerSession @0x4A6760 CNapiGameSession_BuildAndCreateSession
-	// before Game_MainLoop] and the game's host listens before its boot
-	// (mission_root.cpp enable_host_listen).
-	if (!mount(error) || !read_host_file(error) || !open_socket(error) || !boot_mission(error)) {
+	// Retail's boot order: game.cfg at Game_Run's start, the subsystems (the
+	// mount, weapon.def and game.cfg again), then the dead /HOST path (the host
+	// file, the lock, the save, the session). The socket binds before the
+	// mission loads, as the dead path creates the session before its Game Loop
+	// starts the mission [orig: Game_HostMultiplayerSession @0x4A6760
+	// CNapiGameSession_BuildAndCreateSession before Game_MainLoop] and the
+	// game's host listens before its boot (mission_root.cpp enable_host_listen).
+	if (!read_boot_config(error) || !mount(error) || !read_config_over_weapons(error) ||
+			!read_host_file(error) || !open_socket(error) || !boot_mission(error)) {
 		stop();
 		return false;
 	}
 	running_ = true;
+	return true;
+}
+
+// Game_Run's read, before the mount: no weapon table yet (every avail_wpn
+// line drops) and no gametext (the `!` default texts). A set mpreset exits
+// the process there [orig: Game_Run @0x4A7FBB -> Game_LoadConfig @0x551480,
+// crt_exit @0x5514A1..0x5514AC]; a missing file is the defaults.
+bool Server::read_boot_config(std::string &error) {
+	const gamecfg::LoadResult boot = gamecfg::load_file(gamecfg::kFileName, gamecfg::LoadOptions{});
+	cfg_ = boot.cfg;
+	if (boot.reset_exit) {
+		reset_exit_ = true;
+		error = "game.cfg sets mpreset: the process exits";
+		return false;
+	}
 	return true;
 }
 
@@ -151,12 +162,51 @@ bool Server::mount(std::string &error) {
 	return true;
 }
 
-// The host file over the host screen's defaults, then the server type forced
-// to Serve Only, as the dead auto-host does once the file is read
-// [orig: Game_HostMultiplayerSession @0x4A65A0 -- the parse @0x4A65A0..0x4A65B4
-//  (a file that does not open clears the /HOST flag and returns @0x4A65B6),
-//  SERVERTYPE = 1 @0x4A65F9..0x4A65FE]. The cfg table's defaults stand in for
-// game.cfg, which this slice does not read (D-NET-335).
+// Game_InitSubsystems' read, once weapon.def has loaded behind the mount and
+// gametext.bin with it: the same file over the defaults again, now with the
+// weapon table its avail_wpn lines address and the localized default texts;
+// the defaults keep the boot read's player_index and hw3d_deviceno
+// [orig: Game_InitSubsystems @0x4A6FED (gametext.bin), @0x4A70A6
+// (WeaponDef_LoadAll), @0x4A70AB (Game_LoadConfig); Config_SetDefaults keeps
+// the block's first word]. From here every return owes Game_Run's exit tail.
+bool Server::read_config_over_weapons(std::string &error) {
+	roster_.clear();
+	std::vector<uint8_t> bytes;
+	if (index_.read_file("weapon.def", bytes)) {
+		def::DefWeaponsFile weapons = {};
+		if (def::def_parse_weapons_memory(bytes.data(), bytes.size(), &weapons) == 0) {
+			roster_ = inmatch::game_cfg_weapon_roster(weapons);
+			def::def_free_weapons(&weapons);
+		}
+	}
+	rtxt::File gametext;
+	std::string gametext_error;
+	bytes.clear();
+	const bool have_gametext = index_.read_file("gametext.bin", bytes) &&
+			rtxt::parse(bytes.data(), bytes.size(), gametext, gametext_error);
+	gamecfg::LoadOptions load;
+	load.texts = inmatch::game_cfg_default_texts(have_gametext ? &gametext : nullptr);
+	load.weapons = roster_;
+	load.player_index = cfg_.player_index;
+	load.hw3d_deviceno = cfg_.hw3d_deviceno;
+	const gamecfg::LoadResult loaded = gamecfg::load_file(gamecfg::kFileName, load);
+	cfg_ = loaded.cfg;
+	if (loaded.reset_exit) {
+		reset_exit_ = true;
+		error = "game.cfg sets mpreset: the process exits";
+		return false;
+	}
+	exit_save_owed_ = true;
+	return true;
+}
+
+// The dead /HOST path [orig: Game_HostMultiplayerSession @0x4A65A0]: the host
+// file over the cfg block (a file that does not open ends the attempt,
+// @0x4A65AA..0x4A65C0), the directory lock (@0x4A65C1..0x4A65F1), Serve Only
+// saved (@0x4A65F9..0x4A6604), then the session settings from the block
+// (CNapiGameSession_BuildAndCreateSession @0x4A6759, which fails with no
+// current rotation entry, @0x5695AD..0x5695B1). The session plays LAN whatever
+// networkconnecttype says until the NovaWorld listing lands (ADR 0051 PR6).
 bool Server::read_host_file(std::string &error) {
 	std::ifstream in(options_.host_file, std::ios::binary);
 	if (!in) {
@@ -164,24 +214,19 @@ bool Server::read_host_file(std::string &error) {
 		return false;
 	}
 	const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-	host_ = inmatch::HostScreenState{};
-	// The default game name: the gametext Menu/UNTITLED string
-	// [orig: Config_SetDefaults @0x54D0FF..0x54D11E].
-	std::vector<uint8_t> gametext_bytes;
-	rtxt::File gametext;
-	std::string gametext_error;
-	const bool have_gametext = index_.read_file("gametext.bin", gametext_bytes) &&
-			rtxt::parse(gametext_bytes.data(), gametext_bytes.size(), gametext, gametext_error);
-	host_.config.server_name = game_text(have_gametext ? &gametext : nullptr, "Menu", "UNTITLED",
-			"!Untitled").substr(0, 32);
-	report_ = inmatch::read_host_file(text.data(), text.size(), host_, rotation_, catalog_);
-	host_.serve_and_play = false;
+	report_ = inmatch::read_host_file(text.data(), text.size(), cfg_, rotation_, catalog_);
 	for (const std::string &key : report_.unknown_keys)
 		io::logf(io::LogLevel::kWarn, "opennova-serve: the host file key '%s' is not a host setting",
 				key.c_str());
 	for (const std::string &name : report_.unknown_missions)
 		io::logf(io::LogLevel::kWarn, "opennova-serve: Mission '%s' is not in the mission catalog",
 				name.c_str());
+	if (!gamecfg::write_active_server_marker(gamecfg::kActiveServerMarkerFileName))
+		io::logf(io::LogLevel::kWarn, "opennova-serve: %s did not open for writing",
+				gamecfg::kActiveServerMarkerFileName);
+	cfg_.dedicated = 1;
+	(void)save_config();
+	host_ = inmatch::host_session_settings(cfg_);
 	if (rotation_.current() == nullptr) {
 		error = "the host file names no mission the catalog lists";
 		return false;
@@ -212,13 +257,12 @@ bool Server::boot_mission(std::string &error) {
 	const size_t dot = basename.rfind('.');
 	if (dot != std::string::npos) basename.resize(dot);
 
-	// The session config: the host screen's, the published player cap with the
-	// dedicated slot, the session game type from the starting row
+	// The session config: the cfg block's (the published player cap with the
+	// dedicated slot among it), the session game type from the starting row
 	// [orig: Game_StartMission @0x5244DE..0x52452B sets g_GameType from the
 	//  rotation's current catalog entry +0x1128 on the authority, over the
 	//  file's GameType], the mission identity and the expansion check.
 	inmatch::GameConfig config = host_.config;
-	config.max_players = inmatch::host_player_slot_limit(host_.player_limit, host_.serve_and_play);
 	config.game_type = rotation_.map_game_type;
 	config.mission_file = rotation_.map_file;
 	config.mission_name = doc.get_mission_name();
@@ -271,14 +315,19 @@ bool Server::boot_mission(std::string &error) {
 	return true;
 }
 
-// The authority's bind scan over the retail LAN server range from its first
-// port, stepping by one and wrapping [orig: CNapiNetwork_OpenTransportSocket
-// @0x4C6A40, the authority arm @0x4C6AA2; NapiUdpSocket_CreateAndBind
-// @0x62D2A0; net_ports.h lan_host_bind_ports]. The embedder owns the socket
-// layer (net::startup), which is process-wide.
+// The authority's bind scan over the cfg's LAN server range from its first
+// port, stepping by its delta and wrapping; --lan-port replaces the first port
+// [orig: CNapiNetwork_OpenTransportSocket @0x4C6A40, the authority arm
+// @0x4C6AA2 over mplanserverportmin / max / delta (g_GameConfigState+0x244 /
+// +0x248 / +0x24C); NapiUdpSocket_CreateAndBind @0x62D2A0; net_ports.h
+// lan_host_bind_ports]. The embedder owns the socket layer (net::startup),
+// which is process-wide.
 bool Server::open_socket(std::string &error) {
-	const uint16_t first = options_.port != 0 ? options_.port : kRetailLanPortMin;
-	for (const uint16_t port : lan_host_bind_ports(first)) {
+	const uint32_t first = options_.port != 0 ? options_.port
+											  : static_cast<uint32_t>(cfg_.mp_lan_server_port_min);
+	for (const uint16_t port : lan_host_bind_ports(first,
+				 static_cast<uint32_t>(cfg_.mp_lan_server_port_max),
+				 static_cast<uint32_t>(cfg_.mp_lan_server_port_delta))) {
 		socket_ = net::udp_bind(port, &bound_port_);
 		if (socket_.is_valid()) break;
 	}
@@ -311,9 +360,26 @@ void Server::stop() {
 		session_.reset();
 	}
 	running_ = false;
+	// Game_Run's exit: game.cfg saved, the subsystems (the socket among them)
+	// shut down, then the lock deleted, unconditionally [orig: Game_Run
+	// @0x4A7FFF Game_SaveConfig, @0x4A8004 Game_ShutdownSubsystems,
+	// @0x4A8009..0x4A800E DeleteFileA("activesrvr.txt")].
+	const bool exit_tail = exit_save_owed_;
+	exit_save_owed_ = false;
+	if (exit_tail) (void)save_config();
 	if (role_) role_->set_socket(nullptr);
 	datagrams_.reset();
 	if (socket_.is_valid()) net::close_socket(socket_);
+	if (exit_tail) gamecfg::remove_active_server_marker(gamecfg::kActiveServerMarkerFileName);
+}
+
+bool Server::save_config() {
+	// [orig: Game_SaveConfig @0x54C490: fopen("game.cfg", "w"); a file that
+	//  does not open writes nothing, @0x54C4AF..0x54C4BB]
+	std::string error;
+	if (gamecfg::save_file(gamecfg::kFileName, cfg_, roster_, error)) return true;
+	io::logf(io::LogLevel::kWarn, "opennova-serve: %s", error.c_str());
+	return false;
 }
 
 } // namespace opennova::serve

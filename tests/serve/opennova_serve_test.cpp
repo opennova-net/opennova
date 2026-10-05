@@ -4,8 +4,11 @@
 // mission headless as a DedicatedHost, answers a LAN browser's 0x41 probe
 // with its 0x81 ServerHello, and admits a LAN joiner (a ClientRuntime on a
 // second real socket) through the handshake into the match. Then the server's
-// stop reaches the joiner.
+// stop reaches the joiner. The run happens in a temp working directory, where
+// the server writes its game.cfg and activesrvr.txt (ADR 0051 d2; the files
+// themselves are opennova_serve_game_cfg's).
 #include "server.h"
+#include "serve_test_support.h"
 
 #include <base/gameprofile/game_type.h>
 #include <formats/mission/bms.h>
@@ -14,9 +17,6 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/napi_np_connection.h>
 
-#include "common/synthetic_mission.h"
-
-#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -26,6 +26,9 @@
 
 using namespace opennova;
 namespace fs = std::filesystem;
+using serve_test::deathmatch_mission;
+using serve_test::free_udp_port;
+using serve_test::write_bytes;
 
 namespace {
 
@@ -38,50 +41,13 @@ int failures = 0;
 		}                                                                            \
 	} while (0)
 
-bool write_bytes(const fs::path &path, const std::vector<uint8_t> &bytes) {
-	std::ofstream out(path, std::ios::binary);
-	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-	return static_cast<bool>(out);
-}
-
-// A deathmatch mission: the two placed entities every kernel test boots, and
-// the solo start marker (6002) a deathmatch player spawns at.
-std::vector<uint8_t> deathmatch_mission() {
-	bms::File m = test_mission::two_entity_mission();
-	m.header.magic[0] = 'B';
-	m.header.magic[1] = 'M';
-	m.header.magic[2] = 'S';
-	m.header.magic[3] = static_cast<char>(bms::kMinVersion);
-	std::snprintf(m.header.mission_name, sizeof(m.header.mission_name), "Serve Test Map");
-	m.header.attrib_flags = bms::AttribFlags::Deathmatch;
-	bms::Entity marker{};
-	marker.type = bms::ItemType::Marker;
-	marker.type_id = 6002;
-	marker.x = 40 << 16;
-	marker.y = 40 << 16;
-	marker.id = 41;
-	m.items.push_back(marker);
-	mission::sync_counts(m);
-	std::vector<uint8_t> bytes;
-	std::string error;
-	if (!bms::write(m, bytes, error)) std::printf("bms::write: %s\n", error.c_str());
-	return bytes;
-}
-
-uint16_t free_udp_port() {
-	uint16_t port = 0;
-	net::ScopedSocket probe(net::udp_bind(0, &port));
-	return probe.is_valid() ? port : 0;
-}
-
 } // namespace
 
 int main() {
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
-	const fs::path dir = fs::temp_directory_path() /
-			("opennova_serve_test_" + std::to_string(
-					std::chrono::steady_clock::now().time_since_epoch().count()));
-	fs::create_directories(dir);
+	const fs::path dir = serve_test::fresh_dir("lan_join");
+	const fs::path work = serve_test::fresh_dir("lan_join_cwd");
+	serve_test::ScopedCwd cwd(work);
 	CHECK(write_bytes(dir / "SERVETST.BMS", deathmatch_mission()));
 	// A loose score.ini with a deathmatch row that is not the default table:
 	// it must reach world.match, which the bring-up configures.
@@ -276,8 +242,10 @@ int main() {
 	CHECK(client.has_disconnect_event() &&
 			client.last_disconnect_event().ddstr == "NP.C:SH:STOP");
 	net::shutdown();
+	cwd.restore();
 	std::error_code ec;
 	fs::remove_all(dir, ec);
+	fs::remove_all(work, ec);
 	if (failures != 0) {
 		std::printf("opennova_serve: %d failure(s)\n", failures);
 		return 1;
