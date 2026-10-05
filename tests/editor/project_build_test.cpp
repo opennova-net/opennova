@@ -849,6 +849,33 @@ static int test_base_gate() {
 	Diagnostic wrong = make_finding(CoreFinding::RequirementWrongKind, DiagnosticSeverity::Error, "wrong kind");
 	wrong.subject = RequirementSubject{ "gametext", "gametext.bin" };
 	TEST_EXPECT(blocks_build(wrong) && blocks_build(wrong, &base));
+	// The demo round's bug 6: the words follow the gate's rule. A required file the base serves says the game
+	// reads the base's, never what the game does without it; one the base lacks says that as before.
+	const RequirementReport over_base = evaluate_requirements(p.doc, scan, nullptr, &required);
+	const RequirementReport over_thin = evaluate_requirements(p.doc, scan, nullptr, &nothing);
+	size_t served = 0, lacking = 0;
+	for (const Diagnostic &d : over_base.diagnostics)
+		if (d.code() == "requirement.missing") {
+			++served;
+			TEST_EXPECT(d.message.find("The game reads the base game's, which the expansion builds on.") != std::string::npos &&
+			            d.message.find("exits") == std::string::npos);
+		}
+	for (const Diagnostic &d : over_thin.diagnostics)
+		if (d.code() == "requirement.missing") lacking += d.message.find("base game's") == std::string::npos ? 1 : 0;
+	TEST_EXPECT(served > 0 && lacking == served);
+	// A mission's terrain the base serves: the graph's words over the base's names.
+	AssetGraph graph;
+	GraphEdge edge;
+	edge.source = "missions/test.bms";
+	edge.kind = ReferenceKind::Terrain;
+	edge.value = edge.target = "hills";
+	edge.field = "terrain";
+	const Diagnostic alone = graph.missing_finding(edge);
+	TEST_EXPECT(alone.message.find("the game refuses to start the mission") != std::string::npos);
+	graph.set_base_names(hills);
+	const Diagnostic over = graph.missing_finding(edge);
+	TEST_EXPECT(over.message.find("the game reads the base game's hills.trn, which the expansion builds on.") != std::string::npos &&
+	            over.message.find("refuses") == std::string::npos && !blocks_build(over, &with_hills));
 	return 0;
 }
 
