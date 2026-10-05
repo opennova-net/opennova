@@ -22,7 +22,7 @@
       "parts": ["project"]
     },
     "b": {
-      "about": "The imported project: Files, the mission editor, definitions, menus, models and animation, textures, build and Play, the file card (last: the card has no close request)",
+      "about": "The imported project: Files, the mission editor, definitions, menus, models and animation, textures, build and Play, the file card",
       "port": 8995,
       "parts": ["files", "mission", "defs", "menus", "models", "textures", "build", "card"]
     }
@@ -31,8 +31,8 @@
     {
       "id": "welcome", "take": "a", "part": "project",
       "caption": "Welcome page: recent projects, and the game install checked",
-      "shows": "Welcome page: recents (River Run on jox01, Desert Patrol), the New project form's install field checked green (9,300 files, jox01)",
-      "mcp": "(launch, no project)",
+      "shows": "Welcome page: recents (River Run on jox01, Desert Patrol), the New project form's install field checked green (9,300 files, jox01), the form filled: Operation Nightfall, an expansion on jox01",
+      "mcp": "(launch, no project); set_workspace {new_project: {open, title, dir, game_install, builds_on, as_expansion, expansion}}",
       "cut": [{"from": "welcome", "to": "new_project+6", "hold": 0.6}]
     },
     {
@@ -75,7 +75,7 @@
       "id": "card", "take": "b", "part": "card",
       "caption": "A file card: what it is, where the build puts it, and its sound playing",
       "shows": "The card of sounds/cmpv503.wav: Wave, packed into expansion/nightfall/nightfall.pff, named by nightfallL.lwf, mono 22,050 Hz 1.2 s; the wave plays (audio in the MP4)",
-      "mcp": "about_file, play_sound",
+      "mcp": "about_file, play_sound, then set_workspace {card: {path: (empty)}}",
       "cut": [{"from": "card", "to": "card_end"}]
     },
     {
@@ -97,7 +97,7 @@
       "id": "pick", "take": "b", "part": "mission",
       "caption": "Pick a vehicle: named, not numbered",
       "shows": "Drivable Transport Truck #108 picked: its label, the outline row, the Inspector by name",
-      "mcp": "viewport hit, select_record",
+      "mcp": "viewport command {name: click, at}: the canvas's own click",
       "cut": [{"from": "pick", "to": "drag", "hold": 0.5}]
     },
     {
@@ -118,7 +118,7 @@
       "id": "script", "take": "b", "part": "mission",
       "caption": "Scripts: type a line, notes in plain words",
       "shows": "CP10.wac: three lines typed; the missing wave said in words after the line",
-      "mcp": "open_document, edit_record text.span x20 (coalesced)",
+      "mcp": "open_document, edit_record text.span x20 (coalesced), viewport options {assist: {op: hover}}",
       "cut": [{"from": "script", "to": "blocks", "hold": 0.8}]
     },
     {
@@ -216,14 +216,14 @@
       "id": "built", "take": "b", "part": "build",
       "caption": "Built: the archives written, the warnings listed in Problems",
       "shows": "The Build result: nightfall.pff and nightfallL.pff written; Problems' Build warnings",
-      "mcp": "(the build's result)",
+      "mcp": "(the build's result), then set_workspace {build_result: {open: false}}",
       "cut": [{"from": "built", "to": "built+100", "hold": 0.4}]
     },
     {
       "id": "play", "take": "b", "part": "build",
       "caption": "Play: the game starts in the built mission",
       "shows": "The game in CP10's briefing (the game's own game_screenshot)",
-      "mcp": "play {mission: CP10.bms}, game MCP",
+      "mcp": "play {mission: CP10.bms, behind: true}, game MCP",
       "cut": [{"still": "game.png", "seconds": 3.0}]
     }
   ],

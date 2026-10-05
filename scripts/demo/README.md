@@ -18,17 +18,19 @@ captioned MP4 (about 94 s, 1600x900, 30 fps, the file card's wave as its audio) 
 
 Two takes, each one editor launch:
 
-- **Take A** (part `project`): the welcome page with its recents and the game install checked, a new
-  project ("Operation Nightfall", an expansion building on jox01), the import chooser, one
-  mission's plan (CP10, grouped, Needed by in words) and its import.
+- **Take A** (part `project`): the welcome page with its recents and the game install checked, its
+  New project form filled (the workspace's `new_project`), the new project ("Operation Nightfall", an
+  expansion building on jox01), the import chooser, one mission's plan (CP10, grouped, Needed by in
+  words) and its import.
 - **Take B** (on the project take A made), parts in recording order: `files` (Files by kind),
-  `mission` (CP10 in 3D: daylight, a glide into the village, a truck picked and dragged, an event
-  and the script edited, Problems naming what blocks a build), `defs` (an item in words, weapons by
+  `mission` (CP10 in 3D: daylight, a glide into the village, a truck picked by the canvas's own click
+  and dragged, an event and the script edited with a command's words shown as a hover shows them,
+  Problems naming what blocks a build), `defs` (an item in words, weapons by
   game text, Duplicate and save), `menus` (a menu on the canvas, a label typed live), `models` (the
   Blackhawk, its materials and collision layers, a soldier's run clip), `textures` (a thumbnail, a
-  texture as the game reads it and as drawn), `build` (save all, build, then Play: the game's own
-  screenshot), `card` (a wave's file card, the wave playing). The card is last because the editor
-  has no request that closes it.
+  texture as the game reads it and as drawn), `build` (save all, build, its result panel closed, then
+  Play behind: the game's own screenshot), `card` (a wave's file card, the wave playing, the card
+  closed).
 
 `storyboard.json` is the storyboard: each scene's caption, what it shows, the requests that drive
 it, and the marks its frames are cut between. The recorders lay down the marks; the cutter reads
@@ -98,9 +100,9 @@ python scripts/demo/record_demo.py clean    --work <work>
 - **No cursor, no focus, no desktop capture.** The editor starts behind every other window
   (`game_mcp.BehindLaunch`: the foreground lock taken for the start, the first window shown without
   activation, each window sent to the bottom of the z-order) and is driven through its MCP alone:
-  nothing moves the mouse, sends OS input or brings a window to the front. Play's game window is
-  tended the same way from the moment the editor's `run` section names its pid until its world has
-  loaded (Godot raises a window it restyles, which a load may do). The frames are
+  nothing moves the mouse, sends OS input or brings a window to the front. Play starts the game behind
+  (`play {behind}`: the editor shows its window without activation and sends it to the bottom while it
+  starts, keeping the foreground). The frames are
   Godot Movie Maker's (`--write-movie <take>/frame.png --fixed-fps 30`), never a screen grab; the
   Play scene's picture is the game's own `game_screenshot`. Never minimize the window to hide it:
   a minimized window draws nothing, and restoring it takes the foreground.
@@ -136,11 +138,10 @@ python scripts/demo/record_demo.py clean    --work <work>
   `seconds` long when given; resolved against the spans the cut wrote to `cut/scenes.json`.
 - A new part needs a function in `takes.py` (`PARTS`) that lays down the marks its scenes name.
 
-## What the MCP cannot show yet
+## The editor's own forms it drives
 
-The takes work around these: the file card has no close request (so the card is recorded last);
-the Build result window has none either (the card is drawn over it); the welcome page's New project
-form cannot be filled over the wire (the take shows the page, then raises `new_project`); the
-script view's completion list and hover cannot be opened (the take types lines and shows the
-inline notes instead); and `play` has no way to start the game behind (the client tends its windows
-as above).
+Every gesture a take shows is the editor's own over its MCP (the editor MCP's gaps lane): the New
+project form filled and the build result's panel and the file card closed through `set_workspace`
+(`new_project`, `build_result`, `card`), the card opened by `about_file`, a mark picked by the
+viewport's `click` command (the canvas's own click), a script command's words shown by the script
+viewport's `assist` option, and Play started behind by `play {behind}`.

@@ -1,7 +1,7 @@
 """The recorded takes (scripts/demo/README.md). Take A: the welcome page, a new project on jox01 and
 one mission's closure imported. Take B, on the imported project: Files, the mission editor,
-definitions, menus, models and animation, textures, build and Play, and the file card (last: the card
-has no close request over the MCP, so nothing can follow it on screen).
+definitions, menus, models and animation, textures, build and Play, and the file card (closed at its end
+through the workspace, as its X closes it).
 
 Each part is a function; storyboard.json names a take's parts in the order it records them, and its
 scenes are cut from the marks these functions lay down. What a part asks the editor for (the mission,
@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from demo_lib import Editor, Storyboard, Take, Workspace
-from game_mcp import BehindLaunch, GameMcp, GameMcpError  # scripts/mcp, on the path demo_lib sets
+from game_mcp import GameMcp, GameMcpError  # scripts/mcp, on the path demo_lib sets
 
 MISSION_NAME = "CP10.bms"
 MISSION = "missions/CP10.bms"
@@ -103,14 +103,22 @@ def glide(ed: Editor, path: str, start: dict, end: dict, steps: int) -> None:
 
 # --- take A ----------------------------------------------------------------------------------------
 def part_project(t: Take) -> None:
-    """The welcome page, the new project, the chooser, one mission's plan and its import."""
+    """The welcome page, its New project form filled (the workspace's new_project), the new project, the
+    chooser, one mission's plan and its import."""
     ed, project = t.ed, t.sb.project
     t.mark("start", shot=False)
     t.hold(0.5)
     t.mark("welcome")
-    t.hold(3.5)
-    t.mark("new_project", shot=False)
+    t.hold(2.0)
     extra = {key: project[key] for key in ("expansion", "builds_on") if key in project}
+    form = {"open": True, "title": project["title"], "dir": t.project_dir.as_posix(), "game_install": t.install,
+            **extra}
+    if "expansion" in project:
+        form["as_expansion"] = True
+    ed.req("set_workspace", workspace={"new_project": form})
+    t.mark("form")
+    t.hold(2.5)
+    t.mark("new_project", shot=False)
     ed.req("new_project", wait=True, dir=t.project_dir.as_posix(), title=project["title"], game_install=t.install,
            **extra)
     t.mark("opened")
@@ -168,9 +176,12 @@ def part_mission(t: Take) -> None:
     truck = first((i for i in items_of(ed, MISSION) if i["kind"] == "item" and i["name"].endswith(TRUCK_SUFFIX)),
                   f"the item {TRUCK_SUFFIX} in {MISSION}")
     sx, sy = truck["screen"]
-    hit = ed.vp("hit", path=MISSION, x=sx, y=sy - 12)
-    t.mark("pick", shot=False, hit=hit.get("name"))
-    select(ed, MISSION, truck["id"])
+    # The canvas's own click at the truck's mark (the viewport's click command), as a person's click picks.
+    t.mark("pick", shot=False)
+    ed.vp("command", path=MISSION, command={"name": "click", "at": [sx, sy - 12]})
+    primary = (ed.state("selection")["selection"].get("primary") or {}).get("row")
+    if primary != address(ed, MISSION, truck["id"])["row"]:
+        select(ed, MISSION, truck["id"])  # the click landed on another mark: the truck chosen by its record
     t.hold(1.8)
     t.mark("picked")
     t.mark("drag", shot=False)
@@ -212,8 +223,12 @@ def part_mission(t: Take) -> None:
         at_line += 1
     ed.req("end_edit", path=script)
     ed.wait_idle()
-    t.hold(2.4)
+    t.hold(1.2)
+    # The words of the command typed, shown at its place as a hover shows them (the script viewport's assist).
+    ed.vp("options", path=script, options={"assist": {"op": "hover", "line": at_line - 2, "column": 3}}, check=False)
+    t.hold(1.8)
     t.mark("script_typed")
+    ed.vp("options", path=script, options={"assist": {"op": "none"}}, check=False)
     t.mark("blocks", shot=False)
     ed.req("open_document", path=MISSION)
     ed.req("edit_record", path=MISSION, edits=[{"op": "set", "id": rows[0]["id"], "field": "terrain",
@@ -344,52 +359,38 @@ def part_build(t: Take) -> None:
     build = operation.get("build", {})
     t.hold(2.4)
     t.mark("built", ok=build.get("ok"), dir=build.get("dir"), status=ed.state("status")["status"]["status"])
+    # The build result's panel closed (the workspace's build_result), the editor as it was under it.
+    ed.req("set_workspace", check=False, workspace={"build_result": {"open": False}})
+    t.hold(0.5)
     play(t)
 
 
 def play(t: Take) -> None:
-    """Play: the editor starts the game itself, so this client takes the foreground lock before
-    raising `play` and tends the game's windows behind the others from the moment the `run` section
-    names its pid until its world has loaded (game_mcp.BehindLaunch: Godot raises a window it
-    restyles, which a load may do), then settles and lets the lock go. The shot is the game's own
-    `game_screenshot`."""
+    """Play behind (`play {behind}`): the editor starts the game's window behind every other and keeps the
+    foreground, so nothing of the person's work moves; this client waits for the `run` section to name
+    its endpoint and for its world to load. The shot is the game's own `game_screenshot`."""
     ed = t.ed
-    behind = BehindLaunch(False)
     run: dict = {}
-    pid = 0
     shell: dict = {}
-    try:
-        behind.prepare()
-        ed.req("play", mission=MISSION_NAME)
-        deadline = time.monotonic() + 180
-        while time.monotonic() < deadline:
-            run = ed.state("run")["run"]
-            pid = run.get("pid") or 0
-            if pid > 0:
-                behind.tend(pid)
-            if pid and run.get("state") == "running" and run.get("mcp_port"):
-                break
-            time.sleep(0.05)
-        else:
-            raise RuntimeError(f"the game did not start: {json.dumps(run)[:500]}")
-        game = GameMcp.for_port(run["mcp_port"], timeout=60)
-        # Tended through the world's load, the game's state asked every half second.
-        waited = time.monotonic()
-        asked = 0.0
-        while time.monotonic() - waited < 180:
-            behind.tend(pid)
-            if time.monotonic() - asked >= 0.5:
-                asked = time.monotonic()
-                try:
-                    shell = game.structured("game_state", {}, timeout=10).get("shell") or {}
-                except GameMcpError:
-                    shell = {}
-                if shell.get("world_loaded"):
-                    break
-            time.sleep(0.05)
-        behind.settle(pid)
-    finally:
-        behind.release()
+    ed.req("play", mission=MISSION_NAME, behind=True)
+    deadline = time.monotonic() + 180
+    while time.monotonic() < deadline:
+        run = ed.state("run")["run"]
+        if run.get("pid") and run.get("state") == "running" and run.get("mcp_port"):
+            break
+        time.sleep(0.1)
+    else:
+        raise RuntimeError(f"the game did not start: {json.dumps(run)[:500]}")
+    game = GameMcp.for_port(run["mcp_port"], timeout=60)
+    waited = time.monotonic()
+    while time.monotonic() - waited < 180:
+        try:
+            shell = game.structured("game_state", {}, timeout=10).get("shell") or {}
+        except GameMcpError:
+            shell = {}
+        if shell.get("world_loaded"):
+            break
+        time.sleep(0.5)
     t.mark("playing", mission=shell.get("mission_file"), loaded=bool(shell.get("world_loaded")))
     t.hold(1.5)
     shot = game.call("game_screenshot", {"format": "png", "max_dim": t.sb.size[0]})
@@ -418,6 +419,8 @@ def part_card(t: Take) -> None:
     ed.req("play_sound", check=False, path=CARD_FILE)
     t.hold(3.0)
     t.mark("card_end")
+    # The card closed (the workspace's card, "" closing it), which stops its sound.
+    ed.req("set_workspace", check=False, workspace={"card": {"path": ""}})
 
 
 PARTS = {
