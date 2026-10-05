@@ -85,6 +85,13 @@ public:
 	// 0), "" for none.
 	String get_mark_note(int p_line) const;
 	String get_word_tip(int p_line, int p_column) const;
+	// A word's words shown at a place (the viewport's assist hover, the MCP gaps lane: what the pointer over
+	// the word shows, asked over the wire), in a box under the word drawn over the text, until the next ask
+	// ("" none). Line and column from 0. The GUT tests read what it shows.
+	void set_hover_note(const String &p_text, int p_line = 0, int p_column = 0);
+	String get_hover_note() const { return hover_note_; }
+	// Whether the completion list shows (CodeEdit's), for the GUT tests.
+	bool is_completion_shown() const { return get_code_completion_options().size() > 0; }
 
 protected:
 	static void _bind_methods();
@@ -100,6 +107,10 @@ private:
 	void on_symbol_lookup_(const String &p_symbol, int64_t p_line, int64_t p_column);
 	// Each marked line's note after its text, in its severity's colour, where the line shows.
 	void draw_notes_();
+	// The hover note's box under its word, where the word shows.
+	void draw_hover_note_();
+	String hover_note_;
+	int hover_line_ = 0, hover_column_ = 0;
 	const opennova::editor::ScriptMark *mark_at_(int p_line) const;
 	Assist assist_;
 

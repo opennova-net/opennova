@@ -87,7 +87,7 @@ func test_the_largest_mission_builds() -> void:
 	assert_true(_served({"kind": "preview_install_import", "names": [MISSION], "with_dependencies": true}))
 	var plan: Dictionary = _seam.query("import_preview", {"limit": 1})
 	assert_gt(int(plan.get("count", 0)), 0, "the closure planned: %s" % str(plan).left(400))
-	assert_true(_served({"kind": "import_files", "planned": true}))
+	assert_true(_served({"kind": "import_files", "planned": true, "plan": int(plan.get("plan", 0))}))
 	gut.p("%s's closure: %d files, %.1f MB, imported in %.1f s" % [MISSION, int(plan.get("count", 0)),
 			float(plan.get("total_bytes", 0)) / 1e6, float(Time.get_ticks_msec() - started) / 1000.0])
 
