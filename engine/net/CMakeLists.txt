@@ -25,8 +25,10 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/nwu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/pubcrypto.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/epask.cpp
-    # admin — the retail remote-admin TCP protocol (CAdminServer): framing, login, replies
+    # admin — the retail remote-admin TCP protocol (CAdminServer): framing, login, replies;
+    # the client codec and the server's connection machine
     ${CMAKE_CURRENT_SOURCE_DIR}/admin/admin_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/admin/admin_server.cpp
     # napi — the NAPI envelope/TLV/session primitives
     ${CMAKE_CURRENT_SOURCE_DIR}/napi/envelope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/napi/literal.cpp

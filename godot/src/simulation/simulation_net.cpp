@@ -447,8 +447,8 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	config.max_players = net_.host_max_players;
 	net_.host_session_config = std::move(config);
 	if (kernel_ && is_host_listening()) {
-		kernel_->world.rules.fat_bullets = net_.host_session_config.fat_bullets;
-		kernel_->world.rules.one_shot_kill = net_.host_session_config.one_shot_kill;
+		kernel_->world.rules.fat_bullets = net_.host_session_config.fat_bullets != 0;
+		kernel_->world.rules.one_shot_kill = net_.host_session_config.one_shot_kill != 0;
 		kernel_->world.rules.vehicle_respawns = net_.host_session_config.unlimited_vehicles;
 	}
 	// A LAN host role follows the server type it was just given.

@@ -12,6 +12,7 @@
 
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_ban_lists.h>  // banlist.txt / banned.txt (the join refusals)
 #include <runtime/inmatch/server_designations.h> // the designation table (S2C 0x6B)
 #include <runtime/replication/net_quality.h>   // the CNetQuality window (the host send half)
 #include <runtime/world/entity.h>              // world::EntityHandle (the deployable spawner seam)
@@ -143,11 +144,12 @@ struct NapiNPServerCtx {
 	// rules + session_config. Seeded by create_session (see server_session.h).
 	// Live admission controls. The IP ban compares the connection's UDP source
 	// address (conn+0x30, the datagram source stored @0x62bf28), never the
-	// client-reported SIP; entries use PeerAddr::ip's LE octet packing (the
-	// same as BanList_ParseIPEntry @0x4fd5c9).
+	// client-reported SIP, against banned.txt's entries, which use PeerAddr::ip's
+	// LE octet packing (the same as BanList_ParseIPEntry @0x4fd5c9); banlist.txt's
+	// PCIDs and banned.txt's names refuse at the game-layer join (codes 29 / 31).
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, the compare @0x4c6210]
 	bool join_locked = false;
-	std::vector<uint32_t> banned_join_addresses;
+	ServerBanLists bans;
 	GameConfig config;             // [orig g_NapiNPCtx.game_settings @+0xE68 + the scattered g_* rule globals]
 	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)
 

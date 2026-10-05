@@ -1125,6 +1125,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						reject_dpc = validate_spectator_join(config, conn, roster);
 					if (reject_dpc == 0)
 						reject_dpc = validate_side_password(config, conn);
+					if (reject_dpc == 0 && inputs.server_ctx != nullptr)
+						reject_dpc = Server_ValidateJoinBans(*inputs.server_ctx, conn); // 29 / 31
 					if (reject_dpc != 0) {
 						(void)stage_join_gate_reject(conn, reject_dpc);
 						conn.admission_stage = GameAdmissionStage::Rejected;

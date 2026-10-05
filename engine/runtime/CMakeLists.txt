@@ -379,6 +379,8 @@ add_library(opennova_runtime STATIC
     # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
     # d4): the fixed-tick session, the listen-host frame, the IDA-faithful
     # server/client state machines and frame loops, the transports
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/admin_console.cpp          # the remote-admin console's verbs (ADR 0051 PR5)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/admin_console_player.cpp   # its slot walks: PLAYER, PETERRABBIT, QUERY
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/character_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_challenge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_card.cpp
@@ -418,6 +420,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_overlays.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_ban_lists.cpp       # banlist.txt / banned.txt on the authority
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_idle_timers.cpp          # the every-32 player breath samples (split off server_tick.cpp)

@@ -100,15 +100,15 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.max_players = host_player_slot_limit(host.player_limit, host.serve_and_play);
 	config.num_teams = static_cast<uint8_t>(cfg.mp_numteams); // g_NumTeamsConfig @0x551BAC
 	config.mp_attributes = static_cast<uint32_t>(cfg.mpattrib); // game_settings @0x56967F
-	config.fat_bullets = cfg.fatbullets != 0;         // g_FatBullets @0x551C01
-	config.one_shot_kill = cfg.oneshotonekill != 0;   // g_OneShotKill @0x551BF5
+	config.fat_bullets = cfg.fatbullets;              // g_FatBullets @0x551C01
+	config.one_shot_kill = cfg.oneshotonekill;        // g_OneShotKill @0x551BF5
 	config.unlimited_vehicles = cfg.unlimited_vehicles != 0; // dword_24D2258 @0x551D91
-	config.voting_enabled = cfg.mpvoting != 0;        // g_VoteKickEnabled @0x551DC3
+	config.voting_enabled = cfg.mpvoting;             // g_VoteKickEnabled @0x551DC3
 	config.voting_min_players = cfg.mpvoting_min_players; // @0x551DCF
 	config.voting_percent = cfg.mpvoting_percent;     // g_VoteKickPercent @0x551D43
 	config.change_team_interval_seconds = cfg.mpchangeteam_interval; // dword_24D2280 @0x551DEB
 	config.change_team_penalty_seconds = cfg.mpchangeteam_penalty;   // dword_24D2284 @0x551DF1
-	config.auto_balance_enabled = cfg.autobalance_on_recycle_enabled != 0; // @0x551BCE
+	config.auto_balance_enabled = cfg.autobalance_on_recycle_enabled; // @0x551BCE
 	config.auto_balance_min_difference = cfg.autobalance_on_recycle_diff_min; // @0x551BDA
 	config.auto_balance_trigger_difference = cfg.autobalance_on_recycle_diff_max; // @0x551BEB
 
@@ -136,9 +136,9 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.balance_join_percent = cfg.balance_join_percent;
 	// [orig: g_MinPing / g_DoMinPingCheck / g_MaxPing / g_DoMaxPingCheck
 	//  @0x551C3E..0x551C5D]
-	config.do_min_ping_check = cfg.dominpingcheck != 0;
+	config.do_min_ping_check = cfg.dominpingcheck;
 	config.min_ping = static_cast<uint32_t>(cfg.minping);
-	config.do_max_ping_check = cfg.domaxpingcheck != 0;
+	config.do_max_ping_check = cfg.domaxpingcheck;
 	config.max_ping = static_cast<uint32_t>(cfg.maxping);
 	config.multiplayer_reset = cfg.mp_reset;
 	// [orig: net_config.max_packet_bytes = maxPacketSize_338 @0x569840;
