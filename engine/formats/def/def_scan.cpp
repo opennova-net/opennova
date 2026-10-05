@@ -2,8 +2,9 @@
 
 #include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_ITEM_ATTRIB_* (the tables initialize from them)
 
-// Split out of def.cpp (quality campaign W3-3). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
+#include <base/io/strutil.h>
+
+// Split out of def.cpp (quality campaign W3-3).
 //
 // The shared .def text scanner. Its lookup tables (flags, item attributes, death
 // pieces) stay private here; only what a family parser calls is declared.
@@ -43,58 +44,10 @@ void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len) {
     dst[src_len] = '\0';
 }
 
-/* Trim leading+trailing whitespace, return pointer and length (no alloc) */
-const char *trim_span(const char *s, size_t len, size_t *out_len) {
-    while (len > 0 && isspace((unsigned char)*s)) { ++s; --len; }
-    while (len > 0 && isspace((unsigned char)s[len - 1])) --len;
-    *out_len = len;
-    return s;
-}
-
 void to_lower_buf(char *dst, const char *src, size_t len) {
     for (size_t i = 0; i < len; ++i)
         dst[i] = (char)tolower((unsigned char)src[i]);
     dst[len] = '\0';
-}
-
-/* Extract quoted string from line: first "..." pair */
-size_t extract_quoted(const char *line, size_t line_len, char *dst, size_t dst_size) {
-    const char *q0 = (const char *)memchr(line, '"', line_len);
-    if (!q0) { dst[0] = '\0'; return 0; }
-    size_t rem = line_len - (size_t)(q0 - line) - 1;
-    const char *q1 = (const char *)memchr(q0 + 1, '"', rem);
-    if (!q1 || q1 <= q0 + 1) { dst[0] = '\0'; return 0; }
-    size_t slen = (size_t)(q1 - q0 - 1);
-    safe_copy(dst, dst_size, q0 + 1, slen);
-    return slen;
-}
-
-/* consume_value: skip key_len chars, trim, strip quotes, strip // comment */
-const char *consume_value_span(const char *line, size_t line_len, size_t key_len, size_t *out_len) {
-    if (key_len >= line_len) { *out_len = 0; return line; }
-    size_t vlen;
-    const char *v = trim_span(line + key_len, line_len - key_len, &vlen);
-    /* Strip surrounding quotes */
-    if (vlen >= 2 && v[0] == '"' && v[vlen - 1] == '"') {
-        ++v; vlen -= 2;
-    }
-    /* Strip trailing comment */
-    for (size_t i = 0; i + 1 < vlen; ++i) {
-        if (v[i] == '/' && v[i + 1] == '/') {
-            vlen = i;
-            /* re-trim */
-            while (vlen > 0 && isspace((unsigned char)v[vlen - 1])) --vlen;
-            break;
-        }
-    }
-    *out_len = vlen;
-    return v;
-}
-
-void consume_value_str(const char *line, size_t line_len, size_t key_len, char *dst, size_t dst_size) {
-    size_t vlen;
-    const char *v = consume_value_span(line, line_len, key_len, &vlen);
-    safe_copy(dst, dst_size, v, vlen);
 }
 
 int parse_int_n(const char *s, size_t len) {
@@ -121,23 +74,6 @@ float parse_float_n(const char *s, size_t len) {
     return (float)strtod(buf, NULL);
 }
 
-/* Tokenize by whitespace, returns count. Stores start+len pairs. Max tokens. */
-
-int tokenize(const char *s, size_t len, Token *tokens, int max_tok) {
-    int n = 0;
-    size_t i = 0;
-    while (i < len && n < max_tok) {
-        while (i < len && isspace((unsigned char)s[i])) ++i;
-        if (i >= len) break;
-        size_t start = i;
-        while (i < len && !isspace((unsigned char)s[i])) ++i;
-        tokens[n].s = s + start;
-        tokens[n].len = i - start;
-        ++n;
-    }
-    return n;
-}
-
 /* The engine debris-type table row names, in table order — index = the byte
    items.def 'husk_sub_part_types' stores per husk sub-part. Mirrors the 13 named
    rows of the 80-B static table; the full row data (velocities/effects/sounds)
@@ -161,36 +97,24 @@ int death_piece_type_index(const char *name, size_t len) {
     return 0; /* unknown -> HULL, the engine's zero-init read */
 }
 
-/* Split on commas and/or whitespace */
-int split_values(const char *s, size_t len, Token *tokens, int max_tok) {
+bool key_is(const char *key, const char *name) {
+    return strutil::iequals(key, name);
+}
+
+int value_tokens(const io::ConfigTokens &tokens, Token *out, int max_tok) {
     int n = 0;
-    size_t i = 0;
-    while (i < len && n < max_tok) {
-        while (i < len && (s[i] == ',' || isspace((unsigned char)s[i]))) ++i;
-        if (i >= len) break;
-        size_t start = i;
-        while (i < len && s[i] != ',' && !isspace((unsigned char)s[i])) ++i;
-        tokens[n].s = s + start;
-        tokens[n].len = i - start;
+    for (int i = 1; i < tokens.count && n < max_tok; ++i) {
+        out[n].s = tokens.tokens[i];
+        out[n].len = strlen(tokens.tokens[i]);
         ++n;
     }
     return n;
 }
 
-/* starts_with for known-length prefix against lowercase buffer */
-int lower_starts_with(const char *lower, size_t lower_len, const char *prefix, size_t prefix_len) {
-    if (lower_len < prefix_len) return 0;
-    return memcmp(lower, prefix, prefix_len) == 0;
+void copy_token(char *dst, size_t dst_size, const io::ConfigTokens &tokens, int index) {
+    const char *token = tokens.token(index);
+    safe_copy(dst, dst_size, token, strlen(token));
 }
-
-/* Check prefix + next char is whitespace or end */
-int lower_match_key(const char *lower, size_t lower_len, const char *prefix, size_t prefix_len) {
-    if (!lower_starts_with(lower, lower_len, prefix, prefix_len)) return 0;
-    if (lower_len == prefix_len) return 1;
-    return isspace((unsigned char)lower[prefix_len]);
-}
-
-
 
 int next_line(LineIter *it, const char **out, size_t *out_len) {
     if (it->pos >= it->buf_len) return 0;
@@ -406,15 +330,6 @@ static int parse_alignment(const char *s, size_t len) {
     if (len == 5 && memcmp(s, "right", 5) == 0) return 1;
     if (len == 6 && memcmp(s, "center", 6) == 0) return 2;
     return 0;
-}
-
-/* Parse N ints from value string */
-int parse_ints(const char *s, size_t len, int *out, int max_n) {
-    Token tok[MAX_TOKENS];
-    int n = split_values(s, len, tok, max_n < MAX_TOKENS ? max_n : MAX_TOKENS);
-    for (int i = 0; i < n && i < max_n; ++i)
-        out[i] = parse_int_n(tok[i].s, tok[i].len);
-    return n;
 }
 
 /* Parse HudColor from RGB values */

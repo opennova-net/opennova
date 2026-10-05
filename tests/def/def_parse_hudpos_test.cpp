@@ -94,9 +94,43 @@ static int synthetic_legs(void) {
     return failures;
 }
 
+/* Every line as the retail tokenizer cuts it: the key is the whole first
+   token (`KEY,value` binds), a quoted value is one token without its quotes,
+   and a HUD key inside a VEHICLE_HUD block is the HUD's as anywhere else (the
+   block keys are matched ahead of the HUD chain, never instead of it)
+   [orig: File_ParseASCIIFile @0x53D810 -> Terrain_TokenizeConfigLine
+   @0x53CB60; HUD_ParseHudposToken @0x59F370 (VEHICLE_HUD @0x59F380, the
+   block keys @0x59F5CE..0x59F74E, the HUD chain from @0x59F7CE)]. */
+static int tokenizer_legs() {
+    const char *text =
+        "fonthud1_hi,FontHi.fnt\n"
+        "HUDCLIP \"5\" \"579\"\n"
+        "VEHICLE_HUD\n"
+        "  sid dbuggy1\n"
+        "  HUDCHLINE 7\n"
+        "VEHICLE_END\n";
+    DefHudPosFile tok;
+    memset(&tok, 0, sizeof(tok));
+    if (def_parse_hudpos_memory((const unsigned char *)text, strlen(text), &tok) != 0) {
+        fprintf(stderr, "FAIL: tokenizer snippet did not parse\n");
+        return 1;
+    }
+    const bool ok = strcmp(tok.hud.font_hi, "FontHi.fnt") == 0 && tok.hud.clip_pos[0] == 5 &&
+            tok.hud.clip_pos[1] == 579 && tok.hud.hud_chline == 7 &&
+            tok.hud.vehicle_huds_count == 1;
+    if (!ok)
+        fprintf(stderr, "FAIL: tokenizer snippet: font '%s' clip %d,%d chline %d blocks %zu\n",
+                tok.hud.font_hi, tok.hud.clip_pos[0], tok.hud.clip_pos[1], tok.hud.hud_chline,
+                tok.hud.vehicle_huds_count);
+    def_free_hudpos(&tok);
+    if (ok) printf("hudpos tokenizer lines OK\n");
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     if (synthetic_legs() != 0) return 1;
+    if (tokenizer_legs() != 0) return 1;
     /* Every remaining leg reads the shipped hudpos.def (the memory legs compare
        against its path parse), so they gate on the reference fixture set
        (OPENNOVA_JO_ASSETS). */

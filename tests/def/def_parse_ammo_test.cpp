@@ -417,6 +417,65 @@ int main(int argc, char **argv) {
         if (!correct) { fprintf(stderr, "FAIL: secondary_effect / kz_sound\n"); return 1; }
     }
 
+    {
+        // Every line as the retail tokenizer cuts it: the `ammo` name is token 1,
+        // a comment never sticks to it, a key is the whole first token (`flags`
+        // is not `flag`, `KEY,value` binds), a quoted value is one token, and a
+        // file's trailing NUL ends the text, so JO:CA's ammo.def, whose last
+        // line is `end` + NUL with no CR LF, closes its last def (GRENADE_NOEXP).
+        // An `ammo` line while a def is open ends the whole walk, and the def it
+        // interrupted stays in the table [orig: File_ParseASCIIFile @0x53D810 ->
+        // Terrain_TokenizeConfigLine @0x53CB60; AmmoDef_ParseProperty @0x40A2D0
+        // (`ammo` @0x40A347..0x40A397, the return 1 @0x40A37D; File_ParseASCIIFile
+        // @0x53D942)].
+        static const char text[] =
+                "ammo AMMO_A // the rifle round\n"
+                " flags shotgun\n"
+                " flag,silenced\n"
+                " secondary_effect \"Effect_Burn\"\n"
+                " tracer_type stdred\n"
+                " tracer_type\n"
+                "end\n"
+                "ammo AMMO_B\n"
+                " velocity 900\n"
+                "end";
+        std::string source(text, sizeof(text) - 1);
+        source.push_back('\0');
+        DefAmmoFile parsed{};
+        if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(source.data()), source.size(),
+                                  &parsed) != 0 || parsed.count != 2) {
+            fprintf(stderr, "FAIL: tokenizer snippet gave %zu defs, expected 2\n", parsed.count);
+            def_free_ammo(&parsed);
+            return 1;
+        }
+        const auto &a = parsed.entries[0];
+        const auto &b = parsed.entries[1];
+        const bool correct = strcmp(a.name, "AMMO_A") == 0 &&
+                a.flags == DEF_AMMO_FLAG_SILENCED &&
+                strcmp(a.secondary_effect, "Effect_Burn") == 0 &&
+                a.tracer_type_friendly == 0 && a.tracer_type_enemy == 0 &&
+                strcmp(b.name, "AMMO_B") == 0 && b.velocity == 900;
+        if (!correct)
+            fprintf(stderr, "FAIL: tokenizer snippet: name '%s' flags 0x%x effect '%s' tracer %d/%d, "
+                    "second '%s' velocity %d\n", a.name, a.flags, a.secondary_effect,
+                    a.tracer_type_friendly, a.tracer_type_enemy, b.name, b.velocity);
+        def_free_ammo(&parsed);
+        if (!correct) return 1;
+
+        static const char interrupted[] =
+                "ammo AMMO_A\n velocity 1\nammo AMMO_B\n velocity 2\nend\nammo AMMO_C\nend\n";
+        DefAmmoFile cut{};
+        if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(interrupted),
+                                  sizeof(interrupted) - 1, &cut) != 0) return 1;
+        const bool stopped = cut.count == 1 && strcmp(cut.entries[0].name, "AMMO_A") == 0 &&
+                cut.entries[0].velocity == 1;
+        if (!stopped)
+            fprintf(stderr, "FAIL: an `ammo` line inside a def must end the walk (%zu defs)\n",
+                    cut.count);
+        def_free_ammo(&cut);
+        if (!stopped) return 1;
+    }
+
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/ammo.def (the shipped ammo table)");
     printf("PASS: ammo parsing OK\n");

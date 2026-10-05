@@ -1,8 +1,5 @@
 #include <formats/def/def.h>
 
-// Split out of def.cpp (quality campaign W3-3). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // WEAPONS.DEF: one record per weapon.
 
 #include "def_scan.h"
@@ -25,35 +22,16 @@ namespace opennova::def {
 /* Weapons Parsing                                                           */
 /* ========================================================================= */
 
-/* Every line reaches the parser as the retail tokenizer cuts it, and every
-   key is the WHOLE first token compared without case: `END // x` closes a
-   block, `KEY,value` binds, a `weapon` or `action` name needs no quotes (the
-   AT4 and RPG entries open their scopeup rows with a bare `ACTION SCOPEUP`),
-   and a scalar key reads its first value token only.
-   [orig: File_ParseASCIIFile @0x53D810 hands Terrain_TokenizeConfigLine
-   @0x53CB60's tokens to the callback (@0x53D908), skipping a line with no
-   token or whose first starts with '/' (@0x53D915 / @0x53D91E);
-   WeaponDefs_ParseLineCallback @0x543680 (stricmp on token 0: "weapon"
+/* Every line reaches the parser as the retail tokenizer cuts it
+   (defscan::for_each_def_line), and every key is the WHOLE first token
+   compared without case: `END // x` closes a block, `KEY,value` binds, a
+   `weapon` or `action` name needs no quotes (the AT4 and RPG entries open
+   their scopeup rows with a bare `ACTION SCOPEUP`), and a scalar key reads its
+   first value token only.
+   [orig: WeaponDefs_ParseLineCallback @0x543680 (stricmp on token 0: "weapon"
    @0x54369D, "end" @0x54374C, "ammoclass_max_carry" @0x5437F2, "action"
    @0x5438CF, the scalar reads of tokens[2] throughout);
-   ActionDef_ParseScriptLine @0x4023C0 ("action" @0x4023F3, "end" @0x40251B)]
-   The line split itself stays def_scan's LF-tolerant one: retail cuts at CR
-   LF alone (io::for_each_config_line), and every shipped def is CR LF. */
-static bool key_is(const char *key, const char *name) {
-    return strutil::iequals(key, name);
-}
-
-/* The value tokens (token 1 on) as the scanner's spans, for the handlers that
-   read several. */
-static int value_tokens(const io::ConfigTokens &tokens, Token *out, int max_tok) {
-    int n = 0;
-    for (int i = 1; i < tokens.count && n < max_tok; ++i) {
-        out[n].s = tokens.tokens[i];
-        out[n].len = strlen(tokens.tokens[i]);
-        ++n;
-    }
-    return n;
-}
+   ActionDef_ParseScriptLine @0x4023C0 ("action" @0x4023F3, "end" @0x40251B)] */
 
 /* CRT atof on a token span: the double the retail parse multiplies before its
    ftol, kept unnarrowed (parse_float_n rounds through a float). */
@@ -99,18 +77,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
     size_t cw_raw_cap = 0, cw_act_cap = 0, cw_sight_cap = 0;
     size_t ca_raw_cap = 0;
 
-    LineIter it = {buf, file_len, 0};
-    const char *line; size_t line_len;
     // Every line counts: split at LF, a CR before it dropped, which for CR LF
     // text is the retail walk's numbering [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5].
-    size_t line_index = (size_t)-1;
-    io::ConfigTokens tokens;
-
-    while (next_line(&it, &line, &line_len)) {
-        ++line_index;
-        const std::string copy(line, line_len);
-        io::tokenize_config_line(copy.c_str(), tokens);
-        if (tokens.count == 0 || tokens.tokens[0][0] == '/') continue;
+    for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens, const char *line,
+                                         size_t line_len, size_t line_index) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1); // the first value token, "" when none
         const size_t vl = strlen(v);
@@ -129,7 +99,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             const uint32_t bits = static_cast<uint32_t>(value);
             carry.cap = static_cast<int>(value < 0 ? 0u - bits : bits); // abs32
             DA_PUSH(out->ammo_class_carries, out->ammo_class_carries_count, carry_cap, carry);
-            continue;
+            return;
         }
 
         if (state == ST_TOP) {
@@ -147,7 +117,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 cw.open_line = line_index;
                 state = ST_WEAPON;
             }
-            continue;
+            return;
         }
 
         if (state == ST_WEAPON) {
@@ -157,7 +127,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 safe_copy(ca.name, sizeof(ca.name), v, vl);
                 ca.open_line = line_index;
                 state = ST_ACTION;
-                continue;
+                return;
             }
 
             if (key_is(key, "end")) {
@@ -166,7 +136,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 memset(&cw, 0, sizeof(cw));
                 cw_raw_cap = 0; cw_act_cap = 0; cw_sight_cap = 0;
                 state = ST_TOP;
-                continue;
+                return;
             }
 
             int parsed = 0;
@@ -199,8 +169,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    char-class VALUE table (medic=1 sniper=2 gunner=3 rifleman=5
                    engineer=6, must be <= 6) and stores at the value's index
                    [orig: handler @ 0x543ab0 -> AdmDef+0x60+value*4, table @ 0x830EE8]. */
-                Token tok[MAX_TOKENS];
-                int n = value_tokens(tokens, tok, MAX_TOKENS);
+                Token tok[kMaxValueTokens];
+                int n = value_tokens(tokens, tok, kMaxValueTokens);
                 if (n >= 2) {
                     char cb[16]; size_t cbl = tok[0].len < 15 ? tok[0].len : 15;
                     to_lower_buf(cb, tok[0].s, cbl);
@@ -239,8 +209,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             } else if (key_is(key, "ammoclass")) {
                 /* ammoclass <CLASS_NAME> <pool-units-per-round> [orig: parse @0x5441CB] */
-                Token tok[MAX_TOKENS];
-                int n = value_tokens(tokens, tok, MAX_TOKENS);
+                Token tok[kMaxValueTokens];
+                int n = value_tokens(tokens, tok, kMaxValueTokens);
                 if (n >= 1) safe_copy(cw.ammo_class, sizeof(cw.ammo_class), tok[0].s, tok[0].len);
                 if (n >= 2) cw.ammo_class_count = parse_int_n(tok[1].s, tok[1].len);
                 parsed = 1;
@@ -272,8 +242,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    from the first value token [orig: parse @0x543F6E reads tokens[2]].
                    Also packs the original producer's class-mask bit
                    [orig: WeaponDef_ParseProperty @ 0x54d730]. */
-                Token tok[MAX_TOKENS];
-                int n = value_tokens(tokens, tok, MAX_TOKENS);
+                Token tok[kMaxValueTokens];
+                int n = value_tokens(tokens, tok, kMaxValueTokens);
                 for (int ti = 0; ti < n; ++ti) {
                     if (cw.charfilter_count >= 8) break;
                     safe_copy(cw.charfilter[cw.charfilter_count], sizeof(cw.charfilter[0]),
@@ -290,8 +260,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 /* Repeatable, one team token per line [orig: parse @0x543FE3 reads
                    tokens[2]]. Also packs the original producer's team-mask bit
                    [orig: WeaponDef_ParseProperty @ 0x54d730]. */
-                Token tok[MAX_TOKENS];
-                int n = value_tokens(tokens, tok, MAX_TOKENS);
+                Token tok[kMaxValueTokens];
+                int n = value_tokens(tokens, tok, kMaxValueTokens);
                 for (int ti = 0; ti < n; ++ti) {
                     if (cw.teamfilter_count >= 4) break;
                     safe_copy(cw.teamfilter[cw.teamfilter_count], sizeof(cw.teamfilter[0]),
@@ -358,8 +328,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "hudclipgfx")) {
                 /* HUDCLIPGFX: offset x/y + texture [orig: WeaponDefs_ParseLineCallback
                    @0x54427f]. */
-                Token tok[MAX_TOKENS];
-                int n = value_tokens(tokens, tok, MAX_TOKENS);
+                Token tok[kMaxValueTokens];
+                int n = value_tokens(tokens, tok, kMaxValueTokens);
                 if (n >= 3) {
                     cw.hudclipgfx_offset[0] = parse_int_n(tok[0].s, tok[0].len);
                     cw.hudclipgfx_offset[1] = parse_int_n(tok[1].s, tok[1].len);
@@ -370,8 +340,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 /* HUDRNDGFX: start x/y, step x/y, rounds-per-icon divisor, texture
                    [orig: WeaponDefs_ParseLineCallback @0x5442fc -> weapon
                    +644/+648/+652/+656/+727]. */
-                Token tok[MAX_TOKENS];
-                int n = value_tokens(tokens, tok, MAX_TOKENS);
+                Token tok[kMaxValueTokens];
+                int n = value_tokens(tokens, tok, kMaxValueTokens);
                 if (n >= 6) {
                     cw.hudrndgfx_offset[0] = parse_int_n(tok[0].s, tok[0].len);
                     cw.hudrndgfx_offset[1] = parse_int_n(tok[1].s, tok[1].len);
@@ -490,8 +460,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    [orig: WeaponDefs_ParseLineCallback @ 0x544e8b..0x544efd — the
                     stores @ 0x544eac / @ 0x544ec1 / @ 0x544ed9, the count gate
                     @ 0x544edf, the fourth store @ 0x544efd] */
-                Token zv[MAX_TOKENS];
-                int zn = value_tokens(tokens, zv, MAX_TOKENS);
+                Token zv[kMaxValueTokens];
+                int zn = value_tokens(tokens, zv, kMaxValueTokens);
                 if (zn >= 1) cw.scope_max_zero_steps = parse_int_n(zv[0].s, zv[0].len);
                 if (zn >= 2) cw.scope_zero_step = parse_int_n(zv[1].s, zv[1].len);
                 if (zn >= 3) cw.scope_zero_default = parse_int_n(zv[2].s, zv[2].len);
@@ -502,16 +472,16 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    digit parser then integer-divided by 100 and by 100*62 (the logic
                    rate) — the two truncating divides are load-bearing, see def.h.
                    [orig: @ 0x543eb7 -> +0x36C / +0x370] */
-                Token hv[MAX_TOKENS];
-                int hn = value_tokens(tokens, hv, MAX_TOKENS);
+                Token hv[kMaxValueTokens];
+                int hn = value_tokens(tokens, hv, kMaxValueTokens);
                 if (hn >= 1) cw.heat_per_shot = parse_fixed16_digits_n(hv[0].s, hv[0].len) / 100;
                 if (hn >= 2) cw.heat_decay_per_tick = parse_fixed16_digits_n(hv[1].s, hv[1].len) / 6200;
                 parsed = 1;
             } else if (key_is(key, "heat_effect")) {
                 /* Effect name + the 16.16 glow threshold; any further values on the
                    line are unread in retail too. [orig: @ 0x543e36 -> +0x358 / +0x374] */
-                Token hv[MAX_TOKENS];
-                int hn = value_tokens(tokens, hv, MAX_TOKENS);
+                Token hv[kMaxValueTokens];
+                int hn = value_tokens(tokens, hv, kMaxValueTokens);
                 if (hn >= 1) safe_copy(cw.heat_effect, sizeof(cw.heat_effect), hv[0].s, hv[0].len);
                 if (hn >= 2) cw.heat_glow_threshold = parse_fixed16_digits_n(hv[1].s, hv[1].len);
                 parsed = 1;
@@ -540,8 +510,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parse_view_pose(tokens, cw.tpos, cw.tpos_rotation_deg_q16);
                 parsed = 1;
             } else if (key_is(key, "sights")) {
-                Token tok[MAX_TOKENS];
-                int n = value_tokens(tokens, tok, MAX_TOKENS);
+                Token tok[kMaxValueTokens];
+                int n = value_tokens(tokens, tok, kMaxValueTokens);
                 if (n >= 5) {
                     DefSightEntry se;
                     memset(&se, 0, sizeof(se));
@@ -578,7 +548,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             if (!parsed) {
                 DA_PUSH_RAW(cw.raw_lines, cw.raw_lines_count, cw_raw_cap, line, line_len);
             }
-            continue;
+            return;
         }
 
         if (state == ST_ACTION) {
@@ -602,7 +572,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 memset(&ca, 0, sizeof(ca));
                 ca_raw_cap = 0;
                 state = ST_WEAPON;
-                continue;
+                return;
             }
             /* A nested `action` line while one is open is REFUSED by the
                original: it logs "forgot an end", keeps the current row open
@@ -654,7 +624,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 DA_PUSH_RAW(ca.raw_lines, ca.raw_lines_count, ca_raw_cap, line, line_len);
             }
         }
-    }
+    });
 
     return 0;
 }

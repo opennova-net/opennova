@@ -561,6 +561,11 @@ static int test_retail_particlefx_rows(void) {
     return rc;
 }
 
+/* A line carries 30 tokens at most: the key and 29 values, the 29th running on to
+   the line's end because the tokenizer stops before cutting it, so its atol reads
+   its first number only [orig: Terrain_TokenizeConfigLine @0x53CB60, the cap
+   @0x53CC93]. Forty authored ids on one line are 28 ids, then "200028 200029 ...",
+   which reads as 200028. The 32-slot group table fills across lines. */
 static int test_vehicle_spawn_lists() {
 	std::string source = "begin First\n id 1\n pcvehicle_spawnlist 100042 100043 100042\nend\n"
 						 "begin Second\n id 2\n PCVEHICLE_SPAWNLIST 100043\nend\n"
@@ -568,17 +573,21 @@ static int test_vehicle_spawn_lists() {
 	for (int id = 0; id < 40; ++id)
 		source += " " + std::to_string(200000 + id);
 	source += "\nend\nbegin Replace\n id 4\n pcvehicle_spawnlist 100042\n"
-			  " pcvehicle_spawnlist 100043\nend\n";
+			  " pcvehicle_spawnlist 100043\nend\n"
+			  "begin Overflow\n id 5\n pcvehicle_spawnlist 300000 300001 300002\nend\n";
 	DefItemsFile file{};
 	if (def_parse_items_memory(
 				reinterpret_cast<const uint8_t *>(source.data()), source.size(), &file) != 0 ||
-			file.count != 4)
+			file.count != 5)
 		return 1;
 	const bool ok = file.vehicle_spawn_id_count == 32 && file.vehicle_spawn_ids[0] == 100042 &&
 			file.vehicle_spawn_ids[1] == 100043 && file.entries[0].vehicle_spawn_mask == 3 &&
 			file.entries[1].vehicle_spawn_mask == 2 &&
-			file.entries[2].vehicle_spawn_mask == 0xFFFFFFFCu &&
-			file.entries[3].vehicle_spawn_mask == 2;
+			file.vehicle_spawn_ids[30] == 200028 &&
+			file.entries[2].vehicle_spawn_mask == 0x7FFFFFFCu &&
+			file.entries[3].vehicle_spawn_mask == 2 &&
+			file.vehicle_spawn_ids[31] == 300000 &&
+			file.entries[4].vehicle_spawn_mask == 0x80000000u;
 	def_free_items(&file);
 	if (!ok)
 		fprintf(stderr, "FAIL: vehicle spawn lists/cap/replacement\n");
@@ -659,8 +668,87 @@ static int test_scale_keeps_the_low_dword_of_the_fistp() {
     return ok ? 0 : 1;
 }
 
+/* Every line reaches the parser as the retail tokenizer cuts it: the key is the
+   whole first token, a single-text key takes its first value token (not the rest
+   of the line), a quoted run is one token without its quotes and `""` is no token
+   at all, space, tab and comma separate, `;` or `//` outside quotes ends the line
+   (a token already running there runs on to the end), and a trailing NUL is the
+   end of the text. A record is allocated at its `begin`, so a nested `begin` and
+   an unclosed block are both items. Repeated `attrib:` lines OR together.
+   [orig: File_ParseASCIIFile @0x53D810 -> Terrain_TokenizeConfigLine @0x53CB60;
+    ItemDef_ParseProperty @0x49EB00 (the begin arm @0x49EB88..0x49EBB3, the
+    attrib loop @0x4A06A8..0x4A0F52)] */
+static int test_items_read_the_retail_tokens(void) {
+    static const char text[] =
+        "begin Plain Name\n"
+        "  graphic Dm1a1 extra\n"
+        "  anim_def Anim1 ; a semicolon comment\n"
+        "  particlefxs \"\" FX00 Smoke\n"
+        "  virtualdisplay tankdrvr,camera\n"
+        "  hp,150\n"
+        "  sid \"Long Alias Name Here\"\n"
+        "  type vehicle\n"
+        "  type bogus\n"
+        "  husk run//on\n"
+        "  attrib: Door\n"
+        "  attrib: Takeable VehicleBay\n"
+        "begin \"Nested Opens\"\n"
+        "  attrib:Door\n"
+        "end\0trailing bytes\n" /* the line is read up to its NUL: `end` */
+        "begin Unclosed\n"
+        "  id 7\n";
+    const std::string source(text, sizeof(text) - 1);
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(source.data()), source.size(),
+                               &items) != 0) {
+        fprintf(stderr, "FAIL: tokenizer snippet did not parse\n");
+        return 1;
+    }
+    int bad = 0;
+    if (items.count != 3) {
+        fprintf(stderr, "FAIL: tokenizer snippet gave %zu items, expected 3\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *a = &items.entries[0];
+    if (strcmp(a->display_name, "Plain") != 0) { fprintf(stderr, "FAIL: begin name '%s'\n", a->display_name); bad = 1; }
+    if (strcmp(a->graphic, "Dm1a1") != 0) { fprintf(stderr, "FAIL: graphic '%s'\n", a->graphic); bad = 1; }
+    if (strcmp(a->anim_def, "Anim1") != 0) { fprintf(stderr, "FAIL: anim_def '%s'\n", a->anim_def); bad = 1; }
+    if (strcmp(a->particlefxs.effect, "FX00") != 0 || strcmp(a->particlefxs.userpoint, "Smoke") != 0) {
+        fprintf(stderr, "FAIL: particlefxs '%s' @ '%s'\n", a->particlefxs.effect, a->particlefxs.userpoint);
+        bad = 1;
+    }
+    if (strcmp(a->virtual_display, "tankdrvr") != 0 || strcmp(a->virtual_display_userpoint, "camera") != 0) {
+        fprintf(stderr, "FAIL: virtualdisplay '%s' '%s'\n", a->virtual_display, a->virtual_display_userpoint);
+        bad = 1;
+    }
+    if (a->hp != 150) { fprintf(stderr, "FAIL: hp,150 gave %d\n", a->hp); bad = 1; }
+    /* strncpy(alias, .., 15) [orig: @0x49EC8A] */
+    if (strcmp(a->sid, "Long Alias Name") != 0) { fprintf(stderr, "FAIL: sid '%s'\n", a->sid); bad = 1; }
+    if (a->type != DEF_ITEM_TYPE_VEHICLE) { fprintf(stderr, "FAIL: an unknown type token reset the type to %d\n", a->type); bad = 1; }
+    if (strcmp(a->husk, "run//on") != 0) { fprintf(stderr, "FAIL: husk '%s'\n", a->husk); bad = 1; }
+    if ((a->attrib & DEF_ITEM_ATTRIB_DOOR) == 0 || (a->attrib & DEF_ITEM_ATTRIB_TAKEABLE) == 0 ||
+        (a->attrib2 & DEF_ITEM_ATTRIB2_VEHICLEBAY) == 0) {
+        fprintf(stderr, "FAIL: repeated attrib: lines did not OR together (0x%x / 0x%x)\n",
+                a->attrib, a->attrib2);
+        bad = 1;
+    }
+    const DefItemDef *b = &items.entries[1];
+    if (strcmp(b->display_name, "Nested Opens") != 0) { fprintf(stderr, "FAIL: nested name '%s'\n", b->display_name); bad = 1; }
+    if (b->attrib & DEF_ITEM_ATTRIB_DOOR) { fprintf(stderr, "FAIL: `attrib:Door` is one token, not the attrib key\n"); bad = 1; }
+    const DefItemDef *c = &items.entries[2];
+    if (strcmp(c->display_name, "Unclosed") != 0 || c->id != 7) {
+        fprintf(stderr, "FAIL: the unclosed block: '%s' id %d\n", c->display_name, c->id);
+        bad = 1;
+    }
+    def_free_items(&items);
+    return bad;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
+    if (test_items_read_the_retail_tokens() != 0) return 1;
     if (test_regional_sound_delays() != 0) return 1;
     if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;
     if (test_out_of_range_values_take_the_sse2_leg() != 0) return 1;

@@ -1,9 +1,9 @@
 #pragma once
 
 // Internal to engine/formats/def — not part of def/def.h. Split out of def.cpp (quality
-// campaign W3-3); the bodies are unchanged.
+// campaign W3-3).
 //
-// The shared .def text scanner: line iteration, key matching, value tokenizing and
+// The shared .def text scanner: the retail line walk and its tokens, key matching and
 // the scalar conversions every family parser beside it uses.
 //
 // These were file-local statics when every parser lived in one file. They now cross
@@ -15,15 +15,18 @@
 
 #include <formats/def/def.h>
 
+#include <base/io/ascii_config.h>
+
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <string>
+
 namespace opennova::defscan {
 
 // The scanner's own types and the caps/macros the family parsers use directly.
-#define MAX_TOKENS 16
-typedef struct { const char *s; size_t len; } Token;
+typedef struct { const char *s; size_t len; } Token; // a value token's span
 
 /* Line iterator: walks through buf splitting on \n, stripping \r */
 typedef struct {
@@ -58,15 +61,7 @@ char *read_file(const char *path, size_t *out_len);
 
 void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len);
 
-const char *trim_span(const char *s, size_t len, size_t *out_len);
-
 void to_lower_buf(char *dst, const char *src, size_t len);
-
-size_t extract_quoted(const char *line, size_t line_len, char *dst, size_t dst_size);
-
-const char *consume_value_span(const char *line, size_t line_len, size_t key_len, size_t *out_len);
-
-void consume_value_str(const char *line, size_t line_len, size_t key_len, char *dst, size_t dst_size);
 
 int parse_int_n(const char *s, size_t len);
 
@@ -74,25 +69,61 @@ int signed_i16_value(int value);
 
 float parse_float_n(const char *s, size_t len);
 
-int tokenize(const char *s, size_t len, Token *tokens, int max_tok);
-
 int death_piece_type_index(const char *name, size_t len);
 
-int split_values(const char *s, size_t len, Token *tokens, int max_tok);
-
-int lower_starts_with(const char *lower, size_t lower_len, const char *prefix, size_t prefix_len);
-
-int lower_match_key(const char *lower, size_t lower_len, const char *prefix, size_t prefix_len);
-
 int next_line(LineIter *it, const char **out, size_t *out_len);
+
+// The value tokens a family parser reads off one line: past the key, at most
+// this many.
+inline constexpr int kMaxValueTokens = 16;
+
+// Every family parser reads a line the way the retail walk hands it to its
+// callback: cut into tokens by the shared ASCII tokenizer, the key the WHOLE
+// first token compared without case, each value a token (a quoted run is one
+// token and its quotes are not kept; `""` is no token at all; space, tab and
+// comma separate; `//` or `;` outside quotes ends the line). A line with no
+// token, or whose first token starts with '/', never reaches the callback.
+// [orig: File_ParseASCIIFile @0x53D810 hands Terrain_TokenizeConfigLine
+//  @0x53CB60's tokens to the callback (@0x53D908), skipping a line with no
+//  token or whose first starts with '/' (@0x53D915 / @0x53D91E); the
+//  tokenizer's cuts are io::tokenize_config_line's]
+// The line split stays LF-tolerant (a CR before the LF dropped): retail cuts
+// at CR LF alone (io::for_each_config_line), and every shipped def is CR LF.
+// A line is read up to its first NUL, as the tokenizer's strlen reads it, so a
+// file's trailing NUL never sticks to its last key. `apply(tokens, line,
+// line_len, line_index)` gets the raw line for the parsers' raw_lines and its
+// index counting every line, the skipped ones included.
+template <typename Apply>
+void for_each_def_line(const char *buf, size_t len, Apply &&apply) {
+    LineIter it = {buf, len, 0};
+    const char *line;
+    size_t line_len;
+    size_t line_index = (size_t)-1;
+    io::ConfigTokens tokens;
+    while (next_line(&it, &line, &line_len)) {
+        ++line_index;
+        const std::string copy(line, line_len);
+        io::tokenize_config_line(copy.c_str(), tokens);
+        if (tokens.count == 0 || tokens.tokens[0][0] == '/') continue;
+        apply(static_cast<const io::ConfigTokens &>(tokens), line, line_len, line_index);
+    }
+}
+
+// The key compare every family parser makes [orig: _stricmp @0x76FDF6].
+bool key_is(const char *key, const char *name);
+
+// The value tokens (token 1 on) as spans, at most `max_tok` of them.
+int value_tokens(const io::ConfigTokens &tokens, Token *out, int max_tok);
+
+// Token `index` into `dst`, truncated to `dst_size - 1`; a token past the
+// line's count copies "".
+void copy_token(char *dst, size_t dst_size, const io::ConfigTokens &tokens, int index);
 
 const FlagEntry *lookup_flag(const char *name, size_t len);
 
 int lookup_item_attrib(const char *name, size_t len);
 
 int lookup_item_attrib2(const char *name, size_t len);
-
-int parse_ints(const char *s, size_t len, int *out, int max_n);
 
 opennova::def::DefHudColor parse_hud_color(Token *vals, int n);
 
