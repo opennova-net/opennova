@@ -27,10 +27,19 @@ as usual.
     python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"game_install": "C:/Games/JO"}'
     python scripts/mcp/editor_mcp.py request set_viewport --path models/tank.3di --viewport '{"kind": "model",
         "camera": {"yaw": 1.2}}'                     # that model's viewport (left out: the active document's)
+    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"card": {"path": ""}}'   # the card closed
+    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"new_project": {"title": "Nightfall",
+        "builds_on": "jox01", "expansion": "nightfall"}}'   # the form filled, nothing made
+    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"problems": {"severities": ["error"],
+        "group": "file"}, "focus": "problems"}'           # Problems' filters, the window brought forward
+    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"document": {"filter": "gun",
+        "inspector_filter": "rate"}, "find": {"open": true, "text": "90"}}'   # the active document's views
+    python scripts/mcp/editor_mcp.py state --sections workspace   # what the windows show of their own
     python scripts/mcp/editor_mcp.py viewport --op state --path main.mnu        # a document's viewport: its envelope
     python scripts/mcp/editor_mcp.py viewport --op hit --x 400 --y 300          # what lies under a point
     python scripts/mcp/editor_mcp.py viewport --op drag --id 5 --handle move --by=-8,4 --snap 1   # one undo step
     python scripts/mcp/editor_mcp.py viewport --op command --name align_left --ids 5,7,9          # one request
+    python scripts/mcp/editor_mcp.py viewport --op command --name click --at 400,300 --mode add   # a Shift click
     python scripts/mcp/editor_mcp.py viewport --op seek --clock '{"playing": false, "time_ms": 250}'  # no document named
     python scripts/mcp/editor_mcp.py build                # waits on the build's operation, its progress on stderr
     python scripts/mcp/editor_mcp.py build --out-dir "C:/builds/My Game"   # each build a directory under it
@@ -249,7 +258,8 @@ REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install
                  "purpose")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
-                    "planned")
+                    "planned", "behind", "report")
+REQUEST_NUMBERS = ("plan",)
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -263,6 +273,9 @@ def request_of(args: argparse.Namespace) -> dict:
     for field in REQUEST_SWITCHES:
         if getattr(args, field) is not None:
             request[field] = getattr(args, field) == "true"
+    for field in REQUEST_NUMBERS:
+        if getattr(args, field) is not None:
+            request[field] = getattr(args, field)
     if args.paths:
         request["paths"] = args.paths
     if args.imports:
@@ -271,7 +284,7 @@ def request_of(args: argparse.Namespace) -> dict:
         request["edits"] = parse_list(args.edits, "--edits", "edit")
     if args.records:
         request["records"] = parse_list(args.records, "--records", "{row, kind, child}")
-    for field in ("address", "paste_at", "settings", "viewport", "drag", "command", "values"):
+    for field in ("address", "paste_at", "settings", "viewport", "drag", "command", "values", "workspace"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
     return request
@@ -373,9 +386,11 @@ def viewport_of(args: argparse.Namespace) -> dict:
             command["by"] = parse_pair(args.by, "--by")
         if args.at is not None:
             command["at"] = parse_pair(args.at, "--at")
+        if args.mode is not None:
+            command["mode"] = args.mode
         request["command"] = command
-    elif command:
-        raise GameMcpError(EXIT_NOT_READ, "--name and --ids are op command's (--name also op drop's)")
+    elif command or args.mode is not None:
+        raise GameMcpError(EXIT_NOT_READ, "--name, --ids and --mode are op command's (--name also op drop's)")
     if args.op == "drag":
         request["drag"] = drag
     elif drag:
@@ -447,6 +462,9 @@ def cmd_build(args: argparse.Namespace) -> int:
     request = {"kind": "build"}
     if args.out_dir is not None:
         request["out_dir"] = args.out_dir
+    # --no-report: the build result's panel stays closed as the build ends (the person's work left as it is).
+    if args.no_report:
+        request["report"] = False
     outcome, ended = raise_and_wait(client, request, args.timeout)
     if ended is None:
         return EXIT_NOT_DONE
@@ -491,6 +509,10 @@ def cmd_play(args: argparse.Namespace) -> int:
         request = {"kind": "play"}
         if args.mission:
             request["mission"] = args.mission
+        # --behind: the game's window starts behind every other, the editor keeping the foreground (Windows
+        # only); by default it starts as Play starts it, as the editor_play tool's does.
+        if args.behind:
+            request["behind"] = True
         outcome, ended = raise_and_wait(client, request, args.timeout)
         if ended is None:
             return EXIT_NOT_DONE
@@ -719,6 +741,10 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--values", default=None,
                          help="named values as a JSON object of strings: create_file's starting values, "
                               "set_import_options' options, texture_operation's params")
+    request.add_argument("--workspace", default=None,
+                         help="set_workspace: what the windows show of their own, as a JSON object {<part>: "
+                              "{<member>: value}, focus?} (the parts: `query catalog`'s workspace; the state's "
+                              "workspace section shows them)")
     switch = ("true", "false")
     request.add_argument("--with-dependencies", dest="with_dependencies", choices=switch, default=None,
                          help="preview_import, plan_import, preview_install_import: with the files they need; "
@@ -738,7 +764,16 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--all", choices=switch, default=None,
                          help="preview_install_import: every file of the game install chosen at once, with no walk")
     request.add_argument("--planned", choices=switch, default=None,
-                         help="import_files: the open preview's rows as its plan has them, in place of --imports")
+                         help="import_files: the open preview's checked rows as the dialog's Import takes them, in "
+                              "place of --imports (with --plan)")
+    request.add_argument("--plan", type=int, default=None,
+                         help="import_files --planned: the plan it imports (query import_preview's plan); a plan "
+                              "made since is refused")
+    request.add_argument("--behind", choices=switch, default=None,
+                         help="play: the game's window starts behind every other, the editor keeping the foreground "
+                              "(Windows only)")
+    request.add_argument("--report", choices=switch, default=None,
+                         help="build: false leaves the build result's panel closed as the build ends")
     request.add_argument("--wait", action="store_true",
                          help="await the operation the request starts or joins (open_project, new_project, rescan, "
                               "reimport, the import previews and import_files, the renames, build, play) and the "
@@ -798,15 +833,19 @@ def build_parser() -> argparse.ArgumentParser:
                           help="drag: false keeps the gesture open for the next sample (10 s with none ends it)")
     viewport.add_argument("--name", default=None, help="command: an arrange op (align_left, ..., send_to_back) or frame; "
                                                        "a mission's frame, top, ground (the entities set down on the "
-                                                       "ground under them), select_same, duplicate or paste; drop: the "
-                                                       "name --reference names (an item's id, a path's number)")
+                                                       "ground under them), select_same, duplicate or paste; any "
+                                                       "canvas's click (--at X,Y, --mode): the selection its canvas's "
+                                                       "click makes there; drop: the name --reference names (an item's "
+                                                       "id, a path's number)")
+    viewport.add_argument("--mode", choices=("replace", "add", "toggle"), default=None,
+                          help="command click: how it joins the selection (a Shift or Ctrl click's: add, toggle)")
     viewport.add_argument("--file", default=None,
                           help="drop: a project file by its logical name (a model: the item that draws it)")
     viewport.add_argument("--reference", default=None,
                           help="drop: a reference kind's token whose name --name gives (item: an item by its id; "
                                "path: a path's next stop; area, with --to and no --name: an area over the box)")
     viewport.add_argument("--at", default=None, help="drop: X,Y, the point of the picture it is let go at; command: "
-                                                     "a mission's paste's point")
+                                                     "a mission's paste's point, a click's")
     viewport.add_argument("--ids", default=None, help="command: the records, comma-separated (the first the one the "
                                                       "others follow)")
     viewport.add_argument("--timeout", type=float, default=120.0)
@@ -816,6 +855,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_endpoint_options(build)
     build.add_argument("--out-dir", dest="out_dir", default=None,
                        help="where it lands, each build a directory under it (as request build's --out-dir)")
+    build.add_argument("--no-report", dest="no_report", action="store_true",
+                       help="the build result's panel stays closed as the build ends (build's report false)")
     build.add_argument("--timeout", type=float, default=300.0)
     build.set_defaults(func=cmd_build)
 
@@ -833,6 +874,10 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--mission", default=None,
                       help="start: a mission of the project by its logical name (04TR.bms), the one the game starts "
                            "in (left out: its menu)")
+    play.add_argument("--behind", action="store_true",
+                      help="start: the game's window starts behind every other, the editor keeping the foreground "
+                           "(play's behind; Windows only). Left out, it starts as Play starts it, as the editor_play "
+                           "tool's does")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 

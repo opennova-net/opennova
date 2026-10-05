@@ -302,13 +302,19 @@ void sweep_everything(Sweep &sweep, const std::string &layout) {
 	sweep.view.dialogs.import_preview = DialogsView::ImportPreview();
 	sweep.view.revisions.touch(ViewConcern::Dialogs);
 	sweep.ui.frames(3);
-	// The project settings.
+	// The project settings: the menu asks them open, the workspace's, served as the session serves it (over the
+	// settings in effect).
 	choose(sweep.ui, "File", {"Project settings..."});
+	WorkspaceView::Settings &settings = sweep.view.workspace.settings;
+	CHECK(settings.open && settings.title == sweep.view.project.document->title,
+	      (layout + ": the project settings asked open").c_str());
 	sweep.ui.frames(3);
 	CHECK(ImGui::FindWindowByName("Project settings") && ImGui::FindWindowByName("Project settings")->Active,
 	      (layout + ": the project settings open").c_str());
 	sweep.check(layout + ", the project settings");
 	sweep.ui.activate(item_id(ImHashStr("Project settings"), {"Cancel"}));
+	settings = WorkspaceView::Settings();
+	sweep.view.revisions.touch(ViewConcern::Workspace);
 	sweep.ui.frames(2);
 	sweep.ui.drain();
 }

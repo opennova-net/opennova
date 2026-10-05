@@ -54,8 +54,8 @@ protected:
 	// The canvas `height` tall across the room: the device's picture of the viewport under the
 	// kind's shapes, the frame's pointer and keys to the kind's half of it (the canvas's gestures),
 	// `inside` drawn once the canvas has read the frame's input (a menu's mouse readout and its
-	// right-click menu). A picture that fills the canvas (a model's) sets the size its device draws
-	// at to the canvas's (a SetViewport when it differs). The context's size is the picture's.
+	// right-click menu). A picture that fills the canvas (a model's) is drawn at the canvas's size, which
+	// its device reports (canvas_sized: no SetViewport sets it then). The context's size is the picture's.
 	void canvas(Workspace &workspace, const ViewportModel &model, ViewportContext &context, float height,
 			const std::function<void(const CanvasInput &)> &inside = nullptr);
 	// The canvas (its zoom: a design picture's) and its kind's half, made of the viewport (its

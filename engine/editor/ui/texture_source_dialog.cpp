@@ -10,6 +10,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
@@ -52,12 +53,17 @@ std::vector<std::pair<std::string, std::string>> form_values(const std::vector<s
 void TextureSourceDialog::draw(Workspace &workspace) {
 	const SessionView &view = workspace.view();
 	const DialogsView::TextureSourcePreview &preview = view.dialogs.texture_source;
-	if (preview.open && preview.serial != shown_ && !ImGui::IsPopupOpen(kTitle)) {
+	// It shows while no dialog before it in the session's order is held (shown_modal); one that takes its place
+	// leaves it waiting, opened again (its serial asked anew) once that one closes.
+	const bool shows = preview.open && view.project.open && modal_may_show(view, HeldModal::TextureSource);
+	if (!shows && !ImGui::IsPopupOpen(kTitle)) shown_ = 0;
+	if (shows && preview.serial != shown_ && !ImGui::IsPopupOpen(kTitle)) {
 		shown_ = preview.serial;
 		ImGui::OpenPopup(kTitle);
 	}
 	if (!ImGui::BeginPopupModal(kTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-	if (!preview.open || !view.project.open) {
+	if (!shows) {
+		shown_ = 0;
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;

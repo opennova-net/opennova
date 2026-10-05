@@ -28,6 +28,10 @@ struct LaunchPlan {
 	// the build's expansion folder, mounted with `/exp <expansion>`.
 	std::string resource_dir;
 	std::string expansion; // "" for the standalone game
+	// The game's window starts behind every other and never takes the foreground (a play {behind} over the
+	// editor MCP, the MCP gaps lane: a person works at the machine), as the platform starts a process so
+	// (the Shell's: shown without activation, kept at the bottom while it starts). Not on the command line.
+	bool behind = false;
 };
 
 // The packaged runtime (opennova.exe) on `build_dir`, in `run_dir`. `engine_args` are Godot's own
