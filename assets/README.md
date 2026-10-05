@@ -30,7 +30,8 @@ the editor finds it anywhere in the project. Keep new files at the top level.
 | `Arial12b.fnt`, `Arial14n.fnt`, `Arial14b.fnt`, `Arial16n.fnt`, `Arial16b.fnt`, `Impac22b.fnt`, `Impac38b.fnt` | The seven fonts the game's main menu loads by name. The editor's blank font (the same art as `opennova.fnt`), made by Create Missing. |
 | `gametext.bin`, `gameerr.bin`, `vmacros.bin`, `keyhelp.bin`, `game.bin`, `menutxt.bin` | The string tables the game reads as it starts and the main menu reads. Blank tables from Create Missing. |
 | `nw_cdata.coo` | The NovaWorld screens' string table the main menu reads. Blank, from Create Missing. |
-| `items.def`, `weapon.def`, `charattr.def` | The item, weapon and character-attribute definitions the game reads as it starts, from Create Missing and edited in the editor: `items.def` holds the `Null` marker first, the crate, the barrel, the hut and the insertion point; no weapon or class yet. |
+| `items.def`, `weapon.def`, `charattr.def` | The item, weapon and character-attribute definitions the game reads as it starts, from Create Missing and edited in the editor. `items.def` holds the `Null` marker first, the persons (`Player #1, Single player` 105310 and `Player #1, Multiplayer` 105305, both `onsold1` playing `onp1.adm`; `Rebel rifleman` 101800, `onenmy1` playing `one1.adm`), the crate, the barrel, the hut and the insertion point; `charattr.def` (hand-written in the game's form) spawns class 1 as 5310 and classes 5 to 9 as 5305. |
+| `Avatars.def` | The player's character: one combo of the head `onsoldh.3di`, the body `onsoldb.3di` and the first-person arms `on_arms.3di`. Hand-written in the game's form. |
 | `menu_style.mns`, `brand.mns` | The menu stylesheets: the `%NAME%` fonts and colours the screens use. From Create Missing. |
 | `on_ar15.3di` | A first-person AR-15-pattern carbine, 64 parts on one rig. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` and `on_arms*` file below. |
 | `on_arms.3di` | The first-person arms skinned to `on_ar15`'s rig (its first 55 parts). |
@@ -56,14 +57,26 @@ the editor finds it anywhere in the project. Keep new files at the top level.
 | `border3.tga`, `k_tip.tga`, `g_tip.tga` | The tip panel and its two icons. |
 | `Binoculr.tga`, `BinoCH.tga`, `BNumbers.tga`, `NVG.tga`, `NVGScale.tga`, `vignette.tga` | The first-person view effects: the binocular mask, reticle and range digits, the night-vision mask and gain scale, the damage vignette. |
 | `neticon1.tga`, `neticon2.tga`, `neticon3.tga`, `JO_LFP.tga`, `R_LFP.tga`, `N_LFP.tga`, `lfp_alf.tga`, `lfp_dlf.tga`, `H_flag.tga`, `rockpip.tga`, `turrpip.tga`, `dirguide.tga` | The rest of the HUD's fixed-name art: the connection indicators, the objective tiles and marks, the carried flag, the vehicle pips. |
+| `onsold1.3di` | The player's soldier: fatigues, vest, helmet, three LODs, skinned to the original's 19 person bones in the original's bind with the mesh on a part of its own (the layout of the original's `US01`). Exported from `art/onjo1/person/onsold1.blend`, like every `onsold*`, `onenmy1*`, `onp1*` and `one1*` file below. |
+| `onsoldh.3di`, `onsoldb.3di` | `onsold1` cut at the collar into the head and the body the Avatars combo draws together, on `onsold1`'s textures. |
+| `onenmy1.3di` | The rebel rifleman: tiger-stripe fatigues, chest rig, boonie hat and the rifle in his right hand (`MFlash01` at its muzzle), on the same rig. |
+| `onsold1_0.tga`, `onsold1_0n.mdt`, `onenmy1_0.tga`, `onenmy1_0n.mdt` | Their diffuse textures (the specular mask in the alpha) and normal maps. |
+| `onp1.adm`, `onp1_*.bad` | The player's animation table (109 rows) and its clips: idles, the run in eight directions, the sprint, crouched runs, the kneel, prone and crawls, rolls, the dive, jump, swim, reload and three deaths. A slot it leaves out plays the reset. |
+| `one1.adm`, `one1_*.bad` | The rebel's table: the player's rows with the AI's own (a walk on `anim_walk_forward`, `anim_run_forward`, `anim_attack` firing on `FIRE_SECONDARY`, `anim_guard`, `anim_cover_idle`). |
+| `E_STAND.adm` | The engine's default infantry table (`kDefaultInfantryAdm`, for a person whose item names none), the same rows as `one1.adm`. |
 
 Every HUD file above is our own art from `art/onjo1/hud/` (its `SOURCES.md`
-lists each one's source, size and drawing mode).
+lists each one's source, size and drawing mode); the persons' sources are in
+`art/onjo1/person/` (its `SOURCES.md`).
 
-Nothing references the `on_ar15` files yet. Re-export them by opening the
+Nothing references the `on_ar15` files yet but `on_arms.3di`, the arms of the
+`Avatars.def` combo. Re-export them by opening the
 scene with the add-on installed and running Export Model on `on_ar15` and
 `on_arms` and Export Animations on `on_ar15`: the scene's output paths point
-here. The menu names its font and colors literally, and its pointer by name.
+here. The person re-exports the same way from `art/onjo1/person/onsold1.blend`:
+Export Model on `onsold1` and `onenmy1` first (they write the textures), then on
+`onsoldh` and `onsoldb`, and Export Animations on `onsold1` and `onenmy1`;
+`E_STAND.adm` is a copy of `one1.adm`. The menu names its font and colors literally, and its pointer by name.
 Adding a file here means adding it to this table.
 
 ## How it runs
