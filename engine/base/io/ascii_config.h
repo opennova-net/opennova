@@ -44,7 +44,11 @@ struct ConfigTokens {
 	size_t skip = 0;
 	size_t cut = 0;
 
-	// A token past the count reads as the empty string.
+	// A token past the count reads as the empty string. Retail resets only
+	// tokens 0..2 each line [orig: Terrain_TokenizeConfigLine @0x53CB71..
+	// 0x53CB81]; its tokens 3..29 keep pointers into the static line buffer
+	// at what earlier lines of any file left there, process-wide, which the
+	// port does not reproduce (D-ITEMDEF-8; no shipped def reads one).
 	const char *token(int index) const {
 		return index >= 0 && index < count ? tokens[index] : "";
 	}

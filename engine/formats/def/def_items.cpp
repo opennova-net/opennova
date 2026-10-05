@@ -707,6 +707,9 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             /* Each value 'NN_NAME': split at the FIRST '_', slot = NN-1 (0..15), the
                remainder (internal underscores kept) resolved case-insensitively against
                the engine debris-type table names; at most 16 values processed.
+               Retail walks the token slots to the first NULL, past the line's
+               count into the previous lines' stale slots; the port stops at the
+               count (D-ITEMDEF-8: every shipped line reads the same entries).
                [orig: @ 0x49f314-0x49f396; DeathPieceType_FindByName @ 0x57b310] */
             Token tok[kMaxValueTokens];
             const int ntok = value_tokens(tokens, tok, kMaxValueTokens);
