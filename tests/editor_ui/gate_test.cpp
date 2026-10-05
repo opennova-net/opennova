@@ -246,9 +246,14 @@ void test_windows_show_the_gate() {
 
 	using K = EditorRequestKind;
 	std::vector<Probe> probes = {
+	        // The modal is the workspace's (the MCP gaps lane): the item asks it open, a set_workspace the test
+	        // serves as the Shell does.
 	        {"File > New project...", K::NewProject,
 	         [&] {
-		         menu("File", {"New project..."}, K::NewProject)();
+		         ui.activate(item_id(menu_bar_id(), {"File"}));
+		         ui.activate(item_id(ImHashStr("##Menu_00"), {"New project..."}));
+		         ImGui::ClosePopupsExceptModals();
+		         ui.frames(2);
 		         return opens("New project");
 	         },
 	         nullptr},
@@ -414,14 +419,20 @@ void test_windows_show_the_gate() {
 			std::make_shared<const std::vector<RenameSite>>(std::vector<RenameSite>{ site });
 	const ImGuiID rename = ImHashStr("Rename everywhere");
 	for (const OperationStatus &status : statuses) {
-		post_event(v, ViewEventKind::AskRename, a->path(), NodeAddress(), "name", false,
-				v.dialogs.rename_preview.serial);
+		// The workspace's Rename everywhere opened over the plan (the session's ask), as a preview_rename that
+		// asks the name opens it.
+		std::vector<WorkspaceRefusal> refusals;
+		CHECK(apply_workspace_change(v, R"({"rename": {"open": true}})", refusals) && refusals.empty(), "Rename everywhere asked");
+		v.revisions.touch(ViewConcern::Workspace);
 		ui.frames(3);
 		CHECK(modal_open("Rename everywhere"), "Rename everywhere opens");
 		check_probes(ui, v, status,
 		             {{"Rename everywhere's Rename", K::RenameSymbol, pressed(item_id(rename, {"Rename"}), K::RenameSymbol),
 		               nullptr}});
 		if (modal_open("Rename everywhere")) ui.activate(item_id(rename, {"Cancel"}));
+		// The session closes it as it takes the rename; a hand-made view, here.
+		v.workspace.rename = WorkspaceView::Rename();
+		v.revisions.touch(ViewConcern::Workspace);
 		ui.frames(2);
 	}
 	v.dialogs.rename_preview = DialogsView::RenamePreview();
@@ -444,7 +455,9 @@ void test_windows_show_the_gate() {
 	v.documents.active.clear();
 	for (size_t concern = 0; concern < kViewConcernCount; ++concern) v.revisions.touch(static_cast<ViewConcern>(concern));
 	ui.frames(3);
-	ui.windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
+	// The form's folder, the workspace's (as the session takes the pick's set_workspace).
+	v.workspace.new_project.dir = "C:/mods/New";
+	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(2);
 	// (The welcome page's two columns are a table: its items in its scope.)
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});

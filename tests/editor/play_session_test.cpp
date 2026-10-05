@@ -16,6 +16,7 @@
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <editor/project/project_files.h>
+#include <editor/run/behind_start.h>
 #include <editor/run/launch_plan.h>
 #include <formats/pff/pff.h>
 #include <editor/run/play_session.h>
@@ -32,6 +33,35 @@ using editor_test::FakePlatform;
 static bool write_empty_archive(const std::string &path) {
 	std::filesystem::create_directories(std::filesystem::path(path).parent_path());
 	return opennova::pff::pff_write_archive(path.c_str(), opennova::pff::PFF_FORMAT_PFF3, nullptr, 0) == opennova::pff::PFF_WRITE_OK;
+}
+
+// A game started behind (review X12: BehindStarts, what the Shell's process platform does each pump): the
+// foreground lock serves only while it starts, until its first window went back once or kLockMs passed; its shown
+// windows go back each pump until one is the foreground window (the person brought it forward: let go, never
+// pushed back again), it exits, or kTendMs passed.
+static int test_behind_starts() {
+	using Step = BehindStarts::Step;
+	BehindStarts behind;
+	Step step = Step::Leave;
+	TEST_EXPECT(!behind.tending() && !behind.lock_wanted(0));
+	behind.spawned(40, 1000);
+	TEST_EXPECT(behind.tending() && behind.lock_wanted(1000));
+	// No window yet: left, the lock kept.
+	TEST_EXPECT(behind.tend(40, 1100, false, false, false, step) && step == Step::Leave && behind.lock_wanted(1100));
+	// Its first window shown: sent back, and the lock no longer serves (the person's desktop is theirs again).
+	TEST_EXPECT(behind.tend(40, 1300, false, true, false, step) && step == Step::SendBack && !behind.lock_wanted(1300));
+	TEST_EXPECT(behind.tend(40, 5000, false, true, false, step) && step == Step::SendBack);
+	// Brought forward: let go, never pushed back again.
+	TEST_EXPECT(!behind.tend(40, 6000, false, true, true, step) && step == Step::Leave && !behind.tending());
+	TEST_EXPECT(!behind.tend(40, 6100, false, true, false, step));
+	// A game that shows no window: the lock goes once kLockMs passed; tended until kTendMs, or until it exits.
+	behind.spawned(41, 0);
+	TEST_EXPECT(behind.lock_wanted(BehindStarts::kLockMs - 1) && !behind.lock_wanted(BehindStarts::kLockMs));
+	TEST_EXPECT(behind.tend(41, BehindStarts::kTendMs - 1, false, false, false, step) && step == Step::Leave);
+	TEST_EXPECT(!behind.tend(41, BehindStarts::kTendMs, false, true, false, step) && !behind.tending());
+	behind.spawned(42, 0);
+	TEST_EXPECT(!behind.tend(42, 10, true, false, false, step) && !behind.tending() && !behind.lock_wanted(10));
+	return 0;
 }
 
 static int test_launch_plans() {
@@ -434,6 +464,7 @@ static int test_expansion_staging() {
 
 int main() {
 	int failures = 0;
+	failures += test_behind_starts();
 	failures += test_launch_plans();
 	failures += test_expansion_launch_plans();
 	failures += test_install_staging();
