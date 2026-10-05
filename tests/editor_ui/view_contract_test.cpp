@@ -473,7 +473,17 @@ void test_outline_kinds_and_clicks() {
 		draw_frames(workspace, view, *document, 520.0f, 2);
 		CHECK(in_order(shown(), {"alpha", "bravo", "charlie", "delta", "echo"}) && view.outline()->all_rows(),
 		      "the switch lists the rows left out");
-		CHECK(workspace.requests.empty(), "the chips and the switch are the view's own: no request");
+		// What the outline lists is the workspace's (the MCP gaps lane): each change a set_workspace of the
+		// document's view, the view showing it the while.
+		CHECK(!workspace.requests.empty() &&
+		              std::all_of(workspace.requests.begin(), workspace.requests.end(),
+		                          [](const EditorRequest &request) {
+			                          return request.kind == EditorRequestKind::SetWorkspace &&
+			                                 request.workspace.find("\"document\"") != std::string::npos &&
+			                                 request.workspace.find("pool.txt") != std::string::npos;
+		                          }),
+		      "the chips and the switch are the workspace's: a set_workspace each");
+		workspace.requests.clear();
 
 		// A line by its record: where the mouse hovers it, found down the window.
 		const ImGuiWindow *window = ImGui::FindWindowByName("Tab");
