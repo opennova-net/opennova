@@ -307,17 +307,21 @@ static int test_fixes() {
 	TEST_EXPECT(fixes[0].detail.find(kNotUndoable) != std::string::npos);
 	TEST_EXPECT(fixes[1].bulk && fixes[1].request.kind == EditorRequestKind::CreateMissing &&
 	            fixes[1].detail.rfind("Instead of the game's own: ", 0) == 0);
-	// A required file without a factory (missions on: cmap.mnu): no Create; each menu to use
-	// says what its rename rewrites (b.mnu: the ACTION of a.mnu that names it).
+	// A mission's required menu the game data lacks (missions on: cmap.mnu): Create it, or use a
+	// menu of the project as it, each saying what its rename rewrites (b.mnu: the ACTION of a.mnu
+	// that names it).
 	editor_test::set_missions(session, true);
 	const Diagnostic *cmap = requirement_finding(v, "requirement.missing", "cmap_menu");
 	TEST_EXPECT(cmap != nullptr);
 	if (!cmap) return 1;
 	fixes = fixes_for(*cmap, v);
-	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Use a.mnu as cmap.mnu", "Use b.mnu as cmap.mnu"}));
-	if (fixes.size() != 2) return 1;
-	TEST_EXPECT(fixes[0].detail == "Renames a.mnu to cmap.mnu; nothing refers to it. It cannot be undone with Undo.");
-	TEST_EXPECT(fixes[1].detail ==
+	TEST_EXPECT(labels_of(fixes) ==
+	            std::vector<std::string>({"Create cmap.mnu", "Use a.mnu as cmap.mnu", "Use b.mnu as cmap.mnu"}));
+	if (fixes.size() != 3) return 1;
+	TEST_EXPECT(fixes[0].bulk && fixes[0].request.kind == EditorRequestKind::CreateMissing &&
+	            fixes[0].request.roles == std::vector<std::string>({"cmap_menu"}));
+	TEST_EXPECT(fixes[1].detail == "Renames a.mnu to cmap.mnu; nothing refers to it. It cannot be undone with Undo.");
+	TEST_EXPECT(fixes[2].detail ==
 	            "Renames b.mnu to cmap.mnu and rewrites 1 reference in 1 file. It cannot be undone with Undo.");
 	editor_test::set_missions(session, false);
 	// An optional file the project lacks: its note offers the same (a factory, the game data).
