@@ -81,6 +81,17 @@ typedef struct {
 	int32_t glyph_spacing;
 	fnt_glyph_t glyphs[FNT_GLYPH_COUNT];
 	uint8_t *pages; /* Contiguous num_pages * FNT_TEXTURE_SIZE RGBA bytes. */
+	/* How fnt_write writes the pages' colour (no field of the file: the writer's
+	 * choice, 0 from fnt_init_blank and fnt_parse). 0 writes every texel white
+	 * with its alpha kept, a mask the text's colour tints (our generated fonts'
+	 * form); nonzero writes each texel's RGB as given. The colour is the game's to
+	 * read: the loader makes each page under mode word 0x651, whose colour op 0x600
+	 * is MODULATE2X(TEXTURE, DIFFUSE) and whose alpha op 0x50 MODULATE(TEXTURE,
+	 * DIFFUSE) [orig: GameFont_LoadFromBlob @ 0x674740, 0x674830..0x67483B;
+	 * RenderState_DecodeModeColorStage @ 0x681080; RenderState_DecodeModeAlphaStage
+	 * @ 0x680b00] (docs/render/render-material-re.md), so a dark texel (a glyph's
+	 * rim) draws dark under any text colour. */
+	uint8_t keep_page_rgb;
 } fnt_font_t;
 
 /* The engine's per-font glyph render scale [orig: this+4844 = 800.0 / fontData[1]

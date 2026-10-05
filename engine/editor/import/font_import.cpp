@@ -155,6 +155,17 @@ const std::vector<ImportOptionRow> &font_import_option_rows() {
 		design.accepts = design_width_form;
 		design.fallback = "800";
 		out.push_back(design);
+		ImportOptionRow color;
+		color.key = "color";
+		color.label = "Colour";
+		color.words = "What the font's pages hold of the sheet's colour. The game multiplies a page's colour by the "
+		              "text's, so a dark texel draws dark whatever the text's colour.";
+		color.values = {
+		        {"white", "every texel white with its alpha kept, a mask the text's colour tints"},
+		        {"sheet", "each texel's own colour kept (a dark rim around a glyph stays dark)"},
+		};
+		color.fallback = "white";
+		out.push_back(color);
 		return out;
 	}();
 	return rows;
@@ -182,6 +193,7 @@ bool font_import_settings(const ImportOptions &options, FontImportSettings &out,
 		else if (key == "space" && integer_in(value, 1, kGlyphMax, number)) out.space = number;
 		else if (key == "spacing" && integer_in(value, -kSpacingMax, kSpacingMax, number)) out.spacing = number;
 		else if (key == "design_width" && integer_in(value, 1, kDesignWidthMax, number)) out.design_width = uint32_t(number);
+		else if (key == "color") out.sheet_color = value == "sheet";
 	}
 	field.clear();
 	return true;
@@ -280,6 +292,7 @@ bool make_font_from_sheet(const RgbaImage &sheet, const FontImportSettings &sett
 		return false;
 	}
 	font.design_width = settings.design_width;
+	font.keep_page_rgb = settings.sheet_color ? 1 : 0;
 	const auto uv = [](uint32_t texels, uint32_t side) { return float(texels) / float(side); };
 	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
 		const fnt_pack_rect_t &rect = rects[i];
@@ -344,8 +357,8 @@ bool run_font_import(ImportContext &context, ImportProduct &out) {
 	if (opaque)
 		out.diagnostics.push_back(make_finding(
 		        CoreFinding::ImportFont, DiagnosticSeverity::Warning,
-		        set.sheet + " has no clear texel: a glyph is its cell's alpha (the .fnt keeps the alpha alone, its colour "
-		                    "the text's), so every glyph is a full box. Draw the glyphs on a transparent ground.",
+		        set.sheet + " has no clear texel: a glyph's ink is its texels of alpha above 0, so every glyph is a "
+		                    "full box. Draw the glyphs on a transparent ground.",
 		        source_name));
 	out.outputs.push_back(std::move(output));
 	return true;

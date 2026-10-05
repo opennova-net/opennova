@@ -2,7 +2,8 @@
 // reads, through our own FNT writer and read back by fnt_parse. The set file and its refusals; the
 // options and theirs; a sheet built in memory (16 x 14 cells of 8 x 10, a few glyphs drawn) made into
 // a font under each advance mode, its rect widths, tracking and space, the blank cells, the zero records
-// at 0x7F..0x81, the spacing and design-width header words and the pixels copied; a sheet of large
+// at 0x7F..0x81, the spacing and design-width header words, the pixels copied and their colour (white,
+// or the sheet's own under `color sheet`: a dark rim texel kept dark); a sheet of large
 // cells packed over several pages, and one that needs more than a font holds; the sheet's refusals.
 // Through the importer's run over an ImportContext: the output named after the set, an option, the
 // set, the sheet that is not there, and one that does not decode, each refused with its finding. Over a
@@ -171,23 +172,28 @@ static int test_options() {
 	TEST_EXPECT(font_import_settings({}, settings, why, field));
 	TEST_EXPECT(settings.advance == FontAdvance::Ink && settings.tracking == 1 && settings.space == 0 && settings.spacing == 0 &&
 	            settings.design_width == 800);
-	TEST_EXPECT(font_import_settings({{"advance", "LEFT"}, {"tracking", "0"}, {"space", "5"}, {"spacing", "-3"}, {"design_width", "1024"}},
+	TEST_EXPECT(!settings.sheet_color);
+	TEST_EXPECT(font_import_settings({{"advance", "LEFT"}, {"tracking", "0"}, {"space", "5"}, {"spacing", "-3"}, {"design_width", "1024"},
+	                                  {"color", "sheet"}},
 	                                 settings, why, field));
 	TEST_EXPECT(settings.advance == FontAdvance::Left && settings.tracking == 0 && settings.space == 5 && settings.spacing == -3 &&
-	            settings.design_width == 1024);
+	            settings.design_width == 1024 && settings.sheet_color);
 	// "" is the fallback.
 	TEST_EXPECT(font_import_settings({{"tracking", ""}}, settings, why, field) && settings.tracking == 1);
 	// A key no row has, and a value outside its row: refused, the key in `field`.
 	TEST_EXPECT(!font_import_settings({{"kerning", "1"}}, settings, why, field) && field == "kerning");
 	for (const auto &[key, value] : std::vector<std::pair<std::string, std::string>>{
 	             {"advance", "wide"}, {"tracking", "33"}, {"tracking", "-1"}, {"tracking", "2px"}, {"space", "0"},
-	             {"space", "255"}, {"spacing", "17"}, {"spacing", "-17"}, {"design_width", "0"}, {"design_width", "4097"}}) {
+	             {"space", "255"}, {"spacing", "17"}, {"spacing", "-17"}, {"design_width", "0"}, {"design_width", "4097"},
+	             {"color", "red"}}) {
 		TEST_EXPECT(!font_import_settings({{key, value}}, settings, why, field) && field == key);
 		TEST_EXPECT(why.find("takes") != std::string::npos);
 	}
 	// The rows the import_options query lists: tracking and space only under ink and left.
 	const std::vector<ImportOptionRow> &rows = font_import_option_rows();
-	TEST_EXPECT(rows.size() == 5);
+	TEST_EXPECT(rows.size() == 6);
+	TEST_EXPECT(import_option_row(rows, "color") && import_option_row(rows, "color")->fallback == "white" &&
+	            import_option_row(rows, "color")->values.size() == 2 && import_option_row(rows, "color")->applies_to.empty());
 	const ImportOptionRow *tracking = import_option_row(rows, "tracking");
 	TEST_EXPECT(tracking && tracking->fallback == "1" && tracking->applies_to == "advance" &&
 	            tracking->applies_values == std::vector<std::string>({"ink", "left"}));
@@ -272,6 +278,26 @@ static int test_advance_modes() {
 		// A space wider than a cell is the space option's fault.
 		Made made;
 		TEST_EXPECT(!make(sheet, {{"space", "9"}}, made) && made.field == "space");
+	}
+	{
+		// color: the fallback (white) writes every texel white, its alpha kept; `sheet` keeps the sheet's
+		// own colour, so 'A''s dark rim texel (its first inked column's second row) stays dark.
+		RgbaImage rimmed = test_sheet();
+		uint8_t *rim = &rimmed.pixels[(size_t(2 * kCellH + 1) * size_t(rimmed.width) + size_t(kCellW + 1)) * 4];
+		rim[0] = rim[1] = rim[2] = 0;
+		rim[3] = 255;
+		Made white, named, kept;
+		TEST_EXPECT(make(rimmed, {}, white) && make(rimmed, {{"color", "white"}}, named) && make(rimmed, {{"color", "sheet"}}, kept));
+		TEST_EXPECT(white.bytes == named.bytes);
+		const uint8_t *was_rim = glyph_texel(white.font, 'A', 0, 1);
+		TEST_EXPECT(was_rim[0] == 255 && was_rim[1] == 255 && was_rim[2] == 255 && was_rim[3] == 255);
+		const uint8_t *dark = glyph_texel(kept.font, 'A', 0, 1);
+		TEST_EXPECT(dark[0] == 0 && dark[1] == 0 && dark[2] == 0 && dark[3] == 255);
+		const uint8_t *red = glyph_texel(kept.font, 'A', 1, 1);
+		TEST_EXPECT(red[0] == 200 && red[1] == 10 && red[2] == 10 && red[3] == 255);
+		TEST_EXPECT(glyph_texel(kept.font, '.', 0, 9)[3] == 128 && width_of(kept.font, 'A') == width_of(white.font, 'A'));
+		// Only the pages differ.
+		TEST_EXPECT(std::equal(white.bytes.begin(), white.bytes.begin() + FNT_TOTAL_HEADER, kept.bytes.begin()));
 	}
 	return 0;
 }

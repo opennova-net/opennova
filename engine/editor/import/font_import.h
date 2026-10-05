@@ -25,9 +25,8 @@ namespace opennova::editor {
 // cell of byte b the (b - 0x20)th, as the font's 224 glyph records run from the space [orig:
 // GameFont_LoadFromBlob @ 0x674740] (fnt.h). Its sides divide by 16 and by 14, and a cell is at most
 // 254 texels tall, a page's 256 less the packer's gutter at each edge. A texel is ink where its alpha is
-// above 0, and its pixels are copied into the pages as they are; the FNT writer keeps each texel's
-// alpha and writes its colour white (fnt_write), the text's own colour tinting it as the game draws it,
-// so the glyphs are drawn on a transparent ground.
+// above 0, and its pixels are copied into the pages as they are, so the glyphs are drawn on a
+// transparent ground; what of their colour the .fnt keeps is the `color` option's.
 //
 // Every glyph is the cell's full height, one height for the whole font, which keeps a line's baselines
 // together. Its width is its advance: the format has no advance table, the game stepping each glyph
@@ -47,7 +46,12 @@ namespace opennova::editor {
 //   never read: it draws blank in every mode;
 // - `spacing`, the FNT header's glyph_spacing word, -16..16, fallback 0;
 // - `design_width`, the FNT header's +4 word, 1..4096, fallback 800: the game draws the font at
-//   800 / design_width of its texels [orig: GameFont_LoadFromBlob @ 0x674740] (fnt_design_scale).
+//   800 / design_width of its texels [orig: GameFont_LoadFromBlob @ 0x674740] (fnt_design_scale);
+// - `color`, what the pages keep of the sheet's colour: `white` (the fallback: every texel white with
+//   its alpha kept, the FNT writer's mask, which the text's colour tints) or `sheet` (each texel's own
+//   colour, fnt.h keep_page_rgb). The game multiplies a page's colour by the text's (the page's mode
+//   0x651, MODULATE2X(TEXTURE, DIFFUSE) [orig: GameFont_LoadFromBlob @ 0x674740, 0x674830..0x67483B]),
+//   so a glyph's dark rim drawn in the sheet stays dark under any text colour.
 // The bytes 0x7F, 0x80 and 0x81 get the all-zero record whatever their cells hold: the game neither
 // measures nor draws them [orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]
 // (fnt_byte_is_nonprinting).
@@ -83,6 +87,7 @@ struct FontImportSettings {
 	int space = 0; // 0: a quarter of the cell's height, rounded
 	int spacing = 0;
 	uint32_t design_width = 800;
+	bool sheet_color = false; // `color sheet`: the pages keep the sheet's colour
 };
 // False, with `why` and the option's key in `field`, for a key no row has or a value its row does not
 // take.
