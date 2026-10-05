@@ -28,6 +28,8 @@ const BlankFactory k_factories[] = {
 	{ "vmacros", AssetKind::Strings, make_blank_empty_strings, "an empty voice-macro table", false },
 	{ "keyhelp", AssetKind::Strings, make_blank_empty_strings, "an empty key-help table", false },
 	{ "weapon_def", AssetKind::WeaponDefs, make_blank_weapon_def, "a weapon table with no weapons", true },
+	{ "sndprof_def", AssetKind::SoundProfileDefs, make_blank_sound_profiles,
+	  "the sound profiles: one \"default\" profile, every slot silent", true },
 	{ "items_def", AssetKind::ItemDefs, make_blank_items_def, "an item table holding only the Null marker", true },
 	{ "charattr_def", AssetKind::CharAttrDefs, make_blank_charattr_def,
 	  "a character-attribute file with no classes", true },
