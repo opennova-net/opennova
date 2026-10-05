@@ -1,5 +1,6 @@
 #include "network/udp_pump.h"
 #include "network/udp_datagram.h"
+#include "network/udp_pump_datagram_socket.h"
 #include "util/string_convert.h"
 
 #include <net/npwire/net_ports.h> // lan_client_bind_ports
@@ -54,6 +55,14 @@ uint32_t ipv4_from_string(const String &ip) {
 
 UdpPump::UdpPump() {}
 UdpPump::~UdpPump() { close(); }
+
+opennova::DatagramDemux &UdpPump::demux() {
+	if (demux_ == nullptr) {
+		demux_socket_ = std::make_unique<UdpPumpDatagramSocket>(this);
+		demux_ = std::make_unique<opennova::DatagramDemux>(*demux_socket_);
+	}
+	return *demux_;
+}
 
 void UdpPump::record_(bool inbound, const String &peer_ip, int peer_port,
 		const PackedByteArray &bytes) {

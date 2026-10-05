@@ -248,6 +248,27 @@ bool Simulation::enable_host_listen(int p_port) {
 	return true;
 }
 
+// A NovaWorld host's match rides the NovaWorld session's socket: the pump the
+// session bound from the mpnovaworld range, read through its demux's game view
+// (UdpPumpGameSocket), so the service's observed NWU source is the endpoint its
+// joiners reach (D-NET-346; engine: net/npwire/datagram_demux.h). Nothing binds
+// here; the role and the counter are enable_host_listen's.
+bool Simulation::enable_host_listen_on(const Ref<UdpPump> &p_pump) {
+	using RoleKind = opennova::inmatch::RoleKind;
+	if (p_pump.is_null() || !p_pump->is_open()) return false;
+	listen_server_ = true;
+	const bool installed = install_role(std::make_unique<opennova::inmatch::HostRole>(
+			net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost,
+			assets_.item_replication_catalog));
+	net_.lan_host_pending = !installed;
+	net_.pump = p_pump;
+	net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
+			std::make_unique<UdpPumpGameSocket>(p_pump));
+	if (installed) host_role_->set_socket(net_.pump_socket.get());
+	net_.host_bind_port = static_cast<uint16_t>(p_pump->local_port());
+	return true;
+}
+
 int Simulation::get_host_listen_port() const {
 	return (is_host_listening() && net_.pump.is_valid()) ? net_.pump->local_port() : 0;
 }

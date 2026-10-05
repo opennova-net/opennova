@@ -1019,12 +1019,12 @@ public:
 	void set_terrain_til_data(const PackedByteArray &p_til_bytes);
 
 	// --- co-op LAN host (Increment C) ------------------------------------
-	// Turn the sim into a co-op LAN HOST: bind a UDP listen socket on `p_port`
-	// (0 = an OS-assigned ephemeral port) and accept joiners through the
-	// witnessed session handshake, spawning each into the live World on join.
-	// Implies enable_listen_server(true) — call BEFORE loading a mission.
-	// Returns false if the socket can't bind.
+	// Turn the sim into a co-op LAN HOST: bind a UDP listen socket on `p_port` (0 = OS-assigned) and
+	// accept joiners through the witnessed session handshake, spawning each into the live World on
+	// join. Implies enable_listen_server(true): call BEFORE loading a mission. False if the socket
+	// can't bind. _on hosts on a NovaWorld session's bound pump instead (one socket, D-NET-346).
 	bool enable_host_listen(int p_port);
+	bool enable_host_listen_on(const Ref<UdpPump> &p_pump);
 	bool is_host_listening() const {
 		const opennova::inmatch::RoleKind kind = session_.kind();
 		return kind == opennova::inmatch::RoleKind::ListenHost ||

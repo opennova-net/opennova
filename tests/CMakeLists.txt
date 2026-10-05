@@ -3698,6 +3698,28 @@ add_executable(opennova_serve_game_cfg_test serve/opennova_serve_game_cfg_test.c
 target_link_libraries(opennova_serve_game_cfg_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_game_cfg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_game_cfg COMMAND opennova_serve_game_cfg_test)
+# opennova-serve listed on NovaWorld (ADR 0051 d6) against the real NwUdpListener and an in-test
+# gate over loopback: it hosts on the game socket before the boot, lists the Serve Only columns
+# with no slot 0, the advertised endpoint is the game socket a joiner plays on, and the stop
+# deregisters.
+add_executable(opennova_serve_novaworld_test
+    serve/opennova_serve_novaworld_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(opennova_serve_novaworld_test PRIVATE opennova_serve_core opennova_novaworld_service)
+target_include_directories(opennova_serve_novaworld_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
+set_tests_properties(opennova_serve_novaworld PROPERTIES RUN_SERIAL TRUE)
+# The Serve Only registration's var lists against the witnessed retail names and values.
+add_executable(serve_registration_parity_test serve/serve_registration_parity_test.cpp)
+target_link_libraries(serve_registration_parity_test PRIVATE opennova_serve_core)
+add_test(NAME serve_registration_parity COMMAND serve_registration_parity_test)
+# The one socket under the game's protocol and the NWU session (D-NET-346): the demux and the
+# lobby protocol's claim.
+add_executable(nwu_demux_test novaworld/nwu_demux_test.cpp)
+target_link_libraries(nwu_demux_test PRIVATE opennova_net)
+add_test(NAME nwu_demux COMMAND nwu_demux_test)
 
 # opennova-nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
 # end over real loopback UDP against the real NwUdpListener and an in-test gate (the row, a roster
@@ -3720,6 +3742,11 @@ add_executable(nw_lister_admin_feed_test novaworld/nw_lister_admin_feed_test.cpp
 target_link_libraries(nw_lister_admin_feed_test PRIVATE opennova_nw_lister_core)
 target_include_directories(nw_lister_admin_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/admin)
 add_test(NAME nw_lister_admin_feed COMMAND nw_lister_admin_feed_test)
+# The destination policies: nw-lister's loopback-only, and opennova-serve's loopback and any host
+# off NovaLogic's domain, novaworld.net behind --allow-public (ADR 0051 d6).
+add_executable(nw_lister_destination_policy_test novaworld/nw_lister_destination_policy_test.cpp)
+target_link_libraries(nw_lister_destination_policy_test PRIVATE opennova_nw_lister_core)
+add_test(NAME nw_lister_destination_policy COMMAND nw_lister_destination_policy_test)
 
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)

@@ -6,16 +6,22 @@
 
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/rtxt/rtxt.h>
+#include <net/napi/envelope.h>
+#include <net/novacrypto/nwu.h>
+#include <net/novaworld/gate_probe.h>
 
 #include "common/synthetic_mission.h"
 #include "net_sockets.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace serve_test {
@@ -62,6 +68,51 @@ inline std::vector<uint8_t> deathmatch_mission(const char *name = "Serve Test Ma
 	std::string error;
 	if (!bms::write(m, bytes, error)) std::printf("bms::write: %s\n", error.c_str());
 	return bytes;
+}
+
+// A gametext.bin with the given (section, [(key, text)]) rows, written by the
+// format's own writer.
+inline std::vector<uint8_t> gametext(
+		const std::vector<std::pair<std::string, std::vector<std::pair<std::string, std::string>>>> &sections) {
+	using namespace opennova;
+	rtxt::File file;
+	for (const auto &section : sections) {
+		const uint32_t index = static_cast<uint32_t>(file.sections.size());
+		file.sections.push_back({section.first, static_cast<uint32_t>(section.second.size())});
+		for (const auto &row : section.second) {
+			rtxt::Entry entry;
+			entry.key = row.first;
+			entry.text = row.second;
+			entry.section_index = index;
+			file.entries.push_back(std::move(entry));
+		}
+	}
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!rtxt::write(file, bytes, error)) std::printf("rtxt::write: %s\n", error.c_str());
+	return bytes;
+}
+
+// A NovaWorld gate on `gate` that answers every probe until `stop`, naming
+// 127.0.0.1:`nw_port` (an in-test NwUdpListener) as UDPNOVAWORLD; `met_ext`
+// asks for the extended metrics (the gate's METEXT).
+inline void serve_gate(opennova::net::Socket &gate, uint16_t nw_port, bool met_ext, std::atomic<bool> &stop) {
+	using namespace opennova;
+	std::string body = "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n"
+	                   "VAR \"UDPNOVAWORLD\" \"127.0.0.1:" + std::to_string(nw_port) + "\"\r\n";
+	if (met_ext) body += "VAR \"METEXT\" \"1\"\r\n";
+	std::vector<uint8_t> inner(body.begin(), body.end());
+	nwu_decrypt(inner.data(), inner.size(), GATE_NWU_KEY);
+	std::vector<uint8_t> reply(inner.size() + 16);
+	std::size_t reply_size = 0;
+	napi_envelope_encode(inner.data(), inner.size(), reply.data(), reply.size(), &reply_size);
+	reply.resize(reply_size);
+	while (!stop) {
+		uint8_t rx[1024];
+		net::Endpoint from{};
+		if (net::udp_recv_from(gate, rx, sizeof(rx), from, 50) <= 0) continue;
+		net::udp_send_to(gate, from, reply.data(), reply.size());
+	}
 }
 
 inline uint16_t free_udp_port() {

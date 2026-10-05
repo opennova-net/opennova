@@ -132,6 +132,10 @@ public:
 	// The hosting session's in-match half (C++ only): the roster, the round
 	// clock, the GSID, the join tickets and the ServerCommand config changes.
 	opennova::NwuHostRole &host_role() { return host_role_; }
+	// The NovaWorld network type's one socket: a hosting session's match rides
+	// it (its demux's game view), so the service's observed NWU source is the
+	// game endpoint (D-NET-346).
+	Ref<UdpPump> get_game_pump() const { return nw_pump_; }
 	// The gate reply the lobby HTTP legs resolve their base URL from; null
 	// until a gate response landed.
 	Ref<NovaWorldGateInfo> get_server_info() const;
@@ -280,7 +284,6 @@ private:
 	Ref<UdpPump> gate_pump_;
 	Ref<UdpPump> nw_pump_;
 	std::unique_ptr<UdpPumpDatagramSocket> gate_socket_;
-	std::unique_ptr<UdpPumpDatagramSocket> nw_socket_;
 	double clock_accum_s_ = 0.0;
 	uint32_t clock_ms_ = 0;
 	// The shared gate/session driver (engine/net/novaworld): ClientSession, ci/ck,

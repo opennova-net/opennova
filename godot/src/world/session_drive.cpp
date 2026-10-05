@@ -8,6 +8,7 @@
 #include "mission/mission_data.h"
 #include "mission/mission_root.h"
 #include "network/novaworld_client.h"
+#include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/mission_exit.h> // the post-mission router
 #include "object/avatar_database.h"
 #include "resource_index/launch_flags.h"
@@ -567,11 +568,13 @@ void SessionDrive::stage_runtime_options(const Ref<MissionSetupOptions> &p_opts)
 		// match: its session is already hosting (the service's host verify
 		// lands before the mission starts) and rides in with the load.
 		NovaWorldClient *client = nw_client();
-		pending_host_->set_network_type(
-				pending_host_->get_channel() == kChannelNovaWorld && client != nullptr &&
-								client->is_hosting()
-						? opennova::inmatch::NetworkType::NovaWorld
-						: opennova::inmatch::NetworkType::Lan);
+		const bool novaworld = pending_host_->get_channel() == kChannelNovaWorld &&
+				client != nullptr && client->is_hosting();
+		pending_host_->set_network_type(novaworld ? opennova::inmatch::NetworkType::NovaWorld
+		                                          : opennova::inmatch::NetworkType::Lan);
+		// The match hosts on the session's own socket, the one the service saw
+		// its NWU datagrams come from (D-NET-346).
+		if (novaworld) p_opts->set_host_pump(client->get_game_pump());
 	} else if (pending_join_.is_valid()) {
 		p_opts->set_join_target(pending_join_);
 		p_opts->set_net_transport("lan-join");
@@ -780,9 +783,13 @@ void SessionDrive::stop_nw_client() {
 }
 
 // The hosting session meets its match once the runtime is live: the GSID and
-// AppId the in-match host advertises, the join-ticket arm, and the host's own
-// player in the roster (Server_PlayerAdd adds the local player like any other,
-// its endpoint the bound game port).
+// AppId the in-match host advertises, the join-ticket arm, and a listen host's
+// own player in the roster (Server_PlayerAdd adds the local player like any
+// other). Its PlayerIpAndPort is its loopback connection's address, which
+// carries no peer address and an unset port: "0.0.0.0:0", never a reachable
+// endpoint. The service learns the game endpoint from the NWU datagrams'
+// source, the shared socket (D-NET-346; net-re "A Serve Only host's
+// registration"). A Serve Only host publishes no slot 0.
 void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	NovaWorldClient *client = nw_client();
 	MissionRoot *runtime = world_->get_runtime();
@@ -818,7 +825,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		opennova::HostPlayerSlot self;
 		self.slot = 0;
 		self.player_name = opennova::to_std(p_opts->get_player_name());
-		self.ip_and_port = ":" + std::to_string(sim->get_host_listen_port());
+		self.ip_and_port = opennova::peer_addr_to_string(opennova::PeerAddr{});
 		self.pcid = login_pcid; // the host's own player's PCID is its login cookie
 		self.team = "0";
 		self.type = "0";

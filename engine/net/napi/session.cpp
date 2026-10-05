@@ -395,6 +395,17 @@ const char *server_command_verb_name(ServerCommandVerb verb) {
 	return "";
 }
 
+const char *server_command_target_name(ServerCommandTarget target) {
+	switch (target) {
+		case ServerCommandTarget::None: return "";
+		case ServerCommandTarget::ByIndex: return "ByIndex";
+		case ServerCommandTarget::ByIpAndPort: return "ByIpAndPort";
+		case ServerCommandTarget::ByName: return "ByName";
+		case ServerCommandTarget::ByPCID: return "ByPCID";
+	}
+	return "";
+}
+
 // [orig: String_TokenizeQuotedToArray @0x616d60]
 std::vector<std::string> tokenize_quoted(std::string_view text) {
 	std::vector<std::string> tokens;
