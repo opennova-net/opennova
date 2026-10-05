@@ -60,7 +60,7 @@ constexpr DialogKey kDialogKeys[] = {
 
 // MissionRotation_Append: the pair joins the end, and a row whose code word
 // carries the objective bit or lacks the team bit loses its launch option
-// [orig: Server_QueueEntityAction (a misnomer) @0x5019D0 -- the bounds test
+// [orig: MissionRotation_Append @0x5019D0 -- the bounds test
 //  @0x5019D5..0x5019E3, the append @0x501A86..0x501AA0, the clear
 //  @0x501AA8..0x501AC1].
 void append_to_rotation(MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog,

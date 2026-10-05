@@ -61,11 +61,11 @@ struct HostScreenState {
 	int32_t lineup_queue_size = 100; // [orig: dword_2550AB4]
 };
 
-// The map rotation the Mission lines seed (the list the IDB calls
-// g_EntityActionQueue @0xC86FDC, a misnomer: (catalog index, flag) pairs with a
-// cursor and an alternate cursor). The round-end advance over it is D-NET-331,
-// unported; this is the seed. `launch_options` is the catalog entries' +0x1140
-// word, kept beside the catalog it indexes (0 for a row no line named).
+// The map rotation the Mission lines seed (g_MissionRotation @0xC86FDC:
+// (catalog index, flag) pairs with a cursor and an alternate cursor). The
+// round-end advance over it is D-NET-331, unported; this is the seed.
+// `launch_options` is the catalog entries' +0x1140 word, kept beside the
+// catalog it indexes (0 for a row no line named).
 struct MissionRotationEntry {
 	size_t catalog_index = 0;
 	uint32_t flag = 0;
