@@ -26,10 +26,13 @@ OpenNova show it alike.
 
 | What | Budget | Why |
 |---|---|---|
-| Diffuse | 2048 for hero models (people, vehicles, first-person weapons), 1024 for props and buildings | Retail draws any size; its 32-bit process is the real limit |
-| Normal map | 512 a side | Retail halves a normal map until it is at most 512 |
+| Diffuse | 2048 for hero models (people, vehicles, first-person weapons), 1024 for props and buildings (2048 only where the player looks close, as `oncrate1`) | Retail draws any size; its 32-bit process is the real limit |
+| Diffuse file | DXT5 DDS with a full mip chain beside the `.tga` name the model holds | The model loader takes the `.dds` of the name first; a TGA loads uncompressed with the engine's own mips, 4 bytes a texel (a 2048 TGA is about 21 MiB in retail's process, its DXT5 DDS about 5.3 MiB); every texture the original ships for its models is DXT5 with a full chain |
+| Normal map | 512 a side, a `.mdt` on a normal row (type 4 or 5) | Retail halves a normal map until it is at most 512; a `.tga` on a normal row is a height map the engine converts, and a normal map on a type 0 row loads as a plain colour image with no cap |
 | Specular | in the diffuse alpha | `VS_PHONGT` and the other Phong shaders read it there |
-| Detail | a tiling texture on the second UV map | The `FF_MT` and `*2` shaders multiply it in at 2x |
+| Detail | a tiling texture on the second UV map, mid grey (128) neutral | The `FF_MT` and `*2` shaders multiply it in at 2x; the original's buildings (`Dhut02`) pair a 512 base on the first UV map with small detail textures tiled about 20 times across the second, which is how a building stays sharp up close |
+| Brightness | a lit surface's texel at about half its seen value | Retail lights in gamma space as texture x (hemisphere + sun) x 2, so mid grey under full light reads as white |
+| Sides | powers of two; TGAs stored bottom row first | Every model texture the original ships is a power of two (a height map must be); retail's TGA reader ignores the origin bit, so a top-left TGA draws upside down |
 | Triangles | LOD 0 about 3 to 5 times the original's; keep the LOD chain | Retail lights fixed-function shaders per vertex; more vertices light better |
 | Vertices per LOD | at most 2 MiB of vertex data: 52,428 static, 32,768 static with tangents (the bump shaders), 37,449 skinned, 26,214 skinned with tangents | Retail uploads a LOD into one 2 MiB pool buffer and drops a larger one (`allocate_lod_gpu_buffers @ 0x5B2610`); strides 40, 64, 56, 80 bytes |
 | Indices per LOD | at most 262,144 (512 KiB) | The index pool's smallest buffer |
