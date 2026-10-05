@@ -138,7 +138,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
     size_t raw_cap = 0;
     size_t emplacement_attachments_cap = 0;
 
-    for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens, const char *line,
+    for_each_def_line(buf, file_len, [&](io::ConfigTokens &tokens, const char *line,
                                          size_t line_len, size_t) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1); // the first value token, "" when none
@@ -171,8 +171,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 ItemDef_AllocateWithDefaults @0x49E3B0 from ItemDef_ParseProperty @0x49EB00] */
             raw_cap = 0;
             emplacement_attachments_cap = 0;
-            /* The name is token 1, cut to 46 characters [orig: the strlen
-               compare @0x49EBD9, the terminator @0x49EBFB] */
+            /* The name is token 1, cut to 46 characters in the line buffer
+               itself, where a later short line's stale slot still reads the
+               cut (io::ConfigTokens::terminate_at) [orig: the strlen compare
+               @0x49EBD9, `mov byte ptr [edx+2Eh], 0` @0x49EBFB] */
+            if (vl >= 46) tokens.terminate_at(v + 46);
             copy_token(current.display_name, 47, tokens, 1);
             in_block = 1;
             return;
@@ -644,9 +647,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (key_is(key, "damage_reduc_pp")) {
             /* pp = atof(token 1), max = 1 - pp, then max = atof(token 2) when the
                line carries it [orig: @0x4A0062..0x4A00C3, the count gate
-               `cmp [ctx],2; jle` @0x4A00A1] */
-            current.damage_reduc_pp = parse_float_n(v, vl);
-            current.damage_reduc_max = 1.0f - current.damage_reduc_pp;
+               `cmp [ctx],2; jle` @0x4A00A1]. The subtraction takes the double
+               atof left on the x87 stack, not the float it stored: `fst` keeps
+               st(0) for `fld1; fsubrp` (@0x4A0089..0x4A0092), so a pp of 0.058
+               leaves a max of (float)(1 - 0.058), one float step below
+               1.0f - 0.058f. */
+            const double pp = io::retail_atof_n(v, vl);
+            current.damage_reduc_pp = static_cast<float>(pp);
+            current.damage_reduc_max = static_cast<float>(1.0 - pp);
             if (tokens.count > 2) {
                 const char *max = tokens.tokens[2];
                 current.damage_reduc_max = parse_float_n(max, strlen(max));
@@ -734,25 +742,30 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             current.husk_sub_parts = parse_int_n(v, vl); /* -> +0x100 count byte */
             parsed = 1;
         } else if (key_is(key, "husk_sub_part_types")) {
-            /* Each value 'NN_NAME': split at the FIRST '_', slot = NN-1 (0..15), the
-               remainder (internal underscores kept) resolved case-insensitively against
-               the engine debris-type table names; at most 16 values processed.
-               Retail walks the token slots to the first NULL, past the line's
-               count into the previous lines' stale slots; the port stops at the
-               count (D-ITEMDEF-8: every shipped line reads the same entries).
-               [orig: @ 0x49f314-0x49f396; DeathPieceType_FindByName @ 0x57b310] */
-            Token tok[kMaxValueTokens];
-            const int ntok = value_tokens(tokens, tok, kMaxValueTokens);
+            /* Each value 'NN_NAME': split at the FIRST '_', which the arm cuts
+               in the line buffer itself (a later short line's stale slot reads
+               the cut), slot = atol(NN) - 1 (0..15), the remainder (internal
+               underscores kept) resolved case-insensitively against the engine
+               debris-type table names; at most 16 entries. The walk runs the
+               slots from 1 to the first NULL one, past the line's count into
+               the slots earlier lines left (io::ConfigTokens::slot).
+               [orig: @ 0x49F31A..0x49F396 — the 16 cap @0x49F330, strstr(slot,
+               "_") @0x49F343, the cut @0x49F351, atol @0x49F358, the unsigned
+               `cmp edi, 0Fh; ja` @0x49F365, the NULL test @0x49F393;
+               DeathPieceType_FindByName @ 0x57b310] */
             int processed = 0;
-            for (int ti = 0; ti < ntok && processed < 16; ++ti) {
-                const char *us = (const char *)memchr(tok[ti].s, '_', tok[ti].len);
-                if (us == NULL) continue;
-                const int slot = parse_int_n(tok[ti].s, (size_t)(us - tok[ti].s)) - 1;
-                if (slot < 0 || slot > 15) continue;
+            for (int i = 1; i < io::kConfigMaxTokens; ++i) {
+                const char *value = tokens.slot(i);
+                if (value == nullptr || processed >= 16) break;
+                const char *us = strchr(value, '_');
+                if (us == nullptr) continue;
+                tokens.terminate_at(us);
+                const uint32_t slot = static_cast<uint32_t>(io::retail_atol(value)) - 1u;
+                if (slot > 15u) continue;
                 ++processed;
                 const char *nm = us + 1;
-                const size_t nl = tok[ti].len - (size_t)(nm - tok[ti].s);
-                current.husk_sub_part_types[slot] = (unsigned char)death_piece_type_index(nm, nl);
+                current.husk_sub_part_types[slot] =
+                        (unsigned char)death_piece_type_index(nm, strlen(nm));
             }
             parsed = 1;
         } else if (key_is(key, "attrib:")) {

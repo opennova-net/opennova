@@ -84,9 +84,17 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out) 
     // The one def walk (defscan::for_each_def_line): cut at CR LF only, the
     // last byte of an unterminated tail line dropped [orig: File_ParseASCIIFile
     // @0x53D8C7..0x53D8F5, the tail @0x53D8E9 / @0x53D8EC]; a lone LF is no
-    // line break there.
-    for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens, const char *,
-                                         size_t, size_t line_index) {
+    // line break there. The first load walks the file twice, a count of its
+    // `powerup` lines and then the parse, so the parse's first lines read the
+    // slots the count pass left at the file's end (io::ConfigTokens::slot)
+    // [orig: PowerUpDef_LoadFromFile @0x443350 — the count pass @0x44338E
+    // (PowerUpDef_CountCallback @0x4425B0, which reads only the key), the
+    // parse @0x4433CC]. The count sizes retail's table; ours grows.
+    io::ConfigTokens tokens_state;
+    for_each_def_line(buf, file_len, tokens_state,
+                      [](const io::ConfigTokens &, const char *, size_t, size_t) {});
+    for_each_def_line(buf, file_len, tokens_state, [&](const io::ConfigTokens &tokens,
+                                                       const char *, size_t, size_t line_index) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1);
         const size_t vl = strlen(v);

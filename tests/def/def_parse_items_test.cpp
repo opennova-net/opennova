@@ -849,6 +849,92 @@ static int test_soundloop_slots_below_one(void) {
     return bad;
 }
 
+/* damage_reduc_pp's max is 1 less the double atof left on the x87 stack, not 1
+   less the float the arm stored: 0.058 gives (float)(1 - 0.058), one float step
+   below 1.0f - 0.058f [orig: ItemDef_ParseProperty, `fst` then `fld1; fsubrp`
+   @0x4A0089..0x4A0094]. */
+static int test_damage_reduc_max_from_the_double(void) {
+    static const char text[] =
+        "begin Reduc\r\n"
+        "  id 106194\r\n"
+        "  damage_reduc_pp 0.058\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: damage_reduc snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const float max = items.entries[0].damage_reduc_max;
+    const int bad = max != static_cast<float>(1.0 - 0.058) || max == 1.0f - 0.058f;
+    if (bad) fprintf(stderr, "FAIL: damage_reduc_max %.9g\n", (double)max);
+    def_free_items(&items);
+    return bad;
+}
+
+/* husk_sub_part_types walks the slots from 1 to the first NULL one, past the
+   line's count into what earlier lines left, and cuts each token at its '_' in
+   the line buffer itself, so a later stale read of that slot sees the cut
+   [orig: ItemDef_ParseProperty @0x49F31A..0x49F396 — strstr @0x49F343, the
+   cut @0x49F351, the NULL test @0x49F393]. The `note` line leaves "6_CHUNK_L"
+   in slot 3 at offset 40: HuskA's one-value line reads it (CHUNK_L, 4, at
+   slot 5) and cuts it, so HuskB's reads "6" and keeps its own ROCK_S (5). */
+static int test_husk_walks_the_slots(void) {
+    static const char text[] =
+        "note xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx yyy 6_CHUNK_L\r\n"
+        "begin HuskA\r\n"
+        "  husk_sub_part_types 1_HULL\r\n"
+        "end\r\n"
+        "begin HuskB\r\n"
+        "  husk_sub_part_types 6_ROCK_S\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 2) {
+        fprintf(stderr, "FAIL: husk snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const int a = items.entries[0].husk_sub_part_types[5];
+    const int b = items.entries[1].husk_sub_part_types[5];
+    const int bad = a != 4 || b != 5;
+    if (bad) fprintf(stderr, "FAIL: husk slot 5 reads %d then %d\n", a, b);
+    def_free_items(&items);
+    return bad;
+}
+
+/* `begin` cuts a name of 46 characters or more at 46 in the line buffer, so a
+   later line's stale slot over those bytes stops at the cut: the `note` line
+   leaves slot 4 at offset 50, the begin name puts "771234" there and the cut
+   leaves "77", which rotor_parts' fourth byte reads (0xA2 without the cut)
+   [orig: the begin arm's `mov byte ptr [edx+2Eh], 0` @0x49EBFB; rotor_parts
+   @0x49EF5D..0x49EFB6]. */
+static int test_begin_cut_reaches_stale_reads(void) {
+    static const char text[] =
+        "note xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 1 1 99999999\r\n"
+        "begin BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB771234\r\n"
+        "  rotor_parts 1\r\n"
+        "end\r\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                               &items) != 0 || items.count != 1) {
+        fprintf(stderr, "FAIL: begin-cut snippet gave %zu items\n", items.count);
+        def_free_items(&items);
+        return 1;
+    }
+    const DefItemDef *d = &items.entries[0];
+    const int byte3 = (d->clipsize >> 8) & 0xFF;
+    const int bad = byte3 != 77 || strlen(d->display_name) != 46;
+    if (bad) fprintf(stderr, "FAIL: begin cut: rotor byte %d, name %zu chars\n", byte3,
+                     strlen(d->display_name));
+    def_free_items(&items);
+    return bad;
+}
+
 /* `end` gives a record with no alias "S%06i" of its authored id; a record a
    nested `begin` or the file's end closes keeps an empty one [orig: the `end`
    arm @0x49EB2F..0x49EB5F, sprintf(alias, "S%06i", [esi+50h] + 186A0h), over
@@ -939,6 +1025,9 @@ int main(int argc, char **argv) {
     if (test_atof_is_the_crt_atof() != 0) return 1;
     if (test_soundloop_slots_below_one() != 0) return 1;
     if (test_end_alias_default() != 0) return 1;
+    if (test_damage_reduc_max_from_the_double() != 0) return 1;
+    if (test_husk_walks_the_slots() != 0) return 1;
+    if (test_begin_cut_reaches_stale_reads() != 0) return 1;
     if (test_attrib_reads_the_29_values() != 0) return 1;
     if (test_regional_sound_delays() != 0) return 1;
     if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;

@@ -580,6 +580,30 @@ int main(int argc, char **argv) {
         if (!correct) return 1;
     }
 
+    {
+        // The first load walks the file twice, a count of its `ammo` lines and
+        // then the parse, so the parse's first lines read the slots the count
+        // pass left at the file's end: the last line's "77" in slot 3 is
+        // FIRST's third recoil (0 on a fresh tokenizer). [orig: AmmoDef_LoadAll
+        // @0x40B0B0, the count pass @0x40B0DE, the parse @0x40B116; the recoil
+        // arm's atol of tokens[2..4]]
+        static const char text[] =
+                "ammo FIRST\r\n recoil 5\r\nend\r\n"
+                "note aaaaaaaaaaaaaaaaaaaa b 77\r\n";
+        DefAmmoFile parsed{};
+        const int rc = def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text),
+                                             sizeof(text) - 1, &parsed);
+        const bool correct = rc == 0 && parsed.count == 1 && parsed.entries[0].recoil[0] == 5 &&
+                parsed.entries[0].recoil[1] == 0 && parsed.entries[0].recoil[2] == 77;
+        if (!correct)
+            fprintf(stderr, "FAIL: count pass tail: %zu defs, recoil %d/%d/%d\n", parsed.count,
+                    parsed.count > 0 ? parsed.entries[0].recoil[0] : 0,
+                    parsed.count > 0 ? parsed.entries[0].recoil[1] : 0,
+                    parsed.count > 0 ? parsed.entries[0].recoil[2] : 0);
+        def_free_ammo(&parsed);
+        if (!correct) return 1;
+    }
+
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/ammo.def (the shipped ammo table)");
     printf("PASS: ammo parsing OK\n");

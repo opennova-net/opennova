@@ -155,32 +155,38 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
     size_t entries_cap = 0;
     DefAmmoDef current;
     memset(&current, 0, sizeof(current));
-    int in_block = 0, in_effects = 0, stopped = 0, table_installed = 0;
+    int in_block = 0, in_effects = 0, table_installed = 0;
     size_t raw_cap = 0, eff_cap = 0;
     std::vector<DefEffectTableEntry> staged;
 
-    for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens, const char *line,
-                                         size_t line_len, size_t) {
-        if (stopped) return;
+    /* The first load walks the file twice, a count of its `ammo` lines and
+       then the parse, so the parse's first lines read the slots the count
+       pass left at the file's end (io::ConfigTokens::slot) [orig:
+       AmmoDef_LoadAll @0x40B0B0 — the count pass @0x40B0DE
+       (AmmoDef_CountCallback @0x409E70, which reads only the key), the parse
+       @0x40B116]. The count sizes retail's table; ours grows. */
+    io::ConfigTokens tokens_state;
+    for_each_def_line(buf, file_len, tokens_state,
+                      [](const io::ConfigTokens &, const char *, size_t, size_t) {});
+    for_each_def_line(buf, file_len, tokens_state, [&](const io::ConfigTokens &tokens,
+                                                       const char *line, size_t line_len,
+                                                       size_t) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1); // the first value token, "" when none
         const size_t vl = strlen(v);
 
         if (key_is(key, "ammo")) {
-            if (in_block) {
-                stopped = 1;
-                return;
-            }
+            if (in_block) return true; // "definition missing end": the walk ends
             reset_ammo_def(&current);
             raw_cap = 0; eff_cap = 0;
             table_installed = 0;
             copy_token(current.name, 32, tokens, 1);
             in_block = 1;
-            return;
+            return false;
         }
 
         if (key_is(key, "end")) {
-            if (!in_block) return;
+            if (!in_block) return false;
             if (in_effects) {
                 in_effects = 0;
                 if (!table_installed) {
@@ -189,17 +195,17 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
                     table_installed = 1;
                 }
                 staged.clear();
-                return;
+                return false;
             }
             inherit_ammo_defaults(&current, out);
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
             raw_cap = 0; eff_cap = 0;
             in_block = 0;
-            return;
+            return false;
         }
 
-        if (!in_block) return;
+        if (!in_block) return false;
 
         /* Effects table rows: four tokens or more, tag / hit effect / impact
            sound / value [orig: the table gate @0x40A316, `cmp [tokens],4`
@@ -214,13 +220,13 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
                 e.value = io::retail_atol(tokens.token(3));
                 staged.push_back(e);
             }
-            return;
+            return false;
         }
 
         if (key_is(key, "effects_table")) {
             in_effects = 1;
             staged.clear();
-            return;
+            return false;
         }
 
         int parsed = 0;
@@ -436,6 +442,7 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
         if (!parsed) {
             DA_PUSH_RAW(current.raw_lines, current.raw_lines_count, raw_cap, line, line_len);
         }
+        return false;
     });
 
     /* The def the walk stopped in, or that the file never closes, was allocated

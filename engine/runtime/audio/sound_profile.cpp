@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace opennova::audio {
 
@@ -98,13 +99,16 @@ const char *compose_entity_sound_set(int anim_slot, int type, char *out, size_t 
 // (io::for_each_config_line: CR LF only, the tokenizer's quotes, commas and
 // comments); SoundProfile_ParseLineCallback reads each line's tokens by
 // position with no count check, so a short line's tokens[4] and [5] are what
-// an earlier, longer line left (io::ConfigTokens::token): JO:CA's
-// SndProf.def gives some 190 bare slot lines a param3 of 1.2 that way.
+// an earlier, longer line left (io::ConfigTokens::slot). In JO:CA that changes
+// 178 slot lines (79 in the base SndProf.def, 99 in jox01's) from a read of
+// "": 83 take a param3 of 1.2, the rest another param3 (1.1, 1.3, 1.4, 1.6,
+// -26) or a param4, among them 21 soundloop_1..3 rows (12 and 9), the loop
+// pitch and gear count the vehicle sound reads.
 size_t SoundProfileTable::parse(const char *text, size_t len) {
     const size_t before = entries_.size();
     if (text == nullptr) return 0;
     SoundProfile *cur = nullptr; // inside a begin..end block [orig: dword_24E0894]
-    io::for_each_config_line(text, len, [&](const io::ConfigTokens &t) {
+    io::for_each_config_line(text, len, [&](io::ConfigTokens &t) {
         const char *key = t.tokens[0];
         // "end" closes the block; every other keyword outside a begin is
         // ignored [orig: the "end" stricmp first @ 0x526fe0, the in-block gate
@@ -116,11 +120,13 @@ size_t SoundProfileTable::parse(const char *text, size_t len) {
         if (strutil::iequals(key, "begin")) {
             entries_.emplace_back();
             cur = &entries_.back();
-            // A name of 64 characters or more is cut to its first 64 [orig: the
-            // strlen >= 0x40 test @ 0x527043, the terminator stored at [64]
+            // A name of 64 characters or more is cut to its first 64 in the
+            // line buffer itself, where a later short line's stale slot still
+            // reads the cut (io::ConfigTokens::terminate_at) [orig: the strlen
+            // >= 0x40 test @ 0x52703F..0x527043, the terminator stored at [64]
             // @ 0x527045]. Further columns are free comment text, unread.
-            std::string_view name = t.token(1);
-            if (name.size() > 64) name = name.substr(0, 64);
+            const char *name = t.token(1);
+            if (std::strlen(name) >= 64) t.terminate_at(name + 64);
             cur->name.assign(name);
             return;
         }

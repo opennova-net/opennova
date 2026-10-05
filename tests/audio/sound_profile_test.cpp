@@ -6,6 +6,7 @@
 // (<OPENNOVA_JO_ASSETS>/sndprof.def, 49 profiles) runs only when the extracted
 // asset tree carries it — SKIP-LEG otherwise (docs/asset-gated-tests.md).
 #include <runtime/audio/sound_profile.h>
+#include <base/resource_index/resource_index.h>
 #include "common/test_expect.h"
 
 #include <cstdio>
@@ -141,6 +142,27 @@ int main(int argc, char **argv) {
         TEST_EXPECT(t.index_of("anything") == -1);
     }
 
+    // `begin` cuts a name of 64 characters or more at 64 in the line buffer
+    // itself, so a later short line's stale slot 4 over those bytes stops at
+    // the cut: "4242" rather than the name's "4242424242", which atol would
+    // saturate [orig: SoundProfile_ParseLineCallback, the strlen >= 0x40 test
+    // @0x52703F and `mov [edi+40h], dl` @0x527045; the column reads
+    // @0x5270f0..0x52718b].
+    {
+        const std::string text =
+                "begin P1\r\n"
+                "sounddeath " + std::string(50, 'A') + " 1 1 99999999\r\n"
+                "end\r\n"
+                "begin " + std::string(60, 'B') + "4242424242\r\n"
+                "sounddeath Z\r\n"
+                "end\r\n";
+        SoundProfileTable t;
+        TEST_EXPECT(t.parse(text.data(), text.size()) == 2);
+        const SoundProfile &p2 = t.entries()[1];
+        TEST_EXPECT(p2.name == std::string(60, 'B') + "4242");
+        TEST_EXPECT(p2.param4[slot::kSlotDeath] == 4242);
+    }
+
     // The slot keyword table is the engine's, index == slot.
     {
         TEST_EXPECT(std::strcmp(slot::sound_profile_slot_keyword(17), "SSLFootGND") == 0);
@@ -176,6 +198,30 @@ int main(int argc, char **argv) {
         }
     } else {
         retail::skip_leg("OPENNOVA_JO_ASSETS/sndprof.def (retail sound profile spot check)");
+    }
+
+    // The install's base SndProf.def through its mount: a short slot line
+    // reads the slots an earlier, longer line left, so the Chinook's bare
+    // soundloop_3 takes a param3 of 1.2 (78643) and the Mil26's soundloop_2
+    // the gear count 2 from slot 4 [orig: SoundProfile_ParseLineCallback
+    // @0x526fc0, the column reads @0x5270f0..0x52718b; Terrain_TokenizeConfigLine
+    // @0x53CB71..0x53CB81].
+    const std::string install = retail::install();
+    if (!install.empty()) {
+        opennova::ResourceIndex index;
+        std::vector<uint8_t> bytes;
+        TEST_EXPECT(index.scan(install) && index.read_file("sndprof.def", bytes));
+        SoundProfileTable t;
+        TEST_EXPECT(t.parse(reinterpret_cast<const char *>(bytes.data()), bytes.size()) > 0);
+        const SoundProfile *chinook = t.find("SP_Chinook");
+        const SoundProfile *mil26 = t.find("SP_Mil26");
+        TEST_EXPECT(chinook != nullptr && chinook->name == "SP_Chinook");
+        TEST_EXPECT(mil26 != nullptr && mil26->name == "SP_Mil26");
+        TEST_EXPECT(chinook->param3_q16[slot::kSlotSoundLoop1 + 2] == 78643);
+        TEST_EXPECT(chinook->param2_q16[slot::kSlotSoundLoop1 + 2] == 0);
+        TEST_EXPECT(mil26->param4[slot::kSlotSoundLoop1 + 1] == 2);
+    } else {
+        retail::skip_leg("OPENNOVA_JO_DIR (the mounted SndProf.def's stale-slot rows)");
     }
 
     return 0;

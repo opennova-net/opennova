@@ -18,7 +18,7 @@
 // included) and quoting is not recorded. The comment cut writes no terminator,
 // so a token in progress there runs to the end of the line. Each line resets
 // tokens 0..2 and leaves 3..29 pointing where earlier lines put them (the
-// ConfigTokens::token note). At most 30 tokens:
+// ConfigTokens::slot note). At most 30 tokens:
 // the walk stops at the 30th without cutting it, so that one also runs to the
 // end of the line (its separators, quotes and comment included).
 // [orig: Terrain_TokenizeConfigLine @0x53CB60 — the skip @0x53CB90..0x53CB9E,
@@ -27,8 +27,11 @@
 //  @0x53CC72..0x53CC83, the 30 cap @0x53CC8C..0x53CC93]
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <string>
+#include <type_traits>
+#include <utility>
 
 namespace opennova::io {
 
@@ -46,21 +49,39 @@ struct ConfigTokens {
 	size_t skip = 0;
 	size_t cut = 0;
 
-	// A token past the count reads as retail's does. Each line resets tokens
-	// 0..2 to the empty string and leaves 3..29 where the last line that had
-	// them put them, pointing into the reused line buffer, so a short line
-	// reads whatever an earlier, longer one left at that offset (the current
-	// line's bytes up to its terminator, the older bytes past it)
+	// The slot a retail callback reads at `index`. Each line resets slots 0..2
+	// to the empty string and leaves 3..29 where the last line that had them
+	// put them, pointing into the reused line buffer, so a short line reads
+	// whatever an earlier, longer one left at that offset (the current line's
+	// bytes up to its terminator, the older bytes past it)
 	// [orig: Terrain_TokenizeConfigLine @0x53CB71..0x53CB81; the static buffer
-	// byte_24E5DF0 and slots dword_24E61E4]. One ConfigTokens per walk keeps
-	// that state across its lines; retail's is the process's, across every file
-	// it tokenized, so a slot no line of this walk has set reads "" here
-	// (D-ITEMDEF-8).
-	const char *token(int index) const {
-		if (index < 0 || index >= kConfigMaxTokens) return "";
+	// byte_24E5DF0 and slots dword_24E61E4]. A slot no line has set is NULL
+	// (the zeroed static), and so is the one past the last: the dword after
+	// slot 29 has no writer. The state lives as long as its ConfigTokens: a
+	// reader that walks a file twice, as retail's ammo and power-up loads do,
+	// passes one to both walks; retail's is the process's, across every file it
+	// tokenized (D-ITEMDEF-8).
+	const char *slot(int index) const {
+		if (index < 0 || index >= kConfigMaxTokens) return nullptr;
 		if (index < count) return tokens[index];
-		if (index < 3 || tokens[index] == nullptr) return "";
+		if (index < 3) return "";
 		return tokens[index];
+	}
+
+	// The slot as a string: "" where the slot is NULL.
+	const char *token(int index) const {
+		const char *s = slot(index);
+		return s != nullptr ? s : "";
+	}
+
+	// Writes a NUL into the line buffer where `at` points, as a retail callback
+	// that cuts a token in place does; the byte stays for later lines' stale
+	// reads until a longer line overwrites it. A pointer outside the buffer
+	// (the empty string of a reset slot) writes nothing.
+	void terminate_at(const char *at) {
+		const auto first = reinterpret_cast<std::uintptr_t>(buffer);
+		const auto where = reinterpret_cast<std::uintptr_t>(at);
+		if (where >= first && where < first + sizeof(buffer)) buffer[where - first] = 0;
 	}
 };
 
@@ -117,23 +138,44 @@ struct ConfigLineSpan {
 	size_t token_end[kConfigMaxTokens] = {};
 };
 
-// Calls `apply(const ConfigTokens &, const ConfigLineSpan &)` for EVERY line
-// the retail walk cuts, the ones its callback never sees included (a line
-// with no token, or whose first token starts with '/'), so a consumer that
-// indexes lines counts them as the walk numbers them. The ONE CR LF split;
+namespace detail {
+
+// Runs a walk's callback and says whether it ends the walk. A callback that
+// returns bool ends it on true, as a nonzero return from retail's ends
+// File_ParseASCIIFile's loop [orig: @0x53D942]; one that returns nothing
+// never does.
+template <typename Apply, typename... Args>
+bool walk_apply(Apply &apply, Args &&...args) {
+	if constexpr (std::is_same_v<std::invoke_result_t<Apply &, Args...>, bool>) {
+		return apply(std::forward<Args>(args)...);
+	} else {
+		apply(std::forward<Args>(args)...);
+		return false;
+	}
+}
+
+} // namespace detail
+
+// Calls `apply(ConfigTokens &, const ConfigLineSpan &)` for EVERY line the
+// retail walk cuts, the ones its callback never sees included (a line with no
+// token, or whose first token starts with '/'), so a consumer that indexes
+// lines counts them as the walk numbers them. The ONE CR LF split;
 // for_each_config_line below is this walk with the callback gate applied.
+// `tokens` carries the tokenizer's slots in and out of the walk. Returns the
+// index of the line whose callback ended the walk, else the number of lines
+// cut.
 template <typename Apply>
-void for_each_config_line_span(const char *text, size_t size, Apply &&apply) {
-	if (text == nullptr) return;
+size_t for_each_config_line_span(const char *text, size_t size, ConfigTokens &tokens, Apply &&apply) {
+	if (text == nullptr) return 0;
 	// The pair test reads the two bytes past the end before the tail leg.
 	std::string data(text, size);
 	data.push_back('\0');
 	data.push_back('\0');
 	char *const base = data.data();
 	char *const end = base + size;
-	ConfigTokens tokens;
 	ConfigLineSpan span;
-	for (char *line = base; line < end;) {
+	size_t index = 0;
+	for (char *line = base; line < end; ++index) {
 		char *cut = line;
 		while (!(cut[0] == '\r' && cut[1] == '\n')) {
 			if (cut >= end) {
@@ -154,18 +196,32 @@ void for_each_config_line_span(const char *text, size_t size, Apply &&apply) {
 			span.token_end[i] = span.token_begin[i] + std::strlen(tokens.tokens[i]);
 		}
 		line = cut + 2;
-		apply(static_cast<const ConfigTokens &>(tokens), static_cast<const ConfigLineSpan &>(span));
+		if (detail::walk_apply(apply, tokens, static_cast<const ConfigLineSpan &>(span))) return index;
 	}
+	return index;
 }
 
-// Calls `apply(const ConfigTokens &)` for every line the retail walk hands
-// its callback.
+// The walk over a fresh tokenizer state.
 template <typename Apply>
-void for_each_config_line(const char *text, size_t size, Apply &&apply) {
-	for_each_config_line_span(text, size, [&](const ConfigTokens &tokens, const ConfigLineSpan &) {
-		if (tokens.count == 0 || tokens.tokens[0][0] == '/') return;
-		apply(tokens);
+size_t for_each_config_line_span(const char *text, size_t size, Apply &&apply) {
+	ConfigTokens tokens;
+	return for_each_config_line_span(text, size, tokens, std::forward<Apply>(apply));
+}
+
+// Calls `apply(ConfigTokens &)` for every line the retail walk hands its
+// callback; the return and `tokens` are for_each_config_line_span's.
+template <typename Apply>
+size_t for_each_config_line(const char *text, size_t size, ConfigTokens &tokens, Apply &&apply) {
+	return for_each_config_line_span(text, size, tokens, [&](ConfigTokens &line, const ConfigLineSpan &) {
+		if (line.count == 0 || line.tokens[0][0] == '/') return false;
+		return detail::walk_apply(apply, line);
 	});
+}
+
+template <typename Apply>
+size_t for_each_config_line(const char *text, size_t size, Apply &&apply) {
+	ConfigTokens tokens;
+	return for_each_config_line(text, size, tokens, std::forward<Apply>(apply));
 }
 
 } // namespace opennova::io

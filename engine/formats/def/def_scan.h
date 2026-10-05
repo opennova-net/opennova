@@ -89,16 +89,27 @@ inline constexpr int kMaxValueTokens = io::kConfigMaxTokens - 1;
 // first NUL, as the tokenizer's strlen reads it. `apply(tokens, line, line_len,
 // line_index)` gets the line's bytes in `buf` (its CR LF excluded) for the
 // parsers' raw_lines and its index counting every line the walk cuts, the
-// skipped ones included.
+// skipped ones included. A callback that returns true ends the walk, as a
+// nonzero return ends retail's [orig: @0x53D942]. `tokens` carries the
+// tokenizer's slots across walks (io::ConfigTokens::slot). Returns the index of
+// the line that ended the walk, else the number of lines cut.
 template <typename Apply>
-void for_each_def_line(const char *buf, size_t len, Apply &&apply) {
+size_t for_each_def_line(const char *buf, size_t len, io::ConfigTokens &tokens, Apply &&apply) {
     size_t line_index = (size_t)-1;
-    io::for_each_config_line_span(buf, len, [&](const io::ConfigTokens &tokens,
-                                                 const io::ConfigLineSpan &span) {
+    return io::for_each_config_line_span(buf, len, tokens, [&](io::ConfigTokens &line,
+                                                               const io::ConfigLineSpan &span) {
         ++line_index;
-        if (tokens.count == 0 || tokens.tokens[0][0] == '/') return;
-        apply(tokens, buf + span.begin, span.end - span.begin, line_index);
+        if (line.count == 0 || line.tokens[0][0] == '/') return false;
+        const char *text = buf + span.begin;
+        const size_t text_len = span.end - span.begin;
+        return io::detail::walk_apply(apply, line, text, text_len, line_index);
     });
+}
+
+template <typename Apply>
+size_t for_each_def_line(const char *buf, size_t len, Apply &&apply) {
+    io::ConfigTokens tokens;
+    return for_each_def_line(buf, len, tokens, std::forward<Apply>(apply));
 }
 
 // The key compare every family parser makes [orig: _stricmp @0x76FDF6].
@@ -107,8 +118,8 @@ bool key_is(const char *key, const char *name);
 // The value tokens (token 1 on) as spans, at most `max_tok` of them.
 int value_tokens(const io::ConfigTokens &tokens, Token *out, int max_tok);
 
-// Token `index` into `dst`, truncated to `dst_size - 1`; a token past the
-// line's count copies "".
+// Token `index` into `dst`, truncated to `dst_size - 1`; a slot past the
+// line's count copies what io::ConfigTokens::token reads there.
 void copy_token(char *dst, size_t dst_size, const io::ConfigTokens &tokens, int index);
 
 const FlagEntry *lookup_flag(const char *name, size_t len);
