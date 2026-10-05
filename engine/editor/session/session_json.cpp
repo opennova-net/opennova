@@ -261,7 +261,7 @@ bool members_known(const JsonValue &object, std::initializer_list<const char *> 
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
 	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "game_install",
-	                          "runtime_executable", "play_in_install", "build_folder"},
+	                          "runtime_executable", "play_in_install", "play_in_install_strict", "build_folder"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
 	if (const JsonValue *serial = json.get("serial"); serial && !read_id(*serial, change.serial)) {
@@ -285,7 +285,8 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 	if (!text("title", change.title) || !flag("mission", change.mission) || !flag("multiplayer", change.multiplayer) ||
 	    !text("expansion", change.expansion) || !text("builds_on", change.builds_on) ||
 	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
-	    !flag("play_in_install", change.play_in_install) || !text("build_folder", change.build_folder))
+	    !flag("play_in_install", change.play_in_install) ||
+	    !flag("play_in_install_strict", change.play_in_install_strict) || !text("build_folder", change.build_folder))
 		return false;
 	out = std::move(change);
 	return true;
@@ -303,6 +304,7 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	if (change.runtime_executable)
 		out.set("runtime_executable", json_string(*change.runtime_executable));
 	if (change.play_in_install) out.set("play_in_install", boolean(*change.play_in_install));
+	if (change.play_in_install_strict) out.set("play_in_install_strict", boolean(*change.play_in_install_strict));
 	if (change.build_folder) out.set("build_folder", json_string(*change.build_folder));
 	return out;
 }

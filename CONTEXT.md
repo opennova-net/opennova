@@ -1237,14 +1237,26 @@ _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running ga
 
 **Run directory**:
 Where Play runs the game: `.opennova/run/<n>/` (n from 1), the game's working directory, the
-log Play tails (`session.log`; the game install's own, `_filelog.txt`) and the saves the game
-keeps beside itself (`weapon.sav`), so the build it runs from stays as the build wrote it. Play in
-the game install puts there what the install's game needs beside it: the build's files (linked;
-one the game may write, a `.cfg`, `.sav`, `.coo` or `.txt`, copied), the install's executable and
-Bink DLL, a `game.cfg` (the project's own, else the install's) and the install's `player.sav` and
-`weapon.sav` where the project has none. It records its game (pid and creation time) while the
-game may run; each Play takes the first free one, emptied, passing one whose game may still run.
+log Play tails (`session.log`; the game install's own, `_filelog.txt`, read once its game has
+exited, never while it runs) and the saves the game keeps beside itself (`weapon.sav`), so the
+build it runs from stays as the build wrote it. Play in the game install puts there what the
+install's game needs beside it: the build's files (linked; one the game may write, a `.cfg`,
+`.sav`, `.coo` or `.txt`, copied), the install's executable and Bink DLL, a `game.cfg` (the
+project's own, else the install's) and the install's `player.sav` and `weapon.sav` where the
+project has none; Strict Play, the build's files and the executable and Bink DLL alone. It
+records its game (pid and creation time) while the game may run; each Play takes the first free
+one, emptied, passing one whose game may still run.
 _Avoid_: build directory (what the build publishes, never written after), working copy, stage
+
+**Strict Play**:
+Play in the game install as a player's drop-in: the run directory holds the build's files and the
+game install's executable and Bink DLL, nothing else of the install (no configuration, save or
+score), and the game is launched without `/d`, so it reads its archives first and writes its own
+configuration (`play_in_install_strict`, an editor preference beside Play in the game install). A
+first run that wrote its own `game.cfg` and quit soon after it started is started once more; an
+expansion is refused until a project can name its base game's build. Play in the game install
+without it is the day-to-day run.
+_Avoid_: retail mode, clean run, vanilla run
 
 ## Runtime presentation
 

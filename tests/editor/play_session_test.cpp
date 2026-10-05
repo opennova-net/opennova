@@ -1,6 +1,7 @@
 // Pins the Play launch plan and the one managed child (ADR 0046 d8/d10) over a fake
 // platform: the argument vector, where a packaged editor finds its runtime, the run directory the
-// game works in and what the game install's game finds there (S13 A8), one child at a
+// game works in and what the game install's game finds there (S13 A8; Strict Play's: the build and the
+// program alone, no /d), the game install's file log and Strict Play's first-run start again, one child at a
 // time, the stop request, the deadline kill, exit on its own with the code it exited with,
 // and the build directory the session protects while alive.
 #include <algorithm>
@@ -247,6 +248,133 @@ static int test_install_staging() {
 	return 0;
 }
 
+static std::vector<std::string> files_in(const std::string &dir);
+
+// Strict Play in the game install: the run directory holds the build's files and the install's
+// executable and Bink DLL, nothing else of the install (no game.cfg, save, score table, early error text
+// or admin configuration), the build's own game.cfg among the build's files; one the game only reads
+// linked (copied where the file system will not link it: `link` injected), every other copied, the
+// build's record left out; launched /w /FRISK, no /d. The game writing every file it may write leaves
+// the build and the install as they were. Refused, nothing staged: an expansion (play.strict_expansion),
+// no install, an install without its program (play.install_missing).
+static int test_strict_install_staging() {
+	namespace fs = std::filesystem;
+	editor_test::TempProjectDir dir("opennova_editor_strict_staging");
+	const std::string install = dir.file("install"), build = dir.file("build/0123456789abcdef");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "shim") &&
+	            editor_test::write_text(install + "/binkw32_.dll", "bink") &&
+	            editor_test::write_text(install + "/game.cfg", "install settings") &&
+	            editor_test::write_text(install + "/player.sav", "install player") &&
+	            editor_test::write_text(install + "/weapon.sav", "install weapon") &&
+	            editor_test::write_text(install + "/score.ini", "install scores") &&
+	            editor_test::write_text(install + "/earlyerr.txt", "install early") &&
+	            editor_test::write_text(install + "/admin.cfg", "install admin") &&
+	            editor_test::write_text(install + "/menumus.sbf", "install music"));
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff"})
+		TEST_EXPECT(write_empty_archive(build + "/" + name));
+	TEST_EXPECT(editor_test::write_text(build + "/nw_cdata.coo", "cookies") && editor_test::write_text(build + "/build.json", "{}") &&
+	            editor_test::write_text(build + "/intro.bik", "video"));
+	const std::string build_tree = editor_test::tree_digest(build), install_tree = editor_test::tree_digest(install);
+	const std::string run = dir.file("run/1");
+	fs::create_directories(run);
+	LaunchPlan plan;
+	Diagnostic error;
+	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "", plan, error));
+	TEST_EXPECT(plan.args == std::vector<std::string>({"/w", "/FRISK"}));
+	TEST_EXPECT(std::find(plan.args.begin(), plan.args.end(), "/d") == plan.args.end());
+	TEST_EXPECT(plan.executable == run + "/Jointops.exe" && plan.working_dir == run && plan.build_dir == build &&
+	            plan.resource_dir == run && plan.expansion.empty() && plan.log_file == run + "/_filelog.txt" &&
+	            plan.mcp_port == 0);
+	std::vector<std::string> held = files_in(run);
+	TEST_EXPECT(held == std::vector<std::string>({"Jointops.exe", "binkw32.dll", "intro.bik", "language.pff", "localres.pff",
+	                                              "nw_cdata.coo", "resource.pff"}));
+	std::string text, io_error;
+	std::error_code ec;
+	TEST_EXPECT(read_file_text(run + "/binkw32.dll", text, io_error) && text == "bink"); // JOTAC's real Bink over the shim
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff", "intro.bik"})
+		TEST_EXPECT(fs::equivalent(run + "/" + name, build + "/" + name, ec)); // linked: the game only reads it
+	TEST_EXPECT(!fs::equivalent(run + "/nw_cdata.coo", build + "/nw_cdata.coo", ec)); // copied: the game rewrites it
+	TEST_EXPECT(!fs::equivalent(run + "/Jointops.exe", install + "/Jointops.exe", ec));
+	for (const char *name : {"nw_cdata.coo", "Jointops.exe", "binkw32.dll"})
+		TEST_EXPECT(editor_test::write_text(run + "/" + name, "written by the game"));
+	for (const char *name : {"game.cfg", "player.sav", "weapon.sav", "score.ini", "_filelog.txt"})
+		TEST_EXPECT(editor_test::write_text(run + "/" + name, "written by the game"));
+	TEST_EXPECT(editor_test::tree_digest(build) == build_tree && editor_test::tree_digest(install) == install_tree);
+
+	// A game.cfg the project holds is the build's own: staged with the rest, copied (the game rewrites it).
+	// Another volume: the files the game only reads are copied too.
+	TEST_EXPECT(editor_test::write_text(build + "/game.cfg", "project settings"));
+	const FileLink across = [](const std::string &, const std::string &, std::string &reason) {
+		reason = "another volume";
+		return false;
+	};
+	const std::string run2 = dir.file("run/2");
+	fs::create_directories(run2);
+	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run2, "", plan, error, across));
+	TEST_EXPECT(read_file_text(run2 + "/game.cfg", text, io_error) && text == "project settings" &&
+	            !fs::equivalent(run2 + "/game.cfg", build + "/game.cfg", ec));
+	TEST_EXPECT(!fs::equivalent(run2 + "/language.pff", build + "/language.pff", ec) && fs::is_regular_file(run2 + "/language.pff"));
+	TEST_EXPECT(!fs::exists(run2 + "/player.sav") && !fs::exists(run2 + "/score.ini") && !fs::exists(run2 + "/build.json"));
+
+	// Refused, nothing staged.
+	const std::string run3 = dir.file("run/3");
+	fs::create_directories(run3);
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "jxm", plan, error) &&
+	            error.code() == "play.strict_expansion" &&
+	            error.message.find("Strict Play of an expansion needs its base game's build; not yet supported") == 0 &&
+	            files_in(run3).empty());
+	TEST_EXPECT(!prepare_strict_install_launch_plan("", build, run3, "", plan, error) && error.code() == "play.install_missing");
+	fs::remove(install + "/Jointops.exe");
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "", plan, error) &&
+	            error.code() == "play.install_missing" && files_in(run3).empty());
+	return 0;
+}
+
+// The game install's file log, as /FRISK writes it [orig: File_LogFileAccess @ 0x75a480]: an archive's
+// entry "PFF LOADED FILE: <name>", a file from disk "LOADED FILE: <path>", an archive itself among those,
+// lines ended "\n" (the game's) or "\r\n"; each name once (compared without case, the first spelling
+// kept), in first-open order; a line of neither form counted alone.
+static int test_file_access_log() {
+	const FileAccessLog log = parse_file_access_log("LOADED FILE: language.pff\n"
+	                                                "LOADED FILE: localres.pff\r\n"
+	                                                "LOADED FILE: RESOURCE.PFF\n"
+	                                                "PFF LOADED FILE: gameerr.bin\n"
+	                                                "PFF LOADED FILE: weapon.def\n"
+	                                                "PFF LOADED FILE: WEAPON.DEF\n"
+	                                                "LOADED FILE: player.sav\n"
+	                                                "LOADED FILE: expansion\\jxm\\jxm.bin\n"
+	                                                "something else\n"
+	                                                "PFF LOADED FILE: main.mnu");
+	TEST_EXPECT(log.lines == 10);
+	TEST_EXPECT(log.archives == std::vector<std::string>({"language.pff", "localres.pff", "RESOURCE.PFF"}));
+	TEST_EXPECT(log.from_archives == std::vector<std::string>({"gameerr.bin", "weapon.def", "main.mnu"}));
+	TEST_EXPECT(log.from_disk == std::vector<std::string>({"player.sav", "expansion\\jxm\\jxm.bin"}));
+	TEST_EXPECT(parse_file_access_log("") == FileAccessLog());
+	FileAccessLog one;
+	add_file_access_line(one, "PFF LOADED FILE: keyhelp.bin");
+	TEST_EXPECT(one.lines == 1 && one.from_archives == std::vector<std::string>({"keyhelp.bin"}) && one.archives.empty());
+	return 0;
+}
+
+// Strict Play's first run is started once more only when the run directory held no game.cfg before it,
+// holds one now, and the game exited on its own with code 0 within kStrictFirstRunWindowMs of its start;
+// never a second time, never for a stop, an error exit or an exit the platform could not read, never for
+// a game that ran past the window.
+static int test_strict_first_run_decision() {
+	const int64_t soon = 4000;
+	TEST_EXPECT(strict_first_run_starts_again(false, true, true, 0, soon, false));
+	TEST_EXPECT(strict_first_run_starts_again(false, true, true, 0, kStrictFirstRunWindowMs, false));
+	TEST_EXPECT(!strict_first_run_starts_again(false, true, true, 0, kStrictFirstRunWindowMs + 1, false));
+	TEST_EXPECT(!strict_first_run_starts_again(true, true, true, 0, soon, false));   // it had one (the build's)
+	TEST_EXPECT(!strict_first_run_starts_again(false, false, true, 0, soon, false)); // it wrote none
+	TEST_EXPECT(!strict_first_run_starts_again(false, true, false, -1, soon, false)); // stopped
+	TEST_EXPECT(!strict_first_run_starts_again(false, true, true, 1, soon, false));  // an error exit
+	TEST_EXPECT(!strict_first_run_starts_again(false, true, true, -1, soon, false)); // no code read
+	TEST_EXPECT(!strict_first_run_starts_again(false, true, true, 0, soon, true));   // once only
+	TEST_EXPECT(!strict_first_run_starts_again(false, true, true, 0, -5, false));
+	return 0;
+}
+
 // ADR 0046 S16: an expansion's build runs from its run directory with /exp: the runtime's
 // --resource-dir names the run directory (the install's base game and the build's expansion folder
 // prepare_expansion_run put there), not the build; a source run alike.
@@ -468,6 +596,9 @@ int main() {
 	failures += test_launch_plans();
 	failures += test_expansion_launch_plans();
 	failures += test_install_staging();
+	failures += test_strict_install_staging();
+	failures += test_file_access_log();
+	failures += test_strict_first_run_decision();
 	failures += test_expansion_staging();
 	failures += test_lifecycle();
 	if (failures == 0) std::printf("editor_play_session: all tests passed\n");

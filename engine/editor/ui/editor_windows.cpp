@@ -536,6 +536,18 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 		request(request::apply_project_settings(change));
 	}
 	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
+	// Strict Play, under it: what Play in the game install stages and how it launches the game.
+	bool strict = v.project.play_in_install_strict;
+	ImGui::Indent();
+	const bool strict_settable = settable && v.project.play_retail;
+	if (ImGui::MenuItem("Strict: as a player's install", nullptr, &strict, strict_settable) && strict_settable) {
+		ProjectSettingsChange change;
+		change.play_in_install_strict = strict;
+		request(request::apply_project_settings(change));
+	}
+	ImGui::Unindent();
+	ui_kit::tooltip("The game runs on the build alone, as a player who dropped Jointops.exe into the build's folder "
+	                "runs it: nothing of the install but its program and Bink DLL, no /d.");
 	if (menu_item("Show build folder", nullptr, v.activity.has_build && v.activity.last_build->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_build->build_dir));
 	ImGui::EndMenu();

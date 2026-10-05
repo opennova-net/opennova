@@ -104,6 +104,7 @@ void SessionCore::start() {
 	read_recent_details();
 	show_installs();
 	view_.project.play_retail = settings.play_in_install;
+	view_.project.play_in_install_strict = settings.play_in_install_strict;
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
 	show_recent_items();
@@ -815,13 +816,16 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	if (install) editor.game_install = *install;
 	if (change.runtime_executable) editor.runtime_executable = *change.runtime_executable;
 	if (change.play_in_install) editor.play_in_install = *change.play_in_install;
+	if (change.play_in_install_strict) editor.play_in_install_strict = *change.play_in_install_strict;
 	bool editor_changed = editor.game_install != settings.game_install ||
 	                      editor.runtime_executable != settings.runtime_executable ||
-	                      editor.play_in_install != settings.play_in_install;
+	                      editor.play_in_install != settings.play_in_install ||
+	                      editor.play_in_install_strict != settings.play_in_install_strict;
 	if (editor_changed) {
 		Diagnostic error;
 		if (preferences_.write(editor, error)) {
 			view_.project.play_retail = preferences_.values().play_in_install;
+			view_.project.play_in_install_strict = preferences_.values().play_in_install_strict;
 			view_.project.runtime_setting = preferences_.values().runtime_executable;
 			view_.activity.runtime_executable = play().resolve_runtime_executable();
 		} else {
@@ -1208,6 +1212,7 @@ void SessionCore::save_preferences() {
 	read_recent_details(); // a root new to the list read, the others kept
 	show_installs();
 	view_.project.play_retail = settings.play_in_install;
+	view_.project.play_in_install_strict = settings.play_in_install_strict;
 	view_.project.import_dependencies = settings.import_dependencies;
 	show_recent_items();
 	touch(ViewConcern::Preferences);
