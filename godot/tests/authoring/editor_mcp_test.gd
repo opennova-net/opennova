@@ -1071,6 +1071,24 @@ func test_graph_references_and_rename() -> void:
 	var assigned := await _call("editor_request", {"kind": "assign_requirement", "role": "main_menu", "path": "logo2.tga"})
 	assert_true(not _done(assigned) and _found(assigned, "requirement.assigned"), str(assigned))
 	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
+	# DI-03: a move to another folder rewrites nothing (the game finds a file by its name alone): the menu
+	# still names logo2.tga, which still resolves; the way back puts it at the top level again, the folder
+	# the move made gone with it. A folder outside the project is refused, nothing moved.
+	var outside := await _call("editor_request", {"kind": "move_asset", "path": "logo2.tga", "folder": "../out"})
+	assert_true(not _done(outside) and _found(outside, "rename.path"), str(outside))
+	var moved := await _call("editor_request", {"kind": "move_asset", "path": "logo2.tga", "folder": "art"})
+	assert_true(_done(moved), str(moved))
+	assert_false(FileAccess.file_exists(root.path_join("logo2.tga")))
+	assert_true(FileAccess.file_exists(root.path_join("art/logo2.tga")))
+	assert_eq(String(await _value(reloaded_row, "value")), "logo2.tga")
+	assert_eq(int((await _query("missing")).get("count", -1)), 0)
+	var back_plan := await _call("editor_request", {"kind": "preview_rename_back"})
+	assert_true(_done(back_plan), str(back_plan))
+	var plan: Dictionary = (await _state(["dialogs"])).get("dialogs", {}).get("rename_preview", {})
+	assert_true(bool(plan.get("move", false)) and String(plan.get("folder", "?")) == "", str(plan))
+	assert_true(_done(await _call("editor_request", {"kind": "rename_back"})))
+	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
+	assert_false(DirAccess.dir_exists_absolute(root.path_join("art")))
 	# S12 D9: a style variable the blank menu names renamed everywhere: planned first
 	# (preview_rename, the dialogs section's rename_preview: the definition and its uses, each
 	# before and after), then committed on disk; every use still resolves, under the new name.
@@ -1291,21 +1309,22 @@ func test_png_import_through_the_endpoint() -> void:
 	var imported: Array = state.get("import", {}).get("imported", [])
 	assert_eq(imported.size(), 1, str(state.get("import", {})))
 	if imported.size() == 1:
-		# The UX round's project lane: an author's PNG lands with the textures its import makes.
-		assert_eq(String(imported[0].get("source", "")), "textures/logo.png")
+		# An author's PNG lands where the project keeps the textures its import makes (DI-03: beside
+		# art/plain.png, the project's one texture, not in a textures/ folder it never had).
+		assert_eq(String(imported[0].get("source", "")), "art/logo.png")
 		assert_true(bool(imported[0].get("ok", false)))
 		assert_eq(imported[0].get("outputs", []).size(), 1)
 		assert_true(FileAccess.file_exists(root.path_join(String(imported[0]["outputs"][0]))))
 		assert_eq(imported[0].get("inputs", null), [], "the image importer reads its source alone")
-	assert_true(FileAccess.file_exists(root.path_join("textures/logo.png.import")), "importing writes the record beside the source")
+	assert_true(FileAccess.file_exists(root.path_join("art/logo.png.import")), "importing writes the record beside the source")
 	var problems := await _query("problems", {"severities": ["error"]})
 	assert_eq(int(problems.get("shown", -1)), 0, str(problems))
 	var symbols := await _query("referrers", {"path": "logo.tga"})
 	assert_eq(int(symbols.get("count", -1)), 0)
 	var options := await _query("import_options", {"path": "logo.tga"})
-	assert_eq(String(options.get("source", "")), "textures/logo.png", str(options))
+	assert_eq(String(options.get("source", "")), "art/logo.png", str(options))
 	assert_eq(String(options.get("effective", {}).get("format", "")), "tga", str(options))
-	var made_pcx := await _call("editor_request", {"kind": "set_import_options", "path": "textures/logo.png", "values": {"format": "pcx"}})
+	var made_pcx := await _call("editor_request", {"kind": "set_import_options", "path": "art/logo.png", "values": {"format": "pcx"}})
 	assert_true(_done(made_pcx), str(made_pcx))
 	var renamed := await _query("files", {"limit": 200})
 	var outputs: Array[String] = []

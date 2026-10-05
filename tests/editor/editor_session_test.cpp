@@ -4412,6 +4412,8 @@ static int test_prompt_words_from_the_table() {
 		// S18: a texture's split rewrites its referrers as a rename does.
 		{EditorRequestKind::SplitTexture, "Split main.mnu", "Save all and split"},
 		{EditorRequestKind::Quit, "Quit", "Save all"},
+		// DI-03: a move closes and opens the moved file's document again, as a rename does.
+		{EditorRequestKind::MoveAsset, "Move main.mnu", "Save all and move"},
 	};
 	size_t guarded = 0;
 	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {

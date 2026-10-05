@@ -255,7 +255,7 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
 REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install", "path", "locator", "field",
                  "new_name", "role", "file_kind", "out_dir", "export_dir", "mission", "operation", "mode", "choice",
-                 "purpose")
+                 "purpose", "folder")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
                     "planned", "behind", "report")
@@ -690,6 +690,8 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--locator", default=None, help="a record's locator (open_document, the renames)")
     request.add_argument("--field", default=None, help="a field of that record")
     request.add_argument("--new-name", dest="new_name", default=None, help="the name a rename gives")
+    request.add_argument("--folder", default=None,
+                         help="move_asset: the project folder the file goes to ('' the top level)")
     request.add_argument("--role", default=None, help="a requirement's role (assign_requirement)")
     request.add_argument("--file-kind", dest="file_kind", default=None,
                          help="create_file: an asset kind token, for a name that cannot say its kind")

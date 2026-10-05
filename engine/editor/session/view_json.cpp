@@ -312,6 +312,11 @@ JsonValue dialogs_section(const SessionView &view) {
 			preview.set("field", json_string(rename.field));
 		preview.set("old_name", json_string(rename.old_name));
 		preview.set("new_name", json_string(rename.new_name));
+		// A move's way back (DI-03): the folder the file goes back to ("" the top level).
+		if (rename.move) {
+			preview.set("move", boolean(true));
+			preview.set("folder", json_string(rename.folder));
+		}
 		JsonValue sites = JsonValue::make_array();
 		for (const RenameSite &site : *rename.sites) {
 			JsonValue entry = JsonValue::make_object();

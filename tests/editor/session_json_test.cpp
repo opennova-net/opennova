@@ -824,6 +824,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Behind: out.behind = true; break;
 		case F::Plan: out.plan = 7; break;
 		case F::Report: out.report = false; break; // its default is true
+		case F::Folder: out.folder = "defs"; break;
 		case F::kCount: break;
 		}
 	}

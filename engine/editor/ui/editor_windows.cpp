@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <base/io/json.h>
+#include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
 #include <editor/session/rename_controller.h>
@@ -475,7 +476,10 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 	// the sites it rewrote), shown before it commits, offered while its name is still where it put it.
 	if (v.activity.last_rename.made && rename_back_offered(v)) {
 		const ActivityView::LastRename &last = v.activity.last_rename;
-		const std::string label = "Rename " + last.to + " back to " + last.from + "...";
+		// A move's (DI-03): the file to the folder it left.
+		const std::string label = last.move ? "Move " + basename_of(last.path) + " back to " +
+		                                              (last.from.empty() ? std::string("the top level") : last.from + "/") + "..."
+		                                    : "Rename " + last.to + " back to " + last.from + "...";
 		if (menu_item(label.c_str(), nullptr, v.allows(EditorRequestKind::PreviewRenameBack)))
 			request(request::preview_rename_back(true));
 		ui_kit::tooltip("Undo does not take a rename back: it rewrote files. This shows what renaming it back rewrites "

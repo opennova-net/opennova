@@ -87,6 +87,7 @@ enum class EditorRequestKind {
 	StopSound,
 	ApplyConfirmation,
 	Quit,
+	MoveAsset,
 	// The shell's: the portable session cannot serve these.
 	PickDirectory,
 	PickFile,
@@ -349,6 +350,8 @@ struct EditorRequest {
 	// A build's result panel opens as it ends (false: a build asked over the wire leaves the person's work as
 	// it is; the build section and the outcome say what it came to).
 	bool report = true;
+	// A folder of the project, from its top level ("" the top level): where a move puts a file (DI-03).
+	std::string folder;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -369,7 +372,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
-			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.plan == b.plan && a.report == b.report;
+			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.plan == b.plan && a.report == b.report &&
+			a.folder == b.folder;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

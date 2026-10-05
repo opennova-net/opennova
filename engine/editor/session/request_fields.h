@@ -57,6 +57,7 @@ enum class RequestFieldId : uint8_t {
 	Behind,
 	Plan,
 	Report,
+	Folder,
 	kCount,
 };
 

@@ -90,9 +90,10 @@ struct AssetKindRow {
 	// Its files name other files, or names other files define, that an import brings with them
 	// (import_plan's references_unread: those of a kind the graph does not read are not followed).
 	bool names_files = false;
-	// Where a file of the kind the editor makes goes inside the project tree, created or imported
-	// ("menus", "fonts"; "" for the root): organization only, the engine sees the flat name (a loose
-	// kind's build copy takes the name alone too). The kinds the game reads from its own folder by a
+	// The kind's folder in a project laid out by kind ("menus", "fonts"; "" for the root), where a
+	// file of the kind the editor makes, created or imported, goes when the project has none of the
+	// kind yet (assets/project_layout.h: a flat project keeps it at the top level): organization
+	// only, the engine sees the flat name (a loose kind's build copy takes the name alone too). The kinds the game reads from its own folder by a
 	// fixed name (a configuration, the score table, a text) stay at the root, as the install keeps them.
 	const char *folder = "";
 	// The name Files offers a new file of the kind (New > Menu...: "newmenu.mnu"); "" for a kind

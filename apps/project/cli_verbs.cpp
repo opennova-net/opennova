@@ -19,7 +19,9 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
+#include <editor/session/session_json.h>
 #include <editor/session/session_operation.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::project {
 
@@ -916,6 +918,23 @@ int answer_code(Cli &cli, const JsonValue &answer) {
 	return 1;
 }
 
+// A project file moved to a folder of the project under its own name (move_asset, DI-03), as Files'
+// Move to folder moves it, the operation run to its end: the request's answer (--json), else where it
+// went, its findings on the error stream; exit 1 when it was refused or did not finish.
+int run_move(Cli &cli, const CliVerbRow &, const CliArgs &args) {
+	const EditorRequest request = editor::request::move_asset(args.positional[1], args.positional[2]);
+	const JsonValue answer = send_json(cli, editor::editor_request_to_json(request));
+	const int code = answer_code(cli, answer);
+	if (cli.json) {
+		print_json(cli.out, answer);
+		return code;
+	}
+	print_findings(cli.err, at(answer, "outcome"));
+	// The status line the move left ("Moved items.def to defs/."; a refusal's "The move was refused.").
+	std::fprintf(cli.out, "%s\n", cli.session.view().activity.status.c_str());
+	return code;
+}
+
 // The documents with unsaved edits when the run ends: their edits end with it, said on the error
 // stream (the save belongs in the same run).
 void warn_unsaved(Cli &cli) {
@@ -1141,11 +1160,13 @@ constexpr K kReimportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::
 constexpr K kNewTerrainRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::NewTerrain };
 constexpr K kBuildRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Build };
 constexpr K kExportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Export };
+constexpr K kMoveRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::MoveAsset };
 
 constexpr CliPositional kDir[] = { { "a project directory" } };
 constexpr CliPositional kImportArgs[] = { { "a project directory" }, { "a source file", false } };
 constexpr CliPositional kNewTerrainArgs[] = { { "a project directory" }, { "the terrain's name" } };
 constexpr CliPositional kRequestArgs[] = { { "a project directory" }, { "a request as JSON" } };
+constexpr CliPositional kMoveArgs[] = { { "a project directory" }, { "a project file" }, { "a folder of the project" } };
 constexpr CliPositional kQueryArgs[] = { { "a project directory" }, { "a query's name" }, { "its args as JSON", false } };
 
 constexpr CliOption kNewOptions[] = { { "--title", "a text" },
@@ -1256,6 +1277,13 @@ constexpr VerbRow kRows[] = {
 	        .takes(kBuildOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")
+	        .row,
+	Verb(V::Move, "mv", "<dir> <file> <folder>", kMoveRequests, kMoveArgs, run_move,
+	     "move a project file to a folder of the project (\"\" or / its top level, made when it is\n"
+	     "not there) under its own name, as Files' Move to folder does: no reference is rewritten,\n"
+	     "the game finding a file by its name alone; an import source takes its record (--json:\n"
+	     "the move_asset request's answer, as the request verb prints it)")
+	        .answers_with(CliAnswer::Request)
 	        .row,
 	Verb(V::Request, "request", "<dir> <json>", kReadRequests, kRequestArgs, run_request,
 	     "one request as the editor MCP sends it ({\"kind\": ..., its fields}), its answer as\n"

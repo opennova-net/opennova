@@ -56,8 +56,8 @@ std::vector<std::string> list_retail_file_names(const std::string &retail_root, 
 // (BaseNames); none for a standalone project, and when the install does not mount.
 std::vector<std::string> list_base_file_names(const std::string &retail_root, const ProjectDocument &document);
 // Where an import writes a file of `kind` (project-relative): over the project's file of
-// the name when it has one (a replace keeps its place), else in the kind's folder
-// (AssetKindRow::folder).
+// the name when it has one (a replace keeps its place), else where the project keeps a file
+// of the kind (assets/project_layout.h's placement_path: the top level of a flat project).
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind);
 // What `sources` make copied into the project (a converter's outputs, else the file
 // itself), the whole selection or none of it as far as the disk allows (ADR 0046 S11g).

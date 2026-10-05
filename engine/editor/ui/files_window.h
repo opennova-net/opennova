@@ -124,6 +124,12 @@ private:
 	void draw_folder(const SessionView &view, const Folder &folder);
 	void draw_file(const SessionView &view, const AssetEntry &entry, bool in_tree);
 	void draw_file_menu(const SessionView &view, const AssetEntry &entry);
+	// Move to folder (DI-03, a file's menu): the project's folders, the top level first, and a new one by
+	// name, each a move_asset; a file dragged onto a folder's row moves there too (accept_move), and while
+	// a file of a folder is dragged, a row for the top level stands above the tree (draw_top_level_drop).
+	void draw_move_menu(const SessionView &view, const AssetEntry &entry);
+	void accept_move(const SessionView &view, const std::string &folder);
+	void draw_top_level_drop(const SessionView &view);
 	// Rename... (the file's menu, F2, the card's): the workspace's Rename... opened on the file.
 	void start_rename(const AssetEntry &entry);
 	void draw_rename(const SessionView &view);
@@ -182,6 +188,8 @@ private:
 	ui_kit::HeldPopup rename_popup_;
 	ui_kit::HeldText<kWorkspaceFileName> rename_;
 	std::string previewed_;
+	// Move to folder's new folder, as typed.
+	char new_folder_[kWorkspaceFileName] = {};
 	// The RevealFile events held until Files draws, and then the file to scroll to and the place
 	// whose folders open on the way.
 	ViewEventMailbox<> events_;

@@ -197,6 +197,10 @@ constexpr RequestField kFields[] = {
 	{ F::Report, "report", J::Boolean,
 			"A build's result panel opens over the editor as it ends (true when left out); false leaves the "
 			"person's work as it is (the build section and the operation say what it came to)." },
+	{ F::Folder, "folder", J::String,
+			"A folder of the project, from its top level, '/'-separated (\"defs\", \"art/terrain\"; \"\" or \"/\" the "
+			"top level): where a move puts a file. Made when it is not there; never one outside the project, a "
+			"dot-folder (the cache) or the export folder." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

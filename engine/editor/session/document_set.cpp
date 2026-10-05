@@ -9,6 +9,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/texture_document.h>
@@ -281,10 +282,11 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		return;
 	}
 	// A plain name the archives can carry, whose extension is the kind's, landing
-	// inside the project.
+	// inside the project where it keeps a file of the kind (assets/project_layout.h: beside its
+	// files of the kind, else the top level of a flat project or the kind's folder).
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
-	const char *const folder = asset_kind_row(kind).folder;
+	const std::string folder = placement_folder(*view_.project.scan, kind);
 	if (!check_project_file_name(paths_.root, folder, request.path, kind, problem, message)) {
 		const CoreFinding code = problem == FileNameProblem::Kind   ? CoreFinding::DocumentKind
 		                         : problem == FileNameProblem::Path ? CoreFinding::DocumentPath
@@ -311,8 +313,8 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		std::vector<std::string> made{relative};
 		core_.note("Created " + relative);
 		// A new mission comes with the text table the game finds by its name (its title in the
-		// mission list, its briefing), where the project has none of that name: made beside the
-		// string tables. One that cannot be made leaves the mission made, and says so.
+		// mission list, its briefing), where the project has none of that name: made where it
+		// keeps its string tables. One that cannot be made leaves the mission made, and says so.
 		if (kind == AssetKind::Mission) {
 			const mission::Sidecar *text = mission::sidecar_for_role("text");
 			const std::string table = text ? mission::sidecar_name(request.path, *text) : std::string();
@@ -323,7 +325,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 				text_blank.role = kBlankMissionTextRole;
 				text_blank.project_title = blank.project_title;
 				text_blank.values = {{"title", blank_mission_title(blank)}};
-				const std::string text_relative = join_path(asset_kind_row(AssetKind::Strings).folder, table);
+				const std::string text_relative = placement_path(*view_.project.scan, table, AssetKind::Strings);
 				const auto text_target = path_of(paths_.root) / path_of(text_relative);
 				std::vector<uint8_t> text_bytes;
 				if (!fs::exists(system_path(utf8_of(text_target)), ec) && text_factory->make(text_blank, text_bytes, error) &&
@@ -341,13 +343,13 @@ void DocumentSet::create_file(const EditorRequest &request) {
 			}
 		}
 		// A new menu comes with the pointer its windows name (blank_companion: the original game shows
-		// no system pointer), where the project has no file of that name: made beside the textures. One
-		// on disk since the scan is left as it is; one that cannot be made leaves the menu made, and
-		// says so.
+		// no system pointer), where the project has no file of that name: made where it keeps its textures
+		// (placement_path). One on disk since the scan is left as it is; one that cannot be made leaves
+		// the menu made, and says so.
 		std::string companion;
 		const BlankFactory *beside = blank_companion(*factory, *view_.project.document, companion);
 		if (beside && !view_.project.scan->find(companion)) {
-			const std::string beside_relative = join_path(asset_kind_row(beside->kind).folder, companion);
+			const std::string beside_relative = placement_path(*view_.project.scan, companion, beside->kind);
 			const auto beside_target = path_of(paths_.root) / path_of(beside_relative);
 			if (!fs::exists(system_path(utf8_of(beside_target)), ec) && !ec) {
 				BlankRequest beside_blank;

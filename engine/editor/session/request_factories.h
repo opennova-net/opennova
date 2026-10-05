@@ -535,6 +535,14 @@ inline EditorRequest preview_rename_back(bool ask_name = false) {
 }
 // The last rename taken back, on disk.
 inline EditorRequest rename_back() { return of(EditorRequestKind::RenameBack); }
+// The file `path` moved to the project's `folder` ("" the top level) under its own name, no reference
+// rewritten (DI-03: the game finds a file by its name alone).
+inline EditorRequest move_asset(std::string path, std::string folder) {
+	EditorRequest request = of(EditorRequestKind::MoveAsset);
+	request.path = std::move(path);
+	request.folder = std::move(folder);
+	return request;
+}
 
 // --- the shell's -------------------------------------------------------------------------------
 

@@ -17,6 +17,7 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/install_view.h>
 #include <editor/assets/player_files.h>
+#include <editor/assets/project_layout.h>
 #include <editor/assets/project_scan.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/converter.h>
@@ -151,9 +152,10 @@ std::vector<std::string> list_base_file_names(const std::string &retail_root, co
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {
 	if (const AssetEntry *prior = existing.find(name)) return prior->relative_path;
-	// An import source sits with the files of the kind its name gives (a PNG with the textures it makes).
-	const AssetKind placed = kind == AssetKind::ImportSource ? asset_kind_for_name(name) : kind;
-	return join_path(asset_kind_row(placed).folder, name);
+	// Where the project keeps a file of the kind (assets/project_layout.h: beside its files of the kind,
+	// else the top level of a flat project or the kind's folder); an import source with the files of the
+	// kind its name gives (a PNG with the textures it makes).
+	return placement_path(existing, name, kind);
 }
 
 namespace {
