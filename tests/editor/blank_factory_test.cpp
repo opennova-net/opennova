@@ -25,6 +25,7 @@
 #include <formats/rtxt/rtxt.h>
 #include <formats/tga/tga.h>
 #include <formats/tga/tga_read.h>
+#include <runtime/audio/sound_profile.h>
 #include <runtime/inmatch/charattr_challenge.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
@@ -604,6 +605,23 @@ static int test_defs_and_coo() {
 	opennova::inmatch::CharAttrChallengeTable table;
 	TEST_EXPECT(opennova::inmatch::parse_charattr_challenge_table(charattr.data(), charattr.size(), table));
 	TEST_EXPECT(opennova::inmatch::find_charattr_challenge_row(table, 1) == nullptr); // no classes yet
+
+	// SndProf.def: one "default" profile with every slot silent, the profile every item binds
+	// (ItemDef_AllocateWithDefaults @ 0x49E3EA asks for "default"; a miss takes the first). The
+	// game's profile table is never cleared, so with no profile an item's sounds are whatever
+	// that memory held (docs/required-resources.md).
+	const std::vector<uint8_t> profiles = make("sndprof_def", "SndProf.def");
+	TEST_EXPECT(is_crlf_text(text_of(profiles)));
+	opennova::audio::SoundProfileTable sound_profiles;
+	TEST_EXPECT(sound_profiles.parse(reinterpret_cast<const char *>(profiles.data()), profiles.size()) == 1);
+	const opennova::audio::SoundProfile &silent = sound_profiles.entries()[0];
+	TEST_EXPECT(silent.name == "default" && sound_profiles.find("an item's own") == &silent);
+	for (int slot = 0; slot < opennova::audio::kSoundProfileSlotCount; ++slot)
+		TEST_EXPECT(silent.set_names[slot].empty() && silent.param2_q16[slot] == 0 &&
+		            silent.param3_q16[slot] == 0 && silent.param4[slot] == 0);
+	for (int32_t value : silent.loop_params) TEST_EXPECT(value == 0);
+	TEST_EXPECT(text_of(profiles).find("Blank & Co") != std::string::npos);
+	TEST_EXPECT(find_blank_factory_for_role("sndprof_def")->kind == AssetKind::SoundProfileDefs);
 
 	const std::vector<uint8_t> coo = make("nw_cdata", "nw_cdata.coo");
 	const std::vector<uint8_t> expected = {0, 0, 0, 0, 'R', 'S', 'T', 'R'};
