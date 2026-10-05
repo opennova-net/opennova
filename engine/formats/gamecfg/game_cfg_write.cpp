@@ -149,7 +149,7 @@ std::string write(const GameCfg &cfg, const WeaponRoster &weapons) {
 	// call at that site pushes; `\n` becomes CR LF at the end, the "w" stream's
 	// text mode (fopen @0x54C4AF).
 	std::string out;
-	emit(out, "// %s\n", "game.cfg"); // @0x54C4C2
+	emit(out, "// %s\n", kFileName); // @0x54C4C2
 	emit(out, "//\n");
 	emit(out, "\n");
 	emit(out, "// GENERAL\n");

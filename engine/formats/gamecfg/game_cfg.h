@@ -55,6 +55,12 @@ namespace opennova::gamecfg {
 // @0x54D0D1 sets 29; Game_LoadConfig @0x5514C4 `cmp version, 1Dh`].
 inline constexpr int32_t kConfigVersion = 29;
 
+// The file's name, a bare relative path: the load and the save open it in the
+// process's working directory [orig: the string @0x7D3E5C, read by
+// Game_LoadConfig @0x551499 and opened "w" by Game_SaveConfig @0x54C4AA..
+// 0x54C4AF, which also prints it as the first line @0x54C4C2].
+inline constexpr const char *kFileName = "game.cfg";
+
 // The array lengths of the two availability blocks [orig: GameConfigState
 // +0x5F0 int32[255] weaponAvailability, +0x9EC int32[10] classAvailability].
 inline constexpr int kWeaponAvailabilityCount = 255;
@@ -76,9 +82,12 @@ inline constexpr int kClassEngineer = 9;
 // (`wpn_<x>`) against the whole name, case-insensitively
 // [orig: WeaponDef_FindIndexByName @0x54DD60 from @0x54FA40]; the writer
 // prints the name from its fifth character for every selectable row
-// [orig: Game_SaveConfig @0x54CEDE..0x54CF0F]. The roster is weapon.def in
-// file order: retail's first read at boot runs before weapon.def loads, so an
-// empty roster drops every avail_wpn line, as that read does.
+// [orig: Game_SaveConfig @0x54CEDE..0x54CF0F]. The roster is the weapon
+// table in row order: row 0 the `None` row the load seeds, then weapon.def's
+// rows in file order [orig: WeaponDef_LoadAll @0x54DD10; the builder from a
+// parsed weapon.def is runtime/inmatch/host_config.h game_cfg_weapon_roster].
+// Retail's first read at boot runs before weapon.def loads, so an empty
+// roster drops every avail_wpn line, as that read does.
 struct WeaponRosterEntry {
 	std::string name;
 	int32_t loadout_selectable = 0;
