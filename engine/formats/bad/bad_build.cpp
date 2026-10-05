@@ -210,14 +210,47 @@ void bad_derive_bone_table(const BadBuildClip &clip, const BadBuildClip *reset,
     }
 }
 
-bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, BadAssembled &out,
-                        std::string *error) {
+BadTargetLimits bad_retail_limits() {
+    BadTargetLimits l;
+    // An archive entry's name field is 16 bytes and must hold its NUL, so a
+    // file the pipeline ships (a clip, a table) is at most 15 bytes, its
+    // extension included; no shipped entry is longer [orig: PFF_FindEntry
+    // @0x7685D0 bsearches with PFF_CompareSearchNameToEntry @0x768240, a
+    // strcmp over the entry's 16-byte field at +16; PFF_SortEntries @0x768280
+    // strupr's it @0x7682A1].
+    l.packed_name_bytes = 15;
+    // Every bone buffer the game samples a clip into holds 64, and nothing
+    // clamps the clip's own count to them (retail's largest clip carries 61)
+    // [orig: BoneSystem_Init @0x410170, the 64-bone scratch, from AnimMap_Init
+    // @0x40BE40 (@0x40BE52); BoneAnim_TransformBones @0x410360 fills it for the
+    // clip's bone count; BoneAnim_BuildWorldMatrices @0x40C400, its 64-matrix
+    // locals].
+    l.clip_bones = 64;
+    // The loader refuses a file over 500,000 bytes [orig: BoneFile_Load
+    // @0x40fff0, the 0x7A120 size gate]; the largest retail clip is 298,172.
+    l.clip_bytes = 500000;
+    // A key's duration is the channel's u16 word; a bone name the table's
+    // 32-byte field with its NUL (bad.h).
+    l.key_duration = 0xFFFF;
+    l.bone_name = 31;
+    // What the table's parse holds a row (adm::AdmEntry): eight clips (the
+    // game's own row has no cap but the tokenizer's 30 tokens a line, and the
+    // widest shipped row holds 6), and a key and each variant in 64 bytes with
+    // their NUL.
+    l.row_variants = static_cast<size_t>(adm::ADM_MAX_VARIANTS);
+    l.row_key_bytes = sizeof(adm::AdmEntry{}.key) - 1;
+    l.variant_bytes = sizeof(adm::AdmEntry{}.variants[0]) - 1;
+    return l;
+}
+
+bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, const BadTargetLimits &limits,
+                        BadAssembled &out, std::string *error) {
     out = BadAssembled{};
     const size_t bones = clip.bones.size();
     if (bones == 0) return fail(error, "a clip holds no bones");
-    if (bones > kBadMaxBones)
+    if (bones > limits.clip_bones)
         return fail(error, "a clip holds " + std::to_string(bones) + " bones; the game's bone arrays hold " +
-                                   std::to_string(kBadMaxBones));
+                                   std::to_string(limits.clip_bones));
     if (clip.frame_count == 0) return fail(error, "a clip holds no frames");
     // A loop steps fps / (62 * frames) of its cycle a tick and takes one away
     // once at the wrap, so a step of a whole cycle or more never plays: at
@@ -240,8 +273,9 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, Bad
 
     for (size_t i = 0; i < bones; ++i) {
         const BadBuildBone &bone = clip.bones[i];
-        if (bone.name.size() > 31)
-            return fail(error, "bone " + std::to_string(i) + " name is over 31 characters");
+        if (bone.name.size() > limits.bone_name)
+            return fail(error, "bone " + std::to_string(i) + " name is over " + std::to_string(limits.bone_name) +
+                                       " characters");
         if (i == 0) {
             if (bone.parent >= 0) return fail(error, "bone 0 carries a parent");
         } else if (bone.parent < 0 || static_cast<size_t>(bone.parent) >= i) {
@@ -261,8 +295,15 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, Bad
                                        ", and no key duration table");
         if (!bone.durations.empty() && bone.durations.size() != bone.keys.size())
             return fail(error, "bone " + std::to_string(i) + " duration count is not its key count");
-        for (const uint16_t d : bone.durations) {
+        for (size_t k = 0; k < bone.durations.size(); ++k) {
+            const uint32_t d = bone.durations[k];
             if (d == 0) return fail(error, "bone " + std::to_string(i) + " holds a zero duration");
+            // The channel slerps across a key's whole duration, so a longer
+            // hold is no run of shorter keys: the word must hold it.
+            if (d > limits.key_duration || d > 0xFFFFu)
+                return fail(error, "bone " + std::to_string(i) + " key " + std::to_string(k) + " holds " +
+                                           std::to_string(d) + " frames; a key's duration word holds " +
+                                           std::to_string(std::min<uint32_t>(limits.key_duration, 0xFFFFu)));
         }
         for (const BadBuildQuat &q : bone.keys) {
             const double len = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
@@ -297,7 +338,7 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, Bad
         out.durations[i].resize(count);
         for (size_t f = 0; f < count; ++f) {
             out.rotations[i][f] = stored_key(bone.keys[f]);
-            out.durations[i][f] = bone.durations.empty() ? uint16_t{1} : bone.durations[f];
+            out.durations[i][f] = bone.durations.empty() ? uint16_t{1} : static_cast<uint16_t>(bone.durations[f]);
         }
     }
 
@@ -361,17 +402,15 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, Bad
     return true;
 }
 
-bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, std::vector<uint8_t> &out,
-                    std::string *error) {
+bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, const BadTargetLimits &limits,
+                    std::vector<uint8_t> &out, std::string *error) {
     BadAssembled assembled;
-    if (!bad_build_assemble(clip, reset, assembled, error)) return false;
+    if (!bad_build_assemble(clip, reset, limits, assembled, error)) return false;
     if (bad_write_buffer(&assembled.file, out) != 0)
         return fail(error, "the writer refused the clip");
-    // The loader refuses a file over 500,000 bytes [orig: BoneFile_Load
-    // @0x40fff0, the 0x7A120 size gate]; the largest retail clip is 298,172.
-    if (out.size() > kBadFileMaxBytes)
-        return fail(error, "the clip is " + std::to_string(out.size()) +
-                                   " bytes, over the loader's 500000");
+    if (out.size() > limits.clip_bytes)
+        return fail(error, "the clip is " + std::to_string(out.size()) + " bytes, over the loader's " +
+                                   std::to_string(limits.clip_bytes));
     return true;
 }
 
@@ -390,31 +429,73 @@ bool bad_build_bare_stem(const std::string &name) {
     return true;
 }
 
-bool bad_build_packable_name(const std::string &file_name) {
-    if (file_name.empty() || file_name.size() > kBadPackedNameMax) return false;
+bool bad_build_packable_name(const std::string &file_name, const BadTargetLimits &limits) {
+    if (file_name.empty() || file_name.size() > limits.packed_name_bytes) return false;
     for (const char c : file_name) {
         if (static_cast<unsigned char>(c) >= 0x80) return false;
     }
     return true;
 }
 
-bool bad_build_check_set(const BadBuildSet &set, std::vector<std::string> &problems) {
+bool bad_build_check_set(const BadBuildSet &set, const BadTargetLimits &limits, BadSlotLookup slots,
+                         std::vector<BadBuildProblem> &problems) {
     const size_t before = problems.size();
-    if (set.rows.empty()) return true; // a lone clip: its output name is the file
-    for (const BadBuildClip &clip : set.clips) {
+    const auto problem = [&problems](const std::string &what, int clip, int bone, int row) {
+        problems.push_back(BadBuildProblem{what, clip, bone, row});
+    };
+    for (size_t r = 0; r < set.rows.size(); ++r) {
+        const BadBuildRow &row = set.rows[r];
+        const int at = static_cast<int>(r);
+        if (slots != nullptr && slots(row.key) < 0)
+            problem("row '" + row.key + "' names no anim slot (past its first five characters the key is none of "
+                    "the 252 slot names `opennova-3di catalog` lists), and the game drops such a row", -1, -1, at);
+        if (row.key.size() > limits.row_key_bytes)
+            problem("row key '" + row.key + "' is " + std::to_string(row.key.size()) + " bytes; a table row's key "
+                    "holds " + std::to_string(limits.row_key_bytes), -1, -1, at);
+        if (row.variants.size() > limits.row_variants)
+            problem("row '" + row.key + "' names " + std::to_string(row.variants.size()) + " clips; a table row "
+                    "holds " + std::to_string(limits.row_variants), -1, -1, at);
+        for (const std::string &variant : row.variants)
+            if (variant.size() > limits.variant_bytes)
+                problem("row '" + row.key + "' names '" + variant + "', " + std::to_string(variant.size()) +
+                        " bytes; a table row's clip holds " + std::to_string(limits.variant_bytes), -1, -1, at);
+    }
+    for (size_t c = 0; c < set.clips.size(); ++c) {
+        const BadBuildClip &clip = set.clips[c];
+        const int at = static_cast<int>(c);
         const std::string file = clip.name + ".bad";
-        if (!bad_build_packable_name(file))
-            problems.push_back("clip '" + clip.name + "' writes '" + file + "', " +
-                               std::to_string(file.size()) + " bytes; the game packs a file name of at most " +
-                               std::to_string(kBadPackedNameMax) + " ASCII bytes, its extension included");
+        // A lone clip (a set with no row) lands under its output name.
+        if (!set.rows.empty() && !bad_build_packable_name(file, limits))
+            problem("clip '" + clip.name + "' writes '" + file + "', " + std::to_string(file.size()) +
+                    " bytes; the game packs a file name of at most " + std::to_string(limits.packed_name_bytes) +
+                    " ASCII bytes, its extension included", at, -1, -1);
+        if (clip.bones.size() > limits.clip_bones)
+            problem("clip '" + clip.name + "' holds " + std::to_string(clip.bones.size()) +
+                    " bones; the game's bone arrays hold " + std::to_string(limits.clip_bones), at, -1, -1);
+        for (size_t b = 0; b < clip.bones.size(); ++b) {
+            const BadBuildBone &bone = clip.bones[b];
+            if (bone.name.size() > limits.bone_name)
+                problem("bone '" + bone.name + "' is " + std::to_string(bone.name.size()) + " characters; a bone "
+                        "name holds " + std::to_string(limits.bone_name), at, static_cast<int>(b), -1);
+            for (size_t k = 0; k < bone.durations.size(); ++k)
+                if (bone.durations[k] > limits.key_duration) {
+                    problem("bone '" + bone.name + "' key " + std::to_string(k) + " holds " +
+                            std::to_string(bone.durations[k]) + " frames; a key's duration word holds " +
+                            std::to_string(limits.key_duration) + " (the channel slerps across a key's whole "
+                            "duration, so a longer hold is no run of keys: key the motion between)",
+                            at, static_cast<int>(b), -1);
+                    break;
+                }
+        }
     }
     const BadBuildClip *reset = bad_build_reset_clip(set);
     if (reset != nullptr && (reset->flags & BAD_FLAG_TRANSLATION) == 0) {
-        for (const BadBuildClip &clip : set.clips) {
+        for (size_t c = 0; c < set.clips.size(); ++c) {
+            const BadBuildClip &clip = set.clips[c];
             if ((clip.flags & BAD_FLAG_TRANSLATION) != 0)
-                problems.push_back("clip '" + clip.name + "' carries translations but the reset clip '" +
-                                   reset->name + "' does not; the game moves a bone only when both do "
-                                   "(give the reset clip translations, flag 0x2)");
+                problem("clip '" + clip.name + "' carries translations but the reset clip '" + reset->name +
+                        "' does not; the game moves a bone only when both do (give the reset clip translations, "
+                        "flag 0x2)", static_cast<int>(c), -1, -1);
         }
     }
     return problems.size() == before;
@@ -437,7 +518,8 @@ const BadBuildClip *bad_build_reset_clip(const BadBuildSet &set) {
     return nullptr;
 }
 
-bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string *error) {
+bool bad_build_mint_table(const BadBuildSet &set, const BadTargetLimits &limits, std::string &out,
+                          std::string *error) {
     out.clear();
     // A table binds every clip to its reset row's clip; with none the game
     // faults loading it [orig: AnimMap_LoadAdmFile @0x40cc40, the read of slot
@@ -451,15 +533,18 @@ bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string 
         const BadBuildRow &row = set.rows[i];
         adm::AdmEntry &entry = entries[i];
         std::memset(&entry, 0, sizeof(entry));
-        if (row.key.size() >= sizeof(entry.key))
+        // The table's parse holds what the target says, and no more than its
+        // own fields (adm::AdmEntry).
+        if (row.key.size() > limits.row_key_bytes || row.key.size() >= sizeof(entry.key))
             return fail(error, "row key '" + row.key + "' is too long");
         std::memcpy(entry.key, row.key.c_str(), row.key.size());
-        if (row.variants.size() > static_cast<size_t>(adm::ADM_MAX_VARIANTS))
-            return fail(error, "row '" + row.key + "' holds over " +
-                                       std::to_string(adm::ADM_MAX_VARIANTS) + " variants");
+        if (row.variants.size() > limits.row_variants ||
+                row.variants.size() > static_cast<size_t>(adm::ADM_MAX_VARIANTS))
+            return fail(error, "row '" + row.key + "' holds over " + std::to_string(limits.row_variants) +
+                                       " variants");
         entry.variant_count = row.variants.size();
         for (size_t v = 0; v < row.variants.size(); ++v) {
-            if (row.variants[v].size() >= sizeof(entry.variants[v]))
+            if (row.variants[v].size() > limits.variant_bytes || row.variants[v].size() >= sizeof(entry.variants[v]))
                 return fail(error, "row '" + row.key + "' names a clip that is too long");
             if (!bad_build_bare_stem(bad_build_clip_stem(row.variants[v])))
                 return fail(error, "row '" + row.key + "' names '" + row.variants[v] +
@@ -496,22 +581,26 @@ bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string 
     return true;
 }
 
-bool bad_build_mint_set(const BadBuildSet &set, const std::string &out_name, std::vector<BadMintedFile> &out,
-                        std::string *error, int *failed_clip) {
+bool bad_build_mint_set(const BadBuildSet &set, const std::string &out_name, const BadTargetLimits &limits,
+                        BadSlotLookup slots, std::vector<BadMintedFile> &out, std::vector<BadBuildProblem> &problems) {
     out.clear();
-    if (failed_clip != nullptr) *failed_clip = -1;
+    const auto refuse = [&problems](const std::string &what, int clip = -1) {
+        problems.push_back(BadBuildProblem{what, clip, -1, -1});
+        return false;
+    };
     const bool lone = out_name.size() > 4 && strutil::ends_with_icase(out_name, ".bad");
-    if (set.clips.empty()) return fail(error, "the set holds no clip");
-    // The file the game packs keeps its name: 15 bytes at most, the
-    // extension included (bad_build_packable_name).
-    if (!bad_build_packable_name(out_name))
-        return fail(error, "'" + out_name + "' is " + std::to_string(out_name.size()) +
-                                   " bytes; the game packs a file name of at most " +
-                                   std::to_string(kBadPackedNameMax) + " ASCII bytes, its extension included");
+    if (set.clips.empty()) return refuse("the set holds no clip");
+    // The file the game packs keeps its name (bad_build_packable_name).
+    if (!bad_build_packable_name(out_name, limits))
+        return refuse("'" + out_name + "' is " + std::to_string(out_name.size()) +
+                      " bytes; the game packs a file name of at most " + std::to_string(limits.packed_name_bytes) +
+                      " ASCII bytes, its extension included");
     if (lone && (set.clips.size() != 1 || !set.rows.empty()))
-        return fail(error, "a lone clip is one clip and no table row");
+        return refuse("a lone clip is one clip and no table row");
     if (!lone && set.rows.empty())
-        return fail(error, "the set holds no table row (mint one clip on its own instead)");
+        return refuse("the set holds no table row (mint one clip on its own instead)");
+    // Everything the target cannot hold, all of it at once.
+    if (!bad_build_check_set(set, limits, slots, problems)) return false;
     // Every clip of a table composes against its reset clip; a lone clip
     // against its own first key.
     const BadBuildClip *reset = lone ? nullptr : bad_build_reset_clip(set);
@@ -521,21 +610,17 @@ bool bad_build_mint_set(const BadBuildSet &set, const std::string &out_name, std
         BadMintedFile minted;
         std::string why;
         BadFile check{};
-        if (!bad_build_mint(clip, reset, minted.bytes, &why)) {
-            if (failed_clip != nullptr) *failed_clip = static_cast<int>(c);
-            return fail(error, "clip '" + clip.name + "': " + why);
-        }
-        if (bad_parse_buffer(minted.bytes.data(), minted.bytes.size(), &check) != 0) {
-            if (failed_clip != nullptr) *failed_clip = static_cast<int>(c);
-            return fail(error, "clip '" + clip.name + "' does not read back");
-        }
+        if (!bad_build_mint(clip, reset, limits, minted.bytes, &why))
+            return refuse("clip '" + clip.name + "': " + why, static_cast<int>(c));
+        if (bad_parse_buffer(minted.bytes.data(), minted.bytes.size(), &check) != 0)
+            return refuse("clip '" + clip.name + "' does not read back", static_cast<int>(c));
         bad_free(&check);
         minted.name = lone ? out_name : clip.name + ".bad";
         files.push_back(std::move(minted));
     }
     if (!lone) {
-        std::string text;
-        if (!bad_build_mint_table(set, text, error)) return false;
+        std::string text, why;
+        if (!bad_build_mint_table(set, limits, text, &why)) return refuse(why);
         files.push_back(BadMintedFile{out_name, std::vector<uint8_t>(text.begin(), text.end())});
     }
     out = std::move(files);

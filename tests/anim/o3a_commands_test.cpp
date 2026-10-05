@@ -8,8 +8,12 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
+
+#include <formats/bad/bad_o3a_read.h>
+#include <runtime/anim/adm_clip_index.h>
 
 #include "../../apps/3di/anim_cli.h"
 #include "../common/file_io.h"
@@ -176,6 +180,37 @@ int main(int argc, char **argv) {
 	build("partial-duration", replace(text, " k 0 0 0.0871557427 0.996194698\n",
 									  " k 0 0 0.0871557427 0.996194698 5x\n"),
 			false);
+	// The text holds a key of any duration; retail's word holds 65,535 frames,
+	// so a longer hold reads and fails the mint at its bone's line (line 9, the
+	// pelvis), never split into repeated keys (the channel slerps across a
+	// key's whole duration).
+	{
+		// The pelvis's four keys, each with its duration.
+		const std::string held = replace(replace(replace(text, " k 0 0 0 1\n k 0 0 0.0871557427 0.996194698\n",
+												 " k 0 0 0 1 70000\n k 0 0 0.0871557427 0.996194698 1\n"),
+										 " k 0 0 0.173648178 0.984807753\n", " k 0 0 0.173648178 0.984807753 1\n"),
+				" k 0 0 0.258819045 0.965925826\n", " k 0 0 0.258819045 0.965925826 1\n");
+		std::istringstream in(held);
+		opennova::bad::BadBuildSet set;
+		std::vector<opennova::threedi::SceneFinding> findings;
+		opennova::bad::BadO3aLines lines;
+		check(opennova::bad::bad_o3a_read(in, set, findings, &lines) && findings.empty() &&
+						set.clips.size() == 1 && set.clips[0].bones[0].durations.size() == 4 &&
+						set.clips[0].bones[0].durations[0] == 70000,
+				"a 70000-frame key reads");
+		std::vector<opennova::bad::BadMintedFile> files;
+		std::vector<opennova::bad::BadBuildProblem> problems;
+		check(!opennova::bad::bad_build_mint_set(set, "CHECK.adm", opennova::bad::bad_retail_limits(),
+						opennova::anim::adm_slot_index, files, problems),
+				"a 70000-frame key fails the mint");
+		opennova::bad::bad_o3a_findings(lines, problems, findings);
+		check(findings.size() == 1 && findings[0].line == 9 &&
+						findings[0].message.find("key 0 holds 70000 frames; a key's duration word holds 65535") !=
+								std::string::npos,
+				"the long hold is named at its bone's line");
+		build("long-key-duration", held, false);
+		build("longest-key-duration", replace(held, " 70000\n", " 65535\n"));
+	}
 	build("nan-pivot", replace(text, "bone 0 0 0 1 0.4", "bone 0 nan 0 1 0.4"), false);
 	build("inf-translation", replace(text, " tr 0 0 0.02", " tr 0 0 inf"), false);
 	build("inf-velocity", replace(text, "event 0.06 0 0 0x1", "event -inf 0 0 0x1"), false);

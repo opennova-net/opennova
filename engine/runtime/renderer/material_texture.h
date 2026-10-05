@@ -98,8 +98,8 @@ MaterialTextureSource material_texture_source(std::string_view name, uint8_t typ
 // sibling lies beside it. Only a row of runtime type 0, 2 or 8 whose query
 // (material_texture_query) is no .tga, .mdt or .pcx file does. True with `opens`
 // the query and `loads` the sibling; false for an empty name (a row with no
-// file). The lookup the `.o3d` reader takes (formats/threedi/threedi_o3d_read.h,
-// ThreediTextureLookup), which cannot include this header.
+// file). The lookup the `.o3d` lowering takes (formats/threedi/threedi_o3d_lower.h,
+// ThreediTextureLookup; model_target.h), which cannot include this header.
 // [orig: Texture_LoadByNameWithChannel @ 0x58B4E1..0x58B4FA,
 // @ 0x58B53C..0x58B598, @ 0x58B66F..0x58B6E6]
 bool material_texture_dds_only(const char *name, uint8_t type, std::string &opens, std::string &loads);
