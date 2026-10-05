@@ -635,9 +635,25 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	request.role = &active_role();
 	request.host = host_role_;
 	const uint32_t mission_game_type = opennova::game_type::for_mission_attribs(document.header.attrib_flags);
+	const bool next_mission = net_.map_change_pending && host_role_ != nullptr;
+	if (host_role_ != nullptr && is_host_listening()) {
+		if (next_mission) {
+			// The map change's next map: the session keeps its config, the
+			// rotation names the map and its mode (Game_StartMission's
+			// authority arm, inmatch/map_change.h).
+			net_.host_session_config.mission_file = net_.rotation.list.map_file;
+			net_.host_session_config.game_type = net_.rotation.list.map_game_type;
+			net_.host_session_config.mission_name = document.get_mission_name();
+			net_.host_session_config.spawn_names.clear();
+		} else {
+			seed_host_rotation(net_, p_resource_root);
+		}
+		host_role_->set_rotation(&net_.rotation);
+	}
 	if (host_role_ != nullptr) {
 		request.host_cfg = host_session_cfg(mission_game_type);
 		request.session_score_ini = is_host_listening();
+		request.next_mission = next_mission;
 	}
 	// A joiner's tiles are the host's S2C 0x45 stream (or none), and a caller
 	// may hand a host its bytes; otherwise the boot reads the mission's .til.
@@ -674,6 +690,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	};
 	request.after_bringup = role_bringup_tail();
 	std::string boot_error;
+	net_.map_change_pending = false;
 	if (!inmatch::boot_host_mission(std::move(request), host_boot_, boot_error)) {
 		fail_session_load(boot_error.c_str());
 		return ERR_CANT_OPEN;

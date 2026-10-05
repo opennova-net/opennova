@@ -139,6 +139,10 @@ public:
 	void remove_host_missions() { host_dialog_.remove_selected(runtime_); }
 	bool can_start_host() const { return host_dialog_.can_start(); }
 	PackedStringArray selected_host_missions() const;
+	// The SELECTED_MISSIONS Switch cell's click and the rows' launch options
+	// (engine menu::HostDialog::toggle_switch / selected_launch_options).
+	void toggle_host_mission_switch(int p_row) { host_dialog_.toggle_switch(runtime_, p_row); }
+	PackedInt32Array selected_host_launch_options() const;
 	void select_host_location(int p_id, const String &p_country);
 	void prepare_options(const Ref<ControlsModel> &p_controls);
 	bool is_options_surface() const { return options_.is_surface(); }

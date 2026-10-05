@@ -149,10 +149,11 @@ void Simulation::ensure_session_role() {
 bool Simulation::prepare_session_load() {
 	using State = opennova::inmatch::State;
 	const State state = session_.state();
-	// A pre-connected joiner deliberately carries its live socket into load.
-	// Every other prior session, including Failed, closes its concrete target
-	// before a replacement world is installed.
-	if (state != State::Unloaded && state != State::Connecting) {
+	// A pre-connected joiner deliberately carries its live socket into load,
+	// and a host's map change its whole session (inmatch/map_change.h). Every
+	// other prior session, including Failed, closes its concrete target before
+	// a replacement world is installed.
+	if (state != State::Unloaded && state != State::Connecting && !net_.map_change_pending) {
 		(void)session_.close();
 	}
 	if (session_.state() != State::Connecting) {

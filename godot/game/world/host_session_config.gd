@@ -47,7 +47,8 @@ const CHANNEL_NOVAWORLD := "NovaWorld"
 # The native base owns session fields and host-dialog readback policy.
 # Rotation selection and the menu's mission filter belong to this shell.
 var mission := ""       ## the .bms to load (host screens put the rotation's first pick here)
-var missions: Array[String] = []
+var missions: Array[String] = []  ## the rotation: SELECTED_MISSIONS' files in table order
+var mission_launch_options: Array[int] = []  ## each row's Switch cell (its launch option)
 var game_type_attr := ""  ## the GAME_TYPE spin's raw value attr (HG_COOP=2, ...), for later
 
 
@@ -77,4 +78,6 @@ func to_session_options() -> HostSessionOptions:
 	var options := duplicate_options()
 	options.mission_file = mission if not mission.is_empty() \
 			else (missions[0] if not missions.is_empty() else "")
+	options.rotation_missions = PackedStringArray(missions)
+	options.rotation_launch_options = PackedInt32Array(mission_launch_options)
 	return options

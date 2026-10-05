@@ -111,6 +111,7 @@ std::string MenuFlow::take_expansion_reload() {
 void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows) {
 	pool_.clear();
 	selected_.clear();
+	launch_options_.clear();
 	for (const auto &row : rows)
 		if (game_type::host_list_visible(row.game_type)) pool_.push_back(row);
 	const int table = menu.widget_id("SELECTED_MISSIONS");
@@ -158,9 +159,13 @@ void HostDialog::add_selected(MenuRuntime &menu, const hud::GameTextLookup &text
 		if (std::find(selected_.begin(), selected_.end(), picked) != selected_.end()) continue;
 		const auto &row = pool_[picked];
 		const char *key = game_type::host_abbreviation_key(row.game_type);
+		// The ADD sets the row's launch option to its default: a team mode and
+		// not an objective mode [orig: @0x557E72..0x557E94].
+		const int32_t option = game_type::host_rotation_default(row.game_type) ? 1 : 0;
 		menu.table_add_row(table, {row.text, text ? text("GateTypeAbbrev", key, key) : key,
-				game_type::host_rotation_default(row.game_type) ? "1" : "0"});
+				option != 0 ? "1" : "0"});
 		selected_.push_back(picked);
+		launch_options_.push_back(option);
 	}
 	filter(menu);
 	sync_start(menu);
@@ -175,8 +180,10 @@ void HostDialog::remove_selected(MenuRuntime &menu) {
 	std::sort(rows.rbegin(), rows.rend());
 	for (int row : rows) {
 		menu.table_remove_row(table, row);
-		if (row >= 0 && row < static_cast<int>(selected_.size()))
+		if (row >= 0 && row < static_cast<int>(selected_.size())) {
 			selected_.erase(selected_.begin() + row);
+			launch_options_.erase(launch_options_.begin() + row);
+		}
 	}
 	filter(menu);
 	sync_start(menu);
@@ -195,6 +202,17 @@ std::vector<std::string> HostDialog::selected_missions() const {
 	for (int row : selected_) files.push_back(pool_[row].file);
 	return files;
 }
+
+void HostDialog::toggle_switch(MenuRuntime &menu, int row) {
+	const int table = menu.widget_id("SELECTED_MISSIONS");
+	if (table < 0 || row < 0 || row >= static_cast<int>(selected_.size())) return;
+	int32_t &option = launch_options_[static_cast<size_t>(row)];
+	if (game_type::host_rotation_default(pool_[static_cast<size_t>(selected_[row])].game_type))
+		option = option == 0 ? 1 : 0;
+	menu.table_set_cell_text(table, row, 2, option != 0 ? "1" : "0");
+}
+
+std::vector<int32_t> HostDialog::selected_launch_options() const { return launch_options_; }
 
 // Country matches the first three characters, case-insensitively, leaving
 // the authored row when there is no match.

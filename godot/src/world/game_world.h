@@ -225,6 +225,16 @@ public:
 	// What the main frame does with a stored exit reason over the loaded sim's
 	// session facts (inmatch::main_frame_exit): a MAIN_FRAME_EXIT_* value.
 	int main_frame_exit(int p_reason) const;
+	// The map change (D-NET-331, inmatch/map_change.h), each keeping the live
+	// session for the next load (SessionDrive::keep_session):
+	// begin_map_change runs an in-session host's teardown arms and router and
+	// returns the next map's file (empty: the rotation ended, nothing kept);
+	// load_next_mission is its load. begin_joiner_reload starts a joiner's
+	// reload legs on its kept connection; reload_joiner is its load.
+	String begin_map_change();
+	int load_next_mission(const String &p_bms_name);
+	bool begin_joiner_reload();
+	int reload_joiner();
 	// The error record of the join that last failed (SessionDrive::last_connection_error).
 	Ref<ConnectionError> get_last_connection_error() const;
 	// The join screen's status while a join preload runs (SessionDrive::join_screen_status).

@@ -395,6 +395,16 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	// The same install root feeds the host bring-up's loose _NSTMOUT.TXT
 	// session-timeout override (HostConfig::game_root).
 	host_game_root_ = opennova::to_std(p_options->get_game_root());
+	// The host screen's rotation: the rows and their Switch cells, which the
+	// first host boot seeds the list from (seed_host_rotation).
+	net_.rotation_missions.clear();
+	net_.rotation_launch_options.clear();
+	const PackedStringArray rotation_missions = p_options->get_rotation_missions();
+	const PackedInt32Array rotation_options = p_options->get_rotation_launch_options();
+	for (int64_t i = 0; i < rotation_missions.size(); ++i) {
+		net_.rotation_missions.push_back(opennova::to_std(rotation_missions[i]));
+		net_.rotation_launch_options.push_back(i < rotation_options.size() ? rotation_options[i] : 0);
+	}
 	{
 		const String requested = p_options->get_integrity_profile().strip_edges();
 		const std::string id = opennova::to_std(requested);

@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
@@ -39,6 +40,8 @@ class HostSessionOptions : public RefCounted {
 	// the resource-dir override, and the NovaWorld gate registration row.
 	String dir_;
 	int region_index_ = 0;
+	PackedStringArray rotation_missions_;
+	PackedInt32Array rotation_launch_options_;
 	opennova::inmatch::NetworkType network_type_ = opennova::inmatch::NetworkType::Lan;
 
 protected:
@@ -162,6 +165,16 @@ public:
 	// gametext tokens, resolved by the hosting NovaWorld session).
 	int get_region_index() const { return region_index_; }
 	void set_region_index(int p_index) { region_index_ = p_index; }
+	// The host screen's map rotation at START: the SELECTED_MISSIONS rows'
+	// files in table order and each row's launch option (its Switch cell), which
+	// the session seeds its rotation from (inmatch::seed_rotation_from_host_screen;
+	// D-NET-331). Empty = the one mission_file, with no rotation after it.
+	PackedStringArray get_rotation_missions() const { return rotation_missions_; }
+	void set_rotation_missions(const PackedStringArray &p_files) { rotation_missions_ = p_files; }
+	PackedInt32Array get_rotation_launch_options() const { return rotation_launch_options_; }
+	void set_rotation_launch_options(const PackedInt32Array &p_options) {
+		rotation_launch_options_ = p_options;
+	}
 	// The host's network type (HostConfig::network_type): NovaWorld only for a
 	// host the world registers with the NovaWorld gate. Set by the world's
 	// host entry, not a GDScript field.
