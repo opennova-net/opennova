@@ -11,6 +11,7 @@
 #include <editor/ui/document_views.h>
 #include <editor/ui/record_reveal.h>
 #include <editor/ui/reference_picker.h>
+#include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
 
@@ -64,7 +65,7 @@ private:
 	// is no variable; none at all).
 	bool follow_uses(const MnsDocument &document);
 
-	char filter_[128]{};
+	ui_kit::HeldText<kWorkspaceText> filter_; // the workspace's filter (workspace.document's)
 	// The lines the table lists (the variables and the lines that decide what the game reads, by
 	// their place among the rows) and those the filter shows, made when the document (its
 	// identity, load and revision) or the filter moved; whether the filter keeps each line, by its
