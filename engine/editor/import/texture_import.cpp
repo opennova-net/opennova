@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include <base/io/strutil.h>
+#include <editor/import/dxt_encode.h>
 #include <editor/import/import_context.h>
 #include <editor/import/png_decode.h>
 #include <editor/import/png_encode.h>
@@ -16,7 +17,6 @@
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
-#include <runtime/renderer/texture_dxt.h>
 
 namespace opennova::editor {
 
@@ -500,13 +500,8 @@ bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, s
 			return false;
 		}
 		const bool dxt5 = settings.dds == "dxt5";
-		uint32_t levels = 1;
-		if (settings.mips == "full")
-			for (uint32_t side = std::max(w, h); side > 1; side >>= 1) ++levels;
-		const std::vector<renderer::DxtSurface> chain = renderer::build_dxt_texture_levels(
-		        image.pixels.data(), w, h, dxt5 ? renderer::TextureDxtFormat::Dxt5 : renderer::TextureDxtFormat::Dxt1, levels);
-		std::vector<std::vector<uint8_t>> blocks;
-		for (const renderer::DxtSurface &level : chain) blocks.push_back(level.blocks);
+		// The authoring encoder (import/dxt_encode.h): rgbcx's blocks, each level the box filter of the source's.
+		const std::vector<std::vector<uint8_t>> blocks = encode_dxt_levels(image.pixels.data(), w, h, dxt5, settings.mips == "full");
 		return dds::dds_write_dxt(dds::dds_fourcc('D', 'X', 'T', dxt5 ? '5' : '1'), w, h, blocks, out, why);
 	}
 	why = "the format '" + format + "' is none of tga, tga24, pcx, pcx24, dds, mdt or png";
