@@ -37,6 +37,19 @@ the editor finds it anywhere in the project. Keep new files at the top level.
 | `on_ar15.adm` | `on_ar15`'s animation table: the eight weapon slots and the clip each plays. |
 | `on_ar15_{rst,i,f,r,e,swt,swf,swr}.bad` | The clips: reset, idle, fire, reload, empty, switch to, switch from and switch rank. |
 | `on_ar15_{0,1,2,3}_c.tga`, `on_arms_{0,1}_c.tga`, `on_arms_{0,1}_n.tga` | The models' diffuse textures and the arms' normal maps. |
+| `hudpos.def` | The HUD's layout in the 1024 x 768 design space: the soldier panel bottom left, the map bottom right, the readouts, its fonts, colours and detail levels. Hand-written. |
+| `onhudb18.fnt`, `onhud14.fnt` | The HUD's two fonts (above 640 wide, and at 640 and below). Made by the editor's font importer from the glyph sheets in `art/onjo1/hud/fonts/`. |
+| `onhframe.tga`, `onhstnc{0..5}.tga` | The soldier panel (hudpos `StaticFrame`) and the stance icons: stand, crouch, prone, sitting, emplaced, parachute. |
+| `h_onar15.tga`, `h_onclip.tga`, `h_onrnd.tga`, `onxhair.tga`, `m_onar15.tga` | The AR-15's HUD art, which its weapon.def entry names: its silhouette (`hudicon`), its magazine window and a round (`hudclipgfx`, `hudrndgfx`), its reticle (`crosshair`) and its armory picture (`loadout_menu_icon`). |
+| `cross01.tga` .. `cross25.tga` | The 25 crosshair styles the options offer (`cross01` the default, `cross25` none). |
+| `compring.tga`, `TSDicon.tga`, `WPIndctr.tga`, `dmgslice.tga`, `dmgslc_n.tga` | The map's compass bezel, its icon strip, the waypoint altitude nub and the two hit-direction slices. |
+| `border.tga`, `boxtile.tga`, `monogram.tga` | The HUD's window box (the scoreboard, objectives, help, briefing and message log): its frame and fill, the camouflage printed on the frame, and its glow pass (black: none). |
+| `border3.tga`, `k_tip.tga`, `g_tip.tga` | The tip panel and its two icons. |
+| `Binoculr.tga`, `BinoCH.tga`, `BNumbers.tga`, `NVG.tga`, `NVGScale.tga`, `vignette.tga` | The first-person view effects: the binocular mask, reticle and range digits, the night-vision mask and gain scale, the damage vignette. |
+| `neticon1.tga`, `neticon2.tga`, `neticon3.tga`, `JO_LFP.tga`, `R_LFP.tga`, `N_LFP.tga`, `lfp_alf.tga`, `lfp_dlf.tga`, `H_flag.tga`, `rockpip.tga`, `turrpip.tga`, `dirguide.tga` | The rest of the HUD's fixed-name art: the connection indicators, the objective tiles and marks, the carried flag, the vehicle pips. |
+
+Every HUD file above is our own art from `art/onjo1/hud/` (its `SOURCES.md`
+lists each one's source, size and drawing mode).
 
 Nothing references the `on_ar15` files yet. Re-export them by opening the
 scene with the add-on installed and running Export Model on `on_ar15` and
