@@ -45,6 +45,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova::bad {
@@ -55,25 +56,42 @@ inline constexpr uint32_t BAD_FLAG_LOOP = 0x1u;
 inline constexpr uint32_t BAD_FLAG_TRANSLATION = 0x2u;
 inline constexpr uint32_t BAD_FLAG_BIT3 = 0x8u;
 
-// The largest `.bad` the loader accepts [orig: BoneFile_Load @0x40fff0, the
-// 0x7A120 size gate].
-inline constexpr size_t kBadFileMaxBytes = 500000;
+// What the game a clip set is built for holds: the target's limits, which the
+// `.o3a` text itself never states (ADR 0052's rule, applied to clips: the
+// reader checks the text, the set's check and the mint check the target). Each
+// is [field], a word's width, or [engine], what the game's code does with a
+// value the word holds; the retail values and their witnesses are
+// bad_retail_limits'. Only the retail target exists. The `.bad` and `.adm`
+// containers are retail's, so a target past their words (a u16 key duration,
+// a 32-byte bone name) would need a container of its own.
+struct BadTargetLimits {
+    size_t packed_name_bytes = 0; // [engine] bytes of a packed file's name, its extension included
+    size_t clip_bones = 0;        // [engine] bones a clip carries
+    size_t clip_bytes = 0;        // [engine] bytes of a `.bad` the loader accepts
+    uint32_t key_duration = 0;    // [field] frames a key holds
+    size_t bone_name = 0;         // [field] characters of a bone name
+    size_t row_variants = 0;      // [field] clips a table row's parse holds
+    size_t row_key_bytes = 0;     // [field] bytes of a row's key
+    size_t variant_bytes = 0;     // [field] bytes of a row's variant
+};
 
-// The most bones a clip may carry: every bone buffer the game samples a clip
-// into holds 64, and nothing clamps the clip's own count to them (retail's
-// largest clip carries 61) [orig: BoneSystem_Init @0x410170, the 64-bone
-// scratch, from AnimMap_Init @0x40BE40 (@0x40BE52); BoneAnim_TransformBones @0x410360
-// fills it for the clip's bone count; BoneAnim_BuildWorldMatrices @0x40C400,
-// its 64-matrix locals].
-inline constexpr size_t kBadMaxBones = 64;
+// The retail (Joint Operations) target.
+BadTargetLimits bad_retail_limits();
 
-// The longest file name the game can pack: an archive entry's name field is
-// 16 bytes and must hold its NUL, so a file the pipeline ships (a clip, a
-// table) is at most 15 bytes, its extension included; no shipped entry is
-// longer [orig: PFF_FindEntry @0x7685D0 bsearches with
-// PFF_CompareSearchNameToEntry @0x768240, a strcmp over the entry's 16-byte
-// field at +16; PFF_SortEntries @0x768280 strupr's it @0x7682A1].
-inline constexpr size_t kBadPackedNameMax = 15;
+// The anim slot a table row's key names, -1 for none. The slot table is the
+// runtime's (runtime/anim/adm_clip_index.h, adm_slot_index), which a format
+// library may not include, so the caller passes it.
+using BadSlotLookup = int (*)(std::string_view key);
+
+// One thing a set's check or mint finds the target cannot hold or play, with
+// what it belongs to: the index of its clip, of the clip's bone and of the
+// table row (-1 for none), so a front end names the line that gave it.
+struct BadBuildProblem {
+    std::string what;
+    int clip = -1;
+    int bone = -1;
+    int row = -1;
+};
 
 struct BadBuildVec3 {
     double x = 0.0, y = 0.0, z = 0.0;
@@ -106,7 +124,7 @@ BadBuildVec3 bad_bone_position(const float parent_bind_rows[9], const BadBuildVe
 BadBuildVec3 bad_bone_rel(const float parent_bind_rows[9], const float position[3]);
 
 struct BadBuildBone {
-    std::string name;   // at most 31 characters
+    std::string name;   // any length (the target's bone_name says what it holds)
     int parent = -1;    // -1 for the root; always a lower index
     BadBuildVec3 pivot; // absolute, mission axes: the paired model part's pivot
     double length = 0.0;
@@ -116,8 +134,9 @@ struct BadBuildBone {
     // the header's frame count alone sets the clip's length.
     std::vector<BadBuildQuat> keys;
     // Empty: every key lasts one frame, as 476 of 477 retail clips do; else one
-    // duration per key.
-    std::vector<uint16_t> durations;
+    // duration per key, in frames (the target's key_duration says how long a
+    // key may hold: retail's word is a u16).
+    std::vector<uint32_t> durations;
     // frame_count + 1 entries under BAD_FLAG_TRANSLATION (rows 0..frame_count),
     // mission axes, as the keys and events carry: the runtime reads row
     // trunc(frame_count * t) and lerps it with the next one, so the last
@@ -196,19 +215,25 @@ std::string bad_build_clip_stem(const std::string &variant);
 bool bad_build_bare_stem(const std::string &name);
 
 // Whether `file_name` (a clip's `<name>.bad`, a table's `<name>.adm`) can be
-// packed: 1 to kBadPackedNameMax bytes, all of them ASCII.
-bool bad_build_packable_name(const std::string &file_name);
+// packed: 1 to the target's packed_name_bytes, all of them ASCII.
+bool bad_build_packable_name(const std::string &file_name, const BadTargetLimits &limits);
 
-// What a table needs across its clips, past each clip's own checks
-// (bad_build_assemble): every clip's file (`<name>.bad`) can be packed
-// (bad_build_packable_name), and a clip carries translations only when the
-// table's reset clip does too, because the game moves a bone only when the
-// playing clip AND the bind carry them [orig: BoneAnim_TransformBones
-// @0x410360, the playing clip's flag @0x41038D; AnimChannel_ComputeBoneMatrices
-// @0x410DA0, the bind's flag @0x410DE7]. A lone clip (a set with no row) is
-// checked by its own output name. Appends one line per problem; true when there
-// is none.
-bool bad_build_check_set(const BadBuildSet &set, std::vector<std::string> &problems);
+// What the target holds of a set, every problem at once (the mint stops at its
+// first): a row whose key names no anim slot (`slots`, when given: the game
+// registers nothing under it [orig: AnimMap_ParseConfigLine @0x40CB60,
+// AnimMap_FindSlotByName @0x40CFA0 returns -1 @0x40CFCE and the row registers
+// nothing @0x40CBA4]); a row's variants, key or variant past what the table's
+// parse holds; a clip's file (`<name>.bad`) that cannot be packed
+// (bad_build_packable_name; a lone clip, a set with no row, is checked by its
+// own output name at the mint); a clip carrying translations under a reset
+// clip that does not, because the game moves a bone only when the playing clip
+// AND the bind carry them [orig: BoneAnim_TransformBones @0x410360, the playing
+// clip's flag @0x41038D; AnimChannel_ComputeBoneMatrices @0x410DA0, the bind's
+// flag @0x410DE7]; a clip past the target's bones, a bone name past its
+// characters, a key holding longer than its duration word. Appends one problem
+// each; true when there is none.
+bool bad_build_check_set(const BadBuildSet &set, const BadTargetLimits &limits, BadSlotLookup slots,
+                         std::vector<BadBuildProblem> &problems);
 
 // The clip every clip of a table composes against: the reset row's (a key
 // naming slot 0, `reset`, past its first five characters; the last such row)
@@ -241,27 +266,31 @@ void bad_derive_bone_table(const BadBuildClip &clip, const BadBuildClip *reset,
 
 // Assemble `clip` into the document the writer serializes; `reset` is the
 // set's reset clip (bad_build_reset_clip), null for a lone clip. False with
-// `error` set for a clip the format cannot hold (no bones, more than
-// kBadMaxBones, a parent that is not a lower index, a key list that is not
-// frame_count + 1 long, a translation block a flag promises and the clip
-// lacks or holds without the flag, a name over 31 characters, a version other
-// than 0 or 1, a trigger word on a version 0 event) or the game cannot play (a
+// `error` set for a clip the format cannot hold (no bones, a parent that is not
+// a lower index, a key list that is not frame_count + 1 long, a translation
+// block a flag promises and the clip lacks or holds without the flag, a
+// version other than 0 or 1, a trigger word on a version 0 event), the target
+// cannot (past its bones or a bone name's characters, a key holding longer
+// than its duration word, named by bone and key) or the game cannot play (a
 // loop stepping a whole cycle or more a tick: fps at 62 times its frame count
-// or more).
-bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, BadAssembled &out,
-                        std::string *error);
+// or more). A key held long stays one key: the channel slerps across a key's
+// whole duration, so repeating the key would change the motion.
+bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, const BadTargetLimits &limits,
+                        BadAssembled &out, std::string *error);
 
 // Assemble and serialize in one step, refusing a file the loader would not
-// load (over kBadFileMaxBytes).
-bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, std::vector<uint8_t> &out,
-                    std::string *error);
+// load (past the target's clip_bytes).
+bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, const BadTargetLimits &limits,
+                    std::vector<uint8_t> &out, std::string *error);
 
 // Serialize the set's table through the canonical-form `.adm` writer. False
-// with `error` set for a row the parser could not read back, and for a table
-// with no reset row (bad_build_reset_stem): every clip of a table binds to that
-// row's clip, and retail cannot load a table without one, reading slot 0's null
-// head unchecked [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16].
-bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string *error);
+// with `error` set for a row past what the table's parse holds or the parser
+// could not read back, and for a table with no reset row
+// (bad_build_reset_stem): every clip of a table binds to that row's clip, and
+// retail cannot load a table without one, reading slot 0's null head
+// unchecked [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16].
+bool bad_build_mint_table(const BadBuildSet &set, const BadTargetLimits &limits, std::string &out,
+                          std::string *error);
 
 // One file a set mints: its name (`<clip>.bad`, or the output's) and its bytes.
 struct BadMintedFile {
@@ -269,15 +298,17 @@ struct BadMintedFile {
     std::vector<uint8_t> bytes;
 };
 
-// Mint a whole set, all or nothing, each clip read back through the reader
-// before any is handed on. `out_name` is the file the set lands in, which the
-// game must be able to pack (bad_build_packable_name): a table's `<name>.adm`,
-// whose clips compose against the set's reset clip and land beside it as
-// `<clip>.bad`, the table minted last (bad_build_mint_table); or a name ending
-// `.bad`, the one clip of a set with no row, composed against its own first
-// key and minted under that name. False with `error` set, and `failed_clip`
-// the index of the clip that failed (-1 when none did).
-bool bad_build_mint_set(const BadBuildSet &set, const std::string &out_name, std::vector<BadMintedFile> &out,
-                        std::string *error, int *failed_clip = nullptr);
+// Mint a whole set for a target, all or nothing: the set's check first
+// (bad_build_check_set, every problem it finds), then each clip, read back
+// through the reader before any is handed on. `out_name` is the file the set
+// lands in, which the game must be able to pack (bad_build_packable_name): a
+// table's `<name>.adm`, whose clips compose against the set's reset clip and
+// land beside it as `<clip>.bad`, the table minted last
+// (bad_build_mint_table); or a name ending `.bad`, the one clip of a set with
+// no row, composed against its own first key and minted under that name.
+// False with `problems` saying why, each naming the clip, bone or row it is
+// about.
+bool bad_build_mint_set(const BadBuildSet &set, const std::string &out_name, const BadTargetLimits &limits,
+                        BadSlotLookup slots, std::vector<BadMintedFile> &out, std::vector<BadBuildProblem> &problems);
 
 } // namespace opennova::bad

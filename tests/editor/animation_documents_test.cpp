@@ -94,7 +94,7 @@ std::vector<uint8_t> chain_clip() {
 	}
 	std::vector<uint8_t> bytes;
 	std::string error;
-	if (!bad::bad_build_mint(clip, nullptr, bytes, &error)) std::printf("chain_clip: %s\n", error.c_str());
+	if (!bad::bad_build_mint(clip, nullptr, bad::bad_retail_limits(), bytes, &error)) std::printf("chain_clip: %s\n", error.c_str());
 	return bytes;
 }
 

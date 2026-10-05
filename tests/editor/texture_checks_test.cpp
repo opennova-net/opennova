@@ -175,11 +175,11 @@ int test_checks() {
 	                                    "\tgraphic1 = fits.tga, distort;\n}\n"));
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
-	                                    "o3d 1\nmodel THING\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\n"
+	                                    "o3d 2\nmodel THING\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\n"
 	                                    "texture skin.pcx 1 0\ntexture wall.tga 2 0\nmaterial FF_ST_OP\ntexture big.mdt 3 4\n"
 	                                    "texture bump.tga 3 5\nmaterial VS_DOT3DIFF2\nmatflags 1\nalphatest 64\n"
 	                                    "texture dotskin.pcx 1 0\ntexture dotdet.tga 2 0\ntexture dotnorm.mdt 3 4\n"
-	                                    "lod 0\npart 0 0 0 0\nstrip 0 0\n"
+	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	ImportChoice model;
 	model.path = scene + "/thing.o3d";

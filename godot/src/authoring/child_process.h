@@ -45,6 +45,9 @@ public:
 	// (a recycled pid, a reboot's); Alive when it is; Unknown when it will not be opened, or the
 	// lease records no time.
 	opennova::editor::ProcessLiveness process_liveness(int64_t pid, const std::string &created) override;
+	// The game install's run-one-at-a-time gate (OpenSemaphoreW by its name): Alive when it is there,
+	// Dead when no such semaphore is (ERROR_FILE_NOT_FOUND), Unknown on any other failure.
+	opennova::editor::ProcessLiveness semaphore_held(const std::string &name) override;
 	int64_t now_ms() override;
 	void sleep_ms(int64_t ms) override;
 
