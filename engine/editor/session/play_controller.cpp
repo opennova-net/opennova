@@ -150,7 +150,7 @@ void PlayController::publish_findings() {
 	core_.problems().validate_later();
 }
 
-void PlayController::start(const std::string &mission) {
+void PlayController::start(const std::string &mission, bool behind) {
 	const std::string &build_dir = view_.activity.last_build->build_dir;
 	LaunchPlan plan;
 	Diagnostic error;
@@ -249,6 +249,8 @@ void PlayController::start(const std::string &mission) {
 				: make_play_launch_plan(executable, build_dir, run_dir, view_.project.document->target_game,
 						  launcher.mcp_port, in_mission, launcher.engine_args, expansion);
 	}
+	// Behind the others when the request asked (the MCP gaps lane): how the platform starts it.
+	plan.behind = behind;
 	// The run directory is new (emptied), so the tail starts clean.
 	game_log_file_ = plan.log_file;
 	game_log_offset_ = 0;
@@ -286,6 +288,7 @@ void PlayController::start(const std::string &mission) {
 	view_.activity.play_pid = play_.pid();
 	view_.activity.play_mcp_port = plan.mcp_port;
 	view_.activity.play_mission = in_install ? std::string() : in_mission;
+	view_.activity.play_behind = behind;
 	view_.activity.play_command_line = launch_plan_command_line(plan);
 	view_.activity.play_exited_on_its_own = false;
 	view_.activity.play_exit_code = -1;
