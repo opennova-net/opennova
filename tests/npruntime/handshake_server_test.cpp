@@ -1412,6 +1412,7 @@ bool run_configured_max_packet_size_lands_in_cs_field_13() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::GameConfig config;
 	config.max_packet_size = 2000;
+	config.max_players = 2; // a Serve Only host's smallest cap: one joiner and its own slot 0
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, config);
 	const PeerAddr peer{0x0100007Fu, 30741};
@@ -2411,6 +2412,7 @@ bool run_full_player_info_is_recipient_scoped_lan_metadata() {
 	config.mission_file = "00TRg.bms";
 	config.game_type = 0x00010020u;
 	config.expansion = "revx02";
+	config.max_players = 2; // a Serve Only host's smallest cap: one joiner and its own slot 0
 	inmatch::test::bring_up_host(
 			ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, config);
@@ -2478,6 +2480,7 @@ bool run_full_player_info_selects_retail_mission_title_branch() {
 		config.mission_file = "TDH_I3A.bms";
 		config.game_type = test_case.game_type;
 		config.expansion = "revx02";
+		config.max_players = 2; // a Serve Only host's smallest cap: one joiner and its own slot 0
 		inmatch::test::bring_up_host(
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 				kHostKey, nullptr, config);
@@ -2702,6 +2705,7 @@ bool run_side_password_admission() {
 		config.spectator_slots = -1;
 		config.side_a_password = test.side_a;
 		config.side_b_password = test.side_b;
+		config.max_players = 2; // a Serve Only host's smallest cap: one joiner and its own slot 0
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Lan, kHostKey, nullptr, config);
 		auto auth = make_valid_client_auth(12, 0x1212u, kHostKey, "SideJoiner",
@@ -2973,7 +2977,7 @@ bool run_spectator_admission_codes_match_retail() {
 bool run_capacity_rejects_when_full() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::GameConfig settings;
-	settings.max_players = 2; // dedicated host: two joiner slots, no host loopback
+	settings.max_players = 2; // the 0x42 gate's shared count: two connections, no host loopback
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey,
 	                        nullptr, settings);
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";

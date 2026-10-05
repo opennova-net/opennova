@@ -158,6 +158,15 @@ bool connection_claims_player_slot(const NapiNPConnection &connection) {
 			connection.link.owned_entity.valid();
 }
 
+// Slot 0 is the authority's own row on every host: each round init keeps it
+// active and local, the local add takes it (the listen host's loopback), and a
+// remote add picks among the inactive rows only, so no joiner ever holds slot
+// 0. A Serve Only host builds no local connection and leaves that row
+// connectionless, so its first joiner takes slot 1 and its NovaWorld
+// PlayerList never names slot 0 (D-NET-350).
+// [orig: Server_InitNewRoundState @0x51c99a..0x51ca3c (slot 0 active, local);
+//  Server_PlayerAdd @0x51cc31..0x51cc65 (the local add -> g_LocalNetPlayer),
+//  @0x51cc9a -> sub_4FD7B0 @0x4fd7d0 (only rows whose +4 active byte is 0)]
 std::optional<uint8_t> first_free_player_slot(
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection *joining, uint32_t slot_capacity) {
@@ -167,9 +176,10 @@ std::optional<uint8_t> first_free_player_slot(
 		    !connection_claims_player_slot(connection)) continue;
 		occupied[connection.reply.player_slot] = true;
 	}
+	const bool remote = joining != nullptr && joining->type == NapiNPConnection::kTypeServerSide;
 	const std::size_t bounded_capacity =
 			std::min<std::size_t>(slot_capacity, occupied.size());
-	for (std::size_t slot = 0; slot < bounded_capacity; ++slot) {
+	for (std::size_t slot = remote ? 1 : 0; slot < bounded_capacity; ++slot) {
 		if (!occupied[slot]) return static_cast<uint8_t>(slot);
 	}
 	return std::nullopt;

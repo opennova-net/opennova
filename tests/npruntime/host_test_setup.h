@@ -15,9 +15,8 @@ namespace opennova::inmatch::test {
 // ServerHello.hk / checked against ClientAuth.hk); `local_client`, when non-null with HostClient,
 // registers the host's own type-2 loopback connection.
 inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode socket,
-                          uint32_t host_key = 0,
-                          replication::ISessionTransport *local_client = nullptr,
-                          const GameConfig &config = GameConfig{}) {
+                          uint32_t host_key, replication::ISessionTransport *local_client,
+                          const GameConfig &config) {
 	set_connection_mode(ctx, mode);
 	set_transport_mode(ctx, socket);
 	SessionStartup startup;
@@ -29,6 +28,19 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 	for (NapiNPConnection &connection : ctx.np_protocol.connection_list) {
 		if (connection.type == 2) connection.char_vars = retail_fresh_profile_character_vars();
 	}
+}
+
+// The stock-config form: GameConfig's defaults, except the cap. Its default of 1 is a single
+// player's; slot 0 is the authority's own row on every host (the listen host's player, a Serve Only
+// host's connectionless slot, whose published cap is the cfg max plus one), so the smallest cap
+// that admits a joiner is 2 (D-NET-350).
+// [orig: Server_InitNewRoundState @0x51c99a..0x51ca3c; HostDialog_StartSession @0x5587d7..0x5587e5]
+inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode socket,
+                          uint32_t host_key = 0,
+                          replication::ISessionTransport *local_client = nullptr) {
+	GameConfig config;
+	config.max_players = 2;
+	bring_up_host(ctx, mode, socket, host_key, local_client, config);
 }
 
 } // namespace opennova::inmatch::test
