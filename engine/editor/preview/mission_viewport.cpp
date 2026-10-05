@@ -8,6 +8,7 @@
 
 #include <base/io/bam.h>
 #include <base/io/strutil.h>
+#include <base/vfs/file_source.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mission_document.h>
@@ -24,9 +25,28 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/env/env.h>
+#include <formats/env/env_weather.h>
 #include <formats/mission/bms.h>
 
 namespace opennova::editor {
+
+float mission_settled_fog_level(float level) { return env::EnvScalarChannels::settled_fog_level(level); }
+
+float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header) {
+	if (header.environment.empty()) return 0.0f;
+	std::vector<uint8_t> bytes;
+	if (!files.read(header.environment + ".env", bytes)) return 0.0f;
+	const std::string text(bytes.begin(), bytes.end());
+	env::Config config;
+	if (!env::load_mission_env(&text, config)) return 0.0f;
+	env::apply_bms_overrides(config, env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
+	        header.fog_override, header.fog_color, header.water_color, header.water_murk));
+	const env::FogParams fog = env::compute_fog_params(config.fog_type, mission_settled_fog_level(config.fog_level), 0.0f);
+	if (!fog.enabled || !(fog.end > 0.0f)) return 0.0f;
+	// Half its end: type 1's linear haze (from the eye) half thick there, type 2's start, type 3's past it.
+	return fog.end * 0.5f;
+}
 
 namespace {
 
@@ -267,7 +287,11 @@ OrbitCamera MissionViewport::framed(const std::vector<MissionMark> &marks, const
 	const float dx = high.x - low.x, dy = high.y - low.y, dz = high.z - low.z;
 	const float radius = std::max(kMissionFrameRadius, 0.5f * std::sqrt(dx * dx + dy * dy + dz * dz));
 	camera.frame(center, radius, width, height);
-	camera.distance = std::min(camera.distance, kMissionFrameDistance);
+	// Within the mission's fog too, so what it frames shows (the demo round's CP10 at 11:00, framed
+	// 400 m off past its 325 m fog end: the fog's colour alone, as a game camera there would show it).
+	const float most = fog_reach_ > 0.0f ? std::max(std::min(fog_reach_, kMissionFrameDistance), kMissionFrameRadius)
+										 : kMissionFrameDistance;
+	camera.distance = std::min(camera.distance, most);
 	return camera;
 }
 
@@ -317,6 +341,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	const bool anew = !picture_.shows() || (input.change != ChangeClass::None && !rows);
 	if (anew) {
 		scene_.read(*source);
+		fog_reach_ = mission_fog_reach(files, scene_.header());
 		bound_items_(view);
 		picture_.show(key, generation);
 		shown(*document);
@@ -341,10 +366,12 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	bound_items_(view);
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
+		fog_reach_ = mission_fog_reach(files, scene_.header());
 		options_moved_ = false;
 		return picture_.built(FileStamps());
 	}
 	if (delta.header || delta.reshaped) {
+		if (delta.header) fog_reach_ = mission_fog_reach(files, scene_.header());
 		options_moved_ = false;
 		return ViewportAction::Rebuild;
 	}

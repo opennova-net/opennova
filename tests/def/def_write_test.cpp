@@ -552,15 +552,17 @@ int authored_record(DefRecordKind kind, const void *record, const std::string &b
 			++counts.stored;
 			continue;
 		}
+		// A whole number shows as one, but a scaled one whose word no whole number of the line makes, which
+		// shows the quotient (def_authored.cpp's unscaled_real).
+		const bool whole = std::holds_alternative<int64_t>(shown);
 		if (written) {
 			const size_t at = argument_of(property, index, record, kind);
 			const bool same = at < args.size() &&
-			                  (type == DefAuthored::Integer ? std::to_string(std::get<int64_t>(shown)) == args[at]
-			                                                : std::strtod(args[at].c_str(), nullptr) == std::get<double>(shown));
+			                  (whole ? std::to_string(std::get<int64_t>(shown)) == args[at]
+			                         : std::strtod(args[at].c_str(), nullptr) == std::get<double>(shown));
 			if (!same) {
 				std::printf("FAIL %s.%s: shows %s, the file writes '%s'\n", name.c_str(), field.id.c_str(),
-				            type == DefAuthored::Integer ? std::to_string(std::get<int64_t>(shown)).c_str()
-				                                         : std::to_string(std::get<double>(shown)).c_str(),
+				            whole ? std::to_string(std::get<int64_t>(shown)).c_str() : std::to_string(std::get<double>(shown)).c_str(),
 				            at < args.size() ? args[at].c_str() : "");
 				++failures;
 			}
@@ -576,8 +578,7 @@ int authored_record(DefRecordKind kind, const void *record, const std::string &b
 			continue;
 		}
 		if (!written) continue;
-		const DefValue other = type == DefAuthored::Integer ? DefValue(std::get<int64_t>(shown) + 1)
-		                                                    : DefValue(std::get<double>(shown) + 1.0);
+		const DefValue other = whole ? DefValue(std::get<int64_t>(shown) + 1) : DefValue(std::get<double>(shown) + 1.0);
 		if (!def_authored_set(def_member(kind, field.id), copy.data(), other, error)) {
 			++counts.refused;
 			continue;
@@ -633,6 +634,100 @@ int authored_catalog(const char *family, const std::vector<uint8_t> &bytes, bool
 
 int authored_catalog(const char *family, const char *text) {
 	return authored_catalog(family, std::vector<uint8_t>(text, text + std::strlen(text)), false);
+}
+
+// The demo round's bug 2: a scaled whole number whose word is no multiple of its scale (an item's climb
+// speed at the word 1 its allocation gives it [orig: ItemDef_AllocateWithDefaults @0x49E3B0]) shows the
+// quotient in the line's units, never the number the parser's 32-bit wrap reads back to it (-2066861395
+// km/h for every item without a climb_speed line), and a set of what it shows changes nothing; swept over
+// every kind's defaults, each scaled member a whole number where one of the line makes its word (within 16
+// rounds of the 32-bit product: a boresight's 360 degrees is the word -256, and shows 360). A number set
+// in degrees that wraps the product more than once (540, 720, -720) shows as set, and the line writes it so.
+int scaled_defaults() {
+	int failures = 0;
+	size_t reals = 0;
+	for (size_t k = 0; k < kDefRecordKindCount; ++k) {
+		const DefRecordKind kind = DefRecordKind(k);
+		const size_t size = def_record_size(kind);
+		std::vector<uint64_t> record((size + 7) / 8);
+		def_init_record(kind, record.data());
+		for (const DefField &field : def_fields(kind)) {
+			const DefMember member = def_member(kind, field.id);
+			if (member.authored != DefAuthored::Integer || !member.property) continue;
+			const DefEncoding encoding = member.property->encoding;
+			const double scale = encoding == DefEncoding::ScaledInteger ? member.property->factor
+			                     : encoding == DefEncoding::Degrees     ? 11930464.0
+			                     : encoding == DefEncoding::HalfDegrees ? 11930464.0 / 2.0
+			                                                            : 0.0;
+			if (scale == 0.0) continue;
+			const int64_t word = std::get<int64_t>(def_get(record.data(), field));
+			DefValue shown;
+			const bool got = def_authored_get(member, record.data(), shown);
+			// A whole number of the line makes the word within 16 rounds of the 32-bit product.
+			const double round = 4294967296.0;
+			bool multiple = false;
+			for (int r = 0; r <= 16 && !multiple; ++r)
+				multiple = std::fmod(double(word) + r * round, scale) == 0.0 || std::fmod(double(word) - r * round, scale) == 0.0;
+			const bool right = got && (multiple ? std::holds_alternative<int64_t>(shown) &&
+			                                              uint32_t(int64_t(double(std::get<int64_t>(shown)) * scale)) == uint32_t(word)
+			                                    : std::holds_alternative<double>(shown) && std::get<double>(shown) == double(word) / scale);
+			std::vector<uint64_t> copy = record;
+			std::string error;
+			const bool kept = got && def_authored_set(member, copy.data(), shown, error) && std::memcmp(copy.data(), record.data(), size) == 0;
+			reals += multiple ? 0 : 1;
+			if (!right || !kept) {
+				std::printf("FAIL scaled default %d.%s: word %lld shows %s (%s)\n", int(k), field.id.c_str(), (long long)word,
+				            !got ? "nothing" : std::holds_alternative<int64_t>(shown) ? std::to_string(std::get<int64_t>(shown)).c_str()
+				                                                                      : std::to_string(std::get<double>(shown)).c_str(),
+				            kept ? "a set of it keeps the record" : error.c_str());
+				++failures;
+			}
+		}
+	}
+	// The climb speed's word 1 is one such (1/293 km/h).
+	DefItemDef item{};
+	def_init_item(item);
+	DefValue climb;
+	if (reals == 0 || !def_authored_get(def_member(DefRecordKind::Item, "climb_speed"), &item, climb) ||
+	    !std::holds_alternative<double>(climb) || std::get<double>(climb) != 1.0 / 293.0) {
+		std::printf("FAIL the climb speed's default shows %s\n",
+		            std::holds_alternative<double>(climb) ? std::to_string(std::get<double>(climb)).c_str() : "a whole number");
+		++failures;
+	}
+	// Degrees past a turn: set, shown and written as set, read back to the same word.
+	const struct {
+		DefRecordKind kind;
+		const char *field, *key;
+	} wrapped[] = {{DefRecordKind::Ammo, "boresight_maxang", "boresight_maxang"},
+	               {DefRecordKind::Item, "max_slope", "max_slope"}};
+	for (const auto &w : wrapped)
+		for (const int64_t degrees : {int64_t(540), int64_t(720), int64_t(-720), int64_t(5760)}) {
+			const DefMember member = def_member(w.kind, w.field);
+			std::vector<uint64_t> record((def_record_size(w.kind) + 7) / 8);
+			def_init_record(w.kind, record.data());
+			std::string error;
+			DefValue shown;
+			const bool set = def_authored_set(member, record.data(), DefValue(degrees), error);
+			const bool got = set && def_authored_get(member, record.data(), shown);
+			const bool same = got && std::holds_alternative<int64_t>(shown) && std::get<int64_t>(shown) == degrees;
+			// The line the writer puts down for it.
+			DefRecordWriter writer;
+			std::string key;
+			std::vector<std::string> args;
+			std::vector<DefValue> values;
+			for (const DefField *field : member.line) values.push_back(def_get(record.data(), *field));
+			writer.property_args(w.kind, *member.property, record.data(), values, "", key, args);
+			const bool written = !args.empty() && args[0] == std::to_string(degrees);
+			if (!same || !written) {
+				std::printf("FAIL %s %lld degrees: %s, shows %s, the line writes '%s'\n", w.field, (long long)degrees,
+				            set ? "set" : error.c_str(),
+				            !got ? "nothing" : std::holds_alternative<int64_t>(shown) ? std::to_string(std::get<int64_t>(shown)).c_str()
+				                                                                      : std::to_string(std::get<double>(shown)).c_str(),
+				            args.empty() ? "" : args[0].c_str());
+				++failures;
+			}
+		}
+	return failures;
 }
 
 // What the Inspector shows is what the file writes: a speed in km/h, a turn rate in degrees a
@@ -1114,7 +1209,7 @@ int main(int argc, char **argv) {
 		const auto reads_as = [](const Outcome &out, const char *field, const char *value) {
 			for (const DefIssue &d : out.diagnostics)
 				if (d.code == DefIssueCode::Reinterpreted && d.field == field &&
-				    d.message.find(std::string("reads this as ") + value + ";") != std::string::npos)
+				    d.message.find(std::string("reads this as ") + value + ".") != std::string::npos)
 					return true;
 			return false;
 		};
@@ -1190,6 +1285,7 @@ int main(int argc, char **argv) {
 	failures += kept_layout();
 	failures += kept_layout_edits();
 	failures += numbers_at_both_precisions();
+	failures += scaled_defaults();
 	{
 		// The minted items fixture, each member through its line.
 		const std::vector<uint8_t> fixture = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/items.def");

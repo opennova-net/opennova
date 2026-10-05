@@ -31,23 +31,79 @@ std::string decimal(double value) {
 	return text == "-0" ? "0" : text;
 }
 
-// A real a line's float read takes [the parsers' parse_float_n, atof then a float store]: the shortest
-// plain decimal that reads as the same float as the value's whole expansion does (5.4f as "5.4", not
-// "5.400000095367431640625"), else that expansion. What the game reads is the same; the form is the one a
-// person writes (the plain-words lane: a save after one edit no longer rewrites every real).
-std::string float_decimal(double value) {
-	const std::string whole = decimal(value);
-	const float read = defscan::parse_float_n(whole.data(), whole.size());
-	for (int precision = 0; precision <= 9; ++precision) {
-		std::ostringstream out;
-		out.imbue(std::locale::classic());
-		out << std::fixed << std::setprecision(precision) << value;
-		std::string text = out.str();
-		if (text.find_first_not_of("-0.") == std::string::npos) text = "0";
-		const float again = defscan::parse_float_n(text.data(), text.size());
-		if (std::memcmp(&again, &read, sizeof(float)) == 0) return text;
+// The whole number `k` with `places` digits after the point, as a plain decimal ("-1.25" for -125 at 2;
+// "0" for zero), its trailing zeros dropped.
+std::string with_places(int64_t k, int places) {
+	if (k == 0) return "0";
+	const bool negative = k < 0;
+	std::string digits = std::to_string(negative ? -k : k);
+	if (places > 0) {
+		if (digits.size() <= size_t(places)) digits.insert(0, size_t(places) + 1 - digits.size(), '0');
+		digits.insert(digits.size() - size_t(places), 1, '.');
+		while (digits.back() == '0') digits.pop_back();
+		if (digits.back() == '.') digits.pop_back();
 	}
-	return whole;
+	return negative ? "-" + digits : digits;
+}
+
+// A whole number past what a double's places count exactly (a float's, 9e15 and up), by its significant
+// digits, the rest zeros: at each count of digits from one, the nearest and its two neighbours.
+template <class Reads> std::string shortest_whole(double near, Reads reads) {
+	const double size = std::fabs(near);
+	const int exponent = int(std::floor(std::log10(size)));
+	for (int digits = 1; digits <= 17; ++digits) {
+		const int zeros = exponent + 1 - digits;
+		if (zeros < 0) break;
+		const int64_t k = std::llround(size / std::pow(10.0, zeros));
+		for (const int64_t step : {int64_t(0), int64_t(-1), int64_t(1)}) {
+			if (k + step <= 0) continue;
+			const std::string text = (near < 0 ? "-" : "") + std::to_string(k + step) + std::string(size_t(zeros), '0');
+			if (reads(text)) return text;
+		}
+	}
+	return std::string();
+}
+
+// The shortest plain decimal that `reads` takes to the value it is to set, found near `near`: at each
+// count of places from none, the decimal nearest `near` and its two neighbours (what reads to a value
+// need not centre on the quotient: the digit walker's rounding, a truncation's interval), the fewest
+// places first, up to 17 significant digits (a value below one its leading zeros' places more; one of 9e15
+// and up by its significant digits, shortest_whole); "" when none does. A number the parsers read is
+// written in the form a person writes it (bug 1 of the demo round: never the first hit of a bisection,
+// never a float's whole expansion, where a short decimal reads the same).
+template <class Reads> std::string shortest_text(double near, Reads reads) {
+	if (!std::isfinite(near)) return std::string();
+	if (std::fabs(near) >= 9.0e15) return shortest_whole(near, reads);
+	const int lead = near != 0.0 && std::fabs(near) < 1.0 ? int(std::floor(-std::log10(std::fabs(near)))) : 0;
+	double scale = 1.0;
+	for (int places = 0; places <= 17 + lead; ++places, scale *= 10.0) {
+		const double scaled = near * scale;
+		if (std::fabs(scaled) > 9.0e15) break;
+		const int64_t k = std::llround(scaled);
+		for (const int64_t step : {int64_t(0), int64_t(-1), int64_t(1)}) {
+			const std::string text = with_places(k + step, places);
+			if (reads(text)) return text;
+		}
+	}
+	return std::string();
+}
+
+// A real a line's float read takes [the parsers' parse_float_n, atof then a float store]: the shortest
+// plain decimal that reads as the same float as the value does (5.4f as "5.4", not
+// "5.400000095367431640625"), else its whole expansion. What the game reads is the same; the form is the
+// one a person writes (the plain-words lane: a save after one edit no longer rewrites every real).
+// The same float, bit for bit (a negative zero is not zero's word).
+bool same_float(float a, float b) { return std::memcmp(&a, &b, sizeof(float)) == 0; }
+
+std::string float_decimal(double value) {
+	const float stored = float(value);
+	const auto reads = [stored](const std::string &candidate) {
+		return same_float(defscan::parse_float_n(candidate.data(), candidate.size()), stored);
+	};
+	// A negative zero is written with its sign, which atof keeps.
+	if (stored == 0.0f && std::signbit(stored) && reads("-0")) return "-0";
+	const std::string text = shortest_text(value, reads);
+	return text.empty() ? decimal(value) : text;
 }
 
 // An arithmetic result as the x87 leaves it: at its full 53 bits, or (`coarse`) rounded to the 24-bit
@@ -65,16 +121,11 @@ double at_precision(double value, bool coarse) { return coarse ? double(float(va
 // ticks, not "6.048780487804878...", and never a decimal on an interval's edge that the 24-bit FPU
 // reads one unit off.
 template <class Reads> std::string shortest(double value, Reads reads) {
-	for (int precision = 0; precision <= 17; ++precision) {
-		std::ostringstream out;
-		out.imbue(std::locale::classic());
-		out << std::fixed << std::setprecision(precision) << value;
-		std::string text = out.str();
-		if (text.find_first_not_of("-0.") == std::string::npos) text = "0";
-		const double read = std::strtod(text.c_str(), nullptr);
-		if (reads(read, false) && reads(read, true)) return text;
-	}
-	return decimal(value);
+	const std::string text = shortest_text(value, [&reads](const std::string &candidate) {
+		const double read = std::strtod(candidate.c_str(), nullptr);
+		return reads(read, false) && reads(read, true);
+	});
+	return text.empty() ? decimal(value) : text;
 }
 
 // The death word as a squib rate: atof, 62 over it, _ftol2_sse [orig: ItemDef_ParseProperty @0x49F06F,
@@ -131,10 +182,24 @@ DefRecordWriter::AliasCover alias_cover(const DefItemDef &item, uint8_t step) {
 	return held;
 }
 
+// The shortest decimal the engine's digit walker reads as `reads` wants it [orig: Math_ParseFixedPoint16
+// @ 0x6131f0, defscan::parse_fixed16_digits_n]: unsigned digits only (no sign, no exponent), so a word is
+// written as its unsigned 16.16 quotient.
+template <class Reads> std::string shortest_fixed(double near, Reads reads) {
+	return shortest_text(near, [&reads](const std::string &candidate) {
+		return candidate[0] != '-' && reads(defscan::parse_fixed16_digits_n(candidate.data(), candidate.size()));
+	});
+}
+
 std::string fixed(int64_t value) {
-	// Invert the original decimal-digit walker, including its biased fractional
+	// The shortest decimal the walker reads as the word ("0" for 0, never 0.00000762939453125), else the
+	// inverse of the original decimal-digit walker found by bisection, including its biased fractional
 	// accumulation. A conventional decimal division is not always an inverse.
 	const double target = static_cast<uint32_t>(value);
+	const std::string short_form = shortest_fixed(target / 65536.0, [value](int parsed) {
+		return static_cast<uint32_t>(parsed) == static_cast<uint32_t>(value);
+	});
+	if (!short_form.empty()) return short_form;
 	double low = std::max(0.0, (target - 2.0) / 65536.0);
 	double high = (target + 2.0) / 65536.0;
 	for (int i = 0; i < 80; ++i) {
@@ -149,23 +214,36 @@ std::string fixed(int64_t value) {
 
 std::string float_fixed(float value, int32_t bits) {
 	// Pick the shortest ordinary decimal that preserves BOTH native views.
-	for (int precision = 0; precision <= 9; ++precision) {
-		std::ostringstream out; out.imbue(std::locale::classic());
-		out << std::fixed << std::setprecision(precision) << value;
-		const std::string text = out.str();
-		if (defscan::parse_float_n(text.data(), text.size()) == value &&
-			defscan::parse_fixed16_digits_n(text.data(), text.size()) == bits) return text;
-	}
-	return decimal(value); // the writer's reparse check reports unrepresentable pairs
+	const std::string text = shortest_text(value, [value, bits](const std::string &candidate) {
+		return same_float(defscan::parse_float_n(candidate.data(), candidate.size()), value) &&
+		       defscan::parse_fixed16_digits_n(candidate.data(), candidate.size()) == bits;
+	});
+	return text.empty() ? decimal(value) : text; // the writer's reparse check reports unrepresentable pairs
 }
 
-// The shortest decimal whose product with `factor`, truncated toward zero the way
-// the parsers' _ftol2 store does, is `value` again: the plain quotient when it
-// survives the round trip, otherwise the middle of the interval that truncates to it.
-std::string scaled(int64_t value, double factor) {
-	const std::string text = decimal(double(value) / factor);
-	if (int64_t(std::strtod(text.c_str(), nullptr) * factor) == value) return text;
-	return decimal((double(value) + (value < 0 ? -0.5 : 0.5)) / factor);
+// The shortest decimal whose product with `factor`, truncated toward zero the way the parser stores it
+// (`truncate`: _ftol2_sse for seconds, the `fistp qword` low dword for the item scale), is `value` again
+// at both of the game's FPU precisions (at_precision), else the middle of the interval that truncates to
+// it.
+template <class Truncate> std::string scaled(int64_t value, double factor, Truncate truncate) {
+	const std::string text = shortest_text(double(value) / factor, [&](const std::string &candidate) {
+		const double read = std::strtod(candidate.c_str(), nullptr);
+		return truncate(at_precision(read * factor, false)) == value && truncate(at_precision(read * factor, true)) == value;
+	});
+	return text.empty() ? decimal((double(value) + (value < 0 ? -0.5 : 0.5)) / factor) : text;
+}
+std::string seconds(int64_t ticks) {
+	// atof times 62, _ftol2_sse [orig: ItemDef_ParseProperty @0x49EB00, destroy_timing @0x49EE7E, the shots
+	// @0x49FC79..0x49FE5C].
+	return scaled(ticks, 62.0, [](double product) { return int64_t(io::retail_ftol_sse2(product)); });
+}
+// Seconds through the digit walker to 62 Hz ticks, (62 * 16.16 + 0x8000) >> 16 [orig:
+// AmmoDef_ParseSecondsToTicks @0x40a0f0]: an ammo's ages and its impact light's fade.
+std::string age_seconds(int64_t ticks) {
+	const std::string text = shortest_fixed(double(ticks) / 62.0, [ticks](int fp) {
+		return ((int64_t(62) * fp + 0x8000) >> 16) == ticks;
+	});
+	return !text.empty() ? text : fixed(int64_t(std::llround(double(ticks) * 65536.0 / 62.0)));
 }
 
 int64_t integer(const DefValue &v) {
@@ -193,7 +271,8 @@ std::string written_word(DefRecordKind, const DefValue &v) {
 }
 
 // Integer multiplication in the original 32-bit fields is modular. Prefer the
-// ordinary small inverse, then solve factor*x = value (mod 2^32).
+// ordinary small inverse, then solve factor*x = value (mod 2^32), the answer nearest zero (-720 degrees,
+// the word 512, as -720, not 134217008).
 int64_t unscale(int64_t value, int64_t factor) {
 	if (value % factor == 0) return value / factor;
 	int64_t a = factor, modulus = int64_t(1) << 32;
@@ -208,6 +287,7 @@ int64_t unscale(int64_t value, int64_t factor) {
 	modulus /= remainder;
 	t %= modulus; if (t < 0) t += modulus;
 	const uint64_t answer = (uint64_t(bits / remainder) * uint64_t(t)) % uint64_t(modulus);
+	if (modulus < (int64_t(1) << 32)) return int64_t(answer) > modulus / 2 ? int64_t(answer) - modulus : int64_t(answer);
 	return static_cast<int32_t>(static_cast<uint32_t>(answer));
 }
 
@@ -232,9 +312,46 @@ std::string DefRecordWriter::margin(int levels) const {
 }
 
 void DefRecordWriter::line(const std::string &key, const std::vector<std::string> &values) {
-	result.text += margin(depth) + key;
-	for (const auto &value : values) result.text += (key.empty() && &value == &values.front() ? "" : " ") + value;
-	result.text += "\r\n";
+	std::string text = margin(depth) + key;
+	for (const auto &value : values) text += (key.empty() && &value == &values.front() ? "" : " ") + value;
+	put(text + "\r\n", put_role);
+}
+
+int DefRecordWriter::begin_record(uint64_t note, DefRecordKind kind, uint8_t step, bool plain) {
+	const int slot = int(slots.size());
+	const int parent = open_.empty() ? -1 : open_.back().slot;
+	slots.push_back({note, kind, parent, plain || (parent >= 0 && slots[size_t(parent)].plain)});
+	if (parent >= 0) {
+		Written at;
+		at.slot = parent;
+		at.role = DefNotedRole::Nested;
+		at.step = step;
+		at.nested = slot;
+		at.begin = at.end = result.text.size();
+		written.push_back(at);
+	}
+	open_.push_back({slot, put_role, put_step});
+	put_role = DefNotedRole::Line;
+	put_step = 0;
+	return slot;
+}
+
+void DefRecordWriter::end_record() {
+	if (open_.empty()) return;
+	put_role = open_.back().role;
+	put_step = open_.back().step;
+	open_.pop_back();
+}
+
+void DefRecordWriter::put(const std::string &text, DefNotedRole role) {
+	Written line;
+	line.slot = open_.empty() ? -1 : open_.back().slot;
+	line.role = role;
+	line.step = put_step;
+	line.begin = result.text.size();
+	result.text += text;
+	line.end = result.text.size();
+	written.push_back(line);
 }
 
 void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::string &name,
@@ -292,6 +409,9 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 	AliasCover cover;
 	for (size_t at = 0; at < steps.size(); ++at) {
 		const uint8_t step = steps[at];
+		// What each line put down for this step is: a line of the record's at it (def_notes.h).
+		put_role = DefNotedRole::Line;
+		put_step = step;
 		if (step == DEF_LINE_ORDER_ROWS || step == DEF_LINE_ORDER_BLOCKS) {
 			if (nested) nested(step);
 			continue;
@@ -513,17 +633,30 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 	case DefEncoding::Fixed16:
 		for (const auto &v : values) args.push_back(std::holds_alternative<std::string>(v) ? word(v) : fixed(integer(v)));
 		break;
-	case DefEncoding::FixedSeconds: args.push_back(fixed(int64_t(std::llround(n(0) * 65536.0 / 62.0)))); break;
-	case DefEncoding::TurnRate: args.push_back(fixed(int64_t(std::llround(n(0) * 65536.0 / 192426.0)))); break;
+	case DefEncoding::FixedSeconds: args.push_back(age_seconds(n(0))); break;
+	// (192426 * the walker's 16.16 + 0x8000) >> 16 [orig: AmmoDef_ParseTurnRate @ 0x40a130].
+	case DefEncoding::TurnRate: {
+		const int64_t rate = n(0);
+		const std::string text = shortest_fixed(double(rate) / 192426.0, [rate](int fp) {
+			return ((int64_t(192426) * fp + 0x8000) >> 16) == rate;
+		});
+		args.push_back(!text.empty() ? text : fixed(int64_t(std::llround(double(rate) * 65536.0 / 192426.0))));
+		break;
+	}
 	case DefEncoding::Degrees: args.push_back(std::to_string(unscale(n(0), 11930464))); break;
 	case DefEncoding::HalfDegrees: args.push_back(std::to_string(unscale(n(0), 11930464) * 2)); break;
 	case DefEncoding::ScaledInteger:
 		for (const auto &v : values) args.push_back(std::to_string(unscale(integer(v), int64_t(property.factor)))); break;
 	case DefEncoding::ScaledReal:
+		// An item's scale: atof times 65536 through `fistp qword`, its low dword [orig: ItemDef_ParseProperty
+		// @0x49F6E0..0x49F73D]; a timing's seconds: atof times 62 through _ftol2_sse (seconds()).
 		for (const auto &v : values)
 			args.push_back(std::holds_alternative<std::string>(v) ? word(v)
-			               : std::holds_alternative<int64_t>(v) ? scaled(integer(v), property.factor)
-			                                                    : decimal(real(v) / property.factor));
+			               : !std::holds_alternative<int64_t>(v) ? float_decimal(real(v) / property.factor)
+			               : property.factor == 62.0 ? seconds(integer(v))
+			                                         : scaled(integer(v), property.factor, [](double product) {
+				                                           return int64_t(io::retail_fistp_truncate_low_dword(product));
+			                                           }));
 		break;
 	case DefEncoding::Percent:
 		// The parser reads an integer and scales it by 0.01f: 35 becomes 0.35f, which
@@ -538,17 +671,34 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 			if (key != "dawnshot") fail(name, key, "A timing without a flag name has no authored form.");
 			else key = "particletesttime";
 		} else args.push_back(flag);
-		args.push_back(scaled(n(1), 62.0)); args.push_back(scaled(n(2), 62.0));
+		args.push_back(seconds(n(1))); args.push_back(seconds(n(2)));
 		break;
 	}
+	// Three atof floats, then three 16.16 words through the digit walker [orig: WeaponDefs_ParseLineCallback
+	// @0x543680, the Math_ParseFixedPoint16 calls @0x544662 / @0x5447A9].
 	case DefEncoding::Pose:
-		for (size_t i = 0; i < 6; ++i) args.push_back(i < 3 ? decimal(f(i)) : fixed(n(i))); break;
+		for (size_t i = 0; i < 6; ++i) args.push_back(i < 3 ? float_decimal(f(i)) : fixed(n(i)));
+		break;
 	case DefEncoding::Delay: args.push_back(n(0) == -1 ? "auto" : std::to_string(n(0))); break;
-	case DefEncoding::ScopeParallax: args.push_back(decimal((n(0) + (n(0) < 0 ? -0.25 : 0.25)) / 65535.0)); break;
-	case DefEncoding::Heat: args = {fixed(n(0) * 100), fixed(n(1) * 6200)}; break;
+	// atof times 65535.0, ftol [orig: WeaponDefs_ParseLineCallback @ 0x544e4e..0x544e80].
+	case DefEncoding::ScopeParallax: {
+		const int64_t height = n(0);
+		args.push_back(shortest((height + (height < 0 ? -0.25 : 0.25)) / 65535.0, [height](double read, bool coarse) {
+			return int64_t(io::retail_ftol_sse2(at_precision(read * 65535.0, coarse))) == height;
+		}));
+		break;
+	}
+	// The walker's 16.16 over 100, and over 100 * 62, each a truncating divide [orig: @ 0x543eb7].
+	case DefEncoding::Heat: {
+		const int64_t shot = n(0), decay = n(1);
+		const std::string per_shot = shortest_fixed(double(shot) * 100.0 / 65536.0, [shot](int fp) { return fp / 100 == shot; });
+		const std::string cooling = shortest_fixed(double(decay) * 6200.0 / 65536.0, [decay](int fp) { return fp / 6200 == decay; });
+		args = {!per_shot.empty() ? per_shot : fixed(shot * 100), !cooling.empty() ? cooling : fixed(decay * 6200)};
+		break;
+	}
 	case DefEncoding::LightMove: case DefEncoding::LightImpact:
 		args.push_back(fixed(n(0))); color(n(1));
-		if (property.encoding == DefEncoding::LightImpact) args.push_back(fixed(int64_t(std::llround(n(2) * 65536.0 / 62.0))));
+		if (property.encoding == DefEncoding::LightImpact) args.push_back(age_seconds(n(2)));
 		break;
 	case DefEncoding::ItemDeathTime: {
 		// Whole seconds where the ticks are some: 62 a second and 62 of grace, an explicit 0 eight
@@ -574,10 +724,28 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 		}));
 		break;
 	}
-	case DefEncoding::HuskSeconds: args.push_back(decimal(f(0) / 62.0)); break;
+	// A float times 62 stored as a float, an authored 0 stored as 1.0 [orig: @ 0x49f1ce-0x49f228].
+	case DefEncoding::HuskSeconds: {
+		const float stored = float(f(0));
+		const std::string text = shortest_text(f(0) / 62.0, [stored](const std::string &candidate) {
+			const float sec = float(double(defscan::parse_float_n(candidate.data(), candidate.size())) * 62.0);
+			return (sec == 0.0f ? 1.0f : sec) == stored;
+		});
+		args.push_back(!text.empty() ? text : decimal(f(0) / 62.0));
+		break;
+	}
+	// While the seconds are 0, a whole percent times 0.01; else a float times 62 [orig: @ 0x49f242-0x49f2c2].
 	case DefEncoding::HuskSwap: {
 		const auto &item = *static_cast<const DefItemDef *>(value);
-		args.push_back(decimal(item.husk_swap_at_sec == 0 ? f(0) * 100.0 : f(0) / 62.0)); break;
+		const float stored = float(f(0));
+		const bool percent = item.husk_swap_at_sec == 0;
+		const std::string text = shortest_text(percent ? f(0) * 100.0 : f(0) / 62.0, [stored, percent](const std::string &candidate) {
+			return percent ? float(double(defscan::parse_int_n(candidate.data(), candidate.size())) * 0.01) == stored &&
+			                         candidate.find('.') == std::string::npos
+			               : float(double(defscan::parse_float_n(candidate.data(), candidate.size())) * 62.0) == stored;
+		});
+		args.push_back(!text.empty() ? text : decimal(percent ? f(0) * 100.0 : f(0) / 62.0));
+		break;
 	}
 	case DefEncoding::DeathPieces: {
 		// Every slot up to the last with a piece, as the files list them ("01_HULL 02_WHEEL"): HULL is
@@ -682,6 +850,7 @@ void DefRecordWriter::alias_line(const DefItemDef &item, uint8_t step, AliasCove
 	cover.door_type = cover.door_type || held.door_type;
 }
 
+size_t def_attrib_words_per_line() { return kDefAttribTokensPerLine; }
 std::string def_squib_rate_text(int32_t ticks) { return squib_rate(ticks); }
 std::string def_squib_q16_text(int32_t word) { return squib_q16(word); }
 std::string def_door_open_rate_text(int32_t rate) { return door_open_rate(rate); }

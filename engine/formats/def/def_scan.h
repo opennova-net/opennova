@@ -149,6 +149,23 @@ size_t for_each_def_line(const char *buf, size_t len, Apply &&apply) {
     return for_each_def_line(buf, len, tokens, std::forward<Apply>(apply));
 }
 
+// The walk above with `at(line)` told where each line it cuts begins, the lines
+// its callback never sees included: what an authoring tool's layout recorder
+// (def_notes.h's DefTextNoter) is told of the file, ahead of the callback.
+template <typename At, typename Apply>
+size_t for_each_def_line_noted(const char *buf, size_t len, io::ConfigTokens &tokens, At &&at, Apply &&apply) {
+    size_t line_index = (size_t)-1;
+    return io::for_each_config_line_span(buf, len, tokens, [&](io::ConfigTokens &line,
+                                                               const io::ConfigLineSpan &span) {
+        ++line_index;
+        const char *text = buf + span.begin;
+        at(text);
+        if (line.count == 0 || line.tokens[0][0] == '/') return false;
+        const size_t text_len = span.end - span.begin;
+        return io::detail::walk_apply(apply, line, text, text_len, line_index);
+    });
+}
+
 // The key compare every family parser makes [orig: _stricmp @0x76FDF6].
 bool key_is(const char *key, const char *name);
 

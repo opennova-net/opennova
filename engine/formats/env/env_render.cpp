@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <iterator>
 
 namespace opennova::env {
@@ -192,6 +193,16 @@ void EnvScalarChannels::mission_start_init() {
 	overcast_step_fp = kMissionRainStep;
 	fog_step_fp = kMissionFogAccel;
 	fog_max_fp = kMissionFogMax;
+}
+
+float EnvScalarChannels::settled_fog_level(float level) {
+	EnvScalarChannels channels;
+	const double fp = std::clamp(double(level) * io::kFp16OneD, double(INT32_MIN), double(INT32_MAX));
+	channels.fog_dist_target_fp = channels.fog_dist_fp = static_cast<int32_t>(fp);
+	channels.mission_start_init();
+	// [orig: Environment_MissionStartInit @ 0x57f878..0x57f880: 255 complete weather ticks]
+	for (int i = 0; i < 255; ++i) channels.tick();
+	return float(channels.fog_dist_fp) / io::kFp16One;
 }
 
 void EnvScalarChannels::apply_network_sample(uint16_t fog_dist,

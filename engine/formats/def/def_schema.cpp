@@ -7,6 +7,7 @@
 #include <iterator>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 
@@ -420,6 +421,10 @@ void def_sync_derived(DefRecordKind kind, void *value, const std::string &field)
 		if (field == "armor_kz") item.armor_blast = item.armor_kz;
 		if (field == "powerup_def" && item.powerup_def[0]) item.attrib |= DEF_ITEM_ATTRIB_POWERUP;
 		if (field == "default_aip" && item.default_aip[0]) item.attrib |= DEF_ITEM_ATTRIB_AIDATA;
+		// The alias the `end` arm derived from the id follows it; one set is the item's own [orig:
+		// ItemDef_ParseProperty, the `end` arm @0x49EB2F..0x49EB5F].
+		if (field == "id" && item.sid_derived) std::snprintf(item.sid, 16, "S%06i", item.id);
+		if (field == "sid") item.sid_derived = 0;
 		return;
 	}
 	if (kind == DefRecordKind::Powerup) {
