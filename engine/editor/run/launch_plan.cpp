@@ -222,6 +222,43 @@ void prune_install_copies(const std::string &copy_cache, InstallCopies &copies) 
 	copies.record = std::move(kept);
 }
 
+// The install's Bink DLL. JOTAC's underscored DLL is the real Bink; its plain DLL can be a hook shim
+// (the former GamePacker.stage_retail, 4521b859e^).
+fs::path install_bink(const fs::path &install) {
+	std::error_code ec;
+	const fs::path underscored = install / "binkw32_.dll";
+	return fs::is_regular_file(system_path(utf8_of(underscored)), ec) ? underscored : install / "binkw32.dll";
+}
+
+// The build's files `names` beside the game in `run`: one the game may write copied, every other linked
+// (the game only reads it), copied where the file system will not link it. False with `error`.
+bool stage_build_files(const fs::path &build, const fs::path &run, const std::vector<std::string> &names,
+                       const FileLink &link, Diagnostic &error) {
+	for (const std::string &name : names) {
+		std::string reason;
+		const fs::path from = build / path_of(name);
+		const fs::path to = run / path_of(name);
+		const bool linked = !game_may_write(name) && link(utf8_of(from), utf8_of(to), reason);
+		if (linked || copy_to(from, to, reason)) continue;
+		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+		                     "Could not stage " + utf8_of(from) + " in " + utf8_of(run) + ": " + reason);
+		return false;
+	}
+	return true;
+}
+
+// The two forms of a file log's line [orig: File_LogFileAccess @ 0x75a510 "PFF LOADED FILE: %s\n", the
+// other "LOADED FILE: %s\n"].
+constexpr const char *kLoadedFromArchive = "PFF LOADED FILE: ";
+constexpr const char *kLoadedFromDisk = "LOADED FILE: ";
+
+// `name` added to `names` unless they hold it (compared without case).
+void add_name_once(std::vector<std::string> &names, const std::string &name) {
+	if (name.empty()) return;
+	if (std::none_of(names.begin(), names.end(), [&name](const std::string &held) { return strutil::iequals(held, name); }))
+		names.push_back(name);
+}
+
 // The install's boot archives, as its root spells them (the boot table's names, found without case
 // as the game's _lopen finds them on its file system [orig: PFF_OpenAllArchives @ 0x4a4310]).
 std::vector<std::string> install_archives(const std::string &install) {
@@ -380,7 +417,7 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 
 bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
                                 const std::string &run_dir, LaunchPlan &out, Diagnostic &error,
-                                const std::string &expansion, const std::string &copy_cache) {
+                                const std::string &expansion, const std::string &copy_cache, const FileLink &link) {
 	out = LaunchPlan();
 	std::error_code ec;
 	if (retail_directory.empty() || !fs::is_directory(system_path(retail_directory), ec)) {
@@ -410,11 +447,9 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 		return false;
 	}
 	// Same three-file staging as the former GamePacker.stage_retail (4521b859e^), into the run
-	// directory. JOTAC's underscored DLL is the real Bink; its plain DLL can be a hook shim.
-	fs::path bink = retail / "binkw32_.dll";
-	if (!fs::is_regular_file(system_path(utf8_of(bink)), ec)) bink = retail / "binkw32.dll";
+	// directory.
 	const std::pair<fs::path, const char *> staged[] = {
-		{retail / kInstallExecutable, kInstallExecutable}, {bink, "binkw32.dll"}, {config, "game.cfg"}};
+		{retail / kInstallExecutable, kInstallExecutable}, {install_bink(retail), "binkw32.dll"}, {config, "game.cfg"}};
 	// Every source checked before anything is copied, so a missing file launches nothing.
 	for (const auto &[source, name] : staged) {
 		if (fs::is_regular_file(system_path(utf8_of(source)), ec)) continue;
@@ -442,20 +477,11 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 			if (!own && !found.empty()) saves.push_back(found);
 		}
 	// An expansion's: the install's base game and the build's expansion folder.
-	if (!expansion.empty() && !prepare_expansion_run(retail_directory, build_dir, expansion, run_dir, copy_cache, error))
+	if (!expansion.empty() &&
+	    !prepare_expansion_run(retail_directory, build_dir, expansion, run_dir, copy_cache, error, link))
 		return false;
-	// The build's files beside the game: one the game may write copied, every other linked (the game
-	// only reads it), copied where the file system will not link it.
-	for (const std::string &name : built) {
-		std::string reason;
-		const fs::path from = build / path_of(name);
-		const fs::path to = run / path_of(name);
-		const bool linked = !game_may_write(name) && link_file(utf8_of(from), utf8_of(to), reason);
-		if (linked || copy_to(from, to, reason)) continue;
-		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
-		                     "Could not stage " + utf8_of(from) + " in " + utf8_of(run) + ": " + reason);
-		return false;
-	}
+	// The build's files beside the game.
+	if (!stage_build_files(build, run, built, link, error)) return false;
 	for (const auto &[source, name] : staged) {
 		std::string reason;
 		if (copy_to(source, run / name, reason)) continue;
@@ -475,7 +501,7 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 	out.working_dir = utf8_of(run);
 	out.resource_dir = out.working_dir; // the game opens what it mounts from its working directory
 	out.expansion = expansion;
-	out.log_file = utf8_of(run / "_filelog.txt");
+	out.log_file = utf8_of(run / kInstallFileLogName);
 	out.args = {"/w", "/d"};
 	if (!expansion.empty()) {
 		out.args.push_back(kLaunchFlagExpansion);
@@ -483,6 +509,101 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 	}
 	out.args.push_back("/FRISK");
 	return true;
+}
+
+Diagnostic strict_expansion_refusal(const std::string &expansion) {
+	return make_finding(CoreFinding::PlayStrictExpansion, DiagnosticSeverity::Error,
+	                    "Strict Play of an expansion needs its base game's build; not yet supported. The project builds "
+	                    "as the expansion " + expansion + ", which would play over the game install's own archives: "
+	                    "turn Strict off to play it over the game install.");
+}
+
+bool prepare_strict_install_launch_plan(const std::string &install, const std::string &build_dir,
+                                        const std::string &run_dir, const std::string &expansion, LaunchPlan &out,
+                                        Diagnostic &error, const FileLink &link) {
+	out = LaunchPlan();
+	if (!expansion.empty()) {
+		error = strict_expansion_refusal(expansion);
+		return false;
+	}
+	std::error_code ec;
+	if (install.empty() || !fs::is_directory(system_path(install), ec)) {
+		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
+		                     "Choose the game install folder in File > Project settings... first.");
+		return false;
+	}
+	const fs::path retail = path_of(install);
+	const fs::path build = path_of(build_dir);
+	const fs::path run = path_of(run_dir);
+	// The install's program and its Bink DLL, the game's one import beside the system's, alone of the
+	// install; both checked before anything is staged.
+	const std::pair<fs::path, const char *> staged[] = {
+		{retail / kInstallExecutable, kInstallExecutable}, {install_bink(retail), "binkw32.dll"}};
+	for (const auto &[source, name] : staged) {
+		if (fs::is_regular_file(system_path(utf8_of(source)), ec)) continue;
+		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
+		                     "The game install has no " + utf8_of(source));
+		return false;
+	}
+	// Every file of the build but its record (a game.cfg among them is the project's own).
+	std::vector<std::string> built;
+	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(build_dir), ec)) {
+		std::error_code kind;
+		const std::string name = utf8_of(entry.path().filename());
+		if (entry.is_regular_file(kind) && name != kBuildRecordFileName) built.push_back(name);
+	}
+	if (ec) {
+		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+		                     "Could not read the build " + utf8_of(build) + ": " + ec.message());
+		return false;
+	}
+	if (!stage_build_files(build, run, built, link, error)) return false;
+	for (const auto &[source, name] : staged) {
+		std::string reason;
+		if (copy_to(source, run / name, reason)) continue;
+		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+		                     "Could not stage " + utf8_of(source) + ": " + reason);
+		return false;
+	}
+	out.executable = utf8_of(run / kInstallExecutable);
+	out.build_dir = utf8_of(build);
+	out.working_dir = utf8_of(run);
+	out.resource_dir = out.working_dir;
+	out.log_file = utf8_of(run / kInstallFileLogName);
+	out.args = {"/w", "/FRISK"};
+	return true;
+}
+
+bool strict_first_run_starts_again(bool had_config, bool has_config, bool exited_on_its_own, int64_t exit_code,
+                                   int64_t ran_ms, bool started_again) {
+	return !started_again && !had_config && has_config && exited_on_its_own && exit_code == 0 && ran_ms >= 0 &&
+	       ran_ms <= kStrictFirstRunWindowMs;
+}
+
+void add_file_access_line(FileAccessLog &log, const std::string &line) {
+	++log.lines;
+	const size_t archive_prefix = std::char_traits<char>::length(kLoadedFromArchive);
+	const size_t disk_prefix = std::char_traits<char>::length(kLoadedFromDisk);
+	if (line.compare(0, archive_prefix, kLoadedFromArchive) == 0) {
+		add_name_once(log.from_archives, line.substr(archive_prefix));
+	} else if (line.compare(0, disk_prefix, kLoadedFromDisk) == 0) {
+		const std::string name = line.substr(disk_prefix);
+		add_name_once(strutil::ends_with_icase(name, ".pff") ? log.archives : log.from_disk, name);
+	}
+}
+
+FileAccessLog parse_file_access_log(const std::string &text) {
+	FileAccessLog log;
+	size_t start = 0;
+	while (start < text.size()) {
+		size_t end = text.find('\n', start);
+		if (end == std::string::npos) end = text.size();
+		std::string line = text.substr(start, end - start);
+		if (!line.empty() && line.back() == '\r') line.pop_back();
+		add_file_access_line(log, line);
+		start = end + 1;
+	}
+	return log;
 }
 
 PlayLauncher make_play_launcher(bool source_run, const std::string &editor_executable,
