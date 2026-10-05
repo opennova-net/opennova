@@ -520,24 +520,28 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                     se.y1 = parse_int_n(tok[2].s, tok[2].len);
                     se.x2 = parse_int_n(tok[3].s, tok[3].len);
                     se.y2 = parse_int_n(tok[4].s, tok[4].len);
-                    /* Optional flags */
-                    for (int ti = 5; ti < n; ++ti) {
-                        char fl[16];
-                        size_t fll = tok[ti].len < 15 ? tok[ti].len : 15;
-                        to_lower_buf(fl, tok[ti].s, fll);
-                        if (fll == 5 && memcmp(fl, "blend", 5) == 0) se.blend = DEF_SIGHT_BLEND_BLEND;
-                        else if (fll == 3 && memcmp(fl, "add", 3) == 0) se.blend = DEF_SIGHT_BLEND_ADD;
-                        else if (fll == 7 && memcmp(fl, "blendat", 7) == 0) se.blend = DEF_SIGHT_BLEND_BLEND_AT;
-                        else if (fll == 8 && memcmp(fl, "multiply", 8) == 0) se.blend = DEF_SIGHT_BLEND_MULTIPLY;
-                        else if (fll == 5 && memcmp(fl, "addat", 5) == 0) se.blend = DEF_SIGHT_BLEND_ADD_AT;
-                        else if (fll == 10 && memcmp(fl, "multiplyat", 10) == 0) se.blend = DEF_SIGHT_BLEND_MULTIPLY_AT;
-                        else if (fll == 5 && memcmp(fl, "scale", 5) == 0) se.scale = 1;
-                        else if (fll == 5 && memcmp(fl, "slide", 5) == 0) {
+                    /* By position: the blend mode is token 6 (a name the
+                       material maker does not know, or none, is `blend`), and
+                       token 7 the one `scale` or `slide` flag, `slide`'s frame
+                       count token 8, read only on a line of 8 tokens or more
+                       [orig: the sights arm @0x544AC8 —
+                        WeaponDef_CreateBlendNamedMaterial @0x540190 over
+                        tokens[7] (@0x544B3F), the `cmp [esi],8; jl` @0x544B7A,
+                        "scale" @0x544B86 and "slide" @0x544BA2 against
+                        tokens[8], atol(tokens[9]) @0x544BC3] */
+                    const char *blend = tokens.token(6);
+                    if (strutil::iequals(blend, "add")) se.blend = DEF_SIGHT_BLEND_ADD;
+                    else if (strutil::iequals(blend, "multiply")) se.blend = DEF_SIGHT_BLEND_MULTIPLY;
+                    else if (strutil::iequals(blend, "blendat")) se.blend = DEF_SIGHT_BLEND_BLEND_AT;
+                    else if (strutil::iequals(blend, "addat")) se.blend = DEF_SIGHT_BLEND_ADD_AT;
+                    else if (strutil::iequals(blend, "multiplyat")) se.blend = DEF_SIGHT_BLEND_MULTIPLY_AT;
+                    else se.blend = DEF_SIGHT_BLEND_BLEND;
+                    if (tokens.count >= 8) {
+                        const char *flag = tokens.token(7);
+                        if (strutil::iequals(flag, "scale")) se.scale = 1;
+                        if (strutil::iequals(flag, "slide")) {
                             se.slide = 1;
-                            if (ti + 1 < n) {
-                                ++ti;
-                                se.slide_frames = parse_int_n(tok[ti].s, tok[ti].len);
-                            }
+                            se.slide_frames = (int)strtol(tokens.token(8), NULL, 10);
                         }
                     }
                     DA_PUSH(cw.sights, cw.sights_count, cw_sight_cap, se);

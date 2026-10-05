@@ -582,6 +582,47 @@ int main(int argc, char **argv) {
         printf("sight blend-token map OK\n");
     }
     {
+        /* A SIGHTS row reads by position: the blend mode is token 6 only, and
+           token 7 is the one `scale` or `slide` flag, `slide`'s frame count token
+           8, read only when the line carries 8 tokens or more; a flag word
+           anywhere else is nothing [orig: WeaponDefs_ParseLineCallback @0x543680,
+           the sights arm @0x544AC8: WeaponDef_CreateBlendNamedMaterial(tokens[7])
+           @0x544B3F, the `cmp [esi],8; jl` @0x544B7A, "scale" @0x544B86 and
+           "slide" @0x544BA2 against tokens[8], atol(tokens[9]) @0x544BC3]. */
+        static const char kSightOrderDef[] =
+            "weapon \"WPN_SIGHT_ORDER_TEST\"\n"
+            "\tsights a.tga 0 0 8 8 slide 33\n"       /* `slide` is the blend name */
+            "\tsights b.tga 0 0 8 8 add blend scale\n" /* token 7 is `blend` */
+            "\tsights c.tga 0 0 8 8 add scale\n"
+            "\tsights d.tga 0 0 8 8 blendat slide 12\n"
+            "end\n";
+        DefWeaponsFile of;
+        memset(&of, 0, sizeof(of));
+        if (def_parse_weapons_memory((const unsigned char *)kSightOrderDef,
+                                     sizeof(kSightOrderDef) - 1, &of) != 0 ||
+            of.count != 1 || of.entries[0].sights_count != 4) {
+            fprintf(stderr, "FAIL: positional sights inline parse failed\n");
+            def_free_weapons(&of);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefSightEntry *s = of.entries[0].sights;
+        const bool ok = s[0].blend == DEF_SIGHT_BLEND_BLEND && !s[0].slide && !s[0].scale &&
+                s[1].blend == DEF_SIGHT_BLEND_ADD && !s[1].scale &&
+                s[2].blend == DEF_SIGHT_BLEND_ADD && s[2].scale &&
+                s[3].blend == DEF_SIGHT_BLEND_BLEND_AT && s[3].slide && s[3].slide_frames == 12;
+        if (!ok) {
+            fprintf(stderr, "FAIL: positional sights: %d/%d/%d %d/%d %d/%d %d/%d/%d\n", s[0].blend,
+                    s[0].slide, s[0].scale, s[1].blend, s[1].scale, s[2].blend, s[2].scale,
+                    s[3].blend, s[3].slide, s[3].slide_frames);
+            def_free_weapons(&of);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&of);
+        printf("positional sight rows OK\n");
+    }
+    {
         /* The scope-zero table's token forms [orig: 'scope_max_zero'
            @ 0x544e8b..0x544efd]: three values store +0x84/+0x9C/+0xA0; a fourth stores
            +0x88 only when the line carries four (`cmp dword ptr [esi],4; jle`
