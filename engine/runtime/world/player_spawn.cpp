@@ -49,6 +49,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.item_id = kPlayerInfantryTypeId;
     seed.has_item_def = world.tables.player.has_item_def;
     seed.item_type_index = world.tables.player.item_type_index;
+    seed.has_graphic_model = world.tables.player.has_graphic_model;
     seed.item_type = world.tables.player.item_type;
     seed.item_attrib = world.tables.player.item_attrib;
     seed.armor_impact = retail_signed_i16(world.tables.player.armor_impact);

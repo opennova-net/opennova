@@ -1021,6 +1021,15 @@ void test_parent_handle_reuse_detaches_device() {
     CHECK(entity != nullptr && !entity->ground_target.valid());
 }
 
+// A body the device sweeps consider: an items.def row past the Null one, a
+// def and a model [orig: Entity_FindEnemyInCone @0x43CC07..0x43CC1D /
+// Entity_FindEnemyVehicleInCone @0x43CA5B..0x43CA72].
+void make_sweep_candidate(Entity &seed) {
+    seed.item_type_index = 1;
+    seed.has_item_def = true;
+    seed.has_graphic_model = true;
+}
+
 void test_world_tick_uses_retail_device_order() {
     // A round that converts this frame must not lose an arm-delay tick: pool 1
     // has already run before the projectile pool creates it.
@@ -1059,6 +1068,7 @@ void test_world_tick_uses_retail_device_order() {
                                                 rig.w.tables.ammo.entries[kAmmoClaymore]));
         rig.w.throwables.devices[0].think_delay_ticks = 0;
         Entity enemy;
+        make_sweep_candidate(enemy);
         enemy.kind = EntityKind::Organic;
         enemy.team = 1;
         enemy.health = 100;
@@ -1225,6 +1235,7 @@ void test_claymore_cone_trigger() {
 
     // behind the claymore: no trigger
     Entity enemy_seed;
+    make_sweep_candidate(enemy_seed);
     enemy_seed.kind = EntityKind::Organic;
     enemy_seed.team = 1;
     enemy_seed.health = 100;
@@ -1264,6 +1275,36 @@ void test_claymore_cone_trigger() {
     (void)enemy;
 }
 
+// The person sweep passes over a slot with no items.def row (ItemTypeIndex
+// 0), no def or no graphic model; the same enemy with all three trips the
+// claymore [orig: Entity_FindEnemyInCone @0x43cba0 — `cmp [esi+1Ch], 0`
+// @0x43CC07, `cmp [esi+20h], 0` @0x43CC13, `cmp [esi+30h], 0` @0x43CC19].
+void test_claymore_sweep_skips_rowless_defless_modelless() {
+    for (int missing = 0; missing < 4; ++missing) {
+        Rig rig(0);
+        rig.throw_ammo(kAmmoClaymore, Vec3{20.0f, 20.0f, 0.8f}, 0, 0);
+        rig.tick(160);
+        CHECK(rig.w.throwables.devices.size() == 1);
+        if (rig.w.throwables.devices.empty()) return;
+        const PlacedDevice &placed = rig.w.throwables.devices[0];
+        const double axis = double(placed.yaw_bam) *
+                            (2.0 * 3.14159265358979323846 / 4294967296.0);
+        Entity enemy_seed;
+        make_sweep_candidate(enemy_seed);
+        if (missing == 1) enemy_seed.item_type_index = 0;
+        if (missing == 2) enemy_seed.has_item_def = false;
+        if (missing == 3) enemy_seed.has_graphic_model = false;
+        enemy_seed.kind = EntityKind::Organic;
+        enemy_seed.team = 1;
+        enemy_seed.health = 100;
+        enemy_seed.position = Vec3{placed.pos.x + 8.0f * float(std::cos(axis)),
+                                   placed.pos.y + 8.0f * float(std::sin(axis)), 0.0f};
+        rig.w.registry.spawn(0, enemy_seed);
+        rig.tick(4);
+        CHECK(rig.w.throwables.devices.empty() == (missing == 0));
+    }
+}
+
 // The cone LOS is the full terrain + sector query. A solid building between
 // the placed device and an otherwise eligible enemy must keep the claymore
 // armed; removing that building exposes the same enemy and trips it.
@@ -1282,6 +1323,7 @@ void test_claymore_sector_los_blocks_trigger() {
                      placed.pos.y + 8.0f * float(std::sin(axis)), 0.0f};
 
     Entity enemy_seed;
+    make_sweep_candidate(enemy_seed);
     enemy_seed.kind = EntityKind::Organic;
     enemy_seed.team = 1;
     enemy_seed.health = 100;
@@ -1333,6 +1375,7 @@ void test_avmine_trips_on_a_moving_vehicle() {
         CHECK(rig.w.throwables.devices[0].think == ThrowClass::kAVMine);
 
         Entity veh_seed;
+        make_sweep_candidate(veh_seed);
         veh_seed.kind = EntityKind::Item;
         veh_seed.item_type = 1; // vehicle def kind
         veh_seed.team = 1;
@@ -1379,6 +1422,7 @@ struct ArmedAvMine {
     }
     EntityHandle spawn_vehicle(uint32_t engine_flags, int32_t health) {
         Entity veh_seed;
+        make_sweep_candidate(veh_seed);
         veh_seed.kind = EntityKind::Item;
         veh_seed.item_type = 1; // vehicle def kind
         veh_seed.team = 1;
@@ -1473,6 +1517,7 @@ void test_team_trigger_claymore_rule() {
     const PlacedDevice &placed = rig.w.throwables.devices[0];
     const double axis = double(placed.yaw_bam) * (2.0 * 3.14159265358979323846 / 4294967296.0);
     Entity mate_seed;
+    make_sweep_candidate(mate_seed);
     mate_seed.kind = EntityKind::Organic;
     mate_seed.team = 0; // the owner's own team
     mate_seed.health = 100;
@@ -1619,6 +1664,7 @@ int main() {
     test_per_owner_same_item_device_caps();
     test_detonator_chain();
     test_claymore_cone_trigger();
+    test_claymore_sweep_skips_rowless_defless_modelless();
     test_claymore_sector_los_blocks_trigger();
     test_avmine_trips_on_a_moving_vehicle();
     test_avmine_sees_one_unit_above_the_vehicle();

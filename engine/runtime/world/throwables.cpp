@@ -924,6 +924,11 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
         const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
         const Entity *e = world.registry.get(h);
         if (e == nullptr) continue;
+        // A slot with no items.def row, no def or no model is no candidate
+        // [orig: `cmp [esi+1Ch], 0` (ItemTypeIndex) @0x43CA5B / @0x43CC07, the
+        // def [esi+20h] @0x43CA67 / @0x43CC13, the graphic model [esi+30h]
+        // @0x43CA6E / @0x43CC19].
+        if (e->item_type_index == 0 || !e->has_item_def || !e->has_graphic_model) continue;
         // The vehicle sweep skips Flags bits 0 and 1 (inactive, dead) [orig:
         // `test byte [esi+24h], 3` @0x43CA61]; the person sweep bit 0 alone
         // [orig: `test byte [esi+24h], 1` @0x43CC0D].
