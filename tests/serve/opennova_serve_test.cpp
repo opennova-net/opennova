@@ -1,7 +1,7 @@
 // opennova-serve end to end (ADR 0051), with no retail data: a loose game
 // directory holding one synthetic mission and a retail-format host file. The
-// server mounts it, reads the host file, boots the mission headless as a
-// DedicatedHost, binds a real UDP socket, answers a LAN browser's 0x41 probe
+// server mounts it, reads the host file, binds a real UDP socket, boots the
+// mission headless as a DedicatedHost, answers a LAN browser's 0x41 probe
 // with its 0x81 ServerHello, and admits a LAN joiner (a ClientRuntime on a
 // second real socket) through the handshake into the match. Then the server's
 // stop reaches the joiner.
@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -111,22 +112,37 @@ int main() {
 		     << "Mission servetst.bms\r\n";
 	}
 
-	serve::ServeOptions options;
-	{
+	auto parse_options = [&](uint16_t port, serve::ServeOptions &out) {
 		std::string error;
-		const int parsed = serve::parse_serve_options(
+		return serve::parse_serve_options(
 				{"--resource-dir", dir.string(), "/host", (dir / "test.host").string(), "--loose-root",
-						"--lan-port", std::to_string(free_udp_port())},
-				options, error);
-		CHECK(parsed == 0);
+						"--lan-port", std::to_string(port)},
+				out, error);
+	};
+	{
+		serve::ServeOptions parsed;
+		CHECK(parse_options(free_udp_port(), parsed) == 0);
+		std::string error;
 		serve::ServeOptions missing;
 		CHECK(serve::parse_serve_options({"--resource-dir", dir.string()}, missing, error) == 1);
 		CHECK(serve::parse_serve_options({"--help"}, missing, error) == -1);
 	}
 
-	serve::Server server(options);
+	// The probed port is released before the server binds it, and a parallel
+	// test can take it in between. The server binds before it boots, so a lost
+	// race fails fast and the test probes again.
+	serve::ServeOptions options;
+	std::unique_ptr<serve::Server> holder;
 	std::string error;
-	const bool started = server.start(error);
+	bool started = false;
+	for (int attempt = 0; attempt < 5 && !started; ++attempt) {
+		options = serve::ServeOptions{};
+		CHECK(parse_options(free_udp_port(), options) == 0);
+		holder = std::make_unique<serve::Server>(options);
+		started = holder->start(error);
+		if (!started && error.find("bind scan") == std::string::npos) break;
+	}
+	serve::Server &server = *holder;
 	if (!started) {
 		std::printf("start: %s (catalog rows: %zu)\n", error.c_str(), server.catalog().size());
 		for (const mission_catalog::Row &row : server.catalog())
@@ -248,8 +264,17 @@ int main() {
 	std::printf("opennova_serve: joiner in match after %u client frames on UDP %u\n", tick,
 			server.bound_port());
 
+	// The host's stop reaches the joiner: the round reset, then the STOP
+	// goodbye, which ends the joiner's session.
 	server.stop();
 	CHECK(!server.frame(kFrame));
+	for (int f = 0; f < 120 && !client.session_lost(); ++f) {
+		drain();
+		(void)client.Client_ProcessNetworkFrame(tick++);
+	}
+	CHECK(client.session_lost());
+	CHECK(client.has_disconnect_event() &&
+			client.last_disconnect_event().ddstr == "NP.C:SH:STOP");
 	net::shutdown();
 	std::error_code ec;
 	fs::remove_all(dir, ec);

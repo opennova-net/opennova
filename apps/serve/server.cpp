@@ -1,6 +1,7 @@
 #include "server.h"
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/fixed.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
@@ -69,8 +70,11 @@ std::string game_text(const rtxt::File *table, const char *section, const char *
 // A headless host drains the presentation half of the world's outbox each
 // frame, so nothing a presenter would consume accumulates; the wire half
 // (entity events, relays, grants, the round ring, the water crossings) is the
-// host tick's own drain.
+// host tick's own drain. The terrain scorch queue grows with every blast and
+// death until a presenter clears it, so a long-running server must clear it.
 void drain_presentation_outbox(world::World &world) {
+	world.out.terrain_scorches.clear_pending();
+	world.out.weather_sounds.clear();
 	world.out.tip_events.clear();
 	world.out.hud_detail_blank = false;
 	world.out.destruction.clear();
@@ -140,7 +144,12 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {}
 Server::~Server() { stop(); }
 
 bool Server::start(std::string &error) {
-	if (!mount(error) || !read_host_file(error) || !boot_mission(error) || !open_socket(error)) {
+	// The socket binds before the mission loads, as the dead path creates the
+	// session before its Game Loop starts the mission [orig:
+	// Game_HostMultiplayerSession @0x4A6760 CNapiGameSession_BuildAndCreateSession
+	// before Game_MainLoop] and the game's host listens before its boot
+	// (mission_root.cpp enable_host_listen).
+	if (!mount(error) || !read_host_file(error) || !open_socket(error) || !boot_mission(error)) {
 		stop();
 		return false;
 	}
@@ -329,6 +338,7 @@ bool Server::boot_mission(std::string &error) {
 
 	role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
 	role_->bind(*kernel_);
+	role_->set_socket(datagrams_.get());
 	role_->stage_bringup(std::move(bringup));
 	session_ = std::make_unique<inmatch::Session>(*role_);
 	if (!session_->begin_load().applied()) {
@@ -412,7 +422,7 @@ bool Server::boot_mission(std::string &error) {
 	rungs.terrain_height = have_trn && trn.water_height != 0 ? trn.water_height * 0.5f : 0.0f;
 	rungs.has_loaded_terrain = kernel_->terrain_store.valid();
 	const float water = env::resolve_water_height(rungs, &env_state, 0.0f);
-	kernel_->world.env.water_z = static_cast<int32_t>(water * 65536.0f);
+	kernel_->world.env.water_z = static_cast<int32_t>(water * io::kFp16One);
 	kernel_->sync_water_plane();
 	kernel_->world.weather.seed(env::weather_seed_from_config(env_config, kernel_->mission.header));
 	kernel_->complete_mission_start();
@@ -432,13 +442,9 @@ bool Server::boot_mission(std::string &error) {
 // The authority's bind scan over the retail LAN server range from its first
 // port, stepping by one and wrapping [orig: CNapiNetwork_OpenTransportSocket
 // @0x4C6A40, the authority arm @0x4C6AA2; NapiUdpSocket_CreateAndBind
-// @0x62D2A0; net_ports.h lan_host_bind_ports].
+// @0x62D2A0; net_ports.h lan_host_bind_ports]. The embedder owns the socket
+// layer (net::startup), which is process-wide.
 bool Server::open_socket(std::string &error) {
-	if (net::startup() != 0) {
-		error = "the socket layer did not start";
-		return false;
-	}
-	net_started_ = true;
 	const uint16_t first = options_.port != 0 ? options_.port : kRetailLanPortMin;
 	for (const uint16_t port : lan_host_bind_ports(first)) {
 		socket_ = net::udp_bind(port, &bound_port_);
@@ -449,7 +455,6 @@ bool Server::open_socket(std::string &error) {
 		return false;
 	}
 	datagrams_ = std::make_unique<net::NetDatagramSocket>(socket_);
-	role_->set_socket(datagrams_.get());
 	return true;
 }
 
@@ -476,10 +481,6 @@ void Server::stop() {
 	if (role_) role_->set_socket(nullptr);
 	datagrams_.reset();
 	if (socket_.is_valid()) net::close_socket(socket_);
-	if (net_started_) {
-		net::shutdown();
-		net_started_ = false;
-	}
 }
 
 } // namespace opennova::serve

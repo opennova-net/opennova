@@ -53,9 +53,10 @@ public:
 	Server(const Server &) = delete;
 	Server &operator=(const Server &) = delete;
 
-	// Mount, read the host file, boot the starting mission, bind the socket and
+	// Mount, read the host file, bind the socket, boot the starting mission and
 	// start the session. False with `error` when any leg fails; nothing is bound
-	// then.
+	// then. The embedder starts the socket layer (net::startup) first and shuts
+	// it down after stop(): it is process-wide.
 	bool start(std::string &error);
 	// One outer frame of `delta_seconds` wall clock. False once the session has
 	// ended (end_message() says how).
@@ -93,7 +94,6 @@ private:
 	std::unique_ptr<mission::MissionKernel> kernel_;
 	std::unique_ptr<inmatch::HostRole> role_;
 	std::unique_ptr<inmatch::Session> session_;
-	bool net_started_ = false;
 	net::Socket socket_;
 	std::unique_ptr<net::NetDatagramSocket> datagrams_;
 	uint16_t bound_port_ = 0;
