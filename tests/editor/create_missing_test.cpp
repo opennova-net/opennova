@@ -3,8 +3,8 @@
 // notes), the run is idempotent, one row can be created alone, the roles are explicit
 // (none makes nothing, one named twice is made once, an unknown one is refused), a file
 // that is there, of the right kind or the wrong one, is never overwritten (and one the
-// report missed is found on disk), and every Required row of the default project has a
-// factory (the mission rows without one are reported, not skipped silently).
+// report missed is found on disk), and every Required row has a factory of its own kind, the
+// mission-start rows included (an optional row without one is reported, not skipped silently).
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -165,7 +165,12 @@ static int test_single_role_and_wrong_kind() {
 	return 0;
 }
 
-static int test_mission_rows_report_what_has_no_writer_yet() {
+// With missions on, every Required row has a factory of the row's own kind: Create missing fills
+// the boot, menu and mission-start rows alike (ammo.def, powerup.def, the seven menus a mission
+// opens by name), and the project then lacks no required file. The optional mission rows a factory
+// can fill are made when named; the ones that need real content (the sound banks, the music, the
+// mission-text fallback, the HUD layouts, the celestial model, the fallback animation) have none.
+static int test_mission_rows_are_all_filled() {
 	editor_test::TempProjectDir dir("opennova_editor_create_missing_mission_test");
 	const std::string root = dir.file("Mission");
 	ProjectDocument doc;
@@ -174,19 +179,42 @@ static int test_mission_rows_report_what_has_no_writer_yet() {
 	doc.features.mission = true;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	Evaluated before = evaluate(paths, doc);
+	for (const RequirementRow &row : before.report.rows) {
+		const BlankFactory *factory = find_blank_factory_for_role(row.role);
+		if (row.required) TEST_EXPECT(factory != nullptr);
+		if (factory && factory->kind != row.expected_kind)
+			std::fprintf(stderr, "  %s: the factory makes another kind of file\n", row.role.c_str());
+		TEST_EXPECT(factory == nullptr || factory->kind == row.expected_kind);
+	}
 	const CreateMissingResult result =
 	        create_missing_requirements(paths, doc, before.report, unmet_required_roles(before.report));
-	TEST_EXPECT(result.diagnostics.empty());
-	bool ammo_created = false;
-	for (const std::string &path : result.created) ammo_created = ammo_created || path == "defs/ammo.def";
-	TEST_EXPECT(ammo_created);
-	// failsafe.bad is optional (retail JO ships none), so nothing asks for it.
-	bool failsafe_listed = false, menus_unavailable = false;
-	for (const std::string &name : result.unavailable) {
-		if (name == "failsafe.bad") failsafe_listed = true;
-		if (name == "cmap.mnu") menus_unavailable = true;
+	for (const std::string &name : result.unavailable) std::fprintf(stderr, "  unavailable: %s\n", name.c_str());
+	TEST_EXPECT(result.diagnostics.empty() && result.unavailable.empty());
+	TEST_EXPECT(static_cast<int>(result.created.size()) == before.report.required_total);
+	for (const char *path : {"defs/ammo.def", "defs/powerup.def", "menus/cmap.mnu", "menus/game.mnu", "menus/weapon.mnu",
+	                         "menus/vehicle.mnu", "menus/stat.mnu", "menus/death.mnu", "menus/mp.mnu"}) {
+		bool created = false;
+		for (const std::string &made : result.created) created = created || made == path;
+		if (!created) std::fprintf(stderr, "  not created: %s\n", path);
+		TEST_EXPECT(created);
 	}
-	TEST_EXPECT(!failsafe_listed && menus_unavailable);
+	Evaluated after = evaluate(paths, doc);
+	TEST_EXPECT(after.report.required_missing == 0 && after.report.required_wrong_kind == 0);
+	TEST_EXPECT(!diagnostics_have_errors(after.scan.diagnostics) && !diagnostics_have_errors(after.report.diagnostics));
+
+	const std::vector<std::string> optional = {"font_arials18", "font_arial22", "font_couri20b", "game_wac", "server_wac",
+	                                           "loadscrn_pcx", "monogram_tga", "boxtile_tga", "border_tga"};
+	const CreateMissingResult extras = create_missing_requirements(paths, doc, after.report, optional);
+	TEST_EXPECT(extras.diagnostics.empty() && extras.unavailable.empty() && extras.created.size() == optional.size());
+	for (const char *path : {"fonts/Arials18.fnt", "missions/game.wac", "textures/loadscrn.pcx", "textures/border.tga"}) {
+		bool created = false;
+		for (const std::string &made : extras.created) created = created || made == path;
+		TEST_EXPECT(created);
+	}
+	const CreateMissingResult content = create_missing_requirements(
+	        paths, doc, after.report,
+	        {"failsafe_bad", "game_lwf", "gamemus_sbf", "medmssn_bin", "hudpos_def", "hudfx_def", "upl_3di"});
+	TEST_EXPECT(content.created.empty() && content.diagnostics.empty() && content.unavailable.size() == 7);
 	return 0;
 }
 
@@ -194,7 +222,7 @@ int main() {
 	int failures = 0;
 	failures += test_default_project_fills_and_validates();
 	failures += test_single_role_and_wrong_kind();
-	failures += test_mission_rows_report_what_has_no_writer_yet();
+	failures += test_mission_rows_are_all_filled();
 	if (failures == 0) std::printf("editor_create_missing: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
