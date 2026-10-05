@@ -304,12 +304,17 @@ void test_arming_dud_and_armed_damage() {
 }
 
 // JO:CA's base ammo.def ends on GRENADE_NOEXP's `end` and the file's NUL, with
-// no CR LF, and the walk still closes that def [orig: File_ParseASCIIFile
-// @0x53D810, the tail line @0x53D8E9..0x53D8EC; the tokenizer's strlen
-// @0x53CBA7]. It is the notarmmedammo of the M203 and Mk19 grenades and the
-// RPG and AT4 rockets, so a hit before arming continues as the dud and deals
-// nothing (the round's own kill zone never queues). The defs below are the
-// base file's M203 and its dud (effects tables, tracers and lights aside).
+// no CR LF: the walk drops the tail line's last byte, the NUL, so the `end`
+// still closes that def and AmmoDef_InheritDefaults runs on it; the same file
+// without the NUL reads `en`, the def stays open and inherits nothing [orig:
+// File_ParseASCIIFile @0x53D810, the tail line @0x53D8E9..0x53D8EC; the
+// tokenizer's strlen @0x53CBA7; AmmoDef_InheritDefaults @0x409EB0 from the `end`
+// arm @0x40A3E5]. The dud here leaves its velocity unauthored, so it carries
+// the first def's 74 only when its `end` is read. It is the notarmmedammo of
+// the M203 and Mk19 grenades and the RPG and AT4 rockets, so a hit before
+// arming continues as the dud and deals nothing (the round's own kill zone
+// never queues). The defs below are the base file's M203 and its dud
+// (effects tables, tracers, lights and the dud's velocity aside).
 void test_base_game_m203_hit_before_arming_is_the_dud() {
     Rig r;
     static const char kText[] =
@@ -331,14 +336,23 @@ void test_base_game_m203_hit_before_arming_is_the_dud() {
             "ammo GRENADE_NOEXP\t\r\n"
             "\tmax_age\t\t\t\t7    \r\n"
             "\tarm_age\t\t\t\t.21\r\n"
-            "\tvelocity\t\t\t244\r\n"
             "\tdrag\t\t\t\t0.5\r\n"
             "\tweight_in_grains\t2000\r\n"
             "end";
+    {
+        // Without the NUL the tail reads `en`: the dud is in the table (the
+        // file's end keeps an open def) with the allocator's -1 velocity.
+        opennova::def::DefAmmoFile open{};
+        CHECK(opennova::def::def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(kText),
+                                                   sizeof(kText) - 1, &open) == 0);
+        CHECK(open.count == 2 && open.entries[1].velocity == -1);
+        opennova::def::def_free_ammo(&open);
+    }
     opennova::def::DefAmmoFile parsed{};
     // sizeof keeps the literal's NUL: the file's last byte.
     CHECK(opennova::def::def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(kText),
                                                sizeof(kText), &parsed) == 0);
+    CHECK(parsed.count == 2 && parsed.entries[1].velocity == 74);
     r.world.tables.ammo = build_ammo_table(parsed);
     opennova::def::def_free_ammo(&parsed);
     const int dud = r.world.tables.ammo.index_of("GRENADE_NOEXP");
