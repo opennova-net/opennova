@@ -55,8 +55,9 @@ public:
 	// key, which its words read (documents/name_source.h's definition_words).
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
-	// A save keeps the records' order and the file's indentation, not its spacing or comments, and
-	// leaves out what the game skips: said before saving (the toolbar).
+	// A save generates the file in the form it was read in, but for the lines an edit changed (the file's
+	// modeled layout, def_notes.h: its spacing, its comments, its spellings and what the game skips): said
+	// before saving (the toolbar).
 	std::string save_words() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<DefCatalogDocument>(*this);
@@ -88,6 +89,10 @@ protected:
 	// within the characters of a name the game keeps.
 	void prepare_duplicate(Node &copy, const Node &original,
 	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
+	// A record a Duplicate copies within its row (a sight, an action block, an attachment, an effect row, a
+	// powerup's ammo row) is its own: the copy names none of the file's layout (def_clear_notes), so the
+	// writer puts it down in its own form where the row's order has it.
+	void prepare_record(const Node &row, const ListChange &change, DetachedRecord &record) const override;
 	std::shared_ptr<const FileState> state_after_remove(const std::shared_ptr<const FileState> &state,
 	                                                    size_t remaining) const override;
 	// What the record's kind derives after any edit (an item's attachment slots).
