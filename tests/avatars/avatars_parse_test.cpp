@@ -279,6 +279,24 @@ int main(int argc, char **argv) {
         avatars_free(&model);
     }
 
+    // The lenient id skip compares a signed byte: a first byte of 0x80 or above
+    // is no character above '9', so atol reads it and stops at once (id 0)
+    // where 'N' is skipped. [orig: CAvatarDefs_ParseConfigLine, `cmp byte ptr
+    // [eax], 39h; jle` @0x57A628 / @0x57A74E]
+    {
+        const char src[] =
+            "nationality \xA7" "5 HIGH\r\n{\r\n\tdivision \xA7" "3 HIGH_DIV\r\n\t{\r\n\t}\r\n}\r\n"
+            "nationality N6 LOW\r\n{\r\n}\r\n";
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
+        TEST_EXPECT(model.nationalities_count == 2);
+        TEST_EXPECT(model.nationalities[0].id == 0);
+        TEST_EXPECT(model.nationalities[0].divisions_count == 1);
+        TEST_EXPECT(model.nationalities[0].divisions[0].id == 0);
+        TEST_EXPECT(model.nationalities[1].id == 6);
+        avatars_free(&model);
+    }
+
     {
         const char src[] =
             "define head HEAD_A\r\n{\r\n\tcamo 256 -1 511\r\n\tvoice 260\r\n}\r\n";

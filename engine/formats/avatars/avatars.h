@@ -160,7 +160,12 @@ void avatars_free(AvatarsFile *file);
  * passthrough — docs/adr/0003, policy docs/adr/0021). On success returns 0 and
  * sets *out_data (malloc'd, NUL-terminated) and *out_size (length excluding the
  * NUL). Free with avatars_free_buffer(). The write is deterministic: a
- * parse->write->parse->write round-trip is byte-identical on the second write. */
+ * parse->write->parse->write round-trip is byte-identical on the second write.
+ * Returns 2, writing nothing, when a line would hold an empty field ahead of a
+ * filled one (a nationality's or division's id or name key ahead of its flags,
+ * a combo's id, head or body ahead of the next): the game's tokenizer reads
+ * the `""` it would be written as as no token, so the later fields would read
+ * back shifted. */
 int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size);
 void avatars_free_buffer(char *data);
 
