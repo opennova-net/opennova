@@ -50,4 +50,31 @@ private:
 	UdpPump *pump_;
 };
 
+// The hosted match's side of a pump a NovaWorld lobby session shares
+// (UdpPump::demux, D-NET-346): the game's protocol is attached to the socket
+// for this adapter's lifetime, so the game's queue fills only while a match
+// reads it, and it keeps the shared pump alive.
+class UdpPumpGameSocket : public opennova::IDatagramSocket {
+public:
+	explicit UdpPumpGameSocket(const Ref<UdpPump> &pump) : pump_(pump) {
+		if (pump_.is_valid()) pump_->demux().set_game_attached(true);
+	}
+	~UdpPumpGameSocket() override {
+		if (pump_.is_valid()) pump_->demux().set_game_attached(false);
+	}
+
+	int recv_from(uint8_t *buf, std::size_t cap, opennova::PeerAddr &from) override {
+		if (pump_.is_null() || !pump_->is_open()) return 0;
+		return pump_->demux().game().recv_from(buf, cap, from);
+	}
+
+	void send_to(const opennova::PeerAddr &to, const uint8_t *data, std::size_t len) override {
+		if (pump_.is_null() || !pump_->is_open()) return;
+		pump_->demux().game().send_to(to, data, len);
+	}
+
+private:
+	Ref<UdpPump> pump_;
+};
+
 } // namespace godot

@@ -118,6 +118,11 @@ public:
 	void set_net_transport(const String &p_value) { net_transport_ = p_value; }
 	int get_bind_port() const { return bind_port_; }
 	void set_bind_port(int p_value) { bind_port_ = p_value; }
+	// A NovaWorld host's socket: the NovaWorld session's bound pump, which the
+	// match hosts on instead of binding bind_port (one socket, D-NET-346). Null
+	// for every other host. Native only.
+	Ref<UdpPump> get_host_pump() const { return host_pump_; }
+	void set_host_pump(const Ref<UdpPump> &p_pump) { host_pump_ = p_pump; }
 	String get_server_name() const { return server_name_; }
 	void set_server_name(const String &p_value) { server_name_ = p_value; }
 	// The host's own callsign advertised on the gate row.
@@ -156,6 +161,7 @@ private:
 	Ref<MissionObjectPlacer> placer_;
 	String net_transport_;
 	int bind_port_ = opennova::kRetailLanPortMin;
+	Ref<UdpPump> host_pump_;
 	String server_name_;
 	String player_name_;
 	int max_players_ = kDefaultMaxPlayers;

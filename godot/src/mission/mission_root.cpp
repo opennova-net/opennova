@@ -260,7 +260,11 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		// The loose score.ini overlays the session's score table inside the
 		// boot, ahead of the bring-up (inmatch/host_boot.h).
 		sim_->configure_host_session(session_options);
-		if (!sim_->enable_host_listen(host_session->get_bind_port())) {
+		// A NovaWorld host's match rides its NovaWorld session's socket (D-NET-346).
+		const Ref<UdpPump> host_pump = options->get_host_pump();
+		const bool listening = host_pump.is_valid() ? sim_->enable_host_listen_on(host_pump)
+		                                            : sim_->enable_host_listen(host_session->get_bind_port());
+		if (!listening) {
 			// A requested LAN host that cannot own its UDP endpoint is not a host.
 			// Never degrade into the visually-identical socketless SP/listen path:
 			// the caller must surface the bind failure and keep the menu active.
