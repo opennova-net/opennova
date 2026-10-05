@@ -167,6 +167,8 @@ private:
 	void paste_records(Document &document, const PasteAt &target);
 	void duplicate_records(Document &document);
 	void rewrite_file(const std::string &path);
+	// A request's path that names no file of the project, as its refusal (SessionCore::refuse_request).
+	Diagnostic missing_file(const std::string &path) const;
 	// The open document at exactly `path` (activate's), or null.
 	const DocumentBase *open_at(const std::string &path) const;
 	// The gesture open in the document at `path` ends (none open there: nothing), and with

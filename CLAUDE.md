@@ -47,8 +47,9 @@ easier to relay than to rediscover.
   LFS-tracked, text fixtures plain blobs (`.gitattributes`), and each is classified by
   `scripts/lint/fixture_lint.py` (`fixtures/README.md`, ADR 0041).
 - `scripts/` — the build/test/bootstrap/package entry points, `ci/` (suite selection and
-  attestation, `test_suites.py`), `lint/` (the CI gates), and the `ida/`, `mcp/`, `net/`,
-  `oracles/`, `parity/` and `render/` helper scripts.
+  attestation, `test_suites.py`), `lint/` (the CI gates), `demo/` (the editor demo recorder,
+  driven over the editor MCP), and the `ida/`, `mcp/`, `net/`, `oracles/`, `parity/` and
+  `render/` helper scripts.
 - `docs/` — the golden docs (ADRs, RE records), kept pristine: they represent the
   best current understanding of the original engine. RE findings land there directly
   (via the `re-doc` skill) — there is no scratch directory. `docs/` is a submodule of
