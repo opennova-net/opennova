@@ -3407,6 +3407,12 @@ target_include_directories(npruntime_host_file_test PRIVATE ${CMAKE_CURRENT_SOUR
 target_compile_definitions(npruntime_host_file_test PRIVATE
     OPENNOVA_EXAMPLE_HOST="${CMAKE_SOURCE_DIR}/apps/serve/example.host")
 add_test(NAME npruntime_host_file COMMAND npruntime_host_file_test)
+# game.cfg onto the host session (ADR 0051 d2, inmatch/host_config.h): the weapon table the
+# avail_wpn keys address, the defaults' gametext strings, and the session the cfg block makes.
+add_executable(npruntime_host_config_test npruntime/host_config_test.cpp)
+target_link_libraries(npruntime_host_config_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_host_config_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_config COMMAND npruntime_host_config_test)
 # The one host boot (ADR 0051 d4, inmatch/host_boot.h): the two phases over a
 # synthetic mount -- score.ini, the .til, the .env water, gametext.bin's Server
 # strings and charattr.def -- and the order the fixes ride (the placed tiles
@@ -3667,6 +3673,13 @@ add_executable(opennova_serve_test serve/opennova_serve_test.cpp)
 target_link_libraries(opennova_serve_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_lan_join COMMAND opennova_serve_test)
+# opennova-serve's files in its working directory (ADR 0051 d2): game.cfg read under the host
+# file and rewritten as Serve Only, activesrvr.txt while serving and gone after a clean stop, the
+# no-game.cfg defaults, and mpreset's stop. Each run in a temp working directory.
+add_executable(opennova_serve_game_cfg_test serve/opennova_serve_game_cfg_test.cpp)
+target_link_libraries(opennova_serve_game_cfg_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_game_cfg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_game_cfg COMMAND opennova_serve_game_cfg_test)
 
 # opennova-nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
 # end over real loopback UDP against the real NwUdpListener and an in-test gate (the row, a roster

@@ -6,9 +6,12 @@
 // server reads (ServerConfig_ApplyHostSetting). One `Key value` per line;
 // keys match without regard to case; a value with spaces is quoted; `//` or
 // `;` starts a comment. A key the server does not know changes nothing (it
-// logs a warning). Settings this file leaves out keep the host screen's
-// defaults, which are the values written below. The server type is always
-// Serve Only: the server has no player of its own.
+// logs a warning). Each key writes the setting game.cfg keeps: the server
+// reads game.cfg from the directory it runs from, applies this file over it,
+// and saves it back there. Settings this file leaves out keep their game.cfg
+// values; the values written below are the game's defaults (but the
+// location). The server type is always Serve Only: the server has no player
+// of its own.
 
 // --- The session ---------------------------------------------------------
 GameName            "Untitled"                // GAME_NAME, up to 31 characters
@@ -18,7 +21,7 @@ MPHostSidePasswordA ""                        // BLUE_PW: the blue side's passwo
 MPHostSidePasswordB ""                        // RED_PW: the red side's password
 GameLocation        "USA"                     // GAME_LOCATION, the first three letters count
 ConnectionSpeed     5                         // CONNECTIONSPEED, the host screen's list value
-MaxPlayers          64                        // MAX_PLAYERS (the file is not held to the
+MaxPlayers          64                        // MAX_PLAYERS (1 to 65, not held to the
                                               // screen's 64; the server adds its own slot)
 UseLineUpQueue      1                         // game.cfg mpuselineupqueue
 LineUpQueueSize     100                       // game.cfg mplineupqueuesize
