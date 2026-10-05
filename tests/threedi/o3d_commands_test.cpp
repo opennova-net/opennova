@@ -13,6 +13,7 @@
 #include <fstream>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <base/io/le.h>
@@ -34,14 +35,15 @@ void check(bool ok, const char *what) {
 	}
 }
 
-const std::string prefix = "o3d 1\nmodel CHECK\nskinned 1\nuv1 1\nmaterial VS_SKBASIC\n"
-		"lod 0 gnrc\npart 0 0 0 0\npart 0 0 0 1\npart 0 0 0 0\nstrip 0\nbones 0 1\n";
-// Skinned vertices: four bone-table slots, three weights (slot 3 takes the
-// rest, here nothing).
+const std::string prefix = "o3d 2\nmodel CHECK\nskinned 1\nuv1 1\nmaterial VS_SKBASIC\n"
+		"lod 0 gnrc\npart 0 0 0 0\npart 0 0 0 1\npart 0 0 0 0\nmesh 0\n";
+// Skinned vertices: part weight pairs, the primary first. The strip's table
+// is [0 1], each vertex's slots (0 1 0 0) with its two weights (slot 3 takes
+// the rest, here nothing).
 const std::string verts =
-		"v 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0.75 0.25 0\n"
-		"v 1 0 0 0 0 1 1 0 1 0 0 1 0 0 0.5 0.5 0\n"
-		"v 0 1 0 0 0 1 0 1 0 1 0 1 0 0 0.25 0.75 0\n";
+		"v 0 0 0 0 0 1 0 0 0 0 0 0.75 1 0.25\n"
+		"v 1 0 0 0 0 1 1 0 1 0 0 0.5 1 0.5\n"
+		"v 0 1 0 0 0 1 0 1 0 1 0 0.25 1 0.75\n";
 const std::string suffix = "t 0 1 2\npanm 0 0\npanm 1 0\npanm 2 0\n";
 
 std::string replace(std::string s, const std::string &from, const std::string &to) {
@@ -63,14 +65,14 @@ std::string replace(std::string s, const std::string &from, const std::string &t
 // bounds and the CMDL are set by its corner vertices (0 0 0)..(20 20 0) and
 // the volumes, so the small face 3 4 5 can move without changing them.
 const std::string rich =
-		"o3d 1\nmodel RICH\n"
+		"o3d 2\nmodel RICH\n"
 		"register FLICKER\nregister TEX_CAMO1\nregister TEX_CAMO2\n"
 		"mtrx 0 1 0 -1 0 0 0 0 1\n"
 		"material FF_ST_OP\ntexture rich.tga\n"
 		"material FF_ST_OP_LUM\ntexture bulb.tga\nrgbgen 113 0 2 255 255 255 0 0 0\n"
 		"lod 200 gnrc\n"
-		"part 0 0 0 0\nstrip 0\nv 0 0 0 0 0 1 0 0\nv 2 0 0 0 0 1 1 0\nv 0 2 0 0 0 1 0 1\nt 0 1 2\n"
-		"part 0 1 0 1\nstrip 1\nv 1 0 1 0 0 1 0 0\nv 2 0 1 0 0 1 1 0\nv 1 1 1 0 0 1 0 1\nt 0 1 2\n"
+		"part 0 0 0 0\nmesh 0\nv 0 0 0 0 0 1 0 0\nv 2 0 0 0 0 1 1 0\nv 0 2 0 0 0 1 0 1\nt 0 1 2\n"
+		"part 0 1 0 1\nmesh 1\nv 1 0 1 0 0 1 0 0\nv 2 0 1 0 0 1 1 0\nv 1 1 1 0 0 1 0 1\nt 0 1 2\n"
 		"panm 0 0\npanm 1 0 0x00000200 1\ntrack rotz 113 FLICKER 0 0 4096\n"
 		"userpoint muzzle 1 0 1 1 0 0 1 71\n"
 		"light 1 1 0 1.5 0 4 55 0.296875 0.5 255 0 34 240 235 230 0x40\n"
@@ -134,8 +136,8 @@ int main(int argc, char **argv) {
 	compare("identical", prefix + verts + suffix, true);
 	compare("cyclic-corners", prefix + verts + replace(suffix, "t 0 1 2", "t 1 2 0"), true);
 	compare("winding", prefix + verts + replace(suffix, "t 0 1 2", "t 0 2 1"), false);
-	compare("weights", prefix + replace(verts, "0.75 0.25 0", "0.25 0.75 0") + suffix, false);
-	compare("bone-table", replace(prefix, "bones 0 1", "bones 1 0") + verts + suffix, false);
+	compare("weights", prefix + replace(verts, "0 0.75 1 0.25", "0 0.25 1 0.75") + suffix, false);
+	compare("parts", prefix + replace(verts, "0 0.75 1 0.25", "1 0.75 0 0.25") + suffix, false);
 	// UV swaps preserve each mean, but move the texture to different corners.
 	compare("uv0", prefix + replace(replace(verts,
 			"v 1 0 0 0 0 1 1 0", "v 1 0 0 0 0 1 0 1"),
@@ -143,15 +145,49 @@ int main(int argc, char **argv) {
 	compare("uv1", prefix + replace(replace(verts,
 			"v 1 0 0 0 0 1 1 0 1 0", "v 1 0 0 0 0 1 1 0 0 1"),
 			"v 0 1 0 0 0 1 0 1 0 1", "v 0 1 0 0 0 1 0 1 1 0") + suffix, false);
-	compare("remapped-bones", replace(prefix, "bones 0 1", "bones 1 0") +
-			replace(replace(replace(verts, "0.75 0.25 0", "0.25 0.75 0"),
-					"v 1 0 0 0 0 1 1 0 1 0 0 1 0", "v 1 0 0 0 0 1 1 0 1 0 1 0 0"),
-					"v 0 1 0 0 0 1 0 1 0 1 0 1 0", "v 0 1 0 0 0 1 0 1 0 1 1 0 0") + suffix, true);
-	// The blend is what compares, not how the slots spell it: part 0's 0.75
-	// split over two slots, or left to slot 3 (1 - 0.25), is the same vertex.
-	compare("split-weight", prefix + replace(verts, "0 1 0 0 0.75 0.25 0", "0 1 0 0 0.5 0.25 0.25") + suffix, true);
-	compare("fourth-slot-weight", prefix + replace(verts, "0 1 0 0 0.75 0.25 0", "1 1 1 0 0.25 0 0") + suffix, true);
-	compare("fourth-slot-bone", prefix + replace(verts, "0 1 0 0 0.75 0.25 0", "1 1 1 1 0.25 0 0") + suffix, false);
+	// The blend is what compares, not how the slots spell it (hand edits of
+	// the minted bytes: the text names parts, never slots). The strip's
+	// table (STRP record +48) and each vertex's three weights (VERT +12) and
+	// four index bytes (+24), 56 bytes a vertex after the 12-byte header.
+	{
+		const auto vert_weights = [](uint8_t *vert, int i, float w0, float w1, float w2) {
+			uint8_t *v = vert + 12 + i * 56;
+			opennova::io::write_f32_le(v + 12, w0);
+			opennova::io::write_f32_le(v + 16, w1);
+			opennova::io::write_f32_le(v + 20, w2);
+		};
+		const auto vert_slots = [](uint8_t *vert, int i, uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
+			uint8_t *v = vert + 12 + i * 56 + 24;
+			v[0] = a;
+			v[1] = b;
+			v[2] = c;
+			v[3] = d;
+		};
+		const auto edited = [&](const char *name, const char *tag, const std::function<void(uint8_t *)> &edit,
+				bool same, const std::string &from = std::string()) {
+			const auto path = (dir / (std::string(name) + ".3di")).string();
+			check(patch(from.empty() ? original : from, path, tag, edit), name);
+			check(threedi_cli::cmd_compare(original.c_str(), path.c_str()) == (same ? 0 : 1), name);
+			return path;
+		};
+		// The table's two parts swapped under the same slots: every blend swaps.
+		const auto swapped = edited("bone-table", "STRP", [](uint8_t *p) { std::swap(p[8 + 48], p[8 + 48 + 1]); }, false);
+		// ...and each vertex's slots swapped too: the same blends.
+		edited("remapped-bones", "VERT", [&](uint8_t *p) {
+			for (int i = 0; i < 3; ++i) vert_slots(p, i, 1, 0, 1, 1);
+		}, true, swapped);
+		// Part 0's 0.75 split over two slots, or left to slot 3 (1 - 0.25), is
+		// the same vertex; slot 3 naming part 1 instead is not.
+		edited("split-weight", "VERT", [&](uint8_t *p) { vert_weights(p, 0, 0.5f, 0.25f, 0.25f); }, true);
+		edited("fourth-slot-weight", "VERT", [&](uint8_t *p) {
+			vert_slots(p, 0, 1, 1, 1, 0);
+			vert_weights(p, 0, 0.25f, 0.0f, 0.0f);
+		}, true);
+		edited("fourth-slot-bone", "VERT", [&](uint8_t *p) {
+			vert_slots(p, 0, 1, 1, 1, 1);
+			vert_weights(p, 0, 0.25f, 0.0f, 0.0f);
+		}, false);
+	}
 	build("undeclared-track-register", prefix + verts + suffix + "track rotx 113 0 0 0 100\n", false);
 	build("wrapped-panm-part", prefix + verts + "t 0 1 2\npanm 256 0\n", false);
 	build("wrapped-panm-parent", prefix + verts + "t 0 1 2\npanm 0 256\n", false);
@@ -168,13 +204,13 @@ int main(int argc, char **argv) {
 	// The same register order, the flipbook pointed at the other register.
 	const auto flip_c = build("flipbook-elsewhere", replace(flipbook, "texanim 2 1 1", "texanim 2 1 0"));
 	check(threedi_cli::cmd_compare(flip_a.c_str(), flip_c.c_str()) == 1, "flipbook register pointed elsewhere");
-	std::string nearby = "o3d 1\nmodel NEARBY\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\n";
+	std::string nearby = "o3d 2\nmodel NEARBY\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\n";
 	for (double x : {0.0, 0.00006, -0.00006})
-		nearby += "strip 0\nv " + std::to_string(x) + " 0 0 0 0 1 0 0\nv " + std::to_string(x + 1) +
+		nearby += "mesh 0\nv " + std::to_string(x) + " 0 0 0 0 1 0 0\nv " + std::to_string(x + 1) +
 				" 0 0 0 0 1 1 0\nv " + std::to_string(x) + " 1 0 0 0 1 0 1\nt 0 1 2\n";
 	const auto nearby_path = build("nearby", nearby);
 	check(threedi_cli::cmd_compare(nearby_path.c_str(), nearby_path.c_str()) == 0, "nearly coincident faces");
-	const std::string plain = "o3d 1\nmodel FACES\nlod 0\npart 0 0 0 0\n";
+	const std::string plain = "o3d 2\nmodel FACES\nlod 0\npart 0 0 0 0\n";
 	const std::string collision = "cobj 0\ncv 0 0 0\ncv 1 0 0\ncv 0 1 0\ncf 0 1 2\n";
 	const auto normal_a = build("stored-normal", plain + replace(collision, "cf 0 1 2", "cf 0 1 2 14 0 0.5 0 0.75"));
 	const auto normal_scene = (dir / "stored-normal.rt.o3d").string();
@@ -363,7 +399,7 @@ int main(int argc, char **argv) {
 
 	// A hit sphere (a bone section's `csphere`): its radius alone, then its
 	// bounds alone.
-	const std::string sphere = "o3d 1\nmodel SPH\nlod 0\npart 0 0 0 0\ncobj 0\n"
+	const std::string sphere = "o3d 2\nmodel SPH\nlod 0\npart 0 0 0 0\ncobj 0\n"
 			"csphere 0 0 1 0.5 -0.2 -0.2 0.8 0.2 0.2 1.2\n";
 	const auto sphere_a = build("hit sphere", sphere);
 	const auto sphere_b = build("hit sphere radius", replace(sphere, "0 0 1 0.5 ", "0 0 1 0.6 "));
@@ -372,7 +408,7 @@ int main(int argc, char **argv) {
 	check(threedi_cli::cmd_compare(sphere_a.c_str(), sphere_c.c_str()) == 1, "hit sphere bounds");
 
 	// The vertex layout: tangents on a shader that does not read them.
-	const std::string layout = "o3d 1\nmodel T\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+	const std::string layout = "o3d 2\nmodel T\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
 			"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n";
 	const auto layout_a = build("layout", layout);
 	const auto layout_b = build("layout-tangents", replace(layout, "model T\n", "model T\ntangents 1\n"));
@@ -385,13 +421,26 @@ int main(int argc, char **argv) {
 	check(threedi_cli::cmd_compare(tangent_a.c_str(), tangent_b.c_str(), true) == 1, "tangent values under --strict");
 
 	// A vertex without stored weight is drawn wholly on its fourth slot's bone
-	// (slot 3 takes 1 - (w0 + w1 + w2)): its first slot does not matter.
-	const std::string rigid = "o3d 1\nmodel ZW\nskinned 1\nmaterial VS_SKBASIC\nlod 0 gnrc\npart 0 0 0 0\npart 0 0 0 1\n"
-			"strip 0\nbones 0 1\nv 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0\nv 1 0 0 0 0 1 1 0 0 0 0 0 1 0 0\n"
-			"v 0 1 0 0 0 1 0 1 0 0 0 0 1 0 0\nt 0 1 2\npanm 0 0\npanm 1 0\n";
+	// (slot 3 takes 1 - (w0 + w1 + w2)): its first slot does not matter (hand
+	// edits of vertex 0's weights, VERT +12, and slots, +24; the table is
+	// [0 1]).
+	const std::string rigid = "o3d 2\nmodel ZW\nskinned 1\nmaterial VS_SKBASIC\nlod 0 gnrc\npart 0 0 0 0\npart 0 0 0 1\n"
+			"mesh 0\nv 0 0 0 0 0 1 0 0 0 1\nv 1 0 0 0 0 1 1 0 0 0.5 1 0.5\n"
+			"v 0 1 0 0 0 1 0 1 0 1\nt 0 1 2\npanm 0 0\npanm 1 0\n";
 	const auto rigid_a = build("zero-weight", rigid);
-	const auto rigid_b = build("zero-weight-first-slot", replace(rigid, "v 0 0 0 0 0 1 0 0 0 0 0 0", "v 0 0 0 0 0 1 0 0 1 0 0 0"));
-	const auto rigid_c = build("zero-weight-fourth-slot", replace(rigid, "v 0 0 0 0 0 1 0 0 0 0 0 0", "v 0 0 0 0 0 1 0 0 0 0 0 1"));
+	const auto zero_weight = [&](const char *name, uint8_t first, uint8_t fourth) {
+		const auto path = (dir / (std::string(name) + ".3di")).string();
+		check(patch(rigid_a, path, "VERT", [first, fourth](uint8_t *p) {
+			uint8_t *v = p + 12;
+			for (int k = 0; k < 3; ++k) opennova::io::write_f32_le(v + 12 + 4 * k, 0.0f);
+			v[24] = first;
+			v[25] = v[26] = 0;
+			v[27] = fourth;
+		}), name);
+		return path;
+	};
+	const auto rigid_b = zero_weight("zero-weight-first-slot", 1, 0);
+	const auto rigid_c = zero_weight("zero-weight-fourth-slot", 0, 1);
 	check(threedi_cli::cmd_compare(rigid_a.c_str(), rigid_b.c_str()) == 0, "zero-weight vertex: the first slot carries nothing");
 	check(threedi_cli::cmd_compare(rigid_a.c_str(), rigid_c.c_str()) == 1, "zero-weight vertex: the fourth slot carries it");
 
@@ -400,7 +449,7 @@ int main(int argc, char **argv) {
 
 	// Matching scales: a flat 20,000-triangle grid (one centroid x for every
 	// face) and 2,000 stacked copies of one face, each against itself.
-	std::string grid = "o3d 1\nmodel GRID\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n";
+	std::string grid = "o3d 2\nmodel GRID\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n";
 	for (int i = 0; i <= 100; ++i)
 		for (int j = 0; j <= 100; ++j)
 			grid += "v 0 " + std::to_string(i * 0.1) + " " + std::to_string(j * 0.1) + " 1 0 0 " + std::to_string(i * 0.01) +
@@ -411,7 +460,7 @@ int main(int argc, char **argv) {
 			grid += "t " + std::to_string(v) + " " + std::to_string(v + 101) + " " + std::to_string(v + 1) + "\n";
 			grid += "t " + std::to_string(v + 1) + " " + std::to_string(v + 101) + " " + std::to_string(v + 102) + "\n";
 		}
-	std::string stack = "o3d 1\nmodel STACK\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n";
+	std::string stack = "o3d 2\nmodel STACK\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n";
 	for (int i = 0; i < 2000; ++i)
 		stack += "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt " + std::to_string(3 * i) + " " +
 				std::to_string(3 * i + 1) + " " + std::to_string(3 * i + 2) + "\n";
@@ -480,7 +529,7 @@ int main(int argc, char **argv) {
 	// No section at all: the CMDL box still bounds LOD 0 while its radii,
 	// taken from the collision LOD's faces, stay empty (retail CNet01: 0 0
 	// and a height of -20000).
-	if (read(build("no-collision", "o3d 1\nmodel NOCOLL\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+	if (read(build("no-collision", "o3d 2\nmodel NOCOLL\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
 			"v 0 0 0 0 0 1 0 0\nv 2 0 0 0 0 1 1 0\nv 0 1 3 0 0 1 0 1\nt 0 1 2\n"), m)) {
 		check(m.collision != nullptr && m.collision->object_count == 0 && m.collision->model_data.bbox[3] == 2.0f &&
 				m.collision->model_data.radii[0] == 0.0f && m.collision->model_data.radii[2] == -20000.0f,
@@ -489,7 +538,7 @@ int main(int argc, char **argv) {
 	}
 	// A tangent-space shader lays out tangents, derived from the UVs: u runs
 	// along mission +x, model (0 0 1); v (down) along mission -y, model (1 0 0).
-	if (read(build("tangents", "o3d 1\nmodel TANGENT\nmaterial VS_PHONGT\nlod 0\npart 0 0 0 0\nstrip 0\n"
+	if (read(build("tangents", "o3d 2\nmodel TANGENT\nmaterial VS_PHONGT\nlod 0\npart 0 0 0 0\nmesh 0\n"
 			"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 -1 0 0 0 1 0 1\nt 0 1 2\n"), m)) {
 		const ThreediVertex *v = m.lod_count > 0 && m.lods[0].vertices.count > 0 ? &m.lods[0].vertices.items[0] : nullptr;
 		check(v != nullptr && (m.lods[0].vertices.flags & THREEDI_VERTEX_FLAG_TANGENTS) == THREEDI_VERTEX_FLAG_TANGENTS,
@@ -506,8 +555,8 @@ int main(int argc, char **argv) {
 		std::filesystem::create_directories(folder);
 		for (const char *file : {"wall.tga", "wall.dds", "bump.pcx"}) std::ofstream(folder / file) << "x";
 		const auto model = build("texture-rows/rows",
-				"o3d 1\nmodel ROWS\nmaterial FF_MT_OP\ntexture wall.tga 1 0\ntexture wall.tga 2 1\ntexture bump.pcx 3 4\n"
-				"lod 0\npart 0 0 0 0\nstrip 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n");
+				"o3d 2\nmodel ROWS\nmaterial FF_MT_OP\ntexture wall.tga 1 0\ntexture wall.tga 2 1\ntexture bump.pcx 3 4\n"
+				"lod 0\npart 0 0 0 0\nmesh 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n");
 		const auto text = (folder / "rows.rt.o3d").string();
 		check(threedi_cli::cmd_scene(model.c_str(), text.c_str()) == 0, "scene beside a model's textures");
 		const std::string rt = test_io::read_file_text(text);

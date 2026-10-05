@@ -129,10 +129,12 @@ arrays), and its arms no more than the gun. **Add Animation Rig** turns a
 static model's `PN##` parts into such an armature, everything on a part
 parented to its bone, so clips can animate it.
 
-A skinned mesh deforms on up to four bones a vertex (Weights > Limit Total);
-export writes them dominant first, the way the game blends them, and refuses
-a vertex with more, one with no weight, and a weight on a bone that deforms
-but is no part (Root, a control bone). A mesh parented to a bone of a skinned
+A skinned vertex exports every bone it deforms on, dominant first: the game
+lights a vertex by that bone and blends four, so `opennova-3di build` keeps
+the dominant one and the three heaviest others of a vertex with more (and says
+how many it reduced; Weights > Limit Total sets four yourself). Export refuses
+a vertex with no weight, and a weight on a bone that deforms but is no part
+(Root, a control bone). A mesh parented to a bone of a skinned
 model is skinned wholly on that bone. A skinned model keeps its skinned
 geometry on its root part, or with **Mesh part** on (the retail layout of
 US01 and ArmsG) on a part of its own after the bones, whose pivot is the
@@ -186,8 +188,11 @@ Turn off **Generate bullet faces** on models such as first-person arms that
 do not need triangle collision. Render geometry, skin weights, bone bounds
 and authored collision volumes are still exported.
 
-Strips split when the 65,535-index limit (and, skinned, the 16-bone palette)
-is reached; large meshes need no manual splitting.
+Each part's geometry exports as one mesh a material, of any size: `opennova-3di
+build` splits it into the strips the game holds (21,845 triangles a strip and,
+skinned, a palette of 16 bones by OED's rule), so large meshes need no manual
+splitting. Names, counts and the other limits a retail model has are the
+CLI's to check, at the scene line the object wrote.
 
 To reuse retail animations, match the retail rig, since animations pair with
 parts by index: JO's people share one rig of 19 bones (plus the mesh part);

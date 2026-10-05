@@ -121,12 +121,15 @@ def read_o3d(path):
                 part = {"parent": int(a[0]), "pivot": tuple(num(x) for x in a[1:4]),
                         "centre": tuple(num(x) for x in a[4:7]) if len(a) >= 7 else None, "strips": []}
                 lod["parts"].append(part)
-            elif k == "strip":
-                strip = {"material": int(a[0]), "alpha": len(a) > 1 and a[1] != "0", "bones": [], "verts": [],
-                         "tris": []}
+            elif k == "mesh":
+                # A mesh (`scene` writes one per strip): kept as the part's
+                # strips, under its material.
+                strip = {"material": int(a[0]), "alpha": len(a) > 1 and a[1] != "0", "verts": [], "tris": []}
                 part["strips"].append(strip)
-            elif k == "bones":
-                strip["bones"] = [int(x) for x in a]
+            elif k == "vt":
+                # A stored tangent frame: Blender derives its own (its tangent
+                # space from the UVs), so import keeps none.
+                continue
             elif k == "v":
                 f = [num(x) for x in a]
                 vert = {"p": tuple(f[0:3]), "n": tuple(f[3:6]), "uv": (f[6], f[7])}
@@ -136,10 +139,9 @@ def read_o3d(path):
                 else:
                     vert["uv1"] = vert["uv"]
                 if sc["skinned"]:
-                    # Contract C1: four bone-table slots, three stored weights;
-                    # slot 3 takes 1 - (w0 + w1 + w2).
-                    vert["bi"] = [int(x) for x in rest[0:4]]
-                    vert["bw"] = rest[4:7]
+                    # Its influences, `part weight` pairs, the primary first
+                    # (the bone the game lights it by).
+                    vert["pairs"] = [(int(rest[i]), rest[i + 1]) for i in range(0, len(rest) - 1, 2)]
                 strip["verts"].append(vert)
             elif k == "t":
                 strip["tris"].append(tuple(int(x) for x in a[:3]))
@@ -214,10 +216,11 @@ def top_parent(parts, pi):
 def skin_layout(sc):
     """A skinned model's parts as the scene holds them: (the number of bones,
     the mesh part or None). The mesh part is the part `scene` writes the
-    skinned strips on that no bone table names (ArmsG part 37, US01 part 19);
-    without one the strips are the root's (Delta04, ArmGlovD)."""
+    skinned meshes on that no vertex's influence names (ArmsG part 37, US01
+    part 19); without one the meshes are the root's (Delta04, ArmGlovD)."""
     parts = sc["lods"][0]["parts"] if sc["lods"] else []
-    named = {b for lod in sc["lods"] for p in lod["parts"] for s in p["strips"] for b in s["bones"]}
+    named = {b for lod in sc["lods"] for p in lod["parts"] for s in p["strips"] for v in s["verts"]
+             for b, _ in v["pairs"]}
     mesh = [pi for pi, p in enumerate(parts) if pi > 0 and p["strips"] and pi not in named]
     if mesh and mesh[0] == len(parts) - 1:
         return len(parts) - 1, mesh[0]
@@ -238,17 +241,10 @@ def weighted_top(sc):
 
 
 def influences(s, v):
-    """A skinned vertex's (part, weight) pairs, the implicit fourth included
-    (contract C1: slot 3 takes 1 - (w0 + w1 + w2), so a vertex whose stored
-    weights are all zero lies wholly on it), summed per part; slots past the
-    strip's bone table are left out."""
-    table = s["bones"]
-    out = {}
-    weights = list(v["bw"]) + [max(0.0, 1.0 - sum(v["bw"]))]
-    for slot, w in zip(v["bi"], weights):
-        if w > 0.0 and slot < len(table):
-            out[table[slot]] = out.get(table[slot], 0.0) + w
-    return sorted(out.items())
+    """A skinned vertex's (part, weight) pairs with weight, by part (the scene
+    gives each part once, the fourth weight explicit: `scene` resolves the
+    file's slots, its padding and the fourth slot's 1 - (w0 + w1 + w2))."""
+    return sorted((b, w) for b, w in v["pairs"] if w > 0.0)
 
 
 def same_turn(face, ref):
@@ -430,7 +426,6 @@ class Builder(Notes):
         weight) influences."""
         index, verts, loops, faces, face_mat, slots = {}, [], [], [], [], []
         weights = []
-        dropped = 0
 
         def normal(v):
             # Zero-length and not-finite (J_bsh1's NaN) normals alike: Blender
@@ -452,9 +447,6 @@ class Builder(Notes):
                 infl = ()
                 if skinned:
                     infl = tuple((b, round(w, 6)) for b, w in influences(s, v))
-                    table = len(s["bones"])
-                    dropped += sum(1 for slot, w in zip(v["bi"], list(v["bw"]) + [1.0 - sum(v["bw"])])
-                                   if w > 1e-6 and slot >= table)
                     key += (infl,)
                 if key not in index:
                     index[key] = len(verts)
@@ -484,9 +476,6 @@ class Builder(Notes):
             faces.append(tuple(face))
             face_mat.append(slot)
             loops.extend(s["verts"][x] for x in corners)
-        if dropped:
-            self.note(f"{dropped} weights on bone-table slots past their strip's table (retail FSldr03 ships them) are "
-                      "not kept")
         me = self.data(bpy.data.meshes.new(name))
         me.from_pydata([tuple(v) for v in verts], [], faces)
         for mi in slots:

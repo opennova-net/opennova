@@ -22,7 +22,8 @@
 //   DRIFT (a `drift:` line per category with the count and the worst value,
 //   exit 0; exit 1 under --strict): a value our builder derives by a
 //   heuristic of ours where retail's tool is unwitnessed (tangent and
-//   bitangent values, volume seam flags); a zero-length vertex normal (it has
+//   bitangent values, volume seam flags); a weight on a bone slot past its
+//   strip's bone table (it names no part); a zero-length vertex normal (it has
 //   no direction to keep) given one; the dominant axis of a diagonal bullet
 //   face (either axis projects it); a part's bound sphere beside a GHDR
 //   radius (nothing reads it); and any value above that moved by more
@@ -102,9 +103,11 @@ constexpr double kNormalLengthTol = 1e-3;
 // degrees (a few Q14 steps), and for a bullet face one 8.8 step per corner
 // across its smallest altitude (Section::faces).
 constexpr double kFaceNormalTolDeg = 0.05;
-// Tangents and bitangents are rebuilt from positions and UVs by the OED rule
-// (docs/threedi/o3d-scene-format.md); retail's tool is unwitnessed, so their
-// values are DRIFT only, above what renormalizing float noise moves.
+// Tangents and bitangents: a scene carries the stored frames (`vt`), but an
+// author's tool derives its own (Blender's MikkTSpace) and a mesh without
+// frames takes the OED rule's (docs/threedi/o3d-scene-format.md); retail's
+// tool is unwitnessed, so their values are DRIFT only, above what
+// renormalizing float noise moves.
 constexpr double kTangentNoise = 1e-4;
 // Quantized data: the collision block (8.8 CVRT corners, Q14 CNRM and BPLN
 // normals, 16.16 planes, boxes, offsets and radii), the CXLT rows and the
@@ -260,6 +263,7 @@ struct Corner {
 	// entry).
 	std::array<int, 4> bone{{INT_MAX, INT_MAX, INT_MAX, INT_MAX}};
 	std::array<double, 4> weight{};
+	double stray = 0.0;               // the weight on slots past the strip's bone table (DRIFT only)
 	std::array<double, 6> tangent{};  // tangent then bitangent (DRIFT only)
 	bool tangents = false;
 };
@@ -283,12 +287,15 @@ struct Tolerance {
 // A skinned vertex's blend as the renderer draws it, normalized for
 // comparison: its four influences as retail's shader blends them
 // (threedi_skin_influences: slot 3 takes 1 - (w0 + w1 + w2)), summed per
-// part, a slot past its strip's bone table kept apart as 256 + slot (retail
-// FSldr03 weights one), zero weights and the hair of negative remainder
-// retail's four-decimal weights leave (they sum to 1.0001 in ArmGlovD) left
-// out, and divided by the total so the blend sums to 1. Slot order,
-// bone-table order and one part's weight split over several slots then no
-// longer matter, only each part's share of the vertex.
+// part, zero weights and the hair of negative remainder retail's
+// four-decimal weights leave (they sum to 1.0001 in ArmGlovD) left out, and
+// divided by the total so the blend sums to 1. Slot order, bone-table order
+// and one part's weight split over several slots then no longer matter, only
+// each part's share of the vertex. A slot past its strip's bone table names
+// no part (retail FSldr03 weights slot 255, which reads whatever the palette
+// constant last held): its weight is set apart as `stray` and the parts'
+// shares are taken without it, so a scene that cannot name it compares by
+// the rest, and the stray weight itself is DRIFT.
 void skin_blend(Corner &c, const ThreediVertex &v, const ThreediTriangleStrip &st) {
 	ThreediSkinInfluence influences[4];
 	threedi_skin_influences(&v, st.bone_table, st.bone_table_length, influences);
@@ -301,7 +308,11 @@ void skin_blend(Corner &c, const ThreediVertex &v, const ThreediTriangleStrip &s
 			return;
 		}
 		if (!(x.weight > 0.0f)) continue;
-		const int part = x.part >= 0 ? x.part : 256 + x.slot;
+		if (x.part < 0) {
+			c.stray += x.weight;
+			continue;
+		}
+		const int part = x.part;
 		for (int k = 0; k < 4; ++k)
 			if (c.bone[k] == part || c.bone[k] == INT_MAX) {
 				c.bone[k] = part;
@@ -310,7 +321,8 @@ void skin_blend(Corner &c, const ThreediVertex &v, const ThreediTriangleStrip &s
 			}
 		total += x.weight;
 	}
-	for (int k = 0; k < 4 && c.bone[k] != INT_MAX; ++k) c.weight[k] /= total;
+	if (total > 0.0)
+		for (int k = 0; k < 4 && c.bone[k] != INT_MAX; ++k) c.weight[k] /= total;
 	for (int i = 1; i < 4; ++i)
 		for (int k = i; k > 0 && c.bone[k] < c.bone[k - 1]; --k) {
 			std::swap(c.bone[k], c.bone[k - 1]);
@@ -797,6 +809,9 @@ void render_drift(Diff &d, const std::string &label, const Geometry &x, const Ge
 						kNormalNoiseDeg);
 			within(d, "render UVs", label, gap(a.uv, b.uv), kUvTol, kUvNoise);
 			within(d, "skin weights", label, weight_gap(a, b), kWeightTol, kWeightNoise);
+			if (gap(a.stray, b.stray) > kWeightNoise)
+				d.note("weights on slots past a strip's bone table (no part to name; compared without them)",
+						gap(a.stray, b.stray), label, p.count);
 			if (a.tangents && b.tangents) {
 				const double g = gap(a.tangent, b.tangent);
 				if (g > kTangentNoise)

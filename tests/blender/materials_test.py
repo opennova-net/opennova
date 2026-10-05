@@ -346,7 +346,7 @@ def texture_entry_names_follow_the_cli():
         t = mat.o3d.textures.add()
         t.name, t.write, t.image = name, write, img
         return mat
-    for name, fragment in (("ствол.tga", "not printable ASCII"), ("a_seventeen_c.tga", "exceeds 16"),
+    for name, fragment in (("ствол.tga", "not printable ASCII"), ("a_seventeen_c.tga", "is 17 bytes: the MTRL field"),
                            ("tex/foo.tga", "names a folder"), ("tex\\foo.tga", "names a folder")):
         root, _ = model("entry", entry(name))
         refused(root, fragment)

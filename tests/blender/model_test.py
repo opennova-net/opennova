@@ -134,6 +134,26 @@ def records(lines, key):
     return [line.split()[1:] for line in lines if line.split()[:1] == [key]]
 
 
+def pairs(v, uv1):
+    """A skinned `v` record's (part, weight) influences, after its uv (and uv1)."""
+    rest = v[10:] if uv1 else v[8:]
+    return [(int(rest[i]), float(rest[i + 1])) for i in range(0, len(rest) - 1, 2)]
+
+
+def strip_tables(path):
+    """The built model's strips, [(material, bone table)], as `opennova-3di
+    info --planes` prints them: the lowering's split, which the scene text
+    does not show."""
+    out = subprocess.run([CLI, "info", path, "--planes"], check=True, capture_output=True, text=True).stdout
+    tables = []
+    for line in out.splitlines():
+        words = line.split()
+        if words[:1] == ["strip"] and "mat" in words:
+            at = next(i for i, w in enumerate(words) if w.startswith("bones["))
+            tables.append((int(words[words.index("mat") + 1]), [int(b) for b in words[at + 1:]]))
+    return tables
+
+
 def spheres(lines):
     """{collision section: its csphere values}."""
     out, at = {}, -1
@@ -209,7 +229,7 @@ def static_prop_reads_parts_from_where_things_sit():
     notes, lines = export_model(root)
     parts = records(lines, "part")
     assert len(parts) == 2 and parts[1][0] == "0", parts
-    assert [p[0] for p in records(lines, "strip")].count("0") == 2  # a strip on each part
+    assert [p[0] for p in records(lines, "mesh")].count("0") == 2  # a mesh on each part
     points = {p[0]: p[7] for p in records(lines, "userpoint")}
     assert points == {"handle": "1", "spark": "-1"}, points
     assert records(lines, "light")[0][0] == "1"
@@ -248,7 +268,10 @@ def a_parent_numbered_after_its_part_is_noted():
 
 
 @case
-def rigid_strips_split_at_the_index_limit():
+def rigid_meshes_split_at_the_index_limit():
+    # The add-on writes the part's one mesh; the CLI's lowering splits it at
+    # a strip's 21,845 triangles, and the scene of the built model writes
+    # each strip back as a mesh of its own.
     root, lod = model("grid")
     pn1 = empty("PN01", lod)
     me = bpy.data.meshes.new("grid")
@@ -260,9 +283,10 @@ def rigid_strips_split_at_the_index_limit():
     link(bpy.data.objects.new("grid", me), pn1)
     root.o3d.export_bullet_faces = False
     _, lines = export_model(root)
-    strips = records(lines, "strip")
-    assert len(strips) == 2, strips
+    meshes = records(lines, "mesh")
+    assert len(meshes) == 2, meshes
     assert sum(1 for line in lines if line.startswith("t ")) == 2 * n * n
+    assert [s[1] for s in strip_tables(export.output_path(root))] == [[], []], strip_tables(export.output_path(root))
 
 
 @case
@@ -352,15 +376,15 @@ def first_person_gun_and_arms_share_one_rig():
     # The arms' parts are the rig's bones up to the highest one weighted
     # (BN04, the body, carries a tenth of vertex 0).
     assert len(records(arm_lines, "part")) == 4, records(arm_lines, "part")
-    # Contract C1: vertex 0 keeps its four influences, dominant first, the
-    # fourth on slot 3 with the remainder of the three stored weights.
-    four = [v for v in records(arm_lines, "v") if abs(float(v[-3]) - 0.4) < 1e-6]
+    # Vertex 0 keeps its four influences, dominant first (the bone the game
+    # lights it by), the fourth explicit: the built file stores the first
+    # three weights and slot 3 takes the remainder.
+    uv1 = "uv1 1" in arm_lines
+    four = [pairs(v, uv1) for v in records(arm_lines, "v") if len(pairs(v, uv1)) == 4]
     assert four, records(arm_lines, "v")[:4]
-    w = [float(x) for x in four[0][-3:]]
-    assert abs(w[0] - 0.4) < 1e-6 and abs(w[1] - 0.3) < 1e-6 and abs(w[2] - 0.2) < 1e-6, w
-    table = records(arm_lines, "bones")[0]
-    slots = [int(x) for x in four[0][-7:-3]]
-    assert [int(table[s]) for s in slots] == [0, 1, 2, 3], (table, slots)
+    assert [b for b, _ in four[0]] == [0, 1, 2, 3], four[0]
+    w = [w for _, w in four[0]]
+    assert abs(w[0] - 0.4) < 1e-6 and abs(w[1] - 0.3) < 1e-6 and abs(w[2] - 0.2) < 1e-6 and abs(w[3] - 0.1) < 1e-6, w
 
 
 @case
@@ -479,7 +503,10 @@ def skin_weights_follow_contract_c1():
         root_bone.head, root_bone.tail = (0, 0, -1), (0, 0.2, -1)
     all_five = {"BN01 Hips": 0.2, "BN02 Leg": 0.2, "BN03 Arm": 0.2, "BN04 A": 0.2, "BN05 B": 0.2}
     skin(body, arm, {0: all_five, **{v: {"BN01 Hips": 1.0} for v in range(1, 8)}})
-    refused(root, "Body", "vertex 0", "5 bones")
+    # Five influences export; the CLI keeps the dominant one and the three
+    # heaviest others, as the game blends four, and says so.
+    notes, lines = export_model(root)
+    assert any("blend more than 4 influences" in n for n in notes), notes
     body.vertex_groups["BN05 B"].remove([0])
     body.vertex_groups["BN01 Hips"].remove([1])
     refused(root, "Body", "vertex 1", "no weight")
@@ -491,8 +518,10 @@ def skin_weights_follow_contract_c1():
     refused(root, "Body", "BN04 A", "Deform is off")
     arm.data.bones["BN04 A"].use_deform = True
     _, lines = export_model(root)
-    first = records(lines, "v")[0]
-    assert len(first) == 15, first  # x y z nx ny nz u v i0 i1 i2 i3 w0 w1 w2
+    # x y z nx ny nz u v, then part weight pairs blending each vertex wholly.
+    for v in records(lines, "v"):
+        infl = pairs(v, False)
+        assert infl and abs(sum(w for _, w in infl) - 1.0) < 1e-4, v
 
 
 @case
@@ -519,11 +548,11 @@ def mesh_part_holds_the_skinned_geometry():
 
 
 @case
-def skinned_strips_split_by_the_oed_palette_rule():
-    # Fifteen triangles, each wholly on a bone of its own: a table counts a
-    # triangle's missing bones corner by corner (OED's rule), so the 14-bone
-    # table takes no triangle bringing a 15th on three corners (14 + 3 > 16),
-    # though the bones alone would fit.
+def skinned_meshes_split_by_the_oed_palette_rule():
+    # Fifteen triangles, each wholly on a bone of its own, in one mesh: the
+    # CLI's lowering counts a triangle's missing bones corner by corner (OED's
+    # rule), so the 14-bone table takes no triangle bringing a 15th on three
+    # corners (14 + 3 > 16), though the bones alone would fit.
     root, lod = model("palette")
     bones = {"BN01": ((0.0, 0.0, 0.0), None)}
     bones.update({f"BN{i:02d}": ((0.1 * i, 0.0, 0.0), "BN01") for i in range(2, 16)})
@@ -535,7 +564,7 @@ def skinned_strips_split_by_the_oed_palette_rule():
     body = link(bpy.data.objects.new("Fifteen", me), arm)
     skin(body, arm, {3 * k + c: {f"BN{k + 1:02d}": 1.0} for k in range(15) for c in range(3)})
     _, lines = export_model(root)
-    tables = [[int(b) for b in t] for t in records(lines, "bones")]
+    tables = [t for _, t in strip_tables(export.output_path(root))]
     assert tables == [list(range(14)), [14]], tables
 
 
@@ -609,7 +638,7 @@ def a_sheet_stored_in_both_windings_keeps_its_normals():
     os.makedirs(folder_path, exist_ok=True)
     scene = os.path.join(folder_path, "twins.o3d")
     with open(scene, "w", encoding="utf-8") as f:
-        f.write("o3d 1\nmodel TWINS\nmaterial FF_ST_OP\ntexture wire.tga\nmatflags 4\nlod 0 gnrc\npart 0 0 0 0\nstrip 0\n"
+        f.write("o3d 2\nmodel TWINS\nmaterial FF_ST_OP\ntexture wire.tga\nmatflags 4\nlod 0 gnrc\npart 0 0 0 0\nmesh 0\n"
                 "v 0 0 0 0.6 0 0.8 0 0\nv 1 0 0 0 0.6 0.8 1 0\nv 0 1 0 0 0 1 0 1\nv 1 1 0.2 0.28 0.96 0 1 1\n"
                 "t 0 1 2\nt 2 1 0\nt 1 3 2\nt 2 3 1\npanm 0 0\n"
                 "cobj 0\ncv 0 0 0\ncv 1 0 0\ncv 0 1 0\ncv 1 1 0.2\ncf 0 1 2 1 1\ncf 2 1 0 1 1\ncf 1 3 2 1 1\ncf 2 3 1 1 1\n")
@@ -633,7 +662,7 @@ def a_panm_flags_word_the_tracks_do_not_imply_is_noted_not_kept():
     os.makedirs(folder_path, exist_ok=True)
     scene = os.path.join(folder_path, "src.o3d")
     with open(scene, "w", encoding="utf-8") as f:
-        f.write("o3d 1\nmodel PANMWORD\nmaterial FF_ST_OP\ntexture wire.tga\nlod 0 gnrc\npart 0 0 0 0\nstrip 0\n"
+        f.write("o3d 2\nmodel PANMWORD\nmaterial FF_ST_OP\ntexture wire.tga\nlod 0 gnrc\npart 0 0 0 0\nmesh 0\n"
                 "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\npanm 0 0 0x00000200\ncobj 0\n")
     first = os.path.join(folder_path, "panmword.3di")
     subprocess.run([CLI, "build", scene, "-o", first], check=True, capture_output=True)
@@ -723,9 +752,9 @@ def attach_helpers_make_the_tables_one_per_part_cannot():
     os.makedirs(folder_path, exist_ok=True)
     scene = os.path.join(folder_path, "offsets.o3d")
     with open(scene, "w", encoding="utf-8") as f:
-        f.write("o3d 1\nmodel OFFSETS\nmaterial FF_ST_OP\ntexture wall.tga\nlod 0 bldg\n"
-                "part 0 0 0 0\nstrip 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"
-                "part 0 0 0 0\nstrip 0\nv 2 0 0 0 0 1 0 0\nv 3 0 0 0 0 1 1 0\nv 2 1 0 0 0 1 0 1\nt 0 1 2\n"
+        f.write("o3d 2\nmodel OFFSETS\nmaterial FF_ST_OP\ntexture wall.tga\nlod 0 bldg\n"
+                "part 0 0 0 0\nmesh 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"
+                "part 0 0 0 0\nmesh 0\nv 2 0 0 0 0 1 0 0\nv 3 0 0 0 0 1 1 0\nv 2 1 0 0 0 1 0 1\nt 0 1 2\n"
                 "panm 0 0\npanm 1 0\ncobj 0\ncobj 0 2.5 0.25 0\ncxlt 2.5 0.25 0\n")
     first = os.path.join(folder_path, "offsets.3di")
     subprocess.run([CLI, "build", scene, "-o", first], check=True, capture_output=True)
@@ -988,10 +1017,10 @@ def records_on_the_mesh_part_sit_on_the_root():
     os.makedirs(folder_path, exist_ok=True)
     scene = os.path.join(folder_path, "meshpart.o3d")
     with open(scene, "w", encoding="utf-8") as f:
-        f.write("o3d 1\nmodel MESHPART\nskinned 1\nmaterial VS_SKBASIC\ntexture skin.tga\nlod 0 gnrc\n"
-                "part 0 0 0 0\npart 0 0 0 0.5\npart 0 0 0 -1\nstrip 0\nbones 0 1\n"
-                "v 0 0 0 0 0 1 0 0 0 0 0 0 1 0 0\nv 0.1 0 0 0 0 1 1 0 0 0 0 0 1 0 0\n"
-                "v 0 0.1 0.5 0 0 1 0 1 1 1 1 1 1 0 0\nt 0 1 2\npanm 0 0\npanm 1 0\npanm 2 0\n"
+        f.write("o3d 2\nmodel MESHPART\nskinned 1\nmaterial VS_SKBASIC\ntexture skin.tga\nlod 0 gnrc\n"
+                "part 0 0 0 0\npart 0 0 0 0.5\npart 0 0 0 -1\nmesh 0\n"
+                "v 0 0 0 0 0 1 0 0 0 1\nv 0.1 0 0 0 0 1 1 0 0 1\n"
+                "v 0 0.1 0.5 0 0 1 0 1 1 1\nt 0 1 2\npanm 0 0\npanm 1 0\npanm 2 0\n"
                 "userpoint grip 0 0 -1 0 0 1 2 71\nlight 2 0 0 -1 0 4 24 0 0 255 255 255 0 0 0 0x00\n"
                 "cobj 0\ncobj 0 0 0 0.5\ncobj 0 0 0 -1\ncsphere 0 0 -1 0.3\n")
     first = os.path.join(folder_path, "meshpart.3di")
