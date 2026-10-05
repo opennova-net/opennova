@@ -65,6 +65,10 @@ struct FileCard {
 		ReferenceTarget target;
 	};
 	std::vector<User> named_by;
+	// The project's references are being read (a validation runs, or none has read them yet): what it
+	// names and who names it are the graph's as far as it has read, and may grow (the demo round's bug 9:
+	// "Named by (0)" while an import's files were read).
+	bool reading = false;
 };
 
 // The most of a wave a card reads to say what it is (the game's own are a few hundred KB): a larger file is
@@ -77,7 +81,7 @@ inline constexpr uint64_t kWaveCardBytes = uint64_t(32) << 20;
 FileCard file_card(const SessionView &view, const std::string &path, const FileCard::Sound *known = nullptr);
 // Its wire form: {found, path, name, kind, kind_label, about, size, build, imported_from, opens, sound?
 // {decoded, error?, rate, channels, seconds}, names [{field, record, value, status, file, wave}], named_by
-// [{file, record, field}]}.
+// [{file, record, field}], reading? (true while the project's references are being read)}.
 io::JsonValue file_card_json(const FileCard &card);
 
 // A graph edge's field by the name the Inspector shows it under (its type's schema, which no file's

@@ -1083,6 +1083,64 @@ static int test_requests_that_cannot_run() {
 	return 0;
 }
 
+// The demo round's bug 7 and its review: a request whose own argument names nothing (a path the project
+// lacks or no open document has, a record no document holds, a requirement's role or file that fits none,
+// a viewport change that does not read) is refused in its outcome, says why on the status line, and leaves
+// no Problems row, whatever kind of request names it.
+static int test_request_faults_leave_no_rows() {
+	editor_test::TempProjectDir dir("opennova_editor_session_request_faults");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Faults"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	session.handle(request::open_document("main.mnu"));
+	session.run_operations();
+	const SessionView &v = session.view();
+	const Document *menu = session.document_for("main.mnu");
+	TEST_EXPECT(menu != nullptr && !v.project.requirements->rows.empty());
+	if (!menu || v.project.requirements->rows.empty()) return 1;
+	const std::string role = v.project.requirements->rows.front().role;
+	EditorRequest edit = request::edit_record("nowhere.def", Edit());
+	edit.edits[0].field = "hp";
+	edit.edits[0].value = int64_t(1);
+	const EditorRequest faults[] = {
+		request::open_document("nowhere.mnu"),
+		request::show_in_files("nowhere.mnu"),
+		request::about_file("nowhere.mnu"),
+		request::select_file("nowhere.mnu"),
+		request::save("nowhere.mnu"),
+		edit,
+		request::undo("nowhere.mnu"),
+		request::redo("nowhere.mnu"),
+		request::copy("nowhere.mnu"),
+		request::paste("nowhere.mnu"),
+		request::duplicate("nowhere.mnu"),
+		request::revert_to_saved("nowhere.mnu", {Edit()}),
+		request::select_record(menu->path(), NodeAddress{999999, 0, 0}),
+		request::set_viewport(menu->path(), R"({"kind": "menu", "options": {"bogus": 1}})"),
+		request::assign_requirement("no_such_role", "main.mnu"),
+		request::assign_requirement(role, "nowhere.bin"),
+	};
+	for (const EditorRequest &fault : faults) {
+		const std::string status = v.activity.status;
+		session.handle(fault);
+		const ActionOutcome &outcome = session.outcome();
+		TEST_EXPECT(!outcome.done() && !outcome.findings.empty());
+		if (outcome.findings.empty()) {
+			std::printf("  %s: no finding in its outcome\n", editor_request_kind_token(fault.kind));
+			continue;
+		}
+		const std::string code = outcome.findings.front().code();
+		const bool row = std::any_of(v.findings.diagnostics.begin(), v.findings.diagnostics.end(),
+		                             [&](const Diagnostic &d) { return d.code() == code; });
+		TEST_EXPECT(!row && v.activity.status == outcome.findings.front().message);
+		if (row) std::printf("  %s left a Problems row (%s)\n", editor_request_kind_token(fault.kind), code.c_str());
+	}
+	return 0;
+}
+
 // A request's words are its own: Play over the command line's process seam (NullProcessPlatform,
 // which starts no game) says that session starts none, never that Play is Windows-only; an Open,
 // a Reload and a Create say on the status line what they did, or that they did not, never the line
@@ -1117,7 +1175,7 @@ static int test_status_says_the_request() {
 	session.handle(request::reload_document("main.mnu"));
 	TEST_EXPECT(v.activity.status == "Reloaded " + menu_path + ".");
 	session.handle(request::open_document("nowhere.mnu"));
-	TEST_EXPECT(!session.outcome().done() && v.activity.status == "nowhere.mnu could not be opened: see Problems.");
+	TEST_EXPECT(!session.outcome().done() && v.activity.status == "The project has no file nowhere.mnu.");
 
 	// A Create: made and opened, or refused.
 	session.handle(request::create_file("extra.mnu", "menu"));
@@ -1611,9 +1669,10 @@ struct SaveProject {
 };
 
 // S11a, the save contract. Save writes the file it names (the active one when it names
-// none), with no unsaved edits too when the file holds other bytes than it writes: the item
-// table's ignored line dropped, its finding gone from the Problems rows, its history kept.
-// A clean file with nothing to rewrite writes nothing and says so. Save All goes past a
+// none), with no unsaved edits too when the file holds other bytes than it writes (a menu's
+// ignored input: test_rewrite_closed_file). A clean file with nothing to rewrite writes nothing
+// and says so: the item table, whose line the game ignores a save keeps as the file has it (the
+// demo round's bug 3), its finding standing, its history kept. Save All goes past a
 // file it cannot write, reports it, writes the rest, and says how many of each.
 static int test_save_contract() {
 	SaveProject project("opennova_editor_session_save");
@@ -1630,14 +1689,16 @@ static int test_save_contract() {
 	session.handle(request::save(project.strings_path));
 	TEST_EXPECT(session.outcome().done() && v.activity.status == project.strings_path + " has no changes to save.");
 	TEST_EXPECT(!output_has(v, "Saved " + project.strings_path));
-	// Save naming nothing: the active item table, rewritten without the ignored line.
+	// Save naming nothing: the active item table, clean, the bytes it writes the file's own (its ignored
+	// line kept): nothing written.
 	session.handle(request::save());
-	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + project.items_path) && v.activity.status == "Saved 1 file.");
-	session.run_operations(); // the validation the save left due
-	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.ignored_input") && project.items->issues().empty());
+	TEST_EXPECT(session.outcome().done() && !output_has(v, "Saved " + project.items_path) &&
+	            v.activity.status == project.items_path + " has no changes to save.");
+	session.run_operations();
+	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input"));
 	std::string text, error;
 	TEST_EXPECT(read_file_text(project.root + "/" + project.items_path, text, error));
-	TEST_EXPECT(text.find("subtype") == std::string::npos && text.find("hp 10") != std::string::npos);
+	TEST_EXPECT(text.find("subtype Ruins") != std::string::npos && text.find("hp 10") != std::string::npos);
 	session.handle(request::redo(project.items_path));
 	TEST_EXPECT(project.items->dirty() && project.hp() == 20);
 	session.handle(request::undo(project.items_path));
@@ -1776,9 +1837,10 @@ static int test_gestures_per_document() {
 }
 
 // S11b: Save of a file that is not open (a Rewrite fix names one): read, written when it
-// would write other bytes (the item table's ignored line dropped), left closed, its finding
-// gone with the refresh; asked again, nothing to write; a file the project lacks is refused,
-// and so is one that does not serialize, closed or open, with the reason.
+// would write other bytes (a menu's input the game ignores dropped), left closed, its finding
+// gone with the refresh; asked again, nothing to write; an item table's line the game ignores
+// a save keeps as the file has it (the demo round's bug 3): nothing to write either; a file the
+// project lacks is refused, and so is one that does not serialize, closed or open, with the reason.
 static int test_rewrite_closed_file() {
 	editor_test::TempProjectDir dir("opennova_editor_session_rewrite");
 	FakePlatform platform;
@@ -1788,27 +1850,34 @@ static int test_rewrite_closed_file() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
+	const std::string menu = "menus/rewrite.mnu";
+	const std::string file = v.project.root + "/" + menu;
+	TEST_EXPECT(editor_test::write_text(file, "<SCREEN><NAME>R</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
+	                                          "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>"));
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input") && !session.document_for(menu));
+	session.handle(request::save(menu));
+	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + menu) && v.activity.status == "Saved " + menu + ".");
+	session.run_operations(); // the validation the save left due
+	std::string text, error;
+	TEST_EXPECT(read_file_text(file, text, error) && text.find("SCREENX") == std::string::npos &&
+	            text.find("POSITION") != std::string::npos);
+	TEST_EXPECT(!has_code(v.findings.diagnostics, "menu.ignored_input") && !session.document_for(menu));
+	session.handle(request::save("rewrite.mnu"));
+	TEST_EXPECT(session.outcome().done() && v.activity.status == menu + " has no changes to save.");
 	const AssetEntry *entry = v.project.scan->find("items.def");
 	TEST_EXPECT(entry != nullptr);
 	if (!entry) return 1;
 	const std::string items = entry->relative_path;
-	const std::string file = v.project.root + "/" + items;
-	TEST_EXPECT(editor_test::write_text(file, "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n"));
+	const std::string items_text = editor_test::crlf("begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n");
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/" + items, items_text));
 	session.handle(request::rescan());
 	session.run_operations();
-	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input") &&
-			!session.document_for(items));
+	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input"));
 	session.handle(request::save(items));
-	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + items) && v.activity.status == "Saved " + items + ".");
-	session.run_operations(); // the validation the save left due
-	std::string text, error;
-	TEST_EXPECT(read_file_text(file, text, error) && text.find("subtype") == std::string::npos &&
-	            text.find("hp 10") != std::string::npos);
-	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.ignored_input") &&
-			!session.document_for(items));
-	session.handle(request::save("items.def"));
-	TEST_EXPECT(
-			session.outcome().done() && v.activity.status == items + " has no changes to save.");
+	TEST_EXPECT(session.outcome().done() && v.activity.status == items + " has no changes to save.");
+	TEST_EXPECT(read_file_text(v.project.root + "/" + items, text, error) && text == items_text);
 	session.handle(request::save("nowhere.def"));
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.missing"));
 
@@ -2704,23 +2773,21 @@ static int test_fixes_apply() {
 	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && v.project.scan->find("keyhelp.bin") && !v.project.scan->find("spare.bin"));
 	TEST_EXPECT(!finding_about(v.findings.diagnostics, "requirement.missing", "keyhelp.bin"));
-	// The rest made; then the item table with a line the game ignores, closed: Rewrite drops it.
+	// The rest made; then a menu with input the game ignores, closed: Rewrite drops it.
 	editor_test::create_missing_files(session);
 	TEST_EXPECT(v.project.requirements->required_missing == 0);
-	const AssetEntry *items = v.project.scan->find("items.def");
-	TEST_EXPECT(items != nullptr);
-	if (!items) return 1;
-	const std::string items_file = root + "/" + items->relative_path;
-	TEST_EXPECT(editor_test::write_text(items_file, "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n"));
+	const std::string ignored_file = root + "/menus/ignored.mnu";
+	TEST_EXPECT(editor_test::write_text(ignored_file, "<SCREEN><NAME>I</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
+	                                                  "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>"));
 	session.handle(request::rescan());
 	session.run_operations();
-	TEST_EXPECT(find_fix(v, "catalog.ignored_input", "Rewrite items.def", fix));
+	TEST_EXPECT(find_fix(v, "menu.ignored_input", "Rewrite ignored.mnu", fix));
 	session.handle(fix.request);
 	session.run_operations();
 	std::string text, io_error;
 	TEST_EXPECT(
-			session.outcome().done() && !has_code(v.findings.diagnostics, "catalog.ignored_input"));
-	TEST_EXPECT(read_file_text(items_file, text, io_error) && text.find("subtype") == std::string::npos);
+			session.outcome().done() && !has_code(v.findings.diagnostics, "menu.ignored_input"));
+	TEST_EXPECT(read_file_text(ignored_file, text, io_error) && text.find("SCREENX") == std::string::npos);
 	// A font no file of the project is: Create makes it, and the startup menu's name resolves.
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
@@ -3777,28 +3844,30 @@ static int test_save_picks_like_the_rest() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	const std::string ignored = "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n";
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/defs/items.def", ignored));
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/extra/items.def", ignored));
+	// A menu with input the game ignores (SCREENX), which a save drops.
+	const std::string ignored = "<SCREEN><NAME>D</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
+	                            "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>";
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/dup.mnu", ignored));
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/extra/dup.mnu", ignored));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "asset.name.duplicate"));
 	const uint64_t before = v.events.next_seq() - 1;
-	session.handle(request::show_in_files("items.def"));
+	session.handle(request::show_in_files("dup.mnu"));
 	const std::vector<ViewEvent> shown =
 			editor_test::events_after(v, before, ViewEventKind::RevealFile);
 	TEST_EXPECT(shown.size() == 1);
 	const std::string picked = shown.empty() ? std::string() : shown[0].path;
-	const std::string other = picked == "defs/items.def" ? "extra/items.def" : "defs/items.def";
-	TEST_EXPECT(picked == "defs/items.def" || picked == "extra/items.def");
-	session.handle(request::save("items.def"));
+	const std::string other = picked == "menus/dup.mnu" ? "extra/dup.mnu" : "menus/dup.mnu";
+	TEST_EXPECT(picked == "menus/dup.mnu" || picked == "extra/dup.mnu");
+	session.handle(request::save("dup.mnu"));
 	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + picked));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(v.project.root + "/" + picked, text, error) && text.find("subtype") == std::string::npos);
+	TEST_EXPECT(read_file_text(v.project.root + "/" + picked, text, error) && text.find("SCREENX") == std::string::npos);
 	TEST_EXPECT(read_file_text(v.project.root + "/" + other, text, error) && text == ignored);
 	session.handle(request::save(other));
 	TEST_EXPECT(session.outcome().done() && read_file_text(v.project.root + "/" + other, text, error) &&
-	            text.find("subtype") == std::string::npos);
+	            text.find("SCREENX") == std::string::npos);
 	return 0;
 }
 
@@ -4241,6 +4310,16 @@ static int test_no_request_validates() {
 	TEST_EXPECT(after_an_edit(request::preview_import({ loose }, false)));
 	TEST_EXPECT(v.dialogs.import_preview.open && !v.dialogs.import_preview.with_dependencies);
 	const uint64_t planned = v.activity.last_operation.id;
+	// The demo round's bug 8: while its plan is being made the dialog says so (planning), never its empty
+	// plan as "nothing to import"; the plan made, or the planning cancelled, it plans no more.
+	session.handle(request::set_import_dependencies(false));
+	TEST_EXPECT(v.dialogs.import_preview.planning && v.activity.operation.running() &&
+	            v.activity.operation.kind == OperationKind::ImportPlan && v.dialogs.import_preview.plan->rows.empty());
+	session.handle(request::of(EditorRequestKind::CancelOperation));
+	TEST_EXPECT(!v.dialogs.import_preview.planning && !v.activity.operation.running());
+	session.handle(request::set_import_dependencies(false));
+	session.run_operations();
+	TEST_EXPECT(!v.dialogs.import_preview.planning && !v.dialogs.import_preview.plan->rows.empty());
 	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false)));
 	TEST_EXPECT(v.dialogs.import_preview.open && !v.dialogs.import_preview.with_dependencies &&
 	            v.activity.last_operation.id > planned &&
@@ -4299,6 +4378,7 @@ int main() {
 	failures += test_outcomes_and_refusals();
 	failures += test_validation_cost();
 	failures += test_requests_that_cannot_run();
+	failures += test_request_faults_leave_no_rows();
 	failures += test_status_says_the_request();
 	failures += test_rename_keeps_the_active_document();
 	failures += test_preview_target();

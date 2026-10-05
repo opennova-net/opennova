@@ -25,8 +25,12 @@ struct ValidationStatus {
 	// A validation has ended since the project opened: the graph has read the project's references
 	// (the pairings a preview looks up), whatever validation runs again after an edit.
 	bool read = false;
+	// The graph has not read the project's files as the scan lists them now (an import's, a rescan's):
+	// what names a file is known as far as the files read before.
+	bool files_unread = false;
 	bool operator==(const ValidationStatus &o) const {
-		return running == o.running && done == o.done && total == o.total && read == o.read;
+		return running == o.running && done == o.done && total == o.total && read == o.read &&
+		       files_unread == o.files_unread;
 	}
 	bool operator!=(const ValidationStatus &o) const { return !(*this == o); }
 };

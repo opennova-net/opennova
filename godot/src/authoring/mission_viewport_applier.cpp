@@ -515,6 +515,8 @@ void MissionViewportApplier::run_environment_(const MissionScene &scene) {
 				header.fog_override, header.fog_color, header.water_color, header.water_murk));
 		if (overrides->is_empty()) env->clear_mission_overrides();
 		else env->apply_mission_overrides(overrides);
+		// The fog as the mission's start settles it, which no weather tick here does (the editor's helper).
+		env->set_fog_level(opennova::editor::mission_settled_fog_level(env->get_fog_level()));
 		environment_->set_environment_data(env);
 		env_file_ = env;
 		water_->set_mission_water_height_override(
@@ -538,6 +540,9 @@ void MissionViewportApplier::run_environment_(const MissionScene &scene) {
 void MissionViewportApplier::terrain_empty_(const TerrainKey &key) {
 	loading_.unref();
 	terrain_->set_terrain_data(Ref<TerrainData>());
+	// The ground drawn before goes with it: the picture then has no ground (docs/mcp.md's mission view),
+	// never the last terrain under a note that the new one is missing.
+	terrain_->clear_built();
 	water_->set_terrain_data(Ref<TerrainData>());
 	terrain_data_.unref();
 	terrain_built_ = true;
@@ -950,6 +955,7 @@ void MissionViewportApplier::clear() {
 	loading_.unref();
 	drop_entities_();
 	terrain_->set_terrain_data(Ref<TerrainData>());
+	terrain_->clear_built(); // nothing it drew stands
 	water_->set_terrain_data(Ref<TerrainData>());
 	terrain_data_.unref();
 	terrain_built_ = false;
