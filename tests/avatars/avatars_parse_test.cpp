@@ -208,13 +208,13 @@ int main(int argc, char **argv) {
 
     {
         const char src[] =
-            "define head HEAD_A\n{\n\tgraphic old_head.3di\n}\n"
-            "define body BODY_A\n{\n\tgraphic body.3di\n}\n"
-            "define head HEAD_A\n{\n\tgraphic new_head.3di\n}\n"
-            "nationality N00 AV_NAT\n{\n\talignment good\n\tdivision D00 AV_DIV\n\t{\n"
-            "\t\tcombo 001 HEAD_A BODY_A\n"
-            "\t}\n}\n"
-            "define head HEAD_A\n{\n\tgraphic too_late.3di\n}\n";
+            "define head HEAD_A\r\n{\r\n\tgraphic old_head.3di\r\n}\r\n"
+            "define body BODY_A\r\n{\r\n\tgraphic body.3di\r\n}\r\n"
+            "define head HEAD_A\r\n{\r\n\tgraphic new_head.3di\r\n}\r\n"
+            "nationality N00 AV_NAT\r\n{\r\n\talignment good\r\n\tdivision D00 AV_DIV\r\n\t{\r\n"
+            "\t\tcombo 001 HEAD_A BODY_A\r\n"
+            "\t}\r\n}\r\n"
+            "define head HEAD_A\r\n{\r\n\tgraphic too_late.3di\r\n}\r\n";
         AvatarsFile model;
         TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
         TEST_EXPECT(model.nationalities_count == 1);
@@ -231,12 +231,12 @@ int main(int argc, char **argv) {
 
     {
         const char src[] =
-            "define body BODY_A\n{\n\tgraphic body.3di\n}\n"
-            "nationality N00 AV_NAT\n{\n\talignment good\n\tdivision D00 AV_DIV\n\t{\n"
-            "\t\tcombo 001 MISSING_HEAD BODY_A\n"
-            "\t\tcombo 002 LATER_HEAD BODY_A\n"
-            "\t}\n}\n"
-            "define head LATER_HEAD\n{\n\tgraphic later.3di\n}\n";
+            "define body BODY_A\r\n{\r\n\tgraphic body.3di\r\n}\r\n"
+            "nationality N00 AV_NAT\r\n{\r\n\talignment good\r\n\tdivision D00 AV_DIV\r\n\t{\r\n"
+            "\t\tcombo 001 MISSING_HEAD BODY_A\r\n"
+            "\t\tcombo 002 LATER_HEAD BODY_A\r\n"
+            "\t}\r\n}\r\n"
+            "define head LATER_HEAD\r\n{\r\n\tgraphic later.3di\r\n}\r\n";
         AvatarsFile model;
         TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
         TEST_EXPECT(model.nationalities_count == 1);
@@ -248,11 +248,11 @@ int main(int argc, char **argv) {
 
     {
         const char src[] =
-            "define head HEAD_A\n{\n\tgraphic head.3di\n}\n"
-            "define body BODY_A\n{\n\tgraphic body.3di\n}\n"
-            "nationality N00 AV_NAT\n{\n\talignment good\n\tdivision D00 AV_DIV\n\t{\n"
-            "\t\tcombo 001 HEAD_A BODY_A MISSING_ARMS\n"
-            "\t}\n}\n";
+            "define head HEAD_A\r\n{\r\n\tgraphic head.3di\r\n}\r\n"
+            "define body BODY_A\r\n{\r\n\tgraphic body.3di\r\n}\r\n"
+            "nationality N00 AV_NAT\r\n{\r\n\talignment good\r\n\tdivision D00 AV_DIV\r\n\t{\r\n"
+            "\t\tcombo 001 HEAD_A BODY_A MISSING_ARMS\r\n"
+            "\t}\r\n}\r\n";
         AvatarsFile model;
         TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
         TEST_EXPECT(model.nationalities[0].divisions[0].combos_count == 1);
@@ -265,9 +265,9 @@ int main(int argc, char **argv) {
 
     {
         const char src[] =
-            "nationality N00 FIRST\n{\n\tdivision D00 FIRST_DIV\n\t{\n\t}\n"
-            "\tdivision D00 DUP_DIV\n\t{\n\t}\n}\n"
-            "nationality N00 DUP_NAT\n{\n}\n";
+            "nationality N00 FIRST\r\n{\r\n\tdivision D00 FIRST_DIV\r\n\t{\r\n\t}\r\n"
+            "\tdivision D00 DUP_DIV\r\n\t{\r\n\t}\r\n}\r\n"
+            "nationality N00 DUP_NAT\r\n{\r\n}\r\n";
         AvatarsFile model;
         TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
         TEST_EXPECT(model.nationalities_count == 1);
@@ -281,7 +281,7 @@ int main(int argc, char **argv) {
 
     {
         const char src[] =
-            "define head HEAD_A\n{\n\tcamo 256 -1 511\n\tvoice 260\n}\n";
+            "define head HEAD_A\r\n{\r\n\tcamo 256 -1 511\r\n\tvoice 260\r\n}\r\n";
         AvatarsFile model;
         TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
         TEST_EXPECT(model.parts_count == 1);
@@ -296,27 +296,85 @@ int main(int argc, char **argv) {
         std::string src;
         for (int i = 0; i < 512; ++i) {
             char line[128];
-            std::snprintf(line, sizeof(line), "define head H%03d\n{\n}\n", i);
+            std::snprintf(line, sizeof(line), "define head H%03d\r\n{\r\n}\r\n", i);
             src += line;
         }
-        src += "nationality N00 AV_NAT\n{\n}\n";
+        src += "nationality N00 AV_NAT\r\n{\r\n}\r\n";
         AvatarsFile model;
         TEST_EXPECT(avatars_parse_memory(src.data(), src.size(), &model) != 0);
     }
 
     {
         std::string src =
-            "define head HEAD_A\n{\n}\n"
-            "define body BODY_A\n{\n}\n"
-            "nationality N00 AV_NAT\n{\n\tdivision D00 AV_DIV\n\t{\n";
+            "define head HEAD_A\r\n{\r\n}\r\n"
+            "define body BODY_A\r\n{\r\n}\r\n"
+            "nationality N00 AV_NAT\r\n{\r\n\tdivision D00 AV_DIV\r\n\t{\r\n";
         for (int i = 0; i < 129; ++i) {
             char line[96];
-            std::snprintf(line, sizeof(line), "\t\tcombo %03d HEAD_A BODY_A\n", i);
+            std::snprintf(line, sizeof(line), "\t\tcombo %03d HEAD_A BODY_A\r\n", i);
             src += line;
         }
-        src += "\t}\n}\n";
+        src += "\t}\r\n}\r\n";
         AvatarsFile model;
         TEST_EXPECT(avatars_parse_memory(src.data(), src.size(), &model) != 0);
+    }
+
+    // The retail walk and tokenizer [orig: CAvatarDefs_Init @ 0x57b180 ->
+    // File_ParseASCIIFile @ 0x53d810 -> CAvatarDefs_ParseConfigLine @ 0x57a3f0]:
+    // a comma separates and `;` ends the line; a part key reads its value
+    // whether or not the line carries one; a combo id is a plain atol
+    // (@ 0x57a90d); a `define` of no known kind leaves the pending state, so the
+    // next `{` writes the previous part again; `}` is any token beginning with
+    // the brace; `alignment` takes good or evil and nothing else.
+    {
+        const char src[] =
+            "define head HEAD_A\r\n{\r\n\tname FIRST\r\n\tcamo 3,4,5 ; three values\r\n}\r\n"
+            "define legs LEGS_X\r\n{\r\n\tname SECOND\r\n\tgraphic legs.3di\r\n}x\r\n"
+            "define body BODY_A\r\n{\r\n\tname BODY_NAME\r\n\tname\r\n}\r\n"
+            "nationality N03 AV_NAT\r\n{\r\n\talignment evil\r\n\talignment neutral\r\n"
+            "\tdivision D00 AV_DIV\r\n\t{\r\n\t\tcombo c05 HEAD_A BODY_A\r\n\t}\r\n}\r\n";
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(src, sizeof(src) - 1, &model) == 0);
+        TEST_EXPECT(model.parts_count == 2);
+        const AvatarPart *head = find_part(model, "HEAD_A");
+        const AvatarPart *body = find_part(model, "BODY_A");
+        TEST_EXPECT(head != nullptr && body != nullptr);
+        if (head != nullptr) {
+            TEST_EXPECT(head->camo[0] == 3 && head->camo[1] == 4 && head->camo[2] == 5);
+            TEST_EXPECT(std::strcmp(head->display_name, "SECOND") == 0);
+            TEST_EXPECT(std::strcmp(head->graphic, "legs.3di") == 0);
+        }
+        if (body != nullptr) TEST_EXPECT(body->display_name[0] == '\0');
+        TEST_EXPECT(model.nationalities_count == 1);
+        if (model.nationalities_count == 1) {
+            const AvatarNationality &nat = model.nationalities[0];
+            TEST_EXPECT(nat.id == 3 && nat.alignment == AVATAR_ALIGN_EVIL);
+            TEST_EXPECT(nat.divisions_count == 1 && nat.divisions[0].combos_count == 1);
+            if (nat.divisions_count == 1 && nat.divisions[0].combos_count == 1)
+                TEST_EXPECT(nat.divisions[0].combos[0].id == 0);
+        }
+        avatars_free(&model);
+    }
+
+    // The 512-part guard runs ahead of every line but a brace [orig: @ 0x57a456]:
+    // a 512th part whose block carries a key ends the walk, one with an empty
+    // block at the end of the file does not.
+    {
+        std::string full, empty;
+        for (int i = 0; i < 512; ++i) {
+            char line[128];
+            std::snprintf(line, sizeof(line), "define head H%03d\r\n{\r\n", i);
+            full += line;
+            empty += line;
+            if (i == 511) full += "\tvoice 1\r\n";
+            full += "}\r\n";
+            empty += "}\r\n";
+        }
+        AvatarsFile model;
+        TEST_EXPECT(avatars_parse_memory(full.data(), full.size(), &model) != 0);
+        TEST_EXPECT(avatars_parse_memory(empty.data(), empty.size(), &model) == 0);
+        TEST_EXPECT(model.parts_count == 512);
+        avatars_free(&model);
     }
 
     // The retail leg: the shipped Avatars.def from the reference fixture set.

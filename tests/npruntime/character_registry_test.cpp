@@ -28,17 +28,17 @@ void check(bool ok, const char *what) {
 // Two nationalities: N00 good (combos 001/002, head voices 1/3), N07 evil
 // (combo 001, head voice 10, female).
 const char kDef[] =
-		"define head HEAD_A\n{\n\tvoice 1\n\tsex m\n}\n"
-		"define head HEAD_B\n{\n\tvoice 3\n\tsex m\n}\n"
-		"define head HEAD_E\n{\n\tvoice 10\n\tsex f\n}\n"
-		"define body BODY_A\n{\n\tgraphic body.3di\n}\n"
-		"nationality N00 AV_US\n{\n\talignment good\n\tdivision D00 AV_SEAL\n\t{\n"
-		"\t\tcombo 001 HEAD_A BODY_A\n"
-		"\t\tcombo 002 HEAD_B BODY_A\n"
-		"\t}\n}\n"
-		"nationality N07 AV_REBEL\n{\n\talignment evil\n\tdivision D00 AV_REB\n\t{\n"
-		"\t\tcombo 001 HEAD_E BODY_A\n"
-		"\t}\n}\n";
+		"define head HEAD_A\r\n{\r\n\tvoice 1\r\n\tsex m\r\n}\r\n"
+		"define head HEAD_B\r\n{\r\n\tvoice 3\r\n\tsex m\r\n}\r\n"
+		"define head HEAD_E\r\n{\r\n\tvoice 10\r\n\tsex f\r\n}\r\n"
+		"define body BODY_A\r\n{\r\n\tgraphic body.3di\r\n}\r\n"
+		"nationality N00 AV_US\r\n{\r\n\talignment good\r\n\tdivision D00 AV_SEAL\r\n\t{\r\n"
+		"\t\tcombo 001 HEAD_A BODY_A\r\n"
+		"\t\tcombo 002 HEAD_B BODY_A\r\n"
+		"\t}\r\n}\r\n"
+		"nationality N07 AV_REBEL\r\n{\r\n\talignment evil\r\n\tdivision D00 AV_REB\r\n\t{\r\n"
+		"\t\tcombo 001 HEAD_E BODY_A\r\n"
+		"\t}\r\n}\r\n";
 
 } // namespace
 

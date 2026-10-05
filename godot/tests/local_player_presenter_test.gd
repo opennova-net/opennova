@@ -144,7 +144,7 @@ end
 	# one good-side combo binds the staged person head/body + the armsG arms.
 	var avatars := FileAccess.open(root_dir.path_join("Avatars.def"), FileAccess.WRITE)
 	assert_not_null(avatars, "staged Avatars.def is writable")
-	avatars.store_string("""define head STAGED_HEAD
+	avatars.store_string(TestFs.crlf("""define head STAGED_HEAD
 {
 	graphic person.3di
 	camo 0 0 0
@@ -169,7 +169,7 @@ nationality 0 STAGED_NAT
 		combo 1 STAGED_HEAD STAGED_BODY STAGED_ARMS
 	}
 }
-""")
+"""))
 	avatars.close()
 	for pair in [
 		["person.3di", PERSON_FIXTURE],

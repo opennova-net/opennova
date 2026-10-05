@@ -18,7 +18,7 @@ func _write_temp_avatars(name: String, text: String) -> String:
 	var path := ProjectSettings.globalize_path("user://%s" % name)
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	assert_not_null(file, "temp avatar file opens for write")
-	file.store_string(text)
+	file.store_string(TestFs.crlf(text))
 	file.close()
 	return path
 

@@ -1345,12 +1345,12 @@ func test_composed_avatar_head_shares_the_body_thermal_wave_lane() -> void:
 	assert_not_null(avatars)
 	# Head and body both resolve to the flat root's shed.3di; the rig is the
 	# rifleman item's soldier.adm, exactly as the placed avatar composes.
-	avatars.store_string(
+	avatars.store_string(TestFs.crlf(
 			"define head HEAD\n{\n graphic shed.3di\n camo 32 64 96\n voice 3\n sex m\n}\n"
 			+ "define body BODY\n{\n graphic shed.3di\n camo 100 120 140\n}\n"
 			+ "define arms ARMS\n{\n graphic shed.3di\n camo 200 210 220\n}\n"
 			+ "nationality 0 NAT\n{\n alignment good\n division 0 DIV\n {\n"
-			+ "  combo 2 HEAD BODY ARMS\n }\n}\n")
+			+ "  combo 2 HEAD BODY ARMS\n }\n}\n"))
 	avatars.close()
 	var avatar_db := AvatarDatabase.new()
 	assert_eq(avatar_db.load(avatar_path), OK)
