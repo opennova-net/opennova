@@ -488,14 +488,6 @@ PlayerReplicationState anchor_for_owned_entity(const world::Entity &entity) {
 // applied to a local budget in emit_connection_s2c.
 int g_entity_send_budget = 600;
 
-// word_26C681E — the environment's draw/view distance in world units, read by the
-// priority score for the LOS gate and the +200 inside-view bonus. It is ZERO in a
-// fresh image (env-written at load), and zero disables both terms in retail too —
-// so an embedder that never wires it gets the faithful unwired behavior. The sim
-// feeds it from the same env value the occlusion camera uses.
-// [orig: word_26C681E reads @0x50eabb/@0x50eb62; env/render block writer]
-int g_view_distance_units = 0;
-
 } // namespace
 
 void set_entity_send_budget(int bytes) {
@@ -508,11 +500,14 @@ void set_entity_send_budget(int bytes) {
 
 int entity_send_budget() { return g_entity_send_budget; }
 
-void set_view_distance_units(int units) {
-	g_view_distance_units = units < 0 ? 0 : units;
+int view_distance_units(const world::World &world) {
+	// The high word of the 16.16 fog distance, sign-extended: retail reads
+	// `movsx g_EnvFogDistCurrentHigh`, the upper half of g_EnvFogDistCurrent @0x26C681C
+	// [orig: Server_BuildEntityPriorityList @0x50EABB / @0x50EB62;
+	//  Server_BuildEntityPriorityListForPlayer @0x50E160 / @0x50E1F2].
+	return static_cast<int16_t>(
+			static_cast<uint32_t>(world.weather.core.scalar_channels.fog_dist_fp) >> 16);
 }
-
-int view_distance_units() { return g_view_distance_units; }
 
 namespace {
 
@@ -601,6 +596,10 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	const bool self_dead_or_spectator =
 			conn.respawn_pending ||
 			(self != nullptr && (self->state_flags & 0x02) != 0);
+	// The LOS gate's and the +200 bonus's view distance: this peer's fog
+	// distance as its weather tick left it (view_distance_units carries the
+	// witness). Zero, an unseeded environment, disables both terms.
+	const int view_distance = view_distance_units(w);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SETUP);
 
 	for (const GameEntitySnapshot &e : entities) {
@@ -706,8 +705,8 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 			// tracked follow-up; the AI ray's terrain+collision legs match its role)
 			// [orig: gate @0x50eac5, call @0x50eadb].
 			bool los = false;
-			if (angle > 128 && g_view_distance_units > 0 &&
-					distance_tiles < g_view_distance_units && self != nullptr) {
+			if (angle > 128 && view_distance > 0 &&
+					distance_tiles < view_distance && self != nullptr) {
 				// The 0.9 u lift both ends keeps this ray off the ground plane
 				// (@0x53b130's own endpoint recipe is the tracked follow-up above)
 				// — explicit at the call site since line_of_sight_clear takes
@@ -737,7 +736,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 				// [orig: @0x50eb08..0x50eb15].
 				base += 100 * (e.mounted_non_eweap ? 0 : 1);
 			}
-			if (g_view_distance_units > 0 && distance_tiles < g_view_distance_units)
+			if (view_distance > 0 && distance_tiles < view_distance)
 				base += 200; // [orig: @0x50eb6c/@0x50f00b]
 			v += base;
 		}

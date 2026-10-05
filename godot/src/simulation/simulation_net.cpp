@@ -19,7 +19,6 @@
 #include <runtime/inmatch/server_admin_command.h> // Server_ExecuteServerCommand (the NovaWorld ServerCommand verbs)
 #include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
 #include <runtime/inmatch/session_status.h>
-#include <runtime/terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 #include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <runtime/hud/feed_format.h> // the witnessed feed line/color policy
@@ -46,52 +45,55 @@
 using namespace sim_internal;
 
 
-// P7: the per-load host bring-up record — the faithful §5.0 mode-3 in-process listen server
-// [orig: SinglePlayer_StartMission @0x561af0]. The host's own
-// player AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
-// resolve_player_spawn_pose marker chain), and its own loopback client renders the per-frame 0x0A.
-// Staged on the host role right before the kernel boots; its boot-hook bring_up consumes it.
-opennova::inmatch::HostBringup Simulation::host_bringup() {
+// The host's session record (the faithful §5.0 mode-3 in-process listen
+// server [orig: SinglePlayer_StartMission @0x561af0]): the UI host config for a
+// LAN host, the SP listen server's own otherwise. The host's own player
+// AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
+// resolve_player_spawn_pose marker chain), and its own loopback client renders
+// the per-frame 0x0A. Standalone SP is ALWAYS serve-and-play (it renders the
+// host's own player); a LAN host honors the UI server type
+// (net_.host_serve_and_play, from configure_host_session). A dedicated host
+// (serve_and_play=false) skips the own-player spawn + the local view and lets
+// host_session_pump discard the host loopback (step 5), mirroring
+// start_host_session's gating. The host ctx's mission points straight at the
+// kernel's adopted document, which outlives the match; a reload's bring-up
+// rebuilds the loopback and a fresh host owner drops stale owner peers.
+opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type) {
 	namespace inmatch = opennova::inmatch;
-	// The host ctx's mission (read by the §5.1 0x0B BMS-header burst for LAN joiners)
-	// points straight at the kernel's adopted document, which outlives the match.
-	// Reload: the role's bring-up rebuilds the loopback and a fresh host owner drops stale
-	// owner peers, while create_session owns the protocol
-	// connection-table reset at this new-match boundary. No live configuration mutator can clear
-	// admitted peers mid-match. serve_and_play: host_session_pump must NOT discard the host's own loopback 0x0A — we
-	// fold it into ClientState (runtime_) to render the host's own view.
-	// Serve-and-play (default) vs dedicated. Standalone SP is ALWAYS serve-and-play (it renders the
-	// host's own player); isolated test/tooling MissionRoot instantiations keep that default too.
-	// There is no live editor-preview branch: MainGame/GameWorld is the sole live mission runtime
-	// (ADR 0025). A LAN host honors the UI server-type (net_.host_serve_and_play, from
-	// configure_host_session). A dedicated host (serve_and_play=false) skips the own-player spawn +
-	// the local view below and lets host_session_pump discard the host loopback (step 5) — mirroring
-	// start_host_session's gating [orig: SinglePlayer_StartMission @0x561af0].
-	const bool serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;
-	inmatch::GameConfig host_config;
+	inmatch::HostConfig cfg;
 	if (is_host_listening()) {
-		host_config = net_.host_session_config; // mission/player/spawn + game_type/mp_attributes from the UI
-		if (host_config.server_name.empty()) host_config.server_name = "OpenNova LAN Host";
-		host_config.max_players = net_.host_max_players; // the UI player cap as configure_host_session published it (host_player_slot_limit)
+		cfg.config = net_.host_session_config; // mission/player/spawn + game_type/mp_attributes from the UI
+		if (cfg.config.server_name.empty()) cfg.config.server_name = "OpenNova LAN Host";
+		cfg.config.max_players = net_.host_max_players; // the UI cap as configure_host_session published it (host_player_slot_limit)
 	} else {
 		// The SP listen server's config (docs/net/novaworld-net-re.md §5.0).
-		host_config = inmatch::singleplayer_game_config(mission_game_type());
+		cfg.config = inmatch::singleplayer_game_config(p_game_type);
 	}
-	inmatch::HostBringup bringup;
-	bringup.host_cfg.config = host_config;
-	bringup.host_cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
-	bringup.host_cfg.serve_and_play = serve_and_play;
-	bringup.host_cfg.network_type =
-			is_host_listening() ? net_.host_network_type : inmatch::NetworkType::Lan;
+	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
+	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;
+	cfg.network_type = is_host_listening() ? net_.host_network_type : inmatch::NetworkType::Lan;
 	// The loose _NSTMOUT.TXT reap/pool override under the install root
 	// (engine session_timeout_config.h; the CNapiNetwork_Init read). Empty
 	// keeps the 120000 ms / 1200-record template.
-	bringup.host_cfg.game_root = host_game_root_;
-	if (net_.local_character_vars_set) {
-		bringup.host_cfg.local_character_vars = net_.local_character_vars;
-	}
-	bringup.terrain_til_data = net_.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
+	cfg.game_root = host_game_root_;
+	if (net_.local_character_vars_set) cfg.local_character_vars = net_.local_character_vars;
+	return cfg;
+}
+
+// The in-memory loads' bring-up record (load_from_mission_data, the demo):
+// the session record over the adopted document's game type, the retained .til
+// (S2C 0x45 source, empty => skipped, §5.37) and mission text, and the
+// mounted gametext's Server strings. The file boot's phase A stages its own.
+opennova::inmatch::HostBringup Simulation::host_bringup() {
+	namespace inmatch = opennova::inmatch;
+	inmatch::HostBringup bringup;
+	bringup.host_cfg = host_session_cfg(
+			opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags));
+	bringup.terrain_til_data = net_.terrain_til_data;
 	bringup.mission_text = net_.mission_text;
+	if (assets_.root.is_valid())
+		bringup.server_text = inmatch::read_host_server_text(
+				opennova::mission::boot_files_from_index(assets_.root->native_index()));
 	return bringup;
 }
 
@@ -187,32 +189,10 @@ void Simulation::enable_listen_server(bool p_enable) {
 
 void Simulation::set_terrain_til_data(const PackedByteArray &p_til_bytes) {
 	net_.terrain_til_data.assign(p_til_bytes.ptr(), p_til_bytes.ptr() + p_til_bytes.size());
-	// The same bytes feed the sim's placed-tile surface array (D-SND-15);
-	// the fold and its witness live engine-side (terrain_query
-	// surface_tiles_from_til_bytes).
-	assets_.surface_tiles =
-			opennova::terrain::surface_tiles_from_til_bytes(net_.terrain_til_data);
+	// The same bytes feed the terrain store's placed-tile overlay (D-SND-15;
+	// the fold and its witness live engine-side, terrain_field_build.h).
+	kernel_->set_placed_tiles(net_.terrain_til_data);
 	apply_terrain_to_ai();
-}
-
-void Simulation::set_mission_text_data(const PackedByteArray &p_rtxt_bytes) {
-	// Empty bytes (no text file) leave the table unloaded without a warning.
-	net_.mission_text = opennova::mission::MissionText();
-	if (p_rtxt_bytes.is_empty()) return;
-	std::string error;
-	if (!opennova::mission::parse_mission_text(p_rtxt_bytes.ptr(),
-				static_cast<std::size_t>(p_rtxt_bytes.size()), net_.mission_text, error)) {
-		UtilityFunctions::push_warning(String("Simulation: mission text RTXT rejected: ") +
-		                               opennova::to_gd(error));
-	}
-}
-
-bool Simulation::set_score_config_data(const PackedByteArray &p_score_ini_bytes) {
-	if (p_score_ini_bytes.is_empty()) return false;
-	const std::string text(
-			reinterpret_cast<const char *>(p_score_ini_bytes.ptr()),
-			static_cast<std::size_t>(p_score_ini_bytes.size()));
-	return opennova::inmatch::load_session_score_config(net_.host_session_config, text);
 }
 
 bool Simulation::enable_host_listen(int p_port) {
@@ -391,30 +371,16 @@ bool Simulation::apply_player_enter_result(uint32_t p_connection_id, bool p_succ
 
 void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options) {
 	if (p_options.is_null()) return;
-	const opennova::inmatch::GameConfig &in = p_options->config();
-	// Start from the live config so the sim-owned fields (mission header blob,
-	// score tables, PCID) survive; every user-facing field lands from the record.
-	opennova::inmatch::GameConfig config = net_.host_session_config;
+	// The WHOLE request config: every GameConfig field a host screen, the host
+	// file or a tool sets lands as given (identity, rules, the hit feedback,
+	// the vote and autobalance policies, the ping checks, ...). Only the
+	// sim-owned mission header blob survives from the live config; the score
+	// tables come from score.ini at each boot (inmatch/host_boot.h).
+	opennova::inmatch::GameConfig config = p_options->config();
+	config.mission_header_blob = std::move(net_.host_session_config.mission_header_blob);
 	net_.host_bind_port = static_cast<uint16_t>(std::clamp(p_options->get_bind_port(), 0, 0xFFFF));
 	net_.host_network_type = p_options->network_type();
-	config.server_name = in.server_name;
-	config.mission_name = in.mission_name;
-	config.mission_file = in.mission_file;
-	config.custom_text = in.custom_text;
-	config.player_name = in.player_name;
-	config.expansion = in.expansion;
-	config.server_password = in.server_password;
-	config.side_a_password = in.side_a_password;
-	config.side_b_password = in.side_b_password;
-	config.country = in.country;
-	config.server_punkbuster = in.server_punkbuster;
-	config.server_lan_only = in.server_lan_only;
-	config.connection_speed = in.connection_speed;
-	config.max_friendly_kills = in.max_friendly_kills;
-	config.allow_ai = in.allow_ai;
-	config.time_of_day_continuity = in.time_of_day_continuity;
-	config.spectator_password = in.spectator_password;
-	config.spectator_slots = std::max(in.spectator_slots, -1);
+	config.spectator_slots = std::max(config.spectator_slots, -1);
 	// D-NET-166: the host's g_ExpansionChecksum analog. When the caller names
 	// its install root, compute the CRC of the loose
 	// expansion/<name>/version.txt so the join gate can run retail's compare
@@ -441,51 +407,6 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 			config.integrity_profile.clear();
 		}
 	}
-	config.game_type = in.game_type;
-	config.mp_attributes = in.mp_attributes;
-	config.class_allow_mask = in.class_allow_mask;
-	// The armory-reuse cooldown an accepted C2S 0x2F seeds (cfg `armory_reuse_time`,
-	// admin `ArmoryTimer`; the engine default 30 is retail's).
-	config.armory_reuse_time = in.armory_reuse_time;
-	config.respawn_time = in.respawn_time;
-	config.time_limit_minutes = in.time_limit_minutes;
-	config.replay_enabled = in.replay_enabled;
-	config.max_team_lives = in.max_team_lives;
-	config.score_limit = in.score_limit;
-	config.max_score = in.max_score;
-	config.koth_delta = in.koth_delta;
-	config.flag_return_ticks = in.flag_return_ticks;
-	// The flag CARRY limit Server_CheckPlayerViolations enforces (cfg
-	// `flag_reset_seconds`; the engine default 420 is retail's).
-	config.flag_reset_seconds = in.flag_reset_seconds;
-	config.capture_duration_seconds = in.capture_duration_seconds;
-	config.capture_speed_setting = in.capture_speed_setting;
-	config.spawn_wave_time_base = in.spawn_wave_time_base;
-	config.spawn_wave_time_zone = in.spawn_wave_time_zone;
-	config.default_spawn_requires_no_team_zone = in.default_spawn_requires_no_team_zone;
-	config.num_teams = in.num_teams;
-	config.respawn_timeout = in.respawn_timeout;
-	config.start_delay = in.start_delay;
-	config.destroy_buildings = in.destroy_buildings;
-	config.death_messages = in.death_messages;
-	// The witnessed BANDWIDTH server command (100-1600, clamped at apply):
-	// lowers the per-frame 0x0A byte cap so entity records rotate across frames
-	// [orig: g_EntitySendBudget @0xC8FC50].
-	config.entity_send_budget = in.entity_send_budget;
-	// Retail selects its default send divider from the session family, then
-	// from g_LanMode for an authority LAN host. Explicit test/tool overrides
-	// remain available through send_holdoff_ticks.
-	// [orig: NapiNPServer_GetSendHoldoffTicks @0x4c4ab0]
-	config.session_channel = in.session_channel;
-	config.lan_mode = in.lan_mode;
-	config.send_holdoff_ticks = in.send_holdoff_ticks;
-	config.fat_bullets = in.fat_bullets;
-	config.one_shot_kill = in.one_shot_kill;
-	config.unlimited_vehicles = in.unlimited_vehicles;
-	config.spawn_x = in.spawn_x;
-	config.spawn_y = in.spawn_y;
-	config.spawn_z = in.spawn_z;
-	config.spawn_names = in.spawn_names;
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
 	// loopback fold at bring-up; max_players is the session-list-advertised cap as the engine's
 	// host_player_slot_limit publishes it (the dedicated slot added, the 65 ceiling, no lower clamp).

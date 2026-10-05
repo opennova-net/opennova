@@ -214,13 +214,11 @@ func _wire_host_settings() -> void:
 # START read. Edits take the text, spins select the item whose authored
 # value= matches, GAME_LOCATION the item whose name shares the country's
 # first three characters, checkboxes the nonzero value. Without a persisted
-# game.cfg the seed is the record's defaults, with the session name the
-# Menu/UNTITLED gametext the retail config defaults copy in. A user-cleared
-# edit is still read verbatim at START.
+# game.cfg the seed is the record's defaults (the engine's host-screen
+# baseline, with the session name the Menu/UNTITLED gametext the retail config
+# defaults copy in). A user-cleared edit is still read verbatim at START.
 func _seed_host_controls() -> void:
 	var defaults := HostSessionConfig.new()
-	defaults.server_name = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_MENU,
-			"UNTITLED", defaults.server_name)
 	for control in HostSessionOptions.dialog_controls():
 		var id := _id(control)
 		if id < 0:

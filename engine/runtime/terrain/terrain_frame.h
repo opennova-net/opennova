@@ -86,7 +86,7 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 // terrain walk never reads it).
 // [orig: PolyTrn_RenderFrame @ 0x60EAC0 — ctx[3] fov @0x60eaf6, ctx[6] view
 //  distance @0x60eb7e; Render_SceneWithWaterReflection @ 0x5d7ea0 fills
-//  ctx[3] from dword_A7839C/65536 @0x5d8037 and ctx[6] from word_26C681E
+//  ctx[3] from dword_A7839C/65536 @0x5d8037 and ctx[6] from g_EnvFogDistCurrentHigh
 //  @0x5d8052]
 struct TerrainViewInput {
 	float cam_x = 0.0f;

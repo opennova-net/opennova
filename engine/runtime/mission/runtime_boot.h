@@ -32,6 +32,15 @@ struct BootFileSource {
 	// Optional mounted enumeration, in mount precedence order. Used by the
 	// particle catalog; ordinary in-memory BMS/AI boots need only the readers.
 	std::function<std::vector<std::string>(const std::string &extension)> list_files;
+	// Optional loose-first reader: the game directory's own file ahead of the
+	// archives whatever the session's lookup policy, for the reads retail
+	// makes off the disk (score.ini, the mission .til). Unset (an in-memory
+	// source, which has no archive layer) reads through read_file.
+	std::function<bool(const std::string &name, std::vector<uint8_t> &out)> read_loose_first;
+	bool read_loose(const std::string &name, std::vector<uint8_t> &out) const {
+		if (read_loose_first) return read_loose_first(name, out);
+		return read_file != nullptr && read_file(name, out);
+	}
     std::string expansion_name; // mounted bank-chain metadata, empty for the base game
 	bool valid() const { return has_file != nullptr && read_file != nullptr; }
 };

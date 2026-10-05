@@ -1,33 +1,18 @@
 #include "server.h"
 
 #include <base/gameprofile/gameprofile.h>
-#include <base/io/fixed.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
-#include <formats/env/env.h>
 #include <formats/mission/bms.h>
-#include <formats/mission/bms_edit.h>
 #include <formats/rtxt/rtxt.h>
-#include <formats/trn/trn.h>
-#include <formats/trn/trn_io.h>
-#include <net/npwire/entity_class.h>
 #include <net/npwire/net_ports.h>
-#include <runtime/environment/environment_state.h>
-#include <runtime/environment/water_frame.h>
-#include <runtime/environment/weather_seed.h>
-#include <runtime/inmatch/charattr_challenge.h>
 #include <runtime/inmatch/host_settings.h>
-#include <runtime/inmatch/session_status.h>
-#include <runtime/mission/mission_text.h>
 #include <runtime/mission/runtime_boot.h>
-#include <runtime/replication/item_replication_catalog.h>
-#include <runtime/terrain_query/surface_tiles.h>
 
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
-#include <sstream>
 #include <utility>
 
 namespace opennova::serve {
@@ -65,25 +50,6 @@ std::string game_text(const rtxt::File *table, const char *section, const char *
 	if (table == nullptr) return fallback;
 	const std::string value = table->get_in_section(section, key);
 	return value.empty() ? fallback : value;
-}
-
-// A headless host drains the presentation half of the world's outbox each
-// frame, so nothing a presenter would consume accumulates; the wire half
-// (entity events, relays, grants, the round ring, the water crossings) is the
-// host tick's own drain. The terrain scorch queue grows with every blast and
-// death until a presenter clears it, so a long-running server must clear it.
-void drain_presentation_outbox(world::World &world) {
-	world.out.terrain_scorches.clear_pending();
-	world.out.weather_sounds.clear();
-	world.out.tip_events.clear();
-	world.out.hud_detail_blank = false;
-	world.out.destruction.clear();
-	world.out.vehicle_effects.clear();
-	world.out.effects.clear();
-	world.out.script_effects.clear();
-	world.out.script_sounds.clear();
-	world.out.slot_sounds.clear();
-	world.out.sound_emitters.clear();
 }
 
 } // namespace
@@ -220,15 +186,6 @@ bool Server::read_host_file(std::string &error) {
 		error = "the host file names no mission the catalog lists";
 		return false;
 	}
-	// The "Server" chat strings the host's handlers print through
-	// [orig: Game_InitSubsystems @0x4A6CD0 loads gametext.bin;
-	//  Server_BroadcastMedicRequest @0x5153C9; the team change's
-	//  GameText_GetString("server", "C2Blue" / "C2Red") @0x51902E / @0x51909C].
-	if (have_gametext) {
-		server_text_.medic_request_format = gametext.get_in_section("Server", "STRSRV_MEDREQ");
-		server_text_.change_to_blue_format = gametext.get_in_section("Server", "C2Blue");
-		server_text_.change_to_red_format = gametext.get_in_section("Server", "C2Red");
-	}
 	return true;
 }
 
@@ -251,7 +208,6 @@ bool Server::boot_mission(std::string &error) {
 		error = "the mission '" + row.file + "' did not parse: " + parse_error;
 		return false;
 	}
-	const mission::MissionInfo info = mission::mission_info(doc);
 	std::string basename = row.file;
 	const size_t dot = basename.rfind('.');
 	if (dot != std::string::npos) basename.resize(dot);
@@ -270,167 +226,43 @@ bool Server::boot_mission(std::string &error) {
 	config.expansion_version_checksum =
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
 	config.session_channel = inmatch::GameSessionChannel::Lan;
-	// The loose score.ini over the game type's default table, before the
-	// bring-up: start_host_session copies the score values and FIELD rows into
-	// world.match (inmatch/host_session.cpp). The Godot host orders it the same
-	// way (mission_root.cpp -> Simulation::set_score_config_data).
-	// [orig: the load gated on File_IsSingleFile("score.ini") @0x436ED0;
-	//  GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile @0x52D8A0]
-	{
-		std::vector<uint8_t> score_bytes;
-		if (index_.read_file("score.ini", score_bytes, VfsLookupPolicy::ForceLooseFirst) &&
-				!score_bytes.empty() &&
-				!inmatch::load_session_score_config(config,
-						std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
-								score_bytes.size())))
-			io::logf(io::LogLevel::kWarn, "opennova-serve: score.ini rejected; the default table stands");
-	}
 
-	kernel_ = std::make_unique<mission::MissionKernel>();
-	kernel_->set_assets(assets_.get());
-	const mission::BootFileSource files = mission::boot_files_from_index(index_);
-	kernel_->open_document(std::move(doc), basename, files);
-
-	// The bring-up record the boot hook consumes: the config, the mission text
-	// (S2C 0x7E / 0x0F) and the raw .til the S2C 0x45 stream pages out.
-	inmatch::HostBringup bringup;
-	bringup.host_cfg.config = config;
-	bringup.host_cfg.socket_mode = inmatch::SocketMode::Lan;
-	bringup.host_cfg.network_type = inmatch::NetworkType::Lan;
-	bringup.host_cfg.serve_and_play = host_.serve_and_play;
-	bringup.host_cfg.game_root = options_.resource_dir;
-	{
-		std::vector<uint8_t> text;
-		(void)mission::resolve_mission_text(files, basename, text);
-		std::string text_error;
-		if (!text.empty() &&
-				!mission::parse_mission_text(text.data(), text.size(), bringup.mission_text, text_error))
-			io::logf(io::LogLevel::kWarn, "opennova-serve: the mission text did not parse: %s",
-					text_error.c_str());
-	}
-	// The mission's placed tiles, read loose-first [orig: Terrain_LoadTileInfoFile
-	// @0x60A740, the policy force @0x60A74E].
-	(void)index_.read_file(basename + ".til", bringup.terrain_til_data,
-			VfsLookupPolicy::ForceLooseFirst);
-	surface_tiles_ = terrain::surface_tiles_from_til_bytes(bringup.terrain_til_data);
-	mission_text_ = bringup.mission_text;
-
-	// The .trn the water rung and the .TSD tile table read (the kernel's own
-	// terrain load builds the height field from the same pair).
-	TrnConfig trn;
-	bool have_trn = false;
-	{
-		std::vector<uint8_t> trn_bytes;
-		if (index_.read_file(info.terrain + ".trn", trn_bytes)) {
-			std::istringstream stream(std::string(trn_bytes.begin(), trn_bytes.end()));
-			std::string trn_error;
-			have_trn = load_trn(stream, trn, trn_error);
-		}
-	}
-	tile_surface_table_.fill(0);
-	if (have_trn) {
-		terrain::SurfaceTileFileSource tile_files;
-		tile_files.has_file = files.has_file;
-		tile_files.read_file = files.read_file;
-		terrain::resolve_tileset_surface_table(tile_files,
-				trn_mission_tilestrip(trn, info.tile_set), tile_surface_table_.data());
-	}
-
+	// Serve Only: the dedicated role over the bound socket, no player of the
+	// host's own, the session coming up inside the boot.
 	role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
-	role_->bind(*kernel_);
 	role_->set_socket(datagrams_.get());
-	role_->stage_bringup(std::move(bringup));
 	session_ = std::make_unique<inmatch::Session>(*role_);
-	if (!session_->begin_load().applied()) {
-		error = "the session did not enter its load";
-		return false;
-	}
 
-	mission::KernelBootOptions options;
+	// The engine's one host boot (ADR 0051 d4), the game's own order.
+	inmatch::HostBootRequest request;
+	request.mission = std::move(doc);
+	request.mission_basename = basename;
+	request.files = mission::boot_files_from_index(index_);
+	request.assets = assets_.get();
+	request.session = session_.get();
+	request.role = role_.get();
+	request.host = role_.get();
+	request.host_cfg.config = config;
+	request.host_cfg.socket_mode = inmatch::SocketMode::Lan;
+	request.host_cfg.network_type = inmatch::NetworkType::Lan;
+	request.host_cfg.serve_and_play = host_.serve_and_play;
+	request.host_cfg.game_root = options_.resource_dir;
+	request.session_score_ini = true;
+	mission::KernelBootOptions &options = request.boot_options;
 	options.playable = false; // Serve Only: no player of the host's own
 	options.mp_session = true;
 	options.terrain = true;
 	options.wac = true;
-	options.defer_mission_start = true;
 	options.game_type = config.game_type;
 	options.player_limit = static_cast<int32_t>(config.max_players);
 	options.team_count = config.num_teams;
-	options.people_name_resolver = [this](int32_t index) {
-		return mission_text_.people_name(index);
+	request.fresh_kernel = [this]() -> mission::MissionKernel & {
+		kernel_ = std::make_unique<mission::MissionKernel>();
+		return *kernel_;
 	};
-	options.bringup_net_session = [this] { role_->bring_up(); };
-	std::string boot_error;
-	if (!kernel_->boot(options, boot_error)) {
-		error = "the mission boot failed: " + boot_error;
-		return false;
-	}
-
-	// The wire entity class each items.def row stamps, from the replication
-	// catalog the game builds off the same rows.
-	if (const def::DefItemsFile *items = kernel_->items_table()) {
-		auto catalog = std::make_shared<const replication::ItemReplicationCatalog>(
-				replication::ItemReplicationCatalog::from_items_def(*items));
-		role_->set_item_catalog(catalog);
-		kernel_->resolve_item_traits([catalog](int def_id) {
-			const replication::ItemReplicationProfile *profile = catalog->by_definition_id(def_id);
-			return static_cast<uint8_t>(profile != nullptr ? profile->wire_entity_class()
-														   : EntityClass::Unknown);
-		});
-	}
-	// The placed tiles over the charmap the boot's terrain step wired.
-	kernel_->world.tables.surface_map.tiles = surface_tiles_.empty() ? nullptr : surface_tiles_.data();
-	kernel_->world.tables.surface_map.tile_count = static_cast<int32_t>(surface_tiles_.size());
-	kernel_->world.tables.surface_map.tile_surface = tile_surface_table_.data();
-	// The gametext "Server" strings the host's handlers print through.
-	inmatch::set_server_text(role_->state.host_owner.ctx, server_text_);
-	// The per-class ATTRIBUTES words (Medic, KnifeBonus, ...) the authority's
-	// medic heal, knife reach and medic-filtered sends read. Retail loads
-	// charattr.def at boot on every peer, a missing or empty file leaving the
-	// cleared all-zero table (D-NET-345: the game's own host never loads it).
-	// [orig: Game_Run @0x4A7FE3 -> CharAttr_LoadFromDef @0x412140]
-	{
-		inmatch::CharAttrChallengeTable charattr;
-		std::vector<uint8_t> charattr_bytes;
-		if (index_.read_file("charattr.def", charattr_bytes) && !charattr_bytes.empty())
-			(void)inmatch::parse_charattr_challenge_table(charattr_bytes.data(),
-					charattr_bytes.size(), charattr);
-		kernel_->world.tables.class_attribute_flags =
-				inmatch::charattr_class_attribute_rows(charattr);
-	}
-
-	// The environment: the mission's .env with the BMS override layer, the
-	// water plane by its witnessed precedence, then the weather seed and the
-	// mission start (the initial WAC run, the 255-tick settle, the vehicles).
-	env::Config env_config;
-	bool env_loaded = false;
-	{
-		const std::string env_name = info.environment + ".env";
-		std::vector<uint8_t> env_bytes;
-		const bool exists = !info.environment.empty() && index_.read_file(env_name, env_bytes);
-		const std::string env_text(env_bytes.begin(), env_bytes.end());
-		env_loaded = env::load_mission_env(exists ? &env_text : nullptr, env_config);
-	}
-	const env::BmsEnvOverrides overrides = env::bms_env_overrides_from_header(
-			static_cast<uint32_t>(info.attrib_flags), info.water_override, info.fog_override,
-			info.fog_color, info.water_color, info.water_murk);
-	env::apply_bms_overrides(env_config, overrides);
-	env::EnvironmentState env_state;
-	env_state.set_config(&env_config, env_loaded);
-	env::WaterHeightRungs rungs;
-	rungs.has_mission_override = overrides.has_water_height;
-	rungs.mission_override = overrides.water_height * 0.5f;
-	rungs.terrain_height = have_trn && trn.water_height != 0 ? trn.water_height * 0.5f : 0.0f;
-	rungs.has_loaded_terrain = kernel_->terrain_store.valid();
-	const float water = env::resolve_water_height(rungs, &env_state, 0.0f);
-	kernel_->world.env.water_z = static_cast<int32_t>(water * io::kFp16One);
-	kernel_->sync_water_plane();
-	kernel_->world.weather.seed(env::weather_seed_from_config(env_config, kernel_->mission.header));
-	kernel_->complete_mission_start();
-
-	if (!session_->complete_load().applied()) {
-		error = "the session did not leave its load";
-		return false;
-	}
+	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) return false;
+	// No device stages run between the phases on a headless host.
+	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
 	io::logf(io::LogLevel::kInfo,
 			"opennova-serve: '%s' (%s) up: %d entities, terrain %s, WAC %s, %u player slot(s)",
 			row.file.c_str(), config.mission_name.c_str(), kernel_->promo.spawned,
@@ -463,7 +295,8 @@ bool Server::frame(double delta_seconds) {
 	inmatch::FrameInput input;
 	input.delta_seconds = delta_seconds;
 	const inmatch::FrameOutcome outcome = session_->advance(input);
-	drain_presentation_outbox(kernel_->world);
+	// No presenter drains the presentation half of the outbox.
+	kernel_->world.out.discard_presentation();
 	if (outcome.terminal()) {
 		end_message_ = outcome.error.message;
 		running_ = false;

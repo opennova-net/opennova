@@ -8,6 +8,8 @@
 
 #include "common/test_expect.h"
 
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -174,6 +176,50 @@ int main() {
 		TEST_EXPECT(rotation2.launch_options[0] == 1 && rotation2.map_launch_option == 1);
 		TEST_EXPECT(rotation2.map_game_type == game_type::kCaptureTheFlag);
 		TEST_EXPECT(!rotation2.map_source_is_loose);
+	}
+
+	// --- the sample host file the apps zip ships (apps/serve/example.host):
+	//     every key is a host-file key, and every setting it writes is the
+	//     host screen's default, so the sample leaves the defaults standing.
+	{
+		std::ifstream in(OPENNOVA_EXAMPLE_HOST, std::ios::binary);
+		TEST_EXPECT(static_cast<bool>(in));
+		const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		const std::vector<mission_catalog::Row> sample_catalog = {
+			row("EXAMPLE01.BMS", bms::AttribFlags::TeamDeathmatch),
+			row("EXAMPLE02.BMS", bms::AttribFlags::CaptureTheFlag),
+		};
+		HostScreenState host;
+		HostScreenState defaults;
+		defaults.config.server_name = "Untitled";
+		defaults.config.country = "USA";
+		MissionRotation rotation;
+		const HostFileReport report =
+				read_host_file(text.data(), text.size(), host, rotation, sample_catalog);
+		TEST_EXPECT(report.unknown_keys.empty());
+		TEST_EXPECT(report.unknown_missions.empty());
+		TEST_EXPECT(host.config.server_name == defaults.config.server_name);
+		TEST_EXPECT(host.config.custom_text == defaults.config.custom_text);
+		TEST_EXPECT(host.config.country == defaults.config.country);
+		TEST_EXPECT(host.config.server_password.empty() && host.config.side_a_password.empty() &&
+				host.config.side_b_password.empty());
+		TEST_EXPECT(host.config.mp_attributes == defaults.config.mp_attributes);
+		TEST_EXPECT(host.config.connection_speed == defaults.config.connection_speed);
+		TEST_EXPECT(host.config.replay_enabled == defaults.config.replay_enabled);
+		TEST_EXPECT(host.config.start_delay == defaults.config.start_delay);
+		TEST_EXPECT(host.config.respawn_timeout == defaults.config.respawn_timeout);
+		TEST_EXPECT(host.config.respawn_time == defaults.config.respawn_time);
+		TEST_EXPECT(host.config.score_limit == defaults.config.score_limit);
+		TEST_EXPECT(host.config.max_score == defaults.config.max_score);
+		TEST_EXPECT(host.config.max_friendly_kills == defaults.config.max_friendly_kills);
+		TEST_EXPECT(host.config.capture_duration_seconds == defaults.config.capture_duration_seconds);
+		TEST_EXPECT(host.player_limit == defaults.player_limit);
+		TEST_EXPECT(host.game_type_setting == defaults.game_type_setting);
+		TEST_EXPECT(host.use_lineup_queue == defaults.use_lineup_queue);
+		TEST_EXPECT(host.lineup_queue_size == defaults.lineup_queue_size);
+		// Two rotation entries; the last line names the starting map.
+		TEST_EXPECT(rotation.entries.size() == 2);
+		TEST_EXPECT(rotation.map_file == "EXAMPLE02.BMS");
 	}
 	std::printf("host_file: ok\n");
 	return 0;

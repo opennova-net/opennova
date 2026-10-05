@@ -146,7 +146,7 @@ void Simulation::ensure_session_role() {
 	if ((host_role_ != nullptr) != listen_server_) (void)install_offline_role();
 }
 
-bool Simulation::begin_session_load() {
+bool Simulation::prepare_session_load() {
 	using State = opennova::inmatch::State;
 	const State state = session_.state();
 	// A pre-connected joiner deliberately carries its live socket into load.
@@ -164,7 +164,11 @@ bool Simulation::begin_session_load() {
 			return false;
 		}
 	}
-	return session_.begin_load().applied();
+	return true;
+}
+
+bool Simulation::begin_session_load() {
+	return prepare_session_load() && session_.begin_load().applied();
 }
 
 void Simulation::complete_session_load() {

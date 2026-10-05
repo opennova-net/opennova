@@ -205,6 +205,21 @@ Overridable env vars (defaults in parentheses): `ONNET_PUBLIC_HOST` (`127.0.0.1`
 `DATABASE_PATH` (`backend/data/state.db`), `MIGRATIONS_DIR`, `SEED_DIR`, `WEB_DIST_DIR`,
 `TEMPLATES_DIR`, `STATIC_DIR`, `ADMIN_API_TOKEN` (unset = admin API closed).
 
+### The headless game server
+
+`opennova-serve` (`apps/serve`, ADR 0051) is the game's Serve Only host with no window,
+configured by retail's host file; it boots the mission through the same engine host boot
+the game's hosts run (`engine/runtime/inmatch/host_boot.h`). Build and run it against an
+install, with the sample host file (`apps/serve/example.host`, shipped in the apps zip):
+
+```bash
+cmake --build build --config Release --target opennova_serve
+./build/apps/serve/opennova-serve --resource-dir "<Joint Operations install>" /HOST apps/serve/example.host
+ctest --test-dir build -C Release -R "serve|host_boot|host_file"
+```
+
+Its usage, the host file's keys and its exit codes are in `apps/serve/README.md`.
+
 ## Test with retail Joint Operations
 
 Point the retail client's gate host at the dev stack with one hosts-file line in

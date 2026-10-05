@@ -179,10 +179,11 @@ struct NapiNPServerCtx {
 	bool integrity_entity_family_next = false;
 
 	// The rtxt "Server" section strings the host formats into chat
-	// (`GameText_GetString("Server", key)`), loaded by the embedder from its
-	// gametext table through set_server_text(). An EMPTY string is the null
-	// lookup: the consumer no-ops exactly as retail does when the text is
-	// absent. [orig: Server_BroadcastMedicRequest @0x5153C9..0x5153D0]
+	// (`GameText_GetString("Server", key)`), read from gametext.bin by the
+	// host boot and installed by HostRole::bring_up (HostBringup::server_text).
+	// An EMPTY string is the null lookup: the consumer no-ops exactly as retail
+	// does when the text is absent. [orig: Server_BroadcastMedicRequest
+	// @0x5153C9..0x5153D0]
 	ServerTextTable server_text;
 
 	// Host CNetQuality scalar sent as S2C 0x79. Retail derives this byte as
@@ -457,8 +458,8 @@ struct NapiNPServerCtx {
 	NapiNPServerCtx &operator=(NapiNPServerCtx &&) noexcept = default;
 };
 
-// Install the embedder's "Server" strings (the Godot shell reads its gametext
-// table).
+// Install the host's "Server" strings (HostRole::bring_up, from the host
+// boot's gametext.bin read).
 inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 	ctx.server_text = std::move(text);
 }

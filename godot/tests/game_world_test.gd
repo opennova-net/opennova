@@ -1577,13 +1577,14 @@ func test_injected_root_bypasses_settings_mount() -> void:
 
 
 # Typed net-session request builders (the records GameWorld's host/joiner entries
-# consume; expansion/game_type ride the record defaults: "" + GAME_TYPE_COOP).
+# consume; expansion rides the record default "", game_type is set explicitly).
 # The host entry takes the sim-shaped HostSessionOptions the host screen's
 # config projects (HostSessionConfig.to_session_options).
 func _lan_host_config(mission: String, bind_port: int) -> HostSessionOptions:
 	var config := HostSessionConfig.new()
 	config.mission = mission
 	config.bind_port = bind_port
+	config.game_type = HostSessionConfig.GAME_TYPE_COOP
 	return config.to_session_options()
 
 

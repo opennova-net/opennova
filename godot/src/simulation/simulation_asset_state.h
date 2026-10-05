@@ -10,7 +10,6 @@
 
 #include <runtime/renderer/precipitation_frame.h>         // the precipitation drawer state + frame
 #include <runtime/replication/item_replication_catalog.h> // canonical items.def replication traits
-#include <runtime/terrain_query/surface_type_map.h>       // SurfaceTileEntry (the D-SND-15 placed tiles)
 
 #include "wac/wac_program.h"
 
@@ -57,13 +56,6 @@ struct SimulationAssetState {
 	// (kernel_->terrain_store, ADR 0042 d4); the source TerrainData Ref is
 	// retained so a reload (which recreates the kernel) can rebuild it.
 	Ref<TerrainData> terrain_data;
-	// The placed-tile surface override (D-SND-15): the mission .til entries
-	// plus the tileset's .TSD-fed tile-index -> surface table, both resolved
-	// engine-side (terrain_query surface_tiles.h — the witnesses live there).
-	// Owned here like the heightmap so world.tables.surface_map's raw pointers
-	// survive reset_world; the zero table is retail's no-.TSD default.
-	std::vector<opennova::terrain::SurfaceTileEntry> surface_tiles;
-	std::array<uint8_t, 256> tile_surface_table{};
 	// SndProf.def text + water plane held for (re)application on reset_world.
 	std::vector<uint8_t> sndprof_text;
     bool sound_profiles_override = false;

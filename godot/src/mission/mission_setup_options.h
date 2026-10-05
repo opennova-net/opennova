@@ -51,6 +51,11 @@ public:
 	// diagnostic previews and a DEDICATED serve (ADR 0015 serve mode).
 	bool get_playable() const { return playable_; }
 	void set_playable(bool p_value) { playable_ = p_value; }
+	// The world's load runs the boot's phase B (Simulation::start_mission)
+	// after its device stages; unset, an isolated root ends the load itself
+	// with the mission start pending.
+	bool get_mission_start_deferred() const { return mission_start_deferred_; }
+	void set_mission_start_deferred(bool p_value) { mission_start_deferred_ = p_value; }
 
 	// --- The typed net-session request (ADR 0017): at most one is non-null
 	//     per load. ---
@@ -128,15 +133,16 @@ protected:
 
 private:
 	ObjectID music_director_id_;
-	// The default lobby player cap when no host UI supplied one
-	// (HostSessionConfig.DEFAULT_MAX_PLAYERS; the host-side clamp to the
-	// witnessed 1..65 applies either way).
-	static constexpr int kDefaultMaxPlayers = 32;
+	// The default lobby player cap when no host UI supplied one: the engine's
+	// host-screen cap (inmatch::HostScreenState, the cfg table's mpmaxplayers;
+	// the host-side clamp to the witnessed 1..65 applies either way).
+	static inline const int kDefaultMaxPlayers = opennova::inmatch::HostScreenState{}.player_limit;
 
 	Ref<Simulation> simulation_;
 	String mission_file_;
 	String mission_name_;
 	bool playable_ = false;
+	bool mission_start_deferred_ = false;
 	Ref<HostSessionOptions> host_session_;
 	Ref<JoinTarget> join_target_;
 	Ref<CharacterJoinProfile> local_character_profile_;

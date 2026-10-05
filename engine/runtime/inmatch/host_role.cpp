@@ -147,6 +147,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	reset_state(host_cfg.config, host_cfg.serve_and_play, /*in_session=*/true);
 	state.host_owner.host_loopback = &state.host_loop;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	inmatch::set_server_text(ctx, bringup.server_text);
 	ctx.terrain_til_data = bringup.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
 	ctx.mission_text_loaded = bringup.mission_text.loaded;
 	ctx.mission_briefing3 = bringup.mission_text.briefing3;

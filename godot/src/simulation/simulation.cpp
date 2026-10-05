@@ -17,7 +17,6 @@
 #include <base/gameprofile/game_type.h> // game_type::for_mission_attribs
 
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
-#include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 
 using namespace sim_internal;
@@ -158,6 +157,9 @@ void Simulation::reset_world() {
 		next_kernel->carry_across_load_from(*kernel_);
 	kernel_ = std::move(next_kernel);
 	role_->bind(*kernel_);
+	// The retained .til (set_terrain_til_data, the boot's) onto the fresh
+	// store's placed-tile overlay; a file boot replaces it with its own.
+	kernel_->set_placed_tiles(net_.terrain_til_data);
 	kernel_->set_assets(
 			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
@@ -247,8 +249,24 @@ void Simulation::_release_weather_owner() {
 	}
 }
 
-bool Simulation::complete_mission_start() {
-	return world_installed_ && kernel_ != nullptr && kernel_->complete_mission_start();
+bool Simulation::start_mission(opennova::env::WeatherRuntime *p_weather,
+		opennova::env::EnvironmentState *p_environment, const std::function<void()> &p_bind) {
+	if (!world_installed_ || host_boot_.kernel != kernel_.get() ||
+			session_.state() != opennova::inmatch::State::Loading)
+		return false;
+	opennova::inmatch::HostStartDevice device;
+	device.weather = p_weather;
+	device.environment = p_environment;
+	device.bind_render = p_bind;
+	std::string error;
+	if (!opennova::inmatch::start_host_mission(host_boot_, device, error)) {
+		fail_session_load(error.c_str());
+		return false;
+	}
+	// Direct/local simulations historically start paused; the live GameWorld
+	// frame resumes them after its presentation setup.
+	if (session_.kind() == opennova::inmatch::RoleKind::SinglePlayer) (void)session_.pause();
+	return true;
 }
 
 const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitation_frame(
@@ -407,18 +425,11 @@ bool Simulation::command_lightning_color(int p_rgb) { OPENNOVA_WEATHER_COMMAND(s
 
 #undef OPENNOVA_WEATHER_COMMAND
 
-// Wire the kernel's terrain field into the world/AI/collision systems, then
-// layer the shell-fed surface extras back on (the placed-tile override and the
-// sound-profile chain the kernel deliberately leaves to the embedder).
+// Wire the kernel's terrain field into the world/AI/collision systems (the
+// store's placed-tile overlay, D-SND-15, rides the surface view), then layer
+// the sound-profile chain the kernel deliberately leaves to the embedder.
 void Simulation::apply_terrain_to_ai() {
 	kernel_->wire_terrain();
-	// The placed-tile override rides the surface view (D-SND-15). With no
-	// charmap the sampler's early return-1 skips the walk exactly like
-	// retail, so attaching the tiles unconditionally is faithful.
-	kernel_->world.tables.surface_map.tiles =
-			assets_.surface_tiles.empty() ? nullptr : assets_.surface_tiles.data();
-	kernel_->world.tables.surface_map.tile_count = static_cast<int32_t>(assets_.surface_tiles.size());
-	kernel_->world.tables.surface_map.tile_surface = assets_.tile_surface_table.data();
 	apply_sound_state_to_world();
 }
 
@@ -537,9 +548,12 @@ void Simulation::finish_kernel_boot() {
 std::function<void()> Simulation::role_bringup_hook() {
 	opennova::inmatch::Role &role = active_role();
 	if (host_role_ != nullptr) host_role_->stage_bringup(host_bringup());
-	return [this, &role] {
-		const bool fresh_joiner_runtime = role.bring_up();
-		runtime_ = role.client_runtime();
+	return [&role, tail = role_bringup_tail()] { tail(role.bring_up()); };
+}
+
+std::function<void(bool)> Simulation::role_bringup_tail() {
+	return [this](bool fresh_joiner_runtime) {
+		runtime_ = active_role().client_runtime();
 		if (fresh_joiner_runtime) {
 			install_charattr_challenge_table();
 			install_character_join_vars();
@@ -579,13 +593,15 @@ void Simulation::apply_host_session_mission_header(const opennova::bms::File &fi
 	// bringup_host_runtime; there is deliberately nothing to refresh live.
 }
 
-// The production boot (S9/ADR 0042 d3): the kernel owns the ordered step
-// sequence (MissionKernel::boot, recorded in its boot_trace); this entry only
-// converts the Godot Refs into the kernel's sources (the mounted index, the
-// parsed items.def rows, the terrain documents, the mission text) and runs the
-// binding-side legs the kernel deliberately leaves to the shell (net role
-// bring-up context, score.ini, the joiner's decoded-row resolver inputs, the
-// session-kit profile seed).
+// The production boot: phase A of the engine's one host boot (ADR 0051 d4,
+// inmatch/host_boot.h), the order opennova-serve runs too. This entry only
+// converts the Godot Refs into the boot's sources (the mounted index and
+// assets, the parsed items.def rows, the terrain documents) and supplies the
+// binding's seams (the fresh kernel, the shell's terrain store, the bring-up
+// tail); then it retains what the boot read and runs its own legs (the
+// joiner's decoded-row resolver inputs, the session-kit profile seed). The
+// session stays Loading until the world's load runs phase B (start_mission)
+// after its device stages.
 int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		const Ref<ResourceRoot> &p_resource_root,
 		const Ref<ItemDatabase> &p_item_db,
@@ -594,102 +610,93 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		const String &p_infantry_adm, const String &p_mission_file_basename,
 		bool p_playable) {
 	namespace ms = opennova::mission;
-	if (p_mission.is_null() || !begin_session_load()) {
+	namespace inmatch = opennova::inmatch;
+	if (p_mission.is_null() || !prepare_session_load()) {
 		fail_session_load("mission boot failed");
 		return ERR_CANT_OPEN;
 	}
-	ms::BootFileSource files;
-	if (p_resource_root.is_valid()) {
-		files = ms::boot_files_from_index(p_resource_root->native_index());
-	}
-	// The mission text resolves BEFORE the kernel boots: the parsed briefings/
-	// locations feed the host bring-up context (S2C 0x7E/0x0F) and the
-	// [PeopleNames] table feeds the kernel's promote-time name resolver.
-	{
-		std::vector<uint8_t> text;
-		(void)ms::resolve_mission_text(files,
-				opennova::to_std(p_mission_file_basename), text);
-		PackedByteArray bytes;
-		bytes.resize(static_cast<int64_t>(text.size()));
-		if (!text.empty()) std::memcpy(bytes.ptrw(), text.data(), text.size());
-		set_mission_text_data(bytes);
-	}
-	// The mission's raw .til bytes: the S2C 0x45 stream source AND the
-	// placed-tile surface array (D-SND-15).
-	set_terrain_til_data(p_terrain_til);
 	// The previous mission's retained terrain must not rebuild into the fresh
-	// kernel: set_terrain_height_field below builds the store exactly once.
+	// kernel: the boot's terrain seam builds the store exactly once.
 	assets_.terrain_data.unref();
-
-	reset_world();
-	if (p_resource_root.is_valid()) set_asset_root(p_resource_root);
+	if (p_resource_root.is_valid()) assets_.root = p_resource_root;
+	if (p_item_db.is_valid()) ensure_item_replication_catalog(p_item_db);
+	const opennova::bms::File &document = p_mission->native_file();
+	inmatch::HostBootRequest request;
+	request.mission = document;
+	request.mission_basename = opennova::to_std(p_mission_file_basename);
+	if (p_resource_root.is_valid())
+		request.files = ms::boot_files_from_index(p_resource_root->native_index());
+	request.assets = assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr;
 	if (p_item_db.is_valid()) {
-		// Hand the shell's parsed items.def rows over as the kernel's item
-		// table (the Ref pins their lifetime for the kernel's).
-		assets_.item_traits_db = p_item_db;
-		kernel_->set_items_table(&p_item_db->native_items());
+		request.items = &p_item_db->native_items();
+		request.item_catalog = assets_.item_replication_catalog;
 	}
-	kernel_->wire_header_world = p_mission->is_wire_header_only();
-	kernel_->open_document(p_mission->native_file(),
-			opennova::to_std(p_mission_file_basename), files);
-	// Terrain fills the kernel store BEFORE boot (has_terrain gates on it),
-	// exactly the ctest embedder's order; the D-SND-15 .TSD tile table rides
-	// beside it.
-	set_terrain_height_field(p_terrain);
-	assets_.tile_surface_table.fill(0);
-	if (p_terrain.is_valid() && p_terrain->is_loaded() && files.valid()) {
-		opennova::terrain::SurfaceTileFileSource tile_files;
-		tile_files.has_file = files.has_file;
-		tile_files.read_file = files.read_file;
-		opennova::terrain::resolve_tileset_surface_table(tile_files,
-				p_terrain->get_trn().tilestrip, assets_.tile_surface_table.data());
+	request.session = &session_;
+	request.role = &active_role();
+	request.host = host_role_;
+	const uint32_t mission_game_type = opennova::game_type::for_mission_attribs(document.header.attrib_flags);
+	if (host_role_ != nullptr) {
+		request.host_cfg = host_session_cfg(mission_game_type);
+		request.session_score_ini = is_host_listening();
 	}
-	apply_terrain_to_ai();
-	// SndProf.def is the kernel's script_catalogs step (it parses only over an
-	// empty table, so a set_sound_profiles override applied above still wins).
-
-	ms::KernelBootOptions options;
+	// A joiner's tiles are the host's S2C 0x45 stream (or none), and a caller
+	// may hand a host its bytes; otherwise the boot reads the mission's .til.
+	if (is_joiner() || !p_terrain_til.is_empty())
+		request.terrain_til = std::vector<uint8_t>(p_terrain_til.ptr(),
+				p_terrain_til.ptr() + p_terrain_til.size());
+	request.wire_header_world = p_mission->is_wire_header_only();
+	ms::KernelBootOptions &options = request.boot_options;
 	options.music_globals = wac_music_globals();
 	options.playable = p_playable;
 	options.joiner = is_joiner();
 	options.mp_session = is_host_listening() || is_joiner();
 	// The shell owns the terrain field's parsed-document entry (the store the
-	// setter above built, or none): the kernel never loads one from files here.
+	// seam below builds, or none): the kernel never loads one from files here.
 	options.terrain = false;
 	options.wac = !p_wac_basename.is_empty();
-	// This full world boot finishes at Weather::run_mission_start_boundary,
-	// after the environment seed. Running WAC here would lose weather writes
-	// when that boundary seeds the core, then refuse its already-run script.
-	options.defer_mission_start = true;
 	options.wac_basename = opennova::to_std(p_wac_basename);
-	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
+	options.game_type = mission_game_type;
 	stamp_admission_limits(options, net_, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.infantry_adm = p_infantry_adm.is_empty()
 			? std::string(ms::kDefaultInfantryAdm)
 			: opennova::to_std(p_infantry_adm);
-	options.people_name_resolver = [this](int32_t index) {
-		return net_.mission_text.people_name(index);
+	request.fresh_kernel = [this, p_item_db]() -> ms::MissionKernel & {
+		reset_world();
+		// The shell's parsed items.def rows are the kernel's item table; the
+		// Ref pins their lifetime for the kernel's.
+		if (p_item_db.is_valid()) assets_.item_traits_db = p_item_db;
+		return *kernel_;
 	};
-	options.bringup_net_session = role_bringup_hook();
+	// Terrain fills the kernel store BEFORE boot (has_terrain gates on it).
+	request.before_terrain = [this, p_terrain](ms::MissionKernel &) {
+		set_terrain_height_field(p_terrain);
+	};
+	request.after_bringup = role_bringup_tail();
 	std::string boot_error;
-	if (!kernel_->boot(options, boot_error)) {
+	if (!inmatch::boot_host_mission(std::move(request), host_boot_, boot_error)) {
 		fail_session_load(boot_error.c_str());
 		return ERR_CANT_OPEN;
 	}
+	// What the boot read, retained for the binding's own reads and the next
+	// fresh kernel: the mission text (the HUD's people names), the .til, the
+	// water plane (apply_sound_state_to_world re-stamps it) and, on a host,
+	// charattr.def, which the world's resync keeps (D-NET-345).
+	net_.mission_text = host_boot_.mission_text;
+	net_.terrain_til_data = host_boot_.terrain_til;
+	assets_.env_water_z_q16 = host_boot_.water_z_q16;
+	if (host_role_ != nullptr) {
+		net_.charattr_challenge_table = host_boot_.charattr;
+		net_.charattr_challenge_loaded = host_boot_.charattr_loaded;
+	}
 	finish_kernel_boot();
 	// The binding-side resolver inputs (the joiner's decoded rows read the
-	// anim root/item db Refs) and the net-typed re-stamps the kernel's
-	// net-free boot cannot make: the wire entity classes from the replication
-	// ItemReplicationCatalog, then the collision Ref retention.
+	// anim root/item db Refs) and the collision Ref retention.
 	if (p_resource_root.is_valid() && p_item_db.is_valid()) {
 		assets_.infantry_adm_resource_root = p_resource_root;
 		assets_.infantry_adm_item_db = p_item_db;
 	}
-	if (p_item_db.is_valid()) {
-		resolve_item_traits(p_item_db);
-		assets_.collision_item_db = p_item_db;
-	}
+	if (p_item_db.is_valid()) assets_.collision_item_db = p_item_db;
 	// In a live session the resident kit buffer is the assigned side's profile
 	// page (retail's Game_StartMission copy into restrictionData
 	// [orig: @0x525813]); the kernel's table load built the pool from the
@@ -697,7 +704,6 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	if (seed_session_kit_from_profile())
 		rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
 	push_joiner_loadout_kit();
-	complete_session_load();
 	return OK;
 }
 
