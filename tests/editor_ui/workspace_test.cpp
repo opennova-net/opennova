@@ -2870,13 +2870,11 @@ void test_files_tree_kept() {
 	session.handle(request::save_all());
 	ui.frames(3);
 	CHECK(window->rebuilds() == made, "Output and the status line: the tree kept");
-	// An Undo in a file that is not open is refused with a warning on the file: Findings moves
-	// alone of what the tree reads.
-	const AssetEntry *items = session.view().project.scan->find("items.def");
-	CHECK(items != nullptr, "the item table");
-	if (!items) return;
+	// A Cancel with nothing running is refused with a warning row (a request refused for what it names,
+	// an Undo in a file that is not open, leaves none: the demo round's review): Findings moves alone of
+	// what the tree reads.
 	const uint64_t files = session.view().revisions.of(ViewConcern::Files);
-	session.handle(request::undo(items->relative_path));
+	session.handle(request::cancel_operation());
 	ui.frames(2);
 	CHECK(session.view().revisions.of(ViewConcern::Files) == files, "the files as they were");
 	CHECK(window->rebuilds() == made + 1, "a finding alone: the tree and its counts made again");

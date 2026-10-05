@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/requirements/requirement_words.h>
 #include <editor/project/expansion_files.h>
@@ -64,8 +65,10 @@ void unread_expansion_files(const ProjectDocument &doc, const AssetScan &scan, s
 } // namespace
 
 RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetScan &scan,
-                                        const std::vector<std::string> *install_expansions) {
+                                        const std::vector<std::string> *install_expansions,
+                                        const std::vector<std::string> *base_names) {
 	RequirementReport report;
+	const BaseNames base{base_names && !base_names->empty() ? base_names : nullptr};
 	const int count = gameprofile_required_resource_count();
 	for (int i = 0; i < count; ++i) {
 		const RequiredResource *resource = gameprofile_required_resource_at(i);
@@ -121,7 +124,13 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 		// What the game does without it, in plain words (requirement_words.h; the manifest's own record
 		// of it is the cited detail, requirement_witness).
 		const std::string without = requirement_without(row.role);
-		const std::string then = without.empty() ? std::string(" The game reads it by name.") : " " + without;
+		// A file an expansion's base game serves: the game reads the base's under /exp [orig:
+		// PFF_OpenAllArchives @ 0x4a4310, slots 2..4], as the build's gate lets it through (blocks_build
+		// over BaseNames): said so, never what the game does with no file (the demo round's bug 6).
+		const bool served = row.state == RequirementState::Missing && base.has(row.name);
+		const std::string then = served ? " The game reads the base game's, which the expansion builds on."
+		                         : without.empty() ? std::string(" The game reads it by name.")
+		                                           : " " + without;
 		if (row.required) {
 			++report.required_total;
 			if (row.state == RequirementState::Missing) {

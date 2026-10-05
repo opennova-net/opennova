@@ -605,6 +605,15 @@ bool AssetGraph::resolve_edge(Ref ref) {
 	return moved || (was && reworded);
 }
 
+bool AssetGraph::set_base_names(std::vector<std::string> names) {
+	if (names == base_names_) return false;
+	base_names_ = std::move(names);
+	bool moved = false;
+	for (const Ref ref : index_.missing()) moved = reword(ref) || moved;
+	if (moved) list_diagnostics();
+	return moved;
+}
+
 bool AssetGraph::reword(Ref ref) {
 	EdgeResolution &resolution = index_.slot(ref.slot).resolutions[ref.index];
 	Diagnostic finding = missing_finding(index_.edge(ref));
@@ -1242,10 +1251,27 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 		     reference_file_candidates(edge.kind, resolve_style(edge.value), edge.loader_arg,
 		                               [this](const std::string &name) { return file_named(key(name)) != nullptr; }))
 			if ((other = file_named(key(candidate))) != nullptr) break;
+	// A file the project lacks that an expansion's base game serves: the game reads the base's under /exp
+	// [orig: PFF_OpenAllArchives @ 0x4a4310, slots 2..4], which the build's gate lets through (blocks_build
+	// over BaseNames): the words say so, never what the game does with no file at all (the demo round's
+	// bug 6: a terrain the base serves read "the game refuses to start the mission").
+	std::string served;
+	if (!other && row.resolution == ReferenceResolution::File && !base_names_.empty()) {
+		const BaseNames base{&base_names_};
+		const auto in_base = [&base](const std::string &name) { return base.has(name); };
+		for (const std::string &candidate :
+		     reference_file_candidates(edge.kind, resolve_style(edge.value), edge.loader_arg, in_base))
+			if (base.has(candidate)) {
+				served = candidate;
+				break;
+			}
+	}
 	const std::string message =
 	        who + " names " + row.phrase + " '" + edge.value + "'" +
 	        (other ? ", but the project's " + other->logical_name + " is " + asset_kind_label(other->kind) +
 	                         ", which the game does not load as " + row.phrase + "."
+	         : !served.empty() ? ", which the project does not have: the game reads the base game's " + served +
+	                                     ", which the expansion builds on."
 	         : row.missing_message ? row.missing_message(*this, edge)
 	                               : std::string(", which the project does not have."));
 	Diagnostic d = other ? make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, message, edge.source, edge.field)

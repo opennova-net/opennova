@@ -405,10 +405,12 @@ void ImportController::start_plan() {
 	preview.plan = std::make_shared<const ImportPlan>();
 	preview.plan_serial = ++plans_;
 	preview.changed = false;
+	preview.planning = false;
 	const uint64_t id = core_.start_operation(std::make_unique<ImportPlanOperation>(core_.problems(), paths_,
 			*view_.project.document, core_.problems().graph(), view_.documents.open, preview.roots,
 			preview.with_dependencies, core_.game_install()));
 	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
+	preview.planning = true; // until its plan is shown (show_plan) or the operation ends without one
 	core_.outcome().operation = id;
 	view_.activity.status = "Planning the import...";
 	core_.touch(ViewConcern::Dialogs);
@@ -429,6 +431,7 @@ void ImportController::show_plan(std::shared_ptr<const ImportPlan> plan, const I
 	const std::shared_ptr<const ImportPlan> before = std::move(checked_plan_);
 	const ImportPlan *checked = shown ? shown : before.get();
 	preview.plan = std::move(plan);
+	preview.planning = false;
 	preview.plan_serial = ++plans_;
 	preview.changed = shown && !same_import(*shown, *preview.plan);
 	ViewEvent planned;
@@ -637,12 +640,14 @@ void ImportController::refresh_install_files() {
 	                                        : std::vector<std::string>();
 	view_.project.base_files = view_.project.open ? list_base_file_names(core_.game_install(), *view_.project.document)
 	                                      : std::vector<std::string>();
+	core_.problems().set_base_names(view_.project.base_files); // the missing references' words read them
 	core_.touch(ViewConcern::Files);
 }
 
 void ImportController::set_install_files(std::vector<std::string> names, std::vector<std::string> base) {
 	view_.project.retail_files = std::move(names);
 	view_.project.base_files = std::move(base);
+	core_.problems().set_base_names(view_.project.base_files);
 	core_.touch(ViewConcern::Files);
 }
 
