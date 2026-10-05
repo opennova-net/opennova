@@ -68,10 +68,10 @@ int main() {
 	// colour map and a detail map by their own names.
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/thing.o3d",
-	                                    "o3d 1\nmodel THING\nmaterial FF_MT_OP\ntexture body.tga 1 0\ntexture grain.tga 2 0\n"
+	                                    "o3d 2\nmodel THING\nmaterial FF_MT_OP\ntexture body.tga 1 0\ntexture grain.tga 2 0\n"
 	                                    "material FF_ST_OP\ntexture glass.tga 1 0\nmaterial FF_ST_OP\ntexture odd.tga 1 0\n"
 	                                    "material FF_ST_OP\ntexture skin.tga 1 0\nmaterial FF_ST_OP\ntexture dup.tga 1 0\n"
-	                                    "lod 0\npart 0 0 0 0\nstrip 0 0\n"
+	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	TEST_EXPECT(import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false)
 	                    .imported == std::vector<std::string>({"models/thing.3di"}));
