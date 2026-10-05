@@ -3,11 +3,13 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <editor/session/texture_import_state.h>
 #include <editor/session/view/view_revisions.h>
 #include <editor/ui/document_views.h>
+#include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
 
@@ -45,8 +47,9 @@ private:
 	static bool replaceable_image(const std::string &path);
 
 	std::unique_ptr<TextureViewportView> viewport_;
-	// A palette index move as typed.
+	// A palette index move as typed (the workspace's, as last taken).
 	int remap_from_ = 0, remap_to_ = 0;
+	ui_kit::Held<std::pair<int, int>> remap_held_;
 	// The import shown, read again when the file or what it reads moves; a typed value as it is typed.
 	struct ImportShown {
 		bool made = false;

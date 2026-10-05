@@ -41,17 +41,50 @@ menu::MenuWidgetState &widget_state(menu::MenuFrameState &state, int index) {
 // none), force_state (menu_force_state_from_token), checked, popup_open, focus}, each optional, a
 // number's fraction dropped. False, with why, for another member or a value out of range or of
 // another type.
-bool read_options(const JsonValue &json, MenuViewportOptions &held, std::string &error) {
+// A menu zoom's token: fit, scale, device; and back (false for another).
+const char *menu_zoom_token(MenuZoom zoom) {
+	return zoom == MenuZoom::Scale ? "scale" : zoom == MenuZoom::Device ? "device" : "fit";
+}
+bool menu_zoom_from_token(const std::string &token, MenuZoom &out) {
+	if (token == "fit") out = MenuZoom::Fit;
+	else if (token == "scale") out = MenuZoom::Scale;
+	else if (token == "device") out = MenuZoom::Device;
+	else return false;
+	return true;
+}
+
+// The least and the most of the design a Scale zoom shows it at.
+constexpr float kMenuScaleMin = 0.1f, kMenuScaleMax = 8.0f;
+
+bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasShow &show, std::string &error) {
 	if (!json.is_object()) {
 		error = "\"options\" is an object.";
 		return false;
 	}
 	MenuViewportOptions out = held;
+	MenuCanvasShow shown = show;
 	for (const io::JsonMember &member : json.object) {
 		const std::string &key = member.key;
 		const JsonValue &value = member.value;
 		int64_t number = 0;
-		if (key == "force_id") {
+		if (key == "zoom") {
+			if (!value.is_string() || !menu_zoom_from_token(value.string, shown.zoom)) {
+				error = "options.zoom is fit, scale (with scale) or device.";
+				return false;
+			}
+		} else if (key == "scale") {
+			if (!value.is_number() || !(value.number >= kMenuScaleMin && value.number <= kMenuScaleMax)) {
+				error = "options.scale is the design's scale, 0.1 to 8 (1 its own size).";
+				return false;
+			}
+			shown.scale = float(value.number);
+		} else if (key == "snap") {
+			if (!value.is_bool()) {
+				error = "options.snap is true or false.";
+				return false;
+			}
+			shown.snap = value.boolean;
+		} else if (key == "force_id") {
 			if (!json_whole_in(value, 0.0, 9007199254740992.0, number)) {
 				error = "options.force_id is a window's record id (0: none).";
 				return false;
@@ -74,11 +107,12 @@ bool read_options(const JsonValue &json, MenuViewportOptions &held, std::string 
 			flag = value.boolean;
 		} else {
 			error = "Unknown menu option \"" + key +
-					"\" (it takes show_hidden, force_id, force_state, checked, popup_open, focus).";
+					"\" (it takes show_hidden, force_id, force_state, checked, popup_open, focus, zoom, scale, snap).";
 			return false;
 		}
 	}
 	held = out;
+	show = shown;
 	return true;
 }
 
@@ -172,7 +206,7 @@ HandleEdges edges_moved(LayoutHandle handle) {
 
 } // namespace
 
-io::JsonValue menu_options_to_json(const MenuViewportOptions &held) {
+io::JsonValue menu_options_to_json(const MenuViewportOptions &held, const MenuCanvasShow &show) {
 	JsonValue options = JsonValue::make_object();
 	options.set("show_hidden", JsonValue::make_bool(held.show_hidden));
 	options.set("force_id", json_number(double(held.force_window)));
@@ -180,6 +214,9 @@ io::JsonValue menu_options_to_json(const MenuViewportOptions &held) {
 	options.set("checked", JsonValue::make_bool(held.checked));
 	options.set("popup_open", JsonValue::make_bool(held.popup_open));
 	options.set("focus", JsonValue::make_bool(held.focused));
+	options.set("zoom", json_string(menu_zoom_token(show.zoom)));
+	options.set("scale", json_number(show.scale));
+	options.set("snap", JsonValue::make_bool(show.snap));
 	return options;
 }
 
@@ -438,21 +475,27 @@ bool MenuViewport::takes_(const std::string &member) const {
 bool MenuViewport::check_(const io::JsonValue &json, std::string &error) const {
 	const JsonValue *options = json.get("options");
 	MenuViewportOptions held = options_;
-	return !options || read_options(*options, held, error);
+	MenuCanvasShow show = show_;
+	return !options || read_options(*options, held, show, error);
 }
 
 void MenuViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	const JsonValue *options = json.get("options");
 	MenuViewportOptions held = options_;
+	MenuCanvasShow show = show_;
 	std::string error;
-	if (!options || !read_options(*options, held, error) || held == options_) return;
+	if (!options || !read_options(*options, held, show, error)) return;
+	// The zoom and the snap change no picture: the screen is configured again for the held window alone.
+	show_ = show;
+	if (held == options_) return;
 	options_ = held;
 	++options_serial_;
 }
 
-void MenuViewport::report_(const ViewportDeviceReport &report) {
+bool MenuViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
 	device_rects_ = report.rects;
+	return false;
 }
 
 MenuCanvasFrame MenuViewport::canvas_frame(const ViewportContext &context) const {
@@ -491,6 +534,19 @@ ViewportHit MenuViewport::hit(const ViewportContext &context, float x, float y) 
 	const int type = render_.compiler().widget_kind(out.index);
 	out.kind = type >= 0 ? mnu::window_type_name(static_cast<mnu::WindowType>(type)) : "";
 	return out;
+}
+
+bool MenuViewport::click_frame(const ViewportContext &context, SelectMode, int &width, int &height,
+		std::string &error) const {
+	if (!canvas_frame(context).current) {
+		const std::string why = message();
+		error = "The viewport shows no picture of the menu as it is now" + (why.empty() ? std::string(".") : ": " + why);
+		return false;
+	}
+	// The click's point in design pixels: the canvas reads the picture at the design size (its scale 1).
+	width = menu::kMenuDesignWidth;
+	height = menu::kMenuDesignHeight;
+	return true;
 }
 
 std::vector<ViewportHit> MenuViewport::box(const ViewportContext &context, float x0, float y0, float x1,
@@ -616,7 +672,7 @@ bool MenuViewport::command(const ViewportContext &context, const std::string &na
 }
 
 io::JsonValue MenuViewport::options_json() const {
-	return menu_options_to_json(options_);
+	return menu_options_to_json(options_, show_);
 }
 
 io::JsonValue MenuViewport::body_json(const ViewportInput &input) const {

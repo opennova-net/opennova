@@ -9,6 +9,7 @@
 
 #include <editor/assets/asset_kind.h>
 #include <editor/session/view/view_revisions.h>
+#include <editor/ui/ui_kit.h>
 #include <editor/ui/view_event_mailbox.h>
 #include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
@@ -24,18 +25,21 @@ struct SessionView;
 // is typed by the project's name rules, then what the kind's blank takes beside it (ADR 0046
 // S14, BlankFactory::params: a mission's title, and its terrain and environment, each chosen
 // among the project's files of that kind), then Create, which raises CreateFile for it once every
-// required value is given.
+// required value is given. The prompt is the workspace's (the MCP gaps lane: workspace.new_file, its
+// kind, name and values): open while it names a kind, its fields the session's.
 class NewFilePrompt {
 public:
-	// Asks on the next draw for a new file of `kind`.
-	void ask(AssetKind kind);
+	// Asks for a new file of `kind` (the workspace's prompt opened on it).
+	static void ask(Workspace &workspace, AssetKind kind);
 	void draw(Workspace &workspace);
 
 private:
-	bool ask_ = false;
-	AssetKind kind_ = AssetKind::Unknown;
-	char name_[64]{};
-	std::vector<std::string> values_; // per param of the kind's blank: the text typed, the file chosen
+	ui_kit::HeldPopup popup_;
+	ui_kit::HeldText<kWorkspaceFileName> name_;
+	// Per param of the kind's blank: the text typed, the file chosen (the session's values, as last taken).
+	std::vector<std::string> values_;
+	std::vector<std::pair<std::string, std::string>> values_seen_;
+	AssetKind kind_seen_ = AssetKind::kCount;
 };
 
 // The project's files (ADR 0046 d6, S11d): the scan as a tree of its folders, each open
@@ -57,7 +61,7 @@ private:
 // (ShowInFiles, a RevealFile view event; an AboutFile's opens its card too).
 class FilesWindow : public devtools::Window {
 public:
-	FilesWindow(Workspace &workspace, NewFilePrompt &new_file) : workspace_(workspace), new_file_(new_file) { open = true; }
+	explicit FilesWindow(Workspace &workspace) : workspace_(workspace) { open = true; }
 
 	const char *title() const override { return "Files"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override {
@@ -71,9 +75,12 @@ public:
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 	// The file's card, a window of its own drawn every frame by the workspace (with its modals), whether
-	// Files draws or not (collapsed, behind a tab, standing aside): an AboutFile from Problems or the wire
-	// shows it at once. Closed with its project; a sound it played stopped as it closes.
+	// Files draws or not (collapsed, behind a tab, standing aside): the workspace's card (an AboutFile from
+	// Files, Problems or the wire opens it, a set_workspace closes it), shown at once. The session closes it
+	// with its project, and stops the sound it played as it closes.
 	void draw_card_window();
+	// Rename... shows (drawn the frame before).
+	bool rename_shown() const { return rename_popup_.shown(); }
 
 	// The file a click selected (project-relative; "" = none).
 	const std::string &selected() const { return selected_; }
@@ -82,9 +89,9 @@ public:
 	size_t rebuilds() const { return rebuilds_; }
 	// A RevealFile event (a ShowInFiles): Files comes forward at once, whether it draws this frame
 	// or not, and holds the event until it draws; then it selects the file, clears a filter that
-	// hides it, opens its folders, scrolls to it and, when the event asks, opens Rename... on it.
-	// Each event is shown once, the same file asked again shown again; of the events held when
-	// it draws only the newest is, an older ask (and its Rename...) passed over.
+	// hides it (the workspace's), opens its folders and scrolls to it (a show_in_files that asks the
+	// name opens the workspace's Rename... on it). Each event is shown once, the same file asked again
+	// shown again; of the events held when it draws only the newest is.
 	void receive(const ViewEvent &event);
 	// The events it holds until it draws.
 	const ViewEventMailbox<> &events() const { return events_; }
@@ -117,23 +124,27 @@ private:
 	void draw_folder(const SessionView &view, const Folder &folder);
 	void draw_file(const SessionView &view, const AssetEntry &entry, bool in_tree);
 	void draw_file_menu(const SessionView &view, const AssetEntry &entry);
-	// Rename... (the file's menu, F2): asks the new name on the next draw.
+	// Rename... (the file's menu, F2, the card's): the workspace's Rename... opened on the file.
 	void start_rename(const AssetEntry &entry);
 	void draw_rename(const SessionView &view);
 	// The kind filter beside the text: every kind, or one the project has files of (with how many).
 	void draw_kind_filter(const SessionView &view, float width);
+	// The filter and the kind, as the workspace holds them (files {filter, kind}): taken when the session's
+	// moved; one the person sets goes to the session.
+	void follow_filter(const SessionView &view);
+	void send_filter(bool filter, bool kind);
 	// A file's card (the UX round's project lane: session/file_card.h), a window of its own in the editor's:
-	// what the file is, where a build puts it, a wave's sound with Play and Stop, what it names and who
-	// names it, each a click away. Opened by a double click on a file the editor opens no document of, its
-	// menu's About this file..., and an AboutFile request (a RevealFile event with tag 1).
-	void open_card(const std::string &path);
+	// what the file is, where a build puts it, a wave's sound with Play and Stop (and how it goes), what it
+	// names and who names it, each a click away. The workspace's card (the MCP gaps lane): opened by an
+	// AboutFile (a double click on a file the editor opens no document of, its menu's About this file...),
+	// closed by a set_workspace (its X), and by the session as its file goes (workspace_tidies).
 	void draw_card(const SessionView &view);
 	void close_card();
 
 	Workspace &workspace_;
-	NewFilePrompt &new_file_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
-	char filter_[128]{};
+	ui_kit::HeldText<kWorkspaceText> filter_;
+	ui_kit::Held<AssetKind> kind_held_;
 	std::string selected_;
 	// What refresh() makes of the view, kept while what it reads stands (cache_key); the files the
 	// filter last matched and the filter and kind they matched (matching()'s).
@@ -155,21 +166,22 @@ private:
 	// dock had it when last drawn.
 	static constexpr float kKindRoomEm = 19.0f;
 	bool kind_fitted_ = true;
-	// The file whose card shows ("" none) and the card, made again when the files or the graph move (a wave's
-	// sound kept while its file stands); whether its Play played, so its close stops the sound.
+	// The file the card was last drawn for (the workspace's card's: "" none) and the card, made again when the
+	// files or the graph move (a wave's sound kept while its file stands); whether it comes forward at its next
+	// draw (it opened); the card whose close was asked (once).
 	std::string card_path_;
 	bool card_focus_ = false;
 	RevisionKey card_key_;
 	std::shared_ptr<const FileCard> card_;
-	bool card_played_ = false;
-	std::string card_root_; // the project the card is of
-	// The project the filter, the kind and the selection are for: another one starts them afresh.
+	std::string card_closing_;
+	// The project the selection is for: another one starts it afresh (the session starts its filter and
+	// kind afresh).
 	std::string shown_root_;
-	// The file a menu asked to rename, and the name typed.
-	std::string renaming_;
-	bool open_rename_ = false;
-	char rename_[64]{};
-	std::string previewed_; // the name Rename...'s preview was last asked for
+	// Rename... (the workspace's file_rename: the file and the name typed), and the name its preview was
+	// last asked for.
+	ui_kit::HeldPopup rename_popup_;
+	ui_kit::HeldText<kWorkspaceFileName> rename_;
+	std::string previewed_;
 	// The RevealFile events held until Files draws, and then the file to scroll to and the place
 	// whose folders open on the way.
 	ViewEventMailbox<> events_;
