@@ -136,6 +136,14 @@ public:
 	void record_outcome(const Diagnostic &d);
 	// A request that cannot run now: a warning, and the request did nothing.
 	void refuse_now(CoreFinding code, const std::string &message, const std::string &asset = std::string());
+	// A request refused for what it names (a path the project lacks, an address no record has): its
+	// outcome, the status line and Output say why; Problems, which lists the project's problems, gets no
+	// row (the demo round's bug 7: an about_file of a missing path left a document.missing error there).
+	void refuse_request(const Diagnostic &d);
+	// The same, of `code` (a warning unless `severity` says otherwise): a path that names no open document or
+	// one of no records, a requirement's role or file that names none, a viewport change that does not read.
+	void refuse_request(CoreFinding code, const std::string &message, const std::string &asset = std::string(),
+	                    DiagnosticSeverity severity = DiagnosticSeverity::Warning);
 	// A request refused that says nothing about the project (a set_workspace of what the windows show): the
 	// request's outcome alone, no Problems row, no Output line, the status line as it was.
 	void refuse_quietly(CoreFinding code, const std::string &message, const std::string &asset = std::string());
