@@ -7,6 +7,7 @@
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
+#include <runtime/hud/loading_screen.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace opennova::editor {
@@ -97,6 +98,73 @@ bool make_blank_monogram(const BlankRequest &request, std::vector<uint8_t> &out,
 
 bool make_blank_boxtile(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	return make_placeholder(request, 256, 256, out, error);
+}
+
+namespace {
+
+// The pointer's art, authored here (no retail byte): an arrow whose tip is the image's top-left
+// pixel, the point the game draws the pointer's texture from [orig: CUIScene_DrawScreensAndCursor
+// @ 0x63bfda, the rect's top left at the mouse; Game_ShowStartMissionSplash @ 0x520820's quad at
+// the live cursor alike], '#' its black outline, 'o' its white body, the rest clear. It sits in a
+// 32 by 32 image, the size of the shipped pointer's, drawn at the texture's own size, unscaled,
+// in the menus [orig: @ 0x63bfb9..0x63c046, scale 1.0].
+constexpr uint32_t kPointerSide = 32;
+constexpr const char *kPointerArt[] = {
+	"#",
+	"##",
+	"#o#",
+	"#oo#",
+	"#ooo#",
+	"#oooo#",
+	"#ooooo#",
+	"#oooooo#",
+	"#ooooooo#",
+	"#oooooooo#",
+	"#ooooo#####",
+	"#oo#oo#",
+	"#o# #oo#",
+	"##  #oo#",
+	"#    #oo#",
+	"     #oo#",
+	"      ##",
+};
+
+} // namespace
+
+const char *blank_pointer_name() {
+	return hud::kSplashArrowImage;
+}
+
+// The pointer, a TGA as the menus' and the splash's TGA readers take it [orig: CUIImage_LoadTGA
+// @ 0x6647D0; CTerrainTileData_LoadTGAFromArchive @ 0x56E570]: 32-bit with its alpha, the clear
+// pixels clear, which the shipped screens' STANDARD_TRANSPARENT blends away
+// (docs/mnu/menu-re.md, "Cursor material flags").
+bool make_blank_pointer(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+	if (blank_texture_reader(request.logical_name) != MaterialTextureReader::Tga) {
+		error = make_finding(CoreFinding::BlankTexture, DiagnosticSeverity::Error,
+		                     "The mouse pointer is a .tga file; " + request.logical_name + " is not.", request.logical_name);
+		return false;
+	}
+	std::vector<uint8_t> pixels(size_t(kPointerSide) * kPointerSide * 4, 0);
+	uint32_t y = 0;
+	for (const char *row : kPointerArt) {
+		for (uint32_t x = 0; row[x] != '\0' && x < kPointerSide; ++x) {
+			if (row[x] == ' ') continue;
+			uint8_t *p = &pixels[(size_t(y) * kPointerSide + x) * 4];
+			const uint8_t shade = row[x] == 'o' ? 0xFF : 0x00;
+			p[0] = p[1] = p[2] = shade;
+			p[3] = 0xFF;
+		}
+		++y;
+	}
+	std::string reason;
+	if (!tga::tga_write_rgba32(pixels.data(), kPointerSide, kPointerSide, out, reason)) {
+		out.clear();
+		error = make_finding(CoreFinding::BlankTexture, DiagnosticSeverity::Error, "The mouse pointer could not be written: " + reason,
+		                     request.logical_name);
+		return false;
+	}
+	return true;
 }
 
 } // namespace opennova::editor
