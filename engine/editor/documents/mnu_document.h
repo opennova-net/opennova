@@ -11,6 +11,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mnu_table.h>
+#include <editor/model/diagnostic.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/model/table_document.h>
 #include <editor/project/project_document.h>
@@ -222,6 +223,10 @@ std::string menu_window_scope(const std::string &menu_file, const std::string &s
 // through the stylesheet, textures, sound banks, other menus and their screens, windows,
 // string tables and string ids) are the asset graph's.
 std::vector<Diagnostic> validate_menu_file(const DocumentBase &document);
+// A screen or a window an ACTION names that no lookup finds, added to the menu its scope names (ADR 0046 DI-15,
+// DocumentType::define_symbol): a screen as Add screen makes one, a window as Add window makes one where the
+// lookup finds it, each named as the ACTION names it.
+bool define_menu_name(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
 
 // The menu type's own finding codes (DocumentType::findings), each a row of its table
 // (mnu_document.cpp, static_asserted into this order): input the reader leaves out, which the game
