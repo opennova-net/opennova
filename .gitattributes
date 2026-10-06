@@ -36,15 +36,18 @@ fixtures/**/*.wac -text -eol filter= diff= merge= whitespace=cr-at-eol
 
 # assets/ is the game's own bundled data (ADR 0048), shipped beside
 # opennova.exe and stored byte-for-byte. Small hand-written or minted files
-# (the menu, its font, animation tables) are plain git blobs, so no test needs
-# an LFS pull; the models, clips and textures the Blender add-on exports from
-# art/ ride LFS, and the package jobs pull them. The README is ordinary LF
-# text. Last-match precedence: these rules follow assets/**.
+# (the menu, its font, its pointer, animation tables) are plain git blobs, so
+# no test needs an LFS pull; the models, clips and textures the Blender add-on
+# exports from art/ ride LFS, and the package jobs pull them. The README is
+# ordinary LF text. Last-match precedence: these rules follow assets/**.
 assets/** -text -eol
 assets/**/*.3di filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.bad filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.tga filter=lfs diff=lfs merge=lfs -text -eol
 assets/**/*.md text eol=lf
+# The menu's pointer is a .tga the editor's blank factory makes (4 KB), not a
+# Blender export: main.mnu names it, so the bundled-menu GUT test reads it.
+assets/newarow1.tga -text -eol filter= diff= merge=
 
 # art/ holds the authoring sources (Blender scenes and their textures) whose
 # exports land in assets/. Every file rides LFS but Markdown.
