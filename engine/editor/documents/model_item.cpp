@@ -94,8 +94,8 @@ ModelItemFacts model_item_facts(const threedi::Threedi3di3 &model) {
 		out.type = def::DEF_ITEM_TYPE_BUILDING;
 		std::string parts;
 		if (model.occlusion_object_count > 0)
-			parts = "its occlusion (" + counted(model.occlusion_object_count, "object", "objects") + ")";
-		if (blink > 0) parts += (parts.empty() ? "its " : " and ") + counted(blink, "blink box", "blink boxes");
+			parts = "its occlusion, " + counted(model.occlusion_object_count, "object", "objects");
+		if (blink > 0) parts += (parts.empty() ? "its " : ", and ") + counted(blink, "blink box", "blink boxes");
 		out.because = parts;
 		return out;
 	}
