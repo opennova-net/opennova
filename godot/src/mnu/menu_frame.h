@@ -2,6 +2,8 @@
 
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -301,6 +303,11 @@ public:
 
 	// Debug/test accessor: compile at the current size and report counts.
 	Ref<MenuDrawListStats> get_draw_list_stats();
+	// The menu items' shader (the font pages' MODULATE2X stage on a flagged
+	// glyph run), and the test seam's copy of each glyph run as submitted:
+	// [{page, uvs, colors}].
+	static String glyph_shader_code();
+	Array get_glyph_submissions();
 
 	void _draw() override;
 
@@ -379,6 +386,12 @@ private:
 	RID slot_canvas_item_;
 	RID overlay_upper_canvas_item_;
 	bool custom_slot_drawn_ = false;
+	// The material this Control's item and both overlay items draw under: a
+	// glyph run's font page runs its MODULATE2X stage (glyph_shader_code).
+	Ref<Shader> glyph_shader_;
+	Ref<ShaderMaterial> glyph_material_;
+	// Set while get_glyph_submissions records the glyph runs _draw submits.
+	Array *glyph_record_ = nullptr;
 };
 
 } // namespace godot

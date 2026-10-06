@@ -43,7 +43,12 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	const GameFont &bf = have_bold ? label_font_bold_ : font_;
 	const float bscale = have_bold ? label_scale_ : 1.0f;
 	if (bf.font() == nullptr) return;
-	const auto text = [&](const char *t, float design_x, float design_y,
+	// Every string goes through a half-bright drawer, alpha forced opaque: the
+	// title HUD_DrawLabelBox's HUD_DrawTextLeft_HalfBright @0x51f13a, the header
+	// rungs HUD_DrawTextAtVirtualPos (-> sub_5D2EA0), the rows, rank and footer
+	// HUD_DrawTextAligned (ex sub_5D3F30, -> sub_5D2F20). `diffuse` lays a run out
+	// at the glyphs' raw diffuse, `text` at the drawer's halved colour.
+	const auto diffuse = [&](const char *t, float design_x, float design_y,
 			uint32_t argb, uint32_t flags) {
 		if (t == nullptr || t[0] == 0) return;
 		const GameFontRun run = bf.layout(t, sx(design_x, w), sy(design_y, h),
@@ -52,6 +57,10 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 				run.quads.end());
 		draw_list_.underlines.insert(draw_list_.underlines.end(),
 				run.underlines.begin(), run.underlines.end());
+	};
+	const auto text = [&](const char *t, float design_x, float design_y,
+			uint32_t argb, uint32_t flags) {
+		diffuse(t, design_x, design_y, half_bright_argb(argb), flags);
 	};
 
 	const uint32_t hud = active_color(state);
@@ -80,11 +89,13 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	// its rung blank rather than compacting the ladder [orig: the
 	// unconditional +0x14 steps @0x42315c/@0x423184/@0x4231da/@0x423225].
 	// Server name and mission title render white (retail embeds an explicit
-	// <cFFFFFF> run [orig: @0x51f42d/@0x51f497]); the rest take the HUD color.
+	// <cFFFFFF> run [orig: @0x51f42d/@0x51f497]), the tag's colour replacing the
+	// drawer's halved one, so its glyphs' diffuse is full white; the rest take
+	// the HUD color.
 	float hy = static_cast<float>(kHeaderY);
-	text(sb.server_name.c_str(), kHeaderX, hy, 0xFFFFFFFFu, kFontAlignCenter);
+	diffuse(sb.server_name.c_str(), kHeaderX, hy, 0xFFFFFFFFu, kFontAlignCenter);
 	hy += kHeaderStep;
-	text(sb.mission_title.c_str(), kHeaderX, hy, 0xFFFFFFFFu, kFontAlignCenter);
+	diffuse(sb.mission_title.c_str(), kHeaderX, hy, 0xFFFFFFFFu, kFontAlignCenter);
 	hy += kHeaderStep;
 	text(sb.game_type_label.c_str(), kHeaderX, hy, hud, kFontAlignCenter);
 	hy += kHeaderStep;

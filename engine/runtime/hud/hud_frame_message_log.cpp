@@ -55,22 +55,25 @@ void HudFrameCompiler::element_message_log(const HudFrameState &state, float w,
 	}
 	emit_stdbox(sx(kMessageLogBoxX1, w), sy(box_y1, h), sx(kMessageLogBoxX2, w),
 			sy(box_y2, h), w, 0xFFu, title_gap);
-	// The title just inside the box corner, white [orig: HUD_DrawLabelBox's
-	// (x + 15, y + 2) @0x51efe1/@0x51efe8].
+	// The title just inside the box corner, white through the half-bright
+	// drawer [orig: HUD_DrawLabelBox's (x + 15, y + 2) @0x51efe1/@0x51efe8,
+	// HUD_DrawTextLeft_HalfBright @0x51f13a].
 	if (!state.message_log_title.empty()) {
 		const GameFontRun run = bf.layout(state.message_log_title.c_str(),
 				sx(kMessageLogBoxX1 + kMessageLogTitleDx, w),
 				sy(box_y1 + kMessageLogTitleDy, h), bscale, bscale, 0u,
-				0xFFFFFFFFu);
+				half_bright_argb(0xFFFFFFFFu));
 		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 				run.quads.end());
 	}
 
 	// The rows: window row k (top first) shows ring slot 16 - k of each ring —
 	// the oldest of the sixteen newest at the top, the newest at the bottom,
-	// blank slots blank; the stored colour is drawn AS STORED, no expiry test
-	// [orig: the walk @0x5b9e8a..0x5b9f1a from unk_B405BC (slot 16) down by
-	//  128 to byte_B3FDBC, the colour at +120].
+	// blank slots blank; the stored colour through the half-bright drawer, alpha
+	// forced opaque, no expiry test [orig: the walk @0x5b9e8a..0x5b9f1a from
+	//  unk_B405BC (slot 16) down by 128 to byte_B3FDBC, the colour at +120;
+	//  sub_5D2F20 modes 0 / 1 -> HUD_DrawTextLeft_HalfBright /
+	//  HUD_DrawTextRightAligned_HalfBright].
 	const auto column = [&](const std::vector<HudMessageLine> &ring, int x_px,
 			uint32_t align) {
 		const int count = static_cast<int>(ring.size());
@@ -82,7 +85,7 @@ void HudFrameCompiler::element_message_log(const HudFrameState &state, float w,
 			const GameFontRun run = bf.layout(line.text.c_str(),
 					static_cast<float>(x_px),
 					static_cast<float>(text_top_px + row * step_px), bscale,
-					bscale, align, line.color);
+					bscale, align, half_bright_argb(line.color));
 			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 					run.quads.end());
 		}

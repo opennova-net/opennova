@@ -175,6 +175,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/weapon_kit_entry.cpp
     object/skeletal_anim.cpp
     hud/hud_draw_list_stats.cpp
+    hud/font_page_glyphs.cpp
     hud/hud_overlay.cpp
     hud/hud_overlay_combat.cpp
     hud/hud_overlay_flat.cpp
