@@ -198,6 +198,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::LocalSettingsUnreadable, code("local_settings.unreadable", G::LocalSettings) },
 	{ C::LocalSettingsWrite, code("local_settings.write", G::LocalSettings) },
 	{ C::MissionSidecarUnused, code("mission.sidecar.unused", G::Missions) },
+	// A Back or a Forward with no place that way (the navigation history, session/navigation_controller.h):
+	// the request's outcome alone, as a set_workspace refused is.
+	{ C::NavigationNone, code("navigation.none", G::Navigation) },
 	{ C::OperationBusy, code("operation.busy", G::Operations) },
 	{ C::OperationNone, code("operation.none", G::Operations) },
 	{ C::OperationNotCancellable, code("operation.not_cancellable", G::Operations) },
