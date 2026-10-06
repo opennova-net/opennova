@@ -7,6 +7,7 @@
 namespace opennova::editor {
 
 using mission::ParamKind;
+using mission::kUnreadParam;
 
 namespace {
 
@@ -168,7 +169,7 @@ bool logic_form(const MissionDocument &document, const NodeAddress &record, cons
 			const ParamKind kind = mission::action_param_kind(action, slot);
 			const int64_t value = param_of(action, slot);
 			if (kind == K::Unused) {
-				if (value) out.unread.push_back(param(slot, K::Raw, "", value));
+				if (value != kUnreadParam) out.unread.push_back(param(slot, K::Raw, "", value));
 				continue;
 			}
 			out.params.push_back(param(slot, kind, mission::action_param_label(action, slot), value));
@@ -186,7 +187,7 @@ bool logic_form(const MissionDocument &document, const NodeAddress &record, cons
 			const ParamKind kind = mission::trigger_param_kind(trigger, slot);
 			const int64_t value = param_of(trigger, slot);
 			if (kind == K::Unused) {
-				if (value) out.unread.push_back(param(slot, K::Raw, "", value));
+				if (value != kUnreadParam) out.unread.push_back(param(slot, K::Raw, "", value));
 				continue;
 			}
 			out.params.push_back(param(slot, kind, mission::trigger_param_label(trigger, slot), value));
@@ -266,9 +267,11 @@ bool logic_add_edits(const MissionDocument &document, NodeId event, const LogicT
 	if (type.sub) out.push_back(set_of(made, type.action ? "action_sub_type" : "sub_type", type.sub));
 	for (int slot = 0; slot < 4; ++slot) {
 		const ParamKind param = kind_of(type.action, type.type, type.sub, slot);
+		// A slot its type does not read stays as the new record holds it, -1 (kUnreadParam: what every
+		// shipped record holds there); one it reads takes its kind's default.
 		if (param == K::Unused) continue;
 		const int64_t value = logic_param_default(param);
-		if (value) out.push_back(set_of(made, kParams[slot], value));
+		if (value != kUnreadParam) out.push_back(set_of(made, kParams[slot], value));
 	}
 	return true;
 }
@@ -302,7 +305,7 @@ bool logic_retype_edits(const MissionDocument &document, const NodeAddress &reco
 		const ParamKind after = kind_of(type.action, type.type, type.sub, slot);
 		// What still applies stays: the same kind in the same slot.
 		if (after != K::Unused && after == before) continue;
-		const int64_t value = after == K::Unused ? 0 : logic_param_default(after);
+		const int64_t value = after == K::Unused ? int64_t(kUnreadParam) : logic_param_default(after);
 		if (values[slot] != value) out.push_back(set_of(record, kParams[slot], value));
 	}
 	return true;
@@ -346,7 +349,7 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
 		out.push_back(add);
 		if (action.action_sub_type) out.push_back(set_of(made, "action_sub_type", action.action_sub_type));
 		for (int slot = 0; slot < 4; ++slot)
-			if (param_of(action, slot)) out.push_back(set_of(made, kParams[slot], param_of(action, slot)));
+			if (param_of(action, slot) != kUnreadParam) out.push_back(set_of(made, kParams[slot], param_of(action, slot)));
 	} else {
 		const bms::Trigger &trigger = at.event->native.triggers[at.index];
 		add.field = "main_type";
@@ -355,7 +358,7 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
 		if (trigger.condition_flags) out.push_back(set_of(made, "condition_flags", trigger.condition_flags));
 		if (trigger.sub_type) out.push_back(set_of(made, "sub_type", trigger.sub_type));
 		for (int slot = 0; slot < 4; ++slot)
-			if (param_of(trigger, slot)) out.push_back(set_of(made, kParams[slot], param_of(trigger, slot)));
+			if (param_of(trigger, slot) != kUnreadParam) out.push_back(set_of(made, kParams[slot], param_of(trigger, slot)));
 	}
 	Edit remove;
 	remove.operation = EditOperation::Remove;
