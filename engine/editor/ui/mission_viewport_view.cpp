@@ -41,7 +41,7 @@ void set_options(Workspace &workspace, const MissionViewport &mission, const Mis
 			mission.path(), viewport_change(ViewportKind::Mission, "options", mission_options_to_json(options))));
 }
 
-// A command (frame, top, ground, duplicate, select_same, paste) over the selection, as an
+// A command (frame, top, ground, duplicate, select_same, paste, play_from_here) over the selection, as an
 // EditInViewport the session plans over its own context (the viewport's device, the selection): a
 // refusal is the request's outcome, which the editor reports (Output, the status line), never dropped
 // here.
@@ -370,6 +370,15 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 				played.empty() ? std::string("Make the mission the active document to start the game in it.")
 							   : "Build, then start the game in " + played + " (Ctrl+F5)."))
 		workspace.request(request::play(played));
+	// Play from here (DI-26): the game started in this mission with its player on the ground under the camera,
+	// facing the way it looks (the picture's right-click menu starts it where the pointer was).
+	const bool from_here = plays && !play_mission_at(view, mission.path()).empty();
+	if (ui_kit::tool(row, "Play from here", from_here,
+				from_here ? "Build, then start the game in this mission with the player on the ground under the camera, "
+							"facing the way it looks (Alt+F5). The build's copy of the mission gets the start; the "
+							"mission's own file is left as it is."
+						  : std::string("Make the mission the active document to start the game in it.")))
+		viewport_command(workspace, mission, "play_from_here");
 	// The mission's script (S15): the <stem>.wac the game compiles with it [orig: WacScript_InitAndLoad @
 	// 0x4F91F0], opened, or made beside the mission where the project has none.
 	const MissionScript script = mission_script(view, mission.path());
@@ -508,6 +517,14 @@ void MissionViewportView::Tools::canvas_menu(Workspace &workspace, const Mission
 		ui_kit::tooltip(view.documents.clipboard.empty()
 								? "Copy entities or areas first (Ctrl+C)."
 								: "The clipboard holds no entities or areas (events and nested records paste in the outline).");
+	ImGui::Separator();
+	// Play from here (DI-26): the game started in this mission with its player where the menu was opened.
+	const bool plays = view.project.open && view.activity.play_state == PlayState::Stopped &&
+			view.allows(EditorRequestKind::Play) && !play_mission_at(view, mission.path()).empty();
+	if (ImGui::MenuItem("Play from here", nullptr, false, plays))
+		viewport_command(workspace, mission, "play_from_here", {}, &menu_at);
+	ui_kit::tooltip("Build, then start the game in this mission with the player on the ground here, facing the way the "
+					"camera looks.");
 	ImGui::Separator();
 	if (ImGui::MenuItem("Frame", "F", false, true)) viewport_command(workspace, mission, "frame");
 	if (ImGui::MenuItem("Drop to ground", nullptr, false, edits && selected && mission.ground()))

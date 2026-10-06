@@ -56,6 +56,18 @@ struct SpawnSlotState {
 void apply_spawn_point_latches(Entity &player, const SpawnPointResult &sel);
 
 
+// The start markers the no-pick arm reads for a player positioned as `team` under `game_type`, by
+// their items.def type (the raw BMS type_id): the primary, served while the team has no death, and
+// the fallback after it. The waypoint family (Co-op) reads 6094 then 6001, the team modes 6095 + team
+// then 6003/6004/6090/6091, every other mode 6095 then 6002; a team mode's team outside 1..4 reads
+// none (0). What the editor's Play from here moves in a staged mission (editor/run/play_start.h).
+// [orig: Server_PositionPlayerForSpawn @0x50CF60]
+struct StartMarkerTypes {
+    int32_t primary = 0;
+    int32_t fallback = 0;
+};
+StartMarkerTypes start_marker_types(uint32_t game_type, uint8_t team);
+
 // Resolve one complete spawn pose. A valid target selects the picked-zone path
 // (including numbered-zone 6007 scatter). Without one, the retail mode chain is
 // exact: 6095→6002 solo; 6096..6099→6003/6004/6090/6091 team; and

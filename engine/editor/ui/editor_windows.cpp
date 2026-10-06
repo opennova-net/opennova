@@ -562,6 +562,13 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	ui_kit::tooltip(mission.empty() ? std::string("Open a mission, or a file the game finds by its name (its script, its text), to "
 	                                              "start the game in it.")
 	                                : "Build, then start the game in " + mission + ".");
+	// DI-26: the active mission's view plans it, its player on the ground under the camera.
+	const bool from_here = plays && !play_mission_at(v, v.documents.active).empty();
+	if (menu_item("Play from here", "Alt+F5", from_here)) request(request::play_from_here(v.documents.active));
+	ui_kit::tooltip(from_here ? std::string("Build, then start the game in this mission with the player on the ground under "
+	                                        "the mission view's camera, facing the way it looks. The build's copy of the "
+	                                        "mission gets the start; the mission's own file is left as it is.")
+	                          : std::string("Open a mission to start the game in it where its view's camera is."));
 	// A first run: the run directory emptied of what the runs before wrote there (run/run_directory.h), which
 	// Play keeps otherwise.
 	if (menu_item("Play fresh", nullptr, plays)) request(request::play(std::string(), false, true));
@@ -601,6 +608,16 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	ImGui::Unindent();
 	ui_kit::tooltip("The game runs on the build alone, as a player who dropped Jointops.exe into the build's folder "
 	                "runs it: nothing of the install but its program and Bink DLL, no /d.");
+	// DI-26: Play saves first instead of asking; an editor setting, as the two above.
+	bool save_first = v.project.save_before_play;
+	const bool save_settable = v.allows(EditorRequestKind::ApplyProjectSettings);
+	if (ImGui::MenuItem("Save all before Play", nullptr, &save_first, save_settable) && save_settable) {
+		ProjectSettingsChange change;
+		change.save_before_play = save_first;
+		request(request::apply_project_settings(change));
+	}
+	ui_kit::tooltip("Play writes every file with unsaved edits first, as Save all does, and starts at once. Off, Play "
+	                "asks first, as Build does.");
 	if (menu_item("Show build folder", nullptr, v.activity.has_build && v.activity.last_build->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_build->build_dir));
 	ImGui::EndMenu();
@@ -756,6 +773,9 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 		const bool plays = v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play);
 		if (io.KeyShift && v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)) {
 			request(request::stop_play());
+		} else if (io.KeyAlt && !io.KeyCtrl && !io.KeyShift && plays) {
+			// Play from here (DI-26): the active mission's view's camera, nothing where it is no mission.
+			if (!play_mission_at(v, v.documents.active).empty()) request(request::play_from_here(v.documents.active));
 		} else if (io.KeyCtrl && !io.KeyShift && plays) {
 			// Play mission: the active document's mission, nothing where it has none.
 			const std::string mission = play_mission_for(v);

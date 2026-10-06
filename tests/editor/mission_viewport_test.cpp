@@ -805,6 +805,66 @@ static int test_ground_command() {
 	return 0;
 }
 
+// DI-26, Play from here: the mission's `play_from_here` command plans one Play of this mission (its logical
+// name) with the player's start on the ground under the camera's eye (the device's ground there; with
+// none, and no terrain read, the plane through the camera's target), facing the camera's heading; with
+// `at`, where that point of the picture meets the ground. Ids or a way refused; served through the session
+// it starts Play's build.
+static int test_play_from_here() {
+	Rig rig("opennova_editor_mission_viewport_play_from_here");
+	TEST_EXPECT(rig.open());
+	rig.session.handle(request::set_viewport(kMission,
+			R"({"kind": "mission", "camera": {"target": [100, 200, 5], "yaw": 90, "pitch": 30, "distance": 50}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const MissionViewport *viewport = rig.viewport();
+	TEST_EXPECT(viewport != nullptr);
+	if (!viewport) return 1;
+	double eye[3];
+	preview_to_mission(viewport->camera().eye(), eye);
+	std::string error;
+	editor_test::Gathered gathered;
+	TEST_EXPECT(viewport->command(rig.context(), "play_from_here", {}, gathered, error) && gathered.requests.size() == 1);
+	if (gathered.requests.size() == 1) {
+		const EditorRequest &play = gathered.requests[0];
+		TEST_EXPECT(play.kind == EditorRequestKind::Play && play.mission == "synth_logic.bms" && play.start.set);
+		TEST_EXPECT(near(play.start.at[0], eye[0]) && near(play.start.at[1], eye[1]) && near(play.start.at[2], 5.0) &&
+				near(play.start.yaw, 90.0));
+		// Behind its target looking east: the eye stands 50 m west of it, up the pitch.
+		TEST_EXPECT(eye[0] < 100.0 && near(eye[1], 200.0, 0.01));
+	}
+	// The device's ground under the eye.
+	rig.session.viewports().set_devices(&rig.devices.cache);
+	rig.pump();
+	if (FakeDevice *device = rig.device()) device->ground = [](double, double) { return 7.0; };
+	gathered.requests.clear();
+	TEST_EXPECT(viewport->command(rig.context(), "play_from_here", {}, gathered, error) && gathered.requests.size() == 1 &&
+			near(gathered.requests[0].start.at[2], 7.0));
+	rig.session.viewports().set_devices(nullptr);
+	// A point of the picture: its middle, on the plane through the target.
+	ViewportCommand at;
+	at.name = "play_from_here";
+	at.has_at = true;
+	at.at_x = float(rig.context().width) * 0.5f;
+	at.at_y = float(rig.context().height) * 0.5f;
+	gathered.requests.clear();
+	TEST_EXPECT(viewport->command_of(rig.context(), at, gathered, error) && gathered.requests.size() == 1 &&
+			near(gathered.requests[0].start.at[0], 100.0, 0.5) && near(gathered.requests[0].start.at[1], 200.0, 0.5));
+	// Refused: ids, a way.
+	ViewportCommand named = at;
+	named.ids = { 1 };
+	TEST_EXPECT(!viewport->command_of(rig.context(), named, gathered, error) && error.find("no ids or by") != std::string::npos);
+	// Through the session: Play's build starts (this fixture's mission names a terrain the project lacks, so
+	// the build is refused and nothing spawns; editor_session's test_play_from_here plays one).
+	rig.session.handle(request::play_from_here(kMission));
+	TEST_EXPECT(rig.session.outcome().done() && rig.session.view().activity.operation.running() &&
+			rig.session.view().activity.operation.kind == OperationKind::Build);
+	rig.session.run_operations();
+	TEST_EXPECT(rig.platform.spawns == 0 && rig.session.view().activity.has_build);
+	std::printf("test_play_from_here passed\n");
+	return 0;
+}
+
 // A viewport query of the mission's, its args as JSON text ("" error when it answered).
 static JsonValue ask(Rig &rig, const std::string &args, std::string &error) {
 	JsonValue json;
@@ -1928,6 +1988,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_drop() == 0);
 	TEST_EXPECT(test_ground_command() == 0);
+	TEST_EXPECT(test_play_from_here() == 0);
 	TEST_EXPECT(test_palette() == 0);
 	TEST_EXPECT(test_placing() == 0);
 	TEST_EXPECT(test_tweaking_commands() == 0);

@@ -5,6 +5,7 @@
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 #include <base/io/crt_rand.h>
+#include <base/gameprofile/game_type.h>
 
 #include <cmath>
 #include <cstdio>
@@ -746,6 +747,25 @@ int main() {
         w.zones.spawn_waves.reset_on_zone_team_change(w, zone);
         CHECK(w.zones.spawn_waves.entries()[0].queued.empty());
         CHECK(w.zones.spawn_waves.entries()[0].team == 2);
+    }
+
+    // --- The chain's marker types by mode and team, the one table the no-pick arm reads (and the
+    //     editor's Play from here, editor/run/play_start.h).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60]
+    {
+        namespace gt = opennova::game_type;
+        const StartMarkerTypes coop = start_marker_types(gt::kCoop, 1);
+        const StartMarkerTypes objective = start_marker_types(gt::kObjectiveCoop, 3);
+        const StartMarkerTypes deathmatch = start_marker_types(gt::kDeathmatch, 1);
+        const StartMarkerTypes red = start_marker_types(gt::kTeamDeathmatch, 2);
+        const StartMarkerTypes violet = start_marker_types(gt::kTeamDeathmatch, 4);
+        const StartMarkerTypes teamless = start_marker_types(gt::kTeamDeathmatch, 0);
+        CHECK(coop.primary == 6094 && coop.fallback == 6001);
+        CHECK(objective.primary == 6094 && objective.fallback == 6001);
+        CHECK(deathmatch.primary == 6095 && deathmatch.fallback == 6002);
+        CHECK(red.primary == 6097 && red.fallback == 6004);
+        CHECK(violet.primary == 6099 && violet.fallback == 6091);
+        CHECK(teamless.primary == 0 && teamless.fallback == 0);
     }
 
     if (failures == 0) std::printf("OK spawn_select\n");
