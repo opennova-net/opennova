@@ -54,6 +54,18 @@ struct RecordKindRow {
 	bool top = false;           // a row of the file, not a record nested in one
 };
 
+// Why a type refuses a batch's step (Document::accept_step): its words, and where the type's own table
+// has a code for it, that code with the record and the field it is about (an item given an id the
+// engine keeps for another kind: catalog.reserved_refused). With no code the step is refused as a
+// whole (document.structure).
+struct StepRefusal {
+	std::string message;
+	const FindingCodeRow *code = nullptr;
+	NodeAddress record;
+	std::string record_name;
+	std::string field;
+};
+
 // The record document (ADR 0046 d9, S13 D6): a DocumentBase whose content is rows a document
 // type parses from and serializes to its native format, each holding records every edit
 // addresses by identity and field. The base keeps the lifecycle (the load and its decode, the
@@ -545,12 +557,12 @@ protected:
 	// on both sides, with the rows as the step leaves them (StagedRows::rows), for every batch, the
 	// rows added, duplicated, removed and moved included (which never reach the type otherwise). A
 	// refusal commits nothing, leaves the history and last_added as they were, and fails the batch
-	// with `error` (document.structure). The default accepts.
+	// with `refusal`: its code's finding on its record, or document.structure. The default accepts.
 	virtual bool accept_step(const EditStep &step, const StagedRows &rows,
-	                         std::string &error) const {
+	                         StepRefusal &refusal) const {
 		(void)step;
 		(void)rows;
-		(void)error;
+		(void)refusal;
 		return true;
 	}
 	// A collection other records name by their index (targeted_collections: a Record reference,
