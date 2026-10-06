@@ -30,6 +30,17 @@ inline PreviewVec3 preview_from_mission(float x, float y, float z) { return Prev
 // at that distance and width, and Auto picks the level the game would. The device's
 // camera takes the same eye and axes (keep-width), and the overlays project through
 // project(), so a marker sits on the pixel the renderer drew.
+// A camera may instead stand fixed at a pose (DI-13: the first-person eye, the camera the game draws a
+// weapon's view model before): its eye, its axes and its own horizontal field of view; the orbit's angles
+// then name nothing it shows, and the gestures leave it where it stands.
+struct PreviewPose {
+	PreviewVec3 eye;
+	PreviewVec3 right{1.0f, 0.0f, 0.0f};
+	PreviewVec3 up{0.0f, 1.0f, 0.0f};
+	PreviewVec3 back{0.0f, 0.0f, 1.0f};
+	float fov_degrees = 0.0f; // horizontal; 0 the game's world view's
+};
+
 struct OrbitCamera {
 	PreviewVec3 target;
 	float yaw = 0.6f;
@@ -37,13 +48,19 @@ struct OrbitCamera {
 	float distance = 5.0f;
 	float near_plane = 0.05f;
 	float far_plane = 500.0f;
+	bool posed = false; // fixed at `pose` (the orbit's angles name nothing it shows)
+	PreviewPose pose;
 
 	static float fov_horizontal_degrees();
+	// The field of view this camera sees with: the pose's where it is posed with one, else the game's.
+	float fov_degrees() const;
 	// The eye and its axes: right, up, and back (the eye looks along -back).
 	PreviewVec3 eye() const;
 	void axes(PreviewVec3 &right, PreviewVec3 &up, PreviewVec3 &back) const;
-	// The focal length in pixels across a device `width` wide.
+	// The focal length in pixels across a device `width` wide: the game's field of view's, and this
+	// camera's.
 	static float focal_pixels(int width);
+	float focal(int width) const;
 	// A point on the device (pixels from its top left) and its depth in front of the eye;
 	// false behind the near plane.
 	bool project(const PreviewVec3 &point, int width, int height, float &x, float &y, float *depth = nullptr) const;
@@ -56,7 +73,8 @@ struct OrbitCamera {
 	// Look at a sphere so it fills the view (the device's aspect), from the current angles.
 	void frame(const PreviewVec3 &center, float radius, int width, int height);
 	// Mouse gestures in device pixels: orbit turns the angles, pan slides the target in
-	// the view plane (the target stays under the mouse), dolly scales the distance.
+	// the view plane (the target stays under the mouse), dolly scales the distance. A posed camera
+	// takes none of them.
 	void orbit(float dx, float dy);
 	void pan(float dx, float dy, int width);
 	void dolly(float factor);
