@@ -1,0 +1,15 @@
+{
+  "importer": "image",
+  "options": {
+    "dds": "dxt5",
+    "format": "dds",
+    "mips": "full",
+    "name": "onhut1_0.dds"
+  },
+  "outputs": [
+    "onhut1_0.dds"
+  ],
+  "schema_version": 1,
+  "source_hash": "c243f3a79a541322",
+  "version": 2
+}

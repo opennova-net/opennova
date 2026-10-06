@@ -75,6 +75,11 @@ struct ActivityView {
 	// Play tails there ("" before the first Play): never the build directory it runs from.
 	std::string play_run_dir;
 	std::string play_log_file;
+	// Whether the running (or last) game's run directory was emptied first (play's fresh), and what it kept
+	// of what the runs before wrote there ('/'-separated paths under it: the game's game.cfg, its saves),
+	// run/run_directory.h.
+	bool play_fresh = false;
+	std::vector<std::string> play_kept;
 	// The running (or last) game is the game install's under Strict Play (the build and the install's
 	// program alone, no /d), and its first run, which wrote its game.cfg and quit, was started again.
 	bool play_strict = false;

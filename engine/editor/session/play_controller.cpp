@@ -170,7 +170,7 @@ void PlayController::publish_findings() {
 	core_.problems().validate_later();
 }
 
-void PlayController::start(const std::string &mission, bool behind) {
+void PlayController::start(const std::string &mission, bool behind, bool fresh) {
 	const std::string &build_dir = view_.activity.last_build->build_dir;
 	LaunchPlan plan;
 	Diagnostic error;
@@ -227,31 +227,53 @@ void PlayController::start(const std::string &mission, bool behind) {
 		return;
 	}
 	// The run directory the game runs in (run/run_directory.h, S13 A8): its working directory and its
-	// log, emptied, never the build directory it runs from, which stays as the build wrote it. One
-	// whose game may still run (one an earlier editor left running) is passed over. It lives under
-	// the cache, which comes with its self-ignore file.
+	// log, never the build directory it runs from, which stays as the build wrote it. It keeps what the
+	// game wrote there in the runs of this mode before (its game.cfg, which spares it the device dialog, its
+	// saves), what the Play before staged and the logs gone; a fresh Play empties it. One whose game may
+	// still run (one an earlier editor left running) is passed over. It lives under the cache, which comes
+	// with its self-ignore file.
+	const std::string mode = !in_install ? kRunModeRuntime : strict ? kRunModeStrict : kRunModeInstall;
 	std::string run_dir, run_error, cache_error;
+	std::vector<std::string> kept;
 	ensure_project_cache_dir(core_.paths(), cache_error);
 	const LeaseLiveness liveness = [this](int64_t pid, const std::string &created) {
 		return core_.platform().process_liveness(pid, created);
 	};
-	if (!take_run_directory(core_.paths().run_dir, liveness, run_dir, run_error)) {
+	if (!take_run_directory(core_.paths().run_dir, liveness, RunTake{mode, fresh}, run_dir, kept, run_error)) {
 		core_.report(make_finding(CoreFinding::PlayRunDirectory, DiagnosticSeverity::Error,
 		                          "The game's run directory could not be made: " + run_error));
 		view_.activity.status = "The game's run directory could not be made; see Problems.";
 		core_.touch(ViewConcern::Output);
 		return;
 	}
+	view_.activity.play_fresh = fresh;
+	view_.activity.play_kept = kept;
+	if (fresh)
+		core_.note("A fresh run: the run directory was emptied of what the runs before wrote there.");
+	else if (!kept.empty())
+		core_.note_folded("The run directory kept " + counted(kept.size(), "file") +
+		                          " the runs before wrote there (Play fresh starts without them); open this line for "
+		                          "the names.",
+		                  kept);
 	// An expansion's build plays over the game install, with /exp (ADR 0046 S16): its run directory
 	// holds the install's base game and the build's expansion folder (prepare_expansion_run), for the
 	// stock game and the runtime alike.
 	const std::string &expansion = view_.activity.last_build->expansion;
 	const std::string &copy_cache = core_.paths().install_copy_dir;
+	// What the staging put in the run directory recorded there, staged whole or not, so the next Play
+	// removes those files alone (and empties the directory when the record cannot be written).
+	const auto record_staging = [&](const std::vector<std::string> &staged) {
+		std::string record_error;
+		if (!record_run_staging(run_dir, RunStaging{mode, staged}, record_error))
+			core_.note("The run directory's staging record could not be written (" + record_error +
+			           "): the next Play starts from an empty run directory.");
+	};
 	if (in_install) {
 		const bool staged =
 		        strict ? prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan, error)
 		               : prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error, expansion,
 		                                            copy_cache);
+		record_staging(plan.staged);
 		if (!staged) {
 			core_.report(error);
 			view_.activity.status = "The game install could not be prepared; see Problems.";
@@ -262,8 +284,11 @@ void PlayController::start(const std::string &mission, bool behind) {
 		// build's mission is listed.
 		if (!in_mission.empty()) core_.note("The game install starts at its menu: choose " + in_mission + " there.");
 	} else {
-		if (!expansion.empty() &&
-		    !prepare_expansion_run(core_.game_install(), build_dir, expansion, run_dir, copy_cache, error)) {
+		std::vector<std::string> staged;
+		const bool prepared = expansion.empty() || prepare_expansion_run(core_.game_install(), build_dir, expansion,
+		                                                                 run_dir, copy_cache, error, link_file, &staged);
+		record_staging(staged);
+		if (!prepared) {
 			core_.report(error);
 			view_.activity.status = "The expansion's run directory could not be prepared; see Problems.";
 			core_.touch(ViewConcern::Output);
@@ -275,13 +300,15 @@ void PlayController::start(const std::string &mission, bool behind) {
 						  launcher.engine_args, expansion)
 				: make_play_launch_plan(executable, build_dir, run_dir, view_.project.document->target_game,
 						  launcher.mcp_port, in_mission, launcher.engine_args, expansion);
+		plan.staged = std::move(staged);
 	}
 	// Behind the others when the request asked (the MCP gaps lane): how the platform starts it.
 	plan.behind = behind;
 	install_run_ = in_install;
 	strict_run_ = strict;
-	// Strict Play's first run: whether the run directory (emptied, the build's files and the install's
-	// program in it) holds a game.cfg before the game starts, the build's own.
+	// Strict Play's first run: whether the run directory (the build's files and the install's program in
+	// it, and what the runs before wrote there) holds a game.cfg before the game starts, the build's own or
+	// one a run before wrote.
 	had_config_ = strict && fs::is_regular_file(system_path(join_path(plan.working_dir, "game.cfg")), ec);
 	started_again_ = false;
 	view_.activity.play_strict = strict;
@@ -296,8 +323,9 @@ void PlayController::start(const std::string &mission, bool behind) {
 }
 
 bool PlayController::launch(const LaunchPlan &plan, Diagnostic &error) {
-	// The run directory is new (emptied), or the first run's whose log was read as it exited (the game
-	// deletes the log a run before left as it writes its first line): the tail starts clean.
+	// The run directory holds no log (its take removed the logs a run before left, whatever else it kept),
+	// or it is the first run's whose log was read as it exited (the game deletes the log a run before left
+	// as it writes its first line): the tail starts clean.
 	game_log_file_ = plan.log_file;
 	game_log_offset_ = 0;
 	game_log_partial_.clear();

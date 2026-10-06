@@ -8,6 +8,10 @@
       <BOTTOM>600</BOTTOM>
     </POSITION>
     <APPEARANCE type="custom" state="default"></APPEARANCE>
+    <CURSOR>
+      <FILE>newarow1.tga</FILE>
+      <FLAGS>STANDARD_TRANSPARENT</FLAGS>
+    </CURSOR>
     <FONT>
       <NAME>%DEF_FONTNAME_LG%</NAME>
       <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>

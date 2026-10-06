@@ -1,0 +1,15 @@
+{
+  "importer": "image",
+  "options": {
+    "dds": "dxt5",
+    "format": "dds",
+    "mips": "full",
+    "name": "onbarl1_0.dds"
+  },
+  "outputs": [
+    "onbarl1_0.dds"
+  ],
+  "schema_version": 1,
+  "source_hash": "565b8b9815066fdb",
+  "version": 2
+}

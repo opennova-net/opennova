@@ -1,0 +1,15 @@
+{
+  "importer": "image",
+  "options": {
+    "dds": "dxt5",
+    "format": "dds",
+    "mips": "full",
+    "name": "oncrate1_0.dds"
+  },
+  "outputs": [
+    "oncrate1_0.dds"
+  ],
+  "schema_version": 1,
+  "source_hash": "e0fac116a055e1b0",
+  "version": 2
+}
