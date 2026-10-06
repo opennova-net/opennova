@@ -111,13 +111,15 @@ public:
 	// Undo and Redo.
 	void undo_redo(const EditorRequest &request);
 	void end_edit(const std::string &path);
-	void save(const std::string &path);
+	// Save: `over` writes over a file changed outside the editor (ADR 0046 DI-01: document.conflict's Keep my
+	// edits), what the other program saved there lost.
+	void save(const std::string &path, bool over = false);
 	void save_all();
 
 	// Writes each open document at `paths` that has unsaved edits (`rewrite`: an explicit Save,
 	// which also writes one with none whose file holds other bytes than it would write), past a
-	// failure, then one refresh; false when one could not be written.
-	bool save_documents(const std::vector<std::string> &paths, bool rewrite);
+	// failure, then one refresh; false when one could not be written. `over`: as save's.
+	bool save_documents(const std::vector<std::string> &paths, bool rewrite, bool over = false);
 	// What a document's last save said beyond writing, an Output line each; how many lines.
 	size_t note_save(const DocumentBase &document);
 	// EndEdit on every open document: the coalesced groups and the gestures end, and the validation
@@ -171,6 +173,10 @@ private:
 	Diagnostic missing_file(const std::string &path) const;
 	// The open document at exactly `path` (activate's), or null.
 	const DocumentBase *open_at(const std::string &path) const;
+	// `before` read again as `after` (reload_changed, a Reload): the records selected in it, the active
+	// selection or the one it kept while another is active, selected again in `after` by their places
+	// (Document::locator, as a project reopens them: ADR 0046 DI-01); those it no longer has drop out.
+	void keep_selection(const DocumentBase &before, const DocumentBase &after);
 	// The gesture open in the document at `path` ends (none open there: nothing), and with
 	// `validate` the validation its edits left waiting is due: an EndEdit, an Undo or a Redo of the
 	// document, a Save of it, the document closed, discarded or read again.
