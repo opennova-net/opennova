@@ -11,6 +11,7 @@
 
 #include <array>
 #include <filesystem>
+#include <optional>
 
 namespace opennova::editor {
 using namespace def;
@@ -397,6 +398,101 @@ void DefCatalogDocument::refine_symbol(const NodeAddress &address, SymbolFacts &
 	if (def_kind(address.kind) == DefRecordKind::Item) facts.value = std::to_string(static_cast<const DefItemDef *>(native)->type);
 	// A weapon's loadout name's key, which its words read where the HUD's has no text (definition_words).
 	if (def_kind(address.kind) == DefRecordKind::Weapon) facts.value = static_cast<const DefWeaponDef *>(native)->loadout_menu_textid;
+}
+
+// --- a name another file names, added (DI-15) -------------------------------------------------------------
+
+namespace {
+
+// The row kind a reference kind names, and what a new row of it holds before its lines are read, in words: the
+// record the game's reader opens for it (def_init_record), stamped before any key is parsed: an item's physics
+// block [orig: ItemDef_AllocateWithDefaults @ 0x49E3B0, called by the `begin` arm of ItemDef_ParseProperty @
+// 0x49EB00], a weapon's field of view, scope floor and stability [orig: AdmDef_InitEntryDefaults @ 0x53ff31,
+// @ 0x53FF61..0x53FF73], an ammo's velocity and age (taken from the table's first ammo at its `end`), drag,
+// recoil and turn rates [orig: AmmoDef_AllocateSlot @ 0x409A20, the defaults @ 0x409A56..0x409AF6;
+// AmmoDef_InheritDefaults @ 0x409EB0], a powerup's block zeroed [orig: the `end` arm's memset of
+// PowerUpDef_ParseProperty @ 0x442F5D..0x443017].
+bool catalog_kind_of(ReferenceKind kind, CatalogKind &out, const char *&what, const char *&defaults) {
+	switch (kind) {
+	case ReferenceKind::Weapon:
+		out = CatalogKind::Weapon;
+		what = "a weapon";
+		defaults = "the values the game gives a new weapon before its lines are read (its field of view 80, its scope "
+		           "magnification floor 2, full stability), no action and no ammo yet";
+		return true;
+	case ReferenceKind::Ammo:
+		out = CatalogKind::Ammo;
+		what = "an ammo";
+		defaults = "the values the game gives a new ammo before its lines are read (its velocity and age the table's "
+		           "first ammo's, drag 1, recoil 24), no effect rows yet";
+		return true;
+	case ReferenceKind::Item:
+		out = CatalogKind::Item;
+		what = "an item";
+		defaults = "the physics values the game gives every item before its lines are read";
+		return true;
+	case ReferenceKind::Powerup:
+		out = CatalogKind::Powerup;
+		what = "a powerup";
+		defaults = "a powerup's block as the game opens it, empty";
+		return true;
+	default: return false;
+	}
+}
+
+} // namespace
+
+bool define_catalog_symbol(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
+	const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document);
+	CatalogKind kind = CatalogKind::Item;
+	const char *what = "", *defaults = "";
+	if (!catalog || !catalog->family() || missing.target.empty() || !catalog_kind_of(missing.kind, kind, what, defaults) ||
+	    !catalog->family()->holds(node_kind(kind)))
+		return false;
+	const std::string file = basename_of(document.path());
+	out = PlannedFix();
+	if (kind != CatalogKind::Item) {
+		// A row named as the reference names it: the first row of a name is what a lookup finds (an ammo's, a
+		// powerup's), and a weapon block of a name no block has adds that weapon.
+		Edit add;
+		add.operation = EditOperation::Add;
+		add.address.kind = node_kind(kind);
+		add.field = catalog_name_field(node_kind(kind));
+		add.value = missing.target;
+		out.edits.push_back(std::move(add));
+		out.label = "Add " + missing.target + " to " + file;
+		out.detail = "Adds " + std::string(what) + " named " + missing.target + " at the end of " + file + ", with " +
+		             defaults + ", and selects it to fill in: the game's lookup then finds it.";
+		return true;
+	}
+	// An item is named by its id: the id the reference names, by the reserved-id rule. An id the engine keeps for
+	// a place, an objective or a model takes the item the engine looks for there, of its kind and named in the
+	// editor's words for it (reserved_item_add_edits, Add engine item...'s row); any other id a new item, a
+	// marker as an Add makes one, on that id.
+	const std::optional<int> id = strutil::parse_int(missing.target);
+	if (!id || *id < DEF_ITEM_ID_BASE) return false;
+	if (const ReservedItem *reserved = reserved_item_by_id(*id)) {
+		out.edits = reserved_item_add_edits(*reserved);
+		out.label = "Add " + std::string(reserved->label) + " (" + missing.target + ") to " + file;
+		out.detail = "Adds " + reserved_item_words(*reserved) + " on id " + missing.target + ", the id the engine keeps for it (" +
+		             reserved->use + "), at the end of " + file + ", with " + defaults +
+		             ", and selects it to fill in: a lookup by the id then finds it.";
+		return true;
+	}
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = node_kind(kind);
+	out.edits.push_back(std::move(add));
+	Edit set;
+	set.address = {batch_made(0), node_kind(kind), 0};
+	set.field = "id";
+	set.value = int64_t(*id);
+	out.edits.push_back(std::move(set));
+	out.label = "Add item " + missing.target + " to " + file;
+	out.detail = "Adds an item on id " + missing.target + " at the end of " + file + ", a marker as a new item is, with " +
+	             defaults + ", and selects it to fill in (its name, its type, its model): a lookup by the id then finds "
+	             "it.";
+	return true;
 }
 
 bool DefCatalogDocument::record_choices(const NodeAddress &address, const FieldUse &use,
