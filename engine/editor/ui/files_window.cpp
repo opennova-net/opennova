@@ -536,8 +536,8 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		if (ImGui::Selectable("Terrain from images...") && view.allows(EditorRequestKind::NewTerrain))
 			NewFilePrompt::ask(workspace_, AssetKind::Terrain);
 		ImGui::EndDisabled();
-		ui_kit::tooltip("A terrain made from a heightmap and a colour map (and a detail and a tile set): imported into "
-		                "the files the game reads for a terrain, and imported again when an image changes.");
+		ui_kit::tooltip("A terrain made from a heightmap and a colour map (and a detail, a tile set and a surface map): "
+		                "imported into the files the game reads for a terrain, and imported again when an image changes.");
 		// The files the game reads by name, each made at once from its role's factory.
 		ImGui::SeparatorText("Files the game reads");
 		for (size_t i = 0; i < blank_factory_count(); ++i) {
