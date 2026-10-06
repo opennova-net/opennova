@@ -11,6 +11,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/project/project_files.h>
 
 namespace opennova::editor {
 namespace {
@@ -378,6 +379,31 @@ static_assert(finding_rows_well_formed(kFindingRows), "every row of the table ta
 const FindingCodeRow &finding_code(SoundProfileFinding code) { return kFindingRows[static_cast<size_t>(code)]; }
 
 FindingTable sound_profile_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
+
+// A sound profile an item binds by a name no profile has (DI-15): a profile of that name as Add sound profile makes
+// one, the profile the game's reader opens at a `begin` line, every slot empty and every loop number 0
+// (audio::SoundProfile's) [orig: SoundProfile_ParseLineCallback @ 0x526fc0]. A name of 64 characters or more is
+// cut by the reader [orig: @ 0x52703F..0x527043]: none is offered.
+bool define_sound_profile(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
+	const auto *profiles = dynamic_cast<const SoundProfileDocument *>(&document);
+	if (!profiles || missing.kind != ReferenceKind::SoundProfile || missing.target.empty() ||
+	    missing.target.size() >= kProfileNameBytes)
+		return false;
+	const SoundProfileRow *bound = profiles->find_profile(missing.target);
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = kProfile;
+	add.field = "name";
+	add.value = missing.target;
+	out = PlannedFix();
+	out.edits.push_back(std::move(add));
+	const std::string file = basename_of(document.path());
+	out.label = "Add " + missing.target + " to " + file;
+	out.detail = "Adds the sound profile " + missing.target + " at the end of " + file + ", as Add sound profile makes one, "
+	             "every slot empty, and selects it to give its slots their sets: the game then binds it" +
+	             (bound ? " in place of the first profile, " + bound->profile.name + ", which it binds now." : ".");
+	return true;
+}
 
 std::vector<Diagnostic> validate_sound_profiles_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
