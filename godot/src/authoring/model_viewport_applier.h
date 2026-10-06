@@ -95,8 +95,11 @@ private:
 	// registers, the clip at `clock`, the camera and the level), so an Update folded into a build
 	// applies as the build ends exactly as it would have.
 	void apply_state_(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock);
-	// The CTRL registers the options hold (one let go reads 0 again); nothing when they stand.
-	void apply_registers_(const opennova::editor::ViewportModel &model);
+	// The CTRL registers the picture reads at `clock` (the options' held ones, and the destroy fade's while
+	// the damage state drives them: ModelViewport::ctrl_at; one let go reads 0 again), and the sections the
+	// death pieces left (ModelViewport::hidden_sections_at, the model's destroyed-section mask, DI-10);
+	// nothing when they stand.
+	void apply_registers_(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock);
 	// The camera where the viewport's is, and the level it picks.
 	void place_camera_(const opennova::editor::ViewportModel &model);
 	// The rig the viewport loaded, bound to the model (again when it is loaded again).
@@ -111,6 +114,7 @@ private:
 	// The files the built scene read (its textures), noted as they are read.
 	std::shared_ptr<const opennova::editor::StampedFiles> files_;
 	std::map<std::string, int64_t> applied_ctrl_; // the registers the model holds now
+	uint32_t applied_hidden_ = 0; // the destroyed-section mask the model holds now
 	int applied_lod_ = -1;
 	uint64_t applied_skeleton_ = UINT64_MAX; // the rig serial the model holds
 	std::unique_ptr<Build> build_; // the build in flight (null: none)
