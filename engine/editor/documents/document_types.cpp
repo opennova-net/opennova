@@ -8,6 +8,7 @@
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/environment_document.h>
+#include <editor/documents/hud_layout_type.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_validation.h>
@@ -111,6 +112,10 @@ constexpr DocumentType kTypes[] = {
 	// fields' (the cloud layers' textures, the sun, moon, glare and star models).
 	{ DocumentTypeId::Environment, "environment", make_environment, validate_environment_file,
 			EnvironmentDocument::schema, environment_finding_codes },
+	// The HUD layout (the plan's DI-20): hudpos.def held as its text, its line ends the game's reader's;
+	// its picture the HUD viewport's, its names the graph's through the engine's own parser.
+	{ DocumentTypeId::HudLayout, "hud_layout", make_hud_layout_document, validate_hud_layout_file, text_fields,
+			hud_layout_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
