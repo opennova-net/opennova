@@ -222,15 +222,6 @@ SpawnPointResult objective_coop_entity_pose(const World &world, uint8_t team) {
     return out;
 }
 
-int32_t team_fallback_marker(uint8_t team) {
-    switch (team) {
-    case 1: return 6003;
-    case 2: return 6004;
-    case 3: return 6090;
-    case 4: return 6091;
-    default: return 0;
-    }
-}
 
 // The POSITIONING team of the no-pick arm. A slot with the spectator latch
 // never positions as its assigned team 0: Co-op substitutes 1; a team mode
@@ -267,13 +258,14 @@ SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
     // CPlayerStats_GetFieldPlusOne @0x52D7D0]
     const bool primary_allowed =
         world.match.team_stats(team)[MatchStats::kDeaths] == 0;
+    const StartMarkerTypes types = start_marker_types(game_type_value, team);
     if (game_type::is_waypoint_family(game_type_value)) {
         if (primary_allowed) {
-            const std::vector<const Entity *> primary = markers_of_type(world, 6094);
+            const std::vector<const Entity *> primary = markers_of_type(world, types.primary);
             if (!primary.empty())
                 return coop_marker_pose(world, *primary[player_slot % primary.size()]);
         }
-        const std::vector<const Entity *> fallback = markers_of_type(world, 6001);
+        const std::vector<const Entity *> fallback = markers_of_type(world, types.fallback);
         if (!fallback.empty())
             return coop_marker_pose(world, *fallback[player_slot % fallback.size()]);
         return game_type::is_objective(game_type_value)
@@ -281,24 +273,34 @@ SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
             : SpawnPointResult{};
     }
 
-    const bool team_mode = game_type::is_team(game_type_value);
-    const int32_t primary_type = team_mode && team >= 1 && team <= 4
-        ? 6095 + team
-        : team_mode ? 0 : 6095;
-    if (primary_allowed && primary_type != 0 &&
-        !markers_of_type(world, primary_type).empty()) {
+    if (primary_allowed && types.primary != 0 &&
+        !markers_of_type(world, types.primary).empty()) {
         ++world.zones.spawn_cycle_counter;
-        return best_marker_pose(world, primary_type, spawning_player);
+        return best_marker_pose(world, types.primary, spawning_player);
     }
 
-    const int32_t fallback_type = team_mode ? team_fallback_marker(team) : 6002;
     ++world.zones.spawn_cycle_counter;
-    return fallback_type != 0
-        ? best_marker_pose(world, fallback_type, spawning_player)
+    return types.fallback != 0
+        ? best_marker_pose(world, types.fallback, spawning_player)
         : SpawnPointResult{};
 }
 
 } // namespace
+
+StartMarkerTypes start_marker_types(uint32_t game_type_value, uint8_t team) {
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60, the no-pick arm]
+    if (game_type::is_waypoint_family(game_type_value))
+        return {6094, 6001};
+    if (!game_type::is_team(game_type_value))
+        return {6095, 6002};
+    switch (team) {
+    case 1: return {6096, 6003};
+    case 2: return {6097, 6004};
+    case 3: return {6098, 6090};
+    case 4: return {6099, 6091};
+    default: return {0, 0};
+    }
+}
 
 SpawnPointResult resolve_player_spawn_pose(
     World &world, EntityHandle spawning_player, EntityHandle target,

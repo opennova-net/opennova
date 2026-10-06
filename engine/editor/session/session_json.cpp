@@ -262,7 +262,8 @@ bool members_known(const JsonValue &object, std::initializer_list<const char *> 
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
 	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "game_install",
-	                          "runtime_executable", "play_in_install", "play_in_install_strict", "build_folder"},
+	                          "runtime_executable", "play_in_install", "play_in_install_strict", "save_before_play",
+	                          "build_folder"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
 	if (const JsonValue *serial = json.get("serial"); serial && !read_id(*serial, change.serial)) {
@@ -287,7 +288,8 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 	    !text("expansion", change.expansion) || !text("builds_on", change.builds_on) ||
 	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
 	    !flag("play_in_install", change.play_in_install) ||
-	    !flag("play_in_install_strict", change.play_in_install_strict) || !text("build_folder", change.build_folder))
+	    !flag("play_in_install_strict", change.play_in_install_strict) ||
+	    !flag("save_before_play", change.save_before_play) || !text("build_folder", change.build_folder))
 		return false;
 	out = std::move(change);
 	return true;
@@ -306,6 +308,7 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 		out.set("runtime_executable", json_string(*change.runtime_executable));
 	if (change.play_in_install) out.set("play_in_install", boolean(*change.play_in_install));
 	if (change.play_in_install_strict) out.set("play_in_install_strict", boolean(*change.play_in_install_strict));
+	if (change.save_before_play) out.set("save_before_play", boolean(*change.save_before_play));
 	if (change.build_folder) out.set("build_folder", json_string(*change.build_folder));
 	return out;
 }
@@ -517,6 +520,47 @@ bool paste_at_from_json(const JsonValue &json, PasteAt &out, std::string &error)
 		at.position = static_cast<size_t>(index);
 	}
 	out = at;
+	return true;
+}
+
+// Where Play starts the player (DI-26): {at: [x, y, z], yaw?}, mission metres and compass degrees.
+JsonValue play_start_to_json(const PlayStart &start) {
+	JsonValue out = JsonValue::make_object();
+	JsonValue at = JsonValue::make_array();
+	for (const double each : start.at) at.push(json_number(each));
+	out.set("at", std::move(at));
+	out.set("yaw", json_number(start.yaw));
+	return out;
+}
+
+bool play_start_from_json(const JsonValue &json, PlayStart &out, std::string &error) {
+	if (!json.is_object()) {
+		error = "\"start\" must be an object {at: [x, y, z], yaw?}.";
+		return false;
+	}
+	if (!members_known(json, {"at", "yaw"}, "start", error)) return false;
+	PlayStart start;
+	const JsonValue *at = json.get("at");
+	if (!at || !at->is_array() || at->array.size() != 3) {
+		error = "\"start\"'s at must be [x, y, z], mission metres (x east, y north, z up).";
+		return false;
+	}
+	for (size_t i = 0; i < 3; ++i) {
+		if (!at->array[i].is_number() || !std::isfinite(at->array[i].number)) {
+			error = "\"start\"'s at must be three numbers.";
+			return false;
+		}
+		start.at[i] = at->array[i].number;
+	}
+	if (const JsonValue *yaw = json.get("yaw")) {
+		if (!yaw->is_number() || !std::isfinite(yaw->number)) {
+			error = "\"start\"'s yaw must be a number, compass degrees.";
+			return false;
+		}
+		start.yaw = yaw->number;
+	}
+	start.set = true;
+	out = start;
 	return true;
 }
 
@@ -863,6 +907,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return true;
 	}
 	case F::PasteAt: return paste_at_from_json(json, request.paste_at, error);
+	case F::Start: return play_start_from_json(json, request.start, error);
 	case F::Mode:
 		if (json.is_string() && select_mode_from_token(json.string, request.mode)) return true;
 		error = "Unknown selection mode \"" + shown + "\".";
@@ -1025,6 +1070,9 @@ bool field_to_json(
 	// Its default is 1: the writer names it only when it is more.
 	case F::Steps: out = json_number(double(request.steps)); return request.steps != 1;
 	case F::Folder: out = json_string(request.folder); return !request.folder.empty();
+	case F::Start:
+		out = play_start_to_json(request.start);
+		return request.start.set;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();

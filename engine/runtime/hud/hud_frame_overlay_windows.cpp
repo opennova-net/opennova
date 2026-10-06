@@ -285,10 +285,22 @@ void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, flo
 			y1, pages.starts[pages.page], lines);
 	// The wrapper halves the colour keeping its alpha [orig: @0x580c99..0x580ca8].
 	const uint32_t color = half_bright_keep_alpha(0xFFFFFFFFu);
+	// The wrapper threads one five-dword state block through every line: the
+	// style bytes cleared, the live and original colours the halved colour,
+	// the tab width the font's [orig: @0x580caa..0x580cce; &block passed
+	// @0x580d9e]. Its second dword, the inert byte, is never written, so it
+	// holds the panel's stack residue: on the authority path, the section
+	// row TextResource_FindEntryBySectionAndKey pushed for its last call
+	// (push edi @0x75d2e9, reached through MissionText_GetString @0x5bada2).
+	// That pointer's low byte is not zero, so every tag is consumed and
+	// changes nothing: the briefing draws plain, its markup hidden
+	// [orig: GText_ParseFormatTag @0x6743b0] (D-HUD-50).
+	GameFontState block;
+	block.tags_inert = true;
 	for (const HudWrappedLine &line : lines) {
 		const std::string run = state.briefing.text.substr(line.begin, line.end - line.begin);
 		const GameFontRun laid = bf.layout(run.c_str(), static_cast<float>(x0),
-				static_cast<float>(line.y), bscale, bscale, 0u, color);
+				static_cast<float>(line.y), bscale, bscale, 0u, color, &block);
 		draw_list_.glyphs.insert(draw_list_.glyphs.end(), laid.quads.begin(), laid.quads.end());
 		draw_list_.underlines.insert(draw_list_.underlines.end(), laid.underlines.begin(),
 				laid.underlines.end());
