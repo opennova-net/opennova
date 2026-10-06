@@ -1,1 +1,96 @@
-// Character attributes of OpenNova. Classes go in [CHARACTER1] .. [CHARACTER16] sections.
+// Character attributes of OpenNova. Classes go in [CHARACTER1] .. [CHARACTER16].
+// Each class's *_CAMMO is the items.def person (its id less 100000) a player of the class spawns as,
+// by the mission's camo setting: 5310 "Player #1, Single player", 5305 "Player #1, Multiplayer",
+// both the onsold1 soldier. Class 1 is the single-player player's; 5 to 9 the multiplayer classes.
+// Attributes: AutoScope KnifeBonus Medic.
+
+// Single player
+[CHARACTER1]
+STEALTH		= 25
+HPBONUS		= 2
+RECOIL_MUTE	= 0.75
+XHAIR_MUTE	= 2.5
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE	= 0.0
+RELOAD_MUTE	= 0.5
+JUNGLE_CAMMO	= 5310
+DESERT_CAMMO	= 5310
+ARCTIC_CAMMO	= 5310
+RUN_MODIFIER	= 0
+ATTRIBUTES	= AutoScope
+
+// Multiplayer medic
+[CHARACTER5]
+STEALTH		= 25
+HPBONUS		= 2
+RECOIL_MUTE	= 0.75
+XHAIR_MUTE	= 2.5
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE	= 0.0
+RELOAD_MUTE	= 0.5
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= 1
+ATTRIBUTES	= Medic
+
+// Multiplayer sniper
+[CHARACTER6]
+STEALTH		= 25
+HPBONUS		= 2
+RECOIL_MUTE	= 0.75
+XHAIR_MUTE	= 2.5
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE	= 0.0
+RELOAD_MUTE	= 0.5
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= 0
+ATTRIBUTES	= AutoScope
+
+// Multiplayer gunner
+[CHARACTER7]
+STEALTH		= 25
+HPBONUS		= 2
+RECOIL_MUTE	= 0.75
+XHAIR_MUTE	= 2.5
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE	= 0.0
+RELOAD_MUTE	= 0.5
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= -1
+ATTRIBUTES	= AutoScope
+
+// Multiplayer rifleman
+[CHARACTER8]
+STEALTH		= 25
+HPBONUS		= 2
+RECOIL_MUTE	= 0.75
+XHAIR_MUTE	= 2.5
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE	= 0.0
+RELOAD_MUTE	= 0.5
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= 0
+ATTRIBUTES	= KnifeBonus
+
+// Multiplayer engineer
+[CHARACTER9]
+STEALTH		= 25
+HPBONUS		= 2
+RECOIL_MUTE	= 0.75
+XHAIR_MUTE	= 2.5
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE	= 0.0
+RELOAD_MUTE	= 0.5
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= 0
+ATTRIBUTES	= KnifeBonus
+
