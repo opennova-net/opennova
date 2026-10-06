@@ -57,6 +57,11 @@ const char *sound_profile_slot_keyword(int slot) {
     return kSlotKeywords[slot];
 }
 
+const char *sound_profile_loop_keyword(int index) {
+    if (index < 0 || index >= kSoundProfileLoopParamCount) return nullptr;
+    return kLoopKeywords[index];
+}
+
 const char *body_model_prefix(int anim_slot) {
     // [orig: Entity_GetBodyModelPrefix @ 0x5280F0 — a null entity or a zero
     // +0x374 byte defaults to type 1; the switch maps the prefix strings
