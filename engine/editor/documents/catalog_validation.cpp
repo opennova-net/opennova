@@ -5,7 +5,10 @@
 
 #include <base/io/strutil.h>
 
+#include <formats/def/reserved_items.h>
+
 #include <map>
+#include <set>
 #include <unordered_map>
 
 namespace opennova::editor {
@@ -23,6 +26,16 @@ constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
 	{ CatalogFinding::NameDuplicate, { "catalog.name_duplicate" } },
 	{ CatalogFinding::ItemIdentity, { "catalog.item_identity" } },
 	{ CatalogFinding::ItemType, listed_code("catalog.item_type") },
+	// The ids and rows the engine fixes (itemdef-re.md, "The ids and rows the engine fixes"): the game loads
+	// the file either way, so each is listed. What the engine keeps an item's id for (an Info: the
+	// Inspector's hint); an item of another kind on such an id, or named as one the engine keeps under
+	// another id (Use an id of its own, or that id: Rename everywhere); a first row that is no Null
+	// marker (Add one first); an edit refused for either (the refusal's own code).
+	{ CatalogFinding::ReservedId, listed_code("catalog.reserved_id") },
+	{ CatalogFinding::ReservedKind, listed_code("catalog.reserved_kind", FindingFix::ItemId) },
+	{ CatalogFinding::ReservedName, listed_code("catalog.reserved_name", FindingFix::ItemId) },
+	{ CatalogFinding::FirstRow, listed_code("catalog.first_row", FindingFix::FallbackRow) },
+	{ CatalogFinding::ReservedRefused, listed_code("catalog.reserved_refused") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(CatalogFinding::kCount),
 		"every CatalogFinding has exactly one row");
@@ -63,6 +76,51 @@ constexpr RepeatedName kRepeatedNames[] = {
 	{DefRecordKind::Powerup,
 	 "An earlier powerup has this name: an item's powerupdef finds the earlier one, and no item binds this one."},
 };
+
+// What the ids and rows the engine fixes make of an item (formats/def/reserved_items.h; itemdef-re.md,
+// "The ids and rows the engine fixes"), on the item a lookup by its id finds; `ids` every item id of the
+// file, `first_row` whether it is the file's first item. The game loads the file either way: an item of
+// another kind on an id the engine keeps for a place or an objective is an error that refuses no build,
+// one on an id it keeps for a model or an actor a warning.
+template <typename Add>
+void reserved_findings(const DefItemDef &item, const std::set<int> &ids, bool first_row, Add &add,
+                       const NodeAddress &address) {
+	using def::ReservedItemRule;
+	const std::string id = std::to_string(item.id);
+	const def::ReservedItem *held = def::reserved_item_by_id(item.id);
+	if (held && def::reserved_item_kind_matches(*held, item.type)) {
+		add(DiagnosticSeverity::Info, CatalogFinding::ReservedId,
+		    "The engine keeps id " + id + " for " + reserved_item_words(*held) + ": " + held->use, "id", address);
+	} else if (held) {
+		const bool refuse = held->rule == ReservedItemRule::Refuse;
+		add(refuse ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning, CatalogFinding::ReservedKind,
+		    "The engine keeps id " + id + " for " + reserved_item_words(*held) + ": " + held->use + " This item is " +
+		            item_kind_words(item.type) +
+		            (refuse ? ", never what the engine looks for there: give it an id of its own."
+		                    : ", which the engine takes in its place."),
+		    "id", address);
+	} else if (const def::ReservedItem *named = reserved_item_named(item.display_name);
+	           named && !ids.count(def::DEF_ITEM_ID_BASE + named->type)) {
+		// Named as a place or an objective the engine finds by an id the file lacks.
+		add(DiagnosticSeverity::Warning, CatalogFinding::ReservedName,
+		    "This item is named as " + reserved_item_words(*named) + ", which the engine finds only by id " +
+		            std::to_string(def::DEF_ITEM_ID_BASE + named->type) + ": " + named->use + " On id " + id +
+		            " the engine takes it for an item like any other.",
+		    "id", address);
+	}
+	// The row every lookup that finds nothing resolves to [orig: ItemList_FindIndexByTypeId @ 0x49e100,
+	// 0 on a miss], which a player of a class with no item spawns as [orig: Entity_SpawnFromAnimSlotProperty
+	// @ 0x43c390, @0x43C3CA] and the pool walks and the script checks take for no item [orig:
+	// Entity_UpdateVehiclePhysics @ 0x48BDD9; Entity_IsOnTopOfChain @ 0x4F1A35]: retail's is a marker no
+	// mission places, "Null" (id 100000).
+	if (!first_row || (item.type == DEF_ITEM_TYPE_MARKER && !held)) return;
+	const std::string is = held ? reserved_item_words(*held) + " (id " + id + ")" : item_kind_words(item.type);
+	add(DiagnosticSeverity::Warning, CatalogFinding::FirstRow,
+	    "The engine gives every id it finds no item of the first row's item, a player of a class with no item "
+	    "spawns as it, and its script checks take an entity of it for no item at all. Retail's first row is a "
+	    "marker no mission places (\"Null\", id 100000); this one is " + is + ".",
+	    held ? "id" : "type", address);
+}
 
 std::string repeated_name(DefRecordKind kind, const Node &earlier) {
 	for (const RepeatedName &row : kRepeatedNames) {
@@ -129,6 +187,13 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 	// is compared within its table alone.
 	std::map<int, const Node *> first_of_id;
 	std::map<std::string, const Node *> named; // the first record of each kind and name
+	std::set<int> item_ids;                     // every item's id: a reserved one the file has
+	const Node *first_item = nullptr;           // the row every lookup that finds nothing resolves to
+	for (const auto &row : catalog->rows()) {
+		if (def_kind(row->kind) != DefRecordKind::Item) continue;
+		item_ids.insert(catalog_row(*row).native.as<DefItemDef>().id);
+		if (!first_item) first_item = row.get();
+	}
 	for (const auto &row : catalog->rows()) {
 		auto add = [&](DiagnosticSeverity severity, CatalogFinding code, const std::string &message,
 			const std::string &field, NodeAddress address) {
@@ -158,6 +223,8 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 				            ": the game keeps both, and a lookup by the id finds the earlier one.",
 				    "id", address);
 			if (!item.type) add(DiagnosticSeverity::Error, CatalogFinding::ItemType, "Choose an item type.", "type", address);
+			// The id the engine looks this item up by, on the item a lookup finds (the first of its id).
+			if (first.second) reserved_findings(item, item_ids, row.get() == first_item, add, address);
 		}
 	}
 	return findings;

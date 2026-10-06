@@ -517,9 +517,9 @@ protected:
 		}
 		return true;
 	}
-	bool accept_step(const EditStep &step, const StagedRows &, std::string &error) const override {
+	bool accept_step(const EditStep &step, const StagedRows &, StepRefusal &refusal) const override {
 		if (!veto || veto(step)) return true;
-		error = "Vetoed.";
+		refusal.message = "Vetoed.";
 		return false;
 	}
 	// A change made in C++ (FakeChange) of an item and the note; any other change refused.

@@ -186,7 +186,7 @@ protected:
 	bool accept_list_edit(const Node &row, const ListChange &change, std::string &error) const override;
 	// The mission row and the 128 paths are never added, removed or moved, and an area trigger the
 	// step puts in never takes a zone id another holds: a step that would is refused.
-	bool accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const override;
+	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
 	// The markers or the events moved: every stop's marker, every Event trigger's and ResetEvent
 	// action's event renumbered (RecordShift::now), an event the step put in naming another it put in
 	// by its EventLink; a reference to a record the edit removed refuses the edit with its site.
