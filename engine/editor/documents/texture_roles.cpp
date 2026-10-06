@@ -196,9 +196,12 @@ constexpr TextureRoleRow kRows[] = {
 	        .no_alpha()
 	        .row,
 	Role(R::TerrainCharMap, "terrain_char_map", "terrain char map", G::Terrain, L::Pcx8, kTexturePcx)
-	        .size(S::Unknown)
-	        .alpha("none: each palette index is data")
-	        .witness("the parsed slot @ 0x60F7F6 (its reader NEEDS-RE)")
+	        .size(S::SquarePowerOfTwoAtMost, 1024)
+	        .alpha("none: each palette index is a surface class, its colour unused")
+	        .sampling("looked up by index, its side's power of two over the 1024-unit heightmap")
+	        .missing("surface 1 everywhere")
+	        .witness("sub_605A10 @ 0x605A31 (the 8-bit PCX reader), its side @ 0x605A82..0x605AA0; "
+	                 "Terrain_GetSurfaceTypeAtPosition @ 0x606519, @ 0x6065C6")
 	        .no_alpha()
 	        .row,
 	// --- Environment --------------------------------------------------------------------------------
