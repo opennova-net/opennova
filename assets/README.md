@@ -31,6 +31,7 @@ the editor finds it anywhere in the project. Keep new files at the top level.
 | `gametext.bin`, `gameerr.bin`, `vmacros.bin`, `keyhelp.bin`, `game.bin`, `menutxt.bin` | The string tables the game reads as it starts and the main menu reads. Blank tables from Create Missing. |
 | `nw_cdata.coo` | The NovaWorld screens' string table the main menu reads. Blank, from Create Missing. |
 | `items.def`, `weapon.def`, `charattr.def` | The item, weapon and character-attribute definitions the game reads as it starts. Blank (one `Null` marker item; no weapon or class yet), from Create Missing. |
+| `SndProf.def` | One empty `default` sound profile: without it the original game binds every item's sounds to memory it never cleared and hangs the mission (PR #791). |
 | `menu_style.mns`, `brand.mns` | The menu stylesheets: the `%NAME%` fonts and colours the screens use. From Create Missing. |
 | `on_ar15.3di` | A first-person AR-15-pattern carbine, 64 parts on one rig. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` and `on_arms*` file below. |
 | `on_arms.3di` | The first-person arms skinned to `on_ar15`'s rig (its first 55 parts). |
