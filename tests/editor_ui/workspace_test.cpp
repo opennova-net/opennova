@@ -1207,13 +1207,15 @@ void test_menu_bar_status() {
 	CHECK(one(requests, EditorRequestKind::Play) != nullptr, "Play");
 
 	// A window too narrow for all of it: the parts on the left go first, what was said the
-	// first of them; the buttons stay.
-	ImGui::GetIO().DisplaySize = ImVec2(580.0f, 700.0f);
+	// first of them; the buttons stay. Back and Forward lead the bar, two arrows' room taken
+	// before the menus.
+	const float arrows = 2.0f * (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x);
+	ImGui::GetIO().DisplaySize = ImVec2(580.0f + arrows, 700.0f);
 	ui.frames(3);
 	text = logged_frame(ui);
 	CHECK(text.find("menus/a") == std::string::npos && in_order(text, {"Windows", "2 unsaved", "Built", "Stop"}),
 	      "narrower: what was said left out first");
-	ImGui::GetIO().DisplaySize = ImVec2(360.0f, 700.0f);
+	ImGui::GetIO().DisplaySize = ImVec2(360.0f + arrows, 700.0f);
 	ui.frames(3);
 	text = logged_frame(ui);
 	CHECK(text.find("2 unsaved") == std::string::npos && in_order(text, {"Windows", "Stop"}), "narrow: the unsaved count left out");
@@ -1227,7 +1229,7 @@ void test_menu_bar_status() {
 	                                    item_id(bar_id, {"status", "Stop"})};
 	std::vector<ImGuiID> ids = menus;
 	ids.insert(ids.end(), parts.begin(), parts.end());
-	for (const float width : {1000.0f, 520.0f, 360.0f}) {
+	for (const float width : {1000.0f, 520.0f + arrows, 360.0f + arrows}) {
 		ImGui::GetIO().DisplaySize = ImVec2(width, 700.0f);
 		ui.frames(3);
 		const std::vector<std::pair<float, float>> spans = hover_spans(ui, ids);
