@@ -35,4 +35,14 @@ struct NativeTextSite {
 size_t rewrite_native_text(const std::string &file, AssetKind kind, const std::string &game, std::string &text,
                            const std::vector<NativeTextSite> &sites, std::vector<size_t> &missed);
 
+// Where a text the engine's own parser reads writes a record's name (the deep-integration plan's DI-17: a
+// Go to into such a text lands on its line, though the parser keeps no places): the name of the first edge
+// the parser reads of `record` and `field` (any field with none), else of the first symbol `record`
+// defines (of `field`, where given); the whole token spelling it (as rewrite_native_text bounds one, without
+// case) whose change, the text read again, changes that one name and nothing else. Its line and column
+// (1-based, in the text's bytes); false when the text names no such record or no token is it. Any kind the
+// graph reads through a native extractor (the avatars, a terrain, a face animation, a particle file).
+bool native_text_place(const std::string &file, AssetKind kind, const std::string &game, const std::string &text,
+                       const std::string &record, const std::string &field, size_t &line, size_t &column);
+
 } // namespace opennova::editor
