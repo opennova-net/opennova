@@ -30,6 +30,7 @@
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
+#include <formats/trn/charmap_legend.h>
 
 namespace opennova::editor {
 
@@ -111,6 +112,10 @@ struct MissionViewportView::Tools {
 	std::string hint;
 	CanvasPoint mouse;
 	bool mouse_on_picture = false;
+	// The ground under the pointer in the game's words (DI-07), as the canvas last read it: its line and
+	// its surface class (the char map legend's swatch; -1 none).
+	std::string ground;
+	int ground_surface = -1;
 
 	void toolbar(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void show_popup(MissionViewportOptions &options);
@@ -121,6 +126,7 @@ struct MissionViewportView::Tools {
 			const MissionCanvas &canvas);
 	void events_using(Workspace &workspace, const MissionViewport &mission, const SessionView &view);
 	void notes(const MissionViewport &mission);
+	void ground_line();
 	float snap_metres() const { return snap; }
 };
 
@@ -166,9 +172,11 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 			else workspace.request(request::paste(path));
 		}
 	}
-	// Under the canvas: the hint (what a click does now), then a line while the picture lacks a file.
+	// Under the canvas: the hint (what a click does now), the ground under the pointer while the mission
+	// names a terrain (DI-07), then a line while the picture lacks a file.
 	const float line = ImGui::GetFrameHeightWithSpacing();
-	const float under = line + (mission.missing().empty() ? 0.0f : line);
+	const bool terrain = !mission.scene().header().terrain.empty();
+	const float under = line + (terrain ? line : 0.0f) + (mission.missing().empty() ? 0.0f : line);
 	const float height = std::max(48.0f, ImGui::GetContentRegionAvail().y - under);
 	// Beside the picture while a tool picks from a list: the palette (Place) or the paths (Path).
 	const bool side = tool == MissionTool::Place || tool == MissionTool::Path;
@@ -180,7 +188,12 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 			[&](const CanvasInput &in) {
 				tools.mouse = in.mouse;
 				tools.mouse_on_picture = in.hovered;
-				if (canvas) tools.hint = canvas->hint(context, in);
+				if (canvas) {
+					tools.hint = canvas->hint(context, in);
+					const MissionGroundFacts &ground = canvas->ground(context, in);
+					tools.ground = mission_ground_line(ground);
+					tools.ground_surface = ground.on == MissionGroundOn::Terrain && !ground.under_water ? ground.surface : -1;
+				}
 				// Let go over the picture: a palette's item placed there, or a Files row's model (whose item
 				// the viewport finds, refusing another file and naming why).
 				if (ImGui::BeginDragDropTarget()) {
@@ -254,6 +267,7 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 	ui_kit::clipped_text(tools.hint);
 	ImGui::PopStyleColor();
+	if (terrain) tools.ground_line();
 	if (!mission.missing().empty()) tools.notes(mission);
 	if (stop) set_tool(workspace, mission, MissionTool::Select);
 }
@@ -617,6 +631,26 @@ void MissionViewportView::Tools::time_popup(MissionViewportOptions &options, con
 	if (ImGui::SliderFloat("Hour", &hour, 0.0f, 24.0f, "%.1f h", ImGuiSliderFlags_AlwaysClamp) && !own)
 		options.time = double(hour);
 	ImGui::EndDisabled();
+}
+
+void MissionViewportView::Tools::ground_line() {
+	if (ground.empty()) {
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ui_kit::clipped_text("Ground: point at the terrain to read its surface class, the footsteps a body plays there and "
+							 "the row a round plays.");
+		ImGui::PopStyleColor();
+		return;
+	}
+	// The class's colour in the char map legend, the colour a surface map paints it (formats/trn/charmap_legend.h).
+	if (ground_surface >= 0 && ground_surface < kCharmapLegendCount) {
+		const CharmapLegendColour &c = kCharmapLegend[ground_surface];
+		const float side = ImGui::GetTextLineHeight();
+		ImGui::ColorButton("##surface", ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
+				ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoDragDrop,
+				ImVec2(side, side));
+		ImGui::SameLine();
+	}
+	ui_kit::clipped_text("Ground: " + ground);
 }
 
 void MissionViewportView::Tools::notes(const MissionViewport &mission) {
