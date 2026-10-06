@@ -164,11 +164,12 @@ int test_file_card() {
 	const SessionView &v = session.view();
 	const FileCard bank = file_card(v, "menu.lwf");
 	TEST_EXPECT(bank.found && bank.kind == AssetKind::SoundBank && bank.path == "sounds/menu.lwf");
-	TEST_EXPECT(bank.build == "Packed into resource.pff." && !bank.about.empty() && !bank.opens);
+	TEST_EXPECT(bank.build == "Packed into resource.pff." && !bank.about.empty() && bank.opens);
 	bool tone = false, missing = false;
 	for (const FileCard::Named &named : bank.names) {
 		if (named.file == "sounds/tone.wav") tone = named.wave && named.status == ReferenceStatus::Present;
-		if (named.value.find("MSOVR_2") != std::string::npos) missing = named.status == ReferenceStatus::Missing;
+		// The wave row's file (the member naming the wave by its name finds it in the bank).
+		if (named.value == "SFX\\MENU\\MSOVR_2.wav") missing = named.status == ReferenceStatus::Missing;
 	}
 	TEST_EXPECT(tone && missing);
 	const FileCard wave = file_card(v, "sounds/tone.wav");

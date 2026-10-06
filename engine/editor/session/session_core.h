@@ -21,6 +21,7 @@
 #include <editor/session/session_operation.h>
 #include <editor/session/view/view_revisions.h>
 #include <editor/session/view/session_view.h>
+#include <runtime/audio/sound_selector.h>
 
 namespace opennova::editor {
 
@@ -85,6 +86,9 @@ public:
 	void start();
 
 	SessionView &view() { return view_; }
+	// The sound plays' member picks (session/sound_play.h): one stream and one cursor per layer for the
+	// session, as the game keeps one for its run, so a sequential layer steps on from play to play.
+	audio::SoundSelector &sound_selector() { return sound_selector_; }
 	const SessionView &view() const { return view_; }
 	// The viewports (S13 V5): shared const on the view (DocumentsView::viewports), kept with the
 	// view's previews' targets at every touch; the Shell's devices drive their follow.
@@ -394,6 +398,7 @@ private:
 	OperationSlot operations_;
 	PollBudget poll_budget_ = kDefaultPollBudget;
 	SessionView view_;
+	audio::SoundSelector sound_selector_;
 	std::shared_ptr<Viewports> viewports_;
 	std::shared_ptr<TextureUseIndex> texture_uses_; // the view's texture_uses, cleared with the project
 	ActionOutcome outcome_;
