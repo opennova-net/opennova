@@ -52,6 +52,14 @@ struct TextReference {
 	bool rewritable = true;
 };
 
+// A name a text defines at a span, which other files name it by (a shader's tag, the effect it registers
+// under): the asset graph makes a symbol of it, its definition at the span.
+struct TextDefinition {
+	ReferenceKind kind = ReferenceKind::None;
+	std::string name;
+	TextSpan span;
+};
+
 // A run of a text its game reader reads as a word of its language (ADR 0046 S13 V10), what the
 // script device colours: from the type's port of that reader alone (DocumentType::highlights), so
 // nothing is coloured that the reader does not know. A script's: the WAC compiler's keywords (its
