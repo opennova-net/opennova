@@ -3762,6 +3762,15 @@ target_include_directories(opennova_serve_novaworld_test
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
 set_tests_properties(opennova_serve_novaworld PROPERTIES RUN_SERIAL TRUE)
+# opennova-serve's remote-admin server (ADR 0051 PR5b) over real loopback TCP, with a LAN joiner
+# in a synthetic two-map rotation: the login, PLAYER LIST, the MISSION verbs (ADD ONESHOT at a
+# position, SETNEXT, CYCLE, the one-shot's removal), SET and game.cfg's save, CHAT SEND as S2C
+# 0x14, PLAYER BAN on a LAN host, opennova-nw-lister's admin feed, QUIT, and the working
+# directory's admin.cfg, admin_log.txt and banned.txt. No retail data.
+add_executable(opennova_serve_admin_test serve/opennova_serve_admin_test.cpp)
+target_link_libraries(opennova_serve_admin_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_admin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_admin COMMAND opennova_serve_admin_test)
 # The Serve Only registration's var lists against the witnessed retail names and values.
 add_executable(serve_registration_parity_test serve/serve_registration_parity_test.cpp)
 target_link_libraries(serve_registration_parity_test PRIVATE opennova_serve_core)

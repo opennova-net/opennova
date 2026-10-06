@@ -10,7 +10,6 @@
 // [orig: CAdminServer_DispatchCommand @0x406720; CAdminServer_HandleStatus @0x402E30]
 
 #include <net/admin/admin_server.h>
-#include <runtime/inmatch/chat_flood.h>
 #include <runtime/inmatch/rotation_admin.h>
 
 #include <cstdint>
@@ -58,21 +57,24 @@ public:
 		// working-directory game.cfg). [orig: CAdminServer_HandleSetCommand @0x406185..0x4061AE]
 		std::function<void()> save_config;
 		// GOTO MENUSTATE out of the main menu: Game_CloseInGameScreens and input action 3, the
-		// quit to the main menu (exit reason 1 and the active connection's disconnect).
+		// quit to the main menu (exit reason 1 and the active connection's disconnect, which a
+		// Serve Only host does not have). No binding gate stops the action on any host
+		// (handle_goto); the router then destroys the session (PostMenu_RouteMissionExit's
+		// reason-1 arm).
 		// [orig: CAdminServer_HandleGotoCommand @0x404A4E (Game_CloseInGameScreens),
-		//  @0x404A5D (Input_HandleActionBinding(3))]
+		//  @0x404A5D (Input_HandleActionBinding(3)); PostMenu_RouteMissionExit @0x5684AB ->
+		//  CNapiGameSession_FullDestroy @0x568683]
 		std::function<void()> quit_to_menu;
-		// The map rotation and its catalog (ADR 0051 PR3); null reads as no rotation and an
-		// empty catalog.
+		// The map rotation and its catalog (ADR 0051 PR3; HostRotationAdmin over the host's
+		// own); null reads as no rotation and an empty catalog.
 		RotationAdmin *rotation = nullptr;
-		// The host's chat window display lines, oldest first (CHAT GET's walk of slots 40..1):
-		// the HUD's word-wrapped ring on a listen host; a host with no HUD keeps none yet
-		// (D-NET-372).
+		// A listen host's chat window display lines, oldest first (CHAT GET's walk of slots
+		// 40..1): its HUD's word-wrapped ring. A host with no client reads the context's CHAT
+		// ring instead (`console_chat`, server_console.h; D-NET-372).
 		std::function<std::vector<std::string>()> chat_window;
-		// A line into the host's own chat window: the Serve Only CHAT SEND's copy
-		// (Chat_DispatchToChannel(0xFF, 10, text)) and a flood refusal's echo
-		// (Chat_AddMessageChannel1).
-		std::function<void(uint8_t sender_slot, int8_t channel, const std::string &text)> chat_dispatch;
+		// A listen host's flood refusal echoed into its HUD window (Chat_AddMessageChannel1). A
+		// host with no client sends through Server_SendConsoleChat, which posts the sent line,
+		// and echoes a refusal, into the context's CHAT ring.
 		std::function<void(const std::string &text)> chat_echo;
 		// The listen host's own client: a session peer's CHAT SEND and CMD leave on its connection.
 		ClientRuntime *host_client = nullptr;
@@ -85,7 +87,8 @@ public:
 	AdminConsole(NapiNPServerCtx &ctx, Seams seams);
 
 	// The embedder's per-frame facts: the current scene and the per-main-frame counter
-	// (dword_A8705C) the chat flood table keys on.
+	// (g_MainFrameCounter, ex dword_A8705C; Game_TickHudFrameCounters @0x434C00) the chat flood
+	// table keys on.
 	void set_scene(AdminScene scene) { scene_ = scene; }
 	void set_main_frame(uint32_t frame) { main_frame_ = frame; }
 
@@ -120,7 +123,6 @@ private:
 	Seams seams_;
 	AdminScene scene_ = AdminScene::GameLoop;
 	uint32_t main_frame_ = 0;
-	ChatFloodTable chat_flood_{}; // the Serve Only host's (its senders' process table @0xB3B788)
 };
 
 } // namespace opennova::inmatch

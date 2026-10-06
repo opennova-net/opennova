@@ -21,6 +21,9 @@
 #include <net/npwire/session_hello.h>    // parse_disconnect_event
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_console.h> // Server_SendConsoleChat
+#include <runtime/hud/hud_chat_entry.h>     // kChatDispatchGlobal
+#include <runtime/hud/feed_format.h>    // kHudColorWhite / kHudColorLightBlue
 #include <runtime/inmatch/server_session.h> // set_connection_mode
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/world/player_spawn.h>
@@ -161,8 +164,9 @@ struct Host {
 		seams.save_config = [this] { ++saves; };
 		seams.quit_to_menu = [this] { ++quits; };
 		seams.rotation = &rotation;
+		// A listen host's HUD window and flood echo: this Serve Only host never reads them (its
+		// CHAT SEND and CHAT GET run over the context's CHAT ring).
 		seams.chat_window = [this] { return window; };
-		seams.chat_dispatch = [this](uint8_t, int8_t, const std::string &text) { window.push_back(text); };
 		seams.chat_echo = [this](const std::string &text) { echoes.push_back(text); };
 		seams.game_text = [](std::string_view section, std::string_view key) -> std::string {
 			if (section == "Overlays" && key == "STROVER64") return "Team Deathmatch";
@@ -579,7 +583,13 @@ void test_weapon_cmd_goto_chat() {
 	       "GOTO GAMESTATE in a match: two replies and a cycle");
 	const auto menu = a.command("GOTO MENUSTATE");
 	expect(menu.size() == 1 && menu[0] == "OK - Server is cycling..." && host.quits == 1,
-	       "GOTO MENUSTATE in a match: the quit, then the cycle tail's one reply");
+	       "GOTO MENUSTATE in a match on a Serve Only host: input action 3 (record 3, the exit row, "
+	       "no head-gate bit) quits, and the cycle tail sends its one reply");
+	host.ctx.is_mp_session_peer = 1;
+	const auto peer_menu = a.command("GOTO MENUSTATE");
+	expect(peer_menu.size() == 1 && peer_menu[0] == "OK - Server is cycling..." && host.quits == 2,
+	       "a listen host's GOTO MENUSTATE quits the same way");
+	host.ctx.is_mp_session_peer = 0;
 	host.console->set_scene(inmatch::AdminScene::MainMenu);
 	const auto at_menu = a.command("GOTO MENUSTATE");
 	expect(at_menu.size() == 2 && at_menu[0] == "ERROR - Already in 'Menu' State" &&
@@ -594,10 +604,24 @@ void test_weapon_cmd_goto_chat() {
 	const std::vector<uint8_t> want = {10, 0xFF, 'h', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', ' ', 0};
 	expect(sent.size() == 1 && sent[0].tag == s2c::CHAT_BROADCAST && sent[0].body == want,
 	       "S2C 0x14 [10][255] with the text stripped and the trailing space");
-	expect(!host.window.empty() && host.window.back() == "hello <b>world ", "the host's own window takes the line");
+	expect(!host.ctx.console_chat.empty() && host.ctx.console_chat.back().text == "hello <b>world " &&
+	               host.ctx.console_chat.back().color == hud::kHudColorWhite,
+	       "the host's own CHAT ring takes the unstripped line in white");
 	expect_eq(a.one("CHAT SEND hello <b>world"), "OK - Chat sent.", "a repeat");
-	expect(host.drain(0).empty() && host.echoes.size() == 1, "the flood table refuses it and echoes it");
-	expect_eq(a.one("CHAT GET"), "hello <b>world \r\n", "GET lists the window, CR LF each");
+	expect(host.drain(0).empty() && host.ctx.console_chat.size() == 2 &&
+	               host.ctx.console_chat.back().color == hud::kHudColorLightBlue && host.echoes.empty(),
+	       "the flood table refuses it and the sender echoes it into the ring in Global's flood colour");
+	expect_eq(a.one("CHAT GET"), "hello <b>world \r\nhello <b>world \r\n",
+	          "GET lists the ring oldest first, CR LF each");
+	// The flood table is the context's one, which the console's typed line checks too: the
+	// same words over CHAT SEND within 0x500 frames are refused.
+	std::string typed = "from the console ";
+	expect(inmatch::Server_SendConsoleChat(host.ctx, hud::kChatDispatchGlobal, typed, 10) ==
+	               hud::ChatSendResult::Broadcast && host.drain(0).size() == 1,
+	       "the console's typed line");
+	host.console->set_main_frame(20);
+	expect_eq(a.one("CHAT SEND from the console"), "OK - Chat sent.", "the same words over CHAT SEND");
+	expect(host.drain(0).empty(), "the shared table refused the repeat");
 }
 
 void test_framing() {

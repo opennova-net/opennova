@@ -1,6 +1,7 @@
 // The host's map rotation (D-NET-331, net-re §5.70): the list ops and their
-// cursor rules (inmatch/mission_rotation.h), the round-end advance with the
-// REPLAY wrap, the host screen's START seed, the round end's exit reason
+// cursor rules (inmatch/mission_rotation.h), the admin console's insert and
+// one-shot arm and their seam (inmatch/rotation_admin.h, ADR 0051 PR5b), the
+// round-end advance with the REPLAY wrap, the host screen's START seed, the round end's exit reason
 // under REPLAY and LASTGAME, and the map change's router over the
 // Attack-and-Defend halves and the SETNEXT latch (inmatch/map_change.h).
 #include <base/gameprofile/game_type.h>
@@ -9,6 +10,7 @@
 #include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/mission_rotation.h>
+#include <runtime/inmatch/rotation_admin.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/world/world.h>
@@ -166,13 +168,152 @@ void test_advance() {
 	CHECK(unseeded.cursor == -1 && unseeded.alt_cursor == 0);
 	CHECK(unseeded.advance(cat, false));
 	CHECK(unseeded.cursor == 0 && unseeded.map_file == "DM_C.BMS");
+}
 
-	// A one-shot entry is the admin console's (PR5): the seam ends the rotation.
-	MissionRotation one_shot;
-	one_shot.append(cat, 0, 1);
-	one_shot.append(cat, 2, 0);
-	one_shot.find_by_name(cat, "TDM_A.BMS");
-	CHECK(!one_shot.advance(cat, true));
+// The advance's one-shot arm (MISSION ADD ... ONESHOT): the flagged entry under the cursor is
+// removed in place, the entry that slid into its slot plays with no cursor move, the alt
+// cursor is not taken (a pending SETNEXT waits one more map) and steps down past the cursor;
+// every later entry is kept (D-NET-364: retail's copy is one entry short).
+void test_one_shot() {
+	const auto cat = catalog();
+	// [TDM_A, COOP_B*, DM_C, CTF_D], the cursor on COOP_B*.
+	MissionRotation list = seeded(cat, {0, 1, 2, 3});
+	list.slots[1].flag = 1;
+	list.cursor = 1;
+	CHECK(list.set_alt_cursor(3));
+	CHECK(list.advance(cat, false));
+	CHECK(list.count == 3 && list.cursor == 1);
+	CHECK(list.entry(0).catalog_index == 0 && list.entry(1).catalog_index == 2 &&
+			list.entry(2).catalog_index == 3);
+	CHECK(list.map_file == "DM_C.BMS");
+	CHECK(list.alt_cursor == 2); // stepped down, not taken
+	// The next advance takes the pending alt cursor.
+	CHECK(list.advance(cat, false) && list.cursor == 2 && list.map_file == "CTF_D.BMS" &&
+			list.alt_cursor == -1);
+
+	// A one-shot LAST entry: the count drops, the cursor is past the end, and REPLAY decides
+	// (retail's copy of -8 bytes runs off the heap here).
+	MissionRotation last = seeded(cat, {0, 2});
+	last.slots[1].flag = 1;
+	last.cursor = 1;
+	MissionRotation last_replay = last;
+	CHECK(!last.advance(cat, false) && last.count == 1);
+	CHECK(last_replay.advance(cat, true) && last_replay.count == 1 && last_replay.cursor == 0 &&
+			last_replay.map_file == "TDM_A.BMS");
+
+	// A one-shot only entry empties the list: the rotation ends even under REPLAY.
+	MissionRotation only;
+	only.append(cat, 0, 1);
+	only.find_by_name(cat, "TDM_A.BMS");
+	CHECK(only.cursor == 0 && !only.advance(cat, true) && only.count == 0 && only.allocated);
+	CHECK(!only.advance(cat, true));
+
+	// An alt cursor at or before the cursor stays.
+	MissionRotation before = seeded(cat, {0, 1, 2});
+	before.slots[2].flag = 1;
+	before.cursor = 2;
+	CHECK(before.set_alt_cursor(0));
+	CHECK(before.advance(cat, true) && before.count == 2 && before.cursor == 0 &&
+			before.alt_cursor == 0 && before.map_file == "TDM_A.BMS");
+}
+
+// MissionList_InsertEntryAtIndex: the row check one past the catalog, the tail moved up, the
+// cursors stepped strictly past the index (an insert AT the cursor takes it), no launch-option
+// clear, the regrow by five keeping the alt cursor, the position clamped (D-NET-365).
+void test_insert() {
+	const auto cat = catalog();
+	MissionRotation list = seeded(cat, {0, 2, 3}); // capacity 3, full
+	CHECK(list.cursor == 0 && list.alt_cursor == -1);
+	CHECK(list.set_alt_cursor(2));
+	list.cursor = 1;
+	// Before both cursors: both step up; the regrow keeps the alt cursor.
+	list.launch_option(cat, 2) = 1; // a DM row: insert leaves it, append would clear it
+	list.insert_entry(cat, 2, 0, 1);
+	CHECK(list.capacity() == 8 && list.count == 4);
+	CHECK(list.entry(0).catalog_index == 2 && list.entry(0).flag == 1);
+	CHECK(list.entry(1).catalog_index == 0 && list.entry(2).catalog_index == 2 &&
+			list.entry(3).catalog_index == 3);
+	CHECK(list.cursor == 2 && list.alt_cursor == 3);
+	CHECK(list.launch_options[2] == 1);
+	// At the cursor's index: the cursor stays, so the new entry becomes the current one.
+	list.insert_entry(cat, 1, 2, 0);
+	CHECK(list.count == 5 && list.cursor == 2 && list.entry(2).catalog_index == 1 &&
+			list.alt_cursor == 4);
+	// Past the count: clamped to the append's slot; negative: clamped to the head.
+	list.insert_entry(cat, 3, 99, 0);
+	CHECK(list.count == 6 && list.entry(5).catalog_index == 3 && list.cursor == 2);
+	list.insert_entry(cat, 0, -7, 0);
+	CHECK(list.count == 7 && list.entry(0).catalog_index == 0 && list.cursor == 3 &&
+			list.alt_cursor == 5);
+	// The row check: one past the catalog is accepted, past that nothing.
+	list.insert_entry(cat, static_cast<int32_t>(cat.size()) + 1, 0, 0);
+	list.insert_entry(cat, -1, 0, 0);
+	CHECK(list.count == 7);
+	list.insert_entry(cat, static_cast<int32_t>(cat.size()), 7, 0);
+	CHECK(list.count == 8 && list.entry(7).catalog_index == static_cast<int32_t>(cat.size()));
+	// A null list allocates lazily.
+	MissionRotation lazy;
+	lazy.insert_entry(cat, 2, 5, 0);
+	CHECK(lazy.allocated && lazy.count == 1 && lazy.entry(0).catalog_index == 2 && lazy.cursor == -1);
+}
+
+// After the in-game MISSION CLEAR and a later ADD the cursor is -1: the advance starts at entry
+// 0 whatever the header word before the entries holds (D-NET-366; retail's fresh-block 0 does
+// the same, any other word sends its one-shot removal over the header).
+void test_cursor_after_clear() {
+	const auto cat = catalog();
+	MissionRotation list = seeded(cat, {0, 2});
+	list.free_buffer();
+	list.append(cat, 3, 0); // the lazy alloc: cursor -1, alt 0
+	list.append(cat, 2, 0); // the regrow: alt -1, which retail would read as a one-shot flag
+	CHECK(list.cursor == -1 && list.alt_cursor == -1);
+	CHECK(list.advance(cat, false) && list.cursor == 0 && list.map_file == "CTF_D.BMS" &&
+			list.count == 2);
+	MissionRotation set_next = seeded(cat, {0});
+	set_next.free_buffer();
+	set_next.append(cat, 0, 0);
+	set_next.append(cat, 2, 0);
+	CHECK(set_next.set_alt_cursor(1));
+	CHECK(set_next.advance(cat, false) && set_next.cursor == 0 && set_next.alt_cursor == -1);
+}
+
+// The admin console's seam over the host rotation (rotation_admin.h).
+void test_host_rotation_admin() {
+	const auto cat = catalog();
+	HostRotation rotation;
+	seed_rotation_from_host_screen(rotation, cat, {0, 2}, std::vector<int32_t>(cat.size(), 0));
+	HostRotationAdmin admin(rotation, cat);
+	RotationAdmin::List list = admin.list();
+	CHECK(list.exists && list.entries.size() == 2 && list.cursor == 0 && list.alt_cursor == -1);
+	CHECK(list.entries[1].catalog_index == 2 && !list.entries[1].one_shot && !list.half_flipped);
+	const std::vector<RotationAdmin::CatalogRow> rows = admin.catalog();
+	CHECK(rows.size() == cat.size() && rows[3].file == "CTF_D.BMS" && rows[0].launch_option == 0);
+	admin.set_launch_option(3, 1);
+	CHECK(admin.catalog()[3].launch_option == 1);
+	// ADD with no position appends (the option cleared on a non-team row), with one inserts.
+	admin.set_launch_option(2, 1);
+	admin.add(2, std::nullopt, true);
+	CHECK(rotation.list.count == 3 && rotation.list.entry(2).flag == 1 &&
+			admin.catalog()[2].launch_option == 0);
+	// An insert at the cursor's own index takes the cursor (the new entry is the current one).
+	admin.add(3, 0, false);
+	CHECK(rotation.list.count == 4 && rotation.list.entry(0).catalog_index == 3 &&
+			rotation.list.cursor == 0);
+	list = admin.list();
+	CHECK(list.entries[3].one_shot && list.cursor == 0);
+	// SETNEXT: the latch is set even when the index is refused.
+	CHECK(!admin.set_next(9) && rotation.setnext_latch);
+	rotation.setnext_latch = false;
+	CHECK(admin.set_next(3) && rotation.setnext_latch && rotation.list.alt_cursor == 3);
+	CHECK(admin.remove(0) && !admin.remove(9) && rotation.list.count == 3 &&
+			rotation.list.alt_cursor == 2);
+	// CLEAR outside the Game Loop has no host-screen marks to clear; inside it frees the list.
+	admin.clear(false);
+	CHECK(rotation.list.allocated && rotation.list.count == 3);
+	admin.clear(true);
+	CHECK(!rotation.list.allocated && !admin.list().exists);
+	rotation.is_flipped = true;
+	CHECK(admin.list().half_flipped);
 }
 
 void test_host_screen_seed() {
@@ -376,6 +517,10 @@ int main() {
 	test_alloc_append_find();
 	test_remove_alt_reset_free();
 	test_advance();
+	test_one_shot();
+	test_insert();
+	test_cursor_after_clear();
+	test_host_rotation_admin();
 	test_host_screen_seed();
 	test_round_end_exit_reason();
 	test_router_halves_and_latch();

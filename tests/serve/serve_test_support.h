@@ -121,6 +121,12 @@ inline uint16_t free_udp_port() {
 	return probe.is_valid() ? port : 0;
 }
 
+inline uint16_t free_tcp_port() {
+	uint16_t port = 0;
+	opennova::net::ScopedSocket probe(opennova::net::tcp_listen(0, 1, &port));
+	return probe.is_valid() ? port : 0;
+}
+
 // A fresh directory under the system temp dir.
 inline fs::path fresh_dir(const std::string &tag) {
 	const fs::path dir = fs::temp_directory_path() /

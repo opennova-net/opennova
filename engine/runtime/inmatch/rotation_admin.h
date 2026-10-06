@@ -8,6 +8,9 @@
 // rotation runs the list operations as retail's do, its witnessed faults excepted
 // (D-NET-364..366). The record is docs/net/novaworld-net-re.md §5.70.1 and §5.70.8.
 
+#include <runtime/inmatch/mission_rotation.h>
+#include <runtime/mission/mission_catalog.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -63,6 +66,28 @@ public:
 	// then the SETNEXT latch dword_24D2180 (g_RotationSetNextLatch) set either way.
 	// [orig: MissionList_SetAltCursor @0x4FC730; the latch store @0x4066DF]
 	virtual bool set_next(int32_t index) = 0;
+};
+
+// The seam over the host's own rotation (ADR 0051 PR5b): the list the round-end advance and
+// the map change run (HostRotation, inmatch/mission_rotation.h) and the catalog its entries
+// index. The list ops are MissionRotation's ports, the one-shot flag the advance's arm; SETNEXT
+// sets the latch the map change's teardown consumes (inmatch/map_change.h).
+class HostRotationAdmin final : public RotationAdmin {
+public:
+	HostRotationAdmin(HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog)
+			: rotation_(rotation), catalog_(catalog) {}
+
+	List list() const override;
+	std::vector<CatalogRow> catalog() const override;
+	void set_launch_option(size_t catalog_index, int32_t option) override;
+	void add(size_t catalog_index, std::optional<int32_t> insert_at, bool one_shot) override;
+	bool remove(int32_t index) override;
+	void clear(bool in_game) override;
+	bool set_next(int32_t index) override;
+
+private:
+	HostRotation &rotation_;
+	const std::vector<mission_catalog::Row> &catalog_;
 };
 
 } // namespace opennova::inmatch

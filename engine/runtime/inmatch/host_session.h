@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -151,6 +152,11 @@ struct HostConfig {
 	ServerLogs logs;
 	PeerAddr local_address{};
 	bool local_address_known = false;
+	// The directory banned.txt and banlist.txt live in (ServerBanLists::directory): retail's
+	// working directory, "" for the bare names there (opennova-serve's). Unset, the lists
+	// load empty and no file is read or written (the game's hosts, D-NET-295's residual).
+	// The session start installs it ahead of the round init that loads both files.
+	std::optional<std::string> ban_directory;
 };
 
 // Stand `owner` up through the shared in-match host bring-up the Godot host uses. `serve_and_play` selects HostClient and registers the type-2 loopback; otherwise it selects

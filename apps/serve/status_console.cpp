@@ -136,9 +136,10 @@ bool StatusConsole::update(Server &server, uint32_t now_ms) {
 
 void StatusConsole::submit(Server &server, const std::string &line) {
 	if (!server.running()) return;
+	// The input's clock is the per-main-frame counter, which the admin's CHAT SEND reads too:
+	// both check the one flood table (server_console.h).
 	inmatch::NapiNPServerCtx &ctx = server.role().state.host_owner.ctx;
-	(void)inmatch::server_console_submit(ctx, chat_, line, server.kernel().world.logic_tick,
-			gametext(server));
+	(void)inmatch::server_console_submit(ctx, chat_, line, server.main_frame(), gametext(server));
 }
 
 void ConsoleInput::start() {

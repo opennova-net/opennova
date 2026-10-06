@@ -53,9 +53,10 @@ inline constexpr size_t ADMIN_SERVER_BUFFER_BYTES = 1024;
 
 class AdminServer {
 public:
-	// One admin_log.txt line, with its trailing "\n" (the embedder writes it as given). The
-	// log is the process's: retail opens admin_log.txt for writing at static construction, so
-	// each launch truncates it. [orig: CAdminServer_Construct @0x402c10, the fopen @0x402c8c]
+	// One admin_log.txt line, with its trailing "\n" (the embedder writes it as retail's
+	// text-mode stream does, the "\n" as CR LF). The log is the process's: retail opens
+	// admin_log.txt for writing ("w") at static construction, so each launch truncates it.
+	// [orig: CAdminServer_Construct @0x402c10, the fopen @0x402c84]
 	using LogSink = std::function<void(std::string_view line)>;
 
 	// `rand` is the CRT stream the challenge draws from (retail's process rand()).

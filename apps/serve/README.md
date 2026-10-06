@@ -6,7 +6,8 @@ Godot, configured by a host file, retail's own dedicated-server format, over the
 `opennova.exe` mounts it, boots the starting mission through the engine's one host boot
 (`engine/runtime/inmatch/host_boot.h`, the same two phases the game's hosts run), binds
 `game.cfg`'s LAN port range (or, given a NovaWorld gate, its NovaWorld one, listing itself there),
-answers LAN browsers and admits joiners, retail clients included. Pre-1.0 and experimental.
+answers LAN browsers and admits joiners, retail clients included, and takes retail's remote
+admin when `game.cfg` names its port. Pre-1.0 and experimental.
 
 ## Usage
 
@@ -146,15 +147,71 @@ the directory you want). It never writes into `--resource-dir` unless it runs fr
 A `game.cfg` with `mpreset = "1"` stops the server before it writes anything, with exit code
 0, as the game exits at that read.
 
+The remote admin's files sit there too (below): `admin_log.txt`, which every launch starts
+empty, `admin.cfg`, read once at the start, and the ban lists `banned.txt` and
+`banlist.txt`, read when the session starts.
+
+| File | Read | Written |
+|---|---|---|
+| `game.cfg` | at the start (twice, as the game) | at the start, at every map change, at the exit, and by every admin `SET` |
+| `activesrvr.txt` | never | at the start; deleted at a clean exit |
+| `admin.cfg` | at the start | never |
+| `admin_log.txt` | never | emptied at every launch, then one line per admin event |
+| `banned.txt` | when the session starts | at the exit, when an in-game ban added an entry |
+| `banlist.txt` | when a NovaWorld session starts (a missing one is created) | by every ban or unban on a NovaWorld session (`PLAYER BAN`, `CMD BAN`, `CMD UNBAN`) |
+
+## Remote admin
+
+A nonzero `remote_admin_port` in `game.cfg` (0, off, by default) opens retail's remote-admin
+console on that TCP port, on every interface, for retail's admin client (`RAT.exe`, shipped
+with the game) or `opennova-nw-lister --admin`. A port that cannot be opened is logged and
+the server serves on without it. `admin.cfg` holds its users and its address whitelist, in
+retail's format:
+
+```text
+// <user> <password> <hex rights>
+boss secret 4F
+ip_restrict = 192.168.*
+```
+
+The rights are hexadecimal bits: `1` GET, `2` SET, `4` MISSION, `8` PLAYER, `10` WEAPON,
+`20` CMD, `40` GOTO, CHAT and the stub ADMINUSER and BANLIST verbs. With no `ip_restrict` line
+every address may connect; with one or more, an address must match one (`*` matches the rest,
+so `192.168.*` is the 192.168 network). The shipped game's `admin.cfg` has no users and admits
+192.168 only, so a local test needs a user line and a pattern such as `127.0.0.1`.
+
+Every verb behaves as retail's does, replies included. In short:
+
+| Verb | What it does |
+|---|---|
+| `GET GAMESTATE`, `GET GAMESETTINGS` | The scene, and 29 session settings. |
+| `SET <key> <value>` | A session rule (`StartDelay`, `KillLimit`, `FriendlyFire`, ...), the server name or a password, live at once, and `game.cfg` saved. `SET` with no key lists the keys. |
+| `MISSION LIST` / `AVAILABLE` | The rotation with its marks (`(2x)` Attack and Defend, `(ONE_SHOT)`, `<CURRENT MISSION>`, `<NEXT MISSION>`), and the install's missions. |
+| `MISSION ADD <file> [switch] [at] [ONESHOT]` | Sets the map's Attack-and-Defend switch (1 with no value), then appends it to the rotation, or inserts it at position `at`; a `ONESHOT` entry is removed after it plays. |
+| `MISSION REMOVE <#>`, `CLEAR`, `SETNEXT <#>`, `CYCLE` | Remove an entry; clear the rotation (the session then ends at the round's end); play entry `#` next; end the round now (the next map loads after a 10-second linger). |
+| `PLAYER LIST` / `PUNT` / `BAN` / `SWAPTEAM` / `KILL` / `ZEROSCORE` `<# \| ALL>` | The players, and per-player actions. A LAN server keeps no PCID ban list, so `PLAYER BAN` answers that the player has no PCID and does nothing. |
+| `WEAPON LIST`, `WEAPON SET <# \| ALL> <ALWAYS \| NEVER \| ARMORY>` | The armory's weapon availability. |
+| `CMD <line>` | A console line (`BAN`, `UNBAN`, `PUNT`, `BANDWIDTH`). |
+| `CHAT SEND <words>`, `CHAT GET` | A server chat line to every player in the match, and the server's chat lines (the status page's). |
+| `GOTO GAMESTATE` / `MENUSTATE` | `GAMESTATE` cycles the map. `MENUSTATE` ends the round and quits the session, as a retail dedicated server leaves its match for its main menu; with no menu to show, `opennova-serve` then exits (code 0). |
+| `QUIT` | Close the connection (send it rather than dropping the connection). |
+
+Each connection and command is logged to `admin_log.txt`. The rotation edits follow retail's
+list operations except where retail corrupts its own memory: a one-shot entry's removal keeps
+every later entry, an insert position past the end appends, and the rotation restarts at its
+first entry after `MISSION CLEAR` and `ADD` (D-NET-364..366).
+
 ## The console and the logs
 
 A retail dedicated server shows its status page in place of the game: the player slots,
 the server line, the team block, the round clock, the frame and login counts and the four
 newest chat lines. `opennova-serve` prints that same page as text on its standard output
 whenever its rows change (the slots, the server line, the team block or the chat lines;
-the clock and the counts ride along). A line typed on its standard input is what the page's
-chat input sends: the Global talk line, which a server with no player of its own sends to
-every player in the match. The page's labels come from the install's `gametext.bin`.
+the clock and the counts ride along). A line typed on its standard input goes into the
+page's chat input as a retail operator types it on the server's window: the Global talk opens
+(Ctrl+T), the line is typed, and Enter sends it to every player in the match. Global is the
+one talk a server with no player of its own can send. The page's labels come from the
+install's `gametext.bin`.
 
 The console also prints the session's lines retail writes under its `/INOUT` switch: `HOST
 STARTED` and `HOST STOPPED` with the server's address, and `SERVER PLAYER ADDED` and
@@ -172,7 +229,7 @@ These logs go to the working directory, in retail's names and formats:
 
 | Code | Meaning |
 |---|---|
-| 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset`, or the map rotation ran out (the end of the list with `Replay 0`). |
+| 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset`, the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
 | 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), or the mission did not boot. |
 | 2 | A usage error, or the `--credentials` file did not open. |
 | 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting. |

@@ -12,8 +12,11 @@
 //
 // The admin console's MissionList_InsertEntryAtIndex @0x501AD0 and the
 // advance's one-shot arm (a flag-1 entry, which only `MISSION ADD ... ONESHOT`
-// appends) are ADR 0051 PR5's, with the retail defects §5.70.1 lists; this
-// file carries their seams.
+// adds) are the remote admin's (ADR 0051 PR5b, rotation_admin.h). Retail's
+// memory faults in them are not ported: the one-shot removal's short copy
+// (D-NET-364), the insert's unchecked position and uninitialized alt cursor
+// (D-NET-365), and the advance's read before the entries at cursor -1
+// (D-NET-366), each a PERMANENT class-D row.
 
 #include <runtime/mission/mission_catalog.h>
 
@@ -65,6 +68,13 @@ struct MissionRotation {
 	// launch option.
 	void append(const std::vector<mission_catalog::Row> &catalog, int32_t catalog_index,
 			int32_t flag);
+	// [orig: MissionList_InsertEntryAtIndex @0x501AD0] a catalog index in
+	// [0, catalog count] (one past the catalog) joins at `index`: the tail
+	// moves up one and a cursor or alt cursor past the index steps up; the
+	// launch option is left alone. The position is clamped into [0, count]
+	// and a regrow keeps the alt cursor (D-NET-365).
+	void insert_entry(const std::vector<mission_catalog::Row> &catalog, int32_t catalog_index,
+			int32_t index, int32_t flag);
 	// [orig: MissionList_FindByName @0x4FC4C0] the cursor to the first slot
 	// (walking the capacity) whose catalog file matches, the alt cursor -1.
 	void find_by_name(const std::vector<mission_catalog::Row> &catalog, const std::string &name);
@@ -82,9 +92,11 @@ struct MissionRotation {
 	void free_buffer();
 
 	// The round-end advance, MissionList_GetCurrentEntry @0x4FC540: false when
-	// there is no next mission (a null or empty list, or the cursor past the
-	// last entry with REPLAY off), else the next entry's catalog row copied
-	// into the outputs. The catalog's launch options ride `launch_options`.
+	// there is no next mission (a null or empty list, a one-shot removal that
+	// emptied it, or the cursor past the last entry with REPLAY off), else the
+	// next entry's catalog row copied into the outputs. A one-shot entry under
+	// the cursor is removed in place, so the entry after it plays next. The
+	// catalog's launch options ride `launch_options`.
 	bool advance(const std::vector<mission_catalog::Row> &catalog, bool replay_enabled);
 	// The outputs from one catalog row (the seed's and the advance's copy).
 	void take_row(const std::vector<mission_catalog::Row> &catalog, int32_t catalog_index);

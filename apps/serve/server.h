@@ -16,13 +16,25 @@
 // saves game.cfg again and deletes the lock. Everything below the config, the
 // mount, the socket and the wall clock is the engine's.
 //
-// The files are the process's working directory's, as retail's: game.cfg and
-// activesrvr.txt open as bare relative names, never under --resource-dir
-// (unless the server runs from there).
+// The remote-admin server (ADR 0051 PR5b): admin_log.txt truncated at the
+// launch, admin.cfg read once the subsystems are up and the listener opened on
+// game.cfg's remote_admin_port when it is nonzero, then pumped once per game
+// frame into the engine's console (inmatch/admin_console.h) over the host's
+// own rotation (inmatch/rotation_admin.h). The ban files load at the session's
+// round init and banned.txt is saved at the exit when an in-game ban dirtied it.
+//
+// The files are the process's working directory's, as retail's: game.cfg,
+// activesrvr.txt, admin.cfg, admin_log.txt, banned.txt and banlist.txt open as
+// bare relative names, never under --resource-dir (unless the server runs from
+// there).
 
+#include <base/io/crt_rand.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/gamecfg/game_cfg.h>
+#include <net/admin/admin_server.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/inmatch/admin_console.h>
+#include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/host_role.h>
@@ -35,6 +47,7 @@
 #include <net/novaworld/lobby_vars.h>
 #include <net/npwire/datagram_demux.h>
 
+#include "admin_tcp_server.h"
 #include "listing.h" // nw_lister::Credentials
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
@@ -102,7 +115,8 @@ public:
 	// One outer frame of `delta_seconds` wall clock. A round end's mission exit
 	// runs the map change and boots the next map inside the session (a listed
 	// server's listing and socket kept). False once the session has ended
-	// (end_message() says how; rotation_ended() when the rotation ran out), and
+	// (end_message() says how; rotation_ended() when the rotation ran out,
+	// quit() when the remote admin quit it), and
 	// stop() has run.
 	bool frame(double delta_seconds);
 	// The host's exit: the round reset to every joiner, the STOP description,
@@ -123,6 +137,8 @@ public:
 	const ResourceIndex &index() const { return index_; }
 	const std::string &end_message() const { return end_message_; }
 	bool rotation_ended() const { return rotation_ended_; }
+	// The remote admin's GOTO MENUSTATE quit the session (exit reason 1).
+	bool quit() const { return quit_; }
 	// The missions the session has booted (the starting map is 1).
 	int missions_played() const { return missions_played_; }
 	// The cfg block (game.cfg, the host file over it; remote_admin_port is
@@ -140,8 +156,32 @@ public:
 	bool novaworld() const { return novaworld_; }
 	// The NovaWorld listing's lister (null when not listing).
 	nw_lister::Lister *lister() { return lister_.get(); }
+	// The remote-admin listener's bound port: game.cfg's remote_admin_port once it listens,
+	// 0 when the port is 0 (off) or the listen failed.
+	uint16_t admin_port() const { return admin_tcp_ ? admin_tcp_->port() : 0; }
+	// The per-main-frame counter (g_MainFrameCounter, ex dword_A8705C), one per frame(): the
+	// chat flood table's clock, which the console's typed line and the admin's CHAT SEND share.
+	// [orig: Game_TickHudFrameCounters @0x434C00, from Game_ProcessMainFrame @0x5265D5]
+	uint32_t main_frame() const { return main_frame_; }
 
 private:
+	// The admin server's command half until the session's console stands: retail's console
+	// reads the live globals from the first frame, the port's needs the host context, which
+	// the first boot creates. The pump runs only in game frames, so nothing reaches it before.
+	struct AdminForward final : AdminCommandHandler {
+		inmatch::AdminConsole *console = nullptr;
+		bool dispatch(const AdminSession &session, std::string_view line,
+				std::vector<std::string> &replies) override;
+		std::string status_report() override;
+	};
+	// admin.cfg and the listener, once the subsystems are up [orig: Game_InitSubsystems
+	// @0x4A72B8..0x4A72D9].
+	void open_admin();
+	// The console over the session's context, its seams and its rotation (the first boot).
+	void bind_admin_console();
+	// One game frame's admin pump [orig: CAdminServer_ProcessFrame @0x406F50 from
+	// Game_ProcessMainFrame @0x5268F1].
+	void pump_admin();
 	bool read_boot_config(std::string &error);
 	bool mount(std::string &error);
 	bool read_config_over_weapons(std::string &error);
@@ -184,6 +224,7 @@ private:
 	uint16_t bound_port_ = 0;
 	bool running_ = false;
 	bool rotation_ended_ = false;
+	bool quit_ = false;
 	int missions_played_ = 0;
 	// Game_Run's exit tail is owed: the save and the lock's delete, on every
 	// return once the subsystems are up [orig: Game_Run @0x4A7FFF..0x4A800E].
@@ -191,6 +232,19 @@ private:
 	bool reset_exit_ = false;
 	std::string end_message_;
 	ServerLogDevices log_devices_; // the logs the switches armed (server_logs.h)
+	// The working directory as the admin log's device (server_logs.h).
+	WorkingDirectoryFiles files_;
+	uint32_t main_frame_ = 0;
+	// The avatar registry PETERRABBIT SEXCHANGE picks from (the mounted Avatars.def).
+	inmatch::CharacterRegistry characters_;
+	// The remote-admin server: the rotation seam, the console, the wire server, its sockets
+	// and the CRT stream its challenge draws from (the world's, synced around each pump).
+	std::unique_ptr<inmatch::HostRotationAdmin> rotation_admin_;
+	std::unique_ptr<inmatch::AdminConsole> admin_console_;
+	AdminForward admin_forward_;
+	io::CrtRand admin_rand_;
+	std::unique_ptr<AdminServer> admin_server_;
+	std::unique_ptr<net::AdminTcpServer> admin_tcp_;
 };
 
 } // namespace opennova::serve

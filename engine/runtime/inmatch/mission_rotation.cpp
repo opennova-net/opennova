@@ -1,7 +1,6 @@
 #include <runtime/inmatch/mission_rotation.h>
 
 #include <base/gameprofile/game_type.h>
-#include <base/io/log.h>
 #include <base/io/strutil.h>
 
 namespace opennova::inmatch {
@@ -52,6 +51,36 @@ void MissionRotation::append(const std::vector<mission_catalog::Row> &catalog,
 	++count;
 	if (!game_type::host_rotation_default(row_game_type(catalog[static_cast<size_t>(catalog_index)])))
 		launch_option(catalog, catalog_index) = 0;
+}
+
+// Retail never range-checks the position: one past the count writes a slot
+// outside the live entries (the slot at the old count joins the count with
+// whatever it held) and a negative one writes over the block's header; the
+// port clamps it into [0, count], the append's slot and the head. Retail's
+// regrow copies the data, the count, the capacity and the cursor into a
+// malloc'd block and leaves the alt cursor uninitialized; the port keeps it
+// (D-NET-365). The cursors step on the clamped position, as retail's tests
+// read it: strictly before the cursor, so an insert AT the cursor's index
+// takes the cursor (the new entry becomes the current one).
+// [orig: MissionList_InsertEntryAtIndex @0x501AD0 -- the row test
+//  @0x501AD5..0x501AE3 (one past the catalog accepted), the lazy
+//  MissionRotation_Alloc(1) @0x501AF2..0x501AFB, the regrow by five
+//  @0x501B04..0x501B78, ++count @0x501B7F, the tail moved up
+//  @0x501B83..0x501BB1, the cursor @0x501BB3..0x501BBC and the alt cursor
+//  @0x501BC1..0x501BCA stepped, the entry stored @0x501BCF..0x501BDA; no
+//  launch-option clear]
+void MissionRotation::insert_entry(const std::vector<mission_catalog::Row> &catalog,
+		int32_t catalog_index, int32_t index, int32_t flag) {
+	if (catalog_index < 0 || static_cast<size_t>(catalog_index) > catalog.size()) return;
+	if (!allocated) alloc(1);
+	if (count >= capacity()) slots.resize(slots.size() + 5, MissionRotationEntry{});
+	const int32_t at = index < 0 ? 0 : (index > count ? count : index);
+	++count;
+	for (int32_t i = count - 1; i > at; --i)
+		slots[static_cast<size_t>(i)] = slots[static_cast<size_t>(i) - 1];
+	if (at < cursor) ++cursor;
+	if (at < alt_cursor) ++alt_cursor;
+	slots[static_cast<size_t>(at)] = MissionRotationEntry{catalog_index, flag};
 }
 
 // Retail walks to the capacity, so a slot past the count (a zeroed one names
@@ -142,28 +171,42 @@ bool MissionRotation::advance(const std::vector<mission_catalog::Row> &catalog,
 	// starts over [orig: @0x4FC547, @0x4FC551, @0x4FC556..0x4FC558].
 	if (!allocated || count == 0) return false;
 	if (cursor >= count) cursor = 0;
-	// Retail has no `cursor < 0` test: after an in-game MISSION CLEAR and a
-	// later ADD the cursor sits at -1, and the flag read at data + 8 * -1 + 4
-	// is the header's last word, the alt cursor (§5.70.1; reachable only
-	// through the admin console, PR5) [orig: @0x4FC561..0x4FC572].
-	const int32_t flag = cursor >= 0 ? entry(cursor).flag : alt_cursor;
-	if (flag != 0) {
-		// The one-shot arm: the entry is removed in place and the next one
-		// plays without a cursor move [orig: @0x4FC574..0x4FC5B1]. Only the
-		// admin console's `MISSION ADD ... ONESHOT` appends a flagged entry,
-		// so the arm and its retail defects (the copy one entry short, the
-		// heap overrun of a last one-shot entry) are ADR 0051 PR5's to port.
-		io::logf(io::LogLevel::kWarn,
-				"rotation: a one-shot entry reached the advance; its removal is not ported");
-		return false;
+	if (cursor < 0) {
+		// Retail has no `cursor < 0` test: after an in-game MISSION CLEAR and
+		// a later ADD the cursor sits at -1, and the flag read at
+		// data + 8 * -1 + 4 is the header's last word, the alt cursor. A
+		// fresh block's 0 reads clear and the step takes that alt cursor,
+		// entry 0; any other word reads as a one-shot flag and the removal
+		// copies over the header. The port starts at entry 0 either way
+		// (D-NET-366) [orig: @0x4FC564..0x4FC572].
+		cursor = 0;
+		alt_cursor = -1;
+	} else if (entry(cursor).flag != 0) {
+		// The one-shot arm (only the admin console's `MISSION ADD ... ONESHOT`
+		// adds a flagged entry): the count drops and the entries after the
+		// cursor move down over it, so the entry that slid into the slot
+		// plays next with no cursor move and a pending SETNEXT waits one more
+		// map; an emptied list ends the rotation; an alt cursor past the
+		// cursor steps down. Retail's copy is one entry short (8 * (count -
+		// cursor) - 8 bytes after the decrement), dropping the last entry,
+		// and a one-shot LAST entry copies -8 bytes off the heap; the port
+		// moves every later entry (D-NET-364).
+		// [orig: the count @0x4FC574, the memcpy @0x4FC577..0x4FC596, the
+		//  empty test @0x4FC5A3..0x4FC5A7, the alt cursor @0x4FC5A9..0x4FC5B1]
+		--count;
+		for (int32_t i = cursor; i < count; ++i)
+			slots[static_cast<size_t>(i)] = slots[static_cast<size_t>(i) + 1];
+		if (count == 0) return false;
+		if (alt_cursor > cursor) --alt_cursor;
+	} else {
+		// A clear flag steps to the alt cursor when one is set, else by one,
+		// and the alt cursor clears [orig: @0x4FC5B6..0x4FC5CC].
+		if (alt_cursor == -1)
+			++cursor;
+		else
+			cursor = alt_cursor;
+		alt_cursor = -1;
 	}
-	// A clear flag steps to the alt cursor when one is set, else by one, and
-	// the alt cursor clears [orig: @0x4FC5B6..0x4FC5CC].
-	if (alt_cursor == -1)
-		++cursor;
-	else
-		cursor = alt_cursor;
-	alt_cursor = -1;
 	// Past the end: the rotation is exhausted unless REPLAY wraps it; an alt
 	// cursor past the end clears [orig: @0x4FC5D4..0x4FC5E9, @0x4FC5FD].
 	if (cursor >= count) {
