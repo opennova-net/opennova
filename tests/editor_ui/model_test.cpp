@@ -12,6 +12,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
 #include <editor/documents/model_surfaces.h>
+#include <editor/preview/model_viewport.h>
 
 #include "editor_ui_test_support.h"
 
@@ -179,8 +180,85 @@ void test_material_surface() {
 	CHECK(overflowing().empty(), "nothing runs past its window");
 }
 
+// The model preview's damage states (DI-10, preview/model_damage) over a real session: the toolbar's
+// Damage button where an item names the model, its popup naming the item and the husk, the death in order
+// in words, Play destroy the destroyed state from the death (the clock at 0, run); the Registers popup
+// grouped by what drives each register in the game.
+void test_damage_popup() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_model_damage");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(request::new_project(dir.file("project"), "Damage")), "a project");
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/models/crate.3di",
+	                               test_io::read_file(repo + "/fixtures/threedi/synth/crate.3di")) &&
+	              editor_test::write_bytes(v.project.root + "/models/armory.3di",
+	                                       test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")) &&
+	              editor_test::write_text(v.project.root + "/defs/items.def",
+	                                      "begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\n"
+	                                      "ai_function gnrc\nhusk armory\nsounddeath EXPLO_PUMP\nend\n"),
+	      "the models and the item");
+	editor_test::handle_to_end(session, request::rescan());
+	while (v.activity.validation.running) session.poll();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	const auto serve = [&]() {
+		EditorRequest request;
+		while (ui.windows.take_request(request)) session.handle(request);
+		devices.sync(session.viewports(), v);
+	};
+	const auto settle = [&](int frames) {
+		for (int i = 0; i < frames; ++i) {
+			serve();
+			ui.frames(1);
+		}
+		serve();
+	};
+	const std::string path = "models/crate.3di";
+	session.handle(request::open_document(path));
+	session.handle(request::set_viewport(path, R"({"clock": {"playing": false, "ticks": 0}})"));
+	settle(3);
+	const auto *model = static_cast<const ModelViewport *>(session.viewports().find(path, ViewportKind::Model));
+	CHECK(model && model->damage_uses().size() == 1, "the crate is the pump's graphic");
+	if (!model) return;
+	const ImGuiID scope = item_id(Ui::window_id("Preview"), {"model", path.c_str()});
+	ui.activate(item_id(scope, {"Damage###damage"}));
+	settle(1);
+	ui.away();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Pump station (items.def) draws it intact") != std::string::npos, "the item naming the model");
+	CHECK(text.find("Its husk: armory.3di") != std::string::npos, "the husk the game swaps in");
+	CHECK(text.find("The husk swap: armory is drawn in the item's place from here on.") != std::string::npos,
+	      "the death in order, in words");
+	ui.activate(popup_item(ImHashStr("damage", 0, scope), "Play destroy"));
+	settle(2);
+	CHECK(model->options().damage.state == DamageState::Destroyed, "Play destroy: the destroyed state");
+	CHECK(session.viewports().clock().playing(), "Play destroy: the clock runs from the death");
+	ImGui::ClosePopupsExceptModals();
+	settle(1);
+	// The armory's Registers: FLICKER under the lights, in the game's words.
+	session.handle(request::open_document("models/armory.3di"));
+	settle(3);
+	const ImGuiID armory = item_id(Ui::window_id("Preview"), {"model", "models/armory.3di"});
+	ui.activate(item_id(armory, {"Registers"}));
+	settle(1);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("Lights, sky and weather") != std::string::npos && text.find("Flicker (FLICKER)") != std::string::npos,
+	      "the register in its group, in the game's words");
+}
+
 } // namespace
 
-void run_model_tests() { test_material_surface(); }
+void run_model_tests() {
+	test_material_surface();
+	test_damage_popup();
+}
 
 } // namespace editor_ui_test
