@@ -21,6 +21,40 @@
 
 namespace godot {
 
+// The units that make one model's data ready for its scene, a unit a step (ADR 0046 S13 V6: the model device's
+// builds, its gun's and a first-person map's arms', and the definition device's): each material's stages (its first
+// texture of the slot that decodes, the normal stage falling back to the second normal slot) and flipbook frames, as
+// ObjectModel::create_material and collect_anim_frames load them, then each level's meshes, skinned for `bone_count`
+// bones of a rig where `skinned`, as the scene asks them of the data: decoded here, so the scene's loads hit the
+// data's caches.
+class ModelDataBuild {
+public:
+	ModelDataBuild(Ref<ObjectData> data, bool skinned, int bone_count);
+	const Ref<ObjectData> &data() const { return data_; }
+	size_t total() const { return units_.size(); }
+	size_t done() const { return next_; }
+	bool finished() const { return next_ >= units_.size(); }
+	// One unit (nothing once finished).
+	void step();
+	// What the next unit makes: "textures" or "meshes" ("" finished).
+	const char *label() const;
+
+private:
+	struct Unit {
+		enum class Kind : uint8_t { Texture, Frame, Meshes };
+		Kind kind = Kind::Texture;
+		int material = -1;
+		int slot = 0;
+		int frame = 0;
+		int lod = -1;
+	};
+	Ref<ObjectData> data_;
+	bool skinned_ = false;
+	int bone_count_ = 0;
+	std::vector<Unit> units_;
+	size_t next_ = 0;
+};
+
 // A model a preview device draws (ADR 0046 DI-21, the definition device's): the runtime's own ObjectModel
 // (its meshes, materials, CTRL registers, part animations, destroyed sections, body clips on a rig), every
 // level kept (the presenter-driven mode, the mission placer's: a level the camera's distance picks swaps its
@@ -66,23 +100,12 @@ public:
 	ObjectModel *object() const { return object_; }
 
 private:
-	struct Unit {
-		enum class Kind : uint8_t { Texture, Frame, Meshes, Scene };
-		Kind kind = Kind::Scene;
-		int material = -1;
-		int slot = 0;
-		int frame = 0;
-		int lod = -1;
-	};
+	// A build in flight: its data's units, then the scene.
 	struct Build {
-		Ref<ObjectData> data;
 		std::shared_ptr<const opennova::editor::StampedFiles> files;
 		Ref<SkeletalAnim> skeletal;
-		int bone_count = 0;
-		std::vector<Unit> units;
-		size_t next = 0;
+		std::unique_ptr<ModelDataBuild> data;
 	};
-	static void plan_(Build &build);
 	void assemble_(Build &build);
 
 	ObjectModel *object_ = nullptr;

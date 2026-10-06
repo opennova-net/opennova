@@ -18,6 +18,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
 #include <formats/mission/authoring.h>
+#include <formats/mission/mission.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/anim/adm_root_motion.h>
@@ -407,11 +408,15 @@ bool DefinitionViewport::subject_(const ViewportInput &input, const DefCatalogDo
 			why = drawn_.record + " names no tracer item (frndly_trcr_type_id): its rounds draw no model of their own.";
 			return false;
 		}
+		// The id is a type id, the items.def id less 100000, as the game's lookup compares it [orig: AmmoDef_ParseProperty
+		// @ 0x40A5D4..0x40A5DA (foeTrcrID's @ 0x40A646) -> ItemList_FindIndexByTypeId @ 0x49E100; ItemDef_ParseProperty's
+		// id less 100000 @ 0x49EC54]. A miss's fallback by name [orig: @ 0x40A5F3] is not ported.
+		const int item = id + mission::kItemIdOffset;
 		const AssetGraph *graph = view.findings.graph.get();
-		const GraphSymbol *symbol = graph ? graph->resolve_symbol(ReferenceKind::Item, std::to_string(id)) : nullptr;
+		const GraphSymbol *symbol = graph ? graph->resolve_symbol(ReferenceKind::Item, std::to_string(item)) : nullptr;
 		if (!symbol) {
-			why = "No item catalog of the project defines item " + std::to_string(id) + ", the item " + drawn_.record +
-			      "'s rounds become.";
+			why = "No item catalog of the project defines item " + std::to_string(item) + " (type id " + std::to_string(id) +
+			      "), the item " + drawn_.record + "'s rounds become.";
 			return false;
 		}
 		drawn_.via = symbol->record;
@@ -442,14 +447,20 @@ void DefinitionViewport::pose_(const SessionView &view, const std::string &model
 	const FileSource &files = *view.findings.assets;
 	const std::string key = item_.ai_function + '\n' + anim_def_ + '\n' + std::to_string(attrib_) + '\n' +
 	                        std::to_string(options_.ssn) + '\n' + model_file;
-	if (key == person_key_ && !rig_read_.moved(files)) return;
+	const bool files_moved = rig_read_.moved(files);
+	if (key == person_key_ && !files_moved) return;
 	person_key_ = key;
 	person_ = MissionPose();
+	const FileStamps rig_was = rig_read_;
 	rig_read_.clear();
-	const bool had = skeleton_ != nullptr;
-	skeleton_.reset();
+	rig_note_.clear();
+	const auto drop_rig = [&] {
+		if (skeleton_) ++skeleton_serial_;
+		skeleton_.reset();
+		rig_key_.clear();
+	};
 	if (!item_record_ || !model_ || options_.state == DefinitionState::HuskFinal) {
-		if (had) ++skeleton_serial_;
+		drop_rig();
 		return;
 	}
 	auto source = view.findings.assets;
@@ -464,16 +475,29 @@ void DefinitionViewport::pose_(const SessionView &view, const std::string &model
 	PersonRecord record;
 	record.ssn = options_.ssn;
 	pose_person(definition, record, *source, *stamped, rig_files, motion, rings, person_);
+	// An item that is no person (no org0 or org1 class, not of the person type) has no spawn pose to speak of.
+	if (person_.status == "class" && type_ != def::DEF_ITEM_TYPE_PERSON) person_ = MissionPose();
 	if (person_.status == "posed") {
-		// The .adm the spawn loaded over the drawn model's bones, as the game binds it to the entity's model.
-		PreviewRig rig;
-		rig.model = model_file;
-		rig.table = person_.adm;
-		skeleton_ = load_preview_rig(rig, *model_, rig_files);
-		if (!skeleton_) notes_.push_back(person_.adm + " does not load over " + model_file + "'s bones: the person stands unposed.");
+		// The .adm the spawn loaded over the drawn model's bones, as the game binds it to the entity's model: loaded
+		// again only for another model or table, or a file it read moved (another SSN poses the same rig).
+		const std::string rig_key = model_file + '\n' + person_.adm;
+		const bool kept = rig_key == rig_key_ && !files_moved && skeleton_;
+		if (!kept) {
+			PreviewRig rig;
+			rig.model = model_file;
+			rig.table = person_.adm;
+			skeleton_ = load_preview_rig(rig, *model_, rig_files);
+			++skeleton_serial_;
+			rig_key_ = rig_key;
+		}
+		if (!skeleton_) rig_note_ = person_.adm + " does not load over " + model_file + "'s bones: the person stands unposed.";
+		// What the pose read, and what the rig read where it stands from before.
+		rig_read_ = stamped->stamps();
+		if (kept) rig_read_.add(rig_was);
+		return;
 	}
+	drop_rig();
 	rig_read_ = stamped->stamps();
-	if (had || skeleton_) ++skeleton_serial_;
 }
 
 void DefinitionViewport::particle_slot_(const assets::Model &intact) {
@@ -616,6 +640,9 @@ ViewportAction DefinitionViewport::follow_(const ViewportInput &input, PreviewCl
 	if (target.path == path() && target.part && target.part != row_) {
 		row_ = target.part;
 		clock.seek_ticks(0);
+		// What another record's death fired is not this one's.
+		fired_.clear();
+		sound_cursor_ = -1;
 	}
 	const Node *node = document->row(row_);
 	if (!node) {
@@ -655,6 +682,7 @@ ViewportAction DefinitionViewport::follow_(const ViewportInput &input, PreviewCl
 	const assets::Model &intact = item_record_ ? held_(view, intact_, intact_file) : model_;
 	particle_slot_(intact);
 	pose_(view, file);
+	if (!rig_note_.empty()) notes_.push_back(rig_note_);
 	if (!person_.status.empty() && person_.status != "posed" && type_ == def::DEF_ITEM_TYPE_PERSON)
 		notes_.push_back(person_.status == "no_adm"     ? item_.name + " names no animation map (anim_def): the person stands unposed."
 		                 : person_.status == "no_clips" ? person_.adm + " registers no clip the project holds: the person stands unposed."
@@ -735,6 +763,8 @@ OrbitCamera DefinitionViewport::framed(int width, int height) const {
 	PreviewVec3 center;
 	float radius = 1.0f;
 	model_preview_sphere(*model_, center, radius);
+	// A person stands lifted by its spawn's rise (the device draws it there).
+	if (person_.status == "posed" && skeleton_) center.y += float(person_.lift);
 	camera.frame(center, radius, width > 0 ? width : kHeadlessSize.width, height > 0 ? height : kHeadlessSize.height);
 	return camera;
 }
@@ -808,8 +838,8 @@ void DefinitionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) 
 	if (const JsonValue *member = json.get("options")) {
 		DefinitionViewportOptions options = options_;
 		if (read_options(*member, options, error) && options != options_) {
-			// Another state plays from its start, as another record does.
-			if (options.state != options_.state) clock.seek_ticks(0);
+			// Another state plays from its start, as another record does, unless the same change sets the clock.
+			if (options.state != options_.state && !json.get("clock")) clock.seek_ticks(0);
 			options_ = options;
 			options_moved_ = true;
 		}

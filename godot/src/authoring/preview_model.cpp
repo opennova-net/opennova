@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <utility>
 
 #include <formats/threedi/threedi_3di3.h>
 
@@ -45,10 +46,11 @@ PreviewModel::PreviewModel(Node3D &parent) {
 	parent.add_child(object_);
 }
 
-void PreviewModel::plan_(Build &build) {
-	const opennova::threedi::Threedi3di3 &model = build.data->native_model();
-	// The textures the scene's materials bind, each stage's as ObjectModel::create_material loads it and each
-	// flipbook frame as collect_anim_frames does: decoded here, the scene's loads hit the texture files' cache.
+// --- ModelDataBuild ----------------------------------------------------------------------------------------
+
+ModelDataBuild::ModelDataBuild(Ref<ObjectData> data, bool skinned, int bone_count) :
+		data_(std::move(data)), skinned_(skinned), bone_count_(bone_count) {
+	const opennova::threedi::Threedi3di3 &model = data_->native_model();
 	for (size_t i = 0; i < model.material_count; ++i) {
 		const opennova::threedi::ThreediMaterial &material = model.materials[i];
 		for (const int slot : { THREEDI_TEX_SLOT_DIFFUSE, THREEDI_TEX_SLOT_DETAIL, THREEDI_TEX_SLOT_NORMAL }) {
@@ -57,28 +59,44 @@ void PreviewModel::plan_(Build &build) {
 			unit.kind = Unit::Kind::Texture;
 			unit.material = int(i);
 			unit.slot = slot;
-			build.units.push_back(unit);
+			units_.push_back(unit);
 		}
-		const PackedStringArray frames = build.data->get_material_anim_frames(int(i), THREEDI_TEX_SLOT_DIFFUSE);
+		const PackedStringArray frames = data_->get_material_anim_frames(int(i), THREEDI_TEX_SLOT_DIFFUSE);
 		for (int frame = 0; frames.size() > 1 && frame < frames.size(); ++frame) {
 			Unit unit;
 			unit.kind = Unit::Kind::Frame;
 			unit.material = int(i);
 			unit.frame = frame;
-			build.units.push_back(unit);
+			units_.push_back(unit);
 		}
 	}
-	// Every level's meshes, as the scene asks them of the data (skinned for the rig it binds).
 	for (size_t lod = 0; lod < model.lod_count; ++lod) {
 		Unit unit;
 		unit.kind = Unit::Kind::Meshes;
 		unit.lod = int(lod);
-		build.units.push_back(unit);
+		units_.push_back(unit);
 	}
-	Unit scene;
-	scene.kind = Unit::Kind::Scene;
-	build.units.push_back(scene);
 }
+
+void ModelDataBuild::step() {
+	if (finished()) return;
+	const Unit unit = units_[next_++];
+	switch (unit.kind) {
+	case Unit::Kind::Texture:
+		if (data_->load_material_slot_texture(unit.material, unit.slot).is_null() && unit.slot == THREEDI_TEX_SLOT_NORMAL)
+			data_->load_material_slot_texture(unit.material, THREEDI_TEX_SLOT_NORMAL_B);
+		break;
+	case Unit::Kind::Frame: data_->load_material_anim_frame(unit.material, THREEDI_TEX_SLOT_DIFFUSE, unit.frame); break;
+	case Unit::Kind::Meshes: data_->build_lod_submeshes(unit.lod, skinned_, bone_count_, false); break;
+	}
+}
+
+const char *ModelDataBuild::label() const {
+	if (finished()) return "";
+	return units_[next_].kind == Unit::Kind::Meshes ? "meshes" : "textures";
+}
+
+// --- PreviewModel ------------------------------------------------------------------------------------------
 
 void PreviewModel::begin(const opennova::assets::Model &model, const std::string &path,
 		std::shared_ptr<const opennova::editor::StampedFiles> files, std::shared_ptr<const opennova::anim::SkeletalClips> rig) {
@@ -89,39 +107,29 @@ void PreviewModel::begin(const opennova::assets::Model &model, const std::string
 	}
 	auto build = std::make_unique<Build>();
 	build->files = files;
-	build->data.instantiate();
-	build->data->open_from_model(model, opennova::to_gd(path), std::make_shared<opennova::TextureFiles>(files));
+	Ref<ObjectData> data;
+	data.instantiate();
+	data->open_from_model(model, opennova::to_gd(path), std::make_shared<opennova::TextureFiles>(files));
+	int bones = 0;
 	if (rig) {
 		build->skeletal.instantiate();
 		build->skeletal->set_rig(rig);
-		build->bone_count = build->skeletal->get_bone_count();
+		bones = build->skeletal->get_bone_count();
 	}
-	plan_(*build);
+	build->data = std::make_unique<ModelDataBuild>(data, build->skeletal.is_valid(), bones);
 	build_ = std::move(build);
 }
 
 bool PreviewModel::step() {
 	if (!build_) return false;
 	Build &build = *build_;
-	const Unit unit = build.units[build.next++];
-	switch (unit.kind) {
-	case Unit::Kind::Texture:
-		if (build.data->load_material_slot_texture(unit.material, unit.slot).is_null() &&
-				unit.slot == THREEDI_TEX_SLOT_NORMAL)
-			build.data->load_material_slot_texture(unit.material, THREEDI_TEX_SLOT_NORMAL_B);
-		break;
-	case Unit::Kind::Frame:
-		build.data->load_material_anim_frame(unit.material, THREEDI_TEX_SLOT_DIFFUSE, unit.frame);
-		break;
-	case Unit::Kind::Meshes:
-		build.data->build_lod_submeshes(unit.lod, build.skeletal.is_valid(), build.bone_count, false);
-		break;
-	case Unit::Kind::Scene:
-		DEV_ASSERT(build.data->has_document());
-		assemble_(build);
-		break;
+	if (!build.data->finished()) {
+		build.data->step();
+		return false;
 	}
-	if (build.next < build.units.size()) return false;
+	// The scene: built only over a model, which open_from_model always holds.
+	DEV_ASSERT(build.data->data()->has_document());
+	assemble_(build);
 	build_.reset();
 	return true;
 }
@@ -130,16 +138,9 @@ opennova::editor::OperationProgress PreviewModel::progress() const {
 	opennova::editor::OperationProgress progress;
 	progress.unit = opennova::editor::OperationUnit::Steps;
 	if (!build_) return progress;
-	progress.done = build_->next;
-	progress.total = build_->units.size();
-	if (build_->next < build_->units.size()) {
-		switch (build_->units[build_->next].kind) {
-		case Unit::Kind::Texture:
-		case Unit::Kind::Frame: progress.label = "textures"; break;
-		case Unit::Kind::Meshes: progress.label = "meshes"; break;
-		case Unit::Kind::Scene: progress.label = "scene"; break;
-		}
-	}
+	progress.done = build_->data->done();
+	progress.total = build_->data->total() + 1;
+	progress.label = build_->data->finished() ? "scene" : build_->data->label();
 	return progress;
 }
 
@@ -150,8 +151,8 @@ void PreviewModel::assemble_(Build &build) {
 		object_->set_object_data(Ref<ObjectData>());
 		object_->set_skeletal_anim(build.skeletal);
 	}
-	object_->set_object_data(build.data);
-	data_ = build.data;
+	object_->set_object_data(build.data->data());
+	data_ = build.data->data();
 	files_ = build.files;
 	applied_ctrl_.clear();
 	applied_lod_ = -1;

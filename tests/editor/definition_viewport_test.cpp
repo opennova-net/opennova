@@ -184,7 +184,7 @@ const char *kItems =
 		"begin \"Statue\"\nid 100705\ntype decoration\nend\n";
 
 const char *kWeapons = "weapon \"W_FX\"\r\n\tgfx3 fxpump\r\nend\r\n";
-const char *kAmmo = "ammo AMMO_FX\r\nvelocity 900\r\nfrndlytrcrid 100704\r\nend\r\nammo AMMO_PLAIN\r\nvelocity 800\r\nend\r\n";
+const char *kAmmo = "ammo AMMO_FX\r\nvelocity 900\r\nfrndlytrcrid 704\r\nend\r\nammo AMMO_PLAIN\r\nvelocity 800\r\nend\r\n";
 
 struct DefinitionRig {
 	editor_test::TempProjectDir dir{"opennova_editor_definition_viewport"};
@@ -532,11 +532,13 @@ static int test_person() {
 	            person.state == world::anim_state::kIdle && person.updates > 10 && viewport->skeleton() != nullptr);
 	const uint64_t serial = viewport->skeleton_serial();
 	const uint32_t updates = person.updates;
-	// Another SSN warms up longer: posed again over the same rig.
+	// Another SSN warms up longer: posed again over the same rig (not loaded again), the picture standing.
+	const uint64_t builds = viewport->builds();
 	TEST_EXPECT(rig.set(R"({"options": {"ssn": 15}})"));
 	viewport = rig.viewport();
 	TEST_EXPECT(viewport->person().status == "posed" && viewport->person().updates != updates &&
-	            viewport->skeleton_serial() != serial);
+	            viewport->skeleton_serial() == serial && viewport->builds() == builds &&
+	            rig.last() == ViewportAction::Update);
 	// The envelope's person, as the mission's.
 	JsonValue shown = rig.json();
 	const JsonValue *body = shown.get("body");

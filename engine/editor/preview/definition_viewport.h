@@ -254,6 +254,8 @@ private:
 	// A person's.
 	MissionPose person_;
 	std::string person_key_;
+	std::string rig_key_;  // the model and the .adm the rig was loaded of
+	std::string rig_note_; // why a person's rig does not load ("" it does)
 	std::shared_ptr<const anim::SkeletalClips> skeleton_;
 	uint64_t skeleton_serial_ = 0;
 	FileStamps rig_read_;
