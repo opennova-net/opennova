@@ -4833,6 +4833,17 @@ target_link_libraries(editor_mission_poses_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_poses_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_poses COMMAND editor_mission_poses_test)
 
+# An entity off the ground is a Problem with a fix (DI-28, editor/preview/mission_ground_rules and the
+# mission type's project check, mission_ground_check): each entity class grounded by the game's own
+# rule (a static drawn where stored on the terrain, on another's solid or on the water; a person set
+# down by the warmup or standing on a floor; a mover the game's to place), the findings and their fixes
+# over a real session, followed live. Mixed: the retail row runs the rules over every shipped mission
+# of the base game and counts what they flag (OPENNOVA_JO_DIR).
+add_executable(editor_mission_ground_test editor/mission_ground_check_test.cpp)
+target_link_libraries(editor_mission_ground_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_ground_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_ground COMMAND editor_mission_ground_test)
+
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.
 add_executable(editor_menu_viewport_test editor/menu_viewport_test.cpp)
