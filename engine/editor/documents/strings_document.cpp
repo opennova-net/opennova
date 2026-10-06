@@ -132,6 +132,20 @@ bool set_coordinate(int16_t &target, const Value &value, std::string &error) {
 	return true;
 }
 
+// A name of its own for a section or a key (its cp1252 bytes) that `taken` holds (upper case): the
+// name's stem (its trailing digits dropped), cut where the number would not fit the field (one byte a
+// character), and the first number from 2 whose name `taken` lacks.
+std::string numbered_name(const std::string &name, const std::set<std::string> &taken) {
+	std::string stem = name;
+	while (!stem.empty() && std::isdigit(static_cast<unsigned char>(stem.back()))) stem.pop_back();
+	if (stem.empty()) stem = name;
+	for (int n = 2;; ++n) {
+		const std::string number = std::to_string(n);
+		const std::string candidate = stem.substr(0, std::min(stem.size(), kNameWidth - 1 - number.size())) + number;
+		if (!taken.count(strutil::to_upper(candidate))) return candidate;
+	}
+}
+
 } // namespace
 
 StringsSection::StringsSection() {
@@ -319,17 +333,7 @@ void StringsDocument::prepare_duplicate(
 	std::set<std::string> taken;
 	for (const auto &row : rows) taken.insert(strutil::to_upper(row->name()));
 	std::string &name = section_of(copy).section_name;
-	std::string stem = name;
-	while (!stem.empty() && std::isdigit(static_cast<unsigned char>(stem.back()))) stem.pop_back();
-	if (stem.empty()) stem = name;
-	for (int n = 2;; ++n) {
-		const std::string number = std::to_string(n);
-		const std::string candidate = stem.substr(0, std::min(stem.size(), kNameWidth - 1 - number.size())) + number;
-		if (!taken.count(strutil::to_upper(candidate))) {
-			name = candidate;
-			return;
-		}
-	}
+	name = numbered_name(name, taken);
 }
 
 std::shared_ptr<Node> StringsDocument::make_node(NodeKind kind, NodeId id,
@@ -378,7 +382,8 @@ constexpr FindingCodeEntry<StringsFinding> kFindingEntries[] = {
 	{ StringsFinding::SectionEmpty, listed_code("strings.section_empty") },
 	{ StringsFinding::SectionDuplicate, { "strings.section_duplicate" } },
 	{ StringsFinding::KeyEmpty, listed_code("strings.key_empty") },
-	{ StringsFinding::KeyDuplicate, { "strings.key_duplicate" } },
+	// A key the game reads the first of: a key of its own, or the string removed (DI-11, Diagnostic::planned).
+	{ StringsFinding::KeyDuplicate, { "strings.key_duplicate", FindingFix::EditRecord } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(StringsFinding::kCount),
 		"every StringsFinding has exactly one row");
@@ -431,20 +436,50 @@ std::vector<Diagnostic> validate_strings_file(const DocumentBase &document) {
 	for (const auto &node : strings->rows()) {
 		const StringsSection &section = section_of(*node);
 		std::set<std::string> keys;
+		// Every key of the section (upper case), which a key of its own a fix gives keeps clear of.
+		std::set<std::string> taken;
+		for (const rtxt::Entry &entry : section.entries) taken.insert(strutil::to_upper(entry.key));
 		for (size_t i = 0; i < section.entries.size(); ++i) {
 			const rtxt::Entry &entry = section.entries[i];
-			auto add = [&](DiagnosticSeverity severity, StringsFinding code, const std::string &message) {
+			auto add = [&](DiagnosticSeverity severity, StringsFinding code, const std::string &message) -> Diagnostic & {
 				auto diagnostic = make_finding(code, severity, message, document.path(), "key");
 				diagnostic.record = section.section_name;
 				diagnostic.row_id = node->id;
 				diagnostic.child_id = section.collections[0][i];
 				diagnostic.record_kind = kString;
 				findings.push_back(std::move(diagnostic));
+				return findings.back();
 			};
-			if (entry.key.empty()) add(DiagnosticSeverity::Error, StringsFinding::KeyEmpty, "Enter a key for this string in section '" + section.section_name + "'.");
-			else if (!keys.insert(strutil::to_upper(entry.key)).second)
-				add(DiagnosticSeverity::Warning, StringsFinding::KeyDuplicate,
-				    "Section '" + section.section_name + "' has more than one '" + entry.key + "'; the game reads the first.");
+			if (entry.key.empty()) {
+				add(DiagnosticSeverity::Error, StringsFinding::KeyEmpty, "Enter a key for this string in section '" + section.section_name + "'.");
+			} else if (!keys.insert(strutil::to_upper(entry.key)).second) {
+				Diagnostic &d = add(DiagnosticSeverity::Warning, StringsFinding::KeyDuplicate,
+				                    "Section '" + section.section_name + "' has more than one '" + entry.key + "'; the game reads the first.");
+				// Its fixes (DI-11): a key of its own (the number a copied section's name takes), or the string
+				// removed, which no lookup reads [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250, the
+				// first of a key; TextResource_FindEntryByKey @ 0x75D450, the flat walk meets the earlier one
+				// first too].
+				const std::string own = numbered_name(entry.key, taken);
+				taken.insert(strutil::to_upper(own));
+				const NodeAddress at{node->id, kString, section.collections[0][i]};
+				Edit rename;
+				rename.address = at;
+				rename.field = "key";
+				rename.value = retail_text_to_utf8(own);
+				Edit remove;
+				remove.operation = EditOperation::Remove;
+				remove.address = at;
+				const std::string key = retail_text_to_utf8(entry.key), name = retail_text_to_utf8(section.section_name);
+				d.planned.push_back({"Give it the key " + retail_text_to_utf8(own),
+				                     "Sets its key to " + retail_text_to_utf8(own) + ", a key of its own in section '" + name +
+				                             "': a lookup of that key then reads its text. A lookup of " + key +
+				                             " still reads the earlier string.",
+				                     {rename}});
+				d.planned.push_back({"Remove it",
+				                     "Removes this string: a lookup of " + key + " in section '" + name +
+				                             "' reads the earlier one, as the game does now, so nothing the game shows changes.",
+				                     {remove}});
+			}
 		}
 	}
 	return findings;
