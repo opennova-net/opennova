@@ -3849,6 +3849,12 @@ add_executable(npruntime_door_relay_test npruntime/door_relay_test.cpp)
 target_link_libraries(npruntime_door_relay_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_door_relay COMMAND npruntime_door_relay_test)
 
+# D-SND-36 / D-SND-37: the authority's water-crossing fan (S2C 0x34 to every
+# alive player, the host's own through the loopback) and its set binding.
+add_executable(npruntime_water_cross_route_test npruntime/water_cross_route_test.cpp)
+target_link_libraries(npruntime_water_cross_route_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_water_cross_route COMMAND npruntime_water_cross_route_test)
+
 # D-NET-284: the host's join-window kill page (C2S 0x28 -> S2C 0x4E).
 add_executable(npruntime_kill_page_test npruntime/kill_page_test.cpp)
 target_link_libraries(npruntime_kill_page_test PRIVATE opennova_runtime)
