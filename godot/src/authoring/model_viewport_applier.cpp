@@ -17,8 +17,11 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/renderer/fp_viewmodel_spec.h>
+#include <runtime/world/player_present.h>
 
 #include "env/mission_environment.h"
+#include "object/avatar_database.h"
 #include "render/frame_fx.h"
 #include "util/string_convert.h"
 #include "util/texture_files.h"
@@ -74,10 +77,27 @@ ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) {
 	clock_.instantiate();
 	object_->set_panm_clock(clock_);
 	root->add_child(object_);
+	// The first-person arms (DI-13), as the game's view model builds them: no authored levels of their own,
+	// the arms part's camo.
+	arms_ = memnew(ObjectModel);
+	arms_->set_panm_clock(clock_);
+	arms_->set_avatar_part(ObjectModel::AVATAR_PART_ARMS);
+	root->add_child(arms_);
 }
 
 void ModelViewportApplier::plan_(Build &build) {
-	const opennova::threedi::Threedi3di3 &model = build.data->native_model();
+	plan_data_(build, build.data, false);
+	if (build.arms.is_valid()) plan_data_(build, build.arms, true);
+	Unit scene;
+	scene.kind = Unit::Kind::Scene;
+	build.units.push_back(scene);
+	Unit pose;
+	pose.kind = Unit::Kind::Pose;
+	build.units.push_back(pose);
+}
+
+void ModelViewportApplier::plan_data_(Build &build, const Ref<ObjectData> &data, bool arms) {
+	const opennova::threedi::Threedi3di3 &model = data->native_model();
 	// The textures the scene's materials bind, each stage's as ObjectModel::create_material loads it
 	// and each flipbook frame as collect_anim_frames does: decoded here, the scene's loads hit the
 	// texture files' cache.
@@ -89,30 +109,28 @@ void ModelViewportApplier::plan_(Build &build) {
 			unit.kind = Unit::Kind::Texture;
 			unit.material = int(i);
 			unit.slot = slot;
+			unit.arms = arms;
 			build.units.push_back(unit);
 		}
-		const PackedStringArray frames = build.data->get_material_anim_frames(int(i), THREEDI_TEX_SLOT_DIFFUSE);
+		const PackedStringArray frames = data->get_material_anim_frames(int(i), THREEDI_TEX_SLOT_DIFFUSE);
 		for (int frame = 0; frames.size() > 1 && frame < frames.size(); ++frame) {
 			Unit unit;
 			unit.kind = Unit::Kind::Frame;
 			unit.material = int(i);
 			unit.frame = frame;
+			unit.arms = arms;
 			build.units.push_back(unit);
 		}
 	}
-	// Every level's meshes, as the scene asks them of the data (skinned for the rig it binds).
+	// Every level's meshes, as the scene asks them of the data (skinned for the rig it binds: the arms for
+	// the gun's).
 	for (size_t lod = 0; lod < model.lod_count; ++lod) {
 		Unit unit;
 		unit.kind = Unit::Kind::Meshes;
 		unit.lod = int(lod);
+		unit.arms = arms;
 		build.units.push_back(unit);
 	}
-	Unit scene;
-	scene.kind = Unit::Kind::Scene;
-	build.units.push_back(scene);
-	Unit pose;
-	pose.kind = Unit::Kind::Pose;
-	build.units.push_back(pose);
 }
 
 void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewport, const opennova::editor::SessionView &view,
@@ -138,6 +156,18 @@ void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewpo
 		build->skeletal->set_rig(model.skeleton());
 		build->bone_count = build->skeletal->get_bone_count();
 	}
+	// A weapon's first-person map (DI-13): the arms the viewport read, drawn with the gun's bone array (the
+	// game builds the arms over the gun's rig, renderer::fp_viewmodel_spec's witness).
+	const opennova::editor::FirstPersonSources &first_person = model.first_person();
+	if (first_person.arms_model() && model.skeleton()) {
+		build->arms.instantiate();
+		build->arms->open_from_model(first_person.arms_model(), opennova::to_gd(first_person.arms_file()),
+				std::make_shared<opennova::TextureFiles>(files));
+		build->arms_skeletal.instantiate();
+		build->arms_skeletal->set_rig(model.skeleton());
+		if (const opennova::editor::FirstPersonCharacter *who = first_person.character())
+			build->arms_camo = { who->camo[0], who->camo[1], who->camo[2] };
+	}
 	plan_(*build);
 	build_ = std::move(build);
 }
@@ -146,17 +176,18 @@ ApplierStep ModelViewportApplier::step(const opennova::editor::ViewportModel &vi
 		const opennova::editor::PreviewClock &clock, std::string &) {
 	Build &build = *build_;
 	const Unit unit = build.units[build.next++];
+	const Ref<ObjectData> &data = unit.arms ? build.arms : build.data;
 	switch (unit.kind) {
 	case Unit::Kind::Texture:
-		if (build.data->load_material_slot_texture(unit.material, unit.slot).is_null() &&
+		if (data->load_material_slot_texture(unit.material, unit.slot).is_null() &&
 				unit.slot == THREEDI_TEX_SLOT_NORMAL)
-			build.data->load_material_slot_texture(unit.material, THREEDI_TEX_SLOT_NORMAL_B);
+			data->load_material_slot_texture(unit.material, THREEDI_TEX_SLOT_NORMAL_B);
 		break;
 	case Unit::Kind::Frame:
-		build.data->load_material_anim_frame(unit.material, THREEDI_TEX_SLOT_DIFFUSE, unit.frame);
+		data->load_material_anim_frame(unit.material, THREEDI_TEX_SLOT_DIFFUSE, unit.frame);
 		break;
 	case Unit::Kind::Meshes:
-		build.data->build_lod_submeshes(unit.lod, build.skeletal.is_valid(), build.bone_count, false);
+		data->build_lod_submeshes(unit.lod, build.skeletal.is_valid(), build.bone_count, false);
 		break;
 	case Unit::Kind::Scene:
 		// rebuild() builds only over a model, which open_from_model always holds: no scene unit
@@ -204,9 +235,21 @@ void ModelViewportApplier::assemble_(Build &build) {
 	}
 	object_->set_object_data(build.data);
 	data_ = build.data;
+	// The first-person arms (DI-13) on their own instance of the gun's rig, or none.
+	arms_->set_object_data(Ref<ObjectData>());
+	arms_->set_skeletal_anim(build.arms_skeletal);
+	if (build.arms.is_valid()) {
+		arms_->set_object_data(build.arms);
+		arms_->set_graphic_name(build.arms->get_source_path());
+		// The arms' own camo triplet, as the game's per-submit writer stores it before each arms submit.
+		AvatarDatabase::apply_part_camo(arms_, Vector3i(build.arms_camo[0], build.arms_camo[1], build.arms_camo[2]),
+				"first_person:arms_camo");
+	}
+	arms_data_ = build.arms;
 	files_ = build.files;
 	applied_ctrl_.clear();
 	applied_lod_ = -1;
+	applied_team_ = INT32_MIN + 1; // written again over the new scene
 	applied_skeleton_ = build.skeleton_serial;
 }
 
@@ -218,17 +261,41 @@ void ModelViewportApplier::apply_state_(const opennova::editor::ViewportModel &v
 		const opennova::editor::PreviewClock &clock) {
 	if (applied_skeleton_ != model_of(viewport).skeleton_serial()) bind_rig_(viewport);
 	apply_registers_(viewport, clock);
+	apply_first_person_registers_(viewport);
 	play_clip_(viewport, clock);
 	place_camera_(viewport);
+}
+
+// A weapon's first-person map (DI-13): the per-submit writers the game's view model runs on every part,
+// TEX_TEAM the player's team byte (the engine's fp_ctrl_register_writes and viewmodel_team_byte); none
+// written, and any left cleared, for another picture.
+void ModelViewportApplier::apply_first_person_registers_(const opennova::editor::ViewportModel &viewport) {
+	const opennova::editor::FirstPersonSources &first_person = model_of(viewport).first_person();
+	const int team = first_person.active() ? opennova::renderer::viewmodel_team_byte(first_person.team()) : INT32_MIN;
+	if (team == applied_team_) return;
+	applied_team_ = team;
+	static const String kOwner("first_person:team");
+	for (ObjectModel *part : { object_, arms_ }) {
+		const bool arms = part == arms_;
+		const opennova::world::FpCtrlRegisterWrites writes =
+				opennova::world::fp_ctrl_register_writes(first_person.active(), true, false, arms);
+		part->begin_ctrl_update();
+		if (writes.team && team != INT32_MIN) part->set_ctrl_override(kOwner, "TEX_TEAM", team);
+		else part->clear_ctrl_override(kOwner, "TEX_TEAM");
+		part->end_ctrl_update();
+	}
 }
 
 void ModelViewportApplier::clear() {
 	build_.reset();
 	object_->set_object_data(Ref<ObjectData>());
 	data_.unref();
+	arms_->set_object_data(Ref<ObjectData>());
+	arms_data_.unref();
 	files_.reset();
 	applied_ctrl_.clear();
 	applied_lod_ = -1;
+	applied_team_ = INT32_MIN + 1;
 }
 
 // The CTRL registers the picture reads at the clock (a register let go reads 0 again), and the sections
@@ -264,6 +331,8 @@ void ModelViewportApplier::place_camera_(const opennova::editor::ViewportModel &
 	camera_->set_transform(Transform3D(Basis(to_godot(right), to_godot(up), to_godot(back)), to_godot(camera.eye())));
 	camera_->set_near(camera.near_plane);
 	camera_->set_far(camera.far_plane);
+	// The first-person eye sees with the weapon's renderfov (DI-13), else the game's view.
+	camera_->set_fov(camera.fov_degrees());
 	if (model.status() != opennova::editor::ViewportStatus::Ready || data_.is_null()) return;
 	const int lod = model.lod();
 	if (lod >= 0 && lod != applied_lod_) {
@@ -277,12 +346,20 @@ void ModelViewportApplier::bind_rig_(const opennova::editor::ViewportModel &view
 	applied_skeleton_ = model.skeleton_serial();
 	if (!model.skeleton() || data_.is_null()) {
 		object_->set_skeletal_anim(Ref<SkeletalAnim>());
+		if (arms_data_.is_valid()) arms_->set_skeletal_anim(Ref<SkeletalAnim>());
 		return;
 	}
 	Ref<SkeletalAnim> skeletal;
 	skeletal.instantiate();
 	skeletal->set_rig(model.skeleton());
 	object_->set_skeletal_anim(skeletal);
+	// The arms ride their own instance of the gun's rig (DI-13).
+	if (arms_data_.is_valid()) {
+		Ref<SkeletalAnim> arms;
+		arms.instantiate();
+		arms->set_rig(model.skeleton());
+		arms_->set_skeletal_anim(arms);
+	}
 }
 
 void ModelViewportApplier::play_clip_(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
@@ -290,6 +367,9 @@ void ModelViewportApplier::play_clip_(const opennova::editor::ViewportModel &vie
 	// The clip's own tick (a repeated one-shot's taken again from its start): the portable half's.
 	if (model.skeleton() && !model.clip_key().empty() && data_.is_valid()) {
 		object_->play_body_clip_at(opennova::to_gd(model.clip_key()), int(model.clip_ticks(clock)), model.clip_variant());
+		// The first-person arms pose by the same clip on the gun's rig (DI-13).
+		if (arms_data_.is_valid())
+			arms_->play_body_clip_at(opennova::to_gd(model.clip_key()), int(model.clip_ticks(clock)), model.clip_variant());
 	}
 }
 
