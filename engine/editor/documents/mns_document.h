@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
 #include <editor/model/finding_code_row.h>
 #include <formats/mns/mns_document.h>
@@ -131,6 +132,9 @@ bool is_style_kind(AssetKind kind);
 // (a name brand.mns redefines, a value used as a colour that is not one, a value used as more
 // than one of colour, font and image, a name no menu uses) is graph/use_checks'.
 std::vector<Diagnostic> validate_styles_file(const DocumentBase &document);
+// A style variable no stylesheet the game reads defines, added to one it reads (ADR 0046 DI-15,
+// DocumentType::define_symbol): the line Add variable makes, named as the menu names it, where the game reads it.
+bool define_style_variable(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
 
 // The stylesheet type's own finding codes (DocumentType::findings), each a row of its table
 // (mns_document.cpp, static_asserted into this order): its validator's (a line end the game does

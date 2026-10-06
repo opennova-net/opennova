@@ -38,8 +38,16 @@ namespace opennova::editor {
 // missing symbol (a string id, a style variable, a menu screen or window, a weapon, ammo
 // or item, a particle effect, a user point): Open the file where it belongs, the one its
 // scope names, the one that defines its kind's other names, or the table of its kind the
-// game reads (a catalog or stylesheet that defines nothing yet; Show it in Files when the
-// editor does not edit it). An animation map with no anim_reset row: Add one (an edit of
+// game reads (a catalog or stylesheet that defines nothing yet; a sound set's bank the game
+// searches, a menu SOUND's own; Show it in Files when the editor does not edit it); first,
+// where that file's type defines names of the kind (DocumentType::define_symbol, ADR 0046
+// DI-15), Add it there: a record of the kind named as referenced, born as the type's Add makes
+// one, where the lookup finds it (a string id in its section, a variable in a stylesheet the
+// game reads, a weapon, ammo, item (on its id, by the reserved-id rule) or powerup row, a sound
+// set, a sound profile, a menu's screen or window, an effect block), an edit of that file's
+// document opened first that selects it, one step its Undo takes back (the file naming it is
+// not edited), offered where the batch applies and the file, as its Save would write it,
+// defines the name where the game's lookup finds it. An animation map with no anim_reset row: Add one (an edit of
 // its document, which Undo takes back). A missing reference to a file:
 // Import a name its loader reads when the game install has one, or Create it blank when
 // its kind has a free-form factory and the name is free and one the project's name rules
@@ -86,6 +94,23 @@ struct ProblemFix {
 struct ProblemFixIndex {
 	explicit ProblemFixIndex(const SessionView &view);
 	std::unordered_set<std::string> unserializable; // project-relative paths
+
+	// The document a missing name's Add it there plans over (ADR 0046 DI-15): the open one as it stands, else
+	// the file read from the disk once for the index (an open of it gives its records the same identities, the
+	// validation cache's rule), its trial copy; null for a file that does not read.
+	const DocumentBase *definer(const SessionView &view, const AssetEntry &file) const;
+	// The copy a plan is tried on (applied, read, and undone, so it stands as read between tries), kept with the
+	// index: a closed file read from the disk; an open document read again from what it would save, while it
+	// stands at that state (its instance, its load, its revision). Null for one that does not read.
+	DocumentBase *trial(const SessionView &view, const AssetEntry &file) const;
+
+private:
+	struct Copy {
+		std::shared_ptr<DocumentBase> document;
+		uint64_t identity = 0, generation = 0, revision = 0; // the open document's state it copies (0: the file's)
+		bool read = false;
+	};
+	mutable std::map<std::string, Copy> copies_;
 };
 
 // The fixes for a finding over the view as it is, the first the one a click applies.
