@@ -179,17 +179,42 @@ const AssetEntry *usual_table(ReferenceKind kind, const SessionView &view) {
 	return nullptr;
 }
 
+// The bank a missing sound set belongs in (DI-15): a menu SOUND's, the bank its SOUND names, where the menu looks
+// it up alone; any other's, a bank the game searches a set by name in (AssetGraph::bank_rank: the global chain
+// [orig: Game_StartMission @ 0x525443 over the slot table @ 0x82A5B0]), the one defining the other sets the
+// search finds first, else the project's bank the search opens first; null for none.
+const AssetEntry *sound_bank_for(const ReferenceSubject &missing, const SessionView &view) {
+	if (!missing.scope.empty()) {
+		const AssetEntry *bank = view.project.scan->find(missing.scope);
+		return bank && bank->kind == AssetKind::SoundBank ? bank : nullptr;
+	}
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph) return nullptr;
+	for (const GraphSymbol *symbol : graph->symbols_of_kind(ReferenceKind::Sound))
+		if (!symbol->inert && graph->on_bank_chain(symbol->file))
+			if (const AssetEntry *entry = view.project.scan->at_path(symbol->file)) return entry;
+	const AssetEntry *first = nullptr;
+	size_t rank = SIZE_MAX;
+	for (const AssetEntry &entry : view.project.scan->entries)
+		if (entry.kind == AssetKind::SoundBank && graph->bank_rank(entry.relative_path) < rank) {
+			first = &entry;
+			rank = graph->bank_rank(entry.relative_path);
+		}
+	return first;
+}
+
 // The project file where a missing symbol belongs: the one its scope names (its row's
 // scope_names_file: a string id's table, the menu an ACTION's screen or window is looked up in,
-// the model whose user points an item's particle slot names), else the file that defines the
-// other symbols of its kind that a lookup finds, else the table its kind goes in (usual_table:
-// a catalog or a stylesheet that defines nothing yet); null when the project has none (a
-// string id of no table, or of any table).
+// the model whose user points an item's particle slot names), a sound set's bank (sound_bank_for),
+// else the file that defines the other symbols of its kind that a lookup finds, else the table its
+// kind goes in (usual_table: a catalog or a stylesheet that defines nothing yet); null when the
+// project has none (a string id of no table, or of any table).
 const AssetEntry *defining_file(const ReferenceSubject &missing, const SessionView &view) {
 	if (reference_row(missing.kind).scope_names_file) {
 		const std::string scoped = missing.scope.substr(0, missing.scope.find('/'));
 		return scoped.empty() ? nullptr : view.project.scan->find(scoped);
 	}
+	if (missing.kind == ReferenceKind::Sound) return sound_bank_for(missing, view);
 	if (view.findings.graph)
 		for (const GraphSymbol *symbol : view.findings.graph->symbols_of_kind(missing.kind))
 			if (!symbol->inert)
@@ -198,11 +223,55 @@ const AssetEntry *defining_file(const ReferenceSubject &missing, const SessionVi
 	return usual_table(missing.kind, view);
 }
 
-// A missing symbol: the file where it belongs (defining_file), opened to add it or to see the
-// names it has, or shown in Files when the editor does not open its kind.
-void symbol_fixes(const ReferenceSubject &missing, const SessionView &view, std::vector<ProblemFix> &out) {
+// A missing name's Add it there (ADR 0046 DI-15): the record of its kind the file where it belongs gains, named
+// as referenced, planned by the file's type (DocumentType::define_symbol) over its document as it stands (an open
+// one's unsaved edits included). Offered only where it works: the same plan, made over the index's copy of the
+// document (ProblemFixIndex::trial: a snapshot takes no edit), applies to it, and the copy then defines the name
+// where the game's lookup finds it (no inert definition, in the reference's scope), read as the graph reads it (a
+// record document through its schema, extract_from_document; a text as its Save writes it, extract_from_bytes);
+// the copy's Undo then takes the plan back. An edit of that file alone: the file naming the name keeps it as
+// written.
+void add_there_fix(const ReferenceSubject &missing, const SessionView &view, const AssetEntry &file,
+                   const ProblemFixIndex &index, std::vector<ProblemFix> &out) {
+	const DocumentType *type = document_type_for(file.kind);
+	if (!type || !type->define_symbol || !view.project.document) return;
+	const DocumentBase *document = index.definer(view, file);
+	DocumentBase *copy = index.trial(view, file);
+	PlannedFix planned, tried;
+	if (!document || !copy || !type->define_symbol(*document, missing, planned) || planned.edits.empty()) return;
+	// A closed file's copy is the document planned over: the same plan.
+	if (copy == document) tried = planned;
+	else if (!type->define_symbol(*copy, missing, tried)) return;
+	Diagnostic error;
+	if (!copy->apply(tried.edits, error)) return;
+	Extracted extracted;
+	if (const Document *records = records_of(*copy)) {
+		extract_from_document(*records, extracted);
+	} else {
+		const SerializeResult saved = copy->serialize();
+		if (saved.ok())
+			extract_from_bytes(file.relative_path, file.kind, std::vector<uint8_t>(saved.text.begin(), saved.text.end()),
+			                   view.project.document->target_game, extracted, error);
+	}
+	copy->undo();
+	const ReferenceKindRow &row = reference_row(missing.kind);
+	const std::string wanted = graph_names::symbol_name(
+	        missing.kind, row.spell == NameSpelling::StyleVariable ? mns::variable_name(missing.target) : missing.target);
+	const bool defined = std::any_of(extracted.symbols.begin(), extracted.symbols.end(), [&](const GraphSymbol &symbol) {
+		return symbol.kind == missing.kind && !symbol.inert && symbol.name == wanted && scope_matches(symbol.scope, missing.scope);
+	});
+	if (defined) out.push_back(edit_fix(file.relative_path, planned));
+}
+
+// A missing symbol: the file where it belongs (defining_file), its Add it there where its type
+// defines names of the kind (add_there_fix, planned with `plan` alone: has_fixes and a Fix all read
+// none of it), then opened to add it or to see the names it has, or shown in Files when the editor
+// does not open its kind.
+void symbol_fixes(const ReferenceSubject &missing, const SessionView &view, const ProblemFixIndex &index, bool plan,
+                  std::vector<ProblemFix> &out) {
 	const AssetEntry *file = defining_file(missing, view);
 	if (!file) return;
+	if (plan) add_there_fix(missing, view, *file, index, out);
 	const std::string what = std::string(reference_row(missing.kind).phrase) + " '" + missing.target + "'";
 	if (is_editable_kind(file->kind))
 		out.push_back({"Open " + file->logical_name,
@@ -309,8 +378,9 @@ void placeholder_fix(const ReferenceSubject &missing, const SessionView &view, s
 // required name's factory winning over the kind's free-form one (as CreateFile picks), when
 // the name is free (a file of another kind there would only open, the reference still
 // missing) and one the project's name rules take (check_file_name).
-void reference_fixes(const ReferenceSubject &missing, const SessionView &view, std::vector<ProblemFix> &out) {
-	if (reference_row(missing.kind).names_symbol()) return symbol_fixes(missing, view, out);
+void reference_fixes(const ReferenceSubject &missing, const SessionView &view, const ProblemFixIndex &index, bool plan,
+                     std::vector<ProblemFix> &out) {
+	if (reference_row(missing.kind).names_symbol()) return symbol_fixes(missing, view, index, plan, out);
 	const AssetKind kind = reference_row(missing.kind).file;
 	if (kind == AssetKind::Unknown || missing.target.empty()) return;
 	const auto in_game = [&view](const std::string &name) { return !retail_name(view, name).empty(); };
@@ -537,7 +607,7 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		if (!d.asset.empty()) out.push_back(reset_row_fix(d.asset));
 		return;
 	case FindingFix::Reference:
-		if (const ReferenceSubject *missing = reference_subject(d)) reference_fixes(*missing, view, out);
+		if (const ReferenceSubject *missing = reference_subject(d)) reference_fixes(*missing, view, index, plan, out);
 		return;
 	case FindingFix::UnimportedTexture:
 		// A texture an import's model names that the import did not bring: the reference's own
@@ -547,7 +617,7 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		    missing && view.findings.graph &&
 		    view.findings.graph->resolve(missing->kind, missing->target, missing->scope, nullptr, missing->loader_arg) ==
 		            ReferenceStatus::Missing)
-			reference_fixes(*missing, view, out);
+			reference_fixes(*missing, view, index, plan, out);
 		return;
 	case FindingFix::Reload: {
 		// An open document whose file changed outside the editor: read it again, its unsaved
@@ -660,6 +730,48 @@ std::vector<ProblemFix> fixes_over(const Diagnostic &d, const SessionView &view,
 ProblemFixIndex::ProblemFixIndex(const SessionView &view) {
 	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.row() && d.row()->blocks_save) unserializable.insert(d.asset);
+}
+
+namespace {
+
+const DocumentBase *open_at(const SessionView &view, const std::string &path) {
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == path) return open.get();
+	return nullptr;
+}
+
+} // namespace
+
+const DocumentBase *ProblemFixIndex::definer(const SessionView &view, const AssetEntry &file) const {
+	if (const DocumentBase *open = open_at(view, file.relative_path)) return open;
+	return trial(view, file);
+}
+
+DocumentBase *ProblemFixIndex::trial(const SessionView &view, const AssetEntry &file) const {
+	// The state it is a copy of: the open document's (its instance, its load and its revision), else the file's.
+	const DocumentBase *open = open_at(view, file.relative_path);
+	const uint64_t identity = open ? open->identity() : 0, generation = open ? open->load_generation() : 0,
+	               revision = open ? open->revision() : 0;
+	Copy &held = copies_[file.relative_path];
+	if (held.read && held.identity == identity && held.generation == generation && held.revision == revision)
+		return held.document.get();
+	held = Copy{nullptr, identity, generation, revision, true};
+	const DocumentType *type = document_type_for(file.kind);
+	if (!type || !type->make || !view.project.document || view.project.root.empty()) return nullptr;
+	std::shared_ptr<DocumentBase> document = type->make();
+	Diagnostic error;
+	bool loaded = false;
+	if (open) {
+		// The open document as it stands: read again from what it would save.
+		const SerializeResult now = open->serialize();
+		loaded = now.ok() && document->load_bytes(std::vector<uint8_t>(now.text.begin(), now.text.end()), file.relative_path,
+		                                          file.kind, view.project.document->target_game, error);
+	} else {
+		loaded = document->load(join_path(view.project.root, file.relative_path), file.relative_path, file.kind,
+		                        view.project.document->target_game, error);
+	}
+	if (loaded) held.document = std::move(document);
+	return held.document.get();
 }
 
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index) {
