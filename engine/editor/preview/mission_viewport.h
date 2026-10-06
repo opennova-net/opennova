@@ -10,6 +10,7 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_options.h>
+#include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -108,6 +109,10 @@ public:
 	// What it reads of its entities' items (preview/mission_items: a drop's facts, the bound each item's
 	// entity is picked by), as last followed.
 	const MissionItemCache &items() const { return items_; }
+	// Its people's spawn poses (DI-38, preview/mission_poses: what the game's organic init and its
+	// warmup leave each placed person in), as last followed: the device poses each person's model by
+	// its row's.
+	const MissionPoses &poses() const { return poses_; }
 	// How far from its anchor the primary's handles stand, metres: a share of the camera's distance,
 	// so they keep their size on the picture.
 	float handle_reach() const { return camera_.distance * 0.08f; }
@@ -194,6 +199,11 @@ protected:
 
 private:
 	ViewportAction stop_(MissionViewStatus reason);
+	// The mission's ground followed over the project's files (its terrain, tiles and water, DI-07).
+	void follow_ground_(const SessionView &view) const;
+	// The posed people stood on that ground (MissionPoses::stand) where a record, a pose (`posed`) or
+	// the terrain moved; true when a person's lift moved.
+	bool stand_people_(const SessionView &view, bool posed);
 	// The scene's items' bounds asked of the project, where the scene, the graph or the asset source's
 	// generation moved.
 	void bound_items_(const SessionView &view);
@@ -227,6 +237,9 @@ private:
 	uint64_t bounds_serial_ = 0; // the scene's serial the bounds were last asked over
 	uint64_t bounds_graph_ = 0; // the graph's generation then
 	uint64_t bounds_files_ = 0; // and the asset source's
+	MissionPoses poses_;
+	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
+	int stood_reads_ = -1; // the ground's reads then
 	std::vector<std::string> missing_;
 	bool ground_ = false;
 	// Mutable: the ground's facts read through it, its files read once while they stand (DI-07).

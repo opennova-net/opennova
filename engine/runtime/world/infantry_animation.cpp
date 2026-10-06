@@ -3,6 +3,8 @@
 // See docs/world/world-wac-ai-re.md section 36 (D-INF-26).
 #include <runtime/world/infantry_internal.h>
 
+#include <base/io/bam.h>
+
 namespace opennova::world {
 namespace {
 bool primary_blend_active(const InfantryState &inf) {
@@ -157,6 +159,19 @@ bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
                                   inf.anim_prev, inf.anim_prev_variant, inf.anim_prev_clip_phase,
                                   inf.body_clip_state(), inf.anim_variant, inf.clip_phase,
                                   inf.anim_blend_weight, out);
+}
+
+bool infantry_dual_update(InfantryState &inf, IRootMotionSource *source, AnimVariantRings &rings,
+                          RootMotionFrame &frame) {
+    advance_weapon_channel(inf, source, rings);
+    if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
+    const bool have = source != nullptr && advance_primary_channel(inf, *source, rings, frame);
+    if (have) {
+        if (inf.prev_capsule_bottom != 0)
+            frame.dz = io::bam_sub(frame.capsule_bottom, inf.prev_capsule_bottom);
+        inf.prev_capsule_bottom = frame.capsule_bottom;
+    }
+    return have;
 }
 
 void advance_primary_channel_fallback(InfantryState &inf) {

@@ -7,7 +7,6 @@
 #include <formats/bad/bad.h>
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
-#include <runtime/assets/asset_store.h>
 
 using namespace opennova::adm;
 using namespace opennova::bad;
@@ -19,14 +18,13 @@ void AdmRootMotion::clear() {
 	by_name_.clear();
 }
 
-int AdmRootMotion::parse_adm(const opennova::assets::AssetStore *assets,
-							 const std::string &adm_name, ClipSet &out) {
+int AdmRootMotion::parse_adm(const RigFiles *files, const std::string &adm_name, ClipSet &out) {
 	out.tracks.clear();
 	out.adm_name.clear();
-	if (assets == nullptr) {
+	if (files == nullptr) {
 		return 0;
 	}
-	const auto map = assets->animation_map(adm_name);
+	const auto map = files->animation_map(adm_name);
 	if (!map) return 0;
 	const AdmFile &adm = *map;
 	out.adm_name = adm_name;
@@ -51,7 +49,8 @@ int AdmRootMotion::parse_adm(const opennova::assets::AssetStore *assets,
 		}
 		Track t;
 		// A token whose .bad does not load plays failsafe.bad, when the mount has one.
-		if (const auto file = adm_token_clip(*assets, bad_name)) {
+		std::string loaded;
+		if (const auto file = adm_token_clip(*files, bad_name, &loaded)) {
 			const BadFile &bf = *file;
 			// Fence-post: frame_count+1 root records [orig: 0x40b230 lerps rec[i]..rec[i+1]].
 			// No fps gate: the channel delta is fps/62/frames with no fps test, so an
@@ -61,6 +60,7 @@ int AdmRootMotion::parse_adm(const opennova::assets::AssetStore *assets,
 				t.frame_count = static_cast<int32_t>(bf.frame_count);
 				t.loop = (bf.flags & 0x1u) != 0;
 				t.clock = anim::ClipTimeline(bf.fps, bf.frame_count, t.loop);
+				t.file = loaded;
 				const size_t n = bf.num_events;
 				t.fwd.resize(n);
 				t.lat.resize(n);
@@ -123,15 +123,14 @@ int AdmRootMotion::parse_adm(const opennova::assets::AssetStore *assets,
 	return static_cast<int>(out.tracks.size());
 }
 
-int AdmRootMotion::register_adm(const opennova::assets::AssetStore *assets,
-								const std::string &adm_name) {
+int AdmRootMotion::register_adm(const RigFiles *files, const std::string &adm_name) {
 	const std::string key = strutil::to_lower(adm_name);
 	auto cached = by_name_.find(key);
 	if (cached != by_name_.end()) {
 		return cached->second;
 	}
 	ClipSet set;
-	if (parse_adm(assets, adm_name, set) <= 0) {
+	if (parse_adm(files, adm_name, set) <= 0) {
 		return -1; // no usable clips: caller chooses a configured fallback or none
 	}
 	const int adm_id = static_cast<int>(sets_.size());
@@ -374,6 +373,11 @@ const std::string &AdmRootMotion::adm_name(int adm_id) const {
 		return empty;
 	}
 	return sets_[adm_id].adm_name;
+}
+
+std::string AdmRootMotion::clip_file(int adm_id, int state_id, int variant) const {
+	const Track *track = resolve_track(adm_id, state_id, variant);
+	return track != nullptr ? track->file : std::string();
 }
 
 } // namespace opennova::anim

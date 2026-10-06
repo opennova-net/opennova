@@ -162,6 +162,105 @@ void postures_mounts_and_wash() {
     CHECK(player.source.calls.empty() && player.body().inf.magazine == 4);
 }
 
+// The world-free pose (the editor's mission view poses a placed person with it, DI-38) is the
+// world init's: the same state, playheads, served ring entries and blend, for the ids, the
+// postures, a route, a mount and two bodies sharing one .adm's ring heads in spawn order.
+struct RingSource final : IRootMotionSource {
+    std::set<int> clips{0, 1, 43, 44, 67, 75, 140};
+    bool has_clip(int, int state) const override { return clips.count(state) != 0; }
+    int variant_count(int, int state) const override { return state == 43 || state == 140 ? 3 : 1; }
+    int32_t clip_length_ticks(int, int state, int variant) const override { return 40 + state + 7 * variant; }
+    bool clip_loops(int, int, int) const override { return true; }
+    bool advance(int adm, int state, int32_t &phase, RootMotionFrame &out) override {
+        return advance_variant(adm, state, 0, phase, out);
+    }
+    bool advance_variant(int, int state, int, int32_t &phase, RootMotionFrame &out) override {
+        if (!has_clip(0, state)) return false;
+        ++phase;
+        out = {};
+        out.capsule_bottom = 65536 + 37 * (phase % 50) + 11 * state; // a moving hip
+        out.capsule_top = 2 * 65536;
+        return true;
+    }
+};
+
+bool same_pose(const InfantryBodyPose &a, const InfantryBodyPose &b) {
+    return a.state == b.state && a.phase == b.phase && a.variant == b.variant && a.parked == b.parked &&
+           a.blending == b.blending && a.source_state == b.source_state &&
+           a.source_phase == b.source_phase && a.source_variant == b.source_variant && a.weight == b.weight;
+}
+
+void world_free_pose_matches_the_world() {
+    struct Case {
+        int id;
+        uint32_t flags;
+        int route;
+        bool mounted;
+    };
+    const Case cases[] = {{13, 0, 0, false}, {0, 0, 0, false}, {15, 0x40, 0, false}, {7, 0, 3, false},
+                          {2, 0, 126, false}, {1, 0x40, 127, false}, {12, 0, 0, true}};
+    for (const Case &c : cases) {
+        Rig r(c.id);
+        RingSource clips;
+        r.owned->ai.root_motion = &clips;
+        r.entity().flags = c.flags;
+        if (c.route != 0) {
+            r.body().slot.f[35] = 1;
+            r.body().slot.f[37] = c.route;
+        }
+        OrganicSpawnFacts facts;
+        facts.flags = c.flags;
+        facts.route = c.route != 0;
+        facts.route_channel = c.route;
+        if (c.mounted) {
+            const auto parent = r.zone(1, 0, 1);
+            r.owned->registry.get(parent)->emplaced_config = 8;
+            r.entity().mount_target = parent;
+            facts.parented = true;
+            facts.parent_phrase_set = 8;
+        }
+        r.init();
+        AnimVariantRings rings;
+        RingSource fresh;
+        const OrganicSpawnBody spawned = organic_spawn_pose(facts, uint32_t(c.id), &fresh, rings, 0);
+        CHECK(same_pose(spawned.pose, infantry_body_pose(r.body().inf)));
+        CHECK(spawned.pose.state == organic_spawn_state(facts, &fresh, 0));
+        // The height the warmup lifted the world's body by (no collision wired: no ground solve);
+        // a parented body only animates.
+        CHECK(spawned.rise == r.body().pos[2]);
+        CHECK(c.mounted ? spawned.rise == 0 : spawned.rise > 0);
+    }
+    CHECK(organic_warmup_updates(0) == 10 && organic_warmup_updates(13) == 362 &&
+          organic_warmup_updates(15) == 490);
+
+    // Two bodies of one .adm in spawn order: the second's served entries follow the first's.
+    Rig two(13);
+    RingSource clips;
+    two.owned->ai.root_motion = &clips;
+    Entity seed;
+    seed.kind = EntityKind::Organic; seed.item_id = 41; seed.has_item_def = true;
+    seed.item_type = 3; seed.net_id = 6; seed.team = 1;
+    const EntityHandle second = two.owned->registry.spawn(0, seed);
+    two.owned->ai.attach(second);
+    AiEntity &body = *two.owned->ai.for_handle(second);
+    body.inf.active = true;
+    body.net_id = 6;
+    two.init();
+    initialize_organic_ai(*two.owned, *two.owned->registry.get(second));
+    AnimVariantRings rings;
+    RingSource fresh;
+    const InfantryBodyPose first = organic_spawn_pose({}, 13, &fresh, rings, 0).pose;
+    const InfantryBodyPose next = organic_spawn_pose({}, 6, &fresh, rings, 0).pose;
+    CHECK(same_pose(first, infantry_body_pose(two.body().inf)));
+    CHECK(same_pose(next, infantry_body_pose(body.inf)));
+
+    // No clips: the requests stand at phase 0, the reset still blending out, as the world's.
+    AnimVariantRings none;
+    const OrganicSpawnBody bare = organic_spawn_pose({}, 13, nullptr, none, -1);
+    CHECK(bare.pose.state == 43 && bare.pose.phase == 0 && bare.pose.blending && bare.pose.source_state == 0);
+    CHECK(bare.rise == 0);
+}
+
 void control_point_pool_precedence() {
     Rig r;
     r.zone(1, 7, 2, false); // absent definition is not a candidate
@@ -210,6 +309,7 @@ void grounding_strict_one_unit_limit() {
 int main() {
     warmup_permutation_and_root_motion();
     postures_mounts_and_wash();
+    world_free_pose_matches_the_world();
     control_point_pool_precedence();
     grounding_strict_one_unit_limit();
     std::printf("infantry_spawn: %s\n", failures ? "FAIL" : "PASS");
