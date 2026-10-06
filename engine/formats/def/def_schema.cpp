@@ -41,18 +41,31 @@ bool def_set(void *record, const DefField &field, const DefValue &value, std::st
 	auto *p = static_cast<uint8_t *>(record) + field.offset;
 	if (field.read_only) { error = "This field is derived from its authored properties."; return false; }
 	if (field.type == DefFieldType::Text) {
-		const auto *text = std::get_if<std::string>(&value);
-		if (!text || text->size() >= field.width || text->find('\0') != std::string::npos ||
-			text->find_first_of("\r\n\"") != std::string::npos || text->find("//") != std::string::npos) {
-			error = "Text exceeds the field capacity or contains an unsupported character.";
+		const auto *given = std::get_if<std::string>(&value);
+		if (!given || given->find('\0') != std::string::npos ||
+			given->find_first_of("\r\n\"") != std::string::npos || given->find("//") != std::string::npos) {
+			error = "Text contains an unsupported character.";
 			return false;
 		}
-		if (*field.refused && strutil::iequals(*text, field.refused)) {
+		// A text the reader cuts (a strncpy, or the item name's cut in its line buffer) reads, longer, as
+		// its first `width - 1` characters, which is what the record holds: the line takes any length, as
+		// retail's items.def's 47-character "Map Centerpoint, helps align commander map grid" (the game
+		// keeps 46 [orig: ItemDef_ParseProperty @0x49EBD9 `cmp ecx, 2Eh`, @0x49EBFB `mov byte ptr
+		// [edx+2Eh], 0`]). Any other text the field cannot hold is refused.
+		std::string text = *given;
+		if (text.size() >= field.width) {
+			if (!field.cut || field.width == 0) {
+				error = "The field holds " + std::to_string(field.width - 1) + " characters.";
+				return false;
+			}
+			text.resize(field.width - 1);
+		}
+		if (*field.refused && strutil::iequals(text, field.refused)) {
 			error = field.refused_why;
 			return false;
 		}
 		std::memset(p, 0, field.width);
-		std::memcpy(p, text->data(), text->size());
+		std::memcpy(p, text.data(), text.size());
 		return true;
 	}
 	if (field.type == DefFieldType::Real) {
@@ -202,6 +215,11 @@ std::vector<DefChoice> item_types() {
 	return {{"", 0, "Unset"}, {"vehicle", 1}, {"decoration", 2}, {"person", 3}, {"marker", 4}, {"building", 5},
 	        {"powerup", 6}, {"effect", 8}};
 }
+// The word a type line writes where the chain reads two for its value (DefItemType 2 and 6): the
+// first, or the other [orig: ItemDef_ParseProperty, the type chain @0x4A02E4..0x4A04B7].
+std::vector<DefChoice> item_type_words() {
+	return {{"", 0, "decoration, powerup"}, {"other", 1, "foliage, object"}};
+}
 std::vector<DefChoice> kill_zones() {
 	std::vector<DefChoice> out = {{"", 0, "Unset"}};
 	for (size_t n = 1; const char *name = def_ammo_kz_keyword(n); ++n) out.push_back({name, int64_t(n)});
@@ -328,6 +346,7 @@ struct ChoiceRule {
 };
 const ChoiceRule kChoices[] = {
 	{{kItem, "type"}, item_types},
+	{{kItem, "type_word"}, item_type_words},
 	{{kAmmo, "kztype"}, kill_zones},
 	{{kAmmo, "tracer_type_friendly"}, tracer_types}, {{kAmmo, "tracer_type_enemy"}, tracer_types},
 	{{kItem, "", "husk_sub_part_types["}, death_pieces},
@@ -429,6 +448,10 @@ void def_sync_derived(DefRecordKind kind, void *value, const std::string &field)
 		// ItemDef_ParseProperty, the `end` arm @0x49EB2F..0x49EB5F].
 		if (field == "id" && item.sid_derived) std::snprintf(item.sid, 16, "S%06i", item.id);
 		if (field == "sid") item.sid_derived = 0;
+		// Only 2 and 6 have a second word (foliage, object): any other type writes its one.
+		if ((field == "type" || field == "type_word") && item.type != DEF_ITEM_TYPE_DECORATION &&
+		    item.type != DEF_ITEM_TYPE_POWERUP)
+			item.type_word = 0;
 		return;
 	}
 	if (kind == DefRecordKind::Powerup) {
