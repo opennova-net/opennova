@@ -291,12 +291,56 @@ whose names cut to one stem (`gunmodel_a` and `gunmodel_b` both give
 `gunmodel_0.tga`): export refuses each, naming the other, until one has
 another Model name or folder. **Write textures** off writes none.
 
+### Texture files: DDS by default
+
+The game reads a diffuse or detail row's `.dds` before the `.tga` the row
+names, and every model texture retail ships is that `.dds`: DXT5 (or DXT1)
+with its mip chain down to 1 x 1, a quarter to an eighth of the TGA's size.
+A model's **Texture files** setting (on its root, DDS by default) writes them
+that way: each diffuse and detail texture export writes or copies from a
+`.tga` (an image of the scene, or a `.tga` file an image was loaded from) is
+written as the `.dds` beside the `.3di`, DXT1 for an opaque image and DXT5
+for one with alpha, every level the 2 x 2 box filter of the source's level
+above it, through `opennova-3di texture` (the editor's own image import, its
+blocks rgbcx's). The row keeps naming `<stem>.tga`:
+
+- the `.3di` is the same whichever form its textures take, so switching
+  forms writes only the textures;
+- under a loose-first search (the `/d` launch, the editor's Play) a row naming
+  `<stem>.dds` takes the plain path for the loose file, which reads `.tga`,
+  `.mdt` and `.pcx` alone, and the texture would not load; a `<stem>.tga` row
+  with no loose `.tga` reads the `.dds`;
+- it is how retail's rows name the `.dds` it ships.
+
+Stays a TGA: a normal map (slots 3 and 4: DXT's block colours bend normals,
+and retail ships every normal map as an uncompressed `.mdt`), a colour swatch
+(8 x 8), a row of another loader (type 1 reads no `.dds`), and a texture
+whose sides are not powers of two (the game pads a `.dds` of such sides to
+the next powers of two, and the model's UVs would reach the padding). A
+`.dds` file an image was loaded from is copied as it stands in either form.
+**TGA** writes every texture as a 32-bit TGA, as before.
+
+Export writes the one form of each name: writing `<stem>.dds` removes a
+`<stem>.tga` beside the model (a loose-first search would read the stale
+`.tga`), and writing `<stem>.tga` removes a `<stem>.dds` (the game would read
+the stale `.dds`), each said, never a file an image of the scene reads. Two
+models of one run writing one name in two forms are refused.
+
+**Max texture size** (No limit by default, or 256 to 4096) caps the sides a
+texture is written at: past it, **Larger textures** Halve (the default)
+writes it halved until it fits, each texel the mean of its 2 x 2 as the game
+halves a texture, and Refuse refuses the model, naming each texture. A copied
+`.dds` or `.pcx` past it is refused (export does not re-encode them). The game
+halves a normal map until it fits 512 a side when it loads it, so export says
+when one is larger: it ships texels the game never draws.
+
 The texture list carries only what the nodes cannot say: flipbook frames, row
 flags (1 a flipbook frame, 2 the render-state override), an object-space or
 height-map normal texture, a file Blender cannot open. A slot it lists is taken
 from it, not from the nodes. A row's file name is printable ASCII, at most 16
 characters, without a folder; **Write** writes its image under that name,
-which must then be `<stem>.tga` or `<stem>.mdt` in at most 15 characters. A
+which must then be `<stem>.tga` or `<stem>.mdt` in at most 15 characters (a
+diffuse or detail `<stem>.tga` of a model writing DDS textures as its `.dds`). A
 row may also name no file, as 63 rows of the JO models do (`M24_1st`'s lens
 keeps an empty slot 2 row): it exports as it is, with a warning when its
 shader samples that slot. A material holds at most 24 rows.
@@ -311,7 +355,8 @@ Culling, the Math node, the render method and Emission.
 - **3D viewport sidebar > OpenNova**: Import .3di, Import Animations and Add
   Model, Write textures, then the active object's model: its name, output
   `.3di`, the collision LOD (whose meshes also become the bullet faces; 0 = the
-  most detailed), Generate bullet faces, Mesh part (a skinned model), Mount on,
+  most detailed), Generate bullet faces, Texture files and Max texture size (and
+  Larger textures under a max), Mesh part (a skinned model), Mount on,
   Add LOD, Add Part from Selection or Add Animation Rig (a static model),
   Number Parts (a model with its own rig) and Deform with Rig of (a skinned
   one), Export Model, and its Animations box. Export All Models writes every
@@ -545,7 +590,9 @@ time the animation and the action, not the magazine.
 ## Tests
 
 `tests/blender/*_test.py` author their scenes from scratch and run headless,
-against a given `opennova-3di` or against the installed extension:
+against a given `opennova-3di` or against the installed extension (the
+materials cases written before DDS textures pin the TGA form; the DDS cases set
+Texture files themselves):
 
 ```text
 blender -b --factory-startup --python-exit-code 1 --python tests/blender/anim_test.py -- <opennova-3di.exe>
@@ -563,3 +610,21 @@ flat ladder is a single polygon facing the way the ladder does.
 Inspect any `.3di` (retail ones too) with `opennova-3di info <file> --verbose`;
 `opennova-3di compare <a.3di> <b.3di>` tells whether two files hold the same
 model.
+
+## Texture files on the command line
+
+`opennova-3di texture <in.png|in.tga|in.mdt|in.pcx> -o <out.dds|out.tga|out.mdt>
+[--format auto|dxt1|dxt5|argb] [--mips full|none] [--max-size N] [--alpha ...]`
+writes an image as a model's texture file, as export does: a `.dds` (auto, the
+default: DXT1 for an opaque image, DXT5 otherwise; argb: uncompressed, one
+level; the full chain to 1 x 1 unless `--mips none`), or a 32-bit `.tga` or
+`.mdt`, halved while a side exceeds `--max-size`. `--alpha` makes the alpha as
+the editor's import does (`opaque`, `luminance`, `threshold:N`, `key:#RRGGBB`):
+an image whose alpha no shader of its material reads (a bake's stray alpha
+under `FF_ST_OP`) written `--alpha opaque` is DXT1, half DXT5's size. A `.dds`
+whose sides are not powers of two is refused. Converting the textures of an existing model is this, once
+per `<stem>.tga` its rows name, the `.tga` then removed:
+
+```text
+opennova-3di texture on_ar15_0_c.tga -o on_ar15_0_c.dds
+```

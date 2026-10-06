@@ -22,6 +22,7 @@
 #include <editor/graph/texture_uses.h>
 #include <editor/import/importer.h>
 #include <editor/import/texture_import.h>
+#include <editor/import/texture_source.h>
 #include <editor/session/texture_import_state.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/model/field_text.h>
@@ -566,6 +567,21 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		                       " to 4: the game then loads it as a normal map, halved until it fits 512 a side. Undo takes it "
 		                       "back, and Save writes it.",
 		               request::edit_record(d.asset, edit, true), false});
+		return;
+	}
+	case FindingFix::SetAsideUnread: {
+		// A texture no use reads (a .tga beside the .dds its model row loads, which the Blender add-on's export
+		// leaves): set aside under .replaced/, never deleted. Offered where it is no import's output and every
+		// use of it opens another file.
+		const AssetEntry *file = view.project.scan->at_path(d.asset);
+		if (!file || !file->imported_from.empty() || !view.documents.texture_uses) return;
+		const std::vector<TextureUse> &uses = view.documents.texture_uses->uses_of(view, file->relative_path);
+		if (uses.empty() || std::any_of(uses.begin(), uses.end(), [](const TextureUse &use) { return use.reads_file; })) return;
+		out.push_back({"Set " + file->logical_name + " aside",
+		               "Moves " + file->relative_path + " under " + std::string(kReplacedFolder) + "/, never deleted: no use of it "
+		               "reads it, each one's loader opening " + basename_of(uses.front().served) + " in its place, so the build "
+		               "packs it for nothing." + kNotUndoable,
+		               request::set_aside_texture(file->relative_path), true});
 		return;
 	}
 	}
