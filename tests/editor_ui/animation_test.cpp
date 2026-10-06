@@ -121,6 +121,15 @@ void test_timeline() {
 	run.settle(1);
 	CHECK(run.clock().rate() == 0.5, "the speed chosen");
 
+	// The clip's sounds (DI-04): the Sound popup's Mute is the viewport's sound option, and the button says so.
+	ui.activate(item_id(scope, {"Sound###sound"}));
+	run.settle(1);
+	ui.activate(popup_item(ImHashStr("sound", 0, scope), "Mute"));
+	run.settle(1);
+	CHECK(model->options().sound.mute, "Mute, the viewport's sound option");
+	ui.away();
+	CHECK(lowered(logged_frame(ui)).find("sound (muted)") != std::string::npos, "the button says the clip is muted");
+
 	// The track scrubbed with the mouse to its right end and past it: a loop's last tick (its wrap tick
 	// shows the first frame again), its last frame shown, held (S17 review).
 	ui.mouse(5000.0f, 10.0f);
