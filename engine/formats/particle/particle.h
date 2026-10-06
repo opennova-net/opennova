@@ -268,6 +268,15 @@ struct ParticleDef {
 struct EffectDef {
 	std::string id;
 	std::vector<std::string> pdefs;   // ordered list of ParticleDef.id references
+	// Where the text it was read from wrote it, as the parser counts lines (1-based, a line
+	// ending at its LF; 0 for an effect not read from a text): its section's first line (the
+	// [effectdef] header) and last (its closing brace), and the value of the `id` that named it
+	// (its line, and its column, 1-based, in bytes). The writers read none of them; the
+	// OpenNova Editor's Go to and its effect preview do (ADR 0046, DI-14).
+	int first_line = 0;
+	int last_line = 0;
+	int id_line = 0;
+	int id_column = 0;
 };
 
 // 32 rows × 8 uint8_t observed in every corpus file. The smoke test asserts.
