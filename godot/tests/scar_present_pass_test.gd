@@ -297,7 +297,8 @@ func test_entity_ring_batches_parent_under_the_owners_section_node() -> void:
 	assert_eq(stats.owners_unresolved, 0)
 	assert_eq(stats.textures_missing, 2,
 			"no resource root: both strips report their missing TGA rather than hiding")
-	# An owner the pass cannot resolve draws nothing this frame, and is counted.
+	# An owner the pass cannot resolve, with no world-space form, draws nothing
+	# this frame, and is counted.
 	var unresolved := _draw_list()
 	_batch(unresolved, OWNER_B, 0, section, true, 1)
 	entities.present_scar_draw_list(unresolved)
@@ -305,6 +306,81 @@ func test_entity_ring_batches_parent_under_the_owners_section_node() -> void:
 	assert_eq(_entity_meshes(self).filter(
 			func(m: Node) -> bool: return not m.is_queued_for_deletion()).size(), 0,
 			"the previous owner's mesh is retired once it produces no batch")
+	entities.teardown()
+
+
+# The world-space form of the list's LAST batch: one quad around `centre`
+# (the engine's compile emits it from the owner's live section matrix), its run
+# recorded in batch_world_first; every earlier batch without one reads -1.
+func _world_form(draw: ScarDrawList, centre: Vector3) -> void:
+	var firsts := draw.batch_world_first
+	while firsts.size() < draw.batch_owner.size() - 1:
+		firsts.append(-1)
+	firsts.append(draw.world_vertices.size())
+	draw.batch_world_first = firsts
+	var world := draw.world_vertices
+	var corners := [
+		centre + Vector3(-0.25, 0, -0.25), centre + Vector3(0.25, 0, -0.25),
+		centre + Vector3(-0.25, 0, 0.25), centre + Vector3(0.25, 0, 0.25),
+	]
+	for k in [0, 1, 2, 1, 3, 2]:
+		world.append(corners[k])
+	draw.world_vertices = world
+
+
+func test_a_nodeless_owner_draws_its_ring_in_world_space() -> void:
+	# A statically batched prop (a MultiMesh row) has no node to mount its
+	# section-local quads under: its ring draws from the world-space form, the
+	# slots taken through its live section matrix as the original draws every
+	# entity ring (renderer::compile_scar_draws, docs/world/world-wac-ai-re.md
+	# §24.9). An owner with a node keeps its section mount.
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var model := _fixture_model(container)
+	if model == null:
+		return
+	var section := int(model.get_render_part_nodes().keys()[0])
+	var entities := _make_presenter(null, null, {OWNER_A: model})
+	var draw := _draw_list()
+	_batch(draw, OWNER_A, 0, section, true, 1)
+	_world_form(draw, Vector3(100, 0, 0))   # resolved owner: its world form goes unused
+	_batch(draw, OWNER_B, 0, 0, true, 1)
+	_world_form(draw, Vector3(40, 63.5, -77.5))
+
+	entities.present_scar_draw_list(draw)
+
+	var stats := entities.get_scar_present_stats()
+	assert_eq(stats.owners_unresolved, 1, "the batched prop has no node")
+	assert_eq(stats.entity_world_batches, 1, "its batch drew from the world-space form")
+	assert_eq(stats.entity_meshes, 1, "the owner with a node keeps its section mount")
+	var world := _world_mesh(entities)
+	assert_not_null(world)
+	if world == null or world.mesh == null:
+		entities.teardown()
+		return
+	assert_true(world.visible)
+	assert_eq(world.mesh.get_surface_count(), 1, "only the node-less owner's batch is on the world mesh")
+	var arrays := world.mesh.surface_get_arrays(0)
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	assert_eq(vertices.size(), 6)
+	if vertices.size() == 6:
+		assert_almost_eq(vertices[0], Vector3(39.75, 63.5, -77.75), Vector3.ONE * 0.0001,
+				"the world-space run, not the section-local one")
+	var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
+	assert_eq(uvs.size(), 6, "the batch's own UVs serve its world form")
+
+	# The weapon Inset view draws the same form on its own world mesh.
+	entities.scar_presenter().present_inset(draw, {OWNER_A: model})
+	assert_eq(entities.scar_presenter().get_inset_world_surface_count(), 1,
+			"the Inset list draws the node-less owner's world form too")
+	entities.scar_presenter().set_inset_view(false, Vector3.ZERO)
+
+	# Without a world form (its section matrix did not resolve) it draws nothing.
+	var bare := _draw_list()
+	_batch(bare, OWNER_B, 0, 0, true, 1)
+	entities.present_scar_draw_list(bare)
+	assert_eq(entities.get_scar_present_stats().entity_world_batches, 0)
+	assert_false(world.visible, "nothing reaches the world mesh")
 	entities.teardown()
 
 
