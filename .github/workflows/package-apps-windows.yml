@@ -18,7 +18,7 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
-      actions: write   # the compiler cache's master save replaces its older entries
+      actions: write   # the compiler cache's branch save replaces its older entries
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
       artifact_url: ${{ steps.upload.outputs.artifact-url }}
