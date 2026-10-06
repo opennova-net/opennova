@@ -11,6 +11,14 @@ extends GutTest
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
 const PTL := "particles/glow.ptl"
+## The waits are on the preview clock and the scene, never a frame count: the clock runs on the frames'
+## own time, and a window behind others draws without the vsync cap, so a fixed count of frames can pass
+## in a fraction of a second (270 frames held exactly 8 particles at the glow's 30 a second). One second
+## of preview time (62.5 ticks a second) holds about 30. The wall-clock bound only stops a stuck clock
+## from hanging the run.
+const PLAY_TICKS := 63
+const LIVE_PARTICLES := 8
+const WAIT_MS := 30000
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -65,6 +73,25 @@ func _state() -> Dictionary:
 	return _seam.query("viewport", {"op": "state", "path": PTL, "kind": "effect", "limit": 1})
 
 
+## A second of the effect played on the preview clock, its particles alive, its device attached.
+func _played() -> bool:
+	var state := _state()
+	var play: Dictionary = state.get("body", {}).get("play", {})
+	return int(play.get("age", 0)) >= PLAY_TICKS and int(play.get("particles", 0)) > LIVE_PARTICLES \
+			and bool(state.get("device", {}).get("attached", false))
+
+
+## Frames pass until `condition` holds, or the wall-clock bound fails the test.
+func _wait_until(condition: Callable, what: String) -> bool:
+	var deadline := Time.get_ticks_msec() + WAIT_MS
+	while not condition.call():
+		if Time.get_ticks_msec() > deadline:
+			fail_test("timed out waiting for %s" % what)
+			return false
+		await get_tree().process_frame
+	return true
+
+
 func test_the_particle_renderer_draws_in_the_effect_device() -> void:
 	if _app == null:
 		return
@@ -78,24 +105,23 @@ func test_the_particle_renderer_draws_in_the_effect_device() -> void:
 	assert_true(_seam.open_document(PTL))
 	assert_true(_seam.done({"kind": "set_viewport", "path": PTL,
 			"viewport": {"kind": "effect", "options": {"grid": false}, "camera": {"distance": 6.0, "target": [0, 0.5, 0]}}}))
+	if not await _wait_until(_played, "a second of the effect on the preview clock"):
+		return
 	var state := _state()
-	for _frame in 240:
-		await get_tree().process_frame
-		state = _state()
-		if int(state.get("body", {}).get("play", {}).get("particles", 0)) > 8 and bool(state.get("device", {}).get("attached", false)):
-			break
-	for _frame in 30:
-		await get_tree().process_frame
-	state = _state()
 	assert_eq(String(state.get("status", "")), "ready")
-	assert_gt(int(state.get("body", {}).get("play", {}).get("particles", 0)), 8, "the scene holds live particles")
+	assert_gt(int(state.get("body", {}).get("play", {}).get("particles", 0)), LIVE_PARTICLES,
+			"the scene holds live particles")
 	var device: SubViewport = _app.get_viewport_device(PTL, "effect")
 	assert_not_null(device, "the device drawn")
 	if device == null:
 		return
 	var renderers := device.find_children("*", "ParticleRenderer", true, false)
 	assert_eq(renderers.size(), 1)
+	if renderers.size() != 1:
+		return
 	var renderer := renderers[0] as ParticleRenderer
+	# The device hands the scene to the renderer on its next drawn frame: wait for the compiled quads.
+	await _wait_until(func() -> bool: return renderer.get_rendered_quad_count() > 0, "the renderer's quads")
 	var report: Dictionary = renderer.get_debug_draw_list_report()
 	gut.p("draw list report: %s" % JSON.stringify(report))
 	assert_gt(renderer.get_rendered_quad_count(), 0, "the renderer compiled the particles")
