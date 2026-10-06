@@ -87,6 +87,12 @@ enum SoundProfileSlot {
 // e.g. 17 -> "SSLFootGND"). nullptr for an out-of-range slot.
 const char *sound_profile_slot_keyword(int slot);
 
+// The keyword of one of the 12 med/crs loop percents, index == the
+// SoundProfile::loop_params slot (the keyword chain @ 0x5270a9-0x527481, in
+// its order: "medloopfadeinstart" .. "crslooppitchendp"). nullptr out of range.
+inline constexpr int kSoundProfileLoopParamCount = 12;
+const char *sound_profile_loop_keyword(int index);
+
 // ----------------------------------------------------------------------------
 // The player-body composite sound-set path — a SEPARATE mechanism from the
 // profile slots [orig: SoundProfile_FindByEntityAndType @ 0x528180]: a 9-entry
@@ -167,6 +173,14 @@ public:
 private:
     std::vector<SoundProfile> entries_;
 };
+
+// The profile an item binds for the profile name it authors (its `sound_profile`, or for a female
+// avatar its `sound_profileFemale`, D-SND-12): "default" where it authors none, both of an item's
+// profile pointers seeded so [orig: ItemDef_AllocateWithDefaults @0x49e3f5 seeds
+// FindSlotByName("default")], else the first profile of the name without case, a miss the first
+// profile [orig: SoundProfile_FindSlotByName @ 0x526e30 returns the array base]. Null only with no
+// profile loaded. The one binding the bodies' slot sounds and the editor's clip preview take.
+const SoundProfile *item_sound_profile(const std::vector<SoundProfile> &profiles, const char *authored);
 
 // SndProf.def text for `profiles`, written from scratch in CR LF lines (the
 // walk splits only on CR LF) that SoundProfileTable::parse reads back to the

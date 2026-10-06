@@ -76,7 +76,8 @@ struct ProjectPaths {
 	std::string index_dir;
 	std::string build_dir;
 	std::string build_cache_file; // each file's content hash by its size and last write (BuildRun)
-	std::string run_dir;     // where Play runs the game: a numbered directory a run (run/run_directory.h)
+	std::string run_dir;     // where Play runs the game: a directory per mode, a numbered one a run in it
+	                         // (`<mode>/<n>`, run/run_directory.h)
 	std::string staging_dir; // an import's files before they are published (import_assets)
 	// Where the files are read from: the root folder (null), or a source of their own, each file by its
 	// logical name (the game install as the game is served it, which the game's own data's fold validates

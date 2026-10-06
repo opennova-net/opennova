@@ -19,6 +19,10 @@ const BlankParam k_mission_params[] = {
 const BlankParam k_mission_text_params[] = {
 	{ "title", "Title", ReferenceKind::None, false },
 };
+// A new shader: the tag it registers under, which a model's material names (blank_shader_tags).
+const BlankParam k_shader_params[] = {
+	{ "tag", "Shader tag (VS_PHONGT, VS_DOT3DIFF2, VS_SKBUMPPHONGT or VS_SKBUMPDIFFT)", ReferenceKind::None, true },
+};
 
 // A terrain made from images (S20): its images (files on disk, or of the project) and the importer's
 // options, the new_terrain request's values.
@@ -100,6 +104,15 @@ const BlankFactory k_factories[] = {
 	  "the checkerboard the game draws for a missing texture, 256 by 256: the boards' fill", false },
 	{ "border_tga", AssetKind::Texture, make_blank_texture,
 	  "the checkerboard the game draws for a missing texture, 128 by 128: the boards' border pieces", false },
+	// The mission's sound banks, each slot of the bank loop that loads what it finds (the sound lane):
+	// an empty bank, which the editor's bank document fills.
+	{ "game_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the global sound bank, no set yet", false },
+	{ "gamelocl_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the localized sound bank, no set yet", false },
+	{ "game2_lwf", AssetKind::SoundBank, make_blank_sound_bank, "a further global sound bank, no set yet", false },
+	{ "game3_lwf", AssetKind::SoundBank, make_blank_sound_bank, "a further global sound bank, no set yet", false },
+	{ "expansion_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the expansion's sound bank, no set yet", false },
+	{ "expansion_locl_lwf", AssetKind::SoundBank, make_blank_sound_bank,
+	  "the expansion's localized sound bank, no set yet", false },
 	// An expansion's own (ADR 0046 S16): its text table, naming it in the Mods list, and its version text.
 	{ "expansion_table", AssetKind::Strings, make_blank_expansion_table,
 	  "the expansion's text table: its name in the Mods list (the project's title) and an empty description", false },
@@ -121,9 +134,17 @@ const BlankFactory k_factories[] = {
 	  "a mission's text table: its title and an empty briefing", false, k_mission_text_params,
 	  sizeof(k_mission_text_params) / sizeof(k_mission_text_params[0]) },
 	{ "", AssetKind::Script, make_blank_script, "an empty script", true },
+	// The renderer's own effect, which it opens by name as it starts: without it, and with no other
+	// effect, no model draws (blank_shader.cpp); a new effect for one of the shader tags the base game's
+	// models name.
+	{ "ffp_shader", AssetKind::Shader, make_blank_ffp_shader,
+	  "OpenNova's fixed-function effect, the renderer's twelve FF_ shader tags", false },
+	{ "", AssetKind::Shader, make_blank_shader, "OpenNova's effect for the shader tag chosen", true, k_shader_params,
+	  sizeof(k_shader_params) / sizeof(k_shader_params[0]) },
 	// S20: an environment a mission can be made under (a terrain made from images has none).
 	{ "", AssetKind::Environment, make_blank_environment,
 	  "a daytime environment: noon light, sky and fog colours through the day, the stock cloud maps", true },
+	{ "", AssetKind::SoundBank, make_blank_sound_bank, "a sound bank with no set yet", true },
 };
 
 const size_t k_factory_count = sizeof(k_factories) / sizeof(k_factories[0]);

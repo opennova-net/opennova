@@ -121,6 +121,13 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Config, "game.cfg", text_bytes("\r\n[Game]\r\nname = Views\r\n")},
 	        // A texture (S18): a TGA our writer mints, its picture the tab's main view beside its facts.
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
+	        // The sound lane: the minted bank, its sets and waves a tree with a Play heading the Inspector, and a
+	        // SndProf.def, its profile's slots under it.
+	        {AssetKind::SoundBank, "menu.lwf", file("lwf/menu.lwf")},
+	        {AssetKind::SoundProfileDefs, "SndProf.def",
+	         text_bytes("begin \"default\"\r\n\tSSLFootGND FSP_DIRT_L 0 0 0\r\nend\r\n")},
+	        // A particle file (DI-14): its text in the script view, its effect the Preview window's.
+	        {AssetKind::Particles, "minimal_effect.ptl", file("particle/synth_minimal_effect.ptl")},
 	        // The environment (DI-19a): its row and its ten keyframes as a tree, the missions that run on it
 	        // heading the Inspector.
 	        {AssetKind::Environment, "synth_full.env", file("env/synth_full.env")},
@@ -288,9 +295,9 @@ void test_every_view() {
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	CHECK(main_rows == 7 && scripts == 5,
-	      "every text type's row the Main role's, its view the script view, and the mission's and the texture's rows "
-	      "the Main role's too");
+	CHECK(main_rows == 8 && scripts == 6,
+	      "every text type's row the Main role's (a particle file's among them), its view the script view, and the "
+	      "mission's and the texture's rows the Main role's too");
 	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
 	            frames, scripts);
 }

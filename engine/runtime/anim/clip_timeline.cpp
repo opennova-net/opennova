@@ -125,4 +125,11 @@ int32_t ClipTimeline::boundary_after(int32_t ticks) const {
 	return -1;
 }
 
+uint32_t clip_trigger_at(const ClipTimeline &clock, const std::vector<uint32_t> &triggers, int32_t ticks,
+                         int32_t armed_boundary) {
+	if (clock.stopped_at(ticks)) return 0;
+	const int32_t frame = clock.frame_index_at(ticks, armed_boundary);
+	return frame >= 0 && static_cast<size_t>(frame) < triggers.size() ? triggers[static_cast<size_t>(frame)] : 0u;
+}
+
 }

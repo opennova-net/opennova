@@ -571,7 +571,7 @@ void test_texture_import_section() {
 }
 
 // S18, what a texture costs the game: under a model row's use in the texture's tab, its device texture's bytes
-// and its .dds's (documents/texture_budget).
+// and its .dds's (documents/texture_budget); Files listing the textures by that cost (session/texture_budget_list).
 void test_texture_budget_line() {
 	PickerProject project;
 	CHECK(project.open(), "the item table's project");
@@ -605,6 +605,19 @@ void test_texture_budget_line() {
 	CHECK(text.find("Model diffuse: material 1 of crate.3di") != std::string::npos &&
 	              text.find("In the game: 21.3 MB, 5.3 MB as its .dds") != std::string::npos,
 	      "under its use, what the game holds of it and what its .dds would");
+	// Files listing the textures by cost (the workspace's files.by_cost): the crate first, its size the game's,
+	// the list's total beside the count.
+	project.session.handle(request::set_workspace(R"({"files": {"kind": "texture", "by_cost": true}})"));
+	ui.frames(4);
+	ui.focus("Files");
+	ui.away();
+	ui.drain();
+	const std::string files = logged_frame(ui);
+	const size_t crate = files.find("crate.tga");
+	CHECK(files.find("By cost") != std::string::npos && files.find("In game") != std::string::npos &&
+	              files.find("21.3 MB in the game") != std::string::npos && crate != std::string::npos &&
+	              files.find("21.3 MB", crate) != std::string::npos,
+	      "Files by cost: the crate's texture's size in the game, the total beside the count");
 }
 
 // S18, a texture as the game draws it: the toolbar's object texture detail where a model row costs it, the device
@@ -651,6 +664,47 @@ void test_texture_game_view_toolbar() {
 	      "the device texture at the detail shown");
 	CHECK(text.find("Alpha: the specular brightness VS_PHONGT reads, not transparency") != std::string::npos,
 	      "the alpha as the Phong use reads it");
+}
+
+// S18, each role in its own picture: a terrain blend map shown as its terrain's splat reads it, under the picture
+// its legend, each channel its share and the splat detail it weighs (preview/texture_role_view).
+void test_texture_role_legend() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	const std::vector<uint8_t> rgba = {100, 50, 0, 255, 0, 0, 0, 255};
+	std::vector<uint8_t> file;
+	std::string error;
+	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 2, 1, file, error) &&
+	              editor_test::write_bytes(view.project.root + "/textures/blend.tga", file),
+	      "a 2 x 1 blend map");
+	CHECK(editor_test::write_text(view.project.root + "/terrains/isle.trn",
+	                              "polytrn_detailmap detail.tga\npolytrn_polydata isle.cpt\npolytrn_sectorcount 1\n"
+	                              "polytrn_sectors 0\npolytrn_colormap colour.tga\npolytrn_detailmap_c1 grass.tga\n"
+	                              "polytrn_detailblendmap blend.tga\n"),
+	      "a terrain naming it");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("textures/blend.tga"));
+	project.session.handle(request::set_viewport("textures/blend.tga", "{\"kind\":\"texture\",\"options\":{\"as_used\":0}}"));
+	DrawnDevices devices;
+	Ui ui;
+	ui.pump = [&project, &devices] {
+		project.session.poll();
+		devices.sync(project.session.viewports(), project.session.view());
+	};
+	ui.windows.set_view(&project.session.view());
+	ui.windows.set_devices(&devices.cache);
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Its weights as the terrain's splat reads them") != std::string::npos, "the legend's title");
+	CHECK(text.find("weighs polytrn_detailmap_c1, grass.tga") != std::string::npos &&
+	              text.find("weighs polytrn_detailmap_c2, which the terrain does not name") != std::string::npos,
+	      "each channel the splat detail it weighs");
 }
 
 // S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., ask first
@@ -807,6 +861,7 @@ void run_reference_picker_tests() {
 	test_texture_import_section();
 	test_texture_budget_line();
 	test_texture_game_view_toolbar();
+	test_texture_role_legend();
 	test_texture_drop_replaces();
 }
 

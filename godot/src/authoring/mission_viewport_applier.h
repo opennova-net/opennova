@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 
@@ -185,6 +186,9 @@ private:
 		uint64_t model = 0; // its ObjectModel's instance id: a placed individual model, or a lifted one
 		bool lifted = false;
 		bool hidden = false;
+		// The spawn pose its model was last given (DI-38): the model it went to and the pose's stamp.
+		uint64_t posed_model = 0;
+		uint32_t pose_stamp = 0;
 	};
 	static bool places_alike_(const Placed &placed, const opennova::editor::MissionEntityMark &entity) {
 		return placed.item == entity.item && placed.group == entity.group && placed.attributes == entity.attributes;
@@ -244,7 +248,11 @@ private:
 	// The state over the picture that stands: the entities moved, shown or hidden; the layers'
 	// visibility, the time of day, the camera.
 	void apply_state_(const opennova::editor::ViewportModel &model);
-	void move_entities_(const opennova::editor::MissionScene &scene);
+	// A posed person's model stands where its spawn stands it (its pose's lift over the record).
+	void move_entities_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses);
+	// Each person's model in the pose the game spawns it in and where the spawn stands it (DI-38, the
+	// viewport's MissionPoses), where its pose or its model is another than it was given.
+	void pose_people_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses);
 	// The moved entities' terrain shadow sources moved too, once no gesture is open.
 	void flush_shadows_(const opennova::editor::MissionScene &scene);
 	void place_camera_(const opennova::editor::ViewportModel &model);

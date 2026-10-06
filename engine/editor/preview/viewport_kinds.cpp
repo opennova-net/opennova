@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/model/document.h>
+#include <editor/preview/effect_viewport.h>
 #include <editor/preview/menu_viewport.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
@@ -39,6 +40,7 @@ constexpr ViewportFeed kScriptFeeds[] = {
 	{ T::Credits, true },
 	{ T::Shader, true },
 	{ T::Text, true },
+	{ T::Particles, true },
 };
 
 // The mission's (S14): a mission, the Document tab's main view; the rows as they stand (a mission
@@ -51,6 +53,12 @@ constexpr ViewportFeed kMissionFeeds[] = {
 // Files selects (open or not).
 constexpr ViewportFeed kTextureFeeds[] = {
 	{ T::Texture, true },
+};
+
+// The effect's (DI-14): a particle file's effect, the Preview window's while the file is active (its
+// Document tab is its text's script device); its text as the game would read it were it saved now.
+constexpr ViewportFeed kEffectFeeds[] = {
+	{ T::Particles, true },
 };
 
 // The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
@@ -68,6 +76,8 @@ constexpr ViewportKindRow kRows[] = {
 			MissionViewport::make, true, 2 },
 	{ ViewportKind::Texture, ViewportRole::Main, false, false, false, kTextureFeeds, std::size(kTextureFeeds),
 			TextureViewport::make, true, 0, true },
+	{ ViewportKind::Effect, ViewportRole::Preview, true, false, false, kEffectFeeds, std::size(kEffectFeeds),
+			EffectViewport::make },
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");

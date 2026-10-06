@@ -59,6 +59,9 @@ enum class DocumentTypeId {
 	Text,        // any other text, as the file stores it: a configuration, a text, and each text kind no
 	             // structured type edits yet, its engine reader's findings its own (DI-06)
 	Texture,     // a .tga .mdt .pcx .dds .png: its texels as the game reads them (ADR 0046 S18)
+	SoundBank,     // a .lwf: its waves and its sets, their layers and members (the sound lane)
+	SoundProfiles, // SndProf.def: its profiles and each one's 51 slots (the sound lane)
+	Particles,   // a .ptl .ptu .ptg: the effect system's text, its reader's findings (ADR 0046 DI-14)
 	Environment, // a .env: env::Config's keywords and keyframes (the deep-integration plan's DI-19a)
 	kCount, // the number of values, None among them
 };
@@ -92,9 +95,11 @@ struct AssetKindRow {
 	// Its files name other files, or names other files define, that an import brings with them
 	// (import_plan's references_unread: those of a kind the graph does not read are not followed).
 	bool names_files = false;
-	// Where a file of the kind the editor makes goes inside the project tree, created or imported
-	// ("menus", "fonts"; "" for the root): organization only, the engine sees the flat name (a loose
-	// kind's build copy takes the name alone too). The kinds the game reads from its own folder by a
+	// The kind's folder in a project laid out by kind ("menus", "fonts"; "" for the root), where a
+	// file of the kind the editor makes, created or imported, goes when the project has none of the
+	// kind yet (assets/project_layout.h: a flat project keeps it at the top level): organization
+	// only, the engine sees the flat name (a loose kind's build copy takes the name alone too). Read
+	// only by the placement rule: whatever writes a new file into the project asks placement_path. The kinds the game reads from its own folder by a
 	// fixed name (a configuration, the score table, a text) stay at the root, as the install keeps them.
 	const char *folder = "";
 	// The name Files offers a new file of the kind (New > Menu...: "newmenu.mnu"); "" for a kind

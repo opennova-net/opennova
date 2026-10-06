@@ -12,7 +12,9 @@ factories (`engine/editor/blank/`, written through our own writers), minted by
 our tools, or exported by the Blender add-on (`tools/blender/opennova_3di/`)
 from a scene under [`art/`](../art). No retail byte is ever committed here
 ([docs/asset-gated-tests.md](../docs/asset-gated-tests.md) has the policy).
-Models, clips and textures ride Git LFS; everything else is a plain git blob.
+The models, clips and textures exported from `art/` ride Git LFS; everything
+else, the menu's pointer `newarow1.tga` included, is a plain git blob, so no
+test needs an LFS pull (`.gitattributes`).
 
 The files sit flat in this folder, as a game folder holds its loose files: the
 game's loose mount and the original game's loose search find a file by its bare
@@ -32,6 +34,7 @@ the editor finds it anywhere in the project. Keep new files at the top level.
 | `nw_cdata.coo` | The NovaWorld screens' string table the main menu reads. Blank, from Create Missing. |
 | `items.def`, `weapon.def`, `charattr.def` | The item, weapon and character-attribute definitions the game reads as it starts. Blank (one `Null` marker item; no weapon or class yet), from Create Missing. |
 | `SndProf.def` | One empty `default` sound profile: without it the original game binds every item's sounds to memory it never cleared and hangs the mission (PR #791). |
+| `_ffp.fx` | OpenNova's fixed-function effect, written by the editor's blank factory (Create Missing) in the game's SCR form: the renderer's twelve `FF_` shader tags and their `#UV` twins. Without it the original game registers no fixed-function shader, and models whose shader is one draw with whatever registered first, or not at all (PR #830). |
 | `menu_style.mns`, `brand.mns` | The menu stylesheets: the `%NAME%` fonts and colours the screens use. From Create Missing. |
 | `on_ar15.3di` | A first-person AR-15-pattern carbine, 64 parts on one rig. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` and `on_arms*` file below. |
 | `on_arms.3di` | The first-person arms skinned to `on_ar15`'s rig (its first 55 parts). |

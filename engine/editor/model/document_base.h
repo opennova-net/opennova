@@ -55,8 +55,10 @@ public:
 	// Writes serialize()'s text over the file. The file's source findings are then those of
 	// the text written (the input the rewrite dropped is no longer reported); the content and
 	// the history stay, and the saved checkpoint moves to them (on_saved). A blocked document is
-	// refused with its first blocking finding (document.unserializable).
-	bool save(Diagnostic &error);
+	// refused with its first blocking finding (document.unserializable), and a file changed outside
+	// the editor (document.conflict) unless `over` (ADR 0046 DI-01: the conflict's Keep my edits,
+	// what the other program saved there lost).
+	bool save(Diagnostic &error, bool over = false);
 	// What an explicit Save does with this document when it has no unsaved edits: nothing when
 	// it serializes to the bytes the file held when it was loaded or last saved; a write when it
 	// serializes to other bytes (the canonical rewrite: the lines the game ignores dropped, the

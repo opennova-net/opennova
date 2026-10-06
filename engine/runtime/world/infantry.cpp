@@ -1280,15 +1280,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: org1 @0x4B9A48; org2 @0x4B41DF; dual order @0x40B908/@0x40B94E]
     if (!e.net_is_remote_peer) {
         devtools::ProfileLap animation_lap(world.profile);
-        infantry_weapon_channel_advance(e);
-        if (reset_capsule_bottom_state(e.inf.anim_state)) e.inf.prev_capsule_bottom = 0;
-        if (root_motion != nullptr)
-            have_clip = advance_primary_channel(e.inf, *root_motion, anim_rings, frame);
-        if (have_clip) {
-            if (e.inf.prev_capsule_bottom != 0)
-                frame.dz = frame.capsule_bottom - e.inf.prev_capsule_bottom;
-            e.inf.prev_capsule_bottom = frame.capsule_bottom;
-        }
+        have_clip = infantry_dual_update(e.inf, root_motion, anim_rings, frame);
         e.inf.last_events = have_clip ? frame.events : 0;
         animation_lap.mark(devtools::Slot::SIM_AI_INFANTRY_ANIMATION);
     }
@@ -2074,12 +2066,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     ? (tick_entity->flags | tick_entity->engine_flags)
                     : 0u;
             const bool indoors = (settle_flags & kEntityFlagIndoors) != 0;
-            const int32_t feet_z = e.pos[2] - frame.capsule_bottom;
-            const int32_t start[3] = {e.pos[0], e.pos[1], (e.pos[2] + 6143) & ~0x17FF};
-            int32_t end[3] = {start[0], start[1], start[2] - 0x20000};
-            if (terrain->valid() && !indoors)
-                (void)terrain_clip_segment(*terrain, start, end, end);
-            foot_clearance = feet_z - end[2];
+            foot_clearance = terrain_settle_clearance(terrain, e.pos, frame.capsule_bottom, indoors);
             // The probe's +0x28 store is unconditional (null on a miss), and
             // this IS the probe over an empty candidate set — clear the link so
             // the footstep pick cannot read a stale platform. [orig: the
