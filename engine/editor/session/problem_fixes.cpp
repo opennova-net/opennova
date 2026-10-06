@@ -28,6 +28,7 @@
 #include <editor/session/texture_use_index.h>
 #include <editor/model/field_text.h>
 #include <editor/model/finding_code_row.h>
+#include <editor/preview/menu_render_check.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
 #include <runtime/renderer/material_texture.h>
@@ -44,6 +45,8 @@ constexpr size_t kUseFilesMax = 8;
 
 // Every fix acts on the files, which the editor's Undo does not reach: its detail says so.
 constexpr const char *kNotUndoable = " It cannot be undone with Undo.";
+// A fix that edits a document is one step its Undo takes back, and its Save writes.
+constexpr const char *kUndoable = " Undo takes it back, and Save writes it.";
 
 // The game install's spelling of a file it has (view.project.retail_files is sorted by the
 // normalized name), or "" when it has none of that name.
@@ -396,6 +399,37 @@ void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<Pr
 	               request::set_import_options(state.source, std::move(changes)), false});
 }
 
+// The first item id the engine keeps for nothing that no item of the project has and no file names
+// (free_item_id over the graph's item definitions and the ids its edges name).
+int project_free_item_id(const AssetGraph &graph) {
+	std::set<int> used;
+	for (const GraphSymbol *symbol : graph.symbols_of_kind(ReferenceKind::Item))
+		if (const std::optional<int> id = strutil::parse_int(symbol->name)) used.insert(*id);
+	graph.for_each_edge([&](const GraphEdge &edge) {
+		if (edge.kind != ReferenceKind::Item) return;
+		if (const std::optional<int> id = strutil::parse_int(edge.value)) used.insert(*id);
+	});
+	return free_item_id([&](int id) { return used.count(id) != 0; });
+}
+
+// An item on an id an earlier item of its table has (catalog.item_identity, DI-11): no lookup by the id finds
+// it [orig: ItemList_FindIndexByTypeId @ 0x49e100, the first of an id], so nothing reaches it by its id and
+// what names the id means the earlier one: its id set (an edit of its document, no rename) to one of its own,
+// the project's free id by the reserved-id rule.
+void item_identity_fix(const Diagnostic &d, const SessionView &view, std::vector<ProblemFix> &out) {
+	if (!view.findings.graph || d.asset.empty() || d.row_id == 0) return;
+	const int id = project_free_item_id(*view.findings.graph);
+	const std::string to = std::to_string(id);
+	Edit set;
+	set.address = NodeAddress{d.row_id, d.record_kind, d.child_id};
+	set.field = "id";
+	set.value = int64_t(id);
+	out.push_back({"Use id " + to,
+	               "Gives " + d.record + " id " + to + ", one the engine keeps for nothing and no file of the project names: a "
+	               "lookup by its id then finds it. What names its id now still means the earlier item." + kUndoable,
+	               request::edit_record(d.asset, set, true), false});
+}
+
 // An item on an id the engine keeps for another kind (catalog.reserved_kind), or named as a place the
 // engine finds by an id the project lacks (catalog.reserved_name): its id renamed everywhere
 // (graph/rename_transaction: items.def and every file that names it, a mission's entities among them),
@@ -403,6 +437,7 @@ void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<Pr
 // names), or to the engine's where an item of the engine's kind takes it. The item is the finding's
 // record among the graph's item definitions of its file, the one on that kind of id.
 void item_id_fix(const Diagnostic &d, const SessionView &view, bool plan, std::vector<ProblemFix> &out) {
+	if (d.row() == &finding_code(CatalogFinding::ItemIdentity)) return item_identity_fix(d, view, out);
 	if (!view.findings.graph || d.asset.empty() || d.record.empty()) return;
 	const AssetGraph &graph = *view.findings.graph;
 	const bool kind = d.row() == &finding_code(CatalogFinding::ReservedKind);
@@ -422,14 +457,7 @@ void item_id_fix(const Diagnostic &d, const SessionView &view, bool plan, std::v
 	if (!item) return;
 	std::string to;
 	if (kind) {
-		std::set<int> used;
-		for (const GraphSymbol *symbol : graph.symbols_of_kind(ReferenceKind::Item))
-			if (const std::optional<int> id = strutil::parse_int(symbol->name)) used.insert(*id);
-		graph.for_each_edge([&](const GraphEdge &edge) {
-			if (edge.kind != ReferenceKind::Item) return;
-			if (const std::optional<int> id = strutil::parse_int(edge.value)) used.insert(*id);
-		});
-		to = std::to_string(free_item_id([&](int id) { return used.count(id) != 0; }));
+		to = std::to_string(project_free_item_id(graph));
 	} else {
 		to = std::to_string(def::DEF_ITEM_ID_BASE + wanted->type);
 		if (graph.resolve_symbol(ReferenceKind::Item, to)) return; // another item has it: no fix of this one
@@ -460,6 +488,28 @@ ProblemFix fallback_row_fix(const std::string &path) {
 	        "Adds a marker named Null as the first row of " + path + ", the row the engine gives every id it finds "
 	        "no item of, as retail's first row is. Undo takes it back, and Save writes it.",
 	        request::edit_record(path, std::move(add), true), false};
+}
+
+// A stylesheet variable no menu names (style.unused, DI-11): its line removed, an edit of its document that
+// Undo takes back, where no menu's text names it inside a longer text either (the render check's
+// variables: the graph's edges, which the finding reads, are the whole values alone). Nothing else reads a
+// variable by name [orig: NapiXML_ExpandVariablesInText @ 0x63a000, the stylesheet's list read by the
+// expansion alone; docs/mnu/menu-re.md, "%VAR% expansion"], so the game reads nothing less.
+void unused_variable_fix(const Diagnostic &d, const SessionView &view, std::vector<ProblemFix> &out) {
+	if (!view.findings.graph || d.asset.empty() || d.row_id == 0) return;
+	std::string name;
+	for (const GraphSymbol *symbol : view.findings.graph->symbols_of(d.asset, d.record))
+		if (symbol->kind == ReferenceKind::StyleVar) name = symbol->display;
+	const MenuRenderCheck *menus = menu_render_check(view.findings.project_checks.get());
+	if (name.empty() || !menus || menus->names_variable(name)) return;
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = NodeAddress{d.row_id, d.record_kind, d.child_id};
+	out.push_back({"Remove the line",
+	               "Removes the line defining %" + name + "% from " + basename_of(d.asset) +
+	                       ": no menu of the project names it, as a whole value or inside a text, and nothing else the "
+	                       "game runs reads a variable by name." + kUndoable,
+	               request::edit_record(d.asset, remove, true), false});
 }
 
 // The fixes of one finding, over the view's index (a Rewrite reads it): what its code's row offers
@@ -585,6 +635,12 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		               request::set_aside_texture(file->relative_path), true});
 		return;
 	}
+	case FindingFix::EditRecord:
+		// What the finding's maker planned with its file at hand (Diagnostic::planned): each an edit of the file.
+		if (!d.asset.empty())
+			for (const PlannedFix &planned : d.planned) out.push_back(edit_fix(d.asset, planned));
+		return;
+	case FindingFix::UnusedVariable: unused_variable_fix(d, view, out); return;
 	}
 }
 
@@ -608,6 +664,10 @@ ProblemFixIndex::ProblemFixIndex(const SessionView &view) {
 
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index) {
 	return fixes_over(diagnostic, view, index, true);
+}
+
+ProblemFix edit_fix(const std::string &path, const PlannedFix &planned) {
+	return {planned.label, planned.detail + kUndoable, request::edit_record(path, planned.edits, true), false};
 }
 
 bool missing_target(const ReferenceSubject &missing, const SessionView &view, ReferenceTarget &out) {

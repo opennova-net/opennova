@@ -315,12 +315,10 @@ void DefCatalogDocument::prepare_duplicate(Node &copy, const Node &,
 	if (rules.duplicated) rules.duplicated(row.native.data(), others, item_ids_elsewhere_);
 	// A name of its own: the game's lookups by name find the first row of a name (an item, an ammo), and a
 	// weapon block of a name the table has replaces that weapon (itemdef-re.md, "Repeated names and ids").
+	const std::string name = catalog_copy_name(row.kind, row.name(), names);
+	if (name.empty()) return;
 	const TableKind &own = *catalog_table().kind(row.kind);
 	const size_t place = own.find(catalog_name_field(row.kind));
-	if (place == TableKind::npos || rules.copy_name == CopyName::None) return;
-	const FieldSchema &schema = own.fields()[place];
-	const size_t limit = rules.name_chars ? rules.name_chars : schema.width ? schema.width - 1 : 0;
-	const std::string name = copy_name(row.name(), rules.copy_name, limit, names);
 	std::string refused;
 	// A name that cannot be set (a character the game's code page lacks) refuses the copy, saying why: a
 	// copy under its original's name would be the one no lookup finds.

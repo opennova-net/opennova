@@ -4,6 +4,7 @@
 #include <iterator>
 #include <variant>
 
+#include <base/io/strutil.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/project_checks.h>
 #include <editor/documents/validation_cache.h>
@@ -413,6 +414,13 @@ const MenuScreenRender *MenuRenderCheck::render(const std::string &path, NodeId 
 	for (const Screen &screen : found->second.screens)
 		if (screen.row == screen_row) return screen.render.get();
 	return nullptr;
+}
+
+bool MenuRenderCheck::names_variable(const std::string &name) const {
+	const std::string upper = strutil::to_upper(name);
+	for (const auto &[path, menu] : menus_)
+		if (std::binary_search(menu.variables.begin(), menu.variables.end(), upper)) return true;
+	return false;
 }
 
 } // namespace opennova::editor
