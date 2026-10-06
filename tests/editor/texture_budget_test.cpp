@@ -2,7 +2,8 @@
 // model row's texture costs the game at each object texture detail level and as its .dds, from the file's
 // header; over a minted project the texture_uses query's budgets, the use check's texture.memory on a texture
 // past 16 MB with its chain and texture.normal_slot_loader on a normal-map slot's row the diffuse loader reads,
-// its fix giving an .mdt's row type 4. The retail leg (OPENNOVA_JO_DIR): every texture row of every model the
+// its fix giving an .mdt's row type 4; the texture_budget query (one texture a name written, any case, its rows
+// counted, the totals the rows' sums) and a texture's tooltip line. The retail leg (OPENNOVA_JO_DIR): every texture row of every model the
 // install ships costed through the file its loader opens, the most a model texture holds, and no normal-map
 // slot's row of a type the diffuse loader reads.
 #include <algorithm>
@@ -25,6 +26,7 @@
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/texture_budget_list.h>
 #include <editor/session/view/session_view.h>
 #include <formats/dds/dds.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -143,6 +145,7 @@ int test_project() {
 	                                    "material FF_ST_OP\ntexture small.tga 1 0\n"
 	                                    "material VS_SKBUMPDIFFT\ntexture skin.tga 1 0\ntexture arm_n.tga 3 0\n"
 	                                    "material VS_SKBUMPDIFFT\ntexture small.tga 1 0\ntexture leg_n.mdt 3 0\n"
+	                                    "material FF_ST_OP\ntexture SMALL.TGA 1 1\n"
 	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	ImportChoice model;
@@ -217,7 +220,48 @@ int test_project() {
 	answer = session.query("texture_uses", args, error);
 	uses = answer.get("uses");
 	TEST_EXPECT(error.empty() && uses && uses->array.size() == 1 && !uses->array[0].get_bool("reads_file", true));
-	std::printf("project: the memory past 16 MB said once; a normal slot read as a diffuse, its .mdt's fix; the budgets on the wire\n");
+	// The project's budget: one texture a name written, any case, the stage and plain loaders sharing it (small.tga's
+	// three rows, one of them SMALL.TGA through the plain loader), the costliest first; skin.tga's row costed through
+	// skin.dds; the totals the rows' sums.
+	TEST_EXPECT(opennova::io::json_parse("{}", args, error));
+	answer = session.query("texture_budget", args, error);
+	const JsonValue *rows = answer.get("textures");
+	const JsonValue *totals = answer.get("totals");
+	TEST_EXPECT(error.empty() && rows && totals && rows->array.size() == 6 && answer.get_number("count", 0) == 6);
+	if (rows && totals && rows->array.size() == 6) {
+		TEST_EXPECT(rows->array[0].get_string("file", "") == "textures/crate.tga" && rows->array[0].get_number("uses", 0) == 1);
+		double full = 0, lowest = 0, previous = 1e18;
+		for (const JsonValue &row : rows->array) {
+			const JsonValue *detail = row.get("budget") ? row.get("budget")->get("detail") : nullptr;
+			TEST_EXPECT(detail && detail->array.size() == 4);
+			if (!detail || detail->array.size() != 4) continue;
+			const double bytes = detail->array[3].get_number("bytes", 0);
+			TEST_EXPECT(bytes <= previous);
+			previous = bytes;
+			full += bytes;
+			lowest += detail->array[0].get_number("bytes", 0);
+			const std::string file = row.get_string("file", "");
+			if (file == "textures/small.tga") TEST_EXPECT(row.get_number("uses", 0) == 3 && row.get_string("name", "") == "small.tga");
+			if (file == "textures/skin.dds") TEST_EXPECT(row.get_string("name", "") == "skin.tga");
+			if (file == "textures/leg_n.mdt") TEST_EXPECT(row.get("budget")->get_string("loader", "") == "normal");
+			TEST_EXPECT(file != "textures/skin.tga");
+		}
+		const JsonValue *at = totals->get("detail");
+		TEST_EXPECT(at && at->array.size() == 4 && at->array[3].number == full && at->array[0].number == lowest);
+		TEST_EXPECT(totals->get_number("textures", 0) == 6 && totals->get_number("past_warning", 0) == 1 &&
+		            totals->get_number("as_dds", full) < full);
+	}
+	// A page of it.
+	TEST_EXPECT(opennova::io::json_parse("{\"offset\":1,\"limit\":2}", args, error));
+	answer = session.query("texture_budget", args, error);
+	rows = answer.get("textures");
+	TEST_EXPECT(error.empty() && rows && rows->array.size() == 2 && rows->array[0].get_string("file", "") != "textures/crate.tga");
+	// A texture's tooltip line: its texture's cost; none on the .tga its loader passes over.
+	TEST_EXPECT(texture_file_budget_words(view, "textures/crate.tga").find("21.3 MB in the game") == 0);
+	TEST_EXPECT(!texture_file_budget_words(view, "textures/skin.dds").empty() &&
+	            texture_file_budget_words(view, "textures/skin.tga").empty());
+	std::printf("project: the memory past 16 MB said once; a normal slot read as a diffuse, its .mdt's fix; the budgets on the wire; "
+	            "the project's budget\n");
 	return 0;
 }
 
