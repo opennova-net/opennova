@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <sstream>
 
 #include <runtime/renderer/texture_dxt.h>
+#include <formats/trn/trn_io.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include <editor/assets/asset_registry.h>
@@ -171,6 +173,7 @@ TextureShownUse texture_shown_use(const TextureUse &use, int index) {
 	} else if (use.known()) {
 		out.alpha_words = texture_role_row(use.role).alpha;
 	}
+	if (use.role == TextureRoleId::ParticleGraphic) out.blend_mode = use.context.blend_mode;
 	return out;
 }
 
@@ -230,6 +233,7 @@ std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const 
 	if (!image) return image;
 	std::shared_ptr<const TextureImage> made =
 	        use.transform == TextureLoadTransform::None ? image : apply_load_transform(*image, use.transform);
+	made = texture_role_texels(made, use.role, use.blend_mode);
 	if (made && use.model_row && use.cutout < 0 && !texture_alpha_is_transparency(use.alpha) &&
 	    use.alpha != TextureAlphaMeaning::Height) {
 		// The game draws it opaque: whatever its alpha holds is no transparency here.
@@ -409,6 +413,7 @@ ViewportAction TextureViewport::follow_(const ViewportInput &input, PreviewClock
 		image_.reset();
 		source_.reset();
 		use_ = TextureShownUse();
+		role_view_ = TextureRoleView();
 		reason_ = TextureViewStatus::NoTexture;
 		detail_.clear();
 		from_file_ = false;
@@ -419,14 +424,35 @@ ViewportAction TextureViewport::follow_(const ViewportInput &input, PreviewClock
 	// texture detail reads: that use's, else the first model row's.
 	TextureShownUse use;
 	const TextureBudget *budget = nullptr;
+	std::string terrain_path;
 	if (input.view.documents.texture_uses) {
 		const std::vector<TextureUse> &uses = input.view.documents.texture_uses->uses_of(input.view, path());
 		if (options_.as_used >= 0 && size_t(options_.as_used) < uses.size()) {
-			use = texture_shown_use(uses[size_t(options_.as_used)], options_.as_used);
-			if (uses[size_t(options_.as_used)].budget.known) budget = &uses[size_t(options_.as_used)].budget;
+			const TextureUse &shown = uses[size_t(options_.as_used)];
+			use = texture_shown_use(shown, options_.as_used);
+			if (shown.budget.known) budget = &shown.budget;
+			if (shown.role == TextureRoleId::TerrainBlendMap || shown.role == TextureRoleId::TerrainFoliageMap)
+				terrain_path = shown.referrer;
 		}
 		for (size_t i = 0; i < uses.size() && !budget; ++i)
 			if (uses[i].budget.known) budget = &uses[i].budget;
+	}
+	// The terrain a terrain map's use names it from, read as the scan last listed it.
+	const AssetEntry *terrain_entry =
+	        terrain_path.empty() || !input.view.project.scan ? nullptr : input.view.project.scan->at_path(terrain_path);
+	const bool terrain_moved = terrain_path != terrain_path_ ||
+	                           (terrain_entry && (terrain_entry->size_bytes != terrain_size_ || terrain_entry->modified_ticks != terrain_modified_));
+	if (terrain_moved) {
+		terrain_path_ = terrain_path;
+		terrain_size_ = terrain_entry ? terrain_entry->size_bytes : 0;
+		terrain_modified_ = terrain_entry ? terrain_entry->modified_ticks : 0;
+		terrain_.reset();
+		std::string text, error;
+		if (terrain_entry && read_file_text(join_path(input.view.project.root, terrain_path), text, error)) {
+			std::istringstream file(text);
+			auto config = std::make_shared<TrnConfig>();
+			if (load_trn(file, *config, error)) terrain_ = std::move(config);
+		}
 	}
 	const bool read_anew = image != source_;
 	// What moves the picture besides its texels and its use: the detail, the game's chain asked for, the
@@ -436,13 +462,17 @@ ViewportAction TextureViewport::follow_(const ViewportInput &input, PreviewClock
 	                      lit != was_lit || (lit && options_.light != made_options_.light) ||
 	                      (options_.detail >= 0 && budget && !(budget->detail[options_.detail].bytes == detail_device_.bytes &&
 	                                                           budget->detail[options_.detail].width == detail_device_.width));
-	const bool anew = read_anew || !(use == use_) || reshaped;
+	const bool anew = read_anew || !(use == use_) || reshaped || terrain_moved;
 	if (read_anew && input.document) ++reads_;
 	source_ = image;
 	use_ = use;
 	if (anew) {
 		made_options_ = options_;
-		image_ = picture(use.index >= 0 && image->decoded ? texture_as_used(image, use) : image, budget);
+		const std::shared_ptr<const TextureImage> used = use.index >= 0 && image->decoded ? texture_as_used(image, use) : image;
+		// What the use's role reads of it: the legend and the line the picture's words carry.
+		role_view_ = use.index >= 0 && used ? texture_role_view(*image, *used, use.role, use.blend_mode, terrain_.get())
+		                                    : TextureRoleView();
+		image_ = picture(used, budget);
 	}
 	from_file_ = from_file;
 	if (!image->loads) {
@@ -594,6 +624,9 @@ io::JsonValue TextureViewport::body_json(const ViewportInput &) const {
 		as_used.set("cells", json_number(double(use_.cells)));
 		if (use_.model_row) as_used.set("alpha", json_string(texture_alpha_meaning_token(use_.alpha)));
 		as_used.set("alpha_words", json_string(use_.alpha_words));
+		if (use_.blend_mode >= 0) as_used.set("blend_mode", json_number(use_.blend_mode));
+		// What its role reads of it (texture_role_view), null for none.
+		as_used.set("role_view", role_view_.empty() ? JsonValue::make_null() : texture_role_view_json(role_view_));
 	}
 	out.set("as_used", std::move(as_used));
 	// The device texture shown at the detail asked for, and the levels the picture holds (a texture of pixels' the
