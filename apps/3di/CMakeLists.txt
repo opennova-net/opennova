@@ -1,7 +1,8 @@
 # opennova-3di — build a .3di from an authored .o3d scene, write one back out
 # as a scene, inspect or compare models; the same for a rig's .bad/.adm clip
-# set through the .o3a text (`anim build|scene|info|compare`); and `catalog`,
-# the engine tables a front end offers.
+# set through the .o3a text (`anim build|scene|info|compare`); `texture`, an
+# image written as a model's .dds, .tga or .mdt; and `catalog`, the engine
+# tables a front end offers.
 #
 # The native half of the Blender add-on (tools/blender/opennova_3di): the
 # add-on writes and reads the scene text, this tool reads and writes every
@@ -12,11 +13,13 @@
 # The command handlers, one translation unit per command: the exe dispatches
 # them and the command tests (tests/threedi, tests/anim) call them directly.
 # Weapon timing also links the runtime: its preview runs the real weapon FSM,
-# and its merge reads the result back through the def parser.
+# and its merge reads the result back through the def parser. `texture` writes
+# through the editor core's image import (editor/import: the source read, the
+# halving, the DXT encoder), so the add-on's textures are the editor's.
 add_library(opennova_3di_commands STATIC build.cpp scene.cpp info.cpp compare.cpp
     anim_load.cpp anim_build.cpp anim_scene.cpp anim_info.cpp anim_compare.cpp weapon_timing.cpp
-    weapon_merge.cpp)
-target_link_libraries(opennova_3di_commands PUBLIC opennova_runtime)
+    weapon_merge.cpp texture.cpp)
+target_link_libraries(opennova_3di_commands PUBLIC opennova_runtime opennova_editor)
 target_include_directories(opennova_3di_commands PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(opennova_3di_commands PUBLIC cxx_std_17)
 

@@ -68,6 +68,7 @@ SCAN_ROOTS = (
     "third_party/bcrypt",
     "third_party/imgui",
     "third_party/miniz",
+    "third_party/rgbcx",
 )
 
 # --- The rules -------------------------------------------------------------
