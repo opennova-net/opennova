@@ -4319,6 +4319,14 @@ target_link_libraries(editor_texture_game_view_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_game_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_game_view COMMAND editor_texture_game_view_test)
 
+# ADR 0046 S18, each texture role in its own picture (preview/texture_role_view): a blend map's weights and the
+# splat details they weigh, a foliage map's codes and what grows on them, a particle graphic as its atlas page holds
+# it; through a session the texture viewport showing each as its use, its legend read again as its terrain moves.
+add_executable(editor_texture_role_view_test editor/texture_role_view_test.cpp)
+target_link_libraries(editor_texture_role_view_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_role_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_role_view COMMAND editor_texture_role_view_test)
+
 # ADR 0046 S18, a texture's import (import/texture_import, graph/texture_import_needs,
 # session/texture_import_state): the image importer's option rows, its pieces, every format written and
 # read back by the reader the game picks, what a minted project's uses ask of an import, set_import_options

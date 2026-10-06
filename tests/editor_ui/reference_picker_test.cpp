@@ -653,6 +653,47 @@ void test_texture_game_view_toolbar() {
 	      "the alpha as the Phong use reads it");
 }
 
+// S18, each role in its own picture: a terrain blend map shown as its terrain's splat reads it, under the picture
+// its legend, each channel its share and the splat detail it weighs (preview/texture_role_view).
+void test_texture_role_legend() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	const std::vector<uint8_t> rgba = {100, 50, 0, 255, 0, 0, 0, 255};
+	std::vector<uint8_t> file;
+	std::string error;
+	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 2, 1, file, error) &&
+	              editor_test::write_bytes(view.project.root + "/textures/blend.tga", file),
+	      "a 2 x 1 blend map");
+	CHECK(editor_test::write_text(view.project.root + "/terrains/isle.trn",
+	                              "polytrn_detailmap detail.tga\npolytrn_polydata isle.cpt\npolytrn_sectorcount 1\n"
+	                              "polytrn_sectors 0\npolytrn_colormap colour.tga\npolytrn_detailmap_c1 grass.tga\n"
+	                              "polytrn_detailblendmap blend.tga\n"),
+	      "a terrain naming it");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("textures/blend.tga"));
+	project.session.handle(request::set_viewport("textures/blend.tga", "{\"kind\":\"texture\",\"options\":{\"as_used\":0}}"));
+	DrawnDevices devices;
+	Ui ui;
+	ui.pump = [&project, &devices] {
+		project.session.poll();
+		devices.sync(project.session.viewports(), project.session.view());
+	};
+	ui.windows.set_view(&project.session.view());
+	ui.windows.set_devices(&devices.cache);
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Its weights as the terrain's splat reads them") != std::string::npos, "the legend's title");
+	CHECK(text.find("weighs polytrn_detailmap_c1, grass.tga") != std::string::npos &&
+	              text.find("weighs polytrn_detailmap_c2, which the terrain does not name") != std::string::npos,
+	      "each channel the splat detail it weighs");
+}
+
 // S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., ask first
 // (preview_texture_source of that texture); the dialog the preview opens shows the texture before and after
 // and replaces only on its Replace, Cancel closing it; an image dropped on a texture field's value asks for
@@ -807,6 +848,7 @@ void run_reference_picker_tests() {
 	test_texture_import_section();
 	test_texture_budget_line();
 	test_texture_game_view_toolbar();
+	test_texture_role_legend();
 	test_texture_drop_replaces();
 }
 
