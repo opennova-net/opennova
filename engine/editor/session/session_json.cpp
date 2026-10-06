@@ -21,6 +21,7 @@
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/requirements/requirement_words.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
@@ -1650,9 +1651,12 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceTarget> targets = view.findings.graph
+	std::vector<ReferenceTarget> targets = view.findings.graph
 			? reference_targets(*view.findings.graph, *view.project.scan, field, value)
 			: std::vector<ReferenceTarget>();
+	// A name nothing resolves: where it belongs (DI-17, a Go to always lands).
+	ReferenceTarget home;
+	if (targets.empty() && missing_target(field, value, view, home)) targets.push_back(std::move(home));
 	JsonValue list = JsonValue::make_array();
 	for (size_t i = page.first(targets.size()); i < page.last(targets.size()); ++i) {
 		const ReferenceTarget &target = targets[i];
@@ -1662,6 +1666,7 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 		if (!target.locator.empty()) entry.set("locator", json_string(target.locator));
 		if (!target.field.empty()) entry.set("field", json_string(target.field));
 		entry.set("editable", boolean(target.editable));
+		if (target.missing) entry.set("missing", boolean(true));
 		list.push(std::move(entry));
 	}
 	JsonValue out = JsonValue::make_object();
