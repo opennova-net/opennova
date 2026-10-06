@@ -164,7 +164,9 @@ constexpr FieldLabel kLabels[] = {
 	{MissionRecord::Entity, "color_override", "Colour override", "", ""},
 	{MissionRecord::Entity, "ref_num", "Reference number", "", ""},
 	{MissionRecord::Entity, "next_ssn", "Next SSN", "", ""},
-	{MissionRecord::Entity, "ttool_index", "Tool index", "", ""},
+	// A waypoint marker's name id: STRWPNAME%03i in the mission text's WPNames [orig:
+	// Entity_SpawnFromBMSRecord @0x40f0aa..0x40f0e0; HUD_GetWaypointName @0x594630].
+	{MissionRecord::Entity, "ttool_index", "Waypoint name", "", ""},
 	{MissionRecord::Entity, "blink_parent_a", "Blink parent A", "", ""},
 	{MissionRecord::Entity, "blink_parent_b", "Blink parent B", "", ""},
 	{MissionRecord::Entity, "blink_group_a", "Blink group A", "", ""},
@@ -293,6 +295,7 @@ constexpr AppliesRow kApplies[] = {
 	// Read and discarded [orig editor: Med_WriteBmsFile @0x44f920 writes the layer's name].
 	{MissionRecord::Layer, "name", Applicability::Unverified},
 	{MissionRecord::Entity, "next_ssn", Applicability::Unverified},
+	// Read on a waypoint marker alone (type 6005 or 6006, MissionDocument::refine_field).
 	{MissionRecord::Entity, "ttool_index", Applicability::Unverified},
 	{MissionRecord::Entity, "color_override", Applicability::Unverified},
 	{MissionRecord::Entity, "team_budget", Applicability::Unverified},
@@ -675,11 +678,20 @@ ListOps stop_list() {
 	return ops;
 }
 
-// An event's triggers and its actions: the records its chain holds (a new one every word zero, its
-// type set by the Add's field), 20 at most each.
+// A new trigger or action: every word zero but its four parameters, each -1 as every shipped record
+// holds a parameter its type does not read (kUnreadParam); its type set by the Add's field, the
+// parameters its type reads by the logic's add (mission_logic's logic_add_edits).
+template <class Record> Record fresh_logic(const EventChain &, size_t) {
+	Record made{};
+	made.param1 = made.param2 = made.param3 = made.param4 = kUnreadParam;
+	return made;
+}
+
+// An event's triggers and its actions: the records its chain holds (a new one fresh_logic's), 20 at
+// most each.
 template <class Record>
 ListOps chain_list(K kind, std::vector<Record> &(*list)(EventChain &)) {
-	ListOps ops = vector_list<EventChain, Record>(k(kind), list);
+	ListOps ops = vector_list<EventChain, Record>(k(kind), list, fresh_logic<Record>);
 	const auto insert = ops.insert;
 	ops.insert = [insert, list](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
 		if (list(owner.as<EventChain>()).size() >= kMaxEventRecords) {

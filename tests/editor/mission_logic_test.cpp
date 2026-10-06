@@ -8,7 +8,8 @@
 // (an entity, an area, an event, a group, a path; a second holder of an SSN said inert); and the
 // `mission_logic` and `mission_uses` queries over a session. With the game install (a SKIP-LEG without
 // OPENNOVA_JO_DIR), every shipped trigger and action given a form and retyped to its own type planning
-// nothing, and the value each value kind's records hold most often measured: the defaults a new
+// nothing, the value each value kind's records hold most often measured, and what every record holds where its
+// type reads nothing (-1 in a parameter, 0 in a sub-type): the defaults a new
 // record's parameters take.
 #include <chrono>
 #include <cstdio>
@@ -161,15 +162,28 @@ int test_add_and_limit() {
 	Fixture f;
 	TEST_EXPECT(f.load());
 	const MissionDocument &m = as_mission(*f.document);
-	// "Entity is destroyed" added to event 2: an Add with its type, its sub-type; one batch, one step.
+	// "Entity is destroyed" added to event 2: an Add with its type, its sub-type and the entity it reads
+	// at its kind's default (the record born holding -1 in each parameter, the three it does not read
+	// kept so, as every shipped record holds them); one batch, one step.
 	const LogicType *destroyed = logic_type(false, int32_t(bms::TriggerMainType::Single), 4);
 	TEST_EXPECT(destroyed);
 	std::vector<Edit> edits;
 	std::string refusal;
 	TEST_EXPECT(logic_add_edits(m, f.second.row, *destroyed, SIZE_MAX, edits, refusal));
-	TEST_EXPECT(edits.size() == 2 && edits[0].operation == EditOperation::Add && edits[0].field == "main_type" &&
-	            edits[1].address.child == batch_made(0) && edits[1].field == "sub_type");
+	TEST_EXPECT(edits.size() == 3 && edits[0].operation == EditOperation::Add && edits[0].field == "main_type" &&
+	            edits[1].address.child == batch_made(0) && edits[1].field == "sub_type" && edits[2].field == "param1" &&
+	            edits[2].value == Value(int64_t(0)));
 	TEST_EXPECT(f.apply(edits));
+	{
+		const EventRow &event = static_cast<const EventRow &>(*m.row(f.second.row));
+		const bms::Trigger &made = event.native.triggers.back();
+		TEST_EXPECT(made.param1 == 0 && made.param2 == mission::kUnreadParam && made.param3 == mission::kUnreadParam &&
+		            made.param4 == mission::kUnreadParam);
+		LogicForm form;
+		TEST_EXPECT(logic_form(m, {f.second.row, k(MissionKind::Trigger), event.ids.lists[0].back().id},
+		                       DocumentMissionNames(m), form) &&
+		            form.unread.empty());
+	}
 	TEST_EXPECT(f.count(f.second, MissionKind::Trigger) == 2);
 	TEST_EXPECT(same(m.record_title(f.second),
 	                 "Event 2: When event 1 has fired and SSN 0 (no entity has it) is destroyed, then, after 5.1 s, kill group 2."));
@@ -204,10 +218,12 @@ int test_retype_move_negate() {
 	const std::string walker = "Organic #" + std::to_string(f.ssn);
 	std::vector<Edit> edits;
 	std::string refusal;
-	// Entity is in an area -> Entity is destroyed: the entity kept, the zone (unread now) cleared.
+	// Entity is in an area -> Entity is destroyed: the entity kept, the zone (unread now) -1, as every
+	// shipped record holds a parameter its type does not read.
 	const LogicType *destroyed = logic_type(false, int32_t(bms::TriggerMainType::Single), 4);
 	TEST_EXPECT(logic_retype_edits(m, f.trigger, *destroyed, edits, refusal));
-	TEST_EXPECT(edits.size() == 2 && edits[0].field == "sub_type" && edits[1].field == "param2" && edits[1].value == Value(int64_t(0)));
+	TEST_EXPECT(edits.size() == 2 && edits[0].field == "sub_type" && edits[1].field == "param2" &&
+	            edits[1].value == Value(int64_t(mission::kUnreadParam)));
 	TEST_EXPECT(f.apply(edits));
 	TEST_EXPECT(same(m.record_title(f.trigger), walker + " is destroyed"));
 	// To its own type: nothing.
@@ -323,7 +339,9 @@ int test_wire() {
 	JsonValue planned = ask("mission_logic", "{\"path\": \"missions/logic.bms\", \"op\": \"add\", \"id\": " + id +
 	                                                 ", \"list\": \"action\", \"type\": 6}");
 	const JsonValue *edits = planned.get("edits");
-	TEST_EXPECT(edits && edits->array.size() == 1 && !planned.get("refusal"));
+	// The Add, then the text id it reads at its kind's default over the -1 a new record holds.
+	TEST_EXPECT(edits && edits->array.size() == 2 && !planned.get("refusal") &&
+	            edits->array[1].get_string("field", "") == "param1" && edits->array[1].get_number("value", -1) == 0);
 	// The planned edits passed back as they are.
 	JsonValue request = JsonValue::make_object();
 	request.set("kind", opennova::io::json_string("edit_record"));
@@ -363,6 +381,7 @@ int test_retail() {
 	std::set<std::string> seen;
 	size_t missions = 0, records = 0, uses = 0;
 	std::map<mission::ParamKind, std::map<int64_t, size_t>> values;
+	std::map<int64_t, size_t> unused, unread_subs;
 	double took_ms = 0;
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
@@ -395,6 +414,26 @@ int test_retail() {
 							if (measured(param.kind)) ++values[param.kind][param.value];
 					}
 			}
+			// What the records hold where their type reads nothing: each parameter slot no row of the
+			// type names, a trigger's sub-type under a main type that reads none, an action's sub-type
+			// under a type whose sub-type selects nothing.
+			for (const Node *row : m.rows_of(MissionKind::Event)) {
+				const EventRow &event = static_cast<const EventRow &>(*row);
+				for (const bms::Trigger &trigger : event.native.triggers) {
+					const int32_t params[4] = {trigger.param1, trigger.param2, trigger.param3, trigger.param4};
+					for (int slot = 0; slot < 4; ++slot)
+						if (mission::trigger_param_kind(trigger, slot) == mission::ParamKind::Unused) ++unused[params[slot]];
+					if (!mission::trigger_reads_sub_type(int32_t(trigger.main_type))) ++unread_subs[trigger.sub_type];
+				}
+				for (const bms::Action &action : event.native.actions) {
+					const int32_t params[4] = {action.param1, action.param2, action.param3, action.param4};
+					for (int slot = 0; slot < 4; ++slot)
+						if (mission::action_param_kind(action, slot) == mission::ParamKind::Unused) ++unused[params[slot]];
+					if (mission::action_params(int32_t(action.action_type), action.action_sub_type) &&
+					    mission::action_sub_types(int32_t(action.action_type)).count == 0)
+						++unread_subs[action.action_sub_type];
+				}
+			}
 			for (const Node *row : m.rows_of(MissionKind::Organic)) uses += mission_uses(m, {row->id, row->kind, 0}, names).uses.size();
 			took_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
 		}
@@ -420,6 +459,33 @@ int test_retail() {
 		differing += logic_param_default(kind) != most;
 	}
 	TEST_EXPECT(differing == 0);
+	// The words a record's type does not read: what a new record's take (logic_unused_param,
+	// logic_unused_sub_type).
+	const auto most_of = [](const std::map<int64_t, size_t> &counts, size_t &held, size_t &all) {
+		int64_t most = 0;
+		held = all = 0;
+		for (const auto &[value, count] : counts) {
+			all += count;
+			if (count > held) {
+				held = count;
+				most = value;
+			}
+		}
+		return most;
+	};
+	size_t held = 0, all = 0;
+	const int64_t unused_most = most_of(unused, held, all);
+	std::printf("  unused parameters: %zu, most often %lld (%zu)", all, (long long)unused_most, held);
+	for (const auto &[value, count] : unused) std::printf(" [%lld: %zu]", (long long)value, count);
+	std::printf("\n");
+	// Every one -1 (19,596 of 19,596): a new record's are (mission::kUnreadParam).
+	TEST_EXPECT(unused.size() == 1 && unused_most == mission::kUnreadParam && held == all && all == 19596);
+	const int64_t sub_most = most_of(unread_subs, held, all);
+	std::printf("  unread sub-types: %zu, most often %lld (%zu)", all, (long long)sub_most, held);
+	for (const auto &[value, count] : unread_subs) std::printf(" [%lld: %zu]", (long long)value, count);
+	std::printf("\n");
+	// Every one 0 (501 of 501): a new record's is (the Add sets a sub-type only where its type has one).
+	TEST_EXPECT(unread_subs.size() == 1 && sub_most == 0 && held == all && all == 501);
 	TEST_EXPECT(missions == 115 && records == 3858 + 4971);
 	return 0;
 }
