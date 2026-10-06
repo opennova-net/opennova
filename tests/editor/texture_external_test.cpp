@@ -46,6 +46,13 @@ std::vector<uint8_t> tga32(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // The path the last open_externally event names; "" for none.
+// The same 4 x 4 texels as a PNG: what a source in art/ holds.
+std::vector<uint8_t> png32(uint8_t r, uint8_t g, uint8_t b) {
+	std::vector<uint8_t> rgba;
+	for (int i = 0; i < 16; ++i) rgba.insert(rgba.end(), {r, g, b, 255});
+	return encode_png_rgba(rgba.data(), 4, 4);
+}
+
 std::string opened(const SessionView &view) {
 	std::string path;
 	for (const ViewEvent &event : view.events.held())
@@ -84,9 +91,9 @@ int test_round_trip() {
 	editor_test::handle_to_end(session, request::edit_externally("textures/rock.tga"));
 	TEST_EXPECT(session.outcome().done());
 	session.run_operations();
-	TEST_EXPECT(opened(view) == root + "/art/rock_src.tga");
+	TEST_EXPECT(opened(view) == root + "/art/rock.png");
 	const AssetEntry *rock = view.project.scan->find("rock.tga");
-	TEST_EXPECT(rock && rock->imported_from == "art/rock_src.tga" && !fs::exists(root + "/textures/rock.tga") &&
+	TEST_EXPECT(rock && rock->imported_from == "art/rock.png" && !fs::exists(root + "/textures/rock.tga") &&
 	            !session.document_base_for("textures/rock.tga"));
 	if (!rock) return 1;
 	const std::string output = rock->relative_path;
@@ -104,16 +111,16 @@ int test_round_trip() {
 	TEST_EXPECT(changes().empty());
 
 	// Its program is saving the source: written just now, it waits, never read half-written.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/rock_src.tga", tga32(0, 200, 0)));
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/rock.png", png32(0, 200, 0)));
 	const ExternalChanges waiting = changes();
 	TEST_EXPECT(waiting.empty() && waiting.unsettled == 1);
 	editor_test::handle_to_end(session, request::refresh_changed_sources());
 	TEST_EXPECT(session.outcome().done() && session.outcome().operation == 0);
 	// Settled (its last write a while back): that source alone imported again, the scan read again for it
 	// alone (no walk of the project), its output's open document read again.
-	TEST_EXPECT(editor_test::backdate(root + "/art/rock_src.tga", std::chrono::seconds(60)));
-	TEST_EXPECT(changes().sources == std::vector<std::string>({"art/rock_src.tga"}) &&
-	            changes().files == std::vector<std::string>({"art/rock_src.tga"}));
+	TEST_EXPECT(editor_test::backdate(root + "/art/rock.png", std::chrono::seconds(60)));
+	TEST_EXPECT(changes().sources == std::vector<std::string>({"art/rock.png"}) &&
+	            changes().files == std::vector<std::string>({"art/rock.png"}));
 	editor_test::handle_to_end(session, request::refresh_changed_sources());
 	TEST_EXPECT(session.outcome().done() && session.outcome().operation != 0);
 	session.run_operations();
@@ -136,25 +143,25 @@ int test_round_trip() {
 		TEST_EXPECT(editor_test::write_bytes(root + "/textures/grain.tga", bigger) &&
 		            editor_test::backdate(root + "/textures/grain.tga", std::chrono::seconds(60)));
 		ImportedSource reads;
-		reads.source = "art/moss_src.tga";
+		reads.source = "art/moss.png";
 		reads.inputs = {"textures/grain.tga"};
 		const ExternalChanges input = external_changes(ProjectPaths::for_root(root), *view.project.scan, {reads},
 		                                               io::file_clock_now_ticks());
-		TEST_EXPECT(input.sources == std::vector<std::string>({"art/moss_src.tga"}) &&
+		TEST_EXPECT(input.sources == std::vector<std::string>({"art/moss.png"}) &&
 		            input.files == std::vector<std::string>({"textures/grain.tga"}));
 	}
 
 	// An output's own source opened, nothing made.
 	const size_t entries = view.project.scan->entries.size();
 	editor_test::handle_to_end(session, request::edit_externally("rock.tga"));
-	TEST_EXPECT(session.outcome().done() && opened(view) == root + "/art/rock_src.tga");
+	TEST_EXPECT(session.outcome().done() && opened(view) == root + "/art/rock.png");
 	session.run_operations();
 	TEST_EXPECT(view.project.scan->entries.size() == entries);
 
 	// The tab's "Edit in its program" on a texture with a source of its own: open_texture_source opens it,
 	// nothing made; one with none is refused (the dialog's preview asks before making one).
 	editor_test::handle_to_end(session, request::open_texture_source("rock.tga"));
-	TEST_EXPECT(session.outcome().done() && opened(view) == root + "/art/rock_src.tga");
+	TEST_EXPECT(session.outcome().done() && opened(view) == root + "/art/rock.png");
 	TEST_EXPECT(editor_test::write_bytes(root + "/textures/plain.tga", tga32(9, 9, 9)));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
