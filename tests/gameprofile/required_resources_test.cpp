@@ -5,6 +5,9 @@
 #include <string.h>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/gameprofile/resource_missing.h>
+
+#include <string>
 
 using namespace opennova::gameprofile;
 
@@ -179,6 +182,41 @@ static int test_roles_are_unique_snake_case_tokens(void) {
     return 1;
 }
 
+/* DI-27: a miss the runtime says on a line of its log reads back as it was said, after any prefix
+ * the site puts before the marker; a line with no marker, no kind or no quoted name says none. */
+static int test_resource_missing_lines(void) {
+    ResourceMiss full;
+    full.kind = resource_kind::kTexture;
+    full.name = "barrel.tga";
+    full.by = "onbarrel.3di";
+    full.words = "the material draws the checkerboard";
+    const std::string text = resource_missing_text(full);
+    CHECK(text == "resource missing: texture \"barrel.tga\" named by \"onbarrel.3di\": the material draws the checkerboard",
+          "the line's form");
+    ResourceMiss read;
+    CHECK(parse_resource_missing("WARNING: ResourceRoot: " + text + "\r\n", read) && read == full,
+          "read back after a prefix, its line end cut");
+    ResourceMiss bare;
+    bare.kind = resource_kind::kFile;
+    bare.name = "my file.def";
+    CHECK(parse_resource_missing(resource_missing_text(bare), read) && read == bare, "a name with a space, nothing else said");
+    ResourceMiss words;
+    words.kind = resource_kind::kSound;
+    words.name = "SSRFootGND";
+    words.words = "it plays nothing";
+    CHECK(parse_resource_missing(resource_missing_text(words), read) && read == words, "words with no file naming it");
+    ResourceMiss quoted;
+    quoted.kind = resource_kind::kModel;
+    quoted.name = "a\"b.3di";
+    CHECK(resource_missing_text(quoted) == "resource missing: model \"ab.3di\"", "a quote left out");
+    CHECK(!parse_resource_missing("WARNING: nothing to see", read), "no marker");
+    CHECK(!parse_resource_missing("resource missing: texture", read), "no name");
+    CHECK(!parse_resource_missing("resource missing: texture barrel.tga", read), "an unquoted name");
+    CHECK(!parse_resource_missing("resource missing: texture \"\"", read), "an empty name");
+    CHECK(!parse_resource_missing("resource missing: texture \"barrel.tga", read), "an unended name");
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_bounds);
     RUN_TEST(test_every_row_is_complete_and_phase_ordered);
@@ -186,6 +224,7 @@ int main(void) {
     RUN_TEST(test_the_witnessed_fatal_set);
     RUN_TEST(test_known_row_lookups);
     RUN_TEST(test_roles_are_unique_snake_case_tokens);
+    RUN_TEST(test_resource_missing_lines);
     printf("%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }
