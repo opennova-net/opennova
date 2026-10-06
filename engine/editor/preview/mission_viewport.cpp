@@ -16,6 +16,7 @@
 #include <editor/graph/display_names.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_canvas.h>
+#include <editor/preview/mission_ground_check.h>
 #include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_overlay.h>
@@ -1178,6 +1179,7 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 	DisplayNameCache titles;
 	std::optional<GraphNameSource> names;
 	if (const AssetGraph *graph = input.view.findings.graph.get()) names.emplace(*graph);
+	const MissionGroundCheck *ground_check = mission_ground_check(input.view.findings.project_checks.get());
 	for (size_t index = 0; index < shown.size(); ++index) {
 		const MissionMark &mark = shown[index];
 		JsonValue item = JsonValue::make_object();
@@ -1193,6 +1195,10 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 			item.set("team", json_number(entity.team));
 			// A person's spawn pose (DI-38).
 			if (const MissionPose *pose = poses_.pose(entity.row)) item.set("pose", mission_pose_json(*pose));
+			// What the game grounds it on, as the mission's ground check last found it (DI-28).
+			if (ground_check)
+				if (const MissionGroundVerdict *verdict = ground_check->verdict(document->path(), entity.row))
+					item.set("grounded", mission_ground_verdict_json(*verdict));
 		} else {
 			const MissionAreaMark &area = scene_.areas()[size_t(mark.area)];
 			item.set("zone", json_number(area.zone));
