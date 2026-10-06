@@ -21,6 +21,7 @@
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_card.h>
+#include <editor/session/play_controller.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/texture_budget_list.h>
@@ -731,6 +732,14 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	const bool opens = is_editable_kind(entry.kind) && view.allows(EditorRequestKind::OpenDocument);
 	if (ImGui::MenuItem("Open", nullptr, false, opens) && opens)
 		workspace_.request(request::open_document(entry.relative_path));
+	// A mission's row (DI-26): the game started in it, as Build > Play mission starts the active one.
+	const std::string mission = play_mission_at(view, entry.relative_path);
+	if (!mission.empty()) {
+		const bool plays = view.activity.play_state == PlayState::Stopped && view.allows(EditorRequestKind::Play);
+		if (ImGui::MenuItem("Play mission", nullptr, false, plays) && plays)
+			workspace_.request(request::play(mission));
+		ui_kit::tooltip("Build, then start the game in " + mission + ".");
+	}
 	const bool renames = view.allows(EditorRequestKind::RenameAsset);
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
 	draw_move_menu(view, entry);

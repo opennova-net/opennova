@@ -149,6 +149,20 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 				play["behind"] = true
 			if bool(args.get("fresh", false)):
 				play["fresh"] = true
+			# Play from here (DI-26): a start of the caller's (start {at, yaw}), or the mission view's own
+			# (from_here: the ground under its camera, or under the picture point `at`), which the view plans
+			# as the Play it raises.
+			if args.has("start"):
+				play["start"] = args["start"]
+			if bool(args.get("from_here", false)):
+				var command := {"name": "play_from_here", "kind": "mission"}
+				if args.has("at"):
+					command["at"] = args["at"]
+				play = {"kind": "edit_in_viewport", "path": mission, "command": command}
+				if bool(args.get("behind", false)):
+					play["behind"] = true
+				if bool(args.get("fresh", false)):
+					play["fresh"] = true
 			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(play))))
 			var failed := _outcome_error(answer, "editor_play op=start")
 			if failed != null:
