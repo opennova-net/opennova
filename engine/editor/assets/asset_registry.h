@@ -55,6 +55,8 @@ struct AssetScan {
 	struct Visit {
 		std::vector<AssetEntry> entries;
 		std::vector<Diagnostic> findings;
+		// An import record's inputs (S20), project-relative: the files at them are ImportInputs.
+		std::vector<std::string> inputs;
 	};
 	// The scan of the walk's visits, by path ("" the project's folder itself, when it cannot be
 	// read): the entries indexed and the findings made from them (what a ProjectScan hands over).
