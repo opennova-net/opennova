@@ -29,6 +29,14 @@ inline constexpr uint64_t kWholeWalkStep = UINT64_MAX;
 bool scan_project_file(const ProjectPaths &paths, const ProjectDocument &doc, const std::string &relative,
 		std::string &key, AssetScan::Visit &out, uint64_t *bytes_read = nullptr);
 
+// The walk's rule for one folder of the project (`folder` project-relative, '/'-separated; "" the
+// project's own): the files it lists there and the folders it descends into, project-relative and
+// each as the file system spells it, in the order of their paths (ADR 0046 DI-01: a folder whose last
+// write moved listed again, assets/disk_changes.h). False, nothing listed, for a folder that is not
+// there or that the walk does not reach (a dot-directory, the export folder, or one under them).
+bool list_project_folder(const ProjectPaths &paths, const ProjectDocument &doc, const std::string &folder,
+		std::vector<std::string> &files, std::vector<std::string> &folders);
+
 // The project's files walked a few at a time (ADR 0046 S13 A3), so an editor opening or reading
 // again a large project keeps drawing: scan_project_assets' walk as a cursor, stepped by a budget
 // of bytes. The files are listed first (each directory entry kWalkEntryCost), then visited in the
@@ -65,6 +73,7 @@ private:
 	size_t next_ = 0;
 	std::string current_;
 	std::map<std::string, AssetScan::Visit> visits_;
+	std::map<std::string, int64_t> folders_; // each folder descended into, its stamp (AssetScan::folders)
 	AssetScan scan_;
 	Phase phase_ = Phase::Start;
 };
