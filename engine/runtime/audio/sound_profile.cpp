@@ -272,4 +272,12 @@ int SoundProfileTable::index_of(const char *name) const {
     return 0;
 }
 
+const SoundProfile *item_sound_profile(const std::vector<SoundProfile> &profiles, const char *authored) {
+    if (profiles.empty()) return nullptr;
+    const char *name = authored != nullptr && authored[0] != '\0' ? authored : "default";
+    for (const SoundProfile &profile : profiles)
+        if (strutil::iequals(profile.name, name)) return &profile;
+    return &profiles.front();
+}
+
 } // namespace opennova::audio

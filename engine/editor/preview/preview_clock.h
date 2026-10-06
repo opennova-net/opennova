@@ -22,6 +22,9 @@ public:
 	double rate() const { return rate_; }
 	uint32_t ms() const { return ms_; }
 	int32_t ticks() const { return ticks_; }
+	// How many times its ticks were sought (seek_ticks): a clip's sounds fire only for the ticks the clock
+	// runs through, never for a seek (a scrub, a step, a clip newly chosen).
+	uint64_t tick_seeks() const { return tick_seeks_; }
 
 	// `seconds` of the Shell's frames pass: while it plays, `seconds * rate` of the clock.
 	void advance(double seconds) {
@@ -48,6 +51,7 @@ public:
 	void seek_ticks(int32_t ticks) {
 		ticks_ = ticks > 0 ? ticks : 0;
 		tick_carry_ = 0.0;
+		++tick_seeks_;
 	}
 
 private:
@@ -57,6 +61,7 @@ private:
 	double ms_carry_ = 0.0; // the fraction of a millisecond not taken yet
 	int32_t ticks_ = 0;
 	double tick_carry_ = 0.0;
+	uint64_t tick_seeks_ = 0;
 };
 
 } // namespace opennova::editor

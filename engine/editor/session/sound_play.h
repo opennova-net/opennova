@@ -32,6 +32,9 @@ std::string project_expansion(const SessionView &view);
 // - `profile` and `slot` (a keyword, SSRFootGND, or its number): the profile's slot; `slot` "footstep"
 //   with `surface` (ground, snow, object, water) and `foot` (left, right) the slot a footstep plays
 //   there (DI-04's seam), `profile` left out meaning "default" (what an item with no sound_profile binds);
+// - `frame`: what the clip the animation document at `path` (the active one when left out) plays at that
+//   frame under its model viewport's sound options, as a press of the event's mark on the timeline asks
+//   (DI-04, preview/preview_clip_sounds);
 // - none: the project's wave `path`.
 // Refused, the status line saying why (workspace.refused): a name no file has, a set no bank the game
 // searches holds, an empty slot, waves the project lacks, a wave past what a card reads.
