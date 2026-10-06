@@ -59,17 +59,17 @@ std::string quote(const std::string &arg) {
 	return out;
 }
 
-// The runtime on `build_dir` (an expansion's on the run directory, with /exp), working in `run_dir`,
-// its log there.
+// The runtime on `build_dir` (an expansion's on the run directory, with /exp, as a build staged there:
+// `on_run_dir`), working in `run_dir`, its log there.
 LaunchPlan runtime_plan(const std::string &build_dir, const std::string &run_dir, int mcp_port,
-                        const std::string &expansion) {
+                        const std::string &expansion, bool on_run_dir) {
 	LaunchPlan plan;
 	plan.build_dir = utf8_of(path_of(build_dir));
 	plan.working_dir = utf8_of(path_of(run_dir));
 	plan.log_file = join_path(run_dir, kRunLogFileName);
 	plan.mcp_port = mcp_port;
 	plan.expansion = expansion;
-	plan.resource_dir = expansion.empty() ? plan.build_dir : plan.working_dir;
+	plan.resource_dir = expansion.empty() && !on_run_dir ? plan.build_dir : plan.working_dir;
 	return plan;
 }
 
@@ -426,8 +426,8 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const std::string &build_dir,
                                  const std::string &run_dir, const std::string &game_code, int mcp_port,
                                  const std::string &mission, const std::vector<std::string> &engine_args,
-                                 const std::string &expansion) {
-	LaunchPlan plan = runtime_plan(build_dir, run_dir, mcp_port, expansion);
+                                 const std::string &expansion, bool on_run_dir) {
+	LaunchPlan plan = runtime_plan(build_dir, run_dir, mcp_port, expansion, on_run_dir);
 	plan.executable = runtime_executable;
 	plan.args = engine_args;
 	plan.args.push_back("--log-file");
@@ -439,8 +439,9 @@ LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const st
 LaunchPlan make_source_launch_plan(const std::string &godot_executable, const std::string &godot_project_dir,
                                    const std::string &build_dir, const std::string &run_dir,
                                    const std::string &game_code, int mcp_port, const std::string &mission,
-                                   const std::vector<std::string> &engine_args, const std::string &expansion) {
-	LaunchPlan plan = runtime_plan(build_dir, run_dir, mcp_port, expansion);
+                                   const std::vector<std::string> &engine_args, const std::string &expansion,
+                                   bool on_run_dir) {
+	LaunchPlan plan = runtime_plan(build_dir, run_dir, mcp_port, expansion, on_run_dir);
 	plan.executable = godot_executable;
 	plan.args.push_back("--path");
 	plan.args.push_back(godot_project_dir);
@@ -455,6 +456,23 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 	plan.args.push_back(kLaunchFlagWorkingDir);
 	plan.args.push_back(plan.working_dir);
 	return plan;
+}
+
+bool prepare_runtime_run(const std::string &build_dir, const std::string &run_dir, Diagnostic &error,
+                         std::vector<std::string> *staged, const FileLink &link) {
+	std::error_code ec;
+	std::vector<std::string> built;
+	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(build_dir), ec)) {
+		std::error_code kind;
+		const std::string name = utf8_of(entry.path().filename());
+		if (entry.is_regular_file(kind) && name != kBuildRecordFileName) built.push_back(name);
+	}
+	if (ec) {
+		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+		                     "Could not read the build " + build_dir + ": " + ec.message());
+		return false;
+	}
+	return stage_build_files(path_of(build_dir), path_of(run_dir), built, link, error, staged);
 }
 
 bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,

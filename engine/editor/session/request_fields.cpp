@@ -101,7 +101,8 @@ constexpr RequestField kFields[] = {
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
 			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
-			"game_install?, runtime_executable?, play_in_install?, play_in_install_strict?, build_folder?}, each "
+			"game_install?, runtime_executable?, play_in_install?, play_in_install_strict?, save_before_play?, "
+			"build_folder?}, each "
 			"left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game; "
 			"play_in_install_strict: Play in the game install stages the build and the install's program alone "
 			"and launches without /d, as a player's drop-in)." },
@@ -195,12 +196,14 @@ constexpr RequestField kFields[] = {
 	{ F::Behind, "behind", J::Boolean,
 			"Play's game window starts behind every other window, the editor keeping the foreground (shown without "
 			"activation, sent to the bottom while it starts, until the person brings it forward): a client driving "
-			"the editor while a person works at the machine. Windows only: elsewhere Play spawns nothing." },
+			"the editor while a person works at the machine. Windows only: elsewhere Play spawns nothing. On "
+			"edit_in_viewport, the Play its command plans (play_from_here)." },
 	{ F::Fresh, "fresh", J::Boolean,
 			"Play's run directory is emptied before the game starts, of what the runs before wrote there as "
 			"well as what they staged: a first run (the game install's device dialog, the game's default "
 			"profile). Left out, the run directory keeps the game's own files (its game.cfg, which names the "
-			"display adapter its device dialog chose, its saves) between Plays of the same mode." },
+			"display adapter its device dialog chose, its saves) between Plays of the same mode. On "
+			"edit_in_viewport, the Play its command plans (play_from_here)." },
 	{ F::Plan, "plan", J::Integer,
 			"The import plan a planned import means (the import_preview query's plan): the one the dialog shows, or "
 			"the import is refused (planned again since: its rows are others)." },
@@ -215,6 +218,14 @@ constexpr RequestField kFields[] = {
 			"A folder of the project, from its top level, '/'-separated (\"defs\", \"art/terrain\"; \"\" or \"/\" the "
 			"top level): where a move puts a file. Made when it is not there; never one outside the project, a "
 			"dot-folder (the cache) or the export folder." },
+	{ F::Start, "start", J::Object,
+			"Where Play starts the game's player (Play from here, DI-26): {at: [x, y, z], yaw?}, a point of the "
+			"mission Play names (mission metres: x east, y north, z up, the ground's height there) and the compass "
+			"heading the player faces (degrees, as an entity's yaw: 0 north, 90 east; 0 when left out). Neither "
+			"game takes a place on its command line: the build's copy of the mission in the run directory has the "
+			"start markers its single player deploys at moved there (one added where it has none), never the "
+			"project's file nor the build's, so the game install and OpenNova alike place the player there. Needs "
+			"mission (play.start); the game install starts at its menu, where the mission is chosen." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");
