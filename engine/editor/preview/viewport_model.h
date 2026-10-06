@@ -130,6 +130,9 @@ struct ViewportHit {
 	std::string name;
 	std::string kind;
 	bool current = false;
+	// What a kind says of the ground under the point beside the item (the mission's, DI-07:
+	// mission_ground_to_json); null for a kind with no ground.
+	io::JsonValue ground;
 };
 
 // A viewport (ADR 0046 S13 V5; CONTEXT.md "Viewport"): one document's picture as the game would
