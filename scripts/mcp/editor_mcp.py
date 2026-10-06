@@ -35,6 +35,7 @@ as usual.
     python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"document": {"filter": "gun",
         "inspector_filter": "rate"}, "find": {"open": true, "text": "90"}}'   # the active document's views
     python scripts/mcp/editor_mcp.py state --sections workspace   # what the windows show of their own
+    python scripts/mcp/editor_mcp.py request navigate_back --steps 2   # two places back (state --sections navigation)
     python scripts/mcp/editor_mcp.py viewport --op state --path main.mnu        # a document's viewport: its envelope
     python scripts/mcp/editor_mcp.py viewport --op hit --x 400 --y 300          # what lies under a point
     python scripts/mcp/editor_mcp.py viewport --op drag --id 5 --handle move --by=-8,4 --snap 1   # one undo step
@@ -259,7 +260,7 @@ REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
                     "planned", "behind", "report")
-REQUEST_NUMBERS = ("plan",)
+REQUEST_NUMBERS = ("plan", "steps")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -770,6 +771,9 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--plan", type=int, default=None,
                          help="import_files --planned: the plan it imports (query import_preview's plan); a plan "
                               "made since is refused")
+    request.add_argument("--steps", type=int, default=None,
+                         help="navigate_back, navigate_forward: how many places of the navigation history (1 when "
+                              "left out; state --sections navigation lists them, nearest first)")
     request.add_argument("--behind", choices=switch, default=None,
                          help="play: the game's window starts behind every other, the editor keeping the foreground "
                               "(Windows only)")
