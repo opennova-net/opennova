@@ -8,6 +8,7 @@
 #include <editor/model/document_base.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/animation_inspector.h>
+#include <editor/ui/catalog_inspector_view.h>
 #include <editor/ui/environment_inspector.h>
 #include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_view.h>
@@ -121,7 +122,8 @@ std::unique_ptr<DocumentView> make_script_view() { return std::make_unique<Scrip
 // animation table their records as a tree, and every text type its script device, the Main view
 // (S13 V10; its lines read only where no device draws, S13 D9).
 constexpr DocumentViewRow kViews[] = {
-	{DocumentTypeId::Catalog, DocumentViewRole::Records, &kCatalogOutline, nullptr},
+	// A weapon's Show on the HUD heads the Inspector (DI-20, ui/catalog_inspector_view).
+	{DocumentTypeId::Catalog, DocumentViewRole::Records, &kCatalogOutline, nullptr, draw_catalog_inspector},
 	{DocumentTypeId::Strings, DocumentViewRole::Records, &kStringsOutline, nullptr},
 	{DocumentTypeId::Menu, DocumentViewRole::Records, nullptr, make_menu_view},
 	{DocumentTypeId::Styles, DocumentViewRole::Records, nullptr, make_styles_view},
@@ -155,6 +157,8 @@ constexpr DocumentViewRow kViews[] = {
 	// Inspector, each a Go to with its terrain and what its header sets over it (ui/environment_inspector).
 	// DI-19b's time-of-day viewport takes the Main role here.
 	{DocumentTypeId::Environment, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_environment_inspector},
+	// The HUD layout's text in its script device (DI-20), its HUD the Preview window's.
+	{DocumentTypeId::HudLayout, DocumentViewRole::MainViewport, nullptr, make_script_view},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.
