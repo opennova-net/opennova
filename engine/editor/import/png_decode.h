@@ -15,7 +15,12 @@ namespace opennova::editor {
 // byte). Interlaced images are refused: the importer's sources are authored files, and
 // a clear refusal beats a silent de-interlace. Nothing here is a port: PNG is a public
 // format the editor reads on the way in.
-bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error);
+//
+// `indexed`, where the caller asks it: a palette image's texels as the indices they hold
+// (the top row first) and its palette, an entry the PLTE leaves out black (ADR 0046 S20,
+// a terrain's surface map, whose indices are its classes); any other image leaves it empty.
+bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error,
+                IndexedImage8 *indexed = nullptr);
 
 // A PNG as one grey value a texel, at its own depth (ADR 0046 S20, a heightmap's form): a 16-bit
 // image's samples whole (`max_value` 65535), an 8-bit one's as they are (255), a sub-byte grey scaled
