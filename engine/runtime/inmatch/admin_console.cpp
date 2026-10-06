@@ -4,6 +4,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_ban_lists.h>
+#include <runtime/inmatch/server_console.h> // Server_SendConsoleChat, the CHAT ring
 #include <runtime/inmatch/server_initial_state.h> // build_server_config_flags
 #include <runtime/world/world.h>
 
@@ -11,11 +12,9 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <formats/gamecfg/game_cfg.h>
-#include <net/npwire/ingame_decode.h> // ChatBroadcast
-#include <net/npwire/ingame_encode.h> // encode_chat_broadcast
 #include <net/npwire/ingame_message_id.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
-#include <runtime/hud/feed_format.h> // strip_inline_tags (Chat_StripHtmlTags)
+#include <runtime/hud/hud_chat_entry.h> // kChatDispatchGlobal, chat_dispatch_flood_color
 
 #include <cstdio>
 #include <string>
@@ -42,8 +41,6 @@ constexpr const char *kNotImplemented = "ERROR - This feature not yet implemente
 constexpr const char *kCycling = "OK - Server is cycling...";
 constexpr const char *kMustBeInGame = "ERROR - Must be in Game State to cycle server.";
 
-// SendFiltered(0x14, 1, 0x136): the reliable chat with its 310-flush retention.
-constexpr uint32_t kChatRetentionFlushes = 0x136;
 // The admin CYCLE / GOTO linger in place of the 2790 the round end stored.
 // [orig: g_EndRoundLingerTimer = 620 @0x40661F, @0x404AA5]
 constexpr uint32_t kCycleLingerTicks = 620;
@@ -707,7 +704,18 @@ void AdminConsole::handle_goto(const Args &args, std::vector<std::string> &repli
 		replies.emplace_back(in_game() ? "ERROR - In 'Game' State." : kNotImplemented);
 	} else if (ieq(args[0], "MENUSTATE")) {
 		if (scene_ != AdminScene::MainMenu) {
-			if (seams_.quit_to_menu) seams_.quit_to_menu();
+			// Input action 3 runs only where its binding's gate lets it: the dispatcher reads a
+			// session authority that is no peer (a Serve Only host) as 2, and the flag dword it
+			// indexes for action 3 carries bit 0x1, so on that host the quit returns before its
+			// case and the server stays in the match; the cycle tail below still runs. On a
+			// listen host the gate reads its own player's dead latch, the embedder's to test.
+			// [orig: Input_HandleActionBinding @0x49AD52..0x49AD6F (2 for in session, authority,
+			//  not a peer), the flags dword_8159AC[27 * 3] = 0x0C000C05 @0x49AD8D, the return
+			//  @0x49AD9C..0x49ADA0; case 3: g_MissionExitReason = 1 and
+			//  CNapiNetwork_DisconnectActiveConnection("I.C:CIDEMIS")]
+			const bool dedicated = ctx_.is_in_session != 0 && ctx_.is_authority != 0 &&
+					ctx_.is_mp_session_peer == 0;
+			if (!dedicated && seams_.quit_to_menu) seams_.quit_to_menu();
 		} else {
 			replies.emplace_back("ERROR - Already in 'Menu' State");
 		}
@@ -723,11 +731,17 @@ void AdminConsole::handle_goto(const Args &args, std::vector<std::string> &repli
 // running the gates. The gates: nothing on the death screen before the spawn gate (a Serve
 // Only host has no death screen), nothing empty, the flood table (a refusal echoes the line
 // into the host's window), then the `<...>` strip.
+// The flood table is the process's one (g_ChatFloodTable @0xB3B788, which only
+// Chat_CheckFloodControl reads), which every chat sender checks: on a host with no client the
+// console's typed line and this verb share it (`ctx.console_chat_flood`, server_console.h),
+// keyed on the one per-main-frame counter (set_main_frame). On that host the authority arm is
+// Server_SendConsoleChat's, which posts the sent line to the host's CHAT ring
+// (`ctx.console_chat`), and a refusal's echo lands in the same ring in Global's flood colour.
 // [orig: Chat_SendTeamMessage @0x49A900 (an IDB misnomer; the global sender) — the gates
-//  @0x49A931, Chat_CheckFloodControl @0x498F60, Chat_StripHtmlTags @0x4983F0 into 64 bytes,
+//  @0x49A931, Chat_CheckFloodControl @0x49A93B, Chat_StripHtmlTags @0x49A971 into 64 bytes,
 //  the peer's QueueReliableMessage(0xD) @0x49A9B4, the authority's SendFiltered(0x14, 1, 310)
-//  with mask 0x80 and Chat_DispatchToChannel(0xFF, 10, message) @0x42B910, the refusal's
-//  Chat_AddMessageChannel1 @0x4985D0]
+//  with mask 0x80 @0x49AA1D and Chat_DispatchToChannel(0xFF, 10, message) @0x49AA2A, the
+//  refusal's Chat_AddMessageChannel1(message, palette[3], 930) @0x49A953]
 void AdminConsole::chat_send(std::string text) {
 	if (ctx_.is_mp_session_peer != 0) {
 		if (seams_.host_client == nullptr) return;
@@ -736,22 +750,9 @@ void AdminConsole::chat_send(std::string text) {
 			seams_.chat_echo(text);
 		return;
 	}
-	if (text.empty()) return;
-	if (!chat_flood_check(chat_flood_, text, main_frame_)) {
-		if (seams_.chat_echo) seams_.chat_echo(text);
-		return;
-	}
-	if (ctx_.is_authority == 0) return;
-	ChatBroadcast line;
-	line.channel = 10;
-	line.sender_slot = 0xFF;
-	line.text = hud::strip_inline_tags(text);
-	const std::vector<uint8_t> body = encode_chat_broadcast(line);
-	for (NapiNPConnection &conn : ctx_.np_protocol.connection_list) {
-		if (!active_player_recipient(conn)) continue;
-		conn.link.transport->host_send(s2c::CHAT_BROADCAST, body, true, 0, false, kChatRetentionFlushes);
-	}
-	if (seams_.chat_dispatch) seams_.chat_dispatch(0xFF, 10, text);
+	if (Server_SendConsoleChat(ctx_, hud::kChatDispatchGlobal, text, main_frame_) ==
+			hud::ChatSendResult::Flooded)
+		server_console_post(ctx_.console_chat, text, hud::chat_dispatch_flood_color(hud::kChatDispatchGlobal));
 }
 
 // [orig: CAdminServer_HandleChatCommand @0x404AC0 — GET @0x404B0F..0x404BB3 (the window's 40
@@ -760,11 +761,18 @@ void AdminConsole::chat_send(std::string text) {
 //  buffer with no bound, D-NET-362, then `OK - Chat sent.` whatever the sender did)]
 void AdminConsole::handle_chat(const Args &args, std::vector<std::string> &replies) {
 	if (!args.empty() && ieq(args[0], "GET")) {
-		std::string out;
-		if (seams_.chat_window) {
-			for (const std::string &line : seams_.chat_window())
-				if (!line.empty()) out += line + "\r\n";
+		// A host with no client reads its CHAT ring, oldest first: the raw lines, where retail
+		// lists the window's word-wrapped display lines (D-NET-372); a listen host reads its
+		// HUD's window through the seam.
+		std::vector<std::string> window;
+		if (ctx_.is_mp_session_peer == 0) {
+			for (const ServerConsoleLine &line : ctx_.console_chat) window.push_back(line.text);
+		} else if (seams_.chat_window) {
+			window = seams_.chat_window();
 		}
+		std::string out;
+		for (const std::string &line : window)
+			if (!line.empty()) out += line + "\r\n";
 		replies.push_back(out);
 		return;
 	}

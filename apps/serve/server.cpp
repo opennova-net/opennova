@@ -8,6 +8,8 @@
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <formats/admincfg/admin_cfg.h>
+#include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
@@ -15,6 +17,7 @@
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/mission_exit.h>
+#include <runtime/inmatch/server_ban_lists.h>
 #include <runtime/mission/runtime_boot.h>
 
 #include <chrono>
@@ -59,7 +62,14 @@ const char kUsage[] =
 		"                   log punts to _PUNT.TXT, start _CHEAT.TXT (the working directory)\n"
 		"The server reads and writes game.cfg in the directory it runs from (the process's\n"
 		"working directory, as retail), with the host file's settings over it, and marks\n"
-		"itself running there with activesrvr.txt, which a clean exit deletes.\n";
+		"itself running there with activesrvr.txt, which a clean exit deletes. A nonzero\n"
+		"remote_admin_port in game.cfg opens retail's remote-admin console on that TCP port,\n"
+		"its users in admin.cfg there and its log in admin_log.txt; banned.txt and\n"
+		"banlist.txt there are the ban lists.\n";
+
+// The admin server's log, by bare name in the working directory [orig: "admin_log.txt"
+// @0x7C0860, CAdminServer_Construct @0x402C39].
+constexpr const char *kAdminLogFileName = "admin_log.txt";
 
 // The one-token switches, retail-spelled ones matched case-insensitively.
 bool parse_port(const std::string &text, uint16_t &out) {
@@ -169,6 +179,11 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {}
 Server::~Server() { stop(); }
 
 bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
+	// The admin server's log opens for writing at the process's static
+	// construction, ahead of everything, so every launch truncates it whether
+	// or not the listener ever opens [orig: CAdminServer_Construct @0x402C10,
+	// fopen("admin_log.txt", "w") @0x402C84].
+	(void)files_.write(kAdminLogFileName, std::string_view(), /*append=*/false);
 	// The log switches arm at the process start, as retail's command-line
 	// parse arms them (server_logs.h).
 	log_devices_.arm(options_.log_switches);
@@ -183,8 +198,14 @@ bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
 	// a NovaWorld host hosts on its session before either does
 	// [orig: @0x4A66A5..0x4A674F; the live NovaWorld host, D-NET-221,
 	//  UI_DispatchScreenEvent @0x54F2CA..0x54F379].
-	if (!read_boot_config(error) || !mount(error) || !read_config_over_weapons(error) ||
-			!read_host_file(error) || !open_socket(error) || !host_on_novaworld(error, cancel) ||
+	if (!read_boot_config(error) || !mount(error) || !read_config_over_weapons(error)) {
+		stop();
+		return false;
+	}
+	// The subsystems' tail: admin.cfg and the listener [orig: Game_InitSubsystems
+	// @0x4A72B8..0x4A72D9, after the game.cfg read @0x4A70AB].
+	open_admin();
+	if (!read_host_file(error) || !open_socket(error) || !host_on_novaworld(error, cancel) ||
 			!boot_mission(/*next_mission=*/false, error)) {
 		stop();
 		return false;
@@ -246,6 +267,17 @@ bool Server::mount(std::string &error) {
 	index_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
 	assets_ = std::make_unique<assets::AssetStore>(&index_);
 	catalog_ = mission_catalog::build(index_);
+	// The avatar registry, which the admin console's PETERRABBIT SEXCHANGE walks; an install
+	// without Avatars.def leaves it empty [orig: CAvatarDefs_Init @0x57B180 opens
+	// "Avatars.def"].
+	characters_ = inmatch::CharacterRegistry{};
+	std::vector<uint8_t> avatars_bytes;
+	if (index_.read_file("Avatars.def", avatars_bytes)) {
+		avatars::AvatarsFile avatars = {};
+		if (avatars::avatars_parse_memory(avatars_bytes.data(), avatars_bytes.size(), &avatars) == 0)
+			characters_ = inmatch::CharacterRegistry::from_file(avatars);
+		avatars::avatars_free(&avatars);
+	}
 	return true;
 }
 
@@ -383,6 +415,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		// The game's protocol joins the socket now: what reached it while the
 		// NovaWorld session hosted had no handler and was dropped.
 		demux_->set_game_attached(true);
+		bind_admin_console();
 	}
 
 	// The engine's one host boot (ADR 0051 d4), the game's own order.
@@ -409,6 +442,9 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.host_cfg.logs = log_devices_.logs();
 	request.host_cfg.local_address = PeerAddr{0, bound_port_};
 	request.host_cfg.local_address_known = true;
+	// banned.txt and banlist.txt by bare name in the working directory, as retail opens them;
+	// the session's round init loads both (server_ban_lists.h).
+	request.host_cfg.ban_directory = std::string();
 	request.session_score_ini = true;
 	request.next_mission = next_mission;
 	mission::KernelBootOptions &options = request.boot_options;
@@ -591,6 +627,9 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 
 bool Server::frame(double delta_seconds) {
 	if (!running_) return false;
+	// The per-main-frame counter [orig: Game_ProcessMainFrame @0x5265D5 ->
+	// Game_TickHudFrameCounters: ++g_MainFrameCounter (ex dword_A8705C)].
+	++main_frame_;
 	// The NovaWorld session's pass first, as the main frame pumps it ahead of
 	// the server tick [orig: Game_ProcessMainFrame @0x526532
 	// CNapiGameSession_ProcessPeriodicUpdate]; then its facts reach the match,
@@ -604,7 +643,13 @@ bool Server::frame(double delta_seconds) {
 	const inmatch::FrameOutcome outcome = session_->advance(input);
 	// No presenter drains the presentation half of the outbox.
 	kernel_->world.out.discard_presentation();
-	if (!outcome.terminal()) return true;
+	if (!outcome.terminal()) {
+		// The admin pump ends a game frame; a frame whose mission exit pushes the
+		// Post Menu returns before it [orig: Game_ProcessMainFrame @0x526872..0x526878
+		// (the exit's return), @0x5268F1 (CAdminServer_ProcessFrame)].
+		pump_admin();
+		return true;
+	}
 	end_message_ = outcome.error.message;
 	if (route_mission_exit(role_->state.host_owner.ctx.mission_exit_reason)) return true;
 	// The session ends here: the rotation's end takes StopServer's goodbye,
@@ -626,7 +671,22 @@ void Server::stop() {
 	// @0x4A8009..0x4A800E DeleteFileA("activesrvr.txt")].
 	const bool exit_tail = exit_save_owed_;
 	exit_save_owed_ = false;
+	if (role_ && rotation_ended_) {
+		// The rotation's end left through CNapiGameSession_FullDestroy, whose round init
+		// frees banlist.txt's list (off a session it is not reloaded) and re-reads banned.txt
+		// with its dirty word cleared, so the exit below saves nothing an in-game ban added
+		// [orig: PostMenu_RouteMissionExit @0x568683 -> CNapiGameSession_FullDestroy
+		//  @0x4C96A0 -> Server_InitNewRoundState @0x4C9780 (@0x51C92F, @0x51CB25..0x51CB3B)].
+		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
+		ctx.bans.pcids.reset();
+		inmatch::Server_ReloadAddressBanList(ctx);
+	}
 	if (exit_tail) (void)save_config();
+	// The shutdown's banned.txt save, gated on the list and its dirty word
+	// [orig: Game_ShutdownSubsystems @0x4A539D -> j_BanList_SaveToFile @0x508E20].
+	if (exit_tail && role_) inmatch::Server_SaveAddressBanList(role_->state.host_owner.ctx);
+	// The admin server's sockets close with the process.
+	if (admin_tcp_) admin_tcp_->close();
 	if (role_) role_->set_socket(nullptr);
 	if (listing_) listing_->unbind();
 	// The NovaWorld deregistration: ClientStopHosting, then the goodbye burst,
@@ -649,6 +709,80 @@ bool Server::save_config() {
 	if (gamecfg::save_file(gamecfg::kFileName, cfg_, roster_, error)) return true;
 	io::logf(io::LogLevel::kWarn, "opennova-serve: %s", error.c_str());
 	return false;
+}
+
+bool Server::AdminForward::dispatch(const AdminSession &session, std::string_view line,
+		std::vector<std::string> &replies) {
+	return console != nullptr ? console->dispatch(session, line, replies) : true;
+}
+
+std::string Server::AdminForward::status_report() {
+	return console != nullptr ? console->status_report() : std::string();
+}
+
+// admin.cfg from the working directory (a missing file is no users and no whitelist), then the
+// listener on game.cfg's 16-bit remote_admin_port when it is nonzero, on every interface; a
+// listen that fails is ignored, as retail ignores Listen's result.
+// [orig: Game_InitSubsystems — CAdminServer_LoadConfig("admin.cfg") @0x4A72C2, the port's
+//  `movzx` and nonzero test @0x4A72C7..0x4A72D1, CAdminServer_Listen @0x4A72D9 (its result
+//  unread)]
+void Server::open_admin() {
+	admincfg::AdminConfig config;
+	(void)admincfg::load_file(admincfg::kFileName, config);
+	admin_server_ = std::make_unique<AdminServer>(std::move(config), admin_forward_, admin_rand_,
+			[this](std::string_view line) {
+				// The log is a text-mode stream: each "\n" reaches the disk as CR LF.
+				std::string text;
+				for (const char c : line) {
+					if (c == '\n') text += '\r';
+					text += c;
+				}
+				(void)files_.write(kAdminLogFileName, text, /*append=*/true);
+			});
+	admin_tcp_ = std::make_unique<net::AdminTcpServer>(*admin_server_);
+	const uint16_t port = static_cast<uint16_t>(cfg_.remote_admin_port);
+	if (port == 0) return;
+	if (admin_tcp_->listen(port))
+		io::logf(io::LogLevel::kInfo, "opennova-serve: remote admin on TCP %u", admin_tcp_->port());
+	else
+		io::logf(io::LogLevel::kWarn, "opennova-serve: remote admin did not listen on TCP %u", port);
+}
+
+// The console over the session's context, for the whole run: the cfg block SET writes and
+// Game_SaveConfig saves, the host's rotation, the mounted gametext and avatars. GOTO
+// MENUSTATE's quit is not wired: input action 3's binding gate drops it on a Serve Only host,
+// so a headless server never leaves its match for a menu (admin_console.cpp handle_goto); the
+// cycle tail still ends the round. The chat seams are a listen host's: this host's CHAT SEND
+// and CHAT GET run over the context's CHAT ring and flood table (server_console.h).
+void Server::bind_admin_console() {
+	rotation_admin_ = std::make_unique<inmatch::HostRotationAdmin>(rotation_, catalog_);
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &cfg_;
+	seams.save_config = [this] { (void)save_config(); };
+	seams.rotation = rotation_admin_.get();
+	seams.game_text = [this](std::string_view section, std::string_view key) {
+		return have_gametext_ ? gametext_.get_in_section(std::string(section), std::string(key))
+							  : std::string();
+	};
+	seams.characters = &characters_;
+	admin_console_ = std::make_unique<inmatch::AdminConsole>(role_->state.host_owner.ctx, std::move(seams));
+	admin_forward_.console = admin_console_.get();
+}
+
+// The scene is the Game Loop whenever this runs: a map change runs inside one frame, so the
+// pre and post menus' frames, which retail spends between the missions, never reach the pump.
+// The challenge's rand() is the process's one CRT stream, the one the game's draws share on the
+// main thread; the port keeps that stream on the world (World::crt_rand, D-NET-115), so the pump
+// draws from it and hands it back, and an accepted connection advances the session's draws as
+// retail's does. [orig: CAdminServer_AcceptConnection @0x405783..0x4057AC (32 draws of
+//  rand() % 255 + 1); srand @0x51C1AA, the session's one seed]
+void Server::pump_admin() {
+	if (!admin_tcp_ || !admin_tcp_->listening() || !admin_console_) return;
+	admin_console_->set_scene(inmatch::AdminScene::GameLoop);
+	admin_console_->set_main_frame(main_frame_);
+	admin_rand_ = kernel_->world.crt_rand;
+	admin_tcp_->pump();
+	kernel_->world.crt_rand = admin_rand_;
 }
 
 } // namespace opennova::serve

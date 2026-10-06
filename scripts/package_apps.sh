@@ -81,7 +81,9 @@ opennova-serve.exe
     (example.host documents every key). Run
     "opennova-serve --resource-dir <game folder> /HOST example.host".
     It answers LAN browsers and admits joiners on the retail LAN port
-    range. For now it plays one round and exits (code 3).
+    range and plays the host file's map rotation. It keeps game.cfg in
+    the folder it runs from; a nonzero remote_admin_port there opens
+    retail's remote-admin console (users in admin.cfg, beside it).
 
 opennova-wire.exe
     Decodes NovaWorld in-game traffic from a .pcap/.pcapng capture, a .sph
