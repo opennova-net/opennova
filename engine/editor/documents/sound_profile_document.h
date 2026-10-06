@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/model/diagnostic.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/model/table_document.h>
 #include <runtime/audio/sound_profile.h>
@@ -98,6 +99,9 @@ int sound_profile_slot_of(const std::string &keyword);
 // first), no profile named "default" (every item without a sound_profile key binds the first
 // profile then), and a profile the writer cannot carry (the file does not serialize).
 std::vector<Diagnostic> validate_sound_profiles_file(const DocumentBase &document);
+// A sound profile an item names that SndProf.def has none of, added to it (ADR 0046 DI-15,
+// DocumentType::define_symbol): a profile as Add sound profile makes one, named as the item names it.
+bool define_sound_profile(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
 
 enum class SoundProfileFinding { NameRepeated, NoDefault, Unserializable, kCount };
 const FindingCodeRow &finding_code(SoundProfileFinding code);
