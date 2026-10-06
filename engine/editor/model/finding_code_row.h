@@ -311,6 +311,7 @@ enum class CoreFinding {
 	ImportEncode,
 	ImportExists,
 	ImportFolder,
+	ImportFont,
 	ImportInput,
 	ImportInstall,
 	ImportKind,
