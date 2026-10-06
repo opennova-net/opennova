@@ -28,15 +28,19 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
+std::string play_mission_at(const SessionView &view, const std::string &path) {
+	if (!view.project.open || !view.project.scan) return std::string();
+	const std::string name = basename_of(path);
+	if (!strutil::ends_with_icase(name, ".bms")) return std::string();
+	const AssetEntry *entry = view.project.scan->find(name);
+	return entry && entry->kind == AssetKind::Mission ? entry->logical_name : std::string();
+}
+
 std::string play_mission_for(const SessionView &view) {
 	if (!view.project.open || view.documents.active.empty()) return std::string();
 	const AssetScan &scan = *view.project.scan;
-	const auto mission_named = [&scan](const std::string &file) {
-		const AssetEntry *entry = scan.find(file);
-		return entry && entry->kind == AssetKind::Mission ? entry->logical_name : std::string();
-	};
 	const std::string name = basename_of(view.documents.active);
-	if (strutil::ends_with_icase(name, ".bms")) return mission_named(name);
+	if (strutil::ends_with_icase(name, ".bms")) return play_mission_at(view, name);
 	// A file the game finds by a mission's name: that mission, when the project holds it. The readers
 	// cut a mission's name at its first dot ("op.v2.bms" opens "op.wac"), so the mission is any of the
 	// project's whose base name the file's is (the first in the scan's order), and a row read only
@@ -111,7 +115,7 @@ std::string PlayController::mission_file(const std::string &mission) const {
 // one would fight it for its files), and for a mission the project does not hold (the game
 // would start, find no such mission in what it mounts and fall back to its menu). True when
 // refused, said why.
-bool PlayController::refused(const std::string &mission) {
+bool PlayController::refused(const std::string &mission, const PlayStart &start) {
 	if (!core_.platform().can_spawn()) {
 		// The platform says why (an OS the editor cannot spawn on yet, a session with no process seam).
 		core_.report(make_finding(CoreFinding::PlayUnsupported, DiagnosticSeverity::Error,
@@ -123,6 +127,15 @@ bool PlayController::refused(const std::string &mission) {
 	if (play_.state() != PlayState::Stopped || start_again_pending_) {
 		core_.report(make_finding(CoreFinding::PlayAlreadyRunning, DiagnosticSeverity::Error,
 		                          "The game is already running; stop it before starting it again."));
+		return true;
+	}
+	// Play from here starts the player in a mission: a start with none has no mission to place it in.
+	if (start.set && mission.empty()) {
+		core_.report(make_finding(CoreFinding::PlayStart, DiagnosticSeverity::Error,
+		                          "Play from here starts the player in a mission: name the mission (a .bms of the "
+		                          "project) the start is a point of."));
+		view_.activity.status = "Play from here needs a mission.";
+		core_.touch(ViewConcern::Output);
 		return true;
 	}
 	if (!mission.empty() && mission_file(mission).empty()) {
@@ -170,7 +183,7 @@ void PlayController::publish_findings() {
 	core_.problems().validate_later();
 }
 
-void PlayController::start(const std::string &mission, bool behind, bool fresh) {
+void PlayController::start(const std::string &mission, bool behind, bool fresh, const PlayStart &start) {
 	const std::string &build_dir = view_.activity.last_build->build_dir;
 	LaunchPlan plan;
 	Diagnostic error;
@@ -179,6 +192,8 @@ void PlayController::start(const std::string &mission, bool behind, bool fresh) 
 	// validation would make none); the game started now reports on this project.
 	view_.activity.boot_missing.clear();
 	view_.activity.play_mission.clear();
+	view_.activity.play_start = PlayStart();
+	view_.activity.play_start_placed = PlayStartPlaced();
 	start_again_pending_ = false;
 	findings_.clear();
 	core_.problems().set_play_findings({});
@@ -283,11 +298,18 @@ void PlayController::start(const std::string &mission, bool behind, bool fresh) 
 		}
 		// The stock game takes no mission on its command line: it starts at its menu, where the
 		// build's mission is listed.
-		if (!in_mission.empty()) core_.note("The game install starts at its menu: choose " + in_mission + " there.");
+		if (!in_mission.empty())
+			core_.note("The game install starts at its menu: choose " + in_mission + " there" +
+			           (start.set ? std::string(": its player starts at ") + play_start_words(start) + "." : std::string(".")));
 	} else {
+		// Play from here's runtime mounts the run directory, where the build is staged for it (an expansion's
+		// is there already), so the run directory's copy of the mission is the one it loads.
+		const bool on_run_dir = start.set && expansion.empty();
 		std::vector<std::string> staged;
-		const bool prepared = expansion.empty() || prepare_expansion_run(core_.game_install(), build_dir, expansion,
-		                                                                 run_dir, copy_cache, error, link_file, &staged);
+		const bool prepared = expansion.empty()
+		        ? !on_run_dir || prepare_runtime_run(build_dir, run_dir, error, &staged)
+		        : prepare_expansion_run(core_.game_install(), build_dir, expansion, run_dir, copy_cache, error, link_file,
+		                                &staged);
 		record_staging(staged);
 		if (!prepared) {
 			core_.report(error);
@@ -298,11 +320,13 @@ void PlayController::start(const std::string &mission, bool behind, bool fresh) 
 		plan = launcher.source_run
 				? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir, run_dir,
 						  view_.project.document->target_game, launcher.mcp_port, in_mission,
-						  launcher.engine_args, expansion)
+						  launcher.engine_args, expansion, on_run_dir)
 				: make_play_launch_plan(executable, build_dir, run_dir, view_.project.document->target_game,
-						  launcher.mcp_port, in_mission, launcher.engine_args, expansion);
+						  launcher.mcp_port, in_mission, launcher.engine_args, expansion, on_run_dir);
 		plan.staged = std::move(staged);
 	}
+	// Play from here: the start placed in the staged mission, the game started on nothing else.
+	if (start.set && !stage_start(run_dir, expansion, in_mission, start)) return;
 	// Behind the others when the request asked (the MCP gaps lane): how the platform starts it.
 	plan.behind = behind;
 	install_run_ = in_install;
@@ -446,6 +470,32 @@ void PlayController::report_file_log(bool read) {
 	                  std::move(folded));
 }
 
+// Play from here (DI-26): neither game takes a place on its command line, so the start is a start marker of
+// the mission, in the run directory's copy alone (run/play_start.h); the game places its player there by its
+// own spawn selection. Said in Output and the run section; one that cannot be placed is reported and the
+// game is not started.
+bool PlayController::stage_start(const std::string &run_dir, const std::string &expansion, const std::string &mission,
+                                 const PlayStart &start) {
+	PlayStartPlaced placed;
+	Diagnostic error;
+	if (!stage_play_start(run_dir, expansion, mission, start, placed, error)) {
+		core_.report(error);
+		view_.activity.status = "Play from here could not place the start; see Problems.";
+		core_.touch(ViewConcern::Output);
+		return false;
+	}
+	view_.activity.play_start = start;
+	view_.activity.play_start.set = true;
+	view_.activity.play_start_placed = placed;
+	const std::string markers = placed.added ? std::string("a start marker added (type ") + std::to_string(placed.type) + ")"
+	                                         : counted(placed.moved, "start marker") + " of type " +
+	                                                   std::to_string(placed.type) + " moved";
+	core_.note("Play from here: the player starts at " + play_start_words(start) + ", " + markers + " in " + mission +
+	           " of the run directory's " + placed.archive + "; the project's file and the build are as they were.");
+	core_.touch(ViewConcern::Run);
+	return true;
+}
+
 // Strict Play's first run, gone: with no game.cfg beside it, the game may write its own and quit before a
 // player sees its menu. Started once more, in the same run directory (the game.cfg it wrote kept), when
 // it exited on its own with code 0 soon after it started and wrote that game.cfg
@@ -539,8 +589,7 @@ bool PlayController::tail_game_log() {
 		}
 		if (install_run_) add_file_access_line(file_log_, line);
 		folded.push_back(line);
-		absorb_boot_report(line);
-		absorb_mission_report(line);
+		absorb_report(line);
 		start = nl + 1;
 	}
 	game_log_partial_.erase(0, start);
@@ -558,6 +607,11 @@ std::string PlayController::game_words() const {
 	if (game_lines_ == 0) return out + " Its log follows, folded under this line.";
 	return out + " Its log: " + counted(game_lines_, "line") + ", " + std::to_string(game_shown_) +
 	       " shown below; open this line for all of it.";
+}
+
+void PlayController::absorb_report(const std::string &line) {
+	absorb_boot_report(line);
+	absorb_mission_report(line);
 }
 
 // The runtime names each boot-required file it could not find, one line per file
