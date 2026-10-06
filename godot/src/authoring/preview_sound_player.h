@@ -2,10 +2,13 @@
 
 #include <cstdint>
 #include <future>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
+#include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/node.hpp>
 
 #include <editor/session/view/workspace_view.h>
@@ -53,6 +56,50 @@ private:
 	std::vector<Voice> voices_;
 	State state_ = State::Idle;
 	std::string path_;
+};
+
+// The clip sounds' player (DI-04): the device half of the sounds a clip's events fire in the model preview
+// (ProjectSession::clip_sounds_since). Each sound's voices start together beside those still playing, a
+// player each, freed as it ends; a wave is decoded as the game decodes it once (lwf::wav_decode_pcm16 on a
+// worker) and kept until the project's files move (forget). The picks, pitches and volumes are the
+// session's; this only sounds them.
+class PreviewSoundVoices {
+public:
+	explicit PreviewSoundVoices(Node *p_parent) : parent_(p_parent) {}
+	~PreviewSoundVoices();
+	PreviewSoundVoices(const PreviewSoundVoices &) = delete;
+	PreviewSoundVoices &operator=(const PreviewSoundVoices &) = delete;
+
+	// `p_voices`' waves (project-relative paths under `p_root`) started as soon as each is decoded.
+	void add(const std::string &p_root, const std::vector<opennova::editor::WorkspaceView::Voice> &p_voices);
+	// Starts the voices decoded since, and frees the players that ended.
+	void pump();
+	// Every voice stopped and dropped (the project closing); the decoded waves kept.
+	void stop();
+	// The decoded waves dropped (the project's files moved).
+	void forget();
+	// How many voices it started in all, and how many play now (the tests' measure).
+	uint64_t started() const { return started_; }
+	int playing() const;
+
+private:
+	struct Decode {
+		bool decoded = false;
+		std::string error;
+		opennova::lwf::WavPcm pcm;
+	};
+	struct Wave {
+		std::shared_future<Decode> job;
+		Ref<AudioStreamWAV> stream;
+		bool failed = false;
+	};
+	// The players kept at most: the oldest stopped for a new one past it.
+	static constexpr size_t kMaxPlayers = 24;
+	Node *parent_ = nullptr;
+	std::map<std::string, Wave> waves_; // by the wave's full path
+	std::vector<std::pair<std::string, opennova::editor::WorkspaceView::Voice>> pending_;
+	std::vector<AudioStreamPlayer *> players_;
+	uint64_t started_ = 0;
 };
 
 } // namespace godot
