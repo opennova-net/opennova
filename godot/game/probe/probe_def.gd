@@ -428,6 +428,18 @@ static func _build_definitions() -> Array[ProbeDef]:
 				RUNTIME + "mission_audio_probe.gd", {
 					"missions": { "type": "array", "items": { "type": "string" }, "default": [] },
 				}, [], false, false, 300_000),
+		ProbeDef.make("slot_sounds",
+				"The sounds the local player's body and rounds play where (footsteps, foley, "
+				+ "stance, impacts): `weapon` equipped first when given, then for each point a "
+				+ "teleport (mission frame, yaw, pitch), a `look_px` delta, a `round` from the "
+				+ "round sim, and the point's scripted steps (forward then back by default); "
+				+ "every one-shot recorded meanwhile with its set, whether it was a body slot "
+				+ "sound, whether the bank played it and its mission position.",
+				RUNTIME + "slot_sounds_probe.gd", {
+					"points": { "type": "array", "items": { "type": "object" }, "default": [] },
+					"settle_ms": { "type": "integer", "minimum": 0, "default": 400 },
+					"weapon": { "type": "string", "default": "" },
+				}, [], false, true, 600_000),
 		ProbeDef.make("vehicle_drive",
 				"Seat the local player in a vehicle, drive, steer and brake through the "
 				+ "presenter's movement seam; verify native displacement and capture the HUD. "
