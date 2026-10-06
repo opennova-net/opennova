@@ -592,6 +592,7 @@ void SessionCore::absorb_changed(ImportRunResult &imports, const std::vector<std
 	findings.insert(findings.end(), imports.diagnostics.begin(), imports.diagnostics.end());
 	scan.set_import_findings(std::move(findings));
 	files_scanned_ = scan.update(paths_, *view_.project.document, paths);
+	note_came_back(*view_.project.scan, scan, files, refreshed);
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
 	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
 	view_.project.requirements = std::make_shared<const RequirementReport>(
@@ -602,6 +603,31 @@ void SessionCore::absorb_changed(ImportRunResult &imports, const std::vector<std
 	// The open documents of what changed (a PNG its program saved, an output made again) read again; one with
 	// unsaved edits is a conflict, as on a Rescan.
 	documents().reload_changed();
+}
+
+// Each file that came back from outside the editor, in Output (ADR 0046 DI-01): read again, found (made
+// outside), or gone (deleted outside), by what the scan held of it before and after; not an open
+// document's (its reload, or its conflict, says it: DocumentSet::reload_changed), nor a source imported
+// again (its import says it). One file a line; more, a line with each under it.
+void SessionCore::note_came_back(const AssetScan &before, const AssetScan &after, const std::vector<std::string> &files,
+                                 const std::set<std::string> &imported) {
+	const auto open = [this](const std::string &file) {
+		for (const auto &document : documents().documents())
+			if (document->path() == file) return true;
+		return false;
+	};
+	std::vector<std::string> lines;
+	for (const std::string &file : files) {
+		if (imported.count(file) || open(file)) continue;
+		const bool was = before.visits().count(file) != 0, is = after.visits().count(file) != 0;
+		if (was && is) lines.push_back("Read " + file + " again: it changed outside the editor.");
+		else if (is) lines.push_back("Found " + file + ": it was made outside the editor.");
+		else if (was) lines.push_back(file + " is gone: it was deleted outside the editor.");
+	}
+	if (lines.size() == 1) return note(lines.front());
+	if (lines.empty()) return;
+	std::string line = counted(lines.size(), "file") + " changed outside the editor came back.";
+	note_folded(std::move(line), std::move(lines));
 }
 
 void SessionCore::refresh_now() {

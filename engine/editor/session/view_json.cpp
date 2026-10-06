@@ -128,6 +128,9 @@ JsonValue project_section(const SessionView &view) {
 	expansion.set("builds_on", json_string(document.expansion.builds_on));
 	out.set("expansion", std::move(expansion));
 	out.set("file_count", json_number(double(view.project.scan->entries.size())));
+	// What another program changed that the editor has not read yet (DI-01).
+	out.set("outside_waiting", json_number(double(view.project.outside_waiting)));
+	out.set("outside_sweeping", boolean(view.project.outside_sweeping));
 	return out;
 }
 
@@ -457,7 +460,9 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::Project, "project", concern_set({ C::Project, C::Files, C::Preferences }), project_section,
 			"The open project: open, its root, title, id, target game, features and expansion {name, "
 			"builds_on} (S16: \"\" a standalone project, \"\" the base game), file_count (the files query "
-			"pages the files), and quit_requested; open or not, install_expansions, the game install's "
+			"pages the files), outside_waiting and outside_sweeping (DI-01: the files another program changed "
+			"that wait to be read, once they hold still, and whether the sweep a focus-in began over every file "
+			"runs), and quit_requested; open or not, install_expansions, the game install's "
 			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
 			"description), new_project_expansions, the same of the install a new project opens with "
 			"(the one last chosen), install_check, the last install checked (check_install, new_project's): its "

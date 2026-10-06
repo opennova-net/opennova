@@ -64,6 +64,23 @@ bool walk_reaches(const fs::path &root, const fs::path &export_dir, const fs::pa
 	return true;
 }
 
+// Whether the walk from `root` descends into the folder `dir` (the project's own folder included): no
+// dot-directory and no export folder on the way.
+bool folder_reached(const fs::path &root, const fs::path &export_dir, const fs::path &dir) {
+	std::error_code ec;
+	if (!fs::is_directory(dir, ec)) return false;
+	const fs::path relative = fs::relative(dir, root, ec);
+	if (ec || relative.empty()) return false;
+	if (relative == ".") return true;
+	fs::path at = root;
+	for (const fs::path &part : relative) {
+		if (part == "..") return false;
+		at /= part;
+		if (is_dot_directory(at) || export_folder(at, export_dir)) return false;
+	}
+	return true;
+}
+
 // A file of the project at `path`, listed by `key`: its entry, or the outputs its import record
 // lists, and what the walk says of it; `read`, the bytes it read.
 void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path &path, const std::string &key,
@@ -71,6 +88,11 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 	const std::string sidecar_suffix = kImportSidecarSuffix;
 	const std::string filename = utf8_of(path.filename());
 	std::error_code ec;
+	// The file's own stamp, whatever it makes (an import record's too): what a look for a change made
+	// outside the editor compares (assets/disk_changes.h).
+	const auto own_size = fs::file_size(path, ec);
+	if (!ec) out.size_bytes = static_cast<uint64_t>(own_size);
+	out.modified_ticks = io::file_modified_ticks(path);
 	if (strutil::ends_with_icase(filename, sidecar_suffix)) {
 		// An import record: its outputs are project files that live under the cache.
 		const std::string source_relative = key.substr(0, key.size() - sidecar_suffix.size());
@@ -81,8 +103,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 					key));
 			return;
 		}
-		const auto record_size = fs::file_size(path, ec);
-		if (!ec) read += static_cast<uint64_t>(record_size);
+		read += out.size_bytes;
 		ImportSidecar sidecar;
 		Diagnostic error;
 		if (!load_import_sidecar(utf8_of(path), sidecar, error)) {
@@ -125,9 +146,8 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 	AssetEntry asset;
 	asset.logical_name = filename;
 	asset.relative_path = key;
-	const auto size = fs::file_size(path, ec);
-	if (!ec) asset.size_bytes = static_cast<uint64_t>(size);
-	asset.modified_ticks = io::file_modified_ticks(path);
+	asset.size_bytes = out.size_bytes;
+	asset.modified_ticks = out.modified_ticks;
 	if (asset_classification_needs_bytes(filename)) {
 		std::vector<uint8_t> bytes;
 		std::string io_error;
@@ -183,6 +203,32 @@ bool scan_project_file(const ProjectPaths &paths, const ProjectDocument &doc, co
 	return true;
 }
 
+bool list_project_folder(const ProjectPaths &paths, const ProjectDocument &doc, const std::string &folder,
+		std::vector<std::string> &files, std::vector<std::string> &folders) {
+	files.clear();
+	folders.clear();
+	const fs::path root = system_path(paths.root);
+	const fs::path export_dir = system_path(paths.export_dir(doc));
+	const fs::path dir = folder.empty() ? root : under(root, folder);
+	if (!folder_reached(root, export_dir, dir)) return false;
+	std::error_code ec;
+	fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
+	if (ec) return false;
+	for (const fs::directory_iterator end; it != end; it.increment(ec)) {
+		if (ec) break; // listed as far as it could go
+		const fs::path path = it->path();
+		std::error_code kind;
+		if (it->is_directory(kind)) {
+			if (!is_dot_directory(path) && !export_folder(path, export_dir)) folders.push_back(listed_key(root, path));
+		} else if (it->is_regular_file(kind) && !(dir == root && path.filename() == kProjectFileName)) {
+			files.push_back(listed_key(root, path));
+		}
+	}
+	std::sort(files.begin(), files.end());
+	std::sort(folders.begin(), folders.end());
+	return true;
+}
+
 // The walk goes through the system's paths (project_files.h, system_path): a project whose own files
 // lie past MAX_PATH is walked, listed and read whole.
 ProjectScan::ProjectScan(const ProjectPaths &paths, const ProjectDocument &doc) :
@@ -194,11 +240,15 @@ bool ProjectScan::step(uint64_t budget) {
 		switch (phase_) {
 		case Phase::Start: {
 			std::error_code ec;
+			// Each folder's last write taken before what it holds is listed: a file made in it after the
+			// listing moves it past the stamp kept.
+			folders_[std::string()] = io::file_modified_ticks(root_);
 			walk_ = fs::recursive_directory_iterator(root_, fs::directory_options::skip_permission_denied, ec);
 			if (ec) {
 				AssetScan::Visit root;
 				root.findings.push_back(make_finding(CoreFinding::ProjectRootUnreadable, DiagnosticSeverity::Error, "Cannot read the project directory " + paths_.root + ": " + ec.message()));
 				visits_[std::string()] = std::move(root);
+				folders_.clear();
 				scan_.set_visits(std::move(visits_));
 				phase_ = Phase::Done;
 				return true;
@@ -219,6 +269,7 @@ bool ProjectScan::step(uint64_t budget) {
 			const fs::path path = entry.path();
 			if (entry.is_directory(ec)) {
 				if (is_dot_directory(path) || export_folder(path, export_dir_)) walk_.disable_recursion_pending();
+				else folders_[listed_key(root_, path)] = io::file_modified_ticks(path); // before the walk lists it
 			} else if (entry.is_regular_file(ec) &&
 					!(path.parent_path() == root_ && path.filename() == kProjectFileName)) {
 				listed_.emplace_back(listed_key(root_, path), path);
@@ -230,6 +281,7 @@ bool ProjectScan::step(uint64_t budget) {
 		case Phase::Visiting: {
 			if (next_ == listed_.size()) {
 				scan_.set_visits(std::move(visits_));
+				scan_.set_folders(std::move(folders_));
 				phase_ = Phase::Done;
 				return true;
 			}

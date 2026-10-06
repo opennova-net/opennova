@@ -50,7 +50,9 @@ namespace opennova::editor {
 // import did not bring (import.texture_not_imported): the same, while the project still
 // lacks it. An import whose output is missing: import its source again. An open document
 // whose file changed outside the editor (document.conflict: its Save is refused): Reload
-// it, which asks about its unsaved edits first (not in bulk). Input a
+// it, which asks about its unsaved edits first, or, while it has them, Keep my edits and save
+// over it, a Save that writes over the file once Problems confirmed it (ADR 0046 DI-01; neither
+// in bulk). Input a
 // rewrite drops or normalizes (a Rewrite row: style.line_ending, menu.ignored_input,
 // animation_map.ignored_input, strings.regrouped): Rewrite the file, the
 // row's rewrite_does saying what that does, unless a finding of the file says it does not

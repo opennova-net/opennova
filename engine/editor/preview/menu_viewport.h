@@ -155,6 +155,7 @@ public:
 	std::string message() const override { return menu_screen_status_message(reason_, detail_); }
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;
+	const FileStamps *picture_reads() const override { return &picture_.files(); }
 	const char *units() const override { return "design"; }
 	ViewportLayout layout() const override;
 	std::unique_ptr<CanvasHalf> make_canvas() const override;

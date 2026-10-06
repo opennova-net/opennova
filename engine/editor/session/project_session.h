@@ -40,9 +40,9 @@ struct ValidationStats;
 //
 // A facade (S13 A2): the session is its parts (session_core.h, document_set.h,
 // problems_service.h, play_controller.h, import_controller.h, rename_controller.h,
-// unsaved_guard.h, editor_preferences.h), which call one another directly, so handle() is
-// entered once per request from outside and the request's outcome is the one every part adds
-// to. This header names none of them.
+// unsaved_guard.h, disk_watch.h, editor_preferences.h), which call one another directly, so
+// handle() is entered once per request from outside and the request's outcome is the one every
+// part adds to. This header names none of them.
 class ProjectSession {
 public:
 	ProjectSession(ProcessPlatform &platform, PreferencesStore &preferences);

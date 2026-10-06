@@ -50,15 +50,27 @@ struct AssetScan {
 	void index();
 
 	// What the walk made of one project file (assets/project_scan.h, S13 A3): its entries (the file
-	// itself, or the outputs an import record lists) and its findings. A scan keeps each by the
-	// file's project-relative path, so a file visited again replaces what it made, alone.
+	// itself, or the outputs an import record lists) and its findings, and the file's own size and last
+	// write as the visit found them (an import record's too, which is no entry: what a look for changes
+	// made outside the editor compares, assets/disk_changes.h). A scan keeps each by the file's
+	// project-relative path, so a file visited again replaces what it made, alone.
 	struct Visit {
 		std::vector<AssetEntry> entries;
 		std::vector<Diagnostic> findings;
+		uint64_t size_bytes = 0;
+		int64_t modified_ticks = 0; // the file system's own ticks (0 = unknown)
 	};
 	// The scan of the walk's visits, by path ("" the project's folder itself, when it cannot be
 	// read): the entries indexed and the findings made from them (what a ProjectScan hands over).
 	void set_visits(std::map<std::string, Visit> visits);
+	// The walk's visits, by project-relative path: every file it listed (an import record among them).
+	const std::map<std::string, Visit> &visits() const { return visits_; }
+	// The folders the walk descended into, by project-relative path ("" the project's own), each with
+	// its last write as the walk took it before listing what it holds (ADR 0046 DI-01): a folder's last
+	// write moves when a file is made, deleted or renamed in it, so a folder whose stamp moved since is
+	// one to list again. Set by the walk (ProjectScan); an update keeps them as the walk took them.
+	const std::map<std::string, int64_t> &folders() const { return folders_; }
+	void set_folders(std::map<std::string, int64_t> folders) { folders_ = std::move(folders); }
 	// The files at `changed` (project-relative) visited again as the walk visits them
 	// (scan_project_file), and nothing else read: a file gone, or one the walk does not reach,
 	// leaves the scan; an import record is visited with its source and a source with its record (a
@@ -78,6 +90,7 @@ private:
 
 	std::vector<size_t> by_path_;         // the entries' indexes, by relative path
 	std::map<std::string, Visit> visits_; // the walk's visits, by project-relative path
+	std::map<std::string, int64_t> folders_; // the walk's folders and their stamps (folders())
 	std::vector<Diagnostic> import_findings_;
 };
 

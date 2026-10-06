@@ -29,7 +29,8 @@ enum class FindingFix {
 	                   // a placeholder texture, or Open the file where a symbol belongs
 	UnimportedTexture, // a texture an import's model names that it did not bring: the reference's
 	                   // own fixes while the project still lacks it
-	Reload,            // an open document whose file changed outside the editor: Reload it
+	Reload,            // an open document whose file changed outside the editor: Reload it, or (with
+	                   // unsaved edits) Keep my edits and save over it (DI-01)
 	Reimport,          // an import whose output is missing: Import it again
 	Rewrite,           // input a rewrite drops or normalizes: Rewrite the file (rewrite_does)
 	TextureRows,       // a TGA stored top first (S18): Save it bottom first (texture_operation)
