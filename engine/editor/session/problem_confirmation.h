@@ -37,7 +37,8 @@ std::string problem_finding_key(const SessionView &view, size_t index);
 size_t problem_finding_at(const SessionView &view, const std::string &key);
 
 // Whether a fix waits in a confirmation before it acts: a Use fix renames a file and rewrites what names it,
-// which Undo cannot take back. Any other fix is raised as it is, its detail in its tooltip.
+// and a conflict's Keep my edits writes over what another program saved (ADR 0046 DI-01), neither of which
+// Undo can take back. Any other fix is raised as it is, its detail in its tooltip.
 bool fix_asks_first(const ProblemFix &fix);
 // The fixes a field's reference picker offers of its value's finding: those raised at once alone (one that asks
 // first waits in Problems' confirmation, which the picker has not; X16).
