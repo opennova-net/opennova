@@ -53,7 +53,10 @@ void start(SessionCore &core, std::vector<WorkspaceView::Voice> voices, const st
 	sound.error.clear();
 	core.touch(ViewConcern::Workspace);
 	if (!words.empty()) {
-		core.view().activity.status = "Playing " + words;
+		// A set's words name the set first ("Playing FSP_DIRT_L in game.lwf: ..."); a slot's are a sentence of
+		// their own ("default's SSLFootGND plays FSP_DIRT_L in game.lwf: ...").
+		const bool set_first = !set.empty() && words.compare(0, set.size(), set) == 0;
+		core.view().activity.status = set_first ? "Playing " + words : words;
 		core.touch(ViewConcern::Output);
 	}
 }

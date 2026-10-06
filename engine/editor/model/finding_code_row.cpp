@@ -204,11 +204,13 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlayCrashed, code("play.crashed", G::Play) },
 	{ C::PlayInstallCopy, code("play.install_copy", G::Play) },
 	{ C::PlayInstallMissing, code("play.install_missing", G::Play) },
+	{ C::PlayInstallRunning, code("play.install_running", G::Play) },
 	{ C::PlayMissionFailed, code("play.mission.failed", G::Play) },
 	{ C::PlayMissionUnknown, code("play.mission.unknown", G::Play) },
 	{ C::PlayRunDirectory, code("play.run_directory", G::Play) },
 	{ C::PlayRuntimeMissing, code("play.runtime_missing", G::Play) },
 	{ C::PlaySpawn, code("play.spawn", G::Play) },
+	{ C::PlayStrictExpansion, code("play.strict_expansion", G::Play) },
 	{ C::PlayUnsupported, code("play.unsupported", G::Play) },
 	{ C::ProjectExists, code("project.exists", G::Project) },
 	// The project's expansion against its game install (ADR 0046 S16, expansion_name.h): a name the

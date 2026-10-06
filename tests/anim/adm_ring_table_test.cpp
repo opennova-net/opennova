@@ -50,7 +50,7 @@ bool write_clip(const fs::path &path, uint32_t fps, uint32_t frames, bool loop) 
 	clip.bones.push_back(bone);
 	std::vector<uint8_t> bytes;
 	std::string error;
-	if (!bad::bad_build_mint(clip, nullptr, bytes, &error)) return false;
+	if (!bad::bad_build_mint(clip, nullptr, bad::bad_retail_limits(), bytes, &error)) return false;
 	return test_io::write_file(path.string(), bytes);
 }
 

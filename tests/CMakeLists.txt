@@ -170,6 +170,12 @@ target_link_libraries(threedi_o3d_build_test PRIVATE opennova_3di_commands)
 target_include_directories(threedi_o3d_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_o3d_build
          COMMAND threedi_o3d_build_test ${CMAKE_CURRENT_BINARY_DIR} $<TARGET_FILE:opennova_3di>)
+# The .o3d lowering to the retail target: strip and palette splits, influences
+# past four, authored tangent frames, and every limit at its line.
+add_executable(threedi_o3d_lower_test threedi/o3d_lower_test.cpp)
+target_link_libraries(threedi_o3d_lower_test PRIVATE opennova_runtime)
+target_compile_features(threedi_o3d_lower_test PRIVATE cxx_std_17)
+add_test(NAME threedi_o3d_lower COMMAND threedi_o3d_lower_test)
 # opennova-3di over paths the ANSI code page cannot hold (the exe's UTF-8
 # manifest); the test embeds the manifest so its own command line is UTF-8.
 add_executable(threedi_o3d_unicode_test threedi/o3d_unicode_test.cpp)

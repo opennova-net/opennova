@@ -475,9 +475,12 @@ int test_session_play() {
 	TEST_EXPECT(sound.state == WorkspaceView::SoundState::Starting && sound.set == "FSP_DIRT_L" && sound.bank == "game.lwf" &&
 	            sound.voices.size() == 1 && sound.voices[0].path == "sounds/fs_dirt1.wav" && sound.voices[0].volume == 200 &&
 	            sound.path == "sounds/fs_dirt1.wav");
+	TEST_EXPECT(session.view().activity.status.find("Playing FSP_DIRT_L in game.lwf: ") == 0);
 	const uint64_t serial = sound.serial;
 	session.handle(request::play_profile_slot("default", "SSLFootGND"));
 	TEST_EXPECT(sound.serial == serial + 1 && sound.set == "FSP_DIRT_L" && sound.words.find("default's SSLFootGND") == 0);
+	// A slot's words are a sentence of their own, the status line too.
+	TEST_EXPECT(session.view().activity.status.find("default's SSLFootGND plays FSP_DIRT_L in game.lwf: ") == 0);
 	session.handle(request::play_footstep("SP_Soldier", "ground", "left"));
 	// SP_Soldier's SSLFootGND is empty: nothing plays, the status line says why.
 	TEST_EXPECT(sound.serial == serial + 1 && session.view().activity.status.find("SP_Soldier's SSLFootGND is empty") != std::string::npos);

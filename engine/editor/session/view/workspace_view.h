@@ -100,7 +100,8 @@ struct WorkspaceView {
 	// File > Project settings... (ADR 0046 S11d): whether it is open, and what its fields hold until Apply
 	// (one apply_project_settings naming every one): the project's name and features, its expansion (S16), and
 	// this computer's game install, the runtime Play runs ("" the one packaged beside the editor) and Play in
-	// the game install. Opening it fills the fields with the settings in effect; its project closing closes it.
+	// the game install, strictly or not. Opening it fills the fields with the settings in effect; its project
+	// closing closes it.
 	struct Settings {
 		bool open = false;
 		std::string title;
@@ -112,6 +113,7 @@ struct WorkspaceView {
 		std::string game_install;
 		std::string runtime;
 		bool play_in_install = false;
+		bool play_in_install_strict = false;
 	};
 	Settings settings;
 

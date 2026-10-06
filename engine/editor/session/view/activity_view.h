@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/model/value.h>
+#include <editor/run/launch_plan.h>
 #include <editor/run/play_state.h>
 #include <editor/session/output_log.h>
 #include <editor/session/session_operation.h>
@@ -74,6 +75,16 @@ struct ActivityView {
 	// Play tails there ("" before the first Play): never the build directory it runs from.
 	std::string play_run_dir;
 	std::string play_log_file;
+	// The running (or last) game is the game install's under Strict Play (the build and the install's
+	// program alone, no /d), and its first run, which wrote its game.cfg and quit, was started again.
+	bool play_strict = false;
+	bool play_started_again = false;
+	// What the last game install's game loaded, read from its file log (_filelog.txt) once it had exited
+	// (never while it runs: the game's exclusive appends would cut a log a reader holds open): whether the
+	// log was there to read, and what it names (FileAccessLog: the archives, what they served, what was
+	// opened from disk). Cleared as a game starts; a game that loaded nothing leaves no log.
+	bool play_file_log_read = false;
+	FileAccessLog play_file_log;
 	bool play_exited_on_its_own = false;
 	// The code the last game exited with on its own (PlaySession::exit_code; -1: none, or it
 	// was stopped). Nonzero, it is a Problems row (play.crashed) until Play starts again or
