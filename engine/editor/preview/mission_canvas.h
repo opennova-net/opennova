@@ -7,6 +7,7 @@
 #include <editor/graph/display_names.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/canvas_half.h>
+#include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_label_picks.h>
@@ -113,6 +114,10 @@ public:
 	// What the line under the picture says now (mission_hint.h): what the tool does, what a click or a
 	// drag would do where the pointer is.
 	std::string hint(const ViewportContext &context, const CanvasInput &in) const;
+	// The ground under the pointer in the game's words (DI-07, MissionViewport::ground_under), while the
+	// pointer is on the picture and no look or drag holds it (Nothing otherwise): asked of the viewport again
+	// only when the pointer, the picture's size, the camera, the picture or the files moved.
+	const MissionGroundFacts &ground(const ViewportContext &context, const CanvasInput &in) const;
 	// The marks' titles and the labels' last layout as the overlay keeps them (a test's measure: each
 	// title worded once and the labels laid out once while nothing they read moves).
 	const DisplayNameCache &titles() const { return titles_; }
@@ -166,6 +171,17 @@ private:
 	// the labels' last layout, laid out again only when what it read moved.
 	mutable DisplayNameCache titles_;
 	mutable MissionLabelLayout labels_;
+	// The ground last asked under the pointer, and what it was asked over.
+	struct GroundAsked {
+		bool valid = false;
+		float x = 0.0f, y = 0.0f;
+		int width = 0, height = 0;
+		float camera[6] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		uint64_t builds = 0, serial = 0, files = 0;
+		bool surface = false;
+		MissionGroundFacts facts;
+	};
+	mutable GroundAsked ground_;
 	MissionTool tool_ = MissionTool::Select;
 	int64_t item_ = 0;
 	std::string item_name_;

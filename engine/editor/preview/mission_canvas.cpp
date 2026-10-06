@@ -7,6 +7,7 @@
 #include <base/io/bam.h>
 #include <optional>
 
+#include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/model/document.h>
@@ -656,6 +657,33 @@ std::string MissionCanvas::hover_tip(const ViewportContext &, const CanvasInput 
 	// The label beside the hovered mark says it (mission_overlay): no tip beside it.
 	(void)in;
 	return std::string();
+}
+
+const MissionGroundFacts &MissionCanvas::ground(const ViewportContext &context, const CanvasInput &in) const {
+	static const MissionGroundFacts kNothing;
+	if (!frame_.viewport || !in.hovered || looking_ || gesture_.dragging()) return kNothing;
+	const MissionViewport &viewport = *frame_.viewport;
+	const OrbitCamera &camera = viewport.camera();
+	const float view[6] = { camera.target.x, camera.target.y, camera.target.z, camera.yaw, camera.pitch, camera.distance };
+	const uint64_t files = context.input.view.findings.assets ? context.input.view.findings.assets->generation() : 0;
+	GroundAsked &asked = ground_;
+	const bool same = asked.valid && asked.x == in.mouse.x && asked.y == in.mouse.y && asked.width == context.width &&
+			asked.height == context.height && std::equal(std::begin(view), std::end(view), std::begin(asked.camera)) &&
+			asked.builds == viewport.builds() && asked.serial == viewport.scene().serial() && asked.files == files &&
+			asked.surface == viewport.ground();
+	if (same) return asked.facts;
+	asked.valid = true;
+	asked.x = in.mouse.x;
+	asked.y = in.mouse.y;
+	asked.width = context.width;
+	asked.height = context.height;
+	std::copy(std::begin(view), std::end(view), std::begin(asked.camera));
+	asked.builds = viewport.builds();
+	asked.serial = viewport.scene().serial();
+	asked.files = files;
+	asked.surface = viewport.ground();
+	asked.facts = viewport.ground_under(context, in.mouse.x, in.mouse.y);
+	return asked.facts;
 }
 
 std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInput &in) const {
