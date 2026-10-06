@@ -97,6 +97,14 @@ struct DocumentType {
 	// type (the graph reads a record document's definitions through its schema). Read from the document
 	// alone, as validate_file is.
 	void (*definitions)(const TextDocument &document, std::vector<TextDefinition> &out) = nullptr;
+	// A name another file names and nothing defines, defined in a document of the type (ADR 0046 DI-15, Add it
+	// there): the batch adding a record of the kind the name is (`missing`: its kind, the name as the reference
+	// writes it, its scope) to `document`, named as referenced, where the game's lookup finds it, born as the
+	// type's own Add makes one (its kind's defaults: the game's reader's where it gives a new record any), with
+	// the offer's words (`out`: one undo step of the document, which Problems opens first and the Add selects).
+	// False for a name the type does not define, or has no place for in this file. Null for a type defining
+	// nothing another file names.
+	bool (*define_symbol)(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) = nullptr;
 };
 
 // A record in its type's own words with no project names (its record_label with none, else the
