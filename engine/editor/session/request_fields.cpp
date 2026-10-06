@@ -111,7 +111,9 @@ constexpr RequestField kFields[] = {
 			"it, else its Main view), device {width, height} the size its device draws at (1 to "
 			"8192), clock {playing, rate, time_ms, ticks} the preview clock every viewport reads, "
 			"options the kind's (a menu's show_hidden, force_id, force_state, checked, popup_open, "
-			"focus; a model's lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
+			"focus, zoom, scale, snap, pointer (the game's pointer drawn, true or false) and pointer_at "
+			"([x, y] in design units where the pointer stands, as the mouse would, or null); a model's "
+			"lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
 			"distance, target, frame}, each member optional. A change of the clock alone with no "
 			"path sets the clock whatever document is active (none, or one that shows in no "
 			"viewport)." },
@@ -191,6 +193,11 @@ constexpr RequestField kFields[] = {
 			"Play's game window starts behind every other window, the editor keeping the foreground (shown without "
 			"activation, sent to the bottom while it starts, until the person brings it forward): a client driving "
 			"the editor while a person works at the machine. Windows only: elsewhere Play spawns nothing." },
+	{ F::Fresh, "fresh", J::Boolean,
+			"Play's run directory is emptied before the game starts, of what the runs before wrote there as "
+			"well as what they staged: a first run (the game install's device dialog, the game's default "
+			"profile). Left out, the run directory keeps the game's own files (its game.cfg, which names the "
+			"display adapter its device dialog chose, its saves) between Plays of the same mode." },
 	{ F::Plan, "plan", J::Integer,
 			"The import plan a planned import means (the import_preview query's plan): the one the dialog shows, or "
 			"the import is refused (planned again since: its rows are others)." },
