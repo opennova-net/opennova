@@ -107,6 +107,53 @@ begin "Map centerpoint"
 	type marker
 end
 
+begin "Coconut palm"
+	graphic onpalm1
+	id 100013
+	type decoration
+end
+
+begin "Leaning coconut palm"
+	graphic onpalm2
+	id 100014
+	type decoration
+end
+
+begin "Sword fern"
+	graphic onfern1
+	id 100015
+	type decoration
+end
+
+begin "Jungle bush"
+	graphic onbush1
+	id 100016
+	type decoration
+end
+
+begin "Sandbag wall, 4.6 m"
+	graphic onsbag1
+	id 100017
+	type decoration
+end
+
+begin "Wooden guard tower"
+	graphic ontower1
+	id 100018
+	hp 10
+	type building
+	armor -1 -1
+end
+
+begin "Field radio on an ammunition crate"
+	graphic onradio1
+	id 100019
+	hp 10
+	type decoration
+	armor -1 -1
+	attrib: notarget
+end
+
 
 
 
