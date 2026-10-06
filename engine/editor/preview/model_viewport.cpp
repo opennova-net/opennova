@@ -1,6 +1,7 @@
 #include <editor/preview/model_viewport.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <variant>
@@ -190,9 +191,11 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 			if (!read_clip_sound_options(value, options.sound, error)) return false;
 		} else if (key == "damage") {
 			if (!read_damage_options(value, options.damage, error)) return false;
+		} else if (key == "first_person") {
+			if (!read_first_person_options(value, options.first_person, error)) return false;
 		} else {
 			error = "Unknown model option \"" + key +
-			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap, sound, damage).";
+			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap, sound, damage, first_person).";
 			return false;
 		}
 	}
@@ -312,6 +315,7 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 	options.set("snap", json_number(held.snap));
 	options.set("sound", clip_sound_options_to_json(held.sound));
 	options.set("damage", damage_options_to_json(held.damage));
+	options.set("first_person", first_person_options_to_json(held.first_person));
 	return options;
 }
 
@@ -343,7 +347,7 @@ std::unique_ptr<CanvasHalf> ModelViewport::make_canvas() const {
 
 int ModelViewport::auto_lod(int32_t *projected_q16) const {
 	if (projected_q16) *projected_q16 = 0;
-	return model_ ? model_preview_auto_lod(*model_, camera_, size().width, projected_q16) : -1;
+	return model_ ? model_preview_auto_lod(*model_, camera(), size().width, projected_q16) : -1;
 }
 
 int ModelViewport::lod() const {
@@ -444,7 +448,7 @@ bool ModelViewport::handle_edits(const ModelDocument &document, const ModelOverl
 	if (!model_) return false;
 	const PreviewVec3 through = handle == ModelHandle::Axis ? axis_tip(overlay) : overlay.at;
 	PreviewVec3 to;
-	if (!camera_.on_view_plane(x, y, width, height, through, to)) return false;
+	if (!camera().on_view_plane(x, y, width, height, through, to)) return false;
 	int32_t bus[96];
 	model_preview_ctrl_bus(ctrl_at(clock), bus);
 	if (!model_handle_edits(document, *model_, overlay, lod(), clock.ms(), bus, handle, to, snap, gesture, out))
@@ -552,11 +556,21 @@ uint32_t ModelViewport::clip_fps() const {
 	return clip ? clip->clip.fps : 0u;
 }
 
+int32_t ModelViewport::repeat_period_() const {
+	const int32_t length = clip_length_ticks();
+	if (!options_.repeat || length <= 0 || clip_loops()) return 0;
+	// A first-person action's leg past the clip's end (DI-13: a finish the counter holds beyond it) is
+	// reached before the clip plays again.
+	int32_t reach = length;
+	if (const WeaponActionRun *run = first_person_action())
+		for (const WeaponActionLeg &leg : run->legs) reach = std::max(reach, leg.tick + 1);
+	return reach + kClipRepeatHoldTicks;
+}
+
 int32_t ModelViewport::clip_ticks(const PreviewClock &clock) const {
 	const int32_t ticks = clock.ticks();
-	const int32_t length = clip_length_ticks();
-	if (!options_.repeat || length <= 0 || clip_loops()) return ticks;
-	return ticks % (length + kClipRepeatHoldTicks);
+	const int32_t period = repeat_period_();
+	return period > 0 ? ticks % period : ticks;
 }
 
 double ModelViewport::clip_frame(const PreviewClock &clock) const {
@@ -587,7 +601,71 @@ std::vector<PreviewJoint> ModelViewport::joints(const PreviewClock &clock) const
 }
 
 std::vector<std::string> ModelViewport::event_sound_words(uint32_t trigger) const {
+	// A weapon's first-person clip: the body's sound block reads its body channel alone, so nothing reads
+	// this clip's events (DI-13).
+	if (first_person_.active())
+		return {"The game reads no first-person clip event: the weapon's actions play their sets instead."};
 	return clip_event_sound_words(trigger, options_.sound, sound_binding_, sound_sources_);
+}
+
+const WeaponActionRun *ModelViewport::first_person_action() const {
+	if (!animating_ || !first_person_.active() || clip_key_.empty()) return nullptr;
+	const std::vector<const WeaponActionRun *> playing = first_person_.actions_playing(clip_key_);
+	for (const WeaponActionRun *run : playing)
+		if (strutil::iequals(run->suffix, options_.first_person.action)) return run;
+	return playing.empty() ? nullptr : playing.front();
+}
+
+ClipSoundFired ModelViewport::plan_leg_(const WeaponActionRun &run, const WeaponActionLeg &leg, int32_t tick,
+		int32_t clip_tick, audio::SoundSelector &selector, const AssetScan *scan) const {
+	ClipSoundFired fired;
+	fired.path = path();
+	fired.tick = tick;
+	const anim::SkeletalClips::LoadedClip *clip =
+			skeleton_ && !clip_key_.empty() ? skeleton_->find_clip_variant(clip_key_, clip_variant_) : nullptr;
+	fired.frame = clip ? int(clip->clip.playback().frame_index_at(clip_tick)) : 0;
+	fired.slot = -1;
+	fired.action = run.suffix;
+	fired.leg = leg.end ? "end" : "begin";
+	fired.set = leg.set;
+	// As the player hears their own weapon: a one-shot at the player, in first person [orig:
+	// ActionSlot_ExecuteActionWithEffect @0x541860 / ActionSlot_FinishActivePhase @0x53f7b0 -> the set at
+	// the owner; the listener's first-person view, audio::layer_matches_listener_view].
+	constexpr uint8_t kFirstPersonView = 2;
+	const PreviewPlay play = plan_set_play(sound_sources_.banks(), sound_sources_.expansion(), leg.set, std::string(),
+	                                       selector, kFirstPersonView);
+	fired.bank = play.bank;
+	std::string upper = run.suffix;
+	for (char &c : upper) c = char(std::toupper(static_cast<unsigned char>(c)));
+	fired.words = upper + (leg.end ? " finishes" : " begins") + " (tick " + std::to_string(clip_tick) +
+	              " of its clip): " + play.words;
+	fired.state = !play.found         ? "missing"
+	              : play.voices.empty() ? "silent"
+	              : options_.sound.mute ? "muted"
+	                                    : "played";
+	for (const PreviewVoice &voice : play.voices)
+		fired.voices.push_back({voice.wave, voice.file, std::string(), voice.pitch_q16, voice.volume});
+	if (scan) find_clip_sound_waves(fired, *scan);
+	return fired;
+}
+
+bool ModelViewport::press_leg(bool end, audio::SoundSelector &selector, const AssetScan *scan,
+		std::vector<ClipSoundFired> &out, std::string &error) const {
+	out.clear();
+	const WeaponActionRun *run = first_person_action();
+	if (!run) {
+		error = first_person_.active() ? "No action of " + first_person_.weapon() + " plays this row."
+		                               : "No weapon's action plays in this viewport.";
+		return false;
+	}
+	for (const WeaponActionLeg &leg : run->legs)
+		if (leg.end == end) {
+			out.push_back(plan_leg_(*run, leg, std::max(leg.tick, 0), std::max(leg.tick, 0), selector, scan));
+			out.back().pressed = true;
+			return true;
+		}
+	error = run->suffix + std::string(" plays no ") + (end ? "soundsetend." : "soundset.");
+	return false;
 }
 
 std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock, const AssetScan *scan,
@@ -608,12 +686,29 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 	// the Shell held up) fires nothing either: the sounds go on from here rather than in a burst.
 	if (!clip || from < 0 || sought || now <= from || now - from > kClipSoundCatchUpTicks) return out;
 	// The clip's own tick of each clock tick (clip_ticks): a repeated one-shot's taken again from 0.
-	const int32_t length = clip_length_ticks();
-	const int32_t period = options_.repeat && length > 0 && !clip_loops() ? length + kClipRepeatHoldTicks : 0;
+	const int32_t period = repeat_period_();
+	if (first_person_.active()) {
+		// A weapon's first-person clip (DI-13): nothing reads its events; the action playing the row plays
+		// its sets on the ticks the game's pump plays them, each heard as the clock leaves its tick (the
+		// clip's start among them) [from, now).
+		if (const WeaponActionRun *run = first_person_action())
+			for (int32_t tick = from; tick < now; ++tick) {
+				const int32_t clip_tick = period > 0 ? tick % period : tick;
+				for (const WeaponActionLeg &leg : run->legs) {
+					if (leg.tick != clip_tick) continue;
+					ClipSoundFired fired = plan_leg_(*run, leg, tick, clip_tick, selector, scan);
+					fired.seq = ++next_seq;
+					fired_.push_back(fired);
+					out.push_back(std::move(fired));
+				}
+			}
+		if (fired_.size() > kSoundsFiredKept) fired_.erase(fired_.begin(), fired_.end() - kSoundsFiredKept);
+		return out;
+	}
 	for (const ClipEventDue &due :
 			clip_events_due(clip->clip.playback(), clip_track_, period, from, now, sound_binding_.player))
 		for (ClipSoundFired &fired : plan_clip_event(due, options_.sound, sound_binding_, sound_sources_,
-				     camera_.eye(), selector)) {
+				     camera().eye(), selector)) {
 			fired.seq = ++next_seq;
 			fired.path = path();
 			if (scan) find_clip_sound_waves(fired, *scan);
@@ -629,6 +724,11 @@ bool ModelViewport::press_event(int frame, const AssetScan *scan, audio::SoundSe
 	out.clear();
 	if (!animating_ || clip_key_.empty() || clip_track_.triggers.empty()) {
 		error = "No clip plays in this viewport.";
+		return false;
+	}
+	if (first_person_.active()) {
+		error = "The game reads no first-person clip event: the weapon's actions play their sets instead "
+		        "(play_sound {leg}).";
 		return false;
 	}
 	if (frame < 0 || size_t(frame) >= clip_track_.triggers.size()) {
@@ -648,7 +748,7 @@ bool ModelViewport::press_event(int frame, const AssetScan *scan, audio::SoundSe
 	due.frame = frame;
 	due.word = clip_track_.triggers[size_t(frame)];
 	due.bottom = size_t(frame) < clip_track_.bottoms.size() ? clip_track_.bottoms[size_t(frame)] : 0.0f;
-	out = plan_clip_event(due, options_.sound, sound_binding_, sound_sources_, camera_.eye(), selector);
+	out = plan_clip_event(due, options_.sound, sound_binding_, sound_sources_, camera().eye(), selector);
 	if (out.empty()) {
 		error = "Frame " + std::to_string(frame) + " fires no sound: " +
 		        (due.word ? animation_trigger_words(due.word) + " plays none." : std::string("it carries no event."));
@@ -690,6 +790,8 @@ void ModelViewport::reset_animation_() {
 	clip_note_.clear();
 	clip_track_ = ClipSoundTrack();
 	sound_cursor_ = -1;
+	first_person_.clear();
+	eye_ = false;
 }
 
 ViewportAction ModelViewport::follow_(const ViewportInput &input, PreviewClock &clock) {
@@ -1010,7 +1112,7 @@ std::vector<ClipSoundFired> ModelViewport::fire_damage_sounds(const PreviewClock
 		fired.set = leg.name;
 		// Played at the item, the preview's origin, as the camera hears it.
 		PreviewHearing heard;
-		const PreviewVec3 eye = camera_.eye();
+		const PreviewVec3 eye = camera().eye();
 		heard.listener[0] = eye.x;
 		heard.listener[1] = eye.y;
 		heard.listener[2] = eye.z;
@@ -1080,6 +1182,8 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_events_.clear();
 		clip_note_.clear();
 		clip_track_ = ClipSoundTrack();
+		first_person_.clear();
+		eye_ = false;
 		// Until the first validation has read the project's references, the pairing item may not be read
 		// yet: said so, not that none pairs it (a validation after an edit reads with the graph built).
 		return stop_(!view.activity.validation.read ? ModelViewStatus::Reading : ModelViewStatus::NoRig, file, false);
@@ -1127,6 +1231,13 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	sound_sources_.refresh(*view.findings.assets,
 	                       view.project.document ? view.project.document->expansion.name : std::string(), rig_);
 	sound_binding_ = clip_sound_binding(sound_sources_.profiles(), options_.sound, sound_sources_.item(), rig_);
+	// A weapon's map seen in first person (DI-13): the weapon, the character's arms on the gun, the actions
+	// as the game bakes them; the arms read again build the scene again (the device draws them).
+	const uint64_t arms_serial = first_person_.arms_serial();
+	const size_t gun_parts = model_ && model_->lod_count > 0 ? model_->lods[0].render_object_count : 0;
+	const bool first_person_moved = first_person_.refresh(view.findings.assets, view.project.scan.get(), rig_,
+	                                                      options_.first_person, gun_parts);
+	if (first_person_.arms_serial() != arms_serial) rebuild = true;
 	// The clip the selection plays (the selection is the active document's), or what the game plays
 	// in its place, with why.
 	std::string key = clip_key_;
@@ -1192,6 +1303,17 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		state_moved();
 	}
 	framed_clip_ = framing;
+	// The first-person eye (DI-13): the camera the game stands the view model before, where the options ask
+	// for it and the weapon draws a gun.
+	const bool eye = options_.first_person.eye && first_person_.active() && !first_person_.spec().gun.empty();
+	const OrbitCamera was = eye_camera_;
+	if (eye) eye_camera_ = first_person_eye(first_person_, camera_, size().width, size().height);
+	const bool eye_moved = eye != eye_ || (eye && (eye_camera_.pose.eye.x != was.pose.eye.x ||
+	                                               eye_camera_.pose.eye.y != was.pose.eye.y ||
+	                                               eye_camera_.pose.eye.z != was.pose.eye.z ||
+	                                               eye_camera_.pose.fov_degrees != was.pose.fov_degrees));
+	eye_ = eye;
+	if (eye_moved) state_moved();
 	const bool options = options_moved_;
 	options_moved_ = false;
 	if (rebuild || !scene_) {
@@ -1200,7 +1322,8 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		picture_.show(PreviewFollow::Key(), generation);
 		return picture_.built(FileStamps());
 	}
-	return rig_moved || options || document_moved ? ViewportAction::Update : ViewportAction::Keep;
+	return rig_moved || options || document_moved || first_person_moved || eye_moved ? ViewportAction::Update
+	                                                                               : ViewportAction::Keep;
 }
 
 bool ModelViewport::takes_(const std::string &member) const {
@@ -1228,6 +1351,13 @@ bool ModelViewport::check_(const io::JsonValue &json, std::string &error) const 
 	bool frame = false;
 	if (const JsonValue *member = json.get("camera"); member && !read_camera(*member, camera, frame, error))
 		return false;
+	// The first-person eye (DI-13) stands where the game's camera does: the orbit's camera moves only once
+	// the view is the orbit again.
+	if (json.get("camera") && eye_ && options.first_person.eye) {
+		error = "camera: the first-person eye stands where the game's camera does; set options.first_person.view "
+		        "to orbit to move the camera.";
+		return false;
+	}
 	// A clip's frame (S17): the clock held on the first tick the clip shows it, the wire's form of a
 	// scrub or a step of the timeline.
 	if (const JsonValue *member = json.get("frame")) {
@@ -1330,12 +1460,12 @@ ViewportHit ModelViewport::hit(const ViewportContext &context, float x, float y)
 	out.current = current(context.input);
 	if (status() != ViewportStatus::Ready || !model_) return out;
 	const std::vector<ModelOverlay> marks = overlays(context.input.clock);
-	out.index = pick_model_overlay(marks, camera_, context.width, context.height, x, y);
+	out.index = pick_model_overlay(marks, camera(), context.width, context.height, x, y);
 	if (out.index < 0) {
 		// No marker there: the collision shape the pixel is on (S17), the picture's own (the selected
 		// record's shape among them whatever its layer).
 		const ModelCollisionShapesPtr shapes = collision(context.input.clock, selected_collision(context.input));
-		const int at = pick_model_collision(*shapes, camera_, context.width, context.height, x, y);
+		const int at = pick_model_collision(*shapes, camera(), context.width, context.height, x, y);
 		if (at < 0) return out;
 		const ModelCollisionShape &shape = (*shapes)[size_t(at)];
 		const auto *document = dynamic_cast<const ModelDocument *>(
@@ -1404,7 +1534,7 @@ bool ModelViewport::handle_point(const ViewportContext &context, NodeId id, cons
 	ModelOverlay marker;
 	if (!dragged_marker_(context, id, handle, held, marker, error)) return false;
 	const PreviewVec3 through = held == ModelHandle::Axis ? axis_tip(marker) : marker.at;
-	if (!camera_.project(through, context.width, context.height, x, y)) {
+	if (!camera().project(through, context.width, context.height, x, y)) {
 		error = "The marker's handle is not on the picture: drag it to a point of the picture (to).";
 		return false;
 	}
@@ -1455,7 +1585,7 @@ bool ModelViewport::drag(const ViewportContext &context, const ViewportDrag &dra
 		if (drag.by) {
 			const PreviewVec3 through = handle == ModelHandle::Axis ? axis_tip(overlay) : overlay.at;
 			float px = 0.0f, py = 0.0f;
-			if (!camera_.project(through, context.width, context.height, px, py)) {
+			if (!camera().project(through, context.width, context.height, px, py)) {
 				error = "The marker's handle is not on the picture: drag it to a point of the picture (to).";
 				return false;
 			}
@@ -1486,6 +1616,11 @@ bool ModelViewport::command(const ViewportContext &context, const std::string &n
 	}
 	if (!model_) {
 		error = "The viewport shows no model.";
+		return false;
+	}
+	if (eye_) {
+		error = "frame: the first-person eye stands where the game's camera does; set options.first_person.view to "
+		        "orbit to frame the model.";
 		return false;
 	}
 	// The marker of the first record named (one that is no marker refused, as a menu's command refuses
@@ -1532,7 +1667,19 @@ io::JsonValue ModelViewport::camera_json() const {
 	view.set("yaw", json_number(camera_.yaw));
 	view.set("pitch", json_number(camera_.pitch));
 	view.set("distance", json_number(camera_.distance));
-	view.set("fov", json_number(OrbitCamera::fov_horizontal_degrees()));
+	view.set("fov", json_number(camera().fov_degrees()));
+	// The first-person eye (DI-13): where it stands and looks, in the preview's space (the orbit's members
+	// above stand for when the view is the orbit again).
+	view.set("view", json_string(eye_ ? "eye" : "orbit"));
+	if (eye_) {
+		JsonValue eye = JsonValue::make_object();
+		eye.set("eye", vec3(eye_camera_.pose.eye));
+		eye.set("right", vec3(eye_camera_.pose.right));
+		eye.set("up", vec3(eye_camera_.pose.up));
+		eye.set("back", vec3(eye_camera_.pose.back));
+		eye.set("near", json_number(eye_camera_.near_plane));
+		view.set("pose", std::move(eye));
+	}
 	return view;
 }
 
@@ -1689,6 +1836,9 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	JsonValue fired = JsonValue::make_array();
 	for (const ClipSoundFired &one : fired_) fired.push(clip_sound_fired_to_json(one));
 	animation.set("sounds_fired", std::move(fired));
+	// A weapon's first person (DI-13): the gun and the arms, the eye, the actions and the one playing the row.
+	animation.set("first_person", first_person_json(first_person_, options_.first_person, clip_key_,
+	                                                first_person_action()));
 	// The rig's bones as the clip poses them now: each by its name, its parent, where its joint
 	// stands and its pixel on the picture.
 	JsonValue bones = JsonValue::make_array();
@@ -1699,7 +1849,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		row.set("parent", json_number(joint.parent));
 		row.set("position", vec3(joint.at));
 		float x = 0.0f, y = 0.0f;
-		if (camera_.project(joint.at, size().width, size().height, x, y)) {
+		if (camera().project(joint.at, size().width, size().height, x, y)) {
 			JsonValue screen = JsonValue::make_array();
 			screen.push(json_number(x));
 			screen.push(json_number(y));
@@ -1841,7 +1991,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		row.set("part", json_number(overlay.part));
 		row.set("position", vec3(overlay.at));
 		float x = 0.0f, y = 0.0f;
-		if (camera_.project(overlay.at, size().width, size().height, x, y)) {
+		if (camera().project(overlay.at, size().width, size().height, x, y)) {
 			JsonValue screen = JsonValue::make_array();
 			screen.push(json_number(x));
 			screen.push(json_number(y));
@@ -1904,7 +2054,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 			                     (shape.triangles[0].y + shape.triangles[1].y + shape.triangles[2].y) / 3.0f,
 			                     (shape.triangles[0].z + shape.triangles[1].z + shape.triangles[2].z) / 3.0f};
 		float x = 0.0f, y = 0.0f;
-		if (camera_.project(center, size().width, size().height, x, y)) {
+		if (camera().project(center, size().width, size().height, x, y)) {
 			JsonValue screen = JsonValue::make_array();
 			screen.push(json_number(x));
 			screen.push(json_number(y));

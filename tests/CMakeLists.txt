@@ -4399,6 +4399,15 @@ target_link_libraries(editor_problems_test PRIVATE opennova_editor)
 target_include_directories(editor_problems_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_problems COMMAND editor_problems_test)
 
+# The fixes that edit a document (ADR 0046 DI-11): a finding's planned edits of its own file
+# (an SSN, a zone id, a name or a key of its own, a string removed, an end pose's trigger
+# moved), an item's id of its own and an unused stylesheet variable's line removed, each
+# applied over a real session as one step Undo takes back.
+add_executable(editor_problem_edit_fixes_test editor/problem_edit_fixes_test.cpp)
+target_link_libraries(editor_problem_edit_fixes_test PRIVATE opennova_editor)
+target_include_directories(editor_problem_edit_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_problem_edit_fixes COMMAND editor_problem_edit_fixes_test)
+
 # The menu clipboard's one rule for the tree and the canvas (S13 V1, documents/mnu_clipboard):
 # a window a part holds is copyable from neither, a Paste after the primary's window.
 add_executable(editor_mnu_clipboard_test editor/mnu_clipboard_test.cpp)
@@ -4754,6 +4763,13 @@ add_executable(editor_clip_sounds_test editor/clip_sounds_test.cpp)
 target_link_libraries(editor_clip_sounds_test PRIVATE opennova_editor)
 target_include_directories(editor_clip_sounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_clip_sounds COMMAND editor_clip_sounds_test)
+
+# DI-13: a weapon's map in first person: the gun with the character's arms on its rig, the eye the game
+# draws the view model before, the weapon's actions as the game's pump runs them and their sets.
+add_executable(editor_first_person_test editor/first_person_test.cpp)
+target_link_libraries(editor_first_person_test PRIVATE opennova_editor)
+target_include_directories(editor_first_person_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_first_person COMMAND editor_first_person_test)
 
 # DI-10: a model's damage states named in the game's words and played as the game destroys the item (the
 # husk swap, the pieces, the death sound, the destroy fade); the retail leg over JO's damageable items.

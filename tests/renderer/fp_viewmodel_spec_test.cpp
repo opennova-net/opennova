@@ -6,6 +6,7 @@
 
 #include <formats/threedi/threedi_3di3.h>
 
+#include <cmath>
 #include <cstdio>
 
 namespace {
@@ -107,6 +108,57 @@ int main() {
 				"a rigid strip reaches its own part; a meshless helper nothing");
 		arms.lod_count = 0;
 		check(opennova::renderer::fp_arms_part_reach(arms) == 0, "no LOD reaches nothing");
+	}
+
+	// Where the viewmodel's root stands before the camera (DI-13: the game's
+	// first-person presenter and the editor's eye place it by one function).
+	// No cant: the rig's yaw-180 alone, the view offset mapped onto the
+	// camera's axes (view x forward -> -z, y left -> -x, z up -> y).
+	{
+		const float near = 1e-5f;
+		const auto close = [&](float a, float b) { return std::fabs(a - b) < near; };
+		const float units[3] = {25.188f / 256.0f, -5.494f / 256.0f, -144.952f / 256.0f};
+		const float none[3] = {0.0f, 0.0f, 0.0f};
+		const float rig[3] = {0.0f, opennova::renderer::kViewmodelRigYawDeg, 0.0f};
+		const opennova::renderer::FpViewmodelPose pose = opennova::renderer::fp_viewmodel_pose(units, none, rig);
+		const float yaw180[9] = {-1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f};
+		bool basis = true;
+		for (int i = 0; i < 9; ++i) basis = basis && close(pose.basis[i], yaw180[i]);
+		check(basis, "no cant: the basis is the rig's yaw-180");
+		check(close(pose.origin[0], -units[1]) && close(pose.origin[1], units[2]) && close(pose.origin[2], -units[0]),
+				"no cant: the view offset on the camera's axes");
+	}
+	// A cant (the JOX AK47AUTO's 5 / 3.75 / 353): its YXZ basis (yaw about y,
+	// pitch about x, the roll's opposite about z) turns the rig and the offset.
+	{
+		const float near = 1e-5f;
+		const auto close = [&](float a, float b) { return std::fabs(a - b) < near; };
+		const float units[3] = {-19.46f / 256.0f, 21.19f / 256.0f, -161.31f / 256.0f};
+		const float cant[3] = {5.0f, 3.75f, 353.0f};
+		const float none[3] = {0.0f, 0.0f, 0.0f};
+		const opennova::renderer::FpViewmodelPose pose = opennova::renderer::fp_viewmodel_pose(units, cant, none);
+		const float r = 3.14159265358979323846f / 180.0f;
+		const float x = 3.75f * r, y = 5.0f * r, z = 7.0f * r;
+		const float cx = std::cos(x), sx = std::sin(x), cy = std::cos(y), sy = std::sin(y), cz = std::cos(z),
+		            sz = std::sin(z);
+		const float yxz[9] = {cy * cz + sy * sx * sz, -cy * sz + sy * sx * cz, sy * cx,
+		                      cx * sz, cx * cz, -sx,
+		                      -sy * cz + cy * sx * sz, sy * sz + cy * sx * cz, cy * cx};
+		bool basis = true;
+		for (int i = 0; i < 9; ++i) basis = basis && close(pose.basis[i], yxz[i]);
+		check(basis, "a cant: Ry * Rx * Rz of the def's yaw, pitch and the roll's opposite");
+		const float local[3] = {-units[1], units[2], -units[0]};
+		bool origin = true;
+		for (int i = 0; i < 3; ++i)
+			origin = origin && close(pose.origin[i], yxz[i * 3] * local[0] + yxz[i * 3 + 1] * local[1] + yxz[i * 3 + 2] * local[2]);
+		check(origin, "a cant turns the view offset too");
+		const float rig[3] = {0.0f, opennova::renderer::kViewmodelRigYawDeg, 0.0f};
+		const opennova::renderer::FpViewmodelPose turned = opennova::renderer::fp_viewmodel_pose(units, cant, rig);
+		check(close(turned.basis[0], -yxz[0]) && close(turned.basis[2], -yxz[2]) && close(turned.basis[4], yxz[4]),
+				"the rig's yaw-180 composes after the cant");
+		bool same_origin = true;
+		for (int i = 0; i < 3; ++i) same_origin = same_origin && close(turned.origin[i], pose.origin[i]);
+		check(same_origin, "the rig's axis map leaves the offset as the cant turns it");
 	}
 
 	if (failures) {
