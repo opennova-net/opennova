@@ -427,6 +427,8 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::MusicScript, "handled.bin", music_with_a_handler(file("mus/synth_gamemus.bin"))},
 	        {AssetKind::Credits, "spaced.kda", file("cbin/synth_nlist.kda")},
 	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
+	        // A particle file the engine's reader stops in, which the text type holds (DI-06).
+	        {AssetKind::Particles, "open.ptl", text_bytes("[effectdef]\n{\n\tid = OPEN;\n")},
 	        // A 2 x 2 true-colour TGA, its origin bit set (S18: texture.tga_upside_down).
 	        {AssetKind::Texture, "top_first.tga", top_first_tga()},
 	};
@@ -1722,11 +1724,8 @@ int main() {
 			if (loaded) check_validate_file(*type, fixture, *document, counts);
 		}
 		// Per type: a validate_file that never took its own documents (its cast to another type)
-		// would make nothing over its files. The text type makes none (S13 D9: its files are read
-		// through readers the editor does not model), its table empty.
-		const bool silent_type = type->id == DocumentTypeId::Text;
-		check(counts.findings > 0 || (silent_type && type->findings().count == 0), type->name,
-		      "validate_file makes a finding over the type's files");
+		// would make nothing over its files. The text type's are the engine readers' (DI-06).
+		check(counts.findings > 0, type->name, "validate_file makes a finding over the type's files");
 		// Likewise a project check that never read its type's files would keep the clause above
 		// over no findings.
 		check(!type->project_check || counts.check_findings > 0, type->name,
