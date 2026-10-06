@@ -4,17 +4,22 @@
 a three-level timber guard tower laid out as the original's `Wgrdtwr1` (a 6 m
 body on four corner posts, floors at 3.3, 6.6 and 9.9 m, the top platform 8.4 m
 across behind a 1.1 m plank parapet, a hip roof of corrugated tin at 12.3 m),
-with X braces in its open bays and switchback stairs inside. Four LODs (2,636 /
-2,204 / 1,076 / 344 triangles, thresholds 172, 44, 12 and 0) of one part; the
-later LODs drop parts of LOD 0 (the stair treads and rails, then the braces and
-the lower floors, then the beams), so they keep its UVs.
+with X braces in its open bays, guard rails round its two lower floors and
+switchback stairs inside: three cleated plank walkways, one up each storey. Four
+LODs (2,864 / 2,432 / 1,076 / 344 triangles, thresholds 172, 44, 12 and 0) of
+one part; the later LODs drop parts of LOD 0 (the cleats and hand rails, then the
+braces, the walkways and the lower floors, then the beams), so they keep its UVs.
 
 It is climbed as the original's tower is, by its collision, with no user point
-and no ladder: the floors are `CB` volumes that leave the well over each flight,
-each flight a `CB` ramp (a slab whose top is the stairs' slope) from one floor
-to the next, the four corner posts, the parapet and the roof are `CB` volumes,
-and two `VC` volumes (the body and the top) are what vehicles meet. LOD 1's
-triangles are the bullet faces, all Wood, as the original's LOD 1 is.
+and no ladder: the floors are `CB` volumes that leave the well over each flight;
+each flight is a `CB` ramp built as `Wgrdtwr1`'s are (the flight's box, from
+0.09 m under the lower floor to the upper one, cut by the stairs' slope and a
+parallel plane 0.58 m under it: eight planes); the corner posts, the guard
+rails, the parapet and the roof are `CB` volumes, and two `VC` volumes (the
+body and the top) are what vehicles meet. LOD 1's triangles are the bullet
+faces, all Wood, as the original's LOD 1 is. In OpenNova a soldier walks up all
+three flights to the platform (a scripted walk in a scratch copy of the
+mission), as he walks up the original's.
 
 The scene `ontower1 bake` holds the same LOD 0 with the bake materials: the
 textures follow the original's buildings, upgraded as the hut is, one baked base
