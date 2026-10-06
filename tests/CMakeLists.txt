@@ -365,6 +365,13 @@ add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
 add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
 
+# The items.def ids and rows the engine fixes (docs/world/itemdef-re.md, "The ids and rows the
+# engine fixes"): the table, its lookups and rules, and the runtime's constants for the same ids.
+add_executable(def_reserved_items_test def/def_reserved_items_test.cpp)
+target_link_libraries(def_reserved_items_test PRIVATE opennova_runtime)
+target_include_directories(def_reserved_items_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME def_reserved_items COMMAND def_reserved_items_test)
+
 # AVATARS (Avatars.def) tests: parse against the retail fixture + from-scratch
 # writer round-trip (docs/playerinfo/avatars-re.md, docs/adr/0021).
 # fixtures/avatars/synth_avatars.def: the synthetic avatar table through avatars_write.
