@@ -131,7 +131,7 @@ void EpilogCine::clear_events() {
 	events.clear();
 }
 
-void EpilogCine::step_timeline() {
+void EpilogCine::step_timeline(World &world) {
 	++frame; // [orig: sub_56FF40 @0x56FF52]
 	// [orig: @0x56FF8A..0x56FFE7 — start <= frame <= start + duration; the
 	//  +0x0C progress the camera and blend nodes read; slot 1 on the start
@@ -139,7 +139,7 @@ void EpilogCine::step_timeline() {
 	for (CineEvent &e : events) {
 		if (!e.live_at(frame)) continue;
 		if (frame == e.start) activate_event(e);
-		update_event(e);
+		update_event(e, world);
 		if (frame == e.start + e.duration) end_event(e);
 	}
 }
@@ -170,16 +170,22 @@ void EpilogCine::activate_event(CineEvent &e) {
 		e.counter = 0;
 		e.alpha = 0.0f;
 		break;
+	case CineEventKind::EpilogCounter:
+		// The count-up column's start: the count at 0, the first step four
+		// frames away [orig: CineEventEpilogCounter's start @0x573370 —
+		//  +0x440 = 0, +0x444 = 4 @0x57337a].
+		e.points = 0;
+		e.points_cooldown = kEpilogCounterStepWait;
+		break;
 	default:
-		// The cached camera's start is a nullsub (@0x571FB0); the counter's
-		// count-up start (CineEventEpilogCounter_Start @0x573370) feeds a column
-		// the live epilog never draws; the edit fade's camera-target blend
-		// (sub_5726B0 @0x5726B0) has no target in the lose cine.
+		// The cached camera's start is a nullsub (@0x571FB0); the edit fade's
+		// camera-target blend (sub_5726B0 @0x5726B0) has no target in the lose
+		// cine.
 		break;
 	}
 }
 
-void EpilogCine::update_event(CineEvent &e) {
+void EpilogCine::update_event(CineEvent &e, World &world) {
 	switch (e.kind) {
 	case CineEventKind::ImageFade:
 		// [orig: sub_571020 @0x571020 — the delay @0x571028; mode 1 up to 1
@@ -224,11 +230,46 @@ void EpilogCine::update_event(CineEvent &e) {
 			e.alpha = static_cast<float>(static_cast<double>(e.duration - count + 1) / e.fade_out);
 		break;
 	}
+	case CineEventKind::EpilogCounter: {
+		// The count-up step: after its wait the count moves toward the target
+		// by the rate (a negative target subtracts it), clamped past the target,
+		// and the step that lands on the target plays TEXT_END; every step
+		// re-arms the wait. The live epilog's -1 target and rate step the count
+		// up from 0, away from the target, so it never lands and never sounds.
+		// (The step's busy flag dword_269721C, raised while the count is off
+		// its target, has no reader.)
+		// [orig: CineNode_CounterStep @0x573390 — the wait @0x5733ab..0x5733b8;
+		//  the step @0x5733c0..0x5733fa; the arrival @0x573400..0x57340e ->
+		//  Sound_PlayInterfaceTriggerSet(g_SndTextEnd); the re-arm @0x573416]
+		if (e.points_cooldown != 0) {
+			--e.points_cooldown;
+			break;
+		}
+		const int32_t target = e.points_target;
+		const uint32_t count = static_cast<uint32_t>(e.points);
+		const uint32_t rate = static_cast<uint32_t>(e.points_rate);
+		if (e.points != target) {
+			if (target > 0) {
+				e.points = static_cast<int32_t>(count + rate); // @0x5733da
+				if (e.points > target) e.points = target;      // @0x5733fa
+			} else if (target < 0) {
+				e.points = static_cast<int32_t>(count - rate); // @0x5733ea
+				if (e.points < target) e.points = target;      // @0x5733fa
+			}
+			if (e.points == target) {
+				ScriptSoundEvent sound;
+				sound.name = kEpilogCounterEndSoundset;
+				sound.kind = ScriptSoundEvent::Kind::Interface;
+				world.out.script_sounds.push_back(std::move(sound));
+			}
+		}
+		e.points_cooldown = kEpilogCounterStepWait;
+		break;
+	}
 	default:
 		// The cached camera's interpolation (Cine_CameraInterpolateTransform
-		// @0x5722C0) drives the cine view (D-AI-16); the counter's count-up
-		// step (CineEventEpilogCounter_Step @0x573390) feeds the undrawn
-		// column; the edit fade's blend (sub_5726D0 @0x5726D0) has no target.
+		// @0x5722C0) drives the cine view (D-AI-16); the edit fade's blend
+		// (sub_5726D0 @0x5726D0) has no target.
 		break;
 	}
 }
@@ -321,7 +362,7 @@ void EpilogCine::begin_lose() {
 void EpilogCine::update(World &world) {
 	// [orig: Cinematic_EpilogUpdate @0x577961 — the cine-running gate]
 	if (!active) return;
-	step_timeline(); // [orig: Cinematic_EpilogUpdate @0x577963 -> sub_56FF40]
+	step_timeline(world); // [orig: Cinematic_EpilogUpdate @0x577963 -> sub_56FF40]
 	if (mode == EpilogCineMode::Win)
 		update_win(world); // [orig: @0x57797C]
 	else if (mode == EpilogCineMode::Lose)

@@ -279,10 +279,19 @@ bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
 void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
                                        LocalPlayerViewTracker &t);
 
+// The night-vision key's two interface sets, the registry rows the action
+// reads through g_SndNvOn / g_SndNvOff [orig: Input_HandleActionBinding_0
+// case 41 -- Sound_PlayInterfaceTriggerSet @0x527be0 of g_SndNvOn @0x4e06d0
+// and of g_SndNvOff @0x4e0691; the registry @0x82F590]. Raised as Interface
+// ScriptSoundEvents like the scope clicks.
+inline constexpr const char *kNvgOnSoundset = "NV_ON";
+inline constexpr const char *kNvgOffSoundset = "NV_OFF";
+
 // Action 41: toggle NVG. Raising NVG over a settled Inset scope first drops the
 // scope through `scope_toggle` and latches a one-shot restore; clearing NVG
 // consumes the latch and re-raises the scope after the Inset refusal no
-// longer applies. `scope_toggle` is the full scope request (it may route to
+// longer applies. Each way then plays its interface set (NV_ON / NV_OFF) and
+// raises its tip. `scope_toggle` is the full scope request (it may route to
 // the wire). Returns the new NVG state.
 bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w,
                              PlayerViewState &v,

@@ -490,6 +490,16 @@ void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
                                       t.binocular_pitch_offset_deg);
 }
 
+namespace {
+// [orig: Sound_PlayInterfaceTriggerSet @0x527be0 -- the 2D interface play]
+void play_nvg_interface_set(World &world, const char *set) {
+    ScriptSoundEvent sound;
+    sound.name = set;
+    sound.kind = ScriptSoundEvent::Kind::Interface;
+    world.out.script_sounds.push_back(std::move(sound));
+}
+} // namespace
+
 bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v,
                              const std::function<bool()> &scope_toggle) {
     if (world.registry.get(world.cached.local_player) == nullptr) return false;
@@ -500,8 +510,11 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
             w.nvg_scope_restore = scope_toggle();
         }
         const bool on = player_view_toggle_nvg(v);
-        // The NVG tip, once [orig: case 41's on branch — CTipSystem_HandleEvent(7)
-        // @0x4e06ec, after the scope drop and the sound].
+        // NV_ON after the scope drop [orig: case 41's on branch — `mov edx,
+        // g_SndNvOn` @0x4e06d0, Sound_PlayInterfaceTriggerSet @0x4e06dd].
+        play_nvg_interface_set(world, kNvgOnSoundset);
+        // The NVG tip, once [orig: CTipSystem_HandleEvent(7) @0x4e06ec, after
+        // the scope drop and the sound].
         world.out.tip_events.push_back(static_cast<uint8_t>(hud::kTipEventNvgOn));
         return on;
     }
@@ -511,6 +524,9 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
     const bool restore_scope = w.nvg_scope_restore;
     w.nvg_scope_restore = false;
     if (restore_scope && !v.scope_engaged) scope_toggle();
+    // NV_OFF after the scope restore [orig: case 41's off branch — `mov ecx,
+    // g_SndNvOff` @0x4e0691, Sound_PlayInterfaceTriggerSet @0x4e0698].
+    play_nvg_interface_set(world, kNvgOffSoundset);
     // The off branch fades it [orig: CTipSystem_HandleEvent(8) @0x4e06a7, after
     // the scope restore and the sound].
     world.out.tip_events.push_back(static_cast<uint8_t>(hud::kTipEventNvgOff));
