@@ -65,6 +65,9 @@ enum class AssetKind {
 	// beside it (a .png the image importer turns into a texture), which the scan gives this kind;
 	// never packed itself, its outputs are.
 	ImportSource,
+	// A file an import reads besides its source (S20: a terrain set's images), whatever its name, while
+	// a record lists it among its inputs; never packed, its import's outputs are.
+	ImportInput,
 	kCount,         // the number of kinds, not a kind
 };
 

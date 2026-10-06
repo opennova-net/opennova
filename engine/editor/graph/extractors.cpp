@@ -295,6 +295,9 @@ bool extract_terrain(const std::string &name, const std::vector<uint8_t> &bytes,
 	texture("polytrn_foliagemap", TextureRoleId::TerrainFoliageMap, config.foliagemap);
 	for (size_t i = 0; i < config.foliage_defs.size(); ++i)
 		edge("foliage " + std::to_string(i + 1), "graphic", ReferenceKind::Model, config.foliage_defs[i].graphic);
+	// The terrain's own tile placement, read when a mission has none of its name (S20) [orig: Terrain_Init
+	// @ 0x60FCFD; PolyTrn_LoadTerrainConfig @ 0x60E6DC..0x60E6E5, its extension forced to TIL].
+	edge(std::string(), "polytrn_tileinfo", ReferenceKind::TilePlacement, config.tileinfo);
 	return true;
 }
 
