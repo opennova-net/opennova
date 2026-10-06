@@ -141,6 +141,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::AiProfile, "ai_profile", "AI profile", ArchiveSlot::Resource)
 	        .extensions(kAiProfile)
+	        .edited_by(DocumentTypeId::Text)
 	        .folder("ai")
 	        .about("An AI profile: how a unit the computer runs picks its targets and moves, loaded by the name a placed unit gives.")
 	        .row,
@@ -250,6 +251,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
 	        .runtime("environment")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("terrain")
 	        .about("An environment: a mission's sky, light, fog and water.")
@@ -302,6 +304,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
 	        .runtime("particle")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("particles")
 	        .about("Particle effects (smoke, fire, sparks) by name, which items, weapons and ammo name.")
@@ -341,18 +344,21 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::HudPosDefs, "hudpos_defs", "HUD layout", ArchiveSlot::Localres)
 	        .runtime("hudpos")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("Where the HUD draws its parts.")
 	        .row,
 	Kind(AssetKind::HudFxDefs, "hudfx_defs", "HUD effects", ArchiveSlot::Localres)
 	        .file("hudfx.def")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("The HUD's effects.")
 	        .row,
 	Kind(AssetKind::AvatarDefs, "avatar_defs", "Avatars", ArchiveSlot::Localres)
 	        .runtime("avatar")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("The player's avatars.")
@@ -365,6 +371,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::CharAttrDefs, "charattr_defs", "Character attributes", ArchiveSlot::Localres)
 	        .file("charattr.def")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("The characters' attributes.")
@@ -378,6 +385,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::OtherDefs, "other_defs", "Definitions", ArchiveSlot::Localres)
 	        .extensions(kOtherDefs)
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("A definition table the game reads by its name.")
@@ -402,6 +410,7 @@ constexpr AssetKindRow kRows[] = {
 	// (localres), the one place the game reads them with /d and without, and nowhere else.
 	Kind(AssetKind::NovaWorldScreen, "novaworld_screen", "NovaWorld screen", ArchiveSlot::Localres)
 	        .extensions(kNovaWorldScreen)
+	        .edited_by(DocumentTypeId::Text)
 	        .folder("menus")
 	        .about("A NovaWorld screen's page, which the menus read.")
 	        .row,
@@ -444,6 +453,7 @@ constexpr AssetKindRow kRows[] = {
 	// @ 0x52d8a0].
 	Kind(AssetKind::Score, "score", "Score table", ArchiveSlot::Loose)
 	        .file("score.ini")
+	        .edited_by(DocumentTypeId::Text)
 	        .expansion(ExpansionLoose::RootOnly)
 	        .about("The score table, read from the game's own folder.")
 	        .row,

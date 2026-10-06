@@ -322,7 +322,7 @@ static int test_columns() {
 	                     "shader.form", "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
-	                     "style.value_is_directive" }));
+	                     "style.value_is_directive", "text.reader", "text.unreadable" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
 	// A missing required file blocks where its manifest row is the boot's refusal (gametext.bin: the
