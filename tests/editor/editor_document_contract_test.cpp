@@ -75,6 +75,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -1117,8 +1118,17 @@ void check_project_check(const DocumentType &type, const Fixture &fixture, TypeC
 	Diagnostic error;
 	// The sound bank type's check reads the project's waves (documents/wave_check.h): a stereo wave the
 	// game's loader refuses goes beside its bank.
-	const bool companion = type.id != DocumentTypeId::SoundBank ||
-	                       editor_test::write_bytes(root + "/files/stereo.wav", stereo_wave());
+	bool companion = type.id != DocumentTypeId::SoundBank ||
+	                 editor_test::write_bytes(root + "/files/stereo.wav", stereo_wave());
+	// The mission type's (preview/mission_ground_check.h, DI-28) grounds a mission's entities on its terrain:
+	// the fixtures' terrain (Tmap, which the synth missions name), the test item table and the models its
+	// rows draw go beside it, the synth missions' entities at z 0 then under Tmap's ground.
+	const std::string repo = test_paths_repo_root(__FILE__);
+	for (const char *beside : { "terrain/tmap/Tmap.trn", "terrain/tmap/Tmap.cpt", "def/items.def",
+				 "threedi/synth/pump.3di", "threedi/synth/armory.3di" })
+		if (type.id == DocumentTypeId::Mission)
+			companion = companion && editor_test::write_bytes(root + "/files/" + std::filesystem::path(beside).filename().string(),
+					test_io::read_file(repo + "/fixtures/" + beside));
 	const bool made = create_project(root, "Contract", "jo", project, error) &&
 	                  editor_test::write_bytes(root + "/files/" + fixture.name, fixture.bytes) && companion;
 	check(made, fixture.name + " (" + error.message + ")", "a project holding the file is made");
