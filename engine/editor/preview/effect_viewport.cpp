@@ -8,7 +8,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/particle_type.h>
 #include <editor/model/text_document.h>
-#include <editor/preview/effect_canvas.h>
+#include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -39,21 +39,8 @@ OrbitCamera default_camera() {
 	return camera;
 }
 
-JsonValue vec3(const PreviewVec3 &v) {
-	JsonValue out = JsonValue::make_array();
-	out.array.push_back(json_number(v.x));
-	out.array.push_back(json_number(v.y));
-	out.array.push_back(json_number(v.z));
-	return out;
-}
-
 JsonValue camera_to_json(const OrbitCamera &camera) {
-	JsonValue out = JsonValue::make_object();
-	out.set("target", vec3(camera.target));
-	out.set("yaw", json_number(camera.yaw));
-	out.set("pitch", json_number(camera.pitch));
-	out.set("distance", json_number(camera.distance));
-	return out;
+	return orbit_camera_to_json(camera);
 }
 
 // A SetViewport's options over `held`: {effect, loop, wind_speed, wind_direction, grid}, each optional;
@@ -107,52 +94,9 @@ bool read_options(const JsonValue &json, const std::vector<EffectViewportEffect>
 	return true;
 }
 
-// The camera a `camera` member sets over `held`: {yaw, pitch, distance (> 0), target [x, y, z], frame},
-// each optional, the pitch kept within kOrbitPitchLimit; `frame` the camera on the live particles.
+// The camera a `camera` member sets over `held` (read_orbit_camera); `frame` the camera on the live particles.
 bool read_camera(const JsonValue &json, OrbitCamera &held, bool &frame, std::string &error) {
-	if (!json.is_object()) {
-		error = "\"camera\" is an object.";
-		return false;
-	}
-	OrbitCamera camera = held;
-	frame = false;
-	for (const io::JsonMember &member : json.object) {
-		const std::string &key = member.key;
-		const JsonValue &value = member.value;
-		if (key == "yaw" || key == "pitch" || key == "distance") {
-			float f = 0.0f;
-			if (!io::json_float(value, f) || !std::isfinite(f)) {
-				error = "camera." + key + " is a number.";
-				return false;
-			}
-			if (key == "distance" && !(f > 0.0f)) {
-				error = "camera.distance is more than 0.";
-				return false;
-			}
-			(key == "yaw" ? camera.yaw : key == "pitch" ? camera.pitch : camera.distance) = f;
-		} else if (key == "target") {
-			bool numbers = value.is_array() && value.array.size() == 3;
-			float at[3] = {};
-			for (size_t i = 0; numbers && i < 3; ++i) numbers = io::json_float(value.array[i], at[i]);
-			if (!numbers) {
-				error = "camera.target is [x, y, z].";
-				return false;
-			}
-			camera.target = PreviewVec3{at[0], at[1], at[2]};
-		} else if (key == "frame") {
-			if (!value.is_bool()) {
-				error = "camera.frame is true or false.";
-				return false;
-			}
-			frame = value.boolean;
-		} else {
-			error = "Unknown camera member \"" + key + "\" (it takes yaw, pitch, distance, target, frame).";
-			return false;
-		}
-	}
-	camera.pitch = std::clamp(camera.pitch, -kOrbitPitchLimit, kOrbitPitchLimit);
-	held = camera;
-	return true;
+	return read_orbit_camera(json, held, frame, error);
 }
 
 const char *spawn_status_token(particle::EffectSpawnStatus status) {
@@ -469,7 +413,15 @@ OrbitCamera EffectViewport::framed(int width, int height) const {
 }
 
 std::unique_ptr<CanvasHalf> EffectViewport::make_canvas() const {
-	return std::make_unique<EffectCanvas>();
+	OrbitCanvasHooks hooks;
+	hooks.camera = [](const ViewportModel &viewport) -> const OrbitCamera & {
+		return static_cast<const EffectViewport &>(viewport).camera();
+	};
+	hooks.framed = [](const ViewportModel &viewport, int width, int height) {
+		return static_cast<const EffectViewport &>(viewport).framed(width, height);
+	};
+	hooks.change = effect_camera_change;
+	return std::make_unique<OrbitCanvas>(hooks);
 }
 
 ViewportHit EffectViewport::hit(const ViewportContext &context, float, float) const {
