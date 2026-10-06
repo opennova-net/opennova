@@ -134,6 +134,8 @@ const BlankFactory k_factories[] = {
 	  "a mission's text table: its title and an empty briefing", false, k_mission_text_params,
 	  sizeof(k_mission_text_params) / sizeof(k_mission_text_params[0]) },
 	{ "", AssetKind::Script, make_blank_script, "an empty script", true },
+	// A mission's tile placement (<mission>.til), which every shipped mission carries beside it.
+	{ "", AssetKind::TileInfo, make_blank_tile_info, "a tile placement with no tile placed", true },
 	// The renderer's own effect, which it opens by name as it starts: without it, and with no other
 	// effect, no model draws (blank_shader.cpp); a new effect for one of the shader tags the base game's
 	// models name.
