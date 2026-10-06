@@ -15,12 +15,14 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
+#include <editor/import/terrain_import.h>
 #include <editor/model/field_text.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_card.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/texture_budget_list.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
@@ -74,10 +76,10 @@ void NewFilePrompt::ask(Workspace &workspace, AssetKind kind) {
 namespace {
 
 // The prompt's values as the session takes them: each given value by its param's token.
-io::JsonValue values_json(const BlankFactory *factory, const std::vector<std::string> &values) {
+io::JsonValue values_json(const BlankParam *params, size_t count, const std::vector<std::string> &values) {
 	io::JsonValue out = io::JsonValue::make_object();
-	for (size_t i = 0; factory && i < factory->param_count && i < values.size(); ++i)
-		if (!values[i].empty()) out.set(factory->params[i].token, io::JsonValue::make_string(values[i]));
+	for (size_t i = 0; i < count && i < values.size(); ++i)
+		if (!values[i].empty()) out.set(params[i].token, io::JsonValue::make_string(values[i]));
 	return out;
 }
 
@@ -87,8 +89,11 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	const WorkspaceView::NewFile &held = v.workspace.new_file;
 	const AssetKind kind = held.kind;
-	const BlankFactory *factory = kind == AssetKind::kCount ? nullptr : find_blank_factory_for_kind(kind);
-	const size_t params = factory ? factory->param_count : 0;
+	// A terrain is made from images (S20, the new_terrain request): its name the terrain's, its values the
+	// images and the importer's numbers; any other kind is its blank's.
+	const bool terrain = kind == AssetKind::Terrain;
+	size_t params = 0;
+	const BlankParam *taken = kind == AssetKind::kCount ? nullptr : new_file_params(kind, params);
 	// The fields take the session's values when they moved (the prompt opened on another kind, a value set
 	// over the wire).
 	name_.follow(held.name);
@@ -98,7 +103,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		values_.assign(params, std::string());
 		for (size_t i = 0; i < params; ++i)
 			for (const auto &[token, value] : held.values)
-				if (token == factory->params[i].token) values_[i] = value;
+				if (token == taken[i].token) values_[i] = value;
 	}
 	// Held open, it shows when no dialog before it in the session's order is held (shown_modal).
 	const bool open = kind != AssetKind::kCount && v.project.open && modal_may_show(v, HeldModal::NewFile);
@@ -106,12 +111,13 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		if (popup_.dismissed()) window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
 		return;
 	}
-	ImGui::Text("New file: %s", asset_kind_label(kind));
+	if (terrain) ImGui::TextUnformatted("New terrain from images");
+	else ImGui::Text("New file: %s", asset_kind_label(kind));
 	if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
-	// The name a new file of the kind is offered: its row's (AssetKindRow::new_name).
-	const bool enter = ImGui::InputTextWithHint("Name", asset_kind_row(kind).new_name, name_.text, sizeof(name_.text),
-	                                            ImGuiInputTextFlags_EnterReturnsTrue);
+	// The name a new file of the kind is offered: its row's (AssetKindRow::new_name); a terrain's, its stem.
+	const bool enter = ImGui::InputTextWithHint("Name", terrain ? "island" : asset_kind_row(kind).new_name, name_.text,
+	                                            sizeof(name_.text), ImGuiInputTextFlags_EnterReturnsTrue);
 	if (name_.sent() != held.name && ImGui::IsItemEdited())
 		window_requests::set_workspace(workspace, "new_file", "name", io::JsonValue::make_string(name_.sent()));
 	const char *name = name_.text;
@@ -120,17 +126,23 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
 	const bool named = name[0] != '\0';
-	bool fits = named && check_file_name(name, kind, problem, message);
+	bool fits = named && (terrain ? terrain_stem_fits(name, message) : check_file_name(name, kind, problem, message));
 	if (fits && kind == AssetKind::Texture) fits = can_make_blank_texture(name, message);
-	const bool taken = named && v.project.scan->find(name) != nullptr;
+	// A terrain's name is taken where the project has its settings already (the request checks every file
+	// it makes).
+	const std::string file = terrain ? std::string(name) + ".trn" : std::string(name);
+	const bool in_use = named && v.project.scan->find(file) != nullptr;
 	if (named && !fits) ImGui::TextColored(kRefusalColor, "%s", message.c_str());
-	else if (taken) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", name);
+	else if (in_use) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", file.c_str());
+	if (terrain)
+		ImGui::TextWrapped("Each image is a file on disk (copied into art/terrain/) or a file of the project; the "
+		                   "terrain is imported from them, and imported again when one changes.");
 	// What the kind's blank takes beside its name (a mission's title, terrain and environment): a
 	// text, or one of the project's files its reference loads. A project is its own files, so a
 	// kind the project has no file of says to import one.
 	bool given = true, changed = false;
 	for (size_t i = 0; i < params; ++i) {
-		const BlankParam &param = factory->params[i];
+		const BlankParam &param = taken[i];
 		ImGui::PushID(static_cast<int>(i));
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
 		if (param.reference == ReferenceKind::None) {
@@ -162,18 +174,20 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		ImGui::PopID();
 		given = given && (!param.required || !values_[i].empty());
 	}
-	if (changed) window_requests::set_workspace(workspace, "new_file", "values", values_json(factory, values_));
-	const bool ready = fits && !taken && given && v.allows(EditorRequestKind::CreateFile);
+	if (changed) window_requests::set_workspace(workspace, "new_file", "values", values_json(taken, params, values_));
+	const bool ready =
+	        fits && !in_use && given && v.allows(terrain ? EditorRequestKind::NewTerrain : EditorRequestKind::CreateFile);
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create");
 	ImGui::EndDisabled();
 	if ((create || enter) && ready) {
 		std::vector<std::pair<std::string, std::string>> values;
 		for (size_t i = 0; i < params; ++i)
-			if (!values_[i].empty()) values.emplace_back(factory->params[i].token, values_[i]);
+			if (!values_[i].empty()) values.emplace_back(taken[i].token, values_[i]);
 		// The session closes the prompt as it takes the file it names (create_file alone, over the wire); the
 		// prompt's Create closes it too, as Cancel does.
-		workspace.request(request::create_file(name, asset_kind_token(kind), std::move(values)));
+		if (terrain) workspace.request(request::new_terrain(name, std::move(values)));
+		else workspace.request(request::create_file(name, asset_kind_token(kind), std::move(values)));
 		window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
 		popup_.close();
 	}
@@ -235,10 +249,12 @@ void FilesWindow::refresh(const SessionView &view) {
 void FilesWindow::follow_filter(const SessionView &view) {
 	filter_.follow(view.workspace.files.filter);
 	if (kind_held_.follow(view.workspace.files.kind)) kind_shown_ = view.workspace.files.kind;
+	if (by_cost_held_.follow(view.workspace.files.by_cost)) by_cost_ = view.workspace.files.by_cost;
 }
 
-void FilesWindow::send_filter(bool filter, bool kind) {
+void FilesWindow::send_filter(bool filter, bool kind, bool by_cost) {
 	io::JsonValue members = io::JsonValue::make_object();
+	if (by_cost) members.set("by_cost", io::JsonValue::make_bool(by_cost_));
 	if (filter) members.set("filter", io::JsonValue::make_string(filter_.sent()));
 	if (kind) members.set("kind", io::JsonValue::make_string(kind_shown_ == AssetKind::kCount ? "" : asset_kind_token(kind_shown_)));
 	window_requests::set_workspace(workspace_, "files", std::move(members));
@@ -252,7 +268,8 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 		return matches_;
 	}
 	const uint64_t generation = view.findings.graph ? view.findings.graph->generation() : 0;
-	const std::string asked = std::string(filter) + '\n' + std::to_string(static_cast<int>(kind_shown_));
+	const std::string asked =
+			std::string(filter) + '\n' + std::to_string(static_cast<int>(kind_shown_)) + (by_cost_ ? "\ncost" : "");
 	if (matches_made_ && matched_ == asked && matched_generation_ == generation) return matches_;
 	matches_made_ = true;
 	matched_ = asked;
@@ -280,6 +297,18 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 			matches_.push_back(found->second);
 			via_[hit.file] = hit.via;
 		}
+	}
+	// By cost: the costliest first, what the game makes no model texture of after them in their order.
+	costs_.clear();
+	matched_cost_ = 0;
+	if (by_cost_) {
+		for (const TextureBudgetRow &row : texture_budget_list(view).rows) costs_[row.file] += row.budget.full().bytes;
+		const auto cost = [&](size_t i) {
+			const auto found = costs_.find(view.project.scan->entries[i].relative_path);
+			return found == costs_.end() ? uint64_t(0) : found->second;
+		};
+		std::stable_sort(matches_.begin(), matches_.end(), [&](size_t a, size_t b) { return cost(a) > cost(b); });
+		for (const size_t i : matches_) matched_cost_ += cost(i);
 	}
 	return matches_;
 }
@@ -348,12 +377,17 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const bool narrowed = filter_.text[0] != '\0' || kind_shown_ != AssetKind::kCount;
 	const size_t count = narrowed ? matches.size() : v.project.scan->entries.size();
 	const std::string files = (narrowed ? grouped(count) + " of " + grouped(v.project.scan->entries.size()) : grouped(count)) +
-	                          (v.project.scan->entries.size() == 1 ? " file" : " files");
+	                          (v.project.scan->entries.size() == 1 ? " file" : " files") +
+	                          (narrowed && by_cost_ ? ", " + texture_bytes_words(matched_cost_) + " in the game" : "");
+	// By cost, offered while the list shows textures (and while it is on, to turn it off).
+	const bool offers_cost = kind_shown_ == AssetKind::Texture || by_cost_;
 	{
 		const float spacing = ImGui::GetStyle().ItemSpacing.x;
 		const float kind = ImGui::GetFontSize() * 8.0f;
-		const float field = std::max(ImGui::GetFontSize() * 8.0f,
-		                             ImGui::GetContentRegionAvail().x - kind - ui_kit::text_width(files.c_str()) - spacing * 2.0f);
+		const float cost = offers_cost ? ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ui_kit::text_width("By cost") : 0.0f;
+		const float field = std::max(ImGui::GetFontSize() * 8.0f, ImGui::GetContentRegionAvail().x - kind - cost -
+		                                                                   ui_kit::text_width(files.c_str()) -
+		                                                                   spacing * (offers_cost ? 3.0f : 2.0f));
 		ui_kit::WrapRow row;
 		row.next(field);
 		if (ui_kit::filter_box("##filter", filter_.text, sizeof(filter_.text), "Filter files", field,
@@ -362,6 +396,12 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			send_filter(true, false);
 		row.next(kind);
 		draw_kind_filter(v, kind);
+		if (offers_cost) {
+			row.next(cost);
+			if (ImGui::Checkbox("By cost", &by_cost_)) send_filter(false, false, true);
+			ui_kit::tooltip("The files by what the game's textures of them cost at full detail, the costliest first: "
+			                "what the game keeps in its memory for each, every level of its chain.");
+		}
 		row.next(ui_kit::text_width(files.c_str()));
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextDisabled("%s", files.c_str());
@@ -389,7 +429,9 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoHide);
 		ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("Animation map"));
-		ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("999.9 KB"));
+		// By cost, the size the game's textures of the file take ("In game"), in the column's place.
+		ImGui::TableSetupColumn(narrowed && by_cost_ ? "In game###size" : "Size###size", ImGuiTableColumnFlags_WidthFixed,
+		                        ui_kit::text_width("999.9 KB"));
 		if (kind_fits != kind_fitted_) {
 			kind_fitted_ = kind_fits;
 			ImGui::TableSetColumnEnabled(1, kind_fits);
@@ -518,6 +560,13 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 			ui_kit::tooltip(makes(factory));
 			ImGui::PopID();
 		}
+		// A terrain made from images (S20): its name, its images and numbers asked by the same prompt.
+		ImGui::BeginDisabled(!view.allows(EditorRequestKind::NewTerrain));
+		if (ImGui::Selectable("Terrain from images...") && view.allows(EditorRequestKind::NewTerrain))
+			NewFilePrompt::ask(workspace_, AssetKind::Terrain);
+		ImGui::EndDisabled();
+		ui_kit::tooltip("A terrain made from a heightmap and a colour map (and a detail, a tile set and a surface map): "
+		                "imported into the files the game reads for a terrain, and imported again when an image changes.");
 		// The files the game reads by name, each made at once from its role's factory.
 		ImGui::SeparatorText("Files the game reads");
 		for (size_t i = 0; i < blank_factory_count(); ++i) {
@@ -616,7 +665,11 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	};
 	if (entry.kind != AssetKind::Texture) ui_kit::tooltip_lazy(tip);
 	else if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
-		texture_preview::tooltip(workspace_, entry.relative_path, TextureLoadTransform::None, tip());
+		texture_preview::tooltip(workspace_, entry.relative_path, TextureLoadTransform::None, [&] {
+			// What the game's texture of it costs (S18, the texture budget).
+			const std::string cost = texture_file_budget_words(view, entry.relative_path);
+			return cost.empty() ? tip() : tip() + "\n" + cost;
+		}());
 	ImGui::SameLine(0.0f, 0.0f);
 	if (in_tree) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetTreeNodeToLabelSpacing());
 	const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
@@ -649,9 +702,14 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		ui_kit::severity_count(DiagnosticSeverity::Warning, counts.warnings);
 	}
 	if (ImGui::TableNextColumn()) ui_kit::clipped_text(asset_kind_label(entry.kind));
-	// The size, right-aligned.
+	// The size, right-aligned; listed by cost, what the game's textures of it take (none: blank).
 	ImGui::TableNextColumn();
-	const std::string size = ui_kit::fit(size_text(entry.size_bytes), ImGui::GetContentRegionAvail().x);
+	std::string shown_size = size_text(entry.size_bytes);
+	if (by_cost_ && !in_tree) {
+		const auto cost = costs_.find(entry.relative_path);
+		shown_size = cost == costs_.end() ? std::string() : texture_bytes_words(cost->second);
+	}
+	const std::string size = ui_kit::fit(shown_size, ImGui::GetContentRegionAvail().x);
 	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ui_kit::text_width(size.c_str()));
 	ImGui::TextUnformatted(size.c_str());
 	ImGui::PopID();

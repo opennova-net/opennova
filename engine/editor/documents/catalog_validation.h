@@ -22,7 +22,14 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document);
 // (catalog_validation.cpp, static_asserted into this order): input the reader leaves out, which
 // the game ignores and a save keeps as the file has it, or which the typed model cannot carry (the file does not
 // serialize); a value the file cannot write; a record with no name, or with one an earlier record
-// of its kind has; an item with the id of an earlier item of the file; an item with no type.
+// of its kind has; an item with the id of an earlier item of the file; an item with no type. And the
+// ids and rows the engine fixes (formats/def/reserved_items.h; itemdef-re.md, "The ids and rows the
+// engine fixes"): an item on an id the engine keeps, what the engine uses it for (an Info, the
+// Inspector's hint); one of another kind than the engine looks for there; one named as an item the
+// engine keeps under another id, which the file lacks; an items.def whose first row, the one every
+// lookup that finds nothing resolves to, is no marker or holds a reserved id; and an edit refused for
+// moving a reserved record off its id or giving its id to another kind (the refusal, no Problems row
+// of the file's own).
 enum class CatalogFinding {
 	InvalidInput,
 	IgnoredInput,
@@ -31,6 +38,11 @@ enum class CatalogFinding {
 	NameDuplicate,
 	ItemIdentity,
 	ItemType,
+	ReservedId,
+	ReservedKind,
+	ReservedName,
+	FirstRow,
+	ReservedRefused,
 	kCount
 };
 const FindingCodeRow &finding_code(CatalogFinding code);

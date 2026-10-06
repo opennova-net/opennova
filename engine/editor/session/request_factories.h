@@ -167,6 +167,15 @@ inline EditorRequest replace_texture(std::string path, std::string image,
 	request.values = std::move(values);
 	return request;
 }
+// A terrain named `name` made from images (S20: import/terrain_import.h): `values` names them
+// (heightmap, colormap, detail, tiles, surface) and the importer's options (top, water, layout).
+inline EditorRequest new_terrain(std::string name, std::vector<std::pair<std::string, std::string>> values) {
+	EditorRequest request = of(EditorRequestKind::NewTerrain);
+	request.path = std::move(name);
+	std::sort(values.begin(), values.end());
+	request.values = std::move(values);
+	return request;
+}
 // The texture `path` copied as `new_name`, the uses in the project files `referrers` moved to the copy
 // (S18: graph/rename_transaction.h plan_split).
 inline EditorRequest split_texture(std::string path, std::string new_name, std::vector<std::string> referrers) {
@@ -240,11 +249,13 @@ inline EditorRequest build(std::string out_dir = std::string(), bool rehash = fa
 	return request;
 }
 // A build, then the game run on it: at its menu, or in `mission` (a .bms of the project by its
-// logical name; S14); `behind`, its window behind every other (the MCP gaps lane).
-inline EditorRequest play(std::string mission = std::string(), bool behind = false) {
+// logical name; S14); `behind`, its window behind every other (the MCP gaps lane); `fresh`, its run
+// directory emptied first of what the runs before wrote there (a first run).
+inline EditorRequest play(std::string mission = std::string(), bool behind = false, bool fresh = false) {
 	EditorRequest request = of(EditorRequestKind::Play);
 	request.mission = std::move(mission);
 	request.behind = behind;
+	request.fresh = fresh;
 	return request;
 }
 // A build, then the build copied into `export_dir` ("" the project's export folder) as what ships
@@ -371,6 +382,18 @@ inline EditorRequest save_all() {
 inline EditorRequest reveal_path(std::string path) {
 	EditorRequest request = of(EditorRequestKind::RevealPath);
 	request.path = std::move(path);
+	return request;
+}
+// Back (Forward) `steps` places of the navigation history: the nearest, or one further down Back's
+// (Forward's) list.
+inline EditorRequest navigate_back(uint32_t steps = 1) {
+	EditorRequest request = of(EditorRequestKind::NavigateBack);
+	request.steps = steps;
+	return request;
+}
+inline EditorRequest navigate_forward(uint32_t steps = 1) {
+	EditorRequest request = of(EditorRequestKind::NavigateForward);
+	request.steps = steps;
 	return request;
 }
 

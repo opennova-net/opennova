@@ -171,7 +171,7 @@ protected:
 	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
 	// A menu keeps at least one screen: a step that removes its last one is refused.
 	bool accept_step(const EditStep &step, const StagedRows &rows,
-	                 std::string &error) const override;
+	                 StepRefusal &refusal) const override;
 
 private:
 	// Whether the model holds the code page's bytes (a menu with no byte order mark, mnu.h's

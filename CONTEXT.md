@@ -541,9 +541,20 @@ The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
 the tree is organization only. Uniqueness and length are checked on output names.
 _Avoid_: path (when the engine-facing identity is meant), resource name
 
+**Font set**:
+A bitmap font made from a picture by the editor's font importer: `<name>.fntset`, a short text naming
+its **glyph sheet**, a PNG of 16 x 14 equal cells holding the bytes 0x20..0xFF in reading order, each
+glyph its cell's alpha. The sheet is the import's input; the import record's options are the font's
+metrics (`advance`: `ink`, `left` or `cell`; `tracking`; `space`; `spacing`; `design_width`) and
+`color` (`white`, a mask the text's colour tints, or `sheet`, the sheet's own colour kept). The
+import makes `<name>.fnt` through the FNT writer, every glyph the cell's height and as wide as its
+advance (the format has no advance table). An import of the set from the disk brings its sheet beside
+it into `fonts/`.
+_Avoid_: font project, atlas (the `.fnt`'s pages are the packer's layout, not the sheet's)
+
 **Import / sidecar**:
-Bringing a non-native source (an image; later a sound bank's manifest, a font, a terrain's
-images) into the project the Godot way: a committed `<file>.import` sidecar records the
+Bringing a non-native source (an image, a terrain set; later a sound bank's manifest, a font)
+into the project the Godot way: a committed `<file>.import` sidecar records the
 importer, its version, options, output logical names, the source's content hash and the
 **inputs**, every other file the importer read through its **import context**
 (`ImportContext`), by path (taken from the source's folder, never outside the project), and
@@ -557,10 +568,26 @@ seconds of the pass that read it is read again next time), and the record and th
 hashes each source's outputs were made from, so only a real change imports again and an
 untouched file is not read. A file is an **import source** (its own kind, whatever its name:
 `import_source`) only while its record is there: importing it writes the record, and a `.png`
-with none is a texture the build packs as it is. The build never packs an import source, only its
-outputs. The files the import dialog offers are **import choices** (`ImportChoice`).
+with none is a texture the build packs as it is. A file a record lists among its inputs is an
+**import input** (`import_input`, whatever its name: a terrain set's heightmap is no texture) while the
+record lists it. The build never packs an import source or an import input, only the outputs. The
+files the import dialog offers are **import choices** (`ImportChoice`).
 _Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route),
 image source (the kind's name before S13 A8)
+
+**Terrain set**:
+A terrain made from ordinary images (ADR 0046 S20): `<name>.tset`, a short text in `art/terrain/`
+naming its heightmap (a 1024 x 1024 PNG at any depth, or TrnGen's own `.raw`), its colour map
+(1024 x 1024) and, if wanted, a detail, a tile set and a surface map, each an import input; its import
+record's options are the terrain's numbers in world units (the heightmap white's height, the water
+level, the layout). The terrain importer bakes it with TrnGen.exe's own bake (the port in
+`engine/editor/terrain`) into the files the game reads for a terrain, each named after the set:
+`<name>.trn`, `.cpt`, `.til`, the colour, detail, blend and tile-set textures, and `<name>_m.pcx`, the
+**surface map** (the `.trn`'s char map: each texel's index the surface class the game reads there,
+painted as indices or in the char map legend's colours, `formats/trn/charmap_legend.h`). Files' New >
+Terrain from images..., the `new_terrain` request and `opennova-project new-terrain` make one; a change
+to an image imports it again.
+_Avoid_: terrain project (TrnGen's `.tpj`), heightfield document
 
 **Import closure**:
 What an import "with the files these need" brings beside the files chosen (ADR 0046 S14): every
@@ -759,7 +786,7 @@ _Avoid_: request (a request changes the session), view (what the windows draw fr
 
 **Verb**:
 What `opennova-project` is run to do (`new`, `status`, `validate`, `create-missing`, `import`,
-`reimport`, `build`, `request`, `query`): a row of the command line's verb table
+`reimport`, `new-terrain`, `build`, `export`, `request`, `query`): a row of the command line's verb table
 (`apps/project/cli_verbs`) naming the requests it sends the editor's session, run headless for
 that one run, and the query whose answer it prints, as text or with `--json` as the Shell's
 `query_json` gives it. The command line orchestrates nothing of its own (ADR 0046 S13 A7).
@@ -931,10 +958,21 @@ Files selects, read from its file while it is not open): its texels at a zoom (f
 a middle texel, which the wheel steps about the pointer and a drag pans), through its colour, one
 channel or its alpha as grey, or its colour over a checkerboard by its alpha, at a mip level, as the
 file holds it or as the game draws it for one of its uses (the use's loader's texels, a cut-out's test,
-a tile atlas's cells); each a SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
+a tile atlas's cells, a model row's alpha drawn as the game reads it: opaque where it is a specular brightness),
+at the chain the game builds of it and at an object texture detail, or a normal map lit; each a SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
 its palette entry), never a record. Its device draws the texels the portable decode made, texel for
 texel where a texel covers a pixel or more.
 _Avoid_: image viewer, preview (the Preview window, or the role)
+
+**Texture budget**:
+What a model texture costs the game (ADR 0046 S18): the device texture its row's loader makes of the file it
+opens (its sides after the game's halvings, its levels, its format, and every level's bytes, which the game keeps
+in its own memory) at each of the four **object texture detail** levels (game.cfg's `object_texdetail`, 0 the
+lowest to 3 full: one or two halvings of a diffuse or detail texture), and what the `.dds` its loader reads first
+would cost instead. Said under each use in the texture's tab and on the wire; past 16 MB it is a warning. The
+project's budget is every texture the game makes for the model rows (one a name written), costliest first, with
+its totals: the `texture_budget` query, Files' By cost.
+_Avoid_: footprint, VRAM (the game keeps every level in its own process too), file size (what the disk holds)
 
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
@@ -959,6 +997,17 @@ over an ask a newer one or the selection has overtaken since. The editor MCP pag
 place.
 _Avoid_: serial (the per-ask counters the events replaced), reveal state (the view keeps none),
 notification (the OS's), signal (Godot's)
+
+**Navigation history / place**:
+Where the person has been in the editor, which Back and Forward take them to again, as a browser's
+pages (`session/navigation_history.h`, the session's `NavigationController`). A place is the pane that
+shows it and the file: a document's tab with the record selected there (by its locator once the
+document is read again), a text's line a Go to showed, a file's page, or Files on a file. A step is a
+move the request table marks as one (`navigates`: a document switched to, a Go to, a Problems row, a
+find's hit, another of a menu's screens, Show in Files), whoever raised it; a record picked within what
+shows, an edit or a camera move is none, and a run of quick steps is one. The open project's alone.
+_Avoid_: undo (a document's own history of edits), breadcrumb (the outline's path to a record),
+selection history (a selection within what shows is no step)
 
 **Record / owner**:
 A row of a document or anything nested in one, at any depth; the record that holds a
@@ -1236,16 +1285,18 @@ _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running ga
 "see in game"
 
 **Run directory**:
-Where Play runs the game: `.opennova/run/<n>/` (n from 1), the game's working directory, the
-log Play tails (`session.log`; the game install's own, `_filelog.txt`, read once its game has
-exited, never while it runs) and the saves the game keeps beside itself (`weapon.sav`), so the
-build it runs from stays as the build wrote it. Play in the game install puts there what the
-install's game needs beside it: the build's files (linked; one the game may write, a `.cfg`,
-`.sav`, `.coo` or `.txt`, copied), the install's executable and Bink DLL, a `game.cfg` (the
-project's own, else the install's) and the install's `player.sav` and `weapon.sav` where the
-project has none; Strict Play, the build's files and the executable and Bink DLL alone. It
-records its game (pid and creation time) while the game may run; each Play takes the first free
-one, emptied, passing one whose game may still run.
+Where Play runs the game: `.opennova/run/<mode>/<n>/` (the Play's mode, `runtime`, `install` or
+`strict`; n from 1), the game's working directory, the log Play tails (`session.log`; the game
+install's own, `_filelog.txt`, read once its game has exited, never while it runs) and the saves
+the game keeps beside itself (`weapon.sav`), so the build it runs from stays as the build wrote
+it. Play in the game install puts there what the install's game needs beside it: the build's
+files (linked; one the game may write, a `.cfg`, `.sav`, `.coo` or `.txt`, copied), the
+install's executable and Bink DLL, a `game.cfg` (the project's own, else the install's) and the
+install's `player.sav` and `weapon.sav` where the project has none; Strict Play, the build's
+files and the executable and Bink DLL alone. It records its game (pid and creation time) while
+the game may run; each Play takes the first free one of its mode, passing one whose game may
+still run, and keeps what the game wrote there in that mode's runs before (its `game.cfg`, its
+saves; Play fresh empties it). A Play never touches another mode's run directories.
 _Avoid_: build directory (what the build publishes, never written after), working copy, stage
 
 **Strict Play**:

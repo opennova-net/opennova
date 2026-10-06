@@ -134,6 +134,10 @@ constexpr WorkspaceMember kFiles[] = {
 			"Files' filter: the files whose paths hold the text, then those of a kind it names (\"texture\"), "
 			"listed flat; the files query with text lists the same.", kTextLongest },
 	{ "kind", J::String, "The kind Files lists alone, an asset kind's token (\"\" every kind)." },
+	{ "by_cost", J::Boolean,
+			"Files lists what it lists flat (a filter or a kind) by what the game's textures of each file cost at "
+			"full detail, the costliest first, the files the game makes no model texture of after them (the "
+			"texture_budget query's textures)." },
 };
 constexpr WorkspaceMember kImport[] = {
 	{ "filter", J::String,
@@ -201,7 +205,7 @@ constexpr WorkspacePartRow kParts[] = {
 	{ "rename_back", kRenameBack, std::size(kRenameBack), "Rename back." },
 	{ "find", kFind, std::size(kFind), "The Document window's find bar." },
 	{ "project_find", kProjectFind, std::size(kProjectFind), "Find in project." },
-	{ "files", kFiles, std::size(kFiles), "Files' filter and kind." },
+	{ "files", kFiles, std::size(kFiles), "Files' filter, kind and order." },
 	{ "import", kImport, std::size(kImport), "The import dialog's filters, Replace existing files and its checks." },
 	{ "problems", kProblems, std::size(kProblems), "Problems' filters and its confirmation." },
 	{ "document", kDocument, std::size(kDocument), "What a document's views show of it: filters, kinds, order, a menu's and a texture's fields." },
@@ -337,14 +341,6 @@ bool stop_sound(WorkspaceView::Sound &sound) {
 	return true;
 }
 
-// The factory Files' New asks a name of for `kind` (a free-form one of no role); null for a kind it offers none.
-const BlankFactory *new_file_factory(AssetKind kind) {
-	for (size_t i = 0; i < blank_factory_count(); ++i) {
-		const BlankFactory &factory = *blank_factory_at(i);
-		if (factory.free_form && factory.role[0] == '\0' && factory.kind == kind) return &factory;
-	}
-	return nullptr;
-}
 
 // The menu the document is, and whether `screen` is a screen of it its Remove may ask of: the menu keeps a
 // second screen.
@@ -477,12 +473,17 @@ bool set_new_file(Change &change, const JsonValue &part) {
 		AssetKind wanted = AssetKind::kCount;
 		if (!kind_named(kind->string, wanted)) return change.refuse("No kind of file is \"" + kind->string + "\".");
 		if (wanted != AssetKind::kCount && !change.view.project.open) return change.closed("The project", "open or make one first");
-		if (wanted != AssetKind::kCount && !new_file_factory(wanted)) {
+		size_t count = 0;
+		bool asks = false;
+		new_file_params(wanted, count, &asks);
+		if (wanted != AssetKind::kCount && !asks) {
 			std::string offered;
 			for (size_t i = 0; i < blank_factory_count(); ++i) {
 				const BlankFactory &factory = *blank_factory_at(i);
 				if (factory.free_form && factory.role[0] == '\0') offered += (offered.empty() ? "" : ", ") + std::string(asset_kind_token(factory.kind));
 			}
+			// A terrain made from images (S20) is asked too: its images and numbers.
+			offered += ", " + std::string(asset_kind_token(AssetKind::Terrain));
 			return change.refuse("Files' New asks no name of a " + kind->string + " (it does of " + offered + ").");
 		}
 		if (wanted != prompt.kind) prompt = WorkspaceView::NewFile{ wanted, std::string(), {} };
@@ -491,13 +492,14 @@ bool set_new_file(Change &change, const JsonValue &part) {
 		return change.closed("The New file prompt", "name its kind first (new_file.kind)");
 	if (const JsonValue *name = part.get("name")) prompt.name = name->string;
 	if (const JsonValue *values = part.get("values")) {
-		const BlankFactory *factory = new_file_factory(prompt.kind);
+		size_t count = 0;
+		const BlankParam *taken = new_file_params(prompt.kind, count);
 		std::string params;
-		for (size_t i = 0; factory && i < factory->param_count; ++i) params += (i ? ", " : "") + std::string(factory->params[i].token);
+		for (size_t i = 0; i < count; ++i) params += (i ? ", " : "") + std::string(taken[i].token);
 		prompt.values.clear();
 		for (const io::JsonMember &value : values->object) {
 			bool known = false;
-			for (size_t i = 0; factory && i < factory->param_count; ++i) known = known || value.key == factory->params[i].token;
+			for (size_t i = 0; i < count; ++i) known = known || value.key == taken[i].token;
 			if (!known)
 				return change.refuse("A new " + std::string(asset_kind_token(prompt.kind)) + " takes no value \"" + value.key + "\" (" +
 				                     (params.empty() ? std::string("it takes none") : "it takes " + params) + ").");
@@ -613,8 +615,9 @@ bool set_files(Change &change, const JsonValue &part) {
 	if (const JsonValue *filter = part.get("filter")) files.filter = filter->string;
 	if (const JsonValue *kind = part.get("kind"); kind && !kind_named(kind->string, files.kind))
 		return change.refuse("No kind of file is \"" + kind->string + "\".");
+	if (const JsonValue *by_cost = part.get("by_cost")) files.by_cost = by_cost->boolean;
 	WorkspaceView::Files &held = change.workspace().files;
-	if (files.filter == held.filter && files.kind == held.kind) return false;
+	if (files.filter == held.filter && files.kind == held.kind && files.by_cost == held.by_cost) return false;
 	held = std::move(files);
 	return true;
 }
@@ -1329,6 +1332,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	JsonValue files = JsonValue::make_object();
 	files.set("filter", text(workspace.files.filter));
 	files.set("kind", kind_json(workspace.files.kind));
+	files.set("by_cost", flag(workspace.files.by_cost));
 	out.set("files", std::move(files));
 	// The import dialog's, with the checks counted (the import_preview query pages each row's) and the plan they
 	// index.

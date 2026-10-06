@@ -241,6 +241,17 @@ int test_bank_findings() {
 	TEST_EXPECT(has_code(findings, "sound_bank.wave_name_repeated") && has_code(findings, "sound_bank.wave_file_name") &&
 	            has_code(findings, "sound_bank.unserializable"));
 	TEST_EXPECT(!bank.serialize().ok() && bank.rewrite_need() == DocumentBase::RewriteNeed::Unserializable);
+	// A file's name is the archives' flat name, cut at either separator on every host: a shipped bank's
+	// "SFX\MENU\SELECTA1.wav" fits, a long name under it does not and is said by that name.
+	const auto file_finding = [&](const std::string &file) -> std::string {
+		if (!bank.apply(set_edit({b->id, kWave, 0}, "file", file), error)) return "not set";
+		for (const Diagnostic &d : validate_sound_bank_file(bank))
+			if (d.code() == "sound_bank.wave_file_name") return d.message;
+		return std::string();
+	};
+	TEST_EXPECT(file_finding("SFX\\MENU\\SELECTA1.wav").empty() && file_finding("sfx/menu/selecta1.wav").empty());
+	const std::string long_name = file_finding("SFX\\MENU\\A_NAME_FAR_TOO_LONG.wav");
+	TEST_EXPECT(long_name.find("file name A_NAME_FAR_TOO_LONG.wav does not fit") != std::string::npos);
 	Edit add_set;
 	add_set.operation = EditOperation::Add;
 	add_set.address = {0, kSet, 0};

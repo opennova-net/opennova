@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/file_dialog.hpp>
+#include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -54,6 +55,13 @@ public:
 	void _ready() override;
 	void _exit_tree() override;
 	void _process(double p_delta) override;
+	// The mouse's back and forward buttons (MOUSE_BUTTON_XBUTTON1, XBUTTON2) go Back and Forward (the
+	// navigation history: navigate_back, navigate_forward) wherever the pointer is over the editor's window.
+	// The root's input comes before the ImGui layer's and before any control's (the script device's text
+	// control, a text field, a viewport's picture), so the press is taken here, once, and consumed; an
+	// undocked window of the pass is an OS window of its own, whose input reaches Dear ImGui alone, and
+	// the windows' shortcuts take the buttons there (EditorWindows::shortcuts).
+	void _input(const Ref<InputEvent> &p_event) override;
 
 	// Where the editor keeps its own settings (recent projects, the runtime path): the file its
 	// preferences store keeps them in (opennova::editor::FilePreferencesStore), read when the
@@ -214,6 +222,9 @@ private:
 	void refresh_changed_sources_();
 	// The open_externally view events posted since the last pump, each file opened in its program.
 	void open_externally_events_();
+	// The system pointer shown, or hidden while a picture under the mouse draws the game's (DI-08); set
+	// only as it changes.
+	void show_system_pointer_(bool p_shown);
 
 	std::unique_ptr<ChildProcessPlatform> platform_;
 	// The preferences' store, owned here and outliving the session that reads and writes it.
@@ -261,6 +272,8 @@ private:
 	bool open_externally_ = true;
 	String last_external_open_;
 	Vector2 last_drop_at_;
+	// The system pointer hidden after the last frame (a picture under the mouse drew the game's, DI-08).
+	bool pointer_hidden_ = false;
 };
 
 } // namespace godot

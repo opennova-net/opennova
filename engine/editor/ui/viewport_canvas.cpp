@@ -185,13 +185,17 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 	keyboard.focused =
 			ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
 	if (keyboard.focused) {
-		keyboard.arrow_x = (ImGui::IsKeyPressed(ImGuiKey_RightArrow) ? 1 : 0) -
-				(ImGui::IsKeyPressed(ImGuiKey_LeftArrow) ? 1 : 0);
-		keyboard.arrow_y = (ImGui::IsKeyPressed(ImGuiKey_DownArrow) ? 1 : 0) -
-				(ImGui::IsKeyPressed(ImGuiKey_UpArrow) ? 1 : 0);
-		keyboard.arrow_held = ImGui::IsKeyDown(ImGuiKey_LeftArrow) ||
-				ImGui::IsKeyDown(ImGuiKey_RightArrow) || ImGui::IsKeyDown(ImGuiKey_UpArrow) ||
-				ImGui::IsKeyDown(ImGuiKey_DownArrow);
+		// An arrow with Alt held is Back's or Forward's (the navigation history: EditorWindows' shortcuts),
+		// never a nudge.
+		if (!io.KeyAlt) {
+			keyboard.arrow_x = (ImGui::IsKeyPressed(ImGuiKey_RightArrow) ? 1 : 0) -
+					(ImGui::IsKeyPressed(ImGuiKey_LeftArrow) ? 1 : 0);
+			keyboard.arrow_y = (ImGui::IsKeyPressed(ImGuiKey_DownArrow) ? 1 : 0) -
+					(ImGui::IsKeyPressed(ImGuiKey_UpArrow) ? 1 : 0);
+			keyboard.arrow_held = ImGui::IsKeyDown(ImGuiKey_LeftArrow) ||
+					ImGui::IsKeyDown(ImGuiKey_RightArrow) || ImGui::IsKeyDown(ImGuiKey_UpArrow) ||
+					ImGui::IsKeyDown(ImGuiKey_DownArrow);
+		}
 		// Esc that closes a popup (a toolbar's dropdown) is the popup's: Dear ImGui closes it as the frame
 		// starts, so a popup open last frame takes this frame's Esc (the audit's 3.6: it walked the
 		// selection up as well).
@@ -345,7 +349,7 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 	return true;
 }
 
-void ViewportCanvas::picture(const Device &device, const Tip &tip) {
+void ViewportCanvas::picture(const Device &device, const Tip &tip, bool pointer) {
 	// The kind's hover tip, on the surface (the item just drawn): made only while it shows.
 	if (tip)
 		ui_kit::tooltip_lazy(tip);
@@ -360,6 +364,9 @@ void ViewportCanvas::picture(const Device &device, const Tip &tip) {
 	shown.clip_right = surface_max_.x;
 	shown.clip_bottom = surface_max_.y;
 	shown.canvas_sized = zoom_ != Zoom::Device;
+	shown.pointer = pointer;
+	shown.pointer_x = input_.mouse.x;
+	shown.pointer_y = input_.mouse.y;
 	device(shown);
 	// The picture's edge: a design picture's just outside it, on its margin.
 	const float edge = zoom_ != Zoom::Fill ? 1.0f : 0.0f;

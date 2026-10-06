@@ -35,6 +35,7 @@ as usual.
     python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"document": {"filter": "gun",
         "inspector_filter": "rate"}, "find": {"open": true, "text": "90"}}'   # the active document's views
     python scripts/mcp/editor_mcp.py state --sections workspace   # what the windows show of their own
+    python scripts/mcp/editor_mcp.py request navigate_back --steps 2   # two places back (state --sections navigation)
     python scripts/mcp/editor_mcp.py viewport --op state --path main.mnu        # a document's viewport: its envelope
     python scripts/mcp/editor_mcp.py viewport --op hit --x 400 --y 300          # what lies under a point
     python scripts/mcp/editor_mcp.py viewport --op drag --id 5 --handle move --by=-8,4 --snap 1   # one undo step
@@ -258,8 +259,8 @@ REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install
                  "purpose")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
-                    "planned", "behind", "report")
-REQUEST_NUMBERS = ("plan",)
+                    "planned", "behind", "fresh", "report")
+REQUEST_NUMBERS = ("plan", "steps")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -513,6 +514,10 @@ def cmd_play(args: argparse.Namespace) -> int:
         # only); by default it starts as Play starts it, as the editor_play tool's does.
         if args.behind:
             request["behind"] = True
+        # --fresh: the run directory emptied of what the runs before wrote there (game.cfg, saves) first, a
+        # first run; by default it keeps them.
+        if args.fresh:
+            request["fresh"] = True
         outcome, ended = raise_and_wait(client, request, args.timeout)
         if ended is None:
             return EXIT_NOT_DONE
@@ -770,9 +775,15 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--plan", type=int, default=None,
                          help="import_files --planned: the plan it imports (query import_preview's plan); a plan "
                               "made since is refused")
+    request.add_argument("--steps", type=int, default=None,
+                         help="navigate_back, navigate_forward: how many places of the navigation history (1 when "
+                              "left out; state --sections navigation lists them, nearest first)")
     request.add_argument("--behind", choices=switch, default=None,
                          help="play: the game's window starts behind every other, the editor keeping the foreground "
                               "(Windows only)")
+    request.add_argument("--fresh", choices=switch, default=None,
+                         help="play: the run directory emptied of what the runs before wrote there (game.cfg, saves) "
+                              "before the game starts")
     request.add_argument("--report", choices=switch, default=None,
                          help="build: false leaves the build result's panel closed as the build ends")
     request.add_argument("--wait", action="store_true",
@@ -879,6 +890,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="start: the game's window starts behind every other, the editor keeping the foreground "
                            "(play's behind; Windows only). Left out, it starts as Play starts it, as the editor_play "
                            "tool's does")
+    play.add_argument("--fresh", action="store_true",
+                      help="start: the run directory emptied of what the runs before wrote there (the game's game.cfg, "
+                           "its saves) before the game starts, a first run (play's fresh). Left out, it keeps them")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 

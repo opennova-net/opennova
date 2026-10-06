@@ -49,6 +49,7 @@
 #include <editor/session/script_assist.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
+#include <editor/session/texture_budget_list.h>
 #include <editor/session/texture_import_state.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view_json.h>
@@ -1401,6 +1402,25 @@ JsonValue answer_texture_uses(const QueryContext &context, const QueryArgs &args
 	return out;
 }
 
+constexpr QueryParam kTextureBudgetParams[] = {
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+// What the project's model textures cost the game (ADR 0046 S18, session/texture_budget_list).
+JsonValue answer_texture_budget(const QueryContext &context, const QueryArgs &args, std::string &) {
+	const TextureBudgetList list = texture_budget_list(context.core.view());
+	const JsonPage page = page_of(args);
+	JsonValue out = JsonValue::make_object();
+	out.set("totals", texture_budget_totals_json(list));
+	set_page(out, page, list.rows.size());
+	JsonValue rows = JsonValue::make_array();
+	for (size_t i = page.first(list.rows.size()); i < page.last(list.rows.size()); ++i)
+		rows.push(texture_budget_row_json(list.rows[i]));
+	out.set("textures", std::move(rows));
+	return out;
+}
+
 constexpr QueryParam kImportOptionsParams[] = {
 	{ "path", J::String, true, nullptr,
 			"An import source of the project (a file holding its .import record), or a file an import "
@@ -1423,6 +1443,22 @@ constexpr QueryParam kFileCardParams[] = {
 
 JsonValue answer_file_card(const QueryContext &context, const QueryArgs &args, std::string &) {
 	return file_card_json(file_card(context.core.view(), args.text("path")));
+}
+
+// Who names a file, in one look (the deep-integration plan's DI-05): the Inspector's Used by.
+constexpr QueryParam kUsedByParams[] = {
+	{ "path", J::String, false, nullptr,
+			"A project file, as file_card takes it; left out, the active document's file." },
+};
+
+JsonValue answer_used_by(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path").empty() ? view.documents.active : args.text("path");
+	if (path.empty()) {
+		error = "name the file with \"path\" (no document is active).";
+		return JsonValue::make_null();
+	}
+	return file_users_json(file_users(view, path));
 }
 
 // --- the table -----------------------------------------------------------------------------------
@@ -1643,7 +1679,9 @@ constexpr EditorQueryRow kRows[] = {
 			"the device_rect the Shell's device placed it at; a model's markers, each with its "
 			"record, position and picture pixel; a menu's compiler notes), while the picture is "
 			"current. hit: the item under the point x, y (viewport and path, the viewport's kind "
-			"and document; kind, index, id, name, current, the item's). render: one row of the "
+			"and document; kind, index, id, name, current, the item's; a menu's pointer, the game's "
+			"pointer with the mouse there: drawn, and file, width, height, window and name, the window "
+			"whose CURSOR it is; a mission's ground). render: one row of the "
 			"document as its kind renders it apart (a menu's screen as the render check compiled "
 			"it, the menu_render query's answer; a model's whole document is its picture, and it "
 			"refuses). palette: what a mission's Place tool places (count, matching, groups {group, "
@@ -1797,6 +1835,18 @@ constexpr EditorQueryRow kRows[] = {
 			"alpha_ref; key; hud_mode).")
 			.pages("uses")
 			.row,
+	Query(K::TextureBudget, "texture_budget", answer_texture_budget, kTextureBudgetParams,
+			concern_set({ C::Graph, C::Files, C::Documents, C::DocumentSet }),
+			"What the project's model textures cost the game (ADR 0046 S18): totals {detail (the bytes of every "
+			"texture at each object texture detail level, 0 the lowest to 3 full), as_dds (the same at full "
+			"detail had every texture whose loader reads a .dds first that .dds), textures, past_warning (how "
+			"many hold more than the texture.memory warning)} and a page of textures, the costliest first at "
+			"full detail: each texture the game makes for the model rows (one a name written, any case, the "
+			"stage and plain loaders sharing it, the normal-map loader's apart), its name (as its first row "
+			"writes it), file (the file its loader opens), uses (how many rows take it) and its budget as "
+			"texture_uses gives it.")
+			.pages("textures")
+			.row,
 	Query(K::ImportOptions, "import_options", answer_import_options, kImportOptionsParams,
 			concern_set({ C::Files, C::Graph, C::Documents, C::DocumentSet }),
 			"An import's options and what its uses ask of it (ADR 0046 S18): its source, record, "
@@ -1851,6 +1901,16 @@ constexpr EditorQueryRow kRows[] = {
 			"record, value, status in words, the file it resolves to, whether that file is a wave), "
 			"named_by (file, record, field), and reading: true while the project's references are being read "
 			"(names and named_by then as far as the graph has read).")
+			.row,
+	Query(K::UsedBy, "used_by", answer_used_by, kUsedByParams,
+			concern_set({ C::Files, C::Graph, C::Project, C::Operation, C::ActiveDocument }),
+			"Who names a file, in one look, as the Inspector shows it with nothing selected (the deep-"
+			"integration plan's DI-05): found, its path and name, count (its uses: the records naming it, then "
+			"those naming what it defines) and further_count, files (by the naming file: file, name, uses), "
+			"each use's words (the record and its field in words), field, the file and locator Go to opens "
+			"(editable false: shown in Files), and further, one hop on where the naming record defines what "
+			"others name (an item naming a model: the mission entities placing it), by file likewise; reading "
+			"while the project's references are being read.")
 			.row,
 };
 

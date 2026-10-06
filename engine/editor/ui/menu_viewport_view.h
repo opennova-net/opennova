@@ -19,7 +19,10 @@ namespace opennova::editor {
 // primary with eight handles: a drag of a handle resizes the primary, a drag of a selected window
 // moves every selected one (one batch per step, one undo step per drag), as do the arrow keys; Esc
 // selects the primary's parent; Ctrl+C / X / V / D copy, cut, paste and duplicate windows, also
-// from the right-click menu; the middle button or Space pans, Ctrl+wheel zooms about the mouse.
+// from the right-click menu; the middle button or Space pans, Ctrl+wheel zooms about the mouse. With
+// Pointer on (DI-08) the picture draws the game's pointer at the mouse where the canvas shows none of its
+// own, the system pointer hidden over it, and the toolbar names it with a jump to the window whose CURSOR
+// it is (no pointer: the system one stays and the toolbar says the game shows none).
 class MenuViewportView final : public ViewportView {
 public:
 	MenuViewportView();
@@ -27,6 +30,7 @@ public:
 
 protected:
 	void draw_ready(Workspace &workspace, const ViewportModel &model, ViewportContext &context) override;
+	bool draws_pointer(const ViewportModel &model, const ViewportContext &context, const CanvasInput &in) override;
 
 private:
 	struct Tools;

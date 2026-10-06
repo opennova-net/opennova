@@ -211,6 +211,8 @@ JsonValue run_section(const SessionView &view) {
 	out.set("command_line", json_string(activity.play_command_line));
 	out.set("run_dir", json_string(activity.play_run_dir));
 	out.set("log_file", json_string(activity.play_log_file));
+	out.set("fresh", boolean(activity.play_fresh));
+	out.set("kept", strings_to_json(activity.play_kept));
 	out.set("exited_on_its_own", boolean(activity.play_exited_on_its_own));
 	out.set("exit_code",
 			activity.play_exit_code >= 0 ? json_number(double(activity.play_exit_code))
@@ -440,6 +442,34 @@ JsonValue output_section(const SessionView &view) {
 	return out;
 }
 
+// A place of the navigation history: its pane, its file, its words, and in a document the record it
+// names (its locator, and its address while the document read stands) or a text's line.
+JsonValue navigation_place_to_json(const NavigationPlace &place) {
+	JsonValue out = JsonValue::make_object();
+	out.set("pane", json_string(navigation_pane_token(place.pane)));
+	out.set("path", json_string(place.path));
+	out.set("label", json_string(place.label));
+	if (!place.locator.empty()) out.set("locator", json_string(place.locator));
+	if (place.record.row) out.set("record", address_to_json(place.record));
+	return out;
+}
+
+JsonValue navigation_places_to_json(const std::vector<NavigationPlace> &places) {
+	JsonValue out = JsonValue::make_array();
+	for (const NavigationPlace &place : places) out.push(navigation_place_to_json(place));
+	return out;
+}
+
+// The navigation history: whether Back and Forward go anywhere, and their places, nearest first.
+JsonValue navigation_section(const SessionView &view) {
+	JsonValue out = JsonValue::make_object();
+	out.set("can_back", boolean(view.navigation.can_back()));
+	out.set("can_forward", boolean(view.navigation.can_forward()));
+	out.set("back", navigation_places_to_json(view.navigation.back));
+	out.set("forward", navigation_places_to_json(view.navigation.forward));
+	return out;
+}
+
 // The view events held, by seq (the events query pages them).
 JsonValue events_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
@@ -485,7 +515,9 @@ constexpr ViewSectionRow kSections[] = {
 			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), the mission "
 			"it was started in (\"\" at its menu), behind (its window started behind the others), exit_code, "
 			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
-			"the build directory), the files it reported missing at boot, and what Play runs (the "
+			"the build directory), whether that directory was emptied first (fresh) and what it kept of "
+			"what the runs before wrote there (kept: the game's game.cfg, its saves), the files it reported "
+			"missing at boot, and what Play runs (the "
 			"game install, in it or not, the runtime)." },
 	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,
 			"The import dialog in short (open, plan: which plan it shows, with_dependencies, planning while its plan is made, its lists' counts; the "
@@ -534,6 +566,11 @@ constexpr ViewSectionRow kSections[] = {
 			"apply_confirmation raises}, confirm_serial}) and each open document's views "
 			"(documents [{path, active, filter, kinds, all_rows, sort, every, inspector_filter, new_window_type, "
 			"remove_screen, remap_from, remap_to}])." },
+	{ S::Navigation, "navigation", concern_set({ C::Navigation }), navigation_section,
+			"The navigation history (Back and Forward: navigate_back, navigate_forward): can_back, can_forward, "
+			"and the places each goes to, nearest first (back, forward: [{pane: document, page or files, path, "
+			"label (its words, as Back's tooltip and list say it), locator? (a record's, or a text's "
+			"line:column), record? {row, kind, child} while the document read stands}])." },
 };
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");

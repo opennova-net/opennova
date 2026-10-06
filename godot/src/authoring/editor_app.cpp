@@ -4,6 +4,8 @@
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/input.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -31,6 +33,7 @@
 #include <editor/project/project_files.h>
 #include <editor/run/launch_plan.h>
 #include <editor/session/file_preferences_store.h>
+#include <editor/session/navigation_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
@@ -166,8 +169,10 @@ void EditorApp::_ready() {
 	if (get_tree()->get_current_scene() == this) get_tree()->set_auto_accept_quit(false);
 	ensure_session();
 	ImGuiPassNode::_ready();
-	// The session pumps whether or not the workspace draws (headless tests, the smoke).
+	// The session pumps whether or not the workspace draws (headless tests, the smoke); the mouse's back and
+	// forward buttons are taken at the root's input (_input).
 	set_process(true);
+	set_process_input(true);
 	// The viewports' devices render offscreen through the runtime's MenuFrame and ObjectModel, or are a
 	// Control placed over the canvas's rect (the script device's CodeEdit, S13 V10)
 	// (authoring/viewport_devices), drawn only by a viewport's view; headless runs keep them too (the
@@ -259,6 +264,7 @@ int EditorApp::start_mcp_endpoint(int p_port) {
 void EditorApp::_exit_tree() {
 	mcp_service_ = nullptr; // a child: it leaves with the tree and stops its server
 	mcp_port_ = 0;
+	show_system_pointer_(true);
 #if OPENNOVA_EDITOR_UI
 	windows_->set_devices(nullptr);
 	windows_->set_thumbnail_images(nullptr);
@@ -313,6 +319,22 @@ void EditorApp::_process(double p_delta) {
 	}
 }
 
+void EditorApp::_input(const Ref<InputEvent> &p_event) {
+	const InputEventMouseButton *button = Object::cast_to<InputEventMouseButton>(p_event.ptr());
+	if (button == nullptr || !session_) return;
+	const MouseButton which = button->get_button_index();
+	if (which != MOUSE_BUTTON_XBUTTON1 && which != MOUSE_BUTTON_XBUTTON2) return;
+	// A picker waits on a person's answer: the buttons are its own while it shows.
+	if (picker_ != nullptr && picker_->is_visible()) return;
+	// Its release too: Dear ImGui never sees half a click of it.
+	get_viewport()->set_input_as_handled();
+	const bool back = which == MOUSE_BUTTON_XBUTTON1;
+	if (!button->is_pressed() || !opennova::editor::navigation_offered(session_->view(), back)) return;
+	const EditorRequest asked =
+			back ? opennova::editor::request::navigate_back() : opennova::editor::request::navigate_forward();
+	if (!session_->handle(asked)) serve(asked);
+}
+
 void EditorApp::before_layout(double) {
 	if (thumbnails_) thumbnails_->begin_frame();
 #if OPENNOVA_EDITOR_UI
@@ -323,7 +345,16 @@ void EditorApp::before_layout(double) {
 void EditorApp::after_layout(uint64_t, bool, int64_t) {
 #if OPENNOVA_EDITOR_UI
 	windows_->end_frame();
+	// One pointer over a picture that draws the game's (a menu's, DI-08): the system one hidden while a
+	// window asks, shown again the frame none does.
+	show_system_pointer_(!windows_->pointer_hidden());
 #endif
+}
+
+void EditorApp::show_system_pointer_(bool p_shown) {
+	if (p_shown == !pointer_hidden_) return;
+	pointer_hidden_ = !p_shown;
+	Input::get_singleton()->set_mouse_mode(p_shown ? Input::MOUSE_MODE_VISIBLE : Input::MOUSE_MODE_HIDDEN);
 }
 
 void EditorApp::pump() {

@@ -12,7 +12,8 @@ extends GutTest
 ## as one undo step, several selected windows move and arrange in one step each; a TABLE draws through
 ## the device (its rows' cells, a SUBST image, a clip rect) where the compile places it; a device given
 ## up retires its SubViewport, freed at the next frame; a focused edit box's caret blinks on the
-## preview clock through the device's own frame (S13 V8). The model: drawn as it would save, at the level
+## preview clock through the device's own frame (S13 V8); the game's pointer draws through the device's
+## frame where a client holds it (DI-08). The model: drawn as it would save, at the level
 ## the portable half picks; a user point projects within half a pixel of where the device's camera
 ## puts it; a user point's edit builds nothing, a light's builds the scene again; the options hold a
 ## level and a CTRL register; a part's marker rides the part the device draws at the clock the two
@@ -755,6 +756,57 @@ func test_the_caret_blinks_on_the_preview_clock() -> void:
 	await get_tree().process_frame
 	assert_eq(frame.get_draw_list_stats().glyphs, hidden, "and gone in the next hidden half")
 	assert_eq(int(_state().get("builds", -1)), builds, "the frame drawn again, the picture never made again")
+
+
+## DI-08: the game's pointer through the device's own frame (the Shell's MenuViewportApplier and its
+## tick). A new project's MAIN names the blank pointer; a hit says the pointer the game draws there; held
+## at a point by a client (pointer_at, the wire's hover) the frame's cursor pass draws it there, one
+## textured quad more, the screen never configured again for it; Pointer off draws none, a point let go
+## draws none, and a point off the picture is refused.
+func test_the_pointer_draws_where_it_is_held() -> void:
+	if _app == null:
+		return
+	_new_project("Pointer Game")
+	assert_eq(_seam.create_missing_files(), 0)
+	assert_true(_seam.open_document("main.mnu"))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var options: Dictionary = state.get("options", {})
+	assert_true(bool(options.get("pointer", false)), "the pointer drawn by default: %s" % str(options))
+	assert_null(options.get("pointer_at", 0), "held nowhere")
+	var hit := _viewport("hit", {"x": 400, "y": 300})
+	var pointer: Dictionary = hit.get("pointer", {})
+	assert_true(bool(pointer.get("drawn", false)), str(hit))
+	assert_eq(String(pointer.get("file", "")), "newarow1.tga", str(pointer))
+	assert_eq(String(pointer.get("name", "")), "MAIN", str(pointer))
+	assert_eq(int(pointer.get("width", 0)), 32)
+	var frame: Object = _device_node(state, "MenuFrame")
+	assert_not_null(frame, "the device's frame")
+	if frame == null:
+		return
+	await get_tree().process_frame
+	var builds := int(_state().get("builds", 0))
+	var bare = frame.get_draw_list_stats()
+	assert_true(_change({"options": {"pointer_at": [400, 300]}}))
+	await get_tree().process_frame
+	var pointed = frame.get_draw_list_stats()
+	assert_eq(pointed.quads, bare.quads + 1, "the cursor pass draws the pointer")
+	assert_eq(pointed.quads_textured, bare.quads_textured + 1, "with its image")
+	var held_at: Array = _state().get("options", {}).get("pointer_at", [])
+	assert_eq(held_at.size(), 2, str(held_at))
+	if held_at.size() == 2:
+		assert_eq(Vector2(float(held_at[0]), float(held_at[1])), Vector2(400, 300))
+	assert_true(_change({"options": {"pointer": false}}))
+	await get_tree().process_frame
+	assert_eq(frame.get_draw_list_stats().quads, bare.quads, "Pointer off: none drawn")
+	assert_true(_change({"options": {"pointer": true}}))
+	await get_tree().process_frame
+	assert_eq(frame.get_draw_list_stats().quads, bare.quads + 1, "on again where it is held")
+	assert_true(_change({"options": {"pointer_at": null}}))
+	await get_tree().process_frame
+	assert_eq(frame.get_draw_list_stats().quads, bare.quads, "let go: none drawn")
+	assert_true(_refusal({"options": {"pointer_at": [900, 10]}}).contains("pointer_at"))
+	assert_eq(int(_state().get("builds", -1)), builds, "the screen never configured again for the pointer")
 
 
 # --- the model -------------------------------------------------------------------------------------

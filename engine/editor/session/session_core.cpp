@@ -35,6 +35,7 @@
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_controller.h>
+#include <editor/session/navigation_controller.h>
 #include <editor/session/open_operation.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problems_service.h>
@@ -271,6 +272,7 @@ void SessionCore::finish_operation() {
 	problems().show_validation(); // a finish that read the files leaves their validation due
 	show_operation();
 	workspace_tidies(*this); // a refresh, an import or a rename moved the files the workspace names
+	navigation().tidy();     // and those the navigation history's places name
 }
 
 // The slot as the view shows it: the running operation (none) and what the last one came to.
@@ -446,6 +448,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	read_install_expansions(); // the project's install's, before its requirements weigh them
 	absorb_refresh(open.refresh());
 	restore_workspace(); // the documents it was left with (the UX round's project lane)
+	navigation().clear(); // its history starts where it reopened, with no place behind it
 	const std::string &title = view_.project.document->title;
 	note("Opened " + title + ".");
 	view_.activity.status = "Opened " + title + ".";
@@ -474,6 +477,7 @@ bool SessionCore::close_project() {
 	// report of the game started in it (a later line of that game's log is ignored; the
 	// next project opens with none, even when it is this one again).
 	documents().close_all();
+	navigation().clear(); // its places are its files'
 	guard().close_prompt_if_open();
 	play().forget_project();
 	documents().activate(std::string());
@@ -1570,7 +1574,7 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		note("Build failed.");
 		view_.activity.status = "Build failed; see Problems.";
 	}
-	if (result.ok && intent.wanted) play().start(intent.mission, intent.behind);
+	if (result.ok && intent.wanted) play().start(intent.mission, intent.behind, intent.fresh);
 	bool exported_ok = true;
 	if (result.ok && exported.wanted && shipped) {
 		for (const Diagnostic &d : shipped->diagnostics) {

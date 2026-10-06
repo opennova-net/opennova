@@ -64,7 +64,9 @@ constexpr RequestField kFields[] = {
 			"project, by name, with or without their extension; the title its file's name when left "
 			"out); an import's options by their keys, as the import_options query lists them (\"\" an "
 			"option's default); a texture operation's params (resize: size; alpha: alpha; format: "
-			"format, dds, mips, palette; remap_palette: each index to move, \"<from>\": \"<to>\")." },
+			"format, dds, mips, palette; remap_palette: each index to move, \"<from>\": \"<to>\"); a new "
+			"terrain's images (heightmap, colormap, detail, tiles, surface) and its importer's options (top, "
+			"water, layout)." },
 	{ F::Roles, "roles", J::Strings, "Requirements' roles." },
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,
@@ -109,7 +111,9 @@ constexpr RequestField kFields[] = {
 			"it, else its Main view), device {width, height} the size its device draws at (1 to "
 			"8192), clock {playing, rate, time_ms, ticks} the preview clock every viewport reads, "
 			"options the kind's (a menu's show_hidden, force_id, force_state, checked, popup_open, "
-			"focus; a model's lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
+			"focus, zoom, scale, snap, pointer (the game's pointer drawn, true or false) and pointer_at "
+			"([x, y] in design units where the pointer stands, as the mouse would, or null); a model's "
+			"lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
 			"distance, target, frame}, each member optional. A change of the clock alone with no "
 			"path sets the clock whatever document is active (none, or one that shows in no "
 			"viewport)." },
@@ -189,12 +193,21 @@ constexpr RequestField kFields[] = {
 			"Play's game window starts behind every other window, the editor keeping the foreground (shown without "
 			"activation, sent to the bottom while it starts, until the person brings it forward): a client driving "
 			"the editor while a person works at the machine. Windows only: elsewhere Play spawns nothing." },
+	{ F::Fresh, "fresh", J::Boolean,
+			"Play's run directory is emptied before the game starts, of what the runs before wrote there as "
+			"well as what they staged: a first run (the game install's device dialog, the game's default "
+			"profile). Left out, the run directory keeps the game's own files (its game.cfg, which names the "
+			"display adapter its device dialog chose, its saves) between Plays of the same mode." },
 	{ F::Plan, "plan", J::Integer,
 			"The import plan a planned import means (the import_preview query's plan): the one the dialog shows, or "
 			"the import is refused (planned again since: its rows are others)." },
 	{ F::Report, "report", J::Boolean,
 			"A build's result panel opens over the editor as it ends (true when left out); false leaves the "
 			"person's work as it is (the build section and the operation say what it came to)." },
+	{ F::Steps, "steps", J::Integer,
+			"How many places of the navigation history a navigate_back or a navigate_forward goes (1 when left "
+			"out: the nearest; the navigation section lists them nearest first, as Back's and Forward's lists "
+			"do)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

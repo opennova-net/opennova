@@ -152,9 +152,49 @@ std::vector<std::string> list_base_file_names(const std::string &retail_root, co
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {
 	if (const AssetEntry *prior = existing.find(name)) return prior->relative_path;
-	// An import source sits with the files of the kind its name gives (a PNG with the textures it makes).
+	// An import source sits with the files of the kind its name gives (a PNG with the textures it makes),
+	// or, where its name gives none, in its importer's folder (a font set with the fonts it makes).
 	const AssetKind placed = kind == AssetKind::ImportSource ? asset_kind_for_name(name) : kind;
+	if (kind == AssetKind::ImportSource && placed == AssetKind::Unknown)
+		if (const Importer *importer = authored_importer_for(name)) return join_path(importer->folder, name);
 	return join_path(asset_kind_row(placed).folder, name);
+}
+
+std::vector<ImportSourceInput> import_source_inputs(const std::string &source_name, const std::vector<uint8_t> &source,
+                                                    const std::string &source_path, const std::string &source_destination,
+                                                    const std::string &root, const AssetScan &existing) {
+	std::vector<ImportSourceInput> out;
+	const Importer *importer = authored_importer_for(source_name);
+	if (!importer || !importer->names_inputs) return out;
+	std::vector<std::string> paths;
+	importer->names_inputs(source, paths);
+	const std::string beside = utf8_of(path_of(source_path).parent_path());
+	const std::string folder = join_path(root, utf8_of(path_of(source_destination).parent_path()));
+	std::set<std::string> listed;
+	for (const std::string &path : paths) {
+		ImportSourceInput input;
+		input.path = path;
+		input.name = basename_of(utf8_of(path_of(path).lexically_normal()));
+		std::string file;
+		if (!ImportContext::resolve(folder, root, path, file, input.destination)) {
+			input.destination.clear();
+			input.problem = source_name + " reads " + path + ", which leaves the project from where " + source_name +
+			                " goes (an import reads the files of its source's folder and the folders under the project, never "
+			                "one outside it or under a dot-folder).";
+		} else if (!listed.insert(strutil::to_lower(input.destination)).second) {
+			continue; // read once however often it is named
+		} else if (const AssetEntry *held = existing.find(input.name);
+		           held && !strutil::iequals(held->relative_path, input.destination)) {
+			input.problem = "The project has " + input.name + " at " + held->relative_path + ", and " + source_name +
+			                " reads it at " + input.destination + ".";
+		} else {
+			std::string error;
+			if (!read_file_bytes(join_path(beside, path), input.bytes, error))
+				input.problem = source_name + " reads " + path + ", which is not beside it: " + error;
+		}
+		out.push_back(std::move(input));
+	}
+	return out;
 }
 
 namespace {
@@ -414,7 +454,27 @@ private:
 		// A loose file from the disk is an author's source; a file of the game install or an
 		// archive, or one a source marks native, is the game's own, copied as the game reads it.
 		const bool authored = !source.install && source.entry.empty() && !source.native;
-		for (ImportOutput &output : made) {
+		// An author's import source brings the files its import reads besides it (a font set's glyph
+		// sheet): each copied as it is to where the import reads it, beside the source, with no record of
+		// its own (import_source_inputs).
+		std::vector<std::string> input_destinations(made.size());
+		if (authored && !converter) {
+			const std::string destination = import_destination(existing_, name, AssetKind::ImportSource);
+			for (ImportSourceInput &input :
+			     import_source_inputs(name, made.front().bytes, source.path, destination, paths_.root, existing_)) {
+				if (!input.problem.empty()) {
+					refuse(CoreFinding::ImportInput, input.problem, name);
+					continue;
+				}
+				cost_ += input.bytes.size();
+				made.push_back({input.name, std::move(input.bytes)});
+				input_destinations.push_back(input.destination);
+			}
+		}
+		for (size_t index = 0; index < made.size(); ++index) {
+			ImportOutput &output = made[index];
+			const std::string &input_destination = input_destinations[index];
+			const bool input = !input_destination.empty();
 			// An author's wave comes in as the game plays it (the sound lane, import/wave_source.h): as it is
 			// where the game's loader takes it, else written in the form it takes, said; one that reads as no
 			// wave is refused.
@@ -442,7 +502,7 @@ private:
 			// written with it, below), whatever its name makes it otherwise; any other file is the kind
 			// its name and bytes give (the game's own PNG the texture it loads as it is; an author's TGA,
 			// which a record alone makes a source: authored_importer_for).
-			const Importer *importer = authored ? authored_importer_for(output.name) : nullptr;
+			const Importer *importer = authored && !input ? authored_importer_for(output.name) : nullptr;
 			const AssetKind kind = importer ? AssetKind::ImportSource : classify_asset(output.name, &output.bytes);
 			if (kind == AssetKind::Unknown || kind == AssetKind::Archive) {
 				refuse(CoreFinding::ImportKind, "Unsupported asset type: " + output.name, output.name);
@@ -460,7 +520,7 @@ private:
 				       output.name);
 				continue;
 			}
-			const std::string relative = import_destination(existing_, output.name, kind);
+			const std::string relative = input ? input_destination : import_destination(existing_, output.name, kind);
 			if (!check_project_file_name(paths_.root, utf8_of(path_of(relative).parent_path()), output.name, kind,
 			                             problem, message)) {
 				refuse(name_refused(problem), message, output.name);

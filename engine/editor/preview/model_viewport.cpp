@@ -86,7 +86,8 @@ assets::Model with_user_points(const assets::Model &read, const std::vector<thre
 }
 
 bool same_rig(const PreviewRig &a, const PreviewRig &b) {
-	return a.model == b.model && a.table == b.table && a.clip == b.clip && a.source == b.source;
+	return a.model == b.model && a.table == b.table && a.clip == b.clip && a.source == b.source &&
+	       a.pairing.file == b.pairing.file && a.pairing.locator == b.pairing.locator;
 }
 
 std::string file_of(const std::string &path) {
@@ -1633,6 +1634,14 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	animation.set("clip", json_string(rig_.clip));
 	animation.set("model", json_string(rig_.model));
 	animation.set("source", json_string(rig_.source));
+	// Where "paired by" goes (DI-05): the pairing record's file and locator, an open_document's.
+	if (!rig_.pairing.file.empty()) {
+		JsonValue pairing = JsonValue::make_object();
+		pairing.set("file", json_string(rig_.pairing.file));
+		pairing.set("locator", json_string(rig_.pairing.locator));
+		pairing.set("field", json_string(rig_.pairing.field));
+		animation.set("pairing", std::move(pairing));
+	}
 	animation.set("rig", JsonValue::make_bool(skeleton_ != nullptr));
 	animation.set("key", json_string(clip_key_));
 	animation.set("variant", json_number(clip_variant_));
