@@ -244,7 +244,7 @@ int test_bank_findings() {
 	// A file's name is the archives' flat name, cut at either separator on every host: a shipped bank's
 	// "SFX\MENU\SELECTA1.wav" fits, a long name under it does not and is said by that name.
 	const auto file_finding = [&](const std::string &file) -> std::string {
-		TEST_EXPECT(bank.apply(set_edit({b->id, kWave, 0}, "file", file), error));
+		if (!bank.apply(set_edit({b->id, kWave, 0}, "file", file), error)) return "not set";
 		for (const Diagnostic &d : validate_sound_bank_file(bank))
 			if (d.code() == "sound_bank.wave_file_name") return d.message;
 		return std::string();
