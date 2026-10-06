@@ -9,7 +9,13 @@
 // compiler's patches from afar, and near an eye standing on the slope the finest tile under it drawn
 // at the ground's height whichever way it looks); the import rerun-stable (forced again, the same bytes); the blank environment
 // a mission can be made under, and a blank mission made on the new terrain; and the refusals that
-// write nothing (a name taken, a colour map of another size, a value of no key).
+// write nothing (a name taken, a colour map of another size, a value of no key). The surface map: read
+// from an indexed image's indices (an 8-bit PCX, a palette PNG) or a colour image's legend colours,
+// refused at another size and for a texel of no class (named by its place); written as <stem>_m.pcx,
+// 8-bit with the legend its palette, the .trn's polytrn_charmap naming it; and the runtime's surface
+// sampler reading the classes painted at known mission positions over the island, at 512 and at 1024.
+// With --retail, a shipped char map (JO:CA's Dvxi5_m.pcx) through the same read: its palette the legend,
+// its indices kept.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -26,6 +32,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
 #include <editor/import/import_run.h>
+#include <editor/import/png_decode.h>
 #include <editor/import/png_encode.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/terrain_import.h>
@@ -34,15 +41,22 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/request_kinds.h>
+#include <editor/session/texture_import_state.h>
 #include <formats/cpt/cpt_io.h>
 #include <formats/env/env.h>
+#include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 #include <formats/til/til_io.h>
+#include <formats/til/til_tsd.h>
+#include <formats/trn/charmap_legend.h>
 #include <formats/trn/trn_io.h>
 #include <runtime/terrain/terrain_frame.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/png_test_support.h"
@@ -50,6 +64,8 @@
 
 using namespace opennova::editor;
 namespace fs = std::filesystem;
+using opennova::IndexedImage8;
+using opennova::RgbaImage;
 using editor_test::NoProcess;
 using editor_test::PngSpec;
 using editor_test::make_png;
@@ -103,6 +119,73 @@ std::vector<uint8_t> colour_png(int side) {
 			p[3] = 255;
 		}
 	return encode_png_rgba(rgba.data(), uint32_t(side), uint32_t(side));
+}
+
+// A surface map's classes, `side` a side: grass (2) everywhere, then a row of 8 x 8-texel patches in the
+// middle, one of each class 0 to 19, the first at column side / 2 - 80 and row side / 2 - 16 (the
+// patches a little north of the world's origin, around the player's start).
+std::vector<uint8_t> surface_classes(int side) {
+	std::vector<uint8_t> classes(size_t(side) * side, 2);
+	for (int k = 0; k < opennova::kCharmapLegendCount; ++k)
+		for (int row = side / 2 - 16; row < side / 2 - 8; ++row)
+			for (int col = side / 2 - 80 + 8 * k; col < side / 2 - 72 + 8 * k; ++col) classes[size_t(row) * side + col] = uint8_t(k);
+	return classes;
+}
+
+// The classes painted as an RGBA PNG in the legend's colours.
+std::vector<uint8_t> surface_colour_png(int side, const std::vector<uint8_t> &classes) {
+	std::vector<uint8_t> rgba(size_t(side) * side * 4);
+	for (size_t i = 0; i < classes.size(); ++i) {
+		const opennova::CharmapLegendColour &c = opennova::kCharmapLegend[classes[i]];
+		rgba[i * 4] = c.r;
+		rgba[i * 4 + 1] = c.g;
+		rgba[i * 4 + 2] = c.b;
+		rgba[i * 4 + 3] = 255;
+	}
+	return encode_png_rgba(rgba.data(), uint32_t(side), uint32_t(side));
+}
+
+// The classes as a palette PNG, its indices the classes, its palette any colours (a grey ramp: an
+// indexed image's palette is never read).
+std::vector<uint8_t> surface_palette_png(int side, const std::vector<uint8_t> &classes) {
+	PngSpec spec;
+	spec.width = uint32_t(side);
+	spec.height = uint32_t(side);
+	spec.depth = 8;
+	spec.color_type = 3;
+	for (int i = 0; i < 256; ++i) spec.palette.insert(spec.palette.end(), 3, uint8_t(i));
+	for (int y = 0; y < side; ++y) {
+		spec.rows.push_back(0);
+		spec.rows.insert(spec.rows.end(), classes.begin() + long(y) * side, classes.begin() + long(y + 1) * side);
+	}
+	return make_png(spec);
+}
+
+// The mission position (16.16) at the centre of a surface map's texel (col, row) over the island layout:
+// the heightmap's texel (512 + x, 512 - y), the map's side scaling it from the heightmap's 1024.
+void mission_at(int side, int col, int row, int32_t &x_fixed, int32_t &y_fixed) {
+	const double scale = 1024.0 / side;
+	x_fixed = int32_t(std::lround(((col + 0.5) * scale - 512.0) * 65536.0));
+	y_fixed = int32_t(std::lround((512.0 - (row + 0.5) * scale) * 65536.0));
+}
+
+// The classes the runtime's sampler reads over a terrain the import made, at the centre of each patch and
+// of the map's corners, against the classes painted there; off the island, the ocean's 7.
+int expect_surface_sampled(const opennova::terrain::SurfaceTypeMap &map, int side, const std::vector<uint8_t> &classes) {
+	TEST_EXPECT(map.data != nullptr && map.width == side && map.height == side);
+	std::vector<std::pair<int, int>> texels = {{0, 0}, {side - 1, 0}, {0, side - 1}, {side - 1, side - 1}};
+	for (int k = 0; k < opennova::kCharmapLegendCount; ++k) texels.emplace_back(side / 2 - 76 + 8 * k, side / 2 - 12);
+	for (const auto &[col, row] : texels) {
+		int32_t x = 0, y = 0;
+		mission_at(side, col, row, x, y);
+		const int32_t read = opennova::terrain::surface_type_at_fixed(map, x, y);
+		if (read != classes[size_t(row) * side + col])
+			std::fprintf(stderr, "  surface at texel (%d, %d) of %d: read %d, painted %d\n", col, row, side, read,
+			             classes[size_t(row) * side + col]);
+		TEST_EXPECT(read == classes[size_t(row) * side + col]);
+	}
+	TEST_EXPECT(opennova::terrain::surface_type_at_fixed(map, 700 << 16, 0) == 7);
+	return 0;
 }
 
 std::vector<uint8_t> read(const std::string &path) {
@@ -167,13 +250,26 @@ int test_set_text() {
 	std::string why;
 	TEST_EXPECT(parse_terrain_set(write_terrain_set(set), back, why));
 	TEST_EXPECT(back.heightmap == set.heightmap && back.colormap == set.colormap && back.detail.empty() &&
+	            back.tiles == set.tiles && back.surface.empty());
+	set.surface = "isle_surface.png";
+	TEST_EXPECT(parse_terrain_set(write_terrain_set(set), back, why) && back.surface == "isle_surface.png" &&
 	            back.tiles == set.tiles);
-	const std::string text = "; a comment\r\nheightmap h.png ; the heights\r\ncolormap  c.png\r\n";
+	{
+		const std::vector<uint8_t> written = write_terrain_set(set);
+		TEST_EXPECT(std::string(written.begin(), written.end()).find("\r\nsurface isle_surface.png\r\n") != std::string::npos);
+	}
+	const std::string text = "; a comment\r\nheightmap h.png ; the heights\r\ncolormap  c.png\r\nSurface m.pcx\r\n";
 	TEST_EXPECT(parse_terrain_set(std::vector<uint8_t>(text.begin(), text.end()), back, why) && back.heightmap == "h.png" &&
-	            back.colormap == "c.png");
+	            back.colormap == "c.png" && back.surface == "m.pcx");
+	TEST_EXPECT(terrain_output_names("isle", false, false) ==
+	            (std::vector<std::string>{"isle.cpt", "isle_c.tga", "isle_dt.tga", "isle_dm.tga", "isle_d1.tga", "isle.til",
+	                                      "isle.trn"}));
+	TEST_EXPECT(terrain_output_names("isle", true, true) ==
+	            (std::vector<std::string>{"isle.cpt", "isle_c.tga", "isle_dt.tga", "isle_dm.tga", "isle_d1.tga", "isle_t.tga",
+	                                      "isle.til", "isle_m.pcx", "isle.trn"}));
 	const std::string wrong = "heightmap h.png\r\nfoliage f.pcx\r\n";
 	TEST_EXPECT(!parse_terrain_set(std::vector<uint8_t>(wrong.begin(), wrong.end()), back, why) &&
-	            why.find("foliage") != std::string::npos);
+	            why.find("foliage") != std::string::npos && why.find("surface") != std::string::npos);
 	const std::string half = "heightmap h.png\r\n";
 	TEST_EXPECT(!parse_terrain_set(std::vector<uint8_t>(half.begin(), half.end()), back, why) &&
 	            why.find("colormap") != std::string::npos);
@@ -221,6 +317,137 @@ int test_heightmap_depths() {
 	std::vector<uint16_t> steep(1024, 0);
 	steep[300] = 40000;
 	TEST_EXPECT(terrain_steep_blocks(steep) == 1);
+	return 0;
+}
+
+// The surface map: the legend itself (twenty colours, none twice, 15 and up unlike the shipped legend's
+// white); each form it is read from; the sizes and the texels refused; the PCX it is written as.
+int test_surface_reads() {
+	using opennova::kCharmapLegend;
+	using opennova::kCharmapLegendCount;
+	for (int i = 0; i < kCharmapLegendCount; ++i) {
+		TEST_EXPECT(opennova::charmap_legend_class(kCharmapLegend[i].r, kCharmapLegend[i].g, kCharmapLegend[i].b) == i);
+		const opennova::CharmapLegendColour &white = opennova::kCharmapLegendRest;
+		TEST_EXPECT(kCharmapLegend[i].r != white.r || kCharmapLegend[i].g != white.g || kCharmapLegend[i].b != white.b);
+	}
+	TEST_EXPECT(opennova::charmap_legend_class(255, 255, 255) == -1 && opennova::charmap_legend_class(153, 118, 62) == -1);
+	// The new_terrain request's words list the legend, each class by its name and colour.
+	const std::string doc = request_kind_row(EditorRequestKind::NewTerrain).doc;
+	for (int i = 0; i < kCharmapLegendCount; ++i) {
+		char entry[48];
+		std::snprintf(entry, sizeof(entry), "%d %s #%02X%02X%02X", i, opennova::til_tsd_surface_names[i] + 4, kCharmapLegend[i].r,
+		              kCharmapLegend[i].g, kCharmapLegend[i].b);
+		TEST_EXPECT(doc.find(entry) != std::string::npos);
+	}
+
+	IndexedImage8 out;
+	std::string why;
+	const auto same = [](const IndexedImage8 &image, const std::vector<uint8_t> &classes) {
+		return image.indices == classes;
+	};
+	const auto legend_palette = [](const IndexedImage8 &image) {
+		for (int i = 0; i < 256; ++i) {
+			const opennova::CharmapLegendColour &c = i < kCharmapLegendCount ? kCharmapLegend[i] : opennova::kCharmapLegendRest;
+			if (image.palette[i][0] != c.r || image.palette[i][1] != c.g || image.palette[i][2] != c.b) return false;
+		}
+		return true;
+	};
+	// A colour PNG in the legend's colours, its alpha ignored; a palette PNG by its indices alone.
+	const std::vector<uint8_t> c256 = surface_classes(256);
+	TEST_EXPECT(decode_terrain_surface("m.png", surface_colour_png(256, c256), out, why) && out.width == 256 &&
+	            out.height == 256 && same(out, c256) && legend_palette(out));
+	TEST_EXPECT(decode_terrain_surface("m.png", surface_palette_png(256, c256), out, why) && same(out, c256) && legend_palette(out));
+	// An 8-bit PCX by its indices (its palette any), a 24-bit TGA by its colours.
+	const std::vector<uint8_t> c512 = surface_classes(512);
+	{
+		IndexedImage8 pcx;
+		pcx.width = pcx.height = 512;
+		pcx.indices = c512;
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::encode_pcx_indexed(pcx, bytes, why));
+		TEST_EXPECT(decode_terrain_surface("m.pcx", bytes, out, why) && same(out, c512) && legend_palette(out));
+		std::vector<uint8_t> rgb(size_t(512) * 512 * 4), tga;
+		for (size_t i = 0; i < c512.size(); ++i) {
+			rgb[i * 4] = kCharmapLegend[c512[i]].r;
+			rgb[i * 4 + 1] = kCharmapLegend[c512[i]].g;
+			rgb[i * 4 + 2] = kCharmapLegend[c512[i]].b;
+			rgb[i * 4 + 3] = 255;
+		}
+		TEST_EXPECT(opennova::tga::tga_write_rgb24(rgb.data(), 512, 512, tga, why));
+		TEST_EXPECT(decode_terrain_surface("m.tga", tga, out, why) && same(out, c512));
+	}
+	// The sides: square, 256 to 1024, a power of two.
+	TEST_EXPECT(decode_terrain_surface("m.png", surface_colour_png(1024, surface_classes(1024)), out, why) && out.width == 1024);
+	for (const auto &[w, h] : std::vector<std::pair<int, int>>{{128, 128}, {384, 384}, {2048, 2048}, {512, 256}}) {
+		std::vector<uint8_t> rgba(size_t(w) * h * 4, 0);
+		TEST_EXPECT(!decode_terrain_surface("m.png", encode_png_rgba(rgba.data(), uint32_t(w), uint32_t(h)), out, why) &&
+		            why.find("256, 512 or 1024") != std::string::npos && out.empty());
+	}
+	// A colour of no class: refused, the first named by its column and row, and how many there are.
+	{
+		std::vector<uint8_t> classes = c256;
+		std::vector<uint8_t> png = surface_colour_png(256, classes);
+		RgbaImage image;
+		TEST_EXPECT(decode_png(png, image, why));
+		uint8_t *p = &image.pixels[(size_t(5) * 256 + 37) * 4];
+		p[0] = 0x12, p[1] = 0x34, p[2] = 0x56;
+		TEST_EXPECT(!decode_terrain_surface("m.png", encode_png_rgba(image.pixels.data(), 256, 256), out, why) && out.empty());
+		TEST_EXPECT(why.find("m.png's texel (37, 5) is #123456") != std::string::npos && why.find("texels in all") == std::string::npos);
+		// The legend's colour one step off is no class either: no nearest colour.
+		p = &image.pixels[(size_t(200) * 256 + 3) * 4];
+		p[0] = 154, p[1] = 118, p[2] = 61;
+		TEST_EXPECT(!decode_terrain_surface("m.png", encode_png_rgba(image.pixels.data(), 256, 256), out, why) &&
+		            why.find("(37, 5) is #123456 (2 texels in all)") != std::string::npos);
+	}
+	// An index past the classes: refused, by its place.
+	{
+		std::vector<uint8_t> classes = c256;
+		classes[size_t(2) * 256 + 3] = 20;
+		TEST_EXPECT(!decode_terrain_surface("m.png", surface_palette_png(256, classes), out, why) &&
+		            why.find("texel (3, 2) holds index 20") != std::string::npos && why.find("0 to 19") != std::string::npos);
+	}
+	// What the import writes of it: an 8-bit PCX of the map's side, the legend its palette, the classes
+	// its indices, as the runtime's reader reads it.
+	{
+		TEST_EXPECT(decode_terrain_surface("m.png", surface_colour_png(512, c512), out, why));
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::encode_pcx_indexed(out, bytes, why));
+		TEST_EXPECT(bytes[3] == 8 && bytes[65] == 1 && (bytes[66] | (bytes[67] << 8)) == 512 && bytes[bytes.size() - 769] == 0x0C);
+		IndexedImage8 back;
+		TEST_EXPECT(opennova::decode_pcx_indexed(bytes.data(), bytes.size(), back, why) && back.width == 512 && back.height == 512 &&
+		            same(back, c512) && legend_palette(back));
+		// The game's own 8-bit reader (the port of Texture_LoadPCXFromPFF8Bit, the char map's) reads each texel
+		// as its class's index: here its legend colour, every one distinct.
+		RgbaImage game;
+		TEST_EXPECT(opennova::decode_pcx_luminance_alpha(bytes.data(), bytes.size(), game, why) && game.width == 512 &&
+		            game.height == 512);
+		bool classes = game.pixels.size() == c512.size() * 4;
+		for (size_t i = 0; classes && i < c512.size(); ++i) {
+			const opennova::CharmapLegendColour &c = kCharmapLegend[c512[i]];
+			classes = game.pixels[i * 4] == c.r && game.pixels[i * 4 + 1] == c.g && game.pixels[i * 4 + 2] == c.b;
+		}
+		TEST_EXPECT(classes);
+	}
+	return 0;
+}
+
+// With --retail: a shipped char map read as the importer reads a surface map. JO:CA's are 512 x 512, 8-bit,
+// their palette the legend's first fifteen colours and white past them; their indices kept as they are.
+int test_retail_charmap() {
+	const std::string install = retail::install();
+	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped char map, Dvxi5_m.pcx)");
+	opennova::ResourceIndex index;
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(index.scan(install) && index.read_file("Dvxi5_m.pcx", bytes));
+	std::string why;
+	IndexedImage8 shipped, out;
+	TEST_EXPECT(opennova::decode_pcx_indexed(bytes.data(), bytes.size(), shipped, why) && shipped.width == 512 &&
+	            shipped.height == 512);
+	for (int i = 0; i < 256; ++i) {
+		const opennova::CharmapLegendColour &c = i < 15 ? opennova::kCharmapLegend[i] : opennova::kCharmapLegendRest;
+		TEST_EXPECT(shipped.palette[i][0] == c.r && shipped.palette[i][1] == c.g && shipped.palette[i][2] == c.b);
+	}
+	TEST_EXPECT(decode_terrain_surface("Dvxi5_m.pcx", bytes, out, why) && out.indices == shipped.indices);
 	return 0;
 }
 
@@ -278,7 +505,7 @@ int test_new_terrain() {
 	TEST_EXPECT(load_import_sidecar(project.at("art/terrain/isle.tset.import"), record, error));
 	TEST_EXPECT(record.importer == "terrain" && record.options.at("water") == "12" && record.options.at("top") == "100");
 	TEST_EXPECT((record.inputs == std::vector<std::string>{"isle_heightmap.png", "isle_colormap.png"}));
-	TEST_EXPECT(record.outputs == terrain_output_names("isle", false));
+	TEST_EXPECT(record.outputs == terrain_output_names("isle", false, false));
 
 	// The scan: the outputs project files of their kinds, the set an import source, the images inputs.
 	const SessionView &view = session.view();
@@ -344,6 +571,9 @@ int test_new_terrain() {
 		opennova::terrain::TerrainFieldStore store;
 		TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "isle", why));
 		TEST_EXPECT(store.valid());
+		// No surface map: the game's surface 1 everywhere, on the island and off it.
+		TEST_EXPECT(store.surface_map().data == nullptr && opennova::terrain::surface_type_at_fixed(store.surface_map(), 0, 0) == 1 &&
+		            opennova::terrain::surface_type_at_fixed(store.surface_map(), 700 << 16, 0) == 1);
 		const float centre = opennova::terrain::height_field_height_world_bilinear(store.height_field(), 0.0f, 0.0f);
 		const float shore = opennova::terrain::height_field_height_world_bilinear(store.height_field(), 450.0f, 0.0f);
 		TEST_EXPECT(centre > 48.0f && centre < 52.0f && shore < 2.0f);
@@ -402,7 +632,7 @@ int test_new_terrain() {
 
 	// Rerun-stable: imported again with nothing changed, the same bytes.
 	std::map<std::string, std::vector<uint8_t>> before;
-	for (const std::string &name : terrain_output_names("isle", false)) before[name] = read(project.output(name));
+	for (const std::string &name : terrain_output_names("isle", false, false)) before[name] = read(project.output(name));
 	outcome = editor_test::handle_to_end(project.session, request::reimport("art/terrain/isle.tset", true));
 	TEST_EXPECT(!outcome.refused && (*session.view().project.imports)[0].reimported);
 	for (const auto &[name, bytes] : before) TEST_EXPECT(!bytes.empty() && read(project.output(name)) == bytes);
@@ -436,6 +666,113 @@ int test_new_terrain() {
 	return 0;
 }
 
+// A terrain with a surface map (the surface value): refused for a texel of no class, nothing written;
+// made, the map an input of the import, written as reef_m.pcx (8-bit, the legend its palette) and named by
+// the .trn, packed by the build; the runtime's load sampling the painted classes at their mission
+// positions; the map changed to a palette PNG of 1024, imported again and sampled at that scale.
+int test_new_terrain_surface() {
+	Project project("opennova_editor_terrain_surface");
+	const std::string images = project.dir.file("images");
+	const std::vector<uint8_t> c512 = surface_classes(512);
+	std::vector<uint8_t> stray = c512;
+	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", island_png16()));
+	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", colour_png(kSide)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/surface.png", surface_colour_png(512, c512)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/bad.png", surface_palette_png(512, std::vector<uint8_t>(c512.size(), 31))));
+	const ProjectSession &session = project.session;
+
+	ActionOutcome outcome = editor_test::handle_to_end(project.session, request::new_terrain("reef",
+	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"surface", images + "/bad.png"}}));
+	TEST_EXPECT(outcome.refused && outcome.findings.back().code() == "import.terrain" &&
+	            outcome.findings.back().message.find("texel (0, 0) holds index 31") != std::string::npos);
+	TEST_EXPECT(!fs::exists(system_path(project.at("art/terrain"))));
+
+	outcome = editor_test::handle_to_end(project.session, request::new_terrain("reef",
+	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"surface", images + "/surface.png"}}));
+	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(!outcome.refused);
+	TerrainSet set;
+	std::string why;
+	TEST_EXPECT(parse_terrain_set(read(project.at("art/terrain/reef.tset")), set, why) && set.surface == "reef_surface.png");
+	ImportSidecar record;
+	Diagnostic error;
+	TEST_EXPECT(load_import_sidecar(project.at("art/terrain/reef.tset.import"), record, error));
+	TEST_EXPECT((record.inputs == std::vector<std::string>{"reef_heightmap.png", "reef_colormap.png", "reef_surface.png"}));
+	TEST_EXPECT(record.outputs == terrain_output_names("reef", false, true));
+	const SessionView &view = session.view();
+	TEST_EXPECT(view.project.imports && (*view.project.imports)[0].ok);
+	TEST_EXPECT(project.find("reef_m.pcx") && project.find("reef_m.pcx")->kind == AssetKind::Texture);
+	TEST_EXPECT(project.find("reef_surface.png") && project.find("reef_surface.png")->kind == AssetKind::ImportInput);
+
+	// The .trn names it; the file is the game's 8-bit PCX, the legend its palette.
+	opennova::TrnConfig trn;
+	{
+		const std::vector<uint8_t> text = read(project.output("reef.trn"));
+		const std::string words(text.begin(), text.end());
+		TEST_EXPECT(words.find("polytrn_charmap") != std::string::npos && words.find("reef_m.pcx") != std::string::npos);
+		std::istringstream in(words);
+		TEST_EXPECT(opennova::load_trn(in, trn, why) && trn.charmap == "reef_m.pcx");
+	}
+	{
+		const std::vector<uint8_t> pcx = read(project.output("reef_m.pcx"));
+		IndexedImage8 map;
+		TEST_EXPECT(pcx.size() > 897 && pcx[3] == 8 && pcx[65] == 1);
+		TEST_EXPECT(opennova::decode_pcx_indexed(pcx.data(), pcx.size(), map, why) && map.width == 512 && map.indices == c512);
+		for (int i = 0; i < opennova::kCharmapLegendCount; ++i)
+			TEST_EXPECT(map.palette[i][0] == opennova::kCharmapLegend[i].r && map.palette[i][1] == opennova::kCharmapLegend[i].g &&
+			            map.palette[i][2] == opennova::kCharmapLegend[i].b);
+	}
+
+	// The build packs it; the project's checks find nothing wrong with it.
+	AssetGraph graph;
+	ValidationCache cache;
+	const ProjectPaths paths = ProjectPaths::for_root(project.root);
+	const std::vector<Diagnostic> findings =
+	        validate_project({paths, *view.project.document, *view.project.scan, view.documents.open}, graph, cache);
+	for (const Diagnostic &d : findings)
+		if (d.message.find("reef_m") != std::string::npos || d.asset.find("reef_m") != std::string::npos) {
+			std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+			TEST_EXPECT(d.severity != DiagnosticSeverity::Error);
+		}
+	const BuildPlan plan = plan_build(paths, *view.project.scan, *view.project.requirements, findings);
+	bool packed = false;
+	for (const BuildArchive &archive : plan.archives)
+		for (const BuildEntry &entry : archive.entries) packed = packed || entry.logical_name == "reef_m.pcx";
+	for (const BuildEntry &entry : plan.loose) packed = packed || entry.logical_name == "reef_m.pcx";
+	TEST_EXPECT(packed);
+
+	// The texture view asks nothing of a terrain's outputs: the import makes each as the game reads it.
+	for (const char *made : {"reef_m.pcx", "reef_c.tga"}) {
+		TextureImportState state;
+		TEST_EXPECT(texture_import_state(view, made, state, why) && state.sidecar.importer == "terrain");
+		TEST_EXPECT(state.needs.uses == 0 && state.needs.conflicts.empty() && state.needs.options.empty());
+	}
+
+	// The runtime's load: the store's surface map the .trn's char map, the classes painted where they read.
+	const std::string dir = utf8_of(path_of(project.output("reef.trn")).parent_path());
+	{
+		opennova::ResourceIndex index;
+		TEST_EXPECT(index.scan(dir));
+		opennova::terrain::TerrainFieldStore store;
+		TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "reef", why) && store.valid());
+		TEST_EXPECT(expect_surface_sampled(store.surface_map(), 512, c512) == 0);
+	}
+
+	// The map made again as a palette PNG of 1024: imported again, the classes read at that scale.
+	const std::vector<uint8_t> c1024 = surface_classes(1024);
+	TEST_EXPECT(editor_test::write_bytes(project.at("art/terrain/reef_surface.png"), surface_palette_png(1024, c1024)));
+	outcome = editor_test::handle_to_end(project.session, request::reimport(std::string(), false));
+	TEST_EXPECT(!outcome.refused && (*session.view().project.imports)[0].ok);
+	{
+		opennova::ResourceIndex index;
+		TEST_EXPECT(index.scan(dir));
+		opennova::terrain::TerrainFieldStore store;
+		TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "reef", why) && store.valid());
+		TEST_EXPECT(expect_surface_sampled(store.surface_map(), 1024, c1024) == 0);
+	}
+	return 0;
+}
+
 // The blank environment: the writer's template, named after its file, CRLF lines the game parses.
 int test_blank_environment() {
 	BlankRequest blank;
@@ -451,12 +788,16 @@ int test_blank_environment() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	int failures = 0;
 	failures += test_set_text();
 	failures += test_heightmap_depths();
+	failures += test_surface_reads();
+	failures += test_retail_charmap();
 	failures += test_blank_environment();
 	failures += test_new_terrain();
+	failures += test_new_terrain_surface();
 	if (failures == 0) std::printf("editor_terrain_import: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
