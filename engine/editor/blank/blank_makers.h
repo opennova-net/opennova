@@ -18,9 +18,10 @@ bool make_blank_expansion_table(const BlankRequest &, std::vector<uint8_t> &out,
 // An expansion's version text (blank_strings.cpp beside its table): the project's title, one CRLF line.
 bool make_blank_expansion_version(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
-// bms and wac (blank_mission.cpp): a mission on the terrain and under the environment the request
-// names, holding its header alone; an empty script
+// bms, til and wac (blank_mission.cpp): a mission on the terrain and under the environment the request
+// names, holding its header alone; a mission's tile placement with no tile placed; an empty script
 bool make_blank_mission(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_tile_info(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_script(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // mnu (blank_menu.cpp)
