@@ -104,6 +104,10 @@ public:
 	ViewportDeviceSource *devices() const override { return devices_; }
 	TextureThumbnailImages *thumbnail_images() const override { return thumbnail_images_; }
 	bool take_dropped_files(float min_x, float min_y, float max_x, float max_y, std::vector<std::string> &paths) override;
+	void hide_pointer() override { pointer_hidden_ = true; }
+	// A window asked this frame for the system pointer hidden (a picture under the mouse draws the game's,
+	// DI-08): the Shell hides it after the frame and shows it again after one that does not ask.
+	bool pointer_hidden() const { return pointer_hidden_; }
 
 	// MenuBarContributor
 	void draw_menu_bar(devtools::ImGuiPass &pass) override;
@@ -134,6 +138,7 @@ private:
 	std::deque<EditorRequest> requests_;
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;
+	bool pointer_hidden_ = false; // hide_pointer asked this frame (begin_frame clears it)
 	// The texture a Replace with image... pick is for (S18), and the files the OS dropped, held for the
 	// item they land on (drop_files) for `frames` more end_frames.
 	std::string replace_target_;
