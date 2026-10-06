@@ -911,6 +911,13 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		error = std::string("\"") + token + "\" must be a whole number, 0 or more.";
 		return false;
 	case F::Report: return flag_of(json, token, request.report, error);
+	case F::Steps:
+		if (json.is_number() && json.number >= 1.0 && json.number == std::floor(json.number) && json.number <= 4294967295.0) {
+			request.steps = uint32_t(json.number);
+			return true;
+		}
+		error = std::string("\"") + token + "\" must be a whole number, 1 or more.";
+		return false;
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1013,6 +1020,8 @@ bool field_to_json(
 	case F::Plan: out = json_number(double(request.plan)); return request.plan != 0;
 	// Its default is true: the writer names it only when it is false.
 	case F::Report: out = boolean(request.report); return !request.report;
+	// Its default is 1: the writer names it only when it is more.
+	case F::Steps: out = json_number(double(request.steps)); return request.steps != 1;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();

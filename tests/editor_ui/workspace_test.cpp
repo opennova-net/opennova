@@ -1207,13 +1207,15 @@ void test_menu_bar_status() {
 	CHECK(one(requests, EditorRequestKind::Play) != nullptr, "Play");
 
 	// A window too narrow for all of it: the parts on the left go first, what was said the
-	// first of them; the buttons stay.
-	ImGui::GetIO().DisplaySize = ImVec2(580.0f, 700.0f);
+	// first of them; the buttons stay. Back and Forward lead the bar, two arrows' room taken
+	// before the menus.
+	const float arrows = 2.0f * (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x);
+	ImGui::GetIO().DisplaySize = ImVec2(580.0f + arrows, 700.0f);
 	ui.frames(3);
 	text = logged_frame(ui);
 	CHECK(text.find("menus/a") == std::string::npos && in_order(text, {"Windows", "2 unsaved", "Built", "Stop"}),
 	      "narrower: what was said left out first");
-	ImGui::GetIO().DisplaySize = ImVec2(360.0f, 700.0f);
+	ImGui::GetIO().DisplaySize = ImVec2(360.0f + arrows, 700.0f);
 	ui.frames(3);
 	text = logged_frame(ui);
 	CHECK(text.find("2 unsaved") == std::string::npos && in_order(text, {"Windows", "Stop"}), "narrow: the unsaved count left out");
@@ -1227,7 +1229,7 @@ void test_menu_bar_status() {
 	                                    item_id(bar_id, {"status", "Stop"})};
 	std::vector<ImGuiID> ids = menus;
 	ids.insert(ids.end(), parts.begin(), parts.end());
-	for (const float width : {1000.0f, 520.0f, 360.0f}) {
+	for (const float width : {1000.0f, 520.0f + arrows, 360.0f + arrows}) {
 		ImGui::GetIO().DisplaySize = ImVec2(width, 700.0f);
 		ui.frames(3);
 		const std::vector<std::pair<float, float>> spans = hover_spans(ui, ids);
@@ -1519,21 +1521,23 @@ void test_files_window() {
 	ui.frames(2);
 	CHECK(modal_open("New file") && ui.drain().empty(), "a terrain's name asked first");
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"New terrain from images", "Heightmap", "Colour map", "Detail", "Tile set", "Height of white",
-	                      "Water level", "Layout", "Create"}),
+	CHECK(in_order(text, {"New terrain from images", "Heightmap", "Colour map", "Detail", "Tile set", "Surface map",
+	                      "Height of white", "Water level", "Layout", "Create"}),
 	      "the terrain's images and numbers asked");
 	type_into(ui, item_id(prompt, {"Name"}), "isle");
 	ui.activate(item_id(prompt, {"Create"}));
 	CHECK(ui.drain().empty() && modal_open("New file"), "Create waits for the heightmap and the colour map");
 	type_into(ui, item_id(pushed(prompt, 0), {"Heightmap (1024 x 1024 PNG or .raw)"}), "C:/art/h.png");
 	type_into(ui, item_id(pushed(prompt, 1), {"Colour map (1024 x 1024 image)"}), "C:/art/c.png");
-	type_into(ui, item_id(pushed(prompt, 5), {"Water level (world units, 0 none)"}), "12");
+	type_into(ui, item_id(pushed(prompt, 4), {"Surface map (optional, square 256..1024)"}), "C:/art/m.png");
+	type_into(ui, item_id(pushed(prompt, 6), {"Water level (world units, 0 none)"}), "12");
 	ui.frames(2);
 	ui.activate(item_id(prompt, {"Create"}));
 	requests = ui.drain();
 	ui.frames(2);
 	CHECK(one(requests, EditorRequestKind::NewTerrain) && requests[0].path == "isle" &&
-	              requests[0].values == Values({{"colormap", "C:/art/c.png"}, {"heightmap", "C:/art/h.png"}, {"water", "12"}}) &&
+	              requests[0].values == Values({{"colormap", "C:/art/c.png"}, {"heightmap", "C:/art/h.png"},
+	                                            {"surface", "C:/art/m.png"}, {"water", "12"}}) &&
 	              !modal_open("New file"),
 	      "Create: new_terrain with the terrain's name and its values by their tokens");
 }

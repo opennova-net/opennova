@@ -1031,12 +1031,9 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                         const int32_t surface = terrain::surface_type_at_fixed(
                             world.tables.surface_map, hit.position_q16.x,
                             hit.position_q16.y);
-                        imp.effect_tag =
-                            (surface >= 0 && surface + 4 < kImpactEffectTagCount)
-                                ? surface + 4
-                                : 5;
+                        imp.effect_tag = terrain_impact_effect_tag(surface);
                     } else if (hit.hit_class == ProjectileHitClass::Water) {
-                        imp.effect_tag = 11;
+                        imp.effect_tag = kWaterImpactEffectTag;
                     } else if (hit.hit_class == ProjectileHitClass::Person &&
                                hit.surface_type == 1) {
                         // The PERSON leg (hit type 3 = the default slot-type
@@ -2153,14 +2150,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // Projectile_UpdatePhysics @ 0x4e9d70]
             const int32_t surface =
                 terrain::surface_type_at_fixed(world.tables.surface_map, impact_q16.x, impact_q16.y);
-            imp.effect_tag =
-                (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface + 4 : 5;
+            imp.effect_tag = terrain_impact_effect_tag(surface);
             // The terrain handler records the round with no damage, section
             // or target [orig: Projectile_HandleTerrainImpact
             // @0x4E9319..0x4E932B].
             copy_round_to_hit_record(hit_record, r, velocity_q16);
         } else if (collision.hit_class == ProjectileHitClass::Water) {
-            imp.effect_tag = 11;
+            imp.effect_tag = kWaterImpactEffectTag;
         } else if (person_collision) {
             // The person leg. Bullets reach a person ONLY through the bone-section
             // pass — Projectile_RaycastProximitySlots walks pool 2 (statics) for

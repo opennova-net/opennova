@@ -825,6 +825,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Fresh: out.fresh = true; break;
 		case F::Plan: out.plan = 7; break;
 		case F::Report: out.report = false; break; // its default is true
+		case F::Steps: out.steps = 3; break; // its default is 1
 		case F::kCount: break;
 		}
 	}

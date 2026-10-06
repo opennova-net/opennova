@@ -162,6 +162,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportEncode, code("import.encode", G::Imports) },
 	{ C::ImportExists, code("import.exists", G::Imports) },
 	{ C::ImportFolder, code("import.folder", G::Imports) },
+	// A font made from a glyph sheet (import/font_import): a set or a sheet the importer cannot make into a
+	// font, a sheet with no clear texel.
+	{ C::ImportFont, code("import.font", G::Imports) },
 	{ C::ImportInput, code("import.input", G::Imports) },
 	{ C::ImportInstall, code("import.install", G::Imports) },
 	{ C::ImportKind, code("import.kind", G::Imports) },
@@ -195,6 +198,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::LocalSettingsUnreadable, code("local_settings.unreadable", G::LocalSettings) },
 	{ C::LocalSettingsWrite, code("local_settings.write", G::LocalSettings) },
 	{ C::MissionSidecarUnused, code("mission.sidecar.unused", G::Missions) },
+	// A Back or a Forward with no place that way (the navigation history, session/navigation_controller.h):
+	// the request's outcome alone, as a set_workspace refused is.
+	{ C::NavigationNone, code("navigation.none", G::Navigation) },
 	{ C::OperationBusy, code("operation.busy", G::Operations) },
 	{ C::OperationNone, code("operation.none", G::Operations) },
 	{ C::OperationNotCancellable, code("operation.not_cancellable", G::Operations) },
@@ -290,8 +296,14 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::TextureFoliageMapShape, code("texture.foliage_map_shape", G::Textures, F::ImportFitsUse) },
 	{ C::TextureHeightWrap, code("texture.height_wrap", G::Textures, F::ImportFitsUse) },
 	{ C::TextureLoadingScreenSize, code("texture.loading_screen_size", G::Textures, F::ImportFitsUse) },
+	// What a model texture costs the game past kTextureMemoryWarnBytes (documents/texture_budget): where an
+	// import makes the file, the import made as its uses ask (a model row's DXT5 .dds).
+	{ C::TextureMemory, code("texture.memory", G::Textures, F::ImportFitsUse) },
 	{ C::TextureMfdNotPowerOfTwo, code("texture.mfd_not_pow2", G::Textures, F::ImportFitsUse) },
 	{ C::TextureNormalMapHalved, code("texture.normal_map_halved", G::Textures, F::ImportFitsUse) },
+	// A normal-map slot's row of a type the stage or plain loader reads: its row given type 4 where the file
+	// is a finished normal map (.mdt).
+	{ C::TextureNormalSlotLoader, code("texture.normal_slot_loader", G::Textures, F::NormalRowType) },
 	{ C::TextureOperation, code("texture.operation", G::Textures) },
 	{ C::TextureParticleTooBig, code("texture.particle_too_big", G::Textures, F::ImportFitsUse) },
 	{ C::TextureReplace, code("texture.replace", G::Textures) },

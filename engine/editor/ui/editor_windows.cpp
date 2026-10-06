@@ -9,6 +9,7 @@
 #include <base/io/json.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
+#include <editor/session/navigation_controller.h>
 #include <editor/session/rename_controller.h>
 #include <editor/project_build/export_build.h>
 #include <editor/session/play_controller.h>
@@ -260,6 +261,10 @@ void EditorWindows::dispatch_events() {
 		case ViewEventKind::RevealPreview:
 			if (preview_window_) preview_window_->request_focus();
 			break;
+		// A Back or a Forward to a document or a page: the Document window comes forward with its tab.
+		case ViewEventKind::ShowDocument:
+			if (document_window_) document_window_->show_document(event);
+			break;
 		// A set_workspace's focus (the MCP gaps lane): the window it names comes forward, opened when the person
 		// had closed it (the Windows menu's).
 		case ViewEventKind::FocusWindow:
@@ -369,6 +374,7 @@ void EditorWindows::deliver_picks(PickPurpose purpose, const std::vector<std::st
 void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	const SessionView &v = view();
 	const DocumentBase *document = active_document(v);
+	draw_navigation(v);
 	draw_file_menu(v);
 	draw_edit_menu(v, document);
 	draw_build_menu(v);
@@ -387,6 +393,42 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	if (files_window_) files_window_->draw_card_window();
 	if (document_window_) document_window_->draw_modals();
 	shortcuts(v, document);
+}
+
+// Back and Forward (the navigation history, session/navigation_controller.h), before the menus as a
+// browser's are: each enabled while it goes somewhere (navigation_offered), its tooltip naming where and
+// its keys, a right-click listing its places nearest first, a click on one going there (navigate_back's
+// steps). Alt+Left and Alt+Right and the mouse's back and forward buttons are the same requests
+// (shortcuts()).
+void EditorWindows::draw_navigation(const SessionView &v) {
+	for (const bool back : {true, false}) {
+		const std::vector<NavigationPlace> &places = back ? v.navigation.back : v.navigation.forward;
+		const bool offered = navigation_offered(v, back);
+		const auto go = [&](size_t steps) {
+			request(back ? request::navigate_back(uint32_t(steps)) : request::navigate_forward(uint32_t(steps)));
+		};
+		ImGui::PushID(back ? "navigate_back" : "navigate_forward");
+		ImGui::BeginDisabled(!offered);
+		const bool pressed = ImGui::ArrowButton("##go", back ? ImGuiDir_Left : ImGuiDir_Right);
+		ImGui::EndDisabled();
+		if (pressed && offered) go(1);
+		if (offered && ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("places");
+		const std::string keys = back ? " (Alt+Left, or the mouse's back button)" : " (Alt+Right, or the mouse's forward button)";
+		ui_kit::tooltip(places.empty() ? std::string(back ? "Back" : "Forward") + keys +
+		                                         ": nowhere yet. A Go to, a Problems row, a find's hit or another file opened "
+		                                         "is a place it takes you back to."
+		                               : std::string(back ? "Back to " : "Forward to ") + places.front().label + keys +
+		                                         ".\nA right-click lists every place " + (back ? "back." : "forward."));
+		if (ImGui::BeginPopup("places")) {
+			for (size_t i = 0; i < places.size(); ++i) {
+				const std::string label = ui_kit::fit(places[i].label, ImGui::GetFontSize() * 24.0f) + "###" + std::to_string(i);
+				if (menu_item(label.c_str(), nullptr, navigation_offered(v, back))) go(i + 1);
+				ui_kit::tooltip(places[i].path);
+			}
+			ImGui::EndPopup();
+		}
+		ImGui::PopID();
+	}
 }
 
 void EditorWindows::draw_file_menu(const SessionView &v) {
@@ -683,11 +725,11 @@ void EditorWindows::draw_new_project() {
 }
 
 // The shortcuts the menu labels promise (Ctrl+F is the Document window's own, before its views'
-// filters). Saving, closing a file, finding in the project, building and playing work
-// while a text field has the keyboard (what it typed this frame is raised first: request());
-// Undo and Redo are the field's own then. Ctrl+Shift+Z is Redo, as Ctrl+Y is. None of them
-// while the unsaved prompt is open: an Undo behind it would make a file it does not list
-// unsaved.
+// filters), and Back's and Forward's. Saving, closing a file, finding in the project, building and
+// playing work while a text field has the keyboard (what it typed this frame is raised first:
+// request()); Undo and Redo, and Alt+Left and Alt+Right, are the field's own then. Ctrl+Shift+Z is
+// Redo, as Ctrl+Y is. None of them while the unsaved prompt is open: an Undo behind it would make a
+// file it does not list unsaved.
 void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document) {
 	if (v.dialogs.unsaved_prompt.open) return;
 	const ImGuiIO &io = ImGui::GetIO();
@@ -716,6 +758,18 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 		} else if (!io.KeyShift && !io.KeyCtrl && plays) {
 			request(request::play());
 		}
+	}
+	// Back and Forward: Alt+Left and Alt+Right (a text field with the keyboard keeps its arrows, its caret's),
+	// and the mouse's back and forward buttons, Dear ImGui's buttons 3 and 4 as the bridge maps them, wherever
+	// the pointer is over the pass (an undocked window, a viewport's picture, a text field). In the editor's
+	// own window the Shell takes those buttons first, before any control (EditorApp::_input), so a press is
+	// raised once.
+	for (const bool back : {true, false}) {
+		const bool key = io.KeyAlt && !io.KeyCtrl && !io.KeyShift && !io.WantTextInput &&
+		                 ImGui::IsKeyPressed(back ? ImGuiKey_LeftArrow : ImGuiKey_RightArrow, false);
+		const bool button = ImGui::IsMouseClicked(back ? 3 : 4);
+		if ((key || button) && navigation_offered(v, back))
+			request(back ? request::navigate_back() : request::navigate_forward());
 	}
 	if (!io.WantTextInput && document) {
 		const EditorRequestKind z = io.KeyShift ? EditorRequestKind::Redo : EditorRequestKind::Undo;

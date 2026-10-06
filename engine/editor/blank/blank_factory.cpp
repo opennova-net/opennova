@@ -27,6 +27,7 @@ const BlankParam k_terrain_params[] = {
 	{ "colormap", "Colour map (1024 x 1024 image)", ReferenceKind::None, true },
 	{ "detail", "Detail (optional, power-of-two image)", ReferenceKind::None, false },
 	{ "tiles", "Tile set (optional, sides x64)", ReferenceKind::None, false },
+	{ "surface", "Surface map (optional, square 256..1024)", ReferenceKind::None, false },
 	{ "top", "Height of white (world units, 127.5)", ReferenceKind::None, false },
 	{ "water", "Water level (world units, 0 none)", ReferenceKind::None, false },
 	{ "layout", "Layout (island or tiled)", ReferenceKind::None, false },
@@ -66,7 +67,8 @@ const BlankFactory k_factories[] = {
 	{ "font_arial16b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_impac22b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_impac38b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
-	// Mission: what a mission's start and its screens read by name (docs/required-resources.md).
+	// Mission: what a mission's start and its screens read by name (docs/required-resources.md). Each
+	// screen names the game's pointer, the one every shipped screen names.
 	{ "ammo_def", AssetKind::AmmoDefs, make_blank_ammo_def, "an ammo table holding only the null round", true },
 	{ "powerup_def", AssetKind::PowerupDefs, make_blank_powerup_def, "a powerup table with no powerups yet", true },
 	{ "cmap_menu", AssetKind::Menu, make_blank_cmap_menu,

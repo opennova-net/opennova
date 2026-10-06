@@ -472,18 +472,18 @@ bool MnsDocument::edit_collection(Node &, const Edit &, const IdAllocator &, Nod
 }
 
 bool MnsDocument::accept_step(const EditStep &step, const StagedRows &staged,
-                              std::string &error) const {
+                              StepRefusal &refusal) const {
 	// A frozen row keeps its place: only a change of its own fields, in place, passes.
 	for (const RowSwap &swap : step.swaps) {
 		if (swap.in_place()) continue;
 		for (const Node *row : {swap.before.get(), swap.after.get()}) {
 			if (!row || !frozen(*row)) continue;
 			if (row->kind == kConditional)
-				error = "The #if, #else and #endif lines stay where they are: change them in the file itself.";
+				refusal.message = "The #if, #else and #endif lines stay where they are: change them in the file itself.";
 			else if (row->kind == kInactive)
-				error = "The lines of a switched-off #if block stay where they are.";
+				refusal.message = "The lines of a switched-off #if block stay where they are.";
 			else
-				error = "'" + row->name() + "' continues across other lines (a directive, a comment or a blank "
+				refusal.message = "'" + row->name() + "' continues across other lines (a directive, a comment or a blank "
 				        "line): it stays where it is.";
 			return false;
 		}
@@ -493,17 +493,17 @@ bool MnsDocument::accept_step(const EditStep &step, const StagedRows &staged,
 	switch (mns::reread(natives_of(proposed), kCrlf, &first)) {
 	case mns::Reread::Same: return true;
 	case mns::Reread::Inactive:
-		error = "The game would not read that line: it would sit inside a switched-off #if block.";
+		refusal.message = "The game would not read that line: it would sit inside a switched-off #if block.";
 		return false;
 	case mns::Reread::Continued:
-		error = "The line above continues onto that place: the game would read the new line as part of its value.";
+		refusal.message = "The line above continues onto that place: the game would read the new line as part of its value.";
 		return false;
 	case mns::Reread::Changed:
 		break;
 	}
 	int line = 1;
 	for (size_t i = 0; i < first && i < proposed.size(); ++i) line += int(line_count(style_of(*proposed[i]).native));
-	error = "The game would read the lines around line " + std::to_string(line) + " differently.";
+	refusal.message = "The game would read the lines around line " + std::to_string(line) + " differently.";
 	return false;
 }
 
