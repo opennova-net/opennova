@@ -106,6 +106,7 @@ void SessionCore::start() {
 	show_installs();
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.play_in_install_strict = settings.play_in_install_strict;
+	view_.project.save_before_play = settings.save_before_play;
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
 	show_recent_items();
@@ -847,15 +848,18 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	if (change.runtime_executable) editor.runtime_executable = *change.runtime_executable;
 	if (change.play_in_install) editor.play_in_install = *change.play_in_install;
 	if (change.play_in_install_strict) editor.play_in_install_strict = *change.play_in_install_strict;
+	if (change.save_before_play) editor.save_before_play = *change.save_before_play;
 	bool editor_changed = editor.game_install != settings.game_install ||
 	                      editor.runtime_executable != settings.runtime_executable ||
 	                      editor.play_in_install != settings.play_in_install ||
-	                      editor.play_in_install_strict != settings.play_in_install_strict;
+	                      editor.play_in_install_strict != settings.play_in_install_strict ||
+	                      editor.save_before_play != settings.save_before_play;
 	if (editor_changed) {
 		Diagnostic error;
 		if (preferences_.write(editor, error)) {
 			view_.project.play_retail = preferences_.values().play_in_install;
 			view_.project.play_in_install_strict = preferences_.values().play_in_install_strict;
+			view_.project.save_before_play = preferences_.values().save_before_play;
 			view_.project.runtime_setting = preferences_.values().runtime_executable;
 			view_.activity.runtime_executable = play().resolve_runtime_executable();
 		} else {
@@ -1168,8 +1172,15 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 			if (each.kind == EditorRequestKind::EditRecord && !each.edits.empty()) outcome_.gesture = each.edits.front().gesture;
 	}
 	// Served in order, as the parts serve what they compose (never through handle()): each meets its
-	// own row's gate, and its findings are this request's outcome.
-	for (const EditorRequest &each : planned.requests) serve_request(*this, each);
+	// own row's gate, and its findings are this request's outcome. A Play a command plans (DI-26's Play
+	// from here) goes behind, or fresh, as the request asks.
+	for (EditorRequest &each : planned.requests) {
+		if (each.kind == EditorRequestKind::Play) {
+			each.behind = request.behind;
+			each.fresh = request.fresh;
+		}
+		serve_request(*this, each);
+	}
 	// An item placed is among the recently placed (ADR 0046 S15: the Place tool's palette lists them
 	// first), kept with the editor's preferences.
 	if (drop && !outcome_.refused && request.drop.reference == "item" && !request.drop.box)
@@ -1243,6 +1254,7 @@ void SessionCore::save_preferences() {
 	show_installs();
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.play_in_install_strict = settings.play_in_install_strict;
+	view_.project.save_before_play = settings.save_before_play;
 	view_.project.import_dependencies = settings.import_dependencies;
 	show_recent_items();
 	touch(ViewConcern::Preferences);
@@ -1452,7 +1464,7 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
                               const ExportIntent &exported, bool panel) {
-	if (intent.wanted && play().refused(intent.mission)) return;
+	if (intent.wanted && play().refused(intent.mission, intent.start)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
 	// Where it lands: out_dir taken from the project's folder when relative. One inside the project
 	// but in its cache or its export folder (which the scan passes over) would be files of the
@@ -1600,7 +1612,7 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		note("Build failed.");
 		view_.activity.status = "Build failed; see Problems.";
 	}
-	if (result.ok && intent.wanted) play().start(intent.mission, intent.behind, intent.fresh);
+	if (result.ok && intent.wanted) play().start(intent.mission, intent.behind, intent.fresh, intent.start);
 	bool exported_ok = true;
 	if (result.ok && exported.wanted && shipped) {
 		for (const Diagnostic &d : shipped->diagnostics) {

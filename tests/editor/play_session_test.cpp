@@ -19,8 +19,12 @@
 #include <editor/project/project_files.h>
 #include <editor/run/behind_start.h>
 #include <editor/run/launch_plan.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
 #include <formats/pff/pff.h>
 #include <editor/run/play_session.h>
+#include <editor/run/play_start.h>
 #include <editor/run/run_directory.h>
 
 #include "common/test_expect.h"
@@ -832,8 +836,187 @@ static int test_expansion_staging() {
 	return 0;
 }
 
+// DI-26: Play from here's start in a mission. The single player deploys at the first start marker type
+// its mode's chain holds (world::start_marker_types, team 1): every marker of that type moves to the point,
+// facing the heading, a team-2 marker made team 1 (no queued mount), every other marker as it was; none of
+// either type, one of the primary is added; a point past the 16.16 positions is refused.
+static int test_place_player_start() {
+	using namespace opennova;
+	const auto markers_at = [](bms::File &file, int item_id, int count) {
+		mission::EntityTransform at;
+		at.x = 10.0f;
+		at.y = 20.0f;
+		at.z = 3.0f;
+		at.yaw = 45;
+		for (int i = 0; i < count; ++i) mission::add_entity(file, mission::EntityKind::Marker, item_id, at);
+	};
+	PlayStart start;
+	start.set = true;
+	start.at[0] = 412.5;
+	start.at[1] = -88.25;
+	start.at[2] = 36.0;
+	start.yaw = -90.0;
+	const auto at_start = [&start](const bms::Entity &marker) {
+		return marker.x == bms::to_fixed_16_16(start.at[0]) && marker.y == bms::to_fixed_16_16(start.at[1]) &&
+		       marker.z == bms::to_fixed_16_16(start.at[2]) && marker.yaw == 270 && marker.pitch == 0 && marker.roll == 0;
+	};
+	PlayStartPlaced placed;
+	std::string error;
+
+	// Co-op (no mode bit, as single player): the insertion points 6094, both; the fallback and a waypoint stay.
+	bms::File coop;
+	mission::make_default(coop);
+	markers_at(coop, 106094, 2);
+	markers_at(coop, 106001, 1);
+	markers_at(coop, 106000, 1);
+	coop.markers[1].team = 2;
+	TEST_EXPECT(place_player_start(coop, start, placed, error));
+	TEST_EXPECT(placed.type == 6094 && placed.moved == 2 && !placed.added && coop.markers.size() == 4);
+	TEST_EXPECT(at_start(coop.markers[0]) && at_start(coop.markers[1]) && coop.markers[1].team == 1);
+	TEST_EXPECT(!at_start(coop.markers[2]) && coop.markers[2].x == bms::to_fixed_16_16(10.0) && !at_start(coop.markers[3]));
+	TEST_EXPECT(play_start_words(start) == "(412.5, -88.2, 36.0) facing 270");
+
+	// Only the fallback: the 6001s.
+	bms::File fallback;
+	mission::make_default(fallback);
+	markers_at(fallback, 106001, 2);
+	TEST_EXPECT(place_player_start(fallback, start, placed, error));
+	TEST_EXPECT(placed.type == 6001 && placed.moved == 2 && !placed.added && at_start(fallback.markers[1]));
+
+	// None: an insertion point added at the point, its SSN the next.
+	bms::File none;
+	mission::make_default(none);
+	const int ssn = mission::next_entity_ssn(none);
+	TEST_EXPECT(place_player_start(none, start, placed, error));
+	TEST_EXPECT(placed.type == 6094 && placed.moved == 1 && placed.added && none.markers.size() == 1 &&
+	            none.markers[0].type_id == 6094 && none.markers[0].id == ssn && at_start(none.markers[0]));
+
+	// Deathmatch: its chain's 6095, the Co-op starts left.
+	bms::File deathmatch;
+	mission::make_default(deathmatch);
+	deathmatch.header.attrib_flags = bms::AttribFlags::Deathmatch;
+	markers_at(deathmatch, 106094, 1);
+	markers_at(deathmatch, 106095, 1);
+	TEST_EXPECT(place_player_start(deathmatch, start, placed, error));
+	TEST_EXPECT(placed.type == 6095 && placed.moved == 1 && !at_start(deathmatch.markers[0]) && at_start(deathmatch.markers[1]));
+
+	// Past what a position holds.
+	PlayStart far = start;
+	far.at[0] = 40000.0;
+	TEST_EXPECT(!place_player_start(coop, far, placed, error) && error.find("32,768") != std::string::npos);
+	return 0;
+}
+
+// DI-26: the start staged in a run directory. The archive that serves the mission (the boot table's slot
+// order, an expansion's pair first) is written again there with the mission's start placed, every other
+// entry as it held it (an encrypted one's stored bytes and flags too); its name, a link to the build's
+// archive, is replaced, so the build's archive keeps its bytes. A run directory whose archives hold no such
+// mission is refused (play.start). The runtime mounts such a run directory (on_run_dir), its build staged
+// there by prepare_runtime_run, the build's record left out.
+static int test_stage_play_start() {
+	using namespace opennova;
+	namespace fs = std::filesystem;
+	editor_test::TempProjectDir dir("opennova_editor_play_start");
+	const std::string build = dir.file("build/b1");
+	const std::string run = dir.file("run/runtime/1");
+	std::vector<uint8_t> mission_bytes;
+	{
+		bms::File mission;
+		mission::make_default(mission);
+		mission::EntityTransform at;
+		mission::add_entity(mission, mission::EntityKind::Marker, 106094, at);
+		std::string error;
+		TEST_EXPECT(bms::write(mission, mission_bytes, error));
+	}
+	const std::string text = "Hello, briefing";
+	std::vector<uint8_t> secret = {1, 2, 3, 4, 5, 6, 7, 8};
+	pff::pff_container_xor(secret.data(), secret.size(), 0x0312A4CEu);
+	const pff::PffWriteEntry entries[] = {
+		{"First.bms", mission_bytes.data(), uint32_t(mission_bytes.size()), 0, pff::PFF_NEW_ENTRY_TIMESTAMP, 0},
+		{"First.bin", reinterpret_cast<const uint8_t *>(text.data()), uint32_t(text.size()), 0, 1111u, 7u},
+		{"secret.dat", secret.data(), uint32_t(secret.size()), pff::PFF_FLAG_ENCRYPTED, 2222u, 9u},
+	};
+	fs::create_directories(build);
+	TEST_EXPECT(pff::pff_write_archive((build + "/localres.pff").c_str(), pff::PFF_FORMAT_PFF3, entries, 3) == pff::PFF_WRITE_OK);
+	TEST_EXPECT(write_empty_archive(build + "/resource.pff") && editor_test::write_text(build + "/game.cfg", "cfg") &&
+	            editor_test::write_text(build + "/build.json", "{}"));
+	std::vector<uint8_t> built_before;
+	std::string io_error;
+	TEST_EXPECT(read_file_bytes(build + "/localres.pff", built_before, io_error));
+
+	// The runtime's run directory (Play takes it, made): the build staged (linked; the build's record left out),
+	// mounted there.
+	fs::create_directories(run);
+	Diagnostic error;
+	std::vector<std::string> staged;
+	TEST_EXPECT(prepare_runtime_run(build, run, error, &staged));
+	std::sort(staged.begin(), staged.end());
+	TEST_EXPECT(staged == std::vector<std::string>({"game.cfg", "localres.pff", "resource.pff"}));
+	TEST_EXPECT(fs::exists(run + "/localres.pff") && !fs::exists(run + "/build.json"));
+	const LaunchPlan mounted = make_play_launch_plan("opennova", build, run, "jo", 0, "First.bms", {}, "", true);
+	TEST_EXPECT(mounted.resource_dir == mounted.working_dir &&
+	            std::find(mounted.args.begin(), mounted.args.end(), mounted.working_dir) != mounted.args.end());
+	TEST_EXPECT(make_play_launch_plan("opennova", build, run, "jo", 0).resource_dir == utf8_of(path_of(build)));
+
+	PlayStart start;
+	start.set = true;
+	start.at[0] = 100.0;
+	start.at[1] = 200.0;
+	start.at[2] = 12.5;
+	start.yaw = 180.0;
+	PlayStartPlaced placed;
+	TEST_EXPECT(stage_play_start(run, "", "first.BMS", start, placed, error));
+	TEST_EXPECT(placed.archive == "localres.pff" && placed.type == 6094 && placed.moved == 1 && !placed.added);
+	pff::PffArchive archive{};
+	TEST_EXPECT(pff::pff_open(&archive, (run + "/localres.pff").c_str()) == 0);
+	if (archive.entry_count == 3) {
+		const pff::PffEntry *bms_entry = pff::pff_find(&archive, "First.bms");
+		const pff::PffEntry *bin_entry = pff::pff_find(&archive, "First.bin");
+		const pff::PffEntry *secret_entry = pff::pff_find(&archive, "secret.dat");
+		TEST_EXPECT(bms_entry && bin_entry && secret_entry);
+		if (bms_entry && bin_entry && secret_entry) {
+			std::vector<uint8_t> bytes(bms_entry->size);
+			bms::File staged_mission;
+			std::string parse_error;
+			TEST_EXPECT(pff::pff_extract(&archive, bms_entry, bytes.data(), bytes.size()) == 0 &&
+			            bms::parse(bytes.data(), bytes.size(), staged_mission, parse_error));
+			TEST_EXPECT(staged_mission.markers.size() == 1 && staged_mission.markers[0].x == bms::to_fixed_16_16(100.0) &&
+			            staged_mission.markers[0].z == bms::to_fixed_16_16(12.5) && staged_mission.markers[0].yaw == 180);
+			std::vector<uint8_t> held(bin_entry->size);
+			TEST_EXPECT(pff::pff_extract(&archive, bin_entry, held.data(), held.size()) == 0 &&
+			            std::string(held.begin(), held.end()) == text && bin_entry->timestamp == 1111u &&
+			            bin_entry->checksum == 7u);
+			std::vector<uint8_t> raw(secret_entry->size);
+			TEST_EXPECT(pff::pff_extract_raw(&archive, secret_entry, raw.data(), raw.size()) == 0 && raw == secret &&
+			            secret_entry->flags == pff::PFF_FLAG_ENCRYPTED);
+		}
+	} else {
+		TEST_EXPECT(archive.entry_count == 3);
+	}
+	pff::pff_close(&archive);
+	std::vector<uint8_t> built_after;
+	TEST_EXPECT(read_file_bytes(build + "/localres.pff", built_after, io_error) && built_after == built_before);
+	TEST_EXPECT(!fs::exists(run + "/localres.pff.start"));
+
+	// An expansion's archive serves before the boot table's.
+	const std::string expansion_run = dir.file("run/runtime/2");
+	fs::create_directories(expansion_run + "/expansion/jxm");
+	TEST_EXPECT(pff::pff_write_archive((expansion_run + "/expansion/jxm/jxmL.pff").c_str(), pff::PFF_FORMAT_PFF3, entries, 1) ==
+	                    pff::PFF_WRITE_OK &&
+	            pff::pff_write_archive((expansion_run + "/localres.pff").c_str(), pff::PFF_FORMAT_PFF3, entries, 1) ==
+	                    pff::PFF_WRITE_OK);
+	TEST_EXPECT(stage_play_start(expansion_run, "jxm", "First.bms", start, placed, error) &&
+	            placed.archive == "expansion/jxm/jxmL.pff");
+
+	// No archive there holds it.
+	TEST_EXPECT(!stage_play_start(run, "", "Second.bms", start, placed, error) && error.code() == "play.start");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_place_player_start();
+	failures += test_stage_play_start();
 	failures += test_behind_starts();
 	failures += test_launch_plans();
 	failures += test_expansion_launch_plans();
