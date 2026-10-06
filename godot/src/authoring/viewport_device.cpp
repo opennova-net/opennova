@@ -66,6 +66,8 @@ void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
 	// would be made anew, empty).
 	drawn_ = 2;
 	canvas_sized_ = picture.canvas_sized;
+	// Where the mouse is over the picture, for a picture that draws the game's pointer (DI-08).
+	applier_->pointer(picture.pointer, picture.pointer_x, picture.pointer_y);
 	if (!keeps_last_()) {
 		size_(picture.width, picture.height);
 		viewport_->set_update_mode(SubViewport::UPDATE_ONCE);
