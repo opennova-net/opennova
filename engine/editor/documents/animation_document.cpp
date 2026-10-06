@@ -436,7 +436,10 @@ constexpr FindingCodeEntry<AnimationFinding> kFindingEntries[] = {
 	{ AnimationFinding::Fps, { "animation.fps" } },
 	{ AnimationFinding::ParentOrder, { "animation.parent_order" } },
 	{ AnimationFinding::TriggerUnknown, { "animation.trigger_unknown" } },
-	{ AnimationFinding::EndPoseTrigger, { "animation.end_pose_trigger" } },
+	// A trigger the game never reads on the end pose [orig: AnimChannel_InterpolateKeyframe @ 0x40B230]:
+	// moved onto the last frame it plays (DI-11, Diagnostic::planned). A clip's fps and a bit no known
+	// reader tests have none: the game plays a clip at its own rate, and retail's clips carry such bits.
+	{ AnimationFinding::EndPoseTrigger, { "animation.end_pose_trigger", FindingFix::EditRecord } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(AnimationFinding::kCount),
 		"every AnimationFinding has exactly one row");
@@ -501,6 +504,31 @@ std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 		d.record_kind = kEvent;
 		d.child_id = row->collections[1][i];
 		d.record = clip_document->record_path({row->id, kEvent, d.child_id});
+		// Its fix (DI-11): the trigger moved onto the last frame the game plays, beside what that frame
+		// fires already, and the end pose's cleared, one batch; only cleared where that frame fires it all
+		// already (retail's exporter repeats the last frame's row as the end pose).
+		const uint32_t trigger = static_cast<uint32_t>(row->events[i].trigger);
+		const uint32_t before = static_cast<uint32_t>(row->events[i - 1].trigger);
+		const std::string last = std::to_string(i - 1), words = animation_trigger_words(trigger);
+		Edit onto, off;
+		onto.address = {row->id, kEvent, row->collections[1][i - 1]};
+		onto.field = "trigger";
+		onto.value = int64_t(before | trigger);
+		off.address = {row->id, kEvent, d.child_id};
+		off.field = "trigger";
+		off.value = int64_t(0);
+		if ((before & trigger) == trigger)
+			d.planned.push_back({"Clear it from the end pose",
+			                     "Clears the end pose's " + words + ", which the game never reads: frame " + last +
+			                             ", the last frame the game plays, fires it already.",
+			                     {off}});
+		else
+			d.planned.push_back({"Move it to frame " + last,
+			                     "Sets its " + words + " on frame " + last + ", the last frame the game plays" +
+			                             (before ? ", beside the " + animation_trigger_words(before) + " it fires already"
+			                                     : std::string()) +
+			                             ", and clears it from the end pose, whose event the game never reads.",
+			                     {onto, off}});
 		findings.push_back(std::move(d));
 	}
 	for (size_t i = 0; i < row->events.size(); ++i) {

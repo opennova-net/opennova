@@ -127,6 +127,8 @@ const char *finding_fix_token(FindingFix fixes) {
 	case F::FallbackRow: return "fallback_row";
 	case F::NormalRowType: return "normal_row_type";
 	case F::SetAsideUnread: return "set_aside_unread";
+	case F::EditRecord: return "edit_record";
+	case F::UnusedVariable: return "unused_variable";
 	}
 	return "none";
 }
