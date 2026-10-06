@@ -31,12 +31,14 @@ const DocumentBase *open_at(const SessionView &view, const std::string &path) {
 	return nullptr;
 }
 
-// Whether the document's view shows one row of it at a time, the selection's (a menu's screen: the
-// Preview-role kind that shows its type shows a part of it, preview/viewport_kinds.h).
+// Whether the document's view shows one row of it at a time, the selection's, as a page of it (a menu's
+// screen: the Preview-role kind that shows its type shows a part of it, a page, preview/viewport_kinds.h; a
+// definition table's record, which the definition preview shows, is no page).
 bool shows_parts(const DocumentBase &document) {
 	const DocumentTypeId type = asset_kind_row(document.kind()).document;
 	const ViewportKind kind = preview_kind_of(type);
-	return kind != ViewportKind::kCount && viewport_kind_row(kind).part && viewport_kind_shows(kind, type);
+	return kind != ViewportKind::kCount && viewport_kind_row(kind).part && viewport_kind_row(kind).pages &&
+	       viewport_kind_shows(kind, type);
 }
 
 } // namespace

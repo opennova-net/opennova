@@ -202,7 +202,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/orbit_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_effects.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_playback.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_viewport.cpp
@@ -377,6 +379,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_source_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/definition_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/effect_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_inspector_view.cpp
