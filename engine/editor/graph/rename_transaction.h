@@ -17,6 +17,8 @@
 
 namespace opennova::editor {
 
+struct ImportedSource;
+
 // A rename that keeps the project consistent (ADR 0046 d10, S7): every field that
 // names the file is rewritten through its document type, the file moves under its new
 // name, and nothing changes when any site cannot be rewritten. The plan lists the
@@ -75,6 +77,9 @@ struct RenamePlan {
 	// output's own options (`sidecar` its record, so the import pass runs after the commit).
 	bool split = false;
 	std::string split_source;
+	// A move (DI-03, plan_move): the file to another folder of the project under its own name, no site
+	// rewritten; `new_path` where it goes.
+	bool move = false;
 	std::vector<Diagnostic> refusals;
 	bool ok() const { return refusals.empty(); }
 };
@@ -105,6 +110,26 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
                        const std::string &new_name);
 // Where a companion renamed with its mission goes: its own folder, its new name.
 std::string companion_path(const RenameOutput &companion);
+
+// A move (DI-03): the file `file` put in the project's folder `folder` (as a person writes it:
+// normalize_project_folder, "" the top level) under its own name, planned as a rename that keeps the
+// name. A folder is organization only: the game finds a file by its flat name (an archive's entries
+// are names alone, the loose search a name in the install's folder or the expansion's
+// [orig: FileSystem_OpenFile @ 0x75b1c0; PFF_FindEntry @ 0x7685d0]; vfs/vfs-pff-mount-re.md "Resolution
+// order"), and a build packs and copies a file by its name alone (ADR 0046 d6), so no reference is
+// rewritten and the plan has no site. An import source takes its record with it, and its outputs are
+// made again under the new place by the import pass that follows (as a rename's are). Refused when:
+// the file is unknown or an import's output (move its source); the folder is not one of the project's
+// (outside it, a dot-folder such as the cache, the export folder or one an export keeps beside it), or
+// is the file's own; a file sits where it would go; the file is an import source whose record lists the
+// files its import read beside it (they are found from its folder: moved alone, it would no longer
+// find them), or a file another source's import reads from its place (`imports`, the import pass's
+// sources: moved, that import would no longer find it).
+RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
+                     const std::string &file, const std::string &folder,
+                     const std::vector<ImportedSource> *imports = nullptr);
+// A project-relative path's folder ("" the top level).
+std::string folder_of_path(const std::string &relative);
 
 // A split (ADR 0046 S18): the file `file` (a texture two uses ask different things of) copied as
 // `new_name`, and the fields of the files `referrers` lists that name it rewritten to the copy, every
@@ -236,6 +261,7 @@ private:
 	void stage_native(const AssetEntry &asset, const std::vector<const RenameSite *> &sites, Staged &staged);
 	void commit();
 	void commit_file_rename();
+	void commit_move();
 	void commit_split();
 	// Each staged file of a file's rename or a split written in its turn, with the findings its staging made;
 	// false when one did not take or did not write.
