@@ -215,9 +215,11 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(plan.archives.size() == 3);
 	TEST_EXPECT(plan.archives[0].file_name == "language.pff" && !plan.archives[0].entries.empty());
 	TEST_EXPECT(plan.archives[1].file_name == "localres.pff" && !plan.archives[1].entries.empty());
-	// resource.pff holds the one texture the blanks make: the pointer the startup screen names.
-	TEST_EXPECT(plan.archives[2].file_name == "resource.pff" && plan.archives[2].entries.size() == 1 &&
-	            plan.archives[2].entries[0].logical_name == "newarow1.tga");
+	// resource.pff holds what the blanks make that goes there: the pointer the startup screen names and
+	// the renderer's own shader, _ffp.fx.
+	TEST_EXPECT(plan.archives[2].file_name == "resource.pff" && plan.archives[2].entries.size() == 2);
+	for (const auto &entry : plan.archives[2].entries)
+		TEST_EXPECT(entry.logical_name == "newarow1.tga" || entry.logical_name == "_ffp.fx");
 	TEST_EXPECT(plan.loose.size() == 2); // menumus.sbf and nw_cdata.coo
 
 	const BuildReport report = run_build(plan, p.output_root());
