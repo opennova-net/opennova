@@ -839,7 +839,7 @@ generic form beside it)
 
 **Viewport**:
 One document's picture as the game would draw it, of one kind (a menu's screen, a model, a text in
-its script device, a mission's 3D view, a texture, a particle file's effect), kept by the session while the document is
+its script device, a mission's 3D view, a texture, a particle file's effect, a HUD layout's HUD), kept by the session while the document is
 open: one per document and kind (a texture's also while Files selects the file, open or not). Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
 picture with the outline and the Inspector beside it: a mission's, for which the Preview window steps
@@ -995,6 +995,17 @@ would cost instead. Said under each use in the texture's tab and on the wire; pa
 project's budget is every texture the game makes for the model rows (one a name written), costliest first, with
 its totals: the `texture_budget` query, Files' By cost.
 _Avoid_: footprint, VRAM (the game keeps every level in its own process too), file size (what the disk holds)
+
+**HUD viewport**:
+A HUD layout's picture (hudpos.def's Preview, beside its text): the game's own HUD drawn over the layout
+as Save would write it now (the runtime's HudOverlay through the engine's layout fill and frame
+compiler, and the game's view effects over it), at a screen size, for a player whose state its options
+choose (the stance, a weapon of weapon.def with its clip and reserve, the health, the binoculars' or the
+goggles' view, a hit's damage vignette, the HUD detail level, the crosshair style); each a SetViewport.
+A point of it names the HUD element under it (the HUD's walk records what each of its elements drew),
+the hudpos.def lines that place it and the textures it draws, never a record; a click picks the
+element, whose lines and textures are each a Go to.
+_Avoid_: HUD editor (nothing it does edits the layout), preview (the Preview window, or the role)
 
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
