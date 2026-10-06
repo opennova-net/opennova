@@ -108,35 +108,41 @@ std::unique_ptr<DocumentBase> document_of(AssetKind kind, const std::string &tex
 // --- the kinds' table --------------------------------------------------------------------------------
 
 int test_kind_table() {
-	// The menu's, the model's, the script's, the mission's (S14), the texture's (S18), the effect's (DI-14).
-	TEST_EXPECT(kViewportKindCount == 6);
+	// The menu's, the model's, the script's, the mission's (S14), the texture's (S18), the effect's (DI-14),
+	// the HUD's (DI-20).
+	TEST_EXPECT(kViewportKindCount == 7);
 	TEST_EXPECT(std::string(viewport_kind_token(ViewportKind::Script)) == "script");
 	ViewportKind named = ViewportKind::kCount;
 	TEST_EXPECT(viewport_kind_from_token("script", named) && named == ViewportKind::Script);
 	const ViewportKindRow &row = viewport_kind_row(ViewportKind::Script);
 	TEST_EXPECT(row.kind == ViewportKind::Script && row.role == ViewportRole::Main && !row.as_saved && !row.part &&
-	            row.feed_count == 6 && row.make && !row.canvas);
+	            row.feed_count == 7 && row.make && !row.canvas);
 	// Whether a kind has a canvas is what its viewport makes of one: the script's none, the others' one.
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const ViewportKindRow &kind_row = viewport_kind_row(static_cast<ViewportKind>(i));
 		TEST_EXPECT((kind_row.make("t")->make_canvas() != nullptr) == kind_row.canvas);
 	}
 	// Every text type shown by it, the Main role's one kind; no record type; no Preview window's kind for
-	// a text but a particle file's, whose effect the effect viewport plays (DI-14).
+	// a text but a particle file's, whose effect the effect viewport plays (DI-14), and the HUD layout's, whose
+	// HUD the Preview window shows (DI-20).
 	const DocumentTypeId texts[] = {DocumentTypeId::Script, DocumentTypeId::MusicScript, DocumentTypeId::Credits,
-	                                DocumentTypeId::Shader, DocumentTypeId::Text, DocumentTypeId::Particles};
+	                                DocumentTypeId::Shader, DocumentTypeId::Text, DocumentTypeId::Particles,
+	                                DocumentTypeId::HudLayout};
 	size_t shown = 0, mains = 0;
 	for (const DocumentTypeId type : texts) {
 		shown += viewport_kind_shows(ViewportKind::Script, type) ? 1 : 0;
-		TEST_EXPECT(main_viewport_kind(type) == ViewportKind::Script &&
-		            preview_kind_of(type) == (type == DocumentTypeId::Particles ? ViewportKind::Effect : ViewportKind::kCount));
+		const ViewportKind preview = type == DocumentTypeId::Particles ? ViewportKind::Effect
+		                             : type == DocumentTypeId::HudLayout ? ViewportKind::Hud
+		                                                                 : ViewportKind::kCount;
+		TEST_EXPECT(main_viewport_kind(type) == ViewportKind::Script && preview_kind_of(type) == preview);
 	}
 	for (size_t i = 1; i <= kDocumentTypeCount; ++i) mains += main_viewport_kind(static_cast<DocumentTypeId>(i)) != ViewportKind::kCount;
 	for (size_t i = 0; i < kViewportKindCount; ++i)
 		// The Main-role kinds: the script's, the mission's (S14) and the texture's (S18).
 		TEST_EXPECT((viewport_kind_row(static_cast<ViewportKind>(i)).role == ViewportRole::Main) ==
 		            (i == size_t(ViewportKind::Script) || i == size_t(ViewportKind::Mission) || i == size_t(ViewportKind::Texture)));
-	TEST_EXPECT(shown == 6 && mains == 8); // the six text types, the mission (S14) and the texture (S18) have a Main-role kind
+	// The seven text types, the mission (S14) and the texture (S18) have a Main-role kind.
+	TEST_EXPECT(shown == 7 && mains == 9);
 	// Its viewport: one option, assist (the MCP gaps lane: none asked), no camera, no canvas; the empty one's
 	// reason.
 	std::unique_ptr<ViewportModel> made = row.make("t.wac");

@@ -38,14 +38,14 @@ std::string reader_sentence(std::string message);
 // Save writes it back encoded, as the game's own codec does (net/novacrypto/pubcrypto.h,
 // encode_key_chain). Every text kind no structured type edits yet is held by it (the deep-integration
 // plan's DI-06, "every text file opens in the editor": a configuration, a text, an AI profile, the
-// HUD layout and effects, the avatars, the character attributes, the other defs, the score table, a
-// NovaWorld screen; a kind the build leaves out, a mission text, is none of its: every kind a type edits
-// packs, assets/asset_kinds; a kind a structured type edits is that type's, as the environment is the
-// environment type's, DI-19a, and a particle file the particle type's, DI-14). Where the engine has a
-// reader of the kind, its validate_file is that reader's findings of the text (text_reader_findings); a
-// kind the asset graph reads through the engine's reader (graph/extractors.cpp, a native kind: the HUD
-// layout, the avatars) has its open document read by that same reader, so its names follow its edits. A
-// kind with no reader the editor models makes no finding.
+// HUD effects, the avatars, the character attributes, the other defs, the score table, a NovaWorld
+// screen; a kind the build leaves out, a mission text, is none of its: every kind a type edits packs,
+// assets/asset_kinds; a kind a structured type edits is that type's, as the environment is the
+// environment type's, DI-19a, a particle file the particle type's, DI-14, and the HUD layout the HUD
+// layout type's, DI-20). Where the engine has a reader of the kind, its validate_file is that reader's
+// findings of the text (text_reader_findings); a kind the asset graph reads through the engine's reader
+// (graph/extractors.cpp, a native kind: the avatars) has its open document read by that same reader, so
+// its names follow its edits. A kind with no reader the editor models makes no finding.
 std::unique_ptr<DocumentBase> make_text_document();
 std::vector<Diagnostic> validate_text_file(const DocumentBase &document);
 FindingTable text_finding_codes();
@@ -63,8 +63,7 @@ enum class TextFinding {
 };
 const FindingCodeRow &finding_code(TextFinding code);
 // The findings the engine's reader of `document`'s kind makes of its text (validate_text_file's):
-// the HUD layout's
-// (def::def_parse_hudpos_memory), the avatars' (avatars::avatars_parse_memory, each diagnostic at its
+// the avatars' (avatars::avatars_parse_memory, each diagnostic at its
 // line) and the score table's (score::parse); none for any other kind.
 std::vector<Diagnostic> text_reader_findings(const TextDocument &document);
 
