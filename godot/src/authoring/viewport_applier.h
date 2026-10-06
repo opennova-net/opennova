@@ -66,6 +66,15 @@ public:
 	virtual void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) = 0;
 	// The picture's size changed (a menu's frame laid out across it).
 	virtual void resize(int width, int height) = 0;
+	// A canvas draws the picture this frame with the mouse over it at (x, y) of its pixels, showing no
+	// pointer of its own there (opennova::editor::ViewportPicture::pointer), before the frame's tick: a
+	// picture that draws the game's pointer draws it there (a menu's, DI-08). Asked on every frame a
+	// canvas draws it, `over` false where the mouse is not.
+	virtual void pointer(bool over, float x, float y) {
+		(void)over;
+		(void)x;
+		(void)y;
+	}
 	// The surface under the picture's point (x, y), the viewport's space (a drop's ground): none for
 	// today's kinds.
 	virtual bool surface_at(float x, float y, float point[3]) const {
