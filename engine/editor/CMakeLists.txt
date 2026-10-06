@@ -13,6 +13,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kind_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/disk_changes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_choice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_view.cpp
@@ -248,6 +249,7 @@ add_library(opennova_editor STATIC
     # (S13 D7), and the finding codes' lookup over every table (S13 A6)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_result.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/disk_watch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
