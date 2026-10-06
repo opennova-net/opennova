@@ -22,7 +22,7 @@ uint64_t next_edit_gesture() {
 Document::Document(const Document &other)
 		: DocumentBase(other), rows_(other.rows_), file_state_(other.file_state_),
 		  next_id_(other.next_id_), last_added_(other.last_added_), added_(other.added_),
-		  made_(other.made_),
+		  made_(other.made_), found_(other.found_),
 		  history_(other.history_, rows_, file_state_), saved_rows_(other.saved_rows_),
 		  saved_state_(other.saved_state_), saved_positions_(other.saved_positions_) {}
 
@@ -558,6 +558,12 @@ bool Document::removal_edits(const std::vector<NodeAddress> &records, std::vecto
 	return true;
 }
 
+bool Document::move_out_edits(const Edit &move, std::vector<Edit> &, std::string &error) const {
+	const Node *own = row(move.address.row);
+	error = "A record moves within its own " + std::string(own ? kind_label(own->kind) : "row") + ".";
+	return false;
+}
+
 bool Document::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
 	return fail(error, path(), CoreFinding::DocumentValue, "This document has no file-wide values.");
 }
@@ -573,7 +579,7 @@ bool Document::read_source(const std::vector<uint8_t> &decoded, bool adopt,
 	rows_.clear(); file_state_.reset();
 	indexes_.clear();
 	history_.reset();
-	next_id_ = 1; last_added_ = 0; added_.clear(); made_.clear();
+	next_id_ = 1; last_added_ = 0; added_.clear(); made_.clear(); found_.clear();
 	for (auto &row : rows) {
 		row->id = allocate_id();
 		assign_ids(*row);
@@ -615,7 +621,11 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	} staging{*this};
 	staged_ = &staged;
 	std::vector<NodeId> made, added;
-	if (!stage_edits(edits, staged, made, added, error)) return refused();
+	found_.clear();
+	if (!stage_edits(edits, staged, made, added, error)) {
+		found_.clear();
+		return refused();
+	}
 	staged.for_each_changed([this](Node &row) { after_edit(row); });
 	EditStep step = staged.step();
 	if (step.empty()) {
@@ -782,6 +792,13 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		// A row of the file: added, pasted at the top level, duplicated, removed or moved.
 		if (into && !edit.address.row) {
 			if (edit.operation == EditOperation::Add) {
+				// A row the game finds by the value asked already: the Add names it, makes none.
+				if (!edit.field.empty())
+					if (const NodeId found = existing_row_for(edit, staged.rows())) {
+						made[i] = {found, found};
+						found_.push_back(found);
+						return true;
+					}
 				const NodeId id = allocate_id();
 				std::shared_ptr<Node> row =
 				        make_node(edit.address.kind, id, staged.rows(), message);

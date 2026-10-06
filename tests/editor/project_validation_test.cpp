@@ -43,6 +43,7 @@
 
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
+#include <formats/rtxt/rtxt.h>
 #include <base/vfs/vfs.h>
 
 #include <algorithm>
@@ -386,9 +387,59 @@ static int test_use_check_table() {
 		TEST_EXPECT(row->kind == static_cast<AssetKind>(k) && row->check &&
 				document_type_for(row->kind));
 	}
-	// The textures' check (S18), the stylesheet's unused-variable check and the mission's pool check (S14).
-	TEST_EXPECT(rows == 3 && use_check(AssetKind::Texture) && use_check(AssetKind::MenuStyle) && use_check(AssetKind::Mission) &&
-	            !use_check(AssetKind::ItemDefs));
+	// The textures' check (S18), the gametext keys a single-player mission reads (the mission authoring
+	// round), the stylesheet's unused-variable check and the mission's pool check (S14).
+	TEST_EXPECT(rows == 4 && use_check(AssetKind::Texture) && use_check(AssetKind::Strings) && use_check(AssetKind::MenuStyle) &&
+	            use_check(AssetKind::Mission) && !use_check(AssetKind::ItemDefs));
+	return 0;
+}
+
+// The gametext keys a single-player mission's flow reads (graph/use_checks): with no mission, none is
+// asked; with one, each the table's first section of its name lacks, or holds empty, a warning on
+// gametext.bin: of the ten, one present, one empty, one only in a second section of its name (no lookup
+// reads it [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250]).
+static int test_gametext_flow_keys() {
+	rtxt::File table;
+	const auto section = [&table](const char *name, std::vector<std::pair<const char *, const char *>> rows) {
+		const uint32_t index = static_cast<uint32_t>(table.sections.size());
+		table.sections.push_back({ name, static_cast<uint32_t>(rows.size()) });
+		for (const auto &row : rows)
+			table.entries.push_back({ row.first, row.second, {}, index });
+	};
+	section("Overlays", { { "STROVER_MISSION_FAILED", "Mission failed" } });
+	section("Epilog", { { "STREPILOG_KEYINFO", "" } });
+	section("overlays", { { "STROVER_MISSIONOBJECTIVES", "Objectives" } });
+	std::vector<uint8_t> bytes;
+	std::string error;
+	TEST_EXPECT(rtxt::write(table, bytes, error));
+	bool made = true;
+	const auto flow_rows = [&](bool mission) {
+		Project project;
+		made = made && project.make({}) && editor_test::write_bytes(project.root + "/strings/gametext.bin", bytes);
+		if (mission)
+			made = made && editor_test::write_bytes(project.root + "/missions/synth_logic.bms",
+					test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms"));
+		project.rescan();
+		AssetGraph graph;
+		ValidationCache cache;
+		const std::vector<std::shared_ptr<const DocumentBase>> open;
+		std::vector<Diagnostic> rows;
+		for (const Diagnostic &d : validate_project({ project.paths, project.document, project.scan, open }, graph, cache))
+			if (d.code() == "strings.flow_key_missing") rows.push_back(d);
+		return rows;
+	};
+	TEST_EXPECT(flow_rows(false).empty());
+	const std::vector<Diagnostic> rows = flow_rows(true);
+	TEST_EXPECT(made && rows.size() == 9);
+	size_t empty = 0, shadowed = 0;
+	for (const Diagnostic &d : rows) {
+		TEST_EXPECT(d.severity == DiagnosticSeverity::Warning && d.asset == "strings/gametext.bin");
+		TEST_EXPECT(d.message.find("STROVER_MISSION_FAILED") == std::string::npos);
+		empty += d.message.find("Epilog/STREPILOG_KEYINFO, the end screens' key help: it holds no text") != std::string::npos;
+		shadowed += d.message.find("Overlays/STROVER_MISSIONOBJECTIVES") != std::string::npos &&
+				d.message.find("the table has no such string") != std::string::npos;
+	}
+	TEST_EXPECT(empty == 1 && shadowed == 1);
 	return 0;
 }
 
@@ -682,6 +733,7 @@ int main(int argc, char **argv) {
 	failures += test_what_a_validation_reads();
 	failures += test_findings_keep_their_records();
 	failures += test_use_check_table();
+	failures += test_gametext_flow_keys();
 	failures += test_style_name_as_reference();
 	failures += test_style_uses_by_what_names_them();
 	failures += test_item_ids_within_a_table();

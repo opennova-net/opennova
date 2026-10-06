@@ -855,8 +855,103 @@ static int unticked_line_saves_alone() {
 	return 0;
 }
 
+// A name the reader cuts takes any length, as the game's line does, and holds what the game keeps: retail's
+// items.def names its map centre "Map Centerpoint, helps align commander map grid", 47 characters, of
+// which the begin arm keeps 46 [orig: ItemDef_ParseProperty @0x49EBD9, the cut @0x49EBFB]; the saved line
+// reads back the same. A text the reader does not cut is refused past its field, saying how much it holds.
+static int item_name_cut() {
+	editor_test::TempProjectDir dir("opennova_catalog_item_name_cut");
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"Map centre\"\nid 102043\ntype marker\nend\n"));
+	DefCatalogDocument items; Diagnostic error;
+	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	const NodeAddress item{items.rows()[0]->id, node_kind(DefRecordKind::Item), 0};
+	const std::string retail = "Map Centerpoint, helps align commander map grid";
+	TEST_EXPECT(retail.size() == 47);
+	TEST_EXPECT(items.apply(field(item, "display_name", retail), error));
+	TEST_EXPECT(std::string(row_at(items, 0).native.as<DefItemDef>().display_name) == retail.substr(0, 46));
+	TEST_EXPECT(items.save(error));
+	DefCatalogDocument again;
+	TEST_EXPECT(again.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	TEST_EXPECT(std::string(row_at(again, 0).native.as<DefItemDef>().display_name) == retail.substr(0, 46));
+	// The read-back file's line as the game reads it: 46 kept of any longer name.
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"" + retail + "\"\nid 102043\ntype marker\nend\n"));
+	DefCatalogDocument shipped;
+	TEST_EXPECT(shipped.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	TEST_EXPECT(std::string(row_at(shipped, 0).native.as<DefItemDef>().display_name) == retail.substr(0, 46));
+	// The text id's member holds what its line names, uncut: past it, refused.
+	const size_t text_id = sizeof(DefItemDef::text_id);
+	TEST_EXPECT(!items.apply(field(item, "text_id", std::string(text_id, 'T')), error));
+	TEST_EXPECT(error.message.find("holds " + std::to_string(text_id - 1) + " characters") != std::string::npos);
+	return 0;
+}
+
+// The file's ending stays as it is however many items an Add puts at its end: the blank line after
+// the last record (the writer's own form, and the base game's file) is one blank line after each
+// add, never one more per add.
+static int adds_keep_the_ending() {
+	editor_test::TempProjectDir dir("opennova_catalog_adds_keep_the_ending");
+	const std::string text = "// Item definitions\r\n\r\nbegin \"A\"\r\nid 100000\r\ntype marker\r\nend\r\n\r\n";
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), text));
+	DefCatalogDocument items; Diagnostic error;
+	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	TEST_EXPECT(items.serialize().text == text);
+	const auto ending = [](const std::string &file) {
+		size_t blank = 0;
+		for (size_t at = file.size(); at >= 4 && file.compare(at - 4, 4, "\r\n\r\n") == 0; at -= 2) ++blank;
+		return blank;
+	};
+	for (int n = 0; n < 3; ++n) {
+		Edit add; add.operation = EditOperation::Add; add.address.kind = node_kind(DefRecordKind::Item);
+		add.field = "display_name"; add.value = std::string("Item ") + char('B' + n);
+		TEST_EXPECT(items.apply(add, error));
+		const std::string written = items.serialize().text;
+		if (ending(written) != 1) {
+			std::string shown;
+			for (const char c : written) shown += c == '\r' ? std::string("<CR>") : std::string(1, c);
+			std::printf("after %d adds:\n%s|EOF\n", n + 1, shown.c_str());
+		}
+		TEST_EXPECT(ending(written) == 1);
+	}
+	return 0;
+}
+
+// The type line's word where the game reads two alike (foliage for 2, object for 6, as retail's trees and
+// crates write them [orig: ItemDef_ParseProperty, the type chain @0x4A02E4..0x4A04B7]): read, kept by a
+// copy (written in the writer's form), set on a new item, and dropped for a kind with one word.
+static int type_words() {
+	editor_test::TempProjectDir dir("opennova_catalog_type_words");
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"),
+	                                    "begin \"Jungle Bush\"\r\nid 100300\r\ntype foliage\r\nend\r\n\r\n"
+	                                    "begin \"Crate\"\r\nid 100301\r\ntype object\r\nend\r\n\r\n"));
+	DefCatalogDocument items; Diagnostic error;
+	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	const auto &bush = row_at(items, 0).native.as<DefItemDef>();
+	TEST_EXPECT(bush.type == DEF_ITEM_TYPE_FOLIAGE && bush.type_word == 1 && row_at(items, 1).native.as<DefItemDef>().type_word == 1);
+	const NodeKind item = node_kind(DefRecordKind::Item);
+	Edit duplicate; duplicate.operation = EditOperation::Duplicate; duplicate.address = {items.rows()[0]->id, item, 0};
+	TEST_EXPECT(items.apply(duplicate, error));
+	// The record's lines from its header to its end, as written.
+	const auto lines_of = [&items](const char *header) {
+		const std::string text = items.serialize().text;
+		const size_t at = text.find(header);
+		return at == std::string::npos ? std::string() : text.substr(at, text.find("end\r\n", at) - at);
+	};
+	TEST_EXPECT(lines_of("begin \"Jungle Bush (copy)\"").find("\ttype foliage\r\n") != std::string::npos);
+	// A new item made foliage: its type 2, written as the other word.
+	Edit add; add.operation = EditOperation::Add; add.address.kind = item; add.field = "display_name"; add.value = std::string("Palm");
+	TEST_EXPECT(items.apply(add, error));
+	const NodeAddress palm{items.last_added(), item, 0};
+	TEST_EXPECT(items.apply(std::vector<Edit>{field(palm, "type", int64_t(DEF_ITEM_TYPE_DECORATION)), field(palm, "type_word", int64_t(1))},
+	                        error));
+	TEST_EXPECT(lines_of("begin \"Palm\"").find("\ttype foliage\r\n") != std::string::npos);
+	// Made a vehicle: one word, the other dropped.
+	TEST_EXPECT(items.apply(field(palm, "type", int64_t(DEF_ITEM_TYPE_VEHICLE)), error));
+	TEST_EXPECT(static_cast<const CatalogRow &>(*items.row(palm.row)).native.as<DefItemDef>().type_word == 0);
+	return 0;
+}
+
 int main() {
-	return unticked_line_saves_alone() || code_page_names() || history_and_save() || two_new_items() || collections() ||
+	return type_words() || adds_keep_the_ending() || item_name_cut() || unticked_line_saves_alone() || code_page_names() || history_and_save() || two_new_items() || collections() ||
 	       nested_rows_follow_the_record() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
 	       witnessed_enums() || powerup_weapon() || duplicates_apart() || plain_words();
