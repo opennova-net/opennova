@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <editor/assets/asset_kinds.h>
@@ -143,6 +144,11 @@ public:
 	int location_of(const Node &row) const;
 	size_t count_of(MissionKind kind) const;
 	size_t group_members(int64_t group) const;
+	// Whether a marker is a stop of the player's route: the first path with the player-route flag
+	// (WaypointFlags::PlayerRoute), its first min(count, stops, 128) stops [orig:
+	// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the 128 cap @0x502efc; runtime/mission/promote.cpp's
+	// waypoint track], whose names the waypoint HUD shows.
+	bool on_player_route(const Node &row) const;
 	// What the windows show for a record (S15): the mission's own words without the project's names
 	// (mission_record_label, documents/mission_labels.h): an event as its sentence, "When <trigger> and
 	// <trigger>, then <action>; <action>." (documents/mission_sentence.h, Events and scripts), a trigger as
@@ -219,6 +225,7 @@ private:
 		std::unordered_map<NodeId, size_t> places;
 		std::unordered_map<NodeId, int> locations;
 		std::vector<size_t> groups;
+		std::unordered_set<NodeId> route; // the markers the player's route stops at
 	};
 	const Lookups &lookups() const;
 
@@ -265,17 +272,18 @@ std::string mission_scope(const DocumentBase &document);
 // (WinConditions [orig: HUD_DrawWinConditions @0x5ba940, the break @0x5ba9e0]), and what the actions
 // read by a slot's id: SubGoalWon's STRWINMSG%03i, SubGoalLost's STRLOSEMSG%03i, a shown
 // ShowWinSubgoal's STRWINDIRECTIVE%03i and ShowLoseSubgoal's STRLOSEDIRECTIVE%03i, OutputText's
-// Triggered Text ID%03i. None is rewritable. A marker's waypoint name (WPNames STRWPNAME%03i of its
-// record's +0x60, for the markers of the player route, the first path with flags & 2) makes no edge:
-// its key is the raw id out of a session and the id + 1 in a waypoint session after gametext's
-// specials, a miss showing STRWPNAMEDEFAULT [orig: HUD_GetWaypointName @0x594630;
-// docs/interface/hud-re.md, the waypoint HUD], so which key a mission reads is how it is played.
-// Then the files the mission's name finds and a dialog's bank.
+// Triggered Text ID%03i; and STRWPNAME%03i of a type-6005 waypoint's name id (record +0x60, section
+// WPNames), which its spawn looks up for its name [orig: Entity_SpawnFromBMSRecord @0x40f0aa..
+// 0x40f11e] and the waypoint HUD out of a session reads again, a miss showing gametext's
+// STRWPNAMEDEFAULT [orig: HUD_GetWaypointName @0x594630, the mission text @0x59474c] (in a session of
+// a mode without the co-op bit the HUD keys the id + 1 after gametext's specials, @0x594678: the
+// edge is the single-player and co-op key). None is rewritable. Then the files the mission's name
+// finds and a dialog's bank.
 void mission_references(const Document &document, Extracted &out);
 
 // The text keys one record's numbers form, the TextId edges mission_references makes of it, each with
-// its field ("" a navpoint's LOCATION, "name_index" a STRNAME, "win_conditions[i]" an objectives row, an
-// action's "param1" the line it shows), in the order mission_references makes them; `placed` fills each
+// its field ("" a navpoint's LOCATION, "name_index" a STRNAME, "ttool_index" a waypoint's STRWPNAME,
+// "win_conditions[i]" an objectives row, an action's "param1" the line it shows), in the order mission_references makes them; `placed` fills each
 // edge's record path and locator (the graph's), which the display names do without. With `as_field`, the
 // keys the record would form were that field `as_value` (a picker wording a value the field does not
 // hold yet: the display names' choices).
