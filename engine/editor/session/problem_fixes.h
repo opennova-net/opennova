@@ -60,8 +60,17 @@ namespace opennova::editor {
 // serialize (a blocks_save row: *.unserializable, *.invalid_input; its Save is refused). An
 // item on an id the engine keeps for another kind (catalog.reserved_kind): Use an id of its own;
 // one named as a place the engine finds by an id the project lacks (catalog.reserved_name): Use
-// that id; each a Rename everywhere of the item's id (never in bulk). An items.def whose first row
-// is no Null marker (catalog.first_row): Add a Null marker first (an edit of its document).
+// that id; each a Rename everywhere of the item's id (never in bulk); an item on an id an earlier item
+// has (catalog.item_identity): Use an id of its own, the project's free id set as its id (an edit of
+// its document: nothing reaches it by the id). An items.def whose first row
+// is no Null marker (catalog.first_row): Add a Null marker first (an edit of its document). A
+// finding whose maker planned an edit of its own file (an EditRecord row, ADR 0046 DI-11:
+// Diagnostic::planned, made with the file's records at hand: an SSN, a zone id, a name or a key
+// of its own for a record no lookup finds, a string removed that no lookup reads, an end pose's
+// trigger moved onto the last frame the game plays): each, an edit of its document (edit_fix). A
+// stylesheet variable no menu names (style.unused): Remove the line, where no menu's text names it
+// inside a longer text either (the render check's variables). Each edit of a document is opened
+// first, one step Undo takes back, never in bulk.
 // Every other finding has none: Problems goes to its place.
 struct ProblemFix {
 	std::string label;
@@ -82,6 +91,12 @@ struct ProblemFixIndex {
 // The fixes for a finding over the view as it is, the first the one a click applies.
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view,
                                   const ProblemFixIndex *index = nullptr);
+
+// A planned edit of the file at `path` as the fix Problems offers (ADR 0046 DI-11): its words, saying
+// Undo takes it back, and an edit_record of its batch, the document opened first; never in bulk. What an
+// EditRecord row's finding offers (Diagnostic::planned), and what a fix planning an edit of another
+// file than its finding's makes of it.
+ProblemFix edit_fix(const std::string &path, const PlannedFix &planned);
 
 // Where a Go to on a name nothing resolves lands (the deep-integration plan's DI-17: a Go to always lands
 // somewhere): a symbol's (a string id, a style variable, a menu screen or window, a weapon, ammo or item, a
