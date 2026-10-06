@@ -1,0 +1,123 @@
+// hudpos.def: OpenNova's HUD layout. Every position is in the HUD's 1024 x 768 design space,
+// scaled to the screen on each axis; textures named here draw at their own size in that space.
+
+// Fonts: the first above 640 pixels wide, the second at 640 and below.
+fonthud1_hi	onhudb18.fnt
+fonthud1_lo	onhud14.fnt
+
+// ---- The soldier panel, bottom left: weapon above, stance below, health along the foot.
+StaticFrame	onhframe.tga	6,586
+
+HUDWEAPONNAME	14,588,0,left
+HUDWPNICON	14,606
+AMMOCOUNTPOS	168,616,0,right
+HUDCLIP		14,648
+HUDHEAT		172,592,176,662
+HUDHEATBORDER	160,200,206,190
+
+HUDSTANCEPOS	30,639
+HUDVEHSTANCEPOS	6,300
+HUDSTANCE 0	0 0 onhstnc0.tga STAND
+HUDSTANCE 1	0 0 onhstnc1.tga CROUCH
+HUDSTANCE 2	0 0 onhstnc2.tga PRONE
+HUDSTANCE 3	0 0 onhstnc3.tga SITTING
+HUDSTANCE 4	0 0 onhstnc4.tga EMPLACED
+HUDSTANCE 5	0 0 onhstnc5.tga PARACHUTE
+
+HUDHEALTH	25,741,177,751
+HUDHEALTHBORDER	160,200,206,190
+
+HUDPOWERBAR	14,576,160,6
+HUDGeartext	14,640
+cargopos	190,700
+
+// ---- The map, bottom right, and the readouts above it.
+HUDSPINMAPX1	802
+HUDSPINMAPX2	1002
+HUDSPINMAPY1	546
+HUDSPINMAPY2	746
+
+MAPCOORDS	1012,506,0
+HUDWPDINFO	1012,486,0,right
+
+// ---- Session lines, top right.
+CONNECTSTATUS	1012,10,right
+HUDTEAMXY	1012,30,0,right
+HUDTIMECLOCK	1012,50
+HUDPLAYERCOUNT	1012,70,0,right
+HUDFLAGCARRIER	8,8,1,left
+GAMEINFO	1012,410,0,right
+ZONEINFO	1012,386,right
+LFP_FLAGS	1016,96
+LFP_TAKEOVERDLG	200,600
+HUDORDERS	1012,150
+HUDTITLEX	1012
+HUDTITLEY	330
+HUDPINGX	10
+HUDPINGY	10
+HUDPINGRIGHT	0
+EXPPOINTS	8,96,0,left
+STARTTIMER	262,180,500,80
+SPECMODE_LABEL	512,700
+
+// ---- Messages, tips and the centre of the screen.
+HUDSYSTEXT	8,24
+HUDCHATTEXT	196,712
+HUDCHLINE	8
+MRCLIPPYNORMAL	8,120,64,108
+MRCLIPPYALTERNATE	8,340,64,108
+BREATHTIME	512,84,center
+HUDSCOPERANGEXY	180,300
+HUDSCOPEZEROXY	180,320
+HUDSCOPEMAGXY	180,340
+ShowImpactDistPos	512,430
+roomtkpos	20,400
+roomtktxtpos	12,466
+
+// ---- The altitude ladder (aircraft).
+DESTAGLCOLOR	96,60,220,60
+AGLCOLOR	72,96,230,96
+HUDAGLRADIUS	12
+HUDAGLTLRX	120,124
+HUDAGLYLEN	440,90
+HUDROCLEN	40
+
+// ---- Colours. Text colours are r,g,b; the stance and bar colours a,r,g,b.
+alphafade	40 70 3
+weapon_textcolor	246,202,70
+hud_textcolor	246,202,70
+tagcolor_blueteam	70,120,255
+tagcolor_redteam	235,60,50
+tagcolor_good	92,214,72
+tagcolor_middle	236,176,40
+tagcolor_bad	210,48,36
+stancecolor_good	200,92,214,72
+stancecolor_middle	200,236,176,40
+stancecolor_bad	200,210,48,36
+stanceicon_color	0,255,255,255
+
+// ---- What each HUD detail level shows (F6 steps the level; level 3 hides the HUD).
+HUDDECLUT_MSNTITLE	1 0 0 0
+HUDDECLUT_FARPINFO	1 1 0 0
+HUDDECLUT_BREATHTIME	1 1 1 0
+HUDDECLUT_WAYPOINT	1 1 0 0
+HUDDECLUT_ALTGRP	1 1 1 0
+HUDDECLUT_SPEED		1 1 0 0
+HUDDECLUT_CKPTCOND	1 0 0 0
+HUDDECLUT_DMGBAR	1 1 1 0
+HUDDECLUT_WPNGRP	1 1 1 0
+HUDDECLUT_EXPPOINTS	1 0 0 0
+HUDDECLUT_NWSTAT	1 0 0 0
+HUDDECLUT_CFGDISP	1 0 0 0
+HUDDECLUT_LOLLIS	1 1 1 0
+HUDDECLUT_XHAIRS	1 1 1 0
+HUDDECLUT_VELVECT	1 1 0 0
+HUDDECLUT_FARPIND	1 1 0 0
+HUDDECLUT_TARGDMGDISP	1 1 1 0
+HUDDECLUT_SPINMAP	1 1 0 0
+HUDDECLUT_TRGTCNT	1 1 0 0
+HUDDECLUT_TEAMID	1 1 0 0
+HUDDECLUT_PWRBAR	1 1 1 0
+HUDDECLUT_CLOCK		1 1 0 0
+HUDDECLUT_HUDLS		1 0 0 0
+HUDDECLUT_CHAT		1 1 1 0
