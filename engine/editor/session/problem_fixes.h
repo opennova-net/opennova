@@ -54,7 +54,11 @@ namespace opennova::editor {
 // rewrite drops or normalizes (a Rewrite row: style.line_ending, menu.ignored_input,
 // animation_map.ignored_input, strings.regrouped): Rewrite the file, the
 // row's rewrite_does saying what that does, unless a finding of the file says it does not
-// serialize (a blocks_save row: *.unserializable, *.invalid_input; its Save is refused).
+// serialize (a blocks_save row: *.unserializable, *.invalid_input; its Save is refused). An
+// item on an id the engine keeps for another kind (catalog.reserved_kind): Use an id of its own;
+// one named as a place the engine finds by an id the project lacks (catalog.reserved_name): Use
+// that id; each a Rename everywhere of the item's id (never in bulk). An items.def whose first row
+// is no Null marker (catalog.first_row): Add a Null marker first (an edit of its document).
 // Every other finding has none: Problems goes to its place.
 struct ProblemFix {
 	std::string label;
