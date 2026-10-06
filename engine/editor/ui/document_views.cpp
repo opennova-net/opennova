@@ -148,6 +148,8 @@ constexpr DocumentViewRow kViews[] = {
 	// under it; each heads the Inspector with what plays it and a Play (ui/sound_inspector).
 	{DocumentTypeId::SoundBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_bank_inspector},
 	{DocumentTypeId::SoundProfiles, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_profile_inspector},
+	// A particle file's text in the script device; the Preview window plays its effect (DI-14).
+	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_script_view},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.
