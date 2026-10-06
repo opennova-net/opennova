@@ -24,6 +24,7 @@
 #include <runtime/devtools/imgui_pass.h>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
@@ -85,6 +86,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
 	ClassDB::bind_method(D_METHOD("get_sound_state"), &EditorApp::get_sound_state);
 	ClassDB::bind_method(D_METHOD("get_sound_path"), &EditorApp::get_sound_path);
+	ClassDB::bind_method(D_METHOD("get_clip_voices_started"), &EditorApp::get_clip_voices_started);
+	ClassDB::bind_method(D_METHOD("get_clip_sound_seq"), &EditorApp::get_clip_sound_seq);
 	ClassDB::bind_method(D_METHOD("set_open_externally", "open"), &EditorApp::set_open_externally);
 	ClassDB::bind_method(D_METHOD("get_open_externally"), &EditorApp::get_open_externally);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "open_externally"), "set_open_externally", "get_open_externally");
@@ -293,6 +296,8 @@ void EditorApp::_process(double p_delta) {
 	// a test's one unit a frame whatever.
 	if (devices_) {
 		session_->advance(p_delta);
+		// What the previewed clip's events fired as the clock ran, heard now (DI-04).
+		pump_clip_sounds_();
 		devices_->tick(session_->viewports());
 		// E13: of the devices drawn this frame, those of one scene state render (their frame legs
 		// run), the rest keep their last pictures until the next frame.
@@ -498,6 +503,26 @@ void EditorApp::pump_sound_() {
 		break;
 	default: break;
 	}
+}
+
+// The clip sounds (DI-04): each the session fired since the last taken started beside those playing, its
+// waves decoded once while the project's files stand; none while no project is open.
+void EditorApp::pump_clip_sounds_() {
+	if (!session_) return;
+	const opennova::editor::SessionView &view = session_->view();
+	if (!view.project.open) {
+		if (clip_voices_) clip_voices_->stop();
+		return;
+	}
+	const uint64_t generation = view.findings.assets ? view.findings.assets->generation() : 0;
+	if (clip_voices_ && generation != clip_wave_generation_) clip_voices_->forget();
+	clip_wave_generation_ = generation;
+	for (const opennova::editor::ClipSoundPlay &play : session_->clip_sounds_since(clip_sound_seq_)) {
+		clip_sound_seq_ = play.seq;
+		if (!clip_voices_) clip_voices_ = std::make_unique<PreviewSoundVoices>(this);
+		clip_voices_->add(view.project.root, play.voices);
+	}
+	if (clip_voices_) clip_voices_->pump();
 }
 
 String EditorApp::get_sound_state() const {

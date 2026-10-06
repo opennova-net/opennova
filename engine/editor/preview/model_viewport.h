@@ -12,6 +12,7 @@
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_preview_rig.h>
+#include <editor/preview/preview_clip_sounds.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 #include <runtime/assets/asset_store.h>
@@ -58,9 +59,12 @@ struct ModelViewportOptions {
 	// The grid a canvas's drag of a marker's place snaps to on each of the file's axes (metres; 0 free: the
 	// toolbar's Snap, kModelHandleSnaps; the MCP gaps lane), the canvas's alone: no picture changes.
 	float snap = 1.0f / 16.0f;
+	// How a clip's events are heard (DI-04, preview/preview_clip_sounds): no picture changes with it.
+	ClipSoundOptions sound;
 	bool operator==(const ModelViewportOptions &other) const {
 		return lod == other.lod && ctrl == other.ctrl && overlays == other.overlays &&
-				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones && snap == other.snap;
+				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones && snap == other.snap &&
+				sound == other.sound;
 	}
 	bool operator!=(const ModelViewportOptions &other) const { return !(*this == other); }
 };
@@ -69,7 +73,8 @@ struct ModelViewportOptions {
 // pitch and distance): what an orbit, a pan, a dolly or a framing on its canvas sends.
 std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
-// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones, snap}.
+// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones, snap,
+// sound {mute, surface, body, female, profile}}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
 
 // How long a repeated one-shot holds its last frame before it plays again, in game ticks (half a
@@ -198,6 +203,30 @@ public:
 	// The rig's bones as the playing clip poses them at the clock (empty when none plays).
 	std::vector<PreviewJoint> joints(const PreviewClock &clock) const;
 
+	// A clip's sounds (DI-04, preview/preview_clip_sounds): the project's files they play from, the profile
+	// and the body they play through, the clip's event words and capsule bottoms as its channel reads
+	// them, and the sounds its events fired as the clock ran it, the last kSoundsFiredKept, oldest first.
+	const ClipSoundSources &sound_sources() const { return sound_sources_; }
+	const ClipSoundBinding &sound_binding() const { return sound_binding_; }
+	const ClipSoundTrack &clip_track() const { return clip_track_; }
+	static constexpr size_t kSoundsFiredKept = 16;
+	const std::vector<ClipSoundFired> &sounds_fired() const { return fired_; }
+	// What an event of the clip plays under the sound options, a line a sound, nothing picked (the
+	// timeline's hover).
+	std::vector<std::string> event_sound_words(uint32_t trigger) const;
+	// The sounds the clip's events fired over the ticks the clock ran through since the last call
+	// (clip_events_due: never over a seek, a clip newly chosen, a pause; from the clip's tick of each, a
+	// repeated one-shot's taken again from 0), each planned through `selector` (plan_clip_event) and
+	// numbered from `next_seq` on, kept with the last ones fired, and returned. Nothing while no clip
+	// plays. Each voice's wave is the project's file of its name (`scan`, find_clip_sound_waves).
+	std::vector<ClipSoundFired> fire_sounds(const PreviewClock &clock, const AssetScan *scan,
+			audio::SoundSelector &selector, uint64_t &next_seq);
+	// The sounds the clip's event at `frame` plays, once, as a press of its mark on the timeline asks
+	// (play_sound {frame}); false, with why, for no clip playing, a frame the game never reads (the end
+	// pose, a frame the clock steps over) and a frame that fires no sound.
+	bool press_event(int frame, const AssetScan *scan, audio::SoundSelector &selector,
+			std::vector<ClipSoundFired> &out, std::string &error) const;
+
 	// What a canvas maps of it in a frame (model_canvas.h): its markers at the clock and, while the
 	// model is the active document, the selected records' markers.
 	ModelCanvasFrame canvas_frame(const ViewportContext &context) const;
@@ -300,6 +329,14 @@ private:
 	std::vector<PreviewClipEvent> clip_events_;
 	std::string clip_note_;
 	NodeId sought_event_ = 0; // the event record the clock last sought
+	// The clip's sounds (DI-04): the event words it reads, its sources and binding, what fired, and the
+	// clock's tick the sounds were last fired to (-1: none since the clip was chosen) and its seeks then.
+	ClipSoundTrack clip_track_;
+	ClipSoundSources sound_sources_;
+	ClipSoundBinding sound_binding_;
+	std::vector<ClipSoundFired> fired_;
+	int32_t sound_cursor_ = -1;
+	uint64_t sound_seeks_ = 0;
 	// The collision shapes last made and what they were made for.
 	struct CollisionCache {
 		const void *model = nullptr;

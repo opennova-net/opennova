@@ -924,7 +924,10 @@ constexpr RequestKindRow kRows[] = {
 			"does. values {profile?, slot}: the SndProf.def profile's slot (its keyword or 0 to 50; profile "
 			"left out: default). values {profile?, surface, foot?}: the footstep that profile plays on a "
 			"surface (ground, snow, object, water) with that foot (left, right), the slot the game's test "
-			"picks. Refused (workspace.refused): a name no wave of the project has, a set no bank searched "
+			"picks. values {frame}: what the clip the animation document at path (the active one when left "
+			"out) fires at that frame, every sound of its event at once, under its model viewport's sound "
+			"options (a timeline mark pressed; DI-04). Refused (workspace.refused): a name no wave of the "
+			"project has, a frame the game never reads or that fires no sound, a set no bank searched "
 			"holds, an empty slot, waves the project lacks, a wave past what a card reads.")
 			.takes(request_params({}, { F::Path, F::Values }))
 			.row,

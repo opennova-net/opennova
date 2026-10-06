@@ -42,6 +42,11 @@ struct PreviewRig {
 	std::string table;  // the table's file name ("" a lone clip)
 	std::string clip;   // the clip's file name when the document is a clip
 	std::string source; // where the model came from: "chosen", else the record that pairs them
+	// The record that pairs them, where one does: its file (project-relative), its name, and the
+	// field that names the table (an item's anim_def, a weapon's animadm); "" for a model chosen.
+	std::string record_file;
+	std::string record;
+	std::string record_field;
 };
 
 // The model fields of a record that pair with its map field (S17 review): an item's anim_def plays

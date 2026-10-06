@@ -140,7 +140,8 @@ add_library(opennova_editor STATIC
     # the base every kind's viewport derives from, the Shell's devices (an LRU of four keyed by
     # document and kind) and the one envelope on the wire; the menu's viewport (its screen compiled
     # headless, the geometry its hit tests, handles and drags read) and the model's (its orbit camera
-    # and the level the game draws, its rig and the clip it plays); the headless render of a screen,
+    # and the level the game draws, its rig and the clip it plays, the sounds the clip's events fire);
+    # the headless render of a screen,
     # the render check over every menu (the menu type's project check: the compiler notes as
     # findings), and the texture header probe it measures with; what a drag of a window's handles
     # writes, and what arranging several windows (align, distribute, drawing order) writes; a menu's
@@ -152,6 +153,7 @@ add_library(opennova_editor STATIC
     # keystroke burst its edits fold in, the gutter marks and the highlights it colours)
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/animation_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/sound_preview.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_sounds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
@@ -270,6 +272,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/workspace_parts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/sound_play.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/clip_sounds.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
     # the documents, the findings, the activity, the dialogs, the workspace's own), the events a
     # request posts, and the findings by file and record

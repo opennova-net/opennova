@@ -43,7 +43,8 @@ std::vector<const PreviewBank *> chain_banks(const std::vector<PreviewBank> &ban
 }
 
 PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::string &expansion, const std::string &set,
-                          const std::string &only, audio::SoundSelector &selector, uint8_t view_flags) {
+                          const std::string &only, audio::SoundSelector &selector, uint8_t view_flags,
+                          const PreviewHearing *heard) {
 	PreviewPlay play;
 	play.set = set;
 	if (set.empty()) {
@@ -87,7 +88,16 @@ PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::stri
 	location.bank = int32_t(bank - banks.data());
 	location.set = index;
 	location.cull_range = int32_t(bank->file.multis[size_t(index)].target_id);
-	const audio::OneshotPlan plan = audio::plan_oneshot_at_distance(bank->file, location, 0, selector, view_flags, false);
+	const audio::OneshotPlan plan =
+			heard ? audio::plan_oneshot_3d(bank->file, location, heard->source, heard->listener, true, 0, 0, nullptr,
+			                               nullptr, selector, view_flags)
+			      : audio::plan_oneshot_at_distance(bank->file, location, 0, selector, view_flags, false);
+	if (!plan.in_range) {
+		play.in_range = false;
+		play.words = play.set + " in " + play.bank + " is past its range of " +
+		             std::to_string(bank->file.multis[size_t(index)].target_id) + " m from the camera: the game plays nothing.";
+		return play;
+	}
 	std::string words;
 	for (const audio::OneshotVoice &voice : plan.voices) {
 		const lwf::Sndparm &member = bank->file.sndparms[voice.sndparm];
@@ -116,7 +126,7 @@ const audio::SoundProfile *preview_profile(const std::vector<audio::SoundProfile
 
 PreviewPlay plan_slot_play(const std::vector<audio::SoundProfile> &profiles, const std::string &profile, int slot,
                            const std::vector<PreviewBank> &banks, const std::string &expansion,
-                           audio::SoundSelector &selector, uint8_t view_flags) {
+                           audio::SoundSelector &selector, uint8_t view_flags, const PreviewHearing *heard) {
 	PreviewPlay play;
 	const char *keyword = audio::sound_profile_slot_keyword(slot);
 	if (!keyword) {
@@ -133,8 +143,8 @@ PreviewPlay plan_slot_play(const std::vector<audio::SoundProfile> &profiles, con
 		play.words = bound->name + "'s " + keyword + " is empty: the game plays nothing.";
 		return play;
 	}
-	play = plan_set_play(banks, expansion, set, std::string(), selector, view_flags);
-	play.words = bound->name + "'s " + keyword + " plays " + play.words;
+	play = plan_set_play(banks, expansion, set, std::string(), selector, view_flags, heard);
+	play.words = bound->name + "'s " + keyword + (play.in_range ? " plays " : ": ") + play.words;
 	return play;
 }
 
@@ -156,12 +166,21 @@ const char *foot_surface_word(FootSurface surface) {
 	return "ground";
 }
 
+FootState foot_state_on(FootSurface surface) {
+	FootState state;
+	const bool water = surface == FootSurface::Water;
+	state.feet_z = water ? -1 : 0;
+	state.water_z = water ? 1 : 0;
+	state.on_entity = surface == FootSurface::Object;
+	state.surface_type = surface == FootSurface::Snow ? 3 : 0;
+	return state;
+}
+
 int footstep_slot_on(FootSurface surface, int foot) {
 	// The game's own test over the state that picks the surface: feet under a water plane, a ground
 	// entity, the charmap's surface 3 [orig: org2 @0x4b77c6-0x4b78a8].
-	const bool water = surface == FootSurface::Water;
-	return audio::footstep_slot(water ? -1 : 0, water ? 1 : 0, surface == FootSurface::Object,
-	                            surface == FootSurface::Snow ? 3 : 0, foot);
+	const FootState state = foot_state_on(surface);
+	return audio::footstep_slot(state.feet_z, state.water_z, state.on_entity, state.surface_type, foot);
 }
 
 PreviewPlay plan_footstep_play(const std::vector<audio::SoundProfile> &profiles, const std::string &profile,

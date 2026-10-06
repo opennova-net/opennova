@@ -16,6 +16,7 @@
 #include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/viewport_device.h>
+#include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/threedi/threedi_panm_pose.h>
@@ -181,9 +182,11 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 				return false;
 			}
 			options.snap = snap;
+		} else if (key == "sound") {
+			if (!read_clip_sound_options(value, options.sound, error)) return false;
 		} else {
 			error = "Unknown model option \"" + key +
-			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap).";
+			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap, sound).";
 			return false;
 		}
 	}
@@ -301,6 +304,7 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 	options.set("repeat", JsonValue::make_bool(held.repeat));
 	options.set("bones", JsonValue::make_bool(held.bones));
 	options.set("snap", json_number(held.snap));
+	options.set("sound", clip_sound_options_to_json(held.sound));
 	return options;
 }
 
@@ -574,6 +578,81 @@ std::vector<PreviewJoint> ModelViewport::joints(const PreviewClock &clock) const
 	return preview_posed_joints(*skeleton_, clip_key_, clip_variant_, clip_ticks(clock));
 }
 
+std::vector<std::string> ModelViewport::event_sound_words(uint32_t trigger) const {
+	return clip_event_sound_words(trigger, options_.sound, sound_binding_, sound_sources_);
+}
+
+std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock, const AssetScan *scan,
+		audio::SoundSelector &selector, uint64_t &next_seq) {
+	std::vector<ClipSoundFired> out;
+	const int32_t now = clock.ticks();
+	// The clock sought since (a scrub, a step, the clip's start), or a clip newly chosen: nothing fires
+	// for what that passed over, and the sounds go on from where the clock is.
+	const bool sought = clock.tick_seeks() != sound_seeks_;
+	sound_seeks_ = clock.tick_seeks();
+	const int32_t from = sound_cursor_;
+	sound_cursor_ = now;
+	const anim::SkeletalClips::LoadedClip *clip =
+			animating_ && reason_ == ModelViewStatus::Ready && skeleton_ && !clip_key_.empty()
+					? skeleton_->find_clip_variant(clip_key_, clip_variant_)
+					: nullptr;
+	// A run longer than kClipSoundCatchUpTicks since the last (the viewport not the one previewed meanwhile,
+	// the Shell held up) fires nothing either: the sounds go on from here rather than in a burst.
+	if (!clip || from < 0 || sought || now <= from || now - from > kClipSoundCatchUpTicks) return out;
+	// The clip's own tick of each clock tick (clip_ticks): a repeated one-shot's taken again from 0.
+	const int32_t length = clip_length_ticks();
+	const int32_t period = options_.repeat && length > 0 && !clip_loops() ? length + kClipRepeatHoldTicks : 0;
+	for (const ClipEventDue &due :
+			clip_events_due(clip->clip.playback(), clip_track_, period, from, now, sound_binding_.player))
+		for (ClipSoundFired &fired : plan_clip_event(due, options_.sound, sound_binding_, sound_sources_,
+				     camera_.eye(), selector)) {
+			fired.seq = ++next_seq;
+			fired.path = path();
+			if (scan) find_clip_sound_waves(fired, *scan);
+			fired_.push_back(fired);
+			out.push_back(std::move(fired));
+		}
+	if (fired_.size() > kSoundsFiredKept) fired_.erase(fired_.begin(), fired_.end() - kSoundsFiredKept);
+	return out;
+}
+
+bool ModelViewport::press_event(int frame, const AssetScan *scan, audio::SoundSelector &selector,
+		std::vector<ClipSoundFired> &out, std::string &error) const {
+	out.clear();
+	if (!animating_ || clip_key_.empty() || clip_track_.triggers.empty()) {
+		error = "No clip plays in this viewport.";
+		return false;
+	}
+	if (frame < 0 || size_t(frame) >= clip_track_.triggers.size()) {
+		error = "frame: the clip's records run 0 to " + std::to_string(clip_track_.triggers.size() - 1) + ".";
+		return false;
+	}
+	// A frame the clip's clock never runs on (the end pose, a frame a fast clip's steps pass over) is
+	// never read [orig: AnimChannel_InterpolateKeyframe @ 0x40B230].
+	const int32_t tick = tick_of_frame(frame);
+	if (tick < 0) {
+		error = "Frame " + std::to_string(frame) + " is never read: the game reads no event there.";
+		return false;
+	}
+	ClipEventDue due;
+	due.tick = tick;
+	due.clip_tick = tick;
+	due.frame = frame;
+	due.word = clip_track_.triggers[size_t(frame)];
+	due.bottom = size_t(frame) < clip_track_.bottoms.size() ? clip_track_.bottoms[size_t(frame)] : 0.0f;
+	out = plan_clip_event(due, options_.sound, sound_binding_, sound_sources_, camera_.eye(), selector);
+	if (out.empty()) {
+		error = "Frame " + std::to_string(frame) + " fires no sound: " +
+		        (due.word ? animation_trigger_words(due.word) + " plays none." : std::string("it carries no event."));
+		return false;
+	}
+	for (ClipSoundFired &fired : out) {
+		fired.path = path();
+		if (scan) find_clip_sound_waves(fired, *scan);
+	}
+	return true;
+}
+
 ViewportAction ModelViewport::stop_(ModelViewStatus reason, const std::string &detail, bool failed) {
 	reason_ = reason;
 	detail_ = detail;
@@ -601,6 +680,8 @@ void ModelViewport::reset_animation_() {
 	clip_variant_ = 0;
 	clip_events_.clear();
 	clip_note_.clear();
+	clip_track_ = ClipSoundTrack();
+	sound_cursor_ = -1;
 }
 
 ViewportAction ModelViewport::follow_(const ViewportInput &input, PreviewClock &clock) {
@@ -742,6 +823,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_variant_ = 0;
 		clip_events_.clear();
 		clip_note_.clear();
+		clip_track_ = ClipSoundTrack();
 		return stop_(ModelViewStatus::Unserializable, unwritable_, true);
 	}
 	const std::string file = file_of(document.path());
@@ -757,6 +839,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_key_.clear();
 		clip_events_.clear();
 		clip_note_.clear();
+		clip_track_ = ClipSoundTrack();
 		// Until the first validation has read the project's references, the pairing item may not be read
 		// yet: said so, not that none pairs it (a validation after an edit reads with the graph built).
 		return stop_(!view.activity.validation.read ? ModelViewStatus::Reading : ModelViewStatus::NoRig, file, false);
@@ -799,6 +882,11 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		++skeleton_serial_;
 	}
 	rig_ = rig;
+	// What the clip's sounds play from and through (DI-04): the project's SndProf.def and banks as the game
+	// reads them, the item pairing the clip, each read again only as its stamp moves.
+	sound_sources_.refresh(*view.findings.assets,
+	                       view.project.document ? view.project.document->expansion.name : std::string(), rig_);
+	sound_binding_ = clip_sound_binding(sound_sources_.profiles(), options_.sound, sound_sources_.item(), rig_);
 	// The clip the selection plays (the selection is the active document's), or what the game plays
 	// in its place, with why.
 	std::string key = clip_key_;
@@ -818,8 +906,18 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 				skeleton_ && !key.empty() ? skeleton_->find_clip_source(key, variant) : nullptr;
 		clip_file_ = source ? source->file : std::string();
 		clip_events_.clear();
+		clip_track_ = ClipSoundTrack();
 		const auto clip = clip_file_.empty() ? nullptr : rig_files.bone_animation(clip_file_);
-		if (clip) clip_events_ = preview_clip_events(*skeleton_, clip_key_, clip_variant_, *clip);
+		if (clip) {
+			clip_events_ = preview_clip_events(*skeleton_, clip_key_, clip_variant_, *clip);
+			// Every record's event word and capsule bottom, as the body's channel reads them (DI-04).
+			for (size_t i = 0; clip->events && i < clip->num_events; ++i) {
+				clip_track_.triggers.push_back(uint32_t(clip->events[i].trigger));
+				clip_track_.bottoms.push_back(clip->events[i].bottom);
+			}
+		}
+		// The clip's sounds fire from the clock's next run on, never back over what changed.
+		sound_cursor_ = -1;
 	}
 	if (rig_moved) rig_read_ = stamped->stamps();
 	// An event selected in the clip seeks the clock to the tick the clip first samples it, and
@@ -918,11 +1016,13 @@ void ModelViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 	ModelViewportOptions options = options_;
 	if (const JsonValue *member = json.get("options"); member && read_options(*member, options, error) &&
 			options != options_) {
-		// The snap is the canvas's alone: no picture changes with it.
+		// The snap is the canvas's alone, the sound's the clip's sounds' (DI-04): no picture changes with them.
 		ModelViewportOptions drawn = options;
 		drawn.snap = options_.snap;
+		drawn.sound = options_.sound;
 		if (drawn != options_) options_moved_ = true;
 		options_ = options;
+		sound_binding_ = clip_sound_binding(sound_sources_.profiles(), options_.sound, sound_sources_.item(), rig_);
 	}
 	bool frame = false;
 	if (const JsonValue *member = json.get("camera")) read_camera(*member, camera_, frame, error);
@@ -1302,9 +1402,27 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		row.set("tick", json_number(event.tick));
 		row.set("trigger", json_number(double(event.trigger)));
 		row.set("words", json_string(animation_trigger_words(event.trigger)));
+		// What it plays under the sound options, a line a sound (DI-04).
+		JsonValue plays = JsonValue::make_array();
+		for (const std::string &line : event_sound_words(event.trigger)) plays.push(json_string(line));
+		row.set("plays", std::move(plays));
 		events.push(std::move(row));
 	}
 	animation.set("events", std::move(events));
+	// The clip's sounds (DI-04): the profile and the body they play through, and how; the last sounds its
+	// events fired as the clock ran it.
+	JsonValue profile = JsonValue::make_object();
+	profile.set("name", json_string(sound_binding_.profile));
+	profile.set("words", json_string(sound_binding_.profile_words));
+	profile.set("item", json_string(sound_sources_.item().name));
+	animation.set("sound_profile", std::move(profile));
+	JsonValue body_read = JsonValue::make_object();
+	body_read.set("body", json_string(sound_binding_.player ? "player" : "npc"));
+	body_read.set("words", json_string(sound_binding_.body_words));
+	animation.set("sound_body", std::move(body_read));
+	JsonValue fired = JsonValue::make_array();
+	for (const ClipSoundFired &one : fired_) fired.push(clip_sound_fired_to_json(one));
+	animation.set("sounds_fired", std::move(fired));
 	// The rig's bones as the clip poses them now: each by its name, its parent, where its joint
 	// stands and its pixel on the picture.
 	JsonValue bones = JsonValue::make_array();
