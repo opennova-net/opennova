@@ -1,0 +1,70 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include <base/io/json.h>
+#include <formats/env/env.h>
+
+namespace opennova::editor {
+
+struct GraphEdge;
+struct SessionView;
+
+// Which of the game's rungs gives a mission its water plane (runtime/environment/water_frame.h's
+// ladder): the mission header's override, the terrain's water height, the environment's, or none.
+enum class WaterFrom { Mission, Terrain, Environment, None };
+const char *water_from_token(WaterFrom from);
+
+// A mission that runs on an environment (the deep-integration plan's DI-19a), as the game loads
+// the two together [orig: Game_StartMission @ 0x524B26 -> Game_LoadTerrainDuringConnect @ 0x520710 ->
+// Terrain_LoadEnvironmentConfig @ 0x610940]: the header that names it, the terrain it pairs it with,
+// what the header sets over it (the fog, the water [orig: Game_LoadTerrainDuringConnect @ 0x520710;
+// Game_StartMission @ 0x525371..0x525399]) and the clock it starts on [orig: Game_StartMission
+// @ 0x5253d5, @ 0x5253e2], and where its water plane comes from.
+struct EnvironmentMissionUse {
+	const GraphEdge *edge = nullptr; // the header's environment field: where Go to opens the mission
+	std::string mission;             // project-relative
+	std::string title;               // the mission's name as its header holds it
+	bool read = false;               // its header was read
+	const GraphEdge *terrain_edge = nullptr; // the header's terrain field
+	std::string terrain;                     // as the header names it
+	std::string terrain_file;                // project-relative; "" where the project lacks it
+	bool terrain_read = false;
+	int terrain_water = 0;            // the terrain's water_height, half metres (0: none)
+	env::BmsEnvOverrides overrides;   // what the header sets over the environment
+	int start_time = 0;               // the header's start time, 8.8 hours
+	int minutes_per_day = 0;          // the header's day length (0: the clock stands)
+	WaterFrom water_from = WaterFrom::None;
+	float water_height = 0.0f;        // metres
+};
+
+// The missions of the project that run on the environment at `path`, by the graph's edges into it
+// (each a mission header's environment field), each with its header read from its open document or
+// its file (the project's files, the open documents standing in) and its terrain's water height.
+struct EnvironmentUses {
+	std::string path;
+	bool found = false;   // the project has the file
+	bool reading = false; // the project's references are not read yet
+	std::vector<EnvironmentMissionUse> missions;
+};
+EnvironmentUses environment_uses(const SessionView &view, const std::string &path);
+
+// The fields of a mission's header each override names (mission_table's keys), for a Go to on it.
+struct EnvironmentOverride {
+	const char *field = ""; // the header's field
+	std::string words;      // "fog 800 m"
+};
+std::vector<EnvironmentOverride> environment_overrides(const EnvironmentMissionUse &use);
+// "06:00, a day of 30 min": the clock a mission starts on, in words.
+std::string mission_clock_words(const EnvironmentMissionUse &use);
+// "at 12.5 m, from the terrain": the water plane's height and where it comes from, in words.
+std::string water_words(const EnvironmentMissionUse &use);
+
+// The environment_uses query's answer: {path, found, reading?, missions [{mission, title, locator,
+// field, terrain {name, file?, water_height?}, overrides [{field, words}], start_time, minutes_per_day,
+// clock, water {from, height}}]}; a mission's file and locator are where Go to opens it, and an
+// override's field the header's field there.
+io::JsonValue environment_uses_json(const EnvironmentUses &uses);
+
+} // namespace opennova::editor
