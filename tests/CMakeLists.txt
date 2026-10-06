@@ -4589,6 +4589,16 @@ target_link_libraries(editor_import_test PRIVATE opennova_editor)
 target_include_directories(editor_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_import COMMAND editor_import_test)
 
+# The font importer: a font set's glyph sheet made into a .fnt through our own FNT writer and read
+# back by fnt_parse (each advance mode, tracking, the space, the zero records, the header words, the
+# pages, the refusals), its run over an ImportContext, over a project (the set an import source, the
+# .fnt packed into localres, a changed sheet imported again), and an import of a set from the disk
+# bringing its sheet beside it.
+add_executable(editor_font_import_test editor/font_import_test.cpp)
+target_link_libraries(editor_font_import_test PRIVATE opennova_editor)
+target_include_directories(editor_font_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_font_import COMMAND editor_font_import_test)
+
 # The editor's ImGui windows over a null backend (ADR 0046 d11): built with the pass. The
 # workspace's shell (S11d: its layout, the Document tabs, Files, the menus, the modals) is
 # workspace_test.cpp's; the change marks, the reveal, Output and the shortcuts (S11e)
