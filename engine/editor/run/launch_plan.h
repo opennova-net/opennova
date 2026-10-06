@@ -34,6 +34,12 @@ struct LaunchPlan {
 	// editor MCP, the MCP gaps lane: a person works at the machine), as the platform starts a process so
 	// (the Shell's: shown without activation, kept at the bottom while it starts). Not on the command line.
 	bool behind = false;
+	// The files the staging put in the run directory, '/'-separated paths under it (the build's files, the
+	// install's program and Bink DLL, an expansion's base game and folder; never a file the run kept, nor
+	// the install's configuration and saves seeded where it had none of its own): its staging record
+	// (run/run_directory.h, RunStaging), which the next Play removes before it stages again. Filled as each
+	// file is staged, so a staging that failed partway names what it put there too.
+	std::vector<std::string> staged;
 };
 
 // The packaged runtime (opennova.exe) on `build_dir`, in `run_dir`. `engine_args` are Godot's own
@@ -60,13 +66,16 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 // the game runs `/exp <expansion>` in: at its root the install's boot archives, the loose files it
 // ships beside them (list_install_loose_files) but a file the expansion's archives pack (under /d the
 // root copy would stand over the packed edit [orig: FileSystem_OpenFile @ 0x75b1c0]), and the files
-// the game reads from its folder by name (score.ini, earlyerr.txt, admin.cfg); and
-// `expansion/<expansion>/` a directory of its own holding the build's expansion folder's files, never
+// the game reads from its folder by name (score.ini, earlyerr.txt, admin.cfg) where the run directory
+// holds none of its own (seeded: a copy the game rewrote in a run before stays, and is no staged file);
+// and `expansion/<expansion>/` a directory of its own holding the build's expansion folder's files, never
 // a link to the folder: the game writes its expansion's weapon.sav there [orig:
 // PlayerProfile_LoadAllFromDisk @ 0x54f4d0, @ 0x54f6c7]. A file the game only reads (its archives,
 // videos, music and dialog banks, NovaWorld screens) is linked; every other, which the game may write
 // (its configuration, saves, the NovaWorld cookie jar nw_cdata.coo, its logs), is copied fresh every
-// run, never linked and never cached, so no write reaches the install, the build or the cache. Where
+// run, never linked and never cached, so no write reaches the install, the build or the cache. A staged
+// file replaces the name the run directory held (its name removed, never written through); each is
+// added to `staged` ('/'-separated under the run directory, LaunchPlan::staged) as it is staged. Where
 // the file system will not link an install's file to the run directory (another volume), it is copied
 // into `copy_cache` (the project's `.opennova/install_copy/`, a folder per install) and linked from
 // there, kept while the install's file keeps its size and a last write settled when it was copied (git's
@@ -78,7 +87,7 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 using FileLink = std::function<bool(const std::string &from, const std::string &to, std::string &error)>;
 bool prepare_expansion_run(const std::string &install, const std::string &build_dir, const std::string &expansion,
                            const std::string &run_dir, const std::string &copy_cache, Diagnostic &error,
-                           const FileLink &link = link_file);
+                           const FileLink &link = link_file, std::vector<std::string> *staged = nullptr);
 
 // The game install's own program, which Play in the game install starts (and the install check looks for).
 inline constexpr const char *kInstallExecutable = "Jointops.exe";
@@ -139,13 +148,18 @@ FileAccessLog parse_file_access_log(const std::string &text);
 // saves, its _filelog.txt), so the run directory gets the build's files (one the game only reads
 // linked, copied where the file system cannot link it; every other, which the game may write,
 // copied), the install's executable and Bink DLL, a game.cfg, the build's own when the project has
-// one, else the install's, and the install's player.sav and weapon.sav and the files it reads from
-// its folder by name (score.ini, earlyerr.txt, admin.cfg) where the project has none of its own (the
-// profile and bindings the player starts with). The required files are checked before any
-// is copied, so a missing one launches nothing. The game install and the build directory are only
-// read. A build of the expansion `expansion` (ADR 0046 S16) is staged as prepare_expansion_run
-// stages it, the install's own game.cfg and saves beside it, and the game launched `/w /d /exp
-// <expansion> /FRISK`. `link` gives a file a second name, as prepare_expansion_run's.
+// one, and the install's game.cfg, player.sav and weapon.sav and the files it reads from its folder by
+// name (score.ini, earlyerr.txt, admin.cfg) where neither the project nor the run directory has its own
+// (seeds: the profile, bindings and device the player starts with). A seed never replaces the run
+// directory's own copy, newer or not: the game rewrites its game.cfg as it quits every run [orig: Game_Run
+// @ 0x4a7fff Game_SaveConfig after the loop], so an install's copy newer than the run's says only that the
+// install was played since; the run keeps what its own runs chose (the device its dialog named above
+// all), and a fresh Play (RunTake::fresh) seeds again. The seeds are not staged files (LaunchPlan::staged):
+// the next Play keeps them as the game left them. The required files are checked before any is copied,
+// so a missing one launches nothing. The game install and the build directory are only read. A build of
+// the expansion `expansion` (ADR 0046 S16) is staged as prepare_expansion_run stages it, the install's
+// own game.cfg and saves beside it, and the game launched `/w /d /exp <expansion> /FRISK`. `link` gives a
+// file a second name, as prepare_expansion_run's.
 bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
                                 const std::string &run_dir, LaunchPlan &out, Diagnostic &error,
                                 const std::string &expansion = std::string(),
@@ -157,7 +171,9 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 // them, so no write reaches the build) and the install's executable and Bink DLL (copied), nothing else
 // of the install: no configuration, save, score table, early error text or admin configuration (a
 // game.cfg the build holds is the project's own and is staged with the rest), so the game boots on the
-// build alone and writes its own. Launched `/w /FRISK`, without `/d`: the game reads its archives
+// build alone and writes its own, which the run directory keeps for the next strict Play (a game.cfg
+// naming the adapter spares it the device dialog: run/run_directory.h). Launched `/w /FRISK`, without
+// `/d`: the game reads its archives
 // first, as a player's launch does [orig: Game_ParseCommandLineAndInit @ 0x4a7667 sets the /d flag;
 // Game_InitSubsystems turns on loose-first resolution after the archives mount, @ 0x4a6fa3 ->
 // FileSystem_SetSearchLooseFirst @ 0x75a5a0; docs/vfs/vfs-pff-mount-re.md]. The executable and the
@@ -187,7 +203,9 @@ Diagnostic strict_expansion_refusal(const std::string &expansion);
 // when, the first run exited on its own with code 0 within this window of its start (the dialog and the
 // device's set-up take tens of seconds: the menu came up ~36 s in, the dialog answered at ~8 s), and the
 // run directory, which held no game.cfg before it started, holds one now. A game.cfg a Cancel wrote
-// still names no adapter, so the game started again opens its device dialog again.
+// still names no adapter, so the game started again opens its device dialog again. A run directory that
+// kept a run's game.cfg (run/run_directory.h) has no first run: its game opens no dialog while the cfg
+// names the adapter the game finds (hw3d_deviceno's, by hw3d_name and hw3d_guid).
 inline constexpr int64_t kStrictFirstRunWindowMs = 60000;
 bool strict_first_run_starts_again(bool had_config, bool has_config, bool exited_on_its_own, int64_t exit_code,
                                    int64_t ran_ms, bool started_again);

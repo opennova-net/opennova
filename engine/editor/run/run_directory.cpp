@@ -5,10 +5,12 @@
 #include <filesystem>
 #include <map>
 #include <system_error>
+#include <utility>
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
+#include <editor/run/launch_plan.h>
 
 namespace fs = std::filesystem;
 
@@ -44,10 +46,87 @@ bool held(const fs::path &dir, const LeaseLiveness &liveness) {
 	return state != ProcessLiveness::Dead;
 }
 
+// A staging record's path under its run directory: relative, inside it ("" for any other, which a record
+// never names: a record edited by hand removes nothing outside the directory).
+fs::path staged_path(const std::string &name) {
+	if (name.empty()) return fs::path();
+	const fs::path path = path_of(name).lexically_normal();
+	if (path.empty() || path.has_root_name() || path.has_root_directory()) return fs::path();
+	for (const fs::path &part : path)
+		if (part == ".." || part == ".") return fs::path();
+	return path;
+}
+
+// The staging record `dir` holds; false for none, one that cannot be read, or another schema's.
+bool read_run_staging(const fs::path &dir, RunStaging &out) {
+	std::string text, error;
+	if (!read_file_text(utf8_of(dir / kRunStagingFileName), text, error)) return false;
+	io::JsonValue json;
+	if (!io::json_parse(text, json, error) || !json.is_object() ||
+	    json.get_int("schema_version", -1) != kRunStagingSchemaVersion)
+		return false;
+	const io::JsonValue *files = json.get("files");
+	if (!files || !files->is_array()) return false;
+	out.mode = json.get_string("mode", "");
+	out.files.clear();
+	for (const io::JsonValue &file : files->array)
+		if (file.is_string()) out.files.push_back(file.string);
+	return !out.mode.empty();
+}
+
+// The files under `dir`, '/'-separated paths under it, sorted (directories walked, not listed).
+std::vector<std::string> files_under(const fs::path &dir) {
+	std::vector<std::string> files;
+	const fs::path root = system_path(utf8_of(dir));
+	std::error_code ec;
+	for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
+	     !ec && it != end; it.increment(ec)) {
+		std::error_code kind;
+		if (!it->is_directory(kind)) files.push_back(utf8_of(it->path().lexically_relative(root)));
+	}
+	std::sort(files.begin(), files.end());
+	return files;
+}
+
+// `dir` readied for a Play of `take`'s mode: what the Play before staged there removed, with the logs a
+// run writes for Play to read and the game's record, every other file kept (`kept`); emptied for a fresh
+// take, another mode's directory or one with no staging record. False when a file that must go would not
+// (a process holding it).
+bool ready_run_directory(const fs::path &dir, const RunTake &take, std::vector<std::string> &kept) {
+	kept.clear();
+	const fs::path system = system_path(utf8_of(dir));
+	std::error_code ec;
+	if (!fs::exists(system, ec)) return true;
+	RunStaging before;
+	if (take.fresh || !read_run_staging(dir, before) || before.mode != take.mode) {
+		fs::remove_all(system, ec);
+		return !fs::exists(system, ec);
+	}
+	std::vector<std::string> going = before.files;
+	for (const char *own : {kRunStagingFileName, kRunRecordFileName, kRunLogFileName, kInstallFileLogName})
+		going.push_back(own);
+	bool gone = true;
+	for (const std::string &name : going) {
+		const fs::path path = staged_path(name);
+		if (path.empty()) continue;
+		// The name removed, never written through: a staged file may be a link to the build's or the
+		// install's.
+		const fs::path file = system_path(utf8_of(dir / path));
+		std::error_code removed;
+		const fs::file_status status = fs::symlink_status(file, removed);
+		if (!fs::exists(status) || fs::is_directory(status)) continue;
+		fs::remove(file, removed);
+		if (fs::exists(fs::symlink_status(file, removed))) gone = false;
+	}
+	if (gone) kept = files_under(dir);
+	return gone;
+}
+
 } // namespace
 
-bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liveness, std::string &out,
-                        std::string &error) {
+bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liveness, const RunTake &take,
+                        std::string &out, std::vector<std::string> &kept, std::string &error) {
+	kept.clear();
 	if (!ensure_directory(runs_root, error)) return false;
 	// The numbered directories there, each with whether its game may still run.
 	std::map<unsigned long, bool> runs;
@@ -59,16 +138,13 @@ bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liven
 		if (!entry.is_directory(kind) || !run_number(utf8_of(entry.path().filename()), number)) continue;
 		runs[number] = held(entry.path(), liveness);
 	}
-	// The first one free, emptied (one whose files will not go, a process holding them, is passed
-	// over too); every other one whose game is gone removed.
+	// The first one free, readied (one whose files will not go, a process holding them, is passed over
+	// too); every other one whose game is gone removed.
 	unsigned long taken = 0;
 	for (unsigned long number = 1; taken == 0; ++number) {
 		const auto found = runs.find(number);
 		if (found != runs.end() && found->second) continue;
-		const fs::path dir = system_path(join_path(runs_root, std::to_string(number)));
-		std::error_code removed;
-		fs::remove_all(dir, removed);
-		if (fs::exists(dir, removed)) continue;
+		if (!ready_run_directory(path_of(join_path(runs_root, std::to_string(number))), take, kept)) continue;
 		taken = number;
 	}
 	for (const auto &[number, busy] : runs) {
@@ -78,6 +154,16 @@ bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liven
 	}
 	out = join_path(runs_root, std::to_string(taken));
 	return ensure_directory(out, error);
+}
+
+bool record_run_staging(const std::string &dir, const RunStaging &staging, std::string &error) {
+	io::JsonValue json = io::JsonValue::make_object();
+	json.set("schema_version", io::JsonValue::make_number(kRunStagingSchemaVersion));
+	json.set("mode", io::JsonValue::make_string(staging.mode));
+	io::JsonValue files = io::JsonValue::make_array();
+	for (const std::string &file : staging.files) files.push(io::JsonValue::make_string(file));
+	json.set("files", std::move(files));
+	return write_file_atomic(join_path(dir, kRunStagingFileName), io::json_write(json), error);
 }
 
 bool claim_run_directory(const std::string &dir, int64_t pid, const ProcessIdentity &identity, std::string &error) {

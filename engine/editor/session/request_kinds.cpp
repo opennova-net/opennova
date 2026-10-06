@@ -86,7 +86,8 @@ void serve_build(SessionCore &core, const EditorRequest &request) {
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(PlayIntent{ true, request.mission, request.behind }, std::string(), false, ExportIntent());
+		core.start_build(PlayIntent{ true, request.mission, request.behind, request.fresh }, std::string(), false,
+				ExportIntent());
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
@@ -467,8 +468,10 @@ constexpr RequestKindRow kRows[] = {
 			"all the same); a build running already serves it and starts the game when it lands, in "
 			"the mission the last Play named. A mission that does not load is a Problems row "
 			"(play.mission.failed) until the next Play. behind: the game's window starts behind every other "
-			"and never takes the foreground (the run section says behind).")
-			.takes(request_params({}, { F::Mission, F::Behind }))
+			"and never takes the foreground (the run section says behind). The run directory keeps what the "
+			"game wrote there in the Plays of the same mode before (its game.cfg, its saves: the run section's "
+			"kept); fresh: it is emptied first, a first run (the run section says fresh).")
+			.takes(request_params({}, { F::Mission, F::Behind, F::Fresh }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
 			.acts_on_saved()
