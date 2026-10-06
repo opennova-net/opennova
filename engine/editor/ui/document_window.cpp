@@ -72,6 +72,7 @@ void DocumentWindow::receive(const ViewEvent &event) {
 void DocumentWindow::show_document(const ViewEvent &event) {
 	tab_asked_ = event.flag ? std::string() : event.path;
 	page_asked_ = event.flag;
+	page_reveal_ = page_reveal_ || event.flag;
 	request_focus();
 }
 
@@ -197,7 +198,11 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		bool open = true;
 		const std::string label = "About " + basename_of(view.documents.page) + "###page";
 		if (ImGui::BeginTabItem(label.c_str(), &open, select ? ImGuiTabItemFlags_SetSelected : 0)) {
-			draw_file_page(workspace_, view.documents.page, page_cache_);
+			// The tab asked shows from the next frame: the marked line is scrolled to once the page draws
+			// in it, not on the frame the ask selects it.
+			const bool reveal = page_reveal_ && !page_asked_;
+			draw_file_page(workspace_, view.documents.page, page_cache_, reveal);
+			if (reveal) page_reveal_ = false;
 			ImGui::EndTabItem();
 		}
 		ui_kit::tooltip("What " + view.documents.page + " is and who uses it: the editor has no editor for its kind yet.");
