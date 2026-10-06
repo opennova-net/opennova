@@ -32,6 +32,10 @@ public:
 	RenameController &operator=(const RenameController &) = delete;
 
 	void rename_asset(const std::string &file, const std::string &new_name);
+	// MoveAsset (DI-03): the file put in the project's `folder` under its own name, planned as a rename
+	// that keeps the name (graph/rename_transaction.h plan_move: no site rewritten), committed as a
+	// rename is; its way back the rename's (Edit > Move back).
+	void move_asset(const std::string &file, const std::string &folder);
 	void assign_requirement(const std::string &role, const std::string &file);
 	// PreviewRename: what a rename would do, planned into the view (nothing written, nothing
 	// reported): a name's rename everywhere, or a file's (no field).
@@ -62,8 +66,8 @@ public:
 		backing_ = false;
 	}
 
-	// The documents with unsaved edits a RenameAsset, an AssignRequirement, a RenameSymbol or a
-	// RenameBack would rewrite or leave behind (the unsaved guard's).
+	// The documents with unsaved edits a RenameAsset, a MoveAsset, an AssignRequirement, a RenameSymbol or
+	// a RenameBack would rewrite or leave behind (the unsaved guard's).
 	void unsaved_files(const EditorRequest &request, std::vector<std::string> &files);
 
 private:
@@ -86,8 +90,10 @@ private:
 	// defining it, its scope) or a file's (its new path), the names before and after, the sites it wrote as
 	// it left them (a text's columns as the new name's length moved them), and each file it wrote by its
 	// bytes' hash after the commit.
+	// A move's (`move`): `file` its new path, `from` and `to` the folders it left and went to.
 	struct Done {
 		bool symbol = false;
+		bool move = false;
 		ReferenceKind kind = ReferenceKind::None;
 		std::string file, field, scope, from, to;
 		std::vector<RenameSite> sites;

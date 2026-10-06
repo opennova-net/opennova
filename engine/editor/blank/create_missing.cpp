@@ -5,6 +5,7 @@
 #include <system_error>
 
 #include <editor/assets/asset_kinds.h>
+#include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
@@ -17,15 +18,14 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
                                                 const RequirementReport &report, const std::vector<std::string> &roles) {
 	CreateMissingResult result;
 	const auto named = [&roles](const std::string &role) { return std::find(roles.begin(), roles.end(), role) != roles.end(); };
-	// A file a made blank names (blank_companion), made under its kind's folder where the project has
-	// none of that name and none was made this run, and its target is free; one that is not made
-	// leaves the blank made, and says why.
+	// A file a made blank names (blank_companion), made where the project keeps a file of its kind
+	// (placement_path, as the blank itself) where the project has none of that name and none was made
+	// this run, and its target is free; one that is not made leaves the blank made, and says why.
 	const auto make_companion = [&](const BlankFactory &made_by, const std::string &made) {
 		std::string name;
 		const BlankFactory *factory = blank_companion(made_by, doc, name);
 		if (factory == nullptr || scan.find(name)) return;
-		const std::string dir = asset_kind_row(factory->kind).folder;
-		const std::string relative = dir.empty() ? name : dir + "/" + name;
+		const std::string relative = placement_path(scan, name, factory->kind);
 		if (std::find(result.created.begin(), result.created.end(), relative) != result.created.end()) return;
 		const fs::path target = path_of(paths.root) / path_of(relative);
 		std::error_code ec;
@@ -74,8 +74,9 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 			result.unavailable.push_back(row.name);
 			continue;
 		}
-		const std::string dir = asset_kind_row(row.expected_kind).folder;
-		const std::string relative = dir.empty() ? row.name : dir + "/" + row.name;
+		// Where the project keeps a file of its kind (assets/project_layout.h): the top level of a flat
+		// project, beside its files of the kind, else the kind's folder.
+		const std::string relative = placement_path(scan, row.name, row.expected_kind);
 		const fs::path target = path_of(paths.root) / path_of(relative);
 		// The report may be older than the tree: a file that has appeared where this one
 		// would go since is left as it is.
