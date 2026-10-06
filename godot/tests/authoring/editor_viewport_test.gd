@@ -1010,6 +1010,96 @@ func test_a_table_plays_on_its_rig() -> void:
 	assert_eq(int(_state().get("clock", {}).get("ticks", -1)), 8, "the preview clock's ticks")
 
 
+## DI-04: a clip's footstep events heard as it runs. The session fires each on the body's ticks through
+## the pairing item's profile (the envelope's sounds_fired), and the Shell starts each one's wave.
+func test_a_clip_s_footsteps_reach_the_shell() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor viewport steps %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("project")
+	assert_true(_seam.new_project(root, "Steps Game"))
+	var source := dir.path_join("source")
+	_write(source.path_join("skinned.o3d"),
+			FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)).to_utf8_buffer())
+	_write(source.path_join("skin.o3a"), SKIN_CLIPS.to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
+		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("skin.o3a")}]}))
+	_write(root.path_join("defs/items.def"), TestFs.crlf("begin \"Walker\"\nid 100200\ntype person\ngraphic skinned\n"
+			+ "anim_def skin\nsound_profile walker\nend\n").to_utf8_buffer())
+	_write(root.path_join("SndProf.def"), TestFs.crlf("begin \"default\"\nend\nbegin \"walker\"\n"
+			+ "\tSSLFootGND STEP_L 0 0 0\n\tSSRFootGND STEP_R 0 0 0\nend\n").to_utf8_buffer())
+	for name in ["step_l.wav", "step_r.wav"]:
+		_write(root.path_join("sounds").path_join(name), _wave_bytes(0.2))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	# The bank made in the editor: a set a foot, each one layer playing its wave.
+	assert_true(_seam.done({"kind": "create_file", "path": "game.lwf"}))
+	var edits := []
+	for foot: String in ["L", "R"]:
+		var wave: String = "w" + foot
+		var named: String = "s" + foot
+		edits.append_array([
+			{"op": "add", "kind": "wave", "as": wave}, {"op": "set", "id": wave, "field": "name", "value": "STEP_" + foot},
+			{"op": "set", "id": wave, "field": "file", "value": "step_%s.wav" % foot.to_lower()},
+			{"op": "add", "kind": "set", "as": named}, {"op": "set", "id": named, "field": "name", "value": "STEP_" + foot},
+			{"op": "add", "kind": "layer", "parent": named, "as": named + "l"},
+			{"op": "add", "kind": "member", "parent": named + "l", "field": "wave", "value": "STEP_" + foot},
+		])
+	assert_true(_seam.done({"kind": "edit_record", "path": "game.lwf", "edits": edits, "open_first": true}))
+	assert_true(_seam.done({"kind": "save_all"}))
+	assert_true(_seam.open_document("anims/SKIN.adm"))
+	var walk: int = _seam.find_record("anim_walk_forward")
+	assert_true(_seam.select_record(walk))
+	assert_true(_change({"clock": {"playing": false, "ticks": 0}}))
+	var preview := await _await_ready()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	var animation: Dictionary = preview.get("body", {}).get("animation", {})
+	assert_eq(String(animation.get("sound_profile", {}).get("name", "")), "walker", str(animation.get("sound_profile")))
+	# Run: the walk loops, its feet firing on the NPC body's odd ticks, each heard.
+	assert_true(_change({"clock": {"playing": true, "ticks": 0}}))
+	var started_before: int = _app.get_clip_voices_started()
+	for _frame in 600:
+		if _app.get_clip_voices_started() >= started_before + 2:
+			break
+		await get_tree().process_frame
+	assert_gte(_app.get_clip_voices_started(), started_before + 2, "the Shell started a wave a footstep")
+	var fired: Array = _state().get("body", {}).get("animation", {}).get("sounds_fired", [])
+	assert_gte(fired.size(), 2, str(fired))
+	var sets := {}
+	for sound: Variant in fired:
+		assert_eq(int(sound.get("tick", 0)) % 2, 1, "an NPC's body reads on odd ticks: %s" % str(sound))
+		assert_eq(String(sound.get("state", "")), "played", str(sound))
+		sets[String(sound.get("set", ""))] = true
+	assert_true(sets.has("STEP_L") and sets.has("STEP_R"), str(sets.keys()))
+	assert_true(_change({"clock": {"playing": false}}))
+
+
+func _wave_bytes(seconds: float) -> PackedByteArray:
+	var samples := int(22050 * seconds)
+	var data := PackedByteArray()
+	data.resize(samples * 2)
+	for i in samples:
+		data.encode_s16(i * 2, int(sin(i * 0.1) * 8000.0))
+	var head := PackedByteArray()
+	head.resize(44)
+	head.encode_u32(0, 0x46464952) # RIFF
+	head.encode_u32(4, 36 + data.size())
+	head.encode_u32(8, 0x45564157) # WAVE
+	head.encode_u32(12, 0x20746d66) # "fmt "
+	head.encode_u32(16, 16)
+	head.encode_u16(20, 1) # PCM
+	head.encode_u16(22, 1) # mono
+	head.encode_u32(24, 22050)
+	head.encode_u32(28, 44100)
+	head.encode_u16(32, 2)
+	head.encode_u16(34, 16)
+	head.encode_u32(36, 0x61746164) # data
+	head.encode_u32(40, data.size())
+	head.append_array(data)
+	return head
+
+
 ## S17: the bones the wire reports (and the canvas draws) stand where the device's skeleton puts its
 ## joints, the clip turning the spine a quarter off the axis.
 func test_a_clip_poses_the_bones_it_reports() -> void:
