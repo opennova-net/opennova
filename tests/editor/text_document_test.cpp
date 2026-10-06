@@ -1111,20 +1111,21 @@ static int test_shader_and_text() {
 // Every text file opens in the editor (the deep-integration plan's DI-06): the text kinds no structured
 // type edits are the text type's, a text with undo and save; where the engine has a reader of the kind,
 // its findings are the file's (the avatar reader's notes at their lines; the score table's reader),
-// listed; a kind with none makes none. SndProf.def, the particle file (DI-14) and the environment
-// (DI-19a) are left to their own types (the specific type owns its kind), the mission text to no type (the
-// build leaves it out). An open avatar table stands in for its file in the graph, read by the engine's own
-// reader: its names follow its edits.
+// listed; a kind with none makes none. SndProf.def, the particle file (DI-14), the environment (DI-19a)
+// and the HUD layout (DI-20) are left to their own types (the specific type owns its kind), the mission
+// text to no type (the build leaves it out). An open avatar table stands in for its file in the graph,
+// read by the engine's own reader: its names follow its edits.
 static int test_text_readers() {
 	const DocumentType *text = document_type(DocumentTypeId::Text);
 	TEST_EXPECT(text != nullptr);
 	if (!text) return 1;
-	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::HudPosDefs,
+	for (const AssetKind kind : {AssetKind::AiProfile,
 	                             AssetKind::HudFxDefs, AssetKind::AvatarDefs, AssetKind::CharAttrDefs, AssetKind::OtherDefs,
 	                             AssetKind::Score, AssetKind::NovaWorldScreen})
 		TEST_EXPECT(document_type_for(kind) == text && is_editable_kind(kind));
 	TEST_EXPECT(document_type_for(AssetKind::SoundProfileDefs) != text && document_type_for(AssetKind::MissionText) == nullptr &&
-	            document_type_for(AssetKind::Particles) == document_type(DocumentTypeId::Particles));
+	            document_type_for(AssetKind::Particles) == document_type(DocumentTypeId::Particles) &&
+	            document_type_for(AssetKind::HudPosDefs) == document_type(DocumentTypeId::HudLayout));
 	TEST_EXPECT(document_type_for(AssetKind::Environment) == document_type(DocumentTypeId::Environment));
 	// The graph still reads a native kind through the engine's reader, not the text type.
 	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) &&
