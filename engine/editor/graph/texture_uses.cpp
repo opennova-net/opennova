@@ -400,7 +400,14 @@ JsonValue texture_use_json(const TextureUse &use) {
 	if (use.context.blend_mode >= 0)
 		context.set("blend_mode", json_string(particle::blend_mode_name(particle::BlendMode(use.context.blend_mode))));
 	out.set("context", std::move(context));
+	if (use.budget.known) out.set("budget", texture_budget_json(use.budget));
 	return out;
+}
+
+TextureBudget texture_use_budget(const TextureUse &use, const TextureHeader &header) {
+	TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+	if (!use.known() || use.fixed || use.served.empty() || !texture_role_budget_loader(use.role, loader)) return TextureBudget();
+	return texture_budget(header, basename_of(use.served), loader, use.context.slot);
 }
 
 } // namespace opennova::editor
