@@ -60,6 +60,9 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05, and kept as downloaded
 | `freesound/fs398040_swordofkings128.ogg` | water swimming 5 | swordofkings128 | [freesound.org/s/398040](https://freesound.org/s/398040/) | CC0 1.0 |
 | `freesound/fs398041_swordofkings128.ogg` | water swimming 4 | swordofkings128 | [freesound.org/s/398041](https://freesound.org/s/398041/) | CC0 1.0 |
 | `freesound/fs770112_Vrymaa.ogg` | Plants or ferns - Manipulation & Hit | Vrymaa | [freesound.org/s/770112](https://freesound.org/s/770112/) | CC0 1.0 |
+| `freesound/fs641380_WhiteFire43.ogg` | Clothing Ruffle 03-2.wav | WhiteFire43 | [freesound.org/s/641380](https://freesound.org/s/641380/) | CC0 1.0 |
+| `freesound/fs641383_WhiteFire43.ogg` | Clothing Ruffle 01.wav | WhiteFire43 | [freesound.org/s/641383](https://freesound.org/s/641383/) | CC0 1.0 |
+| `freesound/fs641387_WhiteFire43.ogg` | Clothing Ruffle 04.wav | WhiteFire43 | [freesound.org/s/641387](https://freesound.org/s/641387/) | CC0 1.0 |
 | `freesound/fs319223_worthahep88.ogg` | Single Rock Hitting wood 3.wav | worthahep88 | [freesound.org/s/319223](https://freesound.org/s/319223/) | CC0 1.0 |
 | `freesound/fs319226_worthahep88.ogg` | Single rock hitting wood.wav | worthahep88 | [freesound.org/s/319226](https://freesound.org/s/319226/) | CC0 1.0 |
 | `freesound/fs319227_worthahep88.ogg` | Single Rock hitting wood 4.wav | worthahep88 | [freesound.org/s/319227](https://freesound.org/s/319227/) | CC0 1.0 |
@@ -205,3 +208,9 @@ Each file in `assets/`, what it was made from and how (PCM mono; the rate and bi
 | `onfsrol2.wav` | 22050 Hz 8-bit | 1.130 s | -16.6 dB | khenshom [#481081](https://freesound.org/s/481081/) (jeans rustling) @3.41s, band 0.18-5 kHz, with Kenney impactSoft_heavy_004.ogg (low-pass 1.2 kHz) at -11 dB and again at -15 dB 0.47 s later, and ralph.whitehead [#565720](https://freesound.org/s/565720/) @5.09s at -10 dB; 1.13 s |
 | `onfsrol3.wav` | 22050 Hz 8-bit | 1.160 s | -16.6 dB | khenshom [#481081](https://freesound.org/s/481081/) (jeans rustling) @4.02s, band 0.18-5 kHz, with Kenney impactSoft_heavy_000.ogg (low-pass 1.2 kHz) at -11 dB and again at -15 dB 0.47 s later, and ralph.whitehead [#565720](https://freesound.org/s/565720/) @6.47s at -10 dB; 1.16 s |
 | `onfsrol4.wav` | 22050 Hz 8-bit | 1.190 s | -16.5 dB | khenshom [#481081](https://freesound.org/s/481081/) (jeans rustling) @0.82s, band 0.18-5 kHz, with Kenney impactSoft_heavy_001.ogg (low-pass 1.2 kHz) at -11 dB and again at -15 dB 0.47 s later, and ralph.whitehead [#565720](https://freesound.org/s/565720/) @8.60s at -10 dB; 1.19 s |
+| `ontocrh1.wav` | 22050 Hz 8-bit | 0.580 s | -15.8 dB | WhiteFire43 [#641383](https://freesound.org/s/641383/) @4.57s; cut 0.58 s, band 0.4-7 kHz, +8 dB above 1.5 kHz |
+| `ontocrh2.wav` | 22050 Hz 8-bit | 0.480 s | -15.7 dB | WhiteFire43 [#641383](https://freesound.org/s/641383/) @5.11s; cut 0.48 s, band 0.4-7 kHz, +8 dB above 1.5 kHz |
+| `ontoprn1.wav` | 22050 Hz 8-bit | 0.720 s | -16.7 dB | WhiteFire43 [#641387](https://freesound.org/s/641387/) @2.60s; cut 0.72 s, band 0.4-7 kHz, +8 dB above 1.5 kHz, with Kenney impactSoft_heavy_002.ogg (low-pass 1.2 kHz) at -16 dB 0.12 s in |
+| `ontostd1.wav` | 22050 Hz 8-bit | 0.610 s | -15.5 dB | WhiteFire43 [#641383](https://freesound.org/s/641383/) @5.69s; cut 0.61 s, band 0.4-7 kHz, +8 dB above 1.5 kHz |
+| `ontostd2.wav` | 22050 Hz 8-bit | 0.700 s | -15.6 dB | WhiteFire43 [#641380](https://freesound.org/s/641380/) @2.91s; cut 0.70 s, band 0.4-7 kHz, +8 dB above 1.5 kHz |
+| `ontostd3.wav` | 22050 Hz 8-bit | 0.540 s | -16.6 dB | khenshom [#481081](https://freesound.org/s/481081/) @2.56s; cut 0.54 s, band 0.4-7 kHz, +8 dB above 1.5 kHz |

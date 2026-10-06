@@ -60,7 +60,10 @@ FOLEY_6 bits): `SSAudio1` and `SSAudio2` `FSP_DIRT_R`, `SSAudio3` `FSP_OBJ_L`,
 60, jitter 0x3FFF) and `SSAudio6` `FSP_PRONE_ROLL` (4 rolls, 1.05 to 1.21 s,
 volume 60, jitter 0x0CCC), all 22050 Hz 8-bit. The rebels' profiles put their
 reload in `SSAudio5`; the player's and the friendly soldiers' put the crawl
-there, which our person clips fire on the crawls.
+there, which our person clips fire on the crawls. A stance change plays one of
+three global sets by name, whatever the profile: `TO_CROUCH` (2 rustles),
+`TO_PRONE` (1, a drop) and `TO_STAND` (3), 0.47 to 0.72 s, volume 70, jitter
+0x0CCC (0x0F5C on the drop).
 
 ### Bullet impacts
 
@@ -153,6 +156,7 @@ Measured the same way (means per family; retail's in brackets):
 | Swim strokes | 4 | 1.3 to 1.8 s (0.96 to 1.88) | 1.5 kHz (1.2) | -8.6 dB (-7.8) |
 | Prone crawl | 8 | 0.58 to 0.73 s (0.50 to 0.87) | 2.4 kHz (2.2) | -12.7 dB (-12.8) |
 | Prone roll | 4 | 1.10 to 1.19 s (1.05 to 1.21) | 1.9 kHz (2.0) | -10.4 dB (-9.9) |
+| Stance changes | 2 + 1 + 3 | 0.48 to 0.72 s (0.47 to 0.72) | 1.9 kHz (1.8) | -15.6 dB RMS (-15.4) |
 
 The member volumes below match each family's loudness to retail's: retail's
 volume times the ratio of the two families' loudest-50 ms RMS, at most 255.
@@ -177,6 +181,9 @@ member's base, "jitter" its random range, both Q16.
 | `ON_FS_SWIM` | 50 | `onfsswm1` to `4` | 0xFFFF | 0x3333 | 99 |
 | `ON_FS_PRONE` | 50 | `onfsprn1` to `8` | 0xFFFF | 0x3FFF | 60 |
 | `ON_FS_PRONE_ROLL` | 50 | `onfsrol1` to `4` | 0xFFFF | 0x0CCC | 63 |
+| `TO_CROUCH` | 50 | `ontocrh1`, `ontocrh2` | 0xFFFF | 0x0CCC | 70 |
+| `TO_PRONE` | 50 | `ontoprn1` | 0xFFFF | 0x0F5C | 70 |
+| `TO_STAND` | 50 | `ontostd1` to `3` | 0xFFFF | 0x0CCC | 70 |
 | `ON_IMP_DIRT` | 60 | `onimpdrt1` to `3` | 0xFFFF | 0x2666 | 230 |
 | | 90 | `onnull` x5 | 0xFFFF | 0x3333 | 255 |
 | | | `onricodt1` to `3` | 0xFFFF | 0x3333 | 125 |
