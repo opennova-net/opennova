@@ -141,6 +141,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::AiProfile, "ai_profile", "AI profile", ArchiveSlot::Resource)
 	        .extensions(kAiProfile)
+	        .edited_by(DocumentTypeId::Text)
 	        .folder("ai")
 	        .about("An AI profile: how a unit the computer runs picks its targets and moves, loaded by the name a placed unit gives.")
 	        .row,
@@ -250,7 +251,9 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
 	        .runtime("environment")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
+	        .new_name("newenviro.env")
 	        .folder("terrain")
 	        .about("An environment: a mission's sky, light, fog and water.")
 	        .row,
@@ -302,6 +305,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
 	        .runtime("particle")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("particles")
 	        .about("Particle effects (smoke, fire, sparks) by name, which items, weapons and ammo name.")
@@ -341,18 +345,21 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::HudPosDefs, "hudpos_defs", "HUD layout", ArchiveSlot::Localres)
 	        .runtime("hudpos")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("Where the HUD draws its parts.")
 	        .row,
 	Kind(AssetKind::HudFxDefs, "hudfx_defs", "HUD effects", ArchiveSlot::Localres)
 	        .file("hudfx.def")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("The HUD's effects.")
 	        .row,
 	Kind(AssetKind::AvatarDefs, "avatar_defs", "Avatars", ArchiveSlot::Localres)
 	        .runtime("avatar")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("The player's avatars.")
@@ -365,6 +372,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::CharAttrDefs, "charattr_defs", "Character attributes", ArchiveSlot::Localres)
 	        .file("charattr.def")
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("The characters' attributes.")
@@ -378,6 +386,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::OtherDefs, "other_defs", "Definitions", ArchiveSlot::Localres)
 	        .extensions(kOtherDefs)
+	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
 	        .about("A definition table the game reads by its name.")
@@ -402,6 +411,7 @@ constexpr AssetKindRow kRows[] = {
 	// (localres), the one place the game reads them with /d and without, and nowhere else.
 	Kind(AssetKind::NovaWorldScreen, "novaworld_screen", "NovaWorld screen", ArchiveSlot::Localres)
 	        .extensions(kNovaWorldScreen)
+	        .edited_by(DocumentTypeId::Text)
 	        .folder("menus")
 	        .about("A NovaWorld screen's page, which the menus read.")
 	        .row,
@@ -444,6 +454,7 @@ constexpr AssetKindRow kRows[] = {
 	// @ 0x52d8a0].
 	Kind(AssetKind::Score, "score", "Score table", ArchiveSlot::Loose)
 	        .file("score.ini")
+	        .edited_by(DocumentTypeId::Text)
 	        .expansion(ExpansionLoose::RootOnly)
 	        .about("The score table, read from the game's own folder.")
 	        .row,
@@ -461,6 +472,12 @@ constexpr AssetKindRow kRows[] = {
 	// Its outputs, named after it, pack by their own kinds; it never packs.
 	Kind(AssetKind::ImportSource, "import_source", "Import source", ArchiveSlot::None)
 	        .about("A file the editor turns into the game's form: its import record says how, and the build packs what it made.")
+	        .row,
+	// No name gives it either: the scan gives it to a file an import record lists among its inputs (S20:
+	// a terrain set's heightmap and images), whatever its name would make it. It never packs: its
+	// import's outputs do.
+	Kind(AssetKind::ImportInput, "import_input", "Import input", ArchiveSlot::None)
+	        .about("A file an import reads to make the game's files, such as a terrain's heightmap: the build packs what the import made, never it.")
 	        .row,
 };
 
@@ -511,11 +528,13 @@ constexpr bool rows_well_formed() {
 		const AssetKindRow &row = kRows[i];
 		if (static_cast<size_t>(row.kind) != i || !*row.token || !*row.label) return false;
 		const bool left_out = row.kind == AssetKind::Archive || row.kind == AssetKind::ImportSource ||
-		                      row.kind == AssetKind::Unknown || row.kind == AssetKind::MissionText;
+		                      row.kind == AssetKind::ImportInput || row.kind == AssetKind::Unknown ||
+		                      row.kind == AssetKind::MissionText;
 		if ((row.archive_slot == ArchiveSlot::None) != left_out) return false;
 		// A loose kind says where an expansion's game reads it; no other kind does.
 		if ((row.archive_slot == ArchiveSlot::Loose) != (row.expansion_loose != ExpansionLoose::None)) return false;
-		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::MaterialChunk;
+		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::ImportInput ||
+		                         row.kind == AssetKind::MaterialChunk;
 		if (by_the_scan && (*row.runtime || row.file_name || row.extensions)) return false;
 		if (static_cast<size_t>(row.document) > kDocumentTypeCount) return false;
 		if (!row.folder || !row.new_name || !new_name_fits(row) || !row.about || !*row.about) return false;

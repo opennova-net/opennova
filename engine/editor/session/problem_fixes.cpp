@@ -4,12 +4,15 @@
 #include <algorithm>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <set>
 #include <utility>
 
 #include <editor/assets/asset_type_registry.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/catalog_validation.h>
+#include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <base/io/strutil.h>
 #include <editor/documents/texture_roles.h>
@@ -391,6 +394,72 @@ void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<Pr
 	               request::set_import_options(state.source, std::move(changes)), false});
 }
 
+// An item on an id the engine keeps for another kind (catalog.reserved_kind), or named as a place the
+// engine finds by an id the project lacks (catalog.reserved_name): its id renamed everywhere
+// (graph/rename_transaction: items.def and every file that names it, a mission's entities among them),
+// to an id of its own the engine keeps for nothing (free_item_id over every item id the project has or
+// names), or to the engine's where an item of the engine's kind takes it. The item is the finding's
+// record among the graph's item definitions of its file, the one on that kind of id.
+void item_id_fix(const Diagnostic &d, const SessionView &view, bool plan, std::vector<ProblemFix> &out) {
+	if (!view.findings.graph || d.asset.empty() || d.record.empty()) return;
+	const AssetGraph &graph = *view.findings.graph;
+	const bool kind = d.row() == &finding_code(CatalogFinding::ReservedKind);
+	const GraphSymbol *item = nullptr;
+	const def::ReservedItem *wanted = nullptr;
+	for (const GraphSymbol *symbol : graph.symbols_of(d.asset, d.record)) {
+		if (symbol->kind != ReferenceKind::Item) continue;
+		const std::optional<int> id = strutil::parse_int(symbol->name);
+		const std::optional<int> type = strutil::parse_int(symbol->value);
+		if (!id || !type) continue;
+		const def::ReservedItem *held = def::reserved_item_by_id(*id);
+		if (kind && held && !def::reserved_item_kind_matches(*held, *type)) item = symbol;
+		if (!kind && !held && (wanted = reserved_item_named(d.record)) && def::reserved_item_kind_matches(*wanted, *type))
+			item = symbol;
+		if (item) break;
+	}
+	if (!item) return;
+	std::string to;
+	if (kind) {
+		std::set<int> used;
+		for (const GraphSymbol *symbol : graph.symbols_of_kind(ReferenceKind::Item))
+			if (const std::optional<int> id = strutil::parse_int(symbol->name)) used.insert(*id);
+		graph.for_each_edge([&](const GraphEdge &edge) {
+			if (edge.kind != ReferenceKind::Item) return;
+			if (const std::optional<int> id = strutil::parse_int(edge.value)) used.insert(*id);
+		});
+		to = std::to_string(free_item_id([&](int id) { return used.count(id) != 0; }));
+	} else {
+		to = std::to_string(def::DEF_ITEM_ID_BASE + wanted->type);
+		if (graph.resolve_symbol(ReferenceKind::Item, to)) return; // another item has it: no fix of this one
+	}
+	std::string detail = "Gives " + d.record + " id " + to +
+	                     (kind ? ", one the engine keeps for nothing," : ", the id the engine finds it by,") +
+	                     " in " + basename_of(d.asset) + " and in every file that names it.";
+	if (plan && view.project.scan) {
+		const SymbolRenamePlan rename = plan_symbol_rename_project(*view.project.scan, graph, *item, to);
+		if (!rename.ok()) detail = "Cannot give " + d.record + " id " + to + ": " + rename.refusals.front().message;
+		else detail += " It rewrites " + counted(rename.sites.size(), "use") + ".";
+	}
+	out.push_back({"Use id " + to, detail + kNotUndoable,
+	               request::rename_symbol(item->file, item->locator, item->field, to), false});
+}
+
+// An items.def whose first row is no Null marker (catalog.first_row): a Null marker added first, the
+// row every lookup that finds nothing resolves to (a marker of an id of its own, as a new item is), in
+// its document, opened first when it is not: one step Undo takes back, saved with the file.
+ProblemFix fallback_row_fix(const std::string &path) {
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = node_kind(def::DefRecordKind::Item);
+	add.position = 0;
+	add.field = "display_name";
+	add.value = std::string("Null");
+	return {"Add a Null marker first",
+	        "Adds a marker named Null as the first row of " + path + ", the row the engine gives every id it finds "
+	        "no item of, as retail's first row is. Undo takes it back, and Save writes it.",
+	        request::edit_record(path, std::move(add), true), false};
+}
+
 // The fixes of one finding, over the view's index (a Rewrite reads it): what its code's row offers
 // (FindingCodeRow::fixes), for what the finding is about.
 void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex &index, bool plan,
@@ -469,6 +538,10 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 			               request::texture_operation(d.asset, "reorder_rows", {}, true), false});
 		return;
 	case FindingFix::ImportFitsUse: import_fit_fix(d, view, out); return;
+	case FindingFix::ItemId: item_id_fix(d, view, plan, out); return;
+	case FindingFix::FallbackRow:
+		if (!d.asset.empty()) out.push_back(fallback_row_fix(d.asset));
+		return;
 	case FindingFix::NormalRowType: {
 		// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4, which the
 		// normal-map loader reads, an .mdt as it is, capped at 512 a side [orig: Material_LoadStageTexture

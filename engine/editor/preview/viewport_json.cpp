@@ -158,6 +158,7 @@ io::JsonValue viewport_hit_to_json(const ViewportModel &model, const ViewportHit
 	out.set("id", json_number(double(hit.id)));
 	out.set("name", json_string(hit.name));
 	out.set("current", JsonValue::make_bool(hit.current));
+	if (!hit.ground.is_null()) out.set("ground", hit.ground);
 	return out;
 }
 
