@@ -50,8 +50,9 @@ enum class Shape {
 enum class Type { Integer, Real, Text };
 
 // What a field names outside its record: a texture file, a CTRL register (by its index in the model's
-// table), a part (by its index in LOD 0), an MTRX frame (by its row).
-enum class Ref { None, Texture, Register, Part, Frame };
+// table), a part (by its index in LOD 0), an MTRX frame (by its row), a shader (by the tag an effect
+// registers under).
+enum class Ref { None, Texture, Register, Part, Frame, Shader };
 
 struct Choice {
 	const char *name = "";
@@ -413,7 +414,7 @@ std::vector<Entry> panm_entries() {
 std::vector<Entry> material_entries() {
 	static const std::vector<Choice> styles = style_choices();
 	std::vector<Entry> out = {
-		{textf("shader", 33, "Shader"), [](const void *d, int) -> Value { return std::string(as<ThreediMaterial>(d).shader_name); },
+		{textf("shader", 33, "Shader", Ref::Shader), [](const void *d, int) -> Value { return std::string(as<ThreediMaterial>(d).shader_name); },
 				[](void *d, const Value &v, int, std::string &e) {
 					return set_name(as<ThreediMaterial>(d).shader_name, sizeof(as<ThreediMaterial>(d).shader_name), v, e);
 				}},
@@ -1053,12 +1054,14 @@ FieldSchema field_of(const Field &f) {
 	out.id = f.path;
 	out.type = f.type == Type::Integer ? FieldType::Integer : f.type == Type::Real ? FieldType::Real : FieldType::Text;
 	out.width = f.width;
-	// What it may name outside its record: a texture's file; a CTRL register or an MTRX row of the
-	// model by its index, a Record reference (S13 D8), which the document keeps where the record's
-	// other fields make it one. A part of LOD 0 names no record (LOD 0's parts are the base's).
+	// What it may name outside its record: a texture's file; a material's shader, by its tag; a CTRL
+	// register or an MTRX row of the model by its index, a Record reference (S13 D8), which the document
+	// keeps where the record's other fields make it one. A part of LOD 0 names no record (LOD 0's parts
+	// are the base's).
 	out.reference = f.reference == Ref::Texture    ? ReferenceKind::Texture
 	                : f.reference == Ref::Register ? ReferenceKind::ModelRegister
 	                : f.reference == Ref::Frame    ? ReferenceKind::ModelFrame
+	                : f.reference == Ref::Shader   ? ReferenceKind::Shader
 	                                               : ReferenceKind::None;
 	for (const Choice &c : f.choices) out.choices.push_back({c.name, c.value, c.label});
 	out.flags = f.flags;

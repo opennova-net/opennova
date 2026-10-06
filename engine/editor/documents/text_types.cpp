@@ -293,4 +293,123 @@ FindingTable shader_finding_codes() {
 	return { kShaderRows.data(), kShaderRows.size() };
 }
 
+std::vector<uint8_t> shader_file_bytes(const std::string &text) {
+	std::string stored;
+	std::vector<SourceIssue> issues;
+	ShaderEncoding(true, false).encode(text, stored, issues);
+	return std::vector<uint8_t>(stored.begin(), stored.end());
+}
+
+const std::vector<std::string> &fixed_function_shader_tags() {
+	// In the order the renderer compiles them, texture by self-lit by blending [orig:
+	// HLSLEffect_InitFixedFunctionShaders @ 0x5AFA54..0x5AFCFC; the suffixes @ 0x5AF8D6..0x5AF91E].
+	static const std::vector<std::string> tags = [] {
+		std::vector<std::string> out;
+		for (const char *texture : {"_ST", "_MT"})
+			for (const char *lum : {"", "_LUM"})
+				for (const char *blend : {"_OP", "_AB", "_AD"})
+					out.push_back(std::string("FF") + texture + blend + lum);
+		return out;
+	}();
+	return tags;
+}
+
+namespace {
+
+// The text with its comments blanked to spaces (a line comment to its end, a block comment whole, its line
+// ends kept), so an offset into it is one into the text; a string's contents kept.
+std::string without_comments(const std::string &text) {
+	std::string out = text;
+	for (size_t i = 0; i < out.size();) {
+		if (out[i] == '"') {
+			for (++i; i < out.size() && out[i] != '"' && out[i] != '\n'; ++i)
+				if (out[i] == '\\') ++i;
+			++i;
+		} else if (out.compare(i, 2, "//") == 0) {
+			for (; i < out.size() && out[i] != '\n'; ++i) out[i] = ' ';
+		} else if (out.compare(i, 2, "/*") == 0) {
+			const size_t end = out.find("*/", i + 2);
+			const size_t stop = end == std::string::npos ? out.size() : end + 2;
+			for (; i < stop; ++i)
+				if (out[i] != '\n') out[i] = ' ';
+		} else {
+			++i;
+		}
+	}
+	return out;
+}
+
+bool word_char(char c) {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+// The first `word` of `text` in [from, to) standing alone, npos for none.
+size_t find_word(const std::string &text, const char *word, size_t from, size_t to) {
+	const size_t length = std::char_traits<char>::length(word);
+	for (size_t at = text.find(word, from); at != std::string::npos && at + length <= to; at = text.find(word, at + 1))
+		if ((at == 0 || !word_char(text[at - 1])) && (at + length >= text.size() || !word_char(text[at + length])))
+			return at;
+	return std::string::npos;
+}
+
+size_t skip_space(const std::string &text, size_t at, size_t to) {
+	while (at < to && (text[at] == ' ' || text[at] == '\t' || text[at] == '\r' || text[at] == '\n')) ++at;
+	return at;
+}
+
+} // namespace
+
+ShaderEffectInfo read_shader_effect_info(const std::string &text) {
+	ShaderEffectInfo info;
+	const std::string code = without_comments(text);
+	const size_t name = find_word(code, "EffectInfo", 0, code.size());
+	if (name == std::string::npos) return info;
+	// Its annotations, between the '<' after the name and the '>' closing them outside a string.
+	const size_t open = code.find('<', name);
+	if (open == std::string::npos) return info;
+	size_t close = open + 1;
+	for (bool quoted = false; close < code.size() && (quoted || code[close] != '>'); ++close)
+		if (code[close] == '"') quoted = !quoted;
+	info.found = true;
+	info.info_offset = name;
+	// `<name> = <value>` after the annotation's own name.
+	const auto value_at = [&](const char *annotation) -> size_t {
+		const size_t at = find_word(code, annotation, open, close);
+		if (at == std::string::npos) return at;
+		const size_t eq = skip_space(code, at + std::char_traits<char>::length(annotation), close);
+		return eq < close && code[eq] == '=' ? skip_space(code, eq + 1, close) : std::string::npos;
+	};
+	const size_t tag = value_at("EffectTag");
+	if (tag != std::string::npos && code[tag] == '"') {
+		const size_t end = code.find('"', tag + 1);
+		if (end != std::string::npos && end < close) {
+			info.tag = text.substr(tag + 1, end - tag - 1);
+			info.tag_offset = tag + 1;
+			info.tag_length = end - tag - 1;
+		}
+	}
+	const size_t uv = value_at("EffectAlt_UV");
+	if (uv != std::string::npos)
+		info.alt_uv = code.compare(uv, 4, "true") == 0 || (code[uv] >= '1' && code[uv] <= '9');
+	return info;
+}
+
+void shader_definitions(const TextDocument &document, std::vector<TextDefinition> &out) {
+	const std::string name = basename_of(document.path());
+	const ShaderEffectInfo info = read_shader_effect_info(document.text());
+	const auto define = [&](const std::string &tag, size_t offset, size_t length) {
+		out.push_back({ReferenceKind::Shader, tag, document.span_at(offset, length)});
+		// The twin the loader compiles with TEX_UVXFORM, registered as the tag and "#UV".
+		if (info.alt_uv) out.push_back({ReferenceKind::Shader, tag + "#UV", document.span_at(offset, length)});
+	};
+	if (strutil::iequals(name, kFixedFunctionShaderFile)) {
+		// The renderer names each compile itself, whatever EffectTag says [orig: @ 0x5AFC3A].
+		for (const std::string &tag : fixed_function_shader_tags())
+			define(tag, info.found ? info.info_offset : 0, info.found ? std::char_traits<char>::length("EffectInfo") : 0);
+		return;
+	}
+	if (name.empty() || name[0] == '_' || info.tag.empty()) return;
+	define(info.tag, info.tag_offset, info.tag_length);
+}
+
 } // namespace opennova::editor

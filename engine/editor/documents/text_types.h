@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -81,5 +82,38 @@ enum class ShaderFinding {
 };
 const FindingCodeRow &finding_code(ShaderFinding code);
 FindingTable shader_finding_codes();
+
+// The file in the shader loader's form holding `text` (with the NUL after it every shipped shader has):
+// what Save writes for a new shader.
+std::vector<uint8_t> shader_file_bytes(const std::string &text);
+
+// The fixed-function effect, which the renderer opens by this name as it starts and compiles once for each
+// of its fixed-function tags [orig: HLSLEffect_InitFixedFunctionShaders @ 0x5AF790, the name @ 0x5AFA3E].
+inline constexpr const char *kFixedFunctionShaderFile = "_ffp.fx";
+
+// Those tags, as the renderer names each compile: "FF", then _ST or _MT (one texture or two), _OP, _AB or
+// _AD (opaque, alpha-blended, additive), then _LUM for the self-lit [orig: @ 0x5AFAD6, sprintf "FF%s%s%s"].
+const std::vector<std::string> &fixed_function_shader_tags();
+
+// What a shader's EffectInfo annotations say [orig: HLSLEffect_LoadFromFile @ 0x5AE899..0x5AE9BC]: the tag
+// the effect registers under (EffectTag) and where it is written (its offset into the text and length, 0
+// for none), and whether the loader registers a TEX_UVXFORM twin of it as the tag and "#UV"
+// (EffectAlt_UV) [orig: @ 0x5AEA03; HLSLEffect_LoadAllFromPFFArchive @ 0x5AFF88]. `found` is false for a
+// text with no EffectInfo. Read from the text with its comments left out, as the compiler reads it; a
+// preprocessor condition around the annotations is not followed.
+struct ShaderEffectInfo {
+	bool found = false;
+	size_t info_offset = 0; // where EffectInfo is written
+	std::string tag;
+	size_t tag_offset = 0, tag_length = 0;
+	bool alt_uv = false;
+};
+ShaderEffectInfo read_shader_effect_info(const std::string &text);
+
+// The shader tags a shader file registers (DocumentType::definitions), each a Shader symbol: _ffp.fx's
+// fixed-function tags (and their #UV twins where its EffectInfo asks for them); another file's EffectTag
+// (and its #UV twin); none for a file whose name starts with '_', an include the archive walk skips
+// [orig: HLSLEffect_LoadAllFromPFFArchive @ 0x5AFF6E].
+void shader_definitions(const TextDocument &document, std::vector<TextDefinition> &out);
 
 } // namespace opennova::editor
