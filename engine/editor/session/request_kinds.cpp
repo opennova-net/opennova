@@ -247,6 +247,9 @@ void serve_apply_confirmation(SessionCore &core, const EditorRequest &) {
 void serve_quit(SessionCore &core, const EditorRequest &) {
 	core.quit();
 }
+void serve_move_asset(SessionCore &core, const EditorRequest &request) {
+	core.renames().move_asset(request.path, request.folder);
+}
 
 // --- the table ----------------------------------------------------------------------------------
 
@@ -1037,6 +1040,23 @@ constexpr RequestKindRow kRows[] = {
 			.holds(kNone, kHoldsAll, OnBusy::CancelRunning)
 			.guarded(GuardScope::AllDirty, "Quit", "Save all")
 			.can_discard()
+			.acts_on_saved()
+			.row,
+	// DI-03: a rename that keeps the name, so the import record goes with it and the open documents, the
+	// card and the reopen list follow.
+	Request(K::MoveAsset, "move_asset", serve_move_asset,
+			"The project file path moved to the project's folder (\"\" the top level, made when it is not "
+			"there) under its own name. No reference is rewritten: the game finds a file by its name alone "
+			"(an archive's entries are names, a build packs and copies a file by its name), so a folder is "
+			"organization only. An import source takes its record, its outputs made again under the new "
+			"place; the folder it leaves goes once empty. Refused with the reasons (rename.unknown_file, "
+			"rename.imported for an import's output or a file an import reads from its place, rename.path, "
+			"rename.unchanged, rename.exists). Committed as an operation, as rename_asset; not undoable, "
+			"its way back preview_rename_back and rename_back (Edit > Move back).")
+			.takes(request_params({ F::Path, F::Folder }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.guarded(GuardScope::PlannedWrites, "Move %s", "Save all and move")
 			.acts_on_saved()
 			.row,
 	Request(K::PickDirectory, "pick_directory", nullptr,
