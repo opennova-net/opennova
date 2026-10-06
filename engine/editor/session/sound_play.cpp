@@ -116,6 +116,30 @@ void play_clip_event(SessionCore &core, const EditorRequest &request) {
 	start(core, std::move(voices), fired.front().set, fired.front().bank, words);
 }
 
+// values {leg}: the set the weapon action playing the row of a first-person map plays as it begins (begin:
+// its soundset) or finishes (end: its soundsetend), as a press of the leg's mark asks (DI-13:
+// ModelViewport::press_leg).
+void play_action_leg(SessionCore &core, const EditorRequest &request) {
+	const SessionView &view = core.view();
+	const std::string &leg = value_of(request, "leg");
+	if (!strutil::iequals(leg, "begin") && !strutil::iequals(leg, "end"))
+		return refuse(core, "leg is begin (the action's soundset) or end (its soundsetend).");
+	std::string error;
+	auto *clip = dynamic_cast<ModelViewport *>(
+			core.viewports().resolve(view, request.path, ViewportKind::Model, error));
+	if (!clip || !clip->animating())
+		return refuse(core, !error.empty() ? error : "No clip plays in the model preview of " + request.path + ".",
+		              request.path);
+	std::vector<ClipSoundFired> fired;
+	if (!clip->press_leg(strutil::iequals(leg, "end"), core.sound_selector(), view.project.scan.get(), fired, error))
+		return refuse(core, error, clip->path());
+	std::vector<WorkspaceView::Voice> voices;
+	for (const ClipSoundFired::Voice &voice : fired.front().voices)
+		if (!voice.path.empty()) voices.push_back({voice.path, voice.pitch_q16, voice.volume});
+	if (voices.empty()) return refuse(core, fired.front().words, clip->path());
+	start(core, std::move(voices), fired.front().set, fired.front().bank, fired.front().words);
+}
+
 // A slot by its keyword, without case, or its number; -1 for none.
 int slot_named(const std::string &text) {
 	if (const int slot = sound_profile_slot_of(text); slot >= 0) return slot;
@@ -172,6 +196,7 @@ void serve_sound_play(SessionCore &core, const EditorRequest &request) {
 	const SessionView &view = core.view();
 	if (!view.project.open || !view.project.scan) return refuse(core, "No project is open.");
 	if (has_value(request, "frame")) return play_clip_event(core, request);
+	if (has_value(request, "leg")) return play_action_leg(core, request);
 	const std::string &set = value_of(request, "set");
 	const bool slot_play = has_value(request, "slot") || has_value(request, "profile") || has_value(request, "surface");
 	if (!set.empty()) {
