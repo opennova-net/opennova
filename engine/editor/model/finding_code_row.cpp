@@ -307,6 +307,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::TextureOperation, code("texture.operation", G::Textures) },
 	{ C::TextureParticleTooBig, code("texture.particle_too_big", G::Textures, F::ImportFitsUse) },
 	{ C::TextureReplace, code("texture.replace", G::Textures) },
+	{ C::TextureSetAside, code("texture.set_aside", G::Textures) },
 	{ C::TextureShowUse, code("texture.show_use", G::Textures) },
 	{ C::TextureSplit, code("texture.split", G::Textures) },
 	{ C::TextureStoreDds, code("texture.store_dds", G::Textures) },

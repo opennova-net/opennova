@@ -63,8 +63,10 @@ struct TextureSourcePlan {
 
 // Replace: the texture `texture` (a project file by its path or logical name, an import's output, or a name
 // the project lacks: a texture a field names that is missing) made from the image `image_bytes` named
-// `image_name` (a PNG, a TGA or a PCX the importer reads): the image copied into art/ (another name where a
-// file other than the texture's own source has it), its record's options those reproducing the texture's
+// `image_name` (a PNG, a TGA or a PCX the importer reads): the image copied into art/ under the texture's own
+// stem whatever the image is called (body.dds's art/body.png; `<stem>_src` where another file has that name;
+// an import's output keeps its source's path where the image is of its form), a TGA kept as a PNG of its
+// texels, its record's options those reproducing the texture's
 // stored form (an import output's: its import's own), the exact size its uses read where the image is
 // another, `overrides` over them. Refused: an image the importer does not read, a texture that is no texture
 // or no import's output, a cube map or a volume (the editor writes flat textures), an image of colours for a
@@ -75,8 +77,8 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 
 // Edit externally: the source a paint program edits for the texture `texture`: an import output's own
 // source (nothing to make: `source` its path, no bytes); a PNG the game reads as it is, itself; a plain
-// texture's one made once, a copy of a TGA or a PCX (which a paint program opens, an 8-bit PCX's indices
-// kept by palette indices, a 24-bit PCX's colours kept in three planes), a PNG of a DDS's first level as its
+// texture's one made once, a PNG of a TGA's or an MDT's texels or a copy of a PCX (which a paint program opens,
+// an 8-bit PCX's indices kept by palette indices, a 24-bit PCX's colours kept in three planes), a PNG of a DDS's first level as its
 // reader decodes it, its stored form reproduced and what changes said (a TGA stored top first drawn upright
 // from then on; a DDS's blocks encoded again and its chain made anew). Refused: no texture of the project of
 // that name, no texture (an import source of another importer), one the game cannot read, a cube map or a
@@ -96,6 +98,11 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 // image of other sides is padded to the next ones: render-material-re D-RMAT-18).
 TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &scan, const std::string &texture,
                                    const std::vector<std::string> &reads_tga);
+
+// The project file `relative` set aside under .replaced/<stamp>/ (its own folder kept; a stamp of its own), never
+// deleted: what a texture the game never reads is given (set_aside_texture). True where there is none; false, with
+// the finding, where it could not be moved.
+bool set_aside_project_file(const ProjectPaths &paths, const std::string &relative, std::vector<Diagnostic> &findings);
 
 // The plan done: the replaced files set aside under .replaced/<stamp>/ (their own folders kept; a stamp of
 // its own each time, to the millisecond and numbered past one already there), the source written, its record

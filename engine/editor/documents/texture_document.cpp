@@ -26,7 +26,7 @@ constexpr FindingCodeEntry<F> kFindingEntries[] = {
 	{F::TgaUpsideDown, code("texture.tga_upside_down", FindingFix::TextureRows)},
 	{F::TgaColourMapSkipped, code("texture.tga_colour_map_skipped")},
 	{F::PcxOverrun, code("texture.pcx_overrun")},
-	{F::NotRead, code("texture.not_read")},
+	{F::NotRead, code("texture.not_read", FindingFix::SetAsideUnread)},
 	{F::TgaTruncated, code("texture.tga_truncated")},
 	{F::PcxShortRows, code("texture.pcx_short_rows")},
 };
