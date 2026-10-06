@@ -7,6 +7,7 @@
 //   /d            dev mode: loose files next to the PFFs override the packed
 //                 entries. Without it the runtime reads from PFFs exclusively.
 //   /exp <name>   mount the expansion <name> (e.g. "jox01") over the base game.
+//   /mod <name>   the same flag (retail reads the two spellings in one arm).
 //   /game <code>  which game the data is from (e.g. "jo", "jodemo"); selects
 //                 the SCR decode key. Defaults to "jo" when absent.
 //   --resource-dir <absolute path>
@@ -56,6 +57,7 @@
 // the whole token list (engine and user args alike) so packaged and source
 // launches share one parser.
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -87,7 +89,7 @@ inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 
 struct LaunchFlags {
     bool loose_override = false;   // /d
-    std::string expansion;         // /exp <name>
+    std::string expansion;         // /exp or /mod <name>: the last one, its first 32 bytes
     std::string game;              // /game <code>, lowercased
     std::string resource_dir;      // --resource-dir <path>
     bool resource_dir_given = false; // --resource-dir present, even without a value
@@ -129,6 +131,14 @@ struct LanEndpoint {
 };
 LanEndpoint launch_lan_join_endpoint(const LaunchFlags &flags, int default_port);
 
+// The bytes of an expansion name the game keeps: `g_ExpansionName @ 0xb4c584`
+// is 32 bytes and `/exp`/`/mod` fill it with `strncpy(.., 0x20)`.
+inline constexpr std::size_t kExpansionNameBytes = 32;
+// A `/exp`/`/mod` token as the game holds it: stripped, then its first 32
+// bytes [orig: Game_ParseCommandLineAndInit @ 0x4a76cf]. A name of 32 or more
+// is left unterminated there and read on into the next global; the port stops
+// at 32 (D-VFS-8).
+std::string launch_expansion_name(const std::string &token);
 // A launch flag always wins over a persisted (possibly stale) fallback.
 std::string launch_expansion(const LaunchFlags &flags, const std::string &fallback);
 // Lowercased; the persisted fallback next, then "jo" — the absence of any

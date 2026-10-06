@@ -824,6 +824,9 @@ func _on_host_pressed() -> void:
 	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
 	config.server_name = "%s's Game" % player_name
 	config.mission = mission
+	# The authority plays the starting map's mode: g_GameType comes from the
+	# mission, as the LAN host screen's request derives it.
+	config.game_type_auto = true
 	if resource_root != null:
 		config.expansion = String(resource_root.get_expansion())
 	_pending_host_config = config

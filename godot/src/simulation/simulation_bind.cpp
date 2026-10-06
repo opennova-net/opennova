@@ -133,6 +133,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_screen_status"), &Simulation::get_join_screen_status);
 	ClassDB::bind_method(D_METHOD("is_session_lost"), &Simulation::is_session_lost);
 	ClassDB::bind_method(D_METHOD("get_mission_exit_reason"), &Simulation::get_mission_exit_reason);
+	ClassDB::bind_method(D_METHOD("begin_host_map_change"), &Simulation::begin_host_map_change);
+	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &Simulation::begin_joiner_reload);
 	ClassDB::bind_method(D_METHOD("round_over_key", "vk", "restart_vk"), &Simulation::round_over_key);
 	ClassDB::bind_method(D_METHOD("ingame_restart"), &Simulation::ingame_restart);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &Simulation::is_joined_in_match);
@@ -168,9 +170,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::local_medic_request_cooldown_ticks);
 	ClassDB::bind_method(D_METHOD("local_medic_request_serial"),
 	                     &Simulation::local_medic_request_serial);
-	ClassDB::bind_method(D_METHOD("set_server_text", "medic_request_format",
-	                     "change_to_blue_format", "change_to_red_format"),
-	                     &Simulation::set_server_text);
 	ClassDB::bind_method(D_METHOD("send_team_change_request"),
 	                     &Simulation::send_team_change_request);
 	ClassDB::bind_method(D_METHOD("is_local_player_dead"), &Simulation::local_player_dead);

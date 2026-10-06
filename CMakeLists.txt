@@ -59,6 +59,7 @@ add_subdirectory(apps/lan_probe)
 add_subdirectory(apps/novaworld_server)
 add_subdirectory(apps/nw_lister)
 add_subdirectory(apps/project)
+add_subdirectory(apps/serve)
 add_subdirectory(apps/wire)
 
 enable_testing()

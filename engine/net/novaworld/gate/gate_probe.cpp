@@ -1,8 +1,17 @@
 #include <net/novaworld/gate_probe.h>
 
+#include <base/io/strutil.h>
 #include <net/novacrypto/nwu.h>
 
 namespace opennova {
+
+bool is_novaworld_domain_host(std::string_view host) {
+	if (!host.empty() && host.back() == '.') host.remove_suffix(1); // the root label's dot
+	const std::string_view domain = NOVAWORLD_DOMAIN;
+	if (strutil::iequals(host, domain)) return true;
+	return host.size() > domain.size() && host[host.size() - domain.size() - 1] == '.' &&
+			strutil::ends_with_icase(host, domain);
+}
 
 std::vector<uint8_t> gate_probe_build(std::string_view tag, std::string_view nwu_key) {
 	// Match the binary's ping-thread layout: the tag string PLUS its

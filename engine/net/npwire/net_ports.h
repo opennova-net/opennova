@@ -71,6 +71,23 @@ inline std::vector<uint16_t> lan_client_bind_ports() {
 			kRetailLanClientPortDelta);
 }
 
+// The NovaWorld arm of the same open (D-NET-346): on network type 1 the one
+// socket binds the mpnovaworld quad whether or not the session is the
+// authority, so a NovaWorld host's NWU session, its game traffic and its
+// joiners share it; the server quad above serves only a LAN or direct-address
+// authority. Shipped defaults 32768 / 65535 / 1 / random 0; the scan is the
+// host's. `min_port` is the authored mpnovaworldportmin.
+// [orig: CNapiNetwork_OpenTransportSocket @0x4c6a40 — `[esi+50h]` == 1
+//  @0x4c6a84..0x4c6a8d -> @0x4c6af6..0x4c6b08 (+0x228..+0x234); the cfg table
+//  rows mpnovaworldportmin / max / delta / random @0x8330e0 / @0x8330f8 /
+//  @0x833110 / @0x833128]
+inline constexpr uint16_t kRetailNovaWorldPortMin = 32768;
+inline constexpr uint16_t kRetailNovaWorldPortMax = 65535;
+inline constexpr uint16_t kRetailNovaWorldPortDelta = 1;
+inline std::vector<uint16_t> novaworld_bind_ports(uint32_t min_port = kRetailNovaWorldPortMin) {
+	return lan_host_bind_ports(min_port, kRetailNovaWorldPortMax, kRetailNovaWorldPortDelta);
+}
+
 // The NovaWorld gate's UDP port (novaworld_gate; the same value as
 // engine/net/novaworld gate_probe.h GATE_DEFAULT_PORT, which stays the service-side
 // canonical — novaworld layers ON npwire, so the wire lib carries its own).

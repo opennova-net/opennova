@@ -158,17 +158,15 @@ bool latched_key_edge(bool down, bool active, bool &was_down) {
 }
 
 // [orig: the equipped AdmDef drives the FP model pick,
-//  Player_RenderFirstPersonViewModel @0x4ded60 via the mounted slot]
-ViewmodelDefPick viewmodel_def_pick(bool cleared, const std::string &override_name,
-                                    const char *bringup_fallback) {
+//  Player_RenderFirstPersonViewModel @0x4ded60 via the mounted slot; no
+//  equipped slot @0x4dedb6 and no def @0x4dedc1 draw nothing]
+ViewmodelDefPick viewmodel_def_pick(bool cleared, const std::string &equipped_name) {
     ViewmodelDefPick out;
-    if (cleared) {
+    if (cleared || equipped_name.empty()) {
         return out;
     }
     out.resolves = true;
-    out.name = override_name.empty()
-            ? std::string(bringup_fallback != nullptr ? bringup_fallback : "")
-            : override_name;
+    out.name = equipped_name;
     return out;
 }
 

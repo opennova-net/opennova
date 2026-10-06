@@ -43,9 +43,8 @@ const std::vector<std::string_view>& host_dialog_controls() {
     return controls;
 }
 
-bool apply_host_dialog_control(GameConfig& config, int32_t& player_limit,
-                               bool& serve_and_play, std::string_view control,
-                               const std::string& value) {
+bool apply_host_dialog_text(GameConfig& config, std::string_view control,
+                            const std::string& value) {
     // The edit capacities are literal byte counts (no invented -1).
     // [orig: HostDialog_ReadSettings @ 0x555940;
     // CStaticWnd_GetLabelText @ 0x657570]
@@ -56,40 +55,54 @@ bool apply_host_dialog_control(GameConfig& config, int32_t& player_limit,
     else if (control == "RED_PW") config.side_b_password = value.substr(0, 17);
     else if (control == "SPECTATOR_PW") config.spectator_password = value.substr(0, 17);
     else if (control == "GAME_LOCATION") config.country = value.substr(0, 3);
-    else {
-        const int32_t number = edit_integer(value);
-        for (const FlagControl& flag : kFlagControls) {
-            if (control != flag.control) continue;
-            if ((number != 0) != flag.inverted) config.mp_attributes |= flag.bit;
-            else config.mp_attributes &= ~flag.bit;
-            return true;
-        }
-        if (control == "SERVERTYPE") serve_and_play = number == 0;
-        else if (control == "SERVER_PUNKBUSTER") config.server_punkbuster = number;
-        else if (control == "SERVER_LANONLY") config.server_lan_only = number;
-        else if (control == "CONNECTIONSPEED") config.connection_speed = number;
-        else if (control == "REPLAY") config.replay_enabled = static_cast<uint32_t>(number);
-        else if (control == "DELAY") config.start_delay = static_cast<uint32_t>(number);
-        else if (control == "RESPAWN") config.respawn_timeout = static_cast<uint32_t>(number);
-        else if (control == "TIME") config.respawn_time = static_cast<uint32_t>(number);
-        // Config's 500-point limits and nonpositive KOTH limit have distinct
-        // runtime sentinels; TIME has no such substitution.
-        // [orig: Game_ApplySessionSettingsToGlobals @ 0x551500]
-        else if (control == "KILL_LIMIT") config.score_limit = number == 500 ? 65000u : static_cast<uint32_t>(number);
-        else if (control == "MAX_SCORE") config.max_score = number == 500 ? 65000u : static_cast<uint32_t>(number);
-        else if (control == "MAX_KOTH") config.time_limit_minutes = number <= 0 ? 0x2222222u : static_cast<uint32_t>(number);
-        else if (control == "MAX_PLAYERS") player_limit = std::min(number, 64);
-        else if (control == "MAX_FF_KILLS") config.max_friendly_kills = number;
-        else if (control == "TAKEOVER_TIME") config.capture_duration_seconds = number;
-        else if (control == "LFP_TAKEOVER") config.capture_speed_setting = number;
-        else if (control == "ALLOW_SPECTATORS") {
-            if (number == 0) config.spectator_slots = 0;
-            else if (config.spectator_slots == 0) config.spectator_slots = -1;
-        } else if (control == "ALLOW_AI") config.allow_ai = number != 0;
-        else if (control == "TOD_CONTINUITY") config.time_of_day_continuity = number;
-        else return false;
-    }
+    else return false;
     return true;
+}
+
+bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
+                              bool& serve_and_play, std::string_view control,
+                              int32_t number) {
+    for (const FlagControl& flag : kFlagControls) {
+        if (control != flag.control) continue;
+        if ((number != 0) != flag.inverted) config.mp_attributes |= flag.bit;
+        else config.mp_attributes &= ~flag.bit;
+        return true;
+    }
+    if (control == "SERVERTYPE") serve_and_play = number == 0;
+    else if (control == "SERVER_PUNKBUSTER") config.server_punkbuster = number;
+    else if (control == "SERVER_LANONLY") config.server_lan_only = number;
+    else if (control == "CONNECTIONSPEED") config.connection_speed = number;
+    else if (control == "REPLAY") config.replay_enabled = static_cast<uint32_t>(number);
+    else if (control == "DELAY") config.start_delay = static_cast<uint32_t>(number);
+    else if (control == "RESPAWN") config.respawn_timeout = static_cast<uint32_t>(number);
+    else if (control == "TIME") config.respawn_time = static_cast<uint32_t>(number);
+    // Config's 500-point limits and nonpositive KOTH limit have distinct
+    // runtime sentinels; TIME has no such substitution.
+    // [orig: Game_ApplySessionSettingsToGlobals @ 0x551500]
+    else if (control == "KILL_LIMIT") config.score_limit = session_point_limit(number);
+    else if (control == "MAX_SCORE") config.max_score = session_point_limit(number);
+    else if (control == "MAX_KOTH") config.time_limit_minutes = session_koth_limit_minutes(number);
+    // The dialog read clamps its edit to 64 [orig: HostDialog_ReadSettings
+    // @ 0x555c25..0x555c2d].
+    else if (control == "MAX_PLAYERS") player_limit = std::min(number, 64);
+    else if (control == "MAX_FF_KILLS") config.max_friendly_kills = number;
+    else if (control == "TAKEOVER_TIME") config.capture_duration_seconds = number;
+    else if (control == "LFP_TAKEOVER") config.capture_speed_setting = number;
+    else if (control == "ALLOW_SPECTATORS") {
+        if (number == 0) config.spectator_slots = 0;
+        else if (config.spectator_slots == 0) config.spectator_slots = -1;
+    } else if (control == "ALLOW_AI") config.allow_ai = number != 0;
+    else if (control == "TOD_CONTINUITY") config.time_of_day_continuity = number;
+    else return false;
+    return true;
+}
+
+bool apply_host_dialog_control(GameConfig& config, int32_t& player_limit,
+                               bool& serve_and_play, std::string_view control,
+                               const std::string& value) {
+    if (apply_host_dialog_text(config, control, value)) return true;
+    return apply_host_dialog_number(config, player_limit, serve_and_play, control,
+            edit_integer(value));
 }
 
 std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
@@ -125,9 +138,9 @@ std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
     if (control == "DELAY") return number(config.start_delay);
     if (control == "RESPAWN") return number(config.respawn_timeout);
     if (control == "TIME") return number(config.respawn_time);
-    if (control == "KILL_LIMIT") return number(config.score_limit == 65000u ? 500 : config.score_limit);
-    if (control == "MAX_SCORE") return number(config.max_score == 65000u ? 500 : config.max_score);
-    if (control == "MAX_KOTH") return number(config.time_limit_minutes == 0x2222222u ? 0 : config.time_limit_minutes);
+    if (control == "KILL_LIMIT") return number(config.score_limit == kSessionNoPointLimit ? 500 : config.score_limit);
+    if (control == "MAX_SCORE") return number(config.max_score == kSessionNoPointLimit ? 500 : config.max_score);
+    if (control == "MAX_KOTH") return number(config.time_limit_minutes == kSessionNoKothLimitMinutes ? 0 : config.time_limit_minutes);
     if (control == "MAX_PLAYERS") return number(std::min(player_limit, 64));
     if (control == "MAX_FF_KILLS") return number(config.max_friendly_kills);
     if (control == "TAKEOVER_TIME") return number(config.capture_duration_seconds);
@@ -138,13 +151,31 @@ std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
     return std::string();
 }
 
+uint32_t session_point_limit(int32_t cfg_limit) {
+    // [orig: Game_ApplySessionSettingsToGlobals @0x551B67..0x551B75 (g_ScoreLimit
+    // from maxKills_408), @0x551B84..0x551B8C (g_KillLimit from maxScore_40C)]
+    return cfg_limit == 500 ? kSessionNoPointLimit : static_cast<uint32_t>(cfg_limit);
+}
+
+uint32_t session_koth_limit_minutes(int32_t cfg_limit) {
+    // [orig: Game_ApplySessionSettingsToGlobals @0x551CD2..0x551CDF
+    // (g_TimeLimitMinutes from kothLimit_474)]
+    return cfg_limit <= 0 ? kSessionNoKothLimitMinutes : static_cast<uint32_t>(cfg_limit);
+}
+
 uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play) {
     // Dedicated hosting reserves the extra host slot before publishing the
     // network limit; the 65 ceiling tests the PRE-increment cap (a dedicated
-    // 65 publishes 66) and applies only for networkConnectType 1, which has no
-    // writer other than its default 1. There is no lower clamp: a blank cap
-    // publishes 0 (1 dedicated). The same live count gates BMS placements.
+    // 65 publishes 66) and applies only for networkConnectType 1 (game.cfg's
+    // `networkconnecttype`, default 1). The apply has no lower clamp: a blank
+    // cap publishes 0 (1 dedicated). In session, though, the session's
+    // creation clamps the cap into 1..65 before the apply runs, so the ceiling
+    // never cuts and a blank cap publishes 1 (2 dedicated); host_config.h
+    // host_session_settings ports that clamp, and the game's host, which calls
+    // this with the screen's cap, still lacks it (D-NET-335's open half). The
+    // same live count gates BMS placements.
     // [orig: Game_ApplySessionSettingsToGlobals @0x551b26..0x551b48;
+    // CNapiGameSession_BuildAndCreateSession @0x56955D..0x56956C;
     // Config_SetDefaults @0x54d1d4 (networkConnectType_480 = 1);
     // Server_InitNewRoundState @ 0x51c8e0]
     int64_t total = static_cast<int64_t>(player_limit) + (serve_and_play ? 0 : 1);

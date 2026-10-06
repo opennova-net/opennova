@@ -26,6 +26,8 @@ class ISessionTransport;
 
 namespace opennova::inmatch {
 
+struct HostRotation;
+
 // Re-export the canonical world::kRetailPlayerMinEntitySlot into np for the spawn call sites (one
 // definition, shared with the Godot listen host). [orig: §5.2b spawn placement]
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEntitySlot;
@@ -34,11 +36,15 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEn
 // the later player entity. Repeated calls for one connection are idempotent.
 // Pending MP reservations participate in autobalance, so admissions received
 // in one socket drain cannot all observe stale World counts.
+// The side arms (a side password, a TeamChoose request) return the team the
+// rotation's side-to-team map gives that side (null: sides 1, 2), which the
+// Attack-and-Defend swap exchanges between the halves.
 // [orig: Server_AssignPlayerTeam @0x4fe310 writes playerSlot+416 before
-// NetPacket_WriteSlotAssignment @0x502b30 reads it]
+// NetPacket_WriteSlotAssignment @0x502b30 reads it; byte_82F240 / byte_82F241
+// @0x4FE408, @0x4FE456, @0x4FE492, @0x4FE507, @0x4FE543, @0x4FE56D]
 uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		const world::World &world);
+		const world::World &world, const HostRotation *rotation = nullptr);
 
 // Reserve the first free fixed roster-table row before S2C 0x04 advertises it.
 // Existing player bindings and other pre-spawn reservations both occupy rows;

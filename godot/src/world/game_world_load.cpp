@@ -653,14 +653,18 @@ void GameWorld::prepare_autonomous_weather() {
 	}
 }
 
-// The witnessed mission-start environment boundary runs natively on the
-// weather device (Weather.run_mission_start_boundary): the World's weather
-// seed from the loaded .env + the BMS clock, the authority's WAC direct
-// execution, the initializer + 255-tick settle, the baseline seal.
+// The witnessed mission-start environment boundary, phase B of the one host
+// boot, runs natively on the weather device (Weather.run_mission_start_boundary):
+// the World's weather seed from the loaded .env + the BMS clock, the
+// authority's WAC direct execution, the initializer + 255-tick settle, the
+// baseline seal, then the session's load end. A world with no weather device
+// runs it on the boot's own environment, as the headless host does.
 void GameWorld::run_mission_start_environment_boundary() {
+	Ref<Simulation> sim = get_sim();
 	if (weather_ != nullptr) {
-		weather_->run_mission_start_boundary(get_sim().ptr(), mission_clock_start_q8_8_,
-				mission_clock_minutes_per_day_);
+		weather_->run_mission_start_boundary(sim.ptr());
+	} else if (sim.is_valid()) {
+		(void)sim->start_mission(nullptr, nullptr, {});
 	}
 }
 
@@ -1007,6 +1011,8 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 		opts->set_terrain_til(mission_til_bytes_);
 	}
 	opts->set_playable(playable_ && !drive_.pending_dedicated());
+	// This load runs the boot's phase B itself, after its device stages.
+	opts->set_mission_start_deferred(true);
 	// Stamp the staged net-session request (typed record + derived staging +
 	// the surrendered preload sim, consumed once per load) onto the runtime's
 	// options — MissionRoot alone adopts opts.simulation (ADR 0011/0012).
@@ -1044,12 +1050,10 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// contexts. Re-handed per load; unload's reset() forgets them.
 	occlusion_->bind_mission(runtime->get_sim(), runtime->get_entity_index(), runtime->get_entity_presenter(),
 			placer_);
-	// Vehicle initialization at the mission-start boundary grounds hulls against
-	// the water plane. Seed it before that pass, including unoccupied craft:
-	// 07TR's offshore LCACs otherwise settle on the seabed before crews board.
-	// The native clamp lives in VehicleSystem::initialize_mission_vehicles.
-	if (water_ != nullptr)
-		runtime->get_sim()->set_water_z(water_->get_water_height());
+	// Phase B of the one host boot: the water plane the vehicle init grounds
+	// hulls against (07TR's offshore LCACs otherwise settle on the seabed
+	// before crews board), the environment boundary and the session's load
+	// end (inmatch/host_boot.h).
 	run_mission_start_environment_boundary();
 	sync_runtime_profiling();
 	// The player profile's saved weapon kits, loaded before ANY kit is applied

@@ -138,6 +138,10 @@ public:
 	void remove_host_missions() { host_dialog_.remove_selected(runtime_); }
 	bool can_start_host() const { return host_dialog_.can_start(); }
 	PackedStringArray selected_host_missions() const;
+	// The SELECTED_MISSIONS Switch cell's click and the rows' launch options
+	// (engine menu::HostDialog::toggle_switch / selected_launch_options).
+	void toggle_host_mission_switch(int p_row) { host_dialog_.toggle_switch(runtime_, p_row); }
+	PackedInt32Array selected_host_launch_options() const;
 	void select_host_location(int p_id, const String &p_country);
 	void prepare_options(const Ref<ControlsModel> &p_controls);
 	bool is_options_surface() const { return options_.is_surface(); }
@@ -202,6 +206,21 @@ public:
 	bool show_screen(const String &p_name);
 	bool navigate_to_screen(const String &p_name);
 	bool pop_screen();
+
+	// --- the screen history across menu files and a mission (engine
+	// menu/screen_history.h, kept by the runtime across open_document) ---
+	// A row is [file, screen]; an empty array is no row.
+	void push_screen_history(const String &p_file, const String &p_screen);
+	PackedStringArray pop_screen_history();
+	void clear_screen_history();
+	void trim_screen_history();
+	int get_screen_history_depth() const;
+	// The rows bottom first, each {file, screen, mark}.
+	Array get_screen_history() const;
+	// The menu mode's leave (a mission's start) and its re-entry, which answers
+	// the row to show again.
+	void leave_menu_mode();
+	PackedStringArray return_to_menu_mode();
 
 	// --- widget addressing / state (doc-id keyed) ---
 	int widget_id(const String &p_name) const;

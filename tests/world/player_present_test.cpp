@@ -221,11 +221,13 @@ void test_raw_key_latch_updates_regardless_of_the_gate() {
 }
 
 void test_def_precedence_and_memo() {
-	const w::ViewmodelDefPick none = w::viewmodel_def_pick(true, "WPN_M4AUTO", "WPN_AK47AUTO");
+	const w::ViewmodelDefPick none = w::viewmodel_def_pick(true, "WPN_M4AUTO");
 	CHECK(!none.resolves);
-	const w::ViewmodelDefPick fallback = w::viewmodel_def_pick(false, "", "WPN_AK47AUTO");
-	CHECK(fallback.resolves && fallback.name == "WPN_AK47AUTO");
-	const w::ViewmodelDefPick equipped = w::viewmodel_def_pick(false, "WPN_M4AUTO", "WPN_AK47AUTO");
+	// Nothing equipped resolves nothing: there is no default weapon
+	// [orig: Player_RenderFirstPersonViewModel @0x4dedb6 / @0x4dedc1].
+	const w::ViewmodelDefPick unequipped = w::viewmodel_def_pick(false, "");
+	CHECK(!unequipped.resolves && unequipped.name.empty());
+	const w::ViewmodelDefPick equipped = w::viewmodel_def_pick(false, "WPN_M4AUTO");
 	CHECK(equipped.resolves && equipped.name == "WPN_M4AUTO");
 	CHECK(w::viewmodel_def_memo_hit("WPN_M4AUTO", "WPN_M4AUTO", true));
 	CHECK(!w::viewmodel_def_memo_hit("WPN_M4AUTO", "WPN_M4AUTO", false));

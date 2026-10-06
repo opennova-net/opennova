@@ -38,6 +38,7 @@ void LocalPlayerVisuals::reset() {
 	local_weapon_preserve_slot_state_ = false;
 	viewmodel_weapon_override_ = String();
 	viewmodel_weapon_cleared_ = false;
+	reported_missing_.clear();
 }
 
 Node *LocalPlayerVisuals::world() const {
@@ -307,9 +308,11 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 	if (plan.set_player_class) {
 		spawn_sim->set_local_player_class(plan.player_class);
 	}
+	// Whatever the plan, the viewmodel then follows the inventory the spawn
+	// settled: the FP renderer reads the equipped slot's def and draws nothing
+	// without one (the engine's viewmodel_def_pick carries the witness).
 	switch (plan.action) {
 		case opennova::world::SpawnLoadoutAction::kNone:
-			return;
 		case opennova::world::SpawnLoadoutAction::kSyncInventory:
 			sync_local_player_weapon_from_inventory(spawn_sim);
 			return;
@@ -321,6 +324,7 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 		kit.push_back(WeaponKitEntry::make(opennova::to_gd(row.name), row.clips));
 	}
 	if (!spawn_sim->apply_local_player_loadout(kit, plan.player_class)) {
+		sync_local_player_weapon_from_inventory(spawn_sim);
 		return;
 	}
 	if (plan.after_apply == opennova::world::SpawnLoadoutAfterApply::kClearWeapon) {
@@ -371,6 +375,14 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 		set_first_person_model_available(false);
 		return nullptr;
 	}
+	const Ref<PlayerViewmodelDef> def = local_player_viewmodel_def();
+	if (def.is_null()) {
+		// No equipped def: nothing first-person draws and no model is named,
+		// so nothing is built or reported; the rig asks again each frame until
+		// a weapon equips (the engine's fp_viewmodel_spec carries the witness).
+		set_first_person_model_available(false);
+		return nullptr;
+	}
 	Node3D *container = memnew(Node3D);
 	container->set_name("PlayerViewmodel");
 	parent->add_child(container);
@@ -379,11 +391,9 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	// TOD like every entity (retail draws the FP model through the same
 	// lighting constants [orig: Player_RenderFirstPersonViewModel @ 0x4ded60
 	// -> the ctx block]).
-	const Ref<PlayerViewmodelDef> def = local_player_viewmodel_def();
 	// The submit spec (gun/arms/clip-adm + the emplaced arms omission)
-	// resolves natively (renderer::fp_viewmodel_spec); the AK set is only the no-definition
-	// bring-up fallback and a resolved def with no fpModel intentionally
-	// submits no gun. [orig: Player_RenderFirstPersonViewModel @0x4ded60; @0x4dedc7]
+	// resolves natively (renderer::fp_viewmodel_spec): a def with no fpModel
+	// submits nothing. [orig: Player_RenderFirstPersonViewModel @0x4ded60; @0x4dedc7]
 	const Ref<PlayerVisualSpec> character_spec = local_player_visual_spec();
 	const Ref<FpViewmodelSpec> spec = Simulation::fp_viewmodel_spec(def.is_valid(),
 			def.is_valid() ? def->get_gfx1() : String(),
@@ -403,6 +413,27 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	ObjectModel *gun = !gun_name.is_empty()
 			? mission_placer->build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", gun_name)
 			: nullptr;
+	// Each missing model is reported once a mission, never per build or
+	// frame: retail reports a weapon.def model that fails to load once, at
+	// the def load (the engine's fp_viewmodel_spec carries the witness).
+	const auto report_once = [this](const String &p_key, const String &p_message) {
+		if (reported_missing_.has(p_key)) {
+			return;
+		}
+		reported_missing_.insert(p_key);
+		UtilityFunctions::push_warning(p_message);
+	};
+	if (gun == nullptr && !gun_name.is_empty()) {
+		report_once(String("gun:") + gun_name,
+				vformat("GameWorld: FP gun model '%s' failed to load from the resource root", gun_name));
+		// A gfx1 model that does not load leaves the def with no fpModel, so
+		// retail submits nothing for it, the arms included (the engine's
+		// fp_viewmodel_spec carries the witness).
+		if (arms != nullptr) {
+			arms->queue_free();
+			arms = nullptr;
+		}
+	}
 	local_viewmodel_parts_.clear();
 	if (arms != nullptr) {
 		// The arms' own raw camo triplet, stored by the rig's per-submit FP
@@ -434,28 +465,16 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 		}
 	}
 	set_first_person_model_available(gun != nullptr);
-	if (show_arms && arms == nullptr) {
-		UtilityFunctions::push_warning(
+	if (show_arms && gun != nullptr && arms == nullptr) {
+		report_once(String("arms:") + arms_name,
 				vformat("GameWorld: FP arms model '%s' failed to load from the resource root", arms_name));
 	}
-	if (gun == nullptr && !gun_name.is_empty()) {
-		UtilityFunctions::push_warning(
-				vformat("GameWorld: FP gun model '%s' failed to load from the resource root", gun_name));
-	}
-	if (arms == nullptr && gun == nullptr) {
-		// A valid definition with no resolved fpModel is a stable,
-		// intentionally empty presentation epoch. Returning its container
-		// prevents the caller from retrying every frame or substituting a
-		// different weapon.
-		if (def.is_null()) {
-			container->queue_free();
-			return nullptr;
-		}
-		return container;
-	}
-	// The FSM and its clip rings installed natively at ACCEPT time (S6b) --
-	// the model resolve is purely presentational now, as in retail [orig: the
-	// FP model resolve @0x4ded60 is a render consumer, not a mount].
+	// A definition with no drawable fpModel is a stable, intentionally empty
+	// presentation epoch: returning its container keeps the caller from
+	// rebuilding every frame or substituting a different weapon. The FSM and
+	// its clip rings installed natively at ACCEPT time (S6b) -- the model
+	// resolve is purely presentational, as in retail [orig: the FP model
+	// resolve @0x4ded60 is a render consumer, not a mount].
 	return container;
 }
 
@@ -547,11 +566,10 @@ TypedArray<PlayerWeaponEvent> LocalPlayerVisuals::drain_local_player_weapon_even
 }
 
 Ref<PlayerViewmodelDef> LocalPlayerVisuals::local_player_viewmodel_def() {
-	// Precedence: the armory-equipped (or debug-selected) weapon, else the
-	// fixed default until first equip; NONE resolves nothing.
-	const String fallback = Simulation::viewmodel_bringup_fallback_weapon();
+	// The equipped weapon (spawn kit, armory or debug selection); none or
+	// NONE resolves nothing.
 	const opennova::world::ViewmodelDefPick pick = opennova::world::viewmodel_def_pick(
-			viewmodel_weapon_cleared_, opennova::to_std(viewmodel_weapon_override_), opennova::to_std(fallback).c_str());
+			viewmodel_weapon_cleared_, opennova::to_std(viewmodel_weapon_override_));
 	if (!pick.resolves) {
 		return Ref<PlayerViewmodelDef>();
 	}
@@ -565,8 +583,13 @@ Ref<PlayerViewmodelDef> LocalPlayerVisuals::local_player_viewmodel_def() {
 	}
 	const int index = weapon_db->find_weapon(weapon_name);
 	if (index < 0) {
-		UtilityFunctions::push_warning(vformat(
-				"GameWorld: weapon '%s' not in weapon.def -- FP viewmodel keeps built-in defaults", weapon_name));
+		// Read every frame: report the absent row once a mission.
+		const String key = String("weapon:") + weapon_name;
+		if (!reported_missing_.has(key)) {
+			reported_missing_.insert(key);
+			UtilityFunctions::push_warning(vformat(
+					"GameWorld: weapon '%s' not in weapon.def -- no first-person viewmodel", weapon_name));
+		}
 		return Ref<PlayerViewmodelDef>();
 	}
 	local_weapon_ = weapon_db->get_weapon(index);

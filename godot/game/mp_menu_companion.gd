@@ -205,7 +205,17 @@ func _wire_host_settings() -> void:
 	_connect_pressed("ADD_MISSIONS", _on_add_missions)
 	_connect_pressed("REMOVE_MISSIONS", _on_remove_missions)
 	_connect_pressed("START_GAME", _on_host_start)
+	if not _driver.table_cell_clicked.is_connected(_on_host_table_cell_clicked):
+		_driver.table_cell_clicked.connect(_on_host_table_cell_clicked)
 	_sync_start_gate()
+
+
+## The SELECTED_MISSIONS Switch cell (column 2): a click toggles the row's launch
+## option, the Attack-and-Defend halves (engine menu::HostDialog::toggle_switch).
+func _on_host_table_cell_clicked(_id: int, widget_name: String, row: int, column: int,
+		_state: int, _cell_value: int, _double_click: bool) -> void:
+	if widget_name == "SELECTED_MISSIONS" and column == 2:
+		_driver.toggle_host_mission_switch(row)
 
 
 # The host screen opens seeded from the host configuration, the populate step
@@ -214,13 +224,11 @@ func _wire_host_settings() -> void:
 # START read. Edits take the text, spins select the item whose authored
 # value= matches, GAME_LOCATION the item whose name shares the country's
 # first three characters, checkboxes the nonzero value. Without a persisted
-# game.cfg the seed is the record's defaults, with the session name the
-# Menu/UNTITLED gametext the retail config defaults copy in. A user-cleared
-# edit is still read verbatim at START.
+# game.cfg the seed is the record's defaults (the engine's host-screen
+# baseline, with the session name the Menu/UNTITLED gametext the retail config
+# defaults copy in). A user-cleared edit is still read verbatim at START.
 func _seed_host_controls() -> void:
 	var defaults := HostSessionConfig.new()
-	defaults.server_name = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_MENU,
-			"UNTITLED", defaults.server_name)
 	for control in HostSessionOptions.dialog_controls():
 		var id := _id(control)
 		if id < 0:
@@ -287,6 +295,7 @@ func _read_host_config() -> HostSessionConfig:
 				value = "1" if _driver.is_widget_checked(id) else "0"
 		config.apply_dialog_control(control, value)
 	config.missions.assign(_driver.selected_host_missions())
+	config.mission_launch_options.assign(_driver.selected_host_launch_options())
 	if config.missions.size() > 0:
 		config.mission = config.missions[0]
 	config.game_type_attr = _spin_attr("GAME_TYPE", "")

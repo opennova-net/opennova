@@ -1206,6 +1206,10 @@ mnu::Document flow_document(bool options = false) {
 		widget("START_GAME", mnu::WindowType::Button),
 		widget("MAIN_WRAPPER", mnu::WindowType::Window),
 		widget("OPTIONS_WRAPPER", mnu::WindowType::Window)};
+	// The host screen's rotation table authors three columns: the mission, its
+	// mode, its Switch cell.
+	root.children[4].table_data.column.has_count = true;
+	root.children[4].table_data.column.count = 3;
 	auto filter = widget("GAME_TYPE", mnu::WindowType::SpinList);
 	filter.items.present = true;
 	filter.items.items = {item("All", "255"), item("Team", "1")};
@@ -1290,6 +1294,17 @@ void test_host_dialog() {
 	CHECK(host.selected_missions() == (std::vector<std::string>{"team.bms", "dm.bms"}));
 	CHECK(menu.table_cell_text(table, 0, 1) == "localized");
 	CHECK(menu.table_cell_text(table, 0, 2) == "1" && menu.table_cell_text(table, 1, 2) == "0");
+	CHECK(host.selected_launch_options() == (std::vector<int32_t>{1, 0}));
+	// The Switch cell toggles a team, non-objective row's launch option and
+	// redraws; a DM row keeps 0 [orig: HostDialog_SelectedMissionsTableEvent
+	// @0x558061..0x5580AB].
+	host.toggle_switch(menu, 0);
+	host.toggle_switch(menu, 1);
+	CHECK(menu.table_cell_text(table, 0, 2) == "0" && menu.table_cell_text(table, 1, 2) == "0");
+	CHECK(host.selected_launch_options() == (std::vector<int32_t>{0, 0}));
+	host.toggle_switch(menu, 0);
+	CHECK(menu.table_cell_text(table, 0, 2) == "1");
+	CHECK(host.selected_launch_options() == (std::vector<int32_t>{1, 0}));
 	CHECK(menu.item_count(list) == 1 && host.can_start());
 	CHECK(!menu.is_widget_disabled(menu.widget_id("START_GAME")));
 	menu.select_row(menu.widget_id("GAME_TYPE"), 1, false);

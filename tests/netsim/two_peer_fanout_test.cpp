@@ -1008,7 +1008,9 @@ bool run_0a_priority_view_terms() {
 		if (!expect(b_h.valid(), "vehicle B spawned")) return false;
 	}
 
-	ns::set_view_distance_units(600); // arm the LOS gate + the +200 inside-view bonus
+	// Arm the LOS gate + the +200 inside-view bonus: the view distance is the
+	// world's fog distance (g_EnvFogDistCurrentHigh, the high word of g_EnvFogDistCurrent).
+	world.weather.core.scalar_channels.fog_dist_fp = 600 << 16;
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
@@ -1030,7 +1032,7 @@ bool run_0a_priority_view_terms() {
 	};
 
 	nw::FrameUpdate f1;
-	if (!pump(f1)) { ns::set_view_distance_units(0); return false; }
+	if (!pump(f1)) return false;
 	const int ia1 = record_index(f1, a_h.packed);
 	const int ib1 = record_index(f1, b_h.packed);
 	bool ok = expect(ia1 >= 0 && ib1 >= 0, "both vehicles fit the frame");
@@ -1042,12 +1044,11 @@ bool run_0a_priority_view_terms() {
 	// Frame 2: the one-shot speed delta is gone, but the sustained view terms
 	// (angle/enemy/occupied/LOS/+200) still order B first.
 	nw::FrameUpdate f2;
-	if (!pump(f2)) { ns::set_view_distance_units(0); return false; }
+	if (!pump(f2)) return false;
 	const int ia2 = record_index(f2, a_h.packed);
 	const int ib2 = record_index(f2, b_h.packed);
 	ok = ok && expect(ia2 >= 0 && ib2 >= 0 && ib2 < ia2,
 	                  "sustained view terms keep B ahead once the motion delta is spent");
-	ns::set_view_distance_units(0); // process-global: restore for the sibling tests
 	if (!ok) return false;
 	std::printf("PASS 0a_priority_view_terms\n");
 	return true;

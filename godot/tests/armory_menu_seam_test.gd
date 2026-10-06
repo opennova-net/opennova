@@ -435,6 +435,35 @@ func test_armory_accept_hotkey_debounces_until_release() -> void:
 		"the on-show re-stamps the open debounce [orig: @0x4e0b21]")
 
 
+# A present weapon.def with no weapon rows is a LOADED, empty table, never "not
+# loaded": the game builds its loadout catalog whatever the walk finds
+# [orig: WeaponDef_LoadAll @0x54dd10 seeds the "None" row and never reads the
+# walk's result], and each armory list still gets its NONE row
+# [orig: populate_three_category_lists @0x566f0a..0x566f34]. A comment-only file
+# and a zero-byte one both load so.
+func test_empty_weapon_def_is_a_loaded_empty_table() -> void:
+	for body: PackedByteArray in [
+			TestFs.crlf("// Weapon definitions\n\n").to_utf8_buffer(), PackedByteArray()]:
+		var dir := TestFs.cache_dir(self, "armory_empty_weapon_def")
+		TestFs.write_bytes(self, dir.path_join("weapon.def"), body)
+		var root := ResourceRoot.new()
+		assert_eq(root.set_root_dir(dir), OK)
+		var weapons := LoadoutWeaponTable.load_weapon_database(root, "ArmoryMenuSeamTest",
+				"the test fails")
+		assert_not_null(weapons, "a %d-byte weapon.def loads" % body.size())
+		if weapons != null:
+			assert_true(weapons.is_loaded(), "an empty table is loaded")
+			assert_eq(weapons.get_count(), 0, "with no weapon rows")
+			assert_eq(weapons.get_last_error(), "", "and no error")
+			var companion := ArmoryMenuCompanion.new()
+			companion.set_weapon_database(weapons)
+			var driver := _make_weapon_driver()
+			companion.on_menu_built(driver, "weapon.mnu", "WEAPON", root)
+			for slot in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
+				assert_eq(_items(driver, slot).size(), 1, "%s lists only NONE" % slot)
+		TestFs.remove_dir_recursive(dir)
+
+
 func test_degrades_without_weapon_def() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	var driver := _make_weapon_driver()

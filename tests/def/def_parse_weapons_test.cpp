@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include <formats/def/def.h>
+#include <formats/def/def_notes.h>
 
 #include <string>
 
@@ -58,6 +59,45 @@ int main(int argc, char **argv) {
             fprintf(stderr, "FAIL: the loadout reader's team masks\n");
             return 1;
         }
+    }
+
+    /* A weapon.def with no weapon rows is an empty table, never a failure: a
+       comment-only file and a zero-length one both parse to zero rows
+       [orig: WeaponDef_LoadAll @0x54dd10 seeds the "None" row and never reads
+       the walk's result]. */
+    {
+        static const char kCommentOnly[] = "// Weapon definitions\r\n\r\n";
+        DefWeaponsFile parsed{};
+        if (def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(kCommentOnly),
+                sizeof(kCommentOnly) - 1, &parsed) != 0 || parsed.count != 0) {
+            fprintf(stderr, "FAIL: a comment-only weapon.def is an empty table\n");
+            def_free_weapons(&parsed);
+            return 1;
+        }
+        def_free_weapons(&parsed);
+        DefWeaponsFile empty{};
+        if (def_parse_weapons_memory(nullptr, 0, &empty) != 0 || empty.count != 0) {
+            fprintf(stderr, "FAIL: a zero-length weapon.def is an empty table\n");
+            def_free_weapons(&empty);
+            return 1;
+        }
+        def_free_weapons(&empty);
+        // The editor's noted read takes the same rule.
+        DefTextNotes notes;
+        DefWeaponsFile noted{};
+        if (def_parse_weapons_memory(nullptr, 0, &noted, nullptr, notes) != 0 || noted.count != 0) {
+            fprintf(stderr, "FAIL: a zero-length weapon.def read with notes is an empty table\n");
+            def_free_weapons(&noted);
+            return 1;
+        }
+        def_free_weapons(&noted);
+        DefWeaponsFile refused{};
+        if (def_parse_weapons_memory(nullptr, 4, &refused) == 0) {
+            fprintf(stderr, "FAIL: a null buffer with a length is refused\n");
+            def_free_weapons(&refused);
+            return 1;
+        }
+        def_free_weapons(&refused);
     }
 
     /* The shipped weapon.def from the reference fixture set (OPENNOVA_JO_ASSETS):

@@ -79,6 +79,9 @@ func _join_pair_in_match(host_traits_first := false) -> Dictionary:
 	autofree(host)
 	var host_options := HostSessionOptions.new()
 	host_options.game_type = 0x30020
+	# No configured respawn timeout: the deploy pick's penalty is the stock
+	# three-second floor (the host screen's default RESPAWN would hold it five).
+	host_options.respawn_timeout = 0
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0), "host bound an OS-assigned UDP port")
 	if host_traits_first:

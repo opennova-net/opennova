@@ -779,6 +779,30 @@ struct WorldOutbox {
     // (world/fire_sound.h witness map). [orig: the pending-sound slots
     // @0x24DF678, Sound_TickPendingSlots @0x529310]
     FireSoundQueue fire_sounds;
+
+    // The presentation half dropped undrawn, for a host with no presenter
+    // (opennova-serve): everything a presenter drains each frame -- the tips,
+    // the HUD blank, the destruction, vehicle, script and effect queues, the
+    // pending scorches, the sound queues and the fire sounds' ready list --
+    // so nothing accumulates over a long run. The wire half (the entity
+    // events, the relays, the grants, the round ring, the water crossings,
+    // the replicated WAC commands) stays for the host tick's own drain; the
+    // scar rings and the fire-sound countdown slots are fixed-size state, not
+    // queues. Next to the fields so the list cannot drift from them.
+    void discard_presentation() {
+        tip_events.clear();
+        hud_detail_blank = false;
+        destruction.clear();
+        vehicle_effects.clear();
+        effects.clear();
+        script_effects.clear();
+        script_sounds.clear();
+        terrain_scorches.clear_pending();
+        slot_sounds.clear();
+        sound_emitters.clear();
+        weather_sounds.clear();
+        (void)fire_sounds.drain();
+    }
 };
 
 // The player-slot idle timers (the underwater breath samples) live on the host

@@ -5,8 +5,8 @@
 // spawns its muzzle effect and which gun resolves its userpoint, how one
 // owner-bound action effect binds, the order one fixed tick's weapon batch
 // presents in, the per-submit CTRL register writers, the raw-key down latch,
-// the switch-deny click, the equipped weapon.def precedence with its
-// bring-up fallback and memo, and the spawn-loadout projection. The device
+// the switch-deny click, the equipped weapon.def pick and its memo, and the
+// spawn-loadout projection. The device
 // half -- camera stamps, fov/cull-mask, ObjectModel builds and parenting,
 // input sampling, the projection shader global, the userpoint bone remap --
 // stays in the binding (godot/src/player).
@@ -299,19 +299,18 @@ inline constexpr const char *kScopeZeroSoundset = "GF_SCOPE_ZERO";
 
 // --- the equipped weapon.def precedence -----------------------------------------
 
-// Which weapon.def row drives the FP viewmodel: the armory-equipped (or
-// debug-selected) weapon overrides the bring-up fallback once the player
-// accepts a loadout [orig: the equipped AdmDef drives the FP model pick,
-// Player_RenderFirstPersonViewModel @0x4ded60 via the mounted slot]; the
-// authored NONE row (`cleared`) is distinct from the pre-armory empty
-// override, which falls back to the witnessed bring-up default until an
-// equipped weapon is resolved. `resolves` false = no viewmodel def at all.
+// Which weapon.def row drives the FP viewmodel: the equipped weapon's (the
+// spawn kit's, the armory's or a debug selection's), and nothing without one
+// [orig: the equipped AdmDef drives the FP model pick,
+// Player_RenderFirstPersonViewModel @0x4ded60 via the mounted slot; no
+// equipped slot @0x4dedb6 or no def @0x4dedc1 draws nothing]. The authored
+// NONE row (`cleared`) resolves nothing either. `resolves` false = no
+// viewmodel def at all.
 struct ViewmodelDefPick {
     bool resolves = false;
     std::string name;
 };
-ViewmodelDefPick viewmodel_def_pick(bool cleared, const std::string &override_name,
-                                    const char *bringup_fallback);
+ViewmodelDefPick viewmodel_def_pick(bool cleared, const std::string &equipped_name);
 
 // Retail reads the equipped slot's def pointer, resolved when the slot was
 // mounted; the decoded record is keyed on the name it resolved from, so the

@@ -225,26 +225,11 @@ void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEven
 static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now,
 		bool force_open);
 
-void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
-		HostBeforeServerTickFn before_server_tick, void *before_server_tick_context,
-		HostEventObserverFn event_observer, void *event_observer_context) {
-	devtools::TickProfile *profile =
-			owner.ctx.world != nullptr ? owner.ctx.world->profile : nullptr;
-	const devtools::ProfileScope pump_scope(profile, devtools::Slot::SIM_HOST_PUMP);
-	devtools::ProfileLap lap(profile);
-	const uint32_t now = owner.now_tick;
-	// S2C 0x58 reports elapsed session milliseconds, while gameplay producers
-	// consume a 62.5 Hz logical tick. Keep those clock domains explicit: retail
-	// computes GetTickCount - host_start_tick; this deterministic host derives
-	// equivalent elapsed time from its fixed simulation clock. The tick is the
-	// 16 ms drain quantum, so the clock advances exactly 1000 ms per real second
-	// (dividing by the integer 62 ran it 0.8 % fast and fired the 360 s
-	// deploy-idle punt at ~357 s). [orig: Game_MainLoop @0x52B630 16 ms quantum;
-	// Server_TickUpdate @0x51E109 GetTickCount delta vs 0x57E40]
-	owner.ctx.np_protocol.host_run_duration_ms = static_cast<uint32_t>(
-			static_cast<uint64_t>(now) * uint64_t(io::kTickMs));
+// The pump's step (1): the receive drain with its handlers, the 0x84 tail,
+// and each established remote's send-boundary clock.
+static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock,
+		uint32_t now, HostEventObserverFn event_observer, void *event_observer_context) {
 	auto &pending_session_messages = owner.pending_session_messages;
-
 	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the socket owner.
 	uint8_t buf[4096];
 	for (;;) {
@@ -317,6 +302,30 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 			--c.s2c_send_holdoff_countdown;
 		c.s2c_send_boundary_open = c.s2c_send_holdoff_countdown == 0;
 	}
+}
+
+void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
+		HostBeforeServerTickFn before_server_tick, void *before_server_tick_context,
+		HostEventObserverFn event_observer, void *event_observer_context) {
+	devtools::TickProfile *profile =
+			owner.ctx.world != nullptr ? owner.ctx.world->profile : nullptr;
+	const devtools::ProfileScope pump_scope(profile, devtools::Slot::SIM_HOST_PUMP);
+	devtools::ProfileLap lap(profile);
+	const uint32_t now = owner.now_tick;
+	// S2C 0x58 reports elapsed session milliseconds, while gameplay producers
+	// consume a 62.5 Hz logical tick. Keep those clock domains explicit: retail
+	// computes GetTickCount - host_start_tick; this deterministic host derives
+	// equivalent elapsed time from its fixed simulation clock. The tick is the
+	// 16 ms drain quantum, so the clock advances exactly 1000 ms per real second
+	// (dividing by the integer 62 ran it 0.8 % fast and fired the 360 s
+	// deploy-idle punt at ~357 s). [orig: Game_MainLoop @0x52B630 16 ms quantum;
+	// Server_TickUpdate @0x51E109 GetTickCount delta vs 0x57E40]
+	owner.ctx.np_protocol.host_run_duration_ms = static_cast<uint32_t>(
+			static_cast<uint64_t>(now) * uint64_t(io::kTickMs));
+	auto &pending_session_messages = owner.pending_session_messages;
+
+	// (1) recv-drain, the 0x84 tail and the send-boundary clocks.
+	receive_and_advance_boundaries(owner, sock, now, event_observer, event_observer_context);
 	lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
 
 	// (2) tick_connections — drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
@@ -366,6 +375,12 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 
 void host_session_flush_s2c(HostOwner &owner, opennova::IDatagramSocket &sock) {
 	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/true);
+}
+
+void host_session_load_pump(HostOwner &owner, opennova::IDatagramSocket &sock) {
+	if (owner.ctx.is_authority == 0 || owner.ctx.is_in_session == 0) return;
+	receive_and_advance_boundaries(owner, sock, owner.now_tick, nullptr, nullptr);
+	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/false);
 }
 
 // BuildOutgoingPackets over this connection's queue: the packets framed
@@ -542,8 +557,67 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 	}
 }
 
+namespace {
+
+// The session's rules onto its World: the match, the spawn waves and the
+// rule words every in-match reader tests. A fresh session's and the map
+// change's World alike.
+void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
+	if (owner.ctx.world == nullptr) return;
+	world::MatchRules match_rules;
+	match_rules.game_type = owner.ctx.config.game_type;
+	// SET GameTime feeds g_RespawnTime in retail. The existing host model
+	// calls that field respawn_time; KOTHLimit/time_limit_minutes is unrelated.
+	// [orig: Game_StartMission seed @0x524F66]
+	match_rules.game_time_minutes = owner.ctx.config.respawn_time;
+	match_rules.score_limit = owner.ctx.config.score_limit;
+	match_rules.hill_limit_minutes = owner.ctx.config.time_limit_minutes;
+	match_rules.hill_delta = owner.ctx.config.koth_delta;
+	match_rules.max_score = owner.ctx.config.max_score;
+	match_rules.flag_return_ticks = owner.ctx.config.flag_return_ticks;
+	match_rules.capture_duration_seconds =
+			owner.ctx.config.capture_duration_seconds;
+	match_rules.capture_speed_setting =
+			owner.ctx.config.capture_speed_setting;
+	match_rules.team_count = owner.ctx.config.num_teams;
+	match_rules.score_values = owner.ctx.config.session_status_stat_values;
+	match_rules.score_fields.reserve(owner.ctx.config.scoreboard_fields.size());
+	for (const auto &[field, enabled] : owner.ctx.config.scoreboard_fields)
+		match_rules.score_fields.push_back({field, enabled});
+	owner.ctx.world->match.configure(match_rules);
+	owner.ctx.world->zones.spawn_waves.build_from_mission(
+			*owner.ctx.world, owner.ctx.config.spawn_wave_time_base,
+			owner.ctx.config.spawn_wave_time_zone);
+	owner.ctx.world->rules.mp_session =
+			cfg.socket_mode != SocketMode::Socketless;
+	owner.ctx.world->rules.destroy_buildings =
+			owner.ctx.config.destroy_buildings != 0;
+	// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]
+	owner.ctx.world->throwables.team_trigger_claymore =
+			(owner.ctx.config.mp_attributes & GameConfig::kMpAttribClaymorePref) != 0;
+	// The MP NoTracers rule: bit 0 of the same rules word kills the tracer
+	// visual at round spawn unless the ammo is FORCETRACER; the lobby
+	// publishes its inverse as the "Tracers" key [orig: g_RulesFlags
+	// @ 0x24D1E34 & 1 at RoundData_SpawnRound @ 0x4ec41f; admin set
+	// @ 0x405c80; Lobby_UpdateServerInfo "Tracers" @ 0x4fee4f]
+	owner.ctx.world->round_sim.no_tracers_rule =
+			(owner.ctx.config.mp_attributes & GameConfig::kMpAttribNoTracers) != 0;
+}
+
+} // namespace
+
 void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.now_tick = 0;
+	// The process's log devices and the socket address, ahead of the session
+	// create whose server start logs HOST STARTED and whose round init clears
+	// the punt table.
+	owner.ctx.logs = cfg.logs;
+	owner.ctx.local_address = cfg.local_address;
+	owner.ctx.local_address_known = cfg.local_address_known;
+	// The ban files' directory, ahead of the session create's round init, which loads them
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5695B3 -> Server_InitNewRoundState
+	//  @0x51C92F (banlist.txt), @0x51CB3B (banned.txt)].
+	owner.ctx.bans.directory = cfg.ban_directory;
 	owner.serve_and_play = cfg.serve_and_play; // the pump's step-5 loopback handling reads this
 	owner.pending_session_messages.clear();
 	owner.pending_session_datagrams.clear();
@@ -576,46 +650,7 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 			connection.char_vars = cfg.local_character_vars;
 		}
 	}
-	if (owner.ctx.world != nullptr) {
-		world::MatchRules match_rules;
-		match_rules.game_type = owner.ctx.config.game_type;
-		// SET GameTime feeds g_RespawnTime in retail. The existing host model
-		// calls that field respawn_time; KOTHLimit/time_limit_minutes is unrelated.
-		// [orig: Game_StartMission seed @0x524F66]
-		match_rules.game_time_minutes = owner.ctx.config.respawn_time;
-		match_rules.score_limit = owner.ctx.config.score_limit;
-		match_rules.hill_limit_minutes = owner.ctx.config.time_limit_minutes;
-		match_rules.hill_delta = owner.ctx.config.koth_delta;
-		match_rules.max_score = owner.ctx.config.max_score;
-		match_rules.flag_return_ticks = owner.ctx.config.flag_return_ticks;
-		match_rules.capture_duration_seconds =
-				owner.ctx.config.capture_duration_seconds;
-		match_rules.capture_speed_setting =
-				owner.ctx.config.capture_speed_setting;
-		match_rules.team_count = owner.ctx.config.num_teams;
-		match_rules.score_values = owner.ctx.config.session_status_stat_values;
-		match_rules.score_fields.reserve(owner.ctx.config.scoreboard_fields.size());
-		for (const auto &[field, enabled] : owner.ctx.config.scoreboard_fields)
-			match_rules.score_fields.push_back({field, enabled});
-		owner.ctx.world->match.configure(match_rules);
-		owner.ctx.world->zones.spawn_waves.build_from_mission(
-				*owner.ctx.world, owner.ctx.config.spawn_wave_time_base,
-				owner.ctx.config.spawn_wave_time_zone);
-		owner.ctx.world->rules.mp_session =
-				cfg.socket_mode != SocketMode::Socketless;
-		owner.ctx.world->rules.destroy_buildings =
-				owner.ctx.config.destroy_buildings != 0;
-		// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]
-		owner.ctx.world->throwables.team_trigger_claymore =
-				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribClaymorePref) != 0;
-		// The MP NoTracers rule: bit 0 of the same rules word kills the tracer
-		// visual at round spawn unless the ammo is FORCETRACER; the lobby
-		// publishes its inverse as the "Tracers" key [orig: g_RulesFlags
-		// @ 0x24D1E34 & 1 at RoundData_SpawnRound @ 0x4ec41f; admin set
-		// @ 0x405c80; Lobby_UpdateServerInfo "Tracers" @ 0x4fee4f]
-		owner.ctx.world->round_sim.no_tracers_rule =
-				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribNoTracers) != 0;
-	}
+	configure_session_world(owner, cfg);
 	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
 		// Serve-and-play: spawn the host's own player and queue its load-time stream before it gets the
 		// per-frame 0x0A its local view renders from. A dedicated/headless HostOnly session has no
@@ -627,6 +662,14 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 		// per-frame compact callback.
 		(void)tick_connections(owner.ctx, /*elapsed_ms=*/0, owner.now_tick);
 	}
+}
+
+void continue_host_session(HostOwner &owner, const HostConfig &cfg) {
+	// The same 0x0A byte cap, re-applied from the session config the host
+	// screen or the host file still names.
+	replication::set_entity_send_budget(static_cast<int>(cfg.config.entity_send_budget));
+	continue_session(owner.ctx, cfg.config);
+	configure_session_world(owner, cfg);
 }
 
 } // namespace opennova::inmatch

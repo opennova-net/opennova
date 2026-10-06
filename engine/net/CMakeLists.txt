@@ -25,8 +25,10 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/nwu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/pubcrypto.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novacrypto/epask.cpp
-    # admin — the retail remote-admin TCP protocol (CAdminServer): framing, login, replies
+    # admin — the retail remote-admin TCP protocol (CAdminServer): framing, login, replies;
+    # the client codec and the server's connection machine
     ${CMAKE_CURRENT_SOURCE_DIR}/admin/admin_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/admin/admin_server.cpp
     # napi — the NAPI envelope/TLV/session primitives
     ${CMAKE_CURRENT_SOURCE_DIR}/napi/envelope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/napi/literal.cpp
@@ -48,7 +50,9 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/protocol_message.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/replay/wire_capture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/replay/serverlog_decode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/replay/serverlog_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/lan_discovery.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/datagram_demux.cpp # one socket under the game and NWU protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session_vars.cpp # the session-variable list (0x60 server info)
     # novaworld session leg — NWU session establishment above the npwire
     # framing: the client session state machine, the session-protocol

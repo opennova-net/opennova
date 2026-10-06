@@ -215,6 +215,30 @@ int GameWorld::main_frame_exit(int p_reason) const {
 	return static_cast<int>(opennova::inmatch::main_frame_exit(p_reason, in_session, authority));
 }
 
+String GameWorld::begin_map_change() {
+	MissionRoot *runtime = get_runtime();
+	Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
+	if (sim.is_null() || sim->is_joiner() || !sim->is_mp_session()) return String();
+	const String next = sim->begin_host_map_change();
+	if (next.is_empty() || !drive_.keep_session(runtime)) return String();
+	return next;
+}
+
+int GameWorld::load_next_mission(const String &p_bms_name) {
+	return drive_.load_next_host_mission(p_bms_name);
+}
+
+bool GameWorld::begin_joiner_reload() {
+	MissionRoot *runtime = get_runtime();
+	Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
+	if (sim.is_null() || !sim->is_joiner() || !sim->begin_joiner_reload()) return false;
+	return drive_.keep_session(runtime);
+}
+
+int GameWorld::reload_joiner() {
+	return drive_.reload_as_joiner();
+}
+
 Ref<ConnectionError> GameWorld::get_last_connection_error() const {
 	return drive_.last_connection_error();
 }
@@ -677,6 +701,10 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("mount_join_expansion", "expansion"), &GameWorld::mount_join_expansion);
 	ClassDB::bind_method(D_METHOD("release_novaworld_client"), &GameWorld::release_novaworld_client);
 	ClassDB::bind_method(D_METHOD("post_mission_route", "reason"), &GameWorld::post_mission_route);
+	ClassDB::bind_method(D_METHOD("begin_map_change"), &GameWorld::begin_map_change);
+	ClassDB::bind_method(D_METHOD("load_next_mission", "bms_name"), &GameWorld::load_next_mission);
+	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &GameWorld::begin_joiner_reload);
+	ClassDB::bind_method(D_METHOD("reload_joiner"), &GameWorld::reload_joiner);
 	ClassDB::bind_method(D_METHOD("get_last_connection_error"), &GameWorld::get_last_connection_error);
 	ClassDB::bind_method(D_METHOD("get_join_screen_status"), &GameWorld::get_join_screen_status);
 	// The exit reasons the shell's own exits store (engine: inmatch/mission_exit.h).

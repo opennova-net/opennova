@@ -146,13 +146,14 @@ void Simulation::ensure_session_role() {
 	if ((host_role_ != nullptr) != listen_server_) (void)install_offline_role();
 }
 
-bool Simulation::begin_session_load() {
+bool Simulation::prepare_session_load() {
 	using State = opennova::inmatch::State;
 	const State state = session_.state();
-	// A pre-connected joiner deliberately carries its live socket into load.
-	// Every other prior session, including Failed, closes its concrete target
-	// before a replacement world is installed.
-	if (state != State::Unloaded && state != State::Connecting) {
+	// A pre-connected joiner deliberately carries its live socket into load,
+	// and a host's map change its whole session (inmatch/map_change.h). Every
+	// other prior session, including Failed, closes its concrete target before
+	// a replacement world is installed.
+	if (state != State::Unloaded && state != State::Connecting && !net_.map_change_pending) {
 		(void)session_.close();
 	}
 	if (session_.state() != State::Connecting) {
@@ -164,7 +165,11 @@ bool Simulation::begin_session_load() {
 			return false;
 		}
 	}
-	return session_.begin_load().applied();
+	return true;
+}
+
+bool Simulation::begin_session_load() {
+	return prepare_session_load() && session_.begin_load().applied();
 }
 
 void Simulation::complete_session_load() {

@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object_id.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -114,8 +115,8 @@ public:
 	// the new def [orig: the ACCEPT re-mount, WeaponLoadout_ApplyFromBuffer
 	// @0x565cd0 -> Player_MountWeaponSlot @0x4dfa40].
 	bool set_local_player_weapon_by_name(const String &p_weapon_name, bool p_preserve_slot_state = false);
-	// Armory NONE: clear the equipped render/FSM state instead of falling
-	// back to the pre-armory default model on the next frame.
+	// Armory NONE (or a spawn kit that equips nothing): clear the equipped
+	// render/FSM state; nothing first-person draws until a weapon equips.
 	void clear_local_player_weapon();
 	// Build a GameWorld-managed FIRST-PERSON weapon viewmodel for the local
 	// player (shown in 1st person; the inverse of the 3rd-person avatar).
@@ -163,13 +164,12 @@ public:
 	// The resolved weapon.def record driving the FP viewmodel: model/adm
 	// names plus the witnessed view-bias fields (pos/tpos raw units + rot
 	// degrees, renderfov horizontal degrees) LocalPlayerPresenter consumes --
-	// decoded from the WeaponDatabase row at this edge (ADR 0017). Null when
-	// the mounted root has no weapon.def or the weapon name is absent --
-	// callers keep their witnessed JOX AK-47 defaults then. The weapon is the
-	// bring-up fallback until equipped-weapon resolution lands; the debug
-	// `set_viewmodel_weapon` control (set_local_player_weapon_by_name over
-	// MCP/F3) rigs A/B against another SKU's def. The precedence + memo are
-	// the engine's viewmodel_def_pick / viewmodel_def_memo_hit.
+	// decoded from the WeaponDatabase row at this edge (ADR 0017). The weapon
+	// is the equipped one (the spawn kit's, the armory's, or the debug
+	// `set_viewmodel_weapon` control's: set_local_player_weapon_by_name over
+	// MCP/F3). Null with no equipped weapon, no weapon.def, or the name absent
+	// from it: nothing first-person draws then, as in retail. The pick + memo
+	// are the engine's viewmodel_def_pick / viewmodel_def_memo_hit.
 	Ref<PlayerViewmodelDef> local_player_viewmodel_def();
 	// The player's resolved visual (the combo its packed character id
 	// resolves to), null before a mission is placed.
@@ -201,13 +201,17 @@ private:
 	Ref<PlayerSpawnLoadout> spawn_loadout_;
 	// The resolved weapon.def row (the viewmodel/HUD slices decode it).
 	Ref<WeaponDef> local_weapon_;
-	// The armory-equipped weapon name; overrides the bring-up fallback/env
-	// once the player accepts a loadout (the engine's viewmodel_def_pick
-	// carries the witness). NONE is distinct from the pre-armory empty
-	// override, which falls back to the witnessed bring-up default until an
-	// equipped weapon is resolved.
+	// The equipped weapon's name, mirrored from the authoritative inventory
+	// (the spawn kit, the armory ACCEPT, a debug selection); empty = none
+	// equipped, so no viewmodel (the engine's viewmodel_def_pick carries the
+	// witness). `cleared` is the explicit NONE.
 	String viewmodel_weapon_override_;
 	bool viewmodel_weapon_cleared_ = false;
+	// The weapon names and FP model names already reported missing this
+	// mission: each is reported once, never per frame (retail reports a
+	// weapon.def model that fails to load once, at the def load; the
+	// engine's fp_viewmodel_spec carries the witness).
+	HashSet<String> reported_missing_;
 	// The decoded weapon.def view record and the resolved name it was built
 	// from (the mounted slot's def pointer; re-decoded only when the name
 	// changes).

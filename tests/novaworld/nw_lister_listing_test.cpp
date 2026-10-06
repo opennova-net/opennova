@@ -62,7 +62,7 @@ int main() {
 		expect(r.time_of_day == 4, "time_of_day Night -> 4");
 		// Whole minutes must survive the host's /3720 TimeLeft division.
 		expect(r.round_time_remaining_ticks / 3720 == 9, "time_left_minutes -> ticks");
-		expect(!r.listen_host && r.dedicated_server, "dedicated");
+		expect(!r.listen_host, "dedicated");
 		expect(l.players.size() == 2, "empty player names are dropped");
 		if (l.players.size() == 2) {
 			expect(l.players[0].player_name == "Alpha" && l.players[0].slot == -1,

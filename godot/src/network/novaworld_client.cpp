@@ -29,6 +29,7 @@
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/ping_sweep.h>
 #include <net/novaworld/proxy_rendezvous.h>
+#include <net/npwire/net_ports.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -73,7 +74,11 @@ const char *state_name(NovaWorldClient::State s) {
 
 NovaWorldClient::NovaWorldClient() :
 		lobby_(make_lobby_hooks(), make_lobby_environment()), host_role_(lobby_, make_host_hooks()) {}
-NovaWorldClient::~NovaWorldClient() = default;
+// A hosted match may still hold the shared pump: its demux must not call into
+// this lobby once it is gone.
+NovaWorldClient::~NovaWorldClient() {
+	if (nw_pump_.is_valid()) nw_pump_->demux().set_session_claim(nullptr);
+}
 
 void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_host", "host"), &NovaWorldClient::set_host);
@@ -189,30 +194,16 @@ void NovaWorldClient::set_gate_port(int port) { gate_port_ = port; }
 int NovaWorldClient::get_gate_port() const { return gate_port_; }
 void NovaWorldClient::set_player_name(const String &name) { player_name_ = name; }
 String NovaWorldClient::get_player_name() const { return player_name_; }
-// The Host list's STRNOVA / TimeOfDay tokens resolve through the gametext table; the role keeps
-// the strings. GameText_GetStringWithFallback("TimeOfDay", KEY, fallback): the fallback stands
-// when the table lacks the key.
+// The Host list's STRNOVA / TimeOfDay tokens resolve through the gametext table (the engine's
+// key table, make_host_lobby_text); the role keeps the strings.
 void NovaWorldClient::set_gametext(const Ref<RtxtStringFile> &gametext) {
 	gametext_ = gametext;
-	opennova::HostLobbyText text;
-	if (gametext.is_valid()) {
-		auto lookup = [&gametext](const char *section, const char *key, std::string &out) {
-			if (gametext->has_string_in_section(section, StringName(key)))
+	host_role_.set_lobby_text(opennova::make_host_lobby_text(
+			[&gametext](const char *section, const char *key, std::string &out) {
+				if (gametext.is_null() || !gametext->has_string_in_section(section, StringName(key))) return false;
 				out = opennova::to_std(gametext->get_string_in_section(section, StringName(key)));
-		};
-		lookup("NovaWorld", "STRNOVA11", text.yes);
-		lookup("NovaWorld", "STRNOVA12", text.no);
-		lookup("NovaWorld", "STRNOVA10", text.no_time_limit);
-		lookup("NovaWorld", "STRNOVA07", text.region[0]);
-		lookup("NovaWorld", "STRNOVA08", text.region[1]);
-		lookup("NovaWorld", "STRNOVA09", text.region[2]);
-		lookup("TimeOfDay", "UNKNOWN", text.time_of_day[0]);
-		lookup("TimeOfDay", "DAWN", text.time_of_day[1]);
-		lookup("TimeOfDay", "DAY", text.time_of_day[2]);
-		lookup("TimeOfDay", "DUSK", text.time_of_day[3]);
-		lookup("TimeOfDay", "NIGHT", text.time_of_day[4]);
-	}
-	host_role_.set_lobby_text(text);
+				return true;
+			}));
 }
 
 Ref<NovaWorldGateInfo> NovaWorldClient::get_server_info() const { return server_info_; }
@@ -293,23 +284,39 @@ void NovaWorldClient::start() {
 		                    Callable(this, "on_host_request_completed"));
 	}
 
-	// The gate and NW sockets (any interface, an OS-assigned port), then the driver
-	// mints the ci/ck pair on them; a bind failure is the error state.
+	// The gate worker's socket (an OS-assigned port), and the NovaWorld network
+	// type's one socket: bound from the mpnovaworld range, it carries the NWU
+	// session now and, when this session hosts, the hosted match's game traffic
+	// too (the pump's demux, D-NET-346; engine: net/npwire/net_ports.h
+	// novaworld_bind_ports). Then the driver mints the ci/ck pair on them; a
+	// bind failure is the error state.
 	gate_pump_.instantiate();
 	nw_pump_.instantiate();
 	if (gate_pump_->bind_listen(0) != OK) {
 		enter_state(STATE_ERROR, String("gate UDP bind failed"));
 		return;
 	}
-	if (nw_pump_->bind_listen(0) != OK) {
+	bool nw_bound = false;
+	for (const uint16_t port : opennova::novaworld_bind_ports()) {
+		if (nw_pump_->bind_listen(port) == OK) {
+			nw_bound = true;
+			break;
+		}
+	}
+	if (!nw_bound) {
 		enter_state(STATE_ERROR, String("nw UDP bind failed"));
 		return;
 	}
 	gate_socket_ = std::make_unique<UdpPumpDatagramSocket>(gate_pump_.ptr());
-	nw_socket_ = std::make_unique<UdpPumpDatagramSocket>(nw_pump_.ptr());
+	// No game protocol rides the socket until a hosted match attaches.
+	opennova::DatagramDemux &demux = nw_pump_->demux();
+	demux.set_game_attached(false);
+	demux.set_session_claim([this](const opennova::PeerAddr &from, const uint8_t *data, std::size_t len) {
+		return lobby_.claims(from, data, len);
+	});
 	clock_accum_s_ = 0.0;
 	clock_ms_ = 0;
-	lobby_.open(*gate_socket_, *nw_socket_);
+	lobby_.open(*gate_socket_, demux.session());
 
 	enter_state(STATE_GATE_PROBING);
 	lobby_.probe(opennova::to_std(host_), static_cast<uint16_t>(gate_port_));
@@ -363,9 +370,11 @@ void NovaWorldClient::stop() {
 	flow_.reset();
 	lobby_.close();
 	gate_socket_.reset();
-	nw_socket_.reset();
 	if (gate_pump_.is_valid()) gate_pump_->close();
-	if (nw_pump_.is_valid()) nw_pump_->close();
+	if (nw_pump_.is_valid()) {
+		nw_pump_->demux().set_session_claim(nullptr); // the lobby is gone
+		nw_pump_->close();
+	}
 	gate_pump_.unref();
 	nw_pump_.unref();
 	if (state_ != STATE_DISCONNECTED && state_ != STATE_IDLE) {
@@ -1029,16 +1038,8 @@ opennova::NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
 	hooks.on_command = [this](const opennova::ServerCommand &command) {
 		PackedStringArray args;
 		for (const std::string &arg : command.args) args.push_back(opennova::cp1252_to_gd(arg));
-		const char *target = "";
-		switch (command.target) {
-		case opennova::ServerCommandTarget::ByIndex: target = "ByIndex"; break;
-		case opennova::ServerCommandTarget::ByIpAndPort: target = "ByIpAndPort"; break;
-		case opennova::ServerCommandTarget::ByName: target = "ByName"; break;
-		case opennova::ServerCommandTarget::ByPCID: target = "ByPCID"; break;
-		default: break;
-		}
 		emit_signal("server_command", String(opennova::server_command_verb_name(command.verb)),
-				String(target), args);
+				String(opennova::server_command_target_name(command.target)), args);
 	};
 	hooks.on_player_enter_result = [this](const opennova::ClientSession::PlayerEnterResult &result) {
 		emit_signal("player_enter_result", static_cast<int64_t>(result.connection_id),

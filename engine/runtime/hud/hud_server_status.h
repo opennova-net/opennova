@@ -77,6 +77,12 @@ struct ServerStatusText {
 	std::string game_type_abbreviation;
 };
 
+// One console row of the page: the line and the colour its post stored.
+struct ServerStatusConsoleRow {
+	std::string text;
+	uint32_t color = 0xFFFFFFFFu;
+};
+
 // One frame's page facts.
 struct ServerStatusPageState {
 	// [orig: g_NapiNPCtx.is_mp_session_peer]: a listen host (peer) lists
@@ -111,6 +117,13 @@ struct ServerStatusPageState {
 	// quit dialog and the end-round transition ride HudFrameState, which the
 	// scene frame's HUD shares.
 	bool score_list_open = false;
+	// The four console rows of a host with no client of its own: its CHAT
+	// ring's newest raw slots, oldest first (inmatch/server_status_feed.h).
+	// A listen host's rows are its HUD's SYSTEM ring, which the frame
+	// compiler keeps, so this stays empty there.
+	// [orig: HUD_DrawServerConsoleLines @0x5ba0a0 — the CHAT raw slots 3..0
+	//  @0x5ba0bd on a non-peer]
+	std::vector<ServerStatusConsoleRow> console_rows;
 	ServerStatusText text;
 };
 
@@ -163,6 +176,33 @@ struct ServerStatusRosterCell {
 };
 ServerStatusRosterCell server_status_roster_cell(const ServerStatusPageState &page,
 		int slot_index, uint32_t previous_color);
+
+// One placed line of the page's text: its virtual position, the draw mode
+// (0 left, 1 right-aligned, 2 centred) and the text.
+struct ServerStatusTextLine {
+	int x = 0;
+	int y = 0;
+	int align = 0;
+	std::string text;
+};
+
+// The server line centred at (512, 10): on NovaWorld STRSRV02 with the
+// session key, else STRSRV03, over the server name and the game type's
+// abbreviation [orig: the abbreviation sprintf'd as a format @0x50a3e4;
+// "%s %s [%s] (%i)%s" @0x50a82a with an empty tail @0x50a7f2; "%s %s [%s]"
+// @0x50a85e; the draw mode 2 @0x50a882].
+ServerStatusTextLine server_status_server_line(const ServerStatusPageState &page);
+// The team block at x 800 for Team Deathmatch, CTF and Team KOTH (empty for
+// any other mode): the round wins by side (team 2 first) and the ties, then
+// the current scores — the team records' points, flag captures or hold times
+// [orig: @0x50a88f..0x50af10].
+std::vector<ServerStatusTextLine> server_status_team_block(const ServerStatusPageState &page);
+// The round clock right-aligned at (1000, 10), absent without one
+// [orig: @0x50af20..0x50afa7, "%i:%02i:%02i" of ticks / 62].
+bool server_status_round_clock(const ServerStatusPageState &page, ServerStatusTextLine &out);
+// The bottom row at y 704: the frames, the CPU share, the start timer, the
+// total logins and the current logins [orig: @0x50afb7..0x50b19c].
+std::vector<ServerStatusTextLine> server_status_bottom_row(const ServerStatusPageState &page);
 
 // The class word's one-letter code [orig: GameType_GetShortCodeWChar
 // @0x4fd9a0: 1..9 -> d r t U M S G R E, else ?].

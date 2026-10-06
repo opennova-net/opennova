@@ -1041,6 +1041,9 @@ func _on_join_screen_cancelled() -> void:
 
 
 func _begin_world_load() -> void:
+	# A mission start from the menu leaves it: the menu keeps the screen it was
+	# started from, which the return after the mission shows again (D-MNU-28).
+	_menu_shell.leave_menu_mode()
 	_shell_presentation.begin_world_load(
 			_menu_shell, _world, _hud, _on_world_loaded, _on_world_load_failed)
 	_state = State.WORLD
@@ -1151,26 +1154,6 @@ func _maybe_open_death_menu() -> void:
 	_deploy_presenter.open()
 
 
-func _maybe_exit_round_cycle() -> void:
-	if _state == State.MENU or _world_load_pending or _world == null:
-		return
-	var sim: Simulation = _world.get_sim()
-	if sim == null:
-		return
-	if not sim.is_mp_session():
-		return
-	var er: EndRoundState = sim.get_end_round_state()
-	if not er.is_header_known():
-		return
-	if er.is_session_open():
-		return
-	# The host's linger expiry is the map cycle (3); a joiner's own linger expiry is 4.
-	var exit_reason := GameWorld.MISSION_EXIT_ROUND_OVER if sim.is_joiner() \
-			else GameWorld.MISSION_EXIT_MAP_CYCLE
-	_abort_to_menu("round cycle", "post-round linger expired (mission exit %d)" % exit_reason,
-			exit_reason)
-
-
 ## An established session ended without the player asking: the host closed it on its own
 ## terms (its punt channel — a CRC mismatch, a violation sweep, the six-minute deploy-screen
 ## idle kick), or it went silent past the connection reap window. Retail EXITS THE MISSION
@@ -1207,7 +1190,52 @@ func _on_session_lost(reason: String) -> void:
 		_world_load_pending = false
 		_teardown_world_to_menu(exit_reason)
 		return
+	if _route_round_end(sim, exit_reason):
+		return
 	_abort_to_menu("session ended", reason, exit_reason)
+
+
+## The in-session round end's routes (engine inmatch/mission_exit.h main_frame_exit,
+## inmatch/map_change.h). A joiner's round over (4) is the Game Loop: it reloads the host's
+## next mission in place on its kept connection. An in-session host's round end (3, or 4
+## under REPLAY with LASTGAME off) is the Post Menu's map change: the next rotation entry
+## loads inside the session, every joiner kept; at the rotation's end the session ends
+## (its close sends the joiners the STOP goodbye) and the shell leaves for the menu.
+## False when the exit is not a round end (the caller aborts to the menu).
+func _route_round_end(sim: Simulation, exit_reason: int) -> bool:
+	if sim == null or _world_load_pending:
+		return false
+	var verdict: int = _world.main_frame_exit(exit_reason)
+	if verdict == GameWorld.MAIN_FRAME_EXIT_GAME_LOOP:
+		if not _world.begin_joiner_reload():
+			return false
+		_reload_in_session(LoadingScreenInfo.make("", true, sim.get_join_server_name(), "",
+				0, ""), _world.reload_joiner)
+		return true
+	if verdict != GameWorld.MAIN_FRAME_EXIT_POST_MENU or sim.is_joiner():
+		return false
+	if exit_reason != GameWorld.MISSION_EXIT_MAP_CYCLE \
+			and exit_reason != GameWorld.MISSION_EXIT_ROUND_OVER:
+		return false
+	var next_map: String = _world.begin_map_change()
+	if next_map.is_empty():
+		# The rotation ran out: the session's own end, not an abort.
+		_world_load_pending = false
+		_teardown_world_to_menu(exit_reason)
+		return true
+	var config: HostSessionOptions = sim.get_host_session_config()
+	_reload_in_session(LoadingScreenInfo.make(next_map, true,
+			config.server_name if config != null else "", "", 0, ""),
+			_world.load_next_mission.bind(next_map))
+	return true
+
+
+## The world comes down around the session the world kept, and the next mission
+## loads into it with no menu between.
+func _reload_in_session(load_info: LoadingScreenInfo, loader: Callable) -> void:
+	_teardown_world(false)
+	_state = State.WORLD
+	start_world_load(load_info, loader)
 
 
 func _on_world_load_failed(reason: String) -> void:
@@ -1607,7 +1635,6 @@ func _process(delta: float) -> void:
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
 	_maybe_open_death_menu()
-	_maybe_exit_round_cycle()
 	if timing:
 		_frame_phase_sampler.record_shell_spans(
 				probe_t0, probe_t1, probe_t2, probe_t3, probe_t4,
