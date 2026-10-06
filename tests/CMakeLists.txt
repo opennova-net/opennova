@@ -4583,6 +4583,17 @@ target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_viewport COMMAND editor_mission_viewport_test)
 
+# A mission's people posed as the game spawns them (DI-38, editor/preview/mission_poses) over a real
+# session: each organic's spawn pose held to the world's own organic init over the same clips (pool
+# order, the shared ring heads), why one is not posed, the route and Guarding read through an aidata
+# definition's AI slot alone, the poses following the records and the catalog live, the wire. Mixed:
+# the retail row poses every shipped base-game mission's people over the game's catalog and clips and
+# holds each pose to the world init's (OPENNOVA_JO_DIR).
+add_executable(editor_mission_poses_test editor/mission_poses_test.cpp)
+target_link_libraries(editor_mission_poses_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_poses_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_poses COMMAND editor_mission_poses_test)
+
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.
 add_executable(editor_menu_viewport_test editor/menu_viewport_test.cpp)
