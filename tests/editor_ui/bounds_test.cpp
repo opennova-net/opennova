@@ -354,7 +354,7 @@ void reach_wrapped_toolbars(Sweep &sweep) {
 	sweep.open("menus/deep.mnu", "LEVEL_9_WINDOW_WITH_A_RATHER_LONG_NAME");
 	const ImGuiWindow *document = ImGui::FindWindowByName("Document");
 	const ImGuiID outdent = item_id(document_tab_id(sweep.session.document_for("menus/deep.mnu")->path()), {"Outdent"});
-	CHECK(document && hover_item(ui, outdent, document, document->Pos.y, document->Pos.y + document->Size.y * 0.6f, at),
+	CHECK(document && hover_item(ui, outdent, document, document->Pos.y, document->Pos.y + document->Size.y * 0.8f, at),
 	      "the menu view's Outdent reached");
 	ui.button(true);
 	ui.button(false);
