@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 
+#include <editor/documents/texture_compare.h>
 #include <editor/documents/texture_image.h>
 #include <editor/documents/texture_load_rules.h>
 #include <editor/documents/texture_roles.h>
@@ -37,17 +38,22 @@ bool texture_channels_from_token(const std::string &token, TextureChannels &out)
 // built from pixels shows the chain the game builds of it, a DDS its own; a level past the last shows the
 // last), the use it shows the texture as, by its index among the texture's uses (texture_uses; -1 the file as
 // its reader decodes it), the object texture detail it shows the device texture at (-1 as stored; 0 to 3, by
-// the shown use's slot and loader, else the first model row's: renderer/device_texture), and the light a
-// normal map is lit from (degrees round the picture, 0 from its right, 90 from its top).
+// the shown use's slot and loader, else the first model row's: renderer/device_texture), the light a
+// normal map is lit from (degrees round the picture, 0 from its right, 90 from its top), and the compare
+// (documents/texture_compare: the texture beside the DXT texture made of it, split at `split`, a fraction of
+// its width, the compressed alone, or their difference; a compare shows the file's texels, whatever use is
+// picked).
 struct TextureViewportOptions {
 	TextureChannels channels = TextureChannels::Rgba;
 	int level = 0;
 	int as_used = -1;
 	int detail = -1;
 	float light = 135.0f;
+	TextureCompareView compare = TextureCompareView::Off;
+	float split = 0.5f;
 	bool operator==(const TextureViewportOptions &other) const {
 		return channels == other.channels && level == other.level && as_used == other.as_used && detail == other.detail &&
-		       light == other.light;
+		       light == other.light && compare == other.compare && split == other.split;
 	}
 	bool operator!=(const TextureViewportOptions &other) const { return !(*this == other); }
 };
@@ -170,6 +176,11 @@ public:
 	const renderer::DeviceTexture &shown_device() const { return detail_device_; }
 	uint64_t reads() const { return reads_; }
 	bool from_file() const { return from_file_; }
+	// The compare, made while the options ask for one (null otherwise): the texture beside the DXT texture made
+	// of it, or the `.dds` beside its import's source, with each level's error.
+	const std::shared_ptr<const TextureCompression> &compression() const { return compression_; }
+	// The error of the level shown, where a compare is made (null otherwise).
+	const TextureLevelError *shown_error() const;
 	const TextureViewportOptions &options() const { return options_; }
 	const TextureCamera &camera() const { return camera_; }
 	// The level drawn (the options' held within the texture's levels).
@@ -242,6 +253,17 @@ private:
 	TextureViewportOptions made_options_;
 	// The picture of the source and the use: the transforms the options ask for applied.
 	std::shared_ptr<const TextureImage> picture(const std::shared_ptr<const TextureImage> &used, const TextureBudget *budget);
+	// The compare shown (null while the options ask for none) and the one kept, made of `compared_` (and its
+	// import source's stamp, a .dds's) whether shown or not; the picture's view and split last made.
+	std::shared_ptr<const TextureCompression> compression_;
+	std::shared_ptr<const TextureCompression> kept_;
+	std::shared_ptr<const TextureImage> compared_;
+	uint64_t compared_source_size_ = 0;
+	int64_t compared_source_modified_ = 0;
+	TextureCompareView shown_compare_ = TextureCompareView::Off;
+	float shown_split_ = 0.5f;
+	// The compare of `image` as the view stands: its own texels made a .dds, or a .dds against its import's source.
+	std::shared_ptr<const TextureCompression> compare(const ViewportInput &input, const std::shared_ptr<const TextureImage> &image);
 };
 
 } // namespace opennova::editor

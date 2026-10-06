@@ -13,6 +13,7 @@
 
 #include <base/io/file_time.h>
 #include <base/io/strutil.h>
+#include <editor/graph/texture_uses.h>
 #include <editor/import/import_context.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
@@ -32,6 +33,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
 #include <editor/session/texture_import_state.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/session/view/view_events.h>
 #include <editor/session/workspace_parts.h>
 
@@ -483,6 +485,88 @@ void ImportController::edit_externally(const EditorRequest &request) {
 	}
 	close_texture_source();
 	post_open_externally(plan.source);
+}
+
+void ImportController::store_as_dds(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	// Each use whose loader opens the .tga itself: storing it as its .dds would lose the texture there.
+	std::vector<std::string> reads_tga;
+	const AssetEntry *entry = view_.project.scan->at_path(request.path);
+	if (!entry) entry = view_.project.scan->find(basename_of(request.path));
+	if (entry && view_.documents.texture_uses) {
+		const std::string dds = utf8_of(path_of(entry->logical_name).stem()) + ".dds";
+		for (const TextureUse &use : view_.documents.texture_uses->uses_of(view_, entry->relative_path))
+			if (!use.known() || !texture_use_opens(use, dds))
+				reads_tga.push_back(use.words.empty() ? std::string("A use of it") : use.words);
+	}
+	const TextureSourcePlan plan = plan_texture_dds(paths_, *view_.project.scan, request.path, reads_tga);
+	if (!plan.ok()) {
+		for (size_t i = 0; i + 1 < plan.refusals.size(); ++i) core_.report(plan.refusals[i]);
+		return core_.refuse_now(CoreFinding::TextureStoreDds, plan.refusals.back().message, plan.refusals.back().asset);
+	}
+	if (plan.bytes.empty()) {
+		// An import's output: its record takes the form, then imports again (set_options).
+		const auto value = [&](const char *key) {
+			const auto found = plan.options.find(key);
+			return found == plan.options.end() ? std::string() : found->second;
+		};
+		set_options(plan.source, {{"dds", value("dds")}, {"format", "dds"}, {"name", value("name")}});
+		return;
+	}
+	if (DocumentBase *open = core_.documents().document_for(plan.replaced)) {
+		if (open->dirty())
+			return core_.refuse_now(CoreFinding::TextureStoreDds,
+			                        plan.texture + " is open with unsaved edits: save or discard them before storing it as a DDS.",
+			                        plan.replaced);
+		core_.documents().close_document(plan.replaced);
+	}
+	std::vector<Diagnostic> findings;
+	if (!apply_texture_source(paths_, plan, findings)) {
+		for (size_t i = 0; i + 1 < findings.size(); ++i) core_.report(findings[i]);
+		return core_.refuse_now(CoreFinding::TextureStoreDds,
+		                        findings.empty() ? std::string("The texture could not be stored as a DDS.") : findings.back().message,
+		                        plan.texture);
+	}
+	core_.note("Stored " + plan.texture + " as " + plan.made_name + ", which every use of it reads first: " + plan.source +
+	           " makes it now; the file it replaced is kept under " + std::string(kReplacedFolder) + "/.");
+	reimport(plan.source, true);
+}
+
+void ImportController::set_aside_texture(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	const AssetEntry *entry = view_.project.scan->at_path(request.path);
+	if (!entry) entry = view_.project.scan->find(basename_of(request.path));
+	const auto refuse = [&](const std::string &message) {
+		core_.refuse_now(CoreFinding::TextureSetAside, message, entry ? entry->relative_path : request.path);
+	};
+	if (!entry) return refuse("The project has no texture " + request.path + ".");
+	if (entry->kind != AssetKind::Texture) return refuse(entry->logical_name + " is no texture.");
+	if (!entry->imported_from.empty())
+		return refuse(entry->logical_name + " is made by the import of " + entry->imported_from + ", which makes it again: change "
+		              "how that import is made instead.");
+	// The uses: none may read the file (a .tga beside the .dds its model row loads is read by none).
+	static const std::vector<TextureUse> kNone;
+	const std::vector<TextureUse> &uses =
+	        view_.documents.texture_uses ? view_.documents.texture_uses->uses_of(view_, entry->relative_path) : kNone;
+	if (uses.empty())
+		return refuse("Nothing the editor knows names " + entry->logical_name + ", so it is kept: a script or the game may "
+		              "name it in a way the editor does not read.");
+	std::string read_instead;
+	for (const TextureUse &use : uses) {
+		if (use.reads_file) return refuse(entry->logical_name + " is read by " + (use.words.empty() ? "a use" : use.words) + ".");
+		if (read_instead.empty() && !use.served.empty()) read_instead = basename_of(use.served);
+	}
+	if (DocumentBase *open = core_.documents().document_for(entry->relative_path)) {
+		if (open->dirty()) return refuse(entry->logical_name + " is open with unsaved edits: save or discard them first.");
+		core_.documents().close_document(entry->relative_path);
+	}
+	const std::string path = entry->relative_path;
+	std::vector<Diagnostic> findings;
+	if (!set_aside_project_file(paths_, path, findings))
+		return refuse(findings.empty() ? "Could not set " + path + " aside." : findings.back().message);
+	core_.note("Set " + path + " aside under " + std::string(kReplacedFolder) + "/: the game never read it" +
+	           (read_instead.empty() ? std::string() : ", its loader opening " + read_instead + " in its place") + ".");
+	core_.start_refresh();
 }
 
 // The import dialog on `roots` chosen among `choices` (each file once, `facts` saying each one's
