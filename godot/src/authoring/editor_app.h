@@ -145,6 +145,10 @@ public:
 	// or "playing", and the project file it is of ("" while idle). The wire reads the workspace section's sound.
 	String get_sound_state() const;
 	String get_sound_path() const;
+	// The clip sounds the Shell started in all (DI-04: a previewed clip's events, each sound's voices), and the
+	// order of the last one it took (ProjectSession::clip_sounds_since), for the tests.
+	int64_t get_clip_voices_started() const { return clip_voices_ ? int64_t(clip_voices_->started()) : 0; }
+	int64_t get_clip_sound_seq() const { return int64_t(clip_sound_seq_); }
 
 	// "editor": the variant this library is (the runtime variant has no EditorApp).
 	String get_loaded_variant() const { return "editor"; }
@@ -181,6 +185,9 @@ private:
 	// The pump's half: the session's sound followed (a play of a new serial started, one it no longer plays
 	// stopped), and how it goes reported back (ProjectSession::report_sound: playing, ended, failed).
 	void pump_sound_();
+	// The clip sounds the previewed clip's events fired since the last taken, each started beside those playing
+	// (DI-04, PreviewSoundVoices); every one stopped while no project is open.
+	void pump_clip_sounds_();
 	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);
 	void _on_dir_selected(const String &p_dir);
 	void _on_file_selected(const String &p_file);
@@ -249,6 +256,11 @@ private:
 	// with the EditorApp, its players children of it; the session's play it plays (its serial).
 	std::unique_ptr<PreviewSoundPlayer> sound_;
 	uint64_t sound_serial_ = 0;
+	// The clip sounds' player (DI-04), the order of the last clip sound it took, and the project files'
+	// generation its decoded waves are of.
+	std::unique_ptr<PreviewSoundVoices> clip_voices_;
+	uint64_t clip_sound_seq_ = 0;
+	uint64_t clip_wave_generation_ = 0;
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window
