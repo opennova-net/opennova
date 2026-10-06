@@ -1425,6 +1425,22 @@ JsonValue answer_file_card(const QueryContext &context, const QueryArgs &args, s
 	return file_card_json(file_card(context.core.view(), args.text("path")));
 }
 
+// Who names a file, in one look (the deep-integration plan's DI-05): the Inspector's Used by.
+constexpr QueryParam kUsedByParams[] = {
+	{ "path", J::String, false, nullptr,
+			"A project file, as file_card takes it; left out, the active document's file." },
+};
+
+JsonValue answer_used_by(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path").empty() ? view.documents.active : args.text("path");
+	if (path.empty()) {
+		error = "name the file with \"path\" (no document is active).";
+		return JsonValue::make_null();
+	}
+	return file_users_json(file_users(view, path));
+}
+
 // --- the table -----------------------------------------------------------------------------------
 
 // A row built up column by column, as the request table's are.
@@ -1851,6 +1867,16 @@ constexpr EditorQueryRow kRows[] = {
 			"record, value, status in words, the file it resolves to, whether that file is a wave), "
 			"named_by (file, record, field), and reading: true while the project's references are being read "
 			"(names and named_by then as far as the graph has read).")
+			.row,
+	Query(K::UsedBy, "used_by", answer_used_by, kUsedByParams,
+			concern_set({ C::Files, C::Graph, C::Project, C::Operation, C::ActiveDocument }),
+			"Who names a file, in one look, as the Inspector shows it with nothing selected (the deep-"
+			"integration plan's DI-05): found, its path and name, count (its uses: the records naming it, then "
+			"those naming what it defines) and further_count, files (by the naming file: file, name, uses), "
+			"each use's words (the record and its field in words), field, the file and locator Go to opens "
+			"(editable false: shown in Files), and further, one hop on where the naming record defines what "
+			"others name (an item naming a model: the mission entities placing it), by file likewise; reading "
+			"while the project's references are being read.")
 			.row,
 };
 
