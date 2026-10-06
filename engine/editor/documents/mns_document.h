@@ -105,7 +105,7 @@ protected:
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
 	bool accept_step(const EditStep &step, const StagedRows &rows,
-	                 std::string &error) const override;
+	                 StepRefusal &refusal) const override;
 
 private:
 	// The variables the game reads of the rows as they stand (native().evaluate()), once per
