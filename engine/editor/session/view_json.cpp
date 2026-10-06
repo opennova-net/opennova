@@ -167,8 +167,13 @@ JsonValue requirements_section(const SessionView &view) {
 JsonValue documents_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("active", json_string(view.documents.active));
-	// The file whose page shows beside the documents (the file_page query reads it), where one does.
-	if (!view.documents.page.empty()) out.set("page", json_string(view.documents.page));
+	// The file whose page shows beside the documents (the file_page query reads it), where one does, and
+	// what the Go to that showed it named on it (DI-17: the record's line it marks).
+	if (!view.documents.page.empty()) {
+		out.set("page", json_string(view.documents.page));
+		if (!view.documents.page_locator.empty()) out.set("page_locator", json_string(view.documents.page_locator));
+		if (!view.documents.page_field.empty()) out.set("page_field", json_string(view.documents.page_field));
+	}
 	JsonValue open = JsonValue::make_array();
 	for (const auto &document : view.documents.open) {
 		if (!document)
@@ -451,13 +456,15 @@ JsonValue output_section(const SessionView &view) {
 }
 
 // A place of the navigation history: its pane, its file, its words, and in a document the record it
-// names (its locator, and its address while the document read stands) or a text's line.
+// names (its locator, and its address while the document read stands) or a text's line; on a page, the
+// record and field a Go to marked there.
 JsonValue navigation_place_to_json(const NavigationPlace &place) {
 	JsonValue out = JsonValue::make_object();
 	out.set("pane", json_string(navigation_pane_token(place.pane)));
 	out.set("path", json_string(place.path));
 	out.set("label", json_string(place.label));
 	if (!place.locator.empty()) out.set("locator", json_string(place.locator));
+	if (!place.field.empty()) out.set("field", json_string(place.field));
 	if (place.record.row) out.set("record", address_to_json(place.record));
 	return out;
 }
@@ -511,7 +518,9 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::Documents, "documents", concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument }),
 			documents_section,
 			"The open documents in short (path, kind, dirty, revision, can_undo, can_redo; the "
-			"documents query answers each whole) and the active one." },
+			"documents query answers each whole) and the active one; page, the file whose page shows "
+			"(file_page answers it), with page_locator and page_field, the record and field the Go to "
+			"that showed it marked there." },
 	{ S::Selection, "selection", concern_set({ C::Selection }), selection_section,
 			"The selection in the active document, over any of its rows: its primary record and "
 			"its records, every selected one ({row, kind, child}), and the clipboard's size." },
@@ -580,7 +589,8 @@ constexpr ViewSectionRow kSections[] = {
 			"The navigation history (Back and Forward: navigate_back, navigate_forward): can_back, can_forward, "
 			"and the places each goes to, nearest first (back, forward: [{pane: document, page or files, path, "
 			"label (its words, as Back's tooltip and list say it), locator? (a record's, or a text's "
-			"line:column), record? {row, kind, child} while the document read stands}])." },
+			"line:column; on a page the record a Go to marked), field? (on a page, that record's field), "
+			"record? {row, kind, child} while the document read stands}])." },
 };
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");
