@@ -82,6 +82,24 @@ ReferenceTarget usage_target(const AssetScan &scan, const GraphEdge &edge);
 ReferenceTarget symbol_target(const AssetScan &scan, const GraphSymbol &symbol);
 ReferenceTarget file_target(const AssetScan &scan, const std::string &file);
 
+// Who names a file, one hop further (the deep-integration plan's DI-05, "who names this file, in one
+// look"): its usages (AssetGraph::usages_of: the edges naming the file, then those naming each symbol it
+// defines), each with the uses of what the record making it defines, where that record is a definition
+// itself (an item whose graphic names a model: the mission entities placing that item), read as the
+// Inspector's Referenced by reads a record's (records_users). A further use that is one of the file's own
+// usages, or one the same record's other definitions already listed, is not listed again.
+struct FileUse {
+	const GraphEdge *edge = nullptr;
+	std::vector<const GraphEdge *> further;
+};
+std::vector<FileUse> file_uses(const AssetGraph &graph, const std::string &file);
+// The uses of what a record defines (the edges reaching each symbol it defines that a lookup finds:
+// AssetGraph::symbols_of, users_of), the record named by its file and its path as the edges name it, a
+// symbol of another record of the same path left out (`address`, where the record has one); each edge
+// once, in the order the symbols are defined.
+std::vector<const GraphEdge *> record_users(const AssetGraph &graph, const std::string &file, const std::string &record,
+                                            const NodeAddress &address);
+
 // What a texture reference loads (ADR 0046 S18): whether the value names a texture (a model row's, a
 // role's, a menu's image or a mission's loading screen; a menu's through a stylesheet variable, by the
 // file its value names), its status, the name its loader takes, the project file the loader opens for it
