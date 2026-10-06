@@ -18,6 +18,7 @@
 //                    [--tiles <file>] [--surface <file>] [--top <units>] [--water <units>]
 //                    [--layout island|tiled]
 //   opennova-project build <dir> [--out <dir>]
+//   opennova-project mv <dir> <file> <folder>
 //   opennova-project request <dir> <json>
 //   opennova-project query <dir> <name> [<json>]
 //
@@ -61,6 +62,7 @@ enum class CliVerb : uint8_t {
 	NewTerrain,
 	Build,
 	Export,
+	Move,
 	Request,
 	Query,
 	kCount,
