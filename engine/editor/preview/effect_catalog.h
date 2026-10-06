@@ -53,6 +53,12 @@ public:
 	const particle::ParticleFile *document_at(const std::string &path) const;
 	// What a spawn of `name` reads of the catalog (particle::effect_closure).
 	particle::EffectClosure closure(const std::string &name, const particle::EffectSceneConfig &limits) const;
+	// What spawns of several names read of it together (a definition's picture, DI-21): each name's closure
+	// (`each`, in the order of `names`) and one config holding every effect and definition they instantiate,
+	// each once, and every table, over which a scene spawns each name as one opened over its own closure
+	// does (none: no name found an effect).
+	particle::EffectSceneConfig closures(const std::vector<std::string> &names, const particle::EffectSceneConfig &limits,
+			std::vector<particle::EffectClosure> &each) const;
 	// Moves with every change of what it holds; how many files were read so far (a test's measure).
 	uint64_t serial() const { return serial_; }
 	uint64_t reads() const { return reads_; }

@@ -12,6 +12,7 @@
 
 namespace opennova::anim {
 class AdmRootMotion;
+class RigFiles;
 }
 namespace opennova::terrain {
 struct TerrainHeightField;
@@ -131,6 +132,27 @@ private:
 	size_t runs_ = 0;
 	size_t files_read_ = 0;
 };
+
+// What a person's spawn reads of its definition (its item's first row: its class, its .adm, its
+// attributes) and of its record (its SSN, its route, its attributes).
+struct PersonDefinition {
+	std::string ai_function;
+	std::string anim_def;
+	uint32_t attrib = 0;
+};
+struct PersonRecord {
+	int ssn = 0;
+	int route = 0;
+	uint32_t attributes = 0;
+};
+// One person posed as the game spawns it (DI-38): `pose` from its status on (its row and item the
+// caller's), through `motion` over the project's files (`source`, `files` noting what the pose reads,
+// `rig_files` over them), the .adm's ring heads `rings` served in the order the game's spawn serves
+// them. The mission's poses run it for every person in the file's order; a definition's picture
+// (DI-21) for its one person, as the first of its .adm.
+void pose_person(const PersonDefinition &definition, const PersonRecord &record, const ProjectAssetSource &source,
+		StampedFiles &files, const anim::RigFiles &rig_files, anim::AdmRootMotion &motion, world::AnimVariantRings &rings,
+		MissionPose &pose);
 
 // A pose on the wire (the mission viewport's items: an organic's `pose`): {status, ai_function,
 // adm, ai_slot, state, row (its .adm row, "anim_idle"), because, updates, rise, playing {state,
