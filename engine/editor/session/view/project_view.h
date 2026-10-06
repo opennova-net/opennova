@@ -100,6 +100,8 @@ struct ProjectView {
 	bool play_retail = false;
 	// Play in the game install runs strictly (the editor's play_in_install_strict, Strict Play).
 	bool play_in_install_strict = false;
+	// Play saves every unsaved file first instead of asking (the editor's save_before_play, DI-26).
+	bool save_before_play = true;
 	std::string runtime_setting;
 	bool import_dependencies = true;
 	std::vector<int64_t> recent_items;

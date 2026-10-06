@@ -60,6 +60,7 @@ enum class RequestFieldId : uint8_t {
 	Report,
 	Steps,
 	Folder,
+	Start,
 	kCount,
 };
 
