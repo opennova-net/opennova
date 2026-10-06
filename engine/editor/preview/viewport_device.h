@@ -80,6 +80,12 @@ struct ViewportPicture {
 	// The canvas draws the picture at a size of its own (a design picture fitted or scaled, a picture
 	// that fills it), not at the viewport's device size (a menu's Device size zoom).
 	bool canvas_sized = true;
+	// The mouse over the picture this frame, in its pixels from its top left corner, while the canvas
+	// shows no pointer of its own there (no handle under it, no press, drag or pan open): where a
+	// picture that draws the game's pointer draws it (a menu's, DI-08). False otherwise.
+	bool pointer = false;
+	float pointer_x = 0.0f;
+	float pointer_y = 0.0f;
 };
 
 // A device (ADR 0046 S13 V5): what draws one viewport's picture, the Shell's (an offscreen
