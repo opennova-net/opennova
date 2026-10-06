@@ -315,7 +315,7 @@ static int test_columns() {
 	// error of any other row blocks, as does an error made from no row. A row that says its file does
 	// not serialize always gates.
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) ==
-	            Tokens({ "animation_map.no_reset", "build.expansion.exp_desc", "build.expansion.mission_twice",
+	            Tokens({ "animation_map.no_reset", "asset.wave_unplayable", "build.expansion.exp_desc", "build.expansion.mission_twice",
 	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.item_type",
 	                     "catalog.name_empty", "expansion.file.unread", "export.cancelled", "export.cleanup", "export.replaced",
 	                     "mission.event_missing",

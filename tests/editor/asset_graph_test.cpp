@@ -1215,7 +1215,8 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(graph.referrers_of(ReferenceKind::StyleVar, "TRIM_COLOR").size() == 1);
 	TEST_EXPECT(edge_of(graph, path, ReferenceKind::Menu, "graph.mnu") && edge_of(graph, path, ReferenceKind::Menu, "main.mnu"));
 	TEST_EXPECT(!edge_of(graph, path, ReferenceKind::Menu, "nofile.mnu")); // POP_SCREEN loads no FILE
-	TEST_EXPECT(editor_test::write_text(root + "/click.lwf", "lwf") && editor_test::write_text(root + "/credits.kda", "[TEXT]\r\n"));
+	TEST_EXPECT(editor_test::write_bytes(root + "/click.lwf", editor_test::sound_bank_of({"MOUSE_OVER"})) &&
+	            editor_test::write_text(root + "/credits.kda", "[TEXT]\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	menu = dynamic_cast<const MnuDocument *>(session.document_for("graph.mnu"));
 	TEST_EXPECT(menu);
@@ -1224,6 +1225,9 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::SoundBank, "click") == ReferenceStatus::Missing); // opened by the name as written
 	TEST_EXPECT(graph.resolve(ReferenceKind::Credits, "CREDITS.KDA") == ReferenceStatus::Present);
 	TEST_EXPECT(!finding(view.findings.diagnostics, "reference.missing", "HOME/PANEL/GO/Sound 1"));
+	// The SOUND's trigger is a set of its own bank (the sound lane), found there alone.
+	const GraphEdge *trigger = edge_of(graph, path, ReferenceKind::Sound, "MOUSE_OVER", "trigger");
+	TEST_EXPECT(trigger && trigger->scope == "CLICK.LWF" && graph.resolve(*trigger) == ReferenceStatus::Present);
 
 	// The screens: the last AWAY is the one found; the earlier one, and its windows, are inert.
 	const GraphSymbol *home_screen = symbol_at(graph, path, ReferenceKind::MenuScreen, "HOME");

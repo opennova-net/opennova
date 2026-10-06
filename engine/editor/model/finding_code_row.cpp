@@ -52,6 +52,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::AssetNameEmpty, about_the_file("asset.name.empty", G::ProjectFiles, F::None) },
 	{ C::AssetNameTooLong, about_the_file("asset.name.too_long", G::ProjectFiles, F::Rename) },
 	{ C::AssetUnreadable, code("asset.unreadable", G::ProjectFiles) },
+	// A wave the game's loader refuses plays nothing; the game goes on (the sound lane, wave_source.h).
+	{ C::AssetWaveUnplayable, listed(code("asset.wave_unplayable", G::ProjectFiles)) },
 	{ C::BlankDef, code("blank.def", G::NewFiles) },
 	{ C::BlankFont, code("blank.font", G::NewFiles) },
 	{ C::BlankMenu, code("blank.menu", G::NewFiles) },
@@ -186,6 +188,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportNotFound, code("import.not_found", G::Imports) },
 	{ C::ImportTextureNotImported, code("import.texture_not_imported", G::Imports, F::UnimportedTexture) },
 	{ C::ImportUnreadable, code("import.unreadable", G::Imports) },
+	// An author's wave converted as it came in, or one that reads as no wave (the sound lane).
+	{ C::ImportWave, code("import.wave", G::Imports) },
 	{ C::ImportWrite, code("import.write", G::Imports) },
 	{ C::LocalSettingsJson, code("local_settings.json", G::LocalSettings) },
 	{ C::LocalSettingsSchemaVersionUnsupported, code("local_settings.schema_version.unsupported", G::LocalSettings) },

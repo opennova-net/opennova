@@ -1,12 +1,14 @@
 // The importer table (ADR 0046 d10, S8). The image importer (import/texture_import, S18): a PNG made into
 // the texture file its uses read, by its record's options; a TGA or a PCX too, where a record makes it a
-// source (Replace, Edit externally).
+// source (Replace, Edit externally). The wave importer (import/wave_source, the sound lane): a wave its
+// record makes a source written in the form the game plays.
 #include <editor/import/importer.h>
 
 #include <filesystem>
 
 #include <base/io/strutil.h>
 #include <editor/import/texture_import.h>
+#include <editor/import/wave_source.h>
 #include <editor/project/project_files.h>
 
 namespace opennova::editor {
@@ -22,6 +24,15 @@ const std::vector<Importer> &importers() {
 		image.options = image_import_option_rows();
 		image.run = run_image_import;
 		rows.push_back(std::move(image));
+		// The sound lane: a wave a record makes a source of, written in the form the game plays.
+		Importer wave;
+		wave.id = "wave";
+		wave.version = kWaveImporterVersion;
+		wave.record_extensions = {".wav"};
+		wave.default_options = {{"channels", "mono"}, {"bits", "keep"}, {"rate", "keep"}};
+		wave.options = wave_import_option_rows();
+		wave.run = run_wave_import;
+		rows.push_back(std::move(wave));
 		return rows;
 	}();
 	return table;

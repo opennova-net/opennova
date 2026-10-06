@@ -1083,14 +1083,25 @@ void check_validate_file(const DocumentType &type, const Fixture &fixture,
 // validated first (a check reads which files' own checks read their records): a second update
 // with nothing changed says nothing moved and keeps its findings, and clear() then an update makes
 // the same findings again.
+// A 16-bit stereo RIFF WAVE of a few silent frames, which the game's loader refuses for its channels.
+std::vector<uint8_t> stereo_wave() {
+	const char bytes[] = "RIFF\x2c\0\0\0WAVEfmt \x10\0\0\0\x01\0\x02\0\x44\xac\0\0\x10\xb1\x02\0\x04\0\x10\0"
+	                     "data\x08\0\0\0\0\0\0\0\0\0\0\0";
+	return std::vector<uint8_t>(bytes, bytes + sizeof(bytes) - 1);
+}
+
 void check_project_check(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	if (!type.project_check) return;
 	editor_test::TempProjectDir dir("opennova_editor_contract_project_check");
 	const std::string root = dir.file("project");
 	ProjectDocument project;
 	Diagnostic error;
+	// The sound bank type's check reads the project's waves (documents/wave_check.h): a stereo wave the
+	// game's loader refuses goes beside its bank.
+	const bool companion = type.id != DocumentTypeId::SoundBank ||
+	                       editor_test::write_bytes(root + "/files/stereo.wav", stereo_wave());
 	const bool made = create_project(root, "Contract", "jo", project, error) &&
-	                  editor_test::write_bytes(root + "/files/" + fixture.name, fixture.bytes);
+	                  editor_test::write_bytes(root + "/files/" + fixture.name, fixture.bytes) && companion;
 	check(made, fixture.name + " (" + error.message + ")", "a project holding the file is made");
 	if (!made) return;
 	const ProjectPaths paths = ProjectPaths::for_root(root);

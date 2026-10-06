@@ -22,6 +22,7 @@
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
+#include <editor/import/wave_source.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 
@@ -414,6 +415,19 @@ private:
 		// archive, or one a source marks native, is the game's own, copied as the game reads it.
 		const bool authored = !source.install && source.entry.empty() && !source.native;
 		for (ImportOutput &output : made) {
+			// An author's wave comes in as the game plays it (the sound lane, import/wave_source.h): as it is
+			// where the game's loader takes it, else written in the form it takes, said; one that reads as no
+			// wave is refused.
+			if (authored && asset_kind_for_name(output.name) == AssetKind::Wave) {
+				std::string note, why;
+				if (!prepare_authored_wave(output.name, output.bytes, note, why)) {
+					refuse(CoreFinding::ImportWave, why, output.name);
+					continue;
+				}
+				if (!note.empty())
+					result_.diagnostics.push_back(
+							make_finding(CoreFinding::ImportWave, DiagnosticSeverity::Info, note, output.name));
+			}
 			if (output.name != name) {
 				if (!check_project_file_name(paths_.root, std::string(), output.name, AssetKind::Unknown, problem, message)) {
 					refuse(name_refused(problem), message, output.name);

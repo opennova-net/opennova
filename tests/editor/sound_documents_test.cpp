@@ -4,11 +4,18 @@
 // and the session's play_sound over them. Minted fixtures alone (fixtures/lwf/menu.lwf, a short PCM wave,
 // banks minted here through lwf::encode_lwf); the retail leg (OPENNOVA_JO_ASSETS) reads every shipped
 // bank and the shipped SndProf.def through the documents and writes them back from scratch, the same.
+#include <editor/assets/asset_import.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_kinds.h>
+#include <editor/graph/project_validation.h>
+#include <editor/import/import_context.h>
+#include <editor/import/import_plan.h>
+#include <editor/import/importer.h>
+#include <editor/import/wave_source.h>
 #include <editor/preview/sound_preview.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
@@ -21,10 +28,13 @@
 #include <runtime/audio/sound_profile.h>
 #include <runtime/audio/sound_selector.h>
 
+#include <base/io/le.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -494,6 +504,146 @@ int test_session_play() {
 	return 0;
 }
 
+// --- the waves ----------------------------------------------------------------------------------------------
+
+// A RIFF WAVE of `frames` frames of a 441 Hz sine at amplitude 0.5, each channel the same, its samples
+// `bits` wide (8 unsigned, 16, 24; 32 float with `real`), a LIST chunk before its data when `list`.
+std::vector<uint8_t> wave_of(uint16_t channels, uint16_t bits, uint32_t rate, size_t frames, bool list = false,
+                             bool real = false) {
+	std::vector<uint8_t> data;
+	for (size_t f = 0; f < frames; ++f) {
+		const double s = 0.5 * std::sin(2.0 * 3.14159265358979 * 441.0 * double(f) / double(rate));
+		for (uint16_t c = 0; c < channels; ++c) {
+			if (real) {
+				float v = float(s);
+				uint32_t u;
+				std::memcpy(&u, &v, 4);
+				io::append_u32_le(data, u);
+			} else if (bits == 8) {
+				data.push_back(uint8_t(std::lround(s * 127.0) + 128));
+			} else if (bits == 16) {
+				io::append_u16_le(data, uint16_t(int16_t(std::lround(s * 32767.0))));
+			} else {
+				const int32_t v = int32_t(std::lround(s * 8388607.0));
+				data.push_back(uint8_t(v));
+				data.push_back(uint8_t(v >> 8));
+				data.push_back(uint8_t(v >> 16));
+			}
+		}
+	}
+	std::vector<uint8_t> out;
+	const auto text = [&](const char *t) { out.insert(out.end(), t, t + 4); };
+	std::vector<uint8_t> info;
+	if (list) {
+		const char body[] = "INFOISFT\x0e\0\0\0Lavf58.29.100\0";
+		info.assign(body, body + sizeof(body) - 1);
+	}
+	text("RIFF");
+	io::append_u32_le(out, uint32_t(4 + 24 + (list ? 8 + info.size() : 0) + 8 + data.size()));
+	text("WAVE");
+	text("fmt ");
+	io::append_u32_le(out, 16);
+	io::append_u16_le(out, real ? 3 : 1);
+	io::append_u16_le(out, channels);
+	io::append_u32_le(out, rate);
+	io::append_u32_le(out, rate * channels * (bits / 8));
+	io::append_u16_le(out, uint16_t(channels * (bits / 8)));
+	io::append_u16_le(out, bits);
+	if (list) {
+		text("LIST");
+		io::append_u32_le(out, uint32_t(info.size()));
+		out.insert(out.end(), info.begin(), info.end());
+	}
+	text("data");
+	io::append_u32_le(out, uint32_t(data.size()));
+	out.insert(out.end(), data.begin(), data.end());
+	return out;
+}
+
+// What the game's loader takes, by its own walk: the minted mono 16-bit tone; not a stereo wave, a 24-bit
+// or float one, a LIST ahead of the data, an ADPCM wave with no fact chunk. A wave the game refuses
+// converts into one it takes, the samples kept; a card's facts: the format, the peak and the RMS of a
+// sine at 0.5, its picture.
+int test_waves() {
+	const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
+	TEST_EXPECT(wave_retail_check(tone).plays);
+	TEST_EXPECT(wave_retail_check(wave_of(1, 8, 11025, 100)).plays);
+	const WaveRetailCheck stereo = wave_retail_check(wave_of(2, 16, 44100, 100));
+	TEST_EXPECT(!stereo.plays && stereo.why.find("2 channels") != std::string::npos);
+	TEST_EXPECT(wave_retail_check(wave_of(1, 24, 48000, 100)).why.find("24-bit") != std::string::npos);
+	TEST_EXPECT(wave_retail_check(wave_of(1, 32, 48000, 100, false, true)).why.find("32-bit") != std::string::npos);
+	const WaveRetailCheck listed = wave_retail_check(wave_of(1, 16, 22050, 100, true));
+	TEST_EXPECT(!listed.plays && listed.why.find("LIST") != std::string::npos);
+	// A LIST after the data is never reached.
+	std::vector<uint8_t> after = wave_of(1, 16, 22050, 100);
+	const char tail[] = "LIST\x04\0\0\0INFO";
+	after.insert(after.end(), tail, tail + sizeof(tail) - 1);
+	TEST_EXPECT(wave_retail_check(after).plays);
+	std::vector<uint8_t> adpcm = wave_of(1, 16, 22050, 100);
+	adpcm[20] = 0x11;
+	adpcm[34] = 4;
+	TEST_EXPECT(wave_retail_check(adpcm).why.find("fact") != std::string::npos);
+	TEST_EXPECT(!wave_retail_check(text_bytes("not a wave")).plays);
+	// Converted: mono 16-bit, the rate kept, then resampled.
+	const std::vector<uint8_t> source = wave_of(2, 24, 48000, 4800, true);
+	std::vector<uint8_t> converted;
+	std::string error;
+	TEST_EXPECT(convert_wave(source, WaveConversion(), converted, error) && wave_retail_check(converted).plays);
+	WaveSamples back;
+	TEST_EXPECT(decode_wave_source(converted, back, error) && back.channels == 1 && back.rate == 48000 &&
+	            back.format.bits == 16 && back.frames() == 4800);
+	WaveConversion halved;
+	halved.rate = 24000;
+	halved.bits = "8";
+	TEST_EXPECT(convert_wave(source, halved, converted, error) && decode_wave_source(converted, back, error) &&
+	            back.frames() == 2400 && back.format.bits == 8 && back.rate == 24000);
+	// The card's facts.
+	const WaveFacts facts = wave_facts(source, 16);
+	TEST_EXPECT(facts.read && !facts.retail.plays && facts.format.channels == 2 && facts.format.bits == 24 &&
+	            std::fabs(facts.seconds - 0.1) < 1e-6 && std::fabs(facts.peak - 0.5f) < 0.01f &&
+	            std::fabs(facts.rms - 0.3536f) < 0.01f && facts.envelope.size() == 16);
+	TEST_EXPECT(wave_format_words(facts.format) == "24-bit PCM, stereo, 48000 Hz");
+	// The importer: a record's options make the wave the game plays, named by its option.
+	ImportOptions options = {{"rate", "22050"}, {"name", "fs_dirt1.wav"}};
+	ImportContext context("fs_dirt1_src.wav", source, options, ".", ".");
+	ImportProduct product;
+	const Importer *importer = importer_for("fs_dirt1_src.wav");
+	TEST_EXPECT(importer && std::string(importer->id) == "wave" && !authored_importer_for("x.wav") &&
+	            importer->run(context, product) && product.outputs.size() == 1 && product.outputs[0].name == "fs_dirt1.wav" &&
+	            wave_retail_check(product.outputs[0].bytes).plays);
+	TEST_EXPECT(import_option_row(importer->options, "rate") &&
+	            import_option_accepts(*import_option_row(importer->options, "rate"), "32000") &&
+	            !import_option_accepts(*import_option_row(importer->options, "rate"), "500"));
+	return 0;
+}
+
+// An author's stereo wave imported into a project comes in as the game plays it, said; a wave the game
+// cannot play left in the project is a warning on the file.
+int test_wave_import() {
+	SoundProject project;
+	TEST_EXPECT(project.made);
+	const std::string outside = project.dir.file("outside");
+	TEST_EXPECT(editor_test::write_bytes(outside + "/stereo.wav", wave_of(2, 16, 44100, 441, true)));
+	ImportChoice choice;
+	choice.path = outside + "/stereo.wav";
+	const SessionView &view = project.session.view();
+	const ImportResult result = import_assets({choice}, ProjectPaths::for_root(view.project.root), *view.project.document, false);
+	TEST_EXPECT(result.imported.size() == 1);
+	bool said = false;
+	for (const Diagnostic &d : result.diagnostics) said = said || (d.code() == "import.wave" && d.severity == DiagnosticSeverity::Info);
+	TEST_EXPECT(said);
+	const std::vector<uint8_t> landed = test_io::read_file(view.project.root + "/" + result.imported[0]);
+	TEST_EXPECT(wave_retail_check(landed).plays);
+	// A refused wave written over a project file: Problems says so.
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/sounds/fs_dirt1.wav", wave_of(2, 16, 44100, 441)));
+	editor_test::handle_to_end(project.session, request::rescan());
+	bool warned = false;
+	for (const Diagnostic &d : view.findings.diagnostics)
+		warned = warned || (d.code() == "asset.wave_unplayable" && d.asset == "sounds/fs_dirt1.wav");
+	TEST_EXPECT(warned);
+	return 0;
+}
+
 // --- retail ---------------------------------------------------------------------------------------------
 
 // Every shipped bank through the document: its waves, sets, layers and members as the engine reads them,
@@ -547,6 +697,19 @@ int test_retail_banks() {
 		++banks;
 	}
 	std::printf("retail: %zu banks through the document\n", banks);
+	// Every shipped wave the game's loader takes, by the check's own walk, but one: DSkid.wav, the 16-bit
+	// stereo wave game.lwf's IMP_TMBL_DSKID plays, which the loader's channel test refuses [orig:
+	// Audio_LoadWavFileFromArchive @ 0x7666db], so retail plays nothing for that set (D-SND-33).
+	size_t waves = 0;
+	std::vector<std::string> refused;
+	for (const auto &entry : std::filesystem::directory_iterator(opennova::io::os_path(assets), ec)) {
+		if (strutil::to_lower(entry.path().extension().string()) != ".wav") continue;
+		const WaveRetailCheck check = wave_retail_check(test_io::read_file(opennova::io::utf8_path(entry.path())));
+		++waves;
+		if (!check.plays) refused.push_back(strutil::to_lower(opennova::io::utf8_path(entry.path().filename())));
+	}
+	std::printf("retail: %zu waves, %zu the check refuses\n", waves, refused.size());
+	TEST_EXPECT(waves > 100 && refused == std::vector<std::string>({"dskid.wav"}));
 	TEST_EXPECT(banks >= 3);
 	const std::string sndprof = retail::asset_file("sndprof.def");
 	if (!sndprof.empty()) {
@@ -555,6 +718,41 @@ int test_retail_banks() {
 		TEST_EXPECT(profiles.load_bytes(test_io::read_file(sndprof), "SndProf.def", AssetKind::SoundProfileDefs, "jo", error));
 		TEST_EXPECT(profiles.rows().size() == 49 && profiles.serialize().ok());
 	}
+	return 0;
+}
+
+// An import of the install's ammo.def with the files it needs brings the banks its sounds are sets of
+// (DI-02: a set is a bank's symbol, followed like any other): game.lwf among the plan's rows, no sound left
+// unfollowed.
+int test_retail_import_follows_sounds() {
+	const std::string install = retail::install();
+	if (install.empty()) {
+		retail::skip_leg("OPENNOVA_JO_DIR (an install import following ammo.def's sounds to their banks)");
+		return 0;
+	}
+	// A project of no bank of its own (one of the name would keep its copy: ImportPlan::shadowed).
+	editor_test::TempProjectDir dir("opennova_editor_sound_import_plan");
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Plan"));
+	const SessionView &view = session.view();
+	TEST_EXPECT(view.project.open && view.findings.graph);
+	if (!view.findings.graph) return 1;
+	ImportChoice ammo;
+	ammo.path = install;
+	ammo.entry = "ammo.def";
+	ammo.install = true;
+	const ImportPlan plan = plan_import({ammo}, true, ProjectPaths::for_root(view.project.root), *view.project.document,
+	                                    *view.project.scan, *view.findings.graph, install);
+	bool bank = false;
+	for (const ImportPlanRow &row : plan.rows) bank = bank || (strutil::iequals(row.name, "game.lwf") || strutil::iequals(row.name, "gamelocl.lwf"));
+	bool unfollowed = false;
+	for (const ImportNotFollowed &entry : plan.not_followed) unfollowed = unfollowed || entry.reference == ReferenceKind::Sound;
+	std::printf("retail: ammo.def's plan, %zu rows, a bank among them: %s\n", plan.rows.size(), bank ? "yes" : "no");
+	for (const ImportNotFollowed &entry : plan.undefined)
+		std::printf("  undefined: %s x%zu, first in %s\n", reference_row(entry.reference).token, entry.count, entry.first.c_str());
+	TEST_EXPECT(bank && !unfollowed);
 	return 0;
 }
 
@@ -571,7 +769,10 @@ int main(int argc, char **argv) {
 	failed += test_graph();
 	failed += test_blanks();
 	failed += test_session_play();
+	failed += test_waves();
+	failed += test_wave_import();
 	failed += test_retail_banks();
+	failed += test_retail_import_follows_sounds();
 	if (failed == 0) std::printf("editor sound documents: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

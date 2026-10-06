@@ -204,6 +204,9 @@ std::string wave_missing(const AssetGraph &, const GraphEdge &) {
 // [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0 returns 0; the profile resolve @ 0x5282b2; the
 // one-shot paths return at once, Sound_Play3DPositional @ 0x527cc6].
 std::string sound_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	// A menu SOUND's trigger is looked up in its own bank alone.
+	if (!edge.scope.empty())
+		return ", which " + edge.scope + ", the bank the SOUND names, does not have: the menu plays nothing for it.";
 	for (const GraphSymbol *symbol : graph.symbols_named(ReferenceKind::Sound, edge.target))
 		if (!graph.on_bank_chain(symbol->file))
 			return ", which only " + basename_of(symbol->file) +

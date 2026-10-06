@@ -40,6 +40,15 @@ struct FileCard {
 		uint32_t rate = 0;
 		uint16_t channels = 0;
 		double seconds = 0.0;
+		// What the game's loader makes of it (the sound lane, import/wave_source.h wave_retail_check): whether
+		// it plays, and why not; its format in words ("16-bit PCM, mono, 22050 Hz"), its loudest sample and its
+		// RMS (each 0..1 of full scale) and its picture, each bin's loudest sample (kWaveCardBins of them).
+		bool plays = false;
+		std::string refusal;
+		std::string format;
+		float peak = 0.0f;
+		float rms = 0.0f;
+		std::vector<float> envelope;
 		uint64_t size = 0;     // the file's, as read
 		int64_t modified = 0;  // its last-write ticks, as read (0: unknown, read again)
 	};
@@ -74,13 +83,15 @@ struct FileCard {
 // The most of a wave a card reads to say what it is (the game's own are a few hundred KB): a larger file is
 // said to be too large, nothing read.
 inline constexpr uint64_t kWaveCardBytes = uint64_t(32) << 20;
+// The bins of a wave's picture on its card.
+inline constexpr size_t kWaveCardBins = 64;
 
 // The card of the project file `path` (a project-relative path or a logical name); found false for none.
 // `known`, a card's sound read before: taken as it is while the file's size and last write are those it was
 // read at, else read again.
 FileCard file_card(const SessionView &view, const std::string &path, const FileCard::Sound *known = nullptr);
 // Its wire form: {found, path, name, kind, kind_label, about, size, build, imported_from, opens, sound?
-// {decoded, error?, rate, channels, seconds}, names [{field, record, value, status, file, wave}], named_by
+// {decoded, error?, rate, channels, seconds, plays, refusal?, format, peak, rms, envelope}, names [{field, record, value, status, file, wave}], named_by
 // [{file, record, field}], reading? (true while the project's references are being read)}.
 io::JsonValue file_card_json(const FileCard &card);
 

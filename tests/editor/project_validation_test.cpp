@@ -197,8 +197,9 @@ static int test_rows_as_before() {
 		// The sound lane adds thirteen warnings: a sound set is a bank's symbol and a sound profile
 		// SndProf.def's, so the fixture items' twelve sound_profile and sound_profile_female names and
 		// the barrel's sounddeath EXPLO_BARREL are missing in a project with neither (the 239 rows
-		// before them gave 6289b82a).
-		{ "fixtures", fixture_files, false, 252, 0xbbd5cc4e430289b5ull },
+		// before them gave 6289b82a); and two more, a menu SOUND's trigger being a set of the bank its FILE
+		// names, MENU.LWF, which the project does not have (the 252 rows before them gave bbd5cc4e).
+		{ "fixtures", fixture_files, false, 254, 0x8522d767a9e72569ull },
 		{ "styles", style_files, false, 15, 0xe39ad4219139a453ull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
 		{ "open", style_and_item_files, true, 19, 0x80eb2caf43356608ull },

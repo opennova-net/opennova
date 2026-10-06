@@ -225,6 +225,9 @@ void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value,
 	ImGui::EndPopup();
 }
 
+// Whether a reference's Play sounds what it names: a sound set or a wave.
+bool plays_sound(ReferenceKind kind) { return kind == ReferenceKind::Sound || kind == ReferenceKind::Wave; }
+
 // Present / Missing / Unverified beside a reference, from the same tables the validator
 // uses (compact: a coloured dot, the words in its tooltip, a click on it the Go to); a
 // reference that resolves gets a "Go to" (go_to_tool) to the record that defines it, this
@@ -264,6 +267,19 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 	if (compact || !present) return;
 	place(row, ui_kit::button_width("Go to"));
 	go_to_tool(workspace, field, value, ImGui::SmallButton("Go to"), std::string(), "");
+	// A sound it names plays from here, through the one preview player (the sound lane, DI-02): a set as the
+	// game finds it (in the bank the field's scope names, a menu's SOUND's own), a wave as recorded.
+	const ReferenceKind named = value_reference(field, value);
+	if (!plays_sound(named)) return;
+	const auto *text = std::get_if<std::string>(&value);
+	if (!text || text->empty()) return;
+	place(row, ui_kit::button_width("Play"));
+	if (ImGui::SmallButton("Play"))
+		workspace.request(named == ReferenceKind::Sound ? request::play_set(*text, field.scope.substr(0, field.scope.find('/')))
+		                                                : request::play_sound(basename_of(*text)));
+	ui_kit::tooltip(named == ReferenceKind::Sound
+	                        ? "Play " + *text + " as the game plays it: each layer's member picked, its pitch composed."
+	                        : "Play " + basename_of(*text) + " as recorded.");
 }
 
 // A field that names something: its badge and its Go to, a number (an item id) as much as a
@@ -334,7 +350,8 @@ Value picked_value(const FieldUse &field, const std::string &picked) {
 float reference_tools_width(const FieldUse &field) {
 	const float gap = ImGui::GetStyle().ItemSpacing.x;
 	return (picks_reference(field) ? ui_kit::button_width("Pick") + gap : 0.0f) + ImGui::GetFrameHeight() * 0.5f +
-	       ui_kit::button_width("Go to") + gap * 2.0f;
+	       ui_kit::button_width("Go to") + gap * 2.0f +
+	       (plays_sound(field.reference) ? ui_kit::button_width("Play") + gap : 0.0f);
 }
 
 // The picker's button (a text reference's, ReferencePicker: a pick set on every target) and the
