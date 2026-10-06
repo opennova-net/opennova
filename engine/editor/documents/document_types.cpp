@@ -52,17 +52,22 @@ std::unique_ptr<DocumentBase> make_environment() { return std::make_unique<Envir
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
+	// Each defines a name another file names and nothing defines (DI-15, define_symbol): a weapon, an ammo, an
+	// item or a powerup row; a string id; a screen or a window; a style variable.
 	{ DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalog_file,
 			DefCatalogDocument::schema, catalog_finding_codes, nullptr, nullptr, nullptr, nullptr,
-			catalog_record_label },
+			catalog_record_label, nullptr, nullptr, nullptr, nullptr, nullptr, define_catalog_symbol },
 	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file,
-			StringsDocument::schema, strings_finding_codes },
+			StringsDocument::schema, strings_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, nullptr, nullptr, nullptr, define_string_id },
 	// The menu: its parts by what they do (an action, a look, a sound), never "Action 1" (the plain-words
 	// lane).
 	{ DocumentTypeId::Menu, "menu", make_menu, validate_menu_file, MnuDocument::schema,
-			menu_finding_codes, make_menu_render_check, nullptr, nullptr, nullptr, menu_record_label },
+			menu_finding_codes, make_menu_render_check, nullptr, nullptr, nullptr, menu_record_label, nullptr,
+			nullptr, nullptr, nullptr, nullptr, define_menu_name },
 	{ DocumentTypeId::Styles, "styles", make_styles, validate_styles_file, MnsDocument::schema,
-			style_finding_codes },
+			style_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, define_style_variable },
 	// The model: its records and the values naming a part or a surface in a modder's words (S17).
 	{ DocumentTypeId::Model, "model", make_model, validate_model_file, ModelDocument::schema,
 			model_finding_codes, nullptr, nullptr, nullptr, nullptr, model_record_label, model_value_label },
@@ -100,14 +105,19 @@ constexpr DocumentType kTypes[] = {
 	// The sound lane: a bank's waves and sets (a set's name a sound, a member's wave one of the bank's), its
 	// project check the project's waves the game's loader refuses; and SndProf.def's profiles, each slot
 	// naming a set.
+	// Each defines its kind's names (DI-15): a sound set, a sound profile.
 	{ DocumentTypeId::SoundBank, "sound_bank", make_sound_bank, validate_sound_bank_file, SoundBankDocument::schema,
-			sound_bank_finding_codes, make_wave_check },
+			sound_bank_finding_codes, make_wave_check, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, nullptr, define_sound_set },
 	{ DocumentTypeId::SoundProfiles, "sound_profiles", make_sound_profiles, validate_sound_profiles_file,
-			SoundProfileDocument::schema, sound_profile_finding_codes },
+			SoundProfileDocument::schema, sound_profile_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, nullptr, nullptr, nullptr, nullptr, define_sound_profile },
 	// The particle file (DI-14): a text the effect system's reader reads, its findings that reader's;
-	// what it names the asset graph reads through the same reader (no references of the type's own).
+	// what it names the asset graph reads through the same reader (no references of the type's own). An
+	// effect a file names and no file defines is written by the engine's own effect writer (DI-15).
 	{ DocumentTypeId::Particles, "particle", make_particle_document, validate_particle_file, text_fields,
-			particle_finding_codes },
+			particle_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, define_particle_effect },
 	// The environment (DI-19a): a .env's keywords and keyframes over env::Config, its references its
 	// fields' (the cloud layers' textures, the sun, moon, glare and star models).
 	{ DocumentTypeId::Environment, "environment", make_environment, validate_environment_file,

@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <iterator>
 #include <map>
+#include <sstream>
 #include <string>
 #include <utility>
 
 #include <base/io/strutil.h>
 #include <editor/documents/text_types.h>
+#include <editor/project/project_files.h>
 
 namespace opennova::editor {
 
@@ -85,6 +87,48 @@ std::vector<Diagnostic> validate_particle_file(const DocumentBase &document) {
 				*text, effect.id_line, effect.id_column));
 	}
 	return findings;
+}
+
+bool define_particle_effect(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
+	const TextDocument *text = text_of(document);
+	if (!text || missing.kind != ReferenceKind::Particle || missing.target.empty()) return false;
+	// A file the reader stops in loads nothing: an effect added to it would not load either.
+	particle::ParticleFile read;
+	particle::ParseError error;
+	if (!read_particle_text(*text, read, error)) return false;
+	// The block the engine's own writer makes of an effect of that id and nothing else.
+	particle::ParticleFile made;
+	particle::EffectDef effect;
+	effect.id = missing.target;
+	made.effects.push_back(std::move(effect));
+	std::ostringstream written;
+	std::string write_error;
+	if (!particle::save_particles(written, made, write_error)) return false;
+	std::string block = written.str();
+	// In the file's line ends: CR LF where its lines end so.
+	if (text->text().find("\r\n") != std::string::npos) {
+		std::string crlf;
+		for (const char c : block) {
+			if (c == '\n') crlf += '\r';
+			crlf += c;
+		}
+		block = std::move(crlf);
+	}
+	// After the file's last effect, where the writer puts every effect (before its particles and tables), else
+	// at its end.
+	size_t offset = text->text().size();
+	size_t after = 0;
+	for (const particle::EffectDef &each : read.effects) after = std::max(after, size_t(std::max(each.last_line, 0)));
+	if (after && !text->offset_of(after + 1, 1, offset)) offset = text->text().size();
+	out = PlannedFix();
+	out.edits.push_back(TextDocument::replace(text->span_at(offset, 0), block));
+	const std::string file = basename_of(document.path());
+	out.label = "Add effect " + missing.target + " to " + file;
+	out.detail = "Writes an effect block of id " + missing.target + " into " + file + " " +
+	             (after ? "after its last effect" : "at its end") + ", as the game's own effect writer writes one: its "
+	             "id alone, no particles yet. The game then spawns it by that name (nothing until its particles are "
+	             "named) where it now spawns the stock effect.";
+	return true;
 }
 
 const FindingCodeRow &finding_code(ParticleFinding code) {
