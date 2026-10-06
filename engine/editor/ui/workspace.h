@@ -32,6 +32,9 @@ public:
 		(void)min_x, (void)min_y, (void)max_x, (void)max_y, (void)paths;
 		return false;
 	}
+	// The system pointer hidden for this frame: a picture under the mouse draws the game's own there (a
+	// menu's, DI-08), so one pointer shows. The Shell shows it again on a frame none asks.
+	virtual void hide_pointer() {}
 };
 
 } // namespace opennova::editor
