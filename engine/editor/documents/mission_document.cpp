@@ -58,6 +58,11 @@ int lookup_order(NodeKind kind) {
 // the player that SSN is not in the records read), so it names none of them.
 constexpr int64_t kPlayerSsn = 10000;
 
+// The waypoint markers whose record +0x60 the spawn keeps as the waypoint's name id (entity+672): type
+// 6005, which also looks the name up, and type 6006 [orig: Entity_SpawnFromBMSRecord @0x40f05a
+// `cmp [edi], 1775h`, @0x40f0ad; @0x40f157 `cmp [edi], 1776h`, @0x40f176].
+constexpr int32_t kWaypointType = 6005, kWaypointRepeatType = 6006;
+
 // The waypoint list's commands [orig editor: dfx2med Med_ParamWaypointList @0x449c60 names them;
 // docs/world/world-wac-ai-re.md section 11].
 const char *path_command_name(int number) {
@@ -236,6 +241,8 @@ size_t MissionDocument::index_of(const Node &row) const {
 	const auto found = made.places.find(row.id);
 	return found == made.places.end() ? SIZE_MAX : found->second;
 }
+
+bool MissionDocument::on_player_route(const Node &row) const { return lookups().route.count(row.id) != 0; }
 
 int MissionDocument::location_of(const Node &row) const {
 	const Lookups &made = lookups();
@@ -598,6 +605,18 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 		use.key_last = last;
 	};
 	if (!address.child && is_entity_kind(address.kind) && id == "name_index") keyed("PeopleNames", "STRNAME", 1, INT32_MAX);
+	// A waypoint's name id (record +0x60), which a type-6005 or 6006 marker's spawn keeps for the waypoint
+	// HUD, keying STRWPNAME%03i in WPNames, any number [orig: Entity_SpawnFromBMSRecord @0x40f0ad,
+	// @0x40f176: entity+672; HUD_GetWaypointName @0x59473d]; the type-6005 spawn looks the name up
+	// (mission_text_edges).
+	if (!address.child && is_entity_kind(address.kind) && id == "ttool_index") {
+		const Node *node = row(address.row);
+		const int32_t type = node && is_entity_kind(node->kind) ? static_cast<const EntityRow &>(*node).native.type_id : 0;
+		if (type == kWaypointType || type == kWaypointRepeatType) {
+			use.applies = Applicability::Reads;
+			keyed("WPNames", "STRWPNAME", 0, INT32_MAX);
+		}
+	}
 	if (!address.child && address.kind == k(K::Mission) && id.compare(0, 15, "win_conditions[") == 0)
 		keyed("WinConditions", "STRWINCOND", 1, 254);
 }
@@ -694,6 +713,17 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 		} else if (row->kind == k(K::Area)) {
 			made.zones.emplace(static_cast<const AreaRow &>(*row).native.id, row->id);
 		}
+	}
+	// The player's route: the first path with the flag, its stops by their marker's index [orig:
+	// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the count capped at 128 @0x502efc].
+	const std::vector<const Node *> &markers = made.by_kind[size_t(K::Marker)];
+	for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
+		const bms::WaypointRecord &path = static_cast<const PathRow &>(*row).native.record;
+		if (!(uint32_t(path.flags) & uint32_t(bms::WaypointFlags::PlayerRoute))) continue;
+		const size_t count = std::min<size_t>({size_t(path.marker_count), path.waypoint_numbers.size(), size_t(128)});
+		for (size_t i = 0; i < count; ++i)
+			if (path.waypoint_numbers[i] < markers.size()) made.route.insert(markers[path.waypoint_numbers[i]]->id);
+		break;
 	}
 	made.made = true;
 	made.load_generation = load_generation();
@@ -891,6 +921,16 @@ void mission_text_edges(const MissionDocument &document, const NodeAddress &addr
 		// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a: sprintf("STRNAME%03i", rec+4), gated
 		// on the index being nonzero]
 		if (const int64_t name = number_of("name_index", entity.name_index)) text("name_index", "PeopleNames", "STRNAME", name);
+		// [orig: Entity_SpawnFromBMSRecord @0x40f0be..0x40f0e0: a type-6005 record's sprintf("STRWPNAME%03i",
+		// rec+0x60) looked up in WPNames for the waypoint's name, any number]
+		if (entity.type_id == kWaypointType) {
+			text("ttool_index", "WPNames", "STRWPNAME", number_of("ttool_index", entity.ttool_index));
+			// Where the name is witnessed shown, a stop of the player's route (the waypoint HUD, which
+			// shows gametext's STRWPNAMEDEFAULT for a missing one [orig: HUD_GetWaypointName @0x59476f..
+			// 0x59477b]), a key the table lacks is a finding; any other waypoint's (the shipped missions'
+			// patrol stops, mostly id 0) none.
+			if (!document.on_player_route(*row)) out.back().optional = true;
+		}
 		return;
 	}
 	if (!address.child && row->kind == k(K::Mission)) {
