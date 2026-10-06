@@ -4522,6 +4522,15 @@ target_link_libraries(editor_problems_test PRIVATE opennova_editor)
 target_include_directories(editor_problems_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_problems COMMAND editor_problems_test)
 
+# The fixes that edit a document (ADR 0046 DI-11): a finding's planned edits of its own file
+# (an SSN, a zone id, a name or a key of its own, a string removed, an end pose's trigger
+# moved), an item's id of its own and an unused stylesheet variable's line removed, each
+# applied over a real session as one step Undo takes back.
+add_executable(editor_problem_edit_fixes_test editor/problem_edit_fixes_test.cpp)
+target_link_libraries(editor_problem_edit_fixes_test PRIVATE opennova_editor)
+target_include_directories(editor_problem_edit_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_problem_edit_fixes COMMAND editor_problem_edit_fixes_test)
+
 # The menu clipboard's one rule for the tree and the canvas (S13 V1, documents/mnu_clipboard):
 # a window a part holds is copyable from neither, a Paste after the primary's window.
 add_executable(editor_mnu_clipboard_test editor/mnu_clipboard_test.cpp)
