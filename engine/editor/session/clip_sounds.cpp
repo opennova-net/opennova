@@ -21,9 +21,14 @@ void fire_clip_sounds(SessionCore &core) {
 	// the clip it fires from is the one the selection plays.
 	if (!model->attached()) model = viewports.follow_one(view, path, ViewportKind::Model);
 	auto *clip = dynamic_cast<ModelViewport *>(model);
-	if (!clip || !clip->animating()) return;
+	if (!clip) return;
+	// A clip's events (DI-04), or a model's death as its damage state plays it (DI-10).
 	const std::vector<ClipSoundFired> fired =
-			clip->fire_sounds(viewports.clock(), view.project.scan.get(), core.sound_selector(), viewports.clip_sound_seq());
+			clip->animating()
+					? clip->fire_sounds(viewports.clock(), view.project.scan.get(), core.sound_selector(),
+					                    viewports.clip_sound_seq())
+					: clip->fire_damage_sounds(viewports.clock(), view.project.scan.get(), core.sound_selector(),
+					                           viewports.clip_sound_seq());
 	if (!fired.empty()) core.touch(ViewConcern::Viewports);
 }
 
