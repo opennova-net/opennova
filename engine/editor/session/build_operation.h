@@ -9,6 +9,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/project_build/build_run.h>
 #include <editor/project_build/export_build.h>
+#include <editor/run/play_start.h>
 #include <editor/session/session_operation.h>
 
 namespace opennova::editor {
@@ -22,6 +23,8 @@ struct PlayIntent {
 	bool behind = false;
 	// The run directory emptied first of what the runs before wrote there (play's fresh: RunTake::fresh).
 	bool fresh = false;
+	// Where the game's player starts (play's start, DI-26: Play from here).
+	PlayStart start;
 };
 
 // The Export that waits on a build (ADR 0046 S16): whether one does, and the folder it lands in (""
