@@ -16,6 +16,7 @@
 #include <editor/graph/graph_names.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
+#include <runtime/audio/bank_chain.h>
 #include <runtime/menu/menu_style.h>
 #include <runtime/renderer/material_texture.h>
 
@@ -212,6 +213,14 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 		GraphReadings *read_ahead) {
 	stats_ = GraphStats();
 	Patch patch;
+	// The banks the game searches for a set, the project's expansion's own first: another chain (the
+	// expansion's name changed) resolves every edge again.
+	std::vector<std::string> chain;
+	for (const std::string &bank : audio::global_bank_chain(project.expansion.name)) chain.push_back(upper(bank));
+	if (chain != bank_chain_) {
+		bank_chain_ = std::move(chain);
+		patch.base = true;
+	}
 	// The open record and text documents stand in for their files (another kind of document reads
 	// none).
 	std::unordered_map<std::string, const DocumentBase *> documents;
@@ -938,6 +947,9 @@ const GraphSymbol *AssetGraph::resolve_symbol(ReferenceKind kind, const std::str
 		return named.empty() ? nullptr : &index_.symbol(named.front());
 	}
 	if (resolution != ReferenceResolution::Symbol) return nullptr;
+	// A set by name, where no bank names it (a menu's SOUND names its own): the game's search over its
+	// banks in order [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0].
+	if (kind == ReferenceKind::Sound && scope.empty()) return sound_binding(name);
 	const std::string name_key = GraphIndex::key_of(kind, symbol_name(kind, name), scope);
 	for (const Ref ref : index_.symbols_named(name_key)) {
 		const GraphSymbol &symbol = index_.symbol(ref);
@@ -952,6 +964,34 @@ const GraphSymbol *AssetGraph::resolve_symbol(ReferenceKind kind, const std::str
 			return &symbol;
 	}
 	return nullptr;
+}
+
+size_t AssetGraph::bank_rank(const std::string &file) const {
+	const std::string name = upper(basename_of(file));
+	for (size_t i = 0; i < bank_chain_.size(); ++i)
+		if (bank_chain_[i] == name) return i;
+	return SIZE_MAX;
+}
+
+const GraphSymbol *AssetGraph::sound_binding(const std::string &name) const {
+	const std::string name_key = GraphIndex::key_of(ReferenceKind::Sound, symbol_name(ReferenceKind::Sound, name), std::string());
+	const GraphSymbol *best = nullptr;
+	size_t best_rank = SIZE_MAX;
+	// The project's banks first: a base layer's bank of a name the project has is hidden, and of two
+	// banks of one rank the project's is the one the game opens.
+	const auto consider = [&](const GraphSymbol &symbol) {
+		const size_t rank = bank_rank(symbol.file);
+		if (symbol.inert || rank == SIZE_MAX || rank >= best_rank) return;
+		best = &symbol;
+		best_rank = rank;
+	};
+	for (const Ref ref : index_.symbols_named(name_key)) consider(index_.symbol(ref));
+	if (base_) {
+		const GraphIndex &base = base_->index();
+		for (const Ref ref : base.symbols_named(name_key))
+			if (base_file_shows(base.slot(ref.slot))) consider(base.symbol(ref));
+	}
+	return best;
 }
 
 std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::string &scope, int32_t loader_arg) const {
@@ -1011,7 +1051,9 @@ std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::
 			const GraphIndex &index = base ? base_->index() : index_;
 			for (const Ref ref : index.symbols_of_kind(kind)) {
 				const GraphSymbol &symbol = index.symbol(ref);
-				if ((base && !base_file_shows(index.slot(ref.slot))) || unread(symbol) != inert ||
+				// A set of a bank the game's search never reaches is none an unscoped lookup finds.
+				const bool off_chain = kind == ReferenceKind::Sound && scope.empty() && !on_bank_chain(symbol.file);
+				if ((base && !base_file_shows(index.slot(ref.slot))) || (unread(symbol) || off_chain) != inert ||
 						(row.picker_scoped && !scope_matches(symbol.scope, scope)) ||
 						!offered.insert(symbol.name).second)
 					continue;
@@ -1026,6 +1068,8 @@ std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::
 				choice.reason = inert && base && symbol.kind == ReferenceKind::StyleVar
 				                        ? unread_reason(symbol, symbol.inert, symbol.inert_reason)
 				                        : symbol.inert_reason;
+				if (off_chain && choice.reason.empty())
+					choice.reason = basename_of(symbol.file) + " is no bank the game searches for a set by name";
 				out.push_back(std::move(choice));
 			}
 		}
