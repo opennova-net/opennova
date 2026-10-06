@@ -1,6 +1,6 @@
 # `art/onjo1/sound/` sources
 
-Every game sound in `assets/` is OpenNova's own, made on 2026-10-05 from the CC0
+Every game sound in `assets/` is OpenNova's own, made on 2026-10-05 and 2026-10-06 from the CC0
 files below (cut, layered, filtered, levelled) or synthesised (procedural noise,
 clicks and glides, no source). Freesound files are each sound's HQ OGG preview,
 the stream its page plays (the original upload needs a login); each page said
@@ -12,7 +12,7 @@ length, loudness, spectrum and variation count only (`README.md`).
 
 ## Source files
 
-Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landing, parachute and rain sources 2026-10-06), and kept as downloaded under `sources/`.
+Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landing, parachute and rain sources, and those of the engine's own sets (the water entries, the thunder and the drowning), 2026-10-06), and kept as downloaded under `sources/`.
 
 | File under `sources/` | Title | Author | Page | Licence |
 |---|---|---|---|---|
@@ -45,10 +45,13 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landi
 | `freesound/fs811077_DangerLaef.ogg` | Solo Skydive Interior Plane and Freefall | DangerLaef | [freesound.org/s/811077](https://freesound.org/s/811077/) | CC0 1.0 |
 | `freesound/fs272376_danhelbling.ogg` | Feet Land On Gravel.wav | danhelbling | [freesound.org/s/272376](https://freesound.org/s/272376/) | CC0 1.0 |
 | `freesound/fs132901_EchoCinematics.ogg` | Jump Into Gravel.MP3 | EchoCinematics | [freesound.org/s/132901](https://freesound.org/s/132901/) | CC0 1.0 |
+| `freesound/fs434978_felix.blume.ogg` | Water Splash | felix.blume | [freesound.org/s/434978](https://freesound.org/s/434978/) | CC0 1.0 |
+| `freesound/fs581125_Fission9.ogg` | Distant Thunder 4 | Fission9 | [freesound.org/s/581125](https://freesound.org/s/581125/) | CC0 1.0 |
 | `freesound/fs390730_FunWithSound.ogg` | Glass Tinkle 2.mp3 | FunWithSound | [freesound.org/s/390730](https://freesound.org/s/390730/) | CC0 1.0 |
 | `freesound/fs390731_FunWithSound.ogg` | Glass Tinkle 1.mp3 | FunWithSound | [freesound.org/s/390731](https://freesound.org/s/390731/) | CC0 1.0 |
 | `freesound/fs390732_FunWithSound.ogg` | Glass Tinkle 3.mp3 | FunWithSound | [freesound.org/s/390732](https://freesound.org/s/390732/) | CC0 1.0 |
 | `freesound/fs390735_FunWithSound.ogg` | Glass Tinkle 4.mp3 | FunWithSound | [freesound.org/s/390735](https://freesound.org/s/390735/) | CC0 1.0 |
+| `freesound/fs654044_hetsumani.ogg` | Man making drown noises | hetsumani | [freesound.org/s/654044](https://freesound.org/s/654044/) | CC0 1.0 |
 | `freesound/fs701647_IENBA.ogg` | Fabric Flapping | IENBA | [freesound.org/s/701647](https://freesound.org/s/701647/) | CC0 1.0 |
 | `freesound/fs395331_ihitokage.ogg` | Body falling on the ground 1 | ihitokage | [freesound.org/s/395331](https://freesound.org/s/395331/) | CC0 1.0 |
 | `freesound/fs138478_JustInvoke.ogg` | Bullet Blood 1 | JustInvoke | [freesound.org/s/138478](https://freesound.org/s/138478/) | CC0 1.0 |
@@ -57,25 +60,36 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landi
 | `freesound/fs704395_jgxxx.ogg` | Rain at night medium.wav | jgxxx | [freesound.org/s/704395](https://freesound.org/s/704395/) | CC0 1.0 |
 | `freesound/fs481075_khenshom.ogg` | Foley - Cotton clothes rustling - Fabric movement sound.wav | khenshom | [freesound.org/s/481075](https://freesound.org/s/481075/) | CC0 1.0 |
 | `freesound/fs481081_khenshom.ogg` | Foley - Jeans - Rustling - Fabric movement sound.wav | khenshom | [freesound.org/s/481081](https://freesound.org/s/481081/) | CC0 1.0 |
+| `freesound/fs361772_kingsrow.ogg` | 2016-10-06 Thunder Crack.wav | kingsrow | [freesound.org/s/361772](https://freesound.org/s/361772/) | CC0 1.0 |
 | `freesound/fs504626_leonelmail.ogg` | BODY FALL - V HVY - DIRT | leonelmail | [freesound.org/s/504626](https://freesound.org/s/504626/) | CC0 1.0 |
+| `freesound/fs840628_loganzsound.ogg` | Closeup Thunder Strike 01 | loganzsound | [freesound.org/s/840628](https://freesound.org/s/840628/) | CC0 1.0 |
 | `freesound/fs182263_martian.ogg` | Foley bullet hit metal 02.wav | martian | [freesound.org/s/182263](https://freesound.org/s/182263/) | CC0 1.0 |
 | `freesound/fs427596_michorvath.ogg` | AR15 rifle shot | michorvath | [freesound.org/s/427596](https://freesound.org/s/427596/) | CC0 1.0 |
 | `freesound/fs427597_michorvath.ogg` | AR15 rifle shot from 50 yards away | michorvath | [freesound.org/s/427597](https://freesound.org/s/427597/) | CC0 1.0 |
 | `freesound/fs789388_modusmogulus.ogg` | Bullet impact ground (subsonic) SFX | modusmogulus | [freesound.org/s/789388](https://freesound.org/s/789388/) | CC0 1.0 |
+| `freesound/fs513249_nickmaysoundmusic.ogg` | Spring Distant thunderstorm suburban birds wind single rumble - short | nickmaysoundmusic | [freesound.org/s/513249](https://freesound.org/s/513249/) | CC0 1.0 |
+| `freesound/fs513250_nickmaysoundmusic.ogg` | Spring Distant thunderstorm suburban birds wind single rumble - medium | nickmaysoundmusic | [freesound.org/s/513250](https://freesound.org/s/513250/) | CC0 1.0 |
 | `freesound/fs144444_pushkin.ogg` | bullet impacts | pushkin | [freesound.org/s/144444](https://freesound.org/s/144444/) | CC0 1.0 |
 | `freesound/fs166944_qubodup.ogg` | Grunts of pain by military soldiers.flac | qubodup | [freesound.org/s/166944](https://freesound.org/s/166944/) | CC0 1.0 |
+| `freesound/fs442773_qubodup.ogg` | Big Water Splash | qubodup | [freesound.org/s/442773](https://freesound.org/s/442773/) | CC0 1.0 |
 | `freesound/fs565716_ralph.whitehead.ogg` | Footsteps Walking On Wooden Floor Medium Pace.wav | ralph.whitehead | [freesound.org/s/565716](https://freesound.org/s/565716/) | CC0 1.0 |
 | `freesound/fs565720_ralph.whitehead.ogg` | Footsteps Walking On Gravel Stones Medium Pace.wav | ralph.whitehead | [freesound.org/s/565720](https://freesound.org/s/565720/) | CC0 1.0 |
 | `freesound/fs798649_randbsoundbites.ogg` | The Last gasp before death | randbsoundbites | [freesound.org/s/798649](https://freesound.org/s/798649/) | CC0 1.0 |
+| `freesound/fs200990_rayjensen.ogg` | rayjensen - thunder-crack 41k 16bit mono.wav | rayjensen | [freesound.org/s/200990](https://freesound.org/s/200990/) | CC0 1.0 |
 | `freesound/fs396801_scorpion67890.ogg` | Male Death 4 | scorpion67890 | [freesound.org/s/396801](https://freesound.org/s/396801/) | CC0 1.0 |
 | `freesound/fs725397_ser_ut_nin--depriv_d.ogg` | An M16 Rifle being reloaded while empty; full sequence | serøutōnin--deprivəd | [freesound.org/s/725397](https://freesound.org/s/725397/) | CC0 1.0 |
 | `freesound/fs725402_ser_ut_nin--depriv_d.ogg` | A rifle being dry fired once | serøutōnin--deprivəd | [freesound.org/s/725402](https://freesound.org/s/725402/) | CC0 1.0 |
 | `freesound/fs725403_ser_ut_nin--depriv_d.ogg` | A rifle being moved around and handled w/ magazine removals | serøutōnin--deprivəd | [freesound.org/s/725403](https://freesound.org/s/725403/) | CC0 1.0 |
+| `freesound/fs752733_simonjeffery13.ogg` | Man Drowning Underwater | simonjeffery13 | [freesound.org/s/752733](https://freesound.org/s/752733/) | CC0 1.0 |
+| `freesound/fs509880_slamaxu.ogg` | male_gasp.wav | slamaxu | [freesound.org/s/509880](https://freesound.org/s/509880/) | CC0 1.0 |
 | `freesound/fs643671_SnowFightStudios.ogg` | Various Man Dying Grunts.mp3 | SnowFightStudios | [freesound.org/s/643671](https://freesound.org/s/643671/) | CC0 1.0 |
 | `freesound/fs398036_swordofkings128.ogg` | water swimming 2 | swordofkings128 | [freesound.org/s/398036](https://freesound.org/s/398036/) | CC0 1.0 |
 | `freesound/fs398037_swordofkings128.ogg` | water swimming 1 | swordofkings128 | [freesound.org/s/398037](https://freesound.org/s/398037/) | CC0 1.0 |
 | `freesound/fs398040_swordofkings128.ogg` | water swimming 5 | swordofkings128 | [freesound.org/s/398040](https://freesound.org/s/398040/) | CC0 1.0 |
 | `freesound/fs398041_swordofkings128.ogg` | water swimming 4 | swordofkings128 | [freesound.org/s/398041](https://freesound.org/s/398041/) | CC0 1.0 |
+| `freesound/fs530152_tbsounddesigns.ogg` | POOL CANONBALL DIVE 4 | tbsounddesigns | [freesound.org/s/530152](https://freesound.org/s/530152/) | CC0 1.0 |
+| `freesound/fs157835_Tonsofpaperbrokenpen.ogg` | Guy retching water and gasping for air.wav | Tonsofpaperbrokenpen | [freesound.org/s/157835](https://freesound.org/s/157835/) | CC0 1.0 |
+| `freesound/fs169931_u3190.ogg` | Gasp Inhale | u3190 | [freesound.org/s/169931](https://freesound.org/s/169931/) | CC0 1.0 |
 | `freesound/fs610998_unfa.ogg` | Medium Male Pain Grunts | unfa | [freesound.org/s/610998](https://freesound.org/s/610998/) | CC0 1.0 |
 | `freesound/fs671409_Victormaa.ogg` | forest heavy rain loop.wav | Victormaa | [freesound.org/s/671409](https://freesound.org/s/671409/) | CC0 1.0 |
 | `freesound/fs770112_Vrymaa.ogg` | Plants or ferns - Manipulation & Hit | Vrymaa | [freesound.org/s/770112](https://freesound.org/s/770112/) | CC0 1.0 |
@@ -270,3 +284,30 @@ Each file in `assets/`, what it was made from and how (PCM mono; the rate and bi
 | `onfrfall8.wav` | 22050 Hz 16-bit | 3.560 s | -11.8 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @76.0s (free fall); cut 3.56 s, band 0.12-2.2 kHz, faded in and out |
 | `onrainl.wav` | 22050 Hz 16-bit | 13.650 s | -24.0 dB | jgxxx [#704395](https://freesound.org/s/704395/) @40.0s (forest rain at night) under Victormaa [#671409](https://freesound.org/s/671409/) @0.0s (jungle downpour) 3 dB down; 14.65 s each, high-pass 120 Hz, low-pass 8 kHz, a 15 % tilt toward 2.5 kHz and below, its last second crossfaded (equal power) into its start so it loops without a seam, levelled to -24 dB RMS under a tanh soft-clip (the rain sets loop it) |
 | `onrainr.wav` | 22050 Hz 16-bit | 13.650 s | -24.0 dB | jgxxx [#704395](https://freesound.org/s/704395/) @62.0s under Victormaa [#671409](https://freesound.org/s/671409/) @5.0s 3 dB down; made as `onrainl.wav`, other stretches of the same two so the two sides do not match |
+| `onnewgol.wav` | 22050 Hz 8-bit | 0.182 s | -6.4 dB | synthesised: a radio chirp, two square-wave notes rising a fifth (C7, G7; 75 and 85 ms) after a 30 ms band-noise squelch, band 0.3-7 kHz |
+| `onpuexit.wav` | 22050 Hz 8-bit | 0.182 s | -6.1 dB | synthesised: the new-goal chirp turned over, its two square-wave notes falling a fifth (G7, C7) |
+| `onscrtck.wav` | 22050 Hz 8-bit | 0.045 s | -11.6 dB | synthesised: a 45 ms counter tick, a 2.35 kHz ping (9 ms decay) with its octave and a 2 ms noise click |
+| `ontxtend.wav` | 22050 Hz 8-bit | 0.424 s | -15.7 dB | synthesised: a 0.42 s stop, a 110 Hz thud under a bell (E6 with its fifth above and a bright partial, 0.13 s decay) |
+| `onnvon.wav` | 22050 Hz 8-bit | 0.096 s | -6.0 dB | synthesised: a 96 ms whine sweeping 4.2 to 9.5 kHz over a 10 ms high-passed noise click, high-pass 3 kHz |
+| `onnvoff.wav` | 22050 Hz 8-bit | 0.110 s | -6.4 dB | synthesised: a 110 ms whine sweeping 9.5 to 4.2 kHz over a 10 ms high-passed noise click, high-pass 3 kHz |
+| `onstmis1.wav` | 22050 Hz 16-bit | 9.240 s | -16.2 dB | synthesised: a 9.24 s sting, a drum hit then at 0.42 s a deep boom (95 to 45 Hz) under a low D drone (detuned saws on D2, A2, D3, A3, low-passed 900 Hz, 3.2 s decay) |
+| `onstmis2.wav` | 22050 Hz 16-bit | 8.330 s | -17.1 dB | synthesised: an 8.33 s sting, two drum hits then at 0.46 s the boom under a low G drone (G2, D3, G3, D4) |
+| `onstmis3.wav` | 22050 Hz 16-bit | 8.450 s | -16.9 dB | synthesised: an 8.45 s sting, a 16-stroke drum roll swelling into the boom at 1.94 s under a low A drone (A2, E3, A3, E4) |
+| `onbdwtr1.wav` | 22050 Hz 8-bit | 2.800 s | -20.5 dB | tbsounddesigns [#530152](https://freesound.org/s/530152/) @0.05s (a cannonball dive), 1.6 s, low-pass 2.5 kHz, slowed 1.75x (an octave less a little: the set plays it at 1.9x) to 2.80 s, tail decayed from 1.6 s |
+| `onbdwtr2.wav` | 22050 Hz 8-bit | 2.720 s | -13.7 dB | felix.blume [#434978](https://freesound.org/s/434978/) @0.00s (a splash), 1.7 s, low-pass 2 kHz, slowed 1.6x (the set plays it at 1.6x) to 2.72 s, tail decayed from 1.7 s |
+| `onsplsh1.wav` | 22050 Hz 8-bit | 1.575 s | -14.6 dB | qubodup [#442773](https://freesound.org/s/442773/) @0.00s (a big splash), 1.75 s, high-pass 80 Hz, sped up 1.11x (the set plays it at 0.9x) to 1.58 s |
+| `onthdst1.wav` | 11025 Hz 8-bit | 6.650 s | -16.9 dB | nickmaysoundmusic [#513249](https://freesound.org/s/513249/) @2.75s (a distant rumble); cut 6.65 s, band 25 Hz-0.9 kHz, faded in over 0.15 s and out over its last third |
+| `onthdst2.wav` | 11025 Hz 8-bit | 4.970 s | -9.6 dB | nickmaysoundmusic [#513250](https://freesound.org/s/513250/) @21.30s (a distant rumble); cut 4.97 s, band 25 Hz-0.9 kHz, faded in over 0.15 s and out over its last third |
+| `onthdst3.wav` | 22050 Hz 8-bit | 2.970 s | -9.7 dB | Fission9 [#581125](https://freesound.org/s/581125/) @4.30s (distant thunder); cut 2.97 s, band 25 Hz-1.2 kHz, faded in over 0.15 s and out over its last third |
+| `onthdst4.wav` | 22050 Hz 8-bit | 4.990 s | -6.8 dB | nickmaysoundmusic [#513250](https://freesound.org/s/513250/) @4.60s (a distant rumble); cut 4.99 s, band 25 Hz-1.2 kHz, faded in over 0.15 s and out over its last third |
+| `onthcrk1.wav` | 22050 Hz 8-bit | 3.600 s | -16.4 dB | loganzsound [#840628](https://freesound.org/s/840628/) @0.35s (a close thunder strike); cut 3.60 s, high-pass 30 Hz |
+| `onthswt1.wav` | 22050 Hz 8-bit | 2.300 s | -12.4 dB | kingsrow [#361772](https://freesound.org/s/361772/) @8.45s (a thunder crack); cut 2.30 s, high-pass 30 Hz |
+| `onthswt2.wav` | 22050 Hz 8-bit | 1.910 s | -16.0 dB | rayjensen [#200990](https://freesound.org/s/200990/) @1.45s (the roll after a crack); cut 1.91 s, high-pass 60 Hz |
+| `onthswt3.wav` | 22050 Hz 8-bit | 2.650 s | -16.8 dB | kingsrow [#361772](https://freesound.org/s/361772/) @13.90s (a second crack); cut 2.65 s, high-pass 30 Hz |
+| `onsrfbr1.wav` | 22050 Hz 8-bit | 1.640 s | -8.2 dB | u3190 [#169931](https://freesound.org/s/169931/) @0.05s (a gasping inhale); cut 1.64 s, band 0.09-7 kHz |
+| `onsrfbr2.wav` | 22050 Hz 8-bit | 0.540 s | -13.4 dB | slamaxu [#509880](https://freesound.org/s/509880/) @0.18s (a male gasp); cut 0.54 s, band 0.09-7 kHz |
+| `onsrfgp1.wav` | 22050 Hz 8-bit | 2.340 s | -15.2 dB | Tonsofpaperbrokenpen [#157835](https://freesound.org/s/157835/) @5.55s (a man coughing up water and gasping for air); cut 2.34 s, band 0.09-7 kHz |
+| `onsrfgp2.wav` | 22050 Hz 8-bit | 3.320 s | -8.4 dB | Tonsofpaperbrokenpen [#157835](https://freesound.org/s/157835/) @9.95s (a man coughing up water and gasping for air); cut 3.32 s, band 0.09-6 kHz; soft-clipped (tanh, 3.3 dB drive) |
+| `ondrown1.wav` | 22050 Hz 8-bit | 2.700 s | -10.8 dB | simonjeffery13 [#752733](https://freesound.org/s/752733/) @0.95s (a man drowning under water); cut 2.70 s, band 0.06-3 kHz |
+| `ondrown2.wav` | 22050 Hz 8-bit | 3.550 s | -6.8 dB | simonjeffery13 [#752733](https://freesound.org/s/752733/) @4.10s (a man drowning under water); cut 3.55 s, band 0.06-3 kHz |
+| `ondrown3.wav` | 22050 Hz 8-bit | 2.800 s | -7.3 dB | hetsumani [#654044](https://freesound.org/s/654044/) @0.00s (a man making drowning noises), 1.3 s, band 60 Hz-1.5 kHz (muffled), then simonjeffery13 [#752733](https://freesound.org/s/752733/) @5.75s (drowning under water), 1.9 s at -4 dB from 0.9 s, band 60 Hz-3 kHz |
