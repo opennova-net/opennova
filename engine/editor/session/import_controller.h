@@ -71,6 +71,12 @@ public:
 	// OpenTextureSource (S18): an existing source opened alike, nothing written. Refused (texture.external):
 	// a texture with none yet, a source edited in place open with unsaved edits.
 	void open_texture_source(const EditorRequest &request);
+	// NewTerrain (S20): a terrain made from images: its terrain set written in art/terrain/ naming the
+	// images (each copied in from disk, or a project file named where it is), its record the importer's
+	// options, then the refresh that imports it. Refused, nothing written (import.terrain): a name that
+	// does not fit or that the project has a file of, a value of no key it takes, an image that does not
+	// read or fit its role (import/terrain_import.h).
+	void new_terrain(const EditorRequest &request);
 	// PreviewTextureSource (S18): what a Replace (an image in paths) or an Edit externally (none) would do,
 	// into the view's texture_source dialog, nothing written: the plan's changes, its before and after in
 	// words and as pictures (the texture's thumbnail, the file the import would make), the stored forms

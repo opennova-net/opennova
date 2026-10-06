@@ -58,7 +58,9 @@ using RequestHandler = void (*)(SessionCore &core, const EditorRequest &request)
 // operation reads or writes, or reads what the operation writes); the prompt's words for what waits
 // on it ("Close %s", the %s the file) and its Save button; whether the Shell sends it of its own (a
 // timer's, the window's focus: no person's, so the status line a refused request left stays, S18);
-// and what it does. Every row is static_asserted into place (request_kinds.cpp).
+// whether where it takes the person is a step of the navigation history (session/navigation_controller.h:
+// a document switched to, a Go to, Show in Files; the place it left is Back's); and what it does. Every
+// row is static_asserted into place (request_kinds.cpp).
 struct RequestKindRow {
 	EditorRequestKind kind = EditorRequestKind::kCount;
 	const char *token = "";
@@ -71,6 +73,7 @@ struct RequestKindRow {
 	bool names_active = false;
 	bool ends_edit_groups = false;
 	bool background = false;
+	bool navigates = false;
 	Holds reads = HoldsNothing;
 	Holds writes = HoldsNothing;
 	OnBusy on_busy = OnBusy::Refuse;

@@ -23,6 +23,7 @@ add_library(opennova_editor STATIC
     # missing texture's placeholder
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_coo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_defs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_environment.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_menu.cpp
@@ -81,6 +82,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_load_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_operations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_roles.cpp
@@ -113,10 +115,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
     # import — the importers (a PNG to the texture file its uses read, S18, a DDS's blocks and chain through
-    # the authoring DXT encoder) and what they read (the import context), the sidecars, the import pass, and
-    # the plan of an import with the files it needs
+    # the authoring DXT encoder; a font set's glyph sheet to a .fnt) and what they read (the import context),
+    # the sidecars, the import pass, and the plan of an import with the files it needs
     ${CMAKE_CURRENT_SOURCE_DIR}/import/converter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/dxt_encode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/font_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_context.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/importers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_pass.cpp
@@ -128,9 +131,19 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/png_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/quantize.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/terrain_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/tga_source.cpp
+    # terrain — TrnGen.exe's terrain bake ported (a depth map to the .cpt's depth atlas and its
+    # ground mesh: the quadtree, the mesh simplifier, the strips, the TPM1 tile files kept in memory)
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lod_mesh_data.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/mesh_data.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/mesh_simp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree_node.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_bake.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_mesh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/tristrip.cpp
     # preview — the viewports (S13 V5): their kinds' table, the session's viewports and the preview
     # clock, the follow every kind shares (the files a picture read, the action its device takes),
     # the base every kind's viewport derives from, the Shell's devices (an LRU of four keyed by
@@ -157,6 +170,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_facts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_hint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_items.cpp
@@ -217,10 +231,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/run_directory.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10):
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
-    # imports, renames, the unsaved guard, the preferences over their store), what Problems
-    # shows of its findings and offers to do about them, the request and query tables (S13 A4,
-    # A5) and their wire forms (session_json, view_json), the selection (S13 D7), and the
-    # finding codes' lookup over every table (S13 A6)
+    # imports, renames, the unsaved guard, the navigation history, the preferences over their
+    # store), what Problems shows of its findings and offers to do about them, the request and
+    # query tables (S13 A4, A5) and their wire forms (session_json, view_json), the selection
+    # (S13 D7), and the finding codes' lookup over every table (S13 A6)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_result.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
@@ -235,6 +249,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_logic_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/model_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/navigation_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/navigation_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/operation_progress.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/original_bytes.cpp
@@ -265,11 +281,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/workspace_parts.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
-    # the documents, the findings, the activity, the dialogs, the workspace's own), the events a
-    # request posts, and the findings by file and record
+    # the documents, the findings, the activity, the dialogs, the workspace's own, the navigation
+    # history's places), the events a request posts, and the findings by file and record
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/activity_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/dialogs_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/findings_index.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/navigation_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/project_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/session_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/view_events.cpp

@@ -1,4 +1,5 @@
-// opennova::audio::SoundProfileTable — the SndProf.def parser + lookup semantics
+// opennova::audio::SoundProfileTable — the SndProf.def parser + lookup semantics,
+// and write_sound_profiles, the from-scratch writer it reads back
 // [orig: SoundProfile_LoadAll @ 0x527490, sound_profile_xml_callback @ 0x526fc0,
 // SoundProfile_FindSlotByName @ 0x526e30]. The inline fixture mirrors the retail
 // file's shapes (quoted begin names + trailing comment text, tab/space runs,
@@ -43,8 +44,136 @@ static const char kFixture[] =
     "end \r\n"
     "orphan_line_outside_begin  ALSO_IGNORED\r\n";
 
+static bool same_profiles(const std::vector<SoundProfile> &a, const std::vector<SoundProfile> &b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i].name != b[i].name || a[i].set_names != b[i].set_names ||
+            a[i].param2_q16 != b[i].param2_q16 || a[i].param3_q16 != b[i].param3_q16 ||
+            a[i].param4 != b[i].param4 || a[i].loop_params != b[i].loop_params)
+            return false;
+    }
+    return true;
+}
+
+// write_sound_profiles -> parse gives the profiles back.
+static bool round_trips(const std::vector<SoundProfile> &profiles) {
+    std::string text, error;
+    if (!opennova::audio::write_sound_profiles(profiles, text, error)) {
+        std::fprintf(stderr, "write_sound_profiles: %s\n", error.c_str());
+        return false;
+    }
+    SoundProfileTable back;
+    back.parse(text.data(), text.size());
+    return same_profiles(profiles, back.entries());
+}
+
+// The writer refuses what the file cannot carry, writing nothing.
+static bool refused(const SoundProfile &profile) {
+    std::string text = "untouched", error;
+    return !opennova::audio::write_sound_profiles({profile}, text, error) && !error.empty() &&
+           text == "untouched";
+}
+
+static int test_writer() {
+    using opennova::audio::write_sound_profiles;
+    // The inline fixture's profiles, written from scratch, read back the same.
+    SoundProfileTable fixture;
+    TEST_EXPECT(fixture.parse(kFixture, sizeof(kFixture) - 1) == 2);
+    TEST_EXPECT(round_trips(fixture.entries()));
+
+    // CR LF lines, a quoted begin name, all five columns on a slot line, the
+    // shortest decimal for a column-2/3 word and the whole percent for a
+    // percent row.
+    SoundProfile p;
+    p.name = "SP Writer; test";
+    p.set_names[slot::kSlotFootLGround] = "FSP_DIRT_L";
+    p.set_names[1] = "V_APACHE_ILP";
+    p.param2_q16[1] = static_cast<int32_t>(0.8 * 65536.0); // 52428
+    p.param3_q16[1] = static_cast<int32_t>(1.2 * 65536.0); // 78643
+    p.param4[1] = 2;
+    p.loop_params[0] = 20 * 655;
+    std::string text, error;
+    TEST_EXPECT(write_sound_profiles({p}, text, error));
+    TEST_EXPECT(text == "begin \"SP Writer; test\"\r\n"
+                        "\tSoundloop_2 V_APACHE_ILP 0.8 1.2 2\r\n"
+                        "\tSSLFootGND FSP_DIRT_L 0 0 0\r\n"
+                        "\tmedloopfadeinstart 20\r\n"
+                        "end\r\n");
+    TEST_EXPECT(round_trips({p}));
+
+    // Words the shortest decimal must still hit exactly: the smallest step,
+    // negatives, a set name the tokenizer would split, a negative percent.
+    SoundProfile q;
+    q.name = "default";
+    q.set_names[slot::kSlotWarning] = "WARN, LOW";
+    q.param2_q16[slot::kSlotWarning] = 1;
+    q.param3_q16[slot::kSlotWarning] = -0x18000 - 3;
+    q.param4[slot::kSlotWarning] = -7;
+    q.set_names[slot::kSlotTumbleSkid] = "A//B";
+    q.param2_q16[slot::kSlotTumbleSkid] = 0x7FFFFFFF;
+    q.loop_params[11] = -3 * 655;
+    TEST_EXPECT(round_trips({q, p, q}));
+
+    // Every slot line carries its five columns, so what an earlier line left in
+    // the tokenizer's slots 3 and 4 is never read for it [orig:
+    // Terrain_TokenizeConfigLine @0x53CB71..0x53CB81 resets 0..2 only; the
+    // callback reads tokens[4]/[5] @0x52714b/@0x52718b]: after a long line the
+    // written slot still reads 0 and 0.
+    SoundProfile r;
+    r.name = "Fresh";
+    r.set_names[slot::kSlotDeath] = "BM1_DEATH";
+    TEST_EXPECT(write_sound_profiles({r}, text, error));
+    const std::string after_long = "begin Long\r\nsounddeath LONGSET 1 1.5 7 extra\r\nend\r\n" + text;
+    SoundProfileTable t;
+    TEST_EXPECT(t.parse(after_long.data(), after_long.size()) == 2);
+    TEST_EXPECT(t.entries()[1].param3_q16[slot::kSlotDeath] == 0);
+    TEST_EXPECT(t.entries()[1].param4[slot::kSlotDeath] == 0);
+
+    // A slot with no set but column-3/4 values (shipped: JO's SP_FuelTruck
+    // enginehighrev) is a bare keyword line that reads them from a '/' line
+    // just ahead, which the walk tokenizes but never hands the callback
+    // [orig: File_ParseASCIIFile, the '/' test @0x53D91E]; its slot-3 token
+    // starts past where the keyword line's terminator lands.
+    SoundProfile bare;
+    bare.name = "Bare";
+    bare.param3_q16[slot::kSlotEngineHighRev] = static_cast<int32_t>(1.2 * 65536.0);
+    bare.param4[slot::kSlotEngineHighRev] = 5;
+    bare.set_names[slot::kSlotEngineStart] = "V_START";
+    bare.param3_q16[slot::kSlotEngineStart] = 0x10000;
+    TEST_EXPECT(write_sound_profiles({bare}, text, error));
+    TEST_EXPECT(text == "begin \"Bare\"\r\n"
+                        "\tenginestart V_START 0 1 0\r\n"
+                        "/------------- - - 1.2 5\r\n"
+                        "\tenginehighrev\r\n"
+                        "end\r\n");
+    TEST_EXPECT(round_trips({bare, r, bare}));
+
+    // What the file cannot carry.
+    SoundProfile bad;
+    TEST_EXPECT(refused(bad)); // no name
+    bad.name = std::string(64, 'N');
+    TEST_EXPECT(refused(bad)); // the callback cuts a name at 64 [orig: @0x527043]
+    bad.name = "a\"b";
+    TEST_EXPECT(refused(bad));
+    bad.name = "ok";
+    bad.set_names[3] = std::string(24, 'S');
+    TEST_EXPECT(refused(bad)); // the 24-byte set field
+    bad.set_names[3] = "S";
+    bad.param2_q16[4] = 1;
+    TEST_EXPECT(refused(bad)); // column 2 resets on every line: no set, no column 2
+    bad.param2_q16[4] = 0;
+    bad.loop_params[2] = 1;
+    TEST_EXPECT(refused(bad)); // no whole percent
+    bad.loop_params[2] = 0;
+    TEST_EXPECT(round_trips({bad}));
+    // No profile is an empty file.
+    TEST_EXPECT(write_sound_profiles({}, text, error) && text.empty());
+    return 0;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
+    if (test_writer() != 0) return 1;
     // Inline fixture: shapes and stores.
     {
         SoundProfileTable t;
@@ -192,6 +321,9 @@ int main(int argc, char **argv) {
             TEST_EXPECT(player->set_names[slot::kSlotFootWater] == "FS_WATER");
             TEST_EXPECT(player->set_names[slot::kSlotNightDeath] == "BM1_DEATH_K");
             TEST_EXPECT(player->set_names[slot::kSlotFreeFall] == "FREEFALL");
+            // The writer carries every shipped profile: written from scratch,
+            // the 49 read back the same.
+            TEST_EXPECT(round_trips(t.entries()));
         } else {
             std::fprintf(stderr, "FAIL: cannot open %s\n", path.c_str());
             return 1;
@@ -220,6 +352,9 @@ int main(int argc, char **argv) {
         TEST_EXPECT(chinook->param3_q16[slot::kSlotSoundLoop1 + 2] == 78643);
         TEST_EXPECT(chinook->param2_q16[slot::kSlotSoundLoop1 + 2] == 0);
         TEST_EXPECT(mil26->param4[slot::kSlotSoundLoop1 + 1] == 2);
+        // Written from scratch with every slot line's five columns, the
+        // stale-slot values read back as the values they are.
+        TEST_EXPECT(round_trips(t.entries()));
     } else {
         retail::skip_leg("OPENNOVA_JO_DIR (the mounted SndProf.def's stale-slot rows)");
     }

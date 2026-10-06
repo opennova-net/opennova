@@ -5,7 +5,9 @@
 // through the list, Enter picks, a pick is the field's Set. A Files row
 // dropped on a reference's value sets the file there when the field's kind loads it, and
 // nothing when it does not. A missing value's picker offers the fixes Problems offers for it. S18: a texture
-// field's picture and its picker's; a texture an import makes shows how it is made in its tab.
+// field's picture and its picker's; a texture an import makes shows how it is made in its tab, and under a
+// model row's use what the texture costs the game; the texture's toolbar shows its object texture detail and
+// its alpha as the use shown reads it.
 #include <cstring>
 #include <string>
 #include <utility>
@@ -568,6 +570,89 @@ void test_texture_import_section() {
 	CHECK(set && set->path == source && set->values == asked, "the one click raises the set_import_options of what its uses ask");
 }
 
+// S18, what a texture costs the game: under a model row's use in the texture's tab, its device texture's bytes
+// and its .dds's (documents/texture_budget).
+void test_texture_budget_line() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	const std::vector<uint8_t> rgba(size_t(2048) * 2048 * 4, 200);
+	std::vector<uint8_t> big;
+	std::string error;
+	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 2048, 2048, big, error) &&
+	              editor_test::write_bytes(view.project.root + "/textures/crate.tga", big),
+	      "a 2048 x 2048 32-bit diffuse");
+	const std::string scene = project.dir.file("scene");
+	CHECK(editor_test::write_text(scene + "/crate.o3d",
+	                              "o3d 2\nmodel CRATE\nmaterial VS_PHONGT\ntexture crate.tga 1 0\nlod 0\npart 0 0 0 0\n"
+	                              "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"),
+	      "a model naming it");
+	const ImportResult imported =
+	        import_assets({{scene + "/crate.o3d", {}}}, ProjectPaths::for_root(view.project.root), *view.project.document, false);
+	CHECK(imported.imported.size() == 1, "the model imported");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("textures/crate.tga"));
+	Ui ui;
+	ui.pump = [&project] { project.session.poll(); };
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Model diffuse: material 1 of crate.3di") != std::string::npos &&
+	              text.find("In the game: 21.3 MB, 5.3 MB as its .dds") != std::string::npos,
+	      "under its use, what the game holds of it and what its .dds would");
+}
+
+// S18, a texture as the game draws it: the toolbar's object texture detail where a model row costs it, the device
+// texture said at the detail shown, and the alpha as the use shown reads it (a Phong diffuse's the specular
+// brightness).
+void test_texture_game_view_toolbar() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	const std::vector<uint8_t> rgba(size_t(64) * 64 * 4, 130);
+	std::vector<uint8_t> file;
+	std::string error;
+	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 64, 64, file, error) &&
+	              editor_test::write_bytes(view.project.root + "/textures/shine.tga", file),
+	      "a 64 x 64 diffuse");
+	const std::string scene = project.dir.file("scene");
+	CHECK(editor_test::write_text(scene + "/shine.o3d",
+	                              "o3d 2\nmodel SHINE\nmaterial VS_PHONGT\ntexture shine.tga 1 0\nlod 0\npart 0 0 0 0\n"
+	                              "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"),
+	      "a Phong model naming it");
+	CHECK(import_assets({{scene + "/shine.o3d", {}}}, ProjectPaths::for_root(view.project.root), *view.project.document, false)
+	                      .imported.size() == 1,
+	      "the model imported");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("textures/shine.tga"));
+	project.session.handle(request::set_viewport("textures/shine.tga", "{\"kind\":\"texture\",\"options\":{\"as_used\":0,\"detail\":1}}"));
+	DrawnDevices devices;
+	Ui ui;
+	ui.pump = [&project, &devices] {
+		project.session.poll();
+		devices.sync(project.session.viewports(), project.session.view());
+	};
+	ui.windows.set_view(&project.session.view());
+	ui.windows.set_devices(&devices.cache);
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Detail 1") != std::string::npos, "the toolbar's object texture detail");
+	CHECK(text.find("At object texture detail 1 the game makes 32 x 32, A8R8G8B8") != std::string::npos,
+	      "the device texture at the detail shown");
+	CHECK(text.find("Alpha: the specular brightness VS_PHONGT reads, not transparency") != std::string::npos,
+	      "the alpha as the Phong use reads it");
+}
+
 // S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., ask first
 // (preview_texture_source of that texture); the dialog the preview opens shows the texture before and after
 // and replaces only on its Replace, Cancel closing it; an image dropped on a texture field's value asks for
@@ -720,6 +805,8 @@ void run_reference_picker_tests() {
 	test_pick_by_name();
 	test_texture_previews();
 	test_texture_import_section();
+	test_texture_budget_line();
+	test_texture_game_view_toolbar();
 	test_texture_drop_replaces();
 }
 
