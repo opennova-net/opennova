@@ -211,6 +211,14 @@ public:
 	// The symbols a record defines (its file and record, as the edges name them): indexed, a
 	// string table defining one per key.
 	std::vector<const GraphSymbol *> symbols_of(const std::string &file, const std::string &record) const;
+	// Every symbol a file defines (named as references_of names it), in the order it defines them, each
+	// with whether a lookup of the game finds it (`read`: a style variable the binding, any other not
+	// inert); none for a file the graph does not hold.
+	struct FileSymbol {
+		const GraphSymbol *symbol = nullptr;
+		bool read = false;
+	};
+	std::vector<FileSymbol> symbols_in(const std::string &file) const;
 	// The definitions the graph read from `document` when its slot is current for it (the same
 	// instance at the same revision: find_definition's reuse), each with its inert as the
 	// document's own lookup makes it (a stylesheet's earlier definition of a name), not the game's

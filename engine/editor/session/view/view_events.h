@@ -52,9 +52,11 @@ enum class ViewEventKind : uint8_t {
 	// inspector, problems, output; session/workspace_parts.h). That window comes forward, as a click on its
 	// tab brings it.
 	FocusWindow,
-	// A Back or a Forward that took the person to a document or a file's page (the navigation history):
-	// `path` the document, or with `flag` the file whose page it is. The Document window comes forward with
-	// that tab shown, whichever tab showed before (a page's About tab over the active document's).
+	// A Back or a Forward that took the person to a document (the navigation history), or an OpenDocument
+	// that showed a file's page (a Go to landing there, DI-17; a Back or a Forward to one): `path` the
+	// document, or with `flag` the file whose page it is. The Document window comes forward with that tab
+	// shown, whichever tab showed before (a page's About tab over the active document's), and a page shows
+	// the line its Go to marked.
 	ShowDocument,
 	kCount,
 };
