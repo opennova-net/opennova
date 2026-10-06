@@ -98,7 +98,8 @@ size_t problem_finding_at(const SessionView &view, const std::string &key) {
 }
 
 bool fix_asks_first(const ProblemFix &fix) {
-	return fix.request.kind == EditorRequestKind::AssignRequirement;
+	return fix.request.kind == EditorRequestKind::AssignRequirement ||
+	       (fix.request.kind == EditorRequestKind::Save && fix.request.force); // DI-01: Keep my edits
 }
 
 std::vector<ProblemFix> fixes_raised_at_once(std::vector<ProblemFix> fixes) {
