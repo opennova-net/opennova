@@ -5,10 +5,13 @@ extends GutTest
 ## creates a project, fills its checklist, builds it, and Play starts the game on the
 ## build (the Godot binary at this checkout, headless and self-quitting) through the
 ## real process seam, whose exit the session notices. Build and Play are requests, as the
-## windows raise them, and the session's operation (S13 A1) runs across pumps.
+## windows raise them, and the session's operation (S13 A1) runs across pumps. What another
+## program saves comes back with no Rescan, the window focused or not (DI-01).
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
+const ROCKING := "res://../fixtures/threedi/synth/house_lod0_sine_rotx.3di"
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -765,3 +768,100 @@ func test_catalog_edits_reach_the_play_child() -> void:
 	_seam.close_project()
 	_seam.resolve_unsaved(1) # Discard
 	assert_false(_seam.is_project_open())
+
+
+## A catalog of `count` items, as a program other than the editor writes it.
+func _items_text(count: int) -> String:
+	var text := ""
+	for i in count:
+		text += "begin \"Crate %d\"\nid %d\ntype building\nhp %d\nend\n" % [i, 100100 + i, 10 + i]
+	return text
+
+
+## How many rows the open document at `path` lists.
+func _rows(path: String) -> int:
+	return int(_seam.query("document", {"path": path, "limit": 1}).get("count", 0))
+
+
+## The model viewport over `path`, read as the wire reads it.
+func _model_viewport(path: String) -> Dictionary:
+	return _seam.query("viewport", {"op": "state", "path": path, "kind": "model", "limit": 1})
+
+
+## The model viewport over `path` ready on its device with more than `builds` builds: a frame at a time.
+func _model_ready(path: String, builds: int) -> Dictionary:
+	var state := _model_viewport(path)
+	for _frame in 600:
+		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
+				and int(state.get("builds", 0)) > builds:
+			break
+		await get_tree().process_frame
+		state = _model_viewport(path)
+	return state
+
+
+## ADR 0046 DI-01: what another program saves comes back with no Rescan whether or not the window has
+## the focus (an editor an MCP client launched never has it, and this one never gets a focus-in): the
+## Shell's once-a-second check reads an open catalog written from outside into its rows, the record
+## selected in it selected again by its place, and an open model written from outside into its picture
+## (its device builds again), each named in Output, within a few seconds. A file no document shows is
+## left to the window gaining the focus, whose sweep over every file reads it again.
+func test_outside_saves_come_back_unfocused() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova outside saves %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir, "Outside saves"))
+	assert_eq(_seam.create_missing_files(), 0)
+	var root: String = _seam.get_project_root()
+	TestFs.write_text(self, root.path_join("defs/items.def"), _items_text(2))
+	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("models")), OK)
+	TestFs.copy(self, ARMORY, root.path_join("models/armory.3di"))
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.settle())
+	assert_true(_seam.open_document("defs/items.def"))
+	assert_eq(_rows("defs/items.def"), 2)
+	assert_true(_seam.select_record(_seam.get_row_id(1)))
+	assert_true(_seam.open_document("models/armory.3di"))
+	var picture := await _model_ready("models/armory.3di", 0)
+	var builds := int(picture.get("builds", 0))
+	assert_gt(builds, 0, str(picture))
+
+	# Another program saves both files; nothing asks for a Rescan and the window never has the focus.
+	var saved_at := Time.get_ticks_msec()
+	TestFs.write_text(self, root.path_join("defs/items.def"), _items_text(3))
+	TestFs.copy(self, ROCKING, root.path_join("models/armory.3di"))
+	while Time.get_ticks_msec() - saved_at < 10000 and (_rows("defs/items.def") != 3 \
+			or int(_model_viewport("models/armory.3di").get("builds", 0)) == builds):
+		await get_tree().create_timer(0.05).timeout
+	var took := Time.get_ticks_msec() - saved_at
+	assert_eq(_rows("defs/items.def"), 3, "the catalog's rows read again")
+	picture = await _model_ready("models/armory.3di", builds)
+	assert_gt(int(picture.get("builds", 0)), builds, "the model's picture made again: %s" % str(picture))
+	# A check comes once a second and a file waits a quarter second to hold still: about 1.25 s at most,
+	# with room for a loaded machine.
+	assert_lt(took, 4000, "back within a check and a hold (%d ms)" % took)
+	var lines := "\n".join(_seam.get_output_lines())
+	assert_string_contains(lines, "Reloaded defs/items.def: it changed outside the editor.")
+	assert_string_contains(lines, "Reloaded models/armory.3di: it changed outside the editor.")
+	assert_true(_seam.open_document("defs/items.def"))
+	assert_eq(_seam.get_selected_records(), PackedInt64Array([_seam.get_row_id(1)]),
+			"the record selected in it selected again by its place")
+
+	# A file no document shows: the checks pass it by; the window gaining the focus sweeps it in.
+	var weapons := root.path_join("defs/weapon.def")
+	var bytes := FileAccess.get_file_as_bytes(weapons)
+	bytes.append_array("\r\n".to_utf8_buffer())
+	TestFs.write_bytes(self, weapons, bytes)
+	await get_tree().create_timer(1.5).timeout
+	assert_false("\n".join(_seam.get_output_lines()).contains("Read defs/weapon.def again"),
+			"a file no document shows waits for the focus")
+	_app.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	var swept_at := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - swept_at < 10000 \
+			and not "\n".join(_seam.get_output_lines()).contains("Read defs/weapon.def again"):
+		await get_tree().create_timer(0.05).timeout
+	assert_string_contains("\n".join(_seam.get_output_lines()),
+			"Read defs/weapon.def again: it changed outside the editor.")
+	assert_true(_seam.settle())
+	_seam.close_project()
