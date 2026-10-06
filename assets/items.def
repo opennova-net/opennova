@@ -97,6 +97,30 @@ begin "Power Up AR-15"
 	type powerup
 	attrib: powerup notarget
 end
+begin "Coconut palm"
+	graphic onpalm1
+	id 100013
+	type decoration
+end
+begin "Leaning coconut palm"
+	graphic onpalm2
+	id 100014
+	type decoration
+end
+
+begin "Sword fern"
+	graphic onfern1
+	id 100015
+	type decoration
+end
+
+begin "Jungle bush"
+	graphic onbush1
+	id 100016
+	type decoration
+end
+
+
 
 
 
