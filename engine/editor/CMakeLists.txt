@@ -166,6 +166,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_facts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_hint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_items.cpp
