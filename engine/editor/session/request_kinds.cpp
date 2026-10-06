@@ -9,6 +9,7 @@
 #include <editor/session/build_operation.h>
 #include <editor/session/document_set.h>
 #include <editor/session/import_controller.h>
+#include <editor/session/navigation_controller.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problem_confirmation.h>
 #include <editor/session/problems_service.h>
@@ -117,6 +118,12 @@ void serve_close_document(SessionCore &core, const EditorRequest &request) {
 void serve_select_record(SessionCore &core, const EditorRequest &request) {
 	core.documents().select_record(request);
 }
+void serve_navigate_back(SessionCore &core, const EditorRequest &request) {
+	core.navigation().go(true, request.steps);
+}
+void serve_navigate_forward(SessionCore &core, const EditorRequest &request) {
+	core.navigation().go(false, request.steps);
+}
 void serve_edit_record(SessionCore &core, const EditorRequest &request) {
 	core.documents().edit_record(request);
 }
@@ -210,6 +217,9 @@ void serve_open_texture_source(SessionCore &core, const EditorRequest &request) 
 void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
 	core.imports().preview_install(request);
 }
+void serve_new_terrain(SessionCore &core, const EditorRequest &request) {
+	core.imports().new_terrain(request);
+}
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
@@ -297,6 +307,11 @@ struct Request {
 	constexpr Request background() const {
 		Request out = *this;
 		out.row.background = true;
+		return out;
+	}
+	constexpr Request navigates() const {
+		Request out = *this;
+		out.row.navigates = true;
 		return out;
 	}
 };
@@ -500,28 +515,35 @@ constexpr RequestKindRow kRows[] = {
 			"does not take, a required one left out or a file the project lacks is refused, "
 			"document.values, nothing made); a new mission comes with its text table (<mission>.bin: "
 			"its title, an empty briefing) where the project has none of that name; opened when the "
-			"editor edits its kind.")
+			"editor edits its kind, a step of the navigation history.")
 			.takes(request_params({ F::Path }, { F::FileKind, F::Values }))
 			.holds(kFiles, kFilesAndDocuments)
+			.navigates()
 			.row,
 	Request(K::OpenDocument, "open_document", serve_open_document,
 			"The document at path opened, or made active, with the record at locator (a Go to) or "
-			"at address selected and its field shown (a RevealRecord view event).")
+			"at address selected and its field shown (a RevealRecord view event); a file the editor has "
+			"no editor for shows its page. Where it takes the person is a step of the navigation history "
+			"(the place left is Back's).")
 			.takes(request_params({}, { F::Path, F::Locator, F::Field, F::Address }))
 			.holds(kFiles, kDocuments)
 			.names_active()
+			.navigates()
 			.row,
 	Request(K::ShowInFiles, "show_in_files", serve_show_in_files,
 			"Files selects the project file path and scrolls to it (a RevealFile view event), a "
 			"file the editor does not open included; ask_name: and asks its new name "
-			"(Rename...).")
+			"(Rename...). A step of the navigation history (the place left is Back's).")
 			.takes(request_params({ F::Path }, { F::AskName }))
+			.navigates()
 			.row,
 	Request(K::AboutFile, "about_file", serve_show_in_files,
 			"Files selects the project file path and comes forward (a RevealFile view event), and its card opens "
 			"(the workspace section's card; set_workspace closes it): what it is, where a build puts it, what it "
-			"names and who names it, a wave's sound; the file_card query reads the same.")
+			"names and who names it, a wave's sound; the file_card query reads the same. A step of the navigation "
+			"history.")
 			.takes(request_params({ F::Path }))
+			.navigates()
 			.row,
 	Request(K::SelectFile, "select_file", serve_select_file,
 			"The project file path selected in Files (left out, none): a file a viewport draws whether "
@@ -550,9 +572,33 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::SelectRecord, "select_record", serve_select_record,
 			"The record at address, the primary, and the records named with it selected in the "
-			"document at path, over any of its rows, joining the selection as mode says.")
+			"document at path, over any of its rows, joining the selection as mode says. One that makes "
+			"another document active, or shows another screen of a menu, is a step of the navigation "
+			"history; a record picked within what shows is where the person is, no step.")
 			.takes(request_params({ F::Address }, { F::Path, F::Records, F::Mode }))
 			.names_active()
+			.navigates()
+			.row,
+	// What the navigation history takes the person back to is opened, made active and selected as an
+	// open_document does it: it reads the files and changes the open documents, as an open does.
+	Request(K::NavigateBack, "navigate_back", serve_navigate_back,
+			"Back to the place the navigation history holds steps places back (1 when left out; the "
+			"navigation section lists them nearest first): its document made active again, opened again "
+			"where it was closed, its record selected again (by its locator where the document was read "
+			"again since), a text at the line a Go to showed there, a file's page, or Files on its file; "
+			"the Document window comes forward with its tab (a show_document view event). Where it was "
+			"goes onto Forward with the places stepped over. A place whose file the project no longer has "
+			"is passed over, dropped. Refused (navigation.none), nothing changed, with fewer places "
+			"back.")
+			.takes(request_params({}, { F::Steps }))
+			.holds(kFiles, kDocuments)
+			.row,
+	Request(K::NavigateForward, "navigate_forward", serve_navigate_forward,
+			"Forward again to the place the navigation history holds steps places forward (1 when left "
+			"out), as navigate_back goes back: what Back left, until a move to somewhere else drops it. "
+			"Refused (navigation.none), nothing changed, with fewer places forward.")
+			.takes(request_params({}, { F::Steps }))
+			.holds(kFiles, kDocuments)
 			.row,
 	// A fix's edit opens its document first.
 	Request(K::EditRecord, "edit_record", serve_edit_record,
@@ -812,9 +858,11 @@ constexpr RequestKindRow kRows[] = {
 			"environment's, the view of a mission that names it (one open, else the first); any other "
 			"referrer's, the texture opened with its viewport's as_used set to the use. Refused, nothing "
 			"opened (texture.show_use): the references not read yet, a file that does not use it, a name "
-			"the game opens itself, a terrain or an environment no mission names.")
+			"the game opens itself, a terrain or an environment no mission names. Where it takes the person is a "
+			"step of the navigation history.")
 			.takes(request_params({ F::Path, F::Paths }, { F::Locator, F::Field }))
 			.holds(kFiles, kDocuments)
+			.navigates()
 			.row,
 	Request(K::PreviewTextureSource, "preview_texture_source", serve_preview_texture_source,
 			"What a Replace of the texture path by the image in paths (a file on disk, or a project file), "
@@ -848,6 +896,31 @@ constexpr RequestKindRow kRows[] = {
 			"walk: import_files with planned then takes them.")
 			.takes(request_params({}, { F::Names, F::WithDependencies, F::All }))
 			.holds(kFiles, kSlot, OnBusy::Supersede)
+			.ends_edit_groups()
+			.row,
+	// A terrain made from images is an import of them (S20): the set and its record written, then the
+	// refresh that imports it, which holds the slot as a reimport does.
+	Request(K::NewTerrain, "new_terrain", serve_new_terrain,
+			"A terrain named path (its stem: letters, digits and underscores, at most 9) made from images "
+			"(import/terrain_import.h): values names them, heightmap (a PNG of 1024 x 1024, any depth, or a "
+			".raw) and colormap (1024 x 1024) required, detail, tiles and surface optional, each a file on "
+			"disk (copied into art/terrain/ as <name>_<key>.<ext>) or a project file (named where it is), "
+			"and takes the importer's options top (world units of the heightmap's white, 127.5), water (the "
+			"sea's height in world units, 0 none) and layout (island or tiled); art/terrain/<name>.tset and "
+			"its record written, then imported, a refresh (the outcome names the operation), which makes "
+			"<name>.trn, .cpt, .til and its textures, and <name>_m.pcx, the surface map the .trn's "
+			"polytrn_charmap names, from a surface image (square, 256, 512 or 1024 a side, over the "
+			"heightmap: an 8-bit PCX's or a palette PNG's indices are the surface classes, 0 to 19; any "
+			"other image's colours each a class's legend colour exactly: 0 NULL #000000, 1 DIRT #99763D, 2 "
+			"GRASS #00D200, 3 SNOW #CCEFF4, 4 CEMENT #989898, 5 SAND #FFFF00, 6 PACKEDDIRT #FF8000, 7 "
+			"UNDERWATER #0000FF, 8 RAILROAD #FF0000, 9 MUD #724000, 10 ICE #A0BEDB, 11 QUICKSAND #A100A1, 12 "
+			"STONE #FF00BA, 13 WOOD #9E4E00, 14 METAL #00C9CB, 15 GLASS #C0FFFF, 16 CLOTH #8080FF, 17 "
+			"FOLIAGE #006400, 18 HMETAL #505050, 19 FLESH #FFC0A0). "
+			"Refused, nothing written (import.terrain): a name taken or that does not fit, a value of no "
+			"key it takes, an image that does not read or does not fit its role (a surface texel of no "
+			"class named by its column and row).")
+			.takes(request_params({ F::Path, F::Values }))
+			.holds(kFiles, kFiles | kSlot)
 			.ends_edit_groups()
 			.row,
 	Request(K::ClearOutput, "clear_output", serve_clear_output,
@@ -990,7 +1063,7 @@ constexpr bool rows_named() {
 }
 static_assert(rows_named(), "each request kind has a token of its own and a doc");
 
-// The session serves a row by its handler; a shell row has none, and holds, guards and ends
+// The session serves a row by its handler; a shell row has none, and holds, guards, ends and moves
 // nothing of the session's.
 constexpr bool handlers_where_served() {
 	for (const RequestKindRow &row : kRows) {
@@ -999,7 +1072,7 @@ constexpr bool handlers_where_served() {
 			return false;
 		if (!session &&
 				(row.guard != GuardScope::None || row.acts_on_saved || row.names_active ||
-						row.ends_edit_groups || row.reads != kNone ||
+						row.ends_edit_groups || row.navigates || row.reads != kNone ||
 						row.writes != kNone))
 			return false;
 	}
@@ -1193,7 +1266,11 @@ bool serve_request(SessionCore &core, const EditorRequest &request) {
 	workspace_closes_for(core, request);
 	if (core.guard().holds(request))
 		return true;
+	// Where the person was, as the navigation history keeps a place: what the request moves of it is a
+	// step of the history (a document switched to, a Go to) or where the person is now.
+	const NavigationController::Mark mark = core.navigation().mark(request);
 	row.handler(core, request);
+	core.navigation().follow(request, mark);
 	workspace_follows(core, request);
 	// What the workspace holds kept true to what the request changed (a file gone, a screen removed).
 	workspace_tidies(core);

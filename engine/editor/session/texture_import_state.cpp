@@ -116,7 +116,9 @@ bool texture_import_state(const SessionView &view, const std::string &path, Text
 			alpha = image_source_has_alpha(out.source, head);
 		}
 	}
-	out.needs = texture_import_needs(uses, basename_of(out.source), alpha);
+	// What the uses ask is the image importer's to answer, by its format, name, size and palette options; a
+	// terrain set's outputs are each made as the game reads it (import/terrain_import.h), and asked nothing.
+	if (out.sidecar.importer == "image") out.needs = texture_import_needs(uses, basename_of(out.source), alpha);
 	return true;
 }
 

@@ -15,6 +15,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
+#include <editor/import/terrain_import.h>
 #include <editor/model/field_text.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
@@ -75,10 +76,10 @@ void NewFilePrompt::ask(Workspace &workspace, AssetKind kind) {
 namespace {
 
 // The prompt's values as the session takes them: each given value by its param's token.
-io::JsonValue values_json(const BlankFactory *factory, const std::vector<std::string> &values) {
+io::JsonValue values_json(const BlankParam *params, size_t count, const std::vector<std::string> &values) {
 	io::JsonValue out = io::JsonValue::make_object();
-	for (size_t i = 0; factory && i < factory->param_count && i < values.size(); ++i)
-		if (!values[i].empty()) out.set(factory->params[i].token, io::JsonValue::make_string(values[i]));
+	for (size_t i = 0; i < count && i < values.size(); ++i)
+		if (!values[i].empty()) out.set(params[i].token, io::JsonValue::make_string(values[i]));
 	return out;
 }
 
@@ -88,8 +89,11 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	const WorkspaceView::NewFile &held = v.workspace.new_file;
 	const AssetKind kind = held.kind;
-	const BlankFactory *factory = kind == AssetKind::kCount ? nullptr : find_blank_factory_for_kind(kind);
-	const size_t params = factory ? factory->param_count : 0;
+	// A terrain is made from images (S20, the new_terrain request): its name the terrain's, its values the
+	// images and the importer's numbers; any other kind is its blank's.
+	const bool terrain = kind == AssetKind::Terrain;
+	size_t params = 0;
+	const BlankParam *taken = kind == AssetKind::kCount ? nullptr : new_file_params(kind, params);
 	// The fields take the session's values when they moved (the prompt opened on another kind, a value set
 	// over the wire).
 	name_.follow(held.name);
@@ -99,7 +103,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		values_.assign(params, std::string());
 		for (size_t i = 0; i < params; ++i)
 			for (const auto &[token, value] : held.values)
-				if (token == factory->params[i].token) values_[i] = value;
+				if (token == taken[i].token) values_[i] = value;
 	}
 	// Held open, it shows when no dialog before it in the session's order is held (shown_modal).
 	const bool open = kind != AssetKind::kCount && v.project.open && modal_may_show(v, HeldModal::NewFile);
@@ -107,12 +111,13 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		if (popup_.dismissed()) window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
 		return;
 	}
-	ImGui::Text("New file: %s", asset_kind_label(kind));
+	if (terrain) ImGui::TextUnformatted("New terrain from images");
+	else ImGui::Text("New file: %s", asset_kind_label(kind));
 	if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
-	// The name a new file of the kind is offered: its row's (AssetKindRow::new_name).
-	const bool enter = ImGui::InputTextWithHint("Name", asset_kind_row(kind).new_name, name_.text, sizeof(name_.text),
-	                                            ImGuiInputTextFlags_EnterReturnsTrue);
+	// The name a new file of the kind is offered: its row's (AssetKindRow::new_name); a terrain's, its stem.
+	const bool enter = ImGui::InputTextWithHint("Name", terrain ? "island" : asset_kind_row(kind).new_name, name_.text,
+	                                            sizeof(name_.text), ImGuiInputTextFlags_EnterReturnsTrue);
 	if (name_.sent() != held.name && ImGui::IsItemEdited())
 		window_requests::set_workspace(workspace, "new_file", "name", io::JsonValue::make_string(name_.sent()));
 	const char *name = name_.text;
@@ -121,17 +126,23 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
 	const bool named = name[0] != '\0';
-	bool fits = named && check_file_name(name, kind, problem, message);
+	bool fits = named && (terrain ? terrain_stem_fits(name, message) : check_file_name(name, kind, problem, message));
 	if (fits && kind == AssetKind::Texture) fits = can_make_blank_texture(name, message);
-	const bool taken = named && v.project.scan->find(name) != nullptr;
+	// A terrain's name is taken where the project has its settings already (the request checks every file
+	// it makes).
+	const std::string file = terrain ? std::string(name) + ".trn" : std::string(name);
+	const bool in_use = named && v.project.scan->find(file) != nullptr;
 	if (named && !fits) ImGui::TextColored(kRefusalColor, "%s", message.c_str());
-	else if (taken) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", name);
+	else if (in_use) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", file.c_str());
+	if (terrain)
+		ImGui::TextWrapped("Each image is a file on disk (copied into art/terrain/) or a file of the project; the "
+		                   "terrain is imported from them, and imported again when one changes.");
 	// What the kind's blank takes beside its name (a mission's title, terrain and environment): a
 	// text, or one of the project's files its reference loads. A project is its own files, so a
 	// kind the project has no file of says to import one.
 	bool given = true, changed = false;
 	for (size_t i = 0; i < params; ++i) {
-		const BlankParam &param = factory->params[i];
+		const BlankParam &param = taken[i];
 		ImGui::PushID(static_cast<int>(i));
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
 		if (param.reference == ReferenceKind::None) {
@@ -163,18 +174,20 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		ImGui::PopID();
 		given = given && (!param.required || !values_[i].empty());
 	}
-	if (changed) window_requests::set_workspace(workspace, "new_file", "values", values_json(factory, values_));
-	const bool ready = fits && !taken && given && v.allows(EditorRequestKind::CreateFile);
+	if (changed) window_requests::set_workspace(workspace, "new_file", "values", values_json(taken, params, values_));
+	const bool ready =
+	        fits && !in_use && given && v.allows(terrain ? EditorRequestKind::NewTerrain : EditorRequestKind::CreateFile);
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create");
 	ImGui::EndDisabled();
 	if ((create || enter) && ready) {
 		std::vector<std::pair<std::string, std::string>> values;
 		for (size_t i = 0; i < params; ++i)
-			if (!values_[i].empty()) values.emplace_back(factory->params[i].token, values_[i]);
+			if (!values_[i].empty()) values.emplace_back(taken[i].token, values_[i]);
 		// The session closes the prompt as it takes the file it names (create_file alone, over the wire); the
 		// prompt's Create closes it too, as Cancel does.
-		workspace.request(request::create_file(name, asset_kind_token(kind), std::move(values)));
+		if (terrain) workspace.request(request::new_terrain(name, std::move(values)));
+		else workspace.request(request::create_file(name, asset_kind_token(kind), std::move(values)));
 		window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
 		popup_.close();
 	}
@@ -547,6 +560,13 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 			ui_kit::tooltip(makes(factory));
 			ImGui::PopID();
 		}
+		// A terrain made from images (S20): its name, its images and numbers asked by the same prompt.
+		ImGui::BeginDisabled(!view.allows(EditorRequestKind::NewTerrain));
+		if (ImGui::Selectable("Terrain from images...") && view.allows(EditorRequestKind::NewTerrain))
+			NewFilePrompt::ask(workspace_, AssetKind::Terrain);
+		ImGui::EndDisabled();
+		ui_kit::tooltip("A terrain made from a heightmap and a colour map (and a detail, a tile set and a surface map): "
+		                "imported into the files the game reads for a terrain, and imported again when an image changes.");
 		// The files the game reads by name, each made at once from its role's factory.
 		ImGui::SeparatorText("Files the game reads");
 		for (size_t i = 0; i < blank_factory_count(); ++i) {

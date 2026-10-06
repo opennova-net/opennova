@@ -87,16 +87,29 @@ bool png_header_size(const std::vector<uint8_t> &bytes, uint32_t &width, uint32_
 	return true;
 }
 
-bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error) {
+namespace {
+
+// A PNG read to its unfiltered scanlines: its header, its palette (RGB triples) and the palette's
+// alpha, and the rows, each behind its filter byte (stride + 1 bytes a row).
+struct Scanlines {
+	Header header;
+	std::vector<uint8_t> palette;
+	std::vector<uint8_t> palette_alpha;
+	std::vector<uint8_t> raw;
+	size_t stride = 0;
+	const uint8_t *row(size_t y) const { return &raw[y * (stride + 1) + 1]; }
+};
+
+bool read_scanlines(const std::vector<uint8_t> &bytes, Scanlines &image, std::string &error) {
 	error.clear();
 	if (!is_png(bytes)) {
 		error = "Not a PNG file.";
 		return false;
 	}
-	Header header;
+	Header &header = image.header;
 	bool have_header = false, done = false;
-	std::vector<uint8_t> palette; // RGB triples
-	std::vector<uint8_t> palette_alpha;
+	std::vector<uint8_t> &palette = image.palette; // RGB triples
+	std::vector<uint8_t> &palette_alpha = image.palette_alpha;
 	std::vector<uint8_t> compressed;
 	size_t pos = 8;
 	while (!done) {
@@ -155,9 +168,11 @@ bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &
 
 	const size_t bits_per_pixel = size_t(header.channels) * size_t(header.bit_depth);
 	const size_t stride = (size_t(header.width) * bits_per_pixel + 7) / 8;
+	image.stride = stride;
 	const size_t filter_bytes = std::max<size_t>(1, bits_per_pixel / 8);
 	const size_t raw_size = (stride + 1) * size_t(header.height);
-	std::vector<uint8_t> raw(raw_size);
+	std::vector<uint8_t> &raw = image.raw;
+	raw.assign(raw_size, 0);
 	mz_ulong produced = mz_ulong(raw_size);
 	const int inflated = mz_uncompress(raw.data(), &produced, compressed.data(), mz_ulong(compressed.size()));
 	if (inflated != MZ_OK || produced != raw_size) {
@@ -188,13 +203,38 @@ bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &
 		}
 		std::memcpy(previous.data(), row, stride);
 	}
+	return true;
+}
+
+// A 16-bit sample, big-endian, at `index` of a 16-bit row.
+uint16_t sample16_at(const uint8_t *row, size_t index) {
+	return uint16_t((uint16_t(row[index * 2]) << 8) | row[index * 2 + 1]);
+}
+
+} // namespace
+
+bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error, IndexedImage8 *indexed) {
+	if (indexed) *indexed = IndexedImage8();
+	Scanlines image;
+	if (!read_scanlines(bytes, image, error)) return false;
+	const Header &header = image.header;
+	const std::vector<uint8_t> &palette = image.palette;
+	const std::vector<uint8_t> &palette_alpha = image.palette_alpha;
 
 	out.width = int(header.width);
 	out.height = int(header.height);
 	out.pixels.assign(size_t(out.width) * size_t(out.height) * 4, 255);
 	const size_t palette_entries = palette.size() / 3;
+	// The indices beside the colours, where the caller asks them of a palette image.
+	if (indexed && header.color_type == 3) {
+		indexed->width = out.width;
+		indexed->height = out.height;
+		indexed->indices.assign(size_t(out.width) * size_t(out.height), 0);
+		for (size_t i = 0; i < palette_entries; ++i)
+			for (size_t c = 0; c < 3; ++c) indexed->palette[i][c] = palette[i * 3 + c];
+	}
 	for (size_t y = 0; y < header.height; ++y) {
-		const uint8_t *row = &raw[y * (stride + 1) + 1];
+		const uint8_t *row = image.row(y);
 		for (size_t x = 0; x < header.width; ++x) {
 			uint8_t *pixel = &out.pixels[(y * header.width + x) * 4];
 			switch (header.color_type) {
@@ -210,11 +250,16 @@ bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &
 				break;
 			case 3: {
 				const size_t index = sample_at(row, x, header.bit_depth);
-				if (index >= palette_entries) { error = "Corrupt PNG: a pixel indexes past the palette."; return false; }
+				if (index >= palette_entries) {
+					if (indexed) *indexed = IndexedImage8();
+					error = "Corrupt PNG: a pixel indexes past the palette.";
+					return false;
+				}
 				pixel[0] = palette[index * 3];
 				pixel[1] = palette[index * 3 + 1];
 				pixel[2] = palette[index * 3 + 2];
 				if (index < palette_alpha.size()) pixel[3] = palette_alpha[index];
+				if (indexed) indexed->indices[y * header.width + x] = uint8_t(index);
 				break;
 			}
 			case 4: {
@@ -231,6 +276,45 @@ bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &
 				break;
 			default: break;
 			}
+		}
+	}
+	return true;
+}
+
+bool decode_png_gray(const std::vector<uint8_t> &bytes, GrayImage &out, std::string &error) {
+	Scanlines image;
+	if (!read_scanlines(bytes, image, error)) return false;
+	const Header &header = image.header;
+	const bool wide = header.bit_depth == 16;
+	out.width = int(header.width);
+	out.height = int(header.height);
+	out.max_value = wide ? 65535 : 255;
+	out.samples.assign(size_t(out.width) * size_t(out.height), 0);
+	const size_t palette_entries = image.palette.size() / 3;
+	// A sample of the image's own depth: 16 bits whole, 8 as they are, fewer scaled to 0..255.
+	const auto sample = [&](const uint8_t *row, size_t index) -> uint32_t {
+		if (wide) return sample16_at(row, index);
+		return header.color_type == 0 ? gray_scale(sample_at(row, index, header.bit_depth), header.bit_depth)
+		                              : sample_at(row, index, header.bit_depth);
+	};
+	for (size_t y = 0; y < header.height; ++y) {
+		const uint8_t *row = image.row(y);
+		for (size_t x = 0; x < header.width; ++x) {
+			uint32_t value = 0;
+			switch (header.color_type) {
+			case 0: value = sample(row, x); break;
+			case 4: value = sample(row, x * 2); break;
+			case 2: value = (sample(row, x * 3) + sample(row, x * 3 + 1) + sample(row, x * 3 + 2) + 1) / 3; break;
+			case 6: value = (sample(row, x * 4) + sample(row, x * 4 + 1) + sample(row, x * 4 + 2) + 1) / 3; break;
+			case 3: {
+				const size_t index = sample_at(row, x, header.bit_depth);
+				if (index >= palette_entries) { error = "Corrupt PNG: a pixel indexes past the palette."; return false; }
+				value = (uint32_t(image.palette[index * 3]) + image.palette[index * 3 + 1] + image.palette[index * 3 + 2] + 1) / 3;
+				break;
+			}
+			default: break;
+			}
+			out.samples[y * header.width + x] = uint16_t(value);
 		}
 	}
 	return true;

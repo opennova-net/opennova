@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <base/resource_index/resource_index.h>
+#include <base/vfs/file_source.h>
 #include <formats/cpt/cpt.h>
 #include <formats/trn/trn.h>
 #include <runtime/terrain_query/terrain_field_store.h>
@@ -57,5 +58,10 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 // and calls terrain_field_store_build directly.
 bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
 		const std::string &terrain_name, std::string &error);
+// The same load over any flat-name file source (the editor's project files, its open documents
+// standing in for theirs): the .trn it parsed handed back in `trn` where asked (its water height,
+// tile strip and char map name).
+bool terrain_field_store_load(TerrainFieldStore &store, const FileSource &files,
+		const std::string &terrain_name, std::string &error, TrnConfig *trn = nullptr);
 
 } // namespace opennova::terrain

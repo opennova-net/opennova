@@ -369,6 +369,13 @@ add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
 add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
 
+# The items.def ids and rows the engine fixes (docs/world/itemdef-re.md, "The ids and rows the
+# engine fixes"): the table, its lookups and rules, and the runtime's constants for the same ids.
+add_executable(def_reserved_items_test def/def_reserved_items_test.cpp)
+target_link_libraries(def_reserved_items_test PRIVATE opennova_runtime)
+target_include_directories(def_reserved_items_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME def_reserved_items COMMAND def_reserved_items_test)
+
 # AVATARS (Avatars.def) tests: parse against the retail fixture + from-scratch
 # writer round-trip (docs/playerinfo/avatars-re.md, docs/adr/0021).
 # fixtures/avatars/synth_avatars.def: the synthetic avatar table through avatars_write.
@@ -4034,6 +4041,24 @@ target_link_libraries(editor_blank_factory_test PRIVATE opennova_editor)
 target_include_directories(editor_blank_factory_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_blank_factory COMMAND editor_blank_factory_test)
 
+# TrnGen.exe's terrain bake ported (engine/editor/terrain): a depth map to the .cpt the game reads,
+# read back through the engine's reader; given the retired TrnGen corpus's directory as its
+# argument, the byte parity with TrnGen's own .cpt files (a run by hand).
+add_executable(editor_terrain_bake_test editor/terrain_bake_test.cpp)
+target_link_libraries(editor_terrain_bake_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_bake COMMAND editor_terrain_bake_test)
+
+# A terrain made from images (S20): the terrain set, the heightmap's depths, the new_terrain request
+# over a project (the import, the scan's kinds, the build's packing), the outputs read back and loaded
+# by the runtime's terrain field and frame compiler, the import rerun-stable, the blank environment
+# and a mission made on the terrain; the surface map read, written and sampled by the runtime (its
+# _retail entry reads a shipped char map as the importer does).
+add_executable(editor_terrain_import_test editor/terrain_import_test.cpp)
+target_link_libraries(editor_terrain_import_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_terrain_import COMMAND editor_terrain_import_test)
+
 add_executable(editor_create_missing_test editor/create_missing_test.cpp)
 target_link_libraries(editor_create_missing_test PRIVATE opennova_editor)
 target_include_directories(editor_create_missing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4124,6 +4149,13 @@ add_executable(editor_workspace_parts_test editor/workspace_parts_test.cpp)
 target_link_libraries(editor_workspace_parts_test PRIVATE opennova_editor)
 target_include_directories(editor_workspace_parts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_workspace_parts COMMAND editor_workspace_parts_test)
+
+# The navigation history (CONTEXT.md "Navigation history"): the history alone on a stepped clock, what is
+# a step of it in a session, Back and Forward showing a place again, the wire's requests and section.
+add_executable(editor_navigation_test editor/navigation_test.cpp)
+target_link_libraries(editor_navigation_test PRIVATE opennova_editor)
+target_include_directories(editor_navigation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_navigation COMMAND editor_navigation_test)
 
 add_executable(editor_document_set_test editor/document_set_test.cpp)
 target_link_libraries(editor_document_set_test PRIVATE opennova_editor)
@@ -4441,8 +4473,10 @@ add_test(NAME editor_mission_scene COMMAND editor_mission_scene_test)
 # row, its status and follow, what each change set comes to (an entity's transform an Update, an
 # event's field Keep with no row read, an Add and the header's terrain a Rebuild), a Rebuild held for
 # a gesture, a file the device read moving, its camera on the wire, its hits and boxes, its envelope,
-# a drop and the ground command. Mixed: the retail row opens every shipped mission (OPENNOVA_JO_DIR)
-# in its viewport, hits its marks and moves its first item and back.
+# a drop and the ground command; DI-07, the ground under a point in the game's words over a minted
+# terrain with a char map (class, footstep slots, effects row, a placed tile, the water). Mixed: the
+# retail row opens every shipped mission (OPENNOVA_JO_DIR) in its viewport, hits its marks and moves
+# its first item and back.
 add_executable(editor_mission_viewport_test editor/mission_viewport_test.cpp)
 target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4507,6 +4541,16 @@ target_link_libraries(editor_import_test PRIVATE opennova_editor)
 target_include_directories(editor_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_import COMMAND editor_import_test)
 
+# The font importer: a font set's glyph sheet made into a .fnt through our own FNT writer and read
+# back by fnt_parse (each advance mode, tracking, the space, the zero records, the header words, the
+# pages, the refusals), its run over an ImportContext, over a project (the set an import source, the
+# .fnt packed into localres, a changed sheet imported again), and an import of a set from the disk
+# bringing its sheet beside it.
+add_executable(editor_font_import_test editor/font_import_test.cpp)
+target_link_libraries(editor_font_import_test PRIVATE opennova_editor)
+target_include_directories(editor_font_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_font_import COMMAND editor_font_import_test)
+
 # The editor's ImGui windows over a null backend (ADR 0046 d11): built with the pass. The
 # workspace's shell (S11d: its layout, the Document tabs, Files, the menus, the modals) is
 # workspace_test.cpp's; the change marks, the reveal, Output and the shortcuts (S11e)
@@ -4518,7 +4562,8 @@ opennova_add_mixed_test(editor_import COMMAND editor_import_test)
 # control that raises a request enabled exactly when the busy gate takes it (S13 A1) gate_test.cpp's;
 # a clip's timeline and the animation types' Inspector (S17) animation_test.cpp's; the project, the
 # import, Files and the layout as a modder meets them (the UX round's project lane) project_test.cpp's;
-# all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
+# Back and Forward (the navigation history: the arrows, Alt+Left and Alt+Right, the mouse's buttons)
+# navigation_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
 # group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
 # this list and the program's table of groups to one list.
 if(OPENNOVA_IMGUI)
@@ -4527,12 +4572,13 @@ if(OPENNOVA_IMGUI)
                                   editor_ui/field_widgets_test.cpp editor_ui/reference_picker_test.cpp
                                   editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp
                                   editor_ui/logic_test.cpp editor_ui/animation_test.cpp
-                                  editor_ui/model_test.cpp editor_ui/project_test.cpp)
+                                  editor_ui/model_test.cpp editor_ui/project_test.cpp
+                                  editor_ui/navigation_test.cpp)
     target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
     target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
                                   menu inspector preview styles problems gate logic animation model
-                                  project)
+                                  project navigation)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
@@ -4575,6 +4621,13 @@ add_executable(editor_catalog_test editor/catalog_document_test.cpp)
 target_link_libraries(editor_catalog_test PRIVATE opennova_editor)
 target_include_directories(editor_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_catalog COMMAND editor_catalog_test)
+
+# The item ids the engine fixes, as the catalog keeps them (ADR 0046 S19, "Reserved item ids"): the
+# ids a new item never takes, the edits refused, the findings and their fixes, the engine's rows added.
+add_executable(editor_reserved_items_test editor/reserved_items_test.cpp)
+target_link_libraries(editor_reserved_items_test PRIVATE opennova_editor)
+target_include_directories(editor_reserved_items_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_reserved_items COMMAND editor_reserved_items_test)
 
 add_executable(editor_strings_test editor/strings_document_test.cpp)
 target_link_libraries(editor_strings_test PRIVATE opennova_editor)

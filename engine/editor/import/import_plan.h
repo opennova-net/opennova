@@ -153,7 +153,10 @@ struct ImportPlanRow {
 	std::string name;        // the logical name the project gets; not found: the name as the reference gives it
 	AssetKind kind = AssetKind::Unknown; // what the file is to the engine once imported (not found: the kind wanted)
 	std::string destination; // project-relative, where import_assets writes it
-	std::string made_from;   // on a converter's output, its source's name ("" = the file itself)
+	// On a converter's output, its source's name; on a file an import source brings beside it (a font
+	// set's glyph sheet: import_source_inputs), that source's; "" the file itself. The files of one
+	// source come together.
+	std::string made_from;
 	std::string found_in;    // where it comes from, in words
 	// The file's bytes as it is stored where it comes from (a converter's output: as made); 0 for
 	// one not found. What the dialog sums before anything is copied.

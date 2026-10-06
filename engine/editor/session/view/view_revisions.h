@@ -58,6 +58,9 @@ enum class ViewConcern : uint8_t {
 	// WorkspaceView: what the windows show of their own (the MCP gaps lane): a card, a panel or a dialog
 	// open and its fields, the sound the editor plays.
 	Workspace,
+	// NavigationView: the navigation history's places, Back's and Forward's; moves with a step kept, a
+	// Back or a Forward, a place dropped or moved, and the history cleared with its project.
+	Navigation,
 	kCount,
 };
 
@@ -80,6 +83,7 @@ inline constexpr ViewConcernRow kViewConcernRows[] = {
 	{ViewConcern::ActiveDocument, "active_document"},
 	{ViewConcern::Viewports, "viewports"},
 	{ViewConcern::Workspace, "workspace"},
+	{ViewConcern::Navigation, "navigation"},
 };
 
 static_assert(std::size(kViewConcernRows) == kViewConcernCount,

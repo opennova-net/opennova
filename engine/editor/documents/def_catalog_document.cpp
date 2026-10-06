@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/documents/catalog_validation.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/model/diagnostic.h>
@@ -188,11 +189,108 @@ void DefCatalogDocument::set_names_used_elsewhere(ReferenceKind kind, const std:
 		if (const std::optional<int> id = strutil::parse_int(name)) item_ids_elsewhere_.push_back(*id);
 }
 
-bool DefCatalogDocument::accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const {
-	if (duplicate_refusal_.empty()) return TableDocument::accept_step(step, rows, error);
-	error = duplicate_refusal_;
-	duplicate_refusal_.clear();
+bool DefCatalogDocument::accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const {
+	if (!duplicate_refusal_.empty()) {
+		refusal.message = duplicate_refusal_;
+		duplicate_refusal_.clear();
+		return false;
+	}
+	// A place or an objective the engine finds by its id keeps it (ReservedItemRule::Refuse): a step that
+	// moves such an item off its id, or gives its id to an item of another kind, is refused; one that
+	// leaves a mismatch the file already had as it was is not (retail's own items.def repeats 102044 on a
+	// powerup row, which stays editable). Every other field of the item stays free.
+	for (const RowSwap &swap : step.swaps) {
+		if (!swap.after || def_kind(swap.after->kind) != DefRecordKind::Item) continue;
+		const auto &after = static_cast<const CatalogRow &>(*swap.after).native.as<DefItemDef>();
+		const DefItemDef *before = swap.before && def_kind(swap.before->kind) == DefRecordKind::Item
+		                                   ? &static_cast<const CatalogRow &>(*swap.before).native.as<DefItemDef>()
+		                                   : nullptr;
+		std::string why, field;
+		if (reserved_change_allowed(before, after, why, field)) continue;
+		refusal.message = why;
+		refusal.code = &finding_code(CatalogFinding::ReservedRefused);
+		refusal.record = {swap.after->id, swap.after->kind, 0};
+		refusal.record_name = swap.after->name();
+		refusal.field = field;
+		return false;
+	}
+	return TableDocument::accept_step(step, rows, refusal);
+}
+
+// --- the ids the engine fixes ---------------------------------------------------------------------------
+
+// "a marker", "an effect", "an item of no type": an item's type as a message names it.
+std::string item_kind_words(int type) {
+	const std::string name = type ? def_item_type_name(type) : "item of no type";
+	return (std::string("aeiou").find(name.front()) != std::string::npos ? "an " : "a ") + name;
+}
+
+// "the Insertion point, a marker" / "the Parachute": a reserved row as a message names it.
+std::string reserved_item_words(const ReservedItem &row) {
+	std::string words = std::string("the ") + row.label;
+	if (row.kind) words += ", " + item_kind_words(row.kind);
+	return words;
+}
+
+bool reserved_change_allowed(const DefItemDef *before, const DefItemDef &after, std::string &why, std::string &field) {
+	// Off its id: an item the engine finds by its id, of the kind it looks for, moved to another.
+	if (before && before->id != after.id) {
+		const ReservedItem *held = reserved_item_by_id(before->id);
+		if (held && held->rule == ReservedItemRule::Refuse && reserved_item_kind_matches(*held, before->type)) {
+			why = "The engine finds " + reserved_item_words(*held) + ", by id " + std::to_string(before->id) + ": " +
+			      held->use + " This item keeps the id; add another item for a new one.";
+			field = "id";
+			return false;
+		}
+	}
+	// Onto its id, or there with another kind: refused where the step makes the mismatch.
+	const ReservedItem *taken = reserved_item_by_id(after.id);
+	if (!taken || taken->rule != ReservedItemRule::Refuse || reserved_item_kind_matches(*taken, after.type)) return true;
+	if (before && before->id == after.id && !reserved_item_kind_matches(*taken, before->type)) return true;
+	std::string what = item_kind_words(after.type);
+	what[0] = 'A';
+	why = "The engine keeps id " + std::to_string(after.id) + " for " + reserved_item_words(*taken) + ": " + taken->use +
+	      " " + what + " is never what it looks for there; give this item an id of its own.";
+	field = before && before->id == after.id ? "type" : "id";
 	return false;
+}
+
+const ReservedItem *reserved_item_named(const std::string &name) {
+	const std::string wanted = strutil::to_upper(strutil::trim(name));
+	if (wanted.empty()) return nullptr;
+	size_t count = 0;
+	const ReservedItem *rows = reserved_items(&count);
+	// The places and objectives retail ships a row of, by its name there or the editor's words for it (a
+	// flag of no retail row is named "Flag", as a decoration flag may be).
+	for (size_t i = 0; i < count; ++i)
+		if (rows[i].rule == ReservedItemRule::Refuse && *rows[i].retail &&
+		    (strutil::to_upper(rows[i].retail) == wanted || strutil::to_upper(rows[i].label) == wanted))
+			return &rows[i];
+	return nullptr;
+}
+
+std::vector<Edit> reserved_item_add_edits(const ReservedItem &row) {
+	std::vector<Edit> edits;
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = node_kind(DefRecordKind::Item);
+	add.field = "display_name";
+	add.value = std::string(row.label);
+	edits.push_back(std::move(add));
+	// The new item is a marker of an id of its own (made_item): its id and its kind the engine's.
+	Edit id;
+	id.address = {batch_made(0), node_kind(DefRecordKind::Item), 0};
+	id.field = "id";
+	id.value = int64_t(DEF_ITEM_ID_BASE + row.type);
+	edits.push_back(std::move(id));
+	if (row.kind && row.kind != DEF_ITEM_TYPE_MARKER) {
+		Edit kind;
+		kind.address = {batch_made(0), node_kind(DefRecordKind::Item), 0};
+		kind.field = "type";
+		kind.value = int64_t(row.kind);
+		edits.push_back(std::move(kind));
+	}
+	return edits;
 }
 
 void DefCatalogDocument::prepare_record(const Node &, const ListChange &change, DetachedRecord &record) const {

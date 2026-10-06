@@ -60,7 +60,7 @@ std::string startup_screen_xml(const std::string &title) {
 	       "\t\t\t<RIGHT>800</RIGHT>\n"
 	       "\t\t\t<BOTTOM>525</BOTTOM>\n"
 	       "\t\t</POSITION>\n" +
-	       std::string(k_main_font) + main_cursor() +
+	       std::string(k_main_font) + blank_menu_cursor() +
 	       "\t\t<WINDOW type=\"static\" name=\"TITLE\">\n"
 	       "\t\t\t<APPEARANCE state=\"default\"></APPEARANCE>\n"
 	       "\t\t\t<POSITION>\n"
@@ -101,7 +101,7 @@ std::string free_form_screen_xml(const std::string &screen) {
 	       "\t\t\t<RIGHT>800</RIGHT>\n"
 	       "\t\t\t<BOTTOM>600</BOTTOM>\n"
 	       "\t\t</POSITION>\n" +
-	       std::string(k_main_font) + main_cursor() +
+	       std::string(k_main_font) + blank_menu_cursor() +
 	       "\t</WINDOW>\n"
 	       "</SCREEN>\n";
 }
@@ -110,6 +110,10 @@ std::string free_form_screen_xml(const std::string &screen) {
 
 const char *blank_menu_font() {
 	return k_main_font;
+}
+
+std::string blank_menu_cursor() {
+	return main_cursor();
 }
 
 // Through the document model: the authored screen parses, and the serializer's

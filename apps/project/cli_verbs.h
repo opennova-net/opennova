@@ -14,6 +14,9 @@
 //   opennova-project import <dir> [<source>] [--entry <name>]... [--replace] [--with-dependencies]
 //                    [--all] [--dry-run [--rows]]
 //   opennova-project reimport <dir> [--force] [--source <path>]
+//   opennova-project new-terrain <dir> <name> --heightmap <file> --colormap <file> [--detail <file>]
+//                    [--tiles <file>] [--surface <file>] [--top <units>] [--water <units>]
+//                    [--layout island|tiled]
 //   opennova-project build <dir> [--out <dir>]
 //   opennova-project request <dir> <json>
 //   opennova-project query <dir> <name> [<json>]
@@ -55,6 +58,7 @@ enum class CliVerb : uint8_t {
 	CreateMissing,
 	Import,
 	Reimport,
+	NewTerrain,
 	Build,
 	Export,
 	Request,

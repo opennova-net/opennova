@@ -34,6 +34,10 @@ enum class FindingFix {
 	Rewrite,           // input a rewrite drops or normalizes: Rewrite the file (rewrite_does)
 	TextureRows,       // a TGA stored top first (S18): Save it bottom first (texture_operation)
 	ImportFitsUse,     // what a use asks of a texture an import makes (S18): Make the import fit the use
+	ItemId,            // an item on an id the engine keeps for another kind, or named as one it keeps
+	                   // under another id: Use an id of its own, or the id the engine looks for
+	                   // (Rename everywhere, the missions placing it with it)
+	FallbackRow,       // an items.def whose first row is no Null marker: Add one first
 	NormalRowType,     // a finished normal map (.mdt) in a normal-map slot loaded as a diffuse: its row
 	                   // given the normal map's type (edit_record)
 };
@@ -70,6 +74,7 @@ enum class FindingGroup {
 	UnsavedChanges,
 	Viewports,
 	Workspace,
+	Navigation,
 	Catalogs,
 	StringTables,
 	Menus,
@@ -83,6 +88,7 @@ enum class FindingGroup {
 	Shaders,
 	Missions,
 	Textures,
+	Texts, // a text the engine's own reader reads (DI-06: a particle file, an environment, the defs)
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -236,6 +242,7 @@ enum class CoreFinding {
 	AssetNameTooLong,
 	AssetUnreadable,
 	BlankDef,
+	BlankEnvironment,
 	BlankFont,
 	BlankMenu,
 	BlankMission,
@@ -312,6 +319,7 @@ enum class CoreFinding {
 	ImportEncode,
 	ImportExists,
 	ImportFolder,
+	ImportFont,
 	ImportInput,
 	ImportInstall,
 	ImportKind,
@@ -330,6 +338,7 @@ enum class CoreFinding {
 	ImportScene,
 	ImportSceneNote,
 	ImportSidecar,
+	ImportTerrain,
 	ImportNotFound,
 	ImportTextureNotImported,
 	ImportUnreadable,
@@ -339,6 +348,7 @@ enum class CoreFinding {
 	LocalSettingsUnreadable,
 	LocalSettingsWrite,
 	MissionSidecarUnused,
+	NavigationNone,
 	OperationBusy,
 	OperationNone,
 	OperationNotCancellable,

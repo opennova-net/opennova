@@ -167,9 +167,11 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 	// the config is rejected (returns 0) when the colormap (+256), detailmap
 	// (+512) or polydata (+3072) name is empty, when the `polytrn_sectors` row
 	// count (+5960) or `polytrn_sectorcount` (+5956) exceeds 16, or when either
-	// is not a power of two (`((n - 1) & n) != 0`). The heightmap row shift
-	// (`Terrain_ShiftHeightmapRows @0x60f190`) failing also rejects there;
-	// that leg runs over the loaded .cpt, not the text, and is not ported here.
+	// is not a power of two (`((n - 1) & n) != 0`). Its last leg,
+	// `Terrain_ShiftHeightmapRows @0x60f190`, never rejects: it extends the
+	// parsed grid to 16 columns and rows (periodically under wrap, else the
+	// last column and row copied outward) and returns 0 on every path
+	// [orig: @0x60F2A5..0x60F317, @0x60F31A]; the extension below is it.
 	if (out.colormap.empty()) {
 		error = "TRN rejected: polytrn_colormap is empty";
 		return false;
