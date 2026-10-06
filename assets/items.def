@@ -131,6 +131,15 @@ begin "Wooden guard tower"
 	type building
 	armor -1 -1
 end
+begin "Field radio on an ammunition crate"
+	graphic onradio1
+	id 100019
+	hp 10
+	type decoration
+	armor -1 -1
+	attrib: notarget
+end
+
 
 
 
