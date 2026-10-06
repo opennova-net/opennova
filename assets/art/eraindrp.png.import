@@ -1,0 +1,12 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga"
+  },
+  "outputs": [
+    "eraindrp.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "7851a77dc82471cd",
+  "version": 3
+}
