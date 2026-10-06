@@ -247,6 +247,7 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::TileInfo, "tile_info", "Tile placement", ArchiveSlot::Resource)
 	        .extensions(kTileInfo)
 	        .folder("missions")
+	        .new_name("newmission.til")
 	        .about("A mission's tile placement, which the game finds by the mission's name.")
 	        .row,
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
