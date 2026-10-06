@@ -51,6 +51,7 @@
 #include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
 #include "editor/png_test_support.h"
+#include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
 namespace fs = std::filesystem;
@@ -2213,6 +2214,11 @@ static int test_unsaved_prompt() {
 	            !v.dialogs.quit_requested);
 	answer(UnsavedChoice::Cancel);
 
+	// Play asks as Build does with the editor's save_before_play off (DI-26: on, it saves first).
+	ProjectSettingsChange asks;
+	asks.save_before_play = false;
+	session.handle(request::apply_project_settings(asks));
+	TEST_EXPECT(!v.project.save_before_play);
 	session.handle(request::play());
 	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Play && prompt.files == both && !prompt.can_discard);
 	answer(UnsavedChoice::Cancel);
@@ -2235,6 +2241,70 @@ static int test_unsaved_prompt() {
 	TEST_EXPECT(session.outcome().done() && !prompt.open && !project.items->dirty() && session.view().activity.operation.running());
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build);
+	return 0;
+}
+
+// DI-26, the Play loop: with the editor's save_before_play on (the default, kept with the preferences), Play
+// writes every file with unsaved edits first, as Save all does, and builds without asking; Output says how
+// many. A file it could not write stays unsaved and the prompt lists it alone. While a build runs, which the
+// Play would join, it asks (the Save weighed against the build, as the prompt's answer is).
+static int test_play_saves_first() {
+	SaveProject project("opennova_editor_session_play_saves");
+	TEST_EXPECT(project.open());
+	if (!project.items) return 1;
+	ProjectSession &session = project.session;
+	const SessionView &v = session.view();
+	const DialogsView::UnsavedPrompt &prompt = v.dialogs.unsaved_prompt;
+	TEST_EXPECT(v.project.save_before_play && project.preferences.preferences().save_before_play);
+	TEST_EXPECT(view_section_to_json(v, ViewSection::Preferences).get_bool("save_before_play", false));
+	const std::string runtime = project.dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+	project.set_hp(20);
+	project.add_section();
+	session.handle(request::play());
+	TEST_EXPECT(session.outcome().done() && !prompt.open && !project.items->dirty() && !project.strings->dirty());
+	TEST_EXPECT(output_has(v, "Saved 2 files before Play") && v.activity.operation.running());
+	std::string text, error;
+	TEST_EXPECT(read_file_text(project.root + "/" + project.items_path, text, error) && text.find("hp 20") != std::string::npos);
+	session.run_operations();
+	TEST_EXPECT(v.activity.has_build && project.platform.spawns == 1);
+	session.handle(request::stop_play());
+	session.poll();
+
+	// One it cannot write: the other is written, the prompt lists the one left.
+	project.set_hp(30);
+	project.add_section();
+	TEST_EXPECT(project.block_items(true));
+	session.handle(request::play());
+	TEST_EXPECT(session.outcome().unsaved_prompt && prompt.open && prompt.action == EditorRequestKind::Play &&
+	            prompt.files == std::vector<std::string>{project.items_path} && !project.strings->dirty());
+	TEST_EXPECT(project.block_items(false));
+	session.handle(request::resolve_unsaved(UnsavedChoice::Cancel));
+	session.handle(request::save_all());
+	TEST_EXPECT(!project.items->dirty());
+
+	// A build running: Play would join it, which packs the files as they are: it asks.
+	session.handle(request::build());
+	TEST_EXPECT(v.activity.operation.running());
+	project.set_hp(40);
+	TEST_EXPECT(project.items->dirty());
+	session.handle(request::play());
+	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Play && project.items->dirty());
+	session.handle(request::resolve_unsaved(UnsavedChoice::Cancel));
+	session.run_operations();
+
+	// The setting kept with the preferences, and read back as on where a store does not say.
+	ProjectSettingsChange asks;
+	asks.save_before_play = false;
+	editor_test::apply_settings(session, asks);
+	TEST_EXPECT(!v.project.save_before_play && !project.preferences.preferences().save_before_play);
+	session.handle(request::play());
+	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Play);
+	session.handle(request::resolve_unsaved(UnsavedChoice::Cancel));
+	TEST_EXPECT(Preferences().save_before_play);
 	return 0;
 }
 
@@ -2690,6 +2760,166 @@ static int test_play_mission() {
 	            platform.last_plan.args == std::vector<std::string>({"/w", "/d", "/FRISK"}) &&
 	            output_has(v, "The game install starts at its menu: choose First.bms there.") &&
 	            v.activity.status == "Game install running.");
+	session.handle(request::stop_play());
+	session.poll();
+	return 0;
+}
+
+// The start markers of the mission `name` in the run directory's (or a build's) archive `archive`, by
+// their positions (empty when it holds no such mission).
+static std::vector<opennova::bms::Entity> staged_markers(const std::string &archive, const std::string &name) {
+	std::vector<opennova::bms::Entity> out;
+	opennova::pff::PffArchive pff{};
+	if (opennova::pff::pff_open(&pff, archive.c_str()) != 0) return out;
+	if (const opennova::pff::PffEntry *entry = opennova::pff::pff_find(&pff, name.c_str())) {
+		std::vector<uint8_t> bytes(entry->size);
+		opennova::bms::File mission;
+		std::string error;
+		if (opennova::pff::pff_extract(&pff, entry, bytes.data(), bytes.size()) == 0 &&
+		    opennova::bms::parse(bytes.data(), bytes.size(), mission, error))
+			out = mission.markers;
+	}
+	opennova::pff::pff_close(&pff);
+	return out;
+}
+
+// DI-26, Play from here: play {mission, start}. A start with no mission is refused before anything is built
+// (play.start). The runtime mounts its run directory, where the build is staged for it, and the run
+// directory's archive carries the mission with its insertion point at the start, facing its heading; the
+// project's file and the build's archive keep theirs. The run section says where the player starts, and
+// Output how the start was placed. A plain Play after runs on the build again, the staged files gone. Strict
+// Play in the game install gets the same start in its staged archive, and Output says the game starts at
+// its menu, where the mission is chosen.
+static int test_play_from_here() {
+	using namespace opennova;
+	editor_test::TempProjectDir dir("opennova_editor_session_play_from_here");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	const std::string root = dir.file("project");
+	session.handle(request::new_project(root, "From here"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	std::vector<uint8_t> mission_bytes;
+	{
+		bms::File mission;
+		mission::make_default(mission);
+		mission::EntityTransform at;
+		at.x = 5.0f;
+		at.y = 6.0f;
+		mission::add_entity(mission, mission::EntityKind::Marker, 106094, at);
+		std::string error;
+		TEST_EXPECT(bms::write(mission, mission_bytes, error));
+	}
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/First.bms", mission_bytes));
+	session.handle(request::rescan());
+	session.run_operations();
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	launcher.mcp_port = 8999;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+	PlayStart start;
+	start.set = true;
+	start.at[0] = 120.5;
+	start.at[1] = -40.25;
+	start.at[2] = 8.0;
+	start.yaw = 90.0;
+	const auto at_start = [&start](const std::vector<bms::Entity> &markers) {
+		return markers.size() == 1 && markers[0].x == bms::to_fixed_16_16(start.at[0]) &&
+		       markers[0].y == bms::to_fixed_16_16(start.at[1]) && markers[0].z == bms::to_fixed_16_16(start.at[2]) &&
+		       markers[0].yaw == 90;
+	};
+
+	EditorRequest bare = request::play();
+	bare.start = start;
+	session.handle(bare);
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "play.start") &&
+	            !v.activity.operation.running());
+	// The wire form: start {at, yaw}, read back as it was.
+	{
+		const EditorRequest from = request::play_from("First.bms", start);
+		EditorRequest read;
+		std::string error;
+		TEST_EXPECT(editor_request_from_json(editor_request_to_json(from), read, error) && read == from);
+		io::JsonValue short_start;
+		TEST_EXPECT(io::json_parse(R"({"kind": "play", "mission": "First.bms", "start": {"at": [1, 2]}})", short_start, error));
+		TEST_EXPECT(!editor_request_from_json(short_start, read, error) && error.find("[x, y, z]") != std::string::npos);
+	}
+
+	session.handle(request::play_from("First.bms", start));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running && v.activity.play_mission == "First.bms");
+	const std::string run = platform.last_plan.working_dir;
+	const std::string build = platform.last_plan.build_dir;
+	{
+		const std::vector<std::string> &args = platform.last_plan.args;
+		const auto mounted = std::find(args.begin(), args.end(), "--resource-dir");
+		TEST_EXPECT(platform.last_plan.resource_dir == run && mounted != args.end() && mounted + 1 != args.end() &&
+		            *(mounted + 1) == run && args.back() == "First.bms");
+	}
+	TEST_EXPECT(at_start(staged_markers(run + "/localres.pff", "First.bms")));
+	const std::vector<bms::Entity> built = staged_markers(build + "/localres.pff", "First.bms");
+	TEST_EXPECT(built.size() == 1 && built[0].x == bms::to_fixed_16_16(5.0));
+	std::vector<uint8_t> project_bytes;
+	std::string io_error;
+	TEST_EXPECT(read_file_bytes(root + "/missions/First.bms", project_bytes, io_error) && project_bytes == mission_bytes);
+	{
+		const io::JsonValue section = view_section_to_json(v, ViewSection::Run);
+		const io::JsonValue *placed = section.get("start");
+		TEST_EXPECT(placed && placed->is_object() && placed->get_number("marker_type", 0) == 6094 &&
+		            placed->get_number("markers", 0) == 1 && !placed->get_bool("added", true) &&
+		            placed->get_string("archive", "") == "localres.pff" && placed->get_number("yaw", 0) == 90);
+	}
+	TEST_EXPECT(output_has(v, "Play from here: the player starts at (120.5, -40.2, 8.0) facing 90, 1 start marker of type "
+	                          "6094 moved in First.bms of the run directory's localres.pff"));
+	session.handle(request::stop_play());
+	session.poll();
+
+	// A plain Play: on the build, no start; the staged build gone from the run directory.
+	session.handle(request::play("First.bms"));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 2 && platform.last_plan.resource_dir == platform.last_plan.build_dir &&
+	            platform.last_plan.working_dir == run && !std::filesystem::exists(run + "/localres.pff") &&
+	            !v.activity.play_start.set && view_section_to_json(v, ViewSection::Run).get("start")->is_null());
+	session.handle(request::stop_play());
+	session.poll();
+
+	// The mission view's Play from here: its camera's start (no terrain here: the plane through its target),
+	// the Play behind as the edit_in_viewport asks.
+	session.handle(request::open_document("First.bms"));
+	editor_test::FakeDevices devices;
+	devices.sync(session);
+	EditorRequest here = request::play_from_here("First.bms");
+	here.behind = true;
+	session.handle(here);
+	TEST_EXPECT(session.outcome().done() && v.activity.operation.running());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 3 && platform.last_plan.behind && v.activity.play_start.set &&
+	            platform.last_plan.resource_dir == platform.last_plan.working_dir &&
+	            staged_markers(platform.last_plan.working_dir + "/localres.pff", "First.bms").size() == 1);
+	session.handle(request::stop_play());
+	session.poll();
+
+	// Strict Play in the game install: the staged archive carries the start; the game starts at its menu.
+	const std::string install = dir.file("install");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink"));
+	editor_test::set_game_install(session, install);
+	ProjectSettingsChange strict;
+	strict.play_in_install = true;
+	strict.play_in_install_strict = true;
+	editor_test::apply_settings(session, strict);
+	session.handle(request::play_from("First.bms", start));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running &&
+	            platform.last_plan.args == std::vector<std::string>({"/w", "/FRISK"}));
+	TEST_EXPECT(at_start(staged_markers(platform.last_plan.working_dir + "/localres.pff", "First.bms")));
+	TEST_EXPECT(staged_markers(build + "/localres.pff", "First.bms").size() == 1 &&
+	            staged_markers(build + "/localres.pff", "First.bms")[0].x == bms::to_fixed_16_16(5.0));
+	TEST_EXPECT(output_has(v, "The game install starts at its menu: choose First.bms there: its player starts at (120.5, "
+	                          "-40.2, 8.0) facing 90."));
 	session.handle(request::stop_play());
 	session.poll();
 	return 0;
@@ -4643,6 +4873,7 @@ int main() {
 	failures += test_build_findings_stay();
 	failures += test_boot_findings();
 	failures += test_play_mission();
+	failures += test_play_from_here();
 	failures += test_new_mission();
 	failures += test_mission_notes();
 	failures += test_optional_rows();
@@ -4653,6 +4884,7 @@ int main() {
 	failures += test_save_contract();
 	failures += test_gestures_per_document();
 	failures += test_unsaved_prompt();
+	failures += test_play_saves_first();
 	failures += test_prompt_saves_what_it_lists();
 	failures += test_prompt_renews();
 	failures += test_prompt_belongs_to_its_project();

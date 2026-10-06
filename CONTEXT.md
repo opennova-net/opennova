@@ -1350,9 +1350,22 @@ runtime MCP answers, then drives it there. Play starts the game at its menu; **P
 (Ctrl+F5) starts it in the active document's mission, a `.bms` of the project (the document
 itself, or the mission whose sidecar it is). A mission the project does not hold is refused
 before anything is built; one that does not load is a Problems row until the next Play. Play in
-the game install starts at its menu whatever is asked (the stock game takes no mission).
+the game install starts at its menu whatever is asked (the stock game takes no mission). Play
+saves every file with unsaved edits first (the editor's `save_before_play`, on by default; off,
+it asks as Build does).
 _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running game),
 "see in game"
+
+**Play from here**:
+Play of a mission with the player starting at a point of it: the ground under the mission view's
+camera (its button, Build > Play from here, Alt+F5) or under a point of its picture (the picture's
+right-click menu), facing the way the camera looks. Neither game takes a place on its command
+line, so the start is a **start marker**: the build's copy of the mission in the run directory
+has the markers its single player deploys at moved there (one added where it has none), never the
+project's file nor the build, and the game places its player there by its own spawn selection,
+OpenNova and the game install alike (the game install starts at its menu, where the mission is
+chosen).
+_Avoid_: teleport, spawn point (a deploy zone's), warp
 
 **Run directory**:
 Where Play runs the game: `.opennova/run/<mode>/<n>/` (the Play's mode, `runtime`, `install` or
