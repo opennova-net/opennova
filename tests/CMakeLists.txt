@@ -4531,6 +4531,16 @@ target_link_libraries(editor_problem_edit_fixes_test PRIVATE opennova_editor)
 target_include_directories(editor_problem_edit_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_problem_edit_fixes COMMAND editor_problem_edit_fixes_test)
 
+# Missing names offer "Add it there" (ADR 0046 DI-15): a record of the name's kind added to the
+# file where the game looks it up, named as referenced, born as the type's own Add makes one
+# (a weapon, an ammo, a powerup, an item on its id by the reserved-id rule, a string id, a
+# screen, a window, a style variable, a sound set, a sound profile, an effect), one step Undo
+# takes back, over a real session.
+add_executable(editor_add_it_there_test editor/add_it_there_test.cpp)
+target_link_libraries(editor_add_it_there_test PRIVATE opennova_editor)
+target_include_directories(editor_add_it_there_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_add_it_there COMMAND editor_add_it_there_test)
+
 # The menu clipboard's one rule for the tree and the canvas (S13 V1, documents/mnu_clipboard):
 # a window a part holds is copyable from neither, a Paste after the primary's window.
 add_executable(editor_mnu_clipboard_test editor/mnu_clipboard_test.cpp)
