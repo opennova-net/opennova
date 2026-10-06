@@ -260,7 +260,7 @@ void ImportController::new_terrain(const EditorRequest &request) {
 	const std::string folder = "art/terrain";
 	const std::string set_path = folder + "/" + stem + kTerrainSetExtension;
 	// Its files' names are the project's to give: none may be taken (the game's names are flat).
-	std::vector<std::string> names = terrain_output_names(stem, true);
+	std::vector<std::string> names = terrain_output_names(stem, true, true);
 	names.push_back(stem + kTerrainSetExtension);
 	for (const std::string &name : names)
 		if (const AssetEntry *taken = scan.find(name))
@@ -270,7 +270,7 @@ void ImportController::new_terrain(const EditorRequest &request) {
 			                        taken->relative_path);
 
 	// The values: the images by their set keys, the importer's options by theirs.
-	static const char *const kImageKeys[] = {"heightmap", "colormap", "detail", "tiles"};
+	static const char *const kImageKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface"};
 	std::map<std::string, std::string> images;
 	ImportOptions options;
 	for (const auto &[key, value] : request.values) {
@@ -282,8 +282,8 @@ void ImportController::new_terrain(const EditorRequest &request) {
 			if (!value.empty()) options[key] = value;
 		} else {
 			return core_.refuse_now(CoreFinding::ImportTerrain,
-			                        "No terrain made: a new terrain takes heightmap, colormap, detail, tiles, top, water and "
-			                        "layout; '" + key + "' is none of them.");
+			                        "No terrain made: a new terrain takes heightmap, colormap, detail, tiles, surface, top, "
+			                        "water and layout; '" + key + "' is none of them.");
 		}
 	}
 	if (!images.count("heightmap") || !images.count("colormap"))
@@ -316,6 +316,9 @@ void ImportController::new_terrain(const EditorRequest &request) {
 		if (std::string(key) == "heightmap") {
 			TerrainHeights heights;
 			fits = decode_terrain_heightmap(name, bytes, settings.top, heights, why);
+		} else if (std::string(key) == "surface") {
+			IndexedImage8 surface;
+			fits = decode_terrain_surface(name, bytes, surface, why);
 		} else {
 			RgbaImage image;
 			fits = decode_terrain_image(key, name, bytes, image, why);
@@ -338,7 +341,8 @@ void ImportController::new_terrain(const EditorRequest &request) {
 		if (std::string(key) == "heightmap") set.heightmap = named;
 		else if (std::string(key) == "colormap") set.colormap = named;
 		else if (std::string(key) == "detail") set.detail = named;
-		else set.tiles = named;
+		else if (std::string(key) == "tiles") set.tiles = named;
+		else set.surface = named;
 	}
 
 	// Written: the copies, the set, its record; what was written taken away again should one fail.
