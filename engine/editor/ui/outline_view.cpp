@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include <base/io/cp1252.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_table.h>
@@ -623,9 +625,39 @@ void OutlineView::draw_masters(Workspace &workspace, const Document &document) {
 	tools.remove_tip = "Removes the selected one with what it holds.";
 	const NodeAddress address = index < rows.size() ? NodeAddress{rows[index]->id, rows[index]->kind, 0} : NodeAddress();
 	const ui_kit::RowTool tool = ui_kit::row_tools(row, tools);
-	if (tool == ui_kit::RowTool::Add) {
-		if (const RecordKindRow *kind = own_kind(document))
-			edit(workspace, document, EditOperation::Add, {0, kind->kind, 0});
+	const RecordKindRow *adds = own_kind(document);
+	if (tool == ui_kit::RowTool::Add && adds) {
+		// A row named as it is added (a string table's section): its name asked first.
+		if (*spec_.row_name_field) {
+			add_name_[0] = '\0';
+			ImGui::OpenPopup("add named");
+		} else {
+			edit(workspace, document, EditOperation::Add, {0, adds->kind, 0});
+		}
+	}
+	if (adds && ImGui::BeginPopup("add named")) {
+		const std::string words = lower(adds->label);
+		ImGui::TextUnformatted(("The new " + words + "'s name:").c_str());
+		if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16.0f);
+		const bool entered = ImGui::InputText("##name", add_name_, sizeof(add_name_), ImGuiInputTextFlags_EnterReturnsTrue);
+		// One of the name already (in any case, as the game's lookup finds a name): Add selects it.
+		const Node *held = nullptr;
+		for (const auto &each : rows)
+			if (!held && add_name_[0] && strutil::iequals(retail_text_to_utf8(each->name()), add_name_)) held = each.get();
+		if (held)
+			ImGui::TextDisabled("%s", (adds->label + std::string(" ") + retail_text_to_utf8(held->name()) +
+			                           " is already in the file: Add selects it.").c_str());
+		ImGui::BeginDisabled(!add_name_[0]);
+		const bool add = ImGui::Button("Add") || (entered && add_name_[0]);
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+		if (add) {
+			window_requests::add_with(workspace, document, {0, adds->kind, 0}, 0, spec_.row_name_field, std::string(add_name_));
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
 	}
 	row_tool(workspace, document, tool, address, index);
 	if (rows.empty()) ui_kit::empty_state(("No " + lower(spec_.rows) + " yet.").c_str());
@@ -662,6 +694,39 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 		const ui_kit::RowTool tool = ui_kit::row_tools(row, tools);
 		if (tool == ui_kit::RowTool::Add) edit(workspace, document, EditOperation::Add, {master->id, kind, 0});
 		row_tool(workspace, document, tool, address, at);
+		// The selected record to another row (a string to another section): a Move whose destination is
+		// that row, which the type makes an add there and a remove here, one undo step.
+		if (spec_.details_move_between_rows) {
+			const RecordKindRow *rows_kind = own_kind(document);
+			const std::string to = lower(rows_kind ? rows_kind->label : "row");
+			const std::string label = "Move to " + to + "...";
+			const bool can = at < ids.size() && document.rows().size() > 1;
+			if (ui_kit::tool(row, label.c_str(), can,
+			                 at >= ids.size() ? std::string(tools.pick)
+			                 : can           ? "Moves it to the end of another " + to + "'s list (one undo step)."
+			                                 : "The file has no other " + to + ".",
+			                 true)) {
+				move_filter_[0] = '\0';
+				ImGui::OpenPopup("move to row");
+			}
+			if (ImGui::BeginPopup("move to row")) {
+				ui_kit::filter_box("##rows", move_filter_, sizeof(move_filter_), "Filter", ImGui::GetFontSize() * 16.0f);
+				NodeId chosen = 0;
+				for (const auto &each : document.rows()) {
+					if (each->id == master->id) continue;
+					const std::string name = retail_text_to_utf8(each->name());
+					if (move_filter_[0] && !window_requests::matches(name, move_filter_)) continue;
+					ImGui::PushID(static_cast<int>(each->id));
+					if (ImGui::Selectable(name.empty() ? "(no name)" : name.c_str())) chosen = each->id;
+					ImGui::PopID();
+				}
+				if (chosen) {
+					edit(workspace, document, EditOperation::Move, address, SIZE_MAX, chosen);
+					ImGui::CloseCurrentPopup();
+				}
+				ImGui::EndPopup();
+			}
+		}
 		ImGui::PopID();
 		if (!every && ids.empty()) return ui_kit::empty_state("Nothing in it yet.");
 	}
