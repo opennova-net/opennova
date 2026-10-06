@@ -28,6 +28,7 @@ std::string sound_words(const world::AnimEventSound &sound) {
 }
 
 std::string slot_keyword(int slot) {
+	if (slot < 0) return std::string(); // a set played by name (DI-10's death sound), no profile's slot
 	const char *keyword = audio::sound_profile_slot_keyword(slot);
 	return keyword ? keyword : "slot " + std::to_string(slot);
 }
