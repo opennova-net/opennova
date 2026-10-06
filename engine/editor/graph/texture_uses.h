@@ -8,6 +8,7 @@
 
 #include <base/io/json.h>
 #include <editor/assets/asset_kind.h>
+#include <editor/documents/texture_budget.h>
 #include <editor/documents/texture_load_rules.h>
 #include <editor/documents/texture_roles.h>
 
@@ -54,8 +55,15 @@ struct TextureUse {
 	// -1 for a menu's or a mission's, which its role's loader takes), a fixed name's loader.
 	int32_t loader_arg = -1;
 	TextureLoader loader = TextureLoader::kCount;
+	// What the use's texture costs the game (documents/texture_budget): a model row's, of the file its loader
+	// opens; unknown for another use, or until the session reads that file's header (TextureUseIndex).
+	TextureBudget budget;
 	bool known() const { return role != TextureRoleId::kCount; }
 };
+
+// The budget of a use whose loader opens the file `header` is of (its `served` file): a model row's, by its
+// role's loader and its slot; unknown for any other use.
+TextureBudget texture_use_budget(const TextureUse &use, const TextureHeader &header);
 
 // Whether the use's loader would open the file named `file` (by its logical name) were that the one file of
 // its names the project held: a model row naming body.tga opens body.dds (the .dds beside it first) and
