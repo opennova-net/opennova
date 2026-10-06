@@ -7,6 +7,7 @@
 #include <editor/session/view/dialogs_view.h>
 #include <editor/session/view/documents_view.h>
 #include <editor/session/view/findings_view.h>
+#include <editor/session/view/navigation_view.h>
 #include <editor/session/view/project_view.h>
 #include <editor/session/view/view_events.h>
 #include <editor/session/view/view_revisions.h>
@@ -18,8 +19,9 @@ namespace opennova::editor {
 // one and rewrites it as the project changes; the windows read it by const reference
 // every frame and never reach into the session. Since S13 V4 it is an aggregate of sub-views,
 // one per part of what it shows (session/view/): the project, the documents, the findings, the
-// activity (the operation, the build, Play, Output), the dialogs and the workspace (what the windows
-// show of their own: a card, a panel, a form's fields; the MCP gaps lane), each holding what is heavy
+// activity (the operation, the build, Play, Output), the dialogs, the workspace (what the windows
+// show of their own: a card, a panel, a form's fields; the MCP gaps lane) and the navigation history's
+// places (Back's and Forward's), each holding what is heavy
 // behind a shared pointer to a type it only declares, so this header pulls no header of the
 // runtime, the graph, the build or the import machinery; and the events, the one-shot asks a
 // request makes of a window (view_events.h). `revisions` counts the changes of each concern
@@ -33,6 +35,7 @@ struct SessionView {
 	ActivityView activity;
 	DialogsView dialogs;
 	WorkspaceView workspace;
+	NavigationView navigation;
 	ViewEvents events;
 
 	// Whether the session's busy gate takes a request of `kind` now: not busy_refuses over the
