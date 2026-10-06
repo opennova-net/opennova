@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <base/io/json.h>
+#include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
 #include <editor/session/navigation_controller.h>
@@ -228,6 +229,7 @@ bool EditorWindows::draw_frame(uint64_t frame_index) {
 
 void EditorWindows::begin_frame() {
 	in_frame_ = true;
+	pointer_hidden_ = false;
 	dispatch_events();
 }
 
@@ -517,7 +519,10 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 	// the sites it rewrote), shown before it commits, offered while its name is still where it put it.
 	if (v.activity.last_rename.made && rename_back_offered(v)) {
 		const ActivityView::LastRename &last = v.activity.last_rename;
-		const std::string label = "Rename " + last.to + " back to " + last.from + "...";
+		// A move's (DI-03): the file to the folder it left.
+		const std::string label = last.move ? "Move " + basename_of(last.path) + " back to " +
+		                                              (last.from.empty() ? std::string("the top level") : last.from + "/") + "..."
+		                                    : "Rename " + last.to + " back to " + last.from + "...";
 		if (menu_item(label.c_str(), nullptr, v.allows(EditorRequestKind::PreviewRenameBack)))
 			request(request::preview_rename_back(true));
 		ui_kit::tooltip("Undo does not take a rename back: it rewrote files. This shows what renaming it back rewrites "
@@ -557,6 +562,12 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	ui_kit::tooltip(mission.empty() ? std::string("Open a mission, or a file the game finds by its name (its script, its text), to "
 	                                              "start the game in it.")
 	                                : "Build, then start the game in " + mission + ".");
+	// A first run: the run directory emptied of what the runs before wrote there (run/run_directory.h), which
+	// Play keeps otherwise.
+	if (menu_item("Play fresh", nullptr, plays)) request(request::play(std::string(), false, true));
+	ui_kit::tooltip("Build, then start the game in an emptied run folder, as on its first run: without the game.cfg, "
+	                "saves and scores earlier runs wrote there (the game install asks for the display adapter again). "
+	                "Play keeps them.");
 	if (menu_item("Stop", "Shift+F5", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
 		request(request::stop_play());
 	ImGui::Separator();

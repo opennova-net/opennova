@@ -30,7 +30,6 @@
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
-#include <formats/lwf/lwf.h>
 #include <formats/env/env.h>
 #include <formats/grm/grm.h>
 #include <formats/particle/parser.h>
@@ -301,19 +300,6 @@ bool extract_terrain(const std::string &name, const std::vector<uint8_t> &bytes,
 	return true;
 }
 
-// A sound bank (.lwf, ADR 0046 S14): the wave each of its singles names (formats/lwf).
-bool extract_sound_bank(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
-	lwf::File bank;
-	std::string message;
-	if (!lwf::parse_lwf_buffer(bytes.data(), bytes.size(), bank, message)) {
-		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
-		return false;
-	}
-	for (const lwf::Single &single : bank.singles)
-		if (!single.path.empty()) out.edges.push_back(edge_of(name, single.name, "wave", ReferenceKind::Wave, single.path));
-	return true;
-}
-
 bool extract_avatars(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	avatars::AvatarsFile file{};
 	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &file) != 0) {
@@ -426,7 +412,6 @@ struct NativeKind {
 constexpr NativeKind kNativeKinds[] = {
 	{AssetKind::HudPosDefs, extract_hudpos},
 	{AssetKind::Terrain, extract_terrain},
-	{AssetKind::SoundBank, extract_sound_bank},
 	{AssetKind::Environment, extract_environment},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},

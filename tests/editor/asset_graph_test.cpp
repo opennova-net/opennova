@@ -173,10 +173,12 @@ static int test_blank_project() {
 	TEST_EXPECT(!font_file.empty() && !graph.referrers_of_file(font_file).empty());
 	TEST_EXPECT(graph.referrers_of_file("nothing.fnt").empty());
 	// The blank tables define nothing yet: the stylesheet's variables, the blank item
-	// table's null marker and the blank menus' screens and windows are the symbols.
+	// table's null marker, the blank menus' screens and windows and the blank SndProf.def's
+	// "default" profile are the symbols.
 	for (const GraphSymbol &symbol : all_symbols(graph))
 		TEST_EXPECT(symbol.kind == ReferenceKind::StyleVar || symbol.kind == ReferenceKind::Item ||
-		            symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow);
+		            symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow ||
+		            symbol.kind == ReferenceKind::SoundProfile);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuScreen, "startup", "MAIN.MNU") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuWindow, "exit", "MAIN.MNU/STARTUP") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuWindow, "EXIT", "MAIN.MNU/ELSEWHERE") == ReferenceStatus::Missing);
@@ -185,7 +187,8 @@ static int test_blank_project() {
 	for (const ReferenceChoice &choice : graph.choices(ReferenceKind::Font))
 		TEST_EXPECT(choice.kind == ReferenceKind::Font && choice.status == ReferenceStatus::Present && !choice.file.empty() &&
 		            choice.record.empty() && !choice.inert);
-	TEST_EXPECT(graph.resolve(ReferenceKind::Sound, "boom.wav") == ReferenceStatus::Unverified);
+	// A sound set is a bank's symbol (the sound lane): the blank project has no bank, so none is found.
+	TEST_EXPECT(graph.resolve(ReferenceKind::Sound, "BOOM") == ReferenceStatus::Missing);
 	TEST_EXPECT(graph.resolve(ReferenceKind::None, "x") == ReferenceStatus::NotAReference);
 	TEST_EXPECT(graph.stats().files_extracted > 0);
 	// Nothing changed: the next update reuses every extraction.
@@ -1214,7 +1217,8 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(graph.referrers_of(ReferenceKind::StyleVar, "TRIM_COLOR").size() == 1);
 	TEST_EXPECT(edge_of(graph, path, ReferenceKind::Menu, "graph.mnu") && edge_of(graph, path, ReferenceKind::Menu, "main.mnu"));
 	TEST_EXPECT(!edge_of(graph, path, ReferenceKind::Menu, "nofile.mnu")); // POP_SCREEN loads no FILE
-	TEST_EXPECT(editor_test::write_text(root + "/click.lwf", "lwf") && editor_test::write_text(root + "/credits.kda", "[TEXT]\r\n"));
+	TEST_EXPECT(editor_test::write_bytes(root + "/click.lwf", editor_test::sound_bank_of({"MOUSE_OVER"})) &&
+	            editor_test::write_text(root + "/credits.kda", "[TEXT]\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	menu = dynamic_cast<const MnuDocument *>(session.document_for("graph.mnu"));
 	TEST_EXPECT(menu);
@@ -1223,6 +1227,9 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::SoundBank, "click") == ReferenceStatus::Missing); // opened by the name as written
 	TEST_EXPECT(graph.resolve(ReferenceKind::Credits, "CREDITS.KDA") == ReferenceStatus::Present);
 	TEST_EXPECT(!finding(view.findings.diagnostics, "reference.missing", "HOME/PANEL/GO/Sound 1"));
+	// The SOUND's trigger is a set of its own bank (the sound lane), found there alone.
+	const GraphEdge *trigger = edge_of(graph, path, ReferenceKind::Sound, "MOUSE_OVER", "trigger");
+	TEST_EXPECT(trigger && trigger->scope == "CLICK.LWF" && graph.resolve(*trigger) == ReferenceStatus::Present);
 
 	// The screens: the last AWAY is the one found; the earlier one, and its windows, are inert.
 	const GraphSymbol *home_screen = symbol_at(graph, path, ReferenceKind::MenuScreen, "HOME");
@@ -1618,7 +1625,8 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint ||
 		                       kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone ||
 		                       kind == ReferenceKind::TilePlacement || kind == ReferenceKind::DialogBank ||
-		                       kind == ReferenceKind::MissionStrings;
+		                       kind == ReferenceKind::MissionStrings || kind == ReferenceKind::Sound ||
+		                       kind == ReferenceKind::SoundProfile;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;
@@ -1626,7 +1634,8 @@ static int test_reference_kind_rows() {
 	TEST_EXPECT(reference_row(ReferenceKind::Font).file == AssetKind::Font &&
 	            reference_row(ReferenceKind::MenuTexture).file == AssetKind::Texture);
 	TEST_EXPECT(reference_row(ReferenceKind::StyleVar).resolution == ReferenceResolution::StyleVariable);
-	TEST_EXPECT(reference_row(ReferenceKind::Sound).resolution == ReferenceResolution::Unchecked);
+	TEST_EXPECT(reference_row(ReferenceKind::Sound).resolution == ReferenceResolution::Symbol &&
+	            reference_row(ReferenceKind::OtherText).resolution == ReferenceResolution::Unchecked);
 	TEST_EXPECT(reference_row(ReferenceKind::OtherText).also_offers == ReferenceKind::TextId);
 	// A model's register by its index, every whole number from 0 one; its frame row by the pose's
 	// rule, a signed byte above 0.
@@ -1796,7 +1805,7 @@ static int test_terrain_and_bank_extractors() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Missing &&
 	            graph.resolve(ReferenceKind::Texture, "isle_c.tga") == ReferenceStatus::Present);
 	const GraphEdge *shot = edge_to(graph, "game.lwf", ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav");
-	TEST_EXPECT(shot && shot->record == "SHOT" && shot->field == "wave");
+	TEST_EXPECT(shot && shot->record == "SHOT" && shot->field == "file");
 	TEST_EXPECT(graph.resolve(ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav") == ReferenceStatus::Present &&
 	            graph.resolve(ReferenceKind::Wave, "gone.wav") == ReferenceStatus::Missing &&
 	            !graph.referrers_of_file("shot.wav").empty());

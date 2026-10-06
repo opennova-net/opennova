@@ -140,12 +140,17 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 			+ "project does not hold is refused, play.mission.unknown; one that does not load is a "
 			+ "play.mission.failed Problems row). With behind (op=start; Windows only), the game's window starts "
 			+ "behind every other window, the editor keeping the foreground, until the person brings it forward "
-			+ "(the run section's behind). op=stop ends the game and waits; op=state reads the run section.",
+			+ "(the run section's behind). The run directory keeps what the game wrote there in the Plays of "
+			+ "the same mode before (its game.cfg, which spares the game install its device dialog, its saves: "
+			+ "the run section's kept); with fresh (op=start) it is emptied first, a first run. op=stop ends "
+			+ "the game and waits; op=state reads the run section.",
 			{
 				"op": {"type": "string", "enum": PLAY_OPS},
 				"mission": {"type": "string", "description": "op=start: the mission the game starts in (04TR.bms)"},
 				"behind": {"type": "boolean", "description": "op=start: the game's window behind every other, the "
 						+ "editor keeping the foreground (Windows only; false when left out)"},
+				"fresh": {"type": "boolean", "description": "op=start: the run directory emptied of what the runs "
+						+ "before wrote there (game.cfg, saves) before the game starts (false when left out)"},
 			}, ["op"], true, BUILD_TIMEOUT_MS),
 		_viewport_tool(catalog),
 		McpToolDef.make("editor_screenshot",

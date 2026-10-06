@@ -121,6 +121,11 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Config, "game.cfg", text_bytes("\r\n[Game]\r\nname = Views\r\n")},
 	        // A texture (S18): a TGA our writer mints, its picture the tab's main view beside its facts.
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
+	        // The sound lane: the minted bank, its sets and waves a tree with a Play heading the Inspector, and a
+	        // SndProf.def, its profile's slots under it.
+	        {AssetKind::SoundBank, "menu.lwf", file("lwf/menu.lwf")},
+	        {AssetKind::SoundProfileDefs, "SndProf.def",
+	         text_bytes("begin \"default\"\r\n\tSSLFootGND FSP_DIRT_L 0 0 0\r\nend\r\n")},
 	        // A particle file (DI-14): its text in the script view, its effect the Preview window's.
 	        {AssetKind::Particles, "minimal_effect.ptl", file("particle/synth_minimal_effect.ptl")},
 	};
