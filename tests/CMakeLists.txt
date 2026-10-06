@@ -4387,6 +4387,14 @@ target_link_libraries(editor_texture_role_view_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_role_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_role_view COMMAND editor_texture_role_view_test)
 
+# ADR 0046 S18, the compare (documents/texture_compare): a texture beside the DXT texture made of it, each
+# level's error and the pictures of its views; through a session the texture viewport's compare option on a
+# TGA, a plain .dds refused, an imported .dds against its import's source.
+add_executable(editor_texture_compare_test editor/texture_compare_test.cpp)
+target_link_libraries(editor_texture_compare_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_compare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_compare COMMAND editor_texture_compare_test)
+
 # ADR 0046 S18, a texture's import (import/texture_import, graph/texture_import_needs,
 # session/texture_import_state): the image importer's option rows, its pieces, every format written and
 # read back by the reader the game picks, what a minted project's uses ask of an import, set_import_options

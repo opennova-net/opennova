@@ -75,6 +75,7 @@ enum class EditorRequestKind {
 	SplitTexture,
 	EditExternally,
 	StoreAsDds,
+	SetAsideTexture,
 	RefreshChangedSources,
 	ShowUse,
 	PreviewTextureSource,

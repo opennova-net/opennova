@@ -205,6 +205,9 @@ void serve_edit_externally(SessionCore &core, const EditorRequest &request) {
 void serve_store_as_dds(SessionCore &core, const EditorRequest &request) {
 	core.imports().store_as_dds(request);
 }
+void serve_set_aside_texture(SessionCore &core, const EditorRequest &request) {
+	core.imports().set_aside_texture(request);
+}
 void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &request) {
 	core.disk().check(request.all);
 }
@@ -862,6 +865,18 @@ constexpr RequestKindRow kRows[] = {
 			"output's own record takes the form. Refused, nothing written (texture.store_dds): no .tga, a use "
 			"that reads the .tga itself (a terrain map, a model's plain row, the HUD's art), a .dds of the "
 			"name already there, sides that are not powers of two, a texture open with unsaved edits.")
+			.takes(request_params({ F::Path }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.row,
+	// A texture the game never reads set aside (S18), as a Replace sets one aside.
+	Request(K::SetAsideTexture, "set_aside_texture", serve_set_aside_texture,
+			"The texture path, which no use of it reads (each use's loader opens another file of its name: the "
+			".dds beside a .tga a model row names), set aside under .replaced/, never deleted, then a rescan: "
+			"what the Blender add-on's .tga leaves beside the .dds the game loads. Refused, nothing moved "
+			"(texture.set_aside): a name the project lacks, a file that is no texture, a file an import makes "
+			"(its import makes it again), a texture no use names (a script may name it), one a use reads (the "
+			"use said), a texture open with unsaved edits.")
 			.takes(request_params({ F::Path }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
 			.ends_edit_groups()

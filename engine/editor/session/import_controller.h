@@ -68,6 +68,11 @@ public:
 	// refresh that imports it; a plain file's clean open document closed. Refused, nothing written
 	// (texture.store_dds): what the plan refuses, a texture open with unsaved edits.
 	void store_as_dds(const EditorRequest &request);
+	// SetAsideTexture (S18): a texture no use of it reads (each use's loader opens another file of its name)
+	// set aside under .replaced/ (import/texture_source.h set_aside_project_file), its clean open document
+	// closed, then a rescan. Refused, nothing moved (texture.set_aside): no such texture, a file an import
+	// makes, a texture no use names, one a use reads, one open with unsaved edits.
+	void set_aside_texture(const EditorRequest &request);
 	// OpenTextureSource (S18): an existing source opened alike, nothing written. Refused (texture.external):
 	// a texture with none yet, a source edited in place open with unsaved edits.
 	void open_texture_source(const EditorRequest &request);

@@ -94,6 +94,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_compare.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_load_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_operations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_roles.cpp

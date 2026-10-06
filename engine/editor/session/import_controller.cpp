@@ -532,6 +532,43 @@ void ImportController::store_as_dds(const EditorRequest &request) {
 	reimport(plan.source, true);
 }
 
+void ImportController::set_aside_texture(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	const AssetEntry *entry = view_.project.scan->at_path(request.path);
+	if (!entry) entry = view_.project.scan->find(basename_of(request.path));
+	const auto refuse = [&](const std::string &message) {
+		core_.refuse_now(CoreFinding::TextureSetAside, message, entry ? entry->relative_path : request.path);
+	};
+	if (!entry) return refuse("The project has no texture " + request.path + ".");
+	if (entry->kind != AssetKind::Texture) return refuse(entry->logical_name + " is no texture.");
+	if (!entry->imported_from.empty())
+		return refuse(entry->logical_name + " is made by the import of " + entry->imported_from + ", which makes it again: change "
+		              "how that import is made instead.");
+	// The uses: none may read the file (a .tga beside the .dds its model row loads is read by none).
+	static const std::vector<TextureUse> kNone;
+	const std::vector<TextureUse> &uses =
+	        view_.documents.texture_uses ? view_.documents.texture_uses->uses_of(view_, entry->relative_path) : kNone;
+	if (uses.empty())
+		return refuse("Nothing the editor knows names " + entry->logical_name + ", so it is kept: a script or the game may "
+		              "name it in a way the editor does not read.");
+	std::string read_instead;
+	for (const TextureUse &use : uses) {
+		if (use.reads_file) return refuse(entry->logical_name + " is read by " + (use.words.empty() ? "a use" : use.words) + ".");
+		if (read_instead.empty() && !use.served.empty()) read_instead = basename_of(use.served);
+	}
+	if (DocumentBase *open = core_.documents().document_for(entry->relative_path)) {
+		if (open->dirty()) return refuse(entry->logical_name + " is open with unsaved edits: save or discard them first.");
+		core_.documents().close_document(entry->relative_path);
+	}
+	const std::string path = entry->relative_path;
+	std::vector<Diagnostic> findings;
+	if (!set_aside_project_file(paths_, path, findings))
+		return refuse(findings.empty() ? "Could not set " + path + " aside." : findings.back().message);
+	core_.note("Set " + path + " aside under " + std::string(kReplacedFolder) + "/: the game never read it" +
+	           (read_instead.empty() ? std::string() : ", its loader opening " + read_instead + " in its place") + ".");
+	core_.start_refresh();
+}
+
 // The import dialog on `roots` chosen among `choices` (each file once, `facts` saying each one's
 // kind and size), planned with the files they need when `with_dependencies`: open while it has
 // something to show, a list to choose from or a file chosen. `all`: the roots are every file of the

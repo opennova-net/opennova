@@ -31,7 +31,7 @@ Diagnostic refused(const std::string &message, const std::string &asset) {
 // A file name for the source in art/ that no file of the project has and that fits an archive's 16
 // characters (an import source's name binds as its outputs' would): `wanted` where it is free and not the
 // texture's own name (a source named like its output would be two files of one name), else its stem with
-// "_src" and a number, cut to fit.
+// "_src" and a number, cut to fit (a stem cut ends on no separator).
 std::string free_source_name(const AssetScan &scan, const std::string &wanted, const std::string &texture,
                              const std::string &allowed_path) {
 	const std::string extension = utf8_of(path_of(wanted).extension());
@@ -46,7 +46,10 @@ std::string free_source_name(const AssetScan &scan, const std::string &wanted, c
 	for (int n = 1; n < 100; ++n) {
 		const std::string suffix = n == 1 ? "_src" : "_src" + std::to_string(n);
 		const size_t room = size_t(pff::PFF_NAME_SIZE) - suffix.size() - extension.size();
-		const std::string name = stem.substr(0, std::min(stem.size(), room)) + suffix + extension;
+		// A stem cut to fit ends on no separator of its own: onbarl1_0 makes onbarl1_src, never onbarl1__src.
+		std::string cut = stem.substr(0, std::min(stem.size(), room));
+		while (cut.size() > 1 && (cut.back() == '_' || cut.back() == '-' || cut.back() == '.')) cut.pop_back();
+		const std::string name = cut + suffix + extension;
 		if (free(name)) return name;
 	}
 	return std::string();
@@ -226,20 +229,31 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 		if (taken.empty()) options.erase(key);
 		else options[key] = taken;
 	}
-	// The source: the old source's own path where the image is of its kind, else a free name in art/.
-	if (!plan.old_source.empty() && extension_of(plan.old_source) == extension) {
+	// The source's form: a TGA image kept as a PNG of its texels, the same texels in a fraction of the bytes (its
+	// origin, depth and colour map read as decode_image_source reads them); a PCX as it is (an 8-bit one's indices
+	// are data), a PNG as it is.
+	const bool as_png = extension == ".tga";
+	const std::string source_extension = as_png ? std::string(".png") : extension;
+	// The source: the old source's own path where it is of the source's form, else a free name in art/ after the
+	// texture's own stem (body.dds's art/body.png), whatever the image is called.
+	if (!plan.old_source.empty() && extension_of(plan.old_source) == source_extension) {
 		plan.source = plan.old_source;
 		plan.old_source.clear();
 		plan.changes.push_back(plan.source + " is written over with " + image + " (its old bytes kept in " + kReplacedFolder + "/).");
 	} else {
-		const std::string name = free_source_name(scan, image, plan.texture, std::string());
+		const std::string name = free_source_name(scan, stem_of(plan.texture) + source_extension, plan.texture, std::string());
 		if (name.empty()) {
-			plan.refusals.push_back(refused("No free name in art/ for " + image + ".", plan.texture));
+			plan.refusals.push_back(refused("No free name in art/ for " + image + "'s copy.", plan.texture));
 			return plan;
 		}
 		plan.source = "art/" + name;
 	}
-	plan.bytes = image_bytes;
+	if (as_png) {
+		plan.bytes = encode_png_rgba(decoded.image.pixels.data(), uint32_t(decoded.image.width), uint32_t(decoded.image.height));
+		plan.changes.push_back(image + " is kept in " + plan.source + " as a PNG of its texels.");
+	} else {
+		plan.bytes = image_bytes;
+	}
 	// The output takes the texture's name.
 	const auto format = options.find("format");
 	const std::string made = stem_of(plan.source) + image_format_extension(format == options.end() ? "tga" : format->second);
@@ -317,11 +331,23 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 	const TextureHeader header = texture_header(entry->logical_name, bytes);
 	std::string wanted;
 	bool indexed = false;
-	if (extension == ".tga" || extension == ".mdt" || extension == ".pcx") {
-		// A copy a paint program opens: a TGA's bytes (an .mdt's are a TGA's), a PCX's (its indices kept).
-		wanted = stem_of(entry->logical_name) + (extension == ".pcx" ? ".pcx" : ".tga");
+	if (extension == ".pcx") {
+		// A copy a paint program opens: a PCX's bytes (its indices kept).
+		wanted = stem_of(entry->logical_name) + ".pcx";
 		plan.bytes = bytes;
-		indexed = extension == ".pcx" && !image->indices.empty();
+		indexed = !image->indices.empty();
+	} else if (extension == ".tga" || extension == ".mdt") {
+		// A PNG of its texels (an .mdt's bytes are a TGA's), read as an image program reads the TGA (its origin
+		// honoured), which a paint program opens: the same texels in a fraction of the bytes.
+		ImageSource source;
+		std::string why;
+		if (!decode_image_source(stem_of(entry->logical_name) + ".tga", bytes, source, why)) {
+			plan.refusals.push_back(refused(entry->logical_name + " does not read as an image program reads a TGA: " + why + ".",
+			                                entry->relative_path));
+			return plan;
+		}
+		wanted = stem_of(entry->logical_name) + ".png";
+		plan.bytes = encode_png_rgba(source.image.pixels.data(), uint32_t(source.image.width), uint32_t(source.image.height));
 		if (header.reader == TextureReader::Tga && (header.tga_descriptor & 0x20))
 			plan.changes.push_back(entry->logical_name + "'s rows are stored top first, so the game draws it upside down now; made from "
 			                                             "its source, it is stored bottom first and drawn as its program shows it.");
@@ -424,35 +450,37 @@ TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &s
 	return plan;
 }
 
-bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &plan, std::vector<Diagnostic> &findings) {
-	if (!plan.ok()) {
-		findings.insert(findings.end(), plan.refusals.begin(), plan.refusals.end());
-		return false;
-	}
-	if (plan.bytes.empty()) return true; // the source is there as it is
-	const auto at = [&](const std::string &relative) { return system_path(join_path(paths.root, relative)); };
-	// Set aside, never deleted: .replaced/<stamp>/<the file's own path>, the stamp to the millisecond and
-	// numbered past a folder already there (two set-asides within one never share it).
-	const auto now = std::chrono::system_clock::now();
-	const std::time_t seconds = std::chrono::system_clock::to_time_t(now);
-	const int millis = int(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000);
-	char stamp[48];
-	std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", std::localtime(&seconds));
-	char milli[8];
-	std::snprintf(milli, sizeof(milli), "%03d", millis);
-	const std::string base = std::string(stamp) + "-" + milli;
-	std::string folder = base;
-	{
-		std::error_code ec;
-		for (int n = 2; fs::exists(at(join_path(kReplacedFolder, folder)), ec) && n < 1000; ++n)
-			folder = base + "-" + std::to_string(n);
-	}
-	const std::string aside = join_path(kReplacedFolder, folder);
+namespace {
+
+// Files set aside, never deleted: each under .replaced/<stamp>/<the file's own path>, the stamp to the
+// millisecond and numbered past a folder already there (two set-asides within one never share it); what
+// was moved kept, to be put back.
+struct SetAside {
+	const ProjectPaths &paths;
+	std::string folder;
 	std::vector<std::pair<fs::path, fs::path>> moved;
-	const auto set_aside = [&](const std::string &relative) {
+
+	explicit SetAside(const ProjectPaths &project) : paths(project) {
+		const auto now = std::chrono::system_clock::now();
+		const std::time_t seconds = std::chrono::system_clock::to_time_t(now);
+		const int millis = int(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000);
+		char stamp[48];
+		std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", std::localtime(&seconds));
+		char milli[8];
+		std::snprintf(milli, sizeof(milli), "%03d", millis);
+		const std::string base = std::string(stamp) + "-" + milli;
+		std::string name = base;
+		std::error_code ec;
+		for (int n = 2; fs::exists(at(join_path(kReplacedFolder, name)), ec) && n < 1000; ++n) name = base + "-" + std::to_string(n);
+		folder = join_path(kReplacedFolder, name);
+	}
+	fs::path at(const std::string &relative) const { return system_path(join_path(paths.root, relative)); }
+	// The project file `relative` moved there; true for none (or no such file); false, with the finding, where it
+	// could not be moved.
+	bool move(const std::string &relative, std::vector<Diagnostic> &findings) {
 		std::error_code ec;
 		if (relative.empty() || !fs::exists(at(relative), ec)) return true;
-		const fs::path to = at(join_path(aside, relative));
+		const fs::path to = at(join_path(folder, relative));
 		fs::create_directories(to.parent_path(), ec);
 		if (!ec && rename_with_retry(at(relative), to, ec)) {
 			moved.emplace_back(at(relative), to);
@@ -460,7 +488,31 @@ bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &pl
 		}
 		findings.push_back(refused("Could not set " + relative + " aside: " + ec.message() + ".", relative));
 		return false;
-	};
+	}
+	// Every file moved put back where it was.
+	void put_back() {
+		std::error_code ec;
+		for (auto it = moved.rbegin(); it != moved.rend(); ++it) rename_with_retry(it->second, it->first, ec);
+		moved.clear();
+	}
+};
+
+} // namespace
+
+bool set_aside_project_file(const ProjectPaths &paths, const std::string &relative, std::vector<Diagnostic> &findings) {
+	SetAside aside(paths);
+	return aside.move(relative, findings);
+}
+
+bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &plan, std::vector<Diagnostic> &findings) {
+	if (!plan.ok()) {
+		findings.insert(findings.end(), plan.refusals.begin(), plan.refusals.end());
+		return false;
+	}
+	if (plan.bytes.empty()) return true; // the source is there as it is
+	const auto at = [&](const std::string &relative) { return system_path(join_path(paths.root, relative)); };
+	SetAside set_aside(paths);
+	const std::string aside = set_aside.folder;
 	// A source written over: its old bytes kept beside the set-asides, and put back should the plan fail; a
 	// source written new taken away again.
 	std::vector<uint8_t> overwritten;
@@ -472,10 +524,10 @@ bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &pl
 			if (had_source) write_file_atomic(join_path(paths.root, plan.source), overwritten.data(), overwritten.size(), message);
 			else fs::remove(at(plan.source), ec);
 		}
-		for (auto it = moved.rbegin(); it != moved.rend(); ++it) rename_with_retry(it->second, it->first, ec);
+		set_aside.put_back();
 	};
-	bool ok = set_aside(plan.replaced) && set_aside(plan.old_source) &&
-	          set_aside(plan.old_source.empty() ? std::string() : plan.old_source + kImportSidecarSuffix);
+	bool ok = set_aside.move(plan.replaced, findings) && set_aside.move(plan.old_source, findings) &&
+	          set_aside.move(plan.old_source.empty() ? std::string() : plan.old_source + kImportSidecarSuffix, findings);
 	if (ok) {
 		std::error_code ec;
 		std::string message;
