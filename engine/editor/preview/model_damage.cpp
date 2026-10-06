@@ -151,6 +151,7 @@ void death_sounds_legs(int32_t tick, const DamageItem &item, const DamageModels 
 		if (dead && !item.particleh2odeath.empty())
 			words += " (" + item.particleh2odeath + " in its place for an item under water)";
 		plan.legs.push_back(leg(tick, "effect", bank.effect, words + ".", cite, kEffectNamed));
+		plan.legs.back().bank = int(&bank - rows) + 1;
 	}
 	const bool husk_kz = !item.husk.empty() && models.kz_points > 0;
 	plan.legs.push_back(leg(tick, "blast", "kz_OrganicBlast",
@@ -204,32 +205,38 @@ bool read_damage_item(const FileSource &files, const std::string &catalog, const
 	for (size_t i = 0; i < items.count; ++i) {
 		const def::DefItemDef &def = items.entries[i];
 		if (!strutil::iequals(def.display_name, record)) continue;
-		out.found = true;
-		out.name = def.display_name;
-		out.file = catalog;
-		out.graphic = def.graphic;
-		out.graphic_enemy = def.graphic_enemy;
-		out.husk = def.husk;
-		out.huskfinal = def.huskfinal;
-		std::copy(std::begin(def.destroy_timing_ticks), std::end(def.destroy_timing_ticks),
-		          std::begin(out.destroy_timing_ticks));
-		out.ai_function = def.ai_function;
-		out.death_class = world::item_death_class_from_tag(def.ai_function);
-		out.ai_class = (def.attrib & world::kItemAttribAIData) != 0;
-		out.decoration = def.type == def::DEF_ITEM_TYPE_DECORATION;
-		out.unit_type = def.unit_type;
-		out.sounddeath = def.sounddeath;
-		out.particledeath = def.particledeath;
-		out.particleh2odeath = def.particleh2odeath;
-		out.particlefire = def.particlefire;
-		out.particleother = def.particleother;
-		std::copy(std::begin(def.husk_sub_part_types), std::end(def.husk_sub_part_types), out.piece_types);
-		out.husk_sub_parts = def.husk_sub_parts;
-		out.kz = def.kz;
+		out = damage_item_of(def, catalog);
 		break;
 	}
 	def::def_free_items(&items);
 	return out.found;
+}
+
+DamageItem damage_item_of(const def::DefItemDef &def, const std::string &catalog) {
+	DamageItem out;
+	out.found = true;
+	out.name = def.display_name;
+	out.file = catalog;
+	out.graphic = def.graphic;
+	out.graphic_enemy = strutil::fixed_string(def.graphic_enemy, sizeof(def.graphic_enemy));
+	out.husk = def.husk;
+	out.huskfinal = def.huskfinal;
+	std::copy(std::begin(def.destroy_timing_ticks), std::end(def.destroy_timing_ticks),
+	          std::begin(out.destroy_timing_ticks));
+	out.ai_function = strutil::fixed_string(def.ai_function, sizeof(def.ai_function));
+	out.death_class = world::item_death_class_from_tag(out.ai_function.c_str());
+	out.ai_class = (def.attrib & world::kItemAttribAIData) != 0;
+	out.decoration = def.type == def::DEF_ITEM_TYPE_DECORATION;
+	out.unit_type = def.unit_type;
+	out.sounddeath = def.sounddeath;
+	out.particledeath = def.particledeath;
+	out.particleh2odeath = def.particleh2odeath;
+	out.particlefire = def.particlefire;
+	out.particleother = def.particleother;
+	std::copy(std::begin(def.husk_sub_part_types), std::end(def.husk_sub_part_types), out.piece_types);
+	out.husk_sub_parts = def.husk_sub_parts;
+	out.kz = def.kz;
+	return out;
 }
 
 io::JsonValue damage_options_to_json(const DamageOptions &options) {
@@ -332,14 +339,18 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 				     : tag + ": the husk lands at once, with the item's death sound and one death effect.";
 		if (!gnl2) plan.legs.push_back(swap_leg(0, plan, cite));
 		sound_leg(0, item.sounddeath, cite, plan);
-		if (!item.particledeath.empty())
+		if (!item.particledeath.empty()) {
 			plan.legs.push_back(leg(0, "effect", item.particledeath,
 			                        "The death effect " + item.particledeath + ", once at the item.", cite, kEffectNamed));
+			plan.legs.back().at_item = true;
+		}
 		if (gnl2) {
 			const char *expiry = "[orig: Entity_HandleDeathEvent @ 0x4071EF..0x40725F; Entity_SpawnExplosionEffects @ "
 			                     "0x4399C0]";
 			plan.legs.push_back(leg(32, "effect", "Effect_AirExp", "The explosion: Effect_AirExp a unit above the item.",
 			                        expiry, kEffectNamed));
+			plan.legs.back().at_item = true;
+			plan.legs.back().above = 1.0f;
 			plan.legs.push_back(leg(32, "blast", "kz_M406HE", "The explosion's blast: kz_M406HE a unit above the item.",
 			                        expiry, "named"));
 			plan.legs.push_back(swap_leg(32, plan, expiry));
