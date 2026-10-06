@@ -11,6 +11,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/model_ctrl_words.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/preview/animation_uses.h>
@@ -19,7 +20,9 @@
 #include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm_pose.h>
+#include <runtime/world/present_passes.h>
 
 namespace opennova::editor {
 
@@ -185,9 +188,11 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 			options.snap = snap;
 		} else if (key == "sound") {
 			if (!read_clip_sound_options(value, options.sound, error)) return false;
+		} else if (key == "damage") {
+			if (!read_damage_options(value, options.damage, error)) return false;
 		} else {
 			error = "Unknown model option \"" + key +
-			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap, sound).";
+			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap, sound, damage).";
 			return false;
 		}
 	}
@@ -306,6 +311,7 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 	options.set("bones", JsonValue::make_bool(held.bones));
 	options.set("snap", json_number(held.snap));
 	options.set("sound", clip_sound_options_to_json(held.sound));
+	options.set("damage", damage_options_to_json(held.damage));
 	return options;
 }
 
@@ -349,7 +355,7 @@ int ModelViewport::lod() const {
 std::vector<ModelOverlay> ModelViewport::overlays(const PreviewClock &clock) const {
 	if (!model_) return {};
 	int32_t bus[96];
-	model_preview_ctrl_bus(options_.ctrl, bus);
+	model_preview_ctrl_bus(ctrl_at(clock), bus);
 	std::vector<ModelOverlay> out = model_overlays(*model_, lod(), clock.ms(), bus, options_.overlays);
 	// A clip playing (S17): a user point on a bone rides it as the skin carries the mesh there, as
 	// the game's attachment resolve poses a point on its bone [orig: Entity_GetAttachmentWorldPosition
@@ -382,18 +388,19 @@ ModelCollisionShapesPtr ModelViewport::collision(const PreviewClock &clock, Mode
 	const bool live = threedi::threedi_panm_lod_has_live(*model_, 0) ||
 	                  (options_.overlays.part_spheres && level >= 0 && threedi::threedi_panm_lod_has_live(*model_, level));
 	const uint32_t time_ms = live ? clock.ms() : 0;
+	const std::map<std::string, int64_t> ctrl = ctrl_at(clock);
 	CollisionCache &cache = collision_cache_;
 	if (cache.shapes && cache.model == model_.get() && cache.lod == level && cache.overlays == options_.overlays &&
-	    cache.ctrl == options_.ctrl && cache.also == also && cache.time_ms == time_ms)
+	    cache.ctrl == ctrl && cache.also == also && cache.time_ms == time_ms)
 		return cache.shapes;
 	int32_t bus[96];
-	model_preview_ctrl_bus(options_.ctrl, bus);
+	model_preview_ctrl_bus(ctrl, bus);
 	cache.shapes = std::make_shared<const std::vector<ModelCollisionShape>>(
 			model_collision_shapes(model_, level, time_ms, bus, options_.overlays, also));
 	cache.model = model_.get();
 	cache.lod = level;
 	cache.overlays = options_.overlays;
-	cache.ctrl = options_.ctrl;
+	cache.ctrl = ctrl;
 	cache.also = also;
 	cache.time_ms = time_ms;
 	++cache.builds;
@@ -439,7 +446,7 @@ bool ModelViewport::handle_edits(const ModelDocument &document, const ModelOverl
 	PreviewVec3 to;
 	if (!camera_.on_view_plane(x, y, width, height, through, to)) return false;
 	int32_t bus[96];
-	model_preview_ctrl_bus(options_.ctrl, bus);
+	model_preview_ctrl_bus(ctrl_at(clock), bus);
 	if (!model_handle_edits(document, *model_, overlay, lod(), clock.ms(), bus, handle, to, snap, gesture, out))
 		return false;
 	if (handle != ModelHandle::Place || !others) return true;
@@ -689,17 +696,20 @@ ViewportAction ModelViewport::follow_(const ViewportInput &input, PreviewClock &
 	const SessionView &view = input.view;
 	if (!view.project.open || !view.findings.assets) {
 		reset_animation_();
+		reset_damage_();
 		return stop_(ModelViewStatus::NoProject, std::string(), false);
 	}
 	const Document *document = input.document ? records_of(*input.document) : nullptr;
-	if (const auto *model = dynamic_cast<const ModelDocument *>(document)) return follow_model_(input, *model);
+	if (const auto *model = dynamic_cast<const ModelDocument *>(document)) return follow_model_(input, *model, clock);
+	reset_damage_();
 	if (document && (is_animation_kind(document->kind()) || is_animation_map_kind(document->kind())))
 		return follow_animation_(input, *document, clock);
 	reset_animation_();
 	return stop_(ModelViewStatus::NoModel, std::string(), false);
 }
 
-ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const ModelDocument &document) {
+ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const ModelDocument &document,
+		const PreviewClock &clock) {
 	if (animating_) {
 		// From an animation to a model document: the rig's model is not this one.
 		reset_animation_();
@@ -707,9 +717,16 @@ ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const Mo
 	}
 	const FileSource &files = *input.view.findings.assets;
 	const uint64_t generation = input.view.findings.assets->generation();
-	const PreviewFollow::Key key;
-	// A change only the overlays show: the held model patched, the scene standing (S13 V8).
-	const bool overlays = input.change == ChangeClass::Changed && overlays_alone_(input, document);
+	// The damage state (DI-10): the husk the game swaps in for the model at the clock, a key of its own
+	// (another husk drawn, or the model again, is a picture made anew).
+	const std::string husk = follow_damage_(input, clock);
+	PreviewFollow::Key key;
+	key.state = husk.empty() ? 0 : io::fnv1a64_bytes(io::kFnv1a64Offset, husk.data(), husk.size()) | 1u;
+	FileStamps husk_read; // the husk's file, a file the picture read
+	if (!husk.empty()) husk_read.note(husk_model_.file, husk_model_.stamp);
+	// A change only the overlays show: the held model patched, the scene standing (S13 V8); never while the
+	// picture is the husk, which the document's user points do not move.
+	const bool overlays = husk.empty() && input.change == ChangeClass::Changed && overlays_alone_(input, document);
 	switch (picture_.follow(key, input.change != ChangeClass::None && !overlays, files, generation)) {
 	case PreviewFollow::Found::Same: {
 		// A change set naming nothing patches nothing: Keep, as for no change.
@@ -720,13 +737,15 @@ ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const Mo
 		return ViewportAction::Update;
 	}
 	case PreviewFollow::Found::Files:
-		// A texture the device read moved: the scene is built again over the model read before.
+		// A texture the device read moved: the scene is built again over the model read before (the husk
+		// as read again, its file moved).
 		if (overlays) {
 			patch_user_points_(document);
 			shown(document);
 		}
+		if (!husk.empty()) model_ = husk_model_.model;
 		options_moved_ = false;
-		return picture_.built(FileStamps());
+		return picture_.built(husk_read);
 	case PreviewFollow::Found::Anew: break;
 	}
 	// A texture the device read that moved in the same follow as the document builds the scene again.
@@ -752,6 +771,20 @@ ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const Mo
 	drawn_hashed_ = hashed;
 	reason_ = ModelViewStatus::Ready;
 	detail_.clear();
+	// The destroyed state's husk swap (DI-10): the husk the game draws in the model's place, not the
+	// document's picture (no record maps to it); its file a file the picture read.
+	if (!husk.empty()) {
+		model_ = husk_model_.model;
+		shown_none();
+		if (framed_ != path()) {
+			framed_ = path();
+			frame_();
+			state_moved();
+		}
+		options_moved_ = false;
+		scene_ = true;
+		return picture_.built(husk_read);
+	}
 	shown(document);
 	if (framed_ != path()) {
 		framed_ = path();
@@ -788,6 +821,212 @@ bool ModelViewport::patch_user_points_(const ModelDocument &document) {
 bool ModelViewport::held_drawn_hash_() {
 	if (!drawn_hashed_ && read_) drawn_hashed_ = drawn_hash(*read_, drawn_hash_);
 	return drawn_hashed_;
+}
+
+// --- the damage state (DI-10, preview/model_damage) ----------------------------------------------------
+
+void ModelViewport::reset_damage_() {
+	damage_uses_.clear();
+	damage_graph_ = nullptr;
+	damage_generation_ = 0;
+	damage_use_ = SIZE_MAX;
+	damage_catalog_.clear();
+	damage_record_.clear();
+	damage_catalog_stamp_ = 0;
+	damage_item_ = DamageItem();
+	husk_model_ = DamageModel();
+	piece_model_ = DamageModel();
+	damage_models_ = DamageModels();
+	damage_plan_ = DamagePlan();
+	damage_drives_ = false;
+	damage_drawn_.clear();
+	damage_note_.clear();
+	damage_cursor_ = -1;
+}
+
+const DamageUse *ModelViewport::damage_use() const {
+	return damage_use_ < damage_uses_.size() ? &damage_uses_[damage_use_] : nullptr;
+}
+
+std::string ModelViewport::follow_damage_(const ViewportInput &input, const PreviewClock &clock) {
+	const SessionView &view = input.view;
+	// The items naming the model, again as the graph moves (the edges are not kept: a graph replaced frees
+	// them).
+	const AssetGraph *graph = view.findings.graph.get();
+	if (graph != damage_graph_ || (graph && graph->generation() != damage_generation_)) {
+		damage_graph_ = graph;
+		damage_generation_ = graph ? graph->generation() : 0;
+		damage_uses_ = graph ? model_damage_uses(*graph, path()) : std::vector<DamageUse>();
+		for (DamageUse &use : damage_uses_) use.edge = nullptr;
+	}
+	// The use the options name, else the first.
+	damage_use_ = SIZE_MAX;
+	for (size_t i = 0; i < damage_uses_.size() && !options_.damage.item.empty(); ++i)
+		if (strutil::iequals(damage_uses_[i].item, options_.damage.item)) {
+			damage_use_ = i;
+			break;
+		}
+	if (damage_use_ == SIZE_MAX && !damage_uses_.empty()) damage_use_ = 0;
+	const DamageUse *use = damage_use();
+	// The item as its catalog reads, again as the catalog's stamp moves.
+	const FileSource &files = *view.findings.assets;
+	const std::string catalog = use ? file_of(use->file) : std::string();
+	const std::string record = use ? use->item : std::string();
+	const uint64_t stamp = catalog.empty() ? 0 : files.stamp(catalog);
+	bool moved = false;
+	if (catalog != damage_catalog_ || record != damage_record_ || stamp != damage_catalog_stamp_) {
+		damage_catalog_ = catalog;
+		damage_record_ = record;
+		damage_catalog_stamp_ = stamp;
+		damage_item_ = DamageItem();
+		if (!catalog.empty()) read_damage_item(files, catalog, record, damage_item_);
+		moved = true;
+	}
+	// The husk the game draws (husk first) and the model its pieces come from (huskfinal first), each the
+	// project's file the game loads by its name, read again as its stamp moves.
+	const AssetScan *scan = view.project.scan.get();
+	const auto file_named = [&](const std::string &name) -> std::string {
+		if (!scan || name.empty()) return std::string();
+		const AssetEntry *entry = scan->find(name);
+		if (!entry && !strutil::ends_with_icase(name, ".3di")) entry = scan->find(name + ".3di");
+		return entry && entry->kind == AssetKind::Model ? entry->logical_name : std::string();
+	};
+	const auto refresh = [&](const std::string &file, DamageModel &held) {
+		const uint64_t now = file.empty() ? 0 : files.stamp(file);
+		if (file == held.file && now == held.stamp && held.read) return false;
+		held = DamageModel();
+		held.file = file;
+		held.stamp = now;
+		held.read = true;
+		std::vector<uint8_t> bytes;
+		if (!file.empty() && files.read(file, bytes)) held.model = assets::parse_model(bytes.data(), bytes.size());
+		return true;
+	};
+	const DamageItem &item = damage_item_;
+	const std::string husk_file =
+			item.found ? file_named(world::husk_render_graphic(item.husk, item.huskfinal)) : std::string();
+	const std::string piece_file =
+			item.found ? file_named(world::death_piece_graphic(item.husk, item.huskfinal)) : std::string();
+	moved = refresh(husk_file, husk_model_) || moved;
+	moved = refresh(piece_file, piece_model_) || moved;
+	if (moved) {
+		damage_models_ = DamageModels();
+		if (husk_model_.model) {
+			note_damage_husk(*husk_model_.model, damage_models_);
+			// The KZ walk reads the first husk alone: a def with only a final husk has no KZ point.
+			if (item.husk.empty()) damage_models_.kz_points = 0;
+		}
+		if (piece_model_.model) note_damage_pieces(*piece_model_.model, damage_models_);
+		damage_plan_ = editor::damage_plan(item, damage_models_);
+	}
+	// What the picture draws at the clock, and why where the destroyed state draws other than the husk.
+	const std::string self = file_of(path());
+	const bool graphic = use && (use->role == DamageRole::Graphic || use->role == DamageRole::EnemyGraphic);
+	const bool husk_is_self = !husk_file.empty() && strutil::iequals(husk_file, self);
+	damage_drives_ = use && item.found && damage_plan_.swaps && !damage_plan_.husk.empty() &&
+	                 (husk_is_self || (graphic && husk_model_.model));
+	damage_note_.clear();
+	std::string drawn;
+	if (options_.damage.state != DamageState::Destroyed) {
+		damage_drawn_.clear();
+		return drawn;
+	}
+	// The death's sounds play from the project's banks, read as the game reads them (DI-04's sources).
+	sound_sources_.refresh(*view.findings.assets,
+	                       view.project.document ? view.project.document->expansion.name : std::string(), PreviewRig());
+	if (!use) {
+		damage_note_ = "No item names this model as its graphic or its husk: it has no damage state.";
+	} else if (!item.found) {
+		damage_note_ = use->item + " does not read in " + catalog + ".";
+	} else if (!damage_plan_.swaps) {
+		damage_note_ = damage_plan_.class_words;
+	} else if (graphic) {
+		if (damage_plan_.husk.empty())
+			damage_note_ = item.name + " authors no husk model: the preview keeps drawing its graphic.";
+		else if (husk_file.empty())
+			damage_note_ = "The project has no " + damage_plan_.husk + ": the preview keeps drawing the graphic.";
+		else if (!husk_is_self && !husk_model_.model)
+			damage_note_ = husk_file + " does not read as a model: the preview keeps drawing the graphic.";
+		else if (!husk_is_self && damage_frame(damage_plan_, item, clock.ticks()).husked)
+			drawn = husk_file;
+	} else if (!husk_is_self) {
+		damage_note_ = self + " is " + item.name + "'s final husk: the game draws it only as the death pieces, each " +
+		               "its own section; " + damage_plan_.husk + " is the husk drawn.";
+	}
+	damage_drawn_ = drawn;
+	return drawn;
+}
+
+bool ModelViewport::damage_playing() const {
+	return options_.damage.state == DamageState::Destroyed && !animating_ && damage_use() && damage_item_.found &&
+	       damage_plan_.swaps;
+}
+
+bool ModelViewport::damage_driven() const {
+	return damage_playing() && damage_drives_;
+}
+
+DamageFrame ModelViewport::damage_frame_at(const PreviewClock &clock) const {
+	return damage_playing() ? damage_frame(damage_plan_, damage_item_, clock.ticks()) : DamageFrame();
+}
+
+std::map<std::string, int64_t> ModelViewport::ctrl_at(const PreviewClock &clock) const {
+	std::map<std::string, int64_t> out = options_.ctrl;
+	if (!damage_driven()) return out;
+	// The game writes the six every time the model draws: zero first, the fade's phases once husked [orig:
+	// Entity_PublishSwapFadePhases @ 0x5C3F40].
+	const DamageFrame frame = damage_frame(damage_plan_, damage_item_, clock.ticks());
+	for (int i = 0; i < 6; ++i) {
+		const char *name = threedi::threedi_ctrl_register_name(size_t(threedi::THREEDI_CTRL_OBJECT_DESTROY + i));
+		for (auto it = out.begin(); it != out.end();) it = strutil::iequals(it->first, name) ? out.erase(it) : std::next(it);
+		if (frame.fade.phases_q16[size_t(i)] != 0) out[name] = frame.fade.phases_q16[size_t(i)];
+	}
+	return out;
+}
+
+uint32_t ModelViewport::hidden_sections_at(const PreviewClock &clock) const {
+	return damage_driven() ? damage_frame(damage_plan_, damage_item_, clock.ticks()).hidden_sections : 0;
+}
+
+std::vector<ClipSoundFired> ModelViewport::fire_damage_sounds(const PreviewClock &clock, const AssetScan *scan,
+		audio::SoundSelector &selector, uint64_t &next_seq) {
+	std::vector<ClipSoundFired> out;
+	const int32_t now = clock.ticks();
+	const bool sought = clock.tick_seeks() != damage_seeks_;
+	damage_seeks_ = clock.tick_seeks();
+	const int32_t from = damage_cursor_;
+	damage_cursor_ = now;
+	if (!damage_playing() || reason_ != ModelViewStatus::Ready || from < 0 || sought || now <= from ||
+	    now - from > kClipSoundCatchUpTicks)
+		return out;
+	// The legs on the ticks [from, now): the death on tick 0 heard as the clock leaves it.
+	for (const DamageLeg &leg : damage_plan_.legs) {
+		if (leg.kind != "sound" || leg.tick < from || leg.tick >= now) continue;
+		ClipSoundFired fired;
+		fired.seq = ++next_seq;
+		fired.path = path();
+		fired.tick = leg.tick;
+		fired.slot = -1;
+		fired.set = leg.name;
+		// Played at the item, the preview's origin, as the camera hears it.
+		PreviewHearing heard;
+		const PreviewVec3 eye = camera_.eye();
+		heard.listener[0] = eye.x;
+		heard.listener[1] = eye.y;
+		heard.listener[2] = eye.z;
+		const PreviewPlay play = plan_set_play(sound_sources_.banks(), sound_sources_.expansion(), leg.name, std::string(),
+		                                       selector, kClipSoundListenerView, &heard);
+		fired.bank = play.bank;
+		fired.words = "Tick " + std::to_string(leg.tick) + " (the death sound): " + play.words;
+		fired.state = !play.found ? "missing" : !play.in_range ? "out_of_range" : play.voices.empty() ? "silent" : "played";
+		for (const PreviewVoice &voice : play.voices)
+			fired.voices.push_back({voice.wave, voice.file, std::string(), voice.pitch_q16, voice.volume});
+		if (scan) find_clip_sound_waves(fired, *scan);
+		fired_.push_back(fired);
+		out.push_back(std::move(fired));
+	}
+	if (fired_.size() > kSoundsFiredKept) fired_.erase(fired_.begin(), fired_.end() - kSoundsFiredKept);
+	return out;
 }
 
 // A clip or a table plays on its rig's model (as the project's files hold it): the model is read
@@ -1343,12 +1582,29 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		collision_json.set("layers", std::move(layers));
 		collision_json.set("legend", std::move(legend));
 		body.set("collision", std::move(collision_json));
+		// Each register the model names (DI-10): its value as the picture reads it now, whether the damage
+		// state drives it, and what the game does with it (documents/model_ctrl_words).
+		const std::map<std::string, int64_t> ctrl = ctrl_at(input.clock);
 		for (uint32_t i = 0; i < shown.ctrl.count; ++i) {
 			const std::string name = strutil::fixed_string(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
 			JsonValue row = JsonValue::make_object();
 			row.set("name", json_string(name));
-			const auto value = options_.ctrl.find(name);
-			row.set("value", json_number(value == options_.ctrl.end() ? 0.0 : double(value->second)));
+			const auto value = ctrl.find(name);
+			row.set("value", json_number(value == ctrl.end() ? 0.0 : double(value->second)));
+			const int ordinal = threedi::threedi_ctrl_register_ordinal(name.c_str());
+			row.set("ordinal", json_number(ordinal));
+			const CtrlRegisterWords &words = ctrl_register_words(ordinal);
+			row.set("group", json_string(words.group));
+			row.set("label", json_string(words.label));
+			row.set("writer", json_string(ctrl_writer_token(words.writer)));
+			row.set("driven", json_string(words.driven));
+			row.set("cite", json_string(words.cite));
+			JsonValue range = JsonValue::make_array();
+			range.push(json_number(double(words.min)));
+			range.push(json_number(double(words.max)));
+			row.set("range", std::move(range));
+			row.set("share", JsonValue::make_bool(words.share));
+			row.set("damage", JsonValue::make_bool(damage_driven() && ctrl_register_is_destroy_phase(ordinal)));
 			registers.push(std::move(row));
 		}
 	}
@@ -1358,6 +1614,7 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	const AssetScan *scan = input.view.project.scan.get();
 	if (!animating_) {
 		body.set("animation", JsonValue::make_null());
+		body.set("damage", damage_json_(input));
 		// The maps this model plays (S17): each record pairing it with one (preview_model_fields), and how.
 		JsonValue maps = JsonValue::make_array();
 		if (graph && scan && input.document)
@@ -1487,7 +1744,89 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	animation.set("uses", std::move(uses));
 	animation.set("notes", std::move(notes));
 	body.set("animation", std::move(animation));
+	body.set("damage", JsonValue::make_null());
 	return body;
+}
+
+io::JsonValue ModelViewport::damage_json_(const ViewportInput &input) const {
+	JsonValue out = JsonValue::make_object();
+	JsonValue uses = JsonValue::make_array();
+	for (size_t i = 0; i < damage_uses_.size(); ++i) {
+		const DamageUse &use = damage_uses_[i];
+		JsonValue row = JsonValue::make_object();
+		row.set("item", json_string(use.item));
+		row.set("file", json_string(use.file));
+		row.set("field", json_string(use.field));
+		row.set("role", json_string(damage_role_token(use.role)));
+		row.set("locator", json_string(use.locator));
+		row.set("chosen", JsonValue::make_bool(i == damage_use_));
+		uses.push(std::move(row));
+	}
+	out.set("uses", std::move(uses));
+	out.set("state", json_string(options_.damage.state == DamageState::Destroyed ? "destroyed" : "intact"));
+	const DamageUse *use = damage_use();
+	out.set("item", json_string(use ? use->item : std::string()));
+	out.set("role", json_string(use ? damage_role_token(use->role) : ""));
+	const DamageItem &item = damage_item_;
+	out.set("found", JsonValue::make_bool(item.found));
+	out.set("playing", JsonValue::make_bool(damage_playing()));
+	out.set("driven", JsonValue::make_bool(damage_driven()));
+	out.set("drawn", json_string(damage_drawn_));
+	out.set("note", json_string(damage_note_));
+	if (item.found) {
+		const DamagePlan &plan = damage_plan_;
+		out.set("class", json_string(plan.class_words));
+		out.set("ai_function", json_string(item.ai_function));
+		JsonValue timing = JsonValue::make_array();
+		for (const int32_t ticks : item.destroy_timing_ticks) timing.push(json_number(ticks));
+		out.set("destroy_timing", std::move(timing));
+		out.set("husk", json_string(plan.husk));
+		out.set("husk_file", json_string(husk_model_.file));
+		out.set("pieces_from", json_string(plan.pieces_from));
+		out.set("pieces_file", json_string(piece_model_.file));
+		out.set("swaps", JsonValue::make_bool(plan.swaps));
+		out.set("swap_tick", json_number(plan.swap_tick));
+		out.set("fade_end_tick", json_number(damage_fade_end_tick(plan, item)));
+		JsonValue pieces = JsonValue::make_array();
+		for (const DamagePiece &piece : plan.pieces) {
+			JsonValue row = JsonValue::make_object();
+			row.set("section", json_number(piece.section));
+			row.set("type", json_string(piece.type));
+			row.set("chance", json_number(piece.chance));
+			pieces.push(std::move(row));
+		}
+		out.set("pieces", std::move(pieces));
+		JsonValue legs = JsonValue::make_array();
+		for (const DamageLeg &leg : plan.legs) {
+			JsonValue row = JsonValue::make_object();
+			row.set("tick", json_number(leg.tick));
+			row.set("seconds", json_number(leg.tick / io::kTickHz));
+			row.set("kind", json_string(leg.kind));
+			row.set("name", json_string(leg.name));
+			row.set("words", json_string(leg.words));
+			row.set("cite", json_string(leg.cite));
+			row.set("shown", json_string(leg.shown));
+			row.set("due", JsonValue::make_bool(damage_playing() && input.clock.ticks() >= leg.tick));
+			legs.push(std::move(row));
+		}
+		out.set("legs", std::move(legs));
+	}
+	// The state the game draws at the clock (the death at tick 0).
+	const DamageFrame frame = damage_frame_at(input.clock);
+	JsonValue now = JsonValue::make_object();
+	now.set("ticks", json_number(input.clock.ticks()));
+	now.set("husked", JsonValue::make_bool(frame.husked));
+	now.set("fade_elapsed", json_number(frame.fade_elapsed));
+	JsonValue phases = JsonValue::make_array();
+	for (const int32_t phase : frame.fade.phases_q16) phases.push(json_number(phase));
+	now.set("phases", std::move(phases));
+	now.set("progress", json_number(frame.fade.progress));
+	now.set("hidden_sections", json_number(double(frame.hidden_sections)));
+	out.set("frame", std::move(now));
+	JsonValue fired = JsonValue::make_array();
+	for (const ClipSoundFired &one : fired_) fired.push(clip_sound_fired_to_json(one));
+	out.set("sounds_fired", std::move(fired));
+	return out;
 }
 
 io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
