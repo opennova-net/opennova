@@ -827,6 +827,13 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Report: out.report = false; break; // its default is true
 		case F::Steps: out.steps = 3; break; // its default is 1
 		case F::Folder: out.folder = "defs"; break;
+		case F::Start:
+			out.start.set = true;
+			out.start.at[0] = 120.5;
+			out.start.at[1] = -40.25;
+			out.start.at[2] = 8.0;
+			out.start.yaw = 90.0;
+			break;
 		case F::kCount: break;
 		}
 	}
