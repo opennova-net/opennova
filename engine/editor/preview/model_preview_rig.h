@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/model/node.h>
 #include <editor/preview/model_preview_camera.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -42,6 +43,9 @@ struct PreviewRig {
 	std::string table;  // the table's file name ("" a lone clip)
 	std::string clip;   // the clip's file name when the document is a clip
 	std::string source; // where the model came from: "chosen", else the record that pairs them
+	// The record that pairs them, where Go to on "paired by" takes (DI-05: its file opened at the record,
+	// its map field shown); an empty file for a chosen model or none.
+	ReferenceTarget pairing;
 };
 
 // The model fields of a record that pair with its map field (S17 review): an item's anim_def plays
