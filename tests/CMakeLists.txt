@@ -4523,6 +4523,14 @@ target_link_libraries(editor_texture_external_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_external_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_external COMMAND editor_texture_external_test)
 
+# ADR 0046 DI-01, outside saves come back (editor/assets/disk_changes.h, editor/session/disk_watch.h): a
+# file read once it holds still, the folders' made and gone files, the focus-in sweep; an open catalog's
+# outside save read again with its selection kept, a conflict raised at once with Keep my edits.
+add_executable(editor_disk_changes_test editor/disk_changes_test.cpp)
+target_link_libraries(editor_disk_changes_test PRIVATE opennova_editor)
+target_include_directories(editor_disk_changes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_disk_changes COMMAND editor_disk_changes_test)
+
 # A file's rename through the native texts (ADR 0046 S18, graph/native_text_sites): a terrain's, an
 # environment's, a particle file's and the HUD layout's names rewritten as text, only the token the game
 # reads at each site; a flipbook's frame refused; a file in the SCR form written back as plain text. The

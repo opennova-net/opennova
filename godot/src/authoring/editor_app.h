@@ -217,9 +217,9 @@ private:
 	// The SubViewports of devices given up before this frame, freed (queued: they go at the frame's
 	// end, after the ImGui pass of this frame drew without them).
 	void free_retired_();
-	// A refresh_changed_sources sent of the Shell's own (S18), when the busy gate takes it: as the
-	// window gains the focus and once a second while it has it.
-	void refresh_changed_sources_();
+	// A refresh_changed_sources sent of the Shell's own (S18, DI-01), when the busy gate takes it: once a
+	// second whatever has the focus (sooner while a file waits), and with `p_all` as the window gains it.
+	void refresh_changed_sources_(bool p_all);
 	// The open_externally view events posted since the last pump, each file opened in its program.
 	void open_externally_events_();
 	// The system pointer shown, or hidden while a picture under the mouse draws the game's (DI-08); set
@@ -264,10 +264,9 @@ private:
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window
-	// The external round trip (S18): whether the window has the focus, when the sources were last
-	// checked, the last view event taken, and the file the last open_externally named.
-	bool focused_ = false;
-	uint64_t last_source_check_ms_ = 0;
+	// The external round trip (S18, DI-01): when the files were last checked, the last view event taken, and
+	// the file the last open_externally named.
+	uint64_t last_disk_check_ms_ = 0;
 	uint64_t external_seq_ = 0;
 	bool open_externally_ = true;
 	String last_external_open_;
