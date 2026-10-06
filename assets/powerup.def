@@ -1,3 +1,15 @@
 // Powerups of OpenNova. Each is a powerup "<name>" .. end block.
 // Powerup definitions
 
+powerup "PU_ONAR15"
+	respawn_time 120
+	weapon WPN_ON_AR15
+	action "pickup"
+	function powerup_pickup
+	soundset GF_ONAR15_ST
+	end
+	action "respawn"
+	function powerup_respawn
+	end
+end
+

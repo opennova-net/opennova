@@ -44,6 +44,7 @@ ammo AMMO_ON_556
 		player none ON_IMP_PLAYER 10
 		zip none ON_BULLET_BY 10
 	end
+	ai_launch GS_ONAR15AI
 end
 
 

@@ -64,6 +64,10 @@ begin "Rebel rifleman"
 	type person
 	attrib: aidata nodismember
 	deathtime 30
+	ammo_closeattack AMMO_ON_556
+	ammo_marker3 AMMO_ON_556
+	ammo_easyrocket AMMO_ON_556
+	ammo_advancedrocket AMMO_ON_556
 end
 
 
@@ -86,6 +90,14 @@ begin "Mud-brick hut"
 	id 100012
 	type building
 	attrib: landable
+end
+begin "Power Up AR-15"
+	powerupdef PU_ONAR15
+	graphic onar15_3
+	disk_function POWERUP
+	id 102050
+	type powerup
+	attrib: powerup notarget
 end
 
 
