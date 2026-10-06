@@ -161,8 +161,7 @@ bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &ind
 		return false;
 	}
 	std::vector<uint8_t> cpt_bytes, trn_bytes;
-	if (!index.read_file(terrain_name + ".cpt", cpt_bytes) ||
-			!index.read_file(terrain_name + ".trn", trn_bytes)) {
+	if (!read(terrain_name + ".cpt", cpt_bytes) || !read(terrain_name + ".trn", trn_bytes)) {
 		error = terrain_name + ".cpt/.trn are not under the mount";
 		return false;
 	}
@@ -185,7 +184,7 @@ bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &ind
 	IndexedImage8 charmap;
 	std::vector<uint8_t> charmap_bytes;
 	if (!trn.charmap.empty()) {
-		if (!index.read_file(trn.charmap, charmap_bytes)) {
+		if (!read(trn.charmap, charmap_bytes)) {
 			io::logf(io::LogLevel::kWarn, "terrain: charmap %s is not under the mount - no surface map",
 					trn.charmap.c_str());
 		} else {
@@ -201,7 +200,26 @@ bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &ind
 	terrain_field_store_build(store, cpt, trn,
 			charmap.empty() ? nullptr : charmap.indices.data(),
 			charmap.width, charmap.height);
+	if (trn_out != nullptr) *trn_out = std::move(trn);
 	return store.valid();
+}
+
+} // namespace
+
+bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
+		const std::string &terrain_name, std::string &error) {
+	const auto read = [&index](const std::string &name, std::vector<uint8_t> &out) {
+		return index.read_file(name, out);
+	};
+	return load_store(store, read, terrain_name, error, nullptr);
+}
+
+bool terrain_field_store_load(TerrainFieldStore &store, const FileSource &files,
+		const std::string &terrain_name, std::string &error, TrnConfig *trn) {
+	const auto read = [&files](const std::string &name, std::vector<uint8_t> &out) {
+		return files.read(name, out);
+	};
+	return load_store(store, read, terrain_name, error, trn);
 }
 
 } // namespace opennova::terrain

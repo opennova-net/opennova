@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <base/resource_index/resource_index.h>
+#include <base/vfs/file_source.h>
 #include <formats/cpt/cpt.h>
 #include <formats/trn/trn.h>
 #include <runtime/terrain_query/terrain_field_store.h>
