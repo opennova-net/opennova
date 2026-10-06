@@ -80,6 +80,12 @@ std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Docum
 // in three digits at least, sprintf's "%s%03i": STRNAME005 is 5, STRNAME1234 is 1234); false for a key of
 // another prefix or one no number forms (STRNAME5, STRNAME0005), which no lookup of the game reads.
 bool text_key_number(const std::string &key, const char *prefix, int64_t &out);
+// The text key a field's number forms (FieldUse::key_prefix: a mission's name index, a waypoint's name
+// id, an objectives row) as a reference the badge and the Go to read: `out` the field as a TextId
+// reference in the table the game reads (its own where the project has it, else the alternate:
+// AssetGraph::lookup_scope), `key` the key ("STRWPNAME001"); false for a field that forms none, or a
+// number no lookup of the game reads (outside key_first..key_last).
+bool keyed_text_reference(const AssetGraph &graph, const FieldUse &field, const Value &value, FieldUse &out, Value &key);
 
 // A place an edge names, in words, its file not opened (the plain-words lane: a find's uses, a file's
 // page, a string's uses, the import plan): the record by its path, its last step in its type's own words
