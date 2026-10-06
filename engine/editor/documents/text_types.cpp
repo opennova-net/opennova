@@ -2,14 +2,12 @@
 
 #include <algorithm>
 #include <iterator>
-#include <sstream>
 #include <utility>
 
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
-#include <formats/env/env.h>
 #include <formats/scr/scr.h>
 #include <formats/score/score.h>
 #include <net/novacrypto/pubcrypto.h>
@@ -199,15 +197,6 @@ std::vector<Diagnostic> text_reader_findings(const TextDocument &document) {
 	const auto *bytes = reinterpret_cast<const uint8_t *>(text.data());
 	const char *unchecked = " The editor cannot check what the file names until it reads.";
 	switch (document.kind()) {
-	case AssetKind::Environment: {
-		std::istringstream input(text);
-		env::Config config;
-		std::string error;
-		if (!env::load_env(input, config, error))
-			findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
-					"The game's environment reader does not read it: " + sentence(error) + unchecked, document, 0, 0));
-		break;
-	}
 	case AssetKind::HudPosDefs: {
 		def::DefHudPosFile file{};
 		if (def::def_parse_hudpos_memory(bytes, text.size(), &file) != 0)
