@@ -307,7 +307,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
 	        .runtime("particle")
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::Particles)
 	        .names_files()
 	        .folder("particles")
 	        .about("Particle effects (smoke, fire, sparks) by name, which items, weapons and ammo name.")
