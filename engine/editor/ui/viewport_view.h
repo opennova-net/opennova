@@ -6,6 +6,7 @@
 
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/viewport_kinds.h>
+#include <editor/preview/viewport_model.h>
 #include <editor/ui/viewport_canvas.h>
 #include <editor/ui/workspace.h>
 
@@ -72,6 +73,7 @@ protected:
 private:
 	ViewportKind kind_;
 	std::unique_ptr<ViewportCanvas> canvas_;
+	ViewportLayout layout_; // the layout the canvas was made for
 	std::unique_ptr<CanvasHalf> half_;
 	std::string path_; // the document the last frame drew
 };
