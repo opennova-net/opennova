@@ -8,7 +8,9 @@
 // (a closed document opened again at its record by its locator, a text at its line, a page, Files), a
 // place whose file is gone passed over, a rename's places following it, the history going with its
 // project; and the wire: navigate_back and navigate_forward with steps, the navigation section, the
-// catalog, the show_document event.
+// catalog, the show_document event. DI-17, a Go to always lands: a file the editor has no editor for on its
+// page with the record marked, a place with its mark; a native text at the record's line; a missing name
+// where it belongs.
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -16,17 +18,23 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document.h>
+#include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
+#include <editor/session/file_page.h>
 #include <editor/session/navigation_history.h>
 #include <editor/session/preferences_store.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -153,6 +161,15 @@ int test_same_place() {
 	TEST_EXPECT(same_place(at("main.mnu"), at("main.mnu")) && !same_place(at("main.mnu"), at("main.mnu", kExit)));
 	TEST_EXPECT(!same_place(at("hit.wav", "", Pane::Page), at("hit.wav", "", Pane::Files)));
 	TEST_EXPECT(same_place(at("hit.wav", "", Pane::Files), at("hit.wav", "", Pane::Files)));
+	// A page by the record and field a Go to marked there (DI-17), or none.
+	NavigationPlace foliage = at("isle.trn", "foliage 1", Pane::Page), again = at("isle.trn", "foliage 1", Pane::Page);
+	foliage.field = again.field = "graphic";
+	TEST_EXPECT(same_place(foliage, again) && !same_place(foliage, at("isle.trn", "", Pane::Page)));
+	again.field = "texture";
+	TEST_EXPECT(!same_place(foliage, again));
+	again = at("isle.trn", "foliage 2", Pane::Page);
+	again.field = "graphic";
+	TEST_EXPECT(!same_place(foliage, again) && same_place(at("isle.trn", "", Pane::Page), at("isle.trn", "", Pane::Page)));
 	return 0;
 }
 
@@ -379,6 +396,158 @@ JsonValue parsed(const std::string &text) {
 	return out;
 }
 
+// The lines of a page a Go to marked.
+std::vector<std::string> marked_lines(const FilePage &page) {
+	std::vector<std::string> out;
+	for (const FilePageDefinition &defined : page.defines)
+		if (defined.at) out.push_back(defined.text);
+	for (const FilePageLine &line : page.names)
+		if (line.at) out.push_back(line.text);
+	return out;
+}
+
+// DI-17, a Go to always lands: a file the editor has no editor for lands on its page, the record it names
+// marked (a terrain's colour map, from the texture it names), a place of its own with its mark (another line
+// of the same page a step, Back and Forward marking each again); a wave's page, whose user is a sound bank,
+// a document of its own (S22: the specific document wins), there opened at the single; a native text held as
+// a text (DI-06: an avatar table, whose parser keeps no places) at the line that writes the record's name (of
+// two records naming one model each its own line, a record named alone its first, the text already open),
+// again on Back; a name nothing resolves where it belongs (a string id in its table, a style variable in a
+// stylesheet), a file the project lacks nowhere; the page's wire: what it names with its mark, a wave's Play,
+// where its lines go.
+int test_go_to_lands() {
+	Navigated n("opennova_editor_navigation_lands");
+	const SessionView &v = n.view();
+	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/";
+	std::string avatars = "Avatars.def";
+	for (const AssetEntry &entry : v.project.scan->entries)
+		if (entry.kind == AssetKind::AvatarDefs) avatars = entry.relative_path;
+	const std::string root = v.project.root;
+	TEST_EXPECT(editor_test::write_bytes(root + "/sounds/menu.lwf", test_io::read_file(fixtures + "lwf/menu.lwf")) &&
+	            editor_test::write_bytes(root + "/sounds/tone.wav", test_io::read_file(fixtures + "lwf/tone.wav")) &&
+	            editor_test::write_bytes(root + "/" + avatars, test_io::read_file(fixtures + "avatars/synth_avatars.def")) &&
+	            editor_test::write_text(root + "/textures/map.tga", "not a picture") &&
+	            editor_test::write_text(root + "/textures/grain.tga", "not a picture") &&
+	            editor_test::write_text(root + "/terrains/isle.trn",
+	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_polydata isle.cpt\n"));
+	editor_test::handle_to_end(n.session, request::rescan());
+	const std::string bank = "sounds/menu.lwf", wave = "sounds/tone.wav", terrain = "terrains/isle.trn";
+
+	// The terrain's page, from the texture its colour map names: that line marked, the page's tab forward.
+	ReferenceTarget colormap;
+	for (const FilePageLine &line : file_page(v, "textures/map.tga").used_by)
+		if (line.target.file == terrain) colormap = line.target;
+	TEST_EXPECT(colormap.locator.empty() && colormap.field == "polytrn_colormap" && !colormap.editable);
+	uint64_t seq = v.events.next_seq() - 1;
+	TEST_EXPECT(n.go(request::open_document(colormap.file, colormap.locator, colormap.field)) && v.documents.page == terrain &&
+	            v.documents.page_locator.empty() && v.documents.page_field == "polytrn_colormap");
+	std::vector<ViewEvent> shown = editor_test::events_after(v, seq, ViewEventKind::ShowDocument);
+	TEST_EXPECT(shown.size() == 1 && shown[0].path == terrain && shown[0].flag);
+	TEST_EXPECT(v.activity.status.find("at polytrn_colormap") != std::string::npos);
+	const FilePage terrain_page = shown_file_page(v, terrain);
+	const std::vector<std::string> marked = marked_lines(terrain_page);
+	TEST_EXPECT(marked.size() == 1 && marked[0].rfind("polytrn_colormap: ", 0) == 0 &&
+	            marked[0].find("map.tga") != std::string::npos);
+	TEST_EXPECT(v.navigation.back.front().pane == Pane::Document && v.navigation.back.front().path == n.extra);
+	// Its missing height data: no file to go to (its finding in Problems holds the fixes); the page alone marks
+	// nothing.
+	size_t missing = 0;
+	for (const FilePageLine &line : terrain_page.names)
+		if (line.missing) missing += line.target.file.empty() && line.name == "isle.cpt" ? 1 : 100;
+	TEST_EXPECT(missing == 1);
+	TEST_EXPECT(marked_lines(file_page(v, terrain)).empty());
+
+	// Another line of the same page: a step of its own, the place left the page at the colour map.
+	TEST_EXPECT(n.go(request::open_document(terrain, "", "polytrn_detailmap")) && v.documents.page_field == "polytrn_detailmap");
+	TEST_EXPECT(v.navigation.back.front().pane == Pane::Page && v.navigation.back.front().path == terrain &&
+	            v.navigation.back.front().locator.empty() && v.navigation.back.front().field == "polytrn_colormap" &&
+	            v.navigation.back.front().label == "About isle.trn: polytrn_colormap");
+	TEST_EXPECT(n.back() && v.documents.page == terrain && v.documents.page_field == "polytrn_colormap" &&
+	            marked_lines(shown_file_page(v, terrain)) == marked);
+	TEST_EXPECT(n.back() && v.documents.active == n.extra);
+	TEST_EXPECT(n.forward(2) && v.documents.page == terrain && v.documents.page_field == "polytrn_detailmap");
+
+	// A wave's page, its Play; its user, the bank, is a document of its own: opened at the single.
+	TEST_EXPECT(n.go(request::open_document(wave)) && v.documents.page == wave && v.documents.page_locator.empty());
+	const FilePage wave_page = shown_file_page(v, wave);
+	ReferenceTarget single;
+	for (const FilePageLine &line : wave_page.used_by)
+		if (line.target.file == bank) single = line.target;
+	TEST_EXPECT(wave_page.found && wave_page.wave && single.editable && !single.locator.empty());
+	TEST_EXPECT(n.go(request::open_document(single.file, single.locator, single.field)) && v.documents.active == bank);
+	const DocumentBase *bank_document = n.session.document_base_for(bank);
+	const Document *bank_records = bank_document ? records_of(*bank_document) : nullptr;
+	TEST_EXPECT(bank_records && v.documents.selection.primary.row &&
+	            bank_records->locator(v.documents.selection.primary) == single.locator);
+	TEST_EXPECT(v.navigation.back.front().pane == Pane::Page && v.navigation.back.front().path == wave);
+
+	// A native text at the record's line: two heads name synth_boonie.3di, each Go to its own line.
+	seq = v.events.next_seq() - 1;
+	TEST_EXPECT(n.go(request::open_document(avatars, "SYN_HEAD_BOONIE_CAMO_1", "graphic")));
+	const DocumentBase *text = n.session.document_base_for(avatars);
+	std::vector<ViewEvent> lines = editor_test::events_after(v, seq, ViewEventKind::RevealText);
+	TEST_EXPECT(text && text_of(*text) && lines.size() == 1 && lines[0].locator == "15:11");
+	seq = v.events.next_seq() - 1;
+	TEST_EXPECT(n.go(request::open_document(avatars, "SYN_HEAD_BOONIE", "graphic")));
+	lines = editor_test::events_after(v, seq, ViewEventKind::RevealText);
+	TEST_EXPECT(lines.size() == 1 && lines[0].locator == "6:11");
+	TEST_EXPECT(v.navigation.back.front().path == avatars && v.navigation.back.front().locator == "15:11" &&
+	            v.navigation.back.front().label == basename_of(avatars) + ", line 15");
+	seq = v.events.next_seq() - 1;
+	TEST_EXPECT(n.back());
+	lines = editor_test::events_after(v, seq, ViewEventKind::RevealText);
+	TEST_EXPECT(lines.size() == 1 && lines[0].locator == "15:11");
+	// A record named alone, the text open: the first name the parser reads of it (SYN_HEAD_2's model).
+	seq = v.events.next_seq() - 1;
+	TEST_EXPECT(n.go(request::open_document(avatars, "SYN_HEAD_2")));
+	lines = editor_test::events_after(v, seq, ViewEventKind::RevealText);
+	TEST_EXPECT(lines.size() == 1 && lines[0].locator == "24:11");
+	// A record the text does not hold: the text, at no line.
+	seq = v.events.next_seq() - 1;
+	TEST_EXPECT(n.go(request::open_document(avatars, "NO_SUCH_HEAD", "graphic")) &&
+	            editor_test::events_after(v, seq, ViewEventKind::RevealText).empty());
+
+	// A name nothing resolves: where it belongs; a file the project lacks, nowhere.
+	std::string gametext, style;
+	for (const AssetEntry &entry : v.project.scan->entries) {
+		if (basename_of(entry.relative_path) == "gametext.bin") gametext = entry.relative_path;
+		if (entry.kind == AssetKind::MenuStyle && style.empty()) style = entry.relative_path;
+	}
+	ReferenceTarget home;
+	TEST_EXPECT(!gametext.empty() &&
+	            missing_target(ReferenceSubject{ReferenceKind::TextId, "NO_SUCH_KEY", "GAMETEXT.BIN/WepDes", -1}, v, home) &&
+	            home.file == gametext && home.missing && home.editable && home.locator.empty());
+	TEST_EXPECT(!style.empty() && missing_target(ReferenceSubject{ReferenceKind::StyleVar, "NO_SUCH_VAR", "", -1}, v, home) &&
+	            home.missing && asset_kind_row(v.project.scan->at_path(home.file)->kind).document != DocumentTypeId::None);
+	TEST_EXPECT(!missing_target(ReferenceSubject{ReferenceKind::Model, "nothing.3di", "", -1}, v, home));
+	TEST_EXPECT(!missing_target(ReferenceSubject{ReferenceKind::TextId, "NO_SUCH_KEY", "", -1}, v, home));
+	TEST_EXPECT(n.go(request::open_document(gametext)) && v.documents.active == gametext &&
+	            v.navigation.back.front().path == avatars);
+
+	// The wire: the page showing with its mark, what it names going where, the wave's Play.
+	TEST_EXPECT(n.go(request::open_document(terrain, "", "polytrn_colormap")));
+	std::string error;
+	JsonValue page = n.session.query("file_page", JsonValue(), error);
+	TEST_EXPECT(page.get_string("path", "") == terrain && !page.get("at_locator") &&
+	            page.get_string("at_field", "") == "polytrn_colormap" && page.get("defines") && !page.get("wave"));
+	bool at_map = false;
+	if (const JsonValue *names = page.get("names"))
+		for (const JsonValue &line : names->array)
+			at_map |= line.get_bool("at", false) && line.get_string("file", "") == "textures/map.tga";
+	TEST_EXPECT(at_map);
+	page = n.session.query("file_page", parsed(R"({"path": "sounds/tone.wav"})"), error);
+	bool to_bank = false;
+	if (const JsonValue *users = page.get("used_by"))
+		for (const JsonValue &line : users->array)
+			to_bank |= line.get_string("file", "") == bank && line.get_string("locator", "") == single.locator;
+	TEST_EXPECT(page.get_bool("wave", false) && to_bank && !page.get("at_field"));
+	const JsonValue state = n.session.query("state", parsed(R"({"sections": ["documents", "navigation"]})"), error);
+	const JsonValue *documents = state.get("documents");
+	TEST_EXPECT(documents && documents->get_string("page", "") == terrain && !documents->get("page_locator") &&
+	            documents->get_string("page_field", "") == "polytrn_colormap");
+	return 0;
+}
+
 JsonValue navigation_section(ProjectSession &session) {
 	std::string error;
 	const JsonValue state = session.query("state", parsed(R"({"sections": ["navigation"]})"), error);
@@ -449,6 +618,7 @@ int main() {
 	failed += test_session_closed_gone_renamed();
 	failed += test_session_panes();
 	failed += test_wire();
+	failed += test_go_to_lands();
 	if (failed == 0) std::printf("editor_navigation: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }
