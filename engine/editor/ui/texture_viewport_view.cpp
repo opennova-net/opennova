@@ -187,6 +187,33 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		                    device_texture_words(model.shown_device()).c_str());
 	const TextureShownUse &use_shown = model.shown_use();
 	if (use_shown.index >= 0 && !use_shown.alpha_words.empty()) ImGui::TextDisabled("Alpha: %s.", use_shown.alpha_words.c_str());
+	// What the use's role reads of it: a line (a particle graphic's atlas page), and a legend (a blend map's weights,
+	// a foliage map's codes), each row its swatch, its share and what the game does with it; six rows show, more scroll.
+	const TextureRoleView &role = model.role_view();
+	if (!role.words.empty()) ImGui::TextDisabled("%s", role.words.c_str());
+	if (!role.title.empty()) {
+		ImGui::TextDisabled("%s:", role.title.c_str());
+		const float line = ImGui::GetTextLineHeightWithSpacing();
+		const float height = line * float(std::min<size_t>(std::max<size_t>(role.legend.size(), 1), 6)) + ImGui::GetStyle().WindowPadding.y;
+		if (ImGui::BeginChild("legend", ImVec2(0.0f, height))) {
+			ImGui::PushTextWrapPos(0.0f);
+			for (size_t i = 0; i < role.legend.size(); ++i) {
+				const TextureLegendRow &entry = role.legend[i];
+				ImGui::PushID(int(i));
+				const float side = ImGui::GetTextLineHeight();
+				ImGui::ColorButton("##swatch", ImVec4(entry.rgb[0] / 255.0f, entry.rgb[1] / 255.0f, entry.rgb[2] / 255.0f, 1.0f),
+				                   ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoDragDrop,
+				                   ImVec2(side, side));
+				ImGui::SameLine();
+				char share[32];
+				std::snprintf(share, sizeof(share), "%.1f%%", entry.share * 100.0);
+				ImGui::TextUnformatted((entry.key + " (" + share + "): " + entry.words).c_str());
+				ImGui::PopID();
+			}
+			ImGui::PopTextWrapPos();
+		}
+		ImGui::EndChild();
+	}
 	ImGui::PopTextWrapPos();
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y));
 }
