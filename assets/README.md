@@ -12,7 +12,9 @@ factories (`engine/editor/blank/`, written through our own writers), minted by
 our tools, or exported by the Blender add-on (`tools/blender/opennova_3di/`)
 from a scene under [`art/`](../art). No retail byte is ever committed here
 ([docs/asset-gated-tests.md](../docs/asset-gated-tests.md) has the policy).
-Models, clips and textures ride Git LFS; everything else is a plain git blob.
+The models, clips and textures exported from `art/` ride Git LFS; everything
+else, the menu's pointer `newarow1.tga` included, is a plain git blob, so no
+test needs an LFS pull (`.gitattributes`).
 
 The files sit flat in this folder, as a game folder holds its loose files: the
 game's loose mount and the original game's loose search find a file by its bare
