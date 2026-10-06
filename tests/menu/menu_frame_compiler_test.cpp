@@ -34,6 +34,13 @@ using opennova::menu::kMenuTexNone;
 
 namespace {
 
+// A text colour as the menus' text sink submits it: the RGB halved on a
+// modulate-2x device, which the font page's MODULATE2X doubles back on the
+// device (D-HUD-51) [orig: CFontCache_DrawTextScaled @0x6531e7..0x6531eb].
+constexpr uint32_t text_rgb(uint32_t rgb) {
+	return (rgb >> 1) & 0x7F7F7Fu;
+}
+
 // One table row of cell texts (values 0, state 0).
 MenuTableRow table_row(std::initializer_list<std::string> cells) {
 	MenuTableRow row;
@@ -210,7 +217,7 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	CHECK(dl.lines.size() == 4, "the outline draws four 1px lines");
 	// Text: both labels emit glyphs with the default color.
 	CHECK(!dl.glyphs.empty(), "glyph quads emitted");
-	CHECK((dl.glyphs[0].color & 0xFFFFFFu) == 0xAABBCCu,
+	CHECK((dl.glyphs[0].color & 0xFFFFFFu) == text_rgb(0xAABBCCu),
 			"default text color from the inherited FONT");
 
 	// Hover flips the button to the MOUSEOVER appearance and color pair
@@ -226,7 +233,7 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 			"hover replaces the default appearance");
 	bool found_red = false;
 	for (const auto &g : dl2.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0xFF0000u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0xFF0000u)) {
 			found_red = true;
 		}
 	}
@@ -244,10 +251,10 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	bool found_default = false;
 	bool found_green = false;
 	for (const auto &g : dl3.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0xAABBCCu) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0xAABBCCu)) {
 			found_default = true;
 		}
-		if ((g.color & 0xFFFFFFu) == 0x00FF00u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x00FF00u)) {
 			found_green = true;
 		}
 	}
@@ -261,7 +268,7 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	const MenuDrawList &dl4 = c.compile(state, 1.0f, 1.0f);
 	bool found_gray = false;
 	for (const auto &g : dl4.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0x808080u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x808080u)) {
 			found_gray = true;
 		}
 	}
@@ -817,14 +824,14 @@ void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
 	bool other_text_default_fg = false;
 	for (const auto &g : dl.glyphs) {
 		const uint32_t rgb = g.color & 0xFFFFFFu;
-		if (rgb == 0xFF0000u) {
+		if (rgb == text_rgb(0xFF0000u)) {
 			any_mouseover_text = true;
 		}
 		if (g.y_top >= 35.0f && g.y_top < 55.0f) {
-			if (rgb == 0x00FF00u) {
+			if (rgb == text_rgb(0x00FF00u)) {
 				selected_row_text_selected_fg = true;
 			}
-		} else if (rgb == 0xAAAAAAu) {
+		} else if (rgb == text_rgb(0xAAAAAAu)) {
 			other_text_default_fg = true;
 		}
 	}
@@ -910,8 +917,8 @@ void test_text_inline_colour_tags(const fnt_font_t *font) {
 	if (!dl.font_runs.empty() && dl.font_runs[0].count == 2) {
 		const size_t first = static_cast<size_t>(dl.font_runs[0].first);
 		CHECK((dl.glyphs[first].color & 0xFFFFFFu) == 0xFF0000u, "<cFF0000> draws red");
-		CHECK((dl.glyphs[first + 1].color & 0xFFFFFFu) == 0xAABBCCu,
-				"<co> restores the text colour");
+		CHECK((dl.glyphs[first + 1].color & 0xFFFFFFu) == text_rgb(0xAABBCCu),
+				"<co> restores the text colour (as the sink submits it, D-HUD-51)");
 		CHECK((dl.glyphs[first].color & 0xFF000000u) == (dl.glyphs[first + 1].color & 0xFF000000u),
 				"the tag keeps the text colour's alpha");
 	}
@@ -994,7 +1001,7 @@ void test_radio_checkbox_forcing(const fnt_font_t *font) {
 			"checked radio drops the default art");
 	bool radio_green = false;
 	for (const auto &g : dl.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0x00FF00u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x00FF00u)) {
 			radio_green = true;
 			break;
 		}
@@ -1064,7 +1071,7 @@ void test_edit_caret(const fnt_font_t *font) {
 	// vertex 11.5.
 	CHECK(dl.glyphs[2].x_top_left == 11.5f,
 			"caret x after the left run + the two gap terms");
-	bool mouseover_text = (dl.glyphs[0].color & 0xFFFFFFu) == 0x222222u;
+	bool mouseover_text = (dl.glyphs[0].color & 0xFFFFFFu) == text_rgb(0x222222u);
 	CHECK(mouseover_text, "focused edit text uses the mouseover fg");
 
 	// Blink OFF phase: no caret glyph.
@@ -1145,10 +1152,10 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 	int green_runs = 0;
 	int default_runs = 0;
 	for (const auto &g : dl.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0x00FF00u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x00FF00u)) {
 			++green_runs;
 		}
-		if ((g.color & 0xFFFFFFu) == 0x111111u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x111111u)) {
 			++default_runs;
 		}
 	}

@@ -60,11 +60,15 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	const bool have_bold = label_font_bold_.font() != nullptr;
 	const GameFont &bf = have_bold ? label_font_bold_ : font_;
 	const float bscale = have_bold ? label_scale_ : 1.0f;
+	// Every text here goes through a half-bright drawer, alpha forced opaque
+	// [orig: sub_580B40 @0x580b40 -> HUD_DrawTextLeft_HalfBright, sub_580BC0
+	//  @0x580bc0 -> HUD_DrawTextRightAligned_HalfBright, sub_580B80 @0x580b80 ->
+	//  HUD_DrawTextCentered_HalfBright].
 	const auto bold_text = [&](const char *t, float design_x, float design_y,
 			uint32_t argb, uint32_t flags) {
 		if (t == nullptr || t[0] == 0) return;
 		const GameFontRun run = bf.layout(t, sx(design_x, w), sy(design_y, h),
-				bscale, bscale, flags, argb);
+				bscale, bscale, flags, half_bright_argb(argb));
 		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 				run.quads.end());
 	};
@@ -93,7 +97,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 		const char *fallback = status_kind == 1 ? "!Under\nAttack!!"
 												 : "!Ready for\nTakeover!";
 		emit_text(s.empty() ? fallback : s.c_str(), static_cast<float>(tx),
-				static_cast<float>(ty), w, h, status_color, kFontAlignRight);
+				static_cast<float>(ty), w, h, half_bright_argb(status_color), kFontAlignRight);
 	};
 
 	for (size_t i = start; i < lp.zones.size(); ++i) {
@@ -157,13 +161,15 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 						true, own ? kHudTexLfpTileOwn : kHudTexLfpTileOther);
 			}
 		}
-		// 3. The letter, centred [orig: sprintf("%c", 'A' + idx) @0x5989fe;
-		//  HUD_DrawTextCenteredScaled (ex sub_580B80)(&dword_2723C74, x+32, y+44) @0x598a1b]. The
-		//  font object at dword_2723C74 is the hudpos HUD slot [orig: HUD_SelectHudposFont
-		//  @0x591890], the HUD font here.
+		// 3. The letter, centred, in the point colour through the half-bright
+		//  drawer [orig: sprintf("%c", 'A' + idx) @0x5989fe;
+		//  HUD_DrawTextCenteredScaled (ex sub_580B80)(&dword_2723C74, x+32, y+44,
+		//  text, point) @0x598a1b, the colour `push edi` @0x598a05 (edi the point
+		//  colour from @0x59890d)]. The font object at dword_2723C74 is the hudpos
+		//  HUD slot [orig: HUD_SelectHudposFont @0x591890], the HUD font here.
 		std::snprintf(text, sizeof(text), "%c", 'A' + z.letter_index);
 		emit_text(text, static_cast<float>(mx + kLfpLetterOffX),
-				static_cast<float>(my + kLfpLetterOffY), w, h, 0xFFFFFFFFu,
+				static_cast<float>(my + kLfpLetterOffY), w, h, half_bright_argb(point),
 				kFontAlignCenter);
 		// 4. The capture bar: the rect outline in the point colour and the
 		// fraction filled from the bottom [orig: the rect (x+56,y+30)..(x+76,y+82)

@@ -44,6 +44,13 @@ using opennova::menu::kMenuTexNone;
 
 namespace {
 
+// A text colour as the menus' text sink submits it: the RGB halved on a
+// modulate-2x device, which the font page's MODULATE2X doubles back on the
+// device (D-HUD-51) [orig: CFontCache_DrawTextScaled @0x6531e7..0x6531eb].
+constexpr uint32_t text_rgb(uint32_t rgb) {
+	return (rgb >> 1) & 0x7F7F7Fu;
+}
+
 int failures = 0;
 
 #define CHECK(cond, msg)                                                       \
@@ -258,7 +265,7 @@ void test_fonts(const fnt_font_t *font) {
 	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
 	const std::set<uint32_t> colors = glyph_colors(dl);
 	CHECK(dl.glyphs.size() == 2, "both labels draw with the root's font");
-	CHECK(colors == std::set<uint32_t>({ 0xFF0000u }),
+	CHECK(colors == std::set<uint32_t>({ text_rgb(0xFF0000u) }),
 			"a FONT that did not load (or has no NAME) takes the ancestor's colors too");
 	// No font anywhere: nothing drawn, and a text-sized rect measures nothing.
 	opennova::mnu::Document none = parse_or_die(screen(button("L", "<STRING>LABEL</STRING>",
@@ -366,9 +373,9 @@ void test_label_colors(const fnt_font_t *font) {
 	for (const auto &g : dl.glyphs) {
 		(g.y_top < 25.0f ? static_colors : radio_colors).insert(g.color & 0xFFFFFFu);
 	}
-	CHECK(static_colors == std::set<uint32_t>({ 0xFFFFFFu }),
+	CHECK(static_colors == std::set<uint32_t>({ text_rgb(0xFFFFFFu) }),
 			"a hovered static with no MOUSEOVER row keeps the default color");
-	CHECK(radio_colors == std::set<uint32_t>({ 0x00FF00u }), "a checked radio draws the selected pair");
+	CHECK(radio_colors == std::set<uint32_t>({ text_rgb(0x00FF00u) }), "a checked radio draws the selected pair");
 	CHECK(quad_with(dl, r) == nullptr, "and its unauthored SELECTED slot draws nothing");
 	CHECK(quad_with(dl, ck) == nullptr,
 			"a checkbox whose state resolves to none draws no checked art");
@@ -593,7 +600,7 @@ void test_table_columns(const fnt_font_t *font) {
 	CHECK(rl.glyphs.size() == 4 + 1 + 3 + 1, "the installed columns draw their labels and cells");
 	bool team = false;
 	for (const auto &g : rl.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0x00BFFFu) team = true;
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x00BFFFu)) team = true;
 	}
 	CHECK(team, "a row's colour override colours its cells");
 }

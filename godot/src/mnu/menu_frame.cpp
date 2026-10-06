@@ -1,4 +1,5 @@
 #include "mnu/menu_frame.h"
+#include "hud/font_page_glyphs.h"
 #include "util/color_convert.h"
 #include "mnu/menu_draw_list_stats.h"
 #include "util/string_convert.h"
@@ -19,6 +20,8 @@
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 
@@ -41,6 +44,38 @@ static_assert(MenuFrame::EDIT_RESULT_CHANGED == 1);
 static_assert(MenuFrame::EDIT_RESULT_COMMIT == 2);
 
 namespace {
+
+// The menu items' shader: the font page's material on a glyph run. A command
+// whose UV.y carries a -16 flag is a glyph run on a font page, whose material is
+// colour family 0x600 (hud::kFontPageMaterialWord): vertex() strips the flag and
+// fragment() runs MODULATE2X(TEXTURE, DIFFUSE) over COLOR (the texel times the
+// vertex colour), saturated per channel, the alpha MODULATE as COLOR has it,
+// under the SRCALPHA/INVSRCALPHA blend. The flag is negative because a menu's
+// tiled rects carry UVs far above 1 and none below 0; every other command keeps
+// the default texel x vertex colour.
+constexpr const char *kMenuGlyphShader = R"(
+shader_type canvas_item;
+render_mode unshaded, blend_mix;
+
+varying flat float modulate2x_on;
+
+void vertex() {
+	modulate2x_on = 0.0;
+	if (UV.y <= -8.0) {
+		UV.y += 16.0;
+		modulate2x_on = 1.0;
+	}
+}
+
+void fragment() {
+	if (modulate2x_on > 0.5) {
+		COLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));
+	}
+}
+)";
+
+// The -16 UV.y flag a glyph run's vertices carry into kMenuGlyphShader.
+constexpr float kMenuModulate2xUvFlag = -16.0f;
 
 int positive_mod(int value, int divisor) {
 	const int result = value % divisor;
@@ -103,6 +138,31 @@ void MenuFrame::ensure_overlay_canvas_item_() {
 	rs->canvas_item_set_parent(overlay_upper_canvas_item_, get_canvas_item());
 	rs->canvas_item_set_z_as_relative_to_parent(overlay_upper_canvas_item_, true);
 	rs->canvas_item_set_z_index(overlay_upper_canvas_item_, 3);
+	// Every item the draw list paints on runs the font pages' material on its
+	// glyph runs (the slot item is its companion's, which binds its own).
+	glyph_shader_.instantiate();
+	glyph_shader_->set_code(kMenuGlyphShader);
+	glyph_material_.instantiate();
+	glyph_material_->set_shader(glyph_shader_);
+	for (const RID &item : { get_canvas_item(), overlay_canvas_item_, overlay_upper_canvas_item_ }) {
+		rs->canvas_item_set_material(item, glyph_material_->get_rid());
+	}
+}
+
+String MenuFrame::glyph_shader_code() {
+	return String(kMenuGlyphShader);
+}
+
+Array MenuFrame::get_glyph_submissions() {
+	Array out;
+	if (!configured_ || !is_inside_tree()) {
+		return out;
+	}
+	glyph_record_ = &out;
+	_draw();
+	glyph_record_ = nullptr;
+	queue_redraw();
+	return out;
 }
 
 void MenuFrame::set_custom_slot_widget(int p_index) {
@@ -184,18 +244,7 @@ const std::vector<Ref<Texture2D>> *MenuFrame::font_pages_(int32_t p_slot) {
 	if (found == font_pages_by_serial_.end()) {
 		std::vector<Ref<Texture2D>> pages(font->font.num_pages);
 		for (uint32_t page = 0; page < font->font.num_pages && page < FNT_MAX_PAGES; ++page) {
-			const uint8_t *data = fnt_get_page_data_const(&font->font, page);
-			if (data == nullptr) {
-				continue;
-			}
-			PackedByteArray page_bytes;
-			page_bytes.resize(FNT_TEXTURE_SIZE);
-			std::memcpy(page_bytes.ptrw(), data, FNT_TEXTURE_SIZE);
-			const Ref<Image> image = Image::create_from_data(FNT_TEXTURE_WIDTH,
-					FNT_TEXTURE_HEIGHT, false, Image::FORMAT_RGBA8, page_bytes);
-			if (image.is_valid()) {
-				pages[page] = ImageTexture::create_from_image(image);
-			}
+			pages[page] = font_page_texture(font->font, page);
 		}
 		found = font_pages_by_serial_.emplace(font->serial, std::move(pages)).first;
 	}
@@ -1076,34 +1125,35 @@ void MenuFrame::_draw() {
 				if (pages == nullptr) {
 					return;
 				}
-				const int32_t end = run.first + run.count;
-				for (int32_t i = run.first;
-						i < end && i < static_cast<int32_t>(list.glyphs.size()); ++i) {
-					const opennova::hud::GameFontQuad &glyph =
-							list.glyphs[static_cast<size_t>(i)];
-					if (glyph.page >= pages->size()) {
-						continue;
+				// One triangle array per consecutive font page, through the page's
+				// material: its MODULATE2X stage rides kMenuGlyphShader's UV.y flag,
+				// doubling the text sink's halved colour (hud::kFontPageMaterialWord).
+				const Vector2 uv_flag(0.0f,
+						font_page_runs_modulate2x() ? kMenuModulate2xUvFlag : 0.0f);
+				const size_t end = std::min(list.glyphs.size(),
+						static_cast<size_t>(std::max(run.first + run.count, 0)));
+				for (size_t first = static_cast<size_t>(std::max(run.first, 0)); first < end;) {
+					const uint32_t page_index = list.glyphs[first].page;
+					size_t run_end = first + 1;
+					while (run_end < end && list.glyphs[run_end].page == page_index) ++run_end;
+					const Ref<Texture2D> page = page_index < pages->size()
+							? (*pages)[page_index]
+							: Ref<Texture2D>();
+					if (page.is_valid()) {
+						GlyphRunArrays arrays;
+						append_glyph_quads(list.glyphs, first, run_end, uv_flag, arrays);
+						rs->canvas_item_add_triangle_array(target, arrays.indices, arrays.points,
+								arrays.colors, arrays.uvs, PackedInt32Array(), PackedFloat32Array(),
+								page->get_rid());
+						if (glyph_record_ != nullptr) {
+							Dictionary row;
+							row["page"] = static_cast<int64_t>(page_index);
+							row["uvs"] = arrays.uvs;
+							row["colors"] = arrays.colors;
+							glyph_record_->push_back(row);
+						}
 					}
-					const Ref<Texture2D> page = (*pages)[glyph.page];
-					if (page.is_null()) {
-						continue;
-					}
-					PackedVector2Array points;
-					points.resize(4);
-					points.set(0, Vector2(glyph.x_top_left, glyph.y_top));
-					points.set(1, Vector2(glyph.x_top_right, glyph.y_top));
-					points.set(2, Vector2(glyph.x_bottom_right, glyph.y_bottom));
-					points.set(3, Vector2(glyph.x_bottom_left, glyph.y_bottom));
-					PackedVector2Array uvs;
-					uvs.resize(4);
-					uvs.set(0, Vector2(glyph.u0, glyph.v0));
-					uvs.set(1, Vector2(glyph.u1, glyph.v0));
-					uvs.set(2, Vector2(glyph.u1, glyph.v1));
-					uvs.set(3, Vector2(glyph.u0, glyph.v1));
-					PackedColorArray colors;
-					colors.push_back(opennova::color_from_argb(glyph.color));
-					rs->canvas_item_add_polygon(target, points, colors, uvs,
-							page->get_rid());
+					first = run_end;
 				}
 				const int32_t underline_end = run.underline_first + run.underline_count;
 				for (int32_t i = run.underline_first;
@@ -1214,6 +1264,9 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::options_forced_checks);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_preset_buttons"),
 			&MenuFrame::video_preset_buttons);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("glyph_shader_code"),
+			&MenuFrame::glyph_shader_code);
+	ClassDB::bind_method(D_METHOD("get_glyph_submissions"), &MenuFrame::get_glyph_submissions);
 	ClassDB::bind_method(
 			D_METHOD("configure", "document", "screen_name", "root", "style",
 					"override_text"),

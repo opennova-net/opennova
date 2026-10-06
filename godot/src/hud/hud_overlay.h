@@ -589,6 +589,10 @@ private:
 	// Per texture slot, whether the map top item flags its sprites MODULATE2X
 	// (refreshed by map_pass_textures for the pass renderers).
 	mutable std::array<uint8_t, kTextureSlots> slot_modulate2x_{};
+	// The same per font page (page_textures_' namespace): whether a map glyph run
+	// on that page takes the MODULATE2X flag.
+	mutable std::array<uint8_t, opennova::hud::kHudFontSlotCount * opennova::fnt::FNT_MAX_PAGES>
+			page_modulate2x_{};
 	// Set while get_flat_submissions records render_flat_'s textured commands.
 	Array *flat_record_ = nullptr;
 	// Stamp the cached colour/spread options into layout_.
