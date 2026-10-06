@@ -23,8 +23,10 @@ constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
 	// A record with no name, an item of type 0: the editor's own rules, no refusal of the game's
 	// witnessed (the gate follows retail, ADR 0046 S14): listed.
 	{ CatalogFinding::NameEmpty, listed_code("catalog.name_empty") },
-	{ CatalogFinding::NameDuplicate, { "catalog.name_duplicate" } },
-	{ CatalogFinding::ItemIdentity, { "catalog.item_identity" } },
+	// A name an earlier record of its kind has: a name of its own (DI-11, Diagnostic::planned); an id an
+	// earlier item has: an id of its own (the reserved-id rule's free id, set: nothing reaches it by id).
+	{ CatalogFinding::NameDuplicate, { "catalog.name_duplicate", FindingFix::EditRecord } },
+	{ CatalogFinding::ItemIdentity, { "catalog.item_identity", FindingFix::ItemId } },
 	{ CatalogFinding::ItemType, listed_code("catalog.item_type") },
 	// The ids and rows the engine fixes (itemdef-re.md, "The ids and rows the engine fixes"): the game loads
 	// the file either way, so each is listed. What the engine keeps an item's id for (an Info: the
@@ -133,6 +135,37 @@ std::string repeated_name(DefRecordKind kind, const Node &earlier) {
 	}
 	return "An earlier record has this name.";
 }
+
+// A repeated name's fix (DI-11): a name of its own, the one a Duplicate's copy of the record would take
+// (catalog_copy_name), `taken` (the names of its kind in the file, upper case) grown by it so the next
+// fix gives another; what the game then makes of the two by their kind's rule (kRepeatedNames). None for
+// a carry limit, whose name is a class the game's weapons belong to, nor for a name of no copy rule.
+void own_name_fix(Diagnostic &d, const Node &row, const NodeAddress &address, std::vector<std::string> &taken) {
+	const DefRecordKind kind = def_kind(row.kind);
+	if (kind == DefRecordKind::Carry) return;
+	const std::string own = catalog_copy_name(row.kind, row.name(), taken);
+	if (own.empty() || strutil::to_upper(own) == strutil::to_upper(row.name())) return;
+	taken.push_back(strutil::to_upper(own));
+	const std::string name = row.name();
+	std::string after;
+	switch (kind) {
+	case DefRecordKind::Weapon:
+		after = "the game then keeps both weapons, the earlier " + name + " as written and this one as " + own + ".";
+		break;
+	case DefRecordKind::Ammo:
+		after = "a lookup by the name then finds it; a weapon naming " + name + " still fires the earlier one.";
+		break;
+	case DefRecordKind::Powerup:
+		after = "an item's powerupdef can then bind it; one naming " + name + " still binds the earlier one.";
+		break;
+	default: after = "a lookup by the name then finds it; one of " + name + " still finds the earlier one."; break;
+	}
+	Edit set;
+	set.address = address;
+	set.field = catalog_name_field(row.kind);
+	set.value = own;
+	d.planned.push_back({"Name it " + own, "Sets its name to " + own + ", the name a copy of it takes: " + after, {set}});
+}
 }
 const FindingCodeRow &finding_code(CatalogFinding code) {
 	return kFindingRows[static_cast<size_t>(code)];
@@ -189,7 +222,10 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 	std::map<std::string, const Node *> named; // the first record of each kind and name
 	std::set<int> item_ids;                     // every item's id: a reserved one the file has
 	const Node *first_item = nullptr;           // the row every lookup that finds nothing resolves to
+	// Every name of each kind (upper case), which a name of its own a fix gives keeps clear of.
+	std::map<NodeKind, std::vector<std::string>> names_of;
 	for (const auto &row : catalog->rows()) {
+		names_of[row->kind].push_back(strutil::to_upper(row->name()));
 		if (def_kind(row->kind) != DefRecordKind::Item) continue;
 		item_ids.insert(catalog_row(*row).native.as<DefItemDef>().id);
 		if (!first_item) first_item = row.get();
@@ -210,9 +246,11 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 			add(DiagnosticSeverity::Error, CatalogFinding::NameEmpty, "Enter a name for this record.", name_field, address);
 		} else {
 			const auto first = named.emplace(std::to_string(int(row->kind)) + "/" + strutil::to_upper(row->name()), row.get());
-			if (!first.second)
+			if (!first.second) {
 				add(DiagnosticSeverity::Warning, CatalogFinding::NameDuplicate, repeated_name(kind, *first.first->second), name_field,
 				    address);
+				own_name_fix(findings.back(), *row, address, names_of[row->kind]);
+			}
 		}
 		if (kind == DefRecordKind::Item) {
 			const auto &item = catalog_row(*row).native.as<DefItemDef>();

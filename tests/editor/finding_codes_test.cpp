@@ -280,7 +280,14 @@ static int test_columns() {
 	                     "texture.tile_atlas_cells", "texture.wrong_reader" }));
 	// S19: an item on an id the engine keeps for another kind, or named as one under another id: Use an id;
 	// an items.def whose first row is no Null marker: Add one first.
-	TEST_EXPECT(fixed_by(FindingFix::ItemId) == Tokens({ "catalog.reserved_kind", "catalog.reserved_name" }));
+	// DI-11: an item on an id an earlier item has, too (Use an id of its own).
+	TEST_EXPECT(fixed_by(FindingFix::ItemId) == Tokens({ "catalog.item_identity", "catalog.reserved_kind", "catalog.reserved_name" }));
+	// DI-11: what a finding's maker planned with its file at hand (Diagnostic::planned): an id, a name or a key
+	// of its own for a record no lookup finds, an end pose's trigger moved; a variable no menu names, removed.
+	TEST_EXPECT(fixed_by(FindingFix::EditRecord) ==
+	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "menu.duplicate_screen", "menu.duplicate_window",
+	                     "mission.ssn_duplicate", "mission.zone_duplicate", "strings.key_duplicate" }));
+	TEST_EXPECT(fixed_by(FindingFix::UnusedVariable) == Tokens({ "style.unused" }));
 	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
 	// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4.
 	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));

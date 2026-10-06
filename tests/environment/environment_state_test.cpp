@@ -952,6 +952,51 @@ int main() {
 				"200 -> 163, 128 -> 255 (clamp), 0 -> 0x80, packed r<<16|g<<8|b");
 	}
 
+	// --- the overcast cross-fade, with and without an overcast table ---------
+	// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 lerps the .env set
+	//  toward the .trn/overcast.def set by the overcast blend whatever that set
+	//  holds; an empty one is Environment_InitDefaults' zeros (env #41)]
+	{
+		EnvironmentState env;
+		opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		WeatherRuntime weather;
+		weather.prepare_world_driven(&env);
+		env.set_time_of_day(1200.0f);
+		const opennova::env::TodState clear = opennova::env::interpolate_tod(
+				cfg.keyframes, 1200.0f, cfg.envscale);
+		ok &= expect(rgb_near(env.sun_light_target(), clear.sun),
+				"no overcast: the .env colors as they are");
+
+		weather.state().overcast_for_tod_q16 = 0x8000;
+		env.update_tod();
+		const opennova::env::TodState to_black = opennova::env::blend_tod_states(
+				clear, opennova::env::TodState{}, 0x8000);
+		ok &= expect(rgb_near(env.sun_light_target(), to_black.sun) &&
+						rgb_near(env.sky_ambient_target(), to_black.sky) &&
+						rgb_near(env.fog_color_base_target(), to_black.fog),
+				"overcast with no overcast table fades half way to black");
+		ok &= expect(env.sun_light_target().r < clear.sun.r * 0.6f,
+				"the faded sun is about half the clear one");
+
+		opennova::env::Config overcast_cfg = opennova::env::make_default_config();
+		opennova::env::Keyframe grey;
+		grey.time = 1200;
+		grey.sun = {0.2f, 0.2f, 0.2f};
+		grey.sky = {0.5f, 0.5f, 0.5f};
+		grey.fog = {0.3f, 0.3f, 0.3f};
+		overcast_cfg.keyframes.assign(1, grey);
+		env.set_overcast_config(&overcast_cfg);
+		const opennova::env::TodState to_grey = opennova::env::blend_tod_states(clear,
+				opennova::env::interpolate_tod(overcast_cfg.keyframes, 1200.0f,
+						overcast_cfg.envscale),
+				0x8000);
+		ok &= expect(rgb_near(env.sun_light_target(), to_grey.sun) &&
+						rgb_near(env.sky_ambient_target(), to_grey.sky),
+				"overcast with a table fades half way to the table's colors");
+		env.set_overcast_config(nullptr);
+	}
+
 	// --- the light values carry the one device fog range ---------------------
 	{
 		// Under overcast the device end is Environment_GetFogEndDistance's
