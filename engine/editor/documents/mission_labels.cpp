@@ -35,6 +35,9 @@ constexpr int64_t kPlayerSsn = 10000;
 constexpr int64_t kGroupCount = 64;
 // A waypoint number from 1 to 122 names a path; 0 none, 123..127 a command.
 constexpr int64_t kLastPathNumber = 122;
+// The characters of its STRWPNAME string a waypoint's name keeps: a longer one is cut in the table
+// itself [orig: Entity_SpawnFromBMSRecord @0x40f102 `cmp ecx, 0Fh`, @0x40f107 `mov [ebp+0Fh], dl`].
+constexpr size_t kWaypointNameChars = 15;
 
 // The waypoint list's commands by what the game does with them (mission_sentence's path_command_words;
 // the original editor's names in the tooltip, path_command_editor_name).
@@ -357,6 +360,25 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 			else return false;
 		} else if (id == "name_index") {
 			return *number != 0 && text("");
+		} else if (id == "ttool_index") {
+			// A type-6005 waypoint's name: its STRWPNAME string as the spawn keeps it, the first 15
+			// characters [orig: Entity_SpawnFromBMSRecord @0x40f102..0x40f107, the string cut in place].
+			if (!text("")) return false;
+			if (!out.dangling && out.text.size() > 2) {
+				// The words are UTF-8, a character of the game's code page each: cut by characters.
+				const std::string whole = out.text.substr(1, out.text.size() - 2);
+				size_t characters = 0, cut = whole.size();
+				for (size_t at = 0; at < whole.size(); ++at) {
+					if ((static_cast<unsigned char>(whole[at]) & 0xC0) == 0x80) continue;
+					if (characters++ == kWaypointNameChars) {
+						cut = at;
+						break;
+					}
+				}
+				if (cut < whole.size())
+					out.text = "\"" + whole.substr(0, cut) + "\" (the game keeps " + std::to_string(kWaypointNameChars) +
+					           " characters of \"" + whole + "\")";
+			}
 		} else {
 			return false;
 		}
@@ -611,8 +633,12 @@ void mission_game_choices(const Document &, const NodeAddress &, const FieldUse 
 	// A number forming a text key, 0 forming none: an entity with no name (the spawn looks no STRNAME
 	// up for it [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a]), the end of the objectives panel's
 	// rows [orig: HUD_DrawWinConditions @0x5ba940, the break @0x5ba9e0].
-	if (field.reference == ReferenceKind::TextId && field.key_prefix && field.schema)
-		out.push_back({"0", field.schema->id == "name_index" ? "No name" : "No objective (the panel's rows end here)"});
+	// (A waypoint's name id forms STRWPNAME000 from 0 like any other number [orig: @0x40f0c6].)
+	if (field.reference == ReferenceKind::TextId && field.key_prefix && field.schema) {
+		if (field.schema->id == "name_index") out.push_back({"0", "No name"});
+		else if (field.schema->id.compare(0, 15, "win_conditions[") == 0)
+			out.push_back({"0", "No objective (the panel's rows end here)"});
+	}
 }
 
 std::string mission_record_brief(const Document &base, const NodeAddress &address, const NameSource *names) {
