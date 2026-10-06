@@ -62,6 +62,7 @@ enum class DocumentTypeId {
 	SoundBank,     // a .lwf: its waves and its sets, their layers and members (the sound lane)
 	SoundProfiles, // SndProf.def: its profiles and each one's 51 slots (the sound lane)
 	Particles,   // a .ptl .ptu .ptg: the effect system's text, its reader's findings (ADR 0046 DI-14)
+	Environment, // a .env: env::Config's keywords and keyframes (the deep-integration plan's DI-19a)
 	kCount, // the number of values, None among them
 };
 
