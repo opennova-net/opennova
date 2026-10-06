@@ -14,6 +14,7 @@
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_preview_rig.h>
 #include <editor/preview/preview_clip_sounds.h>
+#include <editor/preview/preview_first_person.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 #include <runtime/assets/asset_store.h>
@@ -65,10 +66,13 @@ struct ModelViewportOptions {
 	// The damage state a model is drawn in (DI-10, preview/model_damage): intact, or destroyed as an item
 	// naming it is, the death at the preview clock's tick 0.
 	DamageOptions damage;
+	// A weapon's map seen in first person (DI-13, preview/preview_first_person): the eye or the orbit, the
+	// character whose arms draw, the action whose sets a row plays.
+	FirstPersonOptions first_person;
 	bool operator==(const ModelViewportOptions &other) const {
 		return lod == other.lod && ctrl == other.ctrl && overlays == other.overlays &&
 				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones && snap == other.snap &&
-				sound == other.sound && damage == other.damage;
+				sound == other.sound && damage == other.damage && first_person == other.first_person;
 	}
 	bool operator!=(const ModelViewportOptions &other) const { return !(*this == other); }
 };
@@ -78,7 +82,8 @@ struct ModelViewportOptions {
 std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
 // ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones, snap,
-// sound {mute, surface, body, female, profile}, damage {state, item}}.
+// sound {mute, surface, body, female, profile}, damage {state, item}, first_person {view, character,
+// action}}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
 
 // How long a repeated one-shot holds its last frame before it plays again, in game ticks (half a
@@ -107,7 +112,11 @@ public:
 
 	ModelViewStatus view_status() const { return reason_; }
 	const ModelViewportOptions &options() const { return options_; }
-	const OrbitCamera &camera() const { return camera_; }
+	// The camera the picture is seen through: the first-person eye while it shows (DI-13: a posed camera,
+	// no gesture moves it), else the orbit camera.
+	const OrbitCamera &camera() const { return eye_ ? eye_camera_ : camera_; }
+	// Whether the first-person eye shows: the options ask for it and the map is a weapon's that draws a gun.
+	bool eye_view() const { return eye_; }
 	// The model the device shows and the overlays mark (null unless ready): as read, or patched with
 	// the document's user points since (patches).
 	const assets::Model &model() const { return model_; }
@@ -227,9 +236,21 @@ public:
 			audio::SoundSelector &selector, uint64_t &next_seq);
 	// The sounds the clip's event at `frame` plays, once, as a press of its mark on the timeline asks
 	// (play_sound {frame}); false, with why, for no clip playing, a frame the game never reads (the end
-	// pose, a frame the clock steps over) and a frame that fires no sound.
+	// pose, a frame the clock steps over), a frame that fires no sound, and a weapon's first-person clip
+	// (DI-13: nothing reads its events).
 	bool press_event(int frame, const AssetScan *scan, audio::SoundSelector &selector,
 			std::vector<ClipSoundFired> &out, std::string &error) const;
+
+	// A weapon's first-person view (DI-13, preview/preview_first_person): the weapon pairing the map, its gun
+	// and the arms on it, the character, the eye, its actions as the game bakes and runs them; and the action
+	// whose sets the row playing plays (the options' where it plays the row, else the first that does; null
+	// for none). The arms model the device draws on the gun's rig: first_person().arms_model().
+	const FirstPersonSources &first_person() const { return first_person_; }
+	const WeaponActionRun *first_person_action() const;
+	// The sets an action's leg plays (its soundset as it begins, its soundsetend as it finishes), once, as a
+	// press of the leg's mark asks; false, with why, for no action tied to the row or a leg it has not.
+	bool press_leg(bool end, audio::SoundSelector &selector, const AssetScan *scan, std::vector<ClipSoundFired> &out,
+			std::string &error) const;
 
 	// The model's damage states (DI-10, preview/model_damage), for a model document: the items naming it as
 	// a graphic or a husk, the one the options choose (the first when they name none or one not among
@@ -380,6 +401,16 @@ private:
 	std::vector<ClipSoundFired> fired_;
 	int32_t sound_cursor_ = -1;
 	uint64_t sound_seeks_ = 0;
+	// A weapon's first person (DI-13): what it reads, the eye shown and its camera.
+	FirstPersonSources first_person_;
+	bool eye_ = false;
+	OrbitCamera eye_camera_;
+	// The clock's ticks a repeated one-shot plays over before it plays again (0: it does not repeat): its
+	// length, or the last tick a first-person action's leg plays on past it, and the hold.
+	int32_t repeat_period_() const;
+	// An action leg's sound planned (fire_sounds, press_leg).
+	ClipSoundFired plan_leg_(const WeaponActionRun &run, const WeaponActionLeg &leg, int32_t tick, int32_t clip_tick,
+			audio::SoundSelector &selector, const AssetScan *scan) const;
 	// The damage state's (DI-10): the uses and the graph they were read from, the chosen use, the item and
 	// the catalog stamp it was read at, the husk models read (each by its file and stamp, a model that does
 	// not read latched until its stamp moves), the plan, the husk file drawn and why, and the death sounds'

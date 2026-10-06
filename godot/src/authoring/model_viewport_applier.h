@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -37,6 +38,12 @@ namespace godot {
 // afterwards swaps its rows in place rather than building the scene again. A Rebuild while one runs
 // drops the build's data and begins anew; what the device draws meanwhile is the last picture (the
 // device renders nothing half built). No unit fails: a build is planned only over a model.
+//
+// A weapon's first-person map (DI-13) draws the arms beside the gun: a second ObjectModel of the arms model
+// the viewport read, built with the gun's (its textures and its meshes skinned for the gun's rig, built as
+// the game's first-person view model builds its arms, without their authored levels), bound to its own
+// instance of the gun's rig and posed by the same clip, its camo the character's; the camera stands where
+// the viewport's eye does and sees with its field of view.
 class ModelViewportApplier final : public ViewportApplier {
 public:
 	explicit ModelViewportApplier(SubViewport &viewport);
@@ -54,9 +61,10 @@ public:
 	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int, int) override {}
 
-	// Its nodes, for the parity tests: the camera and the model.
+	// Its nodes, for the parity tests: the camera, the model and the first-person arms.
 	Camera3D *camera() const { return camera_; }
 	ObjectModel *object_model() const { return object_; }
+	ObjectModel *arms_model() const { return arms_; }
 
 private:
 	// One unit of a build, in the order they run.
@@ -73,11 +81,15 @@ private:
 		int slot = 0; // Texture
 		int frame = 0; // Frame
 		int lod = -1; // Meshes
+		bool arms = false; // Texture, Frame, Meshes: the first-person arms' data
 	};
-	// A build in flight: the data the scene will hold, the files its textures are read through, the
-	// rig it binds (null: none) and its serial, and its units.
+	// A build in flight: the data the scene will hold (and the first-person arms', null: none), the files
+	// its textures are read through, the rig it binds (null: none) and its serial, and its units.
 	struct Build {
 		Ref<ObjectData> data;
+		Ref<ObjectData> arms;
+		Ref<SkeletalAnim> arms_skeletal;
+		std::array<int, 3> arms_camo{};
 		std::shared_ptr<const opennova::editor::StampedFiles> files;
 		Ref<SkeletalAnim> skeletal;
 		int bone_count = 0;
@@ -85,9 +97,10 @@ private:
 		std::vector<Unit> units;
 		size_t next = 0;
 	};
-	// The units of `build`'s data: its materials' stages and flipbook frames, its levels, the scene,
-	// the pose.
+	// The units of `build`'s data (and its arms'): its materials' stages and flipbook frames, its levels,
+	// the scene, the pose.
 	static void plan_(Build &build);
+	static void plan_data_(Build &build, const Ref<ObjectData> &data, bool arms);
 	// The scene: the build's data swapped in with its rig.
 	void assemble_(Build &build);
 	// The viewport's state over the picture that stands, in one place: the pose unit as a build ends,
@@ -100,6 +113,8 @@ private:
 	// death pieces left (ModelViewport::hidden_sections_at, the model's destroyed-section mask, DI-10);
 	// nothing when they stand.
 	void apply_registers_(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock);
+	// A weapon's first-person map's per-submit registers (DI-13): TEX_TEAM on the gun and the arms.
+	void apply_first_person_registers_(const opennova::editor::ViewportModel &model);
 	// The camera where the viewport's is, and the level it picks.
 	void place_camera_(const opennova::editor::ViewportModel &model);
 	// The rig the viewport loaded, bound to the model (again when it is loaded again).
@@ -108,7 +123,9 @@ private:
 
 	Camera3D *camera_ = nullptr;
 	ObjectModel *object_ = nullptr;
+	ObjectModel *arms_ = nullptr; // the first-person arms on the gun's rig (no data: none)
 	Ref<ObjectData> data_;
+	Ref<ObjectData> arms_data_;
 	Ref<PanmClock> clock_;
 	int64_t frame_ = 0;
 	// The files the built scene read (its textures), noted as they are read.
@@ -116,6 +133,7 @@ private:
 	std::map<std::string, int64_t> applied_ctrl_; // the registers the model holds now
 	uint32_t applied_hidden_ = 0; // the destroyed-section mask the model holds now
 	int applied_lod_ = -1;
+	int applied_team_ = INT32_MIN + 1; // the TEX_TEAM written (INT32_MIN: none, cleared)
 	uint64_t applied_skeleton_ = UINT64_MAX; // the rig serial the model holds
 	std::unique_ptr<Build> build_; // the build in flight (null: none)
 };
