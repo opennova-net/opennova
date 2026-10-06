@@ -80,6 +80,7 @@ enum class EditorRequestKind {
 	CancelTextureSource,
 	OpenTextureSource,
 	PreviewInstallImport,
+	NewTerrain,
 	ClearOutput,
 	SetViewport,
 	EditInViewport,

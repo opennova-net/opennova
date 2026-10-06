@@ -776,6 +776,16 @@ static int test_placeholders() {
 	Diagnostic png = *logo;
 	editor_test::own_reference(png).target = "badge.png";
 	TEST_EXPECT(fixes_for(chunk, v).empty() && fixes_for(png, v).empty() && !has_fixes(png, v));
+	// The pointer's name (a CURSOR's texture) makes the pointer, never the checkerboard.
+	Diagnostic pointer = *logo;
+	editor_test::own_reference(pointer).target = "newarow1.tga";
+	const std::vector<ProblemFix> pointer_fixes = fixes_for(pointer, v);
+	TEST_EXPECT(labels_of(pointer_fixes) == std::vector<std::string>({"Create newarow1.tga"}));
+	if (pointer_fixes.size() == 1)
+		TEST_EXPECT(pointer_fixes[0].bulk && pointer_fixes[0].request.kind == EditorRequestKind::CreateFile &&
+		            pointer_fixes[0].request.path == "newarow1.tga" &&
+		            pointer_fixes[0].detail.find("the game's mouse pointer") != std::string::npos &&
+		            pointer_fixes[0].detail.find("checkerboard") == std::string::npos);
 	// A particle's graphic, as its atlas reads it (ADR 0046 S18): the name alone, so one whose
 	// extension the factory cannot write takes none, and neither does a name with no extension (no
 	// loader of the game adds one).

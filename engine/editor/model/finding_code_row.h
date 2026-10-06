@@ -34,6 +34,10 @@ enum class FindingFix {
 	Rewrite,           // input a rewrite drops or normalizes: Rewrite the file (rewrite_does)
 	TextureRows,       // a TGA stored top first (S18): Save it bottom first (texture_operation)
 	ImportFitsUse,     // what a use asks of a texture an import makes (S18): Make the import fit the use
+	ItemId,            // an item on an id the engine keeps for another kind, or named as one it keeps
+	                   // under another id: Use an id of its own, or the id the engine looks for
+	                   // (Rename everywhere, the missions placing it with it)
+	FallbackRow,       // an items.def whose first row is no Null marker: Add one first
 };
 
 // Where Problems takes a finding of the code: what the file holds (its document opened on the
@@ -235,6 +239,7 @@ enum class CoreFinding {
 	AssetNameTooLong,
 	AssetUnreadable,
 	BlankDef,
+	BlankEnvironment,
 	BlankFont,
 	BlankMenu,
 	BlankMission,
@@ -311,6 +316,7 @@ enum class CoreFinding {
 	ImportEncode,
 	ImportExists,
 	ImportFolder,
+	ImportFont,
 	ImportInput,
 	ImportInstall,
 	ImportKind,
@@ -329,6 +335,7 @@ enum class CoreFinding {
 	ImportScene,
 	ImportSceneNote,
 	ImportSidecar,
+	ImportTerrain,
 	ImportNotFound,
 	ImportTextureNotImported,
 	ImportUnreadable,
