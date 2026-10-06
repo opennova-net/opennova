@@ -33,11 +33,12 @@ struct WaterCrossEvent {
     // whether the thing was AIRBORNE when it met the plane. A soldier who walks
     // into a river and a boat that idles onto a sandbar take the same sound; a
     // soldier who jumps off a bridge and a truck that launches off a bank take
-    // the other. The name-to-global binding stays capture-derived (npwire's
-    // kWaterCross* constants).
-    // [orig: `if (entity->Flags & 0x2000) send(dword_24E09B0) else
-    //  send(dword_24E09B4)` @0x482c8b (wheeled), @0x49254e (aircraft),
-    //  @0x4b8020 (player body), @0x4bfb87 (AI soldier), and their twins]
+    // the other. The airborne arm plays BODYWATER1, the other SURFACE_WTR
+    // (npwire's kWaterCross* constants, the registry's binding of the two slots).
+    // [orig: `if (entity->Flags & 0x2000) send(g_SndBodyWater1 @0x24E09B0) else
+    //  send(g_SndSurfaceWtr @0x24E09B4)` @0x47758c (wheeled), @0x482c69..0x482c8b
+    //  (platform), @0x4802f5 (aircraft contact, called @0x49254e), @0x4b82e3
+    //  (player body), @0x4bfc24 (AI soldier), and their twins]
     bool airborne = false;
 };
 

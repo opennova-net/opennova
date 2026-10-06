@@ -209,8 +209,8 @@ void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
             world.out.script_sounds.push_back(std::move(sound));
         } else {
             // Wire XY are signed whole units; the third coordinate is ZERO.
-            // The misnamed HUD_DrawDefaultProgressBar is a positional sound wrapper.
-            // [orig: HUD_DrawDefaultProgressBar @ 0x527E60 -> Sound_Play3DPositional]
+            // [orig: Sound_PlayAtPosition @ 0x527E60, a Sound_Play3DPositional
+            //  wrapper, null entity, volume 255]
             world.out.fire_sounds.play_immediate(cue, {float(x), float(y), 0.0f}, 0);
         }
     }

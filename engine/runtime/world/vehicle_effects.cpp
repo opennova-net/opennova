@@ -1,8 +1,6 @@
 #include "vehicle_motor_detail.h"
 #include "world.h"
 
-#include <cstdio>
-
 namespace opennova::world::detail {
 namespace {
 // Live damage smoke/fire use independent emitter slots, shared between the
@@ -57,7 +55,9 @@ void set_parked(Entity &e, bool value) {
 
 // All six contact callbacks spawn this local effect AND fan the positioned
 // sound on their first submerged pad. The two resource-table bindings at
-// 849188/849298 are Effect_sboatwake / Effect_SmlSplash.
+// 849188/849298 are Effect_sboatwake / Effect_SmlSplash. The sound is the
+// crossing queue's: the host's fan sends it to every alive player, the
+// authority's own through its loopback leg (Server_RouteWaterCrossings).
 // [orig: Entity_ProcessVehicleSuspension @0x463C60; Entity_ProcessTrackedVehiclePhysics
 // @0x47C1C0; Entity_ProcessPlatformPhysics @0x481870; Server_SendOverlayActionToAlive @0x50A1B0]
 void vehicle_water_entry(World &world, Entity &e, int32_t x, int32_t y, bool was_water) {
@@ -68,17 +68,9 @@ void vehicle_water_entry(World &world, Entity &e, int32_t x, int32_t y, bool was
 	world.out.vehicle_effects.push_back({ airborne ? "Effect_SmlSplash" : "Effect_sboatwake",
 			{ float(from_fixed(x)), float(from_fixed(y)), float(from_fixed(z)) }, { 0, 0, -0.5f },
 			world.logic_tick });
+	// [orig: `test [esi+24h], 2000h` @0x464b16 -> g_SndBodyWater1 @0x464b1f /
+	//  g_SndSurfaceWtr @0x464b2f -> Server_SendOverlayActionToAlive @0x464b3e]
 	world.out.water_crossings.add(x, y, z, airborne);
-	if (world.ai.is_authority) {
-		SoundSlotEvent event;
-		event.source_handle = e.handle.packed;
-		event.pos[0] = x;
-		event.pos[1] = y;
-		event.pos[2] = z;
-		std::snprintf(event.set_name, sizeof(event.set_name), "%s",
-				airborne ? "SURFACE_WTR" : "BODYWATER1");
-		world.out.slot_sounds.push_back(event);
-	}
 }
 
 void vehicle_smoke_effect(World &world, Entity &e, bool release) {
