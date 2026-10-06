@@ -649,6 +649,9 @@ static int test_deep_project_files() {
 	const AssetEntry *table = view.project.scan->find("gametext.bin");
 	TEST_EXPECT(table && (root + "/" + table->relative_path).size() > 260 && table->size_bytes > 0 &&
 	            table->kind == AssetKind::Strings);
+	// The entry lives in the scan the view holds now, which the Rescan below replaces (and frees):
+	// what the last line says of it is kept by value.
+	const std::string table_path = table ? table->relative_path : std::string();
 	// An import source under a folder past MAX_PATH: found by the pass, imported, its output listed.
 	PngSpec spec;
 	spec.width = 1;
@@ -675,7 +678,7 @@ static int test_deep_project_files() {
 		for (const Diagnostic &d : view.activity.last_build->diagnostics)
 			std::printf("  build: %s %s\n", d.code().c_str(), d.message.c_str());
 	std::printf("editor_import: a project folder %zu characters long, its string table at %zu\n", root.size(),
-	            table ? root.size() + 1 + table->relative_path.size() : size_t(0));
+	            table_path.empty() ? size_t(0) : root.size() + 1 + table_path.size());
 	return 0;
 }
 
