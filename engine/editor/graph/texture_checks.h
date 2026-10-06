@@ -14,6 +14,7 @@ namespace opennova::editor {
 
 class AssetGraph;
 class ValidationCache;
+struct AssetEntry;
 struct ValidationInput;
 
 // The texture use check (ADR 0046 S18; the texture kind's row of graph/use_checks): what each texture
@@ -29,6 +30,11 @@ struct ValidationInput;
 // names the game opens itself, the MFD's sides and the default loading screen's size.
 void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
                         std::vector<Diagnostic> &out);
+
+// A project file's header as `reader` reads it (`root` the project's directory), read once and kept while
+// the file's stamp (the scan's size and last write) stands: the use check's read of it, which the uses'
+// budgets (TextureUseIndex) share.
+TextureHeader texture_file_header(const std::string &root, const AssetEntry &entry, TextureReader reader);
 
 // What a role asks of a file's sides, by its header as the role's loader reads it (`file` its name,
 // `where` the use in words: "the terrain colour map of isle.trn", `context` what the use says of itself:

@@ -26,9 +26,11 @@ bool make_blank_script(const BlankRequest &, std::vector<uint8_t> &out, Diagnost
 // mnu (blank_menu.cpp)
 bool make_blank_main_menu(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_menu(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
-// The MAIN window's FONT element every blank screen authors (the stylesheet's variables), and an
-// authored screen's bytes: parsed through the document model and written in its canonical form.
+// The MAIN window's FONT element every blank screen authors (the stylesheet's variables), its CURSOR
+// naming the game's pointer (blank_pointer_name), and an authored screen's bytes: parsed through the
+// document model and written in its canonical form.
 const char *blank_menu_font();
+std::string blank_menu_cursor();
 bool blank_menu_bytes(const std::string &xml, const BlankRequest &request, std::vector<uint8_t> &out,
                       Diagnostic &error);
 
@@ -57,6 +59,9 @@ bool make_blank_powerup_def(const BlankRequest &, std::vector<uint8_t> &out, Dia
 bool make_blank_charattr_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 // SndProf.def: the one "default" profile every item binds, every slot silent
 bool make_blank_sound_profiles(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+
+// env (blank_environment.cpp): the environment writer's authoring template, named after the file
+bool make_blank_environment(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // coo (blank_coo.cpp)
 bool make_blank_coo(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);

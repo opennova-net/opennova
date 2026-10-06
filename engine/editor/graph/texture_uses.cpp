@@ -394,13 +394,26 @@ JsonValue texture_use_json(const TextureUse &use) {
 		context.set("shader", json_string(use.context.shader));
 		context.set("alpha_test", JsonValue::make_bool(use.context.alpha_test()));
 		context.set("alpha_ref", json_number(use.context.alpha_ref));
+		// What its alpha is to the game, by its material's technique (texture_row_alpha_meaning).
+		const TextureAlphaMeaning alpha = texture_row_alpha_meaning(use.context.shader, use.context.material_flags,
+		                                                            use.context.type, use.context.slot, use.name_written);
+		context.set("alpha", json_string(texture_alpha_meaning_token(alpha)));
+		context.set("alpha_words", json_string(texture_alpha_meaning_words(alpha, use.context.shader, use.context.alpha_ref,
+		                                                                   use.context.alpha_test_inverted())));
 	}
 	if (!use.context.key.empty()) context.set("key", json_string(use.context.key));
 	if (use.context.hud_mode >= 0) context.set("hud_mode", json_number(use.context.hud_mode));
 	if (use.context.blend_mode >= 0)
 		context.set("blend_mode", json_string(particle::blend_mode_name(particle::BlendMode(use.context.blend_mode))));
 	out.set("context", std::move(context));
+	if (use.budget.known) out.set("budget", texture_budget_json(use.budget));
 	return out;
+}
+
+TextureBudget texture_use_budget(const TextureUse &use, const TextureHeader &header) {
+	TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+	if (!use.known() || use.fixed || use.served.empty() || !texture_role_budget_loader(use.role, loader)) return TextureBudget();
+	return texture_budget(header, basename_of(use.served), loader, use.context.slot);
 }
 
 } // namespace opennova::editor

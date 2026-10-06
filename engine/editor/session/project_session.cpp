@@ -17,6 +17,7 @@
 #include <editor/session/editor_queries.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_controller.h>
+#include <editor/session/navigation_controller.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problems_service.h>
@@ -51,8 +52,9 @@ struct ProjectSession::Impl {
 			imports(core),
 			renames(core),
 			guard(core),
-			disk(core) {
-		core.bind({&documents, &problems, &play, &imports, &renames, &guard, &disk});
+			disk(core),
+			navigation(core) {
+		core.bind({&documents, &problems, &play, &imports, &renames, &guard, &disk, &navigation});
 	}
 
 	EditorPreferences preferences;
@@ -64,6 +66,7 @@ struct ProjectSession::Impl {
 	RenameController renames;
 	UnsavedGuard guard;
 	DiskWatch disk;
+	NavigationController navigation;
 	uint64_t handle_entries = 0;
 };
 

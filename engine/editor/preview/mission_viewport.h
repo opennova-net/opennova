@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_options.h>
@@ -91,6 +92,15 @@ public:
 	// A gesture is open in its document, as it last followed (the Shell's pump each frame): what its
 	// device defers to the gesture's end (a moved entity's terrain shadow).
 	bool gesture_open() const { return gesture_open_; }
+
+	// The ground under the picture's point (x, y) in the game's words (DI-07, mission_ground_facts.h): what
+	// the device's ray meets first (an entity's drawn surface: a body standing on it; the terrain: the class
+	// the game reads there, its footstep slots and the round's effects row; nothing, or no device to say:
+	// Nothing), the mission's terrain, tiles and water read through the game's own loads when first asked.
+	MissionGroundFacts ground_under(const ViewportContext &context, float x, float y) const;
+	// What that reads of the mission's files (its terrain, its char map, its tiles and its water plane), as
+	// last asked.
+	const MissionGround &ground_reader() const { return terrain_ground_; }
 
 	// The marks on a picture `width` x `height` (mission_scene.h), an area's anchor on the ground of
 	// `device` where it answers, each entity's with its item's bound (picked by it).
@@ -220,6 +230,8 @@ private:
 	uint64_t bounds_files_ = 0; // and the asset source's
 	std::vector<std::string> missing_;
 	bool ground_ = false;
+	// Mutable: the ground's facts read through it, its files read once while they stand (DI-07).
+	mutable MissionGround terrain_ground_;
 	bool gesture_open_ = false;
 };
 

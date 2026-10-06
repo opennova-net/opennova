@@ -59,6 +59,8 @@ struct AssetScan {
 		std::vector<Diagnostic> findings;
 		uint64_t size_bytes = 0;
 		int64_t modified_ticks = 0; // the file system's own ticks (0 = unknown)
+		// An import record's inputs (S20), project-relative: the files at them are ImportInputs.
+		std::vector<std::string> inputs;
 	};
 	// The scan of the walk's visits, by path ("" the project's folder itself, when it cannot be
 	// read): the entries indexed and the findings made from them (what a ProjectScan hands over).
