@@ -35,6 +35,8 @@ std::string project_expansion(const SessionView &view);
 // - `frame`: what the clip the animation document at `path` (the active one when left out) plays at that
 //   frame under its model viewport's sound options, as a press of the event's mark on the timeline asks
 //   (DI-04, preview/preview_clip_sounds);
+// - `leg` (begin, end): the set the weapon action playing the row of a first-person map plays as it begins
+//   or finishes, as a press of the leg's mark asks (DI-13, preview/preview_first_person);
 // - none: the project's wave `path`.
 // Refused, the status line saying why (workspace.refused): a name no file has, a set no bank the game
 // searches holds, an empty slot, waves the project lacks, a wave past what a card reads.
