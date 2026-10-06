@@ -40,6 +40,10 @@ struct MissionEntityMark {
 	// NoShadow, Reflective, ... [orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]).
 	int group = 0;
 	uint32_t attributes = 0;
+	// What a person's spawn pose reads of it beside its item and attributes (DI-38, mission_poses.h):
+	// its route (the record's waypoint_id, 0 none) and its id (the SSN, the warmup's update count).
+	int route = 0;
+	int ssn = 0;
 	PreviewVec3 at; // its position in the presentation frame (the camera's)
 	uint32_t stamp = 0; // moves when its transform, its item, its group or its attributes do (the scene's serial then)
 };
@@ -80,13 +84,15 @@ inline bool operator!=(const MissionSceneHeader &a, const MissionSceneHeader &b)
 
 // What a patch found changed, in the picture's terms: a header field the device reads; an entity
 // added, removed or with another item, group or attributes (the device places again what differs); an entity's
-// transform (the device moves it in place); an area, a path, a team, a name (the overlays alone).
+// transform (the device moves it in place); an entity's route or SSN (a person's spawn pose: the device poses
+// it again); an area, a path, a team, a name (the overlays alone).
 struct MissionSceneDelta {
 	bool header = false;
 	bool reshaped = false;
 	bool moved = false;
+	bool posed = false;
 	bool overlays = false;
-	bool any() const { return header || reshaped || moved || overlays; }
+	bool any() const { return header || reshaped || moved || posed || overlays; }
 };
 
 // Where the scene reads from: the mission viewport's, over the document's typed reads
