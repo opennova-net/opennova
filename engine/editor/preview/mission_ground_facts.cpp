@@ -183,7 +183,7 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	TrnConfig trn;
 	bool loaded = false;
 	if (header.terrain.empty()) error_ = "The mission names no terrain.";
-	else loaded = terrain::terrain_field_store_load(store_, *stamped, header.terrain, error_, &trn);
+	else loaded = terrain::terrain_field_store_load(store_, *stamped, header.terrain, header.tile_set, error_, &trn);
 	if (loaded) {
 		if (store_.surface_map().data != nullptr) surface_map_ = trn.charmap;
 		// The mission's placed tiles, read as the game reads <mission>.til [orig: Terrain_LoadTileInfoFile @
