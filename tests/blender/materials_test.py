@@ -9,6 +9,7 @@ reads the .3di back with `opennova-3di scene`.
 """
 import math
 import os
+import struct
 import subprocess
 import sys
 import traceback
@@ -78,8 +79,16 @@ def folder(root):
     return os.path.dirname(root.o3d.output_path)
 
 
+def as_tga_unless_set(root):
+    """The cases before DDS textures read the TGAs they write: a model root
+    whose Texture files a case leaves unset writes TGAs (the DDS cases set it)."""
+    if not root.o3d.is_property_set("texture_files"):
+        root.o3d.texture_files = "TGA"
+
+
 def export_model(root, run=None):
     """(notes, the model read back as importer.read_o3d gives it)."""
+    as_tga_unless_set(root)
     bpy.context.view_layer.update()
     os.makedirs(folder(root), exist_ok=True)
     _, notes = export.export_model(bpy.context, root, run)
@@ -96,6 +105,7 @@ def import_model(path):
 
 def refused(root, *fragments, run=None):
     """The ExportError the export raises, which must name every fragment."""
+    as_tga_unless_set(root)
     bpy.context.view_layer.update()
     os.makedirs(folder(root), exist_ok=True)
     try:
@@ -113,11 +123,12 @@ def principled_material(name):
     return mat, tree, next(n for n in tree.nodes if n.type == "BSDF_PRINCIPLED")
 
 
-def image(name, rgba, size=4, float_buffer=False, colour_space=None):
-    img = bpy.data.images.new(name, width=size, height=size, alpha=True, float_buffer=float_buffer)
+def image(name, rgba, size=4, float_buffer=False, colour_space=None, height=None):
+    height = size if height is None else height
+    img = bpy.data.images.new(name, width=size, height=height, alpha=True, float_buffer=float_buffer)
     if colour_space is not None:
         img.colorspace_settings.name = colour_space  # before the pixels: it regenerates the image
-    img.pixels[:] = list(rgba) * (size * size)
+    img.pixels.foreach_set(np.tile(np.asarray(rgba, dtype=np.float32), size * height))
     return img
 
 
@@ -154,6 +165,35 @@ def tga_pixels(path):
 def first_pixel(root, name):
     """The BGRA bytes of the first pixel of the texture `name` beside the model."""
     return tuple(tga_pixels(os.path.join(folder(root), name))[:4])
+
+
+def dds_file(path):
+    """(width, height, mip count, FourCC, bytes) of a DDS file."""
+    with open(path, "rb") as f:
+        data = f.read()
+    assert data[:4] == b"DDS ", path
+    height, width, _, _, mips = struct.unpack_from("<IIIII", data, 12)
+    return width, height, mips, data[84:88].decode("ascii"), data
+
+
+def dds_first_texel(path):
+    """The RGB of the first texel of a DXT1 or DXT5 file's first level, its
+    block decoded as D3D decodes it (8-bit channels, truncated)."""
+    _, _, _, fourcc, data = dds_file(path)
+    c0, c1, bits = struct.unpack_from("<HHI", data, 128 + (8 if fourcc == "DXT5" else 0))
+
+    def rgb(c):
+        return ((c >> 11) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31)
+    p0, p1 = rgb(c0), rgb(c1)
+    if c0 > c1 or fourcc == "DXT5":
+        palette = [p0, p1, tuple((2 * a + b) // 3 for a, b in zip(p0, p1)), tuple((a + 2 * b) // 3 for a, b in zip(p0, p1))]
+    else:
+        palette = [p0, p1, tuple((a + b) // 2 for a, b in zip(p0, p1)), (0, 0, 0)]
+    return palette[bits & 3]
+
+
+def files(root):
+    return sorted(os.listdir(folder(root)))
 
 
 # --- geom-2: the diffuse texture is the image feeding Base Color ---------------
@@ -223,6 +263,8 @@ def two_images_on_one_uv_map_refused():
     mat, tree, bsdf = principled_material("TwoImages")
     mix = tree.nodes.new("ShaderNodeMix")
     mix.data_type = "RGBA"
+    # A blend of both (Blender 5.2's new Mix node no longer starts at 0.5).
+    materials.socket(mix.inputs, "Factor_Float").default_value = 0.5
     tree.links.new(image_node(tree, image("two_a", (1, 0, 0, 1))).outputs["Color"],
                    materials.socket(mix.inputs, "A_Color"))
     tree.links.new(image_node(tree, image("two_b", (0, 1, 0, 1))).outputs["Color"],
@@ -800,6 +842,149 @@ def a_copy_never_replaces_another_file():
     with open(os.path.join(folder(root), "copied.tga"), "rb") as f:
         assert f.read() == b"another file"
     assert any("not replaced" in n for n in notes), notes
+
+
+# --- DDS textures: the form the game's model textures ship in -------------------
+
+@case
+def colour_textures_written_as_dds():
+    # A model writing DDS textures (the default) writes each diffuse and detail
+    # texture as the .dds the game reads before the .tga its row keeps naming:
+    # DXT1 for an opaque image, DXT5 for one with alpha, each with its chain to
+    # 1 x 1. A normal map stays an .mdt, a swatch a TGA.
+    opaque, tree, bsdf = principled_material("Opaque")
+    tree.links.new(image_node(tree, image("dds_red", (1, 0, 0, 1))).outputs["Color"], bsdf.inputs["Base Color"])
+    normal = image_node(tree, image("dds_n", (0.5, 0.5, 1.0, 1.0), colour_space="Non-Color"))
+    node = tree.nodes.new("ShaderNodeNormalMap")
+    tree.links.new(normal.outputs["Color"], node.inputs["Color"])
+    tree.links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
+    opaque.o3d.shader = "VS_DOT3DIFF"
+    clear = textured("Clear", image("dds_clear", (0, 0, 1, 0.5), size=8))
+    swatch, _, swatch_bsdf = principled_material("Swatch")
+    swatch_bsdf.inputs["Base Color"].default_value = (0.0, 1.0, 0.0, 1.0)
+    root, _ = model("ddsmodel", opaque, clear, swatch)
+    assert root.o3d.texture_files == "DDS"  # the default
+    root.o3d.texture_files = "DDS"  # set: export_model leaves it
+    notes, sc = export_model(root)
+    assert textures(sc, 0) == [("ddsmodel_0.tga", 1, 0, 0, 0), ("ddsmodel_0n.mdt", 3, 4, 0, 0)], textures(sc, 0)
+    assert textures(sc, 1) == [("ddsmodel_1.tga", 1, 0, 0, 0)], textures(sc, 1)
+    assert files(root) == ["ddsmodel.3di", "ddsmodel_0.dds", "ddsmodel_0n.mdt", "ddsmodel_1.dds", "ddsmodel_2.tga"], \
+        files(root)
+    w, h, mips, fourcc, _ = dds_file(os.path.join(folder(root), "ddsmodel_0.dds"))
+    assert (w, h, mips, fourcc) == (4, 4, 3, "DXT1"), (w, h, mips, fourcc)
+    assert dds_first_texel(os.path.join(folder(root), "ddsmodel_0.dds")) == (255, 0, 0)
+    w, h, mips, fourcc, _ = dds_file(os.path.join(folder(root), "ddsmodel_1.dds"))
+    assert (w, h, mips, fourcc) == (8, 8, 4, "DXT5"), (w, h, mips, fourcc)
+    assert dds_first_texel(os.path.join(folder(root), "ddsmodel_1.dds")) == (0, 0, 255)
+    # Written as TGAs again: each .dds goes with the TGA that takes its place (the
+    # game would read the stale .dds first), and back.
+    root.o3d.texture_files = "TGA"
+    notes, _ = export_model(root)
+    assert files(root) == ["ddsmodel.3di", "ddsmodel_0.tga", "ddsmodel_0n.mdt", "ddsmodel_1.tga", "ddsmodel_2.tga"], \
+        files(root)
+    assert any("removed ddsmodel_0.dds" in n for n in notes), notes
+    assert first_pixel(root, "ddsmodel_0.tga") == (0, 0, 255, 255)
+    root.o3d.texture_files = "DDS"
+    notes, _ = export_model(root)
+    assert "ddsmodel_0.dds" in files(root) and "ddsmodel_0.tga" not in files(root), files(root)
+    assert any("removed ddsmodel_0.tga" in n for n in notes), notes
+
+
+@case
+def a_copied_tga_is_converted():
+    # An image loaded unchanged from a .tga is that file; a model writing DDS
+    # textures writes the .dds of it beside the .3di, its row naming the .tga.
+    # A .tga an image of the scene reads is never removed, beside the model too.
+    art = os.path.join(OUT, "ddsart")
+    os.makedirs(art, exist_ok=True)
+    root, _ = model("ddscopy", textured("Copied", textured_file("barrel_c", (0, 1, 0, 1), art)))
+    root.o3d.texture_files = "DDS"
+    _, sc = export_model(root)
+    assert textures(sc) == [("barrel_c.tga", 1, 0, 0, 0)], textures(sc)
+    assert files(root) == ["barrel_c.dds", "ddscopy.3di"], files(root)
+    assert dds_first_texel(os.path.join(folder(root), "barrel_c.dds")) == (0, 255, 0)
+    assert os.path.isfile(os.path.join(art, "barrel_c.tga"))
+    beside, _ = model("ddsbeside", textured("Beside", textured_file("crate_c", (1, 0, 0, 1), os.path.join(OUT, "ddsbeside"))))
+    beside.o3d.texture_files = "DDS"
+    notes, _ = export_model(beside)
+    assert files(beside) == ["crate_c.dds", "crate_c.tga", "ddsbeside.3di"], files(beside)
+    assert not any("removed" in n for n in notes), notes
+
+
+@case
+def odd_sides_stay_tga():
+    # The game pads a .dds whose sides are not powers of two (D-RMAT-18): such
+    # a texture is written as a TGA, said.
+    root, _ = model("ddsodd", textured("Odd", image("odd_sides", (1, 1, 0, 1), size=6, height=4)))
+    root.o3d.texture_files = "DDS"
+    notes, sc = export_model(root)
+    assert files(root) == ["ddsodd.3di", "ddsodd_0.tga"], files(root)
+    assert any("not powers of two" in n and "ddsodd_0.tga" in n for n in notes), notes
+
+
+@case
+def textures_past_the_max_are_halved_or_refused():
+    big = image("big", (1, 0, 1, 1), size=512)
+    root, _ = model("ddsmax", textured("Big", big))
+    root.o3d.texture_files, root.o3d.texture_max_size = "DDS", "256"
+    notes, _ = export_model(root)
+    w, h, mips, fourcc, _ = dds_file(os.path.join(folder(root), "ddsmax_0.dds"))
+    assert (w, h, mips, fourcc) == (256, 256, 9, "DXT1"), (w, h, mips, fourcc)
+    assert any("512 x 512" in n and "256 x 256" in n for n in notes), notes
+    # A TGA is halved alike.
+    root.o3d.texture_files = "TGA"
+    export_model(root)
+    with open(os.path.join(folder(root), "ddsmax_0.tga"), "rb") as f:
+        assert struct.unpack_from("<HH", f.read(18), 12) == (256, 256)
+    root.o3d.texture_oversize = "REFUSE"
+    refused(root, "ddsmax_0.tga", "512 x 512", "Max texture size 256")
+
+
+@case
+def a_large_normal_map_is_noted():
+    # The game halves a normal map until it fits 512 a side.
+    mat, tree, bsdf = principled_material("Bumpy")
+    tree.links.new(image_node(tree, image("bumpy_c", (1, 1, 1, 1))).outputs["Color"], bsdf.inputs["Base Color"])
+    normal = image_node(tree, image("bumpy_n", (0.5, 0.5, 1.0, 1.0), size=1024, colour_space="Non-Color"))
+    node = tree.nodes.new("ShaderNodeNormalMap")
+    tree.links.new(normal.outputs["Color"], node.inputs["Color"])
+    tree.links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
+    mat.o3d.shader = "VS_DOT3DIFF"
+    root, _ = model("bumpy", mat)
+    root.o3d.texture_files = "DDS"
+    notes, _ = export_model(root)
+    assert any("bumpy_0n.mdt is 1024 x 1024" in n and "512" in n for n in notes), notes
+
+
+@case
+def a_listed_row_writes_its_dds():
+    mat = bpy.data.materials.new("Listed")
+    t = mat.o3d.textures.add()
+    t.name, t.image = "listed_c.tga", image("listed", (0, 0, 1, 1))
+    root, _ = model("ddslisted", mat)
+    root.o3d.texture_files = "DDS"
+    _, sc = export_model(root)
+    assert textures(sc) == [("listed_c.tga", 1, 0, 0, 0)], textures(sc)
+    assert files(root) == ["ddslisted.3di", "listed_c.dds"], files(root)
+
+
+@case
+def one_form_for_a_name_across_a_run():
+    # Two models of one run naming one texture write it in one form: each would
+    # remove the other's, and the game reads the .dds first.
+    shared = image("shared_img", (1, 0, 0, 1))
+
+    def listed(name):
+        mat = bpy.data.materials.new(name)
+        t = mat.o3d.textures.add()
+        t.name, t.image = "shared.tga", shared
+        return mat
+    run = export.ExportRun()
+    a, _ = model("forma", listed("FormA"))
+    b, _ = model("formb", listed("FormB"))
+    a.o3d.texture_files, b.o3d.texture_files = "DDS", "TGA"
+    export_model(a, run)
+    refused(b, "shared.tga", "shared.dds", "forma", "Texture files", run=run)
 
 
 # --- the flipbook: a register only with frames on the register clock ------------
