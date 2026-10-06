@@ -72,6 +72,10 @@ func test_no_resource_dir_boots_the_bundled_placeholder_menu() -> void:
 	for widget_name in ["PLAY_RETAIL", "CHANGE_FOLDER", "EXIT"]:
 		assert_true(driver.has_widget(widget_name), "%s is authored" % widget_name)
 	var frame := menu.get_frame()
+	# One mouse sample resolves the screen's claimed pointer.
+	driver.process_mouse(Vector2(400, 300), false)
+	assert_not_null(frame.get_cursor_texture(),
+			"MAIN's pointer newarow1.tga decodes (a plain git blob, never an LFS pointer)")
 	assert_eq(frame.get_unresolved_asset_count(), 0, "every asset the menu names resolves")
 	assert_gt(frame.get_draw_list_stats().glyphs, 0, "the bundled font draws the menu text")
 
