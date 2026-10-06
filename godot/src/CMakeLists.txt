@@ -117,6 +117,7 @@ add_library(opennova_bindings OBJECT
     mission/static_population_instance.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
+    env/celestial_overlay.cpp
     env/environment_cube_capture.cpp
     env/sky_dome.cpp
     env/slot_shadow.cpp
@@ -395,6 +396,7 @@ if(OPENNOVA_EDITOR)
         authoring/child_process.cpp
         authoring/definition_viewport_applier.cpp
         authoring/editor_app.cpp
+        authoring/environment_viewport_applier.cpp
         authoring/hud_viewport_applier.cpp
         authoring/menu_viewport_applier.cpp
         authoring/mission_viewport_applier.cpp

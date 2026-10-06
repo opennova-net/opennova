@@ -24,6 +24,7 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "env/celestial_overlay.h"
 #include "hud/hud_inset_scope.h"
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
@@ -819,18 +820,8 @@ void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) 
 	}
 }
 
-// The water glint and the sun glare: Celestial places both models and
-// drives their UPL_INTENSITY submit value (the SelfLumColor their SELFLUM
-// materials evaluate) and keeps their Q3 copy; the stage draws them at the
-// scene tail with the SELFLUM combine, ONE / ONE, fogged to black under the
-// frame's fog, depth ALWAYS (submit 0x110), so their meshes leave every
-// camera (the Q3 redraw reads the node, not the layers). The glint leg runs
-// only while the mission water height is nonzero (retail Environment_UpdateSunGlare
-// @ 0x5c96c0 behind the test @ 0x5c96b5) and draws under the frame's own
-// light scale; the glare draws last, under the forced 0xFF404040 modulator
-// (light scale 1.0, retail @ 0x5c96fd..0x5c9722). The glare's own gate is
-// the scene's drawShadows argument (test edi @ 0x5c970a), which the main
-// view and the scope view both pass as 1.
+// The water glint and the sun glare of the main view (env/celestial_overlay.h carries the
+// witnesses), then the weapon Inset pass's glint.
 void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) {
 	if (celestial_ == nullptr || env_ == nullptr || !is_inside_tree()) {
 		return;
@@ -841,42 +832,10 @@ void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) 
 	if (camera == nullptr || light.is_null()) {
 		return;
 	}
-	const Transform3D eye = camera->get_camera_transform();
-	const Vector3 forward = -eye.basis.get_column(2).normalized();
-	const opennova::env::SceneFogValues fog =
-			env_->state().build_scene_fog(env_->is_underwater_view());
-	const Celestial::OverlayBodies bodies = celestial_->get_overlay_bodies();
+	::godot::append_celestial_overlays(scene_overlay_bodies_, *celestial_, *env_, water_, *camera, r_submission);
 	const float frame_scale[3] = { static_cast<float>(light->gain.x),
 		static_cast<float>(light->gain.y), static_cast<float>(light->gain.z) };
-	const float glare_scale[3] = { opennova::renderer::kSunGlareLightScale,
-		opennova::renderer::kSunGlareLightScale, opennova::renderer::kSunGlareLightScale };
-	struct Leg {
-		const Celestial::OverlayBody &body;
-		opennova::renderer::SceneOverlaySlot slot;
-		const float *light_scale;
-		bool gated;
-	};
 	const bool water_height_set = water_ != nullptr && water_->get_water_height() != 0.0f;
-	const Leg legs[] = {
-		{ bodies.glint, opennova::renderer::SceneOverlaySlot::WaterGlint, frame_scale,
-				!water_height_set },
-		{ bodies.glare, opennova::renderer::SceneOverlaySlot::SunGlare, glare_scale, false },
-	};
-	for (const Leg &leg : legs) {
-		if (leg.body.model == nullptr) {
-			continue;
-		}
-		scene_overlay_bodies_.take_over(leg.body.model);
-		if (!leg.body.drawn || leg.gated) {
-			continue;
-		}
-		const float view_depth = static_cast<float>(
-				(leg.body.model->get_global_position() - eye.origin).dot(forward));
-		const float visibility = opennova::renderer::device_fog_visibility(view_depth,
-				fog.start, fog.end, fog.type, light->fog_enabled);
-		scene_overlay_bodies_.append(leg.slot, leg.body.model, leg.light_scale, visibility,
-				r_submission, {});
-	}
 	// The weapon Inset pass's glint: the leg's second call at the Inset camera
 	// (Celestial::get_inset_glint), the body drawn from that eye at the
 	// Inset's submit value under the Inset's pass fog, behind the same water
@@ -900,58 +859,12 @@ void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) 
 	}
 }
 
-// The water mirror's closing draws (runtime/renderer/scene_overlay.h
-// kMirrorOverlayOrder; only the mirror's overlay pass admits these slots):
-// the dim over the finished mirror target, then the sun/moon discs and the
-// glow redrawn at the MIRROR camera inside the far depth band, fogged by the
-// mirror's own dry block (EnvironmentState::build_water_mirror_fog) under
-// the frame's light scale. The discs keep their beauty submit value (their
-// live materials); the glow takes the mirror view's no-occlusion value
-// (Celestial::get_mirror_redraw).
+// The water mirror's closing draws (env/celestial_overlay.h), while the water renders.
 void GameWorld::append_water_mirror_overlays(SceneOverlaySubmission &r_submission) {
 	if (water_ == nullptr || !is_water_render_active()) {
 		return;
 	}
-	Camera3D *mirror = water_->get_reflection_camera();
-	if (mirror == nullptr || !mirror->is_inside_tree()) {
-		return;
-	}
-	opennova::renderer::append_mirror_dim_overlay(opennova::env::kReflectionDimFactor,
-			r_submission.frame);
-	if (celestial_ == nullptr || env_ == nullptr) {
-		return;
-	}
-	const Ref<EnvLightValues> light = frame_light_values();
-	if (light.is_null()) {
-		return;
-	}
-	const Transform3D eye = mirror->get_global_transform();
-	const Vector3 forward = -eye.basis.get_column(2).normalized();
-	const Celestial::MirrorRedraw redraw = celestial_->get_mirror_redraw(forward);
-	const opennova::env::SceneFogValues fog = env_->state().build_water_mirror_fog();
-	const float light_scale[3] = { static_cast<float>(light->gain.x),
-		static_cast<float>(light->gain.y), static_cast<float>(light->gain.z) };
-	SceneOverlayModelSurfaces::AppendOptions options;
-	options.offset = eye.origin - redraw.anchor;
-	options.depth = opennova::renderer::SceneOverlayDepth::FarBand;
-	const auto visibility_of = [&](ObjectModel *p_model) {
-		const float view_depth = static_cast<float>(
-				(p_model->get_global_position() + options.offset - eye.origin).dot(forward));
-		return opennova::renderer::device_fog_visibility(view_depth, fog.start, fog.end,
-				fog.type, light->fog_enabled);
-	};
-	for (ObjectModel *disc : { redraw.sun, redraw.moon }) {
-		if (disc != nullptr) {
-			scene_overlay_bodies_.append(
-					opennova::renderer::SceneOverlaySlot::MirrorCelestialBodies, disc,
-					light_scale, visibility_of(disc), r_submission, options);
-		}
-	}
-	if (redraw.glare_drawn && redraw.glare != nullptr) {
-		options.self_lum = &redraw.glare_self_lum;
-		scene_overlay_bodies_.append(opennova::renderer::SceneOverlaySlot::MirrorSunGlow,
-				redraw.glare, light_scale, visibility_of(redraw.glare), r_submission, options);
-	}
+	::godot::append_water_mirror_overlays(scene_overlay_bodies_, celestial_, env_, *water_, r_submission);
 }
 
 void GameWorld::apply_blink_frame() {

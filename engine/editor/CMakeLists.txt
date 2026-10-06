@@ -210,6 +210,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_playback.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/environment_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_collision.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
@@ -384,6 +385,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/definition_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/effect_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_inspector_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
