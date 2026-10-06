@@ -223,6 +223,8 @@ def two_images_on_one_uv_map_refused():
     mat, tree, bsdf = principled_material("TwoImages")
     mix = tree.nodes.new("ShaderNodeMix")
     mix.data_type = "RGBA"
+    # A blend of both (Blender 5.2's new Mix node no longer starts at 0.5).
+    materials.socket(mix.inputs, "Factor_Float").default_value = 0.5
     tree.links.new(image_node(tree, image("two_a", (1, 0, 0, 1))).outputs["Color"],
                    materials.socket(mix.inputs, "A_Color"))
     tree.links.new(image_node(tree, image("two_b", (0, 1, 0, 1))).outputs["Color"],
