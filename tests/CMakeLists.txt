@@ -4755,6 +4755,13 @@ target_link_libraries(editor_clip_sounds_test PRIVATE opennova_editor)
 target_include_directories(editor_clip_sounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_clip_sounds COMMAND editor_clip_sounds_test)
 
+# DI-13: a weapon's map in first person: the gun with the character's arms on its rig, the eye the game
+# draws the view model before, the weapon's actions as the game's pump runs them and their sets.
+add_executable(editor_first_person_test editor/first_person_test.cpp)
+target_link_libraries(editor_first_person_test PRIVATE opennova_editor)
+target_include_directories(editor_first_person_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_first_person COMMAND editor_first_person_test)
+
 # DI-10: a model's damage states named in the game's words and played as the game destroys the item (the
 # husk swap, the pieces, the death sound, the destroy fade); the retail leg over JO's damageable items.
 add_executable(editor_model_damage_test editor/model_damage_test.cpp)

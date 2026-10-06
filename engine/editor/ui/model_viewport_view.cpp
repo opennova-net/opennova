@@ -43,6 +43,8 @@ namespace {
 constexpr int64_t kRegisterRange = 32767; // a slider's reach (the value is the register's word)
 // A clip event's tick on the timeline (a step's is green, a shot's red).
 constexpr ImU32 kEventColor = IM_COL32(255, 220, 90, 255);
+// A weapon action's leg on the timeline (DI-13).
+constexpr ImU32 kLegColor = IM_COL32(110, 190, 255, 255);
 
 void set_options(Workspace &workspace, const ModelViewport &model, const ModelViewportOptions &options) {
 	workspace.request(request::set_viewport(
@@ -108,6 +110,7 @@ struct ModelViewportView::Tools {
 	void damage(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
 	void rig_chooser(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void sound(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
+	void first_person(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
 };
 
@@ -295,6 +298,80 @@ void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row,
 	if (options != model.options()) set_options(workspace, model, options);
 }
 
+// A weapon's map in first person (DI-13, preview/preview_first_person): the view (the orbit, or the eye the
+// game draws the view model before), the character whose arms draw, the action whose sets the row plays,
+// what draws and why, and each of the action's legs in words with a Play of it. Each a SetViewport of the
+// options' `first_person`.
+void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model) {
+	ModelViewportOptions options = model.options();
+	FirstPersonOptions &chosen = options.first_person;
+	const FirstPersonSources &sources = model.first_person();
+	const char *label = model.eye_view() ? "First person (eye)###first_person" : "First person###first_person";
+	row.next(ui_kit::button_width(label));
+	if (ImGui::Button(label)) ImGui::OpenPopup("first_person");
+	ui_kit::tooltip(sources.words());
+	if (ImGui::BeginPopup("first_person")) {
+		const float unit = ImGui::GetFontSize();
+		ImGui::PushTextWrapPos(unit * 26.0f);
+		ImGui::TextUnformatted(sources.words().c_str());
+		if (!sources.arms_note().empty()) ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", sources.arms_note().c_str());
+		ImGui::PopTextWrapPos();
+		int view = chosen.eye ? 1 : 0;
+		ImGui::RadioButton("Orbit", &view, 0);
+		ui_kit::tooltip("Turn around the gun and the arms with the orbit camera.");
+		ImGui::SameLine();
+		ImGui::RadioButton("Eye", &view, 1);
+		ui_kit::tooltip("The camera the game draws the weapon before: the model at the weapon's pos at the hip, turned by "
+		                "its cant, seen through its renderfov (Player_UpdateFirstPersonCamera @ 0x4dd380, "
+		                "Player_RenderFirstPersonViewModel @ 0x4ded60). Nothing moves it.");
+		chosen.eye = view == 1;
+		const FirstPersonCharacter *who = sources.character();
+		ImGui::SetNextItemWidth(unit * 16.0f);
+		if (ImGui::BeginCombo("Character", who ? who->words.c_str() : "None")) {
+			for (const FirstPersonCharacter &character : sources.characters()) {
+				const std::string line = character.words + (character.arms.empty() ? "  (no arms)" : "  (" + character.arms + ")") +
+				                         "##" + std::to_string(character.id);
+				if (ImGui::Selectable(line.c_str(), &character == who)) chosen.character = int32_t(character.id);
+			}
+			ImGui::EndCombo();
+		}
+		ui_kit::tooltip("The character the player is: the game draws its Avatars.def arms with the gun's bones. A fresh "
+		                "profile is the first of the good side.");
+		const std::vector<const WeaponActionRun *> playing = sources.actions_playing(model.clip_key());
+		const WeaponActionRun *action = model.first_person_action();
+		if (playing.size() > 1) {
+			ImGui::SetNextItemWidth(unit * 10.0f);
+			if (ImGui::BeginCombo("Action", action ? action->suffix.c_str() : "")) {
+				for (const WeaponActionRun *run : playing)
+					if (ImGui::Selectable(run->suffix.c_str(), run == action)) chosen.action = run->suffix;
+				ImGui::EndCombo();
+			}
+			ui_kit::tooltip("Several of the weapon's actions play this row: the sets of the one chosen play.");
+		}
+		ImGui::PushTextWrapPos(unit * 26.0f);
+		if (!action) {
+			ImGui::TextDisabled("No action of %s plays this row: no set plays with it.", sources.weapon().c_str());
+		} else {
+			ImGui::TextUnformatted(action->words.c_str());
+			for (size_t i = 0; i < action->legs.size(); ++i) {
+				const WeaponActionLeg &leg = action->legs[i];
+				ImGui::PushID(int(i));
+				ImGui::BeginDisabled(leg.tick < 0);
+				if (ImGui::SmallButton("Play")) workspace.request(request::play_action_leg(model.path(), leg.end));
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				ImGui::TextUnformatted(leg.words.c_str());
+				ImGui::PopID();
+			}
+			if (action->legs.empty()) ImGui::TextDisabled("Its row plays no set.");
+		}
+		ImGui::TextDisabled("The game reads no first-person clip event; Mute (Sound) mutes the sets too.");
+		ImGui::PopTextWrapPos();
+		ImGui::EndPopup();
+	}
+	if (options != model.options()) set_options(workspace, model, options);
+}
+
 // The clip the selection plays (ADR 0046 S17): its transport (Run or Pause, Space; the first
 // frame, Home; a frame back and on, the arrows; Repeat for a one-shot; the speed), the frame and the
 // time shown, then a track the mouse scrubs with its frames ruled and its events marked by what
@@ -380,9 +457,16 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	const PreviewClipEvent *under = nullptr;
 	for (const PreviewClipEvent &event : model.clip_events())
 		if (hovered && std::fabs(mouse - x_of(event.tick)) <= 4.0f) under = &event;
+	// A weapon's action playing the row (DI-13): its legs' marks on the track's foot, B as it begins, E as it
+	// finishes (a leg past the clip's end at its right end).
+	const WeaponActionRun *action = model.first_person_action();
+	const WeaponActionLeg *leg_under = nullptr;
+	if (action && !under)
+		for (const WeaponActionLeg &leg : action->legs)
+			if (leg.tick >= 0 && hovered && std::fabs(mouse - x_of(std::min(leg.tick, length))) <= 4.0f) leg_under = &leg;
 	// A press on an event's mark holds the clock on the event's own tick until it is let go; any other
 	// press scrubs. A loop's right end is its last tick (its wrap tick shows the first frame again).
-	if (clicked) event_press = under != nullptr;
+	if (clicked) event_press = under != nullptr || leg_under != nullptr;
 	if (!active) event_press = false;
 	if (active && !event_press) {
 		const float t = std::clamp((mouse - left) / std::max(1.0f, right - left), 0.0f, 1.0f);
@@ -416,6 +500,14 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		paint->AddRectFilled(ImVec2(x - 1.5f, top + 2.0f), ImVec2(x + 1.5f, top + 9.0f), mark.color);
 		paint->AddText(ImVec2(x + 2.5f, top), mark.color, mark.letter);
 	}
+	// The action's legs: a mark and its letter at the foot of the track.
+	for (size_t i = 0; action && i < action->legs.size(); ++i) {
+		const WeaponActionLeg &leg = action->legs[i];
+		if (leg.tick < 0) continue;
+		const float x = x_of(std::min(leg.tick, length));
+		paint->AddRectFilled(ImVec2(x - 1.5f, bottom - 9.0f), ImVec2(x + 1.5f, bottom - 2.0f), kLegColor);
+		paint->AddText(ImVec2(x + 2.5f, bottom - ImGui::GetFontSize() - 1.0f), kLegColor, leg.end ? "E" : "B");
+	}
 	// The playhead.
 	const float head = x_of(shown);
 	paint->AddLine(ImVec2(head, top), ImVec2(head, bottom), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 2.0f);
@@ -427,13 +519,15 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 			if (!said.empty()) said[0] = char(std::toupper(static_cast<unsigned char>(said[0])));
 			plays += "\n" + said;
 		}
+		// A weapon's first-person clip (DI-13): nothing reads its events, so a press plays nothing.
+		const bool audible = !plays.empty() && !model.first_person().active();
 		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + seconds_text(under->tick / io::kTickHz) +
 		                "): " + animation_trigger_words(under->trigger) + "." + plays +
-		                (plays.empty() ? "\nClick to go there." : "\nClick to go there and hear it."));
+		                (audible ? "\nClick to go there and hear it." : "\nClick to go there."));
 		if (clicked) {
 			seek_ticks(workspace, model, under->tick, true);
 			// A press plays the event once, as the game plays it (play_sound {frame}).
-			if (!plays.empty()) workspace.request(request::play_clip_event(model.path(), under->frame));
+			if (audible) workspace.request(request::play_clip_event(model.path(), under->frame));
 			// In the clip's own document the event is a record: select it.
 			const SessionView &view = workspace.view();
 			for (const auto &open : view.documents.open) {
@@ -446,11 +540,32 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 					                         clip_row.collections[1][size_t(under->frame)]});
 			}
 		}
+	} else if (leg_under) {
+		// A leg of the weapon's action (DI-13): what it plays, and a press plays it once.
+		ui_kit::tooltip(leg_under->words + "\nClick to go there and hear it.");
+		if (clicked) {
+			seek_ticks(workspace, model, std::min(leg_under->tick, length), true);
+			workspace.request(request::play_action_leg(model.path(), leg_under->end));
+		}
 	} else if (hovered) {
 		ui_kit::tooltip("Drag to scrub; the clip holds where you let go.");
 	}
-	// The marks' legend.
-	if (!model.clip_events().empty()) {
+	// The marks' legend: a weapon's action's legs (DI-13), whose clip's own events the game reads not.
+	const bool legs = action && !action->legs.empty();
+	if (legs) {
+		std::string letters;
+		for (const WeaponActionLeg &leg : action->legs) {
+			if (!letters.empty()) letters += ' ';
+			letters += leg.end ? 'E' : 'B';
+		}
+		const std::string legend = letters + " " + action->suffix + (action->legs.size() == 1 ? "'s set" : "'s sets");
+		ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(kLegColor), "%s", legend.c_str());
+		ui_kit::tooltip("B: the set the action plays as it begins (its soundset); E: as it finishes (its soundsetend).");
+	}
+	if (legs && !model.clip_events().empty()) ImGui::SameLine();
+	if (model.first_person().active() && !model.clip_events().empty()) {
+		ImGui::TextDisabled("Events: not read in first person");
+	} else if (!model.clip_events().empty()) {
 		ImGui::TextColored(ImVec4(120 / 255.0f, 220 / 255.0f, 120 / 255.0f, 1.0f), "L R footstep");
 		ImGui::SameLine();
 		ImGui::TextColored(ImVec4(240 / 255.0f, 90 / 255.0f, 80 / 255.0f, 1.0f), "F fires");
@@ -522,6 +637,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 		                "generators.");
 	}
 	if (model.animating()) sound(workspace, row, model);
+	if (model.animating() && model.first_person().active()) first_person(workspace, row, model);
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
 	ui_kit::tooltip("What the viewport marks over the model, and the collision it draws.");

@@ -99,6 +99,32 @@ inline void viewmodel_camera_local_from_view(const float view[3], float out[3]) 
     out[2] = -view[0];
 }
 
+// Where the viewmodel's root stands in the camera's frame (camera-local axes:
+// x right, y up, -z forward), the gun and the arms drawn at it: a 3x3 basis
+// (row-major, its rows the presentation's) and an origin.
+struct FpViewmodelPose {
+    float basis[9];
+    float origin[3];
+};
+
+// The viewmodel root the first-person view draws the gun and the arms at,
+// relative to the camera: the def's cant (`rot_bias_deg`, yaw / pitch / roll
+// degrees, through viewmodel_bias_euler_rad) composed over the rig's axis map
+// (`rig_rot_deg`, euler degrees in camera space: the yaw-180 of
+// kViewmodelRigYawDeg), and the view offset (`view_units`, VIEW-FRAME world
+// units: the def `pos` over kWeaponDefPosScale, or the sim's blended bias)
+// mapped onto the camera's axes and turned by the cant. Each euler is the
+// presentation's YXZ order (Ry * Rx * Rz). The camera adds the def's
+// rotation to the view angles and turns its position into the view before
+// adding it to the eye; the model is drawn at that view root [orig:
+// Player_UpdateFirstPersonCamera @0x4dd380, rot = view_rot + Def.Bone.rot
+// @0x4dd444, the view-local rotate Math_FixedPointTransformPoint22
+// @0x4dd5d8; Player_RenderFirstPersonViewModel @0x4ded60 root = the view
+// transform]. The game's first-person presenter and the editor's
+// first-person eye (DI-13) place the viewmodel by it.
+FpViewmodelPose fp_viewmodel_pose(const float view_units[3], const float rot_bias_deg[3],
+		const float rig_rot_deg[3]);
+
 // TEX_TEAM is a signed-byte store immediately before the FP lighting, heat
 // and model-submit path [orig: Player_RenderFirstPersonViewModel
 //  @0x4DEE96..0x4DEE9F].

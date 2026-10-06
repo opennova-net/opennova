@@ -275,6 +275,8 @@ io::JsonValue clip_sound_fired_to_json(const ClipSoundFired &fired) {
 	row.set("slot", json_number(fired.slot));
 	row.set("keyword", json_string(slot_keyword(fired.slot)));
 	row.set("foot", json_string(fired.foot == 0 ? "left" : fired.foot == 1 ? "right" : ""));
+	row.set("action", json_string(fired.action));
+	row.set("leg", json_string(fired.leg));
 	row.set("profile", json_string(fired.profile));
 	row.set("set", json_string(fired.set));
 	row.set("bank", json_string(fired.bank));
