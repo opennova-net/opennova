@@ -390,6 +390,7 @@ if(OPENNOVA_EDITOR)
         authoring/menu_viewport_applier.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
+        authoring/preview_sound_player.cpp
         authoring/script_device.cpp
         authoring/script_edit.cpp
         authoring/script_highlighter.cpp
