@@ -13,9 +13,9 @@
 // is world/item_events.cpp's and world/destruction.cpp's (docs/world/world-wac-ai-re.md §24). The item is
 // read from its catalog by the game's parser (def::def_parse_items_memory).
 //
-// The effects a death spawns are named, not drawn: no editor device draws an effect on this branch (the
-// effect preview, DI-14's preview_effects, is not on the trunk). The legs of kind "effect" are the seam it
-// fills: each names its effect, where it spawns and its tick.
+// The effects a death spawns are named in the model preview, not drawn; the definition preview (DI-21,
+// preview/definition_viewport) spawns them: the legs of kind "effect" name each effect, where it spawns
+// and its tick.
 
 #include <cstdint>
 #include <string>
@@ -26,6 +26,9 @@
 
 namespace opennova {
 class FileSource;
+namespace def {
+struct DefItemDef;
+}
 namespace threedi {
 struct Threedi3di3;
 }
@@ -82,6 +85,9 @@ struct DamageItem {
 // when the catalog does not read or holds no such record.
 bool read_damage_item(const FileSource &files, const std::string &catalog, const std::string &record,
                       DamageItem &out);
+// What a death reads of the item `def` (its record as the game's parser makes it) of the catalog `catalog`:
+// read_damage_item's, and a definition's picture's (DI-21), which has the record in hand.
+DamageItem damage_item_of(const def::DefItemDef &def, const std::string &catalog);
 
 // The state the model preview draws (the options' `damage`): the item intact, or destroyed as the game
 // destroys it, the death at the preview clock's tick 0; the item by its record ("" the first naming the
@@ -114,8 +120,11 @@ void note_damage_pieces(const threedi::Threedi3di3 &pieces, DamageModels &models
 
 // One thing a death does: its tick after the death tick, its kind ("swap", "pieces", "flash", "sound",
 // "effect", "blast", "fade"), what it names (the husk, a set, an effect, an ammo), its words and its
-// citation, and how the preview shows it ("shown", "played", "named": an effect no device draws here, a
-// blast nothing in the preview takes).
+// citation, and how the preview shows it ("shown", "played", "named": an effect the model preview draws
+// none of, a blast nothing in the preview takes). An effect leg says where it spawns: a death bank's
+// family (1 Dead, 2 Fire, 3 Other: world::death_bank_spawns over the piece model's points), or once at
+// the item (`at_item`), `above` metres over its origin, which the definition preview spawns (DI-21); a leg
+// of neither (the bridge's shock on the water plane) is named alone.
 struct DamageLeg {
 	int32_t tick = 0;
 	std::string kind;
@@ -123,6 +132,9 @@ struct DamageLeg {
 	std::string words;
 	std::string cite;
 	std::string shown;
+	int bank = 0;
+	bool at_item = false;
+	float above = 0.0f;
 };
 // One section of the piece model leaving as a death piece: its debris row, its chance (1 always).
 struct DamagePiece {

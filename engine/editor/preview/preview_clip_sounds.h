@@ -195,6 +195,14 @@ std::vector<ClipSoundFired> plan_clip_event(const ClipEventDue &due, const ClipS
 // which it lacks.
 void find_clip_sound_waves(ClipSoundFired &fired, const AssetScan &scan);
 
+// A set an item plays at its own place, once (a death's sound: the model preview's damage state, DI-10, and
+// the definition preview's, DI-21): found in the game's bank order and played at the preview's origin as the
+// camera at `listener` hears it, its member picked through `selector`; on the clock's `tick`, its words led
+// by the tick and `what` ("the death sound"). Its seq and path are the caller's.
+ClipSoundFired plan_set_at_origin(const std::string &set, int32_t tick, const std::string &what,
+                                  const ClipSoundSources &sources, const PreviewVec3 &listener,
+                                  audio::SoundSelector &selector);
+
 // What an event word plays under `options`, a line per sound and none picked (the timeline's hover):
 // "SSRFootGND: FSP_DIRT_R (game.lwf)", "SSAudio5 is empty: nothing plays", "SSLFootGND's FSP_DIRT_L: no
 // bank the game searches holds it".
