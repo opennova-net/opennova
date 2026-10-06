@@ -204,9 +204,9 @@ void print_rows(const std::vector<Diagnostic> &rows) {
 
 } // namespace
 
-// The registry: the menu type's project check is the render check and no other registered type
-// has one (document_types.cpp's static_asserts: a type may have none, and no two name one
-// check); the checks made from it are the render check alone. A stand-in put in place after they
+// The registry: the menu type's project check is the render check, the sound bank type's the wave
+// check (the sound lane), and no other registered type has one (document_types.cpp's static_asserts:
+// a type may have none, and no two name one check). A stand-in put in place after they
 // were made is followed at their next update, which makes its check and runs it once; gone, its
 // check goes with it and so do its findings, the update saying the rows moved.
 static int test_registry() {
@@ -215,8 +215,8 @@ static int test_registry() {
 		TEST_EXPECT(type != nullptr);
 		if (!type)
 			return 1;
-		TEST_EXPECT((type->project_check != nullptr) ==
-				(static_cast<DocumentTypeId>(id) == DocumentTypeId::Menu));
+		TEST_EXPECT((type->project_check != nullptr) == (static_cast<DocumentTypeId>(id) == DocumentTypeId::Menu ||
+		                                                 static_cast<DocumentTypeId>(id) == DocumentTypeId::SoundBank));
 	}
 	(void)probe_type();
 	g_probe = Probe();
@@ -224,7 +224,7 @@ static int test_registry() {
 	TEST_EXPECT(menu_render_check(&checks) != nullptr && menu_render_check(nullptr) == nullptr);
 	TEST_EXPECT(checks.of(DocumentTypeId::None) == nullptr);
 	for (size_t id = 1; id <= kDocumentTypeCount; ++id)
-		if (static_cast<DocumentTypeId>(id) != DocumentTypeId::Menu)
+		if (static_cast<DocumentTypeId>(id) != DocumentTypeId::Menu && static_cast<DocumentTypeId>(id) != DocumentTypeId::SoundBank)
 			TEST_EXPECT(checks.of(static_cast<DocumentTypeId>(id)) == nullptr);
 	Project project("opennova_editor_project_checks_registry");
 	TEST_EXPECT(project.make({ { "defs/items.def", item("Alpha", 5) } }));
