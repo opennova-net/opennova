@@ -494,7 +494,7 @@ int test_overlays() {
 	TEST_EXPECT(lines(kMissionAreaRgb, 1.0f) == 16 && lines(kMissionRedRgb, 1.0f) == 1 && count(list, OverlayKind::Text, OverlayRole::Normal) == 0);
 	TEST_EXPECT(count(list, OverlayKind::Rect, OverlayRole::Marquee) == 0);
 	// The path looping and selected by its marker: two lines, thick; its flag's blue.
-	source.path_rows[0].flags = uint32_t(opennova::bms::WaypointFlags::BlueTeam);
+	source.path_rows[0].flags = uint32_t(opennova::bms::WaypointFlags::PlayerRoute);
 	scene.read(source);
 	std::vector<NodeId> selected_rows = { 12 };
 	in.selected_rows = &selected_rows;

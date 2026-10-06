@@ -106,7 +106,10 @@ constexpr OutlineSpec kCatalogOutline{OutlineMode::List,
 constexpr OutlineSpec kMissionOutline{OutlineMode::Tree, "", nullptr, true, mission_row_listed, "Empty paths",
                                       mission_adds_by_menu, draw_mission_add_menu, mission_row_headings,
                                       mission_row_reads_others};
-constexpr OutlineSpec kStringsOutline{OutlineMode::MasterDetail, "Sections", nullptr};
+// A string table's sections, each added by its name (one the table has selected, as a lookup reads the
+// first section of a name), its strings moved to another section.
+constexpr OutlineSpec kStringsOutline{OutlineMode::MasterDetail, "Sections", nullptr, false, nullptr, "", nullptr, nullptr,
+                                      nullptr, nullptr, nullptr, nullptr, "", "", "name", true};
 constexpr OutlineSpec kTreeOutline{OutlineMode::Tree, "", nullptr};
 // An animation map's rows under their slots' families (S17: "Walking and running", "Deaths"), each
 // row titled by its slot's words and the clips it plays.

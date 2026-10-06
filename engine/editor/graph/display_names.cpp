@@ -140,6 +140,24 @@ bool text_key_number(const std::string &key, const char *prefix, int64_t &out) {
 	return true;
 }
 
+bool keyed_text_reference(const AssetGraph &graph, const FieldUse &field, const Value &value, FieldUse &out, Value &key) {
+	const int64_t *number = std::get_if<int64_t>(&value);
+	if (!field.key_prefix || !number || *number < field.key_first || *number > field.key_last) return false;
+	char formed[64];
+	std::snprintf(formed, sizeof(formed), "%s%03i", field.key_prefix, int(*number));
+	GraphEdge edge;
+	edge.kind = ReferenceKind::TextId;
+	edge.scope = field.scope;
+	if (field.scope_alternate) edge.scope_alternate = field.scope_alternate;
+	out = field;
+	out.reference = ReferenceKind::TextId;
+	out.picks = ReferenceKind::None;
+	out.key_prefix = nullptr;
+	out.scope = graph.lookup_scope(edge);
+	key = std::string(formed);
+	return true;
+}
+
 namespace {
 
 // The keys of a field whose number forms one (FieldUse::key_prefix), in its section of the table the
