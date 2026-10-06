@@ -19,8 +19,8 @@ struct SessionView;
 // The navigation history's part of the session (CONTEXT.md "Navigation history"): where the person is,
 // the places a move took them from, and Back and Forward (navigate_back, navigate_forward), which take
 // them there again. A place is the pane that shows it and the file (session/view/navigation_view.h): a
-// document's tab with the record selected in it (a text's line a Go to showed), a file's page, or Files
-// on a file.
+// document's tab with the record selected in it (a text's line a Go to showed), a file's page (the record a
+// Go to marked there, DI-17), or Files on a file.
 //
 // What moves the person (the request table's `navigates` column, request_kinds.h) is a step: a document
 // opened or switched to (Files, a tab, the unsaved files' list), a Go to (a reference, a use, a referrer,

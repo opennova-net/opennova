@@ -1051,7 +1051,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 					if (goes) {
 						if (ImGui::Selectable((ui_kit::fit(named.value, ImGui::GetContentRegionAvail().x) + "###go").c_str()))
 							window_requests::go_to(workspace_, named.target);
-						ui_kit::tooltip(named.target.editable ? "Open " + named.file + " at it." : "Show " + named.file + " in Files.");
+						ui_kit::tooltip(window_requests::go_to_words(named.target));
 					} else {
 						ui_kit::clipped_text(named.value);
 					}
@@ -1082,7 +1082,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 				const std::string line = user.file + ": " + (user.record.empty() ? "" : user.record + " - ") + user.field;
 				if (ImGui::Selectable((ui_kit::fit(line, ImGui::GetContentRegionAvail().x) + "###use").c_str()))
 					window_requests::go_to(workspace_, user.target);
-				ui_kit::tooltip(line + "\n" + (user.target.editable ? "Open " + user.target.file + " at it." : "Show " + user.target.file + " in Files."));
+				ui_kit::tooltip(line + "\n" + window_requests::go_to_words(user.target));
 				ImGui::PopID();
 			}
 	}

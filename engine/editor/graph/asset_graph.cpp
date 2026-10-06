@@ -1158,6 +1158,15 @@ std::vector<const GraphSymbol *> AssetGraph::symbols_of(const std::string &file,
 	return out;
 }
 
+std::vector<AssetGraph::FileSymbol> AssetGraph::symbols_in(const std::string &file) const {
+	std::vector<FileSymbol> out;
+	const GraphSlot *slot = named_file(file);
+	if (!slot) return out;
+	out.reserve(slot->symbols.size());
+	for (const GraphSymbol &symbol : slot->symbols) out.push_back({&symbol, !unread(symbol)});
+	return out;
+}
+
 bool AssetGraph::for_each_definition(const Document &document,
 		const std::function<void(const GraphSymbol &symbol, bool inert)> &visit) const {
 	const uint32_t id = index_.find(document.path());
