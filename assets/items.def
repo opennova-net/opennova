@@ -97,6 +97,16 @@ begin "Power Up AR-15"
 	type powerup
 	attrib: powerup notarget
 end
+begin "Waypoint"
+	id 106005
+	type marker
+end
+
+begin "Map centerpoint"
+	id 102043
+	type marker
+end
+
 
 
 
