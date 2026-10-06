@@ -16,6 +16,18 @@ namespace opennova::editor {
 // a clear refusal beats a silent de-interlace. Nothing here is a port: PNG is a public
 // format the editor reads on the way in.
 bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error);
+
+// A PNG as one grey value a texel, at its own depth (ADR 0046 S20, a heightmap's form): a 16-bit
+// image's samples whole (`max_value` 65535), an 8-bit one's as they are (255), a sub-byte grey scaled
+// to 0..255; a colour or palette image's red, green and blue averaged. Interlaced images are refused
+// as decode_png refuses them.
+struct GrayImage {
+	int width = 0;
+	int height = 0;
+	uint32_t max_value = 255;
+	std::vector<uint16_t> samples; // row-major, the top row first
+};
+bool decode_png_gray(const std::vector<uint8_t> &bytes, GrayImage &out, std::string &error);
 bool is_png(const std::vector<uint8_t> &bytes);
 // The size a PNG states in its IHDR, the chunk that follows the signature, read without
 // decoding the image (the editor's texture probe measures a menu's PNG with it): false when

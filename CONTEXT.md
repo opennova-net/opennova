@@ -542,8 +542,8 @@ the tree is organization only. Uniqueness and length are checked on output names
 _Avoid_: path (when the engine-facing identity is meant), resource name
 
 **Import / sidecar**:
-Bringing a non-native source (an image; later a sound bank's manifest, a font, a terrain's
-images) into the project the Godot way: a committed `<file>.import` sidecar records the
+Bringing a non-native source (an image, a terrain set; later a sound bank's manifest, a font)
+into the project the Godot way: a committed `<file>.import` sidecar records the
 importer, its version, options, output logical names, the source's content hash and the
 **inputs**, every other file the importer read through its **import context**
 (`ImportContext`), by path (taken from the source's folder, never outside the project), and
@@ -557,10 +557,24 @@ seconds of the pass that read it is read again next time), and the record and th
 hashes each source's outputs were made from, so only a real change imports again and an
 untouched file is not read. A file is an **import source** (its own kind, whatever its name:
 `import_source`) only while its record is there: importing it writes the record, and a `.png`
-with none is a texture the build packs as it is. The build never packs an import source, only its
-outputs. The files the import dialog offers are **import choices** (`ImportChoice`).
+with none is a texture the build packs as it is. A file a record lists among its inputs is an
+**import input** (`import_input`, whatever its name: a terrain set's heightmap is no texture) while the
+record lists it. The build never packs an import source or an import input, only the outputs. The
+files the import dialog offers are **import choices** (`ImportChoice`).
 _Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route),
 image source (the kind's name before S13 A8)
+
+**Terrain set**:
+A terrain made from ordinary images (ADR 0046 S20): `<name>.tset`, a short text in `art/terrain/`
+naming its heightmap (a 1024 x 1024 PNG at any depth, or TrnGen's own `.raw`), its colour map
+(1024 x 1024) and, if wanted, a detail and a tile set, each an import input; its import record's
+options are the terrain's numbers in world units (the heightmap white's height, the water level, the
+layout). The terrain importer bakes it with TrnGen.exe's own bake (the port in `engine/editor/terrain`)
+into the files the game reads for a terrain, each named after the set: `<name>.trn`, `.cpt`, `.til`
+and the colour, detail, blend and tile-set textures. Files' New > Terrain from images..., the
+`new_terrain` request and `opennova-project new-terrain` make one; a change to an image imports it
+again.
+_Avoid_: terrain project (TrnGen's `.tpj`), heightfield document
 
 **Import closure**:
 What an import "with the files these need" brings beside the files chosen (ADR 0046 S14): every
@@ -759,7 +773,7 @@ _Avoid_: request (a request changes the session), view (what the windows draw fr
 
 **Verb**:
 What `opennova-project` is run to do (`new`, `status`, `validate`, `create-missing`, `import`,
-`reimport`, `build`, `request`, `query`): a row of the command line's verb table
+`reimport`, `new-terrain`, `build`, `export`, `request`, `query`): a row of the command line's verb table
 (`apps/project/cli_verbs`) naming the requests it sends the editor's session, run headless for
 that one run, and the query whose answer it prints, as text or with `--json` as the Shell's
 `query_json` gives it. The command line orchestrates nothing of its own (ADR 0046 S13 A7).
