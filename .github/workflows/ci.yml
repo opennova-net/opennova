@@ -783,11 +783,30 @@ jobs:
           merge-multiple: true
           path: godot/bin
 
+      # The game zip ships the OpenNova Editor's export of assets/ (ADR 0048
+      # d8), which the package script makes with opennova-project, built here
+      # from the root project as the test job builds it (Ninja + sccache over
+      # its win-root cache, read only: that job saves it).
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-root
+          mode: restore
+
       # PRs export in debug mode (debug export template + the template_debug DLL,
       # the development flavour); master/manual runs export in
       # release mode like the release workflow.
       - name: Package Godot Windows apps
         shell: pwsh
+        env:
+          CMAKE_GENERATOR: Ninja
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          CMAKE_C_COMPILER_LAUNCHER: sccache
         run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
 
       - name: Save Godot export templates

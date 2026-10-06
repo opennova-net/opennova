@@ -348,12 +348,12 @@ func _ready() -> void:
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
 	if dir.is_empty():
-		# No --resource-dir: OpenNova's own placeholder menu. The launch
-		# shortcuts below all need game data, so they only follow a real dir.
+		# No --resource-dir: OpenNova's own game (ADR 0048), whose build is game
+		# data as an install is, so the launch shortcuts below follow it too.
 		if not _enter_bundled_menu():
 			get_tree().quit(1)
-		return
-	if not _enter_menu(dir):
+			return
+	elif not _enter_menu(dir):
 		get_tree().quit(1)
 		return
 	# F6 is still the real standalone game and normal loading presentation; it
@@ -676,8 +676,9 @@ func _enter_menu(dir: String) -> bool:
 
 # --- Bundled menu + retail picker (ADR 0048) ----------------------------------
 
-# No --resource-dir: mount OpenNova's own bundled assets/ and show its
-# placeholder main menu, whose PLAY RETAIL hands over to a retail install.
+# No --resource-dir: mount OpenNova's own bundled game (ADR 0048 d8: the
+# editor's Build of the base game) and show its main menu, whose PLAY RETAIL
+# hands over to a retail install.
 func _enter_bundled_menu() -> bool:
 	var root := BootRootMount.mount_bundled(BootRootMount.bundled_assets_dir())
 	if root == null:
@@ -685,8 +686,13 @@ func _enter_bundled_menu() -> bool:
 	_root = root
 	if not _enter_menu(root.get_root_dir()):
 		return false
-	# The boot marker the CLI startup contract test reads (--verbose).
-	print_verbose("OpenNova: bundled menu up from %s" % root.get_root_dir())
+	var built := root.is_runtime_mount()
+	if not built and not OS.has_feature("template") and not OS.has_feature("web"):
+		push_warning(("OpenNova: the base game in %s is not exported: its project folder boots the menu, "
+				+ "but not its missions, whose terrain only its Build makes (opennova-project export assets, "
+				+ "or the OpenNova Editor's Export)") % BootRootMount.bundled_project_dir())
+	# The boot marker the CLI startup contract test and the package smoke read (--verbose).
+	print_verbose("OpenNova: bundled menu up from %s (%s)" % [root.get_root_dir(), "build" if built else "loose"])
 	return true
 
 

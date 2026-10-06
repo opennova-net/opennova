@@ -1,11 +1,13 @@
 # Build and export the Windows products. Produces
 # dist/opennova-game-windows-v<version>.zip (opennova.exe, its matching native
-# dependencies and the bundled assets/ placeholder game, ADR 0048) and
+# dependencies and, in assets/, OpenNova's own game: the OpenNova Editor's export of
+# the base game project assets/, ADR 0048 d8) and
 # dist/opennova-editor-windows-v<version>.zip (editor/ = the OpenNova Editor,
 # runtime/ = the game it plays a project with, ADR 0046 d4). Retail game data is
 # supplied by the player. Debug exports include the game's ImGui tools; the
 # editor carries ImGui in both.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
+#        [-ProjectCli <opennova-project.exe>]
 
 param(
     # CI builds the GDExtension once per flavour (the build-gdextension-windows job)
@@ -13,6 +15,11 @@ param(
     # rebuild. Local runs omit it and build normally. See
     # .github/workflows/ci.yml build-gdextension-windows.
     [switch]$SkipBuild,
+    # The OpenNova Editor's project CLI that builds the base game the game zip
+    # ships. Left out, it is built from the root CMake project into build/, as
+    # scripts/build.sh configures it (CMAKE_GENERATOR and the compiler launcher
+    # from the environment, as CI's package job sets them).
+    [string]$ProjectCli = "",
     # Godot export mode. "release" (default; what the release workflow ships):
     # --export-release, and the packaged exes load the template_release
     # GDExtensions. "debug" (pull-request CI): --export-debug, and the packaged exes
@@ -177,6 +184,35 @@ else {
 }
 
 # ---------------------------------------------------------------------------
+# 3b. The base game's builder: opennova-project, the OpenNova Editor's project
+#     session on the command line (ADR 0046 S13 A7). The game zip ships the
+#     editor's export of assets/ (ADR 0048 d8), never the project's own files:
+#     its imports (the terrain set, the texture sources) make files only its
+#     Build has.
+# ---------------------------------------------------------------------------
+if ($ProjectCli) {
+    $PROJECT_CLI = (Resolve-Path -LiteralPath $ProjectCli).Path
+}
+else {
+    Write-Host "=== Building opennova-project ==="
+    $cliBuildDir = "$ROOT\build"
+    if (-not (Test-Path "$cliBuildDir\CMakeCache.txt")) {
+        cmake -S $ROOT -B $cliBuildDir -DCMAKE_BUILD_TYPE=Release
+        if ($LASTEXITCODE -ne 0) { throw "CMake configure of the root project failed (exit $LASTEXITCODE)" }
+    }
+    cmake --build $cliBuildDir --config Release --target opennova_project
+    if ($LASTEXITCODE -ne 0) { throw "Building opennova-project failed (exit $LASTEXITCODE)" }
+    # Ninja puts it in apps/project/, the Visual Studio generator under Release/.
+    $PROJECT_CLI = @("$cliBuildDir\apps\project\opennova-project.exe",
+                     "$cliBuildDir\apps\project\Release\opennova-project.exe") |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+}
+if (-not $PROJECT_CLI -or -not (Test-Path -LiteralPath $PROJECT_CLI)) {
+    throw "opennova-project not found (pass -ProjectCli, or let the script build it)"
+}
+Write-Host "    opennova-project: $PROJECT_CLI"
+
+# ---------------------------------------------------------------------------
 # 4. Run headless exports
 # ---------------------------------------------------------------------------
 $DIST = "$ROOT\dist"
@@ -296,11 +332,16 @@ function Test-GodotAppBoot {
     param([string]$ExePath)
 
     Write-Host "=== Boot smoke: opennova-runtime ==="
-    # No arguments: the bundled assets/ placeholder menu (ADR 0048).
+    # No arguments: the bundled game's menu (ADR 0048), from the base game's
+    # build in assets/ (its archives mounted, not a loose folder).
     $bundled = Invoke-GodotAppBoot -ExePath $ExePath -ExtraArgs "" -ExpectedExit 0
     if ($bundled -match "bundled assets not found|no menu found in resource dir") {
         Write-Host $bundled.TrimEnd()
-        throw "Boot smoke did not reach the bundled placeholder menu"
+        throw "Boot smoke did not reach the bundled game's menu"
+    }
+    if ($bundled -notmatch "OpenNova: bundled menu up from .* \(build\)") {
+        Write-Host $bundled.TrimEnd()
+        throw "Boot smoke did not mount the base game's build"
     }
     # --resource-dir without a value stays a usage error.
     $usage = Invoke-GodotAppBoot -ExePath $ExePath -ExtraArgs "-- --resource-dir" -ExpectedExit 2
@@ -331,9 +372,9 @@ function Test-EditorAppBoot {
 }
 
 # Stage the TRACKED files of assets/ (never a wildcard copy: a working checkout
-# may hold untracked local data there that must never ship). The models, clips
-# and textures ride LFS, so a checkout without them pulled holds pointer files,
-# which must never ship either.
+# may hold untracked local data there that must never ship, and the editor's
+# cache). The models, clips and textures ride LFS, so a checkout without them
+# pulled holds pointer files, which must never ship either.
 function Copy-BundledAssets {
     param([string]$AssetsStageDir)
 
@@ -359,6 +400,31 @@ function Copy-BundledAssets {
         Copy-Item -LiteralPath $src -Destination $dst -Force
     }
     Write-Host "    staged $($names.Count) tracked asset files"
+}
+
+# OpenNova's own game into $GameDir (ADR 0048 d8): the tracked files of assets/
+# staged as a project of their own, then the OpenNova Editor's export of it, as
+# its File > Export makes one: the build's three boot-table archives and loose
+# files (the editor's Build refuses a project the game could not boot) and
+# export.json. The staged project, and the cache its build fills, are removed.
+function Export-BaseGame {
+    param([string]$GameDir)
+
+    Write-Host "=== Building the base game (opennova-project export) ==="
+    $projectStage = New-StageDir ".stage-base-game-project"
+    try {
+        Copy-BundledAssets -AssetsStageDir $projectStage
+        & $PROJECT_CLI export $projectStage --out $GameDir
+        if ($LASTEXITCODE -ne 0) { throw "opennova-project export of the base game failed (exit $LASTEXITCODE)" }
+        foreach ($archive in @("language.pff", "localres.pff", "resource.pff")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $GameDir $archive))) {
+                throw "The base game's export holds no $archive"
+            }
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $projectStage -Recurse -Force
+    }
 }
 
 # A staging directory under dist/, wiped and recreated; never a data directory.
@@ -398,20 +464,20 @@ Invoke-GodotExport -PresetName "OpenNova Play Runtime" -OutputPath $PLAY_EXE
 Write-Host "=== Exporting opennova-editor.exe ==="
 Invoke-GodotExport -PresetName "OpenNova Editor" -OutputPath $EDITOR_EXE
 
-# --- the game zip: opennova.exe + its runtime DLL + the bundled assets/ ---
+# --- the game zip: opennova.exe + its runtime DLL + OpenNova's own game in assets/ ---
 $stagePath = New-StageDir ".stage-opennova-game-windows"
 try {
     $stagedExe = Join-Path $stagePath "opennova.exe"
     Copy-Item -LiteralPath $RUNTIME_EXE -Destination $stagedExe
     Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $stagePath
     Copy-ImGuiLibs -ExeDir $DIST -Destination $stagePath -Required ($ExportMode -eq "debug")
-    Copy-BundledAssets -AssetsStageDir (Join-Path $stagePath "assets")
+    Export-BaseGame -GameDir (Join-Path $stagePath "assets")
     $launchHelp = @"
 OpenNova
 
-Run opennova.exe. OpenNova's own game is coming soon; until then, press
-PLAY RETAIL and choose your Joint Operations folder to play the retail game.
-The folder is remembered; CHANGE FOLDER picks another.
+Run opennova.exe. It plays OpenNova's own small game (assets\), more of which
+is coming. To play Joint Operations itself, press PLAY RETAIL and choose your
+Joint Operations folder. The folder is remembered; CHANGE FOLDER picks another.
 
 Command line (advanced):
   opennova.exe -- --resource-dir "C:\Games\Joint Operations"
