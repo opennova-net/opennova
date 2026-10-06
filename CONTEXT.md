@@ -958,10 +958,19 @@ Files selects, read from its file while it is not open): its texels at a zoom (f
 a middle texel, which the wheel steps about the pointer and a drag pans), through its colour, one
 channel or its alpha as grey, or its colour over a checkerboard by its alpha, at a mip level, as the
 file holds it or as the game draws it for one of its uses (the use's loader's texels, a cut-out's test,
-a tile atlas's cells); each a SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
+a tile atlas's cells, a model row's alpha drawn as the game reads it: opaque where it is a specular brightness),
+at the chain the game builds of it and at an object texture detail, or a normal map lit; each a SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
 its palette entry), never a record. Its device draws the texels the portable decode made, texel for
 texel where a texel covers a pixel or more.
 _Avoid_: image viewer, preview (the Preview window, or the role)
+
+**Texture budget**:
+What a model texture costs the game (ADR 0046 S18): the device texture its row's loader makes of the file it
+opens (its sides after the game's halvings, its levels, its format, and every level's bytes, which the game keeps
+in its own memory) at each of the four **object texture detail** levels (game.cfg's `object_texdetail`, 0 the
+lowest to 3 full: one or two halvings of a diffuse or detail texture), and what the `.dds` its loader reads first
+would cost instead. Said under each use in the texture's tab and on the wire; past 16 MB it is a warning.
+_Avoid_: footprint, VRAM (the game keeps every level in its own process too), file size (what the disk holds)
 
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
