@@ -35,6 +35,10 @@ enum class ViewportKind : uint8_t {
 	// runtime's HudOverlay at a screen size, for a player whose state its options choose; the Shell's HUD
 	// device), the Preview window's beside the layout's text
 	Hud,
+	// A definition table's selected record as the game draws the thing it defines (the deep-integration
+	// plan's DI-21: an item's model in its state, its effects and its death's sounds, a person posed as it
+	// spawns, a weapon's model, an ammo's round), the Preview window's beside the table
+	Definition,
 	kCount,
 };
 
@@ -48,7 +52,8 @@ inline constexpr size_t kViewportKindCount = static_cast<size_t>(ViewportKind::k
 // are one Main and one Preview.
 enum class ViewportRole : uint8_t { Preview, Main };
 
-// A kind's token on the wire ("menu", "model", "script", "mission", "texture", "effect", "hud"; "" past the last kind), and
+// A kind's token on the wire ("menu", "model", "script", "mission", "texture", "effect", "hud", "definition"; "" past
+// the last kind), and
 // the kind a token names (false for none).
 const char *viewport_kind_token(ViewportKind kind);
 bool viewport_kind_from_token(const std::string &token, ViewportKind &out);
