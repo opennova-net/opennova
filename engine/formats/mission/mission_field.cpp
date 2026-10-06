@@ -217,7 +217,10 @@ constexpr MissionChoice kAiAttributes[] = {
 	{"EngineRunning", 1 << 17}, {"AdvancedAmmo", 1 << 18},  {"Indestructible", 1 << 21},
 	{"NavigationWaypoint", 1 << 22}, {"Reflective", 1 << 23}, {"NoShadow", 1 << 24},
 };
-constexpr MissionChoice kWaypointFlags[] = {{"DoesNotLoop", 1 << 0}, {"BlueTeam", 1 << 1}, {"RedTeam", 1 << 2}};
+// A path's flags as the game reads them (bms.h WaypointFlags): bit 1 the player's route, the first path
+// holding it the waypoint list the player is sent [orig: NetPacket_WriteWorldStateLoad0x0F @ 0x502D10,
+// the scan @ 0x502e50].
+constexpr MissionChoice kWaypointFlags[] = {{"DoesNotLoop", 1 << 0}, {"PlayerRoute", 1 << 1}, {"RedTeam", 1 << 2}};
 constexpr MissionChoice kAreaFlags[] = {{"MissionArea", bms::AreaTrigger::kFlagMissionArea},
                                         {"ConstrainZ", bms::AreaTrigger::kFlagConstrainZ}};
 // The author's three bits and the two internal ones shipped missions hold (bms.h's
@@ -259,7 +262,8 @@ static_assert(kAttribFlags[19].value == int64_t(uint32_t(bms::AttribFlags::Searc
               kAttribFlags[4].value == int64_t(uint32_t(bms::AttribFlags::ForceIndoors)));
 static_assert(kAiAttributes[14].value == int64_t(uint32_t(bms::BmsiAttributeFlags::NoShadow)) &&
               kAiAttributes[9].value == int64_t(uint32_t(bms::BmsiAttributeFlags::EngineRunning)));
-static_assert(kWaypointFlags[2].value == int64_t(uint32_t(bms::WaypointFlags::RedTeam)));
+static_assert(kWaypointFlags[1].value == int64_t(uint32_t(bms::WaypointFlags::PlayerRoute)) &&
+              kWaypointFlags[2].value == int64_t(uint32_t(bms::WaypointFlags::RedTeam)));
 static_assert(kEventFlags[2].value == int64_t(uint32_t(bms::EventFlags::PostMission)) &&
               (kEventFlags[3].value | kEventFlags[4].value) == int64_t(bms::kEventInternalFlagMask));
 static_assert(kTriggerMainTypes[6].value == int64_t(bms::TriggerMainType::Player));

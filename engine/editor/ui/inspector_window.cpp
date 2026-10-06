@@ -706,8 +706,17 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	// words' room.
 	const bool renames = present && renames_name(document, targets, field, value);
 	const float rename_width = renames ? ui_kit::button_width("Rename...") + ImGui::GetStyle().ItemSpacing.x : 0.0f;
-	const float tools = (is_reference(field, value) ? reference_tools_width(field) : 0.0f) + rename_width;
-	const bool beside = (is_reference(field, value) || renames) && !schema.multiline &&
+	// A number that forms a text key (a name index, a waypoint's name id): the key's badge and Go to beside
+	// its picker, to the string the game's lookup reaches.
+	FieldUse keyed;
+	Value key;
+	const bool keys_text = present && !mixed && workspace.view().findings.graph &&
+	                       keyed_text_reference(*workspace.view().findings.graph, field, value, keyed, key);
+	const float tools = (is_reference(field, value) ? reference_tools_width(field)
+	                     : keys_text                ? reference_tools_width(keyed)
+	                                                : 0.0f) +
+	                    rename_width;
+	const bool beside = (is_reference(field, value) || keys_text || renames) && !schema.multiline &&
 	                    ImGui::GetContentRegionAvail().x - tools >= ImGui::GetFontSize() * 6.0f;
 	// What the value names, in words (ADR 0046 S15): the picker's frame shows them, any other control
 	// has them under it.
@@ -737,6 +746,8 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
 		reference_tools(workspace, controls.picker, document, targets, field, value, false, beside);
+	else if (keys_text)
+		reference_tools(workspace, controls.picker, document, targets, keyed, key, false, beside);
 	// The words under a control that shows the value as it is: one with no choices, or a value none of its
 	// choices is (an open choice typed: a model's part past LOD 0's, S17).
 	std::vector<FieldChoice> own;

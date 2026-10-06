@@ -327,7 +327,7 @@ int main() {
 	TEST_EXPECT(edited_path.marker_indices[0] == static_cast<int>(first_marker_index));
 
 	const int waypoint_flags = static_cast<int>(opennova::bms::WaypointFlags::DoesNotLoop) |
-	                           static_cast<int>(opennova::bms::WaypointFlags::BlueTeam);
+	                           static_cast<int>(opennova::bms::WaypointFlags::PlayerRoute);
 	std::vector<int> marker_order = {static_cast<int>(first_marker_index)};
 	TEST_EXPECT(set_waypoint_path(reparsed, 1, marker_order, waypoint_flags, error));
 	TEST_EXPECT(waypoint_path(reparsed, 1, edited_path));
