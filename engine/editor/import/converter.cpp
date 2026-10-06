@@ -7,10 +7,9 @@
 #include <editor/project/project_files.h>
 #include <formats/bad/bad_build.h>
 #include <formats/bad/bad_o3a_read.h>
-#include <formats/threedi/threedi_o3d_read.h>
+#include <formats/threedi/threedi_o3d_lower.h>
 #include <runtime/anim/adm_clip_index.h>
-#include <runtime/renderer/material_descriptor.h>
-#include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/model_target.h>
 
 
 namespace opennova::editor {
@@ -35,14 +34,14 @@ bool failed(const ImportProduct &out) {
 	return false;
 }
 
-// `.o3d`: the model through the engine's reader and mint (threedi_o3d_build).
+// `.o3d`: the model through the engine's reader, its lowering to the retail target and
+// the mint (threedi_o3d_build over renderer::retail_model_target).
 bool run_o3d(const std::string &source_name, const std::vector<uint8_t> &bytes, ImportProduct &out) {
 	std::istringstream text(std::string(bytes.begin(), bytes.end()));
 	std::vector<threedi::SceneFinding> findings;
 	ImportOutput model;
 	model.name = utf8_of(path_of(source_name).stem()) + ".3di";
-	const bool built = threedi::threedi_o3d_build(text, renderer::material_descriptor_tangent_lookup,
-	                                              renderer::material_texture_dds_only, model.bytes, findings);
+	const bool built = threedi::threedi_o3d_build(text, renderer::retail_model_target(), model.bytes, findings);
 	add_findings(source_name, findings, out);
 	if (!built || failed(out)) {
 		out.outputs.clear();
@@ -52,15 +51,16 @@ bool run_o3d(const std::string &source_name, const std::vector<uint8_t> &bytes, 
 	return true;
 }
 
-// `.o3a`: the clip set through the engine's reader and set mint (bad_build_mint_set):
-// the table its `adm` record names (else the source's stem) and every clip; one clip
-// with no row is that clip alone.
+// `.o3a`: the clip set through the engine's reader and its mint for the retail target
+// (bad_build_mint_set over bad_retail_limits and the runtime's anim slots): the table its
+// `adm` record names (else the source's stem) and every clip; one clip with no row is
+// that clip alone. Every problem the target finds names its line.
 bool run_o3a(const std::string &source_name, const std::vector<uint8_t> &bytes, ImportProduct &out) {
 	std::istringstream text(std::string(bytes.begin(), bytes.end()));
 	bad::BadBuildSet set;
 	std::vector<threedi::SceneFinding> findings;
-	std::vector<int> clip_lines;
-	const bool read = bad::bad_o3a_read(text, anim::adm_slot_index, set, findings, &clip_lines);
+	bad::BadO3aLines lines;
+	const bool read = bad::bad_o3a_read(text, set, findings, &lines);
 	add_findings(source_name, findings, out);
 	if (!read || failed(out)) return false;
 	const bool lone = set.rows.empty() && set.clips.size() == 1;
@@ -68,14 +68,11 @@ bool run_o3a(const std::string &source_name, const std::vector<uint8_t> &bytes, 
 	                         : set.adm_name.empty() ? utf8_of(path_of(source_name).stem()) + ".adm"
 	                                                : set.adm_name;
 	std::vector<bad::BadMintedFile> files;
-	std::string error;
-	int failed_clip = -1;
-	if (!bad::bad_build_mint_set(set, name, files, &error, &failed_clip)) {
-		Diagnostic d = make_finding(CoreFinding::ImportScene, DiagnosticSeverity::Error,
-		                            failed_clip >= 0 ? "Line " + std::to_string(clip_lines[failed_clip]) + ": " + error : error,
-		                            source_name);
-		if (failed_clip >= 0) d.line = static_cast<size_t>(clip_lines[failed_clip]);
-		out.diagnostics.push_back(std::move(d));
+	std::vector<bad::BadBuildProblem> problems;
+	if (!bad::bad_build_mint_set(set, name, bad::bad_retail_limits(), anim::adm_slot_index, files, problems)) {
+		std::vector<threedi::SceneFinding> refused;
+		bad::bad_o3a_findings(lines, problems, refused);
+		add_findings(source_name, refused, out);
 		return false;
 	}
 	for (bad::BadMintedFile &file : files) out.outputs.push_back({file.name, std::move(file.bytes)});

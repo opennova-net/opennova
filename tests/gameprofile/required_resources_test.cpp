@@ -83,6 +83,16 @@ static int test_the_witnessed_fatal_set(void) {
     const RequiredResource *items = gameprofile_required_resource_find("items.def");
     CHECK(items != NULL && items->severity == RES_REQUIRED && items->phase == BOOT_PHASE_BOOT,
           "items.def is required (the boot goes on without it), not fatal");
+    /* SndProf.def never refuses a boot either, but without it the profile
+     * table SoundProfile_LoadAll allocated is never cleared and every item
+     * definition binds its first slot, so a mission's items read their sounds
+     * from that memory [orig: FastMem_Alloc @ 0x7697b0, no clear;
+     * SoundProfile_FindSlotByName @ 0x526e30, the miss @ 0x526e6a;
+     * ItemDef_ResolveAllResources @ 0x49e62d..0x49e687]: required. */
+    const RequiredResource *profiles = gameprofile_required_resource_find("sndprof.def");
+    CHECK(profiles != NULL && profiles->severity == RES_REQUIRED && profiles->phase == BOOT_PHASE_BOOT &&
+          strcmp(profiles->role, "sndprof_def") == 0,
+          "SndProf.def is required (a mission's items read uncleared memory without it), not fatal");
     for (int i = 0; i < 7; ++i) {
         const RequiredResource *row = gameprofile_required_resource_find(fatal_names[i]);
         CHECK(row != NULL, "fatal row present");
