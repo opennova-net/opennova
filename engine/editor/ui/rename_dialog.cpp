@@ -136,8 +136,12 @@ void RenameDialog::draw_back(Workspace &workspace) {
 		return;
 	}
 	const float em = ImGui::GetFontSize();
-	ImGui::Text("Rename %s back to %s, where the rename wrote it:", plan.old_name.c_str(), plan.new_name.c_str());
-	const bool ready = plan.refusals.empty() && plan.sites && !plan.sites->empty();
+	// A move's way back (DI-03) puts the file back in the folder it left, nothing rewritten.
+	const std::string folder = plan.folder.empty() ? std::string("the top level") : plan.folder + "/";
+	if (plan.move) ImGui::Text("Move %s back to %s (nothing that names it changes):", plan.old_name.c_str(), folder.c_str());
+	else ImGui::Text("Rename %s back to %s, where the rename wrote it:", plan.old_name.c_str(), plan.new_name.c_str());
+	// A file's way back may rewrite nothing (a move, a file nothing named); a name's has its definition at least.
+	const bool ready = plan.refusals.empty() && plan.sites && (!plan.sites->empty() || !plan.symbol);
 	ImGui::BeginChild("sites", ImVec2(em * 40.0f, em * 14.0f), ImGuiChildFlags_Borders);
 	for (const Diagnostic &refusal : plan.refusals) {
 		ui_kit::severity_marker(refusal.severity);
@@ -158,11 +162,12 @@ void RenameDialog::draw_back(Workspace &workspace) {
 	ImGui::EndChild();
 	const bool allowed = view.allows(EditorRequestKind::RenameBack);
 	ImGui::BeginDisabled(!ready || !allowed);
-	const bool back = ImGui::Button("Rename back");
+	const bool back = ImGui::Button(plan.move ? "Move back" : "Rename back");
 	ImGui::EndDisabled();
-	ui_kit::tooltip(!allowed ? "A rename rewrites the project's files: it waits for the running operation."
-	                : ready  ? "Rewrites the files listed on disk, only where the rename wrote. It cannot be undone with Undo."
-	                         : "Nothing can be renamed back as it is (the reasons are listed).");
+	ui_kit::tooltip(!allowed   ? "A rename rewrites the project's files: it waits for the running operation."
+	                : !ready   ? "Nothing can be put back as it is (the reasons are listed)."
+	                : plan.move ? "Moves the file back on disk. It cannot be undone with Undo."
+	                            : "Rewrites the files listed on disk, only where the rename wrote. It cannot be undone with Undo.");
 	if (back && ready && allowed) {
 		workspace.request(request::rename_back());
 		close();
