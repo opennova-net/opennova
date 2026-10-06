@@ -197,6 +197,10 @@ constexpr RequestField kFields[] = {
 	{ F::Report, "report", J::Boolean,
 			"A build's result panel opens over the editor as it ends (true when left out); false leaves the "
 			"person's work as it is (the build section and the operation say what it came to)." },
+	{ F::Steps, "steps", J::Integer,
+			"How many places of the navigation history a navigate_back or a navigate_forward goes (1 when left "
+			"out: the nearest; the navigation section lists them nearest first, as Back's and Forward's lists "
+			"do)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");
