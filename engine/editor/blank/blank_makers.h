@@ -63,6 +63,11 @@ bool make_blank_sound_profiles(const BlankRequest &, std::vector<uint8_t> &out, 
 // env (blank_environment.cpp): the environment writer's authoring template, named after the file
 bool make_blank_environment(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
+// fx (blank_shader.cpp): _ffp.fx, the fixed-function effect the renderer opens by name; an object
+// effect for the shader tag the request's `tag` names (blank_shader_tags)
+bool make_blank_ffp_shader(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_shader(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+
 // coo (blank_coo.cpp)
 bool make_blank_coo(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 

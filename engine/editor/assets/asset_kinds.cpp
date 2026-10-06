@@ -430,6 +430,7 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Shader)
 	        .scr(ScrForm::Shader)
 	        .folder("shaders")
+	        .new_name("newshader.fx")
 	        .about("A shader effect the renderer compiles.")
 	        .row,
 	// Read from the install's folder before any archive mounts (game.cfg, assets.cd:

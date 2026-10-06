@@ -155,8 +155,8 @@ bool texture_loader_of(int32_t loader_arg, renderer::TextureLoader &loader);
 // -> Path_ReplaceOrAppendExtension @ 0x53C780]. Below every texture_loader_arg.
 inline constexpr int32_t kTileSetTextureArg = -100;
 
-// The number of reference kinds: MissionStrings is the last.
-inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::MissionStrings) + 1;
+// The number of reference kinds: Shader is the last.
+inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::Shader) + 1;
 
 // The record a Record reference's value names, by its index in the kind's collection: a whole
 // number from 0 that the kind's none does not take (a negative one names none: an index from 0 is

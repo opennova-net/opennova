@@ -43,6 +43,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/install_view.h>
+#include <editor/blank/blank_factory.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/music_script_type.h>
@@ -1105,6 +1106,106 @@ static int test_shader_and_text() {
 	return 0;
 }
 
+// The tags a shader registers, which a model material's shader names (ReferenceKind::Shader): _ffp.fx the
+// renderer's twelve fixed-function tags and their #UV twins whatever its EffectTag says [orig:
+// HLSLEffect_InitFixedFunctionShaders @ 0x5AF790]; another effect its EffectTag and, where EffectAlt_UV
+// asks, the twin; an include the archive walk skips none [orig: HLSLEffect_LoadAllFromPFFArchive @
+// 0x5AFF6E]. The annotations are read with the comments left out. The editor's own shaders: _ffp.fx by
+// its role and an effect per tag it makes, in the loader's form, each defining what it says, sharing the
+// eight system textures the renderer binds once a frame and never the dead TexAngleMap slot.
+static std::vector<std::string> shader_tags_of(const std::vector<uint8_t> &bytes, const char *name) {
+	std::vector<std::string> out;
+	const DocumentType *type = document_type_for(AssetKind::Shader);
+	std::unique_ptr<DocumentBase> document = type->make();
+	Diagnostic error;
+	if (!type->definitions || !document->load_bytes(bytes, name, AssetKind::Shader, "jo", error)) return out;
+	std::vector<TextDefinition> definitions;
+	type->definitions(*text_of(*document), definitions);
+	for (const TextDefinition &definition : definitions)
+		if (definition.kind == ReferenceKind::Shader) out.push_back(definition.name);
+	return out;
+}
+
+static int test_shader_definitions() {
+	using Names = std::vector<std::string>;
+	const std::string source =
+			"// string EffectTag = \"COMMENTED\";\r\n/* string EffectInfo < string EffectTag = \"BLOCK\"; > */\r\n"
+			"string EffectInfo <\r\n\tstring EffectName = \"x > y\";\r\n\tstring EffectTag = \"VS_TEST\";\r\n"
+			"\tbool EffectAlt_UV = true;\r\n>;\r\n";
+	TEST_EXPECT(shader_tags_of(scr_shader(source), "shaders/test.fx") == Names({"VS_TEST", "VS_TEST#UV"}));
+	const ShaderEffectInfo info = read_shader_effect_info(source);
+	TEST_EXPECT(info.found && info.tag == "VS_TEST" && info.alt_uv &&
+	            source.substr(info.tag_offset, info.tag_length) == "VS_TEST");
+	// The definition sits on the tag as written.
+	const DocumentType *type = document_type_for(AssetKind::Shader);
+	std::unique_ptr<DocumentBase> document = type->make();
+	Diagnostic error;
+	TEST_EXPECT(document->load_bytes(scr_shader(source), "test.fx", AssetKind::Shader, "jo", error));
+	std::vector<TextDefinition> definitions;
+	type->definitions(*text_of(*document), definitions);
+	TEST_EXPECT(definitions.size() == 2 && definitions[0].span.line == 5 && definitions[0].span.length == 7);
+	// Without the twin; an include; no EffectInfo at all.
+	TEST_EXPECT(shader_tags_of(scr_shader("string EffectInfo < string EffectTag = \"VS_ONE\"; bool EffectAlt_UV = false; >;"),
+	                           "one.fx") == Names({"VS_ONE"}));
+	TEST_EXPECT(shader_tags_of(scr_shader(source), "_vsinc.fx").empty());
+	TEST_EXPECT(shader_tags_of(scr_shader("float4 main() : COLOR { return 0; }"), "none.fx").empty() &&
+	            !read_shader_effect_info("float4 main() : COLOR { return 0; }").found);
+	// _ffp.fx: the fixed-function tags, whatever its own tag says.
+	const Names ff = shader_tags_of(scr_shader(source), "shaders/_FFP.FX");
+	const auto has = [](const Names &names, const char *name) {
+		return std::find(names.begin(), names.end(), name) != names.end();
+	};
+	TEST_EXPECT(fixed_function_shader_tags().size() == 12 && ff.size() == 24 && has(ff, "FF_ST_OP") &&
+	            has(ff, "FF_MT_AD_LUM#UV") && has(ff, "FF_ST_AB_LUM") && !has(ff, "VS_TEST"));
+	// The editor's own.
+	std::vector<uint8_t> bytes;
+	BlankRequest ffp;
+	ffp.logical_name = "_ffp.fx";
+	ffp.role = "ffp_shader";
+	TEST_EXPECT(make_blank(ffp, AssetKind::Shader, bytes, error) && bytes.size() > 4 &&
+	            std::string(bytes.begin(), bytes.begin() + 4) == std::string("SCR\x01", 4));
+	TEST_EXPECT(shader_tags_of(bytes, "_ffp.fx").size() == 24);
+	const char *shared[] = {"TexCubeNormalize", "TexCubeEnvironment", "TexCubeRotSpecular", "TexPhongMap",
+	                        "TexClip1D",        "TexSpot2D",          "TexDepthGradWrite",  "TexDepthGradTest"};
+	const auto crlf = [](const std::string &text) {
+		std::string out;
+		for (char c : text) out += c == '\n' ? std::string("\r\n") : std::string(1, c);
+		return out;
+	};
+	const auto check_text = [&](const std::vector<uint8_t> &made, const std::string &tag, const char *name) {
+		std::unique_ptr<DocumentBase> shader = type->make();
+		Diagnostic load_error;
+		TEST_EXPECT(shader->load_bytes(made, name, AssetKind::Shader, "jo", load_error) &&
+		            type->validate_file(*shader).empty());
+		const std::string text = text_of(*shader) ? text_of(*shader)->text() : std::string();
+		TEST_EXPECT(!text.empty() && text == crlf(blank_shader_text(tag, name)));
+		for (const char *texture : shared)
+			TEST_EXPECT(text.find(std::string("shared texture ") + texture + ";") != std::string::npos);
+		TEST_EXPECT(text.find("TexAngleMap") == std::string::npos);
+		return 0;
+	};
+	TEST_EXPECT(check_text(bytes, std::string(), "_ffp.fx") == 0);
+	TEST_EXPECT(blank_shader_tags() == Names({"VS_PHONGT", "VS_DOT3DIFF2", "VS_SKBUMPPHONGT", "VS_SKBUMPDIFFT"}));
+	for (const std::string &tag : blank_shader_tags()) {
+		BlankRequest request;
+		request.logical_name = "shaders/new.fx";
+		request.values = {{"tag", tag}};
+		TEST_EXPECT(make_blank(request, AssetKind::Shader, bytes, error));
+		const bool skinned = tag.find("_SK") != std::string::npos;
+		TEST_EXPECT(shader_tags_of(bytes, "new.fx") == (skinned ? Names({tag}) : Names({tag, tag + "#UV"})));
+		TEST_EXPECT(check_text(bytes, tag, "new.fx") == 0);
+	}
+	// Refused: a tag it makes no effect for, a name the archive walk skips.
+	BlankRequest refused;
+	refused.logical_name = "glass.fx";
+	refused.values = {{"tag", "VS_GLASS"}};
+	TEST_EXPECT(!make_blank(refused, AssetKind::Shader, bytes, error) && error.code() == "blank.shader");
+	refused.logical_name = "_glass.fx";
+	refused.values = {{"tag", "VS_PHONGT"}};
+	TEST_EXPECT(!make_blank(refused, AssetKind::Shader, bytes, error) && error.code() == "blank.shader");
+	return 0;
+}
+
 // gt.ssc, which the game reads by its name decoded under its key chain: shown decoded, written back
 // as stored byte for byte (its line end kept), an edit written encoded; a file that does not decode
 // (the game skips it) shown as stored and written in the form; any other configuration its own text,
@@ -1194,7 +1295,7 @@ static int test_retail() {
 	TEST_EXPECT(view.open(install_spec(install, project), view_error));
 	const opennova::Vfs &mount = view.vfs();
 	size_t scripts = 0, compiled = 0, findings = 0, references = 0, music = 0, credits = 0, shaders = 0;
-	size_t witnessed = 0, alone = 0;
+	size_t witnessed = 0, alone = 0, shader_tags = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;
 		const AssetKind kind = classify_asset(name, nullptr);
@@ -1272,20 +1373,27 @@ static int test_retail() {
 			++credits;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
 			break;
-		case AssetKind::Shader:
+		case AssetKind::Shader: {
 			++shaders;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
+			std::vector<TextDefinition> tags;
+			type->definitions(*text_of(*document), tags);
+			shader_tags += tags.size();
 			break;
+		}
 		default: break;
 		}
 	}
 	std::printf("retail: %zu scripts (%zu with the original compiler's listing matched, %zu running no other "
 	            "file; %zu compiler reports, %zu findings, %zu references), %zu music scripts, %zu credits files, "
-	            "%zu shaders\n",
-	            scripts, witnessed, alone, compiled, findings, references, music, credits, shaders);
+	            "%zu shaders (%zu shader tags)\n",
+	            scripts, witnessed, alone, compiled, findings, references, music, credits, shaders, shader_tags);
 	// The install's counts, pinned (Joint Operations: Combined Arms).
 	TEST_EXPECT(scripts == 23 && witnessed == 23 && alone == 23 && compiled == 47 && findings == 11 &&
 	            references == 36 && music == 2 && credits == 1 && shaders == 44);
+	// The tags the shaders register, as the renderer's registry holds them: _ffp.fx's 24 and the shipped
+	// effects' (render-material-re.md, the 46-tag registry).
+	TEST_EXPECT(shader_tags == 46);
 	return 0;
 }
 
@@ -1307,6 +1415,7 @@ int main(int argc, char **argv) {
 	failures += test_credits_unread();
 	failures += test_music_script();
 	failures += test_shader_and_text();
+	failures += test_shader_definitions();
 	failures += test_gate_tag_config();
 	failures += test_import_shader();
 	failures += test_retail();

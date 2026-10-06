@@ -6,6 +6,7 @@
 #include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/animation_slots.h>
+#include <editor/documents/text_types.h>
 #include <editor/documents/texture_load_rules.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
@@ -261,6 +262,21 @@ std::string mission_strings_missing(const AssetGraph &graph, const GraphEdge &) 
 	               ? ", which the project does not have: the game reads medmssn.bin in its place."
 	               : ", which the project does not have, nor medmssn.bin to read in its place: the mission's title, "
 	                 "briefing, location names and objectives show empty.";
+}
+
+// A material whose shader tag no registered effect has draws with the registry's first entry [orig:
+// Material_ConvertDefinition @ 0x5B0664..0x5B0672 and Material_ResolveEffectSubobjectsAndShader @
+// 0x5B18C1..0x5B18CD: HLSLEffect_FindByName's -1 clamped to 0]. The renderer registers _ffp.fx's tags
+// first, each opened by the file's name [orig: HLSLEffect_InitAndLoadAll @ 0x5B00F2]; with no effect at
+// all that entry holds no pass, and the draw draws nothing [orig: CRenderBatchQueue_FlushBatches @
+// 0x5DA220..0x5DA22B].
+std::string shader_missing(const AssetGraph &graph, const GraphEdge &) {
+	return graph.has_file(kFixedFunctionShaderFile)
+	               ? ", which no shader of the project registers: the game draws the material with the first shader it "
+	                 "registered instead."
+	               : ", which no shader of the project registers, nor does the project have _ffp.fx, the renderer's "
+	                 "own: the game draws the material with the first shader it registered, and with none registered "
+	                 "draws nothing.";
 }
 
 // --- the values a Record reference names none by (ReferenceKindRow::none) ----------------------
@@ -554,6 +570,13 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::MissionStrings, "mission_strings", "the mission's string table", "mission string table")
 	        .loads(AssetKind::Strings, kTable)
 	        .tolerated(mission_strings_missing)
+	        .message_reads_files()
+	        .row,
+	// A model material's shader, by the tag an effect registers under, compared without case [orig:
+	// HLSLEffect_FindByName @ 0x5ADE70, stricmp]; one no effect registers draws as another (shader_missing).
+	Row(ReferenceKind::Shader, "shader", "the shader", "shader")
+	        .symbol(NameCase::NoCase, AssetKind::Shader)
+	        .tolerated(shader_missing)
 	        .message_reads_files()
 	        .row,
 };

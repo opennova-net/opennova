@@ -77,8 +77,10 @@ constexpr DocumentType kTypes[] = {
 			validate_music_script_file, text_fields, music_script_finding_codes },
 	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,
 			text_fields, credits_finding_codes },
+	// The shader's text defines the tags it registers (its EffectTag; _ffp.fx the fixed-function tags).
 	{ DocumentTypeId::Shader, "shader", make_shader_document, validate_shader_file, text_fields,
-			shader_finding_codes },
+			shader_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			shader_definitions },
 	{ DocumentTypeId::Text, "text", make_text_document, validate_text_file, text_fields,
 			text_finding_codes },
 	// The texture (S18): its texels as the game reads them, read only for now; no findings yet (what

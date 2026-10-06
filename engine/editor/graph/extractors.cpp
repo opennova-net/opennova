@@ -5,7 +5,8 @@
 // defines (a weapon's name, a string's key, a menu's screen or window by the NAME its
 // ACTIONs find it by), and the record sets of the collections a Record reference names (a
 // model's CTRL registers and MTRX rows, by their index); a text type reads the names its text
-// makes, each at its span (a script's operands, S13 D9); the native kinds (an environment, the
+// makes, each at its span (a script's operands, S13 D9), and the names it defines (a shader's tags); the
+// native kinds (an environment, the
 // avatar table, a particle file, a face animation) read their parsed structs. The names a native text (a
 // terrain, an environment, a particle file, the HUD layout, a face animation) writes are rewritable: a
 // rename finds each in the text by reading it again (graph/native_text_sites.h).
@@ -467,7 +468,18 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 
 void extract_from_text(const TextDocument &document, Extracted &out) {
 	const DocumentType *type = document_type_for(document.kind());
-	if (!type || !type->references) return;
+	if (!type) return;
+	// The names the text defines (a shader's tags), each a symbol defined at its span.
+	if (type->definitions) {
+		std::vector<TextDefinition> definitions;
+		type->definitions(document, definitions);
+		for (const TextDefinition &definition : definitions) {
+			GraphSymbol symbol = symbol_of(definition.kind, cp1252_to_utf8(definition.name), document.path());
+			symbol.locator = TextDocument::locator(definition.span.line, definition.span.column);
+			out.symbols.push_back(std::move(symbol));
+		}
+	}
+	if (!type->references) return;
 	std::vector<TextReference> references;
 	type->references(document, references);
 	for (TextReference &reference : references) {
@@ -552,7 +564,7 @@ bool graph_reads_kind(AssetKind kind) {
 	if (type) {
 		const DocumentContent content = document_content(*type);
 		if (content == DocumentContent::Records) return true;
-		if (content == DocumentContent::Text && type->references) return true;
+		if (content == DocumentContent::Text && (type->references || type->definitions)) return true;
 	}
 	return native_extractor(kind) != nullptr;
 }
