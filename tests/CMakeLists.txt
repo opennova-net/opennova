@@ -4325,6 +4325,14 @@ target_link_libraries(editor_play_session_test PRIVATE opennova_editor)
 target_include_directories(editor_play_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_play_session COMMAND editor_play_session_test)
 
+# Play's log as Problems rows (ADR 0046 DI-27): OpenNova's misses on the files and records naming
+# them, with their Go to and fixes; the game install's file and graphics logs read after exit; each
+# mode's rows kept until the next Play of that mode.
+add_executable(editor_play_log_test editor/play_log_test.cpp)
+target_link_libraries(editor_play_log_test PRIVATE opennova_editor)
+target_include_directories(editor_play_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_play_log COMMAND editor_play_log_test)
+
 # The neutral editing core at any depth (S9g): a fake document type's walk, placements,
 # locators, structural edits and refusals, batches, gestures, the clipboard seam and the
 # selection model.
