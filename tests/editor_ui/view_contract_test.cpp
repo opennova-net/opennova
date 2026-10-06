@@ -52,6 +52,7 @@
 #include "../editor/pool_document.h"
 #include "editor_ui_test_support.h"
 
+#include <editor/ui/catalog_inspector_view.h>
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -119,8 +120,20 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Credits, "nlist.kda", file("cbin/synth_nlist.kda")},
 	        {AssetKind::Shader, "glass.fx", text_bytes("// glass\r\nfloat4 main() : COLOR { return 0; }\r\n")},
 	        {AssetKind::Config, "game.cfg", text_bytes("\r\n[Game]\r\nname = Views\r\n")},
+	        // A HUD layout (DI-20): its text in the script view, its HUD the Preview window's.
+	        {AssetKind::HudPosDefs, "hudpos.def", text_bytes("// soldier panel\r\nHUDHEALTH 25,741,177,751\r\n")},
 	        // A texture (S18): a TGA our writer mints, its picture the tab's main view beside its facts.
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
+	        // The sound lane: the minted bank, its sets and waves a tree with a Play heading the Inspector, and a
+	        // SndProf.def, its profile's slots under it.
+	        {AssetKind::SoundBank, "menu.lwf", file("lwf/menu.lwf")},
+	        {AssetKind::SoundProfileDefs, "SndProf.def",
+	         text_bytes("begin \"default\"\r\n\tSSLFootGND FSP_DIRT_L 0 0 0\r\nend\r\n")},
+	        // A particle file (DI-14): its text in the script view, its effect the Preview window's.
+	        {AssetKind::Particles, "minimal_effect.ptl", file("particle/synth_minimal_effect.ptl")},
+	        // The environment (DI-19a): its row and its ten keyframes as a tree, the missions that run on it
+	        // heading the Inspector.
+	        {AssetKind::Environment, "synth_full.env", file("env/synth_full.env")},
 	};
 }
 
@@ -285,9 +298,9 @@ void test_every_view() {
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	CHECK(main_rows == 7 && scripts == 5,
-	      "every text type's row the Main role's, its view the script view, and the mission's and the texture's rows "
-	      "the Main role's too");
+	CHECK(main_rows == 9 && scripts == 7,
+	      "every text type's row the Main role's (a particle file's and the HUD layout's among them), its view the "
+	      "script view, and the mission's and the texture's rows the Main role's too");
 	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
 	            frames, scripts);
 }
@@ -914,6 +927,74 @@ void test_long_text() {
 	CHECK(text_view->lines_drawn() > 0 && text_view->lines_drawn() < 100, "the lines in sight drawn alone");
 }
 
+// A weapon's Show on the HUD (DI-20, ui/catalog_inspector_view, heading the Inspector over a catalog's
+// record): over a weapon of weapon.def it goes to the project's hudpos.def (an OpenDocument, as Go to
+// raises it) and holds the weapon there (a SetViewport of the HUD viewport's weapon); over a project
+// with no hudpos.def it cannot; over another catalog's record it draws nothing.
+void test_weapon_shows_on_the_hud() {
+	const auto loaded = std::make_shared<DefCatalogDocument>();
+	Diagnostic error;
+	const std::string weapons = "weapon \"WPN_HUD\"\r\nclipsize 30\r\nend\r\n";
+	CHECK(loaded->load_bytes(std::vector<uint8_t>(weapons.begin(), weapons.end()), "defs/weapon.def",
+	                         AssetKind::WeaponDefs, "jo", error) &&
+	              !loaded->rows().empty(),
+	      "the weapon table loads");
+	if (loaded->rows().empty()) return;
+	const std::shared_ptr<const DocumentBase> document = loaded;
+	NullBackend backend;
+	TestWorkspace workspace;
+	seed(workspace.seeded, document);
+	const NodeAddress weapon{loaded->rows()[0]->id, loaded->rows()[0]->kind, 0};
+	const auto draw = [&](const NodeAddress &record) {
+		InspectorTaken taken;
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(400.0f, 300.0f));
+		ImGui::Begin("Inspector part", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+		const bool drew = draw_catalog_inspector(workspace, *loaded, record, taken);
+		ImGui::End();
+		ImGui::Render();
+		return drew;
+	};
+	// No hudpos.def in the project: the tool is there, and does nothing.
+	CHECK(draw(weapon), "a weapon's part draws");
+	const ImGuiID show = item_id(Ui::window_id("Inspector part"), {"Show on the HUD"});
+	ImGui::ActivateItemByID(show);
+	draw(weapon);
+	draw(weapon);
+	CHECK(workspace.requests.empty(), "with no hudpos.def it cannot show the weapon");
+	// The project's HUD layout: the weapon held in its HUD's preview.
+	editor_test::own(workspace.seeded.project.scan).entries.push_back(
+	        file_entry("hudpos.def", "defs/hudpos.def", AssetKind::HudPosDefs));
+	editor_test::own(workspace.seeded.project.scan).index();
+	draw(weapon);
+	ImGui::ActivateItemByID(show);
+	draw(weapon);
+	draw(weapon);
+	CHECK(workspace.requests.size() == 2 && workspace.requests[0].kind == EditorRequestKind::OpenDocument &&
+	              workspace.requests[0].path == "defs/hudpos.def" &&
+	              workspace.requests[1].kind == EditorRequestKind::SetViewport &&
+	              workspace.requests[1].path == "defs/hudpos.def" &&
+	              workspace.requests[1].viewport.find("\"hud\"") != std::string::npos &&
+	              workspace.requests[1].viewport.find("\"WPN_HUD\"") != std::string::npos,
+	      "Show on the HUD goes to hudpos.def and holds the weapon in its HUD");
+	// Another catalog's record: nothing drawn.
+	const auto items = std::make_shared<DefCatalogDocument>();
+	const std::string item = "begin \"Crate\"\r\nid 100001\r\ntype building\r\nend\r\n";
+	CHECK(items->load_bytes(std::vector<uint8_t>(item.begin(), item.end()), "defs/items.def", AssetKind::ItemDefs, "jo",
+	                        error) &&
+	              !items->rows().empty(),
+	      "the item table loads");
+	if (items->rows().empty()) return;
+	InspectorTaken taken;
+	ImGui::NewFrame();
+	ImGui::Begin("Inspector part", nullptr, ImGuiWindowFlags_NoSavedSettings);
+	CHECK(!draw_catalog_inspector(workspace, *items, {items->rows()[0]->id, items->rows()[0]->kind, 0}, taken),
+	      "an item draws no part");
+	ImGui::End();
+	ImGui::Render();
+}
+
 } // namespace
 
 } // namespace editor_ui_test
@@ -927,6 +1008,7 @@ int main() {
 	editor_ui_test::test_outline_kinds_and_clicks();
 	editor_ui_test::test_main_viewport_view();
 	editor_ui_test::test_main_viewport_held();
+	editor_ui_test::test_weapon_shows_on_the_hud();
 	if (editor_ui_test::g_failures) {
 		std::printf("%d check(s) failed\n", editor_ui_test::g_failures);
 		return 1;

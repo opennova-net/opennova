@@ -947,6 +947,39 @@ struct InfantryState {
     int16_t magazine = 0;             // entity+0x35C word (reload at <=0, refill = clipsize)
 };
 
+// The primary (body) channel's pose as a renderer draws it: the playing clip's state, its
+// playhead and served ring entry, whether the armed end-notify parks it, and while it blends
+// the outgoing clip with the target's weight. The present rows publish it, and the editor's
+// mission view draws a placed person's spawn pose from it.
+// [orig: AnimChannel_BlendTwoChannels @0x410740 composes the two channels at the weight;
+//  AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1 the park]
+struct InfantryBodyPose {
+    int state = -1;
+    int32_t phase = 0;
+    int32_t variant = 0;
+    bool parked = false;
+    bool blending = false; // the source fields and the weight hold only while it blends
+    int source_state = -1;
+    int32_t source_phase = 0;
+    int32_t source_variant = 0;
+    float weight = 1.0f;
+};
+inline InfantryBodyPose infantry_body_pose(const InfantryState &inf) {
+    InfantryBodyPose pose;
+    pose.state = inf.body_clip_state();
+    pose.phase = inf.clip_phase;
+    pose.variant = inf.anim_variant;
+    pose.parked = inf.body_phase_parked();
+    pose.blending = inf.body_blend_active();
+    if (pose.blending) {
+        pose.source_state = inf.anim_prev;
+        pose.source_phase = inf.anim_prev_clip_phase;
+        pose.source_variant = inf.anim_prev_variant;
+        pose.weight = inf.anim_blend_weight;
+    }
+    return pose;
+}
+
 // Pure retail body-tick kernels, exposed so deterministic tests can pin the
 // wrap/arithmetic-shift behavior independently of locomotion.
 // [orig: Entity_UpdateInfantryPlayerBody / Entity_UpdateInfantryAI]

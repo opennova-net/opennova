@@ -7,10 +7,7 @@
 
 #include <runtime/world/infantry.h>
 #include <runtime/anim/clip_timeline.h>
-
-namespace opennova {
-namespace assets { class AssetStore; }
-}
+#include <runtime/anim/rig_files.h>
 
 namespace opennova::anim {
 
@@ -38,14 +35,15 @@ namespace opennova::anim {
 // (advance_armed). [orig: AnimChannel_AdvancePlayback @0x40b140].
 class AdmRootMotion : public opennova::world::IRootMotionSource {
 public:
-	// Register a model's .adm (e.g. "E_STAND.adm", "US01.adm") through `assets`
+	// Register a model's .adm (e.g. "E_STAND.adm", "US01.adm") through `files`
+	// (the mounted asset store, or the editor's project files: any RigFiles)
 	// and return its adm_id (an index into the registry). Re-registering the
 	// same name returns the cached id, so a given .adm is parsed once however
 	// many soldiers use it. Returns -1 if the .adm has no usable clip (its
 	// soldiers then hold their state and stand — motion comes from clips, as
 	// in the original). The first successful registration is id 0; choosing
 	// a default fallback is the caller's policy.
-	int register_adm(const opennova::assets::AssetStore *assets, const std::string &adm_name);
+	int register_adm(const RigFiles *files, const std::string &adm_name);
 	void clear();
 
 	bool has_clip(int adm_id, int state_id) const override;
@@ -118,6 +116,10 @@ public:
 	// States with a usable track in a given set (first registered set unless specified).
 	int clip_count(int adm_id = 0) const;
 	const std::string &adm_name(int adm_id = 0) const;
+	// The clip file a state's ring entry plays: the .bad its token loaded (failsafe.bad in
+	// its place where the token's own did not), resolved as the playback resolves it, so an
+	// unauthored state names RESET's; "" for none.
+	std::string clip_file(int adm_id, int state_id, int variant = 0) const;
 
 private:
 	// Fence-post root records (frame_count + 1 entries per channel; see bad.h BadEvent).
@@ -131,6 +133,7 @@ private:
 		int32_t frame_count = 0;
 		anim::ClipTimeline clock;
 		bool loop = false;
+		std::string file; // the .bad the token loaded
 	};
 
 	// One model's .adm reduced to its per-state root tracks. Each state owns the
@@ -141,8 +144,7 @@ private:
 	};
 
 	// Parse adm_name into `out`; returns the number of states with a usable track.
-	static int parse_adm(const opennova::assets::AssetStore *assets,
-	                     const std::string &adm_name, ClipSet &out);
+	static int parse_adm(const RigFiles *files, const std::string &adm_name, ClipSet &out);
 	// Variant wraps modulo the ring size, so a stale cursor from a shorter row on
 	// another rig still resolves; missing states bind RESET's ring.
 	const Track *resolve_track(int adm_id, int state_id, int variant = 0) const;

@@ -90,6 +90,7 @@ enum class EditorRequestKind {
 	StopSound,
 	ApplyConfirmation,
 	Quit,
+	MoveAsset,
 	// The shell's: the portable session cannot serve these.
 	PickDirectory,
 	PickFile,
@@ -346,6 +347,9 @@ struct EditorRequest {
 	// Play's game window starts behind every other, never taking the foreground (the MCP gaps lane: a client
 	// driving the editor while a person works at the machine).
 	bool behind = false;
+	// Play's run directory emptied of what the runs before wrote there (the game's game.cfg, its saves) before
+	// the game starts: a first run (run/run_directory.h).
+	bool fresh = false;
 	// The import plan a planned import means (the import_preview query's plan): another one shown since is
 	// refused, not retargeted.
 	uint64_t plan = 0;
@@ -355,6 +359,8 @@ struct EditorRequest {
 	// How many places of the navigation history a Back or a Forward goes (1: the nearest; Back's and
 	// Forward's lists pick one further).
 	uint32_t steps = 1;
+	// A folder of the project, from its top level ("" the top level): where a move puts a file (DI-03).
+	std::string folder;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -375,8 +381,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
-			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.plan == b.plan && a.report == b.report &&
-			a.steps == b.steps;
+			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.fresh == b.fresh && a.plan == b.plan &&
+			a.report == b.report && a.steps == b.steps && a.folder == b.folder;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

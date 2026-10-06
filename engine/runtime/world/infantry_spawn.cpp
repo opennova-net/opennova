@@ -45,7 +45,96 @@ void release_corpse_effect(World &world, Entity &entity) {
         release_death_effect_bank(entity, 1, world.out.destruction);
 }
 
+// Registration has already started both channels on the ADM reset clip; the
+// init's two requests (the secondary 43, the primary `state`) re-init them on
+// the first update with the normal blend, the secondary serving its ring entry
+// before the primary's.
+// [orig: AnimMap_RegisterEntity @0x40BB60 -> AnimMap_UpdateEntity @0x40B5F0;
+//  the requests Entity_InitOrganicAI @0x4BFF8F..0x4BFF9A;
+//  AnimMap_UpdateDualChannels @0x40B908 before @0x40B94E]
+void begin_spawn_channels(InfantryState &inf, int state, const IRootMotionSource *source,
+                          AnimVariantRings &rings) {
+    inf.reset_weapon_animation(0);
+    inf.begin_weapon_transition(anim_state::kIdle, rings.serve(source, inf.adm_id, anim_state::kIdle));
+    inf.reset_body_animation(0);
+    inf.begin_body_transition(state, -1, rings.serve(source, inf.adm_id, state));
+}
+
+// The warmup's dual updates and the height their vertical root motion adds to
+// an unparented body: each update's vertical delta, then the last frame's
+// capsule bottom and one more update's delta; a parented body only animates.
+// `frame` holds the last update's root output (the ground solve's capsule).
+// [orig: Entity_WarmUpOrganicAnimation @0x4B8B3F..0x4B8BA3 the loop and its
+//  per-update `add [esi+0Ch]` @0x4B8B7E, the final bottom @0x4B8BB4, update
+//  @0x4B8BC1 and delta @0x4B8BD2]
+int32_t warm_up_channels(InfantryState &inf, uint32_t net_id, bool parented, IRootMotionSource &source,
+                         AnimVariantRings &rings, RootMotionFrame &frame) {
+    int32_t rise = 0;
+    const uint32_t steps = organic_warmup_updates(net_id);
+    for (uint32_t i = 0; i < steps; ++i) {
+        infantry_dual_update(inf, &source, rings, frame);
+        if (!parented) rise = io::bam_add(rise, frame.dz);
+    }
+    if (parented) return 0;
+    rise = io::bam_add(rise, frame.capsule_bottom);
+    infantry_dual_update(inf, &source, rings, frame);
+    return io::bam_add(rise, frame.dz);
+}
+
 } // namespace
+
+int organic_spawn_state(const OrganicSpawnFacts &facts, const IRootMotionSource *source, int adm_id) {
+    const auto available = [&](int state) {
+        return source != nullptr && source->has_clip(adm_id, state);
+    };
+    // [orig: @0x4BFF8F..0x4BFFAB the idle request, a route's walk]
+    int state = facts.route ? anim_state::kWalkForward : anim_state::kIdle;
+    // [orig: @0x4BFFB5..0x4BFFD2 sit, @0x4BFFDC..0x4BFFEF guard]
+    if ((facts.flags & 0x200u) != 0 && available(anim_state::kSit)) state = anim_state::kSit;
+    if ((facts.flags & 0x40u) != 0 && available(anim_state::kGuard)) state = anim_state::kGuard;
+    // [orig: @0x4BFFF9..0x4C0015 the reserved routes]
+    if (facts.route_channel == 126) state = anim_state::kIdle2;
+    if (facts.route_channel == 127) state = anim_state::kIdle;
+    // [orig: @0x4C001B..0x4C0085 the rotor's wash]
+    if (facts.rotor_wash) {
+        if (state == anim_state::kWalkForward && available(anim_state::kWashWalk)) state = anim_state::kWashWalk;
+        if ((state == anim_state::kJogForward || state == anim_state::kRunForward) &&
+                available(anim_state::kWashRun))
+            state = anim_state::kWashRun;
+        if ((state == anim_state::kIdle || state == anim_state::kIdle2) && available(anim_state::kWashIdle))
+            state = anim_state::kWashIdle;
+    }
+    // [orig: @0x4C008F..0x4C01BD a parent: emplaced 67, or its phrase_set's 68..75]
+    if (facts.parented) {
+        state = anim_state::kEmplaced;
+        if (facts.parent_phrase_set >= 1 && facts.parent_phrase_set <= 8 &&
+                available(anim_state::kEmplaced + facts.parent_phrase_set))
+            state = anim_state::kEmplaced + facts.parent_phrase_set;
+    }
+    return state;
+}
+
+uint32_t organic_warmup_updates(uint32_t net_id) {
+    // [orig: Entity_WarmUpOrganicAnimation @0x4B8B3F..0x4B8B56]
+    return 8 * ((net_id & 12u) + 8 * ((net_id & 2u) + 4 * (net_id & 1u))) + 10;
+}
+
+OrganicSpawnBody organic_spawn_pose(const OrganicSpawnFacts &facts, uint32_t net_id, IRootMotionSource *source,
+                                    AnimVariantRings &rings, int adm_id) {
+    InfantryState inf;
+    inf.active = true;
+    inf.adm_id = adm_id;
+    begin_spawn_channels(inf, organic_spawn_state(facts, source, adm_id), source, rings);
+    OrganicSpawnBody out;
+    if (source != nullptr && adm_id >= 0) {
+        RootMotionFrame frame{};
+        out.rise = warm_up_channels(inf, net_id, facts.parented, *source, rings, frame);
+        out.capsule_bottom = frame.capsule_bottom;
+        out.capsule_top = frame.capsule_top;
+    }
+    out.pose = infantry_body_pose(inf);
+    return out;
+}
 
 // Initial org1 callback, after definition/ADM/collision resources are bound.
 // Respawn uses the separate 12-step callback below. [orig: @0x4BFCC0]
@@ -77,59 +166,27 @@ void initialize_organic_ai(World &world, Entity &entity) {
     inf.goal_z = body->pos[2]; // [orig: Entity_InitOrganicAI @0x4BFE07]
     inf.magazine = static_cast<int16_t>(body->profile.clip_size);
 
-    const auto available = [&](int state) {
-        return ai.root_motion != nullptr && ai.root_motion->has_clip(inf.adm_id, state);
-    };
-    int state = body->slot.f[35] != 0 ? 1 : 43;
-    if ((flags & 0x200u) != 0 && available(76)) state = 76;
-    if ((flags & 0x40u) != 0 && available(140)) state = 140;
-    if (body->slot.f[37] == 126) state = 44;
-    if (body->slot.f[37] == 127) state = 43;
-    if (world.rotor_wash.nearby_zone(body->pos, 983040) != 0) {
-        if (state == 1 && available(28)) state = 28;
-        if ((state == 148 || state == 149) && available(29)) state = 29;
-        if ((state == 43 || state == 44) && available(27)) state = 27;
-    }
+    OrganicSpawnFacts facts;
+    facts.route = body->slot.f[35] != 0;
+    facts.route_channel = body->slot.f[37];
+    facts.flags = flags;
+    facts.rotor_wash = world.rotor_wash.nearby_zone(body->pos, 983040) != 0;
     if (const Entity *parent = world.registry.get(entity.mount_target)) {
         entity.ground_target = parent->ground_target;
-        state = 67;
-        if (parent->has_item_def && parent->emplaced_config >= 1 &&
-                parent->emplaced_config <= 8 && available(67 + parent->emplaced_config))
-            state = 67 + parent->emplaced_config;
+        facts.parented = true;
+        facts.parent_phrase_set = parent->has_item_def ? parent->emplaced_config : 0;
     }
-    // Registration has already started both channels on the ADM reset clip.
-    // The first update transitions from that clip with the normal blend, the
-    // secondary re-init serving its ring entry before the primary's.
-    // [orig: AnimMap_RegisterEntity @0x40BB60 -> AnimMap_UpdateEntity @0x40B5F0;
-    //  AnimMap_UpdateDualChannels @0x40B908 before @0x40B94E]
-    inf.reset_weapon_animation(0);
-    inf.begin_weapon_transition(43, ai.anim_rings.serve(ai.root_motion, inf.adm_id, 43));
-    inf.reset_body_animation(0);
-    inf.begin_body_transition(state, -1, ai.anim_rings.serve(ai.root_motion, inf.adm_id, state));
+    begin_spawn_channels(inf, organic_spawn_state(facts, ai.root_motion, inf.adm_id), ai.root_motion,
+                         ai.anim_rings);
 
     // Entity_WarmUpOrganicAnimation @0x4B8B20: secondary then primary,
     // net-ID permutation, vertical root motion only, one final ground solve.
     if (ai.root_motion != nullptr && inf.adm_id >= 0) {
         RootMotionFrame frame{};
-        const auto advance = [&] {
-            ai.infantry_weapon_channel_advance(*body);
-            if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
-            if (advance_primary_channel(inf, *ai.root_motion, ai.anim_rings, frame)) {
-                if (inf.prev_capsule_bottom != 0)
-                    frame.dz = io::bam_sub(frame.capsule_bottom, inf.prev_capsule_bottom);
-                inf.prev_capsule_bottom = frame.capsule_bottom;
-            }
-        };
-        const uint32_t id = uint32_t(body->net_id);
-        const uint32_t steps = 8 * ((id & 12u) + 8 * ((id & 2u) + 4 * (id & 1u))) + 10;
-        for (uint32_t i = 0; i < steps; ++i) {
-            advance();
-            if (!entity.mount_target.valid()) body->pos[2] = io::bam_add(body->pos[2], frame.dz);
-        }
-        if (!entity.mount_target.valid()) {
-            body->pos[2] = io::bam_add(body->pos[2], frame.capsule_bottom);
-            advance();
-            body->pos[2] = io::bam_add(body->pos[2], frame.dz);
+        const bool parented = entity.mount_target.valid();
+        body->pos[2] = io::bam_add(body->pos[2],
+                warm_up_channels(inf, uint32_t(body->net_id), parented, *ai.root_motion, ai.anim_rings, frame));
+        if (!parented) {
             body->collide_state.skip_counter = 0;
             if (ai.collision != nullptr) {
                 const int32_t clearance = ai.collision->resolve_entity(
@@ -230,7 +287,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
                     state, -1, state != inf.body_clip_state() ? serve(state) : inf.anim_variant);
             RootMotionFrame frame{};
             for (int i = 0; i < 12; ++i) {
-                ai.infantry_weapon_channel_advance(*body);
+                advance_weapon_channel(inf, ai.root_motion, ai.anim_rings);
                 if (ai.root_motion != nullptr)
                     advance_primary_channel(inf, *ai.root_motion, ai.anim_rings, frame);
             }

@@ -429,6 +429,28 @@ bool hud_stance_group_visible(const HudFrameState &state) {
         state.declutter_visible[kDeclutterWpnGrp];
 }
 
+HudDrawCursor HudFrameCompiler::draw_cursor_() const {
+	HudDrawCursor at;
+	at.quads = draw_list_.quads.size();
+	at.tris = draw_list_.tris.size();
+	at.lines = draw_list_.lines.size();
+	at.glyphs = draw_list_.glyphs.size();
+	at.underlines = draw_list_.underlines.size();
+	return at;
+}
+
+void HudFrameCompiler::note_element_(HudElement element, const HudDrawCursor &from, bool map, bool big_map) {
+	HudElementSpan span;
+	span.element = element;
+	span.begin = from;
+	span.end = draw_cursor_();
+	span.map = map;
+	span.big_map = big_map;
+	const bool drew = span.end.quads != from.quads || span.end.tris != from.tris || span.end.lines != from.lines ||
+			span.end.glyphs != from.glyphs || span.end.underlines != from.underlines || map || big_map;
+	if (drew) draw_list_.element_spans.push_back(span);
+}
+
 void HudFrameCompiler::mark_order_break() {
 	draw_list_.order_breaks.push_back({ draw_list_.quads.size(), draw_list_.tris.size(),
 			draw_list_.lines.size(), draw_list_.glyphs.size(), draw_list_.underlines.size() });
@@ -448,12 +470,13 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	draw_list_.top_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 	draw_list_.order_breaks.clear();
 	draw_list_.elements_drawn = 0;
+	draw_list_.element_spans.clear();
 
 	// The SIGHTS card draws first — the HUD overlays land on top of it
 	// [orig: HUD_DrawWeaponSightOverlays @ 0x4dce00 runs at scene end;
 	//  HUD_RenderAllOverlays later in the frame]. It rides the scene pass,
 	//  not the overlay pass, so the level-3 early-out below never covers it.
-	element_sights_card(state, surface_w, surface_h);
+	element_(HudElement::SightsCard, [&] { element_sights_card(state, surface_w, surface_h); });
 
 	// The snapshot twin's two non-frame writers: the HUD-init seed with the
 	// forced alpha, and the hudcolor cycle's table[index] store — seen here as
@@ -489,22 +512,23 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 — the bar @0x5BDED3, the
 	//  prompts @0x5BDF1B..0x5BE10E].
 	if (gameplay_overlays) {
-		element_breath_bar(state, surface_w, surface_h);
-		element_service_prompt(state, surface_w, surface_h);
+		element_(HudElement::BreathBar, [&] { element_breath_bar(state, surface_w, surface_h); });
+		element_(HudElement::ServicePrompt, [&] { element_service_prompt(state, surface_w, surface_h); });
 	}
-	element_inset_cues(state, surface_w, surface_h);
+	element_(HudElement::InsetCues, [&] { element_inset_cues(state, surface_w, surface_h); });
 	if (state.hud_detail_level >= 3) {
-		element_spinmap(state, surface_w, surface_h);
+		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
 		// The tip rides the scene frame, not the overlay pass: the blank level
 		// keeps it (the alternate slot draws in the top layer, after the map).
-		if (state.minimap.map_mode == 0) element_tip(state, false, surface_w, surface_h);
+		if (state.minimap.map_mode == 0)
+			element_(HudElement::Tip, [&] { element_tip(state, false, surface_w, surface_h); });
 		// The frame drawer's panels run outside the level-3 skip: the chat
 		// input line precedes the kill banner [orig: HUD_DrawOverlayPanels
 		// @0x5c014e then HUD_DrawKillAnnounceBanner @0x5c0184]. The voice-macro
 		// menus and the pause text are the same pass's, ahead of the input line.
 		compile_overlay_panel_menus(state, surface_w, surface_h);
-		element_chat_input(state, surface_w, surface_h);
-		element_kill_announcement(state, surface_w, surface_h);
+		element_(HudElement::ChatInput, [&] { element_chat_input(state, surface_w, surface_h); });
+		element_(HudElement::KillAnnouncement, [&] { element_kill_announcement(state, surface_w, surface_h); });
 		compile_gameplay_overlay_windows(state, surface_w, surface_h);
 		return draw_list_;
 	}
@@ -514,7 +538,8 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// [orig: Render_ProcessMainSceneFrame @0x5cac50 (map mode 0) -> @0x5cad21
 	//  CTipSystem_Draw(0)]; the alternate slot rides the top layer
 	// (compile_gameplay_overlay_windows).
-	if (state.minimap.map_mode == 0) element_tip(state, false, surface_w, surface_h);
+	if (state.minimap.map_mode == 0)
+		element_(HudElement::Tip, [&] { element_tip(state, false, surface_w, surface_h); });
 	// The Recent Messages window draws from the frame drawer, not the overlay
 	// pass: after every HUD element and BEFORE the Tab board
 	// [orig: Server_DrawStatusScreen @0x50a2d0 — HUD_DrawMessageLog @0x50b21f,
@@ -522,22 +547,24 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	//  @0x50b281].
 	// The stats panel precedes the message log in the frame drawer
 	// [orig: HUD_DrawOverlayPanels @0x5c0083 (stats) then @0x5c009a (message log)].
-	element_end_round_statistics(state, surface_w, surface_h);
-	element_message_log(state, surface_w, surface_h);
-	element_scoreboard(state, surface_w, surface_h);
-	element_end_round_overlay(state, surface_w, surface_h);
+	element_(HudElement::EndRoundStatistics,
+			[&] { element_end_round_statistics(state, surface_w, surface_h); });
+	element_(HudElement::MessageLog, [&] { element_message_log(state, surface_w, surface_h); });
+	element_(HudElement::Scoreboard, [&] { element_scoreboard(state, surface_w, surface_h); });
+	element_(HudElement::EndRoundOverlay, [&] { element_end_round_overlay(state, surface_w, surface_h); });
 	// [orig: HUD_DrawOverlayPanels — the voice-macro menus @0x5c00d8 /
 	// @0x5c00ea and the pause text @0x5c0120 (compile_overlay_panel_menus),
 	// the input line @0x5c014e, then the kill banner @0x5c0184]
 	compile_overlay_panel_menus(state, surface_w, surface_h);
-	element_chat_input(state, surface_w, surface_h);
-	element_kill_announcement(state, surface_w, surface_h);
+	element_(HudElement::ChatInput, [&] { element_chat_input(state, surface_w, surface_h); });
+	element_(HudElement::KillAnnouncement, [&] { element_kill_announcement(state, surface_w, surface_h); });
 	compile_gameplay_overlay_windows(state, surface_w, surface_h);
 	// The connection indicators close the scene frame, after the overlay
 	// panels, at level 0 only (so never on the level-3 path above)
 	// [orig: Render_ProcessMainSceneFrame — HUD_DrawOverlayPanels @0x5cae3b,
 	//  then CNetQuality_DrawIndicators(0) @0x5cae5d].
-	element_net_quality_indicators(state, surface_w, surface_h);
+	element_(HudElement::NetQuality,
+			[&] { element_net_quality_indicators(state, surface_w, surface_h); });
 	return draw_list_;
 }
 
@@ -549,13 +576,13 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float surface_w,
 		float surface_h) {
 	if ((state.overlay_master & 2u) == 0u) {
-		element_spinmap(state, surface_w, surface_h);
+		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
 		return;
 	}
 	// The GAMEINFO/ZONEINFO overlay (and the g_HUDColors.active restamp) is
 	// the first draw after the gate, before the crosshair and the element
 	// dispatcher [orig: HUD_DrawGameTimerOverlay @0x5A8499].
-	element_game_info(state, surface_w, surface_h);
+	element_(HudElement::GameInfo, [&] { element_game_info(state, surface_w, surface_h); });
 
 	// The stance cross-fade restamp [orig: @ 0x599f8a; it lives inside the
 	// stance drawer, so a blanked level-3 pass never restamps — matched by
@@ -566,22 +593,22 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 		stance_.stamp = state.ticks;
 	}
 
-	element_frame(surface_w, surface_h);
-	element_health(state, surface_w, surface_h);
-	element_instruments(state, surface_w, surface_h);
-	element_optical_cues(state, surface_w, surface_h);
-	element_stance(state, surface_w, surface_h);
+	element_(HudElement::Frame, [&] { element_frame(surface_w, surface_h); });
+	element_(HudElement::Health, [&] { element_health(state, surface_w, surface_h); });
+	element_(HudElement::Instruments, [&] { element_instruments(state, surface_w, surface_h); });
+	element_(HudElement::OpticalCues, [&] { element_optical_cues(state, surface_w, surface_h); });
+	element_(HudElement::Stance, [&] { element_stance(state, surface_w, surface_h); });
 	element_weapon_cluster(state, surface_w, surface_h);
-	element_heat(state, surface_w, surface_h);
+	element_(HudElement::Heat, [&] { element_heat(state, surface_w, surface_h); });
 	// The CLOCK pair follows the heat bar and the icons in the dispatcher
 	// [orig: HUD_RenderOverlays @0x5A7D75..0x5A7D7C].
-	element_clock(state, surface_w, surface_h);
-	element_power(state, surface_w, surface_h);
-	element_waypoint(state, surface_w, surface_h);
+	element_(HudElement::Clock, [&] { element_clock(state, surface_w, surface_h); });
+	element_(HudElement::Power, [&] { element_power(state, surface_w, surface_h); });
+	element_(HudElement::Waypoint, [&] { element_waypoint(state, surface_w, surface_h); });
 	// The TEAMID line then the HUDLS bar close the dispatcher's walk
 	// [orig: @0x5A7DE9, @0x5A7DF7].
-	element_team_id_line(state, surface_w, surface_h);
-	element_weapon_slot_bar(state, surface_w, surface_h);
+	element_(HudElement::TeamIdLine, [&] { element_team_id_line(state, surface_w, surface_h); });
+	element_(HudElement::WeaponSlotBar, [&] { element_weapon_slot_bar(state, surface_w, surface_h); });
 	// The AAS zone status panel draws BEFORE the map overlay in the retail
 	// walk [orig: HUD_RenderAllOverlays @0x5a8070 — HUD_DrawZoneStatusPanel
 	//  @0x5a8530, then HUD_DrawVehicleBayLogos (ex Radar_DrawBlips) @0x5a8535,
@@ -590,22 +617,23 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	//  capture-point labels / bay-logo pair around it likewise) and the
 	//  function's head tests only g_GameType [orig: @0x5a248d..0x5a24c5], so it
 	//  draws on the shown flag alone here.
-	element_scope_details(state, surface_w, surface_h);
+	element_(HudElement::ScopeDetails, [&] { element_scope_details(state, surface_w, surface_h); });
 	// The capture-point labels join the walk after the death-screen fork's
 	// scope details and before the zone panel, with no gate of their own
 	// [orig: Render_CapturePointLabels @0x5a852b].
-	element_capture_point_labels(state, surface_w, surface_h);
-	element_lfp_panel(state, surface_w, surface_h);
+	element_(HudElement::CapturePointLabels,
+			[&] { element_capture_point_labels(state, surface_w, surface_h); });
+	element_(HudElement::LfpPanel, [&] { element_lfp_panel(state, surface_w, surface_h); });
 	// The vehicle-bay logos: no mask bit, no death-screen test (the only
 	// death-screen fork in this stretch covers the scope details)
 	// [orig: HUD_DrawVehicleBayLogos @0x5a8535; the fork @0x5a850d..0x5a852b].
-	element_vehicle_bay_logos(state, surface_w, surface_h);
-	element_spinmap(state, surface_w, surface_h);
-	element_attach_labels(state);
+	element_(HudElement::VehicleBayLogos, [&] { element_vehicle_bay_logos(state, surface_w, surface_h); });
+	element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
+	element_(HudElement::AttachLabels, [&] { element_attach_labels(state); });
 	// Friendly tags draw after the overlay cluster and before the console
 	// messages, exactly the retail pass order [orig: HUD_DrawFriendlyTagsPass
 	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
-	element_friendly_tags(state);
+	element_(HudElement::FriendlyTags, [&] { element_friendly_tags(state); });
 	// The mounted-vehicle panel sits with the overlay cluster, BEFORE the feed
 	// and the Tab board -- both of those are held-open surfaces that should
 	// cover it, not the other way round. The panel rides the seat dispatch's
@@ -614,14 +642,15 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// [orig: HUD_RenderOverlays -- no root @0x5A7CAE; the panel calls
 	//  @0x5A7CE4 / @0x5A7CFF / @0x5A7D23; `cmp eax,1; jnz` @0x5A7CF5..0x5A7CF8].
     if (hud_stance_group_visible(state))
-        element_vehicle_panel(state, surface_w, surface_h);
+        element_(HudElement::VehiclePanel,
+                [&] { element_vehicle_panel(state, surface_w, surface_h); });
 	// The console messages close the overlay pass [orig: HUD_DrawConsoleMessages
 	//  @0x5a87d1, after HUD_DrawFriendlyTagsPass @0x5a87cc].
-	element_feed(state, surface_w, surface_h);
+	element_(HudElement::Feed, [&] { element_feed(state, surface_w, surface_h); });
 	// The squad order lines right after the feed [orig: sub_59AEE0 @0x5a87d6;
 	//  the earlier call @0x5a8508 off the death screen draws the same two
 	//  lines at the same place first].
-	element_squad_orders(state, surface_w, surface_h);
+	element_(HudElement::SquadOrders, [&] { element_squad_orders(state, surface_w, surface_h); });
 }
 
 // The overlay-panel pass's middle legs, after the message log: the F9 emotes
@@ -633,10 +662,14 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 // @0x5cae3b).
 void HudFrameCompiler::compile_overlay_panel_menus(const HudFrameState &state, float w, float h) {
 	if (!state.combat.death_screen) {
-		element_voice_macro_menu(state, state.emotes_menu, kHudEmotesMenuContextRow, w, h);
-		element_voice_macro_menu(state, state.radio_menu, kHudRadioMenuContextRow, w, h);
+		element_(HudElement::VoiceMenus, [&] {
+			element_voice_macro_menu(state, state.emotes_menu, kHudEmotesMenuContextRow, w, h);
+		});
+		element_(HudElement::VoiceMenus, [&] {
+			element_voice_macro_menu(state, state.radio_menu, kHudRadioMenuContextRow, w, h);
+		});
 	}
-	element_paused_text(state, w, h);
+	element_(HudElement::PausedText, [&] { element_paused_text(state, w, h); });
 }
 
 // The windows HUD_DrawGameplayOverlays draws after its level-3 skip, so they
@@ -658,16 +691,17 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 	// (Flags & 2 -> g_MapOverlayMode = 0), @0x5cad15 HUD_BuildMapOverlayView
 	// then @0x5cad1d CTipSystem_Draw(1)]. /NOHUD does not reach it (the
 	// gameplay-overlay gate below is HUD_DrawGameplayOverlays').
-	if (state.minimap.map_mode != 0 && !state.local_dead) element_tip(state, true, w, h);
+	if (state.minimap.map_mode != 0 && !state.local_dead)
+		element_(HudElement::TipAlternate, [&] { element_tip(state, true, w, h); });
 	if (state.overlay_master == 0u) return;
-	element_briefing(state, w, h);
-	element_objectives(state, w, h);
-	element_help_screen(state, w, h);
+	element_(HudElement::Briefing, [&] { element_briefing(state, w, h); });
+	element_(HudElement::Objectives, [&] { element_objectives(state, w, h); });
+	element_(HudElement::HelpScreen, [&] { element_help_screen(state, w, h); });
 	// The quit dialog below the blank level [orig: `cmp g_HUDDetailLevel, 3`
 	// @0x5be185; UI_DrawDisconnectReasonDialog @0x5be1ce]. Out of a session
 	// it would also draw the save-game list (sub_5B72E0 / sub_5B74B0
 	// @0x5be1dd..0x5be1eb); the dialog only opens in a session.
-	if (state.hud_detail_level != 3) element_quit_dialog(state, w, h);
+	if (state.hud_detail_level != 3) element_(HudElement::QuitDialog, [&] { element_quit_dialog(state, w, h); });
 }
 
 // docs/interface/hud-re.md (D-HUD-27, D-HUD-30).
@@ -1129,10 +1163,12 @@ void HudFrameCompiler::element_weapon_cluster(const HudFrameState &state,
 		const uint32_t align_flags = layout_.ammo_count.align == 1
 				? kFontAlignRight
 				: (layout_.ammo_count.align == 2 ? kFontAlignCenter : 0u);
-		emit_text(ammo_text.c_str(),
-				static_cast<float>(layout_.ammo_count.x),
-				static_cast<float>(layout_.ammo_count.y), w, h, wc,
-				align_flags);
+		element_(HudElement::AmmoCount, [&] {
+			emit_text(ammo_text.c_str(),
+					static_cast<float>(layout_.ammo_count.x),
+					static_cast<float>(layout_.ammo_count.y), w, h, wc,
+					align_flags);
+		});
 	}
 	if (wpngrp_visible && !state.weapon.display_name.empty() &&
 			layout_.weapon_name.hidden == 0) {
@@ -1142,16 +1178,18 @@ void HudFrameCompiler::element_weapon_cluster(const HudFrameState &state,
 		const uint32_t align_flags = layout_.weapon_name.align == 1
 				? kFontAlignRight
 				: (layout_.weapon_name.align == 2 ? kFontAlignCenter : 0u);
-		emit_text(state.weapon.display_name.c_str(),
-				static_cast<float>(layout_.weapon_name.x + nudge),
-				static_cast<float>(layout_.weapon_name.y), w, h, wc,
-				align_flags);
+		element_(HudElement::WeaponName, [&] {
+			emit_text(state.weapon.display_name.c_str(),
+					static_cast<float>(layout_.weapon_name.x + nudge),
+					static_cast<float>(layout_.weapon_name.y), w, h, wc,
+					align_flags);
+		});
 	}
 	if (wpngrp_visible) {
-		element_clip_indicator(state, w, h);
+		element_(HudElement::ClipIndicator, [&] { element_clip_indicator(state, w, h); });
 	}
-	element_targeting(state, w, h);
-	element_crosshair(state, w, h);
+	element_(HudElement::Targeting, [&] { element_targeting(state, w, h); });
+	element_(HudElement::Crosshair, [&] { element_crosshair(state, w, h); });
 	++draw_list_.elements_drawn;
 }
 

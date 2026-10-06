@@ -17,11 +17,13 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/install_view.h>
 #include <editor/assets/player_files.h>
+#include <editor/assets/project_layout.h>
 #include <editor/assets/project_scan.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
+#include <editor/import/wave_source.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 
@@ -151,12 +153,13 @@ std::vector<std::string> list_base_file_names(const std::string &retail_root, co
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {
 	if (const AssetEntry *prior = existing.find(name)) return prior->relative_path;
-	// An import source sits with the files of the kind its name gives (a PNG with the textures it makes),
-	// or, where its name gives none, in its importer's folder (a font set with the fonts it makes).
-	const AssetKind placed = kind == AssetKind::ImportSource ? asset_kind_for_name(name) : kind;
-	if (kind == AssetKind::ImportSource && placed == AssetKind::Unknown)
+	// Where the project keeps a file of the kind (assets/project_layout.h: beside its files of the kind,
+	// else the top level of a flat project or the kind's folder); an import source with the files of the
+	// kind its name gives (a PNG with the textures it makes), or, where its name gives none, in its
+	// importer's folder (a font set with the fonts it makes).
+	if (kind == AssetKind::ImportSource && asset_kind_for_name(name) == AssetKind::Unknown)
 		if (const Importer *importer = authored_importer_for(name)) return join_path(importer->folder, name);
-	return join_path(asset_kind_row(placed).folder, name);
+	return placement_path(existing, name, kind);
 }
 
 std::vector<ImportSourceInput> import_source_inputs(const std::string &source_name, const std::vector<uint8_t> &source,
@@ -474,6 +477,19 @@ private:
 			ImportOutput &output = made[index];
 			const std::string &input_destination = input_destinations[index];
 			const bool input = !input_destination.empty();
+			// An author's wave comes in as the game plays it (the sound lane, import/wave_source.h): as it is
+			// where the game's loader takes it, else written in the form it takes, said; one that reads as no
+			// wave is refused.
+			if (authored && asset_kind_for_name(output.name) == AssetKind::Wave) {
+				std::string note, why;
+				if (!prepare_authored_wave(output.name, output.bytes, note, why)) {
+					refuse(CoreFinding::ImportWave, why, output.name);
+					continue;
+				}
+				if (!note.empty())
+					result_.diagnostics.push_back(
+							make_finding(CoreFinding::ImportWave, DiagnosticSeverity::Info, note, output.name));
+			}
 			if (output.name != name) {
 				if (!check_project_file_name(paths_.root, std::string(), output.name, AssetKind::Unknown, problem, message)) {
 					refuse(name_refused(problem), message, output.name);

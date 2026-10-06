@@ -83,6 +83,7 @@ void ScarPresentStats::_bind_methods() {
 	STAT_BIND(ScarPresentStats, textures_missing)
 	STAT_BIND(ScarPresentStats, strips_unsupported)
 	STAT_BIND(ScarPresentStats, owners_unresolved)
+	STAT_BIND(ScarPresentStats, entity_world_batches)
 }
 
 #undef STAT_BIND

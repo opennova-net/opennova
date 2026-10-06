@@ -42,9 +42,11 @@ void ViewportView::draw(Workspace &workspace, const std::string &path) {
 		draw_empty(workspace, model, path);
 		return;
 	}
-	if (!canvas_) {
-		const ViewportLayout layout = model->layout();
+	// A design picture whose size moved (a HUD's screen, DI-20) is laid out on a canvas of the new size.
+	const ViewportLayout layout = model->layout();
+	if (!canvas_ || layout.design_width != layout_.design_width || layout.design_height != layout_.design_height) {
 		canvas_ = std::make_unique<ViewportCanvas>(layout.design_width, layout.design_height);
+		layout_ = layout;
 	}
 	if (!half_) half_ = model->make_canvas();
 	// The context carries the device from the first (a toolbar's planner, the canvas's frame: a
@@ -75,6 +77,13 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 		const CanvasInput &in = ui.input();
 		context.width = in.width;
 		context.height = in.height;
+		// The mouse's place on the picture goes to its device while the canvas shows no pointer of its own
+		// there (no handle or selected window under it, no press, drag or pan): a picture that draws the
+		// game's pointer draws it there (a menu's, DI-08).
+		const bool on_picture = in.hovered && !in.panning && !in.down && in.mouse.x >= 0.0f &&
+				in.mouse.y >= 0.0f && in.mouse.x < float(in.width) && in.mouse.y < float(in.height);
+		const bool pointer = on_picture && !half_->gesture().pressed() &&
+				half_->cursor(context, in) == CanvasCursor::Default;
 		// A picture that fills the canvas, or a design picture fitted or scaled, is drawn at the
 		// canvas's size: its device sizes itself as it draws, and reports it at the next pump.
 		ui.picture(
@@ -82,7 +91,7 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 					if (device) device->draw(picture);
 					else ImGui::Dummy(ImVec2(float(picture.width), float(picture.height))); // made at the next pump
 				},
-				[&] { return half_->hover_tip(context, in); });
+				[&] { return half_->hover_tip(context, in); }, pointer);
 		// The last picture shows while its device builds the next (S13 V6), or after that build failed.
 		switch (model.picture_status()) {
 		case ViewportStatus::Loading: {
@@ -98,9 +107,17 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 		}
 		if (inside) inside(in);
 		half_->input(context, in, requests);
-		ui.draw(half_->shapes(context, in), half_->cursor(context, in));
+		const CanvasCursor cursor = half_->cursor(context, in);
+		// Where the picture draws a pointer of its own the system's is hidden, so one pointer shows: the
+		// game's. A press begun this frame shows the canvas's own (a handle's, a move's) instead.
+		if (pointer && cursor == CanvasCursor::Default && draws_pointer(model, context, in)) workspace.hide_pointer();
+		ui.draw(half_->shapes(context, in), cursor);
 	}
 	ui.end();
+}
+
+bool ViewportView::draws_pointer(const ViewportModel &, const ViewportContext &, const CanvasInput &) {
+	return false;
 }
 
 void ViewportView::end_frame(Workspace &workspace) {

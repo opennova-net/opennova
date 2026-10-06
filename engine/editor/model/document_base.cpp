@@ -175,7 +175,7 @@ bool DocumentBase::load_bytes(const std::vector<uint8_t> &bytes, const std::stri
 	return true;
 }
 
-bool DocumentBase::save(Diagnostic &error) {
+bool DocumentBase::save(Diagnostic &error, bool over) {
 	if (snapshot_)
 		return fail(error, path(), CoreFinding::DocumentSnapshot, "A snapshot is read, never saved.");
 	if (absolute_path_.empty())
@@ -185,8 +185,9 @@ bool DocumentBase::save(Diagnostic &error) {
 	const SerializeResult output = serialize();
 	if (!output.ok())
 		return fail(error, path(), CoreFinding::DocumentUnserializable, output.issues.front().message, output.issues.front().field);
-	if (!matches_file())
-		return fail(error, path(), CoreFinding::DocumentConflict, "This file changed outside the editor. Reload it before saving.");
+	if (!over && !matches_file())
+		return fail(error, path(), CoreFinding::DocumentConflict,
+		            "This file changed outside the editor: reload it, or keep your edits and save over it.");
 	std::string message;
 	if (!write_file_atomic(absolute_path_, output.text, message)) return fail(error, path(), CoreFinding::DocumentWrite, message);
 	file_fingerprint_ = fingerprint(output.text);

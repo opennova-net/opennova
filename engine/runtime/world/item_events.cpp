@@ -624,6 +624,22 @@ void emit_item_state(World &world, Entity &target, int32_t section) {
 }
 
 // [orig: Entity_PublishSwapFadePhases @0x5C3F40]
+DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ticks[3]) {
+    DestroyFade fade;
+    const int32_t duration=destroy_timing_ticks[1] ? destroy_timing_ticks[1] : 50;
+    const int32_t step=destroy_timing_ticks[2] ? destroy_timing_ticks[2] : 25;
+    const int32_t total=io::bam_add(duration,int32_t(uint32_t(step)*4u));
+    // Zero denominators are malformed authored data; preserve finite render values.
+    fade.progress=total ? double(elapsed)/total : 0;
+    const auto phase=[](double value) { return int32_t(std::clamp(value,0.0,1.0)*65536.0); };
+    fade.phases_q16[0]=phase(fade.progress);
+    for (int i=0;i<5;++i)
+        fade.phases_q16[i+1]=duration ? phase(double(
+                io::bam_sub(elapsed,int32_t(uint32_t(step)*uint32_t(i))))/duration) : 0;
+    return fade;
+}
+
+// [orig: Entity_PublishSwapFadePhases @0x5C3F40]
 void update_item_destroy_fade(World &world, Entity &entity) {
     entity.destroy_phases_q16.fill(0);
     entity.destroy_progress = 0;
@@ -635,16 +651,9 @@ void update_item_destroy_fade(World &world, Entity &entity) {
         if (elapsed < entity.destroy_timer) return;
         entity.destroy_timer=0; entity.death_tick=world.logic_tick; elapsed=0;
     }
-    const int32_t duration=traits->destroy_timing_ticks[1] ? traits->destroy_timing_ticks[1] : 50;
-    const int32_t step=traits->destroy_timing_ticks[2] ? traits->destroy_timing_ticks[2] : 25;
-    const int32_t total=io::bam_add(duration,int32_t(uint32_t(step)*4u));
-    // Zero denominators are malformed authored data; preserve finite render values.
-    entity.destroy_progress=total ? double(elapsed)/total : 0;
-    const auto phase=[](double value) { return int32_t(std::clamp(value,0.0,1.0)*65536.0); };
-    entity.destroy_phases_q16[0]=phase(entity.destroy_progress);
-    for (int i=0;i<5;++i)
-        entity.destroy_phases_q16[i+1]=duration ? phase(double(
-                io::bam_sub(elapsed,int32_t(uint32_t(step)*uint32_t(i))))/duration) : 0;
+    const DestroyFade fade=destroy_fade_phases(elapsed,traits->destroy_timing_ticks);
+    entity.destroy_progress=fade.progress;
+    entity.destroy_phases_q16=fade.phases_q16;
 }
 
 // [orig: Entity_UpdateEnvSoundEmitter @0x4A8080]

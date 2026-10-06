@@ -104,11 +104,13 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/emitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_catalog_names.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_closure.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/script_effects.cpp
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_elements.cpp      # which element of the walk drew each run (a tool's record)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_layout_from_hudpos.cpp    # the hudpos.def parse applied to the layout globals
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_game_text.cpp    # the HUD's game-text key compositions and fallbacks
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/squad_feed.cpp       # the command map squad feed lines

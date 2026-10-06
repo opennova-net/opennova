@@ -12,13 +12,16 @@ extends GutTest
 ## as one undo step, several selected windows move and arrange in one step each; a TABLE draws through
 ## the device (its rows' cells, a SUBST image, a clip rect) where the compile places it; a device given
 ## up retires its SubViewport, freed at the next frame; a focused edit box's caret blinks on the
-## preview clock through the device's own frame (S13 V8). The model: drawn as it would save, at the level
+## preview clock through the device's own frame (S13 V8); the game's pointer draws through the device's
+## frame where a client holds it (DI-08). The model: drawn as it would save, at the level
 ## the portable half picks; a user point projects within half a pixel of where the device's camera
 ## puts it; a user point's edit builds nothing, a light's builds the scene again; the options hold a
 ## level and a CTRL register; a part's marker rides the part the device draws at the clock the two
 ## share, a hit at its pixel names its record and a drag lands it on the pixel, one undo step; a table
 ## plays its clip on the rig at the preview clock's tick, its bones on the wire where the device's
-## skeleton stands them (S17); two models on devices of their own; the
+## skeleton stands them (S17); a model destroyed as the item naming it is (DI-10: its husk drawn in its
+## place, the pieces' sections hidden, the destroy fade's registers on it, the death sound heard); two
+## models on devices of their own; the
 ## device cache holds four, the least recently used given up and made again at the camera it kept.
 ## S13 V6: a device builds its picture over the frames after the pump that takes the Rebuild (a
 ## model's textures, meshes, scene and pose; a menu screen's textures not decoded yet, then its
@@ -30,6 +33,7 @@ extends GutTest
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
 const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
+const CRATE := "res://../fixtures/threedi/synth/crate.3di"
 ## The JO-sized model (S13 V6), as large as the 967 the game ships come near their 99th percentile
 ## (six levels, 4,304 triangles at the first and 10,409 in all, 16 materials, 29 texture rows, 18
 ## textures): the materials (a texture each, every third a detail texture too), the parts, the quads
@@ -754,6 +758,57 @@ func test_the_caret_blinks_on_the_preview_clock() -> void:
 	assert_eq(int(_state().get("builds", -1)), builds, "the frame drawn again, the picture never made again")
 
 
+## DI-08: the game's pointer through the device's own frame (the Shell's MenuViewportApplier and its
+## tick). A new project's MAIN names the blank pointer; a hit says the pointer the game draws there; held
+## at a point by a client (pointer_at, the wire's hover) the frame's cursor pass draws it there, one
+## textured quad more, the screen never configured again for it; Pointer off draws none, a point let go
+## draws none, and a point off the picture is refused.
+func test_the_pointer_draws_where_it_is_held() -> void:
+	if _app == null:
+		return
+	_new_project("Pointer Game")
+	assert_eq(_seam.create_missing_files(), 0)
+	assert_true(_seam.open_document("main.mnu"))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var options: Dictionary = state.get("options", {})
+	assert_true(bool(options.get("pointer", false)), "the pointer drawn by default: %s" % str(options))
+	assert_null(options.get("pointer_at", 0), "held nowhere")
+	var hit := _viewport("hit", {"x": 400, "y": 300})
+	var pointer: Dictionary = hit.get("pointer", {})
+	assert_true(bool(pointer.get("drawn", false)), str(hit))
+	assert_eq(String(pointer.get("file", "")), "newarow1.tga", str(pointer))
+	assert_eq(String(pointer.get("name", "")), "MAIN", str(pointer))
+	assert_eq(int(pointer.get("width", 0)), 32)
+	var frame: Object = _device_node(state, "MenuFrame")
+	assert_not_null(frame, "the device's frame")
+	if frame == null:
+		return
+	await get_tree().process_frame
+	var builds := int(_state().get("builds", 0))
+	var bare = frame.get_draw_list_stats()
+	assert_true(_change({"options": {"pointer_at": [400, 300]}}))
+	await get_tree().process_frame
+	var pointed = frame.get_draw_list_stats()
+	assert_eq(pointed.quads, bare.quads + 1, "the cursor pass draws the pointer")
+	assert_eq(pointed.quads_textured, bare.quads_textured + 1, "with its image")
+	var held_at: Array = _state().get("options", {}).get("pointer_at", [])
+	assert_eq(held_at.size(), 2, str(held_at))
+	if held_at.size() == 2:
+		assert_eq(Vector2(float(held_at[0]), float(held_at[1])), Vector2(400, 300))
+	assert_true(_change({"options": {"pointer": false}}))
+	await get_tree().process_frame
+	assert_eq(frame.get_draw_list_stats().quads, bare.quads, "Pointer off: none drawn")
+	assert_true(_change({"options": {"pointer": true}}))
+	await get_tree().process_frame
+	assert_eq(frame.get_draw_list_stats().quads, bare.quads + 1, "on again where it is held")
+	assert_true(_change({"options": {"pointer_at": null}}))
+	await get_tree().process_frame
+	assert_eq(frame.get_draw_list_stats().quads, bare.quads, "let go: none drawn")
+	assert_true(_refusal({"options": {"pointer_at": [900, 10]}}).contains("pointer_at"))
+	assert_eq(int(_state().get("builds", -1)), builds, "the screen never configured again for the pointer")
+
+
 # --- the model -------------------------------------------------------------------------------------
 
 func test_model_draws_through_the_device() -> void:
@@ -956,6 +1011,175 @@ func test_a_table_plays_on_its_rig() -> void:
 	assert_gt(at_rest.angle_to(turned), 0.05, "the clip poses the skeleton at the clip clock")
 	assert_eq(int(_state().get("body", {}).get("animation", {}).get("ticks", -1)), 8)
 	assert_eq(int(_state().get("clock", {}).get("ticks", -1)), 8, "the preview clock's ticks")
+
+
+## DI-04: a clip's footstep events heard as it runs. The session fires each on the body's ticks through
+## the pairing item's profile (the envelope's sounds_fired), and the Shell starts each one's wave.
+func test_a_clip_s_footsteps_reach_the_shell() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor viewport steps %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("project")
+	assert_true(_seam.new_project(root, "Steps Game"))
+	var source := dir.path_join("source")
+	_write(source.path_join("skinned.o3d"),
+			FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)).to_utf8_buffer())
+	_write(source.path_join("skin.o3a"), SKIN_CLIPS.to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
+		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("skin.o3a")}]}))
+	_write(root.path_join("defs/items.def"), TestFs.crlf("begin \"Walker\"\nid 100200\ntype person\ngraphic skinned\n"
+			+ "anim_def skin\nsound_profile walker\nend\n").to_utf8_buffer())
+	_write(root.path_join("SndProf.def"), TestFs.crlf("begin \"default\"\nend\nbegin \"walker\"\n"
+			+ "\tSSLFootGND STEP_L 0 0 0\n\tSSRFootGND STEP_R 0 0 0\nend\n").to_utf8_buffer())
+	for name in ["step_l.wav", "step_r.wav"]:
+		_write(root.path_join("sounds").path_join(name), _wave_bytes(0.2))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	# The bank made in the editor: a set a foot, each one layer playing its wave.
+	assert_true(_seam.done({"kind": "create_file", "path": "game.lwf"}))
+	var edits := []
+	for foot: String in ["L", "R"]:
+		var wave: String = "w" + foot
+		var named: String = "s" + foot
+		edits.append_array([
+			{"op": "add", "kind": "wave", "as": wave}, {"op": "set", "id": wave, "field": "name", "value": "STEP_" + foot},
+			{"op": "set", "id": wave, "field": "file", "value": "step_%s.wav" % foot.to_lower()},
+			{"op": "add", "kind": "set", "as": named}, {"op": "set", "id": named, "field": "name", "value": "STEP_" + foot},
+			{"op": "add", "kind": "layer", "parent": named, "as": named + "l"},
+			{"op": "add", "kind": "member", "parent": named + "l", "field": "wave", "value": "STEP_" + foot},
+		])
+	assert_true(_seam.done({"kind": "edit_record", "path": "game.lwf", "edits": edits, "open_first": true}))
+	assert_true(_seam.done({"kind": "save_all"}))
+	assert_true(_seam.open_document("anims/SKIN.adm"))
+	var walk: int = _seam.find_record("anim_walk_forward")
+	assert_true(_seam.select_record(walk))
+	assert_true(_change({"clock": {"playing": false, "ticks": 0}}))
+	var preview := await _await_ready()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	var animation: Dictionary = preview.get("body", {}).get("animation", {})
+	assert_eq(String(animation.get("sound_profile", {}).get("name", "")), "walker", str(animation.get("sound_profile")))
+	# Run: the walk loops, its feet firing on the NPC body's odd ticks, each heard.
+	assert_true(_change({"clock": {"playing": true, "ticks": 0}}))
+	var started_before: int = _app.get_clip_voices_started()
+	for _frame in 600:
+		if _app.get_clip_voices_started() >= started_before + 2:
+			break
+		await get_tree().process_frame
+	assert_gte(_app.get_clip_voices_started(), started_before + 2, "the Shell started a wave a footstep")
+	var fired: Array = _state().get("body", {}).get("animation", {}).get("sounds_fired", [])
+	assert_gte(fired.size(), 2, str(fired))
+	var sets := {}
+	for sound: Variant in fired:
+		assert_eq(int(sound.get("tick", 0)) % 2, 1, "an NPC's body reads on odd ticks: %s" % str(sound))
+		assert_eq(String(sound.get("state", "")), "played", str(sound))
+		sets[String(sound.get("set", ""))] = true
+	assert_true(sets.has("STEP_L") and sets.has("STEP_R"), str(sets.keys()))
+	assert_true(_change({"clock": {"playing": false}}))
+
+
+## DI-10: a model's damage state, played as the game destroys the item naming it. The crate is the pump's
+## graphic (gnrc, its husk the armory: four parts, two of them chunks that always fly off): destroyed past
+## the swap, the device draws the armory in its place (not the document's picture), the sections the pieces
+## left hidden, the destroy fade's six registers on the model at the clock's values; Play destroy from the
+## death fires the death sound, which the Shell plays.
+func test_a_destroyed_item_swaps_in_its_husk() -> void:
+	if _app == null:
+		return
+	assert_true(_new_project_with(CRATE, "crate.3di"))
+	_add_model(ARMORY, "armory.3di")
+	var root: String = _seam.get_project_root()
+	_write(root.path_join("defs/items.def"), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\n"
+			+ "graphic crate\nai_function gnrc\nhusk armory\nhusk_sub_part_types 01_HULL 02_WHEEL 03_CHUNK_M 04_CHUNK_S\n"
+			+ "destroy_timing 0.5 1.0 0.25\nsounddeath EXPLO_PUMP\nend\n").to_utf8_buffer())
+	_write(root.path_join("sounds/explo_pump.wav"), _wave_bytes(0.2))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	# The bank made in the editor: the death sound's set, one layer playing its wave.
+	assert_true(_seam.done({"kind": "create_file", "path": "game.lwf"}))
+	assert_true(_seam.done({"kind": "edit_record", "path": "game.lwf", "open_first": true, "edits": [
+		{"op": "add", "kind": "wave", "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "EXPLO_PUMP"},
+		{"op": "set", "id": "w", "field": "file", "value": "explo_pump.wav"},
+		{"op": "add", "kind": "set", "as": "s"}, {"op": "set", "id": "s", "field": "name", "value": "EXPLO_PUMP"},
+		{"op": "add", "kind": "layer", "parent": "s", "as": "l"},
+		{"op": "add", "kind": "member", "parent": "l", "field": "wave", "value": "EXPLO_PUMP"},
+	]}))
+	assert_true(_seam.done({"kind": "save_all"}))
+	assert_true(_seam.open_document("models/crate.3di"))
+	assert_true(_change({"clock": {"playing": false, "ticks": 0}}))
+	var preview := await _await_ready()
+	var model: ObjectModel = _device_node(preview, "ObjectModel")
+	assert_not_null(model)
+	if model == null:
+		return
+	assert_eq(model.get_object_data().get_light_count(), 0, "the crate, intact")
+	var damage: Dictionary = preview.get("body", {}).get("damage", {})
+	assert_eq(String(damage.get("uses", [{}])[0].get("item", "")), "Pump station", str(damage))
+	assert_eq(String(damage.get("husk_file", "")), "armory.3di", str(damage))
+
+	# Destroyed, the clock past the swap and into the fade: the husk drawn, its pieces gone, the fade on it.
+	var builds := int(preview.get("builds", 0))
+	assert_true(_change({"options": {"damage": {"state": "destroyed"}}, "clock": {"ticks": 93, "playing": false}}))
+	preview = await _await_ready()
+	for _frame in 600:
+		if int(preview.get("builds", 0)) > builds and String(preview.get("status", "")) == "ready":
+			break
+		await get_tree().process_frame
+		preview = _state()
+	damage = preview.get("body", {}).get("damage", {})
+	assert_eq(String(damage.get("drawn", "")), "armory.3di", str(damage))
+	assert_false(bool(preview.get("current", true)), "the husk is not the document's picture")
+	model = _device_node(preview, "ObjectModel")
+	assert_eq(model.get_object_data().get_light_count(), 2, "the armory, the husk, drawn in the crate's place")
+	assert_true((model.get_node("Robj_0") as Node3D).visible and (model.get_node("Robj_1") as Node3D).visible,
+			"the hull and the WHEEL its chance keeps")
+	assert_false((model.get_node("Robj_2") as Node3D).visible, "a CHUNK_M flown off")
+	assert_false((model.get_node("Robj_3") as Node3D).visible, "a CHUNK_S flown off")
+	var phases: Array = damage.get("frame", {}).get("phases", [])
+	var values: Dictionary = model.get_ctrl_values()
+	assert_eq(int(values.get("OBJECT_DESTROY01", 0)), 65536, str(values))
+	assert_eq(int(values.get("OBJECT_DESTROY", -1)), int(phases[0]) if phases.size() == 6 else -2, str(values))
+
+	# Play destroy: from the death, the clock run; the death sound four ticks on, heard.
+	var started_before: int = _app.get_clip_voices_started()
+	assert_true(_change({"clock": {"playing": true, "ticks": 0}}))
+	for _frame in 600:
+		if _app.get_clip_voices_started() > started_before:
+			break
+		await get_tree().process_frame
+	assert_gt(_app.get_clip_voices_started(), started_before, "the Shell started the death sound")
+	var fired: Array = _state().get("body", {}).get("damage", {}).get("sounds_fired", [])
+	assert_eq(fired.size(), 1, str(fired))
+	if fired.size() == 1:
+		assert_eq(int(fired[0].get("tick", -1)), 4, str(fired))
+		assert_eq(String(fired[0].get("set", "")), "EXPLO_PUMP")
+		assert_eq(String(fired[0].get("state", "")), "played", str(fired))
+	assert_true(_change({"clock": {"playing": false}, "options": {"damage": {"state": "intact"}}}))
+
+
+func _wave_bytes(seconds: float) -> PackedByteArray:
+	var samples := int(22050 * seconds)
+	var data := PackedByteArray()
+	data.resize(samples * 2)
+	for i in samples:
+		data.encode_s16(i * 2, int(sin(i * 0.1) * 8000.0))
+	var head := PackedByteArray()
+	head.resize(44)
+	head.encode_u32(0, 0x46464952) # RIFF
+	head.encode_u32(4, 36 + data.size())
+	head.encode_u32(8, 0x45564157) # WAVE
+	head.encode_u32(12, 0x20746d66) # "fmt "
+	head.encode_u32(16, 16)
+	head.encode_u16(20, 1) # PCM
+	head.encode_u16(22, 1) # mono
+	head.encode_u32(24, 22050)
+	head.encode_u32(28, 44100)
+	head.encode_u16(32, 2)
+	head.encode_u16(34, 16)
+	head.encode_u32(36, 0x61746164) # data
+	head.encode_u32(40, data.size())
+	head.append_array(data)
+	return head
 
 
 ## S17: the bones the wire reports (and the canvas draws) stand where the device's skeleton puts its

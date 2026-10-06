@@ -26,6 +26,16 @@ void HudOverlay::combat_texture_(int slot, const String &name, ResourceRoot::Tex
 	sprite = { texture.is_valid() ? texture->get_width() : 0,
 		texture.is_valid() ? texture->get_height() : 0, texture.is_valid() };
 }
+void HudOverlay::set_weapon_icon(const String &p_weapon_name, const String &p_hudicon) {
+	// The combat feed's two weapon fields (world::fill_hud_combat_view): the identity the silhouette's
+	// flash stamps on, the hudicon art in alpha mode.
+	state_.combat.weapon_identity = opennova::to_std(p_weapon_name);
+	combat_texture_(opennova::hud::kHudTexWeaponSilhouette, p_hudicon, ResourceRoot::TEXTURE_LOADER_HUD_ALPHA,
+			layout_.combat.weapon);
+	compiler_.update_layout(layout_);
+	queue_redraw();
+}
+
 void HudOverlay::configure_combat_(const opennova::hud::HudLayoutAssets &assets) {
 	using namespace opennova::hud;
 	auto &l = layout_.combat;

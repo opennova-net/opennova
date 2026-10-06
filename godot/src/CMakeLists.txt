@@ -392,13 +392,17 @@ if(OPENNOVA_EDITOR)
         devtools/imgui_pass_node.cpp
         authoring/child_process.cpp
         authoring/editor_app.cpp
+        authoring/hud_viewport_applier.cpp
         authoring/menu_viewport_applier.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
+        authoring/preview_sound_player.cpp
         authoring/script_device.cpp
         authoring/script_edit.cpp
         authoring/script_highlighter.cpp
         authoring/texture_viewport_applier.cpp
+        authoring/effect_viewport_applier.cpp
+        authoring/preview_effects.cpp
         authoring/thumbnail_images.cpp
         authoring/viewport_device.cpp
         authoring/viewport_devices.cpp

@@ -123,6 +123,13 @@ struct Config {
 	float iris_center = 1.25f;
 	float water_murk = 0.8f;
 	int advanced_clouds = 0;
+	// The day's length in real minutes as the file writes it: the parse makes it the clock's
+	// advance a tick, 0x18000000 / (3720 x max(minutes, 60)) [orig: TimeOfDay_ParseProperty
+	// @ 0x57d0e4..0x57d118]. A mission's start sets the advance again from its own header (or
+	// the session's) [orig: Game_StartMission @ 0x5253c3, @ 0x5253e2], so no mission runs on
+	// it. Kept for the round trip; `tod_rate_set` says the file writes it.
+	int tod_rate = 0;
+	bool tod_rate_set = false;
 	std::vector<Keyframe> keyframes;
 	// The scratch keyframe after the parse (above): its seed, overwritten by the color
 	// lines outside every block, each baked with the envscale read before it as the
@@ -131,8 +138,10 @@ struct Config {
 	Keyframe scratch = scratch_keyframe_defaults();
 };
 
-// The engine parses at most 16 TOD keyframes; later tod_begin blocks bleed their
-// colors into the 16th slot [orig: TimeOfDay_ParseProperty @ 0x57c65b].
+// The engine parses at most 16 TOD keyframes. A later tod_begin neither takes a slot nor
+// moves the slot pointer, so its color lines land where the pointer already is: the 16th
+// slot while that block is still open, the scratch keyframe after its tod_end
+// [orig: TimeOfDay_ParseProperty @ 0x57c65b, tod_end's reset @ 0x57c6a3].
 inline constexpr int kMaxTodKeyframes = 16;
 
 // The HHMM clock's authored range; every time-of-day setter clamps into it.
@@ -148,7 +157,26 @@ Config make_default_config();
 float clamp_water_murk_upper(float value);
 
 bool load_env(std::istream &input, Config &out, std::string &error);
+// The file from scratch (no stock writer exists; retail reads it through the parser above):
+// every keyword the parser reads, a line each, CR LF, the keyframes in time order. Each value
+// is written in the form the parser reads back as the Config holds it: a time as four HHMM
+// digits, an atol keyword as a whole number, an atof keyword in the fewest digits that read
+// back as the same float, a name quoted where it holds a separator. False, with `error`, for a
+// name no line can carry (a '"', a control character).
 bool save_env(std::ostream &output, const Config &cfg, std::string &error);
+
+// What the parser makes of one line's key and value, for a caller that reads a file's lines
+// itself (the editor's source findings): the HHMM time a token reads as, by position
+// [orig: Environment_ParseTimeString @ 0x57c500]; whether a key (lower case) is a color line
+// the slot pointer takes, one the parser reads at all, and one whose color the envscale read
+// before it scales [orig: TimeOfDay_ParseProperty @ 0x57c590: every *_rgb arm but terrain_rgb
+// packs through Color_ScaleRGBAndPack]; whether a name can be written on a line (no '"', no
+// control character).
+int parse_tod_time(const char *text);
+bool is_tod_color_key(const std::string &key);
+bool is_env_key(const std::string &key);
+bool is_envscaled_key(const std::string &key);
+bool env_name_writable(const std::string &name);
 
 // A mission's environment as the mission load makes it. The load resets every field to the
 // pre-parse defaults first [orig: Terrain_LoadEnvironmentConfig @ 0x610947 ->

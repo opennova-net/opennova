@@ -1676,6 +1676,14 @@ Vector2 HudOverlay::draw_surface_() const {
 	return Vector2(1024.0f, 768.0f);
 }
 
+const opennova::hud::HudDrawList &HudOverlay::compile_draw_list() {
+	static const opennova::hud::HudDrawList kNone;
+	if (!configured_) return kNone;
+	const Vector2 surface = draw_surface_();
+	ensure_label_fonts_(surface.x); // the fonts the draw would have loaded
+	return compiler_.compile(state_, surface.x, surface.y);
+}
+
 Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 	Ref<HudDrawListStats> out;
 	out.instantiate();

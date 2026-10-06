@@ -57,6 +57,11 @@ const char *sound_profile_slot_keyword(int slot) {
     return kSlotKeywords[slot];
 }
 
+const char *sound_profile_loop_keyword(int index) {
+    if (index < 0 || index >= kSoundProfileLoopParamCount) return nullptr;
+    return kLoopKeywords[index];
+}
+
 const char *body_model_prefix(int anim_slot) {
     // [orig: Entity_GetBodyModelPrefix @ 0x5280F0 — a null entity or a zero
     // +0x374 byte defaults to type 1; the switch maps the prefix strings
@@ -265,6 +270,14 @@ int SoundProfileTable::index_of(const char *name) const {
     // Miss -> the first profile [orig: SoundProfile_FindSlotByName @ 0x526e30
     // returns the array base when no name matches].
     return 0;
+}
+
+const SoundProfile *item_sound_profile(const std::vector<SoundProfile> &profiles, const char *authored) {
+    if (profiles.empty()) return nullptr;
+    const char *name = authored != nullptr && authored[0] != '\0' ? authored : "default";
+    for (const SoundProfile &profile : profiles)
+        if (strutil::iequals(profile.name, name)) return &profile;
+    return &profiles.front();
 }
 
 } // namespace opennova::audio

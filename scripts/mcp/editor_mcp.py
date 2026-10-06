@@ -256,10 +256,10 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
 REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install", "path", "locator", "field",
                  "new_name", "role", "file_kind", "out_dir", "export_dir", "mission", "operation", "mode", "choice",
-                 "purpose")
+                 "purpose", "folder")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
-                    "planned", "behind", "report")
+                    "planned", "behind", "fresh", "report")
 REQUEST_NUMBERS = ("plan", "steps")
 
 
@@ -514,6 +514,10 @@ def cmd_play(args: argparse.Namespace) -> int:
         # only); by default it starts as Play starts it, as the editor_play tool's does.
         if args.behind:
             request["behind"] = True
+        # --fresh: the run directory emptied of what the runs before wrote there (game.cfg, saves) first, a
+        # first run; by default it keeps them.
+        if args.fresh:
+            request["fresh"] = True
         outcome, ended = raise_and_wait(client, request, args.timeout)
         if ended is None:
             return EXIT_NOT_DONE
@@ -691,6 +695,8 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--locator", default=None, help="a record's locator (open_document, the renames)")
     request.add_argument("--field", default=None, help="a field of that record")
     request.add_argument("--new-name", dest="new_name", default=None, help="the name a rename gives")
+    request.add_argument("--folder", default=None,
+                         help="move_asset: the project folder the file goes to ('' the top level)")
     request.add_argument("--role", default=None, help="a requirement's role (assign_requirement)")
     request.add_argument("--file-kind", dest="file_kind", default=None,
                          help="create_file: an asset kind token, for a name that cannot say its kind")
@@ -777,6 +783,9 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--behind", choices=switch, default=None,
                          help="play: the game's window starts behind every other, the editor keeping the foreground "
                               "(Windows only)")
+    request.add_argument("--fresh", choices=switch, default=None,
+                         help="play: the run directory emptied of what the runs before wrote there (game.cfg, saves) "
+                              "before the game starts")
     request.add_argument("--report", choices=switch, default=None,
                          help="build: false leaves the build result's panel closed as the build ends")
     request.add_argument("--wait", action="store_true",
@@ -797,7 +806,7 @@ def build_parser() -> argparse.ArgumentParser:
                           help="the document (a project-relative path or a logical name; the active one when left "
                                "out; seek takes none)")
     viewport.add_argument("--kind", default=None,
-                          help="the viewport's kind (menu, model, script, mission; the one the document shows in when "
+                          help="the viewport's kind (menu, model, script, mission, texture, effect; the one the document shows in when "
                                "left out; seek takes none)")
     viewport.add_argument("--x", type=float, default=None,
                           help="hit: the point across (design units or pixels); box: its first corner's")
@@ -883,6 +892,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="start: the game's window starts behind every other, the editor keeping the foreground "
                            "(play's behind; Windows only). Left out, it starts as Play starts it, as the editor_play "
                            "tool's does")
+    play.add_argument("--fresh", action="store_true",
+                      help="start: the run directory emptied of what the runs before wrote there (the game's game.cfg, "
+                           "its saves) before the game starts, a first run (play's fresh). Left out, it keeps them")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 

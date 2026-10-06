@@ -285,13 +285,17 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));
 	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
-	            Tokens({ "animation_map.ignored_input", "credits.line_ending",
+	            Tokens({ "animation_map.ignored_input", "credits.line_ending", "environment.ignored_input",
+	                     "hud_layout.line_ending",
 	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
-	                     "shader.form", "strings.regrouped", "style.line_ending" }));
+	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "credits.line_ending", "with every line ending CR LF" },
+		{ "environment.ignored_input", "with each line as the game reads it" },
+		{ "hud_layout.line_ending", "with every line ending CR LF" },
 		{ "menu.ignored_input", "without the input the game ignores" },
+		{ "sound_bank.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
 		{ "mission.rewrite_differs", "with its sections as the game reads them" },
 		{ "script.line_ending", "with every line ending CR LF" },
@@ -306,8 +310,9 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
 	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "document.unserializable",
-	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input", "music_script.invalid_input",
-	                     "music_script.unserializable", "strings.invalid_input" }));
+	                     "environment.invalid_input", "menu.invalid_input", "menu.unserializable", "mission.invalid_input",
+	                     "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
+	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.expansion.mission_twice", "build.expansion.mission_untitled", "build.expansion.root_only",
@@ -319,15 +324,20 @@ static int test_columns() {
 	// error of any other row blocks, as does an error made from no row. A row that says its file does
 	// not serialize always gates.
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) ==
-	            Tokens({ "animation_map.no_reset", "build.expansion.exp_desc", "build.expansion.mission_twice",
+	            Tokens({ "animation_map.no_reset", "asset.wave_unplayable", "build.expansion.exp_desc", "build.expansion.mission_twice",
 	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.first_row",
 	                     "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
-	                     "catalog.reserved_name", "catalog.reserved_refused", "expansion.file.unread", "export.cancelled",
+	                     "catalog.reserved_name", "catalog.reserved_refused", "environment.sky_height_default",
+	                     "expansion.file.unread", "export.cancelled",
 	                     "export.cleanup", "export.replaced",
 	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
+	                     "particle.duplicate_effect", "particle.unreadable",
 	                     "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
-	                     "shader.form", "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
+	                     "shader.form", "sound_bank.layer_unheard", "sound_bank.set_name_repeated", "sound_bank.set_silent",
+	                     "sound_bank.wave_file_name", "sound_bank.wave_name_repeated", "sound_bank.wave_no_file",
+	                     "sound_profiles.name_repeated", "sound_profiles.no_default",
+	                     "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
 	                     "style.value_is_directive", "text.reader", "text.unreadable" }));
