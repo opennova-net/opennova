@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include <editor/run/play_lease.h>
 #include <editor/run/play_session.h>
 #include <editor/run/play_start.h>
+#include <editor/session/play_log.h>
 
 namespace opennova::editor {
 
@@ -39,7 +41,10 @@ std::string play_mission_at(const SessionView &view, const std::string &path);
 // from a quit), its lease on the build it runs from (run/play_lease.h), which keeps a build from
 // pruning that directory while the game may still run, and the run directory it runs in
 // (run/run_directory.h, S13 A8: its working directory and its log, the build directory left as the
-// build wrote it).
+// build wrote it). What the game's logs say it looked for and did not find are Problems rows on the
+// files that name it (session/play_log.h, ADR 0046 DI-27): OpenNova's as its log comes, the game
+// install's once its game exited; each mode's kept until the next Play of that mode, or until the
+// project closes.
 class PlayController {
 public:
 	explicit PlayController(SessionCore &core);
@@ -110,15 +115,29 @@ private:
 	// mission's): the one place a new report the game logs is read (DI-27's misses).
 	void absorb_report(const std::string &line);
 	void absorb_boot_report(const std::string &line);
+	// A line saying what the runtime looked for and did not find (gameprofile::kResourceMissingMarker):
+	// its rows (resource_miss_findings) among this mode's, each once, for the project the game was
+	// started in.
+	void absorb_resource_miss(const std::string &line);
+	// What the game install's logs, read once its game exited, say it did not find (install_log_findings):
+	// its file log (`read`: there was one) and the graphics log this run wrote, its rows among this mode's.
+	void absorb_install_logs(bool read);
+	// This mode's log rows gaining `rows`, each once; true when one was new.
+	bool add_log_findings(std::vector<Diagnostic> rows);
+	// The game this Play's mode runs, as its rows name it.
+	PlayGame play_game() const;
 	// The launch mission's report (gameprofile::kLaunchMissionFailedMarker): the mission that did
 	// not load and why, a Problems row (play.mission.failed) of the project the game was started in.
 	void absorb_mission_report(const std::string &line);
 	void absorb_exit();
 	// The project's .bms `mission` names, as the scan spells it; "" for none.
 	std::string mission_file(const std::string &mission) const;
-	// The Play's own findings (a mission that did not load, a nonzero exit) given to Problems, and
-	// the validation that makes their rows left due.
+	// The Play's own findings (a mission that did not load, a nonzero exit) and every mode's log rows
+	// given to Problems, and the validation that makes their rows left due.
 	void publish_findings();
+	// The rows Problems is given: the last Play's own, then each mode's log rows (OpenNova's, the game
+	// install's, strict Play's).
+	std::vector<Diagnostic> play_rows() const;
 
 	SessionCore &core_;
 	SessionView &view_;
@@ -150,6 +169,14 @@ private:
 	size_t game_lines_ = 0, game_shown_ = 0;
 	std::string boot_project_; // the project the game was started in: its boot report is that project's
 	std::vector<Diagnostic> findings_; // this Play's own rows: its mission's failure, its crash
+	// The mode of the running (or last) Play (kRunMode*), and the rows each mode's last Play's logs made
+	// (DI-27), kept until the next Play of that mode.
+	std::string mode_;
+	std::map<std::string, std::vector<Diagnostic>> log_findings_;
+	// The graphics log in the run directory as the game was started (its size, -1 for none, and its last
+	// write): one the game install's game left as it was is a run before's, never read.
+	int64_t graphics_log_size_ = -1;
+	int64_t graphics_log_time_ = 0;
 };
 
 } // namespace opennova::editor
