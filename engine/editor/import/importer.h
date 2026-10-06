@@ -75,6 +75,16 @@ struct Importer {
 	ImportOptions default_options;
 	// The options its record takes, a row each (none: it reads none).
 	std::vector<ImportOptionRow> options;
+	// The files an import of a source of these bytes reads besides it, as its text names them (paths
+	// from its folder), known before the import runs: a font set's glyph sheet. An import of an author's
+	// source from the disk brings each beside it, copied as it is with no record of its own, to the place
+	// the import reads it from (import_assets, the import plan: import_input_destination). Null: none
+	// known ahead (its import may still read the project's files through its context).
+	void (*names_inputs)(const std::vector<uint8_t> &source, std::vector<std::string> &out) = nullptr;
+	// The project folder an author's source of it is imported into when its name gives it no kind of
+	// its own (a font set with the fonts, in fonts/); "" the folder of the kind its name gives (a PNG
+	// with the textures).
+	const char *folder = "";
 	// The import of the context's source: its outputs, each named after the source's stem, or
 	// the stem, an underscore and a suffix of its own where it makes several (renamed_import_output
 	// relies on it), from the source and the files it reads through the context.
