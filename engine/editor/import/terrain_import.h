@@ -30,16 +30,22 @@ namespace opennova::editor {
 //   64-texel cells [orig: Terrain_LoadTileSetAtlas @ 0x604B7C]), when the set names one;
 // - `<stem>.til`: the terrain's own tile placement, empty (a mission's `<mission>.til` comes first
 //   [orig: Terrain_Init @ 0x60FCFD]; with neither the game places no tile);
+// - `<stem>_m.pcx`: the surface map (the .trn's polytrn_charmap, retail's `_m` name), when the set names
+//   one: 8-bit, each index the surface class the game reads there (footsteps, impact effects, the physics
+//   of rounds and throwables), the char map legend (formats/trn/charmap_legend.h) its palette; with none
+//   the game reads surface 1 everywhere [orig: sub_605A10 @ 0x605A31; Terrain_GetSurfaceTypeAtPosition @
+//   0x606519];
 // - `<stem>.trn`: the settings naming them, the sector grid by the `layout` option, the water.
-// No surface map and no foliage map are made: with none the game reads surface 1 everywhere [orig:
-// Terrain_GetSurfaceTypeAtPosition @ 0x606519] and grows no foliage [orig:
-// Foliage_SampleFoliageMapMask @ 0x60662B].
+// No foliage map is made: with none the game grows no foliage [orig: Foliage_SampleFoliageMapMask @
+// 0x60662B].
 //
 // The set file: a line a key and a file name (relative to the set's folder), `;` to the line's end a
 // comment: `heightmap` (required: a PNG of 1024 x 1024 texels, grey at any depth or colour, read as its
 // grey; or TrnGen's own `.raw`, 1 MiB of 8-bit heights, or 2 MiB of the game's own 16-bit heights),
 // `colormap` (required: a PNG, TGA or PCX of 1024 x 1024), `detail` (a power of two a side), `tiles`
-// (sides multiples of 64).
+// (sides multiples of 64), `surface` (a PNG, TGA or PCX, square, 256, 512 or 1024 a side, laid over the
+// heightmap as the colour map is: an 8-bit PCX's or a palette PNG's indices are the classes, 0 to 19; any
+// other's colours each a class's legend colour exactly, its alpha ignored).
 
 inline constexpr int kTerrainImporterVersion = 1;
 inline constexpr const char *kTerrainSetExtension = ".tset";
@@ -52,6 +58,7 @@ struct TerrainSet {
 	std::string colormap;
 	std::string detail;
 	std::string tiles;
+	std::string surface;
 };
 
 // The set's text read; false, with `why`, for a line of no key the set knows, or a set without its
@@ -76,8 +83,8 @@ bool terrain_import_settings(const ImportOptions &options, TerrainImportSettings
 bool terrain_stem_fits(const std::string &stem, std::string &why);
 
 // The outputs' names for a stem, in the order the import makes them (the tile set's atlas only when
-// `tiles`).
-std::vector<std::string> terrain_output_names(const std::string &stem, bool tiles);
+// `tiles`, the surface map only when `surface`).
+std::vector<std::string> terrain_output_names(const std::string &stem, bool tiles, bool surface);
 
 // A heightmap as the bake takes it, from the file `name` holds: an 8-bit map's texels (TrnGen's
 // input) or 16-bit heights (raw16, 1/256 world unit a step), scaled by `top`. False, with `why`, for a
@@ -94,6 +101,14 @@ bool decode_terrain_heightmap(const std::string &name, const std::vector<uint8_t
 // multiples of 64. False, with `why` naming the file, for one that does not read or does not fit.
 bool decode_terrain_image(const std::string &key, const std::string &name, const std::vector<uint8_t> &bytes,
                           RgbaImage &out, std::string &why);
+
+// The set's surface map as the import writes it: its classes as indices, the legend its palette. An
+// indexed image (an 8-bit PCX, a palette PNG) is read by its indices, a colour image by its colours, each
+// looked up in the legend exactly (no nearest colour). False, with `why` naming the file, for one that does
+// not read, is not square with a side of 256, 512 or 1024, or holds a texel of no class (an index past 19,
+// a colour the legend lacks: the first named by its place, column and row from the top left).
+bool decode_terrain_surface(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,
+                            std::string &why);
 
 // The stretches of 256 texels along a row (the CDEP section's blocks) whose heights span more than a
 // block holds: 32,766 raw (just under 128 world units), its width that of the range plus one within the
