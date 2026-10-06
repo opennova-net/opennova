@@ -746,12 +746,19 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 			ImGui::TableNextColumn();
 			ImGui::AlignTextToFramePadding();
 			const size_t count = model_.uses(*graph, document, line.address);
-			if (count) ImGui::Text("%zu", count);
-			else ImGui::TextDisabled("0");
+			// A click opens its uses (DI-05): the record selected, its Referenced by in the Inspector, each a Go to.
+			if (count) {
+				if (ImGui::Selectable((std::to_string(count) + "###uses").c_str())) {
+					select(workspace, document, line.address);
+					window_requests::focus(workspace, "inspector");
+				}
+			} else {
+				ImGui::TextDisabled("0");
+			}
 			ui_kit::tooltip_lazy([&] {
 				const GraphSymbol *symbol = graph->symbol_at(document.path(), document.locator(line.address), defining->id);
 				if (!symbol || !count) return std::string("No file of the project names it.");
-				std::string tip = counted(count, "use") + ":";
+				std::string tip = counted(count, "use") + " (a click lists them in the Inspector, each a Go to):";
 				size_t listed = 0;
 				for (const GraphEdge *edge : graph->users_of(*symbol)) {
 					if (++listed > 12) {
