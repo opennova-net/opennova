@@ -111,13 +111,15 @@ struct ActivityView {
 	// a rename back (it rewrote files, not a step of a document's history), so the Edit menu offers the
 	// rename back (RenameController's rename_back: only the sites it rewrote). A name's (`symbol`: its
 	// defining file, the record's locator and the field, its kind and scope) or a file's (`path` its new
-	// path); `from` the old name, `to` the new.
+	// path); `from` the old name, `to` the new. A move's (`move`, DI-03): `path` its new path, `from` and
+	// `to` the folders it left and went to ("" the top level).
 	struct LastRename {
 		bool made = false;
 		bool symbol = false;
 		std::string path, locator, field, from, to;
 		ReferenceKind kind = ReferenceKind::None;
 		std::string scope;
+		bool move = false;
 	};
 	LastRename last_rename;
 };

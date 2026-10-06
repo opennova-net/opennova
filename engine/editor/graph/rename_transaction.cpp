@@ -15,6 +15,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
+#include <editor/assets/project_layout.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_file_set.h>
 #include <editor/documents/texture_roles.h>
@@ -238,6 +239,116 @@ void plan_sites(RenamePlan &plan, const AssetScan &scan, const AssetGraph &graph
 
 std::string companion_path(const RenameOutput &companion) {
 	return utf8_of(path_of(companion.path).parent_path() / path_of(companion.new_name));
+}
+
+std::string folder_of_path(const std::string &relative) {
+	const size_t slash = relative.rfind('/');
+	return slash == std::string::npos ? std::string() : relative.substr(0, slash);
+}
+
+namespace {
+
+// Whether the folder `dir` (on disk) is the project's export folder, one an export keeps beside it, or a
+// folder under either: no file of the project's sits there (the scan passes them by).
+bool in_export_folder(const fs::path &dir, const fs::path &export_dir) {
+	std::error_code ec;
+	const fs::path at = fs::weakly_canonical(dir, ec);
+	if (ec) return false;
+	for (const char *suffix : {"", kExportStagingSuffix, kExportPreviousSuffix}) {
+		fs::path held = export_dir;
+		held.replace_filename(fs::path(export_dir.filename()).concat(suffix));
+		const fs::path canonical = fs::weakly_canonical(held, ec);
+		if (ec) continue;
+		const fs::path within = at.lexically_relative(canonical);
+		if (!within.empty() && *within.begin() != "..") return true;
+	}
+	return false;
+}
+
+} // namespace
+
+RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
+                     const std::string &file, const std::string &folder, const std::vector<ImportedSource> *imports) {
+	RenamePlan plan;
+	plan.move = true;
+	const AssetEntry *asset = find_asset(scan, file);
+	if (!asset) {
+		plan.refusals.push_back(refusal(CoreFinding::RenameUnknownFile, "The project has no file named '" + file + "'.", file));
+		return plan;
+	}
+	plan.path = asset->relative_path;
+	plan.old_name = asset->logical_name;
+	plan.new_name = asset->logical_name;
+	std::string to, why;
+	if (!normalize_project_folder(folder, to, why)) {
+		plan.refusals.push_back(refusal(CoreFinding::RenamePath, why, asset->relative_path));
+		return plan;
+	}
+	plan.new_path = join_path(to, asset->logical_name);
+	const std::string where = to.empty() ? std::string("the top level of the project") : to + "/";
+	if (!asset->imported_from.empty()) {
+		plan.refusals.push_back(refusal(CoreFinding::RenameImported, asset->logical_name + " is made by the import of " +
+		                                        asset->imported_from + ": move the source instead.",
+		                                asset->relative_path));
+		return plan;
+	}
+	// Its own folder (as the file system compares names): nothing to move.
+	if (strutil::iequals(folder_of_path(asset->relative_path), to)) {
+		plan.refusals.push_back(refusal(CoreFinding::RenameUnchanged, asset->logical_name + " is in " + where + " already.",
+		                                asset->relative_path));
+		return plan;
+	}
+	// Inside the project, symbolic links resolved, and somewhere its walk reaches (never the export folder).
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
+	if (!check_project_file_name(paths.root, to, asset->logical_name, AssetKind::Unknown, problem, message)) {
+		plan.refusals.push_back(refusal(CoreFinding::RenamePath, message, asset->relative_path));
+		return plan;
+	}
+	if (!to.empty() && in_export_folder(system_path(join_path(paths.root, to)), system_path(paths.export_dir(project)))) {
+		plan.refusals.push_back(refusal(CoreFinding::RenamePath,
+		                                to + " is where the project's export lands: a file there is no file of the project's.",
+		                                asset->relative_path));
+		return plan;
+	}
+	std::error_code ec;
+	if (fs::exists(system_path(join_path(paths.root, plan.new_path)), ec) || ec) {
+		plan.refusals.push_back(refusal(CoreFinding::RenameExists, "A file already sits at '" + plan.new_path + "'.",
+		                                asset->relative_path));
+		return plan;
+	}
+	// A file another source's import reads from its place: moved, that import would no longer find it.
+	if (imports)
+		for (const ImportedSource &source : *imports)
+			for (const std::string &input : source.inputs)
+				if (strutil::iequals(input, asset->relative_path))
+					plan.refusals.push_back(refusal(CoreFinding::RenameImported,
+					                                asset->logical_name + " is read by the import of " + source.source +
+					                                        " from where it is: moved, that import would no longer find it.",
+					                                asset->relative_path));
+	// An import source takes its record, and its outputs are made again under its new place; one whose
+	// import reads files beside it (found from its folder) would no longer find them.
+	if (importer_for(asset->logical_name)) {
+		const std::string record = asset->relative_path + kImportSidecarSuffix;
+		if (fs::is_regular_file(system_path(join_path(paths.root, record)), ec)) {
+			ImportSidecar sidecar;
+			Diagnostic unread;
+			if (load_import_sidecar(join_path(paths.root, record), sidecar, unread) && !sidecar.inputs.empty()) {
+				std::string named;
+				for (size_t i = 0; i < sidecar.inputs.size() && i < 4; ++i) named += (i ? ", " : "") + sidecar.inputs[i];
+				if (sidecar.inputs.size() > 4) named += " and " + std::to_string(sidecar.inputs.size() - 4) + " more";
+				plan.refusals.push_back(refusal(CoreFinding::RenameImported,
+				                                asset->logical_name + "'s import reads " + named +
+				                                        " from beside it: moved alone, it would no longer find them.",
+				                                asset->relative_path));
+			}
+			plan.sidecar = record;
+			plan.new_sidecar = plan.new_path + kImportSidecarSuffix;
+		}
+		plan.output_dir = import_output_dir(paths, asset->relative_path);
+		plan.new_output_dir = import_output_dir(paths, plan.new_path);
+	}
+	return plan;
 }
 
 RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
@@ -1085,6 +1196,7 @@ void RenameTransaction::commit() {
 	committed_ = true;
 	if (symbol_) commit_symbol_rename();
 	else if (file_plan_.split) commit_split();
+	else if (file_plan_.move) commit_move();
 	else commit_file_rename();
 	staged_.clear();
 }
@@ -1261,6 +1373,56 @@ void RenameTransaction::commit_file_rename() {
 	// that only changes the case keeps its output directory, which is keyed case-blind.)
 	if (!plan.output_dir.empty() && plan.output_dir != plan.new_output_dir)
 		fs::remove_all(at(plan.output_dir), ec);
+	ok_ = true;
+}
+
+// A move (DI-03): the file renamed into its new folder (made as needed), its import record with it; a
+// record that will not follow puts the file back, so the two stay together. Nothing else is written: no
+// site names a folder. The old outputs go (the import pass that follows makes them under the new
+// place), and the folder the file left, emptied by the move, goes too, as each one above it so emptied
+// (Files shows no empty folder: a flat project moved back to the top level stays flat on disk too).
+void RenameTransaction::commit_move() {
+	const RenamePlan &plan = file_plan_;
+	const auto at = [this](const std::string &relative) { return system_path(join_path(paths_.root, relative)); };
+	const fs::path from = at(plan.path), to = at(plan.new_path);
+	std::error_code ec;
+	if (fs::exists(to, ec) || ec) {
+		findings_.push_back(refusal(CoreFinding::RenameExists, "A file already sits at '" + plan.new_path + "'.", plan.path));
+		return;
+	}
+	// The folders this move makes (project-relative, the innermost first), taken back when it does not happen.
+	std::vector<std::string> made;
+	for (std::string dir = folder_of_path(plan.new_path); !dir.empty() && !fs::exists(at(dir), ec); dir = folder_of_path(dir))
+		made.push_back(dir);
+	std::string io_error;
+	const std::string into = folder_of_path(plan.new_path);
+	if (!into.empty() && !ensure_directory(join_path(paths_.root, into), io_error)) {
+		findings_.push_back(refusal(CoreFinding::RenameMove, "The folder " + into + " could not be made: " + io_error, plan.path));
+		return;
+	}
+	const auto unmake = [&] {
+		std::error_code ignored;
+		for (const std::string &dir : made) fs::remove(at(dir), ignored);
+	};
+	if (!rename_with_retry(from, to, ec)) {
+		findings_.push_back(refusal(CoreFinding::RenameMove, "The file could not be moved: " + ec.message(), plan.path));
+		unmake();
+		return;
+	}
+	if (!plan.sidecar.empty() && !rename_with_retry(at(plan.sidecar), at(plan.new_sidecar), ec)) {
+		findings_.push_back(refusal(CoreFinding::RenameMove, "The import record could not be moved with it: " + ec.message() +
+		                                    ". The file stays where it was.",
+		                            plan.sidecar));
+		std::error_code back;
+		rename_with_retry(to, from, back);
+		unmake();
+		return;
+	}
+	if (!plan.output_dir.empty() && plan.output_dir != plan.new_output_dir) fs::remove_all(at(plan.output_dir), ec);
+	for (std::string dir = folder_of_path(plan.path); !dir.empty(); dir = folder_of_path(dir)) {
+		std::error_code kept;
+		if (!fs::is_empty(at(dir), kept) || kept || !fs::remove(at(dir), kept)) break;
+	}
 	ok_ = true;
 }
 
