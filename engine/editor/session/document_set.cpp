@@ -16,6 +16,7 @@
 #include <editor/documents/texture_operations.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
+#include <editor/graph/native_text_sites.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
@@ -457,13 +458,21 @@ void DocumentSet::open_document(const EditorRequest &request) {
 	// shows it again). A text document's place (its locator "line:column": a Go to's span, a
 	// Problems row's line) is a RevealText event for its view.
 	const auto select_named = [this, &request](const DocumentBase &document) {
-		if (text_of(document)) {
+		if (const TextDocument *text = text_of(document)) {
 			size_t line = 0, column = 0;
-			if (!TextDocument::read_locator(request.locator, line, column)) return;
+			std::string locator = request.locator;
+			// A record of a text the engine's own parser reads (a native kind held as a text, DI-06), which
+			// keeps no places: the line its text writes the record's name on (DI-17, native_text_place).
+			if (!TextDocument::read_locator(locator, line, column)) {
+				if (!native_text_place(document.path(), document.kind(), view_.project.document->target_game, text->text(),
+				                       request.locator, request.field, line, column))
+					return;
+				locator = TextDocument::locator(line, column);
+			}
 			ViewEvent reveal;
 			reveal.kind = ViewEventKind::RevealText;
 			reveal.path = document.path();
-			reveal.locator = request.locator;
+			reveal.locator = std::move(locator);
 			view_.events.post(std::move(reveal));
 			return;
 		}
@@ -499,10 +508,11 @@ void DocumentSet::open_document(const EditorRequest &request) {
 	}
 	if (request.kind == EditorRequestKind::OpenDocument && document_for(path)) {
 		// An open document comes back with the selection it had, unless the request names
-		// a record (a Problems row, a Go to).
+		// a record (a Problems row, a Go to; in a native text a field alone names a file-wide line, DI-17).
 		const DocumentBase &document = *document_for(path);
 		activate(document.path());
-		if (request.address.row || !request.locator.empty()) select_named(document);
+		if (request.address.row || !request.locator.empty() || (!request.field.empty() && text_of(document)))
+			select_named(document);
 		core_.touch(ViewConcern::Selection);
 		say("Showing " + document.path() + ".");
 		return;
@@ -517,9 +527,21 @@ void DocumentSet::open_document(const EditorRequest &request) {
 				refuse(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This kind of file has no editor yet.", path));
 				return;
 			}
+			// A Go to lands there (DI-17), the line of the record it names marked; the Document window comes
+			// forward with the page's tab, over a document's tab that showed (a ShowDocument).
 			view_.documents.page = asset.relative_path;
+			view_.documents.page_locator = request.locator;
+			view_.documents.page_field = request.field;
+			ViewEvent shown;
+			shown.kind = ViewEventKind::ShowDocument;
+			shown.path = asset.relative_path;
+			shown.flag = true;
+			view_.events.post(std::move(shown));
 			core_.touch(ViewConcern::ActiveDocument);
-			say("Showing the page of " + asset.relative_path + ": the editor has no editor for its kind yet.");
+			const std::string &record = request.locator, &field = request.field;
+			const std::string at = record.empty() ? field : field.empty() ? record : record + " - " + field;
+			say("Showing the page of " + asset.relative_path + (at.empty() ? std::string() : ", at " + at) +
+			    ": the editor has no editor for its kind yet.");
 			return;
 		}
 		std::shared_ptr<DocumentBase> document = type->make(); Diagnostic error;
@@ -606,6 +628,8 @@ void DocumentSet::close_document(const std::string &requested) {
 		const AssetEntry *file = core_.project_file(requested);
 		if (requested == view_.documents.page || (file && file->relative_path == view_.documents.page)) {
 			view_.documents.page.clear();
+			view_.documents.page_locator.clear();
+			view_.documents.page_field.clear();
 			core_.touch(ViewConcern::ActiveDocument);
 			return;
 		}

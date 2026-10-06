@@ -67,8 +67,9 @@ public:
 	// A RevealRecord event, sent to the view of its document (made for it when the document is
 	// open and has none yet), which holds it until it draws; dropped for a document not open.
 	void receive(const ViewEvent &event);
-	// A ShowDocument event (a Back or a Forward to a document or a page): its tab shown at the next
-	// draw, whichever tab shows now, and the window brought forward.
+	// A ShowDocument event (a Back or a Forward to a document, a page shown: DI-17's Go to lands there): its
+	// tab shown at the next draw, whichever tab shows now, the window brought forward, and a page's marked
+	// line scrolled to.
 	void show_document(const ViewEvent &event);
 	// The events the view of the document at `path` holds until it draws (0: none, or no view).
 	size_t held_events(const std::string &path) const;
@@ -112,6 +113,8 @@ private:
 	// The tab a ShowDocument asked shown at the next draw: a document's by its path, or the page's.
 	std::string tab_asked_;
 	bool page_asked_ = false;
+	// The page's marked line to be scrolled to as the page next draws (a ShowDocument's ask).
+	bool page_reveal_ = false;
 	FilePageCache page_cache_;  // that page as last made (made again when what it reads moves)
 	// The find bar: open, the keyboard to go to its text on the next draw, the text and whether
 	// case matters (the workspace's: workspace.find, taken when the session's moved, a person's change

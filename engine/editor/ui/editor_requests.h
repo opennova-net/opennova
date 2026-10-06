@@ -19,12 +19,21 @@
 // their lists share.
 namespace opennova::editor::window_requests {
 
-// Go to a target (reference_targets, usage_target): a file the editor edits opened
-// at the record (found by its locator, this same document's too) with its field shown; a file
-// the editor does not edit selected in Files.
+// Go to a target (reference_targets, usage_target), which always lands (the deep-integration plan's
+// DI-17): a file the editor edits opened at the record (found by its locator, this same document's too)
+// with its field shown, a text at the line that writes it; a file the editor has no editor for on its
+// page, the record's line marked. One OpenDocument either way, a step of the navigation history.
 inline void go_to(Workspace &workspace, const ReferenceTarget &target) {
-	if (!target.editable) return workspace.request(request::show_in_files(target.file));
+	if (target.file.empty()) return;
 	workspace.request(request::open_document(target.file, target.locator, target.field));
+}
+
+// Where a Go to leads, in words for its tooltip: the file opened at it, or its page.
+inline std::string go_to_words(const ReferenceTarget &target) {
+	if (target.editable) return "Open " + target.label + ".";
+	const std::string at = target.locator.empty() ? target.field : target.locator;
+	return "Open the page of " + target.file + (at.empty() ? std::string() : ", at " + at) +
+	       " (the editor has no editor for its kind).";
 }
 
 inline void select(Workspace &workspace, const Document &document, NodeAddress address,

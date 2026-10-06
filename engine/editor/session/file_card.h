@@ -128,8 +128,8 @@ FileUsers file_users(const SessionView &view, const std::string &path);
 size_t file_use_count(const SessionView &view, const std::string &path);
 // Its wire form, the used_by query's: {found, path, name, count, further_count, reading?, files [{file, name,
 // uses [{words, field, file, locator?, editable, further [{file, name, uses [{words, field, file, locator?,
-// editable}]}]}]}]}; a use's file and locator are where Go to opens it (open_document's path and locator, or
-// show_in_files's path where `editable` is false).
+// editable}]}]}]}]}; a use's file and locator are where Go to opens it (open_document's path and locator: the
+// file's page with the record marked where `editable` is false, DI-17).
 io::JsonValue file_users_json(const FileUsers &users);
 
 // The most of a wave a card reads to say what it is (the game's own are a few hundred KB): a larger file is

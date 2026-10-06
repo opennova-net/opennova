@@ -586,7 +586,7 @@ JsonValue answer_references(const QueryContext &context, const QueryArgs &args, 
 JsonValue answer_file_page(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
 	const std::string path = args.text("path").empty() ? view.documents.page : args.text("path");
-	const FilePage page = file_page(view, path);
+	const FilePage page = shown_file_page(view, path);
 	if (!page.found) {
 		error = path.empty() ? std::string("name the file with \"path\" (no page shows).") : "no project file " + path + ".";
 		return JsonValue::make_null();
@@ -603,18 +603,35 @@ JsonValue answer_file_page(const QueryContext &context, const QueryArgs &args, s
 	out.set("editor", json_string(page.editor));
 	out.set("errors", json_number(double(page.errors)));
 	out.set("warnings", json_number(double(page.warnings)));
+	if (page.wave) out.set("wave", JsonValue::make_bool(true));
+	// Where the Go to that showed it landed (DI-17).
+	if (!page.at_locator.empty()) out.set("at_locator", json_string(page.at_locator));
+	if (!page.at_field.empty()) out.set("at_field", json_string(page.at_field));
 	const auto lines = [](const std::vector<FilePageLine> &from) {
 		JsonValue list = JsonValue::make_array();
 		for (const FilePageLine &line : from) {
 			JsonValue entry = JsonValue::make_object();
 			entry.set("text", json_string(line.text));
 			if (line.missing) entry.set("missing", JsonValue::make_bool(true));
+			if (line.at) entry.set("at", JsonValue::make_bool(true));
 			if (!line.target.file.empty()) entry.set("file", json_string(line.target.file));
 			if (!line.target.locator.empty()) entry.set("locator", json_string(line.target.locator));
+			if (!line.target.field.empty()) entry.set("field", json_string(line.target.field));
 			list.push(std::move(entry));
 		}
 		return list;
 	};
+	JsonValue defines = JsonValue::make_array();
+	for (const FilePageDefinition &defined : page.defines) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("text", json_string(defined.text));
+		entry.set("read", JsonValue::make_bool(defined.read));
+		if (!defined.unread.empty()) entry.set("unread", json_string(defined.unread));
+		if (defined.at) entry.set("at", JsonValue::make_bool(true));
+		entry.set("used_by", lines(defined.users));
+		defines.push(std::move(entry));
+	}
+	out.set("defines", std::move(defines));
 	out.set("used_by", lines(page.used_by));
 	out.set("names", lines(page.names));
 	return out;
@@ -1610,7 +1627,9 @@ constexpr EditorQueryRow kRows[] = {
 			kTargetReads,
 			"A page of the places a record's reference field's Go to leads with the value it "
 			"holds: each with its label, file, locator and field, and whether the editor opens "
-			"the file.")
+			"the file (editable; else its page shows the record): an open_document of the file, "
+			"locator and field is the Go to, which always lands. A name nothing resolves leads where "
+			"it belongs (missing: the file its fix opens, a symbol's), a file the project lacks nowhere.")
 			.pages("targets")
 			.row,
 	Query(K::DocumentSearch, "document_search", answer_document_search, kDocumentSearchParams,
@@ -1665,8 +1684,11 @@ constexpr EditorQueryRow kRows[] = {
 			"A file's page as the Document window shows it for a kind the editor has no editor for (path "
 			"left out: the page showing, the documents section's page): its name, kind and size, what it "
 			"holds and what in the game reads it (cite: the witness), where a build puts it, what the "
-			"editor does with it, its Problems rows' errors and warnings, who names it (used_by) and what "
-			"it names (names), each {text, missing?, file?, locator?}.")
+			"editor does with it, its Problems rows' errors and warnings, wave (true for a wave, which "
+			"play_sound plays), what it defines (defines, each {text, read, unread?: why no lookup of the "
+			"game finds it, at?, used_by}), who names it (used_by) and what it names (names), each line "
+			"{text, missing?, at?, file?, locator?, field?: where a Go to on it goes, an open_document of "
+			"them}; the page showing, at_locator and at_field: the record a Go to landed on, its lines at.")
 			.row,
 	Query(K::MenuTree, "menu_tree", answer_menu_tree, kMenuTreeParams, kMenuReads,
 			"A menu's screens (id, name, the render check's status and whether it is current) and "
@@ -1930,7 +1952,7 @@ constexpr EditorQueryRow kRows[] = {
 			"integration plan's DI-05): found, its path and name, count (its uses: the records naming it, then "
 			"those naming what it defines) and further_count, files (by the naming file: file, name, uses), "
 			"each use's words (the record and its field in words), field, the file and locator Go to opens "
-			"(editable false: shown in Files), and further, one hop on where the naming record defines what "
+			"(editable false: on the file's page, DI-17), and further, one hop on where the naming record defines what "
 			"others name (an item naming a model: the mission entities placing it), by file likewise; reading "
 			"while the project's references are being read.")
 			.row,
