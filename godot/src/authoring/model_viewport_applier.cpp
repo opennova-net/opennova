@@ -4,19 +4,14 @@
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/basis.hpp>
-#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
-
-#include <algorithm>
-#include <iterator>
 
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
-#include <formats/threedi/threedi_3di3.h>
 #include <runtime/renderer/fp_viewmodel_spec.h>
 #include <runtime/world/player_present.h>
 
@@ -30,28 +25,12 @@ namespace godot {
 
 namespace {
 
-using opennova::threedi::THREEDI_TEX_SLOT_DETAIL;
-using opennova::threedi::THREEDI_TEX_SLOT_DIFFUSE;
-using opennova::threedi::THREEDI_TEX_SLOT_NORMAL;
-using opennova::threedi::THREEDI_TEX_SLOT_NORMAL_B;
-
 Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
 	return Vector3(v.x, v.y, v.z);
 }
 
 const opennova::editor::ModelViewport &model_of(const opennova::editor::ViewportModel &model) {
 	return static_cast<const opennova::editor::ModelViewport &>(model);
-}
-
-// True when the material row has a texture row of `slot` (or, for the normal stage, of the second
-// normal slot it falls back to).
-bool has_stage(const opennova::threedi::ThreediMaterial &material, int slot) {
-	const uint32_t rows = std::min<uint32_t>(material.texture_count, uint32_t(std::size(material.textures)));
-	for (uint32_t i = 0; i < rows; ++i) {
-		const int row = int(material.textures[i].slot);
-		if (row == slot || (slot == THREEDI_TEX_SLOT_NORMAL && row == THREEDI_TEX_SLOT_NORMAL_B)) return true;
-	}
-	return false;
 }
 
 } // namespace
@@ -83,54 +62,6 @@ ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) {
 	arms_->set_panm_clock(clock_);
 	arms_->set_avatar_part(ObjectModel::AVATAR_PART_ARMS);
 	root->add_child(arms_);
-}
-
-void ModelViewportApplier::plan_(Build &build) {
-	plan_data_(build, build.data, false);
-	if (build.arms.is_valid()) plan_data_(build, build.arms, true);
-	Unit scene;
-	scene.kind = Unit::Kind::Scene;
-	build.units.push_back(scene);
-	Unit pose;
-	pose.kind = Unit::Kind::Pose;
-	build.units.push_back(pose);
-}
-
-void ModelViewportApplier::plan_data_(Build &build, const Ref<ObjectData> &data, bool arms) {
-	const opennova::threedi::Threedi3di3 &model = data->native_model();
-	// The textures the scene's materials bind, each stage's as ObjectModel::create_material loads it
-	// and each flipbook frame as collect_anim_frames does: decoded here, the scene's loads hit the
-	// texture files' cache.
-	for (size_t i = 0; i < model.material_count; ++i) {
-		const opennova::threedi::ThreediMaterial &material = model.materials[i];
-		for (const int slot : { THREEDI_TEX_SLOT_DIFFUSE, THREEDI_TEX_SLOT_DETAIL, THREEDI_TEX_SLOT_NORMAL }) {
-			if (!has_stage(material, slot)) continue;
-			Unit unit;
-			unit.kind = Unit::Kind::Texture;
-			unit.material = int(i);
-			unit.slot = slot;
-			unit.arms = arms;
-			build.units.push_back(unit);
-		}
-		const PackedStringArray frames = data->get_material_anim_frames(int(i), THREEDI_TEX_SLOT_DIFFUSE);
-		for (int frame = 0; frames.size() > 1 && frame < frames.size(); ++frame) {
-			Unit unit;
-			unit.kind = Unit::Kind::Frame;
-			unit.material = int(i);
-			unit.frame = frame;
-			unit.arms = arms;
-			build.units.push_back(unit);
-		}
-	}
-	// Every level's meshes, as the scene asks them of the data (skinned for the rig it binds: the arms for
-	// the gun's).
-	for (size_t lod = 0; lod < model.lod_count; ++lod) {
-		Unit unit;
-		unit.kind = Unit::Kind::Meshes;
-		unit.lod = int(lod);
-		unit.arms = arms;
-		build.units.push_back(unit);
-	}
 }
 
 void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewport, const opennova::editor::SessionView &view,
@@ -168,40 +99,31 @@ void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewpo
 		if (const opennova::editor::FirstPersonCharacter *who = first_person.character())
 			build->arms_camo = { who->camo[0], who->camo[1], who->camo[2] };
 	}
-	plan_(*build);
+	// The units: the gun's data, then the arms' (skinned for the gun's rig, its bones' count).
+	build->parts.emplace_back(build->data, build->skeletal.is_valid(), build->bone_count);
+	if (build->arms.is_valid()) build->parts.emplace_back(build->arms, build->skeletal.is_valid(), build->bone_count);
 	build_ = std::move(build);
 }
 
 ApplierStep ModelViewportApplier::step(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::PreviewClock &clock, std::string &) {
 	Build &build = *build_;
-	const Unit unit = build.units[build.next++];
-	const Ref<ObjectData> &data = unit.arms ? build.arms : build.data;
-	switch (unit.kind) {
-	case Unit::Kind::Texture:
-		if (data->load_material_slot_texture(unit.material, unit.slot).is_null() &&
-				unit.slot == THREEDI_TEX_SLOT_NORMAL)
-			data->load_material_slot_texture(unit.material, THREEDI_TEX_SLOT_NORMAL_B);
-		break;
-	case Unit::Kind::Frame:
-		data->load_material_anim_frame(unit.material, THREEDI_TEX_SLOT_DIFFUSE, unit.frame);
-		break;
-	case Unit::Kind::Meshes:
-		data->build_lod_submeshes(unit.lod, build.skeletal.is_valid(), build.bone_count, false);
-		break;
-	case Unit::Kind::Scene:
+	while (build.part < build.parts.size() && build.parts[build.part].finished()) ++build.part;
+	if (build.part < build.parts.size()) {
+		build.parts[build.part].step();
+		return ApplierStep::More;
+	}
+	if (!build.assembled) {
 		// rebuild() builds only over a model, which open_from_model always holds: no scene unit
 		// fails (the protocol's Failed waits for a unit that can).
 		DEV_ASSERT(build.data->has_document());
 		assemble_(build);
-		break;
-	case Unit::Kind::Pose:
-		// The state as it is now, as an Update applies it (one that came while the build ran is
-		// folded into this).
-		apply_state_(viewport, clock);
-		break;
+		build.assembled = true;
+		return ApplierStep::More;
 	}
-	if (build.next < build.units.size()) return ApplierStep::More;
+	// The pose: the state as it is now, as an Update applies it (one that came while the build ran is
+	// folded into this).
+	apply_state_(viewport, clock);
 	build_.reset();
 	return ApplierStep::Built;
 }
@@ -210,18 +132,20 @@ opennova::editor::OperationProgress ModelViewportApplier::progress() const {
 	opennova::editor::OperationProgress progress;
 	progress.unit = opennova::editor::OperationUnit::Steps;
 	if (!build_) return progress;
-	progress.done = build_->next;
-	progress.total = build_->units.size();
-	// What the next unit makes.
-	if (build_->next < build_->units.size()) {
-		switch (build_->units[build_->next].kind) {
-		case Unit::Kind::Texture:
-		case Unit::Kind::Frame: progress.label = "textures"; break;
-		case Unit::Kind::Meshes: progress.label = "meshes"; break;
-		case Unit::Kind::Scene: progress.label = "scene"; break;
-		case Unit::Kind::Pose: progress.label = "pose"; break;
-		}
+	// Each part's units, then the scene and the pose.
+	for (const ModelDataBuild &part : build_->parts) {
+		progress.done += part.done();
+		progress.total += part.total();
 	}
+	progress.done += build_->assembled ? 1 : 0;
+	progress.total += 2;
+	// What the next unit makes.
+	for (const ModelDataBuild &part : build_->parts)
+		if (!part.finished()) {
+			progress.label = part.label();
+			return progress;
+		}
+	progress.label = build_->assembled ? "pose" : "scene";
 	return progress;
 }
 
