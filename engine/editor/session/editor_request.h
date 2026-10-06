@@ -9,6 +9,7 @@
 #include <editor/assets/import_choice.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
+#include <editor/run/play_start.h>
 #include <editor/session/view/viewport_kind.h>
 
 namespace opennova::editor {
@@ -145,6 +146,8 @@ struct ProjectSettingsChange {
 	std::optional<bool> play_in_install;
 	// Play in the game install runs strictly (Strict Play: the build and the install's program alone, no /d).
 	std::optional<bool> play_in_install_strict;
+	// Play saves every unsaved file first instead of asking (DI-26, Preferences::save_before_play).
+	std::optional<bool> save_before_play;
 	// The folder Build to folder builds into, kept with the project's local settings ("" for none): the
 	// modder's pick (a build's out_dir keeps nothing).
 	std::optional<std::string> build_folder;
@@ -155,7 +158,7 @@ inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChan
 			a.multiplayer == b.multiplayer && a.expansion == b.expansion && a.builds_on == b.builds_on &&
 			a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
 			a.play_in_install == b.play_in_install && a.play_in_install_strict == b.play_in_install_strict &&
-			a.build_folder == b.build_folder;
+			a.save_before_play == b.save_before_play && a.build_folder == b.build_folder;
 }
 
 // Where Paste puts the clipboard: into the owner `parent` (0 = the row `row` itself) at
@@ -362,6 +365,9 @@ struct EditorRequest {
 	uint32_t steps = 1;
 	// A folder of the project, from its top level ("" the top level): where a move puts a file (DI-03).
 	std::string folder;
+	// Where Play starts the game's player (DI-26, Play from here: a point of `mission` and a heading), as a
+	// start marker the game honours in the staged build's copy of the mission (run/play_start.h).
+	PlayStart start;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -383,7 +389,7 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
 			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.fresh == b.fresh && a.plan == b.plan &&
-			a.report == b.report && a.steps == b.steps && a.folder == b.folder;
+			a.report == b.report && a.steps == b.steps && a.folder == b.folder && a.start == b.start;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

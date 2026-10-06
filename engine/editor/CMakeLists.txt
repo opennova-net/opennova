@@ -177,6 +177,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/animation_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/sound_preview.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_sounds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_first_person.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_damage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
@@ -254,6 +255,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/launch_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_lease.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/run/play_start.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/run_directory.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10):
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,

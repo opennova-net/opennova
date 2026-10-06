@@ -165,6 +165,10 @@ struct ClipSoundFired {
 	int slot = 0;
 	int foot = -1;
 	bool pressed = false; // a timeline mark pressed (play_sound {frame}), not the clock running
+	// A weapon action's set (DI-13): the action's suffix and its leg ("begin" its soundset, "end" its
+	// soundsetend); "" for a clip event's or a death's sound.
+	std::string action;
+	std::string leg;
 	std::string profile;
 	std::string set;
 	std::string bank;

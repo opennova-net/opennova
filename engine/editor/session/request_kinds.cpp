@@ -89,8 +89,8 @@ void serve_build(SessionCore &core, const EditorRequest &request) {
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(PlayIntent{ true, request.mission, request.behind, request.fresh }, std::string(), false,
-				ExportIntent());
+		core.start_build(PlayIntent{ true, request.mission, request.behind, request.fresh, request.start }, std::string(),
+				false, ExportIntent());
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
@@ -493,8 +493,11 @@ constexpr RequestKindRow kRows[] = {
 			"(play.mission.failed) until the next Play. behind: the game's window starts behind every other "
 			"and never takes the foreground (the run section says behind). The run directory keeps what the "
 			"game wrote there in the Plays of the same mode before (its game.cfg, its saves: the run section's "
-			"kept); fresh: it is emptied first, a first run (the run section says fresh).")
-			.takes(request_params({}, { F::Mission, F::Behind, F::Fresh }))
+			"kept); fresh: it is emptied first, a first run (the run section says fresh). start (Play from here, "
+			"DI-26): the player starts at a point of mission, as a start marker of the build's copy of it in the run "
+			"directory, OpenNova and the game install alike (play.start without a mission). With unsaved edits, Play "
+			"saves them first while the editor's save_before_play is on (the default), else it waits on the prompt.")
+			.takes(request_params({}, { F::Mission, F::Behind, F::Fresh, F::Start }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
 			.acts_on_saved()
@@ -1005,8 +1008,9 @@ constexpr RequestKindRow kRows[] = {
 			"viewport that does not show it as it is now, a record or a handle it does not show, a "
 			"command it has not, a gesture the document holds no open one of, a drag that writes "
 			"nothing the session takes, or a drop the viewport does not take (viewport.refused); a "
-			"planned edit the session refuses is not done.")
-			.takes(request_params({}, { F::Path, F::Drag, F::Command, F::Drop }))
+			"planned edit the session refuses is not done. behind and fresh: the Play a command plans (a "
+			"mission's play_from_here, DI-26) goes behind, or fresh, as play's do.")
+			.takes(request_params({}, { F::Path, F::Drag, F::Command, F::Drop, F::Behind, F::Fresh }))
 			.names_active()
 			.row,
 	// What the windows show of their own (the MCP gaps lane): no file and no document, so it runs beside any
@@ -1048,9 +1052,13 @@ constexpr RequestKindRow kRows[] = {
 			"surface (ground, snow, object, water) with that foot (left, right), the slot the game's test "
 			"picks. values {frame}: what the clip the animation document at path (the active one when left "
 			"out) fires at that frame, every sound of its event at once, under its model viewport's sound "
-			"options (a timeline mark pressed; DI-04). Refused (workspace.refused): a name no wave of the "
-			"project has, a frame the game never reads or that fires no sound, a set no bank searched "
-			"holds, an empty slot, waves the project lacks, a wave past what a card reads.")
+			"options (a timeline mark pressed; DI-04). values {leg}: begin or end, the set the weapon action "
+			"playing the row of a first-person map (the animation document at path, the active one when left "
+			"out) plays as it begins (its soundset) or finishes (its soundsetend), a leg's mark pressed "
+			"(DI-13). Refused (workspace.refused): a name no wave of the project has, a frame the game never "
+			"reads or that fires no sound, a first-person clip's frame (the game reads none), a leg no action "
+			"of the row plays, a set no bank searched holds, an empty slot, waves the project lacks, a wave "
+			"past what a card reads.")
 			.takes(request_params({}, { F::Path, F::Values }))
 			.row,
 	Request(K::StopSound, "stop_sound", serve_stop_sound,
@@ -1222,7 +1230,7 @@ static_assert(viewport_rows_hold(),
 // as it would be before any build: no spawn here, a game running, or a mission the project does
 // not hold). The outcome names the operation joined.
 void join_operation(SessionCore &core, const EditorRequest &request) {
-	if (request.kind == EditorRequestKind::Play && core.play().refused(request.mission))
+	if (request.kind == EditorRequestKind::Play && core.play().refused(request.mission, request.start))
 		return;
 	core.operations().running()->join(request);
 	core.outcome().operation = core.operations().status().id;

@@ -276,6 +276,13 @@ inline EditorRequest play(std::string mission = std::string(), bool behind = fal
 	request.fresh = fresh;
 	return request;
 }
+// Play from here (DI-26): the game started in `mission` with its player at `start` (run/play_start.h).
+inline EditorRequest play_from(std::string mission, const PlayStart &start) {
+	EditorRequest request = play(std::move(mission));
+	request.start = start;
+	request.start.set = true;
+	return request;
+}
 // A build, then the build copied into `export_dir` ("" the project's export folder) as what ships
 // (ADR 0046 S16); with `rehash`, every file read again.
 inline EditorRequest export_project(std::string export_dir = std::string(), bool rehash = false) {
@@ -368,6 +375,14 @@ inline EditorRequest play_clip_event(std::string path, int frame) {
 	EditorRequest request = of(EditorRequestKind::PlaySound);
 	request.path = std::move(path);
 	request.values = {{"frame", std::to_string(frame)}};
+	return request;
+}
+// The set the weapon action playing the row of the first-person map `path` plays as it begins (its soundset)
+// or finishes (`end`: its soundsetend), once (DI-13: a leg's mark pressed).
+inline EditorRequest play_action_leg(std::string path, bool end) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	request.values = {{"leg", end ? "end" : "begin"}};
 	return request;
 }
 inline EditorRequest stop_sound() {
@@ -507,6 +522,14 @@ inline EditorRequest edit_in_viewport(std::string path, ViewportDrop drop) {
 	request.path = std::move(path);
 	request.drop = std::move(drop);
 	return request;
+}
+// Play from here (DI-26) in the mission view over the mission at `path` ("" the active one): the view plans a
+// Play with its player's start on the ground under the camera.
+inline EditorRequest play_from_here(std::string path = std::string()) {
+	ViewportCommand command;
+	command.name = "play_from_here";
+	command.kind = ViewportKind::Mission;
+	return edit_in_viewport(std::move(path), std::move(command));
 }
 inline EditorRequest copy(std::string path = std::string()) {
 	EditorRequest request = of(EditorRequestKind::Copy);

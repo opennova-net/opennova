@@ -150,6 +150,18 @@ chute's three as it opens, flaps and closes.
 | `PARACHUTE_GLIDE` | 50 | 7 | 0xB332 (0.70), 0x4CCC | 80 | six 2.40 to 2.61 s flaps and one of 0.71 s, 8-bit, cloth in the wind (70 % at 250 Hz to 1 kHz); RMS -16.9 |
 | `FREEFALL` | 50 | 8 | 0x14CCB (1.30), 0x3333 | 190 | 2.35 to 4.54 s, 16-bit, wind; RMS -17.4, centroid 0.7 kHz |
 
+### The rain
+
+While a mission rains (its script's `rain(pct, s)`), the game plays two loops
+on the local player by these names whatever its profiles say, `LPNV_RAIN_L` 2 m
+to the left of the eye and `LPNV_RAIN_R` 2 m to the right, at the rain's
+percent, quieter under cover (`docs/env/env-tod-re.md`, Precipitation).
+The original's sets in `game.lwf`:
+
+| Set | Layer (falloff) | Members | Member pitch, jitter | Volume (clamp) | Waves |
+|---|---|---|---|---|---|
+| `LPNV_RAIN_L` / `_R` | 300, flags 0xF | 1 / 1 | 0xFFFF, 0 | 180 (255) | `RAINL.WAV` / `RAINR.WAV`: 13.65 s, 22050 Hz 16-bit, steady rain; RMS -24.7 / -23.7 dB, centroid 4.0 / 4.2 kHz, half the energy at 1 to 4 kHz |
+
 ### What the engine does with an impact table
 
 In `AmmoDef_ParseProperty @ 0x40A2D0`, a `none` hit effect skips the effect intern (@ 0x40A51A) with no log; any other
@@ -198,6 +210,7 @@ Measured the same way (means per family; retail's in brackets):
 | Parachute opening, landing | 1, 1 | 3.65 s, 2.80 s (3.52, 2.81) | 0.8, 0.8 kHz (0.9, 0.8) | -8.6, -8.8 dB (-7.4, -9.0) |
 | Parachute flapping | 6 + 1 | 2.40 to 2.60 s, 0.71 s (2.40 to 2.61, 0.71) | 0.6 kHz (1.0) | -15.8 dB RMS (-16.9) |
 | Free fall | 8 | 2.35 to 4.54 s (2.35 to 4.54) | 0.6 kHz (0.7) | -12.2 dB RMS (-17.4) |
+| Rain, left and right | 1, 1 | 13.65 s (13.65) | 3.5 kHz (4.0, 4.2) | -24.0 dB RMS (-24.7, -23.7) |
 
 The member volumes below match each family's loudness to retail's: retail's
 volume times the ratio of the two families' loudest-50 ms RMS, at most 255;
@@ -268,6 +281,8 @@ member's base, "jitter" its random range, both Q16.
 | `ON_CHUTE_LAND` | 50 | `onchtlnd` | 0xFFFF | 0 | 205 |
 | `ON_CHUTE_GLIDE` | 50 | `onchtflp1` to `7` | 0xB332 | 0x4CCC | 70 |
 | `ON_FREEFALL` | 50 | `onfrfall1` to `8` | 0x14CCB | 0x3333 | 104 |
+| `LPNV_RAIN_L` | 300 | `onrainl` | 0xFFFF | 0 | 180 |
+| `LPNV_RAIN_R` | 300 | `onrainr` | 0xFFFF | 0 | 180 |
 
 A layer plays one member, chosen at random, and every layer of a set plays at
 once, so a silent `onnull` member is the chance that the second layer adds
@@ -275,6 +290,9 @@ nothing (a ricochet on 3 of 8 dirt hits, as retail). The carbine's sets are
 the ones its `weapon.def` row names (`GS_ONAR15` fire, `GF_ONAR15_RL` reload,
 `DRY_ONAR15` dry fire, `GF_ONAR15_ST` and `GF_ONAR15_SF` switch to and from);
 `GS_ONAR15AI` is for `AMMO_ON_556`'s `ai_launch`, the fire others hear.
+The rain's two sets keep the engine's names, which it plays by name while a
+mission rains; their volume and falloff are the original's, the loops matched
+to its loudness.
 
 The infantry profile `on_soldier` in `SndProf.def`, which the player and enemy
 person items name with `sound_profile on_soldier`:
