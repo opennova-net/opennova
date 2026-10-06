@@ -308,6 +308,14 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 		for (const RecordKindRow &kind : document.kinds())
 			if (*kind.add_label && ui_kit::tool(row, kind.add_label, true, "Adds one at the end of the file."))
 				edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
+		// The type's own Add menu (an items.def's rows the engine looks for by their ids).
+		if (spec_.list_menu && spec_.list_menu_offers && spec_.list_menu_offers(document)) {
+			if (ui_kit::tool(row, spec_.list_menu_label, true, spec_.list_menu_tip)) ImGui::OpenPopup("list_menu");
+			if (ImGui::BeginPopup("list_menu")) {
+				spec_.list_menu(workspace, document);
+				ImGui::EndPopup();
+			}
+		}
 		ui_kit::RowTools tools;
 		tools.add = nullptr;
 		tools.count = rows.size();
