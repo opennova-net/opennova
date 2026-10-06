@@ -337,14 +337,6 @@ bool stop_sound(WorkspaceView::Sound &sound) {
 	return true;
 }
 
-// The factory Files' New asks a name of for `kind` (a free-form one of no role); null for a kind it offers none.
-const BlankFactory *new_file_factory(AssetKind kind) {
-	for (size_t i = 0; i < blank_factory_count(); ++i) {
-		const BlankFactory &factory = *blank_factory_at(i);
-		if (factory.free_form && factory.role[0] == '\0' && factory.kind == kind) return &factory;
-	}
-	return nullptr;
-}
 
 // The menu the document is, and whether `screen` is a screen of it its Remove may ask of: the menu keeps a
 // second screen.
@@ -477,12 +469,17 @@ bool set_new_file(Change &change, const JsonValue &part) {
 		AssetKind wanted = AssetKind::kCount;
 		if (!kind_named(kind->string, wanted)) return change.refuse("No kind of file is \"" + kind->string + "\".");
 		if (wanted != AssetKind::kCount && !change.view.project.open) return change.closed("The project", "open or make one first");
-		if (wanted != AssetKind::kCount && !new_file_factory(wanted)) {
+		size_t count = 0;
+		bool asks = false;
+		new_file_params(wanted, count, &asks);
+		if (wanted != AssetKind::kCount && !asks) {
 			std::string offered;
 			for (size_t i = 0; i < blank_factory_count(); ++i) {
 				const BlankFactory &factory = *blank_factory_at(i);
 				if (factory.free_form && factory.role[0] == '\0') offered += (offered.empty() ? "" : ", ") + std::string(asset_kind_token(factory.kind));
 			}
+			// A terrain made from images (S20) is asked too: its images and numbers.
+			offered += ", " + std::string(asset_kind_token(AssetKind::Terrain));
 			return change.refuse("Files' New asks no name of a " + kind->string + " (it does of " + offered + ").");
 		}
 		if (wanted != prompt.kind) prompt = WorkspaceView::NewFile{ wanted, std::string(), {} };
@@ -491,13 +488,14 @@ bool set_new_file(Change &change, const JsonValue &part) {
 		return change.closed("The New file prompt", "name its kind first (new_file.kind)");
 	if (const JsonValue *name = part.get("name")) prompt.name = name->string;
 	if (const JsonValue *values = part.get("values")) {
-		const BlankFactory *factory = new_file_factory(prompt.kind);
+		size_t count = 0;
+		const BlankParam *taken = new_file_params(prompt.kind, count);
 		std::string params;
-		for (size_t i = 0; factory && i < factory->param_count; ++i) params += (i ? ", " : "") + std::string(factory->params[i].token);
+		for (size_t i = 0; i < count; ++i) params += (i ? ", " : "") + std::string(taken[i].token);
 		prompt.values.clear();
 		for (const io::JsonMember &value : values->object) {
 			bool known = false;
-			for (size_t i = 0; factory && i < factory->param_count; ++i) known = known || value.key == factory->params[i].token;
+			for (size_t i = 0; i < count; ++i) known = known || value.key == taken[i].token;
 			if (!known)
 				return change.refuse("A new " + std::string(asset_kind_token(prompt.kind)) + " takes no value \"" + value.key + "\" (" +
 				                     (params.empty() ? std::string("it takes none") : "it takes " + params) + ").");

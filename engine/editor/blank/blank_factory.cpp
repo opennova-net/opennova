@@ -1,5 +1,7 @@
 #include <editor/blank/blank_factory.h>
 
+#include <base/io/strutil.h>
+
 #include "blank_makers.h"
 
 namespace opennova::editor {
@@ -18,6 +20,19 @@ const BlankParam k_mission_text_params[] = {
 	{ "title", "Title", ReferenceKind::None, false },
 };
 
+// A terrain made from images (S20): its images (files on disk, or of the project) and the importer's
+// options, the new_terrain request's values.
+const BlankParam k_terrain_params[] = {
+	{ "heightmap", "Heightmap (1024 x 1024 PNG or .raw)", ReferenceKind::None, true },
+	{ "colormap", "Colour map (1024 x 1024 image)", ReferenceKind::None, true },
+	{ "detail", "Detail (optional, power-of-two image)", ReferenceKind::None, false },
+	{ "tiles", "Tile set (optional, sides x64)", ReferenceKind::None, false },
+	{ "surface", "Surface map (optional, square 256..1024)", ReferenceKind::None, false },
+	{ "top", "Height of white (world units, 127.5)", ReferenceKind::None, false },
+	{ "water", "Water level (world units, 0 none)", ReferenceKind::None, false },
+	{ "layout", "Layout (island or tiled)", ReferenceKind::None, false },
+};
+
 const BlankFactory k_factories[] = {
 	// Boot: the string tables and definition files Game_InitSubsystems demands.
 	{ "gameerr", AssetKind::Strings, make_blank_empty_strings, "an empty error-message table", false },
@@ -26,6 +41,8 @@ const BlankFactory k_factories[] = {
 	{ "vmacros", AssetKind::Strings, make_blank_empty_strings, "an empty voice-macro table", false },
 	{ "keyhelp", AssetKind::Strings, make_blank_empty_strings, "an empty key-help table", false },
 	{ "weapon_def", AssetKind::WeaponDefs, make_blank_weapon_def, "a weapon table with no weapons", true },
+	{ "sndprof_def", AssetKind::SoundProfileDefs, make_blank_sound_profiles,
+	  "the sound profiles: one \"default\" profile, every slot silent", true },
 	{ "items_def", AssetKind::ItemDefs, make_blank_items_def, "an item table holding only the Null marker", true },
 	{ "charattr_def", AssetKind::CharAttrDefs, make_blank_charattr_def,
 	  "a character-attribute file with no classes", true },
@@ -37,7 +54,10 @@ const BlankFactory k_factories[] = {
 	  "a brand stylesheet with no variables yet, read after the menu stylesheet", false },
 	{ "nw_cdata", AssetKind::StringTableCoo, make_blank_coo, "an empty NovaWorld data table", true },
 	{ "main_menu", AssetKind::Menu, make_blank_main_menu,
-	  "the startup screen: the project's title and an Exit button", false },
+	  "the startup screen: the project's title, an Exit button and the game's mouse pointer", false },
+	// The pointer every blank menu names (kBlankPointerRole), made with the menu.
+	{ kBlankPointerRole, AssetKind::Texture, make_blank_pointer,
+	  "the game's mouse pointer, a white arrow outlined in black, which the menus name", false },
 	{ "menutxt", AssetKind::Strings, make_blank_menutxt,
 	  "a menu label table holding the common navigation labels", false },
 	{ "font_arial12b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
@@ -87,7 +107,8 @@ const BlankFactory k_factories[] = {
 	// Free-form: a new file of a kind whose required files are all specific (Create
 	// menu, Create table, a font of another name, a missing texture's placeholder).
 	{ "", AssetKind::Strings, make_blank_empty_strings, "an empty string table", true },
-	{ "", AssetKind::Menu, make_blank_menu, "a menu with one screen named after the file, empty", true },
+	{ "", AssetKind::Menu, make_blank_menu,
+	  "a menu with one screen named after the file, empty but for the game's mouse pointer", true },
 	{ "", AssetKind::Font, make_blank_font, "the built-in bitmap font", true },
 	{ "", AssetKind::Texture, make_blank_texture,
 	  "the checkerboard the game draws for a missing texture, 128 by 128 gray squares", true },
@@ -99,6 +120,9 @@ const BlankFactory k_factories[] = {
 	  "a mission's text table: its title and an empty briefing", false, k_mission_text_params,
 	  sizeof(k_mission_text_params) / sizeof(k_mission_text_params[0]) },
 	{ "", AssetKind::Script, make_blank_script, "an empty script", true },
+	// S20: an environment a mission can be made under (a terrain made from images has none).
+	{ "", AssetKind::Environment, make_blank_environment,
+	  "a daytime environment: noon light, sky and fog colours through the day, the stock cloud maps", true },
 };
 
 const size_t k_factory_count = sizeof(k_factories) / sizeof(k_factories[0]);
@@ -136,6 +160,24 @@ size_t blank_factory_count() {
 	return k_factory_count;
 }
 
+const BlankParam *new_file_params(AssetKind kind, size_t &count, bool *offered) {
+	count = 0;
+	if (offered) *offered = false;
+	if (kind == AssetKind::Terrain) {
+		count = sizeof(k_terrain_params) / sizeof(k_terrain_params[0]);
+		if (offered) *offered = true;
+		return k_terrain_params;
+	}
+	// The kind's free-form factory of no role: what Files' New lists under its kind's label.
+	for (const BlankFactory &factory : k_factories)
+		if (factory.kind == kind && factory.free_form && factory.role[0] == '\0') {
+			if (offered) *offered = true;
+			count = factory.param_count;
+			return factory.params;
+		}
+	return nullptr;
+}
+
 const BlankFactory *blank_factory_at(size_t index) {
 	return index < k_factory_count ? &k_factories[index] : nullptr;
 }
@@ -155,10 +197,22 @@ const BlankFactory *find_blank_factory_for_kind(AssetKind kind) {
 	return nullptr;
 }
 
+const BlankFactory *find_blank_factory(std::string_view role, const std::string &logical_name, AssetKind kind) {
+	if (const BlankFactory *factory = find_blank_factory_for_role(role)) return factory;
+	if (kind == AssetKind::Texture && strutil::iequals(logical_name, blank_pointer_name()))
+		return find_blank_factory_for_role(kBlankPointerRole);
+	return find_blank_factory_for_kind(kind);
+}
+
+const BlankFactory *blank_companion(const BlankFactory &factory, const ProjectDocument &doc, std::string &name) {
+	if (factory.kind != AssetKind::Menu || !doc.expansion.standalone()) return nullptr;
+	name = blank_pointer_name();
+	return find_blank_factory_for_role(kBlankPointerRole);
+}
+
 bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t> &out,
                 Diagnostic &error) {
-	const BlankFactory *factory = find_blank_factory_for_role(request.role);
-	if (factory == nullptr) factory = find_blank_factory_for_kind(kind);
+	const BlankFactory *factory = find_blank_factory(request.role, request.logical_name, kind);
 	if (factory == nullptr) {
 		error = make_finding(CoreFinding::BlankUnavailable, DiagnosticSeverity::Error,
 		                     "The editor cannot create " + request.logical_name +

@@ -1,5 +1,6 @@
 #include "blank_makers.h"
 #include <formats/def/def_write.h>
+#include <runtime/audio/sound_profile.h>
 #include <cstring>
 
 namespace opennova::editor {
@@ -39,6 +40,29 @@ bool make_blank_powerup_def(const BlankRequest &request, std::vector<uint8_t> &o
 		(request.project_title.empty() ? std::string("the project") : request.project_title) +
 		". Each is a powerup \"<name>\" .. end block.\n", header);
 	out.insert(out.begin(), header.begin(), header.end());
+	return true;
+}
+// One profile, "default", with no sound in any slot. The game reads its profile table from
+// memory it never clears, and every item definition binds "default", whose miss is the table's
+// first slot: with no profile there, a mission's items take their sounds from that uncleared
+// memory and the game hangs or crashes once one plays (docs/required-resources.md, the
+// SndProf.def row; docs/audio/lwf-dbf-sound-re.md D-SND-31). A profile's slots start cleared and resolve to no sound, so this one
+// profile makes every item silent instead.
+bool make_blank_sound_profiles(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+	opennova::audio::SoundProfile profile;
+	profile.name = "default";
+	std::string profiles, why;
+	if (!opennova::audio::write_sound_profiles({profile}, profiles, why)) {
+		error = make_finding(CoreFinding::BlankDef, DiagnosticSeverity::Error, why);
+		return false;
+	}
+	const std::string header = blank_crlf(
+		"// Sound profiles of " +
+		(request.project_title.empty() ? std::string("the project") : request.project_title) +
+		". An item plays the profile its sound_profile names, else \"default\".\n"
+		"// A slot line: <slot keyword> <sound set> <param2> <param3> <param4>.\n");
+	const std::string text = header + profiles;
+	out.assign(text.begin(), text.end());
 	return true;
 }
 bool make_blank_charattr_def(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &) {

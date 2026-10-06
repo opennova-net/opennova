@@ -251,6 +251,7 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
 	        .runtime("environment")
 	        .names_files()
+	        .new_name("newenviro.env")
 	        .folder("terrain")
 	        .about("An environment: a mission's sky, light, fog and water.")
 	        .row,
@@ -462,6 +463,12 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::ImportSource, "import_source", "Import source", ArchiveSlot::None)
 	        .about("A file the editor turns into the game's form: its import record says how, and the build packs what it made.")
 	        .row,
+	// No name gives it either: the scan gives it to a file an import record lists among its inputs (S20:
+	// a terrain set's heightmap and images), whatever its name would make it. It never packs: its
+	// import's outputs do.
+	Kind(AssetKind::ImportInput, "import_input", "Import input", ArchiveSlot::None)
+	        .about("A file an import reads to make the game's files, such as a terrain's heightmap: the build packs what the import made, never it.")
+	        .row,
 };
 
 constexpr bool same_text(const char *a, const char *b) {
@@ -511,11 +518,13 @@ constexpr bool rows_well_formed() {
 		const AssetKindRow &row = kRows[i];
 		if (static_cast<size_t>(row.kind) != i || !*row.token || !*row.label) return false;
 		const bool left_out = row.kind == AssetKind::Archive || row.kind == AssetKind::ImportSource ||
-		                      row.kind == AssetKind::Unknown || row.kind == AssetKind::MissionText;
+		                      row.kind == AssetKind::ImportInput || row.kind == AssetKind::Unknown ||
+		                      row.kind == AssetKind::MissionText;
 		if ((row.archive_slot == ArchiveSlot::None) != left_out) return false;
 		// A loose kind says where an expansion's game reads it; no other kind does.
 		if ((row.archive_slot == ArchiveSlot::Loose) != (row.expansion_loose != ExpansionLoose::None)) return false;
-		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::MaterialChunk;
+		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::ImportInput ||
+		                         row.kind == AssetKind::MaterialChunk;
 		if (by_the_scan && (*row.runtime || row.file_name || row.extensions)) return false;
 		if (static_cast<size_t>(row.document) > kDocumentTypeCount) return false;
 		if (!row.folder || !row.new_name || !new_name_fits(row) || !row.about || !*row.about) return false;

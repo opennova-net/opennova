@@ -282,6 +282,12 @@ void placeholder_fix(const ReferenceSubject &missing, const SessionView &view, s
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
 	if (name.empty() || view.project.scan->find(name) || !check_file_name(name, AssetKind::Texture, problem, message)) return;
+	// The pointer's name makes the pointer (find_blank_factory), never the checkerboard.
+	const BlankFactory *factory = find_blank_factory("", name, AssetKind::Texture);
+	if (factory && factory != find_blank_factory_for_kind(AssetKind::Texture)) {
+		out.push_back({"Create " + name, placeholder(*factory), request::create_file(name, asset_kind_token(AssetKind::Texture)), true});
+		return;
+	}
 	out.push_back({"Create a placeholder " + name,
 	               "Creates " + name +
 	                       ": the checkerboard the game draws for a missing texture, 128 by 128 gray squares, to replace "

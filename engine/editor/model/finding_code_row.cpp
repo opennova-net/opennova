@@ -53,6 +53,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::AssetNameTooLong, about_the_file("asset.name.too_long", G::ProjectFiles, F::Rename) },
 	{ C::AssetUnreadable, code("asset.unreadable", G::ProjectFiles) },
 	{ C::BlankDef, code("blank.def", G::NewFiles) },
+	{ C::BlankEnvironment, code("blank.environment", G::NewFiles) },
 	{ C::BlankFont, code("blank.font", G::NewFiles) },
 	{ C::BlankMenu, code("blank.menu", G::NewFiles) },
 	{ C::BlankMission, code("blank.mission", G::NewFiles) },
@@ -161,6 +162,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportEncode, code("import.encode", G::Imports) },
 	{ C::ImportExists, code("import.exists", G::Imports) },
 	{ C::ImportFolder, code("import.folder", G::Imports) },
+	// A font made from a glyph sheet (import/font_import): a set or a sheet the importer cannot make into a
+	// font, a sheet with no clear texel.
+	{ C::ImportFont, code("import.font", G::Imports) },
 	{ C::ImportInput, code("import.input", G::Imports) },
 	{ C::ImportInstall, code("import.install", G::Imports) },
 	{ C::ImportKind, code("import.kind", G::Imports) },
@@ -182,6 +186,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportScene, code("import.scene", G::Imports) },
 	{ C::ImportSceneNote, code("import.scene_note", G::Imports) },
 	{ C::ImportSidecar, code("import.sidecar", G::Imports) },
+	// A terrain made from images (S20): a set the importer cannot make into a terrain, a heightmap
+	// steeper than the game's compressed heights hold, a new_terrain request refused.
+	{ C::ImportTerrain, code("import.terrain", G::Imports) },
 	{ C::ImportNotFound, code("import.not_found", G::Imports) },
 	{ C::ImportTextureNotImported, code("import.texture_not_imported", G::Imports, F::UnimportedTexture) },
 	{ C::ImportUnreadable, code("import.unreadable", G::Imports) },

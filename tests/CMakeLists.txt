@@ -4041,6 +4041,24 @@ target_link_libraries(editor_blank_factory_test PRIVATE opennova_editor)
 target_include_directories(editor_blank_factory_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_blank_factory COMMAND editor_blank_factory_test)
 
+# TrnGen.exe's terrain bake ported (engine/editor/terrain): a depth map to the .cpt the game reads,
+# read back through the engine's reader; given the retired TrnGen corpus's directory as its
+# argument, the byte parity with TrnGen's own .cpt files (a run by hand).
+add_executable(editor_terrain_bake_test editor/terrain_bake_test.cpp)
+target_link_libraries(editor_terrain_bake_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_bake COMMAND editor_terrain_bake_test)
+
+# A terrain made from images (S20): the terrain set, the heightmap's depths, the new_terrain request
+# over a project (the import, the scan's kinds, the build's packing), the outputs read back and loaded
+# by the runtime's terrain field and frame compiler, the import rerun-stable, the blank environment
+# and a mission made on the terrain; the surface map read, written and sampled by the runtime (its
+# _retail entry reads a shipped char map as the importer does).
+add_executable(editor_terrain_import_test editor/terrain_import_test.cpp)
+target_link_libraries(editor_terrain_import_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_terrain_import COMMAND editor_terrain_import_test)
+
 add_executable(editor_create_missing_test editor/create_missing_test.cpp)
 target_link_libraries(editor_create_missing_test PRIVATE opennova_editor)
 target_include_directories(editor_create_missing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4438,8 +4456,10 @@ add_test(NAME editor_mission_scene COMMAND editor_mission_scene_test)
 # row, its status and follow, what each change set comes to (an entity's transform an Update, an
 # event's field Keep with no row read, an Add and the header's terrain a Rebuild), a Rebuild held for
 # a gesture, a file the device read moving, its camera on the wire, its hits and boxes, its envelope,
-# a drop and the ground command. Mixed: the retail row opens every shipped mission (OPENNOVA_JO_DIR)
-# in its viewport, hits its marks and moves its first item and back.
+# a drop and the ground command; DI-07, the ground under a point in the game's words over a minted
+# terrain with a char map (class, footstep slots, effects row, a placed tile, the water). Mixed: the
+# retail row opens every shipped mission (OPENNOVA_JO_DIR) in its viewport, hits its marks and moves
+# its first item and back.
 add_executable(editor_mission_viewport_test editor/mission_viewport_test.cpp)
 target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4503,6 +4523,16 @@ add_executable(editor_import_test editor/import_test.cpp editor/import_plan_test
 target_link_libraries(editor_import_test PRIVATE opennova_editor)
 target_include_directories(editor_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_import COMMAND editor_import_test)
+
+# The font importer: a font set's glyph sheet made into a .fnt through our own FNT writer and read
+# back by fnt_parse (each advance mode, tracking, the space, the zero records, the header words, the
+# pages, the refusals), its run over an ImportContext, over a project (the set an import source, the
+# .fnt packed into localres, a changed sheet imported again), and an import of a set from the disk
+# bringing its sheet beside it.
+add_executable(editor_font_import_test editor/font_import_test.cpp)
+target_link_libraries(editor_font_import_test PRIVATE opennova_editor)
+target_include_directories(editor_font_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_font_import COMMAND editor_font_import_test)
 
 # The editor's ImGui windows over a null backend (ADR 0046 d11): built with the pass. The
 # workspace's shell (S11d: its layout, the Document tabs, Files, the menus, the modals) is
