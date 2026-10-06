@@ -287,6 +287,48 @@ func test_a_texture_edit_redraws() -> void:
 		state = _viewport("textures/brick.tga")
 	assert_true(bool(state.get("body", {}).get("upside_down", false)), "Undo puts the file's own rows back")
 
+## S18: a normal map lit: the picture the viewport made (each texel a grey of its light) in the GPU texture,
+## drawn as its colour (channels 6); the light moved, made again.
+func test_a_normal_map_lit() -> void:
+	if _app == null:
+		return
+	var root := _new_project()
+	_write(root.path_join("textures/brick.tga"), _tga(0))
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.done({"kind": "select_file", "path": "textures/brick.tga"}), "select_file is served")
+	var first := await _await_ready("textures/brick.tga")
+	assert_true(_seam.done({"kind": "set_viewport", "path": "textures/brick.tga",
+			"viewport": {"kind": "texture", "options": {"channels": "normals", "light": 0}}}))
+	# The picture made again for the lit normals: a build past the first.
+	var state := _viewport("textures/brick.tga")
+	for _frame in 60:
+		_app.pump()
+		await get_tree().process_frame
+		state = _viewport("textures/brick.tga")
+		if int(state.get("builds", 0)) > int(first.get("builds", 0)):
+			break
+	var builds := int(state.get("builds", 0))
+	assert_gt(builds, int(first.get("builds", 0)), "the lit picture made")
+	var material := _material("textures/brick.tga")
+	assert_not_null(material, str(state))
+	if material == null:
+		return
+	assert_eq(int(material.get_shader_parameter("channels")), 6, "the lit picture drawn as its colour")
+	var texture := material.get_shader_parameter("level_nearest") as Texture2D
+	var lit := texture.get_image().get_pixel(0, 0)
+	assert_almost_eq(lit.r, lit.g, 0.001, "a grey")
+	assert_almost_eq(lit.g, lit.b, 0.001, "a grey")
+	assert_eq(lit.a, 1.0, "opaque")
+	assert_true(_seam.done({"kind": "set_viewport", "path": "textures/brick.tga",
+			"viewport": {"kind": "texture", "options": {"light": 180}}}))
+	for _frame in 60:
+		_app.pump()
+		await get_tree().process_frame
+		if int(_viewport("textures/brick.tga").get("builds", 0)) > builds:
+			break
+	assert_gt(int(_viewport("textures/brick.tga").get("builds", 0)), builds, "the light moved, the picture made again")
+
+
 ## S18: a texture replaced by an image through the wire: the image an import source in art/, the texture its
 ## import's output under its own name, the file it replaced set aside.
 func test_a_texture_replaced_by_an_image() -> void:
