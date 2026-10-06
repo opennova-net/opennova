@@ -9,6 +9,8 @@
 #include <editor/preview/texture_thumbnail_images.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/project/project_files.h>
+#include <editor/session/texture_budget_list.h>
+#include <editor/session/texture_budget_list.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
@@ -213,6 +215,9 @@ bool file_tooltip(Workspace &workspace, const std::string &file, const std::stri
 		                                                (uses.size() > 1 ? " and " + std::to_string(uses.size() - 1) + " more" : "") + ".";
 		words += (words.empty() ? "" : "\n") + used;
 	}
+	// What the game's texture of it costs (S18, the texture budget).
+	const std::string cost = texture_file_budget_words(view, entry->relative_path);
+	if (!cost.empty()) words += (words.empty() ? "" : "\n") + cost;
 	tooltip(workspace, entry->relative_path, TextureLoadTransform::None, words);
 	return true;
 }
