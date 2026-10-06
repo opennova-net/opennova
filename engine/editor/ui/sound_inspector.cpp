@@ -4,6 +4,7 @@
 
 #include <imgui.h>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
@@ -67,7 +68,7 @@ bool draw_sound_bank_inspector(Workspace &workspace, const Document &document, c
 	const auto &row = static_cast<const SoundBankRow &>(*node);
 	ui_kit::WrapRow tools;
 	if (row.kind == node_kind(SoundBankKind::Wave)) {
-		const std::string file = basename_of(row.wave.file);
+		const std::string file = io::utf8_file_name(row.wave.file); // either separator, on every host
 		if (ui_kit::tool(tools, "Play", !file.empty(),
 		                 file.empty() ? std::string("The wave names no file.") : "Plays " + file + " as recorded.", true))
 			workspace.request(request::play_sound(file));

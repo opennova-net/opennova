@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
@@ -263,6 +264,7 @@ int EditorApp::start_mcp_endpoint(int p_port) {
 void EditorApp::_exit_tree() {
 	mcp_service_ = nullptr; // a child: it leaves with the tree and stops its server
 	mcp_port_ = 0;
+	show_system_pointer_(true);
 #if OPENNOVA_EDITOR_UI
 	windows_->set_devices(nullptr);
 	windows_->set_thumbnail_images(nullptr);
@@ -343,7 +345,16 @@ void EditorApp::before_layout(double) {
 void EditorApp::after_layout(uint64_t, bool, int64_t) {
 #if OPENNOVA_EDITOR_UI
 	windows_->end_frame();
+	// One pointer over a picture that draws the game's (a menu's, DI-08): the system one hidden while a
+	// window asks, shown again the frame none does.
+	show_system_pointer_(!windows_->pointer_hidden());
 #endif
+}
+
+void EditorApp::show_system_pointer_(bool p_shown) {
+	if (p_shown == !pointer_hidden_) return;
+	pointer_hidden_ = !p_shown;
+	Input::get_singleton()->set_mouse_mode(p_shown ? Input::MOUSE_MODE_VISIBLE : Input::MOUSE_MODE_HIDDEN);
 }
 
 void EditorApp::pump() {
