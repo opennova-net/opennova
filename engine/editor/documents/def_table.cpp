@@ -159,6 +159,7 @@ ReferenceKind reference_kind(DefReference reference) {
 	case DefReference::OtherText: return ReferenceKind::OtherText;
 	case DefReference::UserPoint: return ReferenceKind::UserPoint;
 	case DefReference::Powerup: return ReferenceKind::Powerup;
+	case DefReference::SoundProfile: return ReferenceKind::SoundProfile;
 	default: return ReferenceKind::None;
 	}
 }
