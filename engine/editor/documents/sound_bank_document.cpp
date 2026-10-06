@@ -659,6 +659,31 @@ const FindingCodeRow &finding_code(SoundBankFinding code) { return kFindingRows[
 
 FindingTable sound_bank_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
 
+// A sound set nothing defines where the game searches (DI-15): a new set of the bank, named as the reference
+// names it (a set's name is its first 23 characters [orig: SoundBank_LoadTriggerSets @ 0x75c43e..0x75c461]), as
+// Add set makes one: the authoring tools' stock pitch base and every shipped set's range (BankSet's defaults), no
+// layer yet, so it plays nothing until one is given, as nothing plays for the name now.
+bool define_sound_set(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
+	const auto *bank = dynamic_cast<const SoundBankDocument *>(&document);
+	if (!bank || missing.kind != ReferenceKind::Sound || missing.target.empty() || missing.target.size() >= kSetNameBytes)
+		return false;
+	const std::string file = basename_of(document.path());
+	// A menu SOUND's set is looked up in the bank its SOUND names alone.
+	if (!missing.scope.empty() && !strutil::iequals(missing.scope, file)) return false;
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = kSet;
+	add.field = "name";
+	add.value = missing.target;
+	out = PlannedFix();
+	out.edits.push_back(std::move(add));
+	out.label = "Add " + missing.target + " to " + file;
+	out.detail = "Adds the sound set " + missing.target + " to " + file + ", as Add sound set makes one (the stock pitch, a range "
+	             "of 10000), and selects it to give it a layer and the waves it plays: until then it plays nothing, as "
+	             "nothing plays for the name now.";
+	return true;
+}
+
 std::vector<Diagnostic> validate_sound_bank_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *bank = dynamic_cast<const SoundBankDocument *>(&document);

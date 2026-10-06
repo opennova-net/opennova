@@ -1060,6 +1060,61 @@ const FindingCodeRow &finding_code(menu::MenuFrameNoteCode code) {
 
 FindingTable menu_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
 
+// A screen or a window an ACTION names that no lookup finds (DI-15), added to the menu its scope names. A screen:
+// a new one at the menu's end, as Add screen makes one (its MAIN root window), named as the ACTION names it; the
+// screens are searched newest first [orig: CUIScene_SelectNodeByName @ 0x63b6b0], and no screen has the name. A
+// window: on the screen of its scope's NAME the lookup finds (the last of the name), a generic window as Add window
+// makes one (mnu::Window's defaults: WINDOW type, no position), named as the ACTION names it, inside the screen's
+// first root window where that has a NAME (the outline's own place for a new window), else as a root of its own:
+// a window with no NAME ends the search under it [orig: UI_FindScreenControl @ 0x63ae80; CWnd_FindChildByName @
+// 0x646850].
+bool define_menu_name(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
+	const auto *menu = dynamic_cast<const MnuDocument *>(&document);
+	if (!menu || missing.target.empty() || (missing.kind != ReferenceKind::MenuScreen && missing.kind != ReferenceKind::MenuWindow))
+		return false;
+	const std::string file = basename_of(document.path());
+	const size_t slash = missing.scope.find('/');
+	if (!strutil::iequals(missing.scope.substr(0, slash), file)) return false;
+	out = PlannedFix();
+	if (missing.kind == ReferenceKind::MenuScreen) {
+		Edit add;
+		add.operation = EditOperation::Add;
+		add.address.kind = kScreen;
+		add.field = "name";
+		add.value = missing.target;
+		out.edits.push_back(std::move(add));
+		out.label = "Add screen " + missing.target + " to " + file;
+		out.detail = "Adds a screen named " + missing.target + " at the end of " + file + ", as Add screen makes one (a "
+		             "MAIN window 800 by 600), and selects it to build: an ACTION naming the screen then finds it.";
+		return true;
+	}
+	if (slash == std::string::npos) return false;
+	const std::string screen_name = missing.scope.substr(slash + 1);
+	const MenuScreen *screen = nullptr;
+	for (const auto &row : menu->rows())
+		if (row->kind == kScreen && strutil::iequals(screen_of(*row).screen.name, screen_name)) screen = &screen_of(*row);
+	if (!screen || screen->ids.lists.empty()) return false;
+	// The first root window when it has a NAME (the search goes on under it), else the screen's roots.
+	const bool under = !screen->screen.roots.empty() && !screen->screen.roots.front().name.empty() &&
+	                   !screen->ids.lists[0].empty();
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address = {screen->id, kWindow, 0};
+	add.parent = under ? screen->ids.lists[0].front().id : 0;
+	out.edits.push_back(std::move(add));
+	Edit name;
+	name.address = {screen->id, kWindow, batch_made(0)};
+	name.field = "name";
+	name.value = missing.target;
+	out.edits.push_back(std::move(name));
+	out.label = "Add window " + missing.target + " to " + file;
+	out.detail = "Adds a window named " + missing.target + " to screen " + screen->screen.name + " of " + file +
+	             (under ? ", inside its window " + screen->screen.roots.front().name : std::string(", as a root window")) +
+	             ", a generic window as Add window makes one, and selects it to place and fill: an ACTION naming the "
+	             "window then finds it.";
+	return true;
+}
+
 std::vector<Diagnostic> validate_menu_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *menu = dynamic_cast<const MnuDocument *>(&document);
