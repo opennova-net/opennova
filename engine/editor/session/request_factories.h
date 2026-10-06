@@ -192,7 +192,11 @@ inline EditorRequest edit_externally(std::string path) {
 	return request;
 }
 // What changed on disk among the import sources imported again (S18: the Shell's on its window's focus).
-inline EditorRequest refresh_changed_sources() { return of(EditorRequestKind::RefreshChangedSources); }
+inline EditorRequest refresh_changed_sources(bool all = false) {
+	EditorRequest request = of(EditorRequestKind::RefreshChangedSources);
+	request.all = all;
+	return request;
+}
 // What a Replace of the texture `path` by the image `image` (none: an Edit externally) would do, asked in
 // the dialog before it is done (S18), `values` the options asked over the ones reproducing its form.
 inline EditorRequest preview_texture_source(std::string path, std::string image = std::string(),
@@ -249,11 +253,13 @@ inline EditorRequest build(std::string out_dir = std::string(), bool rehash = fa
 	return request;
 }
 // A build, then the game run on it: at its menu, or in `mission` (a .bms of the project by its
-// logical name; S14); `behind`, its window behind every other (the MCP gaps lane).
-inline EditorRequest play(std::string mission = std::string(), bool behind = false) {
+// logical name; S14); `behind`, its window behind every other (the MCP gaps lane); `fresh`, its run
+// directory emptied first of what the runs before wrote there (a first run).
+inline EditorRequest play(std::string mission = std::string(), bool behind = false, bool fresh = false) {
 	EditorRequest request = of(EditorRequestKind::Play);
 	request.mission = std::move(mission);
 	request.behind = behind;
+	request.fresh = fresh;
 	return request;
 }
 // A build, then the build copied into `export_dir` ("" the project's export folder) as what ships
@@ -325,6 +331,31 @@ inline EditorRequest play_sound(std::string path) {
 	request.path = std::move(path);
 	return request;
 }
+// A sound set played as the game plays it (session/sound_play.h): from `bank` ("" the game's search).
+inline EditorRequest play_set(std::string set, std::string bank = std::string()) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(bank);
+	request.values = {{"set", std::move(set)}};
+	return request;
+}
+// A SndProf.def profile's slot played (its keyword or number); the footstep a foot plays on a surface.
+inline EditorRequest play_profile_slot(std::string profile, std::string slot) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.values = {{"profile", std::move(profile)}, {"slot", std::move(slot)}};
+	return request;
+}
+inline EditorRequest play_footstep(std::string profile, std::string surface, std::string foot) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.values = {{"profile", std::move(profile)}, {"surface", std::move(surface)}, {"foot", std::move(foot)}};
+	return request;
+}
+// What the clip the animation document `path` plays fires at `frame`, once (DI-04: a timeline mark pressed).
+inline EditorRequest play_clip_event(std::string path, int frame) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	request.values = {{"frame", std::to_string(frame)}};
+	return request;
+}
 inline EditorRequest stop_sound() {
 	return of(EditorRequestKind::StopSound);
 }
@@ -347,6 +378,13 @@ inline EditorRequest close_document(std::string path = std::string()) {
 inline EditorRequest save(std::string path = std::string()) {
 	EditorRequest request = of(EditorRequestKind::Save);
 	request.path = std::move(path);
+	return request;
+}
+// The document at `path` written over its file that changed outside the editor (DI-01: a conflict's Keep
+// my edits).
+inline EditorRequest save_over(std::string path) {
+	EditorRequest request = save(std::move(path));
+	request.force = true;
 	return request;
 }
 inline EditorRequest save_all() {
@@ -547,6 +585,14 @@ inline EditorRequest preview_rename_back(bool ask_name = false) {
 }
 // The last rename taken back, on disk.
 inline EditorRequest rename_back() { return of(EditorRequestKind::RenameBack); }
+// The file `path` moved to the project's `folder` ("" the top level) under its own name, no reference
+// rewritten (DI-03: the game finds a file by its name alone).
+inline EditorRequest move_asset(std::string path, std::string folder) {
+	EditorRequest request = of(EditorRequestKind::MoveAsset);
+	request.path = std::move(path);
+	request.folder = std::move(folder);
+	return request;
+}
 
 // --- the shell's -------------------------------------------------------------------------------
 

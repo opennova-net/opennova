@@ -4,6 +4,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -21,9 +22,11 @@
 #include <editor/session/session_operation.h>
 #include <editor/session/view/view_revisions.h>
 #include <editor/session/view/session_view.h>
+#include <runtime/audio/sound_selector.h>
 
 namespace opennova::editor {
 
+class DiskWatch;
 class DocumentSet;
 class EditorPreferences;
 class ImportController;
@@ -48,12 +51,12 @@ inline constexpr int64_t kWireGestureLapseMs = 10000;
 // closes it; the one operation slot, its poll budget and the build it runs; the view (the Output
 // log and the revisions in it), which only touch() moves a counter of; the outcome of the request
 // being served; and the editor's preferences. The parts (DocumentSet, ProblemsService,
-// PlayController, ImportController, RenameController, UnsavedGuard, NavigationController) each hold
-// the core and reach one another through it, so a composition calls the part that serves it (a
-// rename's close and reload call DocumentSet), never the session's handle(): handle() is entered
-// once per request from outside, and that request's outcome is the one every part adds to. An
-// operation's finish absorbs its work through the core (SessionOperation::finish). Single-threaded:
-// the session's owner calls it between two frames' requests.
+// PlayController, ImportController, RenameController, UnsavedGuard, DiskWatch, NavigationController)
+// each hold the core and reach one another through it, so a composition calls the part that serves it
+// (a rename's close and reload call DocumentSet), never the session's handle(): handle() is entered once
+// per request from outside, and that request's outcome is the one every part adds to. An operation's
+// finish absorbs its work through the core (SessionOperation::finish). Single-threaded: the session's
+// owner calls it between two frames' requests.
 class SessionCore {
 public:
 	SessionCore(ProcessPlatform &platform, EditorPreferences &preferences);
@@ -69,6 +72,7 @@ public:
 		ImportController *imports = nullptr;
 		RenameController *renames = nullptr;
 		UnsavedGuard *guard = nullptr;
+		DiskWatch *disk = nullptr;
 		NavigationController *navigation = nullptr;
 	};
 	void bind(const Parts &parts) { parts_ = parts; }
@@ -78,6 +82,7 @@ public:
 	ImportController &imports() const { return *parts_.imports; }
 	RenameController &renames() const { return *parts_.renames; }
 	UnsavedGuard &guard() const { return *parts_.guard; }
+	DiskWatch &disk() const { return *parts_.disk; }
 	NavigationController &navigation() const { return *parts_.navigation; }
 
 	// Once, when the session starts: the preferences read (a store that cannot be read is a finding,
@@ -85,6 +90,9 @@ public:
 	void start();
 
 	SessionView &view() { return view_; }
+	// The sound plays' member picks (session/sound_play.h): one stream and one cursor per layer for the
+	// session, as the game keeps one for its run, so a sequential layer steps on from play to play.
+	audio::SoundSelector &sound_selector() { return sound_selector_; }
 	const SessionView &view() const { return view_; }
 	// The viewports (S13 V5): shared const on the view (DocumentsView::viewports), kept with the
 	// view's previews' targets at every touch; the Shell's devices drive their follow.
@@ -238,7 +246,7 @@ public:
 	bool start_changed_refresh(ExternalChanges changes);
 	// Its finish: the sources' imports and findings the view's in place of what they were, the scan updated
 	// for them and the files that moved, the open documents of those files read again, the validation left
-	// due.
+	// due; each file that came back named in Output (ADR 0046 DI-01, note_came_back).
 	void absorb_changed(ImportRunResult &imports, const std::vector<std::string> &files);
 	// The refresh run to its end now and the project validated (the build's, before it plans).
 	void refresh_now();
@@ -351,6 +359,11 @@ public:
 	ShippedFiles shipped_files(const std::vector<Diagnostic> &gate);
 
 private:
+	// What absorb_changed says of the files that came back from outside the editor (`before` and `after` the
+	// scan, `imported` the sources the pass took and their records): an Output line each, or one line with
+	// each under it.
+	void note_came_back(const AssetScan &before, const AssetScan &after, const std::vector<std::string> &files,
+	                    const std::set<std::string> &imported);
 	// The path of the document a viewport request names (its path or logical name; "" the active
 	// one), the name as it came when none is open there.
 	std::string viewport_document(const std::string &path);
@@ -394,6 +407,7 @@ private:
 	OperationSlot operations_;
 	PollBudget poll_budget_ = kDefaultPollBudget;
 	SessionView view_;
+	audio::SoundSelector sound_selector_;
 	std::shared_ptr<Viewports> viewports_;
 	std::shared_ptr<TextureUseIndex> texture_uses_; // the view's texture_uses, cleared with the project
 	ActionOutcome outcome_;

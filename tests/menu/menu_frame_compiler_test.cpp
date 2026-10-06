@@ -2578,6 +2578,91 @@ void test_multiple_roots(const fnt_font_t *font) {
 			"off every root: the first root with a cursor");
 }
 
+// The cursor pass draws the cursor of the claim the pump stamped, whatever the
+// claimant's visual state: a disabled claimant keeps state 1 (no hover) yet
+// stamps its own cursor [orig: CWnd_ProcessMouseEvent @ 0x647a00 stamps
+// g_UIFrameCursorTexture @ 0x647b09 before the visual-state verdict;
+// CUIScene_DrawScreensAndCursor @ 0x63bf60 reads the stamp alone @ 0x63bfa2].
+// claim_at makes the pump's claim with nothing written (the editor's picture,
+// which never pumps), and frame_cursor names the window whose CURSOR is drawn.
+void test_cursor_follows_the_claim(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>P</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <APPEARANCE type="color" state="default">101010</APPEARANCE>
+    <CURSOR><FILE>a.tga</FILE></CURSOR>
+    <WINDOW type="button" name="OWN">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>200</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <APPEARANCE type="color" state="default">202020</APPEARANCE>
+      <CURSOR><FILE>b.tga</FILE></CURSOR>
+    </WINDOW>
+    <WINDOW type="button" name="PLAIN">
+      <POSITION><LEFT>300</LEFT><TOP>100</TOP><RIGHT>400</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <APPEARANCE type="color" state="default">303030</APPEARANCE>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	const int32_t a = slot_of(c, "a.tga");
+	const int32_t b = slot_of(c, "b.tga");
+	CHECK(a >= 0 && b >= 0, "both cursors are interned");
+	c.set_texture_size(a, 32, 32);
+	c.set_texture_size(b, 16, 24);
+	const int own = c.widget_index("OWN");
+	const int plain = c.widget_index("PLAIN");
+	MenuFrameState st;
+	// The claim at a point, nothing written.
+	const MenuFrameCompiler::MouseClaim at = c.claim_at(st, 150.0f, 120.0f, 1.0f, 1.0f);
+	CHECK(at.hovered == own && at.cursor == b, "claim_at: the pump's claim and its cursor");
+	CHECK(st.cursor_claim == -1 && st.widgets.empty(), "claim_at writes nothing");
+	CHECK(c.claim_at(st, 300.0f, 240.0f, 2.0f, 2.0f).hovered == own, "claim_at scales like the pump");
+	// No claim stamped: the first root's; a claimant with none of its own: its root's.
+	MenuFrameCompiler::FrameCursor cursor = c.frame_cursor(st);
+	CHECK(cursor.owner == 0 && cursor.texture == a && cursor.width == 32 && cursor.height == 32,
+			"nothing claimed: the first root's cursor");
+	st.cursor_claim = plain;
+	cursor = c.frame_cursor(st);
+	CHECK(cursor.owner == 0 && cursor.texture == a, "a claimant with no cursor: its root's");
+	st.cursor_claim = own;
+	cursor = c.frame_cursor(st);
+	CHECK(cursor.owner == own && cursor.texture == b && cursor.width == 16 && cursor.height == 24,
+			"a claimant's own cursor");
+	// A disabled claimant: the pump stamps it with no hover written, and the
+	// pass draws its cursor at the mouse, at its own size, unscaled.
+	st = MenuFrameState();
+	MenuWidgetState disabled;
+	disabled.index = own;
+	disabled.has_disabled = true;
+	disabled.disabled = true;
+	st.widgets.push_back(disabled);
+	const MenuFrameCompiler::MouseClaim pumped = c.pump_mouse(st, 300.0f, 240.0f, false, 2.0f, 2.0f);
+	CHECK(pumped.hovered == own && st.cursor_claim == own && !st.widgets[0].hovered &&
+					!st.widgets[0].pressed,
+			"a disabled claimant is stamped, its visual state 1");
+	st.cursor_visible = true;
+	st.cursor_x = 300.0f;
+	st.cursor_y = 240.0f;
+	const MenuDrawList &dl = c.compile(st, 2.0f, 2.0f);
+	CHECK(!dl.quads.empty() && dl.quads.back().texture == b && dl.quads.back().x0 == 300.0f &&
+					dl.quads.back().x1 == 316.0f && dl.quads.back().y1 == 264.0f,
+			"the disabled claimant's own cursor drawn last, unscaled");
+	// No CURSOR loads: no pointer at all [orig: @ 0x63bfa2].
+	c.set_texture_size(a, 0, 0);
+	c.set_texture_size(b, 0, 0);
+	CHECK(c.frame_cursor(st).owner == -1, "no cursor loaded: none");
+	const MenuDrawList &bare = c.compile(st, 2.0f, 2.0f);
+	bool drawn = false;
+	for (const MenuQuad &quad : bare.quads) {
+		drawn = drawn || quad.texture == a || quad.texture == b;
+	}
+	CHECK(!drawn, "nothing drawn for the pointer");
+}
+
 int main() {
 	fnt_font_t font = test_font::uniform_test_font();
 	test_draw_order_and_state_selection(&font);
@@ -2615,6 +2700,7 @@ int main() {
 	test_combo_face_shows_list_box_selection(&font);
 	test_open_combo_popup_draws_over_later_widgets(&font);
 	test_multiple_roots(&font);
+	test_cursor_follows_the_claim(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

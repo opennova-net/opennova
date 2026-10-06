@@ -929,6 +929,32 @@ void MenuFrame::set_cursor_state(bool p_visible, const Vector2 &p_position) {
 	queue_redraw();
 }
 
+void MenuFrame::place_cursor(bool p_visible, const Vector2 &p_position) {
+	// The claim the pump would make there, stamped with no hover or press written
+	// (engine MenuFrameCompiler::claim_at): the picture's windows keep the states
+	// they are held in.
+	int32_t claim = -1;
+	int32_t spin_part = 0;
+	if (p_visible && is_configured()) {
+		const Vector2 scale = design_scale_();
+		const opennova::menu::MenuFrameCompiler::MouseClaim at =
+				compiler_.claim_at(state_, p_position.x, p_position.y, scale.x, scale.y);
+		claim = at.hovered;
+		spin_part = at.spin_part;
+	}
+	if (state_.cursor_visible == p_visible && state_.cursor_x == p_position.x &&
+			state_.cursor_y == p_position.y && state_.cursor_claim == claim &&
+			state_.cursor_spin_part == spin_part) {
+		return;
+	}
+	state_.cursor_visible = p_visible;
+	state_.cursor_x = p_position.x;
+	state_.cursor_y = p_position.y;
+	state_.cursor_claim = claim;
+	state_.cursor_spin_part = spin_part;
+	queue_redraw();
+}
+
 Vector2 MenuFrame::design_scale_() const {
 	const Vector2 size = get_size();
 	if (size.x > 1.0f && size.y > 1.0f) {

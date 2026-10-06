@@ -75,6 +75,11 @@ struct ActivityView {
 	// Play tails there ("" before the first Play): never the build directory it runs from.
 	std::string play_run_dir;
 	std::string play_log_file;
+	// Whether the running (or last) game's run directory was emptied first (play's fresh), and what it kept
+	// of what the runs before wrote there ('/'-separated paths under it: the game's game.cfg, its saves),
+	// run/run_directory.h.
+	bool play_fresh = false;
+	std::vector<std::string> play_kept;
 	// The running (or last) game is the game install's under Strict Play (the build and the install's
 	// program alone, no /d), and its first run, which wrote its game.cfg and quit, was started again.
 	bool play_strict = false;
@@ -106,13 +111,15 @@ struct ActivityView {
 	// a rename back (it rewrote files, not a step of a document's history), so the Edit menu offers the
 	// rename back (RenameController's rename_back: only the sites it rewrote). A name's (`symbol`: its
 	// defining file, the record's locator and the field, its kind and scope) or a file's (`path` its new
-	// path); `from` the old name, `to` the new.
+	// path); `from` the old name, `to` the new. A move's (`move`, DI-03): `path` its new path, `from` and
+	// `to` the folders it left and went to ("" the top level).
 	struct LastRename {
 		bool made = false;
 		bool symbol = false;
 		std::string path, locator, field, from, to;
 		ReferenceKind kind = ReferenceKind::None;
 		std::string scope;
+		bool move = false;
 	};
 	LastRename last_rename;
 };

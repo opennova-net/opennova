@@ -33,6 +33,8 @@ MissionEntityMark mark_of(const MissionEntityRead &read) {
 	mark.team = read.team;
 	mark.group = read.group;
 	mark.attributes = read.attributes;
+	mark.route = read.waypoint_id;
+	mark.ssn = read.ssn;
 	return mark;
 }
 

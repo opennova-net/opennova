@@ -166,6 +166,13 @@ public:
 	// trip. Not bound to Godot.
 	const opennova::particle::EffectScene &native_scene() const { return *scene_; }
     std::shared_ptr<opennova::particle::EffectScene> shared_native_scene() const { return scene_; }
+	// An embedder's own portable scene in this one's place (the OpenNova Editor's effect preview, ADR
+	// 0046 DI-14: the editor core opens and steps the scene itself; its device only draws it): the
+	// renderer reads its snapshot through native_frame_snapshot as it reads this one's. Null opens an
+	// empty scene. Not bound to Godot.
+	void share_native_scene(std::shared_ptr<opennova::particle::EffectScene> p_scene);
+	// The shared scene was stepped by its owner: the next snapshot is written anew. Not bound.
+	void invalidate_snapshot() { snapshot_dirty_ = true; }
 };
 
 } // namespace godot

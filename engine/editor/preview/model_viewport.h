@@ -8,10 +8,12 @@
 
 #include <editor/model/edit.h>
 #include <editor/preview/model_collision.h>
+#include <editor/preview/model_damage.h>
 #include <editor/preview/model_handle_edit.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_preview_rig.h>
+#include <editor/preview/preview_clip_sounds.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 #include <runtime/assets/asset_store.h>
@@ -58,9 +60,15 @@ struct ModelViewportOptions {
 	// The grid a canvas's drag of a marker's place snaps to on each of the file's axes (metres; 0 free: the
 	// toolbar's Snap, kModelHandleSnaps; the MCP gaps lane), the canvas's alone: no picture changes.
 	float snap = 1.0f / 16.0f;
+	// How a clip's events are heard (DI-04, preview/preview_clip_sounds): no picture changes with it.
+	ClipSoundOptions sound;
+	// The damage state a model is drawn in (DI-10, preview/model_damage): intact, or destroyed as an item
+	// naming it is, the death at the preview clock's tick 0.
+	DamageOptions damage;
 	bool operator==(const ModelViewportOptions &other) const {
 		return lod == other.lod && ctrl == other.ctrl && overlays == other.overlays &&
-				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones && snap == other.snap;
+				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones && snap == other.snap &&
+				sound == other.sound && damage == other.damage;
 	}
 	bool operator!=(const ModelViewportOptions &other) const { return !(*this == other); }
 };
@@ -69,7 +77,8 @@ struct ModelViewportOptions {
 // pitch and distance): what an orbit, a pan, a dolly or a framing on its canvas sends.
 std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
-// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones, snap}.
+// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones, snap,
+// sound {mute, surface, body, female, profile}, damage {state, item}}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
 
 // How long a repeated one-shot holds its last frame before it plays again, in game ticks (half a
@@ -198,6 +207,60 @@ public:
 	// The rig's bones as the playing clip poses them at the clock (empty when none plays).
 	std::vector<PreviewJoint> joints(const PreviewClock &clock) const;
 
+	// A clip's sounds (DI-04, preview/preview_clip_sounds): the project's files they play from, the profile
+	// and the body they play through, the clip's event words and capsule bottoms as its channel reads
+	// them, and the sounds its events fired as the clock ran it, the last kSoundsFiredKept, oldest first.
+	const ClipSoundSources &sound_sources() const { return sound_sources_; }
+	const ClipSoundBinding &sound_binding() const { return sound_binding_; }
+	const ClipSoundTrack &clip_track() const { return clip_track_; }
+	static constexpr size_t kSoundsFiredKept = 16;
+	const std::vector<ClipSoundFired> &sounds_fired() const { return fired_; }
+	// What an event of the clip plays under the sound options, a line a sound, nothing picked (the
+	// timeline's hover).
+	std::vector<std::string> event_sound_words(uint32_t trigger) const;
+	// The sounds the clip's events fired over the ticks the clock ran through since the last call
+	// (clip_events_due: never over a seek, a clip newly chosen, a pause; from the clip's tick of each, a
+	// repeated one-shot's taken again from 0), each planned through `selector` (plan_clip_event) and
+	// numbered from `next_seq` on, kept with the last ones fired, and returned. Nothing while no clip
+	// plays. Each voice's wave is the project's file of its name (`scan`, find_clip_sound_waves).
+	std::vector<ClipSoundFired> fire_sounds(const PreviewClock &clock, const AssetScan *scan,
+			audio::SoundSelector &selector, uint64_t &next_seq);
+	// The sounds the clip's event at `frame` plays, once, as a press of its mark on the timeline asks
+	// (play_sound {frame}); false, with why, for no clip playing, a frame the game never reads (the end
+	// pose, a frame the clock steps over) and a frame that fires no sound.
+	bool press_event(int frame, const AssetScan *scan, audio::SoundSelector &selector,
+			std::vector<ClipSoundFired> &out, std::string &error) const;
+
+	// The model's damage states (DI-10, preview/model_damage), for a model document: the items naming it as
+	// a graphic or a husk, the one the options choose (the first when they name none or one not among
+	// them) and its role, the item as its catalog reads, its death as the game runs it, the state the game
+	// draws at the clock (the death at tick 0), and the husk file drawn in the model's place ("" the model
+	// itself) with why where the destroyed state draws otherwise ("": nothing to say).
+	const std::vector<DamageUse> &damage_uses() const { return damage_uses_; }
+	const DamageUse *damage_use() const;
+	const DamageItem &damage_item() const { return damage_item_; }
+	const DamagePlan &damage_plan() const { return damage_plan_; }
+	DamageFrame damage_frame_at(const PreviewClock &clock) const;
+	const std::string &damage_drawn() const { return damage_drawn_; }
+	const std::string &damage_note() const { return damage_note_; }
+	// Whether the destroyed state plays a death (an item chosen whose class dies: its legs fire on the clock,
+	// its sounds play), and whether it drives what the picture shows (the death swaps in a husk the project
+	// holds, and the picture is that husk: the graphic swapped, or the husk itself).
+	bool damage_playing() const;
+	bool damage_driven() const;
+	// The CTRL registers the picture reads at `clock` (what the device holds, the overlays and the collision
+	// pose by): the options' held registers, the six destroy-fade registers the game's in their place while
+	// the destroyed state drives the picture (zero, unheld, before the fade). The sections of the picture
+	// left as death pieces (hidden), likewise.
+	std::map<std::string, int64_t> ctrl_at(const PreviewClock &clock) const;
+	uint32_t hidden_sections_at(const PreviewClock &clock) const;
+	// The death's sounds over the ticks the clock ran through since the last call, as fire_sounds fires a
+	// clip's (never over a seek; a leg on the tick a seek lands on fires as the clock runs from it, so Play
+	// destroy, a seek to 0, hears the death), each set played at the item as the camera hears it, kept with
+	// the clip's (sounds_fired) and returned. Nothing unless the destroyed state drives the picture.
+	std::vector<ClipSoundFired> fire_damage_sounds(const PreviewClock &clock, const AssetScan *scan,
+			audio::SoundSelector &selector, uint64_t &next_seq);
+
 	// What a canvas maps of it in a frame (model_canvas.h): its markers at the clock and, while the
 	// model is the active document, the selected records' markers.
 	ModelCanvasFrame canvas_frame(const ViewportContext &context) const;
@@ -209,6 +272,7 @@ public:
 	std::string message() const override { return model_view_status_message(reason_, detail_); }
 	const std::string &detail() const override { return detail_; }
 	std::string caption() const override;
+	const FileStamps *picture_reads() const override { return &picture_.files(); }
 	const char *units() const override { return "pixels"; }
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
@@ -245,7 +309,7 @@ private:
 	bool dragged_marker_(const ViewportContext &context, NodeId id, const std::string &token, ModelHandle &handle,
 			ModelOverlay &marker, std::string &error) const;
 	ViewportAction stop_(ModelViewStatus reason, const std::string &detail, bool failed);
-	ViewportAction follow_model_(const ViewportInput &input, const ModelDocument &document);
+	ViewportAction follow_model_(const ViewportInput &input, const ModelDocument &document, const PreviewClock &clock);
 	// Whether what changed since the last follow is the overlays' alone (S13 V8): a change set
 	// naming the model row alone, whose version now is alike but for its user points to the one the
 	// held model holds, or naming nothing.
@@ -261,6 +325,14 @@ private:
 	ViewportAction follow_animation_(const ViewportInput &input, const Document &document,
 			PreviewClock &clock);
 	void reset_animation_();
+	// The damage state's follow (DI-10): the uses again when the graph moves, the item when its catalog's
+	// stamp moves, the husk models when theirs do, then the plan; the husk file the picture draws at the
+	// clock ("" the document). Returns that file.
+	std::string follow_damage_(const ViewportInput &input, const PreviewClock &clock);
+	void reset_damage_();
+	// The envelope's `damage` (DI-10): the uses, the chosen item and its role, its death as the game runs
+	// it, and the state the game draws at the clock.
+	io::JsonValue damage_json_(const ViewportInput &input) const;
 	// The camera looks at the whole model.
 	void frame_();
 
@@ -300,6 +372,41 @@ private:
 	std::vector<PreviewClipEvent> clip_events_;
 	std::string clip_note_;
 	NodeId sought_event_ = 0; // the event record the clock last sought
+	// The clip's sounds (DI-04): the event words it reads, its sources and binding, what fired, and the
+	// clock's tick the sounds were last fired to (-1: none since the clip was chosen) and its seeks then.
+	ClipSoundTrack clip_track_;
+	ClipSoundSources sound_sources_;
+	ClipSoundBinding sound_binding_;
+	std::vector<ClipSoundFired> fired_;
+	int32_t sound_cursor_ = -1;
+	uint64_t sound_seeks_ = 0;
+	// The damage state's (DI-10): the uses and the graph they were read from, the chosen use, the item and
+	// the catalog stamp it was read at, the husk models read (each by its file and stamp, a model that does
+	// not read latched until its stamp moves), the plan, the husk file drawn and why, and the death sounds'
+	// cursor (as the clip sounds').
+	std::vector<DamageUse> damage_uses_;
+	const void *damage_graph_ = nullptr;
+	uint64_t damage_generation_ = 0;
+	size_t damage_use_ = SIZE_MAX;
+	std::string damage_catalog_;
+	std::string damage_record_;
+	uint64_t damage_catalog_stamp_ = 0;
+	DamageItem damage_item_;
+	struct DamageModel {
+		std::string file; // the scan's file name
+		uint64_t stamp = 0;
+		bool read = false;
+		assets::Model model;
+	};
+	DamageModel husk_model_;
+	DamageModel piece_model_;
+	DamageModels damage_models_;
+	DamagePlan damage_plan_;
+	bool damage_drives_ = false;
+	std::string damage_drawn_;
+	std::string damage_note_;
+	int32_t damage_cursor_ = -1;
+	uint64_t damage_seeks_ = 0;
 	// The collision shapes last made and what they were made for.
 	struct CollisionCache {
 		const void *model = nullptr;

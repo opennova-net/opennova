@@ -92,6 +92,11 @@ struct DocumentType {
 	// reader, sides, levels and facts), the document query's member named by the type's name; null for
 	// a type whose documents the base's lifecycle, the rows or the lines say.
 	io::JsonValue (*content_json)(const DocumentBase &document) = nullptr;
+	// A text type's definitions: the names its document's text defines, each at its span (a shader's tag),
+	// which the asset graph makes symbols of; null for a type whose text defines nothing, and for a record
+	// type (the graph reads a record document's definitions through its schema). Read from the document
+	// alone, as validate_file is.
+	void (*definitions)(const TextDocument &document, std::vector<TextDefinition> &out) = nullptr;
 };
 
 // A record in its type's own words with no project names (its record_label with none, else the

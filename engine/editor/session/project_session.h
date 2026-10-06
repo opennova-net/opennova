@@ -7,6 +7,7 @@
 
 #include <base/io/json.h>
 #include <editor/run/process_platform.h>
+#include <editor/session/clip_sounds.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/view/workspace_view.h>
 
@@ -40,9 +41,9 @@ struct ValidationStats;
 //
 // A facade (S13 A2): the session is its parts (session_core.h, document_set.h,
 // problems_service.h, play_controller.h, import_controller.h, rename_controller.h,
-// unsaved_guard.h, editor_preferences.h), which call one another directly, so handle() is
-// entered once per request from outside and the request's outcome is the one every part adds
-// to. This header names none of them.
+// unsaved_guard.h, disk_watch.h, editor_preferences.h), which call one another directly, so
+// handle() is entered once per request from outside and the request's outcome is the one every
+// part adds to. This header names none of them.
 class ProjectSession {
 public:
 	ProjectSession(ProcessPlatform &platform, PreferencesStore &preferences);
@@ -136,8 +137,12 @@ public:
 	// (ViewportDeviceCache: attached, followed, their actions taken, their reports given). The view
 	// shares them const (DocumentsView::viewports); their state changes only by SetViewport.
 	Viewports &viewports();
-	// `seconds` of the Shell's frames pass: the preview clock runs while it plays.
+	// `seconds` of the Shell's frames pass: the preview clock runs while it plays, and the clip the model
+	// preview plays fires the sounds of the ticks it ran through (DI-04, session/clip_sounds.h).
 	void advance(double seconds);
+	// The clip sounds fired after `after` that the Shell plays (played, a wave of the project to play),
+	// oldest first, each numbered (session/clip_sounds.h).
+	std::vector<ClipSoundPlay> clip_sounds_since(uint64_t after);
 	// What the Shell's player made of the sound play `serial` asked (the workspace's sound, play_sound): it
 	// plays, it played through, it failed (`error` why). A report of a play stopped or replaced since is passed
 	// over; one that moves the sound moves the Workspace concern.

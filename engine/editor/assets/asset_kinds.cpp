@@ -281,12 +281,14 @@ constexpr AssetKindRow kRows[] = {
 	        .folder("music")
 	        .about("Music the game streams by its path, never through the archives.")
 	        .row,
-	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their singles naming the waves
-	// (the graph's extract_sound_bank).
+	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their waves naming the files
+	// (documents/sound_bank_document: a wave's file is a field's reference, a set's name a symbol).
 	Kind(AssetKind::SoundBank, "sound_bank", "Sound bank", ArchiveSlot::Resource)
 	        .runtime("sound")
+	        .edited_by(DocumentTypeId::SoundBank)
 	        .names_files()
 	        .folder("sounds")
+	        .new_name("newbank.lwf")
 	        .about("A sound bank: sound sets by name, each playing the waves it names.")
 	        .row,
 	// A wave a sound bank's single names, which the game loads from the archives by name
@@ -305,7 +307,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
 	        .runtime("particle")
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::Particles)
 	        .names_files()
 	        .folder("particles")
 	        .about("Particle effects (smoke, fire, sparks) by name, which items, weapons and ammo name.")
@@ -366,6 +368,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::SoundProfileDefs, "sound_profile_defs", "Sound profiles", ArchiveSlot::Localres)
 	        .file("sndprof.def")
+	        .edited_by(DocumentTypeId::SoundProfiles)
 	        .names_files()
 	        .folder("defs")
 	        .about("The sound profiles: named sets of sounds the game looks up by name.")
@@ -439,6 +442,7 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Shader)
 	        .scr(ScrForm::Shader)
 	        .folder("shaders")
+	        .new_name("newshader.fx")
 	        .about("A shader effect the renderer compiles.")
 	        .row,
 	// Read from the install's folder before any archive mounts (game.cfg, assets.cd:

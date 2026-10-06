@@ -42,7 +42,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
 
     // Same motor-head dual update as local org2; only translation is wire-owned.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B41DF]
-    infantry_weapon_channel_advance(e);
+    advance_weapon_channel(inf, root_motion, anim_rings);
     if (root_motion != nullptr) {
         if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
         have_collision_frame =

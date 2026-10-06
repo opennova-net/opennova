@@ -6,6 +6,7 @@
 #include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/animation_slots.h>
+#include <editor/documents/text_types.h>
 #include <editor/documents/texture_load_rules.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
@@ -200,6 +201,34 @@ std::string wave_missing(const AssetGraph &, const GraphEdge &) {
 	return ", which the project does not have: the game plays nothing for it.";
 }
 
+// A set name no loaded bank has resolves to no set, which every consumer witnessed plays as silence
+// [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0 returns 0; the profile resolve @ 0x5282b2; the
+// one-shot paths return at once, Sound_Play3DPositional @ 0x527cc6].
+std::string sound_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	// A menu SOUND's trigger is looked up in its own bank alone.
+	if (!edge.scope.empty())
+		return ", which " + edge.scope + ", the bank the SOUND names, does not have: the menu plays nothing for it.";
+	for (const GraphSymbol *symbol : graph.symbols_named(ReferenceKind::Sound, edge.target))
+		if (!graph.on_bank_chain(symbol->file))
+			return ", which only " + basename_of(symbol->file) +
+			       " has, a bank the game never searches for a set by name (it searches gamelocl.lwf, game.lwf, "
+			       "game3.lwf, game2.lwf and an expansion's own): the game plays nothing for it.";
+	return ", which no sound bank the game searches has: the game plays nothing for it.";
+}
+
+// A member names its wave by the wave's place in the bank, which the save finds by the name: a name
+// no wave of the bank has cannot be written.
+std::string bank_wave_missing(const AssetGraph &, const GraphEdge &edge) {
+	return ", which no wave of " + (edge.scope.empty() ? std::string("the bank") : edge.scope) +
+	       " is named: the bank cannot be saved until one is.";
+}
+
+// A name no profile has binds the file's first profile [orig: SoundProfile_FindSlotByName @ 0x526e30
+// returns the table's base on a miss; ItemDef_ParseProperty @ 0x49fafd].
+std::string profile_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which SndProf.def has no profile of: the game binds its first profile instead.";
+}
+
 std::string credits_missing(const AssetGraph &, const GraphEdge &) {
 	return ", which the project does not have: the marquee shows none of its lines.";
 }
@@ -261,6 +290,21 @@ std::string mission_strings_missing(const AssetGraph &graph, const GraphEdge &) 
 	               ? ", which the project does not have: the game reads medmssn.bin in its place."
 	               : ", which the project does not have, nor medmssn.bin to read in its place: the mission's title, "
 	                 "briefing, location names and objectives show empty.";
+}
+
+// A material whose shader tag no registered effect has draws with the registry's first entry [orig:
+// Material_ConvertDefinition @ 0x5B0664..0x5B0672 and Material_ResolveEffectSubobjectsAndShader @
+// 0x5B18C1..0x5B18CD: HLSLEffect_FindByName's -1 clamped to 0]. The renderer registers _ffp.fx's tags
+// first, each opened by the file's name [orig: HLSLEffect_InitAndLoadAll @ 0x5B00F2]; with no effect at
+// all that entry holds no pass, and the draw draws nothing [orig: CRenderBatchQueue_FlushBatches @
+// 0x5DA220..0x5DA22B].
+std::string shader_missing(const AssetGraph &graph, const GraphEdge &) {
+	return graph.has_file(kFixedFunctionShaderFile)
+	               ? ", which no shader of the project registers: the game draws the material with the first shader it "
+	                 "registered instead."
+	               : ", which no shader of the project registers, nor does the project have _ffp.fx, the renderer's "
+	                 "own: the game draws the material with the first shader it registered, and with none registered "
+	                 "draws nothing.";
 }
 
 // --- the values a Record reference names none by (ReferenceKindRow::none) ----------------------
@@ -364,6 +408,12 @@ struct Row {
 		out.row.missing_message = message;
 		return out;
 	}
+	// A missing name of the kind is an error refusing no build, saying why in its own words.
+	constexpr Row says(ReferenceMissingMessage message) const {
+		Row out = *this;
+		out.row.missing_message = message;
+		return out;
+	}
 	// What the message says depends on which files the project has.
 	constexpr Row message_reads_files() const {
 		Row out = *this;
@@ -392,7 +442,12 @@ constexpr ReferenceKindRow kRows[] = {
 	        .loads(AssetKind::Texture, nullptr, texture_files)
 	        .fatal_for(texture_gates, texture_missing)
 	        .row,
-	Row(ReferenceKind::Sound, "sound", "the sound", "sound").row,
+	// A set by name across the banks the game loads, the first bank's first set of the name, without
+	// case [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0 over SoundBank_FindTriggerByName @ 0x75be90].
+	Row(ReferenceKind::Sound, "sound", "the sound set", "sound set")
+	        .symbol(NameCase::NoCase, AssetKind::SoundBank)
+	        .tolerated(sound_missing)
+	        .row,
 	Row(ReferenceKind::Particle, "particle", "the particle effect", "particle effect")
 	        .symbol(NameCase::FileName, AssetKind::Particles)
 	        .row,
@@ -554,6 +609,26 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::MissionStrings, "mission_strings", "the mission's string table", "mission string table")
 	        .loads(AssetKind::Strings, kTable)
 	        .tolerated(mission_strings_missing)
+	        .message_reads_files()
+	        .row,
+	// A bank's wave by its name, in the bank its scope names: the bank's lookups find the first of the
+	// name, without case [orig: SoundBank_FindEntryByName @ 0x75bba0]. A name none has is an error the
+	// game never meets: the bank cannot be written with it (SoundBankDocument::serialize).
+	Row(ReferenceKind::BankWave, "bank_wave", "the wave", "wave")
+	        .symbol(NameCase::NoCase, AssetKind::SoundBank)
+	        .scoped(true)
+	        .says(bank_wave_missing)
+	        .row,
+	// A profile by name, the first of the name without case [orig: SoundProfile_FindSlotByName @ 0x526e30].
+	Row(ReferenceKind::SoundProfile, "sound_profile", "the sound profile", "sound profile")
+	        .symbol(NameCase::NoCase, AssetKind::SoundProfileDefs)
+	        .tolerated(profile_missing)
+	        .row,
+	// A model material's shader, by the tag an effect registers under, compared without case [orig:
+	// HLSLEffect_FindByName @ 0x5ADE70, stricmp]; one no effect registers draws as another (shader_missing).
+	Row(ReferenceKind::Shader, "shader", "the shader", "shader")
+	        .symbol(NameCase::NoCase, AssetKind::Shader)
+	        .tolerated(shader_missing)
 	        .message_reads_files()
 	        .row,
 };

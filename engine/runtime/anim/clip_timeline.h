@@ -76,4 +76,13 @@ private:
 	mutable float furthest_time_ = 0.0f;
 	mutable int32_t first_end_tick_ = -1;
 };
+
+// The event word a channel on `clock` reads at `ticks`: the record of the keyframe below the
+// playhead, unlerped [orig: AnimChannel_InterpolateKeyframe @0x40b32f, the trigger sampled from the
+// floor keyframe], and none from a one-shot that has stopped, whose parked end samples its capsule
+// but no trigger [orig: AnimChannel_AdvancePlayback @0x40b140]. `triggers` holds a word per record
+// (the clip's frames, then its end pose); armed_boundary as for ClipTimeline::frame_at. The one rule
+// the body's channel (AdmRootMotion's sample) and the editor's clip preview read the word by.
+uint32_t clip_trigger_at(const ClipTimeline &clock, const std::vector<uint32_t> &triggers, int32_t ticks,
+                         int32_t armed_boundary = -1);
 }

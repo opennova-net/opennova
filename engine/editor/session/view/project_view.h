@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -33,6 +34,12 @@ struct ProjectView {
 	// The project's importable sources (a PNG) with the outputs their importers made
 	// (editor/import), refreshed with the scan.
 	std::shared_ptr<const std::vector<ImportedSource>> imports;
+	// What another program changed of the project's files that the editor has not read yet (ADR 0046
+	// DI-01, session/disk_watch.h): the files that moved and wait to hold still (or are ready for the next
+	// check), and whether the sweep over every file a focus-in began still runs. The Shell checks again
+	// soon while either says so.
+	size_t outside_waiting = 0;
+	bool outside_sweeping = false;
 	// The logical names the game install under `retail_directory` resolves, sorted by their
 	// normalized form; empty when no install is set or it mounts nothing.
 	std::vector<std::string> retail_files;

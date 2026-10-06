@@ -40,6 +40,7 @@
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/install_view.h>
+#include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/mns_document.h>
@@ -173,10 +174,14 @@ static int test_blank_project() {
 	TEST_EXPECT(!font_file.empty() && !graph.referrers_of_file(font_file).empty());
 	TEST_EXPECT(graph.referrers_of_file("nothing.fnt").empty());
 	// The blank tables define nothing yet: the stylesheet's variables, the blank item
-	// table's null marker and the blank menus' screens and windows are the symbols.
+	// table's null marker, the blank menus' screens and windows, the blank SndProf.def's "default"
+	// profile and the blank _ffp.fx's fixed-function shader tags are the symbols.
 	for (const GraphSymbol &symbol : all_symbols(graph))
 		TEST_EXPECT(symbol.kind == ReferenceKind::StyleVar || symbol.kind == ReferenceKind::Item ||
-		            symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow);
+		            symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow ||
+		            symbol.kind == ReferenceKind::SoundProfile || symbol.kind == ReferenceKind::Shader);
+	TEST_EXPECT(graph.resolve(ReferenceKind::Shader, "FF_ST_OP") == ReferenceStatus::Present &&
+	            graph.resolve(ReferenceKind::Shader, "FF_MT_AD_LUM#UV") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuScreen, "startup", "MAIN.MNU") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuWindow, "exit", "MAIN.MNU/STARTUP") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuWindow, "EXIT", "MAIN.MNU/ELSEWHERE") == ReferenceStatus::Missing);
@@ -185,7 +190,8 @@ static int test_blank_project() {
 	for (const ReferenceChoice &choice : graph.choices(ReferenceKind::Font))
 		TEST_EXPECT(choice.kind == ReferenceKind::Font && choice.status == ReferenceStatus::Present && !choice.file.empty() &&
 		            choice.record.empty() && !choice.inert);
-	TEST_EXPECT(graph.resolve(ReferenceKind::Sound, "boom.wav") == ReferenceStatus::Unverified);
+	// A sound set is a bank's symbol (the sound lane): the blank project has no bank, so none is found.
+	TEST_EXPECT(graph.resolve(ReferenceKind::Sound, "BOOM") == ReferenceStatus::Missing);
 	TEST_EXPECT(graph.resolve(ReferenceKind::None, "x") == ReferenceStatus::NotAReference);
 	TEST_EXPECT(graph.stats().files_extracted > 0);
 	// Nothing changed: the next update reuses every extraction.
@@ -481,10 +487,10 @@ static int test_native_extractors() {
 			count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 
 	// A native file the graph cannot read is a warning, its references unchecked, kept
-	// while the file is unchanged: since it opens as a text (DI-06), the text type's (text.unreadable,
-	// the engine reader's words at the place it stops), the graph's own reading of it failing still; a
-	// document type's file that does not load (a mission, a model, a menu) is its validator's error,
-	// not the graph's.
+	// while the file is unchanged: a particle file, which opens as a text (DI-14), the particle type's
+	// (particle.unreadable, the reader's words at the place it stops), the graph's own reading of it
+	// failing still; a document type's file that does not load (a mission, a model, a menu) is its
+	// validator's error, not the graph's.
 	TEST_EXPECT(editor_test::write_text(root + "/broken.ptl", "[effectdef]\n{\n\tid = OPEN;\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/broken.bms", "not a mission"));
 	TEST_EXPECT(editor_test::write_text(root + "/broken.3di", "not a model"));
@@ -494,7 +500,7 @@ static int test_native_extractors() {
 	const auto unreadable = [&diagnostics](const std::string &asset) {
 		size_t n = 0;
 		for (const Diagnostic &d : diagnostics)
-			n += d.code() == "text.unreadable" && d.asset == asset && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
+			n += d.code() == "particle.unreadable" && d.asset == asset && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
 		return n;
 	};
 	TEST_EXPECT(unreadable("broken.ptl") == 1 && count_code(diagnostics, "graph.unreadable") == 0);
@@ -1214,7 +1220,8 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(graph.referrers_of(ReferenceKind::StyleVar, "TRIM_COLOR").size() == 1);
 	TEST_EXPECT(edge_of(graph, path, ReferenceKind::Menu, "graph.mnu") && edge_of(graph, path, ReferenceKind::Menu, "main.mnu"));
 	TEST_EXPECT(!edge_of(graph, path, ReferenceKind::Menu, "nofile.mnu")); // POP_SCREEN loads no FILE
-	TEST_EXPECT(editor_test::write_text(root + "/click.lwf", "lwf") && editor_test::write_text(root + "/credits.kda", "[TEXT]\r\n"));
+	TEST_EXPECT(editor_test::write_bytes(root + "/click.lwf", editor_test::sound_bank_of({"MOUSE_OVER"})) &&
+	            editor_test::write_text(root + "/credits.kda", "[TEXT]\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	menu = dynamic_cast<const MnuDocument *>(session.document_for("graph.mnu"));
 	TEST_EXPECT(menu);
@@ -1223,6 +1230,9 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::SoundBank, "click") == ReferenceStatus::Missing); // opened by the name as written
 	TEST_EXPECT(graph.resolve(ReferenceKind::Credits, "CREDITS.KDA") == ReferenceStatus::Present);
 	TEST_EXPECT(!finding(view.findings.diagnostics, "reference.missing", "HOME/PANEL/GO/Sound 1"));
+	// The SOUND's trigger is a set of its own bank (the sound lane), found there alone.
+	const GraphEdge *trigger = edge_of(graph, path, ReferenceKind::Sound, "MOUSE_OVER", "trigger");
+	TEST_EXPECT(trigger && trigger->scope == "CLICK.LWF" && graph.resolve(*trigger) == ReferenceStatus::Present);
 
 	// The screens: the last AWAY is the one found; the earlier one, and its windows, are inert.
 	const GraphSymbol *home_screen = symbol_at(graph, path, ReferenceKind::MenuScreen, "HOME");
@@ -1618,7 +1628,8 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint ||
 		                       kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone ||
 		                       kind == ReferenceKind::TilePlacement || kind == ReferenceKind::DialogBank ||
-		                       kind == ReferenceKind::MissionStrings;
+		                       kind == ReferenceKind::MissionStrings || kind == ReferenceKind::Sound ||
+		                       kind == ReferenceKind::SoundProfile || kind == ReferenceKind::Shader;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;
@@ -1626,7 +1637,8 @@ static int test_reference_kind_rows() {
 	TEST_EXPECT(reference_row(ReferenceKind::Font).file == AssetKind::Font &&
 	            reference_row(ReferenceKind::MenuTexture).file == AssetKind::Texture);
 	TEST_EXPECT(reference_row(ReferenceKind::StyleVar).resolution == ReferenceResolution::StyleVariable);
-	TEST_EXPECT(reference_row(ReferenceKind::Sound).resolution == ReferenceResolution::Unchecked);
+	TEST_EXPECT(reference_row(ReferenceKind::Sound).resolution == ReferenceResolution::Symbol &&
+	            reference_row(ReferenceKind::OtherText).resolution == ReferenceResolution::Unchecked);
 	TEST_EXPECT(reference_row(ReferenceKind::OtherText).also_offers == ReferenceKind::TextId);
 	// A model's register by its index, every whole number from 0 one; its frame row by the pose's
 	// rule, a signed byte above 0.
@@ -1796,7 +1808,7 @@ static int test_terrain_and_bank_extractors() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Missing &&
 	            graph.resolve(ReferenceKind::Texture, "isle_c.tga") == ReferenceStatus::Present);
 	const GraphEdge *shot = edge_to(graph, "game.lwf", ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav");
-	TEST_EXPECT(shot && shot->record == "SHOT" && shot->field == "wave");
+	TEST_EXPECT(shot && shot->record == "SHOT" && shot->field == "file");
 	TEST_EXPECT(graph.resolve(ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav") == ReferenceStatus::Present &&
 	            graph.resolve(ReferenceKind::Wave, "gone.wav") == ReferenceStatus::Missing &&
 	            !graph.referrers_of_file("shot.wav").empty());
@@ -1969,6 +1981,72 @@ static int test_model_texture_references() {
 		puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
 		TEST_EXPECT(puff && view.findings.graph->resolve(*puff) == ReferenceStatus::Missing);
 	}
+	return 0;
+}
+
+// A model material's shader names the tag an effect registers (ReferenceKind::Shader), compared
+// without case [orig: HLSLEffect_FindByName @ 0x5ADE70]: with no effect it is a warning saying the game
+// draws nothing (no registry entry holds a pass) and refuses no build; _ffp.fx registers the
+// fixed-function tags, an object effect its tag and #UV twin, a skinned one no twin. A missing _ffp.fx
+// is a required file the project lacks, which Create Missing makes.
+static int test_model_shader_references() {
+	editor_test::TempProjectDir dir("opennova_asset_graph_model_shaders");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Shaders"));
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(editor_test::write_text(scene + "/lit.o3d",
+	                                    "o3d 2\nmodel LIT\nmaterial FF_ST_OP\ntexture wall.tga 1 0\nlod 0\npart 0 0 0 0\n"
+	                                    "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	const ImportResult imported = import_assets({{scene + "/lit.o3d", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
+	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/lit.3di"}));
+	editor_test::handle_to_end(session, request::rescan());
+	const std::string model = "models/lit.3di";
+	const auto missing = [&]() -> const Diagnostic * {
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "reference.missing" && d.asset == model && subject_target(d) == "FF_ST_OP") return &d;
+		return nullptr;
+	};
+	const auto required = [&]() {
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "requirement.missing" && d.message.find("_ffp.fx") != std::string::npos) return true;
+		return false;
+	};
+	const GraphEdge *edge = edge_to(*view.findings.graph, model, ReferenceKind::Shader, "FF_ST_OP");
+	TEST_EXPECT(edge && view.findings.graph->resolve(*edge) == ReferenceStatus::Missing);
+	const Diagnostic *none = missing();
+	TEST_EXPECT(none && none->severity == DiagnosticSeverity::Warning && !blocks_build(*none) &&
+	            none->message.find("draws nothing") != std::string::npos);
+	TEST_EXPECT(required());
+	// The editor's _ffp.fx: the fixed-function tags and their twins, any case.
+	const auto make = [&](const char *name, const char *tag) {
+		BlankRequest request;
+		request.logical_name = name;
+		if (tag) request.values = {{"tag", tag}};
+		std::vector<uint8_t> bytes;
+		Diagnostic error;
+		return make_blank(request, AssetKind::Shader, bytes, error) &&
+		       editor_test::write_bytes(root + "/shaders/" + name, bytes);
+	};
+	TEST_EXPECT(make("_ffp.fx", nullptr));
+	editor_test::handle_to_end(session, request::rescan());
+	edge = edge_to(*view.findings.graph, model, ReferenceKind::Shader, "FF_ST_OP");
+	std::string file;
+	TEST_EXPECT(edge && view.findings.graph->resolve(*edge, &file) == ReferenceStatus::Present && !missing() && !required());
+	const AssetGraph &graph = *view.findings.graph;
+	TEST_EXPECT(graph.resolve(ReferenceKind::Shader, "ff_mt_ab_lum#uv") == ReferenceStatus::Present &&
+	            graph.resolve(ReferenceKind::Shader, "VS_PHONGT") == ReferenceStatus::Missing);
+	// An object effect registers its tag and its #UV twin; a skinned one no twin.
+	TEST_EXPECT(make("onphongt.fx", "VS_PHONGT") && make("onskphgt.fx", "VS_SKBUMPPHONGT"));
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetGraph &after = *view.findings.graph;
+	TEST_EXPECT(after.resolve(ReferenceKind::Shader, "VS_PHONGT") == ReferenceStatus::Present &&
+	            after.resolve(ReferenceKind::Shader, "vs_phongt#UV") == ReferenceStatus::Present &&
+	            after.resolve(ReferenceKind::Shader, "VS_SKBUMPPHONGT") == ReferenceStatus::Present &&
+	            after.resolve(ReferenceKind::Shader, "VS_SKBUMPPHONGT#UV") == ReferenceStatus::Missing);
 	return 0;
 }
 
@@ -3509,6 +3587,7 @@ int main(int argc, char **argv) {
 	failures += test_reference_file_candidates();
 	failures += test_terrain_and_bank_extractors();
 	failures += test_model_texture_references();
+	failures += test_model_shader_references();
 	failures += test_rename_keeps_loader_spelling();
 	failures += test_user_point_references();
 	failures += test_blank_project();

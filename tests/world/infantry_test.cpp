@@ -2513,7 +2513,7 @@ void test_secondary_loop_wrap_shares_the_ring_heads() {
     e->inf.reset_weapon_animation(anim_state::kIdle);
     RootMotionFrame frame;
     const auto dual = [&] {
-        ai.infantry_weapon_channel_advance(*e);
+        advance_weapon_channel(e->inf, ai.root_motion, ai.anim_rings);
         advance_primary_channel(e->inf, src, ai.anim_rings, frame);
     };
     for (int t = 1; t <= 3; ++t) dual();
