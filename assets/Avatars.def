@@ -1,0 +1,37 @@
+// Avatars.def: the player's characters, each a head, a body and the first-person arms.
+// The head and body models draw together on the person rig (onsold1 cut at the collar); the arms are
+// the first-person arms every gun draws with. camo: the three TEX_CAMO texture-variant selectors.
+// voice: 1 a male voice set. sex: m or f.
+
+define head		ON_HEAD_SOLDIER
+{
+	name		AV_ON_HELMET
+	graphic		onsoldh.3di
+	camo		0 0 0
+	voice		1
+	sex		m
+}
+
+define body		ON_BODY_SOLDIER
+{
+	name		AV_ON_WOODLAND
+	graphic		onsoldb.3di
+	camo		0 0 0
+}
+
+define arms		ON_ARMS
+{
+	name		AV_ON_ARMS
+	graphic		on_arms.3di
+	camo		0 0 0
+}
+
+nationality 0 AV_ON_NATION
+{
+	alignment	good
+
+	division 0 AV_ON_DIVISION
+	{
+		combo 1	ON_HEAD_SOLDIER	ON_BODY_SOLDIER	ON_ARMS
+	}
+}
