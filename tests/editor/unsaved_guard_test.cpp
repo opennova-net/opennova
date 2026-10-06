@@ -93,6 +93,7 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		break;
 	}
 	case EditorRequestKind::RenameAsset: request.new_name = "renamed.mnu"; break;
+	case EditorRequestKind::MoveAsset: request.folder = "moved"; break; // DI-03: its document reopens there
 	case EditorRequestKind::SplitTexture: {
 		// A texture extra.mnu's window shows (that edit unsaved too, validated into the graph): a split of it for
 		// extra.mnu rewrites extra.mnu.
@@ -192,8 +193,8 @@ static int test_guard_column_is_the_prompt() {
 		const std::string named = !request.dir.empty() ? request.dir : request.path;
 		TEST_EXPECT(prompt.target == (row.guard == GuardScope::Document ? dirty.extra : named));
 	}
-	// Export (S16) guards as Build does; a texture's split (S18) as a rename does.
-	TEST_EXPECT(prompted == 15 && went_ahead == kEditorRequestKindCount - 15);
+	// Export (S16) guards as Build does; a texture's split (S18) and a move (DI-03) as a rename does.
+	TEST_EXPECT(prompted == 16 && went_ahead == kEditorRequestKindCount - 16);
 	return 0;
 }
 

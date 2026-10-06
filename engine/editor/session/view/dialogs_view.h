@@ -90,6 +90,9 @@ struct DialogsView {
 		// "old to new".
 		std::vector<std::string> companions;
 		std::vector<Diagnostic> refusals;
+		// A move's way back (DI-03): the file to the folder it left ("" the top level), under its own name.
+		bool move = false;
+		std::string folder;
 	};
 	RenamePreview rename_preview;
 	// What a Replace or an Edit externally would do to a texture (S18: PreviewTextureSource), open while
