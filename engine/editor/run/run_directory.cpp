@@ -18,8 +18,13 @@ namespace opennova::editor {
 
 namespace {
 
-// A run directory's name: a number from 1, written without leading zeros (a few digits: a run root
-// holds the runs whose games may still run, and one more).
+// A Play mode's directory under the run root names it (kRunMode*): one of the three, never a path.
+bool run_mode_known(const std::string &mode) {
+	return mode == kRunModeRuntime || mode == kRunModeInstall || mode == kRunModeStrict;
+}
+
+// A run directory's name: a number from 1, written without leading zeros (a few digits: a mode's
+// directory holds the runs whose games may still run, and one more).
 bool run_number(const std::string &name, unsigned long &out) {
 	if (name.empty() || name.size() > 6 || name[0] == '0' ||
 	    !std::all_of(name.begin(), name.end(), [](char c) { return c >= '0' && c <= '9'; }))
@@ -88,10 +93,11 @@ std::vector<std::string> files_under(const fs::path &dir) {
 	return files;
 }
 
-// `dir` readied for a Play of `take`'s mode: what the Play before staged there removed, with the logs a
-// run writes for Play to read and the game's record, every other file kept (`kept`); emptied for a fresh
-// take, another mode's directory or one with no staging record. False when a file that must go would not
-// (a process holding it).
+// `dir`, a directory of `take`'s mode, readied for a Play of it: what the Play before staged there
+// removed, with the logs a run writes for Play to read and the game's record, every other file kept
+// (`kept`); emptied for a fresh take or one with no staging record of its mode (a guard: the directory
+// is the mode's own, so the record names it unless edited by hand). False when a file that must go
+// would not (a process holding it).
 bool ready_run_directory(const fs::path &dir, const RunTake &take, std::vector<std::string> &kept) {
 	kept.clear();
 	const fs::path system = system_path(utf8_of(dir));
@@ -127,32 +133,38 @@ bool ready_run_directory(const fs::path &dir, const RunTake &take, std::vector<s
 bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liveness, const RunTake &take,
                         std::string &out, std::vector<std::string> &kept, std::string &error) {
 	kept.clear();
-	if (!ensure_directory(runs_root, error)) return false;
+	if (!run_mode_known(take.mode)) {
+		error = "no Play mode is named \"" + take.mode + "\"";
+		return false;
+	}
+	// The mode's own directory: what a Play takes, empties and removes is its mode's alone.
+	const std::string mode_root = join_path(runs_root, take.mode);
+	if (!ensure_directory(mode_root, error)) return false;
 	// The numbered directories there, each with whether its game may still run.
 	std::map<unsigned long, bool> runs;
 	std::error_code ec;
 	for (const fs::directory_entry &entry :
-	     fs::directory_iterator(system_path(runs_root), fs::directory_options::skip_permission_denied, ec)) {
+	     fs::directory_iterator(system_path(mode_root), fs::directory_options::skip_permission_denied, ec)) {
 		unsigned long number = 0;
 		std::error_code kind;
 		if (!entry.is_directory(kind) || !run_number(utf8_of(entry.path().filename()), number)) continue;
 		runs[number] = held(entry.path(), liveness);
 	}
 	// The first one free, readied (one whose files will not go, a process holding them, is passed over
-	// too); every other one whose game is gone removed.
+	// too); every other one of the mode whose game is gone removed.
 	unsigned long taken = 0;
 	for (unsigned long number = 1; taken == 0; ++number) {
 		const auto found = runs.find(number);
 		if (found != runs.end() && found->second) continue;
-		if (!ready_run_directory(path_of(join_path(runs_root, std::to_string(number))), take, kept)) continue;
+		if (!ready_run_directory(path_of(join_path(mode_root, std::to_string(number))), take, kept)) continue;
 		taken = number;
 	}
 	for (const auto &[number, busy] : runs) {
 		if (busy || number == taken) continue;
 		std::error_code removed;
-		fs::remove_all(system_path(join_path(runs_root, std::to_string(number))), removed);
+		fs::remove_all(system_path(join_path(mode_root, std::to_string(number))), removed);
 	}
-	out = join_path(runs_root, std::to_string(taken));
+	out = join_path(mode_root, std::to_string(taken));
 	return ensure_directory(out, error);
 }
 

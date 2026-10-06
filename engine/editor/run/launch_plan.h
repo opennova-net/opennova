@@ -171,10 +171,11 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 // them, so no write reaches the build) and the install's executable and Bink DLL (copied), nothing else
 // of the install: no configuration, save, score table, early error text or admin configuration (a
 // game.cfg the build holds is the project's own and is staged with the rest), so the game boots on the
-// build alone and writes its own, which the run directory keeps for the next strict Play (a game.cfg
-// naming the adapter spares it the device dialog: run/run_directory.h). Launched `/w /FRISK`, without
-// `/d`: the game reads its archives
-// first, as a player's launch does [orig: Game_ParseCommandLineAndInit @ 0x4a7667 sets the /d flag;
+// build alone and writes its own, which strict Play's own run directory (`.opennova/run/strict/<n>`)
+// keeps for the next strict Play, whatever Plays of another mode run between (a game.cfg naming the
+// adapter spares it the device dialog: run/run_directory.h). Launched `/w /FRISK`, without `/d`: the
+// game reads its archives first, as a player's launch does
+// [orig: Game_ParseCommandLineAndInit @ 0x4a7667 sets the /d flag;
 // Game_InitSubsystems turns on loose-first resolution after the archives mount, @ 0x4a6fa3 ->
 // FileSystem_SetSearchLooseFirst @ 0x75a5a0; docs/vfs/vfs-pff-mount-re.md]. The executable and the
 // Bink DLL are checked before anything is staged. An expansion (`expansion` not "") is refused
