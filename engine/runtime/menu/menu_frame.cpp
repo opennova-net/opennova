@@ -1361,32 +1361,41 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 // zeroes it when the texture fails [orig: CTextureManager_LoadOrFindTexture
 // @ 0x654980 writes *outHandle = 0 first; the CURSOR arm @ 0x6495b0], so an
 // authored FILE that did not load reads as none.
-int32_t MenuFrameCompiler::inherited_cursor_(int index) const {
+int MenuFrameCompiler::inherited_cursor_owner_(int index) const {
 	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
-		return kMenuTexNone;
+		return -1;
 	}
 	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
 	if (texture_loaded_(node.cursor)) {
-		return node.cursor;
+		return index;
 	}
-	const int32_t root = nodes_[static_cast<size_t>(node.root)].cursor;
-	return texture_loaded_(root) ? root : kMenuTexNone;
+	return texture_loaded_(nodes_[static_cast<size_t>(node.root)].cursor) ? node.root : -1;
+}
+
+int32_t MenuFrameCompiler::inherited_cursor_(int index) const {
+	const int owner = inherited_cursor_owner_(index);
+	return owner < 0 ? kMenuTexNone : nodes_[static_cast<size_t>(owner)].cursor;
 }
 
 // The first root window in document order whose cursor loaded [orig:
 // CUIScene_EndFrame @ 0x63e600 — the root loop stops at the first
 // CWnd_GetInheritedCursorTexture(root) != 0].
-int32_t MenuFrameCompiler::first_root_cursor_() const {
+int MenuFrameCompiler::first_root_cursor_owner_() const {
 	for (int i = 0; i < document_nodes_; ++i) {
 		const WidgetNode &node = nodes_[static_cast<size_t>(i)];
 		if (node.parent < 0) {
-			const int32_t cursor = inherited_cursor_(i);
-			if (cursor != kMenuTexNone) {
-				return cursor;
+			const int owner = inherited_cursor_owner_(i);
+			if (owner >= 0) {
+				return owner;
 			}
 		}
 	}
-	return kMenuTexNone;
+	return -1;
+}
+
+int32_t MenuFrameCompiler::first_root_cursor_() const {
+	const int owner = first_root_cursor_owner_();
+	return owner < 0 ? kMenuTexNone : nodes_[static_cast<size_t>(owner)].cursor;
 }
 
 // The frame's cursor [orig: CWnd_ProcessMouseEvent @ 0x647ad0..0x647b09
@@ -1398,7 +1407,7 @@ int32_t MenuFrameCompiler::first_root_cursor_() const {
 // CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 attaches the arrows as child
 // windows the pump claims]. The compiler's capture is the scroll pump's part
 // capture (retail's child-button capture of the scrollbar parts).
-int32_t MenuFrameCompiler::claim_cursor_(int hovered, int spin_part) const {
+int MenuFrameCompiler::claim_cursor_owner_(int hovered, int spin_part) const {
 	int claimed = hovered;
 	if (hovered >= 0 && hovered < static_cast<int>(nodes_.size()) && spin_part != 0) {
 		const WidgetNode &list = nodes_[static_cast<size_t>(hovered)];
@@ -1407,46 +1416,62 @@ int32_t MenuFrameCompiler::claim_cursor_(int hovered, int spin_part) const {
 			claimed = arrow;
 		}
 	}
-	const int32_t stamped = inherited_cursor_(claimed);
-	if (stamped != kMenuTexNone) {
+	const int stamped = inherited_cursor_owner_(claimed);
+	if (stamped >= 0) {
 		return stamped;
 	}
 	const int capture = scroll_pump_.captured_index >= 0 ? scroll_pump_.captured_index
 												  : scroll_pump_.latched_index;
 	if (capture >= 0 && capture < static_cast<int>(nodes_.size())) {
-		return inherited_cursor_(capture);
+		return inherited_cursor_owner_(capture);
 	}
-	return first_root_cursor_();
+	return first_root_cursor_owner_();
+}
+
+int32_t MenuFrameCompiler::claim_cursor_(int hovered, int spin_part) const {
+	const int owner = claim_cursor_owner_(hovered, spin_part);
+	return owner < 0 ? kMenuTexNone : nodes_[static_cast<size_t>(owner)].cursor;
+}
+
+MenuFrameCompiler::FrameCursor MenuFrameCompiler::frame_cursor(const MenuFrameState &state) const {
+	FrameCursor out;
+	if (screen_ == nullptr || nodes_.empty()) {
+		return out;
+	}
+	// The claim the pump stamped, whatever its visual state [orig: the stamp
+	// @ 0x647b09 comes before the pump's visual-state verdict].
+	const int claim = state.cursor_claim >= 0 && state.cursor_claim < static_cast<int>(nodes_.size())
+			? state.cursor_claim
+			: -1;
+	out.owner = claim_cursor_owner_(claim, claim >= 0 ? state.cursor_spin_part : 0);
+	if (out.owner < 0) {
+		return out;
+	}
+	out.texture = nodes_[static_cast<size_t>(out.owner)].cursor;
+	const auto &size = texture_sizes_[static_cast<size_t>(out.texture)];
+	out.width = size.first;
+	out.height = size.second;
+	return out;
 }
 
 // The cursor pass [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]: the
-// frame's cursor (claim_cursor_) drawn LAST at the raw mouse position at
-// native texture size, UNSCALED (the cursor never scales with the menu).
+// frame's cursor (frame_cursor: the stamped claim's) drawn LAST at the raw
+// mouse position at native texture size, UNSCALED (the cursor never scales
+// with the menu); nothing when no window's cursor loaded (@ 0x63bfa2).
 void MenuFrameCompiler::emit_cursor(const MenuFrameState &state) {
 	if (!state.cursor_visible) {
 		return;
 	}
-	int hovered = -1;
-	int spin_part = 0;
-	for (const MenuWidgetState &ws : state.widgets) {
-		if ((ws.hovered || ws.pressed) && ws.index >= 0 &&
-				ws.index < document_nodes_) {
-			hovered = ws.index;
-			spin_part = ws.spin_part;
-			break;
-		}
-	}
-	const int32_t slot = claim_cursor_(hovered, spin_part);
-	if (!texture_loaded_(slot)) {
+	const FrameCursor cursor = frame_cursor(state);
+	if (cursor.owner < 0) {
 		return;
 	}
-	const auto &size = texture_sizes_[static_cast<size_t>(slot)];
 	MenuQuad quad;
 	quad.x0 = state.cursor_x;
 	quad.y0 = state.cursor_y;
-	quad.x1 = state.cursor_x + static_cast<float>(size.first);
-	quad.y1 = state.cursor_y + static_cast<float>(size.second);
-	quad.texture = slot;
+	quad.x1 = state.cursor_x + static_cast<float>(cursor.width);
+	quad.y1 = state.cursor_y + static_cast<float>(cursor.height);
+	quad.texture = cursor.texture;
 	push_quad(quad);
 }
 
@@ -1523,6 +1548,10 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_mouse(
 	claim.hovered = hit;
 	claim.spin_part = part;
 	claim.cursor = claim_cursor_(hit, part);
+	// The stamp the cursor pass reads, a disabled claimant's included [orig:
+	// CWnd_ProcessMouseEvent @ 0x647b09].
+	io_state.cursor_claim = hit;
+	io_state.cursor_spin_part = part;
 	if (hit < 0) {
 		return claim;
 	}
