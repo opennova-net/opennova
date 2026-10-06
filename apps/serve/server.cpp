@@ -1,34 +1,31 @@
 #include "server.h"
 
+#include "lister.h"
+#include "serve_listing.h"
+
+#include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
-#include <base/io/fixed.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
-#include <formats/env/env.h>
+#include <formats/admincfg/admin_cfg.h>
+#include <formats/avatars/avatars.h>
+#include <formats/def/def.h>
 #include <formats/mission/bms.h>
-#include <formats/mission/bms_edit.h>
 #include <formats/rtxt/rtxt.h>
-#include <formats/trn/trn.h>
-#include <formats/trn/trn_io.h>
-#include <net/npwire/entity_class.h>
 #include <net/npwire/net_ports.h>
-#include <runtime/environment/environment_state.h>
-#include <runtime/environment/water_frame.h>
-#include <runtime/environment/weather_seed.h>
-#include <runtime/inmatch/charattr_challenge.h>
-#include <runtime/inmatch/host_settings.h>
-#include <runtime/inmatch/session_status.h>
-#include <runtime/mission/mission_text.h>
+#include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/map_change.h>
+#include <runtime/inmatch/mission_exit.h>
+#include <runtime/inmatch/server_ban_lists.h>
 #include <runtime/mission/runtime_boot.h>
-#include <runtime/replication/item_replication_catalog.h>
-#include <runtime/terrain_query/surface_tiles.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
-#include <sstream>
+#include <thread>
 #include <utility>
 
 namespace opennova::serve {
@@ -38,6 +35,8 @@ namespace {
 const char kUsage[] =
 		"usage: opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]\n"
 		"                      [/game <code>] [--loose-root] [--lan-port <n>] [--log-debug]\n"
+		"                      [--master-host <gate>] [--master-gate-port <n>]\n"
+		"                      [--credentials <file>] [--allow-public]\n"
 		"  --resource-dir   the game install to serve from (its PFF set, as opennova.exe takes it)\n"
 		"  /HOST            the host file: retail's `/HOST <file>` format, one `Key value` per line\n"
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
@@ -45,9 +44,34 @@ const char kUsage[] =
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code\n"
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
-		"  --lan-port       the first port of the bind scan (default: the head of the retail\n"
-		"                   LAN server range, game.cfg mplanserverportmin)\n"
-		"  --log-debug      print the engine's debug log lines\n";
+		"  --lan-port       the first port of the bind scan (default: game.cfg mplanserverportmin,\n"
+		"                   the head of the retail LAN server range; mpnovaworldportmin when\n"
+		"                   listing on NovaWorld)\n"
+		"  --log-debug      print the engine's debug log lines\n"
+		"  --master-host    the NovaWorld gate to list on (127.0.0.1 for an\n"
+		"                   opennova-novaworld-server on this machine). With it, game.cfg's\n"
+		"                   networkconnecttype picks the network: 1 (the default) lists on\n"
+		"                   NovaWorld, 2 serves LAN only. Without it the server serves LAN\n"
+		"  --master-gate-port  the gate's UDP port (default: the NovaWorld gate port)\n"
+		"  --credentials    KEY=VALUE file: NOVAWORLD_USER / NOVAWORLD_PASS, the account the\n"
+		"                   listing logs in with for its HOSTKEY (none: no HOSTKEY, which an\n"
+		"                   opennova-novaworld-server accepts)\n"
+		"  --allow-public   allow NovaLogic's NovaWorld (novaworld.net and its hosts), a live\n"
+		"                   shared service: use it sparingly. Loopback and any other host are\n"
+		"                   allowed without it\n"
+		"  /PROFILE <path>  record each mission to <path>.sph (retail's server log)\n"
+		"  /PUNTLOG, /PUNT.TXT, /CHEATLOG\n"
+		"                   log punts to _PUNT.TXT, start _CHEAT.TXT (the working directory)\n"
+		"The server reads and writes game.cfg in the directory it runs from (the process's\n"
+		"working directory, as retail), with the host file's settings over it, and marks\n"
+		"itself running there with activesrvr.txt, which a clean exit deletes. A nonzero\n"
+		"remote_admin_port in game.cfg opens retail's remote-admin console on that TCP port,\n"
+		"its users in admin.cfg there and its log in admin_log.txt; banned.txt and\n"
+		"banlist.txt there are the ban lists.\n";
+
+// The admin server's log, by bare name in the working directory [orig: "admin_log.txt"
+// @0x7C0860, CAdminServer_Construct @0x402C39].
+constexpr const char *kAdminLogFileName = "admin_log.txt";
 
 // The one-token switches, retail-spelled ones matched case-insensitively.
 bool parse_port(const std::string &text, uint16_t &out) {
@@ -59,9 +83,7 @@ bool parse_port(const std::string &text, uint16_t &out) {
 }
 
 // The retail GameText lookup with its default: the string a mounted
-// gametext.bin carries for section/key, else the caller's default
-// [orig: Config_SetDefaults @0x54D0FF..0x54D11E pushes ("Menu", "UNTITLED",
-//  "!Untitled") for the default game name].
+// gametext.bin carries for section/key, else the caller's default.
 std::string game_text(const rtxt::File *table, const char *section, const char *key,
 		const std::string &fallback) {
 	if (table == nullptr) return fallback;
@@ -69,23 +91,20 @@ std::string game_text(const rtxt::File *table, const char *section, const char *
 	return value.empty() ? fallback : value;
 }
 
-// A headless host drains the presentation half of the world's outbox each
-// frame, so nothing a presenter would consume accumulates; the wire half
-// (entity events, relays, grants, the round ring, the water crossings) is the
-// host tick's own drain. The terrain scorch queue grows with every blast and
-// death until a presenter clears it, so a long-running server must clear it.
-void drain_presentation_outbox(world::World &world) {
-	world.out.terrain_scorches.clear_pending();
-	world.out.weather_sounds.clear();
-	world.out.tip_events.clear();
-	world.out.hud_detail_blank = false;
-	world.out.destruction.clear();
-	world.out.vehicle_effects.clear();
-	world.out.effects.clear();
-	world.out.script_effects.clear();
-	world.out.script_sounds.clear();
-	world.out.slot_sounds.clear();
-	world.out.sound_emitters.clear();
+// The wall clock the NovaWorld session runs on (the session's GetTickCount).
+uint32_t wall_ms() {
+	return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch())
+					.count());
+}
+
+// The lister's outcome as start's error text.
+std::string listing_failure(int code) {
+	const char *what = code == nw_lister::kExitNetwork ? "a NovaWorld socket did not open"
+			: code == nw_lister::kExitStoppedByService ? "the NovaWorld service stopped the hosting"
+			: "the NovaWorld session, the login, the HOSTKEY or the host request failed";
+	return std::string("the NovaWorld listing did not host: ") + what +
+			" (game.cfg networkconnecttype = 2 serves LAN only, as does a start without --master-host)";
 }
 
 } // namespace
@@ -122,6 +141,9 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			out.expansion = launch_expansion_name(name);
 		} else if (strutil::iequals(a, "/game")) {
 			if (!value(out.game)) return 1;
+		} else if (const int log = parse_log_switch(args, i, out.log_switches, error); log != 0) {
+			if (log < 0) return 1;
+			i += static_cast<size_t>(log - 1);
 		} else if (a == "--lan-port") {
 			std::string text;
 			if (!value(text)) return 1;
@@ -129,6 +151,19 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 				error = "--lan-port must be 1..65535";
 				return 1;
 			}
+		} else if (a == "--master-host") {
+			if (!value(out.master_host)) return 1;
+		} else if (a == "--master-gate-port") {
+			std::string text;
+			if (!value(text)) return 1;
+			if (!parse_port(text, out.master_gate_port)) {
+				error = "--master-gate-port must be 1..65535";
+				return 1;
+			}
+		} else if (a == "--credentials") {
+			if (!value(out.credentials_path)) return 1;
+		} else if (a == "--allow-public") {
+			out.allow_public = true;
 		} else {
 			error = "unknown option '" + a + "'";
 			return 1;
@@ -149,17 +184,67 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {}
 
 Server::~Server() { stop(); }
 
-bool Server::start(std::string &error) {
-	// The socket binds before the mission loads, as the dead path creates the
-	// session before its Game Loop starts the mission [orig:
-	// Game_HostMultiplayerSession @0x4A6760 CNapiGameSession_BuildAndCreateSession
-	// before Game_MainLoop] and the game's host listens before its boot
-	// (mission_root.cpp enable_host_listen).
-	if (!mount(error) || !read_host_file(error) || !open_socket(error) || !boot_mission(error)) {
+bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
+	// The admin server's log opens for writing at the process's static
+	// construction, ahead of everything, so every launch truncates it whether
+	// or not the listener ever opens [orig: CAdminServer_Construct @0x402C10,
+	// fopen("admin_log.txt", "w") @0x402C84].
+	(void)files_.write(kAdminLogFileName, std::string_view(), /*append=*/false);
+	// The log switches arm at the process start, as retail's command-line
+	// parse arms them (server_logs.h).
+	log_devices_.arm(options_.log_switches);
+	// Retail's boot order: game.cfg at Game_Run's start, the subsystems (the
+	// mount, weapon.def and game.cfg again), then the dead /HOST path (the host
+	// file, the lock, the save, the network type, the socket, on NovaWorld the
+	// hosting, then the session). The socket binds before the mission loads,
+	// as the dead path creates the session before its Game Loop starts the
+	// mission [orig: Game_HostMultiplayerSession @0x4A6760
+	// CNapiGameSession_BuildAndCreateSession before Game_MainLoop] and the
+	// game's host listens before its boot (mission_root.cpp enable_host_listen);
+	// a NovaWorld host hosts on its session before either does
+	// [orig: @0x4A66A5..0x4A674F; the live NovaWorld host, D-NET-221,
+	//  UI_DispatchScreenEvent @0x54F2CA..0x54F379].
+	if (!read_boot_config(error) || !mount(error) || !read_config_over_weapons(error)) {
 		stop();
 		return false;
 	}
+	// The subsystems' tail: admin.cfg and the listener [orig: Game_InitSubsystems
+	// @0x4A72B8..0x4A72D9, after the game.cfg read @0x4A70AB].
+	open_admin();
+	if (!read_host_file(error) || !open_socket(error) || !host_on_novaworld(error, cancel) ||
+			!boot_mission(/*next_mission=*/false, error)) {
+		stop();
+		return false;
+	}
+	if (listing_ != nullptr) bind_listing();
 	running_ = true;
+	return true;
+}
+
+// The listing meets the mission that just started: the live source reads the
+// new kernel and the kept server context, takes the map's columns, and the
+// Host list goes out at once, as every mission start on a NovaWorld authority
+// in session runs the server-info update outside its 1860-tick timer
+// [orig: Game_StartMission @0x5248c6..0x5248f5 -> Lobby_UpdateServerInfo ->
+//  CPlayerManager_RebuildLists @0x4d45b5 -> CNapiGameSession_SendHostUpdate].
+void Server::bind_listing() {
+	listing_->set_base(listing_columns());
+	listing_->bind(*role_, *kernel_, *lister_);
+	lister_->publish_server_info();
+}
+
+// Game_Run's read, before the mount: no weapon table yet (every avail_wpn
+// line drops) and no gametext (the `!` default texts). A set mpreset exits
+// the process there [orig: Game_Run @0x4A7FBB -> Game_LoadConfig @0x551480,
+// crt_exit @0x5514A1..0x5514AC]; a missing file is the defaults.
+bool Server::read_boot_config(std::string &error) {
+	const gamecfg::LoadResult boot = gamecfg::load_file(gamecfg::kFileName, gamecfg::LoadOptions{});
+	cfg_ = boot.cfg;
+	if (boot.reset_exit) {
+		reset_exit_ = true;
+		error = "game.cfg sets mpreset: the process exits";
+		return false;
+	}
 	return true;
 }
 
@@ -188,15 +273,71 @@ bool Server::mount(std::string &error) {
 	index_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
 	assets_ = std::make_unique<assets::AssetStore>(&index_);
 	catalog_ = mission_catalog::build(index_);
+	// The avatar registry, which the admin console's PETERRABBIT SEXCHANGE walks; an install
+	// without Avatars.def leaves it empty [orig: CAvatarDefs_Init @0x57B180 opens
+	// "Avatars.def"].
+	characters_ = inmatch::CharacterRegistry{};
+	std::vector<uint8_t> avatars_bytes;
+	if (index_.read_file("Avatars.def", avatars_bytes)) {
+		avatars::AvatarsFile avatars = {};
+		if (avatars::avatars_parse_memory(avatars_bytes.data(), avatars_bytes.size(), &avatars) == 0)
+			characters_ = inmatch::CharacterRegistry::from_file(avatars);
+		avatars::avatars_free(&avatars);
+	}
 	return true;
 }
 
-// The host file over the host screen's defaults, then the server type forced
-// to Serve Only, as the dead auto-host does once the file is read
-// [orig: Game_HostMultiplayerSession @0x4A65A0 -- the parse @0x4A65A0..0x4A65B4
-//  (a file that does not open clears the /HOST flag and returns @0x4A65B6),
-//  SERVERTYPE = 1 @0x4A65F9..0x4A65FE]. The cfg table's defaults stand in for
-// game.cfg, which this slice does not read (D-NET-335).
+// Game_InitSubsystems' read, once weapon.def has loaded behind the mount and
+// gametext.bin with it: the same file over the defaults again, now with the
+// weapon table its avail_wpn lines address and the localized default texts;
+// the defaults keep the boot read's player_index and hw3d_deviceno
+// [orig: Game_InitSubsystems @0x4A6FED (gametext.bin), @0x4A70A6
+// (WeaponDef_LoadAll), @0x4A70AB (Game_LoadConfig); Config_SetDefaults keeps
+// the block's first word]. From here every return owes Game_Run's exit tail.
+bool Server::read_config_over_weapons(std::string &error) {
+	roster_.clear();
+	std::vector<uint8_t> bytes;
+	if (index_.read_file("weapon.def", bytes)) {
+		def::DefWeaponsFile weapons = {};
+		if (def::def_parse_weapons_memory(bytes.data(), bytes.size(), &weapons) == 0) {
+			roster_ = inmatch::game_cfg_weapon_roster(weapons);
+			def::def_free_weapons(&weapons);
+		}
+	}
+	gametext_ = rtxt::File{};
+	std::string gametext_error;
+	bytes.clear();
+	have_gametext_ = index_.read_file("gametext.bin", bytes) &&
+			rtxt::parse(bytes.data(), bytes.size(), gametext_, gametext_error);
+	gamecfg::LoadOptions load;
+	load.texts = inmatch::game_cfg_default_texts(have_gametext_ ? &gametext_ : nullptr);
+	load.weapons = roster_;
+	load.player_index = cfg_.player_index;
+	load.hw3d_deviceno = cfg_.hw3d_deviceno;
+	const gamecfg::LoadResult loaded = gamecfg::load_file(gamecfg::kFileName, load);
+	cfg_ = loaded.cfg;
+	if (loaded.reset_exit) {
+		reset_exit_ = true;
+		error = "game.cfg sets mpreset: the process exits";
+		return false;
+	}
+	exit_save_owed_ = true;
+	return true;
+}
+
+// The dead /HOST path [orig: Game_HostMultiplayerSession @0x4A65A0]: the host
+// file over the cfg block (a file that does not open ends the attempt,
+// @0x4A65AA..0x4A65C0), the directory lock (@0x4A65C1..0x4A65F1), Serve Only
+// saved (@0x4A65F9..0x4A6604), then the session settings from the block
+// (CNapiGameSession_BuildAndCreateSession @0x4A6759, which fails with no
+// current rotation entry, @0x5695AD..0x5695B1). The network type is the cfg's
+// networkconnecttype, which the menus write (1 the NovaWorld screen, 2 the LAN
+// one), 1 by default [orig: SetNetworkType(networkConnectType_480)
+// @0x4A6609..0x4A6614; UI_InitLANMultiplayerScreen @0x5569E1 (2), @0x556AA0
+// (1); Config_SetDefaults @0x54D050 / @0x54D1D4 (1); Config_ParseSettingsLine
+// `networkconnecttype` @0x550CA1..0x550CC4]. Without a gate host on the command
+// line the server serves LAN whatever the cfg says, where retail's default would
+// host on NovaLogic's gs.novaworld.net (D-NET-358, ADR 0051 d6).
 bool Server::read_host_file(std::string &error) {
 	std::ifstream in(options_.host_file, std::ios::binary);
 	if (!in) {
@@ -204,255 +345,195 @@ bool Server::read_host_file(std::string &error) {
 		return false;
 	}
 	const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-	host_ = inmatch::HostScreenState{};
-	// The default game name: the gametext Menu/UNTITLED string
-	// [orig: Config_SetDefaults @0x54D0FF..0x54D11E].
-	std::vector<uint8_t> gametext_bytes;
-	rtxt::File gametext;
-	std::string gametext_error;
-	const bool have_gametext = index_.read_file("gametext.bin", gametext_bytes) &&
-			rtxt::parse(gametext_bytes.data(), gametext_bytes.size(), gametext, gametext_error);
-	host_.config.server_name = game_text(have_gametext ? &gametext : nullptr, "Menu", "UNTITLED",
-			"!Untitled").substr(0, 32);
-	report_ = inmatch::read_host_file(text.data(), text.size(), host_, rotation_, catalog_);
-	host_.serve_and_play = false;
+	report_ = inmatch::read_host_file(text.data(), text.size(), cfg_, rotation_, catalog_);
 	for (const std::string &key : report_.unknown_keys)
 		io::logf(io::LogLevel::kWarn, "opennova-serve: the host file key '%s' is not a host setting",
 				key.c_str());
 	for (const std::string &name : report_.unknown_missions)
 		io::logf(io::LogLevel::kWarn, "opennova-serve: Mission '%s' is not in the mission catalog",
 				name.c_str());
-	if (rotation_.current() == nullptr) {
+	if (!gamecfg::write_active_server_marker(gamecfg::kActiveServerMarkerFileName))
+		io::logf(io::LogLevel::kWarn, "opennova-serve: %s did not open for writing",
+				gamecfg::kActiveServerMarkerFileName);
+	cfg_.dedicated = 1;
+	(void)save_config();
+	host_ = inmatch::host_session_settings(cfg_);
+	novaworld_ = !options_.master_host.empty() && cfg_.networkconnecttype == 1;
+	if (options_.master_host.empty() && cfg_.networkconnecttype == 1)
+		io::logf(io::LogLevel::kInfo,
+				"opennova-serve: serving LAN; NovaWorld listing needs --master-host <gate>");
+	if (rotation_.list.current() == nullptr) {
 		error = "the host file names no mission the catalog lists";
 		return false;
-	}
-	// The "Server" chat strings the host's handlers print through
-	// [orig: Game_InitSubsystems @0x4A6CD0 loads gametext.bin;
-	//  Server_BroadcastMedicRequest @0x5153C9; the team change's
-	//  GameText_GetString("server", "C2Blue" / "C2Red") @0x51902E / @0x51909C].
-	if (have_gametext) {
-		server_text_.medic_request_format = gametext.get_in_section("Server", "STRSRV_MEDREQ");
-		server_text_.change_to_blue_format = gametext.get_in_section("Server", "C2Blue");
-		server_text_.change_to_red_format = gametext.get_in_section("Server", "C2Red");
 	}
 	return true;
 }
 
-bool Server::boot_mission(std::string &error) {
-	const mission_catalog::Row &row = catalog_[rotation_.current()->catalog_index];
-	// The starting map is the catalog row's file, loaded from disk when the row
+bool Server::boot_mission(bool next_mission, std::string &error) {
+	const inmatch::MissionRotation &list = rotation_.list;
+	// The map is the rotation's output, loaded from disk when its catalog row
 	// is a loose find and from the archives otherwise
 	// [orig: Game_StartMission @0x524769..0x524774 passes g_MapFileName and
 	//  g_MissionSourceIsLoose to the BMS load; Mission_LoadBMSFile
 	//  @0x40F51A..0x40F527 fopens a loose one].
+	const std::string map_file = list.map_file;
 	std::vector<uint8_t> bms_bytes;
-	if (!index_.read_file(row.file, bms_bytes,
-				row.loose ? VfsLookupPolicy::ForceLooseFirst : VfsLookupPolicy::ForceArchiveOnly)) {
-		error = "the mission '" + row.file + "' does not read";
+	if (!index_.read_file(map_file, bms_bytes,
+				list.map_source_is_loose ? VfsLookupPolicy::ForceLooseFirst
+										 : VfsLookupPolicy::ForceArchiveOnly)) {
+		error = "the mission '" + map_file + "' does not read";
 		return false;
 	}
 	bms::File doc;
 	std::string parse_error;
 	if (!bms::parse(bms_bytes.data(), bms_bytes.size(), doc, parse_error)) {
-		error = "the mission '" + row.file + "' did not parse: " + parse_error;
+		error = "the mission '" + map_file + "' did not parse: " + parse_error;
 		return false;
 	}
-	const mission::MissionInfo info = mission::mission_info(doc);
-	std::string basename = row.file;
+	std::string basename = map_file;
 	const size_t dot = basename.rfind('.');
 	if (dot != std::string::npos) basename.resize(dot);
 
-	// The session config: the host screen's, the published player cap with the
-	// dedicated slot, the session game type from the starting row
+	// The session config: the cfg block's (the published player cap with the
+	// dedicated slot among it), the session game type from the rotation's row
 	// [orig: Game_StartMission @0x5244DE..0x52452B sets g_GameType from the
 	//  rotation's current catalog entry +0x1128 on the authority, over the
 	//  file's GameType], the mission identity and the expansion check.
 	inmatch::GameConfig config = host_.config;
-	config.max_players = inmatch::host_player_slot_limit(host_.player_limit, host_.serve_and_play);
-	config.game_type = rotation_.map_game_type;
-	config.mission_file = rotation_.map_file;
+	config.game_type = list.map_game_type;
+	config.mission_file = map_file;
 	config.mission_name = doc.get_mission_name();
 	config.expansion = index_.mounted_expansion();
 	config.expansion_version_checksum =
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
-	config.session_channel = inmatch::GameSessionChannel::Lan;
-	// The loose score.ini over the game type's default table, before the
-	// bring-up: start_host_session copies the score values and FIELD rows into
-	// world.match (inmatch/host_session.cpp). The Godot host orders it the same
-	// way (mission_root.cpp -> Simulation::set_score_config_data).
-	// [orig: the load gated on File_IsSingleFile("score.ini") @0x436ED0;
-	//  GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile @0x52D8A0]
-	{
-		std::vector<uint8_t> score_bytes;
-		if (index_.read_file("score.ini", score_bytes, VfsLookupPolicy::ForceLooseFirst) &&
-				!score_bytes.empty() &&
-				!inmatch::load_session_score_config(config,
-						std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
-								score_bytes.size())))
-			io::logf(io::LogLevel::kWarn, "opennova-serve: score.ini rejected; the default table stands");
+	config.session_channel = novaworld_ ? inmatch::GameSessionChannel::NovaWorld
+										: inmatch::GameSessionChannel::Lan;
+
+	// Serve Only: the dedicated role over the bound socket's game view, no
+	// player of the host's own, the session coming up inside the boot. The
+	// role, its session and the rotation live for the whole run; a map change
+	// keeps them, and the socket with them.
+	if (!next_mission) {
+		role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
+		role_->set_socket(&demux_->game());
+		role_->set_rotation(&rotation_);
+		session_ = std::make_unique<inmatch::Session>(*role_);
+		// The game's protocol joins the socket now: what reached it while the
+		// NovaWorld session hosted had no handler and was dropped.
+		demux_->set_game_attached(true);
+		bind_admin_console();
 	}
 
-	kernel_ = std::make_unique<mission::MissionKernel>();
-	kernel_->set_assets(assets_.get());
-	const mission::BootFileSource files = mission::boot_files_from_index(index_);
-	kernel_->open_document(std::move(doc), basename, files);
-
-	// The bring-up record the boot hook consumes: the config, the mission text
-	// (S2C 0x7E / 0x0F) and the raw .til the S2C 0x45 stream pages out.
-	inmatch::HostBringup bringup;
-	bringup.host_cfg.config = config;
-	bringup.host_cfg.socket_mode = inmatch::SocketMode::Lan;
-	bringup.host_cfg.network_type = inmatch::NetworkType::Lan;
-	bringup.host_cfg.serve_and_play = host_.serve_and_play;
-	bringup.host_cfg.game_root = options_.resource_dir;
-	{
-		std::vector<uint8_t> text;
-		(void)mission::resolve_mission_text(files, basename, text);
-		std::string text_error;
-		if (!text.empty() &&
-				!mission::parse_mission_text(text.data(), text.size(), bringup.mission_text, text_error))
-			io::logf(io::LogLevel::kWarn, "opennova-serve: the mission text did not parse: %s",
-					text_error.c_str());
-	}
-	// The mission's placed tiles, read loose-first [orig: Terrain_LoadTileInfoFile
-	// @0x60A740, the policy force @0x60A74E].
-	(void)index_.read_file(basename + ".til", bringup.terrain_til_data,
-			VfsLookupPolicy::ForceLooseFirst);
-	surface_tiles_ = terrain::surface_tiles_from_til_bytes(bringup.terrain_til_data);
-	mission_text_ = bringup.mission_text;
-
-	// The .trn the water rung and the .TSD tile table read (the kernel's own
-	// terrain load builds the height field from the same pair).
-	TrnConfig trn;
-	bool have_trn = false;
-	{
-		std::vector<uint8_t> trn_bytes;
-		if (index_.read_file(info.terrain + ".trn", trn_bytes)) {
-			std::istringstream stream(std::string(trn_bytes.begin(), trn_bytes.end()));
-			std::string trn_error;
-			have_trn = load_trn(stream, trn, trn_error);
-		}
-	}
-	tile_surface_table_.fill(0);
-	if (have_trn) {
-		terrain::SurfaceTileFileSource tile_files;
-		tile_files.has_file = files.has_file;
-		tile_files.read_file = files.read_file;
-		terrain::resolve_tileset_surface_table(tile_files,
-				trn_mission_tilestrip(trn, info.tile_set), tile_surface_table_.data());
-	}
-
-	role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
-	role_->bind(*kernel_);
-	role_->set_socket(datagrams_.get());
-	role_->stage_bringup(std::move(bringup));
-	session_ = std::make_unique<inmatch::Session>(*role_);
-	if (!session_->begin_load().applied()) {
-		error = "the session did not enter its load";
-		return false;
-	}
-
-	mission::KernelBootOptions options;
+	// The engine's one host boot (ADR 0051 d4), the game's own order.
+	inmatch::HostBootRequest request;
+	request.mission = std::move(doc);
+	request.mission_basename = basename;
+	request.files = mission::boot_files_from_index(index_);
+	request.assets = assets_.get();
+	request.session = session_.get();
+	request.role = role_.get();
+	request.host = role_.get();
+	request.host_cfg.config = config;
+	request.host_cfg.socket_mode = inmatch::SocketMode::Lan;
+	// A listed server's session runs on the NovaWorld network type, whose
+	// session already hosts, as SetNetworkType(1) stands through the match
+	// [orig: Game_HostMultiplayerSession @0x4A6614; UI_ProcessLANSessionStateMachine
+	//  @0x558e85..0x558e8c].
+	request.host_cfg.network_type =
+			novaworld_ ? inmatch::NetworkType::NovaWorld : inmatch::NetworkType::Lan;
+	request.host_cfg.serve_and_play = host_.serve_and_play;
+	request.host_cfg.game_root = options_.resource_dir;
+	// The log devices and the socket's address (bound on every interface) for
+	// the session's logs (server_logs.h; inmatch/server_console.h).
+	request.host_cfg.logs = log_devices_.logs();
+	request.host_cfg.local_address = PeerAddr{0, bound_port_};
+	request.host_cfg.local_address_known = true;
+	// banned.txt and banlist.txt by bare name in the working directory, as retail opens them;
+	// the session's round init loads both (server_ban_lists.h).
+	request.host_cfg.ban_directory = std::string();
+	request.session_score_ini = true;
+	request.next_mission = next_mission;
+	mission::KernelBootOptions &options = request.boot_options;
 	options.playable = false; // Serve Only: no player of the host's own
 	options.mp_session = true;
 	options.terrain = true;
 	options.wac = true;
-	options.defer_mission_start = true;
 	options.game_type = config.game_type;
 	options.player_limit = static_cast<int32_t>(config.max_players);
 	options.team_count = config.num_teams;
-	options.people_name_resolver = [this](int32_t index) {
-		return mission_text_.people_name(index);
+	request.fresh_kernel = [this]() -> mission::MissionKernel & {
+		auto fresh = std::make_unique<mission::MissionKernel>();
+		if (kernel_) fresh->carry_across_load_from(*kernel_);
+		kernel_ = std::move(fresh);
+		return *kernel_;
 	};
-	options.bringup_net_session = [this] { role_->bring_up(); };
-	std::string boot_error;
-	if (!kernel_->boot(options, boot_error)) {
-		error = "the mission boot failed: " + boot_error;
-		return false;
-	}
-
-	// The wire entity class each items.def row stamps, from the replication
-	// catalog the game builds off the same rows.
-	if (const def::DefItemsFile *items = kernel_->items_table()) {
-		auto catalog = std::make_shared<const replication::ItemReplicationCatalog>(
-				replication::ItemReplicationCatalog::from_items_def(*items));
-		role_->set_item_catalog(catalog);
-		kernel_->resolve_item_traits([catalog](int def_id) {
-			const replication::ItemReplicationProfile *profile = catalog->by_definition_id(def_id);
-			return static_cast<uint8_t>(profile != nullptr ? profile->wire_entity_class()
-														   : EntityClass::Unknown);
-		});
-	}
-	// The placed tiles over the charmap the boot's terrain step wired.
-	kernel_->world.tables.surface_map.tiles = surface_tiles_.empty() ? nullptr : surface_tiles_.data();
-	kernel_->world.tables.surface_map.tile_count = static_cast<int32_t>(surface_tiles_.size());
-	kernel_->world.tables.surface_map.tile_surface = tile_surface_table_.data();
-	// The gametext "Server" strings the host's handlers print through.
-	inmatch::set_server_text(role_->state.host_owner.ctx, server_text_);
-	// The per-class ATTRIBUTES words (Medic, KnifeBonus, ...) the authority's
-	// medic heal, knife reach and medic-filtered sends read. Retail loads
-	// charattr.def at boot on every peer, a missing or empty file leaving the
-	// cleared all-zero table (D-NET-345: the game's own host never loads it).
-	// [orig: Game_Run @0x4A7FE3 -> CharAttr_LoadFromDef @0x412140]
-	{
-		inmatch::CharAttrChallengeTable charattr;
-		std::vector<uint8_t> charattr_bytes;
-		if (index_.read_file("charattr.def", charattr_bytes) && !charattr_bytes.empty())
-			(void)inmatch::parse_charattr_challenge_table(charattr_bytes.data(),
-					charattr_bytes.size(), charattr);
-		kernel_->world.tables.class_attribute_flags =
-				inmatch::charattr_class_attribute_rows(charattr);
-	}
-
-	// The environment: the mission's .env with the BMS override layer, the
-	// water plane by its witnessed precedence, then the weather seed and the
-	// mission start (the initial WAC run, the 255-tick settle, the vehicles).
-	env::Config env_config;
-	bool env_loaded = false;
-	{
-		const std::string env_name = info.environment + ".env";
-		std::vector<uint8_t> env_bytes;
-		const bool exists = !info.environment.empty() && index_.read_file(env_name, env_bytes);
-		const std::string env_text(env_bytes.begin(), env_bytes.end());
-		env_loaded = env::load_mission_env(exists ? &env_text : nullptr, env_config);
-	}
-	const env::BmsEnvOverrides overrides = env::bms_env_overrides_from_header(
-			static_cast<uint32_t>(info.attrib_flags), info.water_override, info.fog_override,
-			info.fog_color, info.water_color, info.water_murk);
-	env::apply_bms_overrides(env_config, overrides);
-	env::EnvironmentState env_state;
-	env_state.set_config(&env_config, env_loaded);
-	env::WaterHeightRungs rungs;
-	rungs.has_mission_override = overrides.has_water_height;
-	rungs.mission_override = overrides.water_height * 0.5f;
-	rungs.terrain_height = have_trn && trn.water_height != 0 ? trn.water_height * 0.5f : 0.0f;
-	rungs.has_loaded_terrain = kernel_->terrain_store.valid();
-	const float water = env::resolve_water_height(rungs, &env_state, 0.0f);
-	kernel_->world.env.water_z = static_cast<int32_t>(water * io::kFp16One);
-	kernel_->sync_water_plane();
-	kernel_->world.weather.seed(env::weather_seed_from_config(env_config, kernel_->mission.header));
-	kernel_->complete_mission_start();
-
-	if (!session_->complete_load().applied()) {
-		error = "the session did not leave its load";
-		return false;
-	}
+	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) return false;
+	// No device stages run between the phases on a headless host.
+	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
+	++missions_played_;
 	io::logf(io::LogLevel::kInfo,
 			"opennova-serve: '%s' (%s) up: %d entities, terrain %s, WAC %s, %u player slot(s)",
-			row.file.c_str(), config.mission_name.c_str(), kernel_->promo.spawned,
+			map_file.c_str(), config.mission_name.c_str(), kernel_->promo.spawned,
 			kernel_->terrain_store.valid() ? "loaded" : "absent",
 			kernel_->wac_loaded ? "loaded" : "absent", config.max_players);
 	return true;
 }
 
-// The authority's bind scan over the retail LAN server range from its first
-// port, stepping by one and wrapping [orig: CNapiNetwork_OpenTransportSocket
-// @0x4C6A40, the authority arm @0x4C6AA2; NapiUdpSocket_CreateAndBind
-// @0x62D2A0; net_ports.h lan_host_bind_ports]. The embedder owns the socket
-// layer (net::startup), which is process-wide.
+// The authority's mission exit, as the main frame and the Post Menu route it:
+// a round end in the session (3, or 4 under REPLAY with LASTGAME off) is the
+// map change; the end of the rotation, and any other exit, ends the session.
+// The map change re-applies the cfg block to the session settings, and the
+// PreMenu's init saves game.cfg before the next map loads.
+// [orig: Game_ProcessMainFrame @0x526806..0x526867; PostMenu_RouteMissionExit
+//  @0x5685C2..0x56864F; PreMenu_Init @0x5693E0 -> Game_SaveConfig @0x5693F4;
+//  Game_StartMission @0x524662]
+bool Server::route_mission_exit(int32_t reason) {
+	if (!role_) return false;
+	inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
+	const bool in_session = ctx.is_in_session != 0;
+	if (inmatch::main_frame_exit(reason, in_session, /*authority=*/true) !=
+					inmatch::MainFrameExit::PostMenu ||
+			!in_session ||
+			(reason != inmatch::kMissionExitMapCycle && reason != inmatch::kMissionExitRoundOver))
+		return false;
+	if (inmatch::begin_host_map_change(*role_, catalog_, &cfg_, &host_) ==
+			inmatch::MapChangeStep::RotationEnded) {
+		rotation_ended_ = true;
+		end_message_ = "the map rotation ended";
+		return false;
+	}
+	(void)save_config();
+	std::string error;
+	if (!boot_mission(/*next_mission=*/true, error)) {
+		end_message_ = "the next mission did not boot: " + error;
+		return false;
+	}
+	// A listed server keeps its NovaWorld session and socket through the map
+	// change; the listing follows the new map at the mission start.
+	if (listing_ != nullptr) bind_listing();
+	return true;
+}
+
+// The one socket, opened once for the network type: the authority's bind scan
+// over the cfg's LAN server range on the LAN type, and on the NovaWorld type the
+// mpnovaworld range whatever the authority, so the NWU session, the game
+// traffic and the joiners share it (D-NET-346). Each scans from its first port,
+// stepping by its delta and wrapping; --lan-port replaces the first port
+// [orig: CNapiNetwork_OpenTransportSocket @0x4C6A40 — the one open @0x4C6A7C,
+// the authority arm @0x4C6AA2 over mplanserverportmin / max / delta
+// (g_GameConfigState+0x244 / +0x248 / +0x24C), the NovaWorld arm
+// @0x4C6AF6..0x4C6B08 over mpnovaworldportmin / max / delta (+0x228 / +0x22C /
+// +0x230); NapiUdpSocket_CreateAndBind @0x62D2A0; net_ports.h]. The
+// mpnovaworldportrandom start (+0x234, off by default) is not ported. The
+// embedder owns the socket layer (net::startup), which is process-wide.
 bool Server::open_socket(std::string &error) {
-	const uint16_t first = options_.port != 0 ? options_.port : kRetailLanPortMin;
-	for (const uint16_t port : lan_host_bind_ports(first)) {
+	const uint32_t first = options_.port != 0 ? options_.port
+			: static_cast<uint32_t>(novaworld_ ? cfg_.mp_novaworld_port_min : cfg_.mp_lan_server_port_min);
+	const uint32_t max = static_cast<uint32_t>(
+			novaworld_ ? cfg_.mp_novaworld_port_max : cfg_.mp_lan_server_port_max);
+	const uint32_t delta = static_cast<uint32_t>(
+			novaworld_ ? cfg_.mp_novaworld_port_delta : cfg_.mp_lan_server_port_delta);
+	for (const uint16_t port : lan_host_bind_ports(first, max, delta)) {
 		socket_ = net::udp_bind(port, &bound_port_);
 		if (socket_.is_valid()) break;
 	}
@@ -461,21 +542,135 @@ bool Server::open_socket(std::string &error) {
 		return false;
 	}
 	datagrams_ = std::make_unique<net::NetDatagramSocket>(socket_);
+	demux_ = std::make_unique<DatagramDemux>(*datagrams_);
+	return true;
+}
+
+// What the listing carries before the mission boots: the session settings'
+// name, message, cap, password and rules, the cfg's LAN-only, ping, player-list
+// and country settings, the mount's expansion, and the starting map's game type
+// and title. The live match's config replaces the session's own columns once it
+// is up (ServeListing::registration).
+// [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50 reads the cfg block
+//  (serverName_3A5, serverMessage_560, maxPlayers_3F4, hostLanOnly_340);
+//  Lobby_UpdateServerInfo @0x4fe8c0 — GameType_GetAbbreviation(g_GameType, 1),
+//  the mission's title, AllowPing from g_NWAllowPing @0x4FEF72]
+HostRegistration Server::listing_columns() const {
+	HostRegistration r;
+	const inmatch::GameConfig &config = host_.config;
+	r.server_name = config.server_name;
+	r.server_message = config.custom_text;
+	r.max_players = host_.player_limit;
+	r.published_cap = static_cast<int>(config.max_players);
+	r.password = !config.server_password.empty();
+	r.listen_host = false;
+	r.lan_only = cfg_.mp_novaworld_host_lan_only != 0 ? 1 : 0;
+	r.allow_ping = cfg_.ping != 0;
+	r.send_player_list = cfg_.sendplayerlist != 0;
+	r.country = cfg_.country;
+	r.expansion = index_.mounted_expansion();
+	r.tracers = (config.mp_attributes & inmatch::GameConfig::kMpAttribNoTracers) == 0;
+	r.game_type = game_text(have_gametext_ ? &gametext_ : nullptr, "GateTypeAbbrev",
+			game_type::host_abbreviation_key(rotation_.list.map_game_type), std::string());
+	if (const inmatch::MissionRotationEntry *entry = rotation_.list.current()) {
+		const mission_catalog::Row &row = catalog_[entry->catalog_index];
+		r.mission_name = row.title.empty() ? row.file : row.title;
+	}
+	return r;
+}
+
+// The NovaWorld leg of the dead auto-host on the one socket: the lister's gate
+// probe, the NWU session's verify (the login and the HOSTKEY with an account),
+// the host request and the wait for state 6, pumped here until it hosts or
+// fails [orig: Game_HostMultiplayerSession @0x4A66BD..0x4A674F —
+// WaitForStateChange(gate), ConnectAndWaitForValidation @0x4A66E2,
+// BuildHostVarLists @0x4A66FD, StartHostingSession(0) @0x4A6709, the
+// ProcessPeriodicUpdate loop while state 5 @0x4A6725..0x4A6735, a reset when it
+// is not 6 @0x4A6718]. The session's datagrams ride the demux's session view;
+// the gate probe keeps a socket of its own, as retail's gate worker does.
+bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *cancel) {
+	if (!novaworld_) return true;
+	demux_->set_game_attached(false);
+	listing_ = std::make_unique<ServeListing>(listing_columns());
+	nw_lister::ListerOptions lister_options;
+	lister_options.master_host = options_.master_host;
+	lister_options.master_gate_port = options_.master_gate_port;
+	lister_options.allow_public = options_.allow_public;
+	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.
+	lister_options.destinations = nw_lister::DestinationPolicy::NovaLogicGated;
+	lister_options.credentials = options_.credentials;
+	lister_ = std::make_unique<nw_lister::Lister>(lister_options, *listing_, &demux_->session());
+	const NwuLobbySession &lobby = lister_->lobby();
+	demux_->set_session_claim([&lobby](const PeerAddr &from, const uint8_t *data, std::size_t len) {
+		return lobby.claims(from, data, len);
+	});
+	// The Host list's tokens are the mounted gametext's NovaWorld and TimeOfDay strings.
+	lister_->host_role().set_lobby_text(make_host_lobby_text(
+			[this](const char *section, const char *key, std::string &out) {
+				if (!have_gametext_) return false;
+				out = gametext_.get_in_section(section, key);
+				return !out.empty();
+			}));
+	if (!lister_->start()) {
+		error = listing_failure(lister_->exit_code());
+		return false;
+	}
+	while (!lister_->hosting()) {
+		if (cancel != nullptr && cancel->load()) {
+			error = "stopped before the NovaWorld session hosted";
+			return false;
+		}
+		if (!lister_->tick(wall_ms())) {
+			error = listing_failure(lister_->exit_code());
+			return false;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	io::logf(io::LogLevel::kInfo, "opennova-serve: listed on NovaWorld (%s), the game on UDP %u",
+			lister_options.master_host.c_str(), bound_port_);
 	return true;
 }
 
 bool Server::frame(double delta_seconds) {
 	if (!running_) return false;
+	// The per-main-frame counter [orig: Game_ProcessMainFrame @0x5265D5 ->
+	// Game_TickHudFrameCounters: ++g_MainFrameCounter (ex dword_A8705C)].
+	++main_frame_;
+	// The NovaWorld session's pass first, as the main frame pumps it ahead of
+	// the server tick [orig: Game_ProcessMainFrame @0x526532
+	// CNapiGameSession_ProcessPeriodicUpdate]; then its facts reach the match,
+	// whose NovaWorld exit reads them, even once the lister has finished.
+	if (lister_ != nullptr) {
+		if (!lister_->finished()) (void)lister_->tick(wall_ms());
+		listing_->sync_session();
+	}
 	inmatch::FrameInput input;
 	input.delta_seconds = delta_seconds;
 	const inmatch::FrameOutcome outcome = session_->advance(input);
-	drain_presentation_outbox(kernel_->world);
-	if (outcome.terminal()) {
-		end_message_ = outcome.error.message;
-		running_ = false;
-		return false;
+	// No presenter drains the presentation half of the outbox.
+	kernel_->world.out.discard_presentation();
+	if (!outcome.terminal()) {
+		// The admin pump ends a game frame; a frame whose mission exit pushes the
+		// Post Menu returns before it [orig: Game_ProcessMainFrame @0x526872..0x526878
+		// (the exit's return), @0x5268F1 (CAdminServer_ProcessFrame)].
+		pump_admin();
+		return true;
 	}
-	return true;
+	end_message_ = outcome.error.message;
+	const int32_t reason = role_->state.host_owner.ctx.mission_exit_reason;
+	if (route_mission_exit(reason)) return true;
+	// The admin's quit (exit reason 1, which only GOTO MENUSTATE stores on this host's
+	// context) goes straight to the router's teardown [orig: PostMenu_RouteMissionExit
+	// @0x5684A8..0x5684AB -> @0x568654].
+	if (reason == inmatch::kMissionExitQuit) {
+		quit_ = true;
+		end_message_ = "the remote admin quit the session (GOTO MENUSTATE)";
+	}
+	// The session ends here: the rotation's end and the quit take StopServer's
+	// goodbye, as the router's teardown does through CNapiGameSession_FullDestroy
+	// [orig: PostMenu_RouteMissionExit @0x568683].
+	stop();
+	return false;
 }
 
 void Server::stop() {
@@ -484,9 +679,133 @@ void Server::stop() {
 		session_.reset();
 	}
 	running_ = false;
+	// Game_Run's exit: game.cfg saved, the subsystems (the socket among them)
+	// shut down, then the lock deleted, unconditionally [orig: Game_Run
+	// @0x4A7FFF Game_SaveConfig, @0x4A8004 Game_ShutdownSubsystems,
+	// @0x4A8009..0x4A800E DeleteFileA("activesrvr.txt")].
+	const bool exit_tail = exit_save_owed_;
+	exit_save_owed_ = false;
+	if (role_ && (rotation_ended_ || quit_)) {
+		// The rotation's end and the quit left through CNapiGameSession_FullDestroy, whose
+		// round init frees banlist.txt's list (off a session it is not reloaded) and re-reads
+		// banned.txt with its dirty word cleared, so the exit below saves nothing an in-game ban
+		// added
+		// [orig: PostMenu_RouteMissionExit @0x568683 -> CNapiGameSession_FullDestroy
+		//  @0x4C96A0 -> Server_InitNewRoundState @0x4C9780 (@0x51C92F, @0x51CB25..0x51CB3B)].
+		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
+		ctx.bans.pcids.reset();
+		inmatch::Server_ReloadAddressBanList(ctx);
+	}
+	if (exit_tail) (void)save_config();
+	// The shutdown's banned.txt save, gated on the list and its dirty word
+	// [orig: Game_ShutdownSubsystems @0x4A539D -> j_BanList_SaveToFile @0x508E20].
+	if (exit_tail && role_) inmatch::Server_SaveAddressBanList(role_->state.host_owner.ctx);
+	// The admin server's sockets close with the process.
+	if (admin_tcp_) admin_tcp_->close();
 	if (role_) role_->set_socket(nullptr);
+	if (listing_) listing_->unbind();
+	// The NovaWorld deregistration: ClientStopHosting, then the goodbye burst,
+	// on the same socket before it closes.
+	if (lister_) {
+		lister_->stop();
+		lister_.reset();
+	}
+	listing_.reset();
+	demux_.reset();
 	datagrams_.reset();
 	if (socket_.is_valid()) net::close_socket(socket_);
+	if (exit_tail) gamecfg::remove_active_server_marker(gamecfg::kActiveServerMarkerFileName);
+}
+
+bool Server::save_config() {
+	// [orig: Game_SaveConfig @0x54C490: fopen("game.cfg", "w"); a file that
+	//  does not open writes nothing, @0x54C4AF..0x54C4BB]
+	std::string error;
+	if (gamecfg::save_file(gamecfg::kFileName, cfg_, roster_, error)) return true;
+	io::logf(io::LogLevel::kWarn, "opennova-serve: %s", error.c_str());
+	return false;
+}
+
+bool Server::AdminForward::dispatch(const AdminSession &session, std::string_view line,
+		std::vector<std::string> &replies) {
+	return console != nullptr ? console->dispatch(session, line, replies) : true;
+}
+
+std::string Server::AdminForward::status_report() {
+	return console != nullptr ? console->status_report() : std::string();
+}
+
+// admin.cfg from the working directory (a missing file is no users and no whitelist), then the
+// listener on game.cfg's 16-bit remote_admin_port when it is nonzero, on every interface; a
+// listen that fails is ignored, as retail ignores Listen's result.
+// [orig: Game_InitSubsystems — CAdminServer_LoadConfig("admin.cfg") @0x4A72C2, the port's
+//  `movzx` and nonzero test @0x4A72C7..0x4A72D1, CAdminServer_Listen @0x4A72D9 (its result
+//  unread)]
+void Server::open_admin() {
+	admincfg::AdminConfig config;
+	(void)admincfg::load_file(admincfg::kFileName, config);
+	admin_server_ = std::make_unique<AdminServer>(std::move(config), admin_forward_, admin_rand_,
+			[this](std::string_view line) {
+				// The log is a text-mode stream: each "\n" reaches the disk as CR LF.
+				std::string text;
+				for (const char c : line) {
+					if (c == '\n') text += '\r';
+					text += c;
+				}
+				(void)files_.write(kAdminLogFileName, text, /*append=*/true);
+			});
+	admin_tcp_ = std::make_unique<net::AdminTcpServer>(*admin_server_);
+	const uint16_t port = static_cast<uint16_t>(cfg_.remote_admin_port);
+	if (port == 0) return;
+	if (admin_tcp_->listen(port))
+		io::logf(io::LogLevel::kInfo, "opennova-serve: remote admin on TCP %u", admin_tcp_->port());
+	else
+		io::logf(io::LogLevel::kWarn, "opennova-serve: remote admin did not listen on TCP %u", port);
+}
+
+// The console over the session's context, for the whole run: the cfg block SET writes and
+// Game_SaveConfig saves, the host's rotation, the mounted gametext and avatars, and GOTO
+// MENUSTATE's quit. The chat seams are a listen host's: this host's CHAT SEND and CHAT GET run
+// over the context's CHAT ring and flood table (server_console.h).
+void Server::bind_admin_console() {
+	rotation_admin_ = std::make_unique<inmatch::HostRotationAdmin>(rotation_, catalog_);
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &cfg_;
+	seams.save_config = [this] { (void)save_config(); };
+	seams.rotation = rotation_admin_.get();
+	seams.game_text = [this](std::string_view section, std::string_view key) {
+		return have_gametext_ ? gametext_.get_in_section(std::string(section), std::string(key))
+							  : std::string();
+	};
+	seams.characters = &characters_;
+	// GOTO MENUSTATE's input action 3 on this host: exit reason 1; the active connection's
+	// disconnect drops nothing, as a Serve Only host has no client connection. The next frame's
+	// mission exit takes the router's reason-1 arm, which destroys the session; with no menu
+	// to land on, the session's end is the process's (frame, quit()).
+	// [orig: Input_HandleActionBinding case 3 @0x49AF26 (g_MissionExitReason = 1),
+	//  CNapiNetwork_DisconnectActiveConnection @0x4C918F (no connection, no record);
+	//  PostMenu_RouteMissionExit @0x5684AB -> CNapiGameSession_FullDestroy @0x568683]
+	seams.quit_to_menu = [this] {
+		role_->state.host_owner.ctx.mission_exit_reason = inmatch::kMissionExitQuit;
+	};
+	admin_console_ = std::make_unique<inmatch::AdminConsole>(role_->state.host_owner.ctx, std::move(seams));
+	admin_forward_.console = admin_console_.get();
+}
+
+// The scene is the Game Loop whenever this runs: a map change runs inside one frame, so the
+// pre and post menus' frames, which retail spends between the missions, never reach the pump.
+// The challenge's rand() is the process's one CRT stream, the one the game's draws share on the
+// main thread; the port keeps that stream on the world (World::crt_rand, D-NET-115), so the pump
+// draws from it and hands it back, and an accepted connection advances the session's draws as
+// retail's does. [orig: CAdminServer_AcceptConnection @0x405783..0x4057AC (32 draws of
+//  rand() % 255 + 1); srand @0x51C1AA, the session's one seed]
+void Server::pump_admin() {
+	if (!admin_tcp_ || !admin_tcp_->listening() || !admin_console_) return;
+	admin_console_->set_scene(inmatch::AdminScene::GameLoop);
+	admin_console_->set_main_frame(main_frame_);
+	admin_rand_ = kernel_->world.crt_rand;
+	admin_tcp_->pump();
+	kernel_->world.crt_rand = admin_rand_;
 }
 
 } // namespace opennova::serve

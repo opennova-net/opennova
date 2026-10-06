@@ -107,8 +107,10 @@ The add-on currently supports Windows x64.
 The native apps ship together in `opennova-apps-windows.zip` (on a PR's build
 comment) and `opennova-apps-windows-v<version>.zip` (on tagged releases): the
 `opennova-3di`, `opennova-extract`, `opennova-lan-probe`, `opennova-nw-lister` and
-`opennova-wire` command-line tools and the NovaWorld server
-(`opennova-novaworld-server`), for Windows x64. Its `README.txt` describes each one.
+`opennova-wire` command-line tools, the headless game server (`opennova-serve`, with a
+sample host file; it plays a map rotation and takes retail's remote admin) and the
+NovaWorld server (`opennova-novaworld-server`), for Windows x64. Its `README.txt`
+describes each one.
 
 ## Documentation
 

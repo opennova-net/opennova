@@ -9,6 +9,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/replica_track.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_text.h>
@@ -34,12 +35,21 @@ struct ListenHostState {
 };
 
 // What a shell hands the general bring-up beyond the host config: the S2C
-// 0x45 terrain-tile source and the mission text the initial-state burst
-// streams (the briefing pages and the location-name table).
+// 0x45 terrain-tile source, the mission text the initial-state burst streams
+// (the briefing pages and the location-name table), and the gametext
+// "Server" strings the host's handlers print through, which the bring-up
+// installs on the fresh server context (D-NET-344: every host carries them,
+// a Serve Only host too) [orig: Game_InitSubsystems @0x4A6CD0 loads
+// gametext.bin; Server_BroadcastMedicRequest @0x5153C9; the team change's
+// GameText_GetString("server", "C2Blue" / "C2Red") @0x51902E / @0x51909C].
 struct HostBringup {
 	inmatch::HostConfig host_cfg;
 	std::vector<uint8_t> terrain_til_data;
 	mission::MissionText mission_text;
+	ServerTextTable server_text;
+	// The map change's bring-up: the next mission inside the kept session
+	// (inmatch/map_change.h), not a fresh session.
+	bool next_mission = false;
 };
 
 // The SP listen server's session config: SINGLEPLAYERGAME, the literal
@@ -70,6 +80,20 @@ public:
 	// The socket the host pump reads and writes; null = the socketless
 	// (SP / test) host, every datagram dropped.
 	void set_socket(opennova::IDatagramSocket *socket) { socket_ = socket; }
+	// The session-level rotation state the embedder owns for its whole run
+	// (inmatch/mission_rotation.h); null = no rotation (the session ends at
+	// its first round's end). Every bring-up installs it on the context.
+	void set_rotation(HostRotation *rotation) { rotation_ = rotation; }
+	HostRotation *rotation() const { return rotation_; }
+	// The map change's state between its steps (inmatch/map_change.h).
+	HostMapChange map_change;
+	// The host's network pump while it loads a mission (host_session_load_pump
+	// over the role's socket).
+	void pump_load();
+	// The mission load's end on the authority: the S2C 0x7B to every slot,
+	// and after a map change's bring-up a pump. Phase B of the host boot runs
+	// it [orig: Game_StartMission @0x52625F..0x526267].
+	void finish_mission_load();
 	// The shell's items.def catalog for the HostClient's view (the wire class
 	// and the def facts of a type id); re-installed whenever the role rebuilds
 	// that runtime.
@@ -106,10 +130,11 @@ public:
 	//  CNapiNetwork_QueueReliableMessage @0x4e0de7 with no is_authority test]
 	bool request_stance(int stance);
 	void run_tick(const TickInput &input) override;
-	// A HostOnly (dedicated) host reports the mission exit once its round-end
-	// linger has closed the session; a listen host's shell observes the closed
-	// session itself (_maybe_exit_round_cycle) and never sees this.
-	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_MissionExitReason 4/3]
+	// The mission exit the frame stored: the round end's linger (3 or 4,
+	// the map change's cue), the NovaWorld session's end, or a world-side
+	// writer (the SP end screens, the round-over keys, the in-game RESTART)
+	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_MissionExitReason 4/3;
+	//  read by Game_ProcessMainFrame @0x526806..0x526867].
 	bool session_lost(SessionError &error) const override;
 	bool reset_to_baseline(SessionError &error) override;
 	// The host's mission exit: the round-reset 0x25 to every in-match remote,
@@ -125,11 +150,17 @@ public:
 
 private:
 	void reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session);
+	// The rule words the world reads at tick time, from the session config.
+	void apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play, bool in_session);
 	void make_client_runtime(uint32_t game_type);
+	// The map change's bring-up: the kept session onto the next mission's
+	// kernel (map_change.h).
+	void bring_up_next_mission(const HostBringup &bringup);
 
 	RoleKind kind_ = RoleKind::ListenHost;
 	HostBringup staged_bringup_;
 	opennova::IDatagramSocket *socket_ = nullptr;
+	HostRotation *rotation_ = nullptr;
 	std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog_;
 	int64_t last_net_us_ = 0;
     uint64_t local_round_reset_seen_ = 0;

@@ -1,22 +1,28 @@
 // opennova-serve end to end (ADR 0051), with no retail data: a loose game
-// directory holding one synthetic mission and a retail-format host file. The
+// directory holding two synthetic missions and a retail-format host file. The
 // server mounts it, reads the host file, binds a real UDP socket, boots the
-// mission headless as a DedicatedHost, answers a LAN browser's 0x41 probe
-// with its 0x81 ServerHello, and admits a LAN joiner (a ClientRuntime on a
-// second real socket) through the handshake into the match. Then the server's
-// stop reaches the joiner.
+// starting mission headless as a DedicatedHost, answers a LAN browser's 0x41
+// probe with its 0x81 ServerHello, and admits a LAN joiner (a ClientRuntime on
+// a second real socket) through the handshake into the match. Then the round
+// ends three times: the server runs the map change twice, each time inside
+// the same session, and the joiner reloads in place on its kept connection
+// (D-NET-331); at the third the rotation (Replay 0) runs out, the joiner
+// receives the STOP goodbye and the server reports the rotation's end, having
+// saved game.cfg at each map change. The run happens in a temp working directory, where
+// the server writes its game.cfg and activesrvr.txt (ADR 0051 d2; the files
+// themselves are opennova_serve_game_cfg's).
 #include "server.h"
+#include "serve_test_support.h"
 
 #include <base/gameprofile/game_type.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <net/npwire/lan_discovery.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_admin_command.h>
 
-#include "common/synthetic_mission.h"
-
-#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -26,6 +32,9 @@
 
 using namespace opennova;
 namespace fs = std::filesystem;
+using serve_test::deathmatch_mission;
+using serve_test::free_udp_port;
+using serve_test::write_bytes;
 
 namespace {
 
@@ -38,51 +47,15 @@ int failures = 0;
 		}                                                                            \
 	} while (0)
 
-bool write_bytes(const fs::path &path, const std::vector<uint8_t> &bytes) {
-	std::ofstream out(path, std::ios::binary);
-	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-	return static_cast<bool>(out);
-}
-
-// A deathmatch mission: the two placed entities every kernel test boots, and
-// the solo start marker (6002) a deathmatch player spawns at.
-std::vector<uint8_t> deathmatch_mission() {
-	bms::File m = test_mission::two_entity_mission();
-	m.header.magic[0] = 'B';
-	m.header.magic[1] = 'M';
-	m.header.magic[2] = 'S';
-	m.header.magic[3] = static_cast<char>(bms::kMinVersion);
-	std::snprintf(m.header.mission_name, sizeof(m.header.mission_name), "Serve Test Map");
-	m.header.attrib_flags = bms::AttribFlags::Deathmatch;
-	bms::Entity marker{};
-	marker.type = bms::ItemType::Marker;
-	marker.type_id = 6002;
-	marker.x = 40 << 16;
-	marker.y = 40 << 16;
-	marker.id = 41;
-	m.items.push_back(marker);
-	mission::sync_counts(m);
-	std::vector<uint8_t> bytes;
-	std::string error;
-	if (!bms::write(m, bytes, error)) std::printf("bms::write: %s\n", error.c_str());
-	return bytes;
-}
-
-uint16_t free_udp_port() {
-	uint16_t port = 0;
-	net::ScopedSocket probe(net::udp_bind(0, &port));
-	return probe.is_valid() ? port : 0;
-}
-
 } // namespace
 
 int main() {
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
-	const fs::path dir = fs::temp_directory_path() /
-			("opennova_serve_test_" + std::to_string(
-					std::chrono::steady_clock::now().time_since_epoch().count()));
-	fs::create_directories(dir);
+	const fs::path dir = serve_test::fresh_dir("lan_join");
+	const fs::path work = serve_test::fresh_dir("lan_join_cwd");
+	serve_test::ScopedCwd cwd(work);
 	CHECK(write_bytes(dir / "SERVETST.BMS", deathmatch_mission()));
+	CHECK(write_bytes(dir / "SERVETS2.BMS", deathmatch_mission("Serve Test Map Two")));
 	// A loose score.ini with a deathmatch row that is not the default table:
 	// it must reach world.match, which the bring-up configures.
 	{
@@ -108,7 +81,13 @@ int main() {
 		     << "MaxPlayers 8\r\n"
 		     << "KillLimit 20\r\n"
 		     << "TeamFF 1\r\n"
+		     << "Replay 0\r\n"
+		     // The rotation: the last line names the starting map, the first
+		     // entry with its file; the round ends then take SERVETS2.BMS, the
+		     // third entry, and the end of the list.
+		     << "Mission servetst.bms\r\n"
 		     << "Mission NOSUCH.BMS\r\n"
+		     << "Mission servets2.bms\r\n"
 		     << "Mission servetst.bms\r\n";
 	}
 
@@ -170,7 +149,9 @@ int main() {
 	CHECK(config.mission_name == "Serve Test Map");
 	CHECK(config.game_type == game_type::kDeathmatch);
 	CHECK(server.host_file_report().unknown_missions.size() == 1);
-	CHECK(server.rotation().entries.size() == 1);
+	CHECK(server.rotation().list.count == 3);
+	CHECK(server.rotation().list.cursor == 0);
+	CHECK(server.missions_played() == 1);
 	// The score.ini row reached the match the bring-up configured: its values
 	// (FIRE status 0, ENEMYKILL status 3) and its one FIELD row.
 	const world::Match &match = server.kernel().world.match;
@@ -190,6 +171,11 @@ int main() {
 	CHECK(!server.kernel().local.has_local_player());
 	CHECK(server.kernel().world.rules.mp_session);
 	CHECK(server.bound_port() == options.port);
+	// No game.cfg: remote_admin_port is 0, so no admin listener; the launch still truncates
+	// admin_log.txt, as retail's static construction opens it [orig: Game_InitSubsystems
+	// @0x4A72C7..0x4A72D1; CAdminServer_Construct @0x402C84].
+	CHECK(server.admin_port() == 0);
+	CHECK(fs::exists(work / "admin_log.txt") && fs::file_size(work / "admin_log.txt") == 0);
 
 	constexpr double kFrame = 1.0 / 62.5;
 	const net::Endpoint server_ep{{127, 0, 0, 1}, server.bound_port()};
@@ -229,7 +215,7 @@ int main() {
 		uint8_t rx[4096];
 		net::Endpoint from{};
 		for (;;) {
-			const int n = net::udp_recv_from(joiner_sock.get(), rx, sizeof(rx), from, 5);
+			const int n = net::udp_recv_from(joiner_sock.get(), rx, sizeof(rx), from, 0);
 			if (n <= 0) break;
 			client.receive(rx, static_cast<size_t>(n));
 		}
@@ -271,10 +257,102 @@ int main() {
 	std::printf("opennova_serve: joiner in match after %u client frames on UDP %u\n", tick,
 			server.bound_port());
 
-	// The host's stop reaches the joiner: the round reset, then the STOP
-	// goodbye, which ends the joiner's session.
-	server.stop();
-	CHECK(!server.frame(kFrame));
+	// --- the map rotation: a round end, the map change, the joiner's reload.
+	uint32_t kept_connection_id = 0;
+	for (const inmatch::NapiNPConnection &c : server.role().state.host_owner.ctx.np_protocol.connection_list)
+		if (c.type == inmatch::NapiNPConnection::kTypeServerSide) kept_connection_id = c.connection_id;
+	// One round end, then frames until the joiner is back in a match on the
+	// next map. The Cycle command ends the round with the 620-tick linger
+	// [orig: CNapiGameSession_HandleServerCommand @0x4D31CA].
+	auto play_round_end = [&](int expect_missions) {
+		inmatch::NapiNPServerCtx &ctx = server.role().state.host_owner.ctx;
+		CHECK(inmatch::Server_ExecuteServerCommand(ctx, &server.kernel().world, "Cycle", "", {})
+						.handled);
+		bool reloaded = false;
+		bool back_in_match = false;
+		for (int f = 0; f < 4000 && !back_in_match; ++f) {
+			if (!server.frame(kFrame)) break;
+			drain();
+			for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+			++tick;
+			// The joiner's stored exit 4, in session and not the authority, is
+			// the Game Loop: the reload in place (main_frame_exit).
+			const int32_t reason = client.mission_exit_reason();
+			if (reason != 0) {
+				CHECK(reason == inmatch::kMissionExitRoundOver);
+				CHECK(inmatch::main_frame_exit(reason, /*in_session=*/true, /*authority=*/false) ==
+						inmatch::MainFrameExit::GameLoop);
+				CHECK(client.begin_mission_reload());
+				reloaded = true;
+				continue;
+			}
+			back_in_match = reloaded && client.in_match() && client.is_deployed() &&
+					server.missions_played() == expect_missions;
+		}
+		CHECK(reloaded);
+		return back_in_match;
+	};
+
+	// The map change saves game.cfg, as the PreMenu's init does at every map
+	// change [orig: PreMenu_Init @0x5693E0 -> Game_SaveConfig @0x5693F4].
+	std::error_code removed;
+	fs::remove(work / "game.cfg", removed);
+	CHECK(!fs::exists(work / "game.cfg"));
+	CHECK(play_round_end(2));
+	CHECK(fs::exists(work / "game.cfg"));
+	CHECK(server.missions_played() == 2);
+	CHECK(server.rotation().list.cursor == 1);
+	CHECK(server.role().state.host_owner.ctx.config.mission_file == "SERVETS2.BMS");
+	CHECK(server.role().state.host_owner.ctx.config.mission_name == "Serve Test Map Two");
+	// The next map's session still carries the block's settings, re-applied
+	// at its mission start [orig: Game_StartMission @0x524662].
+	CHECK(server.role().state.host_owner.ctx.config.server_name == "Serve Test");
+	CHECK(server.role().state.host_owner.ctx.config.score_limit == 20u);
+	// The joiner reloaded on its kept connection: the one remote is the same
+	// connection, now owning a fresh body in the next map, and the 0x64 block
+	// named the next map's file.
+	{
+		int kept = 0;
+		world::EntityHandle body2{};
+		for (const inmatch::NapiNPConnection &c :
+				server.role().state.host_owner.ctx.np_protocol.connection_list) {
+			if (c.type != inmatch::NapiNPConnection::kTypeServerSide) continue;
+			++kept;
+			CHECK(c.connection_id == kept_connection_id);
+			body2 = c.link.owned_entity;
+		}
+		CHECK(kept == 1);
+		CHECK(body2.valid() && client.self_handle() == body2.packed);
+		CHECK(client.map_file() == "SERVETS2.BMS");
+		CHECK(!client.session_lost());
+	}
+	// The transfer tokens moved with the mission start (1 -> 2), so the
+	// joiner's stale requests were served from offset 0.
+	CHECK(server.role().state.host_owner.ctx.server_info_transfer_id == 2);
+	CHECK(server.role().state.host_owner.ctx.mission_metadata_transfer_id == 2);
+
+	CHECK(play_round_end(3));
+	CHECK(server.rotation().list.cursor == 2);
+	CHECK(client.map_file() == "SERVETST.BMS");
+	std::printf("opennova_serve: joiner reloaded through %d missions on UDP %u\n",
+			server.missions_played(), server.bound_port());
+
+	// The last round end finds no next entry with Replay 0: the session ends
+	// (StopServer's goodbye) and the server reports the rotation's end.
+	{
+		inmatch::NapiNPServerCtx &ctx = server.role().state.host_owner.ctx;
+		CHECK(inmatch::Server_ExecuteServerCommand(ctx, &server.kernel().world, "Cycle", "", {})
+						.handled);
+		bool ended = false;
+		for (int f = 0; f < 2000 && !ended; ++f) {
+			ended = !server.frame(kFrame);
+			drain();
+			(void)client.Client_ProcessNetworkFrame(tick++);
+		}
+		CHECK(ended);
+		CHECK(server.rotation_ended());
+		CHECK(server.missions_played() == 3);
+	}
 	for (int f = 0; f < 120 && !client.session_lost(); ++f) {
 		drain();
 		(void)client.Client_ProcessNetworkFrame(tick++);
@@ -282,9 +360,12 @@ int main() {
 	CHECK(client.session_lost());
 	CHECK(client.has_disconnect_event() &&
 			client.last_disconnect_event().ddstr == "NP.C:SH:STOP");
+	server.stop();
 	net::shutdown();
+	cwd.restore();
 	std::error_code ec;
 	fs::remove_all(dir, ec);
+	fs::remove_all(work, ec);
 	if (failures != 0) {
 		std::printf("opennova_serve: %d failure(s)\n", failures);
 		return 1;

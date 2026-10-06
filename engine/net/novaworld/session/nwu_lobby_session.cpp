@@ -5,6 +5,7 @@
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/lobby_vars.h> // parse_host_port
 #include <net/npwire/nw_session_framing.h> // make_random_session_u32
+#include <net/npwire/session_keys.h>      // the server-direction opcodes
 
 #include <cstdlib>
 
@@ -111,6 +112,19 @@ void NwuLobbySession::close() {
 	gate_probe_datagram_.clear();
 	gate_socket_ = nullptr;
 	session_socket_ = nullptr;
+}
+
+bool NwuLobbySession::claims(const PeerAddr &from, const uint8_t *data, std::size_t len) const {
+	if (!session_ || data == nullptr || len == 0 || !(from == nw_peer_)) return false;
+	// The manager hands the handlers the envelope-stripped packet; byte 0 is the opcode.
+	// [orig: NapiNPManager_PumpReceive @0x623010 decodes into recv_buffer before HandlePacket]
+	std::vector<uint8_t> stripped(len);
+	std::size_t out_size = 0;
+	if (napi_envelope_decode(data, len, stripped.data(), stripped.size(), &out_size) != 0 ||
+	    out_size == 0)
+		return false;
+	const uint8_t opcode = stripped[0];
+	return opcode >= SESSION_OPCODE_SERVER_HELLO && opcode <= kNwuServerOpcodeLast;
 }
 
 NwuLobbySession::MatchFacts NwuLobbySession::match_facts() const {

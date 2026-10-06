@@ -315,6 +315,65 @@ bool tcp_recv_exact(Socket &s, uint8_t *buf, size_t len) {
 	return true;
 }
 
+Socket tcp_listen(uint16_t port, int backlog, uint16_t *out_bound, bool loopback_only) {
+	Socket s{};
+	const native_socket_t native_fd = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (native_fd == INVALID_SOCKET) {
+		return s;
+	}
+	const intptr_t fd = static_cast<intptr_t>(native_fd);
+	sockaddr_in addr{};
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(loopback_only ? INADDR_LOOPBACK : INADDR_ANY);
+	addr.sin_port = htons(port);
+	if (::bind(native_socket(fd), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR ||
+			::listen(native_socket(fd), backlog) == SOCKET_ERROR) {
+		close_fd(fd);
+		return s;
+	}
+	set_nonblocking(fd, true);
+	if (out_bound) {
+		sockaddr_in bound{};
+		socklen_t_compat len = sizeof(bound);
+		*out_bound = ::getsockname(native_socket(fd), reinterpret_cast<sockaddr *>(&bound), &len) == 0
+				? ntohs(bound.sin_port)
+				: port;
+	}
+	s.fd = fd;
+	return s;
+}
+
+Socket tcp_accept(Socket &listener, Endpoint &from) {
+	Socket s{};
+	if (!listener.is_valid()) {
+		return s;
+	}
+	sockaddr_in addr{};
+	socklen_t_compat len = sizeof(addr);
+	const native_socket_t native_fd =
+			::accept(native_socket(listener.fd), reinterpret_cast<sockaddr *>(&addr), &len);
+	if (native_fd == INVALID_SOCKET) {
+		return s;
+	}
+	s.fd = static_cast<intptr_t>(native_fd);
+	set_nonblocking(s.fd, true);
+	from_in_addr(addr.sin_addr.s_addr, from);
+	from.port = ntohs(addr.sin_port);
+	return s;
+}
+
+int tcp_recv_nonblocking(Socket &s, uint8_t *buf, size_t cap) {
+	const int n = ::recv(native_socket(s.fd), reinterpret_cast<char *>(buf), static_cast<int>(cap), 0);
+	if (n >= 0) {
+		return n;
+	}
+#if defined(_WIN32)
+	return ::WSAGetLastError() == WSAEWOULDBLOCK ? TCP_RECV_WOULD_BLOCK : -1;
+#else
+	return (errno == EWOULDBLOCK || errno == EAGAIN) ? TCP_RECV_WOULD_BLOCK : -1;
+#endif
+}
+
 void shutdown_socket(const Socket &s) {
 	if (!s.is_valid()) {
 		return;

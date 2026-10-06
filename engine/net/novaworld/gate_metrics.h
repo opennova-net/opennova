@@ -8,9 +8,11 @@
 namespace opennova {
 
 // Six retail METPROTOCOL reporters. Keep the ordered fields: PLAYER emits
-// GLANG/GTZB twice whenever the host is dedicated -- the game locale pair,
-// then the player's own (+556/+588) pair; the one gate is g_IsDedicatedServer
-// [orig: Server_SendPlayerMetricsToGate @0x4fae5f]. PING nests one
+// GLANG/GTZB twice whenever the gate's METEXT is set -- the game locale pair,
+// then the player's own (+556/+588) pair; the one gate is g_IsDedicatedServer,
+// a misnomer whose one writer is the gate reply's METEXT (D-NET-347)
+// [orig: Server_SendPlayerMetricsToGate @0x4fae5f; CNapiGateManager_ProcessResponse
+//  @0x4cf2a1..0x4cf2c1]. PING nests one
 // ENTRY/ENDENTRY row group per sorted ping entry (BIP1..BIP4, MS)
 // [orig: Server_SendPingMetricsToGate @0x511BF0].
 struct GateMetricsField {

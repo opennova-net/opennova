@@ -101,6 +101,17 @@ public:
 	// the NP session. [orig: CNapiNetwork_SendUDPPacket -> CNapiNPManager_SendTo @0x61ec20]
 	void send_to(const PeerAddr &to, const std::vector<uint8_t> &dg);
 
+	// Whether this session's protocol takes `data` from `from` when the session socket is shared
+	// with the game's protocol (DatagramDemux's claim): a server-direction opcode (0x81..0x87, the
+	// client-side handlers of the opcode table) from the lobby server's endpoint, which is where
+	// its connection lives. Everything else is the game's (a joiner's 0x41..0x47, a LAN probe).
+	// [orig: NapiNPManager_HandlePacket @0x622f10 offers the envelope-stripped datagram to each
+	//  protocol; NapiNPProtocol_DispatchOpcode @0x622b40 over g_NPOpcodeHandlers @0x849d90 (0x81
+	//  Nwu_HandleServerHello .. 0x87 Nwu_HandleServerProbe); Nwu_HandleServerSession @0x627f90 ->
+	//  NapiNPProtocol_HandleSessionPacket(conn_type 2) @0x626a00, FindConnection(proto, 2, addr,
+	//  port) @0x626ac5]
+	bool claims(const PeerAddr &from, const uint8_t *data, std::size_t len) const;
+
 	bool is_open() const { return session_socket_ != nullptr; }
 	ClientSession *session() { return session_.get(); }
 	const ClientSession *session() const { return session_.get(); }

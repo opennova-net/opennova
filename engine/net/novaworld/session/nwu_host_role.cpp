@@ -71,6 +71,12 @@ void NwuHostRole::tick(uint32_t now_ms) {
 	}
 }
 
+void NwuHostRole::update_server_info() {
+	if (phase_ != Phase::Hosting) return;
+	send_host_update(/*full=*/false);
+	send_status_blob();
+}
+
 // The host-direction notices (ServerHostResult, ServerStopHosting, ServerCommand,
 // ServerPlayerEnterResult: the client msginfo rows ClientSession dispatches).
 bool NwuHostRole::handle_notice(const ClientSession::Notice &notice) {
@@ -192,7 +198,15 @@ void NwuHostRole::send_status_blob() {
 
 HostRegistration NwuHostRole::host_cfg() const {
 	HostRegistration cfg = cfg_;
-	cfg.player_count = players_.empty() ? 1 : static_cast<int>(players_.size());
+	// Players counts the active slots, the host's own only when it is a peer: a listen host's
+	// slot 0 is active from the round init, a dedicated server's never counts, so its roster
+	// (the joiners) is the whole count. [orig: Lobby_UpdateServerInfo @0x4feaa6..0x4feacb;
+	//  Server_InitNewRoundState @0x51c99a..0x51ca3c keeps slot 0 active and local]
+	const int roster = static_cast<int>(players_.size());
+	cfg.player_count = cfg.listen_host && players_.count(0) == 0 ? roster + 1 : roster;
+	// The CountryName / Lang / TZB trio follows the gate reply's METEXT (D-NET-347).
+	// [orig: CNapiGateManager_ProcessResponse @0x4cf2a1..0x4cf2c1 -> g_IsDedicatedServer]
+	cfg.met_ext = lobby_.gate_response().met_ext != 0;
 	cfg.pcid_key = pcid_ring_.current();
 	cfg.uptime_ms = phase_ == Phase::Hosting ? lobby_.clock_ms() - hosting_started_ms_ : 0u;
 	return cfg;

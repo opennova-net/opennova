@@ -152,6 +152,7 @@ bool run_interest_person_bound_radius() {
 	replica.entities.push_back(person);
 
 	w::World world;
+	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	w::CollisionWorld collision;
 	world.collision = &collision;
 	w::WirePersonCollisionProxy proxy;
@@ -205,6 +206,7 @@ bool run_interest_person_los_takes_the_entity_leg() {
 		person.rm_entity_flags = indoors ? w::kEntityFlagIndoors : 0u;
 		replica.entities.push_back(person);
 		w::World world;
+		world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 		world.registry.configure_pool(0, 4);
 		w::CollisionWorld collision;
 		collision.terrain = &field;
@@ -218,10 +220,11 @@ bool run_interest_person_los_takes_the_entity_leg() {
 		ns::UplinkClientInputs inputs;
 		inputs.replica = &replica;
 		inputs.self_wire_handle = 0x0002;
-		ns::set_view_distance_units(600);
+		// The view distance is the world's fog distance (g_EnvFogDistCurrentHigh, the high
+		// word of g_EnvFogDistCurrent).
+		world.weather.core.scalar_channels.fog_dist_fp = 600 << 16;
 		const nw::PlayerExtendedUplink up =
 				ns::build_player_uplink(world, *world.registry.get(self_h), body, inputs);
-		ns::set_view_distance_units(0);
 		const uint16_t want = indoors ? 2036 : 1936;
 		if (!expect(up.priority_handle_0 == 0x0000 && up.priority_score_0 == want,
 				indoors ? "two indoor ends skip the terrain ray"
@@ -239,6 +242,7 @@ bool run_interest_person_los_takes_the_entity_leg() {
 // g_StatsCpuPercent` @0x4C1BBC]
 bool run_stat_bytes() {
 	w::World world;
+	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	w::Entity self{};
 	w::AiEntity body{};
 	ns::UplinkClientInputs inputs;
@@ -296,6 +300,7 @@ bool run_interest_pairs_top4() {
 	replica.entities.push_back(row(0x1002, nw::EntityClass::Vehicle, 0, 3000, 0, 0));
 
 	w::World world;
+	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	w::Entity self{};
 	self.team = 1;
 	self.ground_target = w::EntityHandle{0x1001}; // not in the registry: world pose stays
@@ -318,9 +323,9 @@ bool run_interest_pairs_top4() {
 		return false;
 	}
 
-	ns::set_view_distance_units(600);
+	world.weather.core.scalar_channels.fog_dist_fp = 600 << 16;
 	const nw::PlayerExtendedUplink in_view = ns::build_player_uplink(world, self, body, source);
-	ns::set_view_distance_units(0); // process-global: restore for the sibling tests
+	world.weather.core.scalar_channels.fog_dist_fp = 0;
 	if (!expect(in_view.priority_handle_0 == 0x1004 && in_view.priority_score_0 == 2477 &&
 	                    in_view.priority_handle_1 == 0x1001 && in_view.priority_score_1 == 2436 &&
 	                    in_view.priority_handle_2 == 0x0000 && in_view.priority_score_2 == 2036 &&
@@ -359,6 +364,7 @@ bool run_interest_pairs_top4() {
 //  the observer's scoped-variant selection Entity_UpdateInfantryPlayerBody @0x4b5deb]
 bool run_scope_flag_reaches_host() {
 	w::World world;
+	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;
@@ -415,6 +421,7 @@ bool run_roundtrip_to_host_snap() {
 
 	// Host World with the joiner's peer entity at handle H.
 	w::World world;
+	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;
@@ -682,6 +689,7 @@ bool run_ground_target_carrier_roundtrip() {
 // (including the 0xFF none sentinel) mirrors the failed AdmDef_GetEntryByIndex leg].
 bool run_equipped_adm_ingest_gate() {
 	w::World world;
+	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;
@@ -741,6 +749,7 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 	auto sample = [](bool seeded, double yaw_deg, double pitch_deg, double roll_deg,
 	                 Sample &out) -> bool {
 		w::World world;
+		world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 		world.registry.configure_pool(0, 8);
 		world.registry.configure_pool(1, 8);
 		w::Entity player_seed;
@@ -840,6 +849,7 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 bool run_mounted_echo_names_the_seat_ground_link() {
 	bool ok = true;
 	w::World world;
+	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::Entity deck_seed;
@@ -912,6 +922,7 @@ bool run_mounted_echo_names_the_seat_ground_link() {
 bool run_hud_cursor_names_a_remote_person() {
 	bool ok = true;
 	w::World world;
+	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::Entity self;

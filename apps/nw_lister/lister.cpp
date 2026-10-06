@@ -1,6 +1,8 @@
 #include "lister.h"
 
 #include "console_log.h"
+#include "file_listing_source.h"
+#include "policy.h"
 
 #include <base/io/log.h>
 #include <base/io/strutil.h>
@@ -9,8 +11,6 @@
 #include <net/novaworld/lobby_identity.h>
 
 #include <chrono>
-#include <set>
-#include <system_error>
 
 namespace opennova::nw_lister {
 
@@ -19,57 +19,6 @@ using io::LogLevel;
 namespace {
 
 constexpr int kHttpTimeoutMs = 15000;
-constexpr uint32_t kListingCheckMs = 2000;
-
-// The destination policy: until --allow-public every destination must be on 127.0.0.0/8, and a
-// name does not resolve at all (the lookup would itself be traffic); "localhost" is loopback.
-bool resolve_destination(const std::string &host, net::Endpoint &out, bool allow_public, const char *what) {
-	bool resolved = false;
-	if (host == "localhost") {
-		out.ip = {127, 0, 0, 1};
-		resolved = true;
-	} else {
-		resolved = net::resolve_ipv4(host, out, allow_public);
-	}
-	if (!resolved) {
-		io::logf(LogLevel::kWarn, "[net] cannot resolve %s '%s'%s", what, host.c_str(),
-		         allow_public ? "" : " (names resolve only with --allow-public)");
-		return false;
-	}
-	if (!allow_public && out.ip[0] != 127) {
-		io::logf(LogLevel::kWarn, "[net] refused %s %s: not on 127.0.0.0/8 and --allow-public not given", what,
-		         net::endpoint_to_string(out).c_str());
-		return false;
-	}
-	return true;
-}
-
-// The policy at the datagram level: the gate response and the session name further hosts, so
-// every send is checked, not just the first resolve.
-class PolicySocket final : public IDatagramSocket {
-public:
-	PolicySocket(net::Socket &socket, bool allow_public) : inner_(socket), allow_public_(allow_public) {}
-
-	int recv_from(uint8_t *buf, std::size_t cap, PeerAddr &from) override {
-		return inner_.recv_from(buf, cap, from);
-	}
-
-	void send_to(const PeerAddr &to, const uint8_t *data, std::size_t len) override {
-		if (!allow_public_ && (to.ip & 0xFFu) != 127u) {
-			if (refused_.insert(to.ip).second) {
-				io::logf(LogLevel::kWarn, "[net] refused datagrams to %s: not on 127.0.0.0/8 and --allow-public not given",
-				         net::endpoint_to_string(net::NetDatagramSocket::to_endpoint(to)).c_str());
-			}
-			return;
-		}
-		inner_.send_to(to, data, len);
-	}
-
-private:
-	net::NetDatagramSocket inner_;
-	bool allow_public_;
-	std::set<uint32_t> refused_;
-};
 
 std::string ip4(const std::array<uint8_t, 4> &ip) {
 	return std::to_string(ip[0]) + "." + std::to_string(ip[1]) + "." + std::to_string(ip[2]) + "." +
@@ -102,10 +51,32 @@ bool same_player(const HostPlayerSlot &a, const HostPlayerSlot &b) {
 	       a.pcid == b.pcid && a.type == b.type;
 }
 
+// The file source over the listing and the admin port, from the lister's own options.
+FileListingOptions file_listing_options(const ListerOptions &options) {
+	FileListingOptions out;
+	out.listing_path = options.listing_path;
+	out.allow_public = options.allow_public;
+	out.admin_host = options.admin_host;
+	out.admin_port = options.admin_port;
+	out.admin_user = options.credentials.admin_user;
+	out.admin_pass = options.credentials.admin_pass;
+	return out;
+}
+
 } // namespace
 
 Lister::Lister(ListerOptions options)
+    : Lister(options, std::make_unique<FileListingSource>(file_listing_options(options)), nullptr, nullptr) {}
+
+Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *session_socket)
+    : Lister(std::move(options), nullptr, &source, session_socket) {}
+
+Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, ListingSource *source,
+               IDatagramSocket *session_socket)
     : options_(std::move(options)),
+      owned_source_(std::move(owned)),
+      source_(source != nullptr ? source : owned_source_.get()),
+      shared_session_socket_(session_socket),
       rng_(std::random_device{}()),
       lobby_(
           [this]() {
@@ -129,7 +100,8 @@ Lister::Lister(ListerOptions options)
 	          env.random_u32 = [this]() { return static_cast<uint32_t>(rng_()); };
 	          env.resolve_ipv4 = [this](const std::string &host, PeerAddr &out) {
 		          net::Endpoint endpoint;
-		          if (!resolve_destination(host, endpoint, options_.allow_public, "NovaWorld host")) return false;
+		          if (!resolve_destination(host, endpoint, options_.destinations, options_.allow_public, "NovaWorld host"))
+			          return false;
 		          out.ip = net::NetDatagramSocket::to_peer(endpoint).ip;
 		          return true;
 	          };
@@ -141,18 +113,21 @@ Lister::Lister(ListerOptions options)
 		      phase_ = Phase::Hosting;
 		      io::logf(LogLevel::kInfo, "[host] listed: '%s', %zu player(s)", registration().server_name.c_str(),
 		               role_.roster().size());
+		      source_->on_host_result(true, std::string());
 	      };
 	      hooks.on_failed = [this](const std::string &tag) {
 		      io::logf(LogLevel::kError, "[host] the host request failed: %s", tag.c_str());
+		      source_->on_host_result(false, tag);
 		      end(kExitFailed);
 	      };
 	      hooks.on_stopped = [this](const std::string &key) {
 		      io::logf(LogLevel::kError, "[host] the service stopped the hosting (%s)", key.c_str());
+		      source_->on_host_result(false, key);
 		      end(kExitStoppedByService);
 	      };
-	      hooks.on_command = [](const ServerCommand &command) {
-		      io::logf(LogLevel::kInfo, "[host] ServerCommand %s ignored: no game behind this listing",
-		               server_command_verb_name(command.verb));
+	      hooks.on_command = [this](const ServerCommand &command) { source_->on_command(command); };
+	      hooks.on_player_enter_result = [this](const ClientSession::PlayerEnterResult &result) {
+		      source_->on_player_enter_result(result);
 	      };
 	      return hooks;
       }()) {
@@ -160,48 +135,46 @@ Lister::Lister(ListerOptions options)
 }
 
 Lister::~Lister() {
-	admin_.stop();
+	source_->stop();
 	if (http_.valid()) http_.wait();
 }
 
 bool Lister::start() {
-	std::string error;
-	if (!load_listing(options_.listing_path, listing_, error)) {
-		io::logf(LogLevel::kError, "[listing] %s", error.c_str());
-		exit_code_ = kExitBadInput;
-		return false;
-	}
-	std::error_code ec;
-	listing_mtime_ = std::filesystem::last_write_time(options_.listing_path, ec);
-	if (!options_.admin_host.empty()) {
-		net::Endpoint server;
-		server.port = options_.admin_port;
-		if (!resolve_destination(options_.admin_host, server, options_.allow_public, "admin server")) {
-			exit_code_ = kExitNetwork;
-			return false;
-		}
-		admin_.start(server, options_.credentials.admin_user, options_.credentials.admin_pass);
-		io::logf(LogLevel::kInfo, "[admin] reading %s every %d s for the players, map and time left",
-		         net::endpoint_to_string(server).c_str(), kAdminPollSeconds);
-	}
+	if (!source_->start(exit_code_)) return false;
 	gate_udp_ = net::ScopedSocket(net::udp_bind(0));
-	session_udp_ = net::ScopedSocket(net::udp_bind(0));
-	if (!gate_udp_.is_valid() || !session_udp_.is_valid()) {
+	if (shared_session_socket_ == nullptr) session_udp_ = net::ScopedSocket(net::udp_bind(0));
+	if (!gate_udp_.is_valid() || (shared_session_socket_ == nullptr && !session_udp_.is_valid())) {
 		io::logf(LogLevel::kError, "[net] cannot bind the UDP sockets");
 		exit_code_ = kExitNetwork;
 		return false;
 	}
-	gate_socket_ = std::make_unique<PolicySocket>(gate_udp_.get(), options_.allow_public);
-	session_socket_ = std::make_unique<PolicySocket>(session_udp_.get(), options_.allow_public);
+	gate_raw_ = std::make_unique<net::NetDatagramSocket>(gate_udp_.get());
+	gate_socket_ = std::make_unique<PolicySocket>(*gate_raw_, options_.destinations, options_.allow_public);
+	IDatagramSocket *session = shared_session_socket_;
+	if (session == nullptr) {
+		session_raw_ = std::make_unique<net::NetDatagramSocket>(session_udp_.get());
+		session = session_raw_.get();
+	}
+	session_socket_ = std::make_unique<PolicySocket>(*session, options_.destinations, options_.allow_public);
 	lobby_.open(*gate_socket_, *session_socket_);
 	lobby_.probe(options_.master_host, options_.master_gate_port);
 	io::logf(LogLevel::kInfo, "[gate] probing %s:%u (%s)", options_.master_host.c_str(), options_.master_gate_port,
-	         options_.allow_public ? "public destinations allowed" : "loopback only");
+	         options_.allow_public                                          ? "public destinations allowed"
+	         : options_.destinations == DestinationPolicy::NovaLogicGated ? "NovaLogic's NovaWorld refused"
+	                                                                        : "loopback only");
 	return true;
 }
 
 bool Lister::tick(uint32_t now_ms) {
 	if (phase_ == Phase::Done) return false;
+	// The session's clock starts with the lister: the gate probe went out at 0 (start), so the
+	// embedder's wall clock reads relative to the first pass, else a wall clock past the probe's
+	// deadline ends the probe before its reply can land.
+	if (!clock_started_) {
+		clock_started_ = true;
+		clock_origin_ = now_ms;
+	}
+	now_ms -= clock_origin_;
 	now_ms_ = now_ms;
 	lobby_.tick(now_ms);
 	if (ClientSession *session = lobby_.session()) {
@@ -222,6 +195,12 @@ bool Lister::tick(uint32_t now_ms) {
 	if (!ending_) refresh_listing(false);
 	if (ending_) teardown();
 	return phase_ != Phase::Done;
+}
+
+void Lister::publish_server_info() {
+	if (phase_ != Phase::Hosting || ending_) return;
+	refresh_listing(true);
+	role_.update_server_info();
 }
 
 void Lister::stop() {
@@ -302,11 +281,12 @@ void Lister::ship(const HttpRequestSpec &spec) {
 		if (const std::string *value = flow_.cookies().find(tag)) add_log_secret(*value);
 	}
 	const bool allow_public = options_.allow_public;
+	const DestinationPolicy destinations = options_.destinations;
 	io::logf(LogLevel::kDebug, "[http] %s %s", spec.method == HttpMethod::Post ? "POST" : "GET", spec.url.c_str());
-	http_ = std::async(std::launch::async, [spec, allow_public]() {
+	http_ = std::async(std::launch::async, [spec, allow_public, destinations]() {
 		return net::http_exchange(spec.method == HttpMethod::Post, spec.url, spec.headers, spec.body, kHttpTimeoutMs,
-		                          [allow_public](const std::string &host, net::Endpoint &out) {
-			                          return resolve_destination(host, out, allow_public, "web host");
+		                          [allow_public, destinations](const std::string &host, net::Endpoint &out) {
+			                          return resolve_destination(host, out, destinations, allow_public, "web host");
 		                          });
 	});
 }
@@ -364,114 +344,32 @@ std::vector<std::pair<std::string, std::string>> Lister::cookie_vars() {
 	return flow_.session_cookie_vars();
 }
 
-// The listing file, re-read when it changed, and the admin port's latest answer over it.
+// The source's changes: the columns ride the host role's next refresh, the roster goes out at once.
 void Lister::refresh_listing(bool force) {
 	if (phase_ != Phase::Requesting && phase_ != Phase::Hosting) return;
-	if (!force && now_ms_ - listing_checked_ms_ < kListingCheckMs) return;
-	listing_checked_ms_ = now_ms_;
-	bool changed = false;
-	std::error_code ec;
-	const auto mtime = std::filesystem::last_write_time(options_.listing_path, ec);
-	if (!ec && mtime != listing_mtime_) {
-		Listing fresh;
-		std::string error;
-		if (load_listing(options_.listing_path, fresh, error)) {
-			listing_ = std::move(fresh);
-			changed = true;
-			io::logf(LogLevel::kInfo, "[listing] reloaded: '%s' on %s", listing_.columns.server_name.c_str(),
-			         listing_.columns.mission_name.c_str());
-		} else {
-			io::logf(LogLevel::kWarn, "[listing] %s (keeping the previous listing)", error.c_str());
-		}
-		listing_mtime_ = mtime;
-	}
-	if (!options_.admin_host.empty()) {
-		const AdminSnapshot snapshot = admin_.snapshot();
-		if (snapshot.seq != admin_snapshot_.seq) {
-			changed = true;
-			if (snapshot.ok) {
-				io::logf(LogLevel::kInfo, "[admin] %zu player(s) on %s, %d min left", snapshot.players.size(),
-				         snapshot.mission.c_str(), snapshot.time_left_minutes);
-			} else {
-				io::logf(LogLevel::kWarn, "[admin] the server is not answering (%s): listing no players",
-				         snapshot.status.c_str());
-			}
-			admin_snapshot_ = snapshot;
-		}
-	}
-	if (!changed) return;
+	if (!source_->refresh(now_ms_, force)) return;
 	role_.set_columns(registration());
 	sync_roster();
 }
 
-// The listing columns plus what the session owns: the gate's LobbyName and, for a dedicated
-// server, the machine's locale trio. The admin port's map and time left replace the file's.
+// The source's columns plus what the session owns: the gate's LobbyName, the HOSTKEY, the leg's
+// MaxPlayers clamp and the machine's locale, which the host role sends as the CountryName / Lang /
+// TZB trio when the gate's METEXT asks for it (D-NET-347).
 HostRegistration Lister::registration() const {
-	HostRegistration r = listing_.columns;
+	HostRegistration r = source_->registration();
 	r.lobby_name = lobby_.gate_response().lobby_name;
 	r.host_key = host_key_;
-	r.max_players = host_leg_max_players(r.max_players, r.dedicated_server);
-	if (r.dedicated_server) {
-		r.country_name = identity_.country;
-		r.language = identity_.language;
-		r.tz_bias = strutil::parse_int(identity_.tz_bias).value_or(0);
-	}
-	if (admin_snapshot_.seq != 0 && admin_snapshot_.ok) {
-		if (!admin_snapshot_.mission.empty()) r.mission_name = admin_snapshot_.mission;
-		const int minutes = admin_snapshot_.time_left_minutes;
-		r.round_time_remaining_ticks = minutes < 0 ? -1 : minutes * 3720 + 3719;
-	}
+	r.max_players = host_leg_max_players(r.max_players, !r.listen_host);
+	r.country_name = identity_.country;
+	r.language = identity_.language;
+	r.tz_bias = strutil::parse_int(identity_.tz_bias).value_or(0);
 	return r;
-}
-
-// The roster the PlayerList should carry: the admin port's players (their server slots) once it
-// answered, else the file's, where a player without a slot keeps the one it has and a new name
-// takes the lowest free one, so one player's change never moves another.
-std::vector<HostPlayerSlot> Lister::wanted_roster() const {
-	std::vector<HostPlayerSlot> out;
-	if (admin_snapshot_.seq != 0) {
-		if (!admin_snapshot_.ok) return out;
-		for (const AdminPlayer &player : admin_snapshot_.players) {
-			HostPlayerSlot slot;
-			slot.slot = player.slot;
-			slot.player_name = player.name;
-			slot.team = player.team;
-			slot.type = "0";
-			out.push_back(std::move(slot));
-		}
-		return out;
-	}
-	std::set<int> taken;
-	for (const HostPlayerSlot &player : listing_.players) {
-		if (player.slot >= 0) {
-			out.push_back(player);
-			taken.insert(player.slot);
-		}
-	}
-	const std::map<int, HostPlayerSlot> &current = role_.roster();
-	for (HostPlayerSlot player : listing_.players) {
-		if (player.slot >= 0) continue;
-		for (const auto &entry : current) {
-			if (entry.second.player_name == player.player_name && taken.count(entry.first) == 0) {
-				player.slot = entry.first;
-				break;
-			}
-		}
-		if (player.slot < 0) {
-			int free_slot = 0;
-			while (taken.count(free_slot) != 0) ++free_slot;
-			player.slot = free_slot;
-		}
-		taken.insert(player.slot);
-		out.push_back(std::move(player));
-	}
-	return out;
 }
 
 // ClientHostPlayerRemoved for every slot that left or changed, then ClientHostPlayerAdded for
 // every slot that arrived or changed (Server_PlayerRemove / Server_PlayerAdd per slot).
 void Lister::sync_roster() {
-	const std::vector<HostPlayerSlot> wanted = wanted_roster();
+	const std::vector<HostPlayerSlot> wanted = source_->wanted_roster(role_.roster());
 	std::vector<int> leaving;
 	for (const auto &entry : role_.roster()) {
 		bool kept = false;
@@ -509,7 +407,7 @@ void Lister::teardown() {
 		}
 		lobby_.close();
 	}
-	admin_.stop();
+	source_->stop();
 }
 
 } // namespace opennova::nw_lister

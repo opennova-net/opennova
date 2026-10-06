@@ -67,6 +67,7 @@ jobs:
             @{ Exe = "opennova-extract.exe"; Arguments = @("--help"); Code = 2 },
             @{ Exe = "opennova-lan-probe.exe"; Arguments = @("--help"); Code = 0 },
             @{ Exe = "opennova-nw-lister.exe"; Arguments = @(); Code = 1 },
+            @{ Exe = "opennova-serve.exe"; Arguments = @("--help"); Code = 0 },
             @{ Exe = "opennova-wire.exe"; Arguments = @(); Code = 1 }
           )
           $server = "opennova-novaworld-server.exe"

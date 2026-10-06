@@ -345,6 +345,8 @@ struct ServerCommand {
 	std::vector<std::string> args;   // the tokens after the verb
 };
 const char *server_command_verb_name(ServerCommandVerb verb);
+// The target suffix's spelling ("ByIndex", ...; "" for none), as the in-match executor matches it.
+const char *server_command_target_name(ServerCommandTarget target);
 // The retail tokenizer: whitespace splits outside double quotes, quotes toggle an in-quote
 // run and are dropped, a backslash is copied verbatim. [orig: String_TokenizeQuotedToArray @0x616d60]
 std::vector<std::string> tokenize_quoted(std::string_view text);

@@ -34,7 +34,10 @@ struct EntityHandle;
 // builders (captured-from-observation fixtures, D-NET-127) pending the per-body grill wave.
 namespace opennova::inmatch {
 
+struct HostRotation;
+
 struct NapiNPServerCtx;
+class ServerLogRecorder;
 
 using MissionMetadataBlob = std::array<uint8_t, 180>;
 
@@ -44,6 +47,12 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
 MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config);
 
+// The recipient's S2C 0x7B session summary (its name and PCID, the server
+// name, the advertised mission, the map file, the game type, the expansion).
+// [orig: NapiNPMsg_0x7B_BuildPayload @0x507740]
+std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
+		const NapiNPConnection &conn);
+
 // Build the second, pending-player-spawn boundary of a retail join. The C2S
 // 0x02 handler deliberately does not return these records: retail processes an
 // intervening client frame before CNapiServer_ProcessPendingPlayerSpawns emits
@@ -51,7 +60,8 @@ MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config);
 // this only after the player's live entity/team exists.
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const GameConfig &config, NapiNPConnection &conn,
-		const std::vector<NapiNPConnection> &roster, world::World *world);
+		const std::vector<NapiNPConnection> &roster, world::World *world,
+		const HostRotation *rotation);
 
 // Project the world-owned wave list into the requester-specific S2C 0x6E
 // body. Public because both the reactive 0x0E queue-join reply and the 1 Hz
@@ -65,10 +75,12 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 // team's marker chain. Returns the private 0x5A/0x61/frontier bundle for the
 // owning connection; callers decide whether it is returned reactively or
 // staged on a transport.
+// `server_log` is the /PROFILE recorder (null = off), which marks the deploy.
 // [orig: Server_ProcessPlayerDeath deploy leg @0x517740]
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
-		world::World &world, world::EntityHandle target_zone);
+		world::World &world, world::EntityHandle target_zone,
+		ServerLogRecorder *server_log = nullptr);
 
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into

@@ -29,5 +29,14 @@ bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
 std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
                               bool serve_and_play, std::string_view control);
 uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play);
+// The session apply's two limit substitutions, one rule for the host screen's
+// read and for the game.cfg apply (host_config.h): a cfg point limit of 500
+// is the 65000 no-limit sentinel, and a nonpositive KOTH limit is 0x2222222
+// minutes. [orig: Game_ApplySessionSettingsToGlobals @0x551B67..0x551B8C
+// (g_ScoreLimit, g_KillLimit), @0x551CD2..0x551CDF (g_TimeLimitMinutes)]
+inline constexpr uint32_t kSessionNoPointLimit = 65000u;
+inline constexpr uint32_t kSessionNoKothLimitMinutes = 0x2222222u;
+uint32_t session_point_limit(int32_t cfg_limit);
+uint32_t session_koth_limit_minutes(int32_t cfg_limit);
 
 } // namespace opennova::inmatch

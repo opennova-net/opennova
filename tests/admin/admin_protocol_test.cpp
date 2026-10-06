@@ -1,13 +1,14 @@
 // The remote-admin client codec (net/admin/admin_protocol.h) against the retail server's side:
 // the packet framing, the challenge check, the login the server's own decrypt recovers, the
-// reply classification, and the parsers over replies printed with the server's formats.
+// reply classification, and the parsers over replies printed with the server's formats. The
+// server's side is the engine's own (net/admin/admin_server.h).
 // [orig: CAdminServer_SendResponse @0x402d40; CAdminServer_HandleLogin @0x405870;
 //  Crypto_DecryptBuffer @0x4375b0; CAdminServer_HandlePlayer @0x403fe9;
 //  CAdminServer_HandleMissionCommand @0x406447; CAdminServer_HandleGet @0x403888]
 
-#include "admin_server_side.h"
-
+#include <base/io/crt_rand.h>
 #include <net/admin/admin_protocol.h>
+#include <net/admin/admin_server.h>
 
 #include <algorithm>
 #include <array>
@@ -36,6 +37,30 @@ std::string hex(const std::array<uint8_t, opennova::ADMIN_LOGIN_BYTES> &bytes) {
 		out += t;
 	}
 	return out;
+}
+
+// A challenge as the server sends it (the payload of its first packet), from a seeded stream.
+struct NoCommands final : opennova::AdminCommandHandler {
+	bool dispatch(const opennova::AdminSession &, std::string_view, std::vector<std::string> &) override {
+		return true;
+	}
+	std::string status_report() override { return {}; }
+};
+
+std::vector<uint8_t> server_challenge(uint32_t seed) {
+	NoCommands handler;
+	opennova::io::CrtRand rand;
+	rand.seed(seed);
+	opennova::AdminServer server({}, handler, rand);
+	const opennova::AdminServer::Accepted accepted = server.accept(0x0100007Fu);
+	return std::vector<uint8_t>(accepted.send.begin() + opennova::ADMIN_PACKET_HEADER_BYTES, accepted.send.end());
+}
+
+// The server's decrypt of a login, and HandleLogin's NULs at bytes 31 and 63.
+void server_decrypt_login(uint8_t *buf, size_t size, const std::vector<uint8_t> &challenge) {
+	opennova::admin_decrypt_buffer(buf, size, challenge.data(), 32);
+	buf[31] = 0;
+	buf[63] = 0;
 }
 
 std::string player_row(const char *name, int slot, int team) {
@@ -69,7 +94,7 @@ int main() {
 
 	// The challenge: 33 bytes, byte 0 is 1, the NUL last.
 	{
-		std::vector<uint8_t> challenge = admin_test::server_challenge(7);
+		std::vector<uint8_t> challenge = server_challenge(7);
 		expect(admin_challenge_valid(challenge), "the server's challenge is accepted");
 		challenge[0] = 2;
 		expect(!admin_challenge_valid(challenge), "a challenge whose byte 0 is not 1 is refused, as RAT.exe does");
@@ -78,9 +103,9 @@ int main() {
 
 	// The login: the server's own decrypt recovers the two fields.
 	{
-		const std::vector<uint8_t> challenge = admin_test::server_challenge(0x1234);
+		const std::vector<uint8_t> challenge = server_challenge(0x1234);
 		auto login = admin_encode_login(challenge, "Admin", "s3cret");
-		admin_test::server_decrypt_login(login.data(), login.size(), challenge);
+		server_decrypt_login(login.data(), login.size(), challenge);
 		expect(std::strcmp(reinterpret_cast<const char *>(login.data()), "Admin") == 0, "the server decodes the user");
 		expect(std::strcmp(reinterpret_cast<const char *>(login.data() + 32), "s3cret") == 0,
 		       "the server decodes the password");
@@ -88,7 +113,7 @@ int main() {
 
 		const std::string long_name(40, 'u');
 		auto clipped = admin_encode_login(challenge, long_name, "pw");
-		admin_test::server_decrypt_login(clipped.data(), clipped.size(), challenge);
+		server_decrypt_login(clipped.data(), clipped.size(), challenge);
 		expect(clipped[30] == 'u' && clipped[31] == 0, "a field keeps 31 characters, as the server reads it");
 
 		// The contributor's vectors from opennova-net/WolfRAT2's _jo_encrypt (challenge[i] =

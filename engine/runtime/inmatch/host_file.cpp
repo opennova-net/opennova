@@ -4,92 +4,103 @@
 #include <base/io/ascii_config.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
-#include <runtime/inmatch/host_settings.h>
+#include <formats/gamecfg/game_cfg.h>
 
 #include <string_view>
+#include <utility>
 
 namespace opennova::inmatch {
 
 namespace {
 
-// The keys that write a host-screen global the MULTI_PLAYER_HOST dialog also
-// writes, each with that control: the file's value takes the dialog's arm, so
-// the caps, the inverted rule bits and the later 500-point substitution are
-// the dialog's. Text keys copy the token; the rest read it with atol.
-// [orig: ServerConfig_ApplyHostSetting @0x4A6000 -- GameName strncpy 0x20 ->
-//  0x2550A5D @0x4A6010..0x4A6038, MPHostGamePassword 0x11 -> 0x2550A08
-//  @0x4A603C, ServerMessage 0x80 -> 0x2550C18 @0x4A6068, GameLocation 3 ->
-//  0x2550A7D @0x4A6097, ConnectionSpeed -> 0x2550BF8 @0x4A60C3, Replay ->
-//  0x2550B24 @0x4A6117, Delay -> 0x2550AC8 @0x4A6141, Respawn -> 0x2550B34
-//  @0x4A616B, Time_Limit -> 0x2550B28 @0x4A6195, KillLimit -> 0x2550AC0
-//  @0x4A61BF, MaxScore -> 0x2550AC4 @0x4A61E9, MaxFFKills -> 0x2550C98
-//  @0x4A62A3, TakeoverTime -> 0x2550B78 @0x4A62CD, TeamFF 0x200 / FriendlyTag
-//  0x400 / FFWarning 0x8 set on 0, TeamChoose 0x4 / ClaymorePref 0x8000 set on
-//  nonzero, Tracers 0x1 set on 0 @0x4A62F7..0x4A6458, MPHostSidePasswordA
-//  0x11 -> 0x2550A3B @0x4A645F, MPHostSidePasswordB 0x11 -> 0x2550A4C
-//  @0x4A648B; the dialog writes the same addresses, HostDialog_ReadSettings
-//  @0x555940..0x555EA3]
-struct DialogKey {
-	std::string_view key;
-	std::string_view control;
-	bool text;
-};
-constexpr DialogKey kDialogKeys[] = {
-	{"GameName", "GAME_NAME", true},
-	{"MPHostGamePassword", "SERVER_PASSWORD", true},
-	{"ServerMessage", "SERVER_MESSAGE", true},
-	{"GameLocation", "GAME_LOCATION", true},
-	{"ConnectionSpeed", "CONNECTIONSPEED", false},
-	{"Replay", "REPLAY", false},
-	{"Delay", "DELAY", false},
-	{"Respawn", "RESPAWN", false},
-	{"Time_Limit", "TIME", false},
-	{"KillLimit", "KILL_LIMIT", false},
-	{"MaxScore", "MAX_SCORE", false},
-	{"MaxFFKills", "MAX_FF_KILLS", false},
-	{"TakeoverTime", "TAKEOVER_TIME", false},
-	{"TeamFF", "TEAM_FF", false},
-	{"FriendlyTag", "FRIENDLY_TAG", false},
-	{"FFWarning", "FF_WARNING", false},
-	{"TeamChoose", "TEAM_CHOOSE", false},
-	{"ClaymorePref", "CLAYMORE_PREF", false},
-	{"Tracers", "TRACERS", false},
-	{"MPHostSidePasswordA", "BLUE_PW", true},
-	{"MPHostSidePasswordB", "RED_PW", true},
-};
+using gamecfg::GameCfg;
 
-// MissionRotation_Append: the pair joins the end, and a row whose code word
-// carries the objective bit or lacks the team bit loses its launch option
-// [orig: Server_QueueEntityAction (a misnomer) @0x5019D0 -- the bounds test
-//  @0x5019D5..0x5019E3, the append @0x501A86..0x501AA0, the clear
-//  @0x501AA8..0x501AC1].
-void append_to_rotation(MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
-		size_t index, uint32_t flag) {
-	if (index >= catalog.size()) return;
-	rotation.entries.push_back(MissionRotationEntry{index, flag});
-	const uint32_t code = game_type::for_mission_mode(catalog[index].game_mode);
-	if ((code & game_type::kObjectiveBit) != 0 || (code & game_type::kTeamBit) == 0)
-		rotation.launch_options[index] = 0;
-}
-
-// MissionList_FindByName: the cursor to the first entry whose catalog file
-// matches, case-insensitively; the alternate cursor cleared on a hit. Retail
-// walks to the list's capacity, not its count; this caller always finds the
-// entry it has just appended within the count.
-// [orig: MissionList_FindByName @0x4FC4C0 -- the cursor reset @0x4FC4D0,
-//  the walk @0x4FC4F0..0x4FC51B, the hit @0x4FC521..0x4FC52F]
-void find_in_rotation(MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
-		const std::string &name) {
-	rotation.cursor = -1;
-	for (size_t i = 0; i < rotation.entries.size(); ++i) {
-		const size_t row = rotation.entries[i].catalog_index;
-		if (row < catalog.size() && strutil::iequals(catalog[row].file, name)) {
-			rotation.cursor = static_cast<int32_t>(i);
-			rotation.alt_cursor = -1;
-			return;
-		}
+// `strncpy(field, value, n)` into a block field of `capacity` bytes. A value
+// shorter than n is copied with its NUL; a longer one fills n bytes and no
+// NUL, so the field's old bytes past n still read as part of it. GameCfg holds
+// a field's text up to its size less one byte (D-GAMECFG-1's bound): where the
+// copy fills the field, retail's text runs on into the next field.
+void strncpy_field(std::string &field, const std::string &value, size_t n, size_t capacity) {
+	if (value.size() < n) {
+		field = value;
+	} else {
+		std::string out = value.substr(0, n);
+		if (field.size() > n) out.append(field, n, std::string::npos);
+		field = std::move(out);
 	}
+	if (field.size() > capacity - 1) field.resize(capacity - 1);
 }
+
+// The text keys: each strncpy's count and its field [orig:
+// ServerConfig_ApplyHostSetting @0x4A6000 -- GameName strncpy 0x20 ->
+// serverName_3A5 (+0x3A5, char[32]) @0x4A6010..0x4A6038, MPHostGamePassword
+// 0x11 -> hostGamePassword_350 (+0x350, [17]) @0x4A603C, ServerMessage 0x80 ->
+// serverMessage_560 (+0x560, [128]) @0x4A6068, GameLocation 3 -> country_3C5
+// (+0x3C5, [8]) @0x4A6097, MPHostSidePasswordA 0x11 -> sideAPassword_383
+// (+0x383, [17]) @0x4A645F, MPHostSidePasswordB 0x11 -> sideBPassword_394
+// (+0x394, [17]) @0x4A648B].
+struct TextKey {
+	std::string_view key;
+	std::string GameCfg::*field;
+	size_t count;
+	size_t capacity;
+};
+const TextKey kTextKeys[] = {
+	{"GameName", &GameCfg::game_name, 0x20, 32},
+	{"MPHostGamePassword", &GameCfg::mp_host_game_password, 0x11, 17},
+	{"ServerMessage", &GameCfg::servermsg, 0x80, 128},
+	{"GameLocation", &GameCfg::country, 3, 8},
+	{"MPHostSidePasswordA", &GameCfg::mp_host_side_password_a, 0x11, 17},
+	{"MPHostSidePasswordB", &GameCfg::mp_host_side_password_b, 0x11, 17},
+};
+
+// The number keys: atol into the field [orig: ServerConfig_ApplyHostSetting
+// -- ConnectionSpeed -> nwiSpType_540 @0x4A60C3..0x4A60E1, GameType ->
+// gameType_3F0 @0x4A60ED..0x4A6113, Replay -> unknownModeOption_46C (cfg
+// `replay`) @0x4A6117, Delay -> startDelay_410 @0x4A6141, Respawn ->
+// respawnTimeout_47C (cfg `timeout`) @0x4A616B, Time_Limit -> timeLimit_470
+// @0x4A6195, KillLimit -> maxKills_408 @0x4A61BF, MaxScore -> maxScore_40C
+// @0x4A61E9, UseLineUpQueue -> useLineupQueue_3F8 @0x4A624F..0x4A6275,
+// LineUpQueueSize -> lineupQueueSize_3FC @0x4A6279..0x4A629F, MaxFFKills ->
+// allowableFriendlyKills_5E0 @0x4A62A3, TakeoverTime -> teamChangeTime_4C0
+// (cfg `teamchange_time`) @0x4A62CD].
+struct NumberKey {
+	std::string_view key;
+	int32_t GameCfg::*field;
+};
+const NumberKey kNumberKeys[] = {
+	{"ConnectionSpeed", &GameCfg::nwisptype},
+	{"GameType", &GameCfg::mp_gametype},
+	{"Replay", &GameCfg::replay},
+	{"Delay", &GameCfg::startdelay},
+	{"Respawn", &GameCfg::timeout},
+	{"Time_Limit", &GameCfg::time_limit},
+	{"KillLimit", &GameCfg::max_kills},
+	{"MaxScore", &GameCfg::max_score},
+	{"UseLineUpQueue", &GameCfg::mp_use_lineup_queue},
+	{"LineUpQueueSize", &GameCfg::mp_lineup_queue_size},
+	{"MaxFFKills", &GameCfg::numallowablefriendlykills},
+	{"TakeoverTime", &GameCfg::teamchange_time},
+};
+
+// The mpattrib switches: TeamFF, FriendlyTag, FFWarning and Tracers set their
+// bit on 0 and clear it on nonzero; TeamChoose and ClaymorePref set theirs on
+// nonzero [orig: ServerConfig_ApplyHostSetting @0x4A62F7..0x4A6458 onto
+// multiplayerAttributeFlags_34C: TeamFF 0x200, FriendlyTag 0x400, FFWarning
+// 0x8, TeamChoose 0x4, ClaymorePref 0x8000, Tracers 0x1].
+struct FlagKey {
+	std::string_view key;
+	uint32_t bit;
+	bool set_on_zero;
+};
+constexpr FlagKey kFlagKeys[] = {
+	{"TeamFF", GameConfig::kMpAttribNoFriendlyFire, true},
+	{"FriendlyTag", GameConfig::kMpAttribNoFriendlyTag, true},
+	{"FFWarning", GameConfig::kMpAttribFFWarningSuppress, true},
+	{"TeamChoose", GameConfig::kMpAttribTeamChoose, false},
+	{"ClaymorePref", GameConfig::kMpAttribClaymorePref, false},
+	{"Tracers", GameConfig::kMpAttribNoTracers, true},
+};
 
 } // namespace
 
@@ -117,43 +128,36 @@ GameConfig host_screen_default_config() {
 	return config;
 }
 
-const MissionRotationEntry *MissionRotation::current() const {
-	if (cursor < 0 || static_cast<size_t>(cursor) >= entries.size()) return nullptr;
-	return &entries[static_cast<size_t>(cursor)];
-}
-
-bool apply_host_file_line(const io::ConfigTokens &line, HostScreenState &host,
-		MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
+bool apply_host_file_line(const io::ConfigTokens &line, GameCfg &cfg,
+		HostRotation &host_rotation, const std::vector<mission_catalog::Row> &catalog,
 		HostFileReport *report) {
 	const std::string key = line.token(0);
 	const std::string value = line.token(1);
-	for (const DialogKey &entry : kDialogKeys) {
+	for (const TextKey &entry : kTextKeys) {
 		if (!strutil::iequals(key, entry.key)) continue;
-		if (entry.text) return apply_host_dialog_text(host.config, entry.control, value);
-		return apply_host_dialog_number(host.config, host.player_limit, host.serve_and_play,
-				entry.control, io::retail_atol(value.c_str()));
+		strncpy_field(cfg.*entry.field, value, entry.count, entry.capacity);
+		return true;
 	}
-	// MaxPlayers writes the dialog's global without the dialog's 64 clamp; a
+	for (const NumberKey &entry : kNumberKeys) {
+		if (!strutil::iequals(key, entry.key)) continue;
+		cfg.*entry.field = io::retail_atol(value.c_str());
+		return true;
+	}
+	// MaxPlayers takes the value without the host screen's 64 clamp; a
 	// `/maxplayers N` on the command line replaces it, and nothing else reads
 	// that switch (not ported: opennova-serve has no such switch).
-	// [orig: @0x4A6213..0x4A624B; /maxplayers @0x4A76EF..0x4A7710 -> dword_B4C4F8]
+	// [orig: maxPlayers_3F4 @0x4A6213..0x4A624B; /maxplayers @0x4A76EF..0x4A7710
+	//  -> g_MaxPlayerCommandLineArg @0xB4C4F8]
 	if (strutil::iequals(key, "MaxPlayers")) {
-		host.player_limit = io::retail_atol(value.c_str());
+		cfg.mp_max_players = io::retail_atol(value.c_str());
 		return true;
 	}
-	// [orig: GameType -> 0x2550AA8 @0x4A60ED..0x4A6113; UseLineUpQueue ->
-	//  0x2550AB0 @0x4A624F..0x4A6275; LineUpQueueSize -> 0x2550AB4
-	//  @0x4A6279..0x4A629F]
-	if (strutil::iequals(key, "GameType")) {
-		host.game_type_setting = io::retail_atol(value.c_str());
-		return true;
-	}
-	if (strutil::iequals(key, "UseLineUpQueue")) {
-		host.use_lineup_queue = io::retail_atol(value.c_str());
-		return true;
-	}
-	if (strutil::iequals(key, "LineUpQueueSize")) {
-		host.lineup_queue_size = io::retail_atol(value.c_str());
+	for (const FlagKey &entry : kFlagKeys) {
+		if (!strutil::iequals(key, entry.key)) continue;
+		const bool set = (io::retail_atol(value.c_str()) == 0) == entry.set_on_zero;
+		uint32_t attrib = static_cast<uint32_t>(cfg.mpattrib);
+		attrib = set ? (attrib | entry.bit) : (attrib & ~entry.bit);
+		cfg.mpattrib = static_cast<int32_t>(attrib);
 		return true;
 	}
 	// `Mission <file> <launch option>`: the first catalog row whose file
@@ -168,17 +172,17 @@ bool apply_host_file_line(const io::ConfigTokens &line, HostScreenState &host,
 	//  entry+0x1140) @0x4A6562..0x4A6569, MissionList_FindByName @0x4A6572,
 	//  g_GameType (entry+0x1128) @0x4A6577..0x4A658D]
 	if (strutil::iequals(key, "Mission")) {
-		if (rotation.launch_options.size() != catalog.size())
-			rotation.launch_options.resize(catalog.size(), 0);
+		MissionRotation &rotation = host_rotation.list;
 		for (size_t i = 0; i < catalog.size(); ++i) {
 			if (!strutil::iequals(catalog[i].file, value)) continue;
-			rotation.launch_options[i] = io::retail_atol(line.token(2));
-			append_to_rotation(rotation, catalog, i, 0);
+			const int32_t row = static_cast<int32_t>(i);
+			rotation.launch_option(catalog, row) = io::retail_atol(line.token(2));
+			rotation.append(catalog, row, 0);
+			rotation.take_row(catalog, row);
+			// g_MapFileName takes the line's own token, not the row's spelling.
 			rotation.map_file = value;
-			rotation.map_source_is_loose = catalog[i].loose;
-			rotation.map_launch_option = static_cast<uint8_t>(rotation.launch_options[i]);
-			find_in_rotation(rotation, catalog, value);
-			rotation.map_game_type = game_type::for_mission_mode(catalog[i].game_mode);
+			rotation.find_by_name(catalog, value);
+			host_rotation.previous_game_type = rotation.map_game_type; // [orig: @0x4A658D]
 			return true;
 		}
 		if (report != nullptr) report->unknown_missions.push_back(value);
@@ -188,13 +192,13 @@ bool apply_host_file_line(const io::ConfigTokens &line, HostScreenState &host,
 	return false;
 }
 
-HostFileReport read_host_file(const char *text, size_t size, HostScreenState &host,
-		MissionRotation &rotation, const std::vector<mission_catalog::Row> &catalog) {
+HostFileReport read_host_file(const char *text, size_t size, GameCfg &cfg,
+		HostRotation &host_rotation, const std::vector<mission_catalog::Row> &catalog) {
 	HostFileReport report;
 	// The callback returns 0 for every line, so the walk never stops early
 	// [orig: every arm's `xor eax, eax` before its ret, e.g. @0x4A6035].
 	report.lines = io::for_each_config_file_line(text, size, [&](io::ConfigTokens &line) {
-		apply_host_file_line(line, host, rotation, catalog, &report);
+		apply_host_file_line(line, cfg, host_rotation, catalog, &report);
 	});
 	return report;
 }

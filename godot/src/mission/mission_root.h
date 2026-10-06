@@ -167,6 +167,10 @@ public:
 	Ref<ScarPresentStats> get_scar_present_stats() const;
 
 	Ref<Simulation> get_sim() const { return sim_; }
+	// The map change keeps the live session (inmatch/map_change.h): the session
+	// drive takes the simulation out of this root before the world's unload
+	// frees it, so the root's exit no longer closes that session.
+	Ref<Simulation> release_simulation();
 	void set_presentation_time_ms(int64_t p_value_ms);
 	// The placed-node index (bms_id/kind/group -> live node). The
 	// render-occlusion frame resolves building masks and entity render gates

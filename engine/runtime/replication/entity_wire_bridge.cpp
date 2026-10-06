@@ -7,7 +7,7 @@
 #include <net/npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
 #include <net/npwire/wire_handle.h>   // the wire-side handle packing (pinned below)
 #include <runtime/replication/client_state.h>  // the decoded rows the uplink interest list scores
-#include <runtime/replication/connection_fan.h> // view_distance_units (word_26C681E)
+#include <runtime/replication/connection_fan.h> // view_distance_units (g_EnvFogDistCurrentHigh)
 #include <runtime/terrain_query/height_field.h>  // TerrainHeightField::valid
 #include <runtime/world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
 #include <runtime/world/angle.h>       // spawn_angle_bam (the placement angle)
@@ -994,7 +994,7 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 			e.mounted && e.mount_target.valid() ? e.mount_target : e.ground_target;
 	const int32_t player_yaw = ae.heading;   // +0x10 [orig: @0x50DFA6]
 	const int32_t player_pitch = ae.pitch;   // +0x14 [orig: @0x50DF9D]
-	const int view_distance = static_cast<int16_t>(view_distance_units()); // movsx word_26C681E
+	const int view_distance = view_distance_units(world); // movsx g_EnvFogDistCurrentHigh
 	constexpr double kMaxDistance = 2147418112.0;        // flt_7C19E0
 	constexpr double kRadiansToBam = -683565275.5764316; // dbl_7C57B8 (-2^31 / pi)
 

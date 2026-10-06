@@ -16,6 +16,9 @@ BootFileSource boot_files_from_index(const ResourceIndex &index) {
     files.read_file = [&index](const std::string &name, std::vector<uint8_t> &out) {
         return index.read_file(name, out);
     };
+    files.read_loose_first = [&index](const std::string &name, std::vector<uint8_t> &out) {
+        return index.read_file(name, out, VfsLookupPolicy::ForceLooseFirst);
+    };
     // The effect files, less the names retail's archive walk skips for a zero stamp
     // (ResourceIndex::effect_files, D-VFS-13).
     files.list_files = [&index](const std::string &extension) {
