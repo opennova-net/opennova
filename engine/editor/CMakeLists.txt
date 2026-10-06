@@ -291,6 +291,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/play_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_confirmation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_fixes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_query.cpp

@@ -1382,6 +1382,16 @@ OpenNova and the game install alike (the game install starts at its menu, where 
 chosen).
 _Avoid_: teleport, spawn point (a deploy zone's), warp
 
+**Play log row**:
+A Problems row of what a Play's game looked for and did not find, on the file of the project that
+names it and the record and field naming it, with that reference's or required file's fixes and a
+Go to there. OpenNova says each miss once on its log (`resource missing: <kind> "<name>"`); the game
+install names nothing it lacks, so its rows are read from what its file log shows it opened (the
+missing references of a file it read; the boot's text tables it did not open) and from its graphics
+log (`ghw.txt`: a mission begun and never finished), once its game exited. Each mode's rows stay
+until the next Play of that mode, or until the project closes.
+_Avoid_: crash log, error list, log scrape
+
 **Run directory**:
 Where Play runs the game: `.opennova/run/<mode>/<n>/` (the Play's mode, `runtime`, `install` or
 `strict`; n from 1), the game's working directory, the log Play tails (`session.log`; the game
