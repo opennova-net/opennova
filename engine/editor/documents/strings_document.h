@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/project/project_document.h>
@@ -88,6 +89,9 @@ bool is_strings_kind(AssetKind kind);
 // empty name is an error, a name an earlier section has a warning (a section lookup never
 // reaches it).
 std::vector<Diagnostic> validate_strings_file(const DocumentBase &document);
+// A string id no table defines, added to the table its scope names (ADR 0046 DI-15,
+// DocumentType::define_symbol): a key in the section the lookup reads, or a new section of that name.
+bool define_string_id(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
 
 // The string table type's own finding codes (DocumentType::findings), each a row of its table
 // (strings_document.cpp, static_asserted into this order): input the typed model cannot carry

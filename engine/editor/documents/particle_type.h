@@ -43,4 +43,13 @@ bool read_particle_text(const TextDocument &document, particle::ParticleFile &ou
 // for a line in none.
 size_t particle_effect_at(const particle::ParticleFile &file, size_t line);
 
+// An effect a file names and no particle file defines, added to a particle file the reader reads whole (ADR 0046
+// DI-15, DocumentType::define_symbol): the [effectdef] block the engine's own effect writer makes of an effect of
+// that id and nothing else [orig: CParticleEffectDef_WriteToFile @ 0x5e0fe0], as the game's own writer saves
+// a new one (formats/particle save_particles), after the file's last effect, in its line ends: one span written.
+// The effect system loads every particle file [orig: CEffectSystem_Init @ 0x5F6070] and finds an effect by its
+// id without case [orig: CEffectWorld_FindEffectDefByName @ 0x5E34F0]; a name it does not find it clones the
+// stock effect for [orig: CEffectWorld_InternEffectHandle @ 0x5f7310].
+bool define_particle_effect(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
+
 } // namespace opennova::editor

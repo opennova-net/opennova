@@ -1085,22 +1085,22 @@ static int test_locations_and_fixes() {
 	            fixes[1].request.ask_name);
 
 	// A missing symbol: the file where it belongs, opened (a style variable's stylesheet, the
-	// menu a screen is looked up in, the table a string id's scope names); none for a string
-	// id whose window names no table.
+	// menu a screen is looked up in, the table a string id's scope names), after its Add it there
+	// (DI-15, editor_add_it_there's); none for a string id whose window names no table.
 	Diagnostic style = editor_test::finding_of(DiagnosticSeverity::Warning, "reference.missing", "A variable.", "menus/a.mnu", "font.name");
 	style.subject = ReferenceSubject{ReferenceKind::StyleVar, "%NOPE%"};
 	const AssetEntry *stylesheet = v.project.scan->find("menu_style.mns");
 	fixes = fixes_for(style, v);
-	TEST_EXPECT(stylesheet && labels_of(fixes) == std::vector<std::string>({"Open menu_style.mns"}));
-	if (!stylesheet || fixes.size() != 1) return 1;
-	TEST_EXPECT(fixes[0].request.kind == EditorRequestKind::OpenDocument && fixes[0].request.path == stylesheet->relative_path &&
-	            !fixes[0].bulk && fixes[0].detail.find(kNotUndoable) == std::string::npos);
+	TEST_EXPECT(stylesheet && labels_of(fixes) == std::vector<std::string>({"Add %NOPE% to menu_style.mns", "Open menu_style.mns"}));
+	if (!stylesheet || fixes.size() != 2) return 1;
+	TEST_EXPECT(fixes[1].request.kind == EditorRequestKind::OpenDocument && fixes[1].request.path == stylesheet->relative_path &&
+	            !fixes[1].bulk && fixes[1].detail.find(kNotUndoable) == std::string::npos);
 	Diagnostic screen = style;
 	screen.subject = ReferenceSubject{ReferenceKind::MenuScreen, "B", "A.MNU"};
-	TEST_EXPECT(labels_of(fixes_for(screen, v)) == std::vector<std::string>({"Open a.mnu"}));
+	TEST_EXPECT(labels_of(fixes_for(screen, v)) == std::vector<std::string>({"Add screen B to a.mnu", "Open a.mnu"}));
 	Diagnostic text_id = style;
 	text_id.subject = ReferenceSubject{ReferenceKind::TextId, "NO_ID", "UNGROUPED.BIN/Menu"};
-	TEST_EXPECT(labels_of(fixes_for(text_id, v)) == std::vector<std::string>({"Open ungrouped.bin"}));
+	TEST_EXPECT(labels_of(fixes_for(text_id, v)) == std::vector<std::string>({"Add NO_ID to ungrouped.bin", "Open ungrouped.bin"}));
 	editor_test::own_reference(text_id).scope = "/menu";
 	TEST_EXPECT(fixes_for(text_id, v).empty());
 	// A table of its kind that defines nothing yet: the one the game reads (a weapon table and
@@ -1120,9 +1120,11 @@ static int test_locations_and_fixes() {
 	Diagnostic weapon = style;
 	weapon.subject = ReferenceSubject{ReferenceKind::Weapon, "NOPE"};
 	fixes = fixes_for(weapon, v);
-	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Open weapon.def"}) && fixes[0].request.path == weapons_path);
+	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Add NOPE to weapon.def", "Open weapon.def"}) &&
+	            fixes[1].request.path == weapons_path);
 	fixes = fixes_for(style, v);
-	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Open menu_style.mns"}) && fixes[0].request.path == style_path);
+	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Add %NOPE% to menu_style.mns", "Open menu_style.mns"}) &&
+	            fixes[1].request.path == style_path);
 	return 0;
 }
 
