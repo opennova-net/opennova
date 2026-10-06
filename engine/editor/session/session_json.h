@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -119,8 +120,14 @@ bool value_from_json(const io::JsonValue &json, Value &out);
 // record's identities, and what it is about (role, target, reference as a kind token, scope).
 io::JsonValue diagnostic_to_json(const Diagnostic &diagnostic);
 io::JsonValue diagnostics_to_json(const std::vector<Diagnostic> &diagnostics);
-// A fix: {label, detail, bulk, request} with the request's wire form.
-io::JsonValue problem_fix_to_json(const ProblemFix &fix);
+// A fix: {label, detail, bulk, request} with the request's wire form, its edits named in `names` (else a blank
+// of the type its path opens by its name).
+io::JsonValue problem_fix_to_json(const ProblemFix &fix, const Document *names = nullptr);
+// The record document a request's edits on the file at `path` name their kinds in where no document is open
+// there (a fix's edit, whose document opens first; ADR 0046 DI-15): a blank of the type that opens the file as
+// the project's scan read it (a `.bin` string table by its content, which its name alone does not say), else
+// by its name; null for a file no record type opens.
+std::unique_ptr<Document> blank_names_for(const SessionView &view, const std::string &path);
 // What a query shows: {total, shown, counts {errors, warnings, infos} over every finding,
 // and the page of problems (set_page's, `count` the rows shown), each a finding with its `fixes`
 // (from `fixes`, which keeps them while what they read stands)}. Grouped, each problem
