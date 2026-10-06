@@ -164,6 +164,11 @@ int main() {
 	CHECK(!server.kernel().local.has_local_player());
 	CHECK(server.kernel().world.rules.mp_session);
 	CHECK(server.bound_port() == options.port);
+	// No game.cfg: remote_admin_port is 0, so no admin listener; the launch still truncates
+	// admin_log.txt, as retail's static construction opens it [orig: Game_InitSubsystems
+	// @0x4A72C7..0x4A72D1; CAdminServer_Construct @0x402C84].
+	CHECK(server.admin_port() == 0);
+	CHECK(fs::exists(work / "admin_log.txt") && fs::file_size(work / "admin_log.txt") == 0);
 
 	constexpr double kFrame = 1.0 / 62.5;
 	const net::Endpoint server_ep{{127, 0, 0, 1}, server.bound_port()};

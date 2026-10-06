@@ -614,6 +614,10 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.ctx.logs = cfg.logs;
 	owner.ctx.local_address = cfg.local_address;
 	owner.ctx.local_address_known = cfg.local_address_known;
+	// The ban files' directory, ahead of the session create's round init, which loads them
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5695B3 -> Server_InitNewRoundState
+	//  @0x51C92F (banlist.txt), @0x51CB3B (banned.txt)].
+	owner.ctx.bans.directory = cfg.ban_directory;
 	owner.serve_and_play = cfg.serve_and_play; // the pump's step-5 loopback handling reads this
 	owner.pending_session_messages.clear();
 	owner.pending_session_datagrams.clear();

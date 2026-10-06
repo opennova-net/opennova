@@ -24,9 +24,10 @@ easier to relay than to rediscover.
   ADR 0047), `extract/` (`opennova-extract`, ADR 0040), `lan_probe/`
   (`opennova-lan-probe`), `novaworld_server/` (`opennova-novaworld-server`, the NovaWorld
   service), `nw_lister/` (`opennova-nw-lister`: lists one server on a NovaWorld master
-  without the game), `serve/` (`opennova-serve`, the headless game server, ADR 0051),
-  `wire/` (`opennova-wire`, the capture decoder), and `common/`
-  (shared socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
+  without the game), `serve/` (`opennova-serve`, the headless game server with retail's
+  remote admin, ADR 0051; its files live in its working directory), `wire/`
+  (`opennova-wire`, the capture decoder), and `common/` (shared socket helpers and the
+  remote-admin TCP pump, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
