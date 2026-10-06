@@ -1078,6 +1078,116 @@ func test_a_clip_s_footsteps_reach_the_shell() -> void:
 	assert_true(_change({"clock": {"playing": false}}))
 
 
+## DI-13: a weapon's map in first person. The device draws the gun the weapon names with the character's
+## arms beside it, both on the gun's rig and posed by the row's clip, the arms' camo the character's and
+## TEX_TEAM the player's team on both; the eye stands the camera where the game's presenter stands the view
+## model and sees through the weapon's renderfov; the fire row's shot (its soundsetend) reaches the Shell.
+func test_a_weapon_s_map_draws_its_arms_and_fires() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor viewport first person %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("project")
+	assert_true(_seam.new_project(root, "First Person Game"))
+	var source := dir.path_join("source")
+	var skinned := FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)).to_utf8_buffer()
+	_write(source.path_join("gun.o3d"), skinned)
+	_write(source.path_join("arms.o3d"), skinned)
+	_write(source.path_join("gun.o3a"), SKIN_CLIPS.replace("SKIN.adm", "GUN.adm")
+			.replace("anim_walk_forward", "anim_wpn_fire").to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
+		{"path": source.path_join("gun.o3d")}, {"path": source.path_join("arms.o3d")},
+		{"path": source.path_join("gun.o3a")}]}))
+	assert_true(_seam.settle(), "the import steps across pumps")
+	_write(root.path_join("weapon.def"), TestFs.crlf("weapon \"WPN_TEST\"\n\tclipsize 10\n\tanimadm gun\n\tgfx1 gun\n"
+			+ "\tpos 25 -5 -145 0 0 0\n\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tsoundsetend GS_TEST\n"
+			+ "\t\tdelayend 4\n\t\tfunction wpn_std_fire\n\tend\nend\n").to_utf8_buffer())
+	_write(root.path_join("Avatars.def"), TestFs.crlf("define head H1\n{\n\tname AV_H\n\tgraphic gun.3di\n}\n"
+			+ "define body B1\n{\n\tname AV_B\n\tgraphic gun.3di\n}\n"
+			+ "define arms A1\n{\n\tname AV_A\n\tgraphic arms.3di\n\tcamo 1 2 3\n}\n"
+			+ "nationality 0 AV_GOOD\n{\n\talignment good\n\tdivision 0 AV_DIV\n\t{\n\t\tcombo 1 H1 B1 A1\n\t}\n}\n")
+			.to_utf8_buffer())
+	_write(root.path_join("sounds/gs_test.wav"), _wave_bytes(0.2))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	# The bank made in the editor: the shot, one layer playing its wave.
+	assert_true(_seam.done({"kind": "create_file", "path": "game.lwf"}))
+	assert_true(_seam.done({"kind": "edit_record", "path": "game.lwf", "open_first": true, "edits": [
+		{"op": "add", "kind": "wave", "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "GS_TEST"},
+		{"op": "set", "id": "w", "field": "file", "value": "gs_test.wav"},
+		{"op": "add", "kind": "set", "as": "s"}, {"op": "set", "id": "s", "field": "name", "value": "GS_TEST"},
+		{"op": "add", "kind": "layer", "parent": "s", "as": "l"},
+		{"op": "add", "kind": "member", "parent": "l", "field": "wave", "value": "GS_TEST"}]}))
+	assert_true(_seam.done({"kind": "save_all"}))
+	assert_true(_seam.open_document("anims/GUN.adm"))
+	var fire: int = _seam.find_record("anim_wpn_fire")
+	assert_gt(fire, 0)
+	assert_true(_seam.select_record(fire))
+	assert_true(_change({"clock": {"playing": false, "ticks": 0}}))
+	var preview := await _await_ready()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	var first_person: Dictionary = preview.get("body", {}).get("animation", {}).get("first_person", {})
+	assert_eq(String(first_person.get("weapon", "")), "WPN_TEST", str(first_person))
+	assert_eq(String(first_person.get("arms_file", "")), "arms.3di", str(first_person))
+	await get_tree().process_frame
+	# The gun and the arms, each on the gun's rig, posed by the row's clip.
+	var models: Array = _device(preview).find_children("*", "ObjectModel", true, false)
+	var gun: ObjectModel = null
+	var arms: ObjectModel = null
+	for found: Variant in models:
+		var model := found as ObjectModel
+		if model.get_object_data() == null:
+			continue
+		if model.get_avatar_part() == ObjectModel.AVATAR_PART_ARMS:
+			arms = model
+		else:
+			gun = model
+	assert_not_null(gun, "the gun draws")
+	assert_not_null(arms, "the arms draw beside it")
+	if gun == null or arms == null:
+		return
+	assert_true(gun.has_skeleton() and arms.has_skeleton(), "both ride the gun's rig")
+	assert_eq(arms.get_skeleton().get_bone_count(), gun.get_skeleton().get_bone_count())
+	assert_eq(arms.get_active_body_clip(), "anim_wpn_fire")
+	assert_eq(gun.get_active_body_clip(), "anim_wpn_fire")
+	var arms_ctrl: Dictionary = arms.get_ctrl_values()
+	assert_eq(int(arms_ctrl.get("TEX_CAMO1", -1)), 1, "the character's arms camo: %s" % str(arms_ctrl))
+	assert_eq(int(arms_ctrl.get("TEX_CAMO3", -1)), 3, str(arms_ctrl))
+	assert_eq(int(arms_ctrl.get("TEX_TEAM", -1)), 1, "a good character's player is team 1: %s" % str(arms_ctrl))
+	assert_eq(int(gun.get_ctrl_values().get("TEX_TEAM", -1)), 1, str(gun.get_ctrl_values()))
+	# The eye: the device's camera where the envelope's pose stands it, seeing with the weapon's renderfov.
+	assert_true(_change({"options": {"first_person": {"view": "eye"}}}))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var state := _state()
+	var camera: Dictionary = state.get("camera", {})
+	assert_eq(String(camera.get("view", "")), "eye", str(camera))
+	var pose: Dictionary = camera.get("pose", {})
+	var device_camera: Camera3D = _device_node(state, "Camera3D")
+	assert_not_null(device_camera)
+	if device_camera != null:
+		assert_almost_eq(device_camera.global_position, _vector(pose.get("eye")), Vector3.ONE * 1e-4)
+		assert_almost_eq(device_camera.global_transform.basis.z, _vector(pose.get("back")), Vector3.ONE * 1e-4)
+		assert_almost_eq(device_camera.fov, 80.0, 1e-4)
+		assert_almost_eq(device_camera.near, 0.05, 1e-6)
+	assert_true(_change({"camera": {"yaw": 1.0}}) == false, "the eye stands where the game's camera does")
+	# Run: the shot as the clip plays from its start, heard.
+	var started_before: int = _app.get_clip_voices_started()
+	assert_true(_change({"clock": {"playing": true, "ticks": 0}}))
+	for _frame in 600:
+		if _app.get_clip_voices_started() > started_before:
+			break
+		await get_tree().process_frame
+	assert_gt(_app.get_clip_voices_started(), started_before, "the Shell started the shot's wave")
+	var fired: Array = _state().get("body", {}).get("animation", {}).get("sounds_fired", [])
+	assert_false(fired.is_empty())
+	for sound: Variant in fired:
+		assert_eq(String(sound.get("set", "")), "GS_TEST", "only the action's set fires: %s" % str(sound))
+		assert_eq(String(sound.get("leg", "")), "end", str(sound))
+		assert_eq(String(sound.get("state", "")), "played", str(sound))
+	assert_true(_change({"clock": {"playing": false}, "options": {"first_person": {"view": "orbit"}}}))
+
+
 ## DI-10: a model's damage state, played as the game destroys the item naming it. The crate is the pump's
 ## graphic (gnrc, its husk the armory: four parts, two of them chunks that always fly off): destroyed past
 ## the swap, the device draws the armory in its place (not the document's picture), the sections the pieces
