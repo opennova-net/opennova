@@ -43,6 +43,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::UnsavedChanges, "unsaved", "Unsaved changes" },
 	{ G::Viewports, "viewport", "Viewports" },
 	{ G::Workspace, "workspace", "Windows" },
+	{ G::Navigation, "navigation", "Navigation" },
 	{ G::Catalogs, "catalog", "Catalogs" },
 	{ G::StringTables, "strings", "String tables" },
 	{ G::Menus, "menu", "Menus" },
@@ -116,6 +117,8 @@ const char *finding_fix_token(FindingFix fixes) {
 	case F::Rewrite: return "rewrite";
 	case F::TextureRows: return "texture_rows";
 	case F::ImportFitsUse: return "import_fits_use";
+	case F::ItemId: return "item_id";
+	case F::FallbackRow: return "fallback_row";
 	}
 	return "none";
 }
