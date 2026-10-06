@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "dds",
+    "name": "onenmy1_0.dds"
+  },
+  "outputs": [
+    "onenmy1_0.dds"
+  ],
+  "schema_version": 1,
+  "source_hash": "9602f4e5e2f6625b",
+  "version": 3
+}
