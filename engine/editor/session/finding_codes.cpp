@@ -120,6 +120,7 @@ const char *finding_fix_token(FindingFix fixes) {
 	case F::ImportFitsUse: return "import_fits_use";
 	case F::ItemId: return "item_id";
 	case F::FallbackRow: return "fallback_row";
+	case F::NormalRowType: return "normal_row_type";
 	}
 	return "none";
 }
