@@ -89,7 +89,9 @@
     defines, one `use_checks` row per asset kind, and what a stylesheet line's value is used as
     (`style_value_use`, from the menus' uses of it); and `project_validation`, the one pass over the
     project's files: the graph's update, each file's own findings, the use checks, the graph's
-    findings), `import` (the importers: a PNG to the texture file its uses read, by the
+    findings), `import` (the importers: a font set's glyph sheet to a `.fnt` (`font_import`, the
+    sheet brought beside the set when it is imported from the disk); a PNG to the texture
+    file its uses read, by the
     record's options, each a row of its importer's (S18), the `.import` sidecars, the import pass
     whose outputs the scan lists; the terrain importer (S20: a terrain set's images to a terrain's files,
     `terrain_import`); and the
