@@ -214,7 +214,7 @@ static int test_the_table() {
 			TEST_EXPECT(document_type_for(kind) == nullptr);
 		}
 		const bool left_out = kind == AssetKind::Unknown || kind == AssetKind::Archive || kind == AssetKind::ImportSource ||
-		                      kind == AssetKind::MissionText;
+		                      kind == AssetKind::ImportInput || kind == AssetKind::MissionText;
 		TEST_EXPECT(asset_kind_packed(kind) == !left_out);
 	}
 	TEST_EXPECT(edited.size() == kDocumentTypeCount);
