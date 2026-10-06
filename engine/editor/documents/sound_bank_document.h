@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/model/diagnostic.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/model/table_document.h>
 #include <formats/lwf/lwf.h>
@@ -138,6 +139,9 @@ const char *layer_selection_words(uint32_t flags);
 // no wave of the bank (the save refuses it); a layer heard in neither view, which no play admits
 // [orig: SoundBank_PlayTriggerEntries @ 0x75cd54]; a set with no member to play.
 std::vector<Diagnostic> validate_sound_bank_file(const DocumentBase &document);
+// A sound set no bank the game searches has, added to a bank (ADR 0046 DI-15, DocumentType::define_symbol): a set
+// as Add set makes one, named as referenced; for a menu SOUND's set, only its own bank.
+bool define_sound_set(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
 
 enum class SoundBankFinding {
 	InvalidInput,
