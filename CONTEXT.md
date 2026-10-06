@@ -855,7 +855,7 @@ generic form beside it)
 
 **Viewport**:
 One document's picture as the game would draw it, of one kind (a menu's screen, a model, a text in
-its script device, a mission's 3D view, a texture, a particle file's effect, a HUD layout's HUD), kept by the session while the document is
+its script device, a mission's 3D view, a texture, a particle file's effect, a HUD layout's HUD, a definition table's record), kept by the session while the document is
 open: one per document and kind (a texture's also while Files selects the file, open or not). Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
 picture with the outline and the Inspector beside it: a mission's, for which the Preview window steps
@@ -1149,6 +1149,21 @@ particle renderer, single-sampled as the game's view is. Headless, it answers as
 the name resolves to and the playing cycle.
 _Avoid_: particle editor (ParticleEdit's: nothing here edits but the text), effect viewer, emitter
 preview (one effect spawns several emitters)
+
+**Definition preview**:
+A definition table's viewport in the Preview window (ADR 0046 DI-21): the record the selection lands in
+drawn as the game draws the thing it defines. An item in its State (alive as its mission starts;
+destroying, its death as the game runs it from the clock's tick 0; its husk, the wreck standing; its final
+husk, the model its death pieces are cut from), its graphic or, seen by its enemies, its enemy graphic,
+the husk swapped in with the pieces' sections gone and the destroy fade on its registers, its particle
+slot and its death's Dead, Fire and Other banks spawned where the game spawns them through the engine's
+effect scene, its death sound heard as the clock runs from the death, a person posed as its spawn poses
+it; a weapon's third- or first-person model; an ammo's round as the item its tracer id names. The record
+as it stands, what it names as the game would read it were the project saved now. A record picked is no
+step of the navigation history (a menu's screen is). Headless, it answers as its envelope: what it draws,
+the death in order, the effects it spawned, the sounds it fired.
+_Avoid_: item viewer, def preview (a powerup row or a carry limit draws nothing), model preview (the
+model's own document's picture)
 
 **Rig**:
 What an animation plays on: an animation table (its reset clip the bind) or a lone clip
