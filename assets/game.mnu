@@ -1,0 +1,105 @@
+<SCREEN>
+  <NAME>INGAME</NAME>
+  <WINDOW type="window" name="MAIN">
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>800</RIGHT>
+      <BOTTOM>600</BOTTOM>
+    </POSITION>
+    <APPEARANCE type="custom" state="default"></APPEARANCE>
+    <CURSOR>
+      <FILE>newarow1.tga</FILE>
+      <FLAGS>STANDARD_TRANSPARENT</FLAGS>
+    </CURSOR>
+    <FONT>
+      <NAME>%DEF_FONTNAME_LG%</NAME>
+      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+      <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+      <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+    </FONT>
+    <WINDOW type="window" name="MAIN_WRAPPER">
+      <POSITION>
+        <LEFT>300</LEFT>
+        <TOP>250</TOP>
+        <RIGHT>500</RIGHT>
+        <BOTTOM>350</BOTTOM>
+      </POSITION>
+      <WINDOW type="button" name="HIDDEN_BACK">
+        <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>10</TOP>
+          <RIGHT>200</RIGHT>
+        </POSITION>
+        <APPEARANCE state="default"></APPEARANCE>
+        <APPEARANCE state="mouseover"></APPEARANCE>
+        <APPEARANCE state="selected"></APPEARANCE>
+        <APPEARANCE state="disabled"></APPEARANCE>
+        <STRING justify="CENTER">Resume</STRING>
+      </WINDOW>
+      <WINDOW type="button" name="ABORT">
+        <ACTION type="window" state="SHOW">CONFIRM_EXIT</ACTION>
+        <ACTION type="window" state="HIDE">MAIN_WRAPPER</ACTION>
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>50</TOP>
+          <RIGHT>200</RIGHT>
+        </POSITION>
+        <APPEARANCE state="default"></APPEARANCE>
+        <APPEARANCE state="mouseover"></APPEARANCE>
+        <APPEARANCE state="selected"></APPEARANCE>
+        <APPEARANCE state="disabled"></APPEARANCE>
+        <STRING justify="CENTER">Leave Mission</STRING>
+      </WINDOW>
+    </WINDOW>
+    <WINDOW type="window" name="CONFIRM_EXIT" HIDDEN>
+      <POSITION>
+        <LEFT>250</LEFT>
+        <TOP>250</TOP>
+        <RIGHT>550</RIGHT>
+        <BOTTOM>350</BOTTOM>
+      </POSITION>
+      <WINDOW type="static" name="STATIC_CONFIRM">
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>10</TOP>
+          <RIGHT>300</RIGHT>
+        </POSITION>
+        <APPEARANCE state="default"></APPEARANCE>
+        <STRING justify="CENTER">Leave the mission?</STRING>
+      </WINDOW>
+      <WINDOW type="button" name="CONFIRM_YES">
+        <HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+        <ACTION type="window" state="SHOW">MAIN_WRAPPER</ACTION>
+        <ACTION type="window" state="HIDE">CONFIRM_EXIT</ACTION>
+        <POSITION>
+          <LEFT>30</LEFT>
+          <TOP>60</TOP>
+          <RIGHT>140</RIGHT>
+        </POSITION>
+        <APPEARANCE state="default"></APPEARANCE>
+        <APPEARANCE state="mouseover"></APPEARANCE>
+        <APPEARANCE state="selected"></APPEARANCE>
+        <APPEARANCE state="disabled"></APPEARANCE>
+        <STRING justify="CENTER">Yes</STRING>
+      </WINDOW>
+      <WINDOW type="button" name="CONFIRM_NO">
+        <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+        <ACTION type="window" state="SHOW">MAIN_WRAPPER</ACTION>
+        <ACTION type="window" state="HIDE">CONFIRM_EXIT</ACTION>
+        <POSITION>
+          <LEFT>160</LEFT>
+          <TOP>60</TOP>
+          <RIGHT>270</RIGHT>
+        </POSITION>
+        <APPEARANCE state="default"></APPEARANCE>
+        <APPEARANCE state="mouseover"></APPEARANCE>
+        <APPEARANCE state="selected"></APPEARANCE>
+        <APPEARANCE state="disabled"></APPEARANCE>
+        <STRING justify="CENTER">No</STRING>
+      </WINDOW>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
