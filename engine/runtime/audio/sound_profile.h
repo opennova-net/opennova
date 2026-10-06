@@ -168,6 +168,28 @@ private:
     std::vector<SoundProfile> entries_;
 };
 
+// SndProf.def text for `profiles`, written from scratch in CR LF lines (the
+// walk splits only on CR LF) that SoundProfileTable::parse reads back to the
+// same profiles: each profile a `begin "<name>"` line, its authored slots in
+// slot order, its nonzero percent rows in table order, and `end`. A
+// slot line always carries all five columns: the callback reads columns 3
+// and 4 with no count check, so a shorter line would take what an earlier
+// line, of this file or of any file the game tokenized before it, left there
+// [orig: SoundProfile_ParseLineCallback @ 0x526fc0, the param stores
+// @ 0x527122..0x52718b; Terrain_TokenizeConfigLine @ 0x53cb60 resets only
+// slots 0..2 @ 0x53cb71..0x53cb81]. A slot with no set but a column-3/4
+// value is a bare keyword line that reads them from a '/' line just ahead,
+// which the walk tokenizes and never hands the callback. A column-2/3 value
+// is the shortest decimal that converts back to its Q16 word, a percent row
+// the whole percent. Returns false with `error` in plain words for a profile
+// the file cannot carry, writing nothing: a name that is empty, of 64
+// characters or more (the callback cuts it @ 0x527043) or holding a quote or
+// a line break; a set name of more than 23 characters (its 24-byte field) or
+// holding one; a column-2 value with no set (column 2 resets on every line);
+// a percent row that is no whole percent (stored x 655).
+bool write_sound_profiles(const std::vector<SoundProfile> &profiles, std::string &out,
+                          std::string &error);
+
 // items.def sound-profile bindings for one ORGANIC item type, resolved once at
 // the item-traits sweep (the same portable boundary that binds vehicle audio).
 // The authority body channel reads the equivalent indices off its AiEntity;

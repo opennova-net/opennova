@@ -24,6 +24,9 @@ static constexpr uint32_t DPTH_MAGIC = 0x48545044; // "DPTH"
 static constexpr uint32_t CDEP_MAGIC = 0x50454443; // "CDEP"
 static constexpr uint32_t POLY_MAGIC = 0x594C4F50; // "POLY"
 
+// The widest range a CDEP block holds: its width, that of the range plus one, fits the 4-bit field's 15.
+static constexpr int kCdepMaxRange = 32766;
+
 // The CDEP/POLY bit reader is the shared io::BitReader (engine/base/io/bit_stream.h).
 using io::BitReader;
 
@@ -102,12 +105,10 @@ public:
 		write_bits(value);
 	}
 
-	void write_to_file(const std::string &path) const {
-		std::ofstream out(path, std::ios::binary);
-		if (!out.is_open()) {
-			throw std::runtime_error("Failed to create file: " + path);
-		}
-		out.write(reinterpret_cast<const char *>(buffer_.data()), static_cast<std::streamsize>(high_water_ + 4u));
+	// The written bytes: up to the high-water mark and the four bytes past it the file carries.
+	std::vector<uint8_t> bytes() const {
+		std::vector<uint8_t> out(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(high_water_ + 4u));
+		return out;
 	}
 
 private:
@@ -163,14 +164,19 @@ void write_depth_section(BitWriter &bits,
 				max_value = std::max(max_value, value);
 			}
 
+			// A block's width is that of its range plus one, as the shipped files carry it: a flat
+			// block is written 1 bit wide, never 0, and a range of 2^n - 1 takes n + 1 bits (the retail
+			// .cpt corpus re-encodes byte-identical under this rule; the encoder that made it is not in
+			// Jointops.exe, whose reader takes any width up to 15 [orig: Terrain_LoadLodStorage @
+			// 0x603635..0x6037A8, the 4-bit width]). So a block holds a range of at most 32766.
 			int range = static_cast<int>(max_value) - static_cast<int>(min_value);
-			const bool needs_clamp = range > 32767;
+			const bool needs_clamp = range > kCdepMaxRange;
 			if (needs_clamp) {
-				range = 32767;
+				range = kCdepMaxRange;
 				++clamped_blocks;
 			}
 
-			const int width = count_bit_width(range);
+			const int width = count_bit_width(range + 1);
 			if (width > 15) {
 				throw std::runtime_error("CDEP block range exceeds 15-bit delta limit");
 			}
@@ -181,8 +187,8 @@ void write_depth_section(BitWriter &bits,
 			for (int i = 0; i < block_width; ++i) {
 				int delta = static_cast<int>(depth_buffer[block_start + static_cast<size_t>(i)]) -
 				            static_cast<int>(min_value);
-				if (needs_clamp && delta > 32767) {
-					delta = 32767;
+				if (needs_clamp && delta > kCdepMaxRange) {
+					delta = kCdepMaxRange;
 				}
 				bits.write_bits(static_cast<uint32_t>(delta));
 			}
@@ -453,7 +459,7 @@ CptFile CptFile::read(const std::string &path) {
 	return cpt;
 }
 
-void CptFile::write(const std::string &path) const {
+std::vector<uint8_t> CptFile::write_bytes() const {
 	BitWriter bits;
 
 	Header raw_header = header;
@@ -463,7 +469,16 @@ void CptFile::write(const std::string &path) const {
 	bits.align_dword();
 	write_depth_section(bits, depth_format, depth_buffer);
 	write_poly_section(bits, tiles);
-	bits.write_to_file(path);
+	return bits.bytes();
+}
+
+void CptFile::write(const std::string &path) const {
+	const std::vector<uint8_t> bytes = write_bytes();
+	std::ofstream out(path, std::ios::binary);
+	if (!out.is_open()) {
+		throw std::runtime_error("Failed to create file: " + path);
+	}
+	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 }
 
 } // namespace opennova

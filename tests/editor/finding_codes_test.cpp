@@ -118,7 +118,7 @@ static int test_tokens_unique() {
 	for (const FindingFix fix : { FindingFix::None, FindingFix::Requirement, FindingFix::WrongKind, FindingFix::Rename,
 	                              FindingFix::ResetRow, FindingFix::Reference, FindingFix::UnimportedTexture,
 	                              FindingFix::Reload, FindingFix::Reimport, FindingFix::Rewrite, FindingFix::TextureRows,
-	                              FindingFix::ImportFitsUse })
+	                              FindingFix::ImportFitsUse, FindingFix::ItemId, FindingFix::FallbackRow })
 		TEST_EXPECT(fixes.insert(finding_fix_token(fix)).second && !std::string(finding_fix_token(fix)).empty());
 	TEST_EXPECT(std::string(finding_place_token(FindingPlace::Content)) == "content" &&
 	            std::string(finding_place_token(FindingPlace::File)) == "file");
@@ -277,6 +277,10 @@ static int test_columns() {
 	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size",
 	                     "texture.mfd_not_pow2", "texture.normal_map_halved", "texture.particle_too_big",
 	                     "texture.tile_atlas_cells", "texture.wrong_reader" }));
+	// S19: an item on an id the engine keeps for another kind, or named as one under another id: Use an id;
+	// an items.def whose first row is no Null marker: Add one first.
+	TEST_EXPECT(fixed_by(FindingFix::ItemId) == Tokens({ "catalog.reserved_kind", "catalog.reserved_name" }));
+	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
 	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
 	            Tokens({ "animation_map.ignored_input", "credits.line_ending",
@@ -314,8 +318,10 @@ static int test_columns() {
 	// not serialize always gates.
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) ==
 	            Tokens({ "animation_map.no_reset", "build.expansion.exp_desc", "build.expansion.mission_twice",
-	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.item_type",
-	                     "catalog.name_empty", "expansion.file.unread", "export.cancelled", "export.cleanup", "export.replaced",
+	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.first_row",
+	                     "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
+	                     "catalog.reserved_name", "catalog.reserved_refused", "expansion.file.unread", "export.cancelled",
+	                     "export.cleanup", "export.replaced",
 	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
 	                     "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",

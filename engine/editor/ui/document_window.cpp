@@ -69,6 +69,12 @@ void DocumentWindow::receive(const ViewEvent &event) {
 		}
 }
 
+void DocumentWindow::show_document(const ViewEvent &event) {
+	tab_asked_ = event.flag ? std::string() : event.path;
+	page_asked_ = event.flag;
+	request_focus();
+}
+
 size_t DocumentWindow::held_events(const std::string &path) const {
 	const auto found = views_.find(path);
 	return found == views_.end() ? 0 : found->second.view->held_events();
@@ -154,7 +160,8 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		// always closes.
 		ImGuiTabItemFlags flags = ImGuiTabItemFlags_NoTooltip;
 		if (document->dirty()) flags |= ImGuiTabItemFlags_UnsavedDocument;
-		if (follow && path == view.documents.active) flags |= ImGuiTabItemFlags_SetSelected;
+		if ((follow && path == view.documents.active) || path == tab_asked_)
+			flags |= ImGuiTabItemFlags_SetSelected;
 		const std::string name = basename_of(path);
 		const std::string label = (names[name] > 1 ? path : name) + "###" + path;
 		bool open = true;
@@ -185,7 +192,7 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 	// The page of a file the editor has no editor for (the plain-words lane), after the documents: shown
 	// when it is opened, closed with its tab.
 	if (!view.documents.page.empty()) {
-		const bool select = view.documents.page != page_followed_;
+		const bool select = view.documents.page != page_followed_ || page_asked_;
 		page_followed_ = view.documents.page;
 		bool open = true;
 		const std::string label = "About " + basename_of(view.documents.page) + "###page";
@@ -199,6 +206,8 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		page_followed_.clear();
 	}
 	ImGui::EndTabBar();
+	tab_asked_.clear();
+	page_asked_ = false;
 	if (shown == view.documents.active) {
 		raised_.clear();
 	} else if (!follow && !shown.empty() && shown != raised_) {

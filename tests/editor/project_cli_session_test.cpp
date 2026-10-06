@@ -304,7 +304,7 @@ static int test_verb_table() {
 		TEST_EXPECT(error.empty() && (args.is_null() || args.is_object()));
 		++queries;
 	}
-	TEST_EXPECT(kCliVerbCount == 10 && queries == 8 && requests >= 2 * kCliVerbCount); // export (S16)
+	TEST_EXPECT(kCliVerbCount == 11 && queries == 9 && requests >= 2 * kCliVerbCount); // new-terrain (S20)
 	TEST_EXPECT(cli_verb_row(CliVerb::Request).answer == CliAnswer::Request &&
 	            cli_verb_row(CliVerb::Query).answer == CliAnswer::NamedQuery);
 	const Ran usage = run(dir.root(), { "--help" });
