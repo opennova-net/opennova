@@ -773,7 +773,7 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	# S13 A8: the game runs in a run directory of its own, its log there, the build only read; a
 	# source run names it (--working-dir), since Godot's --path moves the process to the project.
 	var run_dir := String(play.get("run_dir", ""))
-	assert_true(run_dir.ends_with("/.opennova/run/1"), str(play))
+	assert_true(run_dir.ends_with("/.opennova/run/runtime/1"), str(play))
 	assert_eq(String(play.get("log_file", "")), run_dir.path_join("session.log"), str(play))
 	var command_line := String(play.get("command_line", ""))
 	assert_true(command_line.contains("--path") and command_line.contains("--working-dir") and

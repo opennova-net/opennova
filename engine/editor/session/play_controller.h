@@ -60,8 +60,11 @@ public:
 	// `mission` ("" its menu): the project's .bms of that name as the scan spells it, looked up
 	// again now the build landed (one gone since starts nothing, play.mission.unknown). The game
 	// install starts at its menu, a note saying so. `behind`: its window starts behind every other,
-	// never taking the foreground (LaunchPlan::behind; the run section says so).
-	void start(const std::string &mission = std::string(), bool behind = false);
+	// never taking the foreground (LaunchPlan::behind; the run section says so). The run directory keeps
+	// what the game wrote there in the runs of this mode before (run/run_directory.h: its game.cfg, its
+	// saves), Output and the run section's kept naming them; `fresh` empties it first (a first run: the
+	// game install's device dialog, a default profile).
+	void start(const std::string &mission = std::string(), bool behind = false, bool fresh = false);
 	void stop();
 	// The poll's: the child's state, the game's log tail, how it ended once it has; the validation
 	// its report left due.
