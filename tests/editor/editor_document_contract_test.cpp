@@ -94,6 +94,7 @@
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/environment_document.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
@@ -177,7 +178,7 @@ const RowObject kRowObjects[] = {
         {&typeid(ClipRow), sizeof(ClipRow)},       {&typeid(AnimationMapRow), sizeof(AnimationMapRow)},
         {&typeid(MissionRow), sizeof(MissionRow)}, {&typeid(EntityRow), sizeof(EntityRow)},
         {&typeid(PathRow), sizeof(PathRow)},       {&typeid(AreaRow), sizeof(AreaRow)},
-        {&typeid(EventRow), sizeof(EventRow)},
+        {&typeid(EventRow), sizeof(EventRow)},     {&typeid(EnvironmentRow), sizeof(EnvironmentRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
 // clip's bone table, a def catalog's records, a mission's header and entity slots): a longer text
@@ -203,7 +204,7 @@ struct PinnedPresence {
 	const char *type;
 	size_t optional, presences;
 };
-const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}};
+const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}, {"environment", 3, 3}};
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
@@ -349,6 +350,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
 	        {AssetKind::Texture, "sky.pcx", minted_pcx()},
 	        {AssetKind::Texture, "cube.dds", minted_dds()},
+	        // The environment (DI-19a): the minted environment, every keyword and ten keyframes.
+	        {AssetKind::Environment, "synth_full.env", file("env/synth_full.env")},
 	};
 }
 
@@ -431,6 +434,9 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::Particles, "open.ptl", text_bytes("[effectdef]\n{\n\tid = OPEN;\n")},
 	        // A 2 x 2 true-colour TGA, its origin bit set (S18: texture.tga_upside_down).
 	        {AssetKind::Texture, "top_first.tga", top_first_tga()},
+	        // An environment with a line the game skips and no sky height (DI-19a: environment.ignored_input,
+	        // environment.sky_height_default).
+	        {AssetKind::Environment, "flat_sky.env", text_bytes("fog_level 600\r\nspeling 3\r\n")},
 	};
 }
 

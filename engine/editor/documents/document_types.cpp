@@ -7,6 +7,7 @@
 #include <editor/documents/menu_labels.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/environment_document.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_validation.h>
@@ -40,6 +41,7 @@ std::unique_ptr<DocumentBase> make_animation() { return std::make_unique<Animati
 std::unique_ptr<DocumentBase> make_animation_map() {
 	return std::make_unique<AnimationMapDocument>();
 }
+std::unique_ptr<DocumentBase> make_environment() { return std::make_unique<EnvironmentDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -86,6 +88,10 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::Texture, "texture", make_texture_document, validate_texture_file, texture_fields,
 			texture_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			texture_content_json },
+	// The environment (DI-19a): a .env's keywords and keyframes over env::Config, its references its
+	// fields' (the cloud layers' textures, the sun, moon, glare and star models).
+	{ DocumentTypeId::Environment, "environment", make_environment, validate_environment_file,
+			EnvironmentDocument::schema, environment_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its

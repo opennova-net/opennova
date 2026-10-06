@@ -37,6 +37,7 @@
 #include <editor/preview/viewports.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/session/document_set.h>
+#include <editor/session/environment_uses.h>
 #include <editor/session/file_card.h>
 #include <editor/session/file_page.h>
 #include <editor/session/finding_codes.h>
@@ -1441,6 +1442,26 @@ JsonValue answer_used_by(const QueryContext &context, const QueryArgs &args, std
 	return file_users_json(file_users(view, path));
 }
 
+// The missions that run on an environment (DI-19a): a .env named by its path, else the active document.
+constexpr QueryParam kEnvironmentUsesParams[] = {
+	{ "path", J::String, false, nullptr, "An environment (.env); left out, the active document's file." },
+};
+
+JsonValue answer_environment_uses(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path").empty() ? view.documents.active : args.text("path");
+	if (path.empty()) {
+		error = "name the environment with \"path\" (no document is active).";
+		return JsonValue::make_null();
+	}
+	const AssetEntry *entry = view.project.scan ? view.project.scan->named(path) : nullptr;
+	if (entry && entry->kind != AssetKind::Environment) {
+		error = path + " is not an environment (.env).";
+		return JsonValue::make_null();
+	}
+	return environment_uses_json(environment_uses(view, path));
+}
+
 // --- the table -----------------------------------------------------------------------------------
 
 // A row built up column by column, as the request table's are.
@@ -1877,6 +1898,16 @@ constexpr EditorQueryRow kRows[] = {
 			"(editable false: shown in Files), and further, one hop on where the naming record defines what "
 			"others name (an item naming a model: the mission entities placing it), by file likewise; reading "
 			"while the project's references are being read.")
+			.row,
+	Query(K::EnvironmentUses, "environment_uses", answer_environment_uses, kEnvironmentUsesParams,
+			concern_set({ C::Files, C::Graph, C::Project, C::Documents, C::ActiveDocument }),
+			"The missions that run on an environment (the deep-integration plan's DI-19a), as its Inspector shows "
+			"them: path, found, reading (the project's references not read yet), and missions, each its file "
+			"(mission), its header's name (title), the locator and field Go to opens it at (its environment field), "
+			"the terrain it pairs it with (name, file where the project has it, field, water_height in metres where "
+			"the terrain reads), the overrides its header sets over the environment (field: the header's field, "
+			"words), start_time (8.8 hours) and minutes_per_day with the clock in words, and water: from (mission, "
+			"terrain, environment, none: the game's ladder), height in metres and words.")
 			.row,
 };
 

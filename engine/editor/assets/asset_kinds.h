@@ -59,6 +59,7 @@ enum class DocumentTypeId {
 	Text,        // any other text, as the file stores it: a configuration, a text, and each text kind no
 	             // structured type edits yet, its engine reader's findings its own (DI-06)
 	Texture,     // a .tga .mdt .pcx .dds .png: its texels as the game reads them (ADR 0046 S18)
+	Environment, // a .env: env::Config's keywords and keyframes (the deep-integration plan's DI-19a)
 	kCount, // the number of values, None among them
 };
 

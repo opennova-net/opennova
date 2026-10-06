@@ -251,7 +251,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
 	        .runtime("environment")
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::Environment)
 	        .names_files()
 	        .new_name("newenviro.env")
 	        .folder("terrain")

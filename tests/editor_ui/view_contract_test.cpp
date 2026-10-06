@@ -121,6 +121,9 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Config, "game.cfg", text_bytes("\r\n[Game]\r\nname = Views\r\n")},
 	        // A texture (S18): a TGA our writer mints, its picture the tab's main view beside its facts.
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
+	        // The environment (DI-19a): its row and its ten keyframes as a tree, the missions that run on it
+	        // heading the Inspector.
+	        {AssetKind::Environment, "synth_full.env", file("env/synth_full.env")},
 	};
 }
 

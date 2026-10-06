@@ -285,12 +285,13 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));
 	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
-	            Tokens({ "animation_map.ignored_input", "credits.line_ending",
+	            Tokens({ "animation_map.ignored_input", "credits.line_ending", "environment.ignored_input",
 	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
 	                     "shader.form", "strings.regrouped", "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "credits.line_ending", "with every line ending CR LF" },
+		{ "environment.ignored_input", "with each line as the game reads it" },
 		{ "menu.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
 		{ "mission.rewrite_differs", "with its sections as the game reads them" },
@@ -306,7 +307,7 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
 	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "document.unserializable",
-	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input", "music_script.invalid_input",
+	                     "environment.invalid_input", "menu.invalid_input", "menu.unserializable", "mission.invalid_input", "music_script.invalid_input",
 	                     "music_script.unserializable", "strings.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
@@ -322,7 +323,8 @@ static int test_columns() {
 	            Tokens({ "animation_map.no_reset", "build.expansion.exp_desc", "build.expansion.mission_twice",
 	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.first_row",
 	                     "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
-	                     "catalog.reserved_name", "catalog.reserved_refused", "expansion.file.unread", "export.cancelled",
+	                     "catalog.reserved_name", "catalog.reserved_refused", "environment.sky_height_default",
+	                     "expansion.file.unread", "export.cancelled",
 	                     "export.cleanup", "export.replaced",
 	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",

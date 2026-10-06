@@ -1109,20 +1109,22 @@ static int test_shader_and_text() {
 // Every text file opens in the editor (the deep-integration plan's DI-06): the text kinds no structured
 // type edits are the text type's, a text with undo and save; where the engine has a reader of the kind,
 // its findings are the file's (a particle file the reader stops in, at its place; the avatar reader's
-// notes at their lines; the score table's reader), listed; a kind with none makes none. SndProf.def is
-// left to its own type, the mission text to no type (the build leaves it out). An open particle file
-// stands in for its file in the graph, read by the engine's own reader: its names follow its edits.
+// notes at their lines; the score table's reader), listed; a kind with none makes none. SndProf.def and
+// the environment are left to their own types (DI-19a: the specific type owns its kind), the mission text
+// to no type (the build leaves it out). An open particle file stands in for its file in the graph, read by
+// the engine's own reader: its names follow its edits.
 static int test_text_readers() {
 	const DocumentType *text = document_type(DocumentTypeId::Text);
 	TEST_EXPECT(text != nullptr);
 	if (!text) return 1;
-	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::Particles, AssetKind::Environment, AssetKind::HudPosDefs,
+	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::Particles, AssetKind::HudPosDefs,
 	                             AssetKind::HudFxDefs, AssetKind::AvatarDefs, AssetKind::CharAttrDefs, AssetKind::OtherDefs,
 	                             AssetKind::Score, AssetKind::NovaWorldScreen})
 		TEST_EXPECT(document_type_for(kind) == text && is_editable_kind(kind));
 	TEST_EXPECT(document_type_for(AssetKind::SoundProfileDefs) != text && document_type_for(AssetKind::MissionText) == nullptr);
+	TEST_EXPECT(document_type_for(AssetKind::Environment) == document_type(DocumentTypeId::Environment));
 	// The graph still reads a native kind through the engine's reader, not the text type.
-	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) && graph_reads_kind(AssetKind::Environment) &&
+	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) &&
 	            graph_reads_kind(AssetKind::HudPosDefs) && graph_reads_kind(AssetKind::AvatarDefs) &&
 	            !graph_reads_kind(AssetKind::CharAttrDefs) && !graph_reads_kind(AssetKind::Score));
 	Diagnostic error;
@@ -1151,8 +1153,7 @@ static int test_text_readers() {
 	            scores[0].message.find("score table") != std::string::npos);
 	// Kinds whose reader refuses nothing, or that the editor models no reader of.
 	TEST_EXPECT(findings_of("primary_ammo 5\n", "tank.aip", AssetKind::AiProfile).empty() &&
-	            findings_of("[CHARACTER1]\nNAME = x\n", "charattr.def", AssetKind::CharAttrDefs).empty() &&
-	            findings_of("sky_map1 sky.pcx\n", "day.env", AssetKind::Environment).empty());
+	            findings_of("[CHARACTER1]\nNAME = x\n", "charattr.def", AssetKind::CharAttrDefs).empty());
 	TEST_EXPECT(texts_held);
 
 	// In a session: the particle file opens as a text; an edit of its graphic's name moves the graph's

@@ -88,7 +88,8 @@ enum class FindingGroup {
 	Shaders,
 	Missions,
 	Textures,
-	Texts, // a text the engine's own reader reads (DI-06: a particle file, an environment, the defs)
+	Texts, // a text the engine's own reader reads (DI-06: a particle file, the defs)
+	Environments,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
