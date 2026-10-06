@@ -432,6 +432,38 @@ NativeExtractor native_extractor(AssetKind kind) {
 	return nullptr;
 }
 
+// A native kind's file read through the engine's own parser, from its bytes decoded as the game's loader
+// decodes them (or a text document's text, which its load decoded): false when the parser does not read
+// it. A native file holds its names in the game's code page (Windows-1252), the project's file names and
+// every document's names are UTF-8: its names compared in one encoding, UTF-8 (the plain-words lane; a
+// rename of a native text's name writes it back in its code page, native_text_sites).
+bool extract_native(NativeExtractor extract, const std::string &name, const std::vector<uint8_t> &decoded, Extracted &out,
+                    Diagnostic &error) {
+	const size_t edges = out.edges.size(), symbols = out.symbols.size();
+	const bool read = extract(name, decoded, out, error);
+	for (size_t i = edges; i < out.edges.size(); ++i) {
+		GraphEdge &edge = out.edges[i];
+		edge.value = cp1252_to_utf8(edge.value);
+		edge.record = cp1252_to_utf8(edge.record);
+		edge.fallback = cp1252_to_utf8(edge.fallback);
+	}
+	for (size_t i = symbols; i < out.symbols.size(); ++i) {
+		GraphSymbol &symbol = out.symbols[i];
+		symbol.display = cp1252_to_utf8(symbol.display);
+		symbol.name = symbol_name(symbol.kind, symbol.display);
+		symbol.record = cp1252_to_utf8(symbol.record);
+	}
+	return read;
+}
+
+// Whether a type's documents are what the graph reads of their file: a record type's, or a text type's
+// whose text names references (DocumentType::references). A text type whose text names none (the text
+// type over a native kind, DI-06) leaves its file's reading to the kind's native extractor.
+bool read_through_document(const DocumentType &type) {
+	const DocumentContent content = document_content(type);
+	return content == DocumentContent::Records || (content == DocumentContent::Text && type.references);
+}
+
 } // namespace
 
 ReferenceKind value_reference(const FieldUse &field, const Value &value) {
@@ -479,7 +511,17 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 			out.symbols.push_back(std::move(symbol));
 		}
 	}
-	if (!type->references) return;
+	// A native kind held as a text (DI-06: a particle file, an environment, the HUD layout, the avatars):
+	// its text as it stands read by the engine's own parser, as its file is, so what it names follows its
+	// edits; a text the parser does not read names nothing (its own validation says why).
+	if (!type->references) {
+		if (const NativeExtractor extract = native_extractor(document.kind())) {
+			Diagnostic error;
+			const std::string &text = document.text();
+			extract_native(extract, document.path(), std::vector<uint8_t>(text.begin(), text.end()), out, error);
+		}
+		return;
+	}
 	std::vector<TextReference> references;
 	type->references(document, references);
 	for (TextReference &reference : references) {
@@ -573,43 +615,24 @@ bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vect
                         const std::string &game, Extracted &out, Diagnostic &error) {
 	if (!graph_reads_kind(kind))
 		return true;
-	// A record type's document, its records extracted; a text type's, its text's references; a type
-	// of another kind falls through to a native extractor, or gives nothing.
-	if (const DocumentType *type = document_type_for(kind)) {
-		const DocumentContent content = document_content(*type);
-		if (content == DocumentContent::Records || content == DocumentContent::Text) {
-			const std::unique_ptr<DocumentBase> document = type->make();
-			if (!document->load_bytes(bytes, name, kind, game, error)) return false;
-			if (const Document *records = records_of(*document))
-				extract_from_document(*records, out);
-			else
-				extract_from_text(*text_of(*document), out);
-			return true;
-		}
+	// A record type's document, its records extracted; a text type's whose text names references, its
+	// text's; any other kind (a text type over a native kind among them, DI-06) falls through to a native
+	// extractor, or gives nothing.
+	if (const DocumentType *type = document_type_for(kind); type && read_through_document(*type)) {
+		const std::unique_ptr<DocumentBase> document = type->make();
+		if (!document->load_bytes(bytes, name, kind, game, error)) return false;
+		if (const Document *records = records_of(*document))
+			extract_from_document(*records, out);
+		else
+			extract_from_text(*text_of(*document), out);
+		return true;
 	}
 	const NativeExtractor extract = native_extractor(kind);
 	if (!extract) return true;
 	// Decoded as the game's loader decodes a stored file (a document decodes its own).
 	std::vector<uint8_t> decoded = bytes;
 	vfs_decode_payload(decoded, gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
-	const size_t edges = out.edges.size(), symbols = out.symbols.size();
-	const bool read = extract(name, decoded, out, error);
-	// A native file holds its names in the game's code page (Windows-1252), the project's file names and
-	// every document's names are UTF-8: its names compared in one encoding, UTF-8 (the plain-words lane;
-	// a rename of a native text's name writes it back in its code page, native_text_sites).
-	for (size_t i = edges; i < out.edges.size(); ++i) {
-		GraphEdge &edge = out.edges[i];
-		edge.value = cp1252_to_utf8(edge.value);
-		edge.record = cp1252_to_utf8(edge.record);
-		edge.fallback = cp1252_to_utf8(edge.fallback);
-	}
-	for (size_t i = symbols; i < out.symbols.size(); ++i) {
-		GraphSymbol &symbol = out.symbols[i];
-		symbol.display = cp1252_to_utf8(symbol.display);
-		symbol.name = symbol_name(symbol.kind, symbol.display);
-		symbol.record = cp1252_to_utf8(symbol.record);
-	}
-	return read;
+	return extract_native(extract, name, decoded, out, error);
 }
 
 bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset,

@@ -1,11 +1,18 @@
 #include "text_types.h"
 
+#include <algorithm>
 #include <iterator>
+#include <sstream>
 #include <utility>
 
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
+#include <formats/avatars/avatars.h>
+#include <formats/def/def.h>
+#include <formats/env/env.h>
+#include <formats/particle/parser.h>
 #include <formats/scr/scr.h>
+#include <formats/score/score.h>
 #include <net/novacrypto/pubcrypto.h>
 
 namespace opennova::editor {
@@ -115,6 +122,37 @@ bool decode_config(const std::string &path, const std::vector<uint8_t> &stored, 
 	return true;
 }
 
+// The text type's findings (DI-06), listed: a reader's refusal is a warning, its file's names unchecked, as
+// graph.unreadable said of such a file before it opened as a text; what a reader made of a line is its
+// own severity's.
+constexpr FindingCodeEntry<TextFinding> kTextEntries[] = {
+	{ TextFinding::Unreadable, listed_code("text.unreadable") },
+	{ TextFinding::Reader, listed_code("text.reader") },
+};
+static_assert(std::size(kTextEntries) == static_cast<size_t>(TextFinding::kCount),
+		"every TextFinding has exactly one row");
+static_assert(finding_entries_well_formed(kTextEntries),
+		"the text type's rows follow TextFinding's order, each token its own");
+constexpr auto kTextRows = finding_rows(kTextEntries, FindingGroup::Texts);
+static_assert(finding_rows_well_formed(kTextRows), "every row of the table takes its group");
+
+// A finding of a reader's at a line and a column (1-based; column 0 the line's start, line 0 no place:
+// the text's start).
+Diagnostic reader_finding(TextFinding code, DiagnosticSeverity severity, std::string message,
+		const TextDocument &document, size_t line, size_t column) {
+	size_t offset = 0;
+	if (line == 0 || !document.offset_of(line, column ? column : 1, offset)) offset = 0;
+	return text_finding(kTextRows[static_cast<size_t>(code)], severity, std::move(message), document, offset);
+}
+
+// A reader's message as a sentence: its first letter a capital, a full stop after it.
+std::string sentence(std::string message) {
+	while (!message.empty() && (message.back() == '.' || message.back() == ' ' || message.back() == '\n'))
+		message.pop_back();
+	if (!message.empty() && message[0] >= 'a' && message[0] <= 'z') message[0] = char(message[0] - 'a' + 'A');
+	return message.empty() ? message : message + ".";
+}
+
 // A shader the loader rejects is one it does not load, as a missing one, and the game runs: listed
 // (the gate follows retail, ADR 0046 S14); Save writes the form.
 constexpr FindingCodeEntry<ShaderFinding> kShaderEntries[] = {
@@ -149,13 +187,87 @@ std::unique_ptr<DocumentBase> make_text_document() {
 	return std::make_unique<TextDocument>(decode_config);
 }
 
+std::vector<Diagnostic> text_reader_findings(const TextDocument &document) {
+	std::vector<Diagnostic> findings;
+	const std::string &text = document.text();
+	const auto *bytes = reinterpret_cast<const uint8_t *>(text.data());
+	const char *unchecked = " The editor cannot check what the file names until it reads.";
+	switch (document.kind()) {
+	case AssetKind::Particles: {
+		particle::ParticleFile file;
+		particle::ParseError error;
+		if (!particle::load_particles_from_buffer(text.data(), text.size(), file, error))
+			findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
+					"The game's particle reader stops here: " + sentence(error.message) + unchecked, document,
+					size_t(std::max(error.line, 0)), size_t(std::max(error.column, 0))));
+		break;
+	}
+	case AssetKind::Environment: {
+		std::istringstream input(text);
+		env::Config config;
+		std::string error;
+		if (!env::load_env(input, config, error))
+			findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
+					"The game's environment reader does not read it: " + sentence(error) + unchecked, document, 0, 0));
+		break;
+	}
+	case AssetKind::HudPosDefs: {
+		def::DefHudPosFile file{};
+		if (def::def_parse_hudpos_memory(bytes, text.size(), &file) != 0)
+			findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
+					std::string("The game's HUD layout reader does not read it.") + unchecked, document, 0, 0));
+		def::def_free_hudpos(&file);
+		break;
+	}
+	case AssetKind::AvatarDefs: {
+		avatars::AvatarsFile file{};
+		const bool read = avatars::avatars_parse_memory(text.data(), text.size(), &file) == 0;
+		bool refused = false;
+		for (size_t i = 0; i < file.diagnostics_count; ++i) {
+			const avatars::AvatarDiagnostic &note = file.diagnostics[i];
+			const bool error = note.severity == avatars::AVATAR_DIAG_ERROR;
+			// The reader's refusal at the first error it names; its other notes listed.
+			if (!read && error && !refused) {
+				refused = true;
+				findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
+						"The game's avatar reader does not read it: " + sentence(note.message) + unchecked, document,
+						note.line, 0));
+				continue;
+			}
+			findings.push_back(reader_finding(TextFinding::Reader,
+					error ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
+					"The game's avatar reader: " + sentence(note.message), document, note.line, 0));
+		}
+		if (!read && !refused)
+			findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
+					std::string("The game's avatar reader does not read it.") + unchecked, document, 0, 0));
+		avatars::avatars_free(&file);
+		break;
+	}
+	case AssetKind::Score: {
+		score::File file;
+		std::string error;
+		if (!score::parse(bytes, text.size(), file, error))
+			findings.push_back(reader_finding(TextFinding::Reader, DiagnosticSeverity::Warning,
+					"The score table's reader does not read it: " + sentence(error), document, 0, 0));
+		break;
+	}
+	default: break;
+	}
+	return findings;
+}
+
 std::vector<Diagnostic> validate_text_file(const DocumentBase &document) {
-	(void)document;
-	return {};
+	const TextDocument *text = text_of(document);
+	return text ? text_reader_findings(*text) : std::vector<Diagnostic>();
 }
 
 FindingTable text_finding_codes() {
-	return {};
+	return { kTextRows.data(), kTextRows.size() };
+}
+
+const FindingCodeRow &finding_code(TextFinding code) {
+	return kTextRows[static_cast<size_t>(code)];
 }
 
 std::unique_ptr<DocumentBase> make_shader_document() {
