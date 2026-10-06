@@ -5,7 +5,7 @@
   },
   "features": {
     "menu": true,
-    "mission": false,
+    "mission": true,
     "multiplayer": false
   },
   "project_id": "39798cc2-3d39-453c-b786-f04e93d5f8b5",
