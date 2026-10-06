@@ -421,10 +421,10 @@ bool AnimationDocument::edit_collection(Node &, const Edit &, const IdAllocator 
 }
 
 bool AnimationDocument::accept_step(const EditStep &step, const StagedRows &,
-                                    std::string &error) const {
+                                    StepRefusal &refusal) const {
 	for (const RowSwap &swap : step.swaps) {
 		if (swap.before && swap.after) continue;
-		error = "A clip is one record.";
+		refusal.message = "A clip is one record.";
 		return false;
 	}
 	return true;
