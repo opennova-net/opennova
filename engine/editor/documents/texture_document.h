@@ -100,6 +100,7 @@ enum class TextureFinding {
 	NotRead,             // texture.not_read: a file its loader passes over for another of the name
 	TgaTruncated,        // texture.tga_truncated (an error): the file ends before the texels the reader copies
 	PcxShortRows,        // texture.pcx_short_rows: an 8-bit PCX whose rows are shorter than its width
+	DdsNotPowerOfTwo,    // texture.dds_not_pow2: a DDS-reader image whose sides are not powers of two
 	kCount,
 };
 const FindingCodeRow &finding_code(TextureFinding code);
