@@ -700,7 +700,32 @@ void DocumentSet::edit_record(const EditorRequest &request) {
 	}
 	// A batch that asks nothing (a replace_list of an empty list by none, S13 A5) is done.
 	if (request.edits.empty()) return;
-	apply_edits(*document, request.edits);
+	if (!apply_edits(*document, request.edits) || !request.open_first) return;
+	// A fix's batch that made a record and what holds it (DI-15: a string id and the section it goes in) selects the
+	// record it is for, the last it made, where the Add's own selection is the outermost.
+	const bool adds = std::any_of(request.edits.begin(), request.edits.end(),
+	                              [](const Edit &edit) { return edit.operation == EditOperation::Add; });
+	if (const Document *records = records_of(*document)) {
+		if (!adds || records->last_added_records().empty()) return;
+		const NodeAddress last = records->address_of(records->last_added_records().back());
+		if (last.row && !(last == view_.documents.selection.primary)) {
+			view_.documents.selection.select_only(document->path(), last);
+			core_.touch(ViewConcern::Selection);
+		}
+		return;
+	}
+	// A fix's span written into a text (DI-15: an effect added to its particle file) is shown where it went, as
+	// an Add of a record document selects what it made: its document made active, its text revealed there.
+	const TextDocument *text = text_of(*document);
+	const auto *span = text ? dynamic_cast<const TextSpanEdit *>(request.edits.front().payload.get()) : nullptr;
+	if (!span) return;
+	activate(document->path());
+	ViewEvent reveal;
+	reveal.kind = ViewEventKind::RevealText;
+	reveal.path = document->path();
+	reveal.locator = TextDocument::locator(span->span.line, span->span.column);
+	view_.events.post(std::move(reveal));
+	core_.touch(ViewConcern::Selection);
 }
 
 void DocumentSet::texture_operation(const EditorRequest &request) {

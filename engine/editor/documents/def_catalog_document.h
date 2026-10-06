@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <editor/documents/def_table.h>
+#include <editor/model/diagnostic.h>
 #include <editor/model/table_document.h>
 #include <formats/def/reserved_items.h>
 
@@ -124,5 +125,11 @@ std::string reserved_item_words(const def::ReservedItem &row);
 // A batch adding the engine's row to an items.def, as the engine looks for it: an item named by the
 // row's words, on its id, of its kind (an Add and the Sets naming what it made: one undo step).
 std::vector<Edit> reserved_item_add_edits(const def::ReservedItem &row);
+// A weapon, an ammo, an item or a powerup row another file names and no file defines, added to a catalog whose
+// family holds that kind (ADR 0046 DI-15, DocumentType::define_symbol): named as referenced (an item on the id
+// it names, by the reserved-id rule: the engine's own row where the engine keeps the id), born with the values
+// the game's reader gives a new row of its kind. False for another kind, a family without it, or an item id
+// that is none.
+bool define_catalog_symbol(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
 
 } // namespace opennova::editor
