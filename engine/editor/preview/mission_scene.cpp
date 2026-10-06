@@ -18,6 +18,11 @@ bool same_transform(const MissionEntityMark &a, const MissionEntityMark &b) {
 	return a.x == b.x && a.y == b.y && a.z == b.z && a.pitch == b.pitch && a.yaw == b.yaw && a.roll == b.roll;
 }
 
+// What a person's spawn pose reads of its record beside its item and attributes.
+bool same_pose_fields(const MissionEntityMark &a, const MissionEntityMark &b) {
+	return a.route == b.route && a.ssn == b.ssn;
+}
+
 bool pool_shown(const MissionViewportOptions &options, MissionPool pool) {
 	switch (pool) {
 	case MissionPool::Item: return options.items;
@@ -108,6 +113,7 @@ MissionSceneDelta MissionScene::patch(const RowChanges &changes, const MissionSc
 			if (!mission_entity_places_alike(was, mark)) delta.reshaped = true;
 			else if (!same_transform(was, mark)) delta.moved = true;
 			else mark.stamp = was.stamp; // as it was: its stamp stands
+			if (!same_pose_fields(was, mark)) delta.posed = true;
 			if (was.team != mark.team) delta.overlays = true;
 		}
 		if (areas_.size() != areas_were.size() || paths_.size() != paths_were.size() || changes.reordered)
@@ -137,7 +143,7 @@ MissionSceneDelta MissionScene::patch(const RowChanges &changes, const MissionSc
 			++rows_read_;
 			MissionEntityMark &held = entities_[found->second];
 			const bool item = !mission_entity_places_alike(held, read), moved = !same_transform(held, read),
-					   team = held.team != read.team;
+					   team = held.team != read.team, posed = !same_pose_fields(held, read);
 			read.at = mission_scene_point(read.x, read.y, read.z);
 			read.stamp = item || moved ? uint32_t(serial_ + 1) : held.stamp;
 			// Its place in its pool is the whole read's (a row's read alone does not know it).
@@ -145,6 +151,7 @@ MissionSceneDelta MissionScene::patch(const RowChanges &changes, const MissionSc
 			held = read;
 			delta.reshaped = delta.reshaped || item;
 			delta.moved = delta.moved || moved;
+			delta.posed = delta.posed || posed;
 			delta.overlays = delta.overlays || team;
 			touched = true;
 		} else if (const auto area_found = area_rows_.find(row); area_found != area_rows_.end()) {
