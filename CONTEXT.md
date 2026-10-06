@@ -997,7 +997,10 @@ a middle texel, which the wheel steps about the pointer and a drag pans), throug
 channel or its alpha as grey, or its colour over a checkerboard by its alpha, at a mip level, as the
 file holds it or as the game draws it for one of its uses (the use's loader's texels, a cut-out's test,
 a tile atlas's cells, a model row's alpha drawn as the game reads it: opaque where it is a specular brightness),
-at the chain the game builds of it and at an object texture detail, or a normal map lit; each a SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
+at the chain the game builds of it and at an object texture detail, or a normal map lit, or beside the DXT
+texture its `.dds` would hold (a **compare**: split, the DXT texture alone or their difference, with each
+level's error; a `.dds` an import makes beside its source); each a SetViewport. A point of it names the texel
+under it (its column and row in the level shown, its value,
 its palette entry), never a record. Its device draws the texels the portable decode made, texel for
 texel where a texel covers a pixel or more.
 _Avoid_: image viewer, preview (the Preview window, or the role)
@@ -1052,7 +1055,9 @@ notification (the OS's), signal (Godot's)
 Where the person has been in the editor, which Back and Forward take them to again, as a browser's
 pages (`session/navigation_history.h`, the session's `NavigationController`). A place is the pane that
 shows it and the file: a document's tab with the record selected there (by its locator once the
-document is read again), a text's line a Go to showed, a file's page, or Files on a file. A step is a
+document is read again), a text's line a Go to showed, a file's page (with the record a Go to marked
+there: a Go to always lands, on its page where the editor has no editor for the file), or Files on a
+file. A step is a
 move the request table marks as one (`navigates`: a document switched to, a Go to, a Problems row, a
 find's hit, another of a menu's screens, Show in Files), whoever raised it; a record picked within what
 shows, an edit or a camera move is none, and a run of quick steps is one. The open project's alone.

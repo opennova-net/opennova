@@ -163,6 +163,11 @@ set_tests_properties(opennova_3di_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+# `texture`: an image written as a model's .dds, .tga or .mdt through the
+# editor's image import and its authoring DXT encoder.
+add_executable(threedi_texture_command_test threedi/texture_command_test.cpp)
+target_link_libraries(threedi_texture_command_test PRIVATE opennova_3di_commands)
+add_test(NAME threedi_texture_command COMMAND threedi_texture_command_test ${CMAKE_CURRENT_BINARY_DIR})
 # build -> scene -> build over small scenes, and the records build refuses
 # (the executable too, where a refusal must say why).
 add_executable(threedi_o3d_build_test threedi/o3d_build_test.cpp)
@@ -4549,6 +4554,14 @@ target_link_libraries(editor_texture_role_view_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_role_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_role_view COMMAND editor_texture_role_view_test)
 
+# ADR 0046 S18, the compare (documents/texture_compare): a texture beside the DXT texture made of it, each
+# level's error and the pictures of its views; through a session the texture viewport's compare option on a
+# TGA, a plain .dds refused, an imported .dds against its import's source.
+add_executable(editor_texture_compare_test editor/texture_compare_test.cpp)
+target_link_libraries(editor_texture_compare_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_compare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_compare COMMAND editor_texture_compare_test)
+
 # ADR 0046 S18, a texture's import (import/texture_import, graph/texture_import_needs,
 # session/texture_import_state): the image importer's option rows, its pieces, every format written and
 # read back by the reader the game picks, what a minted project's uses ask of an import, set_import_options
@@ -4595,6 +4608,14 @@ add_executable(editor_texture_external_test editor/texture_external_test.cpp)
 target_link_libraries(editor_texture_external_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_external_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_external COMMAND editor_texture_external_test)
+
+# A .tga a model's rows name stored as the .dds of its name, which their loader reads first (ADR 0046
+# S18, store_as_dds): a plain file and an import's output; the uses that read the .tga itself refused;
+# the build packing the .dds alone.
+add_executable(editor_texture_store_dds_test editor/texture_store_dds_test.cpp)
+target_link_libraries(editor_texture_store_dds_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_store_dds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_store_dds COMMAND editor_texture_store_dds_test)
 
 # ADR 0046 DI-01, outside saves come back (editor/assets/disk_changes.h, editor/session/disk_watch.h): a
 # file read once it holds still, the folders' made and gone files, the focus-in sweep; an open catalog's

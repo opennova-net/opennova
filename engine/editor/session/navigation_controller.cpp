@@ -115,7 +115,15 @@ NavigationPlace NavigationController::file_place(Pane pane, const std::string &p
 	NavigationPlace place;
 	place.pane = pane;
 	place.path = path;
-	place.label = pane == Pane::Page ? "About " + basename_of(path) : basename_of(path) + " in Files";
+	if (pane != Pane::Page) {
+		place.label = basename_of(path) + " in Files";
+		return place;
+	}
+	// On a page, the record and field the Go to that showed it marked (DI-17).
+	place.locator = view_.documents.page_locator;
+	place.field = view_.documents.page_field;
+	const std::string at = place.locator.empty() ? place.field : place.locator;
+	place.label = "About " + basename_of(path) + (at.empty() ? std::string() : ": " + at);
 	return place;
 }
 
@@ -177,7 +185,11 @@ void NavigationController::show(const NavigationPlace &place) {
 		return;
 	}
 	EditorRequest open = request::open_document(place.path);
-	if (place.pane == Pane::Document) {
+	if (place.pane == Pane::Page) {
+		// The page with the line it marked (the open brings the Document window forward with its tab).
+		open.locator = place.locator;
+		open.field = place.field;
+	} else {
 		// Its record by the address it was kept by while that read of the document stands, else by its
 		// locator (read again since: closed and opened, renamed, changed on disk); a text at its line.
 		const DocumentBase *document = documents.document_for(place.path);
@@ -190,13 +202,14 @@ void NavigationController::show(const NavigationPlace &place) {
 	documents.open_document(open);
 	pane_ = place.pane;
 	pane_path_ = place.pane == Pane::Page ? place.path : std::string();
-	// The Document window comes forward with its tab, whichever tab showed before (a page's over the
-	// active document's).
-	ViewEvent shown;
-	shown.kind = ViewEventKind::ShowDocument;
-	shown.path = place.path;
-	shown.flag = place.pane == Pane::Page;
-	view_.events.post(std::move(shown));
+	// The Document window comes forward with its tab, whichever tab showed before (the active document's
+	// over a page's; a page's own open asks it for the page's, DocumentSet::open_document).
+	if (place.pane == Pane::Document) {
+		ViewEvent shown;
+		shown.kind = ViewEventKind::ShowDocument;
+		shown.path = place.path;
+		view_.events.post(std::move(shown));
+	}
 	core_.touch(ViewConcern::Selection);
 }
 

@@ -66,11 +66,13 @@ easier to relay than to rediscover.
   with `scripts/land_docs.sh` (Git, PRs, CI below).
 - `third_party/` — vendored submodules (godot-cpp and gut; never edit in
   place — bump submodules upstream) plus two vendored in-tree C sources (bcrypt,
-  and miniz — the BFC1 decoder's inflate, target `opennova_miniz`) and two
+  and miniz — the BFC1 decoder's inflate, target `opennova_miniz`) and three
   hash-pinned FetchContents: sqlite (bump by editing the URL/URL_HASH in
-  `third_party/sqlite/CMakeLists.txt`) and Dear ImGui (`third_party/imgui/`,
+  `third_party/sqlite/CMakeLists.txt`), Dear ImGui (`third_party/imgui/`,
   pinned to the commit the imgui-godot addon bundles — bump it and
-  `scripts/bootstrap_imgui_godot.sh` together, never one alone).
+  `scripts/bootstrap_imgui_godot.sh` together, never one alone) and rgbcx
+  (`third_party/rgbcx/`, the tools' authoring DXT encoder; bump the commit and
+  URL_HASH together).
 
 ## Build & test
 
