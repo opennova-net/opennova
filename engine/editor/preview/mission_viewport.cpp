@@ -451,11 +451,51 @@ MissionCanvasFrame MissionViewport::canvas_frame(const ViewportContext &context)
 	return frame;
 }
 
+MissionGroundFacts MissionViewport::ground_under(const ViewportContext &context, float x, float y) const {
+	MissionGroundFacts none;
+	const Document *document = document_of(context.input);
+	if (reason_ != MissionViewStatus::Ready || !document || !context.device) return none;
+	PreviewVec3 from, along;
+	if (!camera_.ray(x, y, context.width, context.height, from, along)) return none;
+	// The ray as a segment of the mission, from the eye as far as a pick reaches (mission_ground_point's).
+	const double length = std::sqrt(double(along.x) * along.x + double(along.y) * along.y + double(along.z) * along.z);
+	if (!(length > 0.0)) return none;
+	const double reach = kMissionPickReach / length;
+	const PreviewVec3 far{ float(double(from.x) + double(along.x) * reach), float(double(from.y) + double(along.y) * reach),
+		float(double(from.z) + double(along.z) * reach) };
+	double start[3], end[3];
+	preview_to_mission(from, start);
+	preview_to_mission(far, end);
+	const ViewportRayHit met = context.device->ray_between(start, end);
+	double at[3] = { met.point[0], met.point[1], met.point[2] };
+	bool terrain = met.met == ViewportRayHit::Met::Surface;
+	// A device that cannot say what it meets (its records not placed yet) answers its surface alone.
+	if (met.met == ViewportRayHit::Met::Unknown) terrain = context.device->surface_between(start, end, at);
+	if (met.met != ViewportRayHit::Met::Record && !terrain) return none;
+	// The mission's ground as the game reads it, followed over the project's files when first asked (the
+	// mission's own name: the game reads <mission>.til).
+	const SessionView &view = context.input.view;
+	std::string mission = path();
+	if (const size_t slash = mission.find_last_of("/\\"); slash != std::string::npos) mission.erase(0, slash + 1);
+	if (const size_t dot = mission.find_last_of('.'); dot != std::string::npos) mission.erase(dot);
+	terrain_ground_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0,
+			scene_.header(), mission);
+	if (!terrain)
+		return terrain_ground_.record_at(met.row, title_of(view, *document, document->address_of(met.row)), at[0], at[1],
+				at[2]);
+	// On the ground: its height there, as the ground command and a move's stick read it.
+	double height = 0.0;
+	if (context.device->ground_at(at[0], at[1], height)) at[2] = height;
+	return terrain_ground_.terrain_at(at[0], at[1], at[2]);
+}
+
 ViewportHit MissionViewport::hit(const ViewportContext &context, float x, float y) const {
 	ViewportHit out;
 	out.current = current(context.input);
 	const Document *document = document_of(context.input);
 	if (reason_ != MissionViewStatus::Ready || !document) return out;
+	// The ground under the point beside the mark (DI-07).
+	out.ground = mission_ground_to_json(ground_under(context, x, y));
 	const std::vector<MissionMark> shown = marks(context.width, context.height, context.device);
 	out.index = pick_mission_mark(shown, camera_, context.width, context.height, x, y, context.device, MissionPick::Click);
 	if (out.index < 0) return out;
