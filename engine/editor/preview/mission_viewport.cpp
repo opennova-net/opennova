@@ -311,10 +311,31 @@ void MissionViewport::bound_items_(const SessionView &view) {
 	items_.refresh(view, items);
 }
 
+void MissionViewport::follow_ground_(const SessionView &view) const {
+	// The mission's own name: the game reads <mission>.til.
+	std::string mission = path();
+	if (const size_t slash = mission.find_last_of("/\\"); slash != std::string::npos) mission.erase(0, slash + 1);
+	if (const size_t dot = mission.find_last_of('.'); dot != std::string::npos) mission.erase(dot);
+	terrain_ground_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0,
+			scene_.header(), mission);
+}
+
+bool MissionViewport::stand_people_(const SessionView &view, bool posed) {
+	if (poses_.posed() == 0) return false;
+	// The people stand on the mission's terrain as the game reads it (DI-38): again where a record, a pose
+	// or the terrain moved.
+	follow_ground_(view);
+	if (!posed && stood_serial_ == scene_.serial() && stood_reads_ == terrain_ground_.reads()) return false;
+	stood_serial_ = scene_.serial();
+	stood_reads_ = terrain_ground_.reads();
+	return poses_.stand(scene_, terrain_ground_.height_field());
+}
+
 ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 	reason_ = reason;
 	detail_.clear();
 	scene_.clear();
+	poses_.clear();
 	missing_.clear();
 	ground_ = false;
 	shown_none();
@@ -343,6 +364,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		scene_.read(*source);
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		bound_items_(view);
+		stand_people_(view, poses_.refresh(view, scene_));
 		picture_.show(key, generation);
 		shown(*document);
 		if (!framed_) {
@@ -364,6 +386,10 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		shown(*document);
 	}
 	bound_items_(view);
+	// The people posed again where a record they read, the graph or a file they read moved (DI-38): an
+	// Update poses them, the picture standing.
+	bool posed = poses_.refresh(view, scene_);
+	posed = stand_people_(view, posed) || posed;
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
 		fog_reach_ = mission_fog_reach(files, scene_.header());
@@ -375,7 +401,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		options_moved_ = false;
 		return ViewportAction::Rebuild;
 	}
-	if (!delta.moved && !options_moved_) return ViewportAction::Keep;
+	if (!delta.moved && !options_moved_ && !posed) return ViewportAction::Keep;
 	options_moved_ = false;
 	return ViewportAction::Update;
 }
@@ -475,11 +501,7 @@ MissionGroundFacts MissionViewport::ground_under(const ViewportContext &context,
 	// The mission's ground as the game reads it, followed over the project's files when first asked (the
 	// mission's own name: the game reads <mission>.til).
 	const SessionView &view = context.input.view;
-	std::string mission = path();
-	if (const size_t slash = mission.find_last_of("/\\"); slash != std::string::npos) mission.erase(0, slash + 1);
-	if (const size_t dot = mission.find_last_of('.'); dot != std::string::npos) mission.erase(dot);
-	terrain_ground_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0,
-			scene_.header(), mission);
+	follow_ground_(view);
 	if (!terrain)
 		return terrain_ground_.record_at(met.row, title_of(view, *document, document->address_of(met.row)), at[0], at[1],
 				at[2]);
@@ -1080,6 +1102,8 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	counts.set("areas", json_number(double(scene_.areas().size())));
 	counts.set("paths", json_number(double(scene_.paths().size())));
 	body.set("counts", std::move(counts));
+	// How many people the game's spawn poses (DI-38: each organic's own in items).
+	body.set("posed", json_number(double(poses_.posed())));
 	body.set("ground", JsonValue::make_bool(ground_));
 	body.set("missing", json_number(double(missing_.size())));
 	return body;
@@ -1109,6 +1133,8 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 			item.set("item", json_number(double(entity.item)));
 			item.set("yaw", json_number(entity.yaw));
 			item.set("team", json_number(entity.team));
+			// A person's spawn pose (DI-38).
+			if (const MissionPose *pose = poses_.pose(entity.row)) item.set("pose", mission_pose_json(*pose));
 		} else {
 			const MissionAreaMark &area = scene_.areas()[size_t(mark.area)];
 			item.set("zone", json_number(area.zone));
