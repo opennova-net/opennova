@@ -192,7 +192,11 @@ inline EditorRequest edit_externally(std::string path) {
 	return request;
 }
 // What changed on disk among the import sources imported again (S18: the Shell's on its window's focus).
-inline EditorRequest refresh_changed_sources() { return of(EditorRequestKind::RefreshChangedSources); }
+inline EditorRequest refresh_changed_sources(bool all = false) {
+	EditorRequest request = of(EditorRequestKind::RefreshChangedSources);
+	request.all = all;
+	return request;
+}
 // What a Replace of the texture `path` by the image `image` (none: an Edit externally) would do, asked in
 // the dialog before it is done (S18), `values` the options asked over the ones reproducing its form.
 inline EditorRequest preview_texture_source(std::string path, std::string image = std::string(),
@@ -374,6 +378,13 @@ inline EditorRequest close_document(std::string path = std::string()) {
 inline EditorRequest save(std::string path = std::string()) {
 	EditorRequest request = of(EditorRequestKind::Save);
 	request.path = std::move(path);
+	return request;
+}
+// The document at `path` written over its file that changed outside the editor (DI-01: a conflict's Keep
+// my edits).
+inline EditorRequest save_over(std::string path) {
+	EditorRequest request = save(std::move(path));
+	request.force = true;
 	return request;
 }
 inline EditorRequest save_all() {
