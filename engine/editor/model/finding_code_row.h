@@ -37,11 +37,16 @@ enum class FindingFix {
 	ImportFitsUse,     // what a use asks of a texture an import makes (S18): Make the import fit the use
 	ItemId,            // an item on an id the engine keeps for another kind, or named as one it keeps
 	                   // under another id: Use an id of its own, or the id the engine looks for
-	                   // (Rename everywhere, the missions placing it with it)
+	                   // (Rename everywhere, the missions placing it with it); an item on an id an
+	                   // earlier item has: Use an id of its own (its id set: nothing reaches it by id)
 	FallbackRow,       // an items.def whose first row is no Null marker: Add one first
 	NormalRowType,     // a finished normal map (.mdt) in a normal-map slot loaded as a diffuse: its row
 	                   // given the normal map's type (edit_record)
 	SetAsideUnread,    // a texture no use reads, a .tga beside the .dds a model row loads (S18): Set it aside
+	EditRecord,        // an edit of the finding's own file its maker planned (DI-11, Diagnostic::planned):
+	                   // each an edit_record of the file, opened first, one undo step
+	UnusedVariable,    // a stylesheet variable no menu names (style.unused): Remove its line, where no
+	                   // menu's text names it inside a longer text either (DI-11)
 };
 
 // Where Problems takes a finding of the code: what the file holds (its document opened on the
