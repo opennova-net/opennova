@@ -215,4 +215,25 @@ inline TextureRowContext unpack_texture_row_context(uint32_t packed) {
 // carries, so a cut-out check or picture never reads a texture the game does not cut out by.
 uint8_t texture_row_material_flags(const std::string &shader, uint8_t material_flags, uint8_t row_type, uint8_t slot);
 
+// What a model texture row's alpha is to the game, by the technique its material's shader selects
+// (render-material-re.md "What the diffuse's alpha means by the material"): the alpha the material's test cuts
+// out by (a diffuse's, or the normal map's for the unskinned tangent DOT3 effects); the transparency a blended
+// material draws by; the specular brightness the Phong effects read (Diffuse1.a; _psPhong2's PhongMap path, the
+// brightness and the weight between its channels); what a detail row multiplies the diffuse's by (the _MT stage);
+// the height a .tga normal row's normal map is made from; or nothing the technique reads (an opaque or additive
+// material, a mirror's ReflectColor, SELFLUM).
+enum class TextureAlphaMeaning : uint8_t { Unused, CutOut, Blend, Specular, PhongMapWeight, Detail, Height };
+const char *texture_alpha_meaning_token(TextureAlphaMeaning meaning);
+// Whether the game draws the alpha as transparency (a cut-out or a blend): else a picture of the texture as the
+// game draws it is opaque, whatever the alpha holds.
+inline bool texture_alpha_is_transparency(TextureAlphaMeaning meaning) {
+	return meaning == TextureAlphaMeaning::CutOut || meaning == TextureAlphaMeaning::Blend;
+}
+// A model texture row's (`row_type` its authored type, `slot` its slot, `material_flags` its material's as
+// texture_row_material_flags left them on the row, `name` the file it names).
+TextureAlphaMeaning texture_row_alpha_meaning(const std::string &shader, uint8_t material_flags, uint8_t row_type, uint8_t slot,
+                                              const std::string &name);
+// Its words: "the specular brightness VS_PHONGT reads, not transparency".
+std::string texture_alpha_meaning_words(TextureAlphaMeaning meaning, const std::string &shader, uint8_t alpha_ref, bool inverted);
+
 } // namespace opennova::editor
