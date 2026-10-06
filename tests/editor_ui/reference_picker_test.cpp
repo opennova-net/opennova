@@ -7,7 +7,8 @@
 // nothing when it does not. A missing value's picker offers the fixes Problems offers for it. S18: a texture
 // field's picture and its picker's; a texture an import makes shows how it is made in its tab, and under a
 // model row's use what the texture costs the game; the texture's toolbar shows its object texture detail and
-// its alpha as the use shown reads it.
+// its alpha as the use shown reads it; a texture's compare says its DXT error under the toolbar; a texture
+// no use reads says so under its uses, with its Set it aside.
 #include <cstring>
 #include <string>
 #include <utility>
@@ -18,6 +19,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/import/png_encode.h>
 #include <editor/preview/texture_thumbnails.h>
+#include <formats/dds/dds.h>
 #include <formats/pcx/pcx.h>
 #include <formats/tga/tga.h>
 #include <editor/session/request_factories.h>
@@ -707,6 +709,90 @@ void test_texture_role_legend() {
 	      "each channel the splat detail it weighs");
 }
 
+// S18, the compare: a texture's picture beside the DXT texture made of it, its error at the level shown said
+// under the toolbar (documents/texture_compare).
+void test_texture_compare_line() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	std::vector<uint8_t> rgba(size_t(64) * 64 * 4);
+	for (size_t i = 0; i < rgba.size(); ++i) rgba[i] = uint8_t((i * 7) / 4);
+	std::vector<uint8_t> file;
+	std::string error;
+	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 64, 64, file, error) &&
+	              editor_test::write_bytes(view.project.root + "/textures/ramp.tga", file),
+	      "a 64 x 64 texture");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("textures/ramp.tga"));
+	project.session.handle(request::set_viewport("textures/ramp.tga", "{\"kind\":\"texture\",\"options\":{\"compare\":\"split\"}}"));
+	// The Shell's devices, which the texture's viewport follows its document by.
+	DrawnDevices devices;
+	Ui ui;
+	ui.pump = [&project, &devices] {
+		project.session.poll();
+		devices.sync(project.session.viewports(), project.session.view());
+	};
+	ui.windows.set_view(&project.session.view());
+	ui.windows.set_devices(&devices.cache);
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Before | DXT") != std::string::npos, "the compare's view in the toolbar");
+	CHECK(text.find("DXT5 (") != std::string::npos && text.find("against its own texels: PSNR ") != std::string::npos &&
+	              text.find("worst block at") != std::string::npos,
+	      "under the toolbar, what the DXT texture's error is at the level shown");
+}
+
+// S18: a texture no use reads (the .tga beside the .dds its model row loads) says so under its uses, and its
+// Set it aside raises set_aside_texture.
+void test_texture_set_aside_line() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	const std::vector<uint8_t> rgba(16 * 4, 90);
+	std::vector<uint8_t> tga, dds;
+	std::string error;
+	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 4, 4, tga, error) && opennova::dds::dds_write_a8r8g8b8(rgba.data(), 4, 4, dds, error) &&
+	              editor_test::write_bytes(view.project.root + "/textures/wall.tga", tga) &&
+	              editor_test::write_bytes(view.project.root + "/textures/wall.dds", dds),
+	      "a .tga and the .dds of its name");
+	const std::string scene = project.dir.file("scene");
+	CHECK(editor_test::write_text(scene + "/wall.o3d",
+	                              "o3d 2\nmodel WALL\nmaterial FF_ST_OP\ntexture wall.tga 1 0\nlod 0\npart 0 0 0 0\n"
+	                              "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"),
+	      "a model naming the .tga");
+	const ImportResult imported =
+	        import_assets({{scene + "/wall.o3d", {}}}, ProjectPaths::for_root(view.project.root), *view.project.document, false);
+	CHECK(imported.imported.size() == 1, "the model imported");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("textures/wall.tga"));
+	Ui ui;
+	ui.pump = [&project] { project.session.poll(); };
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("The game never reads this file: its loader opens wall.dds in its place.") != std::string::npos,
+	      "under its uses, that the game never reads it");
+	ImGuiWindow *info = nullptr;
+	for (ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && std::strstr(window->Name, "texture_info")) info = window;
+	CHECK(info != nullptr, "the tab's info column");
+	if (!info) return;
+	ui.activate(ImHashStr("Set it aside", 0, info->ID));
+	const std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *aside = only(requests, EditorRequestKind::SetAsideTexture);
+	CHECK(aside && aside->path == "textures/wall.tga", "Set it aside raises set_aside_texture of the file");
+}
+
 // S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., ask first
 // (preview_texture_source of that texture); the dialog the preview opens shows the texture before and after
 // and replaces only on its Replace, Cancel closing it; an image dropped on a texture field's value asks for
@@ -862,6 +948,8 @@ void run_reference_picker_tests() {
 	test_texture_budget_line();
 	test_texture_game_view_toolbar();
 	test_texture_role_legend();
+	test_texture_compare_line();
+	test_texture_set_aside_line();
 	test_texture_drop_replaces();
 }
 

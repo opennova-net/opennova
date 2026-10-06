@@ -41,6 +41,7 @@ enum class FindingFix {
 	FallbackRow,       // an items.def whose first row is no Null marker: Add one first
 	NormalRowType,     // a finished normal map (.mdt) in a normal-map slot loaded as a diffuse: its row
 	                   // given the normal map's type (edit_record)
+	SetAsideUnread,    // a texture no use reads, a .tga beside the .dds a model row loads (S18): Set it aside
 };
 
 // Where Problems takes a finding of the code: what the file holds (its document opened on the
@@ -432,8 +433,10 @@ enum class CoreFinding {
 	TextureOperation,
 	TextureParticleTooBig,
 	TextureReplace,
+	TextureSetAside,
 	TextureShowUse,
 	TextureSplit,
+	TextureStoreDds,
 	TextureTileAtlasCells,
 	TextureWrongReader,
 	UnsavedDiscard,
