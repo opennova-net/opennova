@@ -249,11 +249,13 @@ inline EditorRequest build(std::string out_dir = std::string(), bool rehash = fa
 	return request;
 }
 // A build, then the game run on it: at its menu, or in `mission` (a .bms of the project by its
-// logical name; S14); `behind`, its window behind every other (the MCP gaps lane).
-inline EditorRequest play(std::string mission = std::string(), bool behind = false) {
+// logical name; S14); `behind`, its window behind every other (the MCP gaps lane); `fresh`, its run
+// directory emptied first of what the runs before wrote there (a first run).
+inline EditorRequest play(std::string mission = std::string(), bool behind = false, bool fresh = false) {
 	EditorRequest request = of(EditorRequestKind::Play);
 	request.mission = std::move(mission);
 	request.behind = behind;
+	request.fresh = fresh;
 	return request;
 }
 // A build, then the build copied into `export_dir` ("" the project's export folder) as what ships

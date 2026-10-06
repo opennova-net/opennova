@@ -53,6 +53,7 @@ void BuildOperation::join(const EditorRequest &request) {
 	play_.wanted = true;
 	play_.mission = request.mission;
 	play_.behind = request.behind;
+	play_.fresh = request.fresh;
 }
 
 OperationOutcome BuildOperation::finish(SessionCore &core) {
