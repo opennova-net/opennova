@@ -24,7 +24,8 @@ struct ClipSoundPlay {
 };
 
 // The sounds the clip the Preview's model viewport plays fired over the ticks the clock ran through since
-// the last call (ModelViewport::fire_sounds), its viewport followed first where no device follows it;
+// the last call (ModelViewport::fire_sounds), or, for a model, the sounds of the death its damage state
+// plays (DI-10: ModelViewport::fire_damage_sounds), its viewport followed first where no device follows it;
 // nothing while the clock holds. Moves the Viewports concern when one fired.
 void fire_clip_sounds(SessionCore &core);
 
