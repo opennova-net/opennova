@@ -115,7 +115,8 @@ public:
 	// One outer frame of `delta_seconds` wall clock. A round end's mission exit
 	// runs the map change and boots the next map inside the session (a listed
 	// server's listing and socket kept). False once the session has ended
-	// (end_message() says how; rotation_ended() when the rotation ran out), and
+	// (end_message() says how; rotation_ended() when the rotation ran out,
+	// quit() when the remote admin quit it), and
 	// stop() has run.
 	bool frame(double delta_seconds);
 	// The host's exit: the round reset to every joiner, the STOP description,
@@ -136,6 +137,8 @@ public:
 	const ResourceIndex &index() const { return index_; }
 	const std::string &end_message() const { return end_message_; }
 	bool rotation_ended() const { return rotation_ended_; }
+	// The remote admin's GOTO MENUSTATE quit the session (exit reason 1).
+	bool quit() const { return quit_; }
 	// The missions the session has booted (the starting map is 1).
 	int missions_played() const { return missions_played_; }
 	// The cfg block (game.cfg, the host file over it; remote_admin_port is
@@ -221,6 +224,7 @@ private:
 	uint16_t bound_port_ = 0;
 	bool running_ = false;
 	bool rotation_ended_ = false;
+	bool quit_ = false;
 	int missions_played_ = 0;
 	// Game_Run's exit tail is owed: the save and the lock's delete, on every
 	// return once the subsystems are up [orig: Game_Run @0x4A7FFF..0x4A800E].

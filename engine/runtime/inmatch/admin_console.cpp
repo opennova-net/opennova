@@ -704,18 +704,15 @@ void AdminConsole::handle_goto(const Args &args, std::vector<std::string> &repli
 		replies.emplace_back(in_game() ? "ERROR - In 'Game' State." : kNotImplemented);
 	} else if (ieq(args[0], "MENUSTATE")) {
 		if (scene_ != AdminScene::MainMenu) {
-			// Input action 3 runs only where its binding's gate lets it: the dispatcher reads a
-			// session authority that is no peer (a Serve Only host) as 2, and the flag dword it
-			// indexes for action 3 carries bit 0x1, so on that host the quit returns before its
-			// case and the server stays in the match; the cycle tail below still runs. On a
-			// listen host the gate reads its own player's dead latch, the embedder's to test.
-			// [orig: Input_HandleActionBinding @0x49AD52..0x49AD6F (2 for in session, authority,
-			//  not a peer), the flags dword_8159AC[27 * 3] = 0x0C000C05 @0x49AD8D, the return
-			//  @0x49AD9C..0x49ADA0; case 3: g_MissionExitReason = 1 and
+			// Input action 3 passes its binding's gate on every host: the dispatcher reads the
+			// flag dword by action code after the start-up re-lay, and record 3 is the `exit` row
+			// (flags 0x04000000), which carries none of the head gate's bits, so a Serve Only
+			// host quits too (the cycle tail below runs first, in the same frame).
+			// [orig: Input_HandleActionBinding @0x49AD8D (dword_8159AC[27 * code]) and its head
+			//  gate @0x49AD9C..0x49AE23; KeyBinding_SortBySequentialId @0x498260 (record i holds
+			//  the row whose code is i); case 3 @0x49AF1F: g_MissionExitReason = 1 and
 			//  CNapiNetwork_DisconnectActiveConnection("I.C:CIDEMIS")]
-			const bool dedicated = ctx_.is_in_session != 0 && ctx_.is_authority != 0 &&
-					ctx_.is_mp_session_peer == 0;
-			if (!dedicated && seams_.quit_to_menu) seams_.quit_to_menu();
+			if (seams_.quit_to_menu) seams_.quit_to_menu();
 		} else {
 			replies.emplace_back("ERROR - Already in 'Menu' State");
 		}

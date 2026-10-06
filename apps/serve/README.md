@@ -193,7 +193,7 @@ Every verb behaves as retail's does, replies included. In short:
 | `WEAPON LIST`, `WEAPON SET <# \| ALL> <ALWAYS \| NEVER \| ARMORY>` | The armory's weapon availability. |
 | `CMD <line>` | A console line (`BAN`, `UNBAN`, `PUNT`, `BANDWIDTH`). |
 | `CHAT SEND <words>`, `CHAT GET` | A server chat line to every player in the match, and the server's chat lines (the status page's). |
-| `GOTO GAMESTATE` / `MENUSTATE` | Cycle the map. A retail dedicated server never quits to a menu here, so neither does this one. |
+| `GOTO GAMESTATE` / `MENUSTATE` | `GAMESTATE` cycles the map. `MENUSTATE` ends the round and quits the session, as a retail dedicated server leaves its match for its main menu; with no menu to show, `opennova-serve` then exits (code 0). |
 | `QUIT` | Close the connection (send it rather than dropping the connection). |
 
 Each connection and command is logged to `admin_log.txt`. The rotation edits follow retail's
@@ -207,9 +207,11 @@ A retail dedicated server shows its status page in place of the game: the player
 the server line, the team block, the round clock, the frame and login counts and the four
 newest chat lines. `opennova-serve` prints that same page as text on its standard output
 whenever its rows change (the slots, the server line, the team block or the chat lines;
-the clock and the counts ride along). A line typed on its standard input is what the page's
-chat input sends: the Global talk line, which a server with no player of its own sends to
-every player in the match. The page's labels come from the install's `gametext.bin`.
+the clock and the counts ride along). A line typed on its standard input goes into the
+page's chat input as a retail operator types it on the server's window: the Global talk opens
+(Ctrl+T), the line is typed, and Enter sends it to every player in the match. Global is the
+one talk a server with no player of its own can send. The page's labels come from the
+install's `gametext.bin`.
 
 The console also prints the session's lines retail writes under its `/INOUT` switch: `HOST
 STARTED` and `HOST STOPPED` with the server's address, and `SERVER PLAYER ADDED` and
@@ -227,7 +229,7 @@ These logs go to the working directory, in retail's names and formats:
 
 | Code | Meaning |
 |---|---|
-| 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset`, or the map rotation ran out (the end of the list with `Replay 0`). |
+| 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset`, the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
 | 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), or the mission did not boot. |
 | 2 | A usage error, or the `--credentials` file did not open. |
 | 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting. |

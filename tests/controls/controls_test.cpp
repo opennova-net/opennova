@@ -624,6 +624,35 @@ bool test_action_codes() {
   return true;
 }
 
+// The dispatcher's head gate reads the flags dword by action code, so after
+// the re-lay it reads the record whose code is the action. On a Serve Only
+// host (the authority flag reads 2) a record carrying 0x1 is dropped; the
+// quit (3, the exit row) and the Global talk (101) carry none of the head
+// gate's bits (0x1, 0x40, 0x400, 0x8000000, 0x10), so a dedicated host runs
+// both: GOTO MENUSTATE's quit and the status page's chat input. The static
+// rows 3 and 101 dispatch 151 and 33 and are not those records.
+// [orig: Input_HandleActionBinding @0x49AD8D (dword_8159AC[27 * code]), the
+//  head gate @0x49AD9C..0x49AE23; KeyBinding_SortBySequentialId @0x498260]
+bool test_head_gate_by_code() {
+  const uint32_t head_gate_bits = 0x1u | 0x40u | 0x400u | 0x8000000u | 0x10u;
+  const ActionDef *quit = action_for_code(3);
+  const ActionDef *global_talk = action_for_code(101);
+  CHECK(quit != nullptr && std::string(quit->token) == "exit" && quit->flags == 0x04000000u,
+        "record 3 is the exit row, flags 0x04000000");
+  CHECK(global_talk != nullptr && std::string(global_talk->token) == "gtalk" &&
+            global_talk->flags == 0x05000800u,
+        "record 101 is the Global talk row (gtalk), flags 0x05000800");
+  CHECK((quit->flags & head_gate_bits) == 0 && (global_talk->flags & head_gate_bits) == 0,
+        "neither carries a head-gate bit, so a Serve Only host runs both");
+  std::size_t count = 0;
+  const ActionDef *rows = catalog(&count);
+  CHECK(count > 101 && action_code(3) == 151 && action_code(101) == 33,
+        "the static rows 3 (move_back) and 101 (AudioEmote) dispatch other codes");
+  CHECK((rows[3].flags & 0x1u) != 0 && (rows[101].flags & 0x1u) != 0,
+        "and carry 0x1, which the dispatcher never reads for 3 or 101");
+  return true;
+}
+
 // The records' revision moves on every write and never on a read, so the
 // HUDLS key-label cache rebuilds only on a binding change.
 bool test_binding_revision() {
@@ -680,6 +709,7 @@ int main() {
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);
   RUN_TEST(test_action_codes);
+  RUN_TEST(test_head_gate_by_code);
   RUN_TEST(test_binding_revision);
 
   if (failed > 0) {

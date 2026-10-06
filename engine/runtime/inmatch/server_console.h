@@ -103,11 +103,16 @@ hud::ChatSendResult Server_SendConsoleChat(NapiNPServerCtx &ctx, int dispatch,
 // each byte goes through the line editor's own rules (a printable byte while
 // under the 60-character cap; a backslash cycles the talk channel), and Enter
 // sends through Server_SendConsoleChat; a flood refusal echoes the line into
-// the ring in Global's flood colour. Returns the editor's events.
-// [orig: Input_HandleActionBinding case 101 @0x49b989..0x49b9f4 ->
-//  Chat_BeginChatInput @0x498060; Chat_HandleInputChar @0x49cb70 — Enter
-//  @0x49cd87..0x49ce6a; the flood echo Chat_AddMessageChannel1(message,
-//  palette[3], 930) @0x49a953]
+// the ring in Global's flood colour. Returns the editor's events. The talk row
+// reaches such a host: the dispatcher reads its binding flags by action code
+// after the start-up re-lay, and record 101 (flags 0x05000800) carries none of
+// the head gate's bits, so the gate that drops a flag-0x1 action on a Serve
+// Only host passes it, as the keyboard scan's own copy of that test does.
+// [orig: Input_HandleActionBinding @0x49AD8D..0x49AE23 (the head gate),
+//  KeyBinding_SortBySequentialId @0x498260, Input_ProcessKeyboardEvents
+//  @0x49d330..0x49d42f; case 101 @0x49b989..0x49b9f4 -> Chat_BeginChatInput
+//  @0x498060; Chat_HandleInputChar @0x49cb70 — Enter @0x49cd87..0x49ce6a; the
+//  flood echo Chat_AddMessageChannel1(message, palette[3], 930) @0x49a953]
 uint32_t server_console_submit(NapiNPServerCtx &ctx, hud::ChatEntry &entry,
 		const std::string &line, uint32_t frame, const hud::GameTextLookup &gametext);
 
