@@ -20,7 +20,8 @@ namespace godot {
 // the project's files through the session's asset source (the open documents standing in for
 // theirs), the viewport's options held on its frame state after each configure (apply_menu_options).
 // The viewport's hit tests read its own headless compile; this one draws, and reports where it placed
-// each widget beside it.
+// each widget beside it. With the viewport's Pointer option on, its frame's cursor pass draws the game's
+// pointer where the canvas has the mouse over the picture, or where a client holds it (DI-08).
 //
 // It configures as it takes the Rebuild when the frame keeps every texture the screen names (a
 // configure again after an edit or an option, which the shipped menus measure well within the poll
@@ -46,9 +47,11 @@ public:
 			opennova::editor::ViewportDeviceReport &report) override;
 	// The menu's clock on the preview clock (menu_frame_clock): a focused edit box's caret, the frame's
 	// time set (and the frame drawn again, never configured again) only as the caret's half of the
-	// blink changes.
+	// blink changes. Then the game's pointer (DI-08, place_pointer_).
 	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int width, int height) override;
+	// Where the canvas has the mouse over the picture this frame (its pixels), for the tick's pointer.
+	void pointer(bool over, float x, float y) override;
 
 	MenuFrame *frame() const { return frame_; }
 
@@ -70,6 +73,12 @@ private:
 			const opennova::editor::PreviewClock &clock);
 	// The viewport's options on the configured screen's frame state.
 	void apply_options_(const opennova::editor::ViewportModel &model);
+	// The game's pointer on the frame (DI-08), while the viewport's Pointer option is on: at the mouse
+	// where a canvas drawing the picture this frame has it over the picture, else where a client holds it
+	// (MenuPointerShow::held, design units scaled to the picture), else none. The frame's cursor pass draws
+	// the cursor the game's pump would stamp there (MenuFrame::place_cursor), the windows' held states
+	// untouched; the frame is drawn again only when it moved.
+	void place_pointer_(const opennova::editor::ViewportModel &model);
 
 	MenuFrame *frame_ = nullptr;
 	uint64_t frame_id_ = 0; // the frame's instance, checked as the applier goes
@@ -79,6 +88,10 @@ private:
 	std::shared_ptr<const opennova::editor::ProjectAssetSource> assets_;
 	std::unique_ptr<Build> build_; // the configure in flight (null: none)
 	opennova::editor::OperationProgress done_; // the last configure's units, all done
+	// The mouse over the picture as this frame's canvas drew it (pointer()), taken by the tick.
+	bool canvas_pointer_ = false;
+	float canvas_x_ = 0.0f;
+	float canvas_y_ = 0.0f;
 };
 
 } // namespace godot

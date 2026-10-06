@@ -8,7 +8,9 @@
 // shows at once; a menu the game could not read says so and is not tried again every frame; the
 // options hold a window in a state (a SetViewport). The MCP's half: its drag and its arrange
 // planned as the canvas plans them (MenuViewport::drag, command), one undo step each, and a
-// SetViewport's options read whole or refused whole.
+// SetViewport's options read whole or refused whole. DI-08: the game's pointer at a point (the claim
+// the pump makes there and the CURSOR it stamps; none where no window names one that loads), on a hit
+// as the MCP reads it, and the Pointer and pointer_at options.
 
 #include <cstdint>
 #include <cstdio>
@@ -21,6 +23,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/menu_canvas.h>
 #include <editor/preview/menu_layout_edit.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/menu_viewport.h>
@@ -152,6 +155,35 @@ static int test_headless_viewport() {
 	TEST_EXPECT(rig.viewport()->hit(rig.context(), 5, 5).index == -1); // above MAIN: nothing
 	// Nothing moved: nothing to do (the selection moved the held window, but nothing is held).
 	TEST_EXPECT(rig.pump() == ViewportAction::Keep && rig.configures() == 1);
+
+	// DI-08: the game's pointer at a point, the claim the pump makes there: over TITLE (no CURSOR of its
+	// own) its root MAIN's, and over nothing the first root's, MAIN's again; the blank's pointer file at its
+	// own size. A hit says it, as the MCP reads it.
+	{
+		const MenuPointer over = menu_pointer_at(rig.viewport()->canvas_frame(rig.context()), cx, cy);
+		TEST_EXPECT(over.drawn && over.file == "newarow1.tga" && over.width == 32 && over.height == 32);
+		TEST_EXPECT(over.window == main && over.name == "MAIN");
+		const JsonValue hit_json = viewport_hit_to_json(*rig.viewport(), hit);
+		const JsonValue *pointer = hit_json.get("pointer");
+		TEST_EXPECT(pointer && pointer->get_bool("drawn", false) && pointer->get_string("file", "") == "newarow1.tga");
+		TEST_EXPECT(pointer && pointer->get_number("window", 0) == double(main.child) &&
+				pointer->get_string("name", "") == "MAIN" && pointer->get_number("width", 0) == 32);
+		const ViewportHit nothing = rig.viewport()->hit(rig.context(), 5, 5);
+		TEST_EXPECT(nothing.index == -1 && nothing.pointer.get_bool("drawn", false) &&
+				nothing.pointer.get_number("window", 0) == double(main.child));
+		const MenuPointer screen = menu_screen_pointer(rig.viewport()->canvas_frame(rig.context()));
+		TEST_EXPECT(screen.drawn && screen.window == main);
+		// No window names a CURSOR: the game draws no pointer anywhere on the screen, and the hit says so.
+		set(session, *menu, main, "cursor.file", std::string());
+		TEST_EXPECT(rig.pump() == ViewportAction::Rebuild);
+		TEST_EXPECT(!menu_pointer_at(rig.viewport()->canvas_frame(rig.context()), cx, cy).drawn);
+		const ViewportHit bare = rig.viewport()->hit(rig.context(), cx, cy);
+		TEST_EXPECT(bare.name == "TITLE" && bare.pointer.is_object() && !bare.pointer.get_bool("drawn", true) &&
+				!bare.pointer.get("file"));
+		session.handle(request::undo(menu->path()));
+		TEST_EXPECT(rig.pump() == ViewportAction::Rebuild && !menu->dirty());
+		TEST_EXPECT(menu_pointer_at(rig.viewport()->canvas_frame(rig.context()), cx, cy).drawn);
+	}
 
 	// A drag of TITLE (S9k1): two steps of one gesture from where the viewport shows it, snapped
 	// on the screen's grid under MAIN's top of 75, then the gesture's end; the viewport shows it
@@ -433,15 +465,33 @@ static int test_options_from_json() {
 	            options.focused);
 	TEST_EXPECT(viewport.apply(parse(R"({"options": {"force_state": "normal"}})"), clock, error) &&
 	            viewport.options().force_state == -1 && viewport.state().width == 1024);
+	// DI-08: the game's pointer drawn (on by default) and held at a point of the picture by a client;
+	// neither is an option the screen is configured again for.
+	TEST_EXPECT(viewport.pointer().shown && !viewport.pointer().held);
+	TEST_EXPECT(viewport.apply(parse(R"({"options": {"pointer_at": [400.5, 300]}})"), clock, error));
+	TEST_EXPECT(viewport.pointer().held && viewport.pointer().x == 400.5f && viewport.pointer().y == 300.0f);
+	const JsonValue held_at = viewport.options_json();
+	TEST_EXPECT(held_at.get_bool("pointer", false) && held_at.get("pointer_at") &&
+			held_at.get("pointer_at")->array.size() == 2 && held_at.get("pointer_at")->array[0].number == 400.5);
+	TEST_EXPECT(viewport.apply(parse(R"({"options": {"pointer": false, "pointer_at": null}})"), clock, error));
+	TEST_EXPECT(!viewport.pointer().shown && !viewport.pointer().held);
+	TEST_EXPECT(viewport.options_json().get("pointer_at") && viewport.options_json().get("pointer_at")->is_null() &&
+			!viewport.options_json().get_bool("pointer", true));
+	TEST_EXPECT(viewport.apply(parse(R"({"options": {"pointer": true}})"), clock, error) && viewport.pointer().shown);
+	const MenuPointerShow pointer_held = viewport.pointer();
 	const MenuViewportOptions held = viewport.options();
 	for (const char *bad : {R"({"device": {"width": 0}})", R"({"device": {"height": 8193}})",
 	                        R"({"options": {"force_state": "sideways"}})", R"({"options": {"bogus": 1}})",
 	                        R"({"options": {"focus": 1}})", R"({"options": {"force_id": -1}})",
 	                        R"({"device": {"width": "800"}})", R"([])", R"({"kind": "model"})", R"({"camera": {}})",
-	                        R"({"options": {"show_hidden": false}, "device": {"width": 0}})"}) {
+	                        R"({"options": {"show_hidden": false}, "device": {"width": 0}})",
+	                        R"({"options": {"pointer": 1}})", R"({"options": {"pointer_at": [800, 10]}})",
+	                        R"({"options": {"pointer_at": [10, 600]}})", R"({"options": {"pointer_at": [-1, 10]}})",
+	                        R"({"options": {"pointer_at": [10]}})", R"({"options": {"pointer_at": "here"}})",
+	                        R"({"options": {"pointer_at": [10, 10], "show_hidden": 2}})"}) {
 		error.clear();
 		TEST_EXPECT(!viewport.apply(parse(bad), clock, error) && !error.empty());
-		TEST_EXPECT(viewport.options() == held && viewport.state().width == 1024);
+		TEST_EXPECT(viewport.options() == held && viewport.state().width == 1024 && viewport.pointer() == pointer_held);
 	}
 	std::printf("test_options_from_json passed\n");
 	return 0;
