@@ -87,6 +87,12 @@ enum SoundProfileSlot {
 // e.g. 17 -> "SSLFootGND"). nullptr for an out-of-range slot.
 const char *sound_profile_slot_keyword(int slot);
 
+// The keyword of one of the 12 med/crs loop percents, index == the
+// SoundProfile::loop_params slot (the keyword chain @ 0x5270a9-0x527481, in
+// its order: "medloopfadeinstart" .. "crslooppitchendp"). nullptr out of range.
+inline constexpr int kSoundProfileLoopParamCount = 12;
+const char *sound_profile_loop_keyword(int index);
+
 // ----------------------------------------------------------------------------
 // The player-body composite sound-set path — a SEPARATE mechanism from the
 // profile slots [orig: SoundProfile_FindByEntityAndType @ 0x528180]: a 9-entry

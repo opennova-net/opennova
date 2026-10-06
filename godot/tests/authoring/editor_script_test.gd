@@ -68,14 +68,21 @@ func _write(path: String, bytes: PackedByteArray) -> void:
 	out.close()
 
 
-## A project of the fixture script and the effect and the ammo its operands name (its text key's table
-## left out: that reference is missing, a mark on line 7), and the minted credits file.
+## A project of the fixture script and the effect, the ammo and the sound set its operands name (its text
+## key's table left out: that reference is missing, a mark on line 7), and the minted credits file.
 func _project(texts := 0) -> bool:
 	var dir := OS.get_cache_dir().path_join("opennova editor script project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	if not _seam.new_project(dir, "Script Device"):
 		return false
 	_seam.create_missing_files()
+	# SS_EXPLO_BASE's set, in a game.lwf made by the editor (the sound lane: a set is a bank's symbol).
+	assert_true(_seam.done({"kind": "create_file", "path": "game.lwf"}), "game.lwf made")
+	assert_true(_seam.done({"kind": "edit_record", "path": "game.lwf", "open_first": true,
+			"edits": [{"op": "add", "kind": "set", "as": "s"},
+					{"op": "set", "id": "s", "field": "name", "value": "EXPLO_BASE"}]}), "its set added")
+	assert_true(_seam.done({"kind": "save_all"}), "game.lwf saved")
+	assert_true(_seam.done({"kind": "close_document", "path": "game.lwf"}), "game.lwf closed")
 	_write(dir.path_join(SCRIPT), _fixture("wac/text_document.wac"))
 	_write(dir.path_join("particles/effects.ptl"), _fixture("particle/synth_minimal_effect.ptl"))
 	_write(dir.path_join("defs/ammo.def"),
