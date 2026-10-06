@@ -1,0 +1,136 @@
+; The overcast weather's colours: WAC overcast(pct, s) fades every mission's .env toward them.
+
+tod_begin 0000
+    sun_rgb 0,0,0
+    moon_rgb 10,12,15
+    sky_rgb 10,10,12
+    ground_rgb 4,4,5
+    skyfog_rgb 4,4,5
+    fog_rgb 4,4,5
+    skybase_rgb 8,8,10
+    skybright_rgb 8,8,10
+    skyhighlight_rgb 8,8,10
+    cloudbase_rgb 6,6,7
+    cloudhighlight_rgb 8,8,9
+    cloudedge_rgb 9,9,11
+tod_end
+
+tod_begin 0500
+    sun_rgb 0,0,0
+    moon_rgb 10,12,15
+    sky_rgb 14,14,16
+    ground_rgb 6,6,6
+    skyfog_rgb 7,7,8
+    fog_rgb 6,6,7
+    skybase_rgb 12,12,14
+    skybright_rgb 12,12,14
+    skyhighlight_rgb 12,12,14
+    cloudbase_rgb 9,9,10
+    cloudhighlight_rgb 11,11,12
+    cloudedge_rgb 12,12,14
+tod_end
+
+tod_begin 0630
+    sun_rgb 18,18,18
+    moon_rgb 0,0,0
+    sky_rgb 36,37,40
+    ground_rgb 17,18,18
+    skyfog_rgb 22,22,24
+    fog_rgb 20,20,22
+    skybase_rgb 30,30,33
+    skybright_rgb 34,34,36
+    skyhighlight_rgb 40,40,40
+    cloudbase_rgb 19,19,20
+    cloudhighlight_rgb 40,40,40
+    cloudedge_rgb 36,36,38
+tod_end
+
+tod_begin 0900
+    sun_rgb 30,30,30
+    moon_rgb 0,0,0
+    sky_rgb 66,67,70
+    ground_rgb 34,35,34
+    skyfog_rgb 40,41,43
+    fog_rgb 38,39,41
+    skybase_rgb 70,71,74
+    skybright_rgb 78,79,82
+    skyhighlight_rgb 90,90,90
+    cloudbase_rgb 45,45,47
+    cloudhighlight_rgb 92,92,92
+    cloudedge_rgb 84,85,88
+tod_end
+
+tod_begin 1200
+    sun_rgb 36,36,36
+    moon_rgb 0,0,0
+    sky_rgb 82,83,86
+    ground_rgb 42,43,42
+    skyfog_rgb 46,47,49
+    fog_rgb 44,45,47
+    skybase_rgb 84,85,88
+    skybright_rgb 92,93,96
+    skyhighlight_rgb 104,104,104
+    cloudbase_rgb 53,54,56
+    cloudhighlight_rgb 106,106,106
+    cloudedge_rgb 98,99,102
+tod_end
+
+tod_begin 1500
+    sun_rgb 34,34,34
+    moon_rgb 0,0,0
+    sky_rgb 78,79,82
+    ground_rgb 40,41,40
+    skyfog_rgb 45,46,48
+    fog_rgb 43,44,46
+    skybase_rgb 80,81,84
+    skybright_rgb 88,89,92
+    skyhighlight_rgb 100,100,100
+    cloudbase_rgb 51,51,53
+    cloudhighlight_rgb 102,102,102
+    cloudedge_rgb 94,95,98
+tod_end
+
+tod_begin 1800
+    sun_rgb 16,15,14
+    moon_rgb 0,0,0
+    sky_rgb 44,44,46
+    ground_rgb 20,20,20
+    skyfog_rgb 24,24,26
+    fog_rgb 22,22,24
+    skybase_rgb 40,40,42
+    skybright_rgb 46,45,46
+    skyhighlight_rgb 52,50,50
+    cloudbase_rgb 25,25,26
+    cloudhighlight_rgb 50,49,49
+    cloudedge_rgb 46,46,48
+tod_end
+
+tod_begin 1930
+    sun_rgb 0,0,0
+    moon_rgb 12,14,17
+    sky_rgb 16,16,19
+    ground_rgb 6,6,7
+    skyfog_rgb 8,8,9
+    fog_rgb 7,7,8
+    skybase_rgb 12,12,14
+    skybright_rgb 13,13,15
+    skyhighlight_rgb 14,14,16
+    cloudbase_rgb 10,10,12
+    cloudhighlight_rgb 12,12,14
+    cloudedge_rgb 13,13,15
+tod_end
+
+tod_begin 2359
+    sun_rgb 0,0,0
+    moon_rgb 10,12,15
+    sky_rgb 10,10,12
+    ground_rgb 4,4,5
+    skyfog_rgb 4,4,5
+    fog_rgb 4,4,5
+    skybase_rgb 8,8,10
+    skybright_rgb 8,8,10
+    skyhighlight_rgb 8,8,10
+    cloudbase_rgb 6,6,7
+    cloudhighlight_rgb 8,8,9
+    cloudedge_rgb 9,9,11
+tod_end
