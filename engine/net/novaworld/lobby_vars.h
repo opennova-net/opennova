@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,7 +39,13 @@ struct HostRegistration {
 	std::string lobby_name = "jop_2_consumer"; // LobbyName (g_LobbyName)
 	std::string server_name = "OpenNova Host"; // ServerName
 	std::string server_message;               // Msg (serverMessage_560)
-	int max_players = 32;                     // MaxPlayers
+	int max_players = 32;                     // MaxPlayers (HostSetup, the initial Host list)
+	// The in-match published cap (dword_24D211C: the cfg max, plus the dedicated slot when the host
+	// is not a peer). The refreshed Host list's MaxPlayers is it, minus that slot for a non-peer,
+	// so a dedicated server never counts its own slot; 0 = max_players.
+	// [orig: HostDialog_StartSession @0x5587d7..0x5587e5 (the +1); Lobby_UpdateServerInfo
+	//  @0x4feb03..0x4feb0a (the -1 for a non-peer)]
+	int published_cap = 0;
 	bool password = false;                    // Password "1"/"0" (hostGamePassword_350[0])
 	bool listen_host = true;                  // Dedicated "0" when is_mp_session_peer (the host plays)
 	uint32_t app_id = 0;                      // AppId: make_session_app_id, minted per registration
@@ -56,7 +63,9 @@ struct HostRegistration {
 	std::string game_type;                    // GameType (GameType_GetAbbreviation(g_GameType, 1))
 	std::string mission_name;                 // MissionName (the mission "info"/"title", else the file)
 	int region_index = 0;                     // Region: lod_level 0/1/2 -> STRNOVA07/08/09, else "?"
-	int player_count = 1;                     // Players (active slots; the host itself is one)
+	// Players: the active slots, the host's own counted only when it is a peer (a listen host);
+	// NwuHostRole sets it from its roster. [orig: Lobby_UpdateServerInfo @0x4feaa6..0x4feacb]
+	int player_count = 1;
 	int mi1 = 0, mi2 = 0, mi3 = 0;            // MI1..MI3 (dword_82BEEC..F4)
 	bool locked = false;                      // Locked (g_ServerJoinLocked)
 	bool skins = false;                       // Skins (dword_24D218C)
@@ -78,7 +87,13 @@ struct HostRegistration {
 	int bb_mode = 0;                          // BBMode (dword_24D21A4)
 	std::string gcc;                          // GCC (byte_C87044)
 	std::string version;                      // GV and Version (byte_B4C0B0)
-	bool dedicated_server = false;            // g_IsDedicatedServer: the CountryName/Lang/TZB block
+	// The gate reply's METEXT (g_IsDedicatedServer, a misnomer: its one writer is the gate parse):
+	// set, the Host list carries the CountryName / Lang / TZB trio, whatever the dedicated mode
+	// (D-NET-347). NwuHostRole sets it from the session's gate response; the trio's values are the
+	// embedder's machine locale.
+	// [orig: Lobby_UpdateServerInfo `cmp g_IsDedicatedServer, 0` @0x4ff2de..0x4ff2e5;
+	//  CNapiGateManager_ProcessResponse @0x4cf2a1..0x4cf2c1 (METEXT, atol)]
+	bool met_ext = false;
 	std::string country_name;                 // CountryName (GetLocaleInfoA LOCALE_SENGCOUNTRY)
 	std::string language;                     // Lang (LOCALE_SENGLANGUAGE)
 	int tz_bias = 0;                          // TZB (TIME_ZONE_INFORMATION.Bias)
@@ -99,6 +114,15 @@ struct HostPlayerSlot {
 	std::string team;          // PlayerTeam
 	std::string type;          // PlayerType
 };
+
+// The Host list's gametext tokens, each looked up by (section, key): the NovaWorld STRNOVA07..12
+// (no fallback: a missing key reads empty) and the TimeOfDay quintet (the witnessed literals when
+// the key is missing). `lookup` returns false when the table lacks the key.
+// [orig: Lobby_UpdateServerInfo @0x4fe8c0 — GameText_GetString("NovaWorld", "STRNOVA07".."12")
+//  @0x4fea56.. / @0x4fec2c.. / @0x4fed8d / @0x4fee51.., GameText_GetStringWithFallback("TimeOfDay",
+//  ...) @0x4ff09b..0x4ff138]
+HostLobbyText make_host_lobby_text(
+		const std::function<bool(const char *section, const char *key, std::string &out)> &lookup);
 
 // The "HostSetup" var-list, in retail's insertion order: LobbyName, ServerName, Msg,
 // MaxPlayers, Password, Dedicated, AppId, AccessCodeList, PLoad, Exp, LAN, ReconnectCounter.

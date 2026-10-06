@@ -8,6 +8,7 @@
 #include "mission/mission_data.h"
 #include "mission/mission_root.h"
 #include "network/novaworld_client.h"
+#include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/mission_exit.h> // the post-mission router
 #include "object/avatar_database.h"
 #include "resource_index/launch_flags.h"
@@ -96,6 +97,8 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	cancel_join_preload();
 	policy_->reset_for_join();
 	pending_join_ = p_target;
+	last_join_target_ = p_target;
+	reloading_join_ = false;
 	Ref<ResourceRoot> resource_root = world_->resolve_root(p_target->get_dir());
 	if (resource_root.is_null()) {
 		clear_pending_session();
@@ -252,7 +255,9 @@ void SessionDrive::step_preload() {
 	// aborted"]. It covers only SERVER-owed transitions: at the player-paced
 	// deployment pick the watchdog ends (retail's DEATH screen simply waits;
 	// net-re 5.61).
-	policy_->arm_admission_watch(now_ms());
+	// A reload's admission tail has no window either (net-re §5.70.7).
+	if (!reloading_join_) policy_->arm_admission_watch(now_ms());
+	reloading_join_ = false;
 }
 
 // Point the joiner's resource root at the HOST's expansion (S2C 0x7B field 7,
@@ -489,7 +494,58 @@ void SessionDrive::cancel_join_preload() {
 }
 
 bool SessionDrive::pending_dedicated() const {
+	if (kept_sim_.is_valid() && kept_sim_->is_host_listening()) {
+		const Ref<HostSessionOptions> live = kept_sim_->get_host_session_config();
+		return live.is_valid() && !live->get_serve_and_play();
+	}
 	return pending_host_.is_valid() && !pending_host_->get_serve_and_play();
+}
+
+bool SessionDrive::keep_session(MissionRoot *p_runtime) {
+	if (p_runtime == nullptr) return false;
+	kept_sim_ = p_runtime->release_simulation();
+	return kept_sim_.is_valid();
+}
+
+int SessionDrive::load_next_host_mission(const String &p_bms_name) {
+	if (kept_sim_.is_null() || !kept_sim_->is_host_listening() || p_bms_name.is_empty()) {
+		kept_sim_.unref();
+		world_->emit_signal(kSignalLoadFailed, "map change: no live host session");
+		return ERR_UNAVAILABLE;
+	}
+	// The kept simulation rides stage_runtime_options into the runtime, which
+	// boots the next map inside its session (Simulation::begin_host_map_change
+	// latched it).
+	const int err = world_->load_mission(p_bms_name, String());
+	kept_sim_.unref();
+	return err;
+}
+
+int SessionDrive::reload_as_joiner() {
+	if (kept_sim_.is_null() || !kept_sim_->is_joiner()) {
+		kept_sim_.unref();
+		world_->emit_signal(kSignalLoadFailed, "reload: no live joiner session");
+		return ERR_UNAVAILABLE;
+	}
+	Ref<ResourceRoot> resource_root = world_->resolve_root(
+			last_join_target_.is_valid() ? last_join_target_->get_dir() : String());
+	if (resource_root.is_null()) {
+		kept_sim_.unref();
+		return ERR_CANT_OPEN;
+	}
+	// The kept connection is the preload's: the reload's legs ran from
+	// Simulation::begin_joiner_reload, and step_preload loads the next map at
+	// its 0x11 as a first join's does, with no window armed.
+	policy_->reset_for_join();
+	pending_join_ = last_join_target_;
+	join_preload_sim_ = kept_sim_;
+	kept_sim_.unref();
+	join_preload_sim_->set_join_world_ready(false);
+	join_preload_root_ = resource_root;
+	last_connection_error_.unref();
+	reloading_join_ = true;
+	world_->set_process(true);
+	return OK;
 }
 
 void SessionDrive::stage_runtime_options(const Ref<MissionSetupOptions> &p_opts) {
@@ -512,11 +568,13 @@ void SessionDrive::stage_runtime_options(const Ref<MissionSetupOptions> &p_opts)
 		// match: its session is already hosting (the service's host verify
 		// lands before the mission starts) and rides in with the load.
 		NovaWorldClient *client = nw_client();
-		pending_host_->set_network_type(
-				pending_host_->get_channel() == kChannelNovaWorld && client != nullptr &&
-								client->is_hosting()
-						? opennova::inmatch::NetworkType::NovaWorld
-						: opennova::inmatch::NetworkType::Lan);
+		const bool novaworld = pending_host_->get_channel() == kChannelNovaWorld &&
+				client != nullptr && client->is_hosting();
+		pending_host_->set_network_type(novaworld ? opennova::inmatch::NetworkType::NovaWorld
+		                                          : opennova::inmatch::NetworkType::Lan);
+		// The match hosts on the session's own socket, the one the service saw
+		// its NWU datagrams come from (D-NET-346).
+		if (novaworld) p_opts->set_host_pump(client->get_game_pump());
 	} else if (pending_join_.is_valid()) {
 		p_opts->set_join_target(pending_join_);
 		p_opts->set_net_transport("lan-join");
@@ -531,6 +589,13 @@ void SessionDrive::stage_runtime_options(const Ref<MissionSetupOptions> &p_opts)
 	if (join_preload_sim_.is_valid()) {
 		p_opts->set_simulation(join_preload_sim_);
 		join_preload_sim_.unref();
+	}
+	// A host's map change: the kept session's simulation (its live role,
+	// socket and connections) is the runtime's.
+	if (kept_sim_.is_valid()) {
+		p_opts->set_simulation(kept_sim_);
+		p_opts->set_net_transport("lan");
+		kept_sim_.unref();
 	}
 }
 
@@ -622,6 +687,10 @@ void SessionDrive::reset() {
 	cancel_join_preload();
 	policy_->reset();
 	clear_pending_session();
+	reloading_join_ = false;
+	// A kept session's NovaWorld session rides through the reload with it, as
+	// retail keeps the NWU session playing or hosting across a map change.
+	if (kept_sim_.is_valid()) return;
 	stop_nw_client();
 	nwu_feed_live_ = false;
 }
@@ -714,9 +783,13 @@ void SessionDrive::stop_nw_client() {
 }
 
 // The hosting session meets its match once the runtime is live: the GSID and
-// AppId the in-match host advertises, the join-ticket arm, and the host's own
-// player in the roster (Server_PlayerAdd adds the local player like any other,
-// its endpoint the bound game port).
+// AppId the in-match host advertises, the join-ticket arm, and a listen host's
+// own player in the roster (Server_PlayerAdd adds the local player like any
+// other). Its PlayerIpAndPort is its loopback connection's address, which
+// carries no peer address and an unset port: "0.0.0.0:0", never a reachable
+// endpoint. The service learns the game endpoint from the NWU datagrams'
+// source, the shared socket (D-NET-346; net-re "A Serve Only host's
+// registration"). A Serve Only host publishes no slot 0.
 void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	NovaWorldClient *client = nw_client();
 	MissionRoot *runtime = world_->get_runtime();
@@ -752,7 +825,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		opennova::HostPlayerSlot self;
 		self.slot = 0;
 		self.player_name = opennova::to_std(p_opts->get_player_name());
-		self.ip_and_port = ":" + std::to_string(sim->get_host_listen_port());
+		self.ip_and_port = opennova::peer_addr_to_string(opennova::PeerAddr{});
 		self.pcid = login_pcid; // the host's own player's PCID is its login cookie
 		self.team = "0";
 		self.type = "0";

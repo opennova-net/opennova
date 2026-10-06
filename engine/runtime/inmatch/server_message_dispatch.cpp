@@ -88,13 +88,14 @@ uint32_t read_u32_le_lenient(
 	return value;
 }
 
-bool stage_integrity_crc_punt(
-		NapiNPConnection &conn, std::string_view detail) {
+bool stage_integrity_crc_punt(const ServerDispatchInputs &inputs, NapiNPConnection &conn, const char *reason) {
+	// The _PUNT.TXT line first [orig: Server_WritePuntLog @0x50200e / @0x5021da].
+	if (inputs.server_ctx != nullptr) server_logs_punt(inputs.server_ctx->logs, conn, reason);
 	DisconnectEvent event;
 	event.ds = 1;
 	event.dc = 2;
 	event.dpc = 46;
-	event.ddstr = std::string(detail);
+	event.ddstr = std::string("PUNT ") + reason;
 	return Server_StageHostDisconnect(conn, event);
 }
 
@@ -306,6 +307,8 @@ std::vector<uint8_t> build_tag7a_pcid(const NapiNPConnection &conn) {
 	return payload;
 }
 
+} // namespace
+
 // tag=0x7B session/player info. [orig: NapiNPMsg_0x7B_BuildPayload @0x507740] field order:
 // recipient player_name, PCID, server_name, advertised mission, map filename,
 // gametype(u32), empty_str, expansion. Retail's field-4 source switches at
@@ -331,6 +334,8 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 	append_cstr(payload, cfg.expansion);   // [orig g_ExpansionName]
 	return payload;
 }
+
+namespace {
 
 // The chunk header + at most 200 bytes of the stream from `offset`, shared by the
 // 0x60 (server-info VarList) and 0x64 (mission block) transfers. Header dword 0 is
@@ -694,8 +699,8 @@ void append_connection_settings(const GameConfig &cfg,
 }
 
 bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
-                             std::vector<NapiNPConnection> &roster,
-                             world::World *world, std::vector<ProtocolMessage> &out) {
+                             std::vector<NapiNPConnection> &roster, world::World *world,
+                             const NapiNPServerCtx *ctx, std::vector<ProtocolMessage> &out) {
 	const uint8_t capacity =
 			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig @0x24c0ca4]
 	const std::optional<uint8_t> player_slot =
@@ -705,8 +710,8 @@ bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	// not serialized until the later spawn-pump packet. Player-add consumes this
 	// reservation, so the delayed 0x04 and the live entity cannot disagree.
 	if (world != nullptr) {
-		(void)Server_ReservePlayerTeam(
-				cfg, /*is_in_session=*/true, roster, conn, *world);
+		(void)Server_ReservePlayerTeam(cfg, /*is_in_session=*/true, roster, conn, *world,
+				ctx != nullptr ? ctx->rotation : nullptr);
 	}
 
 	// The both-direction send-holdoff dictation (H:0x00 mask 8 / CS field 3)
@@ -824,7 +829,8 @@ SessionVars host_session_vars(const GameConfig &cfg) {
 
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const GameConfig &config, NapiNPConnection &conn,
-		const std::vector<NapiNPConnection> &roster, world::World *world) {
+		const std::vector<NapiNPConnection> &roster, world::World *world,
+		const HostRotation *rotation) {
 	std::vector<ProtocolMessage> messages;
 	const uint8_t capacity = static_cast<uint8_t>(
 			config.total_player_slot_capacity());
@@ -840,7 +846,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		team = entity != nullptr
 				? entity->team
 				: Server_ReservePlayerTeam(
-						config, /*is_in_session=*/true, roster, conn, *world);
+						config, /*is_in_session=*/true, roster, conn, *world, rotation);
 	}
 
 	// Exact CNapiServer_ProcessPendingPlayerSpawns ordering from the retail LAN
@@ -897,7 +903,7 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
-		world::World &world, world::EntityHandle target_zone) {
+		world::World &world, world::EntityHandle target_zone, ServerLogRecorder *server_log) {
 	std::vector<ProtocolMessage> replies;
 	if (!conn.link.owned_entity.valid()) return replies;
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
@@ -1020,6 +1026,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
 	player->flags &= ~1u;
+	server_logs_deploy(server_log, *player); // /PROFILE's PBRK [orig: Server_ProcessPlayerDeath @0x517a27..0x517a37]
 	if (mobile_spawn) {
 		// Retail repeats FindBestSeatSlot after the reset, then requests the
 		// authoritative attach against the returned root/child seat owner.
@@ -1120,6 +1127,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						reject_dpc = validate_spectator_join(config, conn, roster);
 					if (reject_dpc == 0)
 						reject_dpc = validate_side_password(config, conn);
+					if (reject_dpc == 0 && inputs.server_ctx != nullptr)
+						reject_dpc = Server_ValidateJoinBans(*inputs.server_ctx, conn); // 29 / 31
 					if (reject_dpc != 0) {
 						(void)stage_join_gate_reject(conn, reject_dpc);
 						conn.admission_stage = GameAdmissionStage::Rejected;
@@ -1154,7 +1163,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				}
 				if (!st.admission_metadata_pushed) {
 					if (!emit_admission_metadata(
-								config, conn, roster, world, replies)) {
+								config, conn, roster, world, inputs.server_ctx, replies)) {
 						conn.admission_stage = GameAdmissionStage::Rejected;
 						return {};
 					}
@@ -1297,7 +1306,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				}
 				if (!weapon_integrity_reply_matches(
 							id, source, st.integrity_weapon_crc_salt, received) &&
-						stage_integrity_crc_punt(conn, "PUNT WCRC"))
+						stage_integrity_crc_punt(inputs, conn, "WCRC"))
 					return {};
 				break;
 			}
@@ -1323,7 +1332,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					break;
 				const uint32_t received = read_u32_le_lenient(msg.payload, 1);
 				if ((source ^ st.integrity_ammo_crc_salt) != received &&
-						stage_integrity_crc_punt(conn, "PUNT ACRC"))
+						stage_integrity_crc_punt(inputs, conn, "ACRC"))
 					return {};
 				break;
 			}
@@ -1339,7 +1348,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// roster remain tick-owned boundaries.
 				if (!st.admission_metadata_pushed) {
 					if (!emit_admission_metadata(
-								config, conn, roster, world, replies)) {
+								config, conn, roster, world, inputs.server_ctx, replies)) {
 						conn.admission_stage = GameAdmissionStage::Rejected;
 						return {};
 					}
@@ -1738,9 +1747,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const world::EntityHandle target_handle = target != nullptr
 						? target->handle
 						: world::EntityHandle{};
-				std::vector<ProtocolMessage> deployment =
-						Server_ReleasePlayerDeployment(
-								config, conn, *world, target_handle);
+				std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
+						config, conn, *world, target_handle,
+						inputs.server_ctx != nullptr ? inputs.server_ctx->logs.profile : nullptr);
 				replies.insert(replies.end(),
 				               std::make_move_iterator(deployment.begin()),
 				               std::make_move_iterator(deployment.end()));

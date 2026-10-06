@@ -450,6 +450,41 @@ std::vector<uint8_t> ClientRuntime::start() {
 	return joiner_->start();
 }
 
+bool ClientRuntime::begin_mission_reload() {
+	if (role_ != Role::Joiner || joiner_ == nullptr) return false;
+	std::vector<uint8_t> first = joiner_->begin_mission_reload();
+	if (first.empty()) return false;
+	// The exit the main frame read is spent; the reload's mission start
+	// clears the rest [orig: Game_StartMission].
+	mission_exit_reason_ = kMissionExitNone;
+	pending_reload_notifications_.clear();
+	zone_states_.clear();
+	tracked_window_ = TrackedCaptureWindow{};
+	authoritative_loadout_ = WeaponLoadout{};
+	authoritative_ammo_pools_.fill(0);
+	deployed_ = false;
+	authoritative_spawn_released_ = false;
+	cleared_player_slots_.clear();
+	// The previous mission's replica goes with its world. The round gate the
+	// 0x25 raised holds until the reload's mission start clears it
+	// (JoinerConnection's mission_started) [orig: g_SpawnSuccessGate, cleared
+	// by Game_StartMission @0x524A1F]; the frame clock runs on.
+	const auto clock = view_.state().local_clock_ms;
+	view_.state() = replication::ClientState{};
+	view_.state().local_clock_ms = clock;
+	view_.state().spawn_success_gate = true;
+	view_.reset_minimap_overlays();
+	view_.drain_round_events();
+	view_.drain_game_events();
+	view_.drain_weapon_reloads();
+	view_.drain_weapon_pickups();
+	view_.drain_script_remote_commands();
+	view_.drain_objective_notifications();
+	view_.drain_effect_commands();
+	framed_send_queue_.push_back(std::move(first));
+	return true;
+}
+
 void ClientRuntime::receive(const uint8_t *raw, std::size_t len) {
 	if (role_ != Role::Joiner || raw == nullptr || len == 0) return;
 	recv_fifo_.emplace_back(raw, raw + len);
@@ -595,25 +630,9 @@ bool ClientRuntime::queue_door_request(uint16_t handle, int16_t state, uint8_t s
 	return true;
 }
 
-// [orig: Chat_CheckFloodControl @0x498F60] The 16-entry table of recent lines
-// `[u32 frame][char[64] text]`: a line longer than 59 characters is cut to 59
-// first (`message[59] = 0` @0x498f80); an unseen line shifts the table down
-// and lands in the newest slot (@0x498fe0..0x498fed); a seen line within
-// 0x500 main frames of its entry is refused (@0x499028); an older repeat is
-// moved to the newest slot, the entries after it shifting down (@0x49904a).
+// [orig: Chat_CheckFloodControl @0x498F60] (chat_flood.h)
 bool ClientRuntime::chat_flood_control(std::string &text, uint32_t frame) {
-	if (text.size() > 0x3B) text.resize(59);
-	size_t index = 0;
-	while (index < chat_flood_.size() && chat_flood_[index].text != text) ++index;
-	if (index >= chat_flood_.size()) {
-		for (size_t i = 0; i + 1 < chat_flood_.size(); ++i) chat_flood_[i] = chat_flood_[i + 1];
-		chat_flood_.back() = ChatFloodEntry{frame, text};
-		return true;
-	}
-	if (frame - chat_flood_[index].frame <= 0x500u) return false;
-	for (size_t i = index; i + 1 < chat_flood_.size(); ++i) chat_flood_[i] = chat_flood_[i + 1];
-	chat_flood_.back() = ChatFloodEntry{frame, text};
-	return true;
+	return chat_flood_check(chat_flood_, text, frame);
 }
 
 hud::ChatSendResult ClientRuntime::queue_chat_message(uint8_t channel, std::string &text,
@@ -705,8 +724,15 @@ bool ClientRuntime::queue_team_change_request() {
 int32_t ClientRuntime::mission_exit_reason() const {
 	if (mission_exit_reason_ != kMissionExitNone) return mission_exit_reason_;
 	if (joiner_ != nullptr && joiner_->has_disconnect_event()) {
-		return mission_exit_reason_for_disconnect(joiner_->last_disconnect_event());
+		const int32_t reason = mission_exit_reason_for_disconnect(joiner_->last_disconnect_event());
+		if (reason != kMissionExitNone) return reason;
 	}
+	// A reload wait that loses its link returns into the Post Menu with exit
+	// 1, which takes the main menu [orig: Game_StartMission
+	// @0x524E87..0x524ECD; g_LoadingTimeoutFlag, set by
+	// CNapiNetwork_OnDisconnectedFromServer @0x4C64A4].
+	if (joiner_ != nullptr && joiner_->reloading() && joiner_->session_lost())
+		return kMissionExitQuit;
 	return kMissionExitNone;
 }
 

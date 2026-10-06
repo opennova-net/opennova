@@ -137,8 +137,15 @@ Error WeaponDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resourc
 	}
 	const PackedByteArray bytes = p_resource_root->read_file(file_name);
 	if (bytes.is_empty()) {
-		last_error = String("Weapon database not found in resource root: ") + file_name;
-		return ERR_FILE_NOT_FOUND;
+		if (!p_resource_root->has_file(file_name)) {
+			last_error = String("Weapon database not found in resource root: ") + file_name;
+			return ERR_FILE_NOT_FOUND;
+		}
+		// A present, zero-byte weapon.def: the walk finds no line, so the
+		// table loads empty.
+		source_path = file_name;
+		weapons_file_loaded_ = true;
+		return OK;
 	}
 	source_path = file_name;
 
@@ -159,7 +166,7 @@ Error WeaponDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resourc
 }
 
 bool WeaponDatabase::is_loaded() const {
-	return weapons_file_loaded_ && weapons_file_.count > 0;
+	return weapons_file_loaded_;
 }
 
 String WeaponDatabase::get_source_path() const {

@@ -14,6 +14,7 @@
 #include <runtime/inmatch/charattr_challenge.h>  // CharAttrChallengeTable
 #include <runtime/inmatch/game_config.h>          // GameConfig
 #include <runtime/inmatch/joiner_connection.h>    // JoinerConnection::DiscoveredSession
+#include <runtime/inmatch/mission_rotation.h>     // HostRotation (D-NET-331)
 #include <runtime/inmatch/napi_np_connection.h>   // CharacterJoinVars
 #include <runtime/inmatch/napi_np_server_ctx.h>   // NetworkType
 #include <runtime/mission/mission_text.h>          // MissionText
@@ -72,6 +73,19 @@ struct SimulationNetState {
 	// terrain_til_data at bring-up so the initial-state burst streams the S2C
 	// 0x45 terrain-tile load (phase 5). Empty => 0x45 faithfully skipped. [§5.37]
 	std::vector<uint8_t> terrain_til_data;
+	// The map rotation (D-NET-331, inmatch/mission_rotation.h): the host
+	// screen's rows and Switch cells (configure_host_session), the mounted
+	// catalog the first host boot seeds the list over, the session-level
+	// words the map change reads, and the latch that makes the next boot the
+	// map change's (begin_host_map_change -> boot_mission). The words live
+	// with this session's simulation: a new session's start fresh, where
+	// retail's process globals carry the half toggle and the SETNEXT latch
+	// into the next session (D-NET-353).
+	std::vector<std::string> rotation_missions;
+	std::vector<int32_t> rotation_launch_options;
+	std::vector<opennova::mission_catalog::Row> rotation_catalog;
+	opennova::inmatch::HostRotation rotation;
+	bool map_change_pending = false;
 	// The mounted <mission>.bin (or the medmssn.bin fallback) RTXT the shell
 	// handed over before load, harvested engine-side
 	// (runtime/mission/mission_text.h): the briefing pages the S2C 0x7E payload

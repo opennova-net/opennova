@@ -155,4 +155,7 @@ inline Vector3 godot_from_fixed3(const int32_t p[3]) {
 	               static_cast<float>(-p[1] / 65536.0));
 }
 
+// The host screen's START over the mounted catalog (simulation_rotation.cpp).
+void seed_host_rotation(SimulationNetState &p_net, const Ref<ResourceRoot> &p_root);
+
 } // namespace sim_internal

@@ -327,6 +327,13 @@ class Match {
 
     const MatchRules &rules() const { return rules_; }
     int32_t remaining_ticks() const { return remaining_ticks_; }
+    // The admin console's in-place writes, mid-round and with no reconfigure: SET KillLimit,
+    // MaxScore, KOTHLimit, ChangeTeamDelay and GameTime store the rule globals the round reads,
+    // and GameTime restarts the round clock at `3720 * value` (a zero ends a timed round at its
+    // next check). [orig: CAdminServer_HandleSetCommand @0x405A60 -- g_ScoreLimit, g_KillLimit,
+    // g_TimeLimitMinutes, g_CaptureDuration, g_RespawnTime and g_RoundTimeRemaining]
+    MatchRules &live_rules() { return rules_; }
+    void set_remaining_ticks(int32_t ticks) { remaining_ticks_ = ticks; }
     const MatchOutcome &outcome() const { return outcome_; }
     const MatchResult &result() const { return result_; }
 

@@ -124,9 +124,12 @@ struct GameConfig {
 	uint16_t class_allow_mask = 0x03FFu;
 	// Authoritative projectile game-option globals. These do not alter the
 	// advertised mp_attributes word; the host simulation consumes them directly.
+	// The rule words below hold the raw dword retail stores (the apply's `mov`,
+	// the admin SET's atol), which GET GAMESETTINGS prints back with %d; a
+	// reader tests them for nonzero.
 	bool hit_feedback = true; // [orig: hitFeedback_198 @0x54D18B]
-	bool fat_bullets = false;                   // [orig g_FatBullets @0x24D21A0]
-	bool one_shot_kill = false;                 // [orig g_OneShotKill @0x24D219C]
+	int32_t fat_bullets = 0;                    // [orig g_FatBullets @0x24D21A0]
+	int32_t one_shot_kill = 0;                  // [orig g_OneShotKill @0x24D219C]
 	// game.cfg `unlimited_vehicles`, stock 1: a destroyed PlayerControl hull
 	// respawns instead of being removed (World::Rules::vehicle_respawns), the
 	// S2C 0x70 vehicle-spawn availability rows read unlimited, and an accepted
@@ -148,7 +151,7 @@ struct GameConfig {
 	//  / votingMinPlayers_4E4 / votingPercent_4E8 (Config_SetDefaults) ->
 	//  g_VoteKickEnabled / g_VoteKickMinPlayers / g_VoteKickPercent
 	//  (Game_ApplySessionSettingsToGlobals @0x551dc3 / @0x551dcf / @0x551d43)]
-	bool voting_enabled = false;
+	int32_t voting_enabled = 0;
 	int32_t voting_min_players = 6;
 	float voting_percent = 0.66f;
 	// The death screen's team change (C2S 0x4D): a player may switch again
@@ -173,7 +176,7 @@ struct GameConfig {
 	//  ebx = 0 / esi = 1; Config_ParseSettingsLine @0x54F8B8 / @0x54F8E3) ->
 	//  g_AutoBalanceEnabled / g_AutoBalanceMinDiff / g_AutoBalanceTriggerDiff
 	//  (Game_ApplySessionSettingsToGlobals @0x551BCE..0x551BEB)]
-	bool auto_balance_enabled = false;
+	int32_t auto_balance_enabled = 0;
 	int32_t auto_balance_min_difference = 1;
 	int32_t auto_balance_trigger_difference = 1;
 
@@ -236,9 +239,9 @@ struct GameConfig {
 	//  g_DoMaxPingCheck @0x24D21B8 / g_MaxPing @0x24D21B4 via
 	//  Game_ApplySessionSettingsToGlobals @0x551C3E..0x551C5D;
 	//  NapiNPServerMsg_HandlePingResponse @0x515183..0x51521A]
-	bool do_min_ping_check = false;
+	int32_t do_min_ping_check = 0;
 	uint32_t min_ping = 0;
-	bool do_max_ping_check = false;
+	int32_t do_max_ping_check = 0;
 	uint32_t max_ping = 0;
 	// game.cfg `mpreset`: the NovaWorld ServerCommand SetMPReset stores its
 	// argument here and saves the config; the shell persists it. Its reader is

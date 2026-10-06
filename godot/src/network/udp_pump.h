@@ -9,6 +9,8 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <base/pcapio/pcap_writer.h>
+#include <net/npwire/datagram_demux.h>
+#include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
 
 #include <deque>
@@ -74,6 +76,11 @@ public:
 	String get_capture_path() const { return capture_path_; }
 	bool is_capturing() const { return capture_ != nullptr; }
 
+	// The pump as one socket under two protocols, the game's and a NovaWorld
+	// lobby session's (engine: net/npwire/datagram_demux.h, D-NET-346), made on
+	// first use: the lobby reads its session view, a hosted match its game view.
+	opennova::DatagramDemux &demux();
+
 protected:
 	static void _bind_methods();
 
@@ -107,6 +114,9 @@ private:
 		PackedByteArray bytes;
 	};
 	std::deque<Inbound> inbound_;
+	// The demux over this pump (declared after the adapter it reads through).
+	std::unique_ptr<opennova::IDatagramSocket> demux_socket_;
+	std::unique_ptr<opennova::DatagramDemux> demux_;
 };
 
 } // namespace godot

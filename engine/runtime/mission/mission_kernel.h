@@ -436,9 +436,22 @@ public:
 	int mounted_cache_hits = 0;
 
 	// Re-point the world/AI/collision systems at the terrain field store and
-	// the collision world (the embedder re-layers its own device-fed surface
-	// extras — placed tiles, sound profiles — after wire_terrain).
+	// the collision world; the store's placed-tile overlay rides the surface
+	// view (the embedder re-layers its sound profiles after wire_terrain).
 	void wire_terrain();
+	// The terrain field's file entry: <terrain>.cpt/.trn(+charmap) through
+	// the kernel's asset index with the mission's BMS tile set
+	// (terrain_field_store_load). False (logged) when the documents are not
+	// there; the boot runs it when KernelBootOptions::terrain asks and no
+	// embedder built the store.
+	bool load_terrain_field();
+	// The mission's placed tiles (the .til bytes the S2C 0x45 stream pages
+	// out) onto the terrain store's overlay and the world's surface view
+	// (D-SND-15; terrain_field_store_set_placed_tiles carries the witness).
+	void set_placed_tiles(const std::vector<uint8_t> &til_bytes);
+	// The tileset's .TSD table for the store's tilestrip, through the opened
+	// mission's file source (terrain_field_store_resolve_tile_surfaces).
+	void resolve_tile_surface_table();
 	// Re-feed the terrain store's water plane from World::env.water_z (the
 	// occupant water clamp's 16.16 worldY); wire_terrain runs it, and the
 	// embedder calls it after every environment change.

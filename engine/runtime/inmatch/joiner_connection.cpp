@@ -261,6 +261,8 @@ std::vector<uint8_t> JoinerConnection::start() {
 	mission_metadata_total_size_ = 0;
 	mission_metadata_fixed_bytes_.fill(0);
 	mission_metadata_fixed_byte_mask_ = 0;
+	mission_metadata_bytes_.clear();
+	reloading_ = false;
 	last_error_.clear();
 	host_disconnect_reason_.clear();
 	last_disconnect_event_ = DisconnectEvent{};
@@ -772,7 +774,11 @@ void JoinerConnection::retain_mission_metadata_chunk(
 		mission_metadata_total_size_ = chunk.total_size;
 		mission_metadata_fixed_bytes_.fill(0);
 		mission_metadata_fixed_byte_mask_ = 0;
+		mission_metadata_bytes_.assign(chunk.total_size, 0);
 	}
+	if (mission_metadata_bytes_.size() == chunk.total_size)
+		std::memcpy(mission_metadata_bytes_.data() + chunk.chunk_offset, chunk.chunk_data,
+				chunk.chunk_size);
 
 	for (uint32_t i = 0; i < kFixedWindowSize; ++i) {
 		const uint32_t absolute = kFixedWindowOffset + i;
@@ -942,6 +948,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// a spawn-zone host can still require C2S 0x0E to release its hold.
 			// [orig: NapiNPClientMsg_0x00F @0x42e2ed]
 			deployment_policy_seen_ = true;
+			// The 0x0F ends a reload's last wait [orig: Game_StartMission's
+			// 0x0B loop @0x52629B..0x5262E5].
+			reloading_ = false;
 			// The authority's ammo-pool image rides the fixed span at body offset
 			// 23, ahead of the off-wire waypoint gate, so it reads without the
 			// gametype hint. Retail copies all 128 dwords into g_LocalAmmoPools
@@ -1117,7 +1126,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 							encode_auto_medic_preference(AutoMedicPreference{})),
 					make_protocol_message(c2s::CLIENT_ACK, le32_value(conn_.connection_id)),
 					make_protocol_message(c2s::PING, {}),
-					make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::vector<uint8_t>(8, 0)),
+					// [the last 0x60 id, 0]: eight zero bytes on a first join
+					// [orig: SaveFile_SendAndWaitForServerAck @0x5204B0, dword_A822C0].
+					make_protocol_message(c2s::FILE_CHUNK_REQUEST,
+							le32_pair(server_info_transfer_id_, 0)),
 			}));
 			post_auth_stage_ = PostAuthStage::AwaitServerInfo;
 		} else if (m.tag == s2c::FILE_TRANSFER_CHUNK &&
@@ -1135,8 +1147,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					// Golden frames 19-20 are separate packets: state re-broadcast, then the
 					// initial eight-zero mission-data request.
 					out.outbound.push_back(frame_inner_pending(0x47, {}));
+					// [the last 0x64 id, 0] [orig: CNapiGameSession_InitRandomSeedOrRequest
+					// @0x51E8F0, dword_A822C4].
 					out.outbound.push_back(frame_inner_pending(
-							0x37, std::vector<uint8_t>(8, 0)));
+							0x37, le32_pair(mission_metadata_transfer_id_, 0)));
 					post_auth_stage_ = PostAuthStage::AwaitMissionData;
 				}
 			}
@@ -1152,6 +1166,22 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					out.outbound.push_back(frame_inner_pending(
 							0x37, le32_pair(chunk.transfer_id, next_offset)));
 				} else {
+					// The last chunk copies the server name and the map's file out
+					// of the block: on a map change, the next map's g_MapFileName
+					// [orig: NapiNPClientMsg_HandleMissionDataChunk @0x4324CC (the
+					//  server name, block+52), @0x4324DD (g_MapFileName, block+84),
+					//  each Napi_CopyString(.., 32)].
+					const auto block_string = [&](std::size_t at) {
+						std::string text;
+						for (std::size_t i = at; i < at + 31 && i < mission_metadata_bytes_.size() &&
+								mission_metadata_bytes_[i] != 0; ++i)
+							text.push_back(static_cast<char>(mission_metadata_bytes_[i]));
+						return text;
+					};
+					if (mission_metadata_bytes_.size() >= 116) {
+						server_name_ = block_string(52);
+						map_file_ = block_string(84);
+					}
 					post_auth_stage_ = PostAuthStage::AwaitPlayerList;
 					out.mission_started = true;
 					if (player_list_seen_) {
@@ -2045,6 +2075,40 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	receive_clock_armed_ = true;
 	phase_ = Phase::InMatch;
 	silence_timeout_latched_ = false;
+}
+
+std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
+	if (!in_session() || conn_.server_scrk.empty()) return {};
+	phase_ = Phase::Driving;
+	post_auth_stage_ = PostAuthStage::AwaitServerInfo;
+	reloading_ = true;
+	// The previous mission's admission state; the connection, the transfer
+	// ids the requests echo, the team latch (the 0x47's S2C 0x75 re-latches
+	// it) and the session's identity stay.
+	preload_ready_ = false;
+	sync_tail_seen_ = false;
+	player_list_seen_ = false;
+	deployment_policy_seen_ = false;
+	initial_loadout_grant_count_ = 0;
+	initial_admission_complete_ = false;
+	deployment_pick_sent_ = false;
+	deployment_pick_sequence_ = 0;
+	deployment_pick_sequence_unbound_ = false;
+	deployment_reply_seen_ = false;
+	pending_spawn_menu_request_ = false;
+	has_self_handle_ = false;
+	self_handle_ = 0;
+	spawn_ = SelfSpawn{};
+	mission_header_bytes_.clear();
+	reset_terrain_load();
+	server_info_bytes_.clear();
+	mission_metadata_bytes_.clear();
+	mission_metadata_total_size_ = 0;
+	return frame_session({
+			make_protocol_message(c2s::CLIENT_ACK, le32_value(conn_.connection_id)),
+			make_protocol_message(c2s::PING, {}),
+			make_protocol_message(c2s::FILE_CHUNK_REQUEST, le32_pair(server_info_transfer_id_, 0)),
+	});
 }
 
 uint64_t JoinerConnection::milliseconds_since_last_receive() const {

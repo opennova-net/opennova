@@ -6,6 +6,9 @@
 
 #include <runtime/world/world.h> // World::crt_rand — the session-seeded CRT stream
 
+#include <base/io/log.h>
+#include <runtime/inmatch/server_console.h> // the /INOUT host line
+
 namespace opennova::inmatch {
 
 // [orig: CGameSession_SetConnectionMode @0x4c49f0] — stores the mode and decomposes it into the
@@ -36,19 +39,18 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	p.host_stop_tick = 0;                   // cleared until StopServer
 	p.host_run_duration_ms = 0;
 	p.host_running = 1;                      // StartServer succeeded
+	// The /INOUT host line, ahead of the host-start callback
+	// [orig: CNapiNPConnection_LogHostStarted @0x62b629; D-NET-356].
+	io::logf(io::LogLevel::kInfo, "%s", inout_host_line(ctx, /*started=*/true).c_str());
 	// The host start callback zeroes the total logins [orig: NapiNPProtocol_StartServer
 	// @0x62b640 -> CNapiServer_OnHostStarted @0x4c94f0].
 	ctx.total_logins = 0;
 }
 
-// [orig: CNapiGameSession_CreateSession @0x4c97c0] — see header.
-void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
-                    const SessionStartup &startup, replication::ISessionTransport *local_client) {
-	// A new session owns a new connection table. Clear both remote server-side
-	// peers and any prior local client before installing this session's role set;
-	// no live-update API is allowed to mutate connection residency mid-match.
-	ctx.np_protocol.connection_list.clear();
-	ctx.np_protocol.next_connection_id = kFirstJoinerDcb;
+namespace {
+
+// The mission start's context resets [orig: Game_StartMission].
+void start_mission_state(NapiNPServerCtx &ctx, const GameConfig &config) {
 	ctx.config = config;
 	// Game_StartMission runs Nbstat_StartupInit once per mission, clearing the
 	// shared scoreboard/integrity counter but deliberately leaving the separate
@@ -56,6 +58,8 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	// [orig: Game_StartMission @0x526108 -> Nbstat_StartupInit @0x4FDE30;
 	// timer store @0x4FDE41]
 	ctx.scoreboard_broadcast_timer = 0;
+	// The end-round block clears at every mission start, on every peer
+	// [orig: Game_StartMission @0x5249EA].
 	ctx.round_end_announced = false;
 	ctx.round_end_linger_ticks = 0;
 	ctx.round_end_board_stream.clear();
@@ -65,18 +69,11 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E9C1 `++dword_C86FC8`]
 	++ctx.server_info_transfer_id;
 	++ctx.mission_metadata_transfer_id;
-	// Retail seeds the process CRT stream from the clock once when the host
-	// allocates its player-slot table and immediately spends one draw on the
-	// table's anti-cheat base offset (`rand() % 25145`); the simulation's owned
-	// stream takes the session seed instead (a reproducible session, D-NET-115)
-	// and spends that same first draw so every later consumer sees retail's
-	// draw index. A context without a world keeps the CRT default state.
-	// [orig: Server_AllocatePlayerSlotTable @0x51C1A4..0x51C1BC — srand
-	// @0x51C1AA, rand @0x51C1AF]
-	if (ctx.world != nullptr) {
-		ctx.world->crt_rand.seed(startup.session_seed_id);
-		(void)ctx.world->crt_rand.next();
-	}
+}
+
+// The config the session serves from: the resolved send period, the
+// mission-data block, the advertised name, cap and flag words.
+void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config) {
 	// Resolve the session-selected retail default once at session creation so
 	// every later connection, settings record, and countdown reads the same
 	// concrete period. A caller-supplied override wins verbatim.
@@ -90,12 +87,49 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	ctx.mission_metadata_blob = build_mission_metadata_blob(ctx.config);
 	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
 	ctx.np_protocol.max_players = config.max_players;
-	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
 	// The original snapshots both advertised flag words while building the
 	// session config. P2 and the S2C 0x08 tail are the same BuildFlags value;
 	// computing it once here prevents those two wire legs from drifting.
 	ctx.np_protocol.server_flags = config.game_type;
 	ctx.np_protocol.build_flags = build_server_config_flags(ctx);
+}
+
+} // namespace
+
+void continue_session(NapiNPServerCtx &ctx, const GameConfig &config) {
+	start_mission_state(ctx, config);
+	resolve_mission_config(ctx, config);
+	// The exit the round end stored is spent: the main frame read it before
+	// the map change [orig: Game_ProcessMainFrame @0x526806..0x526867].
+	ctx.mission_exit_reason = 0;
+	// The change-gated S2C 0x6F cache is keyed by the old mission's zone
+	// handles (a port cache with no retail counterpart).
+	ctx.zone_6f_cache.clear();
+}
+
+// [orig: CNapiGameSession_CreateSession @0x4c97c0] — see header.
+void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
+                    const SessionStartup &startup, replication::ISessionTransport *local_client) {
+	// A new session owns a new connection table. Clear both remote server-side
+	// peers and any prior local client before installing this session's role set;
+	// no live-update API is allowed to mutate connection residency mid-match.
+	ctx.np_protocol.connection_list.clear();
+	ctx.np_protocol.next_connection_id = kFirstJoinerDcb;
+	start_mission_state(ctx, config);
+	// Retail seeds the process CRT stream from the clock once when the host
+	// allocates its player-slot table and immediately spends one draw on the
+	// table's anti-cheat base offset (`rand() % 25145`); the simulation's owned
+	// stream takes the session seed instead (a reproducible session, D-NET-115)
+	// and spends that same first draw so every later consumer sees retail's
+	// draw index. A context without a world keeps the CRT default state.
+	// [orig: Server_AllocatePlayerSlotTable @0x51C1A4..0x51C1BC — srand
+	// @0x51C1AA, rand @0x51C1AF]
+	if (ctx.world != nullptr) {
+		ctx.world->crt_rand.seed(startup.session_seed_id);
+		(void)ctx.world->crt_rand.next();
+	}
+	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
+	resolve_mission_config(ctx, config);
 
 	if (ctx.is_authority) {
 		start_server(ctx, startup);

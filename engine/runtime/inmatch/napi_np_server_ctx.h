@@ -10,9 +10,13 @@
 
 #include <functional>
 
+#include <runtime/inmatch/chat_flood.h>        // the console chat's flood table
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_ban_lists.h>  // banlist.txt / banned.txt (the join refusals)
+#include <runtime/inmatch/server_console.h>    // the client-less host's CHAT ring
 #include <runtime/inmatch/server_designations.h> // the designation table (S2C 0x6B)
+#include <runtime/inmatch/server_files.h>      // ServerLogs (the /PROFILE and punt log devices)
 #include <runtime/replication/net_quality.h>   // the CNetQuality window (the host send half)
 #include <runtime/world/entity.h>              // world::EntityHandle (the deployable spawner seam)
 
@@ -31,6 +35,7 @@ struct File;
 namespace opennova::inmatch {
 
 class ClientRuntime;
+struct HostRotation;
 
 // [orig +0x5C] The host/client connection mode written by [orig: CGameSession_SetConnectionMode
 // @0x4c49f0] (§5.0 / §6.3). It decomposes into the two booleans is_authority (is_host) and
@@ -142,11 +147,12 @@ struct NapiNPServerCtx {
 	// rules + session_config. Seeded by create_session (see server_session.h).
 	// Live admission controls. The IP ban compares the connection's UDP source
 	// address (conn+0x30, the datagram source stored @0x62bf28), never the
-	// client-reported SIP; entries use PeerAddr::ip's LE octet packing (the
-	// same as BanList_ParseIPEntry @0x4fd5c9).
+	// client-reported SIP, against banned.txt's entries, which use PeerAddr::ip's
+	// LE octet packing (the same as BanList_ParseIPEntry @0x4fd5c9); banlist.txt's
+	// PCIDs and banned.txt's names refuse at the game-layer join (codes 29 / 31).
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, the compare @0x4c6210]
 	bool join_locked = false;
-	std::vector<uint32_t> banned_join_addresses;
+	ServerBanLists bans;
 	GameConfig config;             // [orig g_NapiNPCtx.game_settings @+0xE68 + the scattered g_* rule globals]
 	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)
 
@@ -179,10 +185,11 @@ struct NapiNPServerCtx {
 	bool integrity_entity_family_next = false;
 
 	// The rtxt "Server" section strings the host formats into chat
-	// (`GameText_GetString("Server", key)`), loaded by the embedder from its
-	// gametext table through set_server_text(). An EMPTY string is the null
-	// lookup: the consumer no-ops exactly as retail does when the text is
-	// absent. [orig: Server_BroadcastMedicRequest @0x5153C9..0x5153D0]
+	// (`GameText_GetString("Server", key)`), read from gametext.bin by the
+	// host boot and installed by HostRole::bring_up (HostBringup::server_text).
+	// An EMPTY string is the null lookup: the consumer no-ops exactly as retail
+	// does when the text is absent. [orig: Server_BroadcastMedicRequest
+	// @0x5153C9..0x5153D0]
 	ServerTextTable server_text;
 
 	// Host CNetQuality scalar sent as S2C 0x79. Retail derives this byte as
@@ -277,6 +284,12 @@ struct NapiNPServerCtx {
 	// C2S drain / S2C fan) is owned by Server_TickUpdate over connection_list — there is no separate
 	// NetSystem (retired P8): the drain/emit primitives live in runtime/replication/connection_fan.h.
 	world::World *world = nullptr;
+	// The session-level rotation state the embedder owns for its whole run
+	// (inmatch/mission_rotation.h): the round end's LASTGAME read, the team
+	// assignment's side-to-team map, the round count. Non-owning; null (a
+	// test context, the SP listen server) reads as LASTGAME off and sides
+	// 1, 2.
+	HostRotation *rotation = nullptr;
 	// The host process's own client half (the listen host's loopback
 	// ClientRuntime; null on a dedicated host): the client-side state a host
 	// handler reads through the process globals retail shares, here the
@@ -450,6 +463,21 @@ struct NapiNPServerCtx {
 	std::function<world::EntityHandle(world::World &, uint16_t item_id, uint8_t team,
 			const int32_t position[3])> deployable_spawner;
 
+	// The host process's log devices — the /PROFILE recorder and the punt
+	// logs — installed from HostConfig::logs at the session start; a null
+	// pointer is a device retail's switch left off (server_files.h).
+	ServerLogs logs;
+	// The host socket's bound address the /INOUT host lines print
+	// [orig: the protocol manager's socket +8 / +12, CNapiNPConnection_LogHostStarted
+	//  @0x61e6c6]; unknown prints retail's no-socket placeholder.
+	PeerAddr local_address{};
+	bool local_address_known = false;
+	// The CHAT ring of a host with no client of its own and the flood table its
+	// console chat checks (server_console.h) [orig: the raw slots byte_B3EA38;
+	//  Chat_CheckFloodControl's table @0xB3B788].
+	std::vector<ServerConsoleLine> console_chat;
+	ChatFloodTable console_chat_flood{};
+
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.
 	NapiNPServerCtx() = default;
@@ -457,8 +485,8 @@ struct NapiNPServerCtx {
 	NapiNPServerCtx &operator=(NapiNPServerCtx &&) noexcept = default;
 };
 
-// Install the embedder's "Server" strings (the Godot shell reads its gametext
-// table).
+// Install the host's "Server" strings (HostRole::bring_up, from the host
+// boot's gametext.bin read).
 inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 	ctx.server_text = std::move(text);
 }

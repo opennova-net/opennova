@@ -23,9 +23,10 @@ namespace opennova::inmatch {
 
 struct NapiNPServerCtx;
 
-// Fill `page`'s roster and host facts from the host context (and its world,
-// null for a world-less context: no entity, stats or clock facts). Leaves
-// the text and the score-list flag to the caller.
+// Fill `page`'s roster, host facts and (for a host with no client of its
+// own) console rows from the host context (and its world, null for a
+// world-less context: no entity, stats or clock facts). Leaves the text and
+// the score-list flag to the caller.
 void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServerCtx &ctx,
 		const world::World *world);
 

@@ -48,6 +48,18 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
                     const SessionStartup &startup,
                     replication::ISessionTransport *local_client = nullptr);
 
+// The next mission inside the same session (net-re §5.70.6): the session
+// config takes `config` (the next map's identity on the host screen's or the
+// host file's rules), every mission-start reset of the context runs (the
+// scoreboard counter, the round-end state, both transfer tokens, the
+// mission-data block, the advertised flag words, the stored exit reason),
+// and the connection list, the protocol state and the session identity stay.
+// [orig: Game_StartMission @0x524360 -- Nbstat_StartupInit @0x526108, the
+//  stream token `++g_ReplayBlockMagic` @0x5247F3,
+//  CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (its `++dword_C86FC8`
+//  @0x51E9C1), the end-round block @0x5249EA]
+void continue_session(NapiNPServerCtx &ctx, const GameConfig &config);
+
 // [orig: NapiNPProtocol_StartServer @0x62b5e0] — host-only. Stamps host_key / host_start_tick /
 // session_seed_id (the latter only when gen_session_seed_flag is set), copies the MP TLV
 // max_players, and sets host_running = 1 (HandleClientHello rejects while it is 0). No-op unless

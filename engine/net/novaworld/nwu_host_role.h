@@ -59,6 +59,12 @@ public:
 	// The 60 s host poll and, while hosting, the Host-list refresh on the logic clock. Call every
 	// tick after the lobby's tick, with the same clock.
 	void tick(uint32_t now_ms);
+	// The server-info update outside the 1860-tick timer: the Host list's dirty delta (and the
+	// status heartbeat where no NWU session is in use) now, the cookie-key ring left alone. A
+	// mission start on a NovaWorld authority in session runs it.
+	// [orig: Game_StartMission @0x5248f5 -> Lobby_UpdateServerInfo @0x4fe8c0 ->
+	//  CPlayerManager_RebuildLists @0x4d45b5 -> CNapiGameSession_SendHostUpdate]
+	void update_server_info();
 	// Route one session notice. True when the notice was a host-direction one.
 	bool handle_notice(const ClientSession::Notice &notice);
 

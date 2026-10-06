@@ -41,6 +41,16 @@ inline constexpr const char *GATE_DEFAULT_HOST = "gs.novaworld.net";
 // Gate server UDP port. [orig: CNapiGateManager_Init @0x633f90 stores 7597]
 inline constexpr uint16_t GATE_DEFAULT_PORT = 7597;
 
+// NovaLogic's NovaWorld domain: the gate manager's host and the gate's own name sit under it.
+// [orig: CNapiGateManager_Init @0x633f90 (host "novaworld.net"); "gs.novaworld.net" @0x7cc368]
+inline constexpr const char *NOVAWORLD_DOMAIN = "novaworld.net";
+
+// True for a host name under NovaLogic's NovaWorld domain: NOVAWORLD_DOMAIN itself or a name
+// ending in "." + it, ASCII case-insensitively, one trailing root dot tolerated. A lookalike that
+// only contains the domain ("novaworld.net.example.com") is not under it. The embedders' gate
+// for NovaLogic's live service (ADR 0051 d6).
+bool is_novaworld_domain_host(std::string_view host);
+
 // Protocol tag the probe ships as its payload; the literal differs per
 // NovaLogic title and is how the gate distinguishes which title is calling
 // in. Retail Joint Operations installs "jop:cus2" as the session's gate tag

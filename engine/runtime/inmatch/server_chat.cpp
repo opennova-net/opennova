@@ -7,6 +7,7 @@
 #include <net/npwire/ingame_encode.h>   // encode_chat_broadcast / encode_player_downed_state / encode_play_sound
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
+#include <runtime/inmatch/server_console.h>  // the client-less host's CHAT ring
 #include <runtime/inmatch/server_message_dispatch.h> // is_medic_recipient
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
@@ -292,6 +293,17 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			recipient.link.transport->host_send(
 					s2c::CHAT_BROADCAST, body, true, 0, false, kChatRetentionFlushes);
 		}
+	}
+	// A host with no client of its own posts the line to its own CHAT ring
+	// after the fan: 2 / 4 / 5 as team (2), 11 as crew, 12 and 13 both as
+	// squad (12), 1 as itself (server_console.h)
+	// [orig: the `!is_mp_session_peer` posts @0x514147..0x51415b (LABEL_85,
+	//  channel 2), the crew arm's (11), the 12 / 13 tail's (12) and the
+	//  everyone arm's (the channel)].
+	if (ctx.is_mp_session_peer == 0) {
+		const int local_channel = channel == 4 || channel == 5 ? 2
+				: channel == 13 ? 12 : channel;
+		server_console_dispatch(ctx, local_channel, formatted);
 	}
 	return replies;
 }

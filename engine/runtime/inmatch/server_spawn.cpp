@@ -1,5 +1,7 @@
 #include <runtime/inmatch/server_spawn.h>
 
+#include <runtime/inmatch/mission_rotation.h> // HostRotation (LASTGAME, the side-to-team map)
+
 #include <runtime/world/ai.h>           // AiEntity / AiSystem
 #include <runtime/world/angle.h>        // bam_heading_from_mission_yaw_deg
 #include <runtime/world/entity_spawn.h> // entity_reset_to_spawn_state
@@ -12,6 +14,8 @@
 #include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
 #include <net/npwire/ingame_encode.h>     // encode_team_assign
+#include <runtime/inmatch/punt_log.h>     // the punt table the round init clears
+#include <runtime/inmatch/server_log_recorder.h> // the /PROFILE PDEF of a player add
 #include <runtime/inmatch/server_squad.h> // Server_DissolveSquadOf
 #include <net/npwire/ingame_message_id.h> // s2c::FORMATTED_GAME_TEXT (the 0x51 convert notice)
 
@@ -39,7 +43,8 @@ namespace {
 // The submitted JSP credential selects a matching protected side before balancing.
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection &joining, const world::World &world) {
+		const NapiNPConnection &joining, const world::World &world,
+		const std::array<uint8_t, 2> &side_team) {
 	// A spectator is a roster player on neutral team zero, bypassing the team
 	// password/selection path. Retail gates the early return on being in a
 	// live MP session; a non-session add ignores the flag and takes team 1.
@@ -71,16 +76,19 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// Password matches precede the two/four-team split and team preference.
 	// If both side passwords match, side A wins the ordered comparison.
 	// [orig: Server_AssignPlayerTeam @0x4FE424..0x4FE4AD]
+	// Each side arm answers with the side's team through the side-to-team map
+	// [orig: byte_82F240 @0x4FE456, byte_82F241 @0x4FE492].
 	if (side_a_locked && opennova::strutil::iequals(
-			config.side_a_password.c_str(), submitted_password.c_str())) return 1;
+			config.side_a_password.c_str(), submitted_password.c_str())) return side_team[0];
 	if (side_b_locked && opennova::strutil::iequals(
-			config.side_b_password.c_str(), submitted_password.c_str())) return 2;
+			config.side_b_password.c_str(), submitted_password.c_str())) return side_team[1];
 	// Without a match, two-team mode selects an unlocked side or fails.
-	// [orig: @0x4FE4AE..0x4FE519]
+	// [orig: @0x4FE4AE..0x4FE519 -- side B's team @0x4FE56D, side A's
+	//  @0x4FE507]
 	if (active_teams == 2) {
 		if (side_a_locked && side_b_locked) return 0;
-		if (side_a_locked) return 2;
-		if (side_b_locked) return 1;
+		if (side_a_locked) return side_team[1];
+		if (side_b_locked) return side_team[0];
 	}
 
 	// jsp[60] is signed at the original call site: 0/1 request side A/B and
@@ -96,8 +104,9 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	if (gt == opennova::game_type::kTeamDeathmatch && (side_a_locked || side_b_locked))
 		team_request = 0xFF;
 	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) {
-		if (team_request == 0 && !side_a_locked) return 1;
-		if (team_request == 1 && !side_b_locked) return 2;
+		// [orig: side A's team @0x4FE543, side B's @0x4FE56D]
+		if (team_request == 0 && !side_a_locked) return side_team[0];
+		if (team_request == 1 && !side_b_locked) return side_team[1];
 	}
 
 	std::array<uint32_t, 4> counts{};
@@ -151,6 +160,15 @@ bool connection_claims_player_slot(const NapiNPConnection &connection) {
 			connection.link.owned_entity.valid();
 }
 
+// Slot 0 is the authority's own row on every host: each round init keeps it
+// active and local, the local add takes it (the listen host's loopback), and a
+// remote add picks among the inactive rows only, so no joiner ever holds slot
+// 0. A Serve Only host builds no local connection and leaves that row
+// connectionless, so its first joiner takes slot 1 and its NovaWorld
+// PlayerList never names slot 0 (D-NET-350).
+// [orig: Server_InitNewRoundState @0x51c99a..0x51ca3c (slot 0 active, local);
+//  Server_PlayerAdd @0x51cc31..0x51cc65 (the local add -> g_LocalNetPlayer),
+//  @0x51cc9a -> sub_4FD7B0 @0x4fd7d0 (only rows whose +4 active byte is 0)]
 std::optional<uint8_t> first_free_player_slot(
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection *joining, uint32_t slot_capacity) {
@@ -160,9 +178,10 @@ std::optional<uint8_t> first_free_player_slot(
 		    !connection_claims_player_slot(connection)) continue;
 		occupied[connection.reply.player_slot] = true;
 	}
+	const bool remote = joining != nullptr && joining->type == NapiNPConnection::kTypeServerSide;
 	const std::size_t bounded_capacity =
 			std::min<std::size_t>(slot_capacity, occupied.size());
-	for (std::size_t slot = 0; slot < bounded_capacity; ++slot) {
+	for (std::size_t slot = remote ? 1 : 0; slot < bounded_capacity; ++slot) {
 		if (!occupied[slot]) return static_cast<uint8_t>(slot);
 	}
 	return std::nullopt;
@@ -196,10 +215,12 @@ std::optional<uint8_t> Server_ReservePlayerSlot(
 
 uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		const world::World &world) {
+		const world::World &world, const HostRotation *rotation) {
 	if (!conn.assigned_team_valid) {
 		conn.assigned_team =
-				assign_player_team(config, is_in_session, roster, conn, world);
+				assign_player_team(config, is_in_session, roster, conn, world,
+						rotation != nullptr ? rotation->side_team
+											: std::array<uint8_t, 2>{1, 2});
 		conn.assigned_team_valid = true;
 	}
 	return conn.assigned_team;
@@ -210,9 +231,22 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// The team-change list starts every round empty
 	// [orig: CBufferList_Free(g_TeamChangeEntityList) @0x51C911..0x51C92A].
 	ctx.team_change_entities.clear();
+	// banlist.txt: freed, and reloaded on a NovaWorld authority session
+	// [orig: sub_436EB0 @0x51c92f -> BanList_InitFromMission @0x5098f0].
+	Server_ReloadPcidBanList(ctx);
+	// banned.txt: zeroed and re-read, authority or not
+	// [orig: @0x51cb25..0x51cb3b].
+	Server_ReloadAddressBanList(ctx);
 	// The designation table clears on every round init, authority or not
 	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
 	ctx.designations.fill(ServerDesignation{});
+	// The punt table clears on every round init too [orig: memset(&g_PuntLog,
+	//  0, 0x7000) @0x51c990, outside the authority test].
+	if (ctx.logs.punt != nullptr) ctx.logs.punt->clear_records();
+	// The LASTGAME toggle clears only here, at the session's create and
+	// destroy, so it holds across the map changes between them (§5.70.3)
+	// [orig: `mov g_LastGameToggle, 0` @0x51CAA4].
+	if (ctx.rotation != nullptr) ctx.rotation->last_game = false;
 	if (!ctx.is_authority) return;
 	// Server_ResetRoundCounters copies the configured StartDelay seconds into the
 	// one live pre-round timer. Keep the timer on World: it is the authority
@@ -249,7 +283,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// Server_PositionPlayerForSpawn's team switch @0x50d266]
 	spawn.team = Server_ReservePlayerTeam(
 			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
-			conn, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
+			conn, world, ctx.rotation); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	// The join spawn enters the no-pick arm (Server_OnPlayerJoin passes spawn
 	// handle low word 0, which Server_ResolveSpawnTargetHandle rejects), where
 	// a spectator slot is POSITIONED with the substitute team (Co-op 1; team
@@ -466,6 +500,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		conn.reply.state6_entry_host_ms_valid = true;
 	}
 	conn.reply.player_slot_reserved = false;
+	// The /PROFILE roster row, late in the add [orig: Server_PlayerAdd
+	//  @0x51d2fd..0x51d30f -> CServerLog_WritePlayerNameRecord].
+	if (ctx.logs.profile != nullptr) {
+		if (const world::Entity *added = world.registry.get(h)) ctx.logs.profile->write_player(*added);
+	}
 	return h;
 }
 
