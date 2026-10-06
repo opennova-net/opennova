@@ -59,6 +59,8 @@ enum class DocumentTypeId {
 	Text,        // any other text, as the file stores it: a configuration, a text, and each text kind no
 	             // structured type edits yet, its engine reader's findings its own (DI-06)
 	Texture,     // a .tga .mdt .pcx .dds .png: its texels as the game reads them (ADR 0046 S18)
+	SoundBank,     // a .lwf: its waves and its sets, their layers and members (the sound lane)
+	SoundProfiles, // SndProf.def: its profiles and each one's 51 slots (the sound lane)
 	kCount, // the number of values, None among them
 };
 

@@ -18,6 +18,7 @@
 #include <editor/session/project_session.h>
 
 #include "authoring/child_process.h"
+#include "authoring/preview_sound_player.h"
 #include "authoring/thumbnail_images.h"
 #include "devtools/imgui_pass_node.h"
 #include "mission/mission_object_placer.h"
@@ -172,9 +173,10 @@ private:
 	void serve_queued_device_requests_();
 	// A device's notice for the person (an edit it refused), on the status line as an error.
 	void post_device_notice_(const std::string &p_text);
-	// The workspace's sound (play_sound, the session's): the project's wave at `p_path` (project-relative) read
-	// and decoded off the frame, played at the pump that finds it decoded; stopped, a decode in flight dropped.
-	void play_sound_(const std::string &p_path);
+	// The workspace's sound (play_sound, the session's): its voices, each a project wave read and decoded off
+	// the frame, played together at the pump that finds them decoded (the one preview player); stopped, a
+	// decode in flight dropped.
+	void play_sound_(const std::vector<opennova::editor::WorkspaceView::Voice> &p_voices);
 	void stop_sound_();
 	// The pump's half: the session's sound followed (a play of a new serial started, one it no longer plays
 	// stopped), and how it goes reported back (ProjectSession::report_sound: playing, ended, failed).
@@ -243,19 +245,10 @@ private:
 	PackedStringArray play_engine_args_;
 	FileDialog *picker_ = nullptr;
 	opennova::editor::PickPurpose pending_pick_ = opennova::editor::PickPurpose::None;
-	// The player of a project's wave (the workspace's sound: Files' card, play_sound), made with the first; a
-	// child, freed with it. The decode in flight (a worker's: the bytes read and decoded as the game decodes
-	// them), the file it plays or will, the session's play it is (its serial) and whether it was reported playing.
-	AudioStreamPlayer *sound_ = nullptr;
-	struct SoundDecode {
-		bool decoded = false;
-		std::string error;
-		opennova::lwf::WavPcm pcm;
-	};
-	std::future<SoundDecode> sound_job_;
-	std::string sound_path_;
+	// The one preview player (the workspace's sound: Files' card, a set's or a slot's Play, play_sound), made
+	// with the EditorApp, its players children of it; the session's play it plays (its serial).
+	std::unique_ptr<PreviewSoundPlayer> sound_;
 	uint64_t sound_serial_ = 0;
-	bool sound_reported_playing_ = false;
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window
