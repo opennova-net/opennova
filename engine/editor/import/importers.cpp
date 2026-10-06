@@ -2,7 +2,8 @@
 // the texture file its uses read, by its record's options; a TGA or a PCX too, where a record makes it a
 // source (Replace, Edit externally). The terrain importer (import/terrain_import, S20): a terrain set made
 // into a terrain's files. The font importer (import/font_import): a font set's glyph sheet made into the
-// .fnt the menus and the HUD write with.
+// .fnt the menus and the HUD write with. The wave importer (import/wave_source, the sound lane): a wave its
+// record makes a source written in the form the game plays.
 #include <editor/import/importer.h>
 
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include <editor/import/font_import.h>
 #include <editor/import/terrain_import.h>
 #include <editor/import/texture_import.h>
+#include <editor/import/wave_source.h>
 #include <editor/project/project_files.h>
 
 namespace opennova::editor {
@@ -46,6 +48,15 @@ const std::vector<Importer> &importers() {
 		font.folder = asset_kind_row(AssetKind::Font).folder;
 		font.run = run_font_import;
 		rows.push_back(std::move(font));
+		// The sound lane: a wave a record makes a source of, written in the form the game plays.
+		Importer wave;
+		wave.id = "wave";
+		wave.version = kWaveImporterVersion;
+		wave.record_extensions = {".wav"};
+		wave.default_options = {{"channels", "mono"}, {"bits", "keep"}, {"rate", "keep"}};
+		wave.options = wave_import_option_rows();
+		wave.run = run_wave_import;
+		rows.push_back(std::move(wave));
 		return rows;
 	}();
 	return table;
