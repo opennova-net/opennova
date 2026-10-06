@@ -147,6 +147,10 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 			RequestNames first;
 			first.unresolved = true;
 			first.text = text_at(path);
+			// Its kinds named in a blank of the type that opens the file as the scan read it (a string table's
+			// .bin by its content, DI-15's Add it there), as the fix's wire form named them.
+			const std::unique_ptr<Document> blank = first.text ? nullptr : blank_names_for(view(), path);
+			first.document = blank.get();
 			EditorRequest unread;
 			ok = editor_request_from_json(json, unread, error, &first);
 			if (ok)
