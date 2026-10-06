@@ -355,6 +355,48 @@ bool MenuDriver::navigate_to_screen(const String &p_name) {
 }
 bool MenuDriver::pop_screen() { return runtime_.pop_screen(); }
 
+namespace {
+PackedStringArray history_row_to_gd(const opennova::menu::ScreenHistoryRow &p_row) {
+	PackedStringArray out;
+	out.push_back(to_gd(p_row.file));
+	out.push_back(to_gd(p_row.screen));
+	return out;
+}
+} // namespace
+
+void MenuDriver::push_screen_history(const String &p_file, const String &p_screen) {
+	runtime_.screen_history().push(to_std(p_file), to_std(p_screen));
+}
+
+PackedStringArray MenuDriver::pop_screen_history() {
+	opennova::menu::ScreenHistoryRow row;
+	return runtime_.screen_history().pop(&row) ? history_row_to_gd(row) : PackedStringArray();
+}
+
+void MenuDriver::clear_screen_history() { runtime_.screen_history().clear(); }
+void MenuDriver::trim_screen_history() { runtime_.trim_screen_history(); }
+
+int MenuDriver::get_screen_history_depth() const { return runtime_.screen_history().size(); }
+
+Array MenuDriver::get_screen_history() const {
+	Array out;
+	for (const opennova::menu::ScreenHistoryRow &row : runtime_.screen_history().rows()) {
+		Dictionary entry;
+		entry["file"] = to_gd(row.file);
+		entry["screen"] = to_gd(row.screen);
+		entry["mark"] = row.mark;
+		out.push_back(entry);
+	}
+	return out;
+}
+
+void MenuDriver::leave_menu_mode() { runtime_.leave_menu_mode(); }
+
+PackedStringArray MenuDriver::return_to_menu_mode() {
+	opennova::menu::ScreenHistoryRow row;
+	return runtime_.return_to_menu_mode(&row) ? history_row_to_gd(row) : PackedStringArray();
+}
+
 // The runtime's events, relayed synchronously: observers may re-enter the
 // driver from a signal (a cross-.mnu jump swaps the document).
 void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
@@ -967,6 +1009,16 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("show_screen", "name"), &MenuDriver::show_screen);
 	ClassDB::bind_method(D_METHOD("navigate_to_screen", "name"), &MenuDriver::navigate_to_screen);
 	ClassDB::bind_method(D_METHOD("pop_screen"), &MenuDriver::pop_screen);
+	ClassDB::bind_method(D_METHOD("push_screen_history", "file", "screen"),
+			&MenuDriver::push_screen_history);
+	ClassDB::bind_method(D_METHOD("pop_screen_history"), &MenuDriver::pop_screen_history);
+	ClassDB::bind_method(D_METHOD("clear_screen_history"), &MenuDriver::clear_screen_history);
+	ClassDB::bind_method(D_METHOD("trim_screen_history"), &MenuDriver::trim_screen_history);
+	ClassDB::bind_method(D_METHOD("get_screen_history_depth"),
+			&MenuDriver::get_screen_history_depth);
+	ClassDB::bind_method(D_METHOD("get_screen_history"), &MenuDriver::get_screen_history);
+	ClassDB::bind_method(D_METHOD("leave_menu_mode"), &MenuDriver::leave_menu_mode);
+	ClassDB::bind_method(D_METHOD("return_to_menu_mode"), &MenuDriver::return_to_menu_mode);
 
 	ClassDB::bind_method(D_METHOD("widget_id", "name"), &MenuDriver::widget_id);
 	ClassDB::bind_method(D_METHOD("widget_name_of", "id"), &MenuDriver::widget_name_of);

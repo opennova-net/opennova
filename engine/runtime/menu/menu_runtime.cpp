@@ -250,6 +250,21 @@ bool MenuRuntime::pop_screen() {
 	return false;
 }
 
+void MenuRuntime::leave_menu_mode() {
+	// Retail's one history already holds this file's screens below the current one;
+	// the runtime's own back stack is that part of it, so it moves over first.
+	for (const std::string &screen : nav_stack_) history_.push(menu_file_, screen);
+	nav_stack_.clear();
+	// The screen the menu mode is left on, and the mark on it.
+	// [orig: UIScene_MarkScreenHistory @0x63c3d0, from @0x54e514]
+	history_.mark(menu_file_, current_screen_);
+}
+
+bool MenuRuntime::return_to_menu_mode(ScreenHistoryRow *out) {
+	// [orig: UIScene_ReturnToHistoryScreen @0x63dfa0, pop_extra 1 @0x552680]
+	return history_.return_to_mark(true, out);
+}
+
 void MenuRuntime::on_screen_shown_() {
 	// The activate dispatch's STARTUP leg sets the screen's VERSION label to the
 	// build's version text, the game's own (gameprofile::GameProfile::version_text;

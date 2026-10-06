@@ -205,6 +205,21 @@ public:
 	bool navigate_to_screen(const String &p_name);
 	bool pop_screen();
 
+	// --- the screen history across menu files and a mission (engine
+	// menu/screen_history.h, kept by the runtime across open_document) ---
+	// A row is [file, screen]; an empty array is no row.
+	void push_screen_history(const String &p_file, const String &p_screen);
+	PackedStringArray pop_screen_history();
+	void clear_screen_history();
+	void trim_screen_history();
+	int get_screen_history_depth() const;
+	// The rows bottom first, each {file, screen, mark}.
+	Array get_screen_history() const;
+	// The menu mode's leave (a mission's start) and its re-entry, which answers
+	// the row to show again.
+	void leave_menu_mode();
+	PackedStringArray return_to_menu_mode();
+
 	// --- widget addressing / state (doc-id keyed) ---
 	int widget_id(const String &p_name) const;
 	String widget_name_of(int p_id) const;

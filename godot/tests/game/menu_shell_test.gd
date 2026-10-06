@@ -234,6 +234,69 @@ func test_in_game_back_requests_resume() -> void:
 	_cleanup(dir)
 
 
+# Leaving a mission returns to the screen it was started from, the history under
+# it kept (D-MNU-28, docs/mnu/menu-re.md; the engine half is ctest screen_history).
+# The start leaves the menu once: a restart's reload marks nothing more. In the
+# mission a back pops nothing past the mark, so it resumes.
+func test_mission_return_shows_the_screen_it_was_started_from() -> void:
+	var dir := _make_dir()
+	TestFs.write_bytes(self, dir.path_join("game.mnu"),
+			MenuDriverFixture.screen_xml("INGAME", "").to_utf8_buffer())
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	driver.menu_requested.emit("sp.mnu", "")
+	assert_eq(shell.get_current_menu_file(), "sp.mnu")
+	assert_eq(driver.get_current_screen(), "LOADOUT")
+	# The mission's start.
+	shell.leave_menu_mode()
+	shell.leave_menu_mode()
+	assert_eq(driver.get_screen_history(), [
+		{"file": "main.mnu", "screen": "STARTUP", "mark": false},
+		{"file": "sp.mnu", "screen": "LOADOUT", "mark": false},
+		{"file": "", "screen": "", "mark": true},
+	], "the screen the mission starts from, under its mark, laid once")
+	# The in-game menu: its back never reaches the menu's screens.
+	assert_true(shell.open_ingame_menu(), "the in-game overlay loads")
+	watch_signals(shell)
+	driver.quit_requested.emit()
+	assert_signal_emitted(shell, "resume_requested")
+	assert_eq(shell.get_current_menu_file(), "game.mnu", "the back popped no menu screen")
+	assert_eq(shell.get_menu_stack_depth(), 3)
+	# LEAVE MISSION -> Yes: the shell's teardown re-enters the menu.
+	assert_true(shell.setup(shell.get_resource_root()))
+	assert_eq(shell.get_current_menu_file(), "sp.mnu", "back on the file the mission left")
+	assert_eq(driver.get_current_screen(), "LOADOUT", "back on the screen the mission left")
+	assert_eq(shell.get_menu_stack_depth(), 1, "STARTUP is still under it")
+	# Its back is the menu's again.
+	driver.quit_requested.emit()
+	assert_eq(shell.get_current_menu_file(), "main.mnu")
+	assert_eq(driver.get_current_screen(), "STARTUP")
+	assert_eq(shell.get_menu_stack_depth(), 0)
+	_cleanup(dir)
+
+
+# An entry that is no return from a mission (the same root again with no mission
+# between) opens the main menu's first screen with an empty history.
+func test_setup_without_a_mission_opens_the_main_menu() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	shell.get_driver().menu_requested.emit("sp.mnu", "")
+	assert_eq(shell.get_menu_stack_depth(), 1)
+	assert_true(shell.setup(shell.get_resource_root()))
+	assert_eq(shell.get_current_menu_file(), "main.mnu")
+	assert_eq(shell.get_driver().get_current_screen(), "STARTUP")
+	assert_eq(shell.get_menu_stack_depth(), 0)
+	_cleanup(dir)
+
+
 func test_ingame_hidden_back_button_resumes() -> void:
 	# game.mnu's ONLY resume affordance is the ESC-hotkeyed, actionless
 	# HIDDEN_BACK button (empty appearances, NOT hidden) — the retail Command

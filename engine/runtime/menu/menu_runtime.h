@@ -21,6 +21,7 @@
 
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_table_row.h>
+#include <runtime/menu/screen_history.h>
 
 #include <cstdint>
 #include <functional>
@@ -277,6 +278,30 @@ public:
 	// (QuitRequested, returns false).
 	bool pop_screen();
 
+	// ---- the screen history across files and a mission (screen_history.h) ----
+	// One history for every menu file the runtime shows: open_document leaves it.
+	// The shell pushes the screen a cross-file jump leaves and pops a row when a
+	// back passes this file's own stack.
+	ScreenHistory &screen_history() { return history_; }
+	const ScreenHistory &screen_history() const { return history_; }
+	// The menu mode's leave, at a mission's start: the screens this file's own back
+	// stack holds join the history in order (retail keeps one history for every
+	// file it has loaded), then the current screen is marked.
+	// [orig: Menu_TeardownShellAndCloseBinkVideos @0x54e430 (the MainMenu mode's
+	//  teardown slot @0x83b42c, run on every mode switch, Game_MainLoop @0x52baff)
+	//  -> UIScene_MarkScreenHistory @0x54e514]
+	void leave_menu_mode();
+	// The menu mode's re-entry after a mission: back to the mark, and the screen
+	// under it (true, the row in *out) for the shell to show again with no push.
+	// [orig: Menu_InitShellResources @0x552500, the kept scene's branch @0x552670
+	//  -> UIScene_ReturnToHistoryScreen(scene, 1) @0x552682]
+	bool return_to_menu_mode(ScreenHistoryRow *out);
+	// An in-game screen's close: the rows its screens pushed above the mission's
+	// mark are dropped, the mark kept.
+	// [orig: UI_CloseMenuScreen @0x54e5e0 -> UIScene_ReturnToHistoryScreen(scene, 0)
+	//  @0x54e635]
+	void trim_screen_history() { history_.return_to_mark(false, nullptr); }
+
 	// ---- addressing (document-wide, doc-id keyed) ----
 	// Case-insensitive, first match in document order; -1 = absent.
 	int widget_id(const std::string &name) const;
@@ -466,6 +491,7 @@ private:
 	std::string game_code_; // set_game_code
 	std::string current_screen_;
 	std::vector<std::string> nav_stack_;
+	ScreenHistory history_; // kept across open_document
 	std::unordered_map<std::string, int> screen_ids_; // upper name -> screen id
 	std::vector<std::string> screen_order_;
 	std::unordered_map<std::string, int> name_to_id_; // upper name -> first doc id
