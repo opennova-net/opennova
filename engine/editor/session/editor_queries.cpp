@@ -49,6 +49,7 @@
 #include <editor/session/script_assist.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
+#include <editor/session/texture_budget_list.h>
 #include <editor/session/texture_import_state.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view_json.h>
@@ -1401,6 +1402,25 @@ JsonValue answer_texture_uses(const QueryContext &context, const QueryArgs &args
 	return out;
 }
 
+constexpr QueryParam kTextureBudgetParams[] = {
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+// What the project's model textures cost the game (ADR 0046 S18, session/texture_budget_list).
+JsonValue answer_texture_budget(const QueryContext &context, const QueryArgs &args, std::string &) {
+	const TextureBudgetList list = texture_budget_list(context.core.view());
+	const JsonPage page = page_of(args);
+	JsonValue out = JsonValue::make_object();
+	out.set("totals", texture_budget_totals_json(list));
+	set_page(out, page, list.rows.size());
+	JsonValue rows = JsonValue::make_array();
+	for (size_t i = page.first(list.rows.size()); i < page.last(list.rows.size()); ++i)
+		rows.push(texture_budget_row_json(list.rows[i]));
+	out.set("textures", std::move(rows));
+	return out;
+}
+
 constexpr QueryParam kImportOptionsParams[] = {
 	{ "path", J::String, true, nullptr,
 			"An import source of the project (a file holding its .import record), or a file an import "
@@ -1812,6 +1832,18 @@ constexpr EditorQueryRow kRows[] = {
 			"loader opens) and context (a model row's material, slot, type, row_flags, shader, alpha_test, "
 			"alpha_ref; key; hud_mode).")
 			.pages("uses")
+			.row,
+	Query(K::TextureBudget, "texture_budget", answer_texture_budget, kTextureBudgetParams,
+			concern_set({ C::Graph, C::Files, C::Documents, C::DocumentSet }),
+			"What the project's model textures cost the game (ADR 0046 S18): totals {detail (the bytes of every "
+			"texture at each object texture detail level, 0 the lowest to 3 full), as_dds (the same at full "
+			"detail had every texture whose loader reads a .dds first that .dds), textures, past_warning (how "
+			"many hold more than the texture.memory warning)} and a page of textures, the costliest first at "
+			"full detail: each texture the game makes for the model rows (one a name written, any case, the "
+			"stage and plain loaders sharing it, the normal-map loader's apart), its name (as its first row "
+			"writes it), file (the file its loader opens), uses (how many rows take it) and its budget as "
+			"texture_uses gives it.")
+			.pages("textures")
 			.row,
 	Query(K::ImportOptions, "import_options", answer_import_options, kImportOptionsParams,
 			concern_set({ C::Files, C::Graph, C::Documents, C::DocumentSet }),
