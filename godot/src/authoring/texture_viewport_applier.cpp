@@ -19,7 +19,8 @@ namespace {
 
 // The picture: each pixel's first-level texel by the camera; the background off the texture; the
 // level's texel (nearest, or filtered where a texel covers less than a pixel) through the channels
-// shown; the checkerboard 8 pixels a square, behind the colour by its alpha.
+// shown (a normal map lit, 6, is the viewport's lit picture drawn as its colour); the checkerboard 8 pixels a
+// square, behind the colour by its alpha.
 constexpr const char *kShader = R"(shader_type canvas_item;
 uniform sampler2D level_nearest : filter_nearest, repeat_disable;
 uniform sampler2D level_linear : filter_linear, repeat_disable;
@@ -40,7 +41,7 @@ void fragment() {
 		vec4 c = nearest ? texture(level_nearest, uv) : texture(level_linear, uv);
 		float check = mod(floor(pixel.x / 8.0) + floor(pixel.y / 8.0), 2.0);
 		vec3 board = mix(vec3(0.40), vec3(0.62), check);
-		if (channels == 0) COLOR = vec4(c.rgb, 1.0);
+		if (channels == 0 || channels == 6) COLOR = vec4(c.rgb, 1.0);
 		else if (channels == 1) COLOR = vec4(vec3(c.r), 1.0);
 		else if (channels == 2) COLOR = vec4(vec3(c.g), 1.0);
 		else if (channels == 3) COLOR = vec4(vec3(c.b), 1.0);
