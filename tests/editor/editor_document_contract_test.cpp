@@ -350,6 +350,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Credits, "nlist.kda", credits_in_cbin()},
 	        {AssetKind::Shader, "glass.fx", shader_in_scr("// glass\r\nfloat4 main() : COLOR { return 0; }\r\n")},
 	        {AssetKind::Config, "game.cfg", text_bytes("[Game]\r\nname = Contract\r\n")},
+	        // The HUD layout (DI-20): hudpos.def, its text.
+	        {AssetKind::HudPosDefs, "hudpos.def", text_bytes("StaticFrame frame.tga 6,586\r\nHUDHEALTH 25,741,177,751\r\n")},
 	        // The texture type (S18): a TGA, a PCX and a DDS, minted by our writers.
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
 	        {AssetKind::Texture, "sky.pcx", minted_pcx()},
@@ -476,6 +478,9 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        // (DI-06: text.reader).
 	        {AssetKind::AvatarDefs, "Avatars.def",
 	         text_bytes("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n")},
+	        // A HUD layout with an LF alone, which the game's reader reads as part of the line before it
+	        // (DI-20: hud_layout.line_ending).
+	        {AssetKind::HudPosDefs, "hudpos.def", text_bytes("HUDHEALTH 25,741,177,751\nHUDCLIP 14,648\r\n")},
 	        // A 2 x 2 true-colour TGA, its origin bit set (S18: texture.tga_upside_down).
 	        {AssetKind::Texture, "top_first.tga", top_first_tga()},
 	        // The sound lane: a bank naming a wave twice, a profile named twice.
