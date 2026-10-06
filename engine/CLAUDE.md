@@ -91,8 +91,12 @@
     project's files: the graph's update, each file's own findings, the use checks, the graph's
     findings), `import` (the importers: a PNG to the texture file its uses read, by the
     record's options, each a row of its importer's (S18), the `.import` sidecars, the import pass
-    whose outputs the scan lists; and the
-    one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
+    whose outputs the scan lists; the terrain importer (S20: a terrain set's images to a terrain's files,
+    `terrain_import`); and the
+    one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `terrain`
+    (S20: TrnGen.exe's terrain bake ported, a depth map to the `.cpt`'s depth atlas and ground mesh,
+    its tile files kept in memory, its nodes of one quadtree level made side by side: a port, cited
+    `[orig: TrnGen.exe ...]`), `preview`
     (the viewports, S13 V5: a document's picture as the game would draw it, one per (document,
     kind) from a compiled-in kind table (`viewport_kinds`: the menu's and the model's, each a
     Preview or a Main role), kept by the session (`viewports`, with the one preview clock) and
@@ -217,9 +221,7 @@
   streaming encoder wants), `io/fixed.h` (16.16 / 2.14), `io/log.h` (the diagnostic
   sink), `io/strutil.h` ASCII case-insensitive helpers, `io/os_path.h` (a UTF-8 path
   string at an OS file call: `os_path`, `fopen_utf8`, `utf8_path`; Windows reads a
-  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`),
-  `io/file_io.h` (whole-file reads and the atomic `.tmp`-then-rename write over
-  `os_path`, the rename's bounded retry). Do not hand-roll a new byte
+  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`). Do not hand-roll a new byte
   reader; migrate existing per-lib copies on-touch (delegate the
   body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
   The 16.16 / 2.14 scales are `io/fixed.h`'s `kFp16One` (float), `kFp16OneD`
@@ -239,13 +241,14 @@
   their own clamp semantics. `engine/formats/cpt` reads through the shared
   `io::BitReader` but keeps its own bit WRITER (a normalizing `set_position` and a
   `write_to_file`); `io/bit_stream.h` carries no writer, and replacing cpt's is a real
-  migration needing a CPT-corpus byte diff, not a swap. That byte diff is the
-  re-encode leg of the gated `tests/terrain/cpt_jo_assets_sweep_test` (ctest
-  `cpt_jo_assets_sweep`, `--suite retail`: every retail .cpt read by `load_cpt` and
-  written again by `CptFile::write_bytes`, byte for byte); `tests/cpt/cpt_roundtrip_test`
-  (ctest `cpt_roundtrip`) pins the bit codec and the DPTH/CDEP/POLY round-trips on
-  synthetic buffers in core, so run the retail suite whenever you touch the CPT
-  encoder. Three more stay
+  migration needing a CPT-corpus byte diff, not a swap. That byte diff is
+  NOT in ctest today: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) pins the
+  bit codec and the DPTH/CDEP/POLY round-trips on synthetic buffers only, so run a
+  retail-corpus byte diff by hand whenever you touch the CPT encoder:
+  `editor_terrain_bake_test --reencode <the extracted retail tree>` reads and writes every
+  `.cpt` again (all 23 of JO:CA's byte-identical since S20), and `editor_terrain_bake_test
+  <dir>` bakes the retired TrnGen corpus (`git show d57608b3d^:fixtures/terrain`) against
+  TrnGen's own `.cpt` files. Three more stay
   by design: `formats/bink`'s
   `BitReader` is a fail-latching decoder contract (`peek`, `align32`, the first short
   read poisons it), the `wire_cursor` posture rather than `io::BitReader`'s lenient

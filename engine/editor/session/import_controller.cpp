@@ -3,16 +3,21 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <filesystem>
+#include <iterator>
 #include <map>
 #include <set>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #include <base/io/file_time.h>
 #include <base/io/strutil.h>
+#include <editor/import/import_context.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
 #include <editor/import/sidecar.h>
+#include <editor/import/terrain_import.h>
 #include <editor/import/texture_source.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
@@ -29,6 +34,8 @@
 #include <editor/session/texture_import_state.h>
 #include <editor/session/view/view_events.h>
 #include <editor/session/workspace_parts.h>
+
+namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
@@ -237,6 +244,134 @@ void ImportController::replace_texture(const EditorRequest &request) {
 	core_.note("Replaced " + plan.texture + " with " + basename_of(image) + ": " + plan.source + " makes it now, as its import record says" +
 	           (plan.replaced.empty() ? std::string(".") : "; the file it replaced is kept under " + std::string(kReplacedFolder) + "/."));
 	reimport(plan.source, true);
+}
+
+// A terrain made from images (S20): every value checked and every image read and checked before a byte
+// is written, then the copies, the set and its record written (each taken back should one fail), then
+// the refresh that imports the set.
+void ImportController::new_terrain(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	const AssetScan &scan = *view_.project.scan;
+	std::string stem = basename_of(request.path);
+	for (const char *extension : {".trn", kTerrainSetExtension})
+		if (strutil::ends_with_icase(stem, extension)) stem.resize(stem.size() - std::char_traits<char>::length(extension));
+	std::string why;
+	if (!terrain_stem_fits(stem, why)) return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + why + ".");
+	const std::string folder = "art/terrain";
+	const std::string set_path = folder + "/" + stem + kTerrainSetExtension;
+	// Its files' names are the project's to give: none may be taken (the game's names are flat).
+	std::vector<std::string> names = terrain_output_names(stem, true);
+	names.push_back(stem + kTerrainSetExtension);
+	for (const std::string &name : names)
+		if (const AssetEntry *taken = scan.find(name))
+			return core_.refuse_now(CoreFinding::ImportTerrain,
+			                        "No terrain made: the terrain " + stem + " makes " + name + ", and the project has " +
+			                                taken->relative_path + " of that name already. Choose another name.",
+			                        taken->relative_path);
+
+	// The values: the images by their set keys, the importer's options by theirs.
+	static const char *const kImageKeys[] = {"heightmap", "colormap", "detail", "tiles"};
+	std::map<std::string, std::string> images;
+	ImportOptions options;
+	for (const auto &[key, value] : request.values) {
+		const bool image = std::find_if(std::begin(kImageKeys), std::end(kImageKeys),
+		                                [&](const char *k) { return key == k; }) != std::end(kImageKeys);
+		if (image) {
+			if (!value.empty()) images[key] = value;
+		} else if (import_option_row(terrain_import_option_rows(), key)) {
+			if (!value.empty()) options[key] = value;
+		} else {
+			return core_.refuse_now(CoreFinding::ImportTerrain,
+			                        "No terrain made: a new terrain takes heightmap, colormap, detail, tiles, top, water and "
+			                        "layout; '" + key + "' is none of them.");
+		}
+	}
+	if (!images.count("heightmap") || !images.count("colormap"))
+		return core_.refuse_now(CoreFinding::ImportTerrain,
+		                        "No terrain made: a terrain is made from its heightmap and its colormap; values names both.");
+	TerrainImportSettings settings;
+	std::string field;
+	if (!terrain_import_settings(options, settings, why, field))
+		return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + why);
+
+	// Each image read and checked; a file of the project named where it is, any other copied in.
+	struct Copy {
+		std::string to; // project-relative
+		std::vector<uint8_t> bytes;
+	};
+	std::vector<Copy> copies;
+	TerrainSet set;
+	const fs::path root = path_of(view_.project.root).lexically_normal();
+	for (const char *key : kImageKeys) {
+		const auto given = images.find(key);
+		if (given == images.end()) continue;
+		const std::string file = path_of(given->second).is_absolute() ? given->second : join_path(view_.project.root, given->second);
+		std::vector<uint8_t> bytes;
+		std::string message;
+		if (!read_file_bytes(file, bytes, message))
+			return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: the " + std::string(key) + " " + given->second +
+			                                                            " could not be read: " + message + ".");
+		const std::string name = basename_of(given->second);
+		bool fits = false;
+		if (std::string(key) == "heightmap") {
+			TerrainHeights heights;
+			fits = decode_terrain_heightmap(name, bytes, settings.top, heights, why);
+		} else {
+			RgbaImage image;
+			fits = decode_terrain_image(key, name, bytes, image, why);
+		}
+		if (!fits) return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + why + ".");
+		std::string named;
+		const fs::path within = path_of(file).lexically_normal().lexically_relative(root);
+		std::string inside, relative;
+		if (!within.empty() && ImportContext::resolve(view_.project.root, view_.project.root, utf8_of(within), inside, relative)) {
+			named = utf8_of(path_of(relative).lexically_relative(path_of(folder)));
+		} else {
+			const std::string extension = strutil::to_lower(utf8_of(path_of(name).extension()));
+			named = stem + "_" + key + extension;
+			const std::string to = folder + "/" + named;
+			std::error_code ec;
+			if (scan.at_path(to) || fs::exists(system_path(join_path(view_.project.root, to)), ec))
+				return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: the project has " + to + " already.", to);
+			copies.push_back({to, std::move(bytes)});
+		}
+		if (std::string(key) == "heightmap") set.heightmap = named;
+		else if (std::string(key) == "colormap") set.colormap = named;
+		else if (std::string(key) == "detail") set.detail = named;
+		else set.tiles = named;
+	}
+
+	// Written: the copies, the set, its record; what was written taken away again should one fail.
+	std::vector<std::string> written;
+	const auto put_back = [&] {
+		std::error_code ec;
+		for (const std::string &path : written) fs::remove(system_path(join_path(view_.project.root, path)), ec);
+	};
+	std::error_code ec;
+	fs::create_directories(system_path(join_path(view_.project.root, folder)), ec);
+	const std::vector<uint8_t> set_bytes = write_terrain_set(set);
+	copies.push_back({set_path, set_bytes});
+	for (const Copy &copy : copies) {
+		std::string message;
+		if (!write_file_atomic(join_path(view_.project.root, copy.to), copy.bytes.data(), copy.bytes.size(), message)) {
+			put_back();
+			return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + copy.to + " could not be written: " + message + ".",
+			                        copy.to);
+		}
+		written.push_back(copy.to);
+	}
+	ImportSidecar record;
+	record.importer = "terrain";
+	record.version = kTerrainImporterVersion;
+	record.options = options;
+	Diagnostic error;
+	if (!save_import_sidecar(join_path(view_.project.root, set_path + kImportSidecarSuffix), record, error)) {
+		put_back();
+		return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + error.message, set_path);
+	}
+	core_.note("Made the terrain set " + set_path + " (" + std::to_string(copies.size() - 1) + " image(s) copied in): importing it makes " +
+	           stem + ".trn, " + stem + ".cpt and their textures.");
+	reimport(set_path, true);
 }
 
 void ImportController::preview_texture_source(const EditorRequest &request) {
