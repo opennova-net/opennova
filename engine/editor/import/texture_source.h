@@ -63,8 +63,10 @@ struct TextureSourcePlan {
 
 // Replace: the texture `texture` (a project file by its path or logical name, an import's output, or a name
 // the project lacks: a texture a field names that is missing) made from the image `image_bytes` named
-// `image_name` (a PNG, a TGA or a PCX the importer reads): the image copied into art/ (another name where a
-// file other than the texture's own source has it), its record's options those reproducing the texture's
+// `image_name` (a PNG, a TGA or a PCX the importer reads): the image copied into art/ under the texture's own
+// stem whatever the image is called (body.dds's art/body.png; `<stem>_src` where another file has that name;
+// an import's output keeps its source's path where the image is of its form), a TGA kept as a PNG of its
+// texels, its record's options those reproducing the texture's
 // stored form (an import output's: its import's own), the exact size its uses read where the image is
 // another, `overrides` over them. Refused: an image the importer does not read, a texture that is no texture
 // or no import's output, a cube map or a volume (the editor writes flat textures), an image of colours for a
@@ -75,13 +77,32 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 
 // Edit externally: the source a paint program edits for the texture `texture`: an import output's own
 // source (nothing to make: `source` its path, no bytes); a PNG the game reads as it is, itself; a plain
-// texture's one made once, a copy of a TGA or a PCX (which a paint program opens, an 8-bit PCX's indices
-// kept by palette indices, a 24-bit PCX's colours kept in three planes), a PNG of a DDS's first level as its
+// texture's one made once, a PNG of a TGA's or an MDT's texels or a copy of a PCX (which a paint program opens,
+// an 8-bit PCX's indices kept by palette indices, a 24-bit PCX's colours kept in three planes), a PNG of a DDS's first level as its
 // reader decodes it, its stored form reproduced and what changes said (a TGA stored top first drawn upright
 // from then on; a DDS's blocks encoded again and its chain made anew). Refused: no texture of the project of
 // that name, no texture (an import source of another importer), one the game cannot read, a cube map or a
 // volume.
 TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan &scan, const std::string &texture);
+
+// Store as DDS: the .tga `texture` (a project file by its path or logical name) stored as the .dds of its
+// name, which the loader of a model's diffuse, detail or flipbook row opens before the .tga
+// (renderer::material_texture_source [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B598]), so every
+// referrer keeps naming the .tga: DXT1 for a texture of no alpha, DXT5 for one with alpha, every level to
+// 1 x 1 (import/dxt_encode.h). A plain .tga becomes an import's output as Edit externally makes it one (its
+// copy in art/ under its own name where that is free, the plain file set aside), its record writing `<stem>.dds`; an
+// import's output's own record takes the same options (`source` its source, no bytes: the session sets
+// them). `reads_tga` holds, in words, each use of the texture whose loader opens the .tga itself and never
+// its .dds (a terrain's colour map, a model's plain row, the HUD's art): any refuses it, the texture lost
+// there. Refused too: no .tga, one that does not read, sides that are not powers of two (a DDS-reader
+// image of other sides is padded to the next ones: render-material-re D-RMAT-18).
+TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &scan, const std::string &texture,
+                                   const std::vector<std::string> &reads_tga);
+
+// The project file `relative` set aside under .replaced/<stamp>/ (its own folder kept; a stamp of its own), never
+// deleted: what a texture the game never reads is given (set_aside_texture). True where there is none; false, with
+// the finding, where it could not be moved.
+bool set_aside_project_file(const ProjectPaths &paths, const std::string &relative, std::vector<Diagnostic> &findings);
 
 // The plan done: the replaced files set aside under .replaced/<stamp>/ (their own folders kept; a stamp of
 // its own each time, to the millisecond and numbered past one already there), the source written, its record
