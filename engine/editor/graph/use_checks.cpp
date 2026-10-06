@@ -1,5 +1,6 @@
 #include <editor/graph/use_checks.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -13,6 +14,7 @@
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_validation.h>
 #include <editor/documents/mns_document.h>
+#include <editor/documents/strings_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/texture_checks.h>
@@ -195,9 +197,61 @@ void check_mission_pools(const AssetGraph &graph, const ValidationCache &files, 
 		if (files.records_checked(path)) out.insert(out.end(), findings.begin(), findings.end());
 }
 
+// The gametext keys a single-player mission's flow reads, by name, each where the game reads it; a key
+// the table lacks, or holds empty, reads "" and shows nothing there [orig: GameText_GetString, the miss
+// @0x51EC00; the section by its first name in any case, TextResource_FindEntryBySectionAndKey @0x75D250].
+struct FlowKey {
+	const char *section;
+	const char *key;
+	const char *shown; // what the game shows with it
+};
+constexpr FlowKey kFlowKeys[] = {
+	// [orig: HUD_ShowObjectiveNotification @0x5ba2e0, the key @0x5ba39b, posted @0x5ba3ae]
+	{"Misc", "STRMISC_NEWOBJECTIVE", "the chat line a newly shown objective posts first"},
+	// [orig: HUD_DrawWinConditions @0x5ba940, the heading @0x5ba986]
+	{"Overlays", "STROVER_MISSIONOBJECTIVES", "the objectives panel's heading"},
+	// [orig: HUD_DrawWaypointNameAndDistance @0x5947a0, @0x594956]
+	{"hud", "mto", "the waypoint label's words between its distance and its name"},
+	// [orig: HUD_GetWaypointName @0x594630, @0x59477b]
+	{"WPNames", "STRWPNAMEDEFAULT", "the name of a waypoint the mission's text names none for"},
+	// [orig: Cine_EpilogStateMachineUpdate @0x576240, the counters @0x5765e1, @0x576649, @0x5766c9, @0x57672a]
+	{"Epilog", "STREPILOG_OBJECTIVEBONUS", "the win screen's objectives line"},
+	{"Epilog", "STREPILOG_ENEMYUNITS", "the win screen's enemies line"},
+	{"Epilog", "STREPILOG_TEAMUNITS", "the win screen's team line"},
+	{"Epilog", "STREPILOG_FRIENDLYUNITS", "the win screen's friendly fire line"},
+	// [orig: Cinematic_EpilogUpdate @0x574491, the title @0x574623]
+	{"Overlays", "STROVER_MISSION_FAILED", "the lose screen's title"},
+	// [orig: @0x57471c (the lose screen), @0x5767b9 (the win screen)]
+	{"Epilog", "STREPILOG_KEYINFO", "the end screens' key help"},
+};
+
+// What a single-player mission reads of the project's gametext.bin (the boot's string table [orig:
+// Game_InitSubsystems @0x4a6fed]): where the project has a mission, each flow key the table's first
+// section of its name lacks, or holds empty, a warning on the table, read through the graph (its string
+// ids' symbols, each with its text).
+void check_gametext_flow(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
+		std::vector<Diagnostic> &out) {
+	const AssetEntry *table = input.scan.find("gametext.bin");
+	if (!table || !is_strings_kind(table->kind) || !files.records_checked(table->relative_path)) return;
+	const bool missions = std::any_of(input.scan.entries.begin(), input.scan.entries.end(),
+			[](const AssetEntry &entry) { return entry.kind == AssetKind::Mission; });
+	if (!missions) return;
+	for (const FlowKey &row : kFlowKeys) {
+		const GraphSymbol *symbol =
+				graph.resolve_symbol(ReferenceKind::TextId, row.key, std::string("GAMETEXT.BIN/") + row.section);
+		if (symbol && symbol->file == table->relative_path && !symbol->value.empty()) continue;
+		out.push_back(make_finding(finding_code(StringsFinding::FlowKeyMissing), DiagnosticSeverity::Warning,
+				std::string("A single-player mission reads ") + row.section + "/" + row.key + ", " + row.shown + ": " +
+						(symbol ? "it holds no text" : "the table has no such string") +
+						", so the game shows nothing there.",
+				table->relative_path));
+	}
+}
+
 // The cross-file checks, one row per asset kind, in AssetKind's order.
 constexpr UseCheckRow kUseChecks[] = {
 	{ AssetKind::Texture, check_texture_uses },
+	{ AssetKind::Strings, check_gametext_flow },
 	{ AssetKind::Mission, check_mission_pools },
 	{ AssetKind::MenuStyle, check_style_uses },
 };
