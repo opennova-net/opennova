@@ -168,7 +168,7 @@ inline EditorRequest replace_texture(std::string path, std::string image,
 	return request;
 }
 // A terrain named `name` made from images (S20: import/terrain_import.h): `values` names them
-// (heightmap, colormap, detail, tiles) and the importer's options (top, water, layout).
+// (heightmap, colormap, detail, tiles, surface) and the importer's options (top, water, layout).
 inline EditorRequest new_terrain(std::string name, std::vector<std::pair<std::string, std::string>> values) {
 	EditorRequest request = of(EditorRequestKind::NewTerrain);
 	request.path = std::move(name);
