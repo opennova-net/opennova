@@ -15,6 +15,7 @@
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
+#include <runtime/renderer/fp_viewmodel_spec.h>
 #include <runtime/world/player_present.h>
 #include <runtime/world/player_view.h>
 
@@ -271,22 +272,35 @@ void PlayerViewmodelRig::place_viewmodel_at_camera() {
 		return;
 	}
 	// The def cant plus the native authored ADS rotation; one basis rotates
-	// both the model and its view-local offset. The rig only maps axes.
+	// both the model and its view-local offset. The rig only maps axes. The
+	// composition is the engine's (renderer::fp_viewmodel_pose), which the
+	// editor's first-person eye places its viewmodel by too.
 	const Ref<Simulation> bias_sim = sim();
 	Vector3 rotation = rot_bias_def_;
 	if (bias_sim.is_valid()) rotation += bias_sim->local_player_viewmodel_rotation_bias_deg();
-	const Basis bias = Basis::from_euler(Simulation::viewmodel_bias_euler_rad(rotation));
-	const Basis vm_basis = bias * Basis::from_euler(Vector3(
-			Math::deg_to_rad(rot_.x), Math::deg_to_rad(rot_.y), Math::deg_to_rad(rot_.z)));
 	// The ADS pos -> tpos blend, the /256 scale, and the NoCardSwitch reload
 	// suppression run in the SIM (world/player_view.h player_view_bias_view_units,
-	// S8) -- one blended VIEW-FRAME offset per frame; viewmodel_view_offset
-	// maps the view axes onto Godot camera axes. Harness sim doubles implement
-	// the same seam.
+	// S8) -- one blended VIEW-FRAME offset per frame. Harness sim doubles
+	// implement the same seam.
 	// [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Bone(+0xF4) + the
 	//  interp bias; the interp CNetPlayerInterp_Setup @0x4df36e runs +0x10C ->
 	//  +0x124]
-	Vector3 view_offset = viewmodel_offset(pos_units_);
+	// The view/def frame is X = FORWARD, Y = LEFT, Z = UP -- proven by the aim
+	// ray's far point being {+65536000, 0, 0} through the SAME transform [orig:
+	// HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0, 0, 0) q16; the
+	// view-local rotate Math_FixedPointTransformPoint22 @0x4dd5d8]; the pose
+	// maps it onto Godot camera-local axes (x right, y up, -z forward):
+	//   view x (forward) -> Godot -z   (M4 tpos x -50.9 = ~0.2u BACK into the shoulder)
+	//   view y (left)    -> Godot -x
+	//   view z (up)      -> Godot  y   (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
+	// (The 2026-07-11 grill REFUTED the earlier x=right/y=forward reading: the
+	// AK's |x| ~= |y| masked the swap; the JOX/REVX M4 tpos made it glare -- the
+	// canted-ADS report. oscarmike's onhook-derived map agrees with the witnessed
+	// frame.) The velocity lead (>>7, clamps @0x4dd4f2..) and the prone Z drop
+	// (-1280 @0x4dd578) are recorded unported tails. Without a sim, the raw
+	// def units take the /256 scale the sim's blend otherwise applies [orig:
+	// flt_7D1D70=256 @0x544770].
+	Vector3 view_units = pos_units_ / static_cast<float>(Simulation::weapon_def_pos_scale());
 	if (bias_sim.is_valid()) {
 		// Sampling the viewport size is this rig's device work; the
 		// 4:3-or-narrower RULE the z drop keys on lives engine-side
@@ -300,12 +314,19 @@ void PlayerViewmodelRig::place_viewmodel_at_camera() {
 				vs = viewport->get_visible_rect().size;
 			}
 		}
-		view_offset = viewmodel_view_offset(bias_sim->local_player_viewmodel_bias_view_units(
-				pos_units_, tpos_units_, static_cast<int>(vs.x), static_cast<int>(vs.y)));
+		view_units = bias_sim->local_player_viewmodel_bias_view_units(
+				pos_units_, tpos_units_, static_cast<int>(vs.x), static_cast<int>(vs.y));
 	}
+	const float units[3] = { view_units.x, view_units.y, view_units.z };
+	const float bias_deg[3] = { rotation.x, rotation.y, rotation.z };
+	const float rig_deg[3] = { rot_.x, rot_.y, rot_.z };
+	const opennova::renderer::FpViewmodelPose pose = opennova::renderer::fp_viewmodel_pose(units, bias_deg, rig_deg);
+	const Basis vm_basis(pose.basis[0], pose.basis[1], pose.basis[2], pose.basis[3], pose.basis[4], pose.basis[5],
+			pose.basis[6], pose.basis[7], pose.basis[8]);
 	// An unchanged write would still dirty every part into the flush's
 	// transform notifications; a still view writes nothing.
-	const Transform3D next = cam->get_global_transform() * Transform3D(vm_basis, bias.xform(view_offset));
+	const Transform3D next = cam->get_global_transform() *
+			Transform3D(vm_basis, Vector3(pose.origin[0], pose.origin[1], pose.origin[2]));
 	if (node->get_global_transform() != next) {
 		node->set_global_transform(next);
 	}
@@ -396,30 +417,6 @@ void PlayerViewmodelRig::apply_viewmodel_def() {
 	// flags / scope_max_mag / clipsize stay with the SIM (the weapon dict
 	// feeds set_local_player_weapon): the ADS gates + fov policy run there
 	// (ADR 0016).
-}
-
-// Map a VIEW-FRAME offset (world units, from the sim's blended bias) onto
-// Godot camera-local axes. The view/def frame is X = FORWARD, Y = LEFT, Z =
-// UP -- proven by the aim ray's far point being {+65536000, 0, 0} through the
-// SAME transform [orig: HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0,
-// 0, 0) q16; the view-local rotate Math_FixedPointTransformPoint22
-// @0x4dd5d8]. Godot camera-local is (x right, y up, -z forward), so:
-//   view x (forward) -> Godot -z   (M4 tpos x -50.9 = ~0.2u BACK into the shoulder)
-//   view y (left)    -> Godot -x
-//   view z (up)      -> Godot  y   (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
-// (The 2026-07-11 grill REFUTED the earlier x=right/y=forward reading: the
-// AK's |x| ~= |y| masked the swap; the JOX/REVX M4 tpos made it glare -- the
-// canted-ADS report. oscarmike's onhook-derived map agrees with the witnessed
-// frame.) The velocity lead (>>7, clamps @0x4dd4f2..) and the prone Z drop
-// (-1280 @0x4dd578) are recorded unported tails.
-Vector3 PlayerViewmodelRig::viewmodel_view_offset(const Vector3 &p_view_units) const {
-	return Simulation::viewmodel_camera_local_from_view(p_view_units);
-}
-
-// The raw-def-units fallback without a sim: the same axis map over the /256
-// scale the sim's blend otherwise applies [orig: flt_7D1D70=256 @0x544770].
-Vector3 PlayerViewmodelRig::viewmodel_offset(const Vector3 &p_units) const {
-	return viewmodel_view_offset(p_units / static_cast<float>(Simulation::weapon_def_pos_scale()));
 }
 
 void PlayerViewmodelRig::_bind_methods() {

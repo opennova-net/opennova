@@ -377,6 +377,14 @@ inline EditorRequest play_clip_event(std::string path, int frame) {
 	request.values = {{"frame", std::to_string(frame)}};
 	return request;
 }
+// The set the weapon action playing the row of the first-person map `path` plays as it begins (its soundset)
+// or finishes (`end`: its soundsetend), once (DI-13: a leg's mark pressed).
+inline EditorRequest play_action_leg(std::string path, bool end) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	request.values = {{"leg", end ? "end" : "begin"}};
+	return request;
+}
 inline EditorRequest stop_sound() {
 	return of(EditorRequestKind::StopSound);
 }

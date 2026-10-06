@@ -177,6 +177,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/animation_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/sound_preview.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_sounds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_first_person.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_damage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
