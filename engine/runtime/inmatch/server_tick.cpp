@@ -631,10 +631,11 @@ void clear_priority_target_marks(world::World &world) {
 // slot exactly as retail would. (b) Every remote slot (the host's own slot byte
 // +5 and bots +96483 are excluded; bots do not exist here): with the
 // MaxFriendlyKills limit L, `L < 0 || teamKills <= L` routes to the suicide arm
-// (`suicides > 9` -> punt t6), else the team-kill arm punts t6. The host-local
-// punt log line ("#S>9") and the global punts-off switch dword_B4C698 are not
-// wire state and are not modeled; stage_host_punt already carries the
-// first-event latch (slot dword +89896).
+// (`suicides > 9` -> punt t6, the suicide arm logging "#S>9" to _PUNT.TXT
+// first), else the team-kill arm punts t6 with no log line. The global
+// punts-off switch dword_B4C698 (`/NOPUNT`) is not modeled (no port host sets
+// it); stage_host_punt already carries the first-event latch (slot dword
+// +89896), which also gates the log line.
 // [orig: Server_CheckPlayerViolations @0x51ABD0 — in-session @0x51abd9, slot
 //  gates @0x51abf6/@0x51abff/@0x51ac0d, game types @0x51ac2c, counter
 //  @0x51ac5a/@0x51ac63, limit @0x51ac75, drop/sync/health @0x51ac84/@0x51ac8a/
@@ -687,8 +688,10 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 		if (stats == nullptr) continue;
 		const int32_t limit = ctx.config.max_friendly_kills;
 		if (limit < 0 || stats->stats[world::MatchStats::kTeamKills] <= limit) {
-			if (stats->stats[world::MatchStats::kSuicides] > 9)
+			if (stats->stats[world::MatchStats::kSuicides] > 9) {
+				server_logs_punt(ctx.logs, conn, "#S>9"); // [orig: @0x51ad0d]
 				stage_host_punt(conn, 6);
+			}
 		} else {
 			stage_host_punt(conn, 6);
 		}
@@ -1862,7 +1865,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 					continue;
 				std::vector<ProtocolMessage> deployment =
 						Server_ReleasePlayerDeployment(
-								ctx.config, conn, world, release.zone);
+								ctx.config, conn, world, release.zone, ctx.logs.profile);
 				for (ProtocolMessage &message : deployment)
 					conn.link.transport->host_send(
 							message.tag, std::move(message.payload),

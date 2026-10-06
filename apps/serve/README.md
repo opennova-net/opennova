@@ -15,6 +15,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
                [/game <code>] [--loose-root] [--lan-port <n>] [--log-debug]
                [--master-host <gate>] [--master-gate-port <n>]
                [--credentials <file>] [--allow-public]
+               [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG]
 ```
 
 | Option | Meaning |
@@ -31,6 +32,9 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 | `--master-gate-port <n>` | The gate's UDP port (default 7597). |
 | `--credentials <file>` | `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines: the account the listing logs in with to fetch its HOSTKEY, as the game's NovaWorld menu does. Without it the server hosts with no HOSTKEY, which an `opennova-novaworld-server` accepts. |
 | `--allow-public` | Allow NovaLogic's NovaWorld (`novaworld.net` and every host under it), a live shared service. Loopback and any other host, an OpenNova service among them, need no flag. |
+| `/PROFILE <path>` | Record every mission to a `.sph` server log (below). |
+| `/PUNTLOG`, `/PUNT.TXT` | Log the players the server punts to `_PUNT.TXT` (below). |
+| `/CHEATLOG` | Start `_CHEAT.TXT` (below). |
 
 `--help` prints the usage. Ctrl+C, SIGTERM or closing the console window (Windows) stops
 the server: it sends every joiner the round reset and the session's STOP goodbye, and a
@@ -141,6 +145,28 @@ the directory you want). It never writes into `--resource-dir` unless it runs fr
 
 A `game.cfg` with `mpreset = "1"` stops the server before it writes anything, with exit code
 0, as the game exits at that read.
+
+## The console and the logs
+
+A retail dedicated server shows its status page in place of the game: the player slots,
+the server line, the team block, the round clock, the frame and login counts and the four
+newest chat lines. `opennova-serve` prints that same page as text on its standard output
+whenever its rows change (the slots, the server line, the team block or the chat lines;
+the clock and the counts ride along). A line typed on its standard input is what the page's
+chat input sends: the Global talk line, which a server with no player of its own sends to
+every player in the match. The page's labels come from the install's `gametext.bin`.
+
+The console also prints the session's lines retail writes under its `/INOUT` switch: `HOST
+STARTED` and `HOST STOPPED` with the server's address, and `SERVER PLAYER ADDED` and
+`SERVER PLAYER REMOVED` per connection.
+
+These logs go to the working directory, in retail's names and formats:
+
+| File | Switch | What it holds |
+|---|---|---|
+| `<path>.sph` | `/PROFILE <path>` | The server log: per map of the rotation, a file of its own holding the map, the players, every eighth tick each player's position and heading, each deploy and disconnect. The extension replaces everything after the path's first dot; an existing file is not overwritten, the name counts up instead (`host.sph`, `host1.sph`, ... `host10.sph`, then `host1.sph` again). `opennova-wire` decodes it. |
+| `_PUNT.TXT` | `/PUNTLOG` or `/PUNT.TXT` | A `START` line, then one line per punted player (the weapon and ammo table checks, more than nine suicides). The switch starts the file anew. |
+| `_CHEAT.TXT` | `/CHEATLOG` | A `START` line (retail writes nothing else to it). |
 
 ## Exit codes
 

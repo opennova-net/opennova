@@ -54,6 +54,9 @@ const char kUsage[] =
 		"  --allow-public   allow NovaLogic's NovaWorld (novaworld.net and its hosts), a live\n"
 		"                   shared service: use it sparingly. Loopback and any other host are\n"
 		"                   allowed without it\n"
+		"  /PROFILE <path>  record each mission to <path>.sph (retail's server log)\n"
+		"  /PUNTLOG, /PUNT.TXT, /CHEATLOG\n"
+		"                   log punts to _PUNT.TXT, start _CHEAT.TXT (the working directory)\n"
 		"The server reads and writes game.cfg in the directory it runs from (the process's\n"
 		"working directory, as retail), with the host file's settings over it, and marks\n"
 		"itself running there with activesrvr.txt, which a clean exit deletes.\n";
@@ -122,6 +125,9 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			if (!value(out.expansion)) return 1;
 		} else if (strutil::iequals(a, "/game")) {
 			if (!value(out.game)) return 1;
+		} else if (const int log = parse_log_switch(args, i, out.log_switches, error); log != 0) {
+			if (log < 0) return 1;
+			i += static_cast<size_t>(log - 1);
 		} else if (a == "--lan-port") {
 			std::string text;
 			if (!value(text)) return 1;
@@ -163,6 +169,9 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {}
 Server::~Server() { stop(); }
 
 bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
+	// The log switches arm at the process start, as retail's command-line
+	// parse arms them (server_logs.h).
+	log_devices_.arm(options_.log_switches);
 	// Retail's boot order: game.cfg at Game_Run's start, the subsystems (the
 	// mount, weapon.def and game.cfg again), then the dead /HOST path (the host
 	// file, the lock, the save, the network type, the socket, on NovaWorld the
@@ -395,6 +404,11 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 			novaworld_ ? inmatch::NetworkType::NovaWorld : inmatch::NetworkType::Lan;
 	request.host_cfg.serve_and_play = host_.serve_and_play;
 	request.host_cfg.game_root = options_.resource_dir;
+	// The log devices and the socket's address (bound on every interface) for
+	// the session's logs (server_logs.h; inmatch/server_console.h).
+	request.host_cfg.logs = log_devices_.logs();
+	request.host_cfg.local_address = PeerAddr{0, bound_port_};
+	request.host_cfg.local_address_known = true;
 	request.session_score_ini = true;
 	request.next_mission = next_mission;
 	mission::KernelBootOptions &options = request.boot_options;

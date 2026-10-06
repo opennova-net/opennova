@@ -987,6 +987,10 @@ bool apply_connection_uplink(world::World &world, Connection &conn,
 	if (!decode_player_extended_uplink(body.data() + consumed, body.size() - consumed,
 	                                   up, body_consumed))
 		return false;
+	// The frame statistics land on the slot as the callback parses them,
+	// ahead of the pre-round gate [orig: @0x4c1edd / @0x4c1efa].
+	conn.uplink_frame_rate = up.stat_byte_0;
+	conn.uplink_cpu_percent = up.stat_byte_1;
 	// The receive queue remains live during the countdown, but the player
 	// state callback does not apply its remote pose/state until the shared
 	// pre-round timer clears.

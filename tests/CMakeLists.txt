@@ -3652,6 +3652,21 @@ add_executable(npruntime_server_status_feed_test npruntime/server_status_feed_te
 target_link_libraries(npruntime_server_status_feed_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_server_status_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_server_status_feed COMMAND npruntime_server_status_feed_test)
+
+# The /PROFILE server log (inmatch/server_log_recorder.h, net/npwire/serverlog_encode.h,
+# formats/sph): the record writers against the decoder, a synthetic session recorded to
+# memory and decoded back, and the file name rule with its numbered rotation.
+add_executable(npruntime_server_log_recorder_test npruntime/server_log_recorder_test.cpp)
+target_link_libraries(npruntime_server_log_recorder_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_server_log_recorder_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_server_log_recorder COMMAND npruntime_server_log_recorder_test)
+
+# The punt and cheat logs (inmatch/punt_log.h): the START lines, a synthetic punt's
+# _PUNT.TXT line, the CRT time text and punt.log over a synthetic table row.
+add_executable(npruntime_punt_log_test npruntime/punt_log_test.cpp)
+target_link_libraries(npruntime_punt_log_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_punt_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_punt_log COMMAND npruntime_punt_log_test)
 add_executable(npruntime_squad_relay_test npruntime/squad_relay_test.cpp)
 target_link_libraries(npruntime_squad_relay_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_squad_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3748,6 +3763,14 @@ add_test(NAME serve_registration_parity COMMAND serve_registration_parity_test)
 add_executable(nwu_demux_test novaworld/nwu_demux_test.cpp)
 target_link_libraries(nwu_demux_test PRIVATE opennova_net)
 add_test(NAME nwu_demux COMMAND nwu_demux_test)
+
+# opennova-serve's status console (ADR 0051 PR7): the page as text over a synthetic feed (a
+# text snapshot) and its print rule; the client-less host's CHAT ring and console chat; the
+# /INOUT lines; the log switches and the working-directory devices. No retail data.
+add_executable(opennova_serve_status_console_test serve/status_console_test.cpp)
+target_link_libraries(opennova_serve_status_console_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_status_console_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_status_console COMMAND opennova_serve_status_console_test)
 
 # opennova-nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
 # end over real loopback UDP against the real NwUdpListener and an in-test gate (the row, a roster

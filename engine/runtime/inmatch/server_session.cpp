@@ -6,6 +6,9 @@
 
 #include <runtime/world/world.h> // World::crt_rand — the session-seeded CRT stream
 
+#include <base/io/log.h>
+#include <runtime/inmatch/server_console.h> // the /INOUT host line
+
 namespace opennova::inmatch {
 
 // [orig: CGameSession_SetConnectionMode @0x4c49f0] — stores the mode and decomposes it into the
@@ -36,6 +39,9 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	p.host_stop_tick = 0;                   // cleared until StopServer
 	p.host_run_duration_ms = 0;
 	p.host_running = 1;                      // StartServer succeeded
+	// The /INOUT host line, ahead of the host-start callback
+	// [orig: CNapiNPConnection_LogHostStarted @0x62b629; D-NET-356].
+	io::logf(io::LogLevel::kInfo, "%s", inout_host_line(ctx, /*started=*/true).c_str());
 	// The host start callback zeroes the total logins [orig: NapiNPProtocol_StartServer
 	// @0x62b640 -> CNapiServer_OnHostStarted @0x4c94f0].
 	ctx.total_logins = 0;

@@ -1,5 +1,7 @@
 #include <runtime/inmatch/map_change.h>
 
+#include <runtime/inmatch/server_log_recorder.h>
+
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/inmatch/host_config.h>
@@ -156,6 +158,12 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	HostRotation *rotation = role.rotation();
 	mission::MissionKernel *kernel = role.kernel();
 	const bool authority_in_session = ctx.is_in_session != 0 && ctx.is_authority != 0;
+
+	// The /PROFILE log closes first, as every mission teardown closes it, so
+	// the next mission's start opens the next numbered file
+	// [orig: Game_TeardownMission @0x5223e2..0x5223f0 -> CServerLog_CloseAndFree,
+	//  ahead of the Post Menu test @0x522413].
+	if (ctx.logs.profile != nullptr) ctx.logs.profile->close();
 
 	// The Game Loop's shutdown with the Post Menu pending: the swap arm, then
 	// the per-mission teardown (pools 0..2, the authority's PostMission
