@@ -13,7 +13,11 @@
 // parented under that section's render-part node, so they ride the carrier's
 // pose for free [orig: Scar_RenderCache @0x5CD830 transforms an entity ring's
 // slots through `bones + bone << 6` at draw time; the shared ring draws its
-// positions as-is — see docs/world/world-wac-ai-re.md §24.9].
+// positions as-is — see docs/world/world-wac-ai-re.md §24.9]. An owner with
+// no node (a statically batched prop: a MultiMesh row, nothing to parent
+// under) draws its ring from the list's world-space form instead — the same
+// slots the engine took through the owner's live section matrix — on the
+// world mesh.
 //
 // The drawer state is per strip: the GfxShader mode word the loader built the
 // strip's effect from (the draw list's `strip_mode_words`, decoded through
@@ -88,7 +92,8 @@ public:
 	// to its live model node (ObjectModel preferred — its render-part nodes are
 	// the mounts for the section-local meshes; any Node3D mounts them at its
 	// origin otherwise).
-	// Entity batches whose owner is absent from the map draw nothing this frame.
+	// Entity batches whose owner is absent from the map draw their world-space
+	// form on the world mesh; one without that form draws nothing this frame.
 	void present(const Ref<ScarDrawList> &p_draw_list, const Dictionary &p_owner_nodes);
 	// Drop every scar mesh (the Stop -> Play boundary, teardown).
 	void clear();
@@ -182,6 +187,8 @@ private:
 	int stat_slots_culled_ = 0;
 	int stat_rings_leased_ = 0;
 	int stat_owners_unresolved_ = 0;
+	// Entity-ring batches drawn from the world-space form (node-less owners).
+	int stat_entity_world_batches_ = 0;
 	// The weapon Inset view's leg (set_inset_view).
 	struct InsetScarTwin {
 		RID instance;

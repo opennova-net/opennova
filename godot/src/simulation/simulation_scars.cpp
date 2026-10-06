@@ -9,24 +9,42 @@
 #include "world/scar_draw_list.h"
 
 #include <runtime/renderer/scar_draw_list.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/impact_scar.h>
 
 using namespace sim_internal;
 
 namespace {
 
-bool scar_owner_visible_cb(uint16_t p_owner_packed, void *p_user) {
-	const Simulation *sim = static_cast<const Simulation *>(p_user);
-	return sim->scar_owner_visible(p_owner_packed);
+// The compile's user: the sim for the owner gate, its world and collision for
+// an entity-ring owner's live section matrix — the one the slot writer stored
+// the hit through (world/impact_scar.cpp) — for the world-space form.
+struct ScarCompileUser {
+	const Simulation *sim = nullptr;
+	const opennova::world::World *world = nullptr;
+	const opennova::world::CollisionWorld *collision = nullptr;
+};
+
+bool scar_owner_visible_cb(uint16_t p_owner_packed, bool p_building, void *p_user) {
+	const ScarCompileUser *user = static_cast<const ScarCompileUser *>(p_user);
+	return user->sim->scar_owner_visible(p_owner_packed, p_building);
+}
+
+bool scar_section_matrix_cb(uint16_t p_owner_packed, int p_section,
+		opennova::world::CollisionMatrix &r_matrix, void *p_user) {
+	const ScarCompileUser *user = static_cast<const ScarCompileUser *>(p_user);
+	opennova::world::EntityHandle handle;
+	handle.packed = p_owner_packed;
+	return user->collision->entity_section_matrix(*user->world, handle, p_section, r_matrix);
 }
 
 } // namespace
 
-bool Simulation::scar_owner_visible(uint16_t p_owner_packed) const {
+bool Simulation::scar_owner_visible(uint16_t p_owner_packed, bool p_building) const {
 	if (!kernel_) return false;
 	opennova::world::EntityHandle handle;
 	handle.packed = p_owner_packed;
-	return opennova::renderer::scar_owner_visible(kernel_->world.registry.get(handle),
+	return opennova::renderer::scar_owner_visible(kernel_->world.registry.get(handle), p_building,
 			[this](opennova::world::EntityHandle building) -> std::optional<uint32_t> {
 				if (!kernel_->occlusion.has_instance(building)) return std::nullopt;
 				return kernel_->occlusion.section_mask(building);
@@ -62,8 +80,13 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	ctx.cam_y = -p_camera_godot.z;
 	ctx.fog_distance = p_fog_distance > 0.0f ? p_fog_distance : 0.0f;
 	ctx.terrain_light_argb = opennova::argb_from_color_opaque(p_terrain_light);
+	ScarCompileUser user;
+	user.sim = this;
+	user.world = &kernel_->world;
+	user.collision = &kernel_->collision;
 	ctx.owner_visible = &scar_owner_visible_cb;
-	ctx.user = const_cast<Simulation *>(this);
+	ctx.section_matrix = &scar_section_matrix_cb;
+	ctx.user = &user;
 	opennova::renderer::ScarDrawList list;
 	opennova::renderer::compile_scar_draws(kernel_->world.out.scars, ctx, list);
 
@@ -120,6 +143,14 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		uvs[static_cast<int64_t>(i)] = Vector2(v.u, v.v);
 		colors[static_cast<int64_t>(i)] = opennova::color_from_argb(v.argb);
 	}
+	// The entity-ring batches in world space (the slots through the owner's
+	// live section matrix): mission space, so the world fold, and the same
+	// rotation's winding argument as the shared ring above.
+	PackedVector3Array world_vertices;
+	world_vertices.resize(static_cast<int64_t>(list.world_vertices.size()));
+	for (size_t i = 0; i < list.world_vertices.size(); ++i) {
+		world_vertices[static_cast<int64_t>(i)] = mission_to_godot(list.world_vertices[i]);
+	}
 	PackedInt32Array batch_owner;
 	PackedInt32Array batch_texture;
 	PackedInt32Array batch_section;
@@ -128,6 +159,7 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	PackedInt32Array batch_count;
 	PackedInt32Array batch_bms_id;
 	PackedInt64Array batch_spawn_origin;
+	PackedInt32Array batch_world_first;
 	const int64_t batches = static_cast<int64_t>(list.batches.size());
 	batch_owner.resize(batches);
 	batch_texture.resize(batches);
@@ -137,6 +169,7 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	batch_count.resize(batches);
 	batch_bms_id.resize(batches);
 	batch_spawn_origin.resize(batches);
+	batch_world_first.resize(batches);
 	for (int64_t i = 0; i < batches; ++i) {
 		const opennova::renderer::ScarDrawBatch &b = list.batches[static_cast<size_t>(i)];
 		batch_owner[i] = b.owner_packed;
@@ -145,6 +178,7 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		batch_flags[i] = (b.entity_local ? 1 : 0) | (b.building ? 2 : 0);
 		batch_first[i] = static_cast<int32_t>(b.first_vertex);
 		batch_count[i] = static_cast<int32_t>(b.vertex_count);
+		batch_world_first[i] = b.world_resolved ? static_cast<int32_t>(b.world_first_vertex) : -1;
 		// The owner's mission identity for the shell's node resolution (the
 		// destruction pass's triple: bms_id + spawn_origin, or the packed
 		// handle for runtime-only rows).
@@ -176,6 +210,7 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 				static_cast<int32_t>(opennova::world::scar_texture_strip_mode_word(strip));
 	}
 	out->set_vertices(vertices);
+	out->set_world_vertices(world_vertices);
 	out->set_uvs(uvs);
 	out->set_colors(colors);
 	out->set_batch_owner(batch_owner);
@@ -186,6 +221,7 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	out->set_batch_count(batch_count);
 	out->set_batch_bms_id(batch_bms_id);
 	out->set_batch_spawn_origin(batch_spawn_origin);
+	out->set_batch_world_first(batch_world_first);
 	out->set_strip_names(strip_names);
 	out->set_strip_mode_words(strip_mode_words);
 	out->set_slots_live(static_cast<int>(list.slots_live));

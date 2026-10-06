@@ -54,16 +54,20 @@ struct BatchRow {
 
 // Append one batch's vertex run as a triangle-list surface (the list already
 // carries six vertices per quad in the witnessed order, so no index array).
+// The positions start at `p_vertex_first` of `p_vertices` (the batch's own
+// first in the stream it was compiled in, or its run in the world-space
+// form), the UVs and colours at the batch's own first: both forms share them.
 bool append_surface(const Ref<ArrayMesh> &p_mesh, const PackedVector3Array &p_vertices,
-		const PackedVector2Array &p_uvs, const PackedColorArray &p_colors,
+		int p_vertex_first, const PackedVector2Array &p_uvs, const PackedColorArray &p_colors,
 		const BatchRow &p_row, const Ref<ShaderMaterial> &p_material) {
-	if (p_row.count < 3 || p_row.first < 0 ||
-			p_row.first + p_row.count > p_vertices.size() ||
+	if (p_row.count < 3 || p_row.first < 0 || p_vertex_first < 0 ||
+			p_vertex_first + p_row.count > p_vertices.size() ||
 			p_row.first + p_row.count > p_uvs.size() ||
 			p_row.first + p_row.count > p_colors.size()) {
 		return false;
 	}
-	PackedVector3Array vertices = p_vertices.slice(p_row.first, p_row.first + p_row.count);
+	PackedVector3Array vertices =
+			p_vertices.slice(p_vertex_first, p_vertex_first + p_row.count);
 	PackedVector2Array uvs = p_uvs.slice(p_row.first, p_row.first + p_row.count);
 	PackedColorArray colors = p_colors.slice(p_row.first, p_row.first + p_row.count);
 	Array arrays;
@@ -266,7 +270,10 @@ void ScarPresenter::present(const Ref<ScarDrawList> &p_draw_list, const Dictiona
 	const PackedInt32Array &counts = p_draw_list->get_batch_count();
 	const PackedStringArray &strip_names = p_draw_list->get_strip_names();
 	const PackedInt32Array &strip_mode_words = p_draw_list->get_strip_mode_words();
+	const PackedVector3Array &world_vertices = p_draw_list->get_world_vertices();
+	const PackedInt32Array &world_firsts = p_draw_list->get_batch_world_first();
 	const int64_t batch_count = owners.size();
+	stat_entity_world_batches_ = 0;
 	if (batch_count == 0 || textures.size() != batch_count ||
 			sections.size() != batch_count || flags.size() != batch_count ||
 			firsts.size() != batch_count || counts.size() != batch_count) {
@@ -313,7 +320,21 @@ void ScarPresenter::present(const Ref<ScarDrawList> &p_draw_list, const Dictiona
 			++stat_strips_unsupported_;
 		}
 		if (!row.entity_local) {
-			append_surface(world_mesh, vertices, uvs, colors, row, material);
+			append_surface(world_mesh, vertices, row.first, uvs, colors, row, material);
+			continue;
+		}
+		// An owner with no node to mount the section-local run under (a
+		// statically batched prop) draws its ring in world space instead: the
+		// slots the engine took through its live section matrix, as
+		// Scar_RenderCache draws every entity ring (renderer::compile_scar_draws
+		// carries the witness).
+		if (Object::cast_to<Node3D>(static_cast<Object *>(
+					p_owner_nodes.get(row.owner, Variant()))) == nullptr) {
+			const int world_first = i < world_firsts.size() ? world_firsts[i] : -1;
+			if (append_surface(world_mesh, world_vertices, world_first, uvs, colors, row,
+						material)) {
+				++stat_entity_world_batches_;
+			}
 			continue;
 		}
 		const uint32_t key = (static_cast<uint32_t>(row.owner & 0xFFFF) << 8) |
@@ -328,7 +349,7 @@ void ScarPresenter::present(const Ref<ScarDrawList> &p_draw_list, const Dictiona
 			group_index[key] = groups.size() - 1;
 			found = group_index.getptr(key);
 		}
-		append_surface(groups[*found].mesh, vertices, uvs, colors, row, material);
+		append_surface(groups[*found].mesh, vertices, row.first, uvs, colors, row, material);
 	}
 
 	MeshInstance3D *world_instance = ensure_world_mesh_();
@@ -506,6 +527,8 @@ void ScarPresenter::present_inset_(const Ref<ScarDrawList> &p_draw_list,
 	const PackedInt32Array &counts = p_draw_list->get_batch_count();
 	const PackedStringArray &strip_names = p_draw_list->get_strip_names();
 	const PackedInt32Array &strip_mode_words = p_draw_list->get_strip_mode_words();
+	const PackedVector3Array &world_vertices = p_draw_list->get_world_vertices();
+	const PackedInt32Array &world_firsts = p_draw_list->get_batch_world_first();
 	const int64_t batch_count = owners.size();
 	const bool rows_ok = textures.size() == batch_count && sections.size() == batch_count &&
 			flags.size() == batch_count && firsts.size() == batch_count &&
@@ -532,7 +555,14 @@ void ScarPresenter::present_inset_(const Ref<ScarDrawList> &p_draw_list,
 		const Ref<ShaderMaterial> material =
 				material_for_strip_(row.texture, texture_name, mode_word).material;
 		if (!row.entity_local) {
-			append_surface(world_mesh, vertices, uvs, colors, row, material);
+			append_surface(world_mesh, vertices, row.first, uvs, colors, row, material);
+			continue;
+		}
+		// A node-less owner's ring in world space, as the main list draws it.
+		if (Object::cast_to<Node3D>(static_cast<Object *>(
+					p_owner_nodes.get(row.owner, Variant()))) == nullptr) {
+			const int world_first = i < world_firsts.size() ? world_firsts[i] : -1;
+			append_surface(world_mesh, world_vertices, world_first, uvs, colors, row, material);
 			continue;
 		}
 		const uint32_t key = (static_cast<uint32_t>(row.owner & 0xFFFF) << 8) |
@@ -545,7 +575,7 @@ void ScarPresenter::present_inset_(const Ref<ScarDrawList> &p_draw_list,
 			group_owner[key] = row.owner;
 			mesh = groups.getptr(key);
 		}
-		append_surface(*mesh, vertices, uvs, colors, row, material);
+		append_surface(*mesh, vertices, row.first, uvs, colors, row, material);
 	}
 
 	// The world batches: the Inset's own mesh on its own bit, the main
@@ -669,6 +699,7 @@ void ScarPresenter::reset_runtime_state() {
 	stat_slots_culled_ = 0;
 	stat_rings_leased_ = 0;
 	stat_owners_unresolved_ = 0;
+	stat_entity_world_batches_ = 0;
 }
 
 Ref<ScarPresentStats> ScarPresenter::get_present_stats() const {
@@ -683,6 +714,7 @@ Ref<ScarPresentStats> ScarPresenter::get_present_stats() const {
 	stats->textures_missing = stat_textures_missing_;
 	stats->strips_unsupported = stat_strips_unsupported_;
 	stats->owners_unresolved = stat_owners_unresolved_;
+	stats->entity_world_batches = stat_entity_world_batches_;
 	return stats;
 }
 
