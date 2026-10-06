@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "dds",
+    "name": "on_ar15_2_c.dds"
+  },
+  "outputs": [
+    "on_ar15_2_c.dds"
+  ],
+  "schema_version": 1,
+  "source_hash": "170ae3ab97d2c388",
+  "version": 3
+}
