@@ -26,8 +26,10 @@
 #include <formats/scr/scr.h>
 #include <formats/tga/tga.h>
 
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -81,6 +83,57 @@ int test_rewrite_text() {
 	TEST_EXPECT(rewrite_native_text("hudpos.def", AssetKind::HudPosDefs, "jo", hud, {{"", "hudls_moreav", "pose.tga", "x.tga"}},
 	                                missed) == 0 &&
 	            missed == std::vector<size_t>({0}) && hud == before);
+	return 0;
+}
+
+// DI-17: where a native text writes a record's name (native_text_place), the line a Go to lands on: the
+// token whose change changes that record's name alone (a comment naming it, an earlier line the game reads
+// over and another record naming the same file are not it), found without case; two records on one line,
+// each its own column; a particle file's effect by its id; nothing for a name the loader derives, a record or
+// a field the text does not have, or the file alone.
+int test_native_text_place() {
+	size_t line = 0, column = 0;
+	using editor_test::crlf;
+	const std::string trn = "; polytrn_colormap map.tga, the old map\r\npolytrn_colormap \"map.tga\"\r\npolytrn_detailmap grain.tga\r\n"
+	                        "polytrn_polydata isle.cpt\r\npolytrn_colormap MAP.tga ; the one read\r\n";
+	TEST_EXPECT(native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "", "polytrn_colormap", line, column) &&
+	            line == 5 && column == 18);
+	TEST_EXPECT(native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "", "polytrn_detailmap", line, column) &&
+	            line == 3 && column == 19);
+	// Two heads name one model: each record's own line.
+	const std::string avatars =
+	        crlf("define head A\n{\n\tname\t\tAV_A\n\tgraphic\t\tboonie.3di\n\tcamo\t\t0 0 0\n\tvoice\t\t1\n\tsex\t\tm\n}\n\n"
+	             "define head B\n{\n\tname\t\tAV_B\n\tgraphic\t\tboonie.3di\n\tcamo\t\t3 0 0\n\tvoice\t\t1\n\tsex\t\tm\n}\n");
+	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "B", "graphic", line, column) &&
+	            line == 13 && column == 11);
+	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "A", "graphic", line, column) &&
+	            line == 4 && column == 11);
+	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "B", "name", line, column) && line == 12);
+	// A record named alone: the first name the parser reads of it.
+	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "B", "", line, column) && line == 13);
+	// A face animation: each eye on the one line that writes both; the base texture's .MDT twin, a name the
+	// loader derives and the text never writes, nowhere.
+	std::string grm;
+	TEST_EXPECT(test_io::read_file_text(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/grm/person.grm", grm));
+	TEST_EXPECT(native_text_place("person.grm", AssetKind::FaceAnimation, "jo", grm, "", "basetexture", line, column) &&
+	            line == 5 && column == 16);
+	TEST_EXPECT(native_text_place("person.grm", AssetKind::FaceAnimation, "jo", grm, "eye 1", "eyetexture", line, column) &&
+	            line == 6 && column == 16);
+	TEST_EXPECT(native_text_place("person.grm", AssetKind::FaceAnimation, "jo", grm, "eye 2", "eyetexture", line, column) &&
+	            line == 6 && column == 28);
+	TEST_EXPECT(!native_text_place("person.grm", AssetKind::FaceAnimation, "jo", grm, "", "basetexture.mdt", line, column));
+	// A particle file's effect (a symbol the record names): its id's line.
+	const std::string ptl = "[particledef]\n{\n\tid = spark;\n\tgraphic1 = spark.tga;\n}\n[effectdef]\n{\n\tid = Hit;\n"
+	                        "\tpdefs = spark;\n}\n";
+	Extracted read;
+	Diagnostic error;
+	TEST_EXPECT(extract_from_bytes("fx.ptl", AssetKind::Particles, std::vector<uint8_t>(ptl.begin(), ptl.end()), "jo", read, error) &&
+	            read.symbols.size() == 1);
+	TEST_EXPECT(native_text_place("fx.ptl", AssetKind::Particles, "jo", ptl, "Hit", "", line, column) && line == 8 && column == 7);
+	// Nowhere: a record or field the text has not, the file alone.
+	TEST_EXPECT(!native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "C", "graphic", line, column));
+	TEST_EXPECT(!native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "", "polytrn_charmap", line, column));
+	TEST_EXPECT(!native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "", "", line, column));
 	return 0;
 }
 
@@ -223,6 +276,7 @@ int test_retail() {
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = test_rewrite_text();
+	failures += test_native_text_place();
 	failures += test_rename_in_native_texts();
 	failures += test_retail();
 	if (failures == 0) std::printf("editor_native_rename: all passed\n");

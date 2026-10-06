@@ -4,6 +4,7 @@ namespace opennova::editor {
 
 bool same_place(const NavigationPlace &a, const NavigationPlace &b) {
 	if (a.pane != b.pane || a.path != b.path) return false;
+	if (a.pane == NavigationPlace::Pane::Page) return a.locator == b.locator && a.field == b.field;
 	if (a.pane != NavigationPlace::Pane::Document) return true;
 	// The same record of the same instance; else the same locator, which names it in any read of the file.
 	if (a.document != 0 && a.document == b.document && (a.record.row || b.record.row)) return a.record == b.record;

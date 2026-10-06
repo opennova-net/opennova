@@ -7,6 +7,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_card.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/view/session_view.h>
@@ -199,12 +200,10 @@ void place(ui_kit::WrapRow *row, float width) {
 	else ImGui::SameLine();
 }
 
-// Where a Go to leads, in its tooltip: the file opened at the record, or shown in Files.
+// Where a Go to leads, in its tooltip: the file opened at the record, or its page (DI-17).
 std::string go_to_words(const std::vector<ReferenceTarget> &targets) {
 	if (targets.size() > 1) return "Go to one of the " + std::to_string(targets.size()) + " places it leads.";
-	const ReferenceTarget &target = targets.front();
-	return target.editable ? "Open " + target.label + "."
-	                       : "Show " + target.file + " in Files (the editor does not edit its kind).";
+	return window_requests::go_to_words(targets.front());
 }
 
 // A reference's Go to, to the places the game's lookup reaches (reference_targets,
@@ -271,7 +270,17 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 	tip = std::string(word) + ": " + tip;
 	if (present) go_to_tool(workspace, field, value, pressed, tip, "A click: ");
 	else ui_kit::tooltip(tip);
-	if (compact || !present) return;
+	if (compact) return;
+	if (!present) {
+		// A name nothing resolves: its Go to lands where it belongs (DI-17: a Go to always lands), the file a
+		// symbol's fix opens; a file the project lacks has no place before it is made (its fixes: Pick, Problems).
+		ReferenceTarget home;
+		if (status != ReferenceStatus::Missing || !missing_target(field, value, view, home)) return;
+		place(row, ui_kit::button_width("Go to"));
+		if (ImGui::SmallButton("Go to")) go_to(workspace, home);
+		ui_kit::tooltip("Go to " + home.label + ": add it there, or correct the name.");
+		return;
+	}
 	place(row, ui_kit::button_width("Go to"));
 	go_to_tool(workspace, field, value, ImGui::SmallButton("Go to"), std::string(), "");
 	// A sound it names plays from here, through the one preview player (the sound lane, DI-02): a set as the

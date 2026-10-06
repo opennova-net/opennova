@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <editor/graph/reference_queries.h>
 #include <editor/model/diagnostic.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/view/session_view.h>
@@ -81,6 +82,16 @@ struct ProblemFixIndex {
 // The fixes for a finding over the view as it is, the first the one a click applies.
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view,
                                   const ProblemFixIndex *index = nullptr);
+
+// Where a Go to on a name nothing resolves lands (the deep-integration plan's DI-17: a Go to always lands
+// somewhere): a symbol's (a string id, a style variable, a menu screen or window, a weapon, ammo or item, a
+// particle effect, a user point) the file where it belongs, as its fix opens it (the file its scope names,
+// the one defining its kind's other names, the table of its kind the game reads), `missing` set; false for a
+// symbol of a kind no file of the project defines, and for a file, which has no place in the project
+// before it is made (its finding's fixes in Problems: Import, Create). `name` as the reference writes it.
+bool missing_target(const ReferenceSubject &missing, const SessionView &view, ReferenceTarget &out);
+// The same for a field's value where it resolves to nothing (graph/reference_queries' reference_status).
+bool missing_target(const FieldUse &field, const Value &value, const SessionView &view, ReferenceTarget &out);
 // Whether the finding has a fix, without planning a Use fix's rename (fixes_for plans it).
 bool has_fixes(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index = nullptr);
 // The finding's bulk fixes, in order, without planning a Use fix's rename (a Use fix is
