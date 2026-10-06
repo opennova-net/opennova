@@ -2,9 +2,11 @@
 // passes draw through: the compiled draw list's quads, triangles, lines and
 // glyphs into canvas commands, each textured command combined through its
 // texture's material word (renderer::material_color_stage; the words are
-// runtime/hud/hud_texture_materials.h and renderer::hud_loader_material_word).
+// runtime/hud/hud_texture_materials.h, renderer::hud_loader_material_word and,
+// for the font pages, hud::kFontPageMaterialWord).
 
 #include "hud/hud_overlay.h"
+#include "hud/font_page_glyphs.h"
 #include "util/color_convert.h"
 #include "util/string_convert.h"
 
@@ -28,7 +30,8 @@ using opennova::renderer::MaterialColorStage;
 
 // The map pass's top-layer shader. A sprite whose texture's material word is
 // colour family 0x600 (every textured map sprite: the TSDicon strip, the
-// compass ring, the radar marks, the WPIndctr strip) arrives with a +8 flag on
+// compass ring, the radar marks, the WPIndctr strip; and every map label's
+// font page, D-HUD-51) arrives with a +8 flag on
 // UV.x (map UVs stay inside [0, 1]); its vertex() strips the flag and
 // fragment() runs the MODULATE2X(TEXTURE, DIFFUSE) colour stage, saturated per
 // channel, over COLOR (the texel times the vertex colour), the alpha stage
@@ -58,7 +61,8 @@ void fragment() {
 )";
 
 // The flat HUD items' shader. A command whose UV.y carries a +16 flag draws a
-// texture whose material word is colour family 0x600: its vertex() strips the
+// texture whose material word is colour family 0x600 (a font page's glyph run
+// among them, hud::kFontPageMaterialWord; D-HUD-51): its vertex() strips the
 // flag and fragment() runs the material's stage-0 MODULATE2X(TEXTURE, DIFFUSE)
 // over COLOR, saturated per channel, the alpha MODULATE as COLOR has it
 // (renderer::hud_color_material_argb; D-HUD-49). A quad with a second texture
@@ -431,7 +435,9 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 				opennova::color_from_argb(line.color), line.width);
 	}
 	// Keep the existing kind order, page order, italic corners, half-pixel
-	// offsets and underline layer. Never sort text by texture across runs.
+	// offsets and underline layer. Never sort text by texture across runs. Each
+	// page run draws through the page's material: its MODULATE2X stage rides the
+	// UV.y flag, doubling the drawers' halved colours (hud::kFontPageMaterialWord).
 	for (size_t first = p_range.glyphs_begin; first < p_range.glyphs_end;) {
 		const uint32_t page = p_list.glyphs[first].page;
 		size_t end = first + 1;
@@ -440,35 +446,23 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 			first = end;
 			continue;
 		}
-		const int count = static_cast<int>(end - first);
-		PackedVector2Array points, uvs;
-		PackedColorArray colors;
-		PackedInt32Array indices;
-		points.resize(count * 4);
-		uvs.resize(count * 4);
-		colors.resize(count * 4);
-		indices.resize(count * 6);
-		Vector2 *point = points.ptrw(), *uv = uvs.ptrw();
-		Color *color = colors.ptrw();
-		int32_t *index = indices.ptrw();
-		for (int i = 0; i < count; ++i) {
-			const auto &glyph = p_list.glyphs[first + static_cast<size_t>(i)];
-			const int base = i * 4;
-			point[base] = Vector2(glyph.x_top_left, glyph.y_top);
-			point[base + 1] = Vector2(glyph.x_top_right, glyph.y_top);
-			point[base + 2] = Vector2(glyph.x_bottom_right, glyph.y_bottom);
-			point[base + 3] = Vector2(glyph.x_bottom_left, glyph.y_bottom);
-			uv[base] = Vector2(glyph.u0, glyph.v0);
-			uv[base + 1] = Vector2(glyph.u1, glyph.v0);
-			uv[base + 2] = Vector2(glyph.u1, glyph.v1);
-			uv[base + 3] = Vector2(glyph.u0, glyph.v1);
-			const Color modulation = opennova::color_from_argb(glyph.color);
-			for (int corner = 0; corner < 4; ++corner) color[base + corner] = modulation;
-			static constexpr int corners[] = {0, 1, 2, 0, 2, 3};
-			for (int corner = 0; corner < 6; ++corner) index[i * 6 + corner] = base + corners[corner];
+		const Ref<Texture2D> &page_texture = page_textures_[page];
+		const float v_flag =
+				texture_stage_(page_texture) == MaterialColorStage::Modulate2x ? kModulate2xUvFlag : 0.0f;
+		GlyphRunArrays run;
+		append_glyph_quads(p_list.glyphs, first, end, Vector2(0.0f, v_flag), run);
+		rs->canvas_item_add_triangle_array(p_item, run.indices, run.points, run.colors, run.uvs,
+				PackedInt32Array(), PackedFloat32Array(), page_texture->get_rid());
+		if (flat_record_ != nullptr) {
+			Dictionary row;
+			row["texture"] = -1;
+			row["page"] = static_cast<int64_t>(page);
+			row["size"] = Vector2i(page_texture->get_width(), page_texture->get_height());
+			row["kind"] = "glyphs";
+			row["uvs"] = run.uvs;
+			row["colors"] = run.colors;
+			flat_record_->push_back(row);
 		}
-		rs->canvas_item_add_triangle_array(p_item, indices, points, colors, uvs,
-				PackedInt32Array(), PackedFloat32Array(), page_textures_[page]->get_rid());
 		first = end;
 	}
 	for (size_t i = p_range.underlines_begin; i < p_range.underlines_end; ++i) {

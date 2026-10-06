@@ -43,12 +43,13 @@ void HudFrameCompiler::element_end_round_statistics(const HudFrameState &state,
 	emit_stdbox(sx(static_cast<float>(kEndRoundStatsBoxX1), w), sy(top, h),
 			sx(static_cast<float>(kEndRoundStatsBoxX2), w), sy(box_y2, h), w, 0xFFu,
 			title_gap);
-	// The title just inside the box corner, white [orig: HUD_DrawLabelBox's
-	// (x + 15, y + 2) @0x51efe1/@0x51efe8].
+	// The title just inside the box corner, white through the half-bright
+	// drawer [orig: HUD_DrawLabelBox's (x + 15, y + 2) @0x51efe1/@0x51efe8,
+	// HUD_DrawTextLeft_HalfBright @0x51f13a].
 	if (!st.title.empty()) {
 		const GameFontRun run = lf.layout(st.title.c_str(),
 				sx(static_cast<float>(kEndRoundStatsBoxX1) + 15.0f, w),
-				sy(top + 2.0f, h), ls, ls, 0u, 0xFFFFFFFFu);
+				sy(top + 2.0f, h), ls, ls, 0u, half_bright_argb(0xFFFFFFFFu));
 		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 				run.quads.end());
 	}

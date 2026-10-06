@@ -98,14 +98,17 @@ static int test_menu_references() {
 	const Diagnostic *nope =
 			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar);
 	TEST_EXPECT(nope && subject_target(*nope) == "%NOPE%");
-	// The picker's finding of the value is the same: the variable's (the stylesheet opened to
-	// define it), never a font file named %NOPE%; a variable that resolves makes none.
+	// The picker's finding of the value is the same: the variable's (added to the stylesheet,
+	// DI-15's Add it there, or the stylesheet opened to define it), never a font file named %NOPE%; a
+	// variable that resolves makes none.
 	Diagnostic picked;
 	TEST_EXPECT(missing_finding(graph, *document, exit, font_use, std::string("%NOPE%"), picked) &&
 	            editor_test::reference_of(picked).kind == ReferenceKind::StyleVar && subject_target(picked) == "%NOPE%" && picked.field == "font.name");
 	const std::vector<ProblemFix> define = fixes_for(picked, view);
-	TEST_EXPECT(!define.empty() && define.front().request.kind == EditorRequestKind::OpenDocument &&
-	            define.front().request.path.find("menu_style.mns") != std::string::npos);
+	TEST_EXPECT(define.size() == 2 && define.front().request.kind == EditorRequestKind::EditRecord &&
+	            define.front().request.path.find("menu_style.mns") != std::string::npos &&
+	            define.back().request.kind == EditorRequestKind::OpenDocument &&
+	            define.back().request.path.find("menu_style.mns") != std::string::npos);
 	TEST_EXPECT(!missing_finding(
 			graph, *document, exit, font_use, std::string("%DEF_FONTNAME_LG%"), picked));
 	// The file a resolving value loads: the variable's value's .fnt.

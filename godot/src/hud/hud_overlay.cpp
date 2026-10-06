@@ -1,4 +1,5 @@
 #include "hud/hud_overlay.h"
+#include "hud/font_page_glyphs.h"
 #include "hud/hud_chat_entry.h"
 #include "simulation/hud_view_records.h" // HudMapOverlays
 #include "util/color_convert.h"
@@ -351,6 +352,9 @@ void HudOverlay::clear_font_() {
 	label_font_impact38_ = {};
 	label_font_impact38_valid_ = false;
 	label_tier_ = -1;
+	for (const Ref<Texture2D> &page : page_textures_) {
+		if (page.is_valid()) texture_material_words_.erase(page->get_instance_id());
+	}
 	page_textures_ = {};
 }
 
@@ -365,18 +369,17 @@ bool HudOverlay::load_fnt_(const String &p_name, fnt_font_t &r_font, int p_slot)
 	}
 	const size_t base = static_cast<size_t>(p_slot) * FNT_MAX_PAGES;
 	for (uint32_t page = 0; page < r_font.num_pages && page < FNT_MAX_PAGES; ++page) {
-		const uint8_t *data = fnt_get_page_data_const(&r_font, page);
-		if (data == nullptr) {
+		const Ref<Texture2D> texture = font_page_texture(r_font, page);
+		if (texture.is_null()) {
 			continue;
 		}
-		PackedByteArray page_bytes;
-		page_bytes.resize(FNT_TEXTURE_SIZE);
-		memcpy(page_bytes.ptrw(), data, FNT_TEXTURE_SIZE);
-		const Ref<Image> image = Image::create_from_data(FNT_TEXTURE_WIDTH,
-				FNT_TEXTURE_HEIGHT, false, Image::FORMAT_RGBA8, page_bytes);
-		if (image.is_valid()) {
-			page_textures_[base + page] = ImageTexture::create_from_image(image);
-		}
+		// Every page draws through the font's page material (its glyph runs
+		// take the flat shader's MODULATE2X flag like any family-0x600 texture).
+		Ref<Texture2D> &slot = page_textures_[base + page];
+		if (slot.is_valid()) texture_material_words_.erase(slot->get_instance_id());
+		texture_material_words_[texture->get_instance_id()] =
+				opennova::hud::kFontPageMaterialWord;
+		slot = texture;
 	}
 	return true;
 }
@@ -1872,6 +1875,14 @@ HudMapPassTextures HudOverlay::map_pass_textures() const {
 	out.slot_modulate2x = slot_modulate2x_.data();
 	out.pages = page_textures_.data();
 	out.page_count = page_textures_.size();
+	// A glyph run takes its page's material (hud::kFontPageMaterialWord).
+	for (size_t page = 0; page < page_textures_.size(); ++page) {
+		page_modulate2x_[page] = texture_stage_(page_textures_[page]) ==
+								opennova::renderer::MaterialColorStage::Modulate2x
+						? 1
+						: 0;
+	}
+	out.page_modulate2x = page_modulate2x_.data();
 	return out;
 }
 

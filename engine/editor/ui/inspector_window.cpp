@@ -235,11 +235,12 @@ void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value,
 bool plays_sound(ReferenceKind kind) { return kind == ReferenceKind::Sound || kind == ReferenceKind::Wave; }
 
 // Present / Missing / Unverified beside a reference, from the same tables the validator
-// uses (compact: a coloured dot, the words in its tooltip, a click on it the Go to); a
-// reference that resolves gets a "Go to" (go_to_tool) to the record that defines it, this
-// document's own included, or the file it loads.
-void reference_status(Workspace &workspace, const FieldUse &field, const Value &value, bool compact,
-                      ui_kit::WrapRow *row) {
+// uses (compact: a coloured dot, the words in its tooltip, a click on it the Go to, or, on a
+// missing value's, its fixes: DI-15, the picker's draw_fixes); a reference that resolves gets a
+// "Go to" (go_to_tool) to the record that defines it, this document's own included, or the file
+// it loads.
+void reference_status(Workspace &workspace, ReferencePicker &picker, const Document &document, const NodeAddress &address,
+                      const FieldUse &field, const Value &value, bool compact, ui_kit::WrapRow *row) {
 	std::string symbol;
 	const SessionView &view = workspace.view();
 	const ReferenceStatus status = view.findings.graph
@@ -268,8 +269,15 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 	ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(at.x + frame * 0.25f, at.y + frame * 0.5f), frame * 0.2f,
 	                                            ImGui::GetColorU32(colour));
 	tip = std::string(word) + ": " + tip;
-	if (present) go_to_tool(workspace, field, value, pressed, tip, "A click: ");
-	else ui_kit::tooltip(tip);
+	if (present) {
+		go_to_tool(workspace, field, value, pressed, tip, "A click: ");
+	} else if (status == ReferenceStatus::Missing) {
+		// A missing value's dot opens what Problems offers for it (DI-15): Add it there, Open the file, Import.
+		ui_kit::tooltip(tip + "\nA click: what fixes it.");
+		picker.draw_fixes(workspace, document, address, field, value, pressed);
+	} else {
+		ui_kit::tooltip(tip);
+	}
 	if (compact) return;
 	if (!present) {
 		// A name nothing resolves: its Go to lands where it belongs (DI-17: a Go to always lands), the file a
@@ -384,7 +392,7 @@ void reference_tools(Workspace &workspace, ReferencePicker &picker, const Docume
 		if (picker.draw(workspace, document, targets.front(), field, value, compact, picked))
 			set(workspace, document, targets, field.schema->id, picked_value(field, picked), false);
 	}
-	reference_status(workspace, field, value, compact, row);
+	reference_status(workspace, picker, document, targets.front(), field, value, compact, row);
 	// A texture's preview (ADR 0046 S18): the file its loader opens, as that loader loads it; under the
 	// field, or a line high beside its dot in a table's cell.
 	texture_preview::reference_field(workspace, field, value, compact);
