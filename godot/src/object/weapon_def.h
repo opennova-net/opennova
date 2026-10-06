@@ -199,6 +199,7 @@ public:
 	void set_hudrndgfx_layout(const Vector3i &p_value);
 	TypedArray<WeaponSightRow> get_sights() const;
 	// The ACTION ladder the weapon FSM bakes (weapon_fsm.h).
+	TypedArray<WeaponActionRow> get_actions() const;
 	void set_actions(const TypedArray<WeaponActionRow> &p_rows);
 };
 
