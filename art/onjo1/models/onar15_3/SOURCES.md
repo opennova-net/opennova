@@ -17,9 +17,14 @@ model's forward, the original's convention, then decimated: 3,999, 1,500 and
 on one texel of `on_ar15_0_c.tga` nearest that texture's mean colour. The four
 materials are `on_ar15`'s, and so are their textures
 (`art/on_ar15/textures/on_ar15_{0,1,2,3}_c.tga`), which the game loads once for
-both models.
+both models. They draw with `VS_PHONGT`, as the original's `M4_3RD` does: the
+Phong highlight whose strength is the diffuse alpha, over `on_ar15`'s flat normal
+map (`on_ar15_n.png`, written as `on_ar15_0n.mdt`), each material's texture list
+naming the two files `on_ar15` already writes. LOD 3's corners each sit on a
+quarter-texel square around their texel, laid out along the face, so the shader
+has a tangent frame to light it by while it keeps that texel's colour.
 
 The original game's `M4_3RD` was looked at for its size, origin, LOD
-thresholds, collision LOD and user points only.
+thresholds, collision LOD, user points and shader only.
 
 No third-party material is used beyond what `on_ar15` itself uses.
