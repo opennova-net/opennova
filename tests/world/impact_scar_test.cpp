@@ -6,6 +6,7 @@
 
 #include <cstdio>
 
+#include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/world.h>
 
@@ -461,6 +462,45 @@ void test_entity_ring_section_local() {
 				"the slot holds the section-local hit point, not a rotated world point");
 	}
 	CHECK(slot.texture == kScarGlassFallbackTextureStrip, "glass takes bhole1");
+
+	// Drawn back through the same live section matrix (the world form a
+	// node-less owner — a statically batched prop — draws), the quad is
+	// centred on the world hit again [orig: Scar_RenderCache @0x5CDA49 —
+	// `bones + bone << 6` applied to the stored section-local position].
+	struct Lookup {
+		const World *world;
+		const CollisionWorld *collision;
+	} lookup{&world, &collision};
+	opennova::renderer::ScarViewContext ctx;
+	ctx.user = &lookup;
+	ctx.section_matrix = [](std::uint16_t owner, int section, CollisionMatrix &out,
+								 void *user) {
+		const auto *l = static_cast<const Lookup *>(user);
+		EntityHandle handle;
+		handle.packed = owner;
+		return l->collision->entity_section_matrix(*l->world, handle, section, out);
+	};
+	opennova::renderer::ScarDrawList list;
+	opennova::renderer::compile_scar_draws(world.out.scars, ctx, list);
+	CHECK(list.batches.size() == 1 && list.batches[0].world_resolved,
+			"the posed ring's batch resolves its world form");
+	if (list.world_vertices.size() != 6) {
+		CHECK(false, "one world-space quad");
+		return;
+	}
+	float centre[3] = {0.0f, 0.0f, 0.0f};
+	const int order_corners[4] = {0, 1, 4, 2}; // -A-B, +A-B, +A+B, -A+B
+	for (int k : order_corners) {
+		centre[0] += list.world_vertices[static_cast<size_t>(k)].x / 4.0f;
+		centre[1] += list.world_vertices[static_cast<size_t>(k)].y / 4.0f;
+		centre[2] += list.world_vertices[static_cast<size_t>(k)].z / 4.0f;
+	}
+	for (int axis = 0; axis < 3; ++axis) {
+		const float expected = static_cast<float>(world_point[axis]) / 65536.0f;
+		const float delta = centre[axis] - expected;
+		CHECK(delta > -0.001f && delta < 0.001f,
+				"the world form puts the quad back on the world hit point");
+	}
 }
 
 int main() {

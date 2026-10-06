@@ -31,6 +31,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_menu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_mission.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_mission_menus.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_shader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_style.cpp
@@ -84,6 +85,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_slots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/environment_document.cpp
     # the sound lane: a bank's waves and sets, SndProf.def's profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
@@ -193,6 +195,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_palette.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_place.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_poses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
@@ -258,12 +261,14 @@ add_library(opennova_editor STATIC
     # (S13 D7), and the finding codes' lookup over every table (S13 A6)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_result.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/catalog_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/disk_watch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_page.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
@@ -331,6 +336,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/file_page_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp

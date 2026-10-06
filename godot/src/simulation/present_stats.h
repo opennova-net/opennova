@@ -127,8 +127,9 @@ protected:
 // Typed diagnostic counters of the scar present pass (ScarPresenter's
 // present_frame leg): the sim's slot census (live, fog-culled, rings
 // leased), the device's batch/surface/mesh counts, the strips whose TGA is
-// missing or whose mode word is neither shipped drawer state, and the
-// entity-ring owners the pass could not resolve to a live node.
+// missing or whose mode word is neither shipped drawer state, the
+// entity-ring owners the pass could not resolve to a live node, and the
+// entity-ring batches it drew in world space for such an owner.
 class ScarPresentStats : public RefCounted {
 	GDCLASS(ScarPresentStats, RefCounted)
 
@@ -142,6 +143,7 @@ public:
 	STAT_FIELD(textures_missing)
 	STAT_FIELD(strips_unsupported)
 	STAT_FIELD(owners_unresolved)
+	STAT_FIELD(entity_world_batches)
 
 protected:
 	static void _bind_methods();

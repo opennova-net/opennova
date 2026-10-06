@@ -251,7 +251,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
 	        .runtime("environment")
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::Environment)
 	        .names_files()
 	        .new_name("newenviro.env")
 	        .folder("terrain")
@@ -442,6 +442,7 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Shader)
 	        .scr(ScrForm::Shader)
 	        .folder("shaders")
+	        .new_name("newshader.fx")
 	        .about("A shader effect the renderer compiles.")
 	        .row,
 	// Read from the install's folder before any archive mounts (game.cfg, assets.cd:

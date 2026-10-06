@@ -89,10 +89,11 @@ enum class FindingGroup {
 	Shaders,
 	Missions,
 	Textures,
-	Texts, // a text the engine's own reader reads (DI-06: an environment, the defs)
+	Texts, // a text the engine's own reader reads (DI-06: the defs)
 	SoundBanks,
 	SoundProfiles,
 	Particles, // a particle file, through the effect system's reader (ADR 0046 DI-14)
+	Environments,
 	HudLayouts,
 	kCount
 };
@@ -252,6 +253,7 @@ enum class CoreFinding {
 	BlankFont,
 	BlankMenu,
 	BlankMission,
+	BlankShader,
 	BlankStrings,
 	BlankSound,
 	BlankStyle,

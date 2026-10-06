@@ -917,6 +917,18 @@ drawn over the tab (a menu, a dialog), the document's lines show instead, read o
 _Avoid_: script editor (the whole editor), code view, text view (the lines shown read only where no
 device draws), CodeEdit (the Godot control behind it)
 
+**Environment document**:
+A mission's environment (a .env: its sky, light, fog and water) open in the editor (the deep-integration
+plan's DI-19a), read and written through the engine's own reader and writer: one record, the
+environment, whose fields are the keywords the game reads in the units the file writes them (a time as
+HHMM, a fog distance in whole metres, a water height in half metres, a colour as its three bytes), and
+its time-of-day keyframes, at most 16, each its time and its twelve colours. The cloud layers name
+textures and the sun, moon, glare and star models, each a Go to; the Inspector heads it with the missions
+that run on it, each with the terrain it pairs it with, what its header sets over it (fog, water) and
+where its water plane comes from. A line the game reads otherwise than written is a finding of its line;
+Save writes the file in the editor's layout, the game reading the same environment.
+_Avoid_: env file (the file alone), weather (the runtime's state), sky (one part of it)
+
 **Texture document**:
 A texture file of the project (a .tga, .mdt, .pcx, .dds or .png) open in the editor, read as the
 game reads it: by the reader its name picks (a .tga or an .mdt the game's TGA reader, which takes every

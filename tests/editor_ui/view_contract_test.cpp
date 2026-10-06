@@ -131,6 +131,9 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	         text_bytes("begin \"default\"\r\n\tSSLFootGND FSP_DIRT_L 0 0 0\r\nend\r\n")},
 	        // A particle file (DI-14): its text in the script view, its effect the Preview window's.
 	        {AssetKind::Particles, "minimal_effect.ptl", file("particle/synth_minimal_effect.ptl")},
+	        // The environment (DI-19a): its row and its ten keyframes as a tree, the missions that run on it
+	        // heading the Inspector.
+	        {AssetKind::Environment, "synth_full.env", file("env/synth_full.env")},
 	};
 }
 

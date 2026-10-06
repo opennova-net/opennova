@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -36,16 +37,15 @@ std::string reader_sentence(std::string message);
 // key chain [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0]: the document shows the tag decoded and
 // Save writes it back encoded, as the game's own codec does (net/novacrypto/pubcrypto.h,
 // encode_key_chain). Every text kind no structured type edits yet is held by it (the deep-integration
-// plan's DI-06, "every text file opens in the editor": a configuration, a text, an
-// environment, an AI profile, the HUD effects, the avatars, the character attributes, the
-// other defs, the score table, a NovaWorld screen; a kind the build leaves out, a mission text, is none of
-// its: every kind a type edits packs, assets/asset_kinds). Where the engine has a reader of
-// the kind, its validate_file is that reader's findings of the text (text_reader_findings); a kind the
-// asset graph reads through the engine's reader (graph/extractors.cpp, a native kind: an environment,
-// the avatars) has its open document read by that same reader, so its names follow its
-// edits. A kind with no reader the editor models makes no finding. A particle file and the HUD layout are
-// no longer the text type's: their own types hold them (documents/particle_type, DI-14;
-// documents/hud_layout_type, DI-20), the specific type owning its kind.
+// plan's DI-06, "every text file opens in the editor": a configuration, a text, an AI profile, the
+// HUD effects, the avatars, the character attributes, the other defs, the score table, a NovaWorld
+// screen; a kind the build leaves out, a mission text, is none of its: every kind a type edits packs,
+// assets/asset_kinds; a kind a structured type edits is that type's, as the environment is the
+// environment type's, DI-19a, a particle file the particle type's, DI-14, and the HUD layout the HUD
+// layout type's, DI-20). Where the engine has a reader of the kind, its validate_file is that reader's
+// findings of the text (text_reader_findings); a kind the asset graph reads through the engine's reader
+// (graph/extractors.cpp, a native kind: the avatars) has its open document read by that same reader, so
+// its names follow its edits. A kind with no reader the editor models makes no finding.
 std::unique_ptr<DocumentBase> make_text_document();
 std::vector<Diagnostic> validate_text_file(const DocumentBase &document);
 FindingTable text_finding_codes();
@@ -63,7 +63,7 @@ enum class TextFinding {
 };
 const FindingCodeRow &finding_code(TextFinding code);
 // The findings the engine's reader of `document`'s kind makes of its text (validate_text_file's):
-// the environment's (env::load_env), the avatars' (avatars::avatars_parse_memory, each diagnostic at its
+// the avatars' (avatars::avatars_parse_memory, each diagnostic at its
 // line) and the score table's (score::parse); none for any other kind.
 std::vector<Diagnostic> text_reader_findings(const TextDocument &document);
 
@@ -81,5 +81,38 @@ enum class ShaderFinding {
 };
 const FindingCodeRow &finding_code(ShaderFinding code);
 FindingTable shader_finding_codes();
+
+// The file in the shader loader's form holding `text` (with the NUL after it every shipped shader has):
+// what Save writes for a new shader.
+std::vector<uint8_t> shader_file_bytes(const std::string &text);
+
+// The fixed-function effect, which the renderer opens by this name as it starts and compiles once for each
+// of its fixed-function tags [orig: HLSLEffect_InitFixedFunctionShaders @ 0x5AF790, the name @ 0x5AFA3E].
+inline constexpr const char *kFixedFunctionShaderFile = "_ffp.fx";
+
+// Those tags, as the renderer names each compile: "FF", then _ST or _MT (one texture or two), _OP, _AB or
+// _AD (opaque, alpha-blended, additive), then _LUM for the self-lit [orig: @ 0x5AFAD6, sprintf "FF%s%s%s"].
+const std::vector<std::string> &fixed_function_shader_tags();
+
+// What a shader's EffectInfo annotations say [orig: HLSLEffect_LoadFromFile @ 0x5AE899..0x5AE9BC]: the tag
+// the effect registers under (EffectTag) and where it is written (its offset into the text and length, 0
+// for none), and whether the loader registers a TEX_UVXFORM twin of it as the tag and "#UV"
+// (EffectAlt_UV) [orig: @ 0x5AEA03; HLSLEffect_LoadAllFromPFFArchive @ 0x5AFF88]. `found` is false for a
+// text with no EffectInfo. Read from the text with its comments left out, as the compiler reads it; a
+// preprocessor condition around the annotations is not followed.
+struct ShaderEffectInfo {
+	bool found = false;
+	size_t info_offset = 0; // where EffectInfo is written
+	std::string tag;
+	size_t tag_offset = 0, tag_length = 0;
+	bool alt_uv = false;
+};
+ShaderEffectInfo read_shader_effect_info(const std::string &text);
+
+// The shader tags a shader file registers (DocumentType::definitions), each a Shader symbol: _ffp.fx's
+// fixed-function tags (and their #UV twins where its EffectInfo asks for them); another file's EffectTag
+// (and its #UV twin); none for a file whose name starts with '_', an include the archive walk skips
+// [orig: HLSLEffect_LoadAllFromPFFArchive @ 0x5AFF6E].
+void shader_definitions(const TextDocument &document, std::vector<TextDefinition> &out);
 
 } // namespace opennova::editor

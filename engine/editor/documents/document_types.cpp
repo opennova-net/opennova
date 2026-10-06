@@ -7,6 +7,7 @@
 #include <editor/documents/menu_labels.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/environment_document.h>
 #include <editor/documents/hud_layout_type.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
@@ -47,6 +48,7 @@ std::unique_ptr<DocumentBase> make_animation_map() {
 }
 std::unique_ptr<DocumentBase> make_sound_bank() { return std::make_unique<SoundBankDocument>(); }
 std::unique_ptr<DocumentBase> make_sound_profiles() { return std::make_unique<SoundProfileDocument>(); }
+std::unique_ptr<DocumentBase> make_environment() { return std::make_unique<EnvironmentDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -84,8 +86,10 @@ constexpr DocumentType kTypes[] = {
 			validate_music_script_file, text_fields, music_script_finding_codes },
 	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,
 			text_fields, credits_finding_codes },
+	// The shader's text defines the tags it registers (its EffectTag; _ffp.fx the fixed-function tags).
 	{ DocumentTypeId::Shader, "shader", make_shader_document, validate_shader_file, text_fields,
-			shader_finding_codes },
+			shader_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			shader_definitions },
 	{ DocumentTypeId::Text, "text", make_text_document, validate_text_file, text_fields,
 			text_finding_codes },
 	// The texture (S18): its texels as the game reads them, read only for now; no findings yet (what
@@ -104,6 +108,10 @@ constexpr DocumentType kTypes[] = {
 	// what it names the asset graph reads through the same reader (no references of the type's own).
 	{ DocumentTypeId::Particles, "particle", make_particle_document, validate_particle_file, text_fields,
 			particle_finding_codes },
+	// The environment (DI-19a): a .env's keywords and keyframes over env::Config, its references its
+	// fields' (the cloud layers' textures, the sun, moon, glare and star models).
+	{ DocumentTypeId::Environment, "environment", make_environment, validate_environment_file,
+			EnvironmentDocument::schema, environment_finding_codes },
 	// The HUD layout (the plan's DI-20): hudpos.def held as its text, its line ends the game's reader's;
 	// its picture the HUD viewport's, its names the graph's through the engine's own parser.
 	{ DocumentTypeId::HudLayout, "hud_layout", make_hud_layout_document, validate_hud_layout_file, text_fields,
