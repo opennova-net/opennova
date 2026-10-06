@@ -20,7 +20,7 @@
 // Game_CloseInGameScreens @ 0x54b940, the close every leave command below calls: the in-game
 // latches cleared and the menu's close requested @ 0x54b94a]. Each screen therefore holds the
 // controls the player leaves it by, named as the code binds them, with literal labels (menutxt.bin
-// is optional and absent from a new project).
+// is optional and absent from a new project), and the pointer the player aims them with.
 
 namespace opennova::editor {
 
@@ -77,12 +77,22 @@ std::string panel(const char *name, const Box &box, bool hidden, const std::stri
 }
 
 // The screen: its NAME, and a MAIN window over the whole 800x600 design frame carrying the font
-// every window under it inherits.
+// every window under it inherits and the pointer every window under it shows [orig:
+// CWnd_GetInheritedCursorTexture @ 0x646AD0]: the startup screen's CURSOR (blank_menu_cursor, the
+// file made with the menu where the project has none, blank_companion), as every shipped in-mission
+// screen's MAIN names it. The game hides the system pointer for good as it starts [orig:
+// Game_InitSubsystems @ 0x4a725a -> Game_HideCursorLoop @ 0x7612e0], and a screen's only pointer is
+// the CURSOR texture its windows name, drawn last at the mouse [orig: CUIScene_DrawScreensAndCursor
+// @ 0x63bf60 over scene_end_frame @ 0x63e600's pick, zeroed each frame @ 0x63e606]. The mouse still
+// works without one, each message's own point hit-testing the buttons [orig: Game_WindowProc @
+// 0x7624c0 -> Input_DispatchMouseEvent @ 0x761470 -> widget_process_mouse_event @ 0x647a00], so a
+// screen naming none is clicked blind: its buttons light under a mouse the player cannot see.
 std::string screen(const char *name, const std::string &children) {
 	return "<SCREEN>\n<NAME>" + std::string(name) +
 	       "</NAME>\n<WINDOW type=\"window\" name=\"MAIN\">\n"
 	       "<APPEARANCE type=\"custom\" state=\"default\"></APPEARANCE>\n" +
-	       position({0, 0, 800, 600}) + blank_menu_font() + children + "</WINDOW>\n</SCREEN>\n";
+	       position({0, 0, 800, 600}) + blank_menu_font() + blank_menu_cursor() + children +
+	       "</WINDOW>\n</SCREEN>\n";
 }
 
 // The leave-the-mission idiom the in-game screens share: a hidden CONFIRM_EXIT panel asking
@@ -117,7 +127,17 @@ bool make_blank_cmap_menu(const BlankRequest &request, std::vector<uint8_t> &out
 // presses it; under the hidden MAIN_WRAPPER (the confirm up) Esc reaches CONFIRM_NO instead. ABORT
 // arms the leave [orig: UI_IngameAbortArmConfirm @ 0x555450, registered @ 0x555547] and raises the
 // question by its actions; CONFIRM_YES leaves [orig: UI_IngameConfirmExitCommand @ 0x555460,
-// registered @ 0x555565].
+// registered @ 0x555565] for the menu screen the mission was started from, which the menu's return
+// selects again from its history [orig: Menu_InitShellResources @ 0x552682 ->
+// UIScene_ReturnToHistoryScreen @ 0x63dfa0].
+//
+// The blank leaves out the shipped screen's OPTIONS (the whole options dialog) and RESTART. RESTART
+// queues the respawn action before the restart [orig: UI_IngameRestartCommand @ 0x555410, action 12
+// @ 0x555428], and the respawn resets the player through its body's animation slot, read unchecked
+// [orig: Server_ProcessClientRequestRespawn @ 0x519ce3 -> Server_ProcessPlayerDeath @ 0x517899 ->
+// Entity_ResetToSpawnState @ 0x4b9620, entity+0x188]: a project with no character yet plays the
+// first items.def row (D-NET-348), which has none, and the game faults there (witnessed in strict
+// retail 2026-10-05). A project whose player has a body adds it; the command stays bound by name.
 bool make_blank_game_menu(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	const std::string wrapper =
 	        panel("MAIN_WRAPPER", {300, 250, 500, 350}, false,
