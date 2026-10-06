@@ -1,0 +1,4 @@
+// Sound profiles of OpenNova. An item plays the profile its sound_profile names, else "default".
+// A slot line: <slot keyword> <sound set> <param2> <param3> <param4>.
+begin "default"
+end
