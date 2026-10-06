@@ -56,9 +56,26 @@ struct MenuCanvasShow {
 	}
 	bool operator!=(const MenuCanvasShow &other) const { return !(*this == other); }
 };
+// The game's pointer over the menu's picture (DI-08), drawn while `shown`: at the mouse while it is over
+// the picture and the canvas shows no pointer of its own (ViewportPicture::pointer), else where a client
+// holds it (`held`, at `x`, `y` in design units: the wire's hover, the MCP gaps lane). The cursor drawn
+// is the one the game draws with the mouse there (menu_pointer_at). Neither option configures the screen
+// again: the device draws its cursor pass again alone.
+struct MenuPointerShow {
+	bool shown = true;
+	bool held = false;
+	float x = 0.0f;
+	float y = 0.0f;
+	bool operator==(const MenuPointerShow &other) const {
+		return shown == other.shown && held == other.held && (!held || (x == other.x && y == other.y));
+	}
+	bool operator!=(const MenuPointerShow &other) const { return !(*this == other); }
+};
 // The options on the wire (the envelope's `options`, a SetViewport's): {show_hidden, force_id,
-// force_state, checked, popup_open, focus, zoom: fit, scale or device, scale, snap}.
-io::JsonValue menu_options_to_json(const MenuViewportOptions &options, const MenuCanvasShow &show);
+// force_state, checked, popup_open, focus, zoom: fit, scale or device, scale, snap, pointer, pointer_at:
+// [x, y] or null}.
+io::JsonValue menu_options_to_json(
+		const MenuViewportOptions &options, const MenuCanvasShow &show, const MenuPointerShow &pointer);
 
 // "normal", "mouseover", "selected", "disabled": a forced state's token (-1 = normal), and back;
 // false for another token.
@@ -86,6 +103,29 @@ uint32_t menu_frame_time(const PreviewClock &clock);
 // (its time the configure's) takes the clock's time at its first tick that would show otherwise.
 bool menu_frame_clock(const MenuViewport &menu, uint32_t frame_ms, const PreviewClock &clock,
 		uint32_t &time);
+
+// The pointer the game draws with the mouse at a point of the menu's picture (DI-08), as the viewport's
+// headless compile finds it: the claim the game's pump makes there and the CURSOR it stamps, whatever
+// state the picture holds its windows in (MenuFrameCompiler::claim_at, frame_cursor): the window under
+// the point's own CURSOR, else its root window's, else the first root window's that loads [orig:
+// CWnd_ProcessMouseEvent @ 0x647a00; CUIScene_EndFrame @ 0x63e600; CUIScene_DrawScreensAndCursor
+// @ 0x63bf60]. `drawn` false: no such CURSOR loads, and the game draws no pointer there at all
+// (menu-re.md "No CURSOR, no pointer").
+struct MenuPointer {
+	bool drawn = false;
+	int owner = -1; // the window whose CURSOR it is, its pre-order index in the compiled screen
+	NodeAddress window; // its record (none: a spin arrow's own)
+	std::string name; // its name
+	std::string file; // the CURSOR's FILE as the screen names it (a variable resolved)
+	int width = 0; // the size it draws at, its texture's own, unscaled
+	int height = 0;
+};
+// At (x, y) in design units of the frame's picture (none while the picture is not the menu as it is now).
+MenuPointer menu_pointer_at(const MenuCanvasFrame &frame, float x, float y);
+// With the mouse over no window of the screen: the first root window's that loads (the screen's own).
+MenuPointer menu_screen_pointer(const MenuCanvasFrame &frame);
+// {drawn, file, width, height, window, name} (window the record's id, 0 none); {drawn: false} for none.
+io::JsonValue menu_pointer_to_json(const MenuPointer &pointer);
 
 // A window's TYPE as the factory matches it (the generic window for none), and what the options
 // can hold it in by its type: checked (a check box, a radio button), its list open (a combo box),
@@ -124,6 +164,8 @@ public:
 	// How its canvas shows the picture (its zoom and its snap): options that change no picture, the
 	// device's configure not asked again for them.
 	const MenuCanvasShow &show() const { return show_; }
+	// The game's pointer over the picture (DI-08): drawn or not, and where a client holds it.
+	const MenuPointerShow &pointer() const { return pointer_; }
 	// The screen row it shows (0 none).
 	NodeId screen_row() const { return part_; }
 	// What the device configures (null unless ready): the menu image, which the device holds while
@@ -208,6 +250,7 @@ private:
 
 	MenuViewportOptions options_;
 	MenuCanvasShow show_;
+	MenuPointerShow pointer_;
 	uint64_t options_serial_ = 0;
 	MenuScreenStatus reason_ = MenuScreenStatus::NoProject;
 	std::string detail_;
