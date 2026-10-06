@@ -8,6 +8,7 @@ const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _config: TestFs.Snapshot
 var _retail_dir := ""
+var _dirs: Array[String] = []
 var _shell: MainGame = null
 
 
@@ -27,6 +28,9 @@ func after_each() -> void:
 	if not _retail_dir.is_empty():
 		TestFs.remove_dir_recursive(_retail_dir)
 		_retail_dir = ""
+	for dir in _dirs:
+		TestFs.remove_dir_recursive(dir)
+	_dirs.clear()
 	LaunchFlags.clear_args_override()
 	_config.restore()
 	Strings.clear()
@@ -76,11 +80,46 @@ func test_no_resource_dir_boots_the_bundled_placeholder_menu() -> void:
 	assert_gt(frame.get_draw_list_stats().glyphs, 0, "the bundled font draws the menu text")
 
 
+func _temp_dir(label: String) -> String:
+	var dir := OS.get_cache_dir().path_join("opennova_bundled_%s_%d" % [label, Time.get_ticks_usec()])
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	_dirs.append(dir)
+	return dir
+
+
+# ADR 0048 d8: a source run plays the base game project's export, its export
+# folder once an export of it is there; never exported, the project folder.
+func test_a_project_plays_its_export_once_there_is_one() -> void:
+	var project := _temp_dir("project")
+	assert_true(_same_dir(BootRootMount.project_game_dir(project), project), "never exported: the project")
+	var exported := project.path_join(BootRootMount.PROJECT_EXPORT_DIR)
+	assert_eq(DirAccess.make_dir_recursive_absolute(exported), OK)
+	assert_true(_same_dir(BootRootMount.project_game_dir(project), project),
+			"an export folder holding no export is none")
+	WorldFixture.stage_shell_archives(self, exported, false)
+	assert_true(_same_dir(BootRootMount.project_game_dir(project), exported), "its export")
+
+
+# The Build's boot-table archives mount as an install's do; a folder with none
+# (an unbuilt project, the web build's staged files) as a plain loose root.
+func test_the_bundled_game_mounts_a_build_packed_and_a_folder_loose() -> void:
+	var build := _temp_dir("build")
+	WorldFixture.stage_shell_archives(self, build, false)
+	var packed := BootRootMount.mount_bundled(build)
+	assert_true(packed != null and packed.is_runtime_mount(), "the build's archives mount")
+	var folder := _temp_dir("folder")
+	TestFs.write_text(self, folder.path_join("main.mnu"), "<SCREEN><NAME>STARTUP</NAME></SCREEN>\n")
+	var loose := BootRootMount.mount_bundled(folder)
+	assert_true(loose != null and not loose.is_runtime_mount(), "a folder of loose files mounts loose")
+	if loose != null:
+		assert_true(loose.has_file("main.mnu"), "its files are found by name")
+
+
 # EXIT is a named control, as retail's is (retail's ACTION has no quit verb): the
 # companion that owns the bundled menu relays it for the shell to quit.
 func test_exit_is_relayed_by_name() -> void:
 	var text := FileAccess.get_file_as_string(
-			BootRootMount.bundled_assets_dir().path_join("main.mnu"))
+			BootRootMount.bundled_project_dir().path_join("main.mnu"))
 	var driver := MenuDriverFixture.driver_over(self,
 			MenuDriverFixture.doc_from_xml(self, text), "main.mnu")
 	var companion := BundledMenuCompanion.new()

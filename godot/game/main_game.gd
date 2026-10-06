@@ -348,12 +348,12 @@ func _ready() -> void:
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
 	if dir.is_empty():
-		# No --resource-dir: OpenNova's own placeholder menu. The launch
-		# shortcuts below all need game data, so they only follow a real dir.
+		# No --resource-dir: OpenNova's own game (ADR 0048), whose build is game
+		# data as an install is, so the launch shortcuts below follow it too.
 		if not _enter_bundled_menu():
 			get_tree().quit(1)
-		return
-	if not _enter_menu(dir):
+			return
+	elif not _enter_menu(dir):
 		get_tree().quit(1)
 		return
 	# F6 is still the real standalone game and normal loading presentation; it
