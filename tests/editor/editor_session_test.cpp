@@ -1153,7 +1153,8 @@ static int test_outcomes_and_refusals() {
 	TEST_EXPECT(v.project.scan->find("newarow1.tga") == nullptr);
 	session.handle(request::create_file("other.mnu", "menu"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(fs::exists(root + "/textures/newarow1.tga") && v.project.scan->find("newarow1.tga") != nullptr);
+	// Where the project keeps its textures now (DI-03): beside logo.tga and logo2.tga at the top level.
+	TEST_EXPECT(fs::exists(root + "/newarow1.tga") && v.project.scan->find("newarow1.tga") != nullptr);
 	// The required name still gets its requirement's blank.
 	const AssetEntry *main_menu = v.project.scan->find("main.mnu");
 	TEST_EXPECT(main_menu != nullptr);
