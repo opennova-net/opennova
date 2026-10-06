@@ -1361,6 +1361,11 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 			if (const std::string witness = requirement_witness(requirement->role); !witness.empty())
 				row.set("witness", json_string(witness));
 		if (answer.grouped) row.set("group", json_string(answer.groups[group_of[i]].key));
+		// Its Go to: the request a click on the row raises (problem_location: its document opened at the
+		// record and field, a text at its line, or the file shown in Files), which editor_request passes back
+		// as it is; none for a row about no file of the project (DI-27).
+		const ProblemLocation location = problem_location(d, view);
+		if (!location.empty()) row.set("go_to", editor_request_to_json(location.request()));
 		JsonValue listed = JsonValue::make_array();
 		for (const ProblemFix &fix : fixes.fixes(view, answer.rows[i])) {
 			// A fix's edits named in its document, open or as the scan read the file (a closed string table's
