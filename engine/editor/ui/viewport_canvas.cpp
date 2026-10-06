@@ -349,7 +349,7 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 	return true;
 }
 
-void ViewportCanvas::picture(const Device &device, const Tip &tip) {
+void ViewportCanvas::picture(const Device &device, const Tip &tip, bool pointer) {
 	// The kind's hover tip, on the surface (the item just drawn): made only while it shows.
 	if (tip)
 		ui_kit::tooltip_lazy(tip);
@@ -364,6 +364,9 @@ void ViewportCanvas::picture(const Device &device, const Tip &tip) {
 	shown.clip_right = surface_max_.x;
 	shown.clip_bottom = surface_max_.y;
 	shown.canvas_sized = zoom_ != Zoom::Device;
+	shown.pointer = pointer;
+	shown.pointer_x = input_.mouse.x;
+	shown.pointer_y = input_.mouse.y;
 	device(shown);
 	// The picture's edge: a design picture's just outside it, on its margin.
 	const float edge = zoom_ != Zoom::Fill ? 1.0f : 0.0f;
