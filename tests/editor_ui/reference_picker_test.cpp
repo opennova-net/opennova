@@ -570,7 +570,7 @@ void test_texture_import_section() {
 }
 
 // S18, what a texture costs the game: under a model row's use in the texture's tab, its device texture's bytes
-// and its .dds's (documents/texture_budget).
+// and its .dds's (documents/texture_budget); Files listing the textures by that cost (session/texture_budget_list).
 void test_texture_budget_line() {
 	PickerProject project;
 	CHECK(project.open(), "the item table's project");
@@ -604,6 +604,19 @@ void test_texture_budget_line() {
 	CHECK(text.find("Model diffuse: material 1 of crate.3di") != std::string::npos &&
 	              text.find("In the game: 21.3 MB, 5.3 MB as its .dds") != std::string::npos,
 	      "under its use, what the game holds of it and what its .dds would");
+	// Files listing the textures by cost (the workspace's files.by_cost): the crate first, its size the game's,
+	// the list's total beside the count.
+	project.session.handle(request::set_workspace(R"({"files": {"kind": "texture", "by_cost": true}})"));
+	ui.frames(4);
+	ui.focus("Files");
+	ui.away();
+	ui.drain();
+	const std::string files = logged_frame(ui);
+	const size_t crate = files.find("crate.tga");
+	CHECK(files.find("By cost") != std::string::npos && files.find("In game") != std::string::npos &&
+	              files.find("21.3 MB in the game") != std::string::npos && crate != std::string::npos &&
+	              files.find("21.3 MB", crate) != std::string::npos,
+	      "Files by cost: the crate's texture's size in the game, the total beside the count");
 }
 
 // S18: an image the OS drops on a texture's tab, and one picked by its Replace with image..., ask first
