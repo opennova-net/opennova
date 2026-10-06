@@ -397,6 +397,8 @@ if(OPENNOVA_EDITOR)
         authoring/script_edit.cpp
         authoring/script_highlighter.cpp
         authoring/texture_viewport_applier.cpp
+        authoring/effect_viewport_applier.cpp
+        authoring/preview_effects.cpp
         authoring/thumbnail_images.cpp
         authoring/viewport_device.cpp
         authoring/viewport_devices.cpp
