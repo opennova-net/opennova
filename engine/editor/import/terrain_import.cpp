@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <exception>
 #include <optional>
 #include <sstream>
@@ -17,8 +18,10 @@
 #include <editor/project/project_files.h>
 #include <editor/terrain/terrain_bake.h>
 #include <formats/cpt/cpt.h>
+#include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 #include <formats/til/til_io.h>
+#include <formats/trn/charmap_legend.h>
 #include <formats/trn/trn_io.h>
 
 namespace opennova::editor {
@@ -27,10 +30,11 @@ namespace {
 
 constexpr int kSide = trngen::kDepthSide; // 1024: the colour map's and the heightmap's side
 constexpr int kDetailSide = 512;          // a made detail's side (the shipped Det_*.tga's)
+constexpr int kSurfaceSideMin = 256;      // a surface map's least side (JO ships 512)
 constexpr uint8_t kNeutralGrey = 128;     // the detail's modulate x2 leaves a colour as it is at 128
 constexpr double kTrnGenTop = 127.5;      // an 8-bit map's white after TrnGen's smoothing: 32 x 4 x 255 / 256
 
-const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles"};
+const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface"};
 
 bool number_in(const std::string &value, double low, double high, double &out) {
 	const std::optional<double> parsed = strutil::parse_double(value);
@@ -69,7 +73,7 @@ RgbaImage flat_image(int side, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // The .trn the outputs make: the names, the sector grid of the layout, the water.
-TrnConfig make_trn(const std::string &stem, const TerrainImportSettings &settings, bool tiles) {
+TrnConfig make_trn(const std::string &stem, const TerrainImportSettings &settings, bool tiles, bool surface) {
 	TrnConfig trn;
 	trn.name = stem;
 	trn.colormap = stem + "_c.tga";
@@ -79,6 +83,7 @@ TrnConfig make_trn(const std::string &stem, const TerrainImportSettings &setting
 	trn.polydata = stem + ".cpt";
 	trn.tileinfo = stem + ".til";
 	if (tiles) trn.tilestrip = stem + "_t.tga";
+	if (surface) trn.charmap = stem + "_m.pcx";
 	// The .trn's water_height is half world units [orig: TimeOfDay_ParseProperty @ 0x57CB48..0x57CB6A,
 	// atol << 15 into 16.16]; 0 draws no water [orig: render_water_surface @ 0x5C32E0..0x5C32E7].
 	trn.water_height = static_cast<int>(std::lround(settings.water * 2.0));
@@ -125,10 +130,11 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 		                    : key == "colormap" ? &out.colormap
 		                    : key == "detail" ? &out.detail
 		                    : key == "tiles" ? &out.tiles
-		                                     : nullptr;
+		                    : key == "surface" ? &out.surface
+		                                       : nullptr;
 		if (!slot) {
 			why = "line " + std::to_string(number) + " names '" + key + "', which a terrain set does not take (it takes " +
-			      "heightmap, colormap, detail and tiles)";
+			      "heightmap, colormap, detail, tiles and surface)";
 			return false;
 		}
 		if (value.empty()) {
@@ -146,8 +152,8 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 
 std::vector<uint8_t> write_terrain_set(const TerrainSet &set) {
 	std::string text = "; A terrain set: the images the editor's terrain importer makes a terrain from (ADR 0046 S20).\r\n";
-	const std::string *values[] = {&set.heightmap, &set.colormap, &set.detail, &set.tiles};
-	for (size_t i = 0; i < 4; ++i)
+	const std::string *values[] = {&set.heightmap, &set.colormap, &set.detail, &set.tiles, &set.surface};
+	for (size_t i = 0; i < 5; ++i)
 		if (!values[i]->empty()) text += std::string(kSetKeys[i]) + " " + *values[i] + "\r\n";
 	return text_bytes(text);
 }
@@ -230,11 +236,12 @@ bool terrain_stem_fits(const std::string &stem, std::string &why) {
 	return true;
 }
 
-std::vector<std::string> terrain_output_names(const std::string &stem, bool tiles) {
+std::vector<std::string> terrain_output_names(const std::string &stem, bool tiles, bool surface) {
 	std::vector<std::string> names = {stem + ".cpt", stem + "_c.tga", stem + "_dt.tga", stem + "_dm.tga",
 	                                  stem + "_d1.tga"};
 	if (tiles) names.push_back(stem + "_t.tga");
 	names.push_back(stem + ".til");
+	if (surface) names.push_back(stem + "_m.pcx");
 	names.push_back(stem + ".trn");
 	return names;
 }
@@ -318,6 +325,74 @@ bool decode_terrain_image(const std::string &key, const std::string &name, const
 	return true;
 }
 
+bool decode_terrain_surface(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,
+                            std::string &why) {
+	out = IndexedImage8();
+	// The texels as an image program shows them, an indexed image's indices beside its colours.
+	RgbaImage colours;
+	IndexedImage8 indices;
+	if (strutil::ends_with_icase(name, ".png")) {
+		if (!decode_png(bytes, colours, why, &indices)) {
+			why = name + ": " + why;
+			return false;
+		}
+	} else {
+		ImageSource source;
+		if (!decode_image_source(name, bytes, source, why)) {
+			why = name + ": " + why;
+			return false;
+		}
+		colours = std::move(source.image);
+		if (source.indexed) indices = std::move(source.indices);
+	}
+	// The game keeps the side alone, the rows' length and the power of two it samples the 1024-unit
+	// heightmap by, so the map is square and a power of two no wider than the heightmap [orig: sub_605A10 @
+	// 0x605A82..0x605AA0; Terrain_GetSurfaceTypeAtPosition @ 0x6065C6].
+	const int w = colours.width, h = colours.height;
+	if (w != h || !power_of_two(w) || w < kSurfaceSideMin || w > kSide) {
+		why = name + " is " + std::to_string(w) + " x " + std::to_string(h) +
+		      ": a surface map is square, 256, 512 or 1024 texels a side, laid over the heightmap";
+		return false;
+	}
+	const bool indexed = !indices.empty();
+	const size_t texels = size_t(w) * size_t(h);
+	out.width = w;
+	out.height = h;
+	out.indices.assign(texels, 0);
+	// The legend its palette, every entry past it white as the shipped legend leaves its own.
+	for (int i = 0; i < 256; ++i) {
+		const CharmapLegendColour &c = i < kCharmapLegendCount ? kCharmapLegend[i] : kCharmapLegendRest;
+		out.palette[i][0] = c.r;
+		out.palette[i][1] = c.g;
+		out.palette[i][2] = c.b;
+	}
+	size_t strays = 0, first = 0;
+	for (size_t i = 0; i < texels; ++i) {
+		const uint8_t *p = &colours.pixels[i * 4];
+		const int surface = indexed ? int(indices.indices[i]) : charmap_legend_class(p[0], p[1], p[2]);
+		if (surface < 0 || surface >= kCharmapLegendCount) {
+			if (strays++ == 0) first = i;
+			continue;
+		}
+		out.indices[i] = uint8_t(surface);
+	}
+	if (strays == 0) return true;
+	const std::string at = "(" + std::to_string(first % size_t(w)) + ", " + std::to_string(first / size_t(w)) + ")";
+	const std::string more = strays > 1 ? " (" + std::to_string(strays) + " texels in all)" : std::string();
+	if (indexed) {
+		why = name + "'s texel " + at + " holds index " + std::to_string(indices.indices[first]) + more +
+		      ": an indexed surface map's indices are the surface classes, 0 to 19";
+	} else {
+		const uint8_t *p = &colours.pixels[first * 4];
+		char colour[8];
+		std::snprintf(colour, sizeof(colour), "#%02X%02X%02X", p[0], p[1], p[2]);
+		why = name + "'s texel " + at + " is " + colour + more +
+		      ", the colour of no surface class: a colour surface map paints each class in its legend colour exactly";
+	}
+	out = IndexedImage8();
+	return false;
+}
+
 int terrain_steep_blocks(const std::vector<uint16_t> &raw16) {
 	int steep = 0;
 	for (size_t start = 0; start + 256 <= raw16.size(); start += 256) {
@@ -364,6 +439,12 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 	if (!set.tiles.empty()) {
 		if (!context.read(set.tiles, bytes)) return false;
 		if (!decode_terrain_image("tiles", set.tiles, bytes, tiles, why)) return refuse(why + ".");
+	}
+
+	IndexedImage8 surface;
+	if (!set.surface.empty()) {
+		if (!context.read(set.surface, bytes)) return false;
+		if (!decode_terrain_surface(set.surface, bytes, surface, why)) return refuse(why + ".");
 	}
 
 	// The bake: the heights and the ground mesh.
@@ -417,10 +498,18 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 	if (!save_til(TilFile(), til.bytes, why)) return refuse(til.name + " cannot be written: " + why + ".", CoreFinding::ImportEncode);
 	out.outputs.push_back(std::move(til));
 
+	if (!surface.empty()) {
+		ImportOutput charmap;
+		charmap.name = stem + "_m.pcx";
+		if (!encode_pcx_indexed(surface, charmap.bytes, why))
+			return refuse(charmap.name + " cannot be written: " + why + ".", CoreFinding::ImportEncode);
+		out.outputs.push_back(std::move(charmap));
+	}
+
 	ImportOutput trn_out;
 	trn_out.name = stem + ".trn";
 	std::ostringstream trn_text;
-	if (!save_trn(trn_text, make_trn(stem, settings, !tiles.empty()), why))
+	if (!save_trn(trn_text, make_trn(stem, settings, !tiles.empty(), !surface.empty()), why))
 		return refuse(trn_out.name + " cannot be written: " + why + ".", CoreFinding::ImportEncode);
 	trn_out.bytes = text_bytes(trn_text.str());
 	out.outputs.push_back(std::move(trn_out));
