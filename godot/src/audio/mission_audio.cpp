@@ -24,6 +24,7 @@
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <base/gameprofile/resource_missing.h>
 #include <runtime/audio/ambient_mixer.h>
 #include <runtime/audio/envs_markers.h>
 #include <runtime/audio/bank_chain.h>
@@ -261,6 +262,11 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 		UtilityFunctions::push_warning(vformat(
 				"MissionAudio: no sound banks loaded (probed %s.LWF, %s) — mission ambience will be silent",
 				mission_base, global_chain_text));
+		// The log line the editor's Play reads back into a Problems row (ADR 0046 DI-27): game.lwf, the
+		// global chain's bank the game's own sets live in, which a project makes or imports to be heard.
+		ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, "game.lwf", String(),
+				vformat("no sound bank loaded (probed %s.LWF, %s), so the mission is silent", mission_base,
+						global_chain_text));
 	} else if (stats_->get_markers_total() > 0 && stats_->get_markers_resolved() == 0) {
 		UtilityFunctions::push_warning(vformat(
 				"MissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent",

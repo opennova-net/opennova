@@ -193,6 +193,10 @@ private:
 			const float p_source[3], int64_t p_dist_q16, int64_t p_source_id);
 
 	opennova::audio::SetLocation _find_set(const String &p_name) const;
+	// A set the game asked to play that no loaded bank holds, while some bank is loaded (with none, every
+	// set misses and the mission's own line says so): the log line the editor's Play reads back into a
+	// Problems row on what names the set (ResourceRoot::report_missing, ADR 0046 DI-27).
+	void _note_missing_set(const String &p_name) const;
 	const opennova::lwf::File &_bank_at(const opennova::audio::SetLocation &p_loc) const;
 	static String _member_wav_path(const opennova::lwf::File &p_bank,
 			const opennova::lwf::Sndparm &p_member);
