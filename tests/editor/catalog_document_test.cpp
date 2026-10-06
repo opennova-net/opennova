@@ -188,7 +188,10 @@ static int nested_rows_follow_the_record() {
 static int session_gate() {
 	editor_test::TempProjectDir dir("opennova_catalog_session_test");
 	NoProcess platform;
-	MemoryPreferencesStore preferences;
+	// Play asks first, as with the editor's save_before_play off (DI-26: on, Play saves without asking).
+	Preferences asks;
+	asks.save_before_play = false;
+	MemoryPreferencesStore preferences(asks);
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Catalog"));
 	session.run_operations();
