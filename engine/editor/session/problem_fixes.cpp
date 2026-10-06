@@ -17,6 +17,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/graph_names.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/graph/texture_import_needs.h>
 #include <editor/graph/texture_uses.h>
@@ -607,6 +608,42 @@ ProblemFixIndex::ProblemFixIndex(const SessionView &view) {
 
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index) {
 	return fixes_over(diagnostic, view, index, true);
+}
+
+bool missing_target(const ReferenceSubject &missing, const SessionView &view, ReferenceTarget &out) {
+	// A record of a file by its index (a Record reference) is its own file's: no other place it belongs.
+	const ReferenceKindRow &row = reference_row(missing.kind);
+	if (!view.project.open || !view.project.scan || !row.names_symbol() || row.resolution == ReferenceResolution::Record)
+		return false;
+	const AssetEntry *file = defining_file(missing, view);
+	if (!file) return false;
+	out = ReferenceTarget();
+	out.label = "where " + std::string(reference_row(missing.kind).phrase) + " '" + missing.target + "' belongs: " +
+	            file->relative_path;
+	out.file = file->relative_path;
+	out.editable = is_editable_kind(file->kind);
+	out.missing = true;
+	return true;
+}
+
+bool missing_target(const FieldUse &field, const Value &value, const SessionView &view, ReferenceTarget &out) {
+	ReferenceKind kind;
+	std::string name, scope;
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph || !reference_target(field, value, kind, name, scope)) return false;
+	if (graph->resolve(kind, name, scope, nullptr, field.loader_arg) != ReferenceStatus::Missing) return false;
+	// A %NAME% the stylesheets the game reads do not define stands for the file: the variable is what is
+	// missing (missing_finding's subject), and belongs in a stylesheet.
+	if (kind != ReferenceKind::StyleVar && graph_names::is_style_reference(name) && !graph->style_binding(name)) {
+		kind = ReferenceKind::StyleVar;
+		scope.clear();
+	}
+	ReferenceSubject missing;
+	missing.kind = kind;
+	missing.target = name;
+	missing.scope = scope;
+	missing.loader_arg = field.loader_arg;
+	return missing_target(missing, view, out);
 }
 
 bool has_fixes(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index) {
