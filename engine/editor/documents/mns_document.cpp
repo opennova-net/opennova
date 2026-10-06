@@ -517,6 +517,40 @@ const FindingCodeRow &finding_code(mns::DiagnosticCode code) {
 
 FindingTable style_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
 
+// A style variable no stylesheet the game reads defines (DI-15): a variable line named as the menu names it, in a
+// stylesheet the game reads (menu_style.mns, brand.mns [orig: Menu_InitShellResources @ 0x552500]), at its end or,
+// where the game stops reading the file, before that line [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639870]:
+// the line Add variable makes, its value the colour it writes until one is set (a variable needs one: with nothing
+// after its name the game reads the next line as its value).
+bool define_style_variable(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
+	const auto *styles = dynamic_cast<const MnsDocument *>(&document);
+	if (!styles || missing.kind != ReferenceKind::StyleVar || !styles->read_by_game()) return false;
+	const std::string name = mns::variable_name(missing.target);
+	if (name.empty() || name.find('%') != std::string::npos) return false;
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = kVariable;
+	add.field = "name";
+	add.value = name;
+	// Before the line the game stops at, where it stops.
+	const mns::EvaluationResult read = styles->native().evaluate();
+	std::string where = "at the end of " + basename_of(document.path());
+	if (read.stopped_line > 0)
+		if (const NodeId stop = styles->row_at_line(read.stopped_line)) {
+			for (size_t i = 0; i < styles->rows().size(); ++i)
+				if (styles->rows()[i]->id == stop) add.position = i;
+			where = "in " + basename_of(document.path()) + " before line " + std::to_string(read.stopped_line) +
+			        ", where the game stops reading it";
+		}
+	out = PlannedFix();
+	out.edits.push_back(std::move(add));
+	out.label = "Add %" + name + "% to " + basename_of(document.path());
+	out.detail = "Adds the variable " + name + " " + where + ", its value FFFFFFFF (white, as Add variable writes one), and "
+	             "selects it to set the value it stands for: the game then reads that value wherever a menu names %" +
+	             name + "%.";
+	return true;
+}
+
 std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *styles = dynamic_cast<const MnsDocument *>(&document);
