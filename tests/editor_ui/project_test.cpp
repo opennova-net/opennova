@@ -55,7 +55,8 @@ float centre() {
 	return files && inspector ? inspector->Pos.x - (files->Pos.x + files->Size.x) : 0.0f;
 }
 
-// The Preview steps aside for what it has nothing of to show (a definition table beside an open menu) and
+// The Preview steps aside for what it has nothing of to show (the sound profiles beside an open menu; a
+// definition table it shows, DI-21) and
 // for a table that feeds its picture (a string table) while the Document beside it lacks the table's room
 // (kFeedTableRoomEm): at 1920 wide the default split gives the Document 394 pixels, so the table takes the
 // centre; at 3600 it has the room, and the Preview shows the menu beside it; with no menu open the table has
@@ -88,10 +89,16 @@ void test_preview_room() {
 	ui.frames(3);
 	CHECK(!preview_stands_aside(v) && preview->Active && document->Size.x < centre() * 0.5f,
 	      "a menu: the Preview beside it, the Document its share");
+	// A definition table: its records' picture is the Preview's (DI-21).
 	run.open("items.def");
 	ui.frames(3);
+	CHECK(!preview_stands_aside(v) && preview->Active, "a definition table: the Preview beside it");
+	const std::string profiles = first_of(v, AssetKind::SoundProfileDefs);
+	CHECK(!profiles.empty(), "the sound profiles");
+	run.open(profiles);
+	ui.frames(3);
 	CHECK(preview_stands_aside(v) && !preview->Active && std::fabs(document->Size.x - centre()) < separators,
-	      "a definition table beside an open menu: the Preview steps aside, the table the whole centre");
+	      "the sound profiles beside an open menu: the Preview steps aside, the table the whole centre");
 	run.open(strings);
 	ui.frames(3);
 	CHECK(!preview_stands_aside(v) && preview_feeds_table(v), "a string table feeds the menu shown");
