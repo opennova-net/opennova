@@ -7,6 +7,7 @@
 
 #include <editor/model/value.h>
 #include <editor/run/launch_plan.h>
+#include <editor/run/play_start.h>
 #include <editor/run/play_state.h>
 #include <editor/session/output_log.h>
 #include <editor/session/session_operation.h>
@@ -80,6 +81,11 @@ struct ActivityView {
 	// run/run_directory.h.
 	bool play_fresh = false;
 	std::vector<std::string> play_kept;
+	// Where the running (or last) game's player starts (Play from here, DI-26: play's start, unset for a Play
+	// at the mission's own starts) and how the run directory's copy of its mission was given it
+	// (run/play_start.h: the start marker type, how many stand there, whether one was added, the archive).
+	PlayStart play_start;
+	PlayStartPlaced play_start_placed;
 	// The running (or last) game is the game install's under Strict Play (the build and the install's
 	// program alone, no /d), and its first run, which wrote its game.cfg and quit, was started again.
 	bool play_strict = false;

@@ -23,11 +23,13 @@
 #include <editor/preview/mission_place.h>
 #include <editor/preview/mission_source.h>
 #include <editor/preview/viewport_device.h>
+#include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
 #include <formats/env/env_weather.h>
 #include <formats/mission/bms.h>
+#include <runtime/terrain_query/height_field.h>
 
 namespace opennova::editor {
 
@@ -874,8 +876,63 @@ io::JsonValue MissionViewport::palette_json(const SessionView &view, const std::
 	return mission_palette_to_json(mission_palette(*graph, text, view.project.recent_items), page);
 }
 
+// The ground's height at mission (x, y) for Play from here: the mission's terrain as the game's collision
+// reads it (DI-07's MissionGround, the bilinear column height the AI grounds on [orig:
+// Terrain_SampleHeightBilinear @ 0x6067B0]), else the device's, else `otherwise`.
+double MissionViewport::ground_height_(const ViewportContext &context, double x, double y, double otherwise) const {
+	follow_ground_(context.input.view);
+	if (const terrain::TerrainHeightField *field = terrain_ground_.height_field())
+		return double(terrain::height_field_height_world_bilinear(*field, float(x), float(-y)));
+	double height = 0.0;
+	if (context.device && context.device->ground_at(x, y, height)) return height;
+	return otherwise;
+}
+
+bool MissionViewport::play_from_here_(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+		std::string &error) const {
+	if (!command.ids.empty() || !command.by.empty()) {
+		error = "play_from_here takes at [x, y], a point of the picture, or nothing (the camera), and no ids or by.";
+		return false;
+	}
+	if (!planned_(context, error)) return false;
+	const std::string mission = play_mission_at(context.input.view, path());
+	if (mission.empty()) {
+		error = path() + " is no mission of the project (a .bms the project holds): Play from here starts the game in one.";
+		return false;
+	}
+	PlayStart start;
+	start.set = true;
+	double target[3];
+	preview_to_mission(camera_.target, target);
+	if (command.has_at) {
+		// A picked point: where the picture's point meets the ground.
+		if (!ground_of_(context, command.at_x, command.at_y, start.at)) {
+			error = "The point is not over the ground.";
+			return false;
+		}
+		start.at[2] = ground_height_(context, start.at[0], start.at[1], start.at[2]);
+	} else {
+		// The camera: the ground under its eye (the game's player stands on the ground, never in the air).
+		double eye[3];
+		preview_to_mission(camera_.eye(), eye);
+		start.at[0] = eye[0];
+		start.at[1] = eye[1];
+		start.at[2] = ground_height_(context, eye[0], eye[1], target[2]);
+		for (int axis = 0; axis < 3; ++axis)
+			if (!(start.at[axis] >= bms::kFixed16Min && start.at[axis] <= bms::kFixed16Max)) {
+				error = "The camera is past what the mission's positions hold (32,768 m from its origin).";
+				return false;
+			}
+	}
+	// Facing the way the camera looks, as a placed entity does (S15): its heading.
+	start.yaw = double(mission_wrapped_yaw(mission_camera_heading(camera_)));
+	out.request(request::play_from(mission, start));
+	return true;
+}
+
 bool MissionViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
+	if (command.name == "play_from_here") return play_from_here_(context, command, out, error);
 	if (command.name != "duplicate" && command.name != "paste") return ViewportModel::command_of(context, command, out, error);
 	const Document *document = planned_(context, error);
 	if (!document) return false;
@@ -950,15 +1007,16 @@ bool MissionViewport::command_of(const ViewportContext &context, const ViewportC
 bool MissionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 		CanvasRequests &out, std::string &error) const {
 	if (name != "frame" && name != "top" && name != "ground" && name != "select_same" && name != "duplicate" &&
-			name != "paste") {
-		error = "Unknown mission command \"" + name + "\" (frame, top, ground, select_same, duplicate, paste).";
+			name != "paste" && name != "play_from_here") {
+		error = "Unknown mission command \"" + name +
+				"\" (frame, top, ground, select_same, duplicate, paste, play_from_here).";
 		return false;
 	}
 	if (reason_ != MissionViewStatus::Ready) {
 		error = "The viewport shows no mission.";
 		return false;
 	}
-	if (name == "duplicate" || name == "paste") {
+	if (name == "duplicate" || name == "paste" || name == "play_from_here") {
 		ViewportCommand whole;
 		whole.name = name;
 		whole.ids = ids;
