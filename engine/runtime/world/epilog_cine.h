@@ -117,6 +117,9 @@ struct CineEvent {
 	int32_t value_x = 0;      // +0x434
 	int32_t count_x = 0;      // +0x438
 	int32_t row_y = 0;        // +0x43C
+	// The count-up column's target and per-step rate. The live epilog passes
+	// -1 for both, which leaves the column undrawn and the count stepping
+	// away from its target, so the TEXT_END its arrival plays never sounds.
 	int32_t points_target = -1; // +0x420
 	int32_t points_rate = -1;   // +0x424
 	int32_t value = 0;          // +0x428
@@ -130,6 +133,12 @@ struct CineEvent {
 	float rate = 0.0f;
 	// An ImageFade's remaining delay (+0x138); a TextFade's frame count (+0xC8).
 	int32_t counter = 0;
+	// An EpilogCounter's count-up column: the count stepped toward
+	// points_target by points_rate (+0x440) and the frames until its next step
+	// (+0x444) [orig: CineEventEpilogCounter's start @0x573370 and step
+	// CineNode_CounterStep @0x573390].
+	int32_t points = 0;
+	int32_t points_cooldown = 0;
 
 	bool live_at(int32_t frame) const { return frame >= start && frame <= start + duration; }
 };
@@ -170,6 +179,13 @@ inline constexpr int32_t kEpilogExitTimeoutTicks = 18600;
 // already-lowered quad. [orig: Cinematic_EpilogUpdate @0x5744BF;
 //  Cine_EpilogStateMachineUpdate @0x5767E6 `fsub flt_7C56A8` (0x3C23D70A)]
 inline constexpr float kEpilogFadeStep = 0.01f;
+// A counter's count-up column steps once every five dispatches: the start and
+// every step re-arm a four-frame wait [orig: @0x57337a / @0x573416].
+inline constexpr int32_t kEpilogCounterStepWait = 4;
+// The interface set a count-up column plays on the step that reaches its
+// target [orig: CineNode_CounterStep @0x573408 — Sound_PlayInterfaceTriggerSet
+// of g_SndTextEnd, the registry @0x82F590's TEXT_END row].
+inline constexpr const char *kEpilogCounterEndSoundset = "TEXT_END";
 
 // The two g_MissionExitReason values the world-side writers store
 // (World::mission_exit_reason): the quit to the Post Menu (the end screens'
@@ -280,9 +296,9 @@ private:
 	// The timeline step: the frame advances, then every live node activates
 	// on its start frame, updates, and ends on its last frame, in list order
 	// [orig: sub_56FF40 @0x56FF40].
-	void step_timeline();
+	void step_timeline(World &world);
 	void activate_event(CineEvent &e);
-	void update_event(CineEvent &e);
+	void update_event(CineEvent &e, World &world);
 	void end_event(const CineEvent &e);
 	void update_lose(World &world);
 	void update_win(World &world);

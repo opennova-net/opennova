@@ -654,6 +654,51 @@ void test_nvg_over_a_non_inset_scope_leaves_it_alone() {
     CHECK(!w.nvg_scope_restore);
 }
 
+// D-SND-34: each NVG toggle plays its interface set, NV_ON turning on and
+// NV_OFF turning off, after the Inset scope's drop or restore [orig:
+// Input_HandleActionBinding_0 case 41 — Player_ToggleWeaponScope @0x4e0686 /
+// @0x4e06c5 ahead of g_SndNvOff @0x4e0691 / g_SndNvOn @0x4e06d0 ->
+// Sound_PlayInterfaceTriggerSet @0x527be0].
+void test_nvg_toggle_plays_its_interface_sets() {
+    LocalWorld lw;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, DEF_WEAPON_FLAG2_INSET);
+    PlayerViewState v;
+    WeaponSlotState slot;
+    CHECK(local_player_scope_toggle(lw.w, w, v, slot));
+    settle_ease(v);
+    lw.w.out.script_sounds.clear();
+    size_t sounds_at_scope_toggle = 0;
+    const auto scope_toggle = [&]() -> bool {
+        sounds_at_scope_toggle = lw.w.out.script_sounds.size();
+        return local_player_scope_toggle(lw.w, w, v, slot);
+    };
+    CHECK(local_player_nvg_toggle(lw.w, w, v, scope_toggle));
+    CHECK(sounds_at_scope_toggle == 0); // the scope drops before the set plays
+    CHECK(lw.w.out.script_sounds.size() == 1);
+    if (lw.w.out.script_sounds.size() == 1) {
+        CHECK(lw.w.out.script_sounds[0].name == kNvgOnSoundset);
+        CHECK(std::string(kNvgOnSoundset) == "NV_ON");
+        CHECK(lw.w.out.script_sounds[0].kind == ScriptSoundEvent::Kind::Interface);
+    }
+    settle_ease(v);
+    lw.w.out.script_sounds.clear();
+    sounds_at_scope_toggle = 99;
+    CHECK(!local_player_nvg_toggle(lw.w, w, v, scope_toggle));
+    CHECK(sounds_at_scope_toggle == 0); // the scope restores before the set plays
+    CHECK(lw.w.out.script_sounds.size() == 1);
+    if (lw.w.out.script_sounds.size() == 1) {
+        CHECK(lw.w.out.script_sounds[0].name == kNvgOffSoundset);
+        CHECK(std::string(kNvgOffSoundset) == "NV_OFF");
+        CHECK(lw.w.out.script_sounds[0].kind == ScriptSoundEvent::Kind::Interface);
+    }
+    // No local player: the toggle is refused and plays nothing.
+    World bare;
+    LocalPlayerWeapon none;
+    PlayerViewState idle;
+    CHECK(!local_player_nvg_toggle(bare, none, idle, []() { return false; }));
+    CHECK(bare.out.script_sounds.empty());
+}
+
 // --- the tip producers: the scope toggle, NVG and the binocular edge -------
 
 // [orig: Player_ToggleWeaponScope — up 11/13/15 @0x4df39c..0x4df3de, down
@@ -2734,6 +2779,7 @@ int main() {
     test_binoculars_refused_scoped_in_gunner_seat();
     test_nvg_drops_a_settled_inset_scope_and_restores_it();
     test_nvg_over_a_non_inset_scope_leaves_it_alone();
+    test_nvg_toggle_plays_its_interface_sets();
     test_tip_events_from_scope_nvg_and_binoculars();
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_tick_without_a_player_resolves_first_person();

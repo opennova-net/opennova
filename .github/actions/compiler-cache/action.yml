@@ -1,7 +1,8 @@
 name: Compiler cache
 description: >-
   sccache on a local disk directory carried between runs as ONE Actions cache
-  entry per build flavour: restored by every run, saved only by master pushes.
+  entry per build flavour and branch: restored by every run, saved only by
+  pushes to (and manual runs on) master and the editor trunk.
 
 # Why not sccache's own GitHub Actions backend: it stores one cache entry per
 # object file. Seven flavours times ~1.5k objects put the repository past the
@@ -11,13 +12,25 @@ description: >-
 #
 # Here the cache directory is one archive per flavour, keyed by commit:
 # - Restore (`mode: restore`, before the build) takes the newest entry of the
-#   flavour. A pull request reads master's entry; forks included.
-# - Save (`mode: save`, after the build, master pushes only) first prunes every
-#   object this build did not touch (sccache refreshes an entry's file times on
-#   each hit, sccache src/lru_disk_cache/mod.rs get_file), so the saved archive
-#   is exactly the latest master build's working set and never grows. It then
-#   deletes the flavour's older entries, which needs `actions: write` on the
-#   job.
+#   flavour in the nearest scope the run can read: its own branch, then a pull
+#   request's base branch, then master (GitHub searches the scopes in that
+#   order). So a pull request into the editor trunk reads the trunk's entry and
+#   one into master reads master's; forks included.
+# - Save (`mode: save`, after the build, on the cache branches below only)
+#   first prunes every object this build did not touch (sccache refreshes an
+#   entry's file times on each hit, sccache src/lru_disk_cache/mod.rs
+#   get_file), so the saved archive is exactly the branch's latest build's
+#   working set and never grows. It then deletes the flavour's older entries
+#   on the same branch (never another branch's), which needs `actions: write`
+#   on the job.
+#
+# The cache branches are master and the editor trunk, editor/s1-project-core
+# (ci.yml's push trigger lists the same two). The trunk differs from master in
+# the whole editor group and many shared headers, so master's objects gave a
+# trunk build 19% hits and 25-45 min of compiles on the 4-core runner; the
+# trunk's own entry gives 93-100% while it is a merge or two behind. A pull
+# request's own entry would be readable by that pull request alone, so pull
+# requests never save.
 #
 # A flavour is one build tree (same flags, same paths): two jobs share one only
 # when they compile the same objects, and only the job that compiles the
@@ -50,6 +63,10 @@ runs:
         # A ceiling for one build's objects; the save prune keeps the archive
         # to the working set, so this never binds in steady state.
         echo "SCCACHE_CACHE_SIZE=4G" >> "$GITHUB_ENV"
+        # The server lives until the job ends, so `sccache --show-stats` after
+        # a long test step still reports the build (the default 600 s idle
+        # exit zeroed them).
+        echo "SCCACHE_IDLE_TIMEOUT=0" >> "$GITHUB_ENV"
 
     - name: Restore the compiler cache
       if: inputs.mode == 'restore'
@@ -66,8 +83,23 @@ runs:
       shell: bash
       run: touch "${RUNNER_TEMP}/sccache.restored"
 
+    - name: Decide whether this run saves
+      id: scope
+      if: inputs.mode == 'save'
+      shell: bash
+      env:
+        EVENT: ${{ github.event_name }}
+      run: |
+        save=false
+        if [[ "$EVENT" == "push" || "$EVENT" == "workflow_dispatch" ]]; then
+          case "$GITHUB_REF" in
+            refs/heads/master | refs/heads/editor/s1-project-core) save=true ;;
+          esac
+        fi
+        echo "save=${save}" >> "$GITHUB_OUTPUT"
+
     - name: Prune objects this build did not use
-      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+      if: inputs.mode == 'save' && steps.scope.outputs.save == 'true'
       shell: bash
       run: |
         sccache --stop-server > /dev/null || true
@@ -76,21 +108,21 @@ runs:
         echo "compiler cache: ${before} MB before prune, $(du -sm "$SCCACHE_DIR" | cut -f1) MB saved"
 
     - name: Save the compiler cache
-      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+      if: inputs.mode == 'save' && steps.scope.outputs.save == 'true'
       uses: actions/cache/save@v4
       with:
         path: ${{ runner.temp }}/sccache
         key: cc-${{ inputs.flavour }}-${{ github.sha }}
 
-    - name: Delete the flavour's older entries
-      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+    - name: Delete the flavour's older entries on this branch
+      if: inputs.mode == 'save' && steps.scope.outputs.save == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         KEEP: cc-${{ inputs.flavour }}-${{ github.sha }}
         PREFIX: cc-${{ inputs.flavour }}-
       run: |
-        gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=${PREFIX}&ref=refs/heads/master&per_page=100" \
+        gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=${PREFIX}&ref=${GITHUB_REF}&per_page=100" \
             --jq ".actions_caches[] | select(.key != \"${KEEP}\") | .id" |
           while read -r id; do
             gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}" ||
