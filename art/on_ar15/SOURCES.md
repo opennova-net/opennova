@@ -1,4 +1,20 @@
-# `on_ar15` sources: the arms' textures
+# `on_ar15` sources
+
+## The carbine's materials
+
+The carbine's four materials `on_ar15_0` .. `on_ar15_3` draw with `VS_PHONGT`, as the original's
+first-person `M4_1st`, `M16_1st` and most of its first-person guns do: a Phong highlight whose
+strength is the diffuse texture's alpha, through a tangent-space normal map. The normal map is flat
+(`textures/on_ar15_n.png`, 64 a side, all four materials share it; export writes it as
+`on_ar15_0n.mdt`). The diffuses `textures/on_ar15_{0,1,2,3}_c.tga` are graded for the original's
+lighting, which draws `2 x texel x light`: each texel holds half the colour it shows lit, and the
+alpha holds the specular mask, 1.3 times the texel's luminance (the original's guns' masks follow
+their luminance at 1.2 to 1.6). The tangent frames make a vertex 64 bytes, so the LOD fits the
+game's 2 MiB vertex pool buffer only under 32,768 vertices: the magazine and the spare magazine
+(`59 Mesh`, `64 Mesh`) are halved (Decimate, collapse 0.5) to 2,960 faces each, which keeps the
+whole carbine at 30,365 vertices.
+
+## The arms' textures
 
 `on_arms` (the first-person arms in `on_ar15.blend`, the `Avatars.def` combo's
 arms part) wears the player soldier `onsold1`'s woodland fatigues: camouflage
