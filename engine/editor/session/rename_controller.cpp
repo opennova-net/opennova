@@ -8,6 +8,7 @@
 #include <utility>
 
 #include <base/io/hash.h>
+#include <editor/assets/project_layout.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
@@ -24,6 +25,18 @@
 namespace opennova::editor {
 
 RenameController::RenameController(SessionCore &core) : core_(core), view_(core.view()), paths_(core.paths()) {}
+
+namespace {
+
+// A project folder in words: "the top level", else its path with a slash ("defs/"); as asked when it is
+// no folder of the project (the move says why).
+std::string folder_words(const std::string &folder) {
+	std::string normal, why;
+	if (!normalize_project_folder(folder, normal, why)) return folder;
+	return normal.empty() ? std::string("the top level") : normal + "/";
+}
+
+} // namespace
 
 // A file renamed with every reference rewritten (graph/rename_transaction), or refused with the
 // reasons as findings: an operation (RenameOperation) that joins the validation left due, plans
@@ -44,6 +57,25 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 	if (id == 0) return core_.refuse_busy(file); // the gate let no operation run beside it
 	core_.outcome().operation = id;
 	view_.activity.status = "Renaming " + basename_of(file) + " to " + new_name + "...";
+	core_.touch(ViewConcern::Output);
+}
+
+// A file put in another folder under its own name (DI-03): a rename that keeps the name (plan_move: no
+// site rewritten, the game finds a file by its name alone), an operation as a rename is, whose finish
+// moves its open document, its card and the reopen list with it (absorb_rename). A file whose document
+// has unsaved edits waits on the unsaved prompt first (UnsavedGuard), as a rename's does.
+void RenameController::move_asset(const std::string &file, const std::string &folder) {
+	if (!view_.project.open) return;
+	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
+	RenameOperation::FilePlanner planner = [this, file, folder](std::shared_ptr<const AssetScan> &scan) {
+		scan = view_.project.scan;
+		return plan_move(paths_, *view_.project.document, *scan, file, folder, view_.project.imports.get());
+	};
+	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
+			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
+	if (id == 0) return core_.refuse_busy(file); // the gate let no operation run beside it
+	core_.outcome().operation = id;
+	view_.activity.status = "Moving " + basename_of(file) + " to " + folder_words(folder) + "...";
 	core_.touch(ViewConcern::Output);
 }
 
@@ -72,9 +104,10 @@ void RenameController::split_texture(const EditorRequest &request) {
 // (its outputs made under the new name), else the touched files alone (AssetScan::update).
 OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 	OperationOutcome outcome;
+	const bool move = !operation.symbol() && operation.file_plan().move;
 	if (operation.refused()) {
 		for (const Diagnostic &d : operation.refusals()) core_.report(d);
-		view_.activity.status = "The rename was refused.";
+		view_.activity.status = move ? "The move was refused." : "The rename was refused.";
 		core_.touch(ViewConcern::Output);
 		outcome.end = OperationEnd::Failed;
 		outcome.findings = operation.refusals();
@@ -186,6 +219,16 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		           (plan.split_source.empty() ? std::string() : " (made by " + plan.split_source + ", a copy of its source)") +
 		           ". Undo does not take it back.");
 		view_.activity.status = "Split " + plan.old_name + " into " + plan.new_name + ".";
+	} else if (ok && move) {
+		// A move: the file in its new folder, nothing rewritten (the game finds a file by its name alone).
+		const RenamePlan &plan = operation.file_plan();
+		const std::string left = folder_of_path(plan.path), went = folder_of_path(plan.new_path);
+		core_.note("Moved " + plan.old_name + (back ? " back" : "") + " from " + folder_words(left) + " to " +
+		           folder_words(went) + ", no reference rewritten: the game finds a file by its name alone. Undo "
+		           "does not take it back: Edit > Move " + plan.old_name + " back to " + folder_words(left) + " does.");
+		view_.activity.status = "Moved " + plan.old_name + (back ? " back" : "") + " to " + folder_words(went) + ".";
+		view_.activity.last_rename = {true, false, plan.new_path, std::string(), std::string(), left, went,
+		                              ReferenceKind::None, std::string(), true};
 	} else if (ok) {
 		const RenamePlan &plan = operation.file_plan();
 		std::string companions;
@@ -198,7 +241,7 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		view_.activity.last_rename = {true, false, plan.new_path, std::string(), std::string(), plan.old_name, plan.new_name,
 		                              ReferenceKind::None, std::string()};
 	} else {
-		view_.activity.status = "The rename did not finish.";
+		view_.activity.status = move ? "The move did not finish." : "The rename did not finish.";
 	}
 	// What it did, for its way back: the sites as it left them (a text's later sites on a line moved by the
 	// names before them), each file it wrote by its bytes' hash now. A split has none.
@@ -216,8 +259,9 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		} else {
 			const RenamePlan &plan = operation.file_plan();
 			done.file = plan.new_path;
-			done.from = plan.old_name;
-			done.to = plan.new_name;
+			done.move = plan.move;
+			done.from = plan.move ? folder_of_path(plan.path) : plan.old_name;
+			done.to = plan.move ? folder_of_path(plan.new_path) : plan.new_name;
 		}
 		done.sites = sites;
 		for (RenameSite &site : done.sites) {
@@ -403,6 +447,16 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 		return;
 	}
 	case EditorRequestKind::RenameAsset: rename_unsaved(request.path, request.new_name, files); return;
+	case EditorRequestKind::MoveAsset: {
+		// The moved file's own document with unsaved edits (it closes and opens again at its new path); none
+		// when the move is refused anyway (it then says why, with nothing to save first).
+		if (!view_.project.open || !documents.documents_dirty()) return;
+		const RenamePlan plan = plan_move(paths_, *view_.project.document, *view_.project.scan, request.path,
+		                                  request.folder, view_.project.imports.get());
+		if (!plan.ok()) return;
+		if (const DocumentBase *open = documents.document_for(plan.path); open && open->dirty()) files.push_back(plan.path);
+		return;
+	}
 	case EditorRequestKind::SplitTexture: {
 		// The documents with unsaved edits among the files the split rewrites.
 		if (!view_.project.open || !documents.documents_dirty()) return;
@@ -551,13 +605,19 @@ RenamePlan RenameController::plan_back_file() {
 	if (!view_.project.scan->at_path(done.file)) {
 		RenamePlan none;
 		none.path = done.file;
-		none.old_name = done.to;
-		none.new_name = done.from;
+		none.move = done.move;
+		none.old_name = done.move ? basename_of(done.file) : done.to;
+		none.new_name = done.move ? none.old_name : done.from;
 		none.refusals.push_back(make_finding(CoreFinding::RenameUnknownFile, DiagnosticSeverity::Error,
-		                                     "The project no longer has " + done.file + ": there is nothing to rename back.",
+		                                     "The project no longer has " + done.file + ": there is nothing to " +
+		                                             (done.move ? "move" : "rename") + " back.",
 		                                     done.file));
 		return none;
 	}
+	// A move's way back: the file moved to the folder it left (no site either way).
+	if (done.move)
+		return plan_move(paths_, *view_.project.document, *view_.project.scan, done.file, done.from,
+		                 view_.project.imports.get());
 	RenamePlan plan = plan_rename(paths_, *view_.project.scan, core_.problems().graph(), done.file, done.from);
 	keep_written(plan.sites, plan.refusals);
 	return plan;
@@ -590,6 +650,8 @@ void RenameController::preview_back(const EditorRequest &request) {
 		preview.old_name = plan.old_name;
 		preview.new_name = plan.new_name;
 		preview.requested = plan.new_name;
+		preview.move = plan.move;
+		if (plan.move) preview.folder = done_->from;
 		preview.sites = std::make_shared<const std::vector<RenameSite>>(plan.sites);
 		for (const RenameOutput &companion : plan.companions) preview.companions.push_back(companion.old_name + " to " + companion.new_name);
 		preview.refusals = plan.refusals;
@@ -633,7 +695,8 @@ void RenameController::rename_back() {
 	if (id == 0) return core_.refuse_busy(done_->file); // the gate let no operation run beside it
 	backing_ = true;
 	core_.outcome().operation = id;
-	view_.activity.status = "Renaming " + done_->to + " back to " + done_->from + "...";
+	view_.activity.status = done_->move ? "Moving " + basename_of(done_->file) + " back to " + folder_words(done_->from) + "..."
+	                                    : "Renaming " + done_->to + " back to " + done_->from + "...";
 	core_.touch(ViewConcern::Output);
 }
 
