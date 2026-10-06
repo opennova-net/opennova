@@ -4311,6 +4311,14 @@ target_link_libraries(editor_texture_budget_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_budget_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_texture_budget COMMAND editor_texture_budget_test)
 
+# ADR 0046 S18, a texture as the game draws it: the chain the game builds, the object texture detail's halvings,
+# a normal map lit, a model row's alpha by its technique; through a session the texture viewport's level, detail,
+# normals and light, and a Phong diffuse shown as its use draws it.
+add_executable(editor_texture_game_view_test editor/texture_game_view_test.cpp)
+target_link_libraries(editor_texture_game_view_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_game_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_game_view COMMAND editor_texture_game_view_test)
+
 # ADR 0046 S18, a texture's import (import/texture_import, graph/texture_import_needs,
 # session/texture_import_state): the image importer's option rows, its pieces, every format written and
 # read back by the reader the game picks, what a minted project's uses ask of an import, set_import_options

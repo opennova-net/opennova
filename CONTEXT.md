@@ -931,7 +931,8 @@ Files selects, read from its file while it is not open): its texels at a zoom (f
 a middle texel, which the wheel steps about the pointer and a drag pans), through its colour, one
 channel or its alpha as grey, or its colour over a checkerboard by its alpha, at a mip level, as the
 file holds it or as the game draws it for one of its uses (the use's loader's texels, a cut-out's test,
-a tile atlas's cells); each a SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
+a tile atlas's cells, a model row's alpha drawn as the game reads it: opaque where it is a specular brightness),
+at the chain the game builds of it and at an object texture detail, or a normal map lit; each a SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
 its palette entry), never a record. Its device draws the texels the portable decode made, texel for
 texel where a texel covers a pixel or more.
 _Avoid_: image viewer, preview (the Preview window, or the role)

@@ -470,6 +470,67 @@ uint8_t texture_row_material_flags(const std::string &shader, uint8_t material_f
 	return tested ? material_flags : uint8_t(material_flags & ~kTestBits);
 }
 
+const char *texture_alpha_meaning_token(TextureAlphaMeaning meaning) {
+	switch (meaning) {
+	case TextureAlphaMeaning::Unused: return "unused";
+	case TextureAlphaMeaning::CutOut: return "cut_out";
+	case TextureAlphaMeaning::Blend: return "blend";
+	case TextureAlphaMeaning::Specular: return "specular";
+	case TextureAlphaMeaning::PhongMapWeight: return "phong_map_weight";
+	case TextureAlphaMeaning::Detail: return "detail";
+	case TextureAlphaMeaning::Height: return "height";
+	}
+	return "unused";
+}
+
+// The technique's rules (render-material-re.md, "What the diffuse's alpha means by the material" and the
+// 2026-08-22 technique audit): a flag-bit-0 material cuts out by the alpha the technique tests
+// (renderer::object_coverage_source, texture_row_material_flags); FF_*_AB blends by Diffuse1.a; the Phong effects
+// read Diffuse1.a as specular brightness (_psPhong.fx), _psPhong2.fx as brightness and the PhongMap channels'
+// weight (renderer::ObjectSpecularSource); the _MT stage multiplies the diffuse's alpha by the detail's
+// [orig: _FFP.fx TECHNIQUE_NORMAL, TSSAlpha(1, Modulate, Texture, Current)]; a normal row's .tga is a height
+// [orig: Texture_LoadAsNormalMap @ 0x58C985..0x58CAED, the height in A].
+TextureAlphaMeaning texture_row_alpha_meaning(const std::string &shader, uint8_t material_flags, uint8_t row_type, uint8_t slot,
+                                              const std::string &name) {
+	const uint8_t runtime = renderer::material_texture_runtime_type(row_type);
+	const bool normal = runtime == 4 || runtime == 5;
+	if (normal && strutil::to_lower(name).size() >= 4 && strutil::to_lower(name).substr(name.size() - 4) == ".tga")
+		return TextureAlphaMeaning::Height;
+	if ((material_flags & threedi::THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0) return TextureAlphaMeaning::CutOut;
+	const bool diffuse = (runtime == 0 || runtime == 2 || runtime == 8) && slot != 2 && slot != 3 && slot != 4;
+	if ((runtime == 0 || runtime == 2 || runtime == 8) && slot == 2) return TextureAlphaMeaning::Detail;
+	if (!diffuse) return TextureAlphaMeaning::Unused;
+	const renderer::ObjectShaderPipelineDescriptor pipeline = renderer::describe_object_shader_pipeline(
+			renderer::build_object_shader_key(renderer::classify_object_material(shader, material_flags, 0, 0, 0)));
+	switch (pipeline.specular_source) {
+	case renderer::ObjectSpecularSource::AnalyticPow8DiffuseAlpha: return TextureAlphaMeaning::Specular;
+	case renderer::ObjectSpecularSource::PhongMapLookupDiffuseAlpha: return TextureAlphaMeaning::PhongMapWeight;
+	case renderer::ObjectSpecularSource::None:
+	case renderer::ObjectSpecularSource::AnalyticPow16: break;
+	}
+	if (pipeline.blend == renderer::ObjectBlendMode::AlphaBlend &&
+	    renderer::object_coverage_source(pipeline.technique) == renderer::ObjectCoverageSource::DiffuseAlpha)
+		return TextureAlphaMeaning::Blend;
+	return TextureAlphaMeaning::Unused;
+}
+
+std::string texture_alpha_meaning_words(TextureAlphaMeaning meaning, const std::string &shader, uint8_t alpha_ref, bool inverted) {
+	const std::string by = shader.empty() ? std::string("its material") : shader;
+	switch (meaning) {
+	case TextureAlphaMeaning::CutOut:
+		return std::string("the cut-out ") + by + " tests: a texel is drawn where its alpha is " + (inverted ? "at or below " : "above ") +
+		       std::to_string(alpha_ref) + ", else discarded";
+	case TextureAlphaMeaning::Blend: return "the transparency " + by + " blends by";
+	case TextureAlphaMeaning::Specular: return "the specular brightness " + by + " reads, not transparency: the surface is opaque";
+	case TextureAlphaMeaning::PhongMapWeight:
+		return "the specular brightness and the weight between the PhongMap's channels " + by + " reads, not transparency";
+	case TextureAlphaMeaning::Detail: return "multiplied into the diffuse's alpha by the detail stage";
+	case TextureAlphaMeaning::Height: return "the height the game makes this normal map from";
+	case TextureAlphaMeaning::Unused: break;
+	}
+	return "unused: " + by + " reads no alpha of this texture";
+}
+
 std::vector<std::string> texture_role_extensions(const TextureRoleRow &row) {
 	std::vector<std::string> out;
 	if (row.formats & kTextureTga) out.push_back(".tga");
