@@ -18,6 +18,7 @@
 #include <editor/session/project_session.h>
 
 #include "authoring/child_process.h"
+#include "authoring/preview_sound_player.h"
 #include "authoring/thumbnail_images.h"
 #include "devtools/imgui_pass_node.h"
 #include "mission/mission_object_placer.h"
@@ -144,6 +145,10 @@ public:
 	// or "playing", and the project file it is of ("" while idle). The wire reads the workspace section's sound.
 	String get_sound_state() const;
 	String get_sound_path() const;
+	// The clip sounds the Shell started in all (DI-04: a previewed clip's events, each sound's voices), and the
+	// order of the last one it took (ProjectSession::clip_sounds_since), for the tests.
+	int64_t get_clip_voices_started() const { return clip_voices_ ? int64_t(clip_voices_->started()) : 0; }
+	int64_t get_clip_sound_seq() const { return int64_t(clip_sound_seq_); }
 
 	// "editor": the variant this library is (the runtime variant has no EditorApp).
 	String get_loaded_variant() const { return "editor"; }
@@ -172,13 +177,17 @@ private:
 	void serve_queued_device_requests_();
 	// A device's notice for the person (an edit it refused), on the status line as an error.
 	void post_device_notice_(const std::string &p_text);
-	// The workspace's sound (play_sound, the session's): the project's wave at `p_path` (project-relative) read
-	// and decoded off the frame, played at the pump that finds it decoded; stopped, a decode in flight dropped.
-	void play_sound_(const std::string &p_path);
+	// The workspace's sound (play_sound, the session's): its voices, each a project wave read and decoded off
+	// the frame, played together at the pump that finds them decoded (the one preview player); stopped, a
+	// decode in flight dropped.
+	void play_sound_(const std::vector<opennova::editor::WorkspaceView::Voice> &p_voices);
 	void stop_sound_();
 	// The pump's half: the session's sound followed (a play of a new serial started, one it no longer plays
 	// stopped), and how it goes reported back (ProjectSession::report_sound: playing, ended, failed).
 	void pump_sound_();
+	// The clip sounds the previewed clip's events fired since the last taken, each started beside those playing
+	// (DI-04, PreviewSoundVoices); every one stopped while no project is open.
+	void pump_clip_sounds_();
 	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);
 	void _on_dir_selected(const String &p_dir);
 	void _on_file_selected(const String &p_file);
@@ -208,9 +217,9 @@ private:
 	// The SubViewports of devices given up before this frame, freed (queued: they go at the frame's
 	// end, after the ImGui pass of this frame drew without them).
 	void free_retired_();
-	// A refresh_changed_sources sent of the Shell's own (S18), when the busy gate takes it: as the
-	// window gains the focus and once a second while it has it.
-	void refresh_changed_sources_();
+	// A refresh_changed_sources sent of the Shell's own (S18, DI-01), when the busy gate takes it: once a
+	// second whatever has the focus (sooner while a file waits), and with `p_all` as the window gains it.
+	void refresh_changed_sources_(bool p_all);
 	// The open_externally view events posted since the last pump, each file opened in its program.
 	void open_externally_events_();
 	// The system pointer shown, or hidden while a picture under the mouse draws the game's (DI-08); set
@@ -243,26 +252,21 @@ private:
 	PackedStringArray play_engine_args_;
 	FileDialog *picker_ = nullptr;
 	opennova::editor::PickPurpose pending_pick_ = opennova::editor::PickPurpose::None;
-	// The player of a project's wave (the workspace's sound: Files' card, play_sound), made with the first; a
-	// child, freed with it. The decode in flight (a worker's: the bytes read and decoded as the game decodes
-	// them), the file it plays or will, the session's play it is (its serial) and whether it was reported playing.
-	AudioStreamPlayer *sound_ = nullptr;
-	struct SoundDecode {
-		bool decoded = false;
-		std::string error;
-		opennova::lwf::WavPcm pcm;
-	};
-	std::future<SoundDecode> sound_job_;
-	std::string sound_path_;
+	// The one preview player (the workspace's sound: Files' card, a set's or a slot's Play, play_sound), made
+	// with the EditorApp, its players children of it; the session's play it plays (its serial).
+	std::unique_ptr<PreviewSoundPlayer> sound_;
 	uint64_t sound_serial_ = 0;
-	bool sound_reported_playing_ = false;
+	// The clip sounds' player (DI-04), the order of the last clip sound it took, and the project files'
+	// generation its decoded waves are of.
+	std::unique_ptr<PreviewSoundVoices> clip_voices_;
+	uint64_t clip_sound_seq_ = 0;
+	uint64_t clip_wave_generation_ = 0;
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window
-	// The external round trip (S18): whether the window has the focus, when the sources were last
-	// checked, the last view event taken, and the file the last open_externally named.
-	bool focused_ = false;
-	uint64_t last_source_check_ms_ = 0;
+	// The external round trip (S18, DI-01): when the files were last checked, the last view event taken, and
+	// the file the last open_externally named.
+	uint64_t last_disk_check_ms_ = 0;
 	uint64_t external_seq_ = 0;
 	bool open_externally_ = true;
 	String last_external_open_;

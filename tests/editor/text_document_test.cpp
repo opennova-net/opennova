@@ -43,6 +43,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/install_view.h>
+#include <editor/blank/blank_factory.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/music_script_type.h>
@@ -627,7 +628,8 @@ bool make_script_project(ScriptProject &project) {
 	        editor_test::write_text(root + "/defs/ammo.def",
 	                                "ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n"
 	                                "ammo bomb\nmax_age 3\nend\n") &&
-	        editor_test::write_bytes(root + "/strings/text_document.bin", strings);
+	        editor_test::write_bytes(root + "/strings/text_document.bin", strings) &&
+	        editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::sound_bank_of({"EXPLO_BASE"}));
 	editor_test::handle_to_end(project.session, request::rescan());
 	return written && project.view().findings.graph;
 }
@@ -1108,19 +1110,21 @@ static int test_shader_and_text() {
 
 // Every text file opens in the editor (the deep-integration plan's DI-06): the text kinds no structured
 // type edits are the text type's, a text with undo and save; where the engine has a reader of the kind,
-// its findings are the file's (a particle file the reader stops in, at its place; the avatar reader's
-// notes at their lines; the score table's reader), listed; a kind with none makes none. SndProf.def is
-// left to its own type, the mission text to no type (the build leaves it out). An open particle file
-// stands in for its file in the graph, read by the engine's own reader: its names follow its edits.
+// its findings are the file's (the avatar reader's notes at their lines; the score table's reader),
+// listed; a kind with none makes none. SndProf.def is left to its own type, the particle file to its own
+// (DI-14: the specific type owns its kind), the mission text to no type (the build leaves it out). An open
+// environment stands in for its file in the graph, read by the engine's own reader: its names follow its
+// edits.
 static int test_text_readers() {
 	const DocumentType *text = document_type(DocumentTypeId::Text);
 	TEST_EXPECT(text != nullptr);
 	if (!text) return 1;
-	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::Particles, AssetKind::Environment, AssetKind::HudPosDefs,
+	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::Environment, AssetKind::HudPosDefs,
 	                             AssetKind::HudFxDefs, AssetKind::AvatarDefs, AssetKind::CharAttrDefs, AssetKind::OtherDefs,
 	                             AssetKind::Score, AssetKind::NovaWorldScreen})
 		TEST_EXPECT(document_type_for(kind) == text && is_editable_kind(kind));
-	TEST_EXPECT(document_type_for(AssetKind::SoundProfileDefs) != text && document_type_for(AssetKind::MissionText) == nullptr);
+	TEST_EXPECT(document_type_for(AssetKind::SoundProfileDefs) != text && document_type_for(AssetKind::MissionText) == nullptr &&
+	            document_type_for(AssetKind::Particles) == document_type(DocumentTypeId::Particles));
 	// The graph still reads a native kind through the engine's reader, not the text type.
 	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) && graph_reads_kind(AssetKind::Environment) &&
 	            graph_reads_kind(AssetKind::HudPosDefs) && graph_reads_kind(AssetKind::AvatarDefs) &&
@@ -1133,13 +1137,6 @@ static int test_text_readers() {
 		texts_held = texts_held && loaded && document->serialize().text == source;
 		return loaded ? text->validate_file(*document) : std::vector<Diagnostic>();
 	};
-	// A particle file the reader stops in: a warning at the place it stops, its names unchecked.
-	const std::string good = "[particledef]\n{\n\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n";
-	TEST_EXPECT(findings_of(good, "fx.ptl", AssetKind::Particles).empty());
-	const std::vector<Diagnostic> broken = findings_of("[effectdef]\n{\n\tid = OPEN;\n", "broken.ptl", AssetKind::Particles);
-	TEST_EXPECT(broken.size() == 1 && broken[0].code() == "text.unreadable" && broken[0].severity == DiagnosticSeverity::Warning &&
-	            broken[0].line >= 1 && broken[0].message.find("particle reader") != std::string::npos && broken[0].row() &&
-	            !broken[0].row()->gates_build);
 	// The avatar reader's notes, each at its line.
 	const std::vector<Diagnostic> avatars =
 			findings_of("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n", "Avatars.def", AssetKind::AvatarDefs);
@@ -1155,8 +1152,8 @@ static int test_text_readers() {
 	            findings_of("sky_map1 sky.pcx\n", "day.env", AssetKind::Environment).empty());
 	TEST_EXPECT(texts_held);
 
-	// In a session: the particle file opens as a text; an edit of its graphic's name moves the graph's
-	// reference with it, unsaved; the broken file's warning is the text type's, at its line.
+	// In a session: the environment opens as a text; an edit of its cloud layer's name moves the graph's
+	// reference with it, unsaved; the avatar table's note is the text type's, at its line.
 	editor_test::TempProjectDir dir("opennova_editor_text_readers");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
@@ -1164,29 +1161,130 @@ static int test_text_readers() {
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Readers"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl", good) &&
-	            editor_test::write_text(root + "/broken.ptl", "[effectdef]\n{\n\tid = OPEN;\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", "sky_map1 sky.pcx\r\n") &&
+	            editor_test::write_text(root + "/Avatars.def",
+	                                    "nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto names = [&session](const std::string &value) {
-		for (const GraphEdge *edge : session.view().findings.graph->references_of("fx.ptl"))
+		for (const GraphEdge *edge : session.view().findings.graph->references_of("day.env"))
 			if (edge->kind == ReferenceKind::Texture && edge->value == value) return true;
 		return false;
 	};
-	TEST_EXPECT(names("puff.tga"));
-	size_t warned = 0;
+	TEST_EXPECT(names("sky.pcx"));
+	size_t noted = 0;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
-		warned += d.code() == "text.unreadable" && d.asset == "broken.ptl" && d.severity == DiagnosticSeverity::Warning && d.line >= 1;
-	TEST_EXPECT(warned == 1);
-	editor_test::handle_to_end(session, request::open_document("fx.ptl"));
-	TextDocument *open = text_of(*session.document_base_for("fx.ptl"));
+		noted += d.code() == "text.reader" && d.asset == "Avatars.def" && d.severity == DiagnosticSeverity::Warning && d.line == 4;
+	TEST_EXPECT(noted == 1);
+	editor_test::handle_to_end(session, request::open_document("day.env"));
+	TextDocument *open = text_of(*session.document_base_for("day.env"));
 	TEST_EXPECT(open != nullptr);
 	if (!open) return 1;
-	TEST_EXPECT(open->line(4) == "\tgraphic1 = puff.tga, additive;");
-	editor_test::handle_to_end(session, request::edit_record("fx.ptl", {TextDocument::replace(span(4, 13, 4), "smoke")}));
-	TEST_EXPECT(session.last_edit_ok() && open->line(4) == "\tgraphic1 = smoke.tga, additive;" && open->dirty());
-	TEST_EXPECT(names("smoke.tga") && !names("puff.tga"));
-	editor_test::handle_to_end(session, request::undo("fx.ptl"));
-	TEST_EXPECT(names("puff.tga") && !open->dirty());
+	TEST_EXPECT(open->line(1) == "sky_map1 sky.pcx");
+	editor_test::handle_to_end(session, request::edit_record("day.env", {TextDocument::replace(span(1, 10, 3), "dusk")}));
+	TEST_EXPECT(session.last_edit_ok() && open->line(1) == "sky_map1 dusk.pcx" && open->dirty());
+	TEST_EXPECT(names("dusk.pcx") && !names("sky.pcx"));
+	editor_test::handle_to_end(session, request::undo("day.env"));
+	TEST_EXPECT(names("sky.pcx") && !open->dirty());
+	return 0;
+}
+
+// The tags a shader registers, which a model material's shader names (ReferenceKind::Shader): _ffp.fx the
+// renderer's twelve fixed-function tags and their #UV twins whatever its EffectTag says [orig:
+// HLSLEffect_InitFixedFunctionShaders @ 0x5AF790]; another effect its EffectTag and, where EffectAlt_UV
+// asks, the twin; an include the archive walk skips none [orig: HLSLEffect_LoadAllFromPFFArchive @
+// 0x5AFF6E]. The annotations are read with the comments left out. The editor's own shaders: _ffp.fx by
+// its role and an effect per tag it makes, in the loader's form, each defining what it says, sharing the
+// eight system textures the renderer binds once a frame and never the dead TexAngleMap slot.
+static std::vector<std::string> shader_tags_of(const std::vector<uint8_t> &bytes, const char *name) {
+	std::vector<std::string> out;
+	const DocumentType *type = document_type_for(AssetKind::Shader);
+	std::unique_ptr<DocumentBase> document = type->make();
+	Diagnostic error;
+	if (!type->definitions || !document->load_bytes(bytes, name, AssetKind::Shader, "jo", error)) return out;
+	std::vector<TextDefinition> definitions;
+	type->definitions(*text_of(*document), definitions);
+	for (const TextDefinition &definition : definitions)
+		if (definition.kind == ReferenceKind::Shader) out.push_back(definition.name);
+	return out;
+}
+
+static int test_shader_definitions() {
+	using Names = std::vector<std::string>;
+	const std::string source =
+			"// string EffectTag = \"COMMENTED\";\r\n/* string EffectInfo < string EffectTag = \"BLOCK\"; > */\r\n"
+			"string EffectInfo <\r\n\tstring EffectName = \"x > y\";\r\n\tstring EffectTag = \"VS_TEST\";\r\n"
+			"\tbool EffectAlt_UV = true;\r\n>;\r\n";
+	TEST_EXPECT(shader_tags_of(scr_shader(source), "shaders/test.fx") == Names({"VS_TEST", "VS_TEST#UV"}));
+	const ShaderEffectInfo info = read_shader_effect_info(source);
+	TEST_EXPECT(info.found && info.tag == "VS_TEST" && info.alt_uv &&
+	            source.substr(info.tag_offset, info.tag_length) == "VS_TEST");
+	// The definition sits on the tag as written.
+	const DocumentType *type = document_type_for(AssetKind::Shader);
+	std::unique_ptr<DocumentBase> document = type->make();
+	Diagnostic error;
+	TEST_EXPECT(document->load_bytes(scr_shader(source), "test.fx", AssetKind::Shader, "jo", error));
+	std::vector<TextDefinition> definitions;
+	type->definitions(*text_of(*document), definitions);
+	TEST_EXPECT(definitions.size() == 2 && definitions[0].span.line == 5 && definitions[0].span.length == 7);
+	// Without the twin; an include; no EffectInfo at all.
+	TEST_EXPECT(shader_tags_of(scr_shader("string EffectInfo < string EffectTag = \"VS_ONE\"; bool EffectAlt_UV = false; >;"),
+	                           "one.fx") == Names({"VS_ONE"}));
+	TEST_EXPECT(shader_tags_of(scr_shader(source), "_vsinc.fx").empty());
+	TEST_EXPECT(shader_tags_of(scr_shader("float4 main() : COLOR { return 0; }"), "none.fx").empty() &&
+	            !read_shader_effect_info("float4 main() : COLOR { return 0; }").found);
+	// _ffp.fx: the fixed-function tags, whatever its own tag says.
+	const Names ff = shader_tags_of(scr_shader(source), "shaders/_FFP.FX");
+	const auto has = [](const Names &names, const char *name) {
+		return std::find(names.begin(), names.end(), name) != names.end();
+	};
+	TEST_EXPECT(fixed_function_shader_tags().size() == 12 && ff.size() == 24 && has(ff, "FF_ST_OP") &&
+	            has(ff, "FF_MT_AD_LUM#UV") && has(ff, "FF_ST_AB_LUM") && !has(ff, "VS_TEST"));
+	// The editor's own.
+	std::vector<uint8_t> bytes;
+	BlankRequest ffp;
+	ffp.logical_name = "_ffp.fx";
+	ffp.role = "ffp_shader";
+	TEST_EXPECT(make_blank(ffp, AssetKind::Shader, bytes, error) && bytes.size() > 4 &&
+	            std::string(bytes.begin(), bytes.begin() + 4) == std::string("SCR\x01", 4));
+	TEST_EXPECT(shader_tags_of(bytes, "_ffp.fx").size() == 24);
+	const char *shared[] = {"TexCubeNormalize", "TexCubeEnvironment", "TexCubeRotSpecular", "TexPhongMap",
+	                        "TexClip1D",        "TexSpot2D",          "TexDepthGradWrite",  "TexDepthGradTest"};
+	const auto crlf = [](const std::string &text) {
+		std::string out;
+		for (char c : text) out += c == '\n' ? std::string("\r\n") : std::string(1, c);
+		return out;
+	};
+	const auto check_text = [&](const std::vector<uint8_t> &made, const std::string &tag, const char *name) {
+		std::unique_ptr<DocumentBase> shader = type->make();
+		Diagnostic load_error;
+		TEST_EXPECT(shader->load_bytes(made, name, AssetKind::Shader, "jo", load_error) &&
+		            type->validate_file(*shader).empty());
+		const std::string text = text_of(*shader) ? text_of(*shader)->text() : std::string();
+		TEST_EXPECT(!text.empty() && text == crlf(blank_shader_text(tag, name)));
+		for (const char *texture : shared)
+			TEST_EXPECT(text.find(std::string("shared texture ") + texture + ";") != std::string::npos);
+		TEST_EXPECT(text.find("TexAngleMap") == std::string::npos);
+		return 0;
+	};
+	TEST_EXPECT(check_text(bytes, std::string(), "_ffp.fx") == 0);
+	TEST_EXPECT(blank_shader_tags() == Names({"VS_PHONGT", "VS_DOT3DIFF2", "VS_SKBUMPPHONGT", "VS_SKBUMPDIFFT"}));
+	for (const std::string &tag : blank_shader_tags()) {
+		BlankRequest request;
+		request.logical_name = "shaders/new.fx";
+		request.values = {{"tag", tag}};
+		TEST_EXPECT(make_blank(request, AssetKind::Shader, bytes, error));
+		const bool skinned = tag.find("_SK") != std::string::npos;
+		TEST_EXPECT(shader_tags_of(bytes, "new.fx") == (skinned ? Names({tag}) : Names({tag, tag + "#UV"})));
+		TEST_EXPECT(check_text(bytes, tag, "new.fx") == 0);
+	}
+	// Refused: a tag it makes no effect for, a name the archive walk skips.
+	BlankRequest refused;
+	refused.logical_name = "glass.fx";
+	refused.values = {{"tag", "VS_GLASS"}};
+	TEST_EXPECT(!make_blank(refused, AssetKind::Shader, bytes, error) && error.code() == "blank.shader");
+	refused.logical_name = "_glass.fx";
+	refused.values = {{"tag", "VS_PHONGT"}};
+	TEST_EXPECT(!make_blank(refused, AssetKind::Shader, bytes, error) && error.code() == "blank.shader");
 	return 0;
 }
 
@@ -1279,7 +1377,7 @@ static int test_retail() {
 	TEST_EXPECT(view.open(install_spec(install, project), view_error));
 	const opennova::Vfs &mount = view.vfs();
 	size_t scripts = 0, compiled = 0, findings = 0, references = 0, music = 0, credits = 0, shaders = 0;
-	size_t witnessed = 0, alone = 0;
+	size_t witnessed = 0, alone = 0, shader_tags = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;
 		const AssetKind kind = classify_asset(name, nullptr);
@@ -1357,20 +1455,27 @@ static int test_retail() {
 			++credits;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
 			break;
-		case AssetKind::Shader:
+		case AssetKind::Shader: {
 			++shaders;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
+			std::vector<TextDefinition> tags;
+			type->definitions(*text_of(*document), tags);
+			shader_tags += tags.size();
 			break;
+		}
 		default: break;
 		}
 	}
 	std::printf("retail: %zu scripts (%zu with the original compiler's listing matched, %zu running no other "
 	            "file; %zu compiler reports, %zu findings, %zu references), %zu music scripts, %zu credits files, "
-	            "%zu shaders\n",
-	            scripts, witnessed, alone, compiled, findings, references, music, credits, shaders);
+	            "%zu shaders (%zu shader tags)\n",
+	            scripts, witnessed, alone, compiled, findings, references, music, credits, shaders, shader_tags);
 	// The install's counts, pinned (Joint Operations: Combined Arms).
 	TEST_EXPECT(scripts == 23 && witnessed == 23 && alone == 23 && compiled == 47 && findings == 11 &&
 	            references == 36 && music == 2 && credits == 1 && shaders == 44);
+	// The tags the shaders register, as the renderer's registry holds them: _ffp.fx's 24 and the shipped
+	// effects' (render-material-re.md, the 46-tag registry).
+	TEST_EXPECT(shader_tags == 46);
 	return 0;
 }
 
@@ -1393,6 +1498,7 @@ int main(int argc, char **argv) {
 	failures += test_music_script();
 	failures += test_shader_and_text();
 	failures += test_text_readers();
+	failures += test_shader_definitions();
 	failures += test_gate_tag_config();
 	failures += test_import_shader();
 	failures += test_retail();

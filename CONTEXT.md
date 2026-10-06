@@ -552,6 +552,15 @@ advance (the format has no advance table). An import of the set from the disk br
 it into `fonts/`.
 _Avoid_: font project, atlas (the `.fnt`'s pages are the packer's layout, not the sheet's)
 
+**Project layout / placement / move**:
+Where a project keeps its files: **flat** (most at the top level, as the base game does) or **by
+kind** (each in its kind's folder, `AssetKindRow::folder`). A file the editor makes (Create
+missing, New file, an import) is **placed** beside the project's files of its kind, else as the
+layout says (`assets/project_layout.h`, DI-03), so a flat project stays flat. A **move** puts a
+file in another folder under its own name and rewrites no reference, since the game finds it by
+its logical name.
+_Avoid_: default folder (a kind's folder holds new files only in a project laid out by kind)
+
 **Import / sidecar**:
 Bringing a non-native source (an image, a terrain set; later a sound bank's manifest, a font)
 into the project the Godot way: a committed `<file>.import` sidecar records the
@@ -830,7 +839,7 @@ generic form beside it)
 
 **Viewport**:
 One document's picture as the game would draw it, of one kind (a menu's screen, a model, a text in
-its script device, a mission's 3D view, a texture), kept by the session while the document is
+its script device, a mission's 3D view, a texture, a particle file's effect), kept by the session while the document is
 open: one per document and kind (a texture's also while Files selects the file, open or not). Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
 picture with the outline and the Inspector beside it: a mission's, for which the Preview window steps
@@ -891,7 +900,8 @@ its picked item and its picked path are its options, set by its toolbar and by t
 _Avoid_: item list, catalog (the items.def file), library, browser (NovaWorld's)
 
 **Script device**:
-A text document's Main view (a script, a music script, a credits file, a shader, a configuration):
+A text document's Main view (a script, a music script, a credits file, a shader, a configuration, a
+particle file):
 a Godot code editor placed over its Document tab, which owns the pointer and the keys there and
 shows the document's text as it stands (the text is the document's: an undo, a reload or another
 client's edit comes back into the control). What is typed goes to the document as spans replaced,
@@ -978,11 +988,12 @@ _Avoid_: footprint, VRAM (the game keeps every level in its own process too), fi
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
 its milliseconds, a clip by its game ticks, and a menu's frame clock by its milliseconds, which a
 focused edit box's caret reads (it blinks as the clock plays, the frame drawn again as the caret's
-half of the blink changes and never configured again); a particle effect and an environment's time
-of day are to read it once they have viewports. It runs while it plays, at its rate, as the Shell's
+half of the blink changes and never configured again), and a particle effect by its game ticks (the
+effect preview's: its spawn stepped a tick at a time); an environment's time of day is to read it once
+it has a viewport. It runs while it plays, at its rate, as the Shell's
 frames pass; a SetViewport plays, pauses, sets its rate or seeks it, and a viewport seeks it as it
 follows (a clip newly chosen starts at tick 0, a clip event selected holds the clock on the tick the
-clip first samples it).
+clip first samples it; an effect newly shown starts at tick 0).
 _Avoid_: clip clock (the model preview's own, which it replaced), game clock (a running match's),
 tick (the game's 62 Hz step, which it counts)
 
@@ -1079,6 +1090,21 @@ the game puts them on the posed model; a click selects a marker's record and a d
 the selected one moves it or turns its axis (every selected marker moving as far). Headless, it
 answers as its viewport's envelope.
 _Avoid_: viewer (it edits), avatar preview (the game's player-info portrait)
+
+**Effect preview**:
+A particle file's viewport in the Preview window (ADR 0046 DI-14): the effect it defines that its
+options name played by the engine's own effect scene as the game spawns one alone (at the spawn point
+with no orientation, every EMITVECTOR member emitting around +Y), over the catalog the game would load
+were the project saved now (every particle file in the effect system's order, the open documents
+standing in), so it shows what the game spawns for the name: the first definition registered (another
+file's where that one comes first, said, with a Go to it), its members all or nothing, its tables. It
+plays on the preview clock's ticks, spawned again as it dies while it loops (the editor's aid) and
+pre-aged on a seek; an edit of any particle file shows at once, the effect at the age it had; a Go to of
+an effect's name opens the file at its id and the preview shows it. Its device draws through the game's
+particle renderer, single-sampled as the game's view is. Headless, it answers as its envelope: what
+the name resolves to and the playing cycle.
+_Avoid_: particle editor (ParticleEdit's: nothing here edits but the text), effect viewer, emitter
+preview (one effect spawns several emitters)
 
 **Rig**:
 What an animation plays on: an animation table (its reset clip the bind) or a lone clip

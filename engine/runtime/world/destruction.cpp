@@ -1249,9 +1249,8 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
     int32_t pose_bam[3];
     entity_live_euler_bam(target, pose_bam);
     for (int s = 1; s < sections; ++s) {
-        // Every section spawns; only the TYPE lookup clamps at slot 16
-        // [orig: the loop bound @ 0x493918 vs the index clamp @ 0x49362f].
-        const int type_idx = traits->husk_sub_part_types[s <= 16 ? s : 16];
+        // Every section spawns; only the TYPE lookup clamps at slot 16.
+        const int type_idx = death_piece_type_index(traits->husk_sub_part_types, s);
         const DeathPieceType &tp = death_piece_type(type_idx);
         if (tp.probability < 1.0f) {
             // [orig: the probability roll @ 0x49365f — rand16 vs prob*65536]

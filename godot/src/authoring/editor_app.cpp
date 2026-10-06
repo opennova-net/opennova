@@ -26,11 +26,13 @@
 #include <runtime/devtools/imgui_pass.h>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/run/launch_plan.h>
+#include <editor/session/disk_watch.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/navigation_controller.h>
 #include <editor/session/request_factories.h>
@@ -88,6 +90,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
 	ClassDB::bind_method(D_METHOD("get_sound_state"), &EditorApp::get_sound_state);
 	ClassDB::bind_method(D_METHOD("get_sound_path"), &EditorApp::get_sound_path);
+	ClassDB::bind_method(D_METHOD("get_clip_voices_started"), &EditorApp::get_clip_voices_started);
+	ClassDB::bind_method(D_METHOD("get_clip_sound_seq"), &EditorApp::get_clip_sound_seq);
 	ClassDB::bind_method(D_METHOD("set_open_externally", "open"), &EditorApp::set_open_externally);
 	ClassDB::bind_method(D_METHOD("get_open_externally"), &EditorApp::get_open_externally);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "open_externally"), "set_open_externally", "get_open_externally");
@@ -205,9 +209,6 @@ void EditorApp::_ready() {
 	// tab or a texture field, a Replace).
 	if (get_tree()->get_current_scene() == this && get_window() != nullptr)
 		get_window()->connect("files_dropped", Callable(this, "_on_files_dropped"));
-	// A window that starts with the focus gets no focus-in: the sources a program edits are checked from the
-	// first pump (S18).
-	focused_ = get_window() != nullptr && get_window()->has_focus();
 	const PackedStringArray args = OS::get_singleton()->get_cmdline_user_args();
 	for (int i = 0; i < args.size(); ++i) {
 		if (args[i] == kSmokeFlag) {
@@ -299,6 +300,8 @@ void EditorApp::_process(double p_delta) {
 	// a test's one unit a frame whatever.
 	if (devices_) {
 		session_->advance(p_delta);
+		// What the previewed clip's events fired as the clock ran, heard now (DI-04).
+		pump_clip_sounds_();
 		devices_->tick(session_->viewports());
 		// E13: of the devices drawn this frame, those of one scene state render (their frame legs
 		// run), the rest keep their last pictures until the next frame.
@@ -359,14 +362,14 @@ void EditorApp::pump() {
 	// budget steps the validation they left due first (S13 A3: no request runs it).
 	serve_queued_device_requests_();
 	drain_requests();
-	// A source a program edits comes back once a second while the window has the focus (S18).
-	if (focused_) {
-		const uint64_t now = Time::get_singleton()->get_ticks_msec();
-		if (now - last_source_check_ms_ >= 1000) {
-			last_source_check_ms_ = now;
-			refresh_changed_sources_();
-		}
-	}
+	// What another program saves comes back (S18, DI-01): a check once a second whether or not the window
+	// has the focus (an editor an MCP client launched never has it), sooner while a file waits to hold still
+	// or the focus-in's sweep runs.
+	const uint64_t now = Time::get_singleton()->get_ticks_msec();
+	const opennova::editor::ProjectView &project = session_->view().project;
+	const int64_t interval = project.outside_waiting || project.outside_sweeping ? opennova::editor::kDiskHoldStillMs
+	                                                                            : opennova::editor::kDiskCheckMs;
+	if (int64_t(now - last_disk_check_ms_) >= interval) refresh_changed_sources_(false);
 	session_->poll();
 	// A game started behind (play {behind}) kept behind while it starts.
 	platform_->tend();
@@ -379,13 +382,15 @@ void EditorApp::pump() {
 	if (session_->view().dialogs.quit_requested) get_tree()->quit(0);
 }
 
-// The import sources a program saved, imported again (S18: RefreshChangedSources), when the busy gate
-// takes it: an operation that holds the files runs, and the next check asks again.
-void EditorApp::refresh_changed_sources_() {
+// What another program saved, read again (S18, DI-01: RefreshChangedSources; `all`, every file of the
+// project swept), when the busy gate takes it: an operation that holds the files runs, and the next
+// check asks again.
+void EditorApp::refresh_changed_sources_(bool p_all) {
+	last_disk_check_ms_ = Time::get_singleton()->get_ticks_msec();
 	if (!session_ || !session_->view().project.open ||
 			!session_->view().allows(opennova::editor::EditorRequestKind::RefreshChangedSources))
 		return;
-	session_->handle(opennova::editor::request::refresh_changed_sources());
+	session_->handle(opennova::editor::request::refresh_changed_sources(p_all));
 }
 
 // Each OpenExternally view event the session posted since the last pump: its file opened in the program
@@ -482,84 +487,86 @@ void EditorApp::serve(const EditorRequest &p_request) {
 	}
 }
 
-// The project's wave of a play (Files' card, the UX round's project lane; the workspace's sound, the MCP gaps
-// lane) decoded as the game decodes it (lwf::wav_decode_pcm16, boxed by WavLoader) on a worker, in place of the
-// one playing. The session checked the file (a wave of the project, within the card's cap).
-void EditorApp::play_sound_(const std::string &p_path) {
-	stop_sound_();
-	const opennova::editor::SessionView &view = session_->view();
-	const std::string file = opennova::editor::join_path(view.project.root, p_path);
-	sound_path_ = p_path;
-	sound_job_ = std::async(std::launch::async, [file]() {
-		SoundDecode out;
-		std::vector<uint8_t> bytes;
-		if (!opennova::editor::read_file_bytes(file, bytes, out.error)) return out;
-		out.decoded = opennova::lwf::wav_decode_pcm16(bytes.data(), bytes.size(), out.pcm, out.error);
-		return out;
-	});
+// The workspace's sound (Files' card, the UX round's project lane; a set's or a slot's Play, the sound lane;
+// the MCP gaps lane) through the one preview player: each voice decoded as the game decodes it on a worker, in
+// place of the play under way. The session checked the files (waves of the project, within the card's cap)
+// and made the picks (session/sound_play.h).
+void EditorApp::play_sound_(const std::vector<opennova::editor::WorkspaceView::Voice> &p_voices) {
+	if (!sound_) sound_ = std::make_unique<PreviewSoundPlayer>(this);
+	sound_->play(session_->view().project.root, p_voices);
 }
 
 void EditorApp::stop_sound_() {
-	// A decode in flight is let finish (its future's end waits for it, the cap bounding it) and dropped.
-	if (sound_job_.valid()) sound_job_ = std::future<SoundDecode>();
-	if (sound_ != nullptr) sound_->stop();
-	sound_path_.clear();
-	sound_reported_playing_ = false;
+	if (sound_) sound_->stop();
 }
 
 // The workspace's sound followed (play_sound and stop_sound are the session's requests): a play of a serial
 // not taken yet decoded off the frame and played at the pump that finds it decoded, reported playing; played
-// through, reported ended; one that does not decode reported failed, and said on the status line; a sound the
-// session no longer plays (stop_sound, its card closing, its project closing) stopped.
+// through, reported ended; one none of whose voices decodes reported failed, and said on the status line; a
+// sound the session no longer plays (stop_sound, its card closing, its project closing) stopped.
 void EditorApp::pump_sound_() {
 	using State = opennova::editor::WorkspaceView::SoundState;
 	const opennova::editor::WorkspaceView::Sound &sound = session_->view().workspace.sound;
 	if (sound.serial != sound_serial_) {
 		sound_serial_ = sound.serial;
 		stop_sound_();
-		if (sound.state == State::Starting) play_sound_(sound.path);
+		if (sound.state == State::Starting) play_sound_(sound.voices);
 	}
 	if (sound.state != State::Starting && sound.state != State::Playing) {
-		if (!sound_path_.empty()) stop_sound_();
+		if (sound_ && sound_->state() != PreviewSoundPlayer::State::Idle) stop_sound_();
 		return;
 	}
-	if (sound_path_.empty()) return;
-	if (sound_reported_playing_) {
-		if (sound_ == nullptr || !sound_->is_playing()) {
-			sound_path_.clear();
-			sound_reported_playing_ = false;
-			session_->report_sound(sound_serial_, State::Ended);
-		}
+	if (!sound_) return;
+	const PreviewSoundPlayer::State was = sound_->state();
+	std::string error;
+	const PreviewSoundPlayer::State now = sound_->pump(error);
+	if (now == was) return;
+	switch (now) {
+	case PreviewSoundPlayer::State::Playing: session_->report_sound(sound_serial_, State::Playing); break;
+	case PreviewSoundPlayer::State::Ended:
+		sound_->stop();
+		session_->report_sound(sound_serial_, State::Ended);
+		break;
+	case PreviewSoundPlayer::State::Failed:
+		post_device_notice_(sound.path + " does not play: " + error);
+		sound_->stop();
+		session_->report_sound(sound_serial_, State::Failed, error);
+		break;
+	default: break;
+	}
+}
+
+// The clip sounds (DI-04): each the session fired since the last taken started beside those playing, its
+// waves decoded once while the project's files stand; none while no project is open.
+void EditorApp::pump_clip_sounds_() {
+	if (!session_) return;
+	const opennova::editor::SessionView &view = session_->view();
+	if (!view.project.open) {
+		if (clip_voices_) clip_voices_->stop();
 		return;
 	}
-	if (!sound_job_.valid() || sound_job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
-	const SoundDecode decoded = sound_job_.get();
-	if (!decoded.decoded) {
-		post_device_notice_(sound_path_ + " does not play: " + decoded.error);
-		sound_path_.clear();
-		session_->report_sound(sound_serial_, State::Failed, decoded.error);
-		return;
+	const uint64_t generation = view.findings.assets ? view.findings.assets->generation() : 0;
+	if (clip_voices_ && generation != clip_wave_generation_) clip_voices_->forget();
+	clip_wave_generation_ = generation;
+	for (const opennova::editor::ClipSoundPlay &play : session_->clip_sounds_since(clip_sound_seq_)) {
+		clip_sound_seq_ = play.seq;
+		if (!clip_voices_) clip_voices_ = std::make_unique<PreviewSoundVoices>(this);
+		clip_voices_->add(view.project.root, play.voices);
 	}
-	const Ref<AudioStreamWAV> stream = WavLoader::from_pcm(decoded.pcm);
-	if (sound_ == nullptr) {
-		sound_ = memnew(AudioStreamPlayer);
-		sound_->set_name("EditorSound");
-		add_child(sound_);
-	}
-	sound_->stop();
-	sound_->set_stream(stream);
-	sound_->play();
-	sound_reported_playing_ = true;
-	session_->report_sound(sound_serial_, State::Playing);
+	if (clip_voices_) clip_voices_->pump();
 }
 
 String EditorApp::get_sound_state() const {
-	if (sound_job_.valid()) return "decoding";
-	return !sound_path_.empty() && sound_ != nullptr && sound_->is_playing() ? "playing" : "idle";
+	if (!sound_) return "idle";
+	switch (sound_->state()) {
+	case PreviewSoundPlayer::State::Decoding: return "decoding";
+	case PreviewSoundPlayer::State::Playing: return "playing";
+	default: return "idle";
+	}
 }
 
 String EditorApp::get_sound_path() const {
-	return get_sound_state() == "idle" ? String() : opennova::to_gd(sound_path_);
+	return get_sound_state() == "idle" ? String() : opennova::to_gd(sound_->path());
 }
 
 void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
@@ -776,12 +783,9 @@ void EditorApp::_notification(int p_what) {
 	if (p_what == NOTIFICATION_WM_CLOSE_REQUEST) {
 		ensure_session(); session_->handle(opennova::editor::request::quit());
 	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_IN) {
-		// Back from another program (S18): what it saved comes back now, then once a second (pump).
-		focused_ = true;
-		last_source_check_ms_ = Time::get_singleton()->get_ticks_msec();
-		refresh_changed_sources_();
-	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_OUT) {
-		focused_ = false;
+		// Back from another program (S18, DI-01): every file of the project looked at now, swept over the
+		// frames, and what it saved read as it holds still.
+		refresh_changed_sources_(true);
 	}
 }
 } // namespace godot

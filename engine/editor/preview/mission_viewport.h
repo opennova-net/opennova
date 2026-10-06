@@ -136,6 +136,7 @@ public:
 	const char *reason() const override { return mission_view_status_token(reason_); }
 	std::string message() const override { return mission_view_status_message(reason_); }
 	const std::string &detail() const override { return detail_; }
+	const FileStamps *picture_reads() const override { return &picture_.files(); }
 	const char *units() const override { return "pixels"; }
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;

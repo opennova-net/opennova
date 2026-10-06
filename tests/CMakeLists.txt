@@ -4294,6 +4294,11 @@ add_test(NAME editor_symbol_rename COMMAND editor_symbol_rename_test)
 # (documents/texture_image), the texture document, and its viewport through a session (Files'
 # selection previewed from its file, the viewport query and SetViewport, the texture opened, the item
 # using it); the retail leg (OPENNOVA_JO_DIR) a sample of the install's textures of each extension.
+add_executable(editor_effect_viewport_test editor/effect_viewport_test.cpp)
+target_link_libraries(editor_effect_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_effect_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_effect_viewport COMMAND editor_effect_viewport_test)
+
 add_executable(editor_texture_document_test editor/texture_document_test.cpp)
 target_link_libraries(editor_texture_document_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4399,6 +4404,14 @@ add_executable(editor_texture_external_test editor/texture_external_test.cpp)
 target_link_libraries(editor_texture_external_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_external_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_external COMMAND editor_texture_external_test)
+
+# ADR 0046 DI-01, outside saves come back (editor/assets/disk_changes.h, editor/session/disk_watch.h): a
+# file read once it holds still, the folders' made and gone files, the focus-in sweep; an open catalog's
+# outside save read again with its selection kept, a conflict raised at once with Keep my edits.
+add_executable(editor_disk_changes_test editor/disk_changes_test.cpp)
+target_link_libraries(editor_disk_changes_test PRIVATE opennova_editor)
+target_include_directories(editor_disk_changes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_disk_changes COMMAND editor_disk_changes_test)
 
 # A file's rename through the native texts (ADR 0046 S18, graph/native_text_sites): a terrain's, an
 # environment's, a particle file's and the HUD layout's names rewritten as text, only the token the game
@@ -4524,6 +4537,19 @@ target_link_libraries(editor_model_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_model_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_model_viewport COMMAND editor_model_viewport_test)
 
+# DI-04: a clip's events heard in the model preview, on the game's ticks, through the game's rules.
+add_executable(editor_clip_sounds_test editor/clip_sounds_test.cpp)
+target_link_libraries(editor_clip_sounds_test PRIVATE opennova_editor)
+target_include_directories(editor_clip_sounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_clip_sounds COMMAND editor_clip_sounds_test)
+
+# DI-10: a model's damage states named in the game's words and played as the game destroys the item (the
+# husk swap, the pieces, the death sound, the destroy fade); the retail leg over JO's damageable items.
+add_executable(editor_model_damage_test editor/model_damage_test.cpp)
+target_link_libraries(editor_model_damage_test PRIVATE opennova_editor)
+target_include_directories(editor_model_damage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_model_damage COMMAND editor_model_damage_test)
+
 # What a drag of a menu window's handles writes (editor/preview/menu_layout_edit, S9k1):
 # the plan against the runtime's POSITION solve, the grid, the handles, the edits.
 add_executable(editor_menu_layout_edit_test editor/menu_layout_edit_test.cpp)
@@ -4625,6 +4651,14 @@ target_link_libraries(project_cli_test PRIVATE opennova_project_cli)
 target_include_directories(project_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME project_cli COMMAND project_cli_test)
 
+# Where a file lands and how it moves (DI-03): one placement rule for Create missing, New file and an
+# import (a flat project stays flat), and a move between folders that rewrites no reference, in the
+# session, over the wire's request and the command line's mv.
+add_executable(editor_file_placement_test editor/file_placement_test.cpp)
+target_link_libraries(editor_file_placement_test PRIVATE opennova_project_cli)
+target_include_directories(editor_file_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_file_placement COMMAND editor_file_placement_test)
+
 # opennova-project as the editor's session, headless (S13 A7): the verb table against the request
 # and query tables, each verb's --json the session's answer to the same requests, the request and
 # query verbs, --install; its retail leg a project imported from the game install whose Problems
@@ -4655,6 +4689,13 @@ add_executable(editor_reserved_items_test editor/reserved_items_test.cpp)
 target_link_libraries(editor_reserved_items_test PRIVATE opennova_editor)
 target_include_directories(editor_reserved_items_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_reserved_items COMMAND editor_reserved_items_test)
+# The sound lane (ADR 0046; DI-02, DI-16): the bank and SndProf.def documents, the sound names in the
+# graph by the game's bank order, the preview's picks, the session's play_sound; a SKIP-LEG without
+# OPENNOVA_JO_ASSETS (every shipped bank and SndProf.def through the documents).
+add_executable(editor_sound_documents_test editor/sound_documents_test.cpp)
+target_link_libraries(editor_sound_documents_test PRIVATE opennova_editor)
+target_include_directories(editor_sound_documents_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_sound_documents COMMAND editor_sound_documents_test)
 
 add_executable(editor_strings_test editor/strings_document_test.cpp)
 target_link_libraries(editor_strings_test PRIVATE opennova_editor)

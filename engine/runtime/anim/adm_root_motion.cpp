@@ -204,8 +204,9 @@ float AdmRootMotion::sample(const Track &track, const std::vector<float> &channe
 
 uint32_t AdmRootMotion::sample_trigger(const Track &track, int32_t phase_ticks,
 									   int32_t armed_boundary) {
-	if (track.clock.stopped_at(phase_ticks)) return 0;
-	return track.trigger[static_cast<size_t>(track.clock.frame_index_at(phase_ticks, armed_boundary))];
+	// The word below the playhead, none once a one-shot stopped: the rule the editor's clip preview
+	// reads it by too (anim::clip_trigger_at).
+	return clip_trigger_at(track.clock, track.trigger, phase_ticks, armed_boundary);
 }
 
 int AdmRootMotion::scan_triggers(int adm_id, int state_id, int32_t from_phase,

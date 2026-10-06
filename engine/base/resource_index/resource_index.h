@@ -137,4 +137,12 @@ private:
 	std::unique_ptr<Impl> impl_;
 };
 
+// The effect catalog's files in the order the runtime parses them, of `names` (logical names):
+// every `.ptl`, then every file of the gore set (`gore_extension`, ResourceIndex::particle_extension),
+// each list by name without case; a name of neither is left out. ResourceIndex::effect_files' order,
+// for an embedder whose files no index lists (the OpenNova Editor's project, ADR 0046 DI-14)
+// [orig: CEffectSystem_Init @ 0x5f6070 — loose `ptl\*.ptl` @ 0x5f6228, then `ptl\*<ext>` @ 0x5f6356,
+// the archive walk's extension test @ 0x5f64cd..0x5f64f3].
+std::vector<std::string> effect_file_order(const std::vector<std::string> &names, const std::string &gore_extension);
+
 } // namespace opennova

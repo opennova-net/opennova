@@ -253,20 +253,26 @@ std::vector<std::string> ResourceIndex::effect_files() const {
 	// entry, strrchr('.') + stricmp(".ptl" / the gore extension) @ 0x5f64cd..0x5f64f3,
 	// File_ParseASCIIFile by name @ 0x5f6545]: a name every mounted entry of which is
 	// stamped 0 is never read, and one stamped entry is enough.
+	std::vector<std::string> names;
+	for (const ResourceFileEntry &entry : impl_->records) {
+		if (entry.kind != "particle") continue;
+		if (impl_->vfs.archive_stamp(entry.logical_name) == VfsArchiveStamp::Unstamped)
+			continue;
+		names.push_back(entry.logical_name);
+	}
+	return effect_file_order(names, particle_extension());
+}
+
+std::vector<std::string> effect_file_order(const std::vector<std::string> &names, const std::string &gore_extension) {
 	std::vector<std::string> out;
-	for (const std::string &extension : {std::string(".ptl"), particle_extension()}) {
-		std::vector<std::string> names;
-		for (const ResourceFileEntry &entry : impl_->records) {
-			if (entry.kind != "particle" || !strutil::ends_with_icase(entry.logical_name, extension))
-				continue;
-			if (impl_->vfs.archive_stamp(entry.logical_name) == VfsArchiveStamp::Unstamped)
-				continue;
-			names.push_back(entry.logical_name);
-		}
-		std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
+	for (const std::string &extension : {std::string(".ptl"), gore_extension}) {
+		std::vector<std::string> listed;
+		for (const std::string &name : names)
+			if (strutil::ends_with_icase(name, extension)) listed.push_back(name);
+		std::sort(listed.begin(), listed.end(), [](const std::string &a, const std::string &b) {
 			return strutil::to_lower(a) < strutil::to_lower(b);
 		});
-		out.insert(out.end(), names.begin(), names.end());
+		out.insert(out.end(), listed.begin(), listed.end());
 	}
 	return out;
 }

@@ -1246,7 +1246,8 @@ static int test_outcomes_and_refusals() {
 	TEST_EXPECT(v.project.scan->find("newarow1.tga") == nullptr);
 	session.handle(request::create_file("other.mnu", "menu"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(fs::exists(root + "/textures/newarow1.tga") && v.project.scan->find("newarow1.tga") != nullptr);
+	// Where the project keeps its textures now (DI-03): beside logo.tga and logo2.tga at the top level.
+	TEST_EXPECT(fs::exists(root + "/newarow1.tga") && v.project.scan->find("newarow1.tga") != nullptr);
 	// The required name still gets its requirement's blank.
 	const AssetEntry *main_menu = v.project.scan->find("main.mnu");
 	TEST_EXPECT(main_menu != nullptr);
@@ -2363,7 +2364,7 @@ static int test_prompt_belongs_to_its_project() {
 
 // S11a: each open document keeps its selection. The document made active again by
 // OpenDocument with no record takes back the selection it had (one it names still wins);
-// one read again or closed forgets it.
+// one read again keeps it by its records' places (DI-01), one closed forgets it.
 static int test_selection_memory() {
 	SaveProject project("opennova_editor_session_selection");
 	TEST_EXPECT(project.open());
@@ -2394,16 +2395,22 @@ static int test_selection_memory() {
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_record(project.strings_path, section(4)));
 	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection.primary == section(4));
-	// Read again: forgotten (its records have new identities).
+	// Read again: its records have new identities, and the selection it kept comes back by their
+	// places (DI-01).
 	session.handle(request::reload_document(project.items_path));
 	session.handle(request::open_document(project.strings_path));
 	session.handle(request::open_document(project.items_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == NodeAddress() && v.documents.selection.records.empty());
+	const Document *again = session.document_for(project.items_path);
+	TEST_EXPECT(again && !again->rows().empty());
+	if (!again || again->rows().empty()) return 1;
+	const NodeAddress marker_again{again->rows()[0]->id, again->rows()[0]->kind, 0};
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == marker_again &&
+	            v.documents.selection.records == std::vector<NodeAddress>{marker_again});
 	// Closed: forgotten; the document that becomes active takes back its own.
 	session.handle(request::open_document(project.strings_path));
 	TEST_EXPECT(v.documents.selection.primary == section(4));
 	session.handle(request::close_document(project.strings_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == NodeAddress());
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == marker_again);
 	session.handle(request::open_document("gametext.bin"));
 	TEST_EXPECT(v.documents.selection.primary == NodeAddress() && v.documents.selection.records.empty());
 	return 0;
@@ -3249,9 +3256,9 @@ static int test_project_settings() {
 }
 
 // A menu made the active document with nothing of it selected shows its first screen (the
-// menu view lists the selected screen's windows, the preview draws it): opened, taken back
-// with no selection kept, read again, and after a rescan; a selection it kept, or a record
-// named, wins.
+// menu view lists the selected screen's windows, the preview draws it): opened, and taken back
+// with no selection kept; a selection it kept, or a record named, wins, and one read again (a
+// Reload, a rescan after its file changed) keeps its record by its place (DI-01).
 static int test_menu_first_screen() {
 	SaveProject project("opennova_editor_session_first_screen");
 	TEST_EXPECT(project.open());
@@ -3291,13 +3298,14 @@ static int test_menu_first_screen() {
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_record(menu_path, title));
 	TEST_EXPECT(v.documents.selection.primary == title);
-	// Read again (new records): its first screen, whatever was selected.
+	// Read again (new records): the record selected selected again by its place (DI-01).
 	session.handle(request::reload_document(menu_path));
 	menu = session.document_for(menu_path);
-	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(menu));
+	TEST_EXPECT(menu && v.documents.active == menu_path);
 	if (!menu) return 1;
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title) && v.documents.selection.primary == title);
 	// A rescan keeps it while its file is as it was read (the selection with it), and reads it
-	// again once the file changed outside the editor.
+	// again once the file changed outside the editor, the record selected again by its place.
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	select(title);
 	session.handle(request::rescan());
@@ -3306,10 +3314,13 @@ static int test_menu_first_screen() {
 	std::string text, io_error;
 	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, io_error) &&
 	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
+	const uint64_t was = menu->identity();
 	session.handle(request::rescan());
 	session.run_operations();
 	menu = session.document_for(menu_path);
-	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(menu));
+	TEST_EXPECT(menu && menu->identity() != was && v.documents.active == menu_path);
+	if (!menu) return 1;
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title) && v.documents.selection.primary == title);
 	return 0;
 }
 
@@ -4505,6 +4516,8 @@ static int test_prompt_words_from_the_table() {
 		// S18: a texture's split rewrites its referrers as a rename does.
 		{EditorRequestKind::SplitTexture, "Split main.mnu", "Save all and split"},
 		{EditorRequestKind::Quit, "Quit", "Save all"},
+		// DI-03: a move closes and opens the moved file's document again, as a rename does.
+		{EditorRequestKind::MoveAsset, "Move main.mnu", "Save all and move"},
 	};
 	size_t guarded = 0;
 	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {

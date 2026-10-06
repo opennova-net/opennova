@@ -1686,7 +1686,7 @@ void test_import_dialog() {
 	                      "Not found (1)", "gone.tga", "menu.mnu: MAIN/KEEP/Appearance 1 value",
 	                      "arial99.fnt: found in both the folder C:/assets and the game install; using the folder C:/assets",
 	                      "The files these kinds name are not looked for yet: Terrain.",
-	                      "References that name no file are not followed: sound.",
+	                      "References that name no file are not followed: string id.",
 	                      "Named by the files but defined nowhere: 1 screen.", stopped.c_str(),
 	                      "broken.mnu: The file could not be read.", "Replace existing files", "Import 5 files", "Cancel"}),
 	      "the plan: the summary, the rows, then what is not found, found twice, not followed, the cap, the finding");
