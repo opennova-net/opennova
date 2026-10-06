@@ -59,6 +59,9 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::BoundingBox, { "mission.bounding_box" } },
 	{ MissionFinding::Pool, { "mission.pool" } },
 	{ MissionFinding::NoStart, { "mission.no_start" } },
+	// An entity the game leaves off the ground (DI-28): its z set where the game's rule stands it, the fix the
+	// project check plans with its finding (Diagnostic::planned).
+	{ MissionFinding::OffGround, { "mission.off_ground", FindingFix::EditRecord } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MissionFinding::kCount),
               "every MissionFinding has exactly one row");
