@@ -211,6 +211,10 @@ constexpr RequestField kFields[] = {
 			"How many places of the navigation history a navigate_back or a navigate_forward goes (1 when left "
 			"out: the nearest; the navigation section lists them nearest first, as Back's and Forward's lists "
 			"do)." },
+	{ F::Folder, "folder", J::String,
+			"A folder of the project, from its top level, '/'-separated (\"defs\", \"art/terrain\"; \"\" or \"/\" the "
+			"top level): where a move puts a file. Made when it is not there; never one outside the project, a "
+			"dot-folder (the cache) or the export folder." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

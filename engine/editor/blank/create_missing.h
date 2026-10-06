@@ -12,7 +12,9 @@ namespace opennova::editor {
 
 // Create missing (ADR 0046 d7): the rows of the enabled phases whose roles `roles` names
 // (each once, in manifest order; none names nothing, and an optional row is made when it is
-// named), filled with their blank factories' files under the kind's folder. A row whose
+// named), filled with their blank factories' files where the project keeps a file of the kind
+// (`scan`, the project's files the report was evaluated over: assets/project_layout.h's
+// placement_folder, the top level of a flat project). A row whose
 // file is in the project is refused (create_missing.exists), as is one whose target is on
 // disk though the report missed it: an existing file is never overwritten, of the right kind
 // or the wrong one. A row without a factory is reported as unavailable; a role no row of
