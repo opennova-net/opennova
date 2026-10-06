@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "pcx",
+    "palette": "median_cut"
+  },
+  "outputs": [
+    "onovcst2.pcx"
+  ],
+  "schema_version": 1,
+  "source_hash": "f2977ba6e89527fb",
+  "version": 3
+}
