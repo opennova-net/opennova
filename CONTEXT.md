@@ -969,7 +969,9 @@ What a model texture costs the game (ADR 0046 S18): the device texture its row's
 opens (its sides after the game's halvings, its levels, its format, and every level's bytes, which the game keeps
 in its own memory) at each of the four **object texture detail** levels (game.cfg's `object_texdetail`, 0 the
 lowest to 3 full: one or two halvings of a diffuse or detail texture), and what the `.dds` its loader reads first
-would cost instead. Said under each use in the texture's tab and on the wire; past 16 MB it is a warning.
+would cost instead. Said under each use in the texture's tab and on the wire; past 16 MB it is a warning. The
+project's budget is every texture the game makes for the model rows (one a name written), costliest first, with
+its totals: the `texture_budget` query, Files' By cost.
 _Avoid_: footprint, VRAM (the game keeps every level in its own process too), file size (what the disk holds)
 
 **Preview clock**:

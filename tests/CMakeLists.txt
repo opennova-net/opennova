@@ -4497,8 +4497,9 @@ opennova_add_mixed_test(editor_texture_checks COMMAND editor_texture_checks_test
 
 # ADR 0046 S18, the texture budget (documents/texture_budget over renderer/device_texture): what a model
 # row's texture costs the game at each object texture detail and as its .dds; over a minted project the
-# texture_uses query's budgets, texture.memory and texture.normal_slot_loader with its fix; the retail leg
-# (OPENNOVA_JO_DIR) every shipped model's texture rows costed, none past the warning.
+# texture_uses query's budgets, texture.memory and texture.normal_slot_loader with its fix, the
+# texture_budget query (the project's textures and their totals); the retail leg (OPENNOVA_JO_DIR) every
+# shipped model's texture rows costed, none past the warning.
 add_executable(editor_texture_budget_test editor/texture_budget_test.cpp)
 target_link_libraries(editor_texture_budget_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_budget_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
