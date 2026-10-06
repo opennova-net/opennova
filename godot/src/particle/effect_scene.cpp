@@ -419,6 +419,15 @@ void EffectScene::clear_view_frustum() {
 	frustum_ = {};
 }
 
+void EffectScene::share_native_scene(std::shared_ptr<opennova::particle::EffectScene> p_scene) {
+	if (!p_scene) {
+		p_scene = std::make_shared<opennova::particle::EffectScene>();
+		p_scene->open(opennova::particle::EffectSceneConfig());
+	}
+	scene_ = std::move(p_scene);
+	snapshot_dirty_ = true;
+}
+
 const opennova::particle::ParticleFrameSnapshot &
 EffectScene::native_frame_snapshot() const {
 	_materialize_snapshot();

@@ -46,6 +46,11 @@ struct PreviewRig {
 	// The record that pairs them, where Go to on "paired by" takes (DI-05: its file opened at the record,
 	// its map field shown); an empty file for a chosen model or none.
 	ReferenceTarget pairing;
+	// The same record as the graph names it, where one pairs them: its file (project-relative), its name,
+	// and the field that names the table (an item's anim_def, a weapon's animadm); "" for a model chosen.
+	std::string record_file;
+	std::string record;
+	std::string record_field;
 };
 
 // The model fields of a record that pair with its map field (S17 review): an item's anim_def plays

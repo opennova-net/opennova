@@ -822,9 +822,11 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::All: out.all = true; break;
 		case F::Planned: out.planned = true; break;
 		case F::Behind: out.behind = true; break;
+		case F::Fresh: out.fresh = true; break;
 		case F::Plan: out.plan = 7; break;
 		case F::Report: out.report = false; break; // its default is true
 		case F::Steps: out.steps = 3; break; // its default is 1
+		case F::Folder: out.folder = "defs"; break;
 		case F::kCount: break;
 		}
 	}

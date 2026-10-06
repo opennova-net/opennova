@@ -9,6 +9,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/texture_document.h>
@@ -159,15 +160,17 @@ std::shared_ptr<DocumentBase> DocumentSet::load(const std::string &relative, Ass
 	return document;
 }
 
-// The open documents against their files (Rescan, an import, Build and Play: the build
-// packs the files on disk, and its gate is the validation in which an open document stands
-// in for its file). A document whose file holds what it was read from or last saved keeps
-// its records, its history and its selection. A clean one whose file changed outside the
-// editor is read again (its selection goes with its old records); one whose file no longer
-// reads (or is gone) stays open as it was, and why is its Problems row (document.stale, an
-// error: the build would pack the file that does not read). One with unsaved edits whose
-// file changed keeps them, and a warning says so (document.conflict: its Save is refused)
-// with a Reload fix, which asks about the edits first.
+// The open documents against their files (Rescan, an import, Build and Play, and what another
+// program saved: session/disk_watch.h; the build packs the files on disk, and its gate is the
+// validation in which an open document stands in for its file). A document whose file holds what
+// it was read from or last saved keeps its records, its history and its selection. A clean one
+// whose file changed outside the editor is read again, the records selected in it selected again by
+// their places (keep_selection: their locators, as a project reopens them, ADR 0046 DI-01); one whose
+// file no longer reads (or is gone) stays open as it was, and why is its Problems row
+// (document.stale, an error: the build would pack the file that does not read). One with unsaved
+// edits whose file changed keeps them, and a warning says so at once (document.conflict: its Save
+// is refused) with its two fixes, Reload (which asks about the edits first) and Keep my edits (a
+// Save over the file, after a confirmation).
 void DocumentSet::reload_changed() {
 	bool changed = false;
 	for (auto &document : documents_) {
@@ -178,7 +181,12 @@ void DocumentSet::reload_changed() {
 		}
 		if (document->dirty()) {
 			stale_.erase(path);
-			conflicts_.insert(path);
+			if (conflicts_.insert(path).second) {
+				core_.note(path + " changed outside the editor while it has unsaved edits: Problems offers to reload "
+				                  "it (the edits are lost) or to keep your edits and save over it.");
+				view_.activity.status = path + " changed outside the editor: see Problems.";
+				core_.touch(ViewConcern::Output);
+			}
 			continue;
 		}
 		Diagnostic error;
@@ -190,17 +198,66 @@ void DocumentSet::reload_changed() {
 			continue;
 		}
 		forget_file_state(path);
-		remembered_.erase(path); // read again: its records' identities are gone
-		if (path == view_.documents.active)
-			view_.documents.selection.select_only(path, NodeAddress());
+		keep_selection(*document, *loaded);
 		document = loaded;
 		changed = true;
 		core_.note("Reloaded " + path + ": it changed outside the editor.");
 	}
 	if (!changed) return;
-	select_first_screen(); // the active menu read again shows its first screen
+	select_first_screen(); // the active menu read again with nothing selected shows its first screen
 	core_.touch(ViewConcern::Selection);
 	update_view();
+}
+
+namespace {
+
+// The records of a selection by their places (Document::locator): the primary's, then every record's.
+struct LocatedRecords {
+	std::string primary;
+	std::vector<std::string> records;
+};
+
+LocatedRecords locate(const Document &document, const Selection &selection) {
+	LocatedRecords out;
+	if (selection.primary.row) out.primary = document.locator(selection.primary);
+	for (const NodeAddress &record : selection.records)
+		if (std::string at = document.locator(record); !at.empty()) out.records.push_back(std::move(at));
+	return out;
+}
+
+// The records at those places in `document` selected in `selection` (of the document at `path`), the
+// primary the primary's when it is there; none found, nothing selected.
+void relocate(const Document &document, const std::string &path, const LocatedRecords &located, Selection &selection) {
+	NodeAddress primary = located.primary.empty() ? NodeAddress() : document.address_at(located.primary);
+	std::vector<NodeAddress> others;
+	for (const std::string &at : located.records)
+		if (const NodeAddress record = document.address_at(at); record.row && !(record == primary)) others.push_back(record);
+	if (!primary.row && !others.empty()) {
+		primary = others.front();
+		others.erase(others.begin());
+	}
+	selection.select_only(path, NodeAddress());
+	if (primary.row) selection.select(path, primary, others, SelectMode::Replace);
+}
+
+} // namespace
+
+void DocumentSet::keep_selection(const DocumentBase &before, const DocumentBase &after) {
+	const std::string &path = before.path();
+	const Document *was = records_of(before);
+	const Document *now = records_of(after);
+	if (path == view_.documents.active) {
+		const LocatedRecords located = was ? locate(*was, view_.documents.selection) : LocatedRecords();
+		view_.documents.selection.select_only(path, NodeAddress());
+		if (now) relocate(*now, path, located, view_.documents.selection);
+	}
+	// The selection it kept while another is active: its records' identities are the old read's.
+	const auto kept = remembered_.find(path);
+	if (kept == remembered_.end()) return;
+	Selection again;
+	if (was && now) relocate(*now, path, locate(*was, kept->second), again);
+	if (again.empty()) remembered_.erase(kept);
+	else kept->second = std::move(again);
 }
 
 // The Problems rows of the open documents whose file changed outside the editor and was not
@@ -218,7 +275,8 @@ std::vector<Diagnostic> DocumentSet::findings() const {
 	for (const std::string &path : conflicts_)
 		findings.push_back(make_finding(CoreFinding::DocumentConflict, DiagnosticSeverity::Warning,
 		                                "This file changed outside the editor while it has unsaved edits: Save is "
-		                                "refused until it is read again, which discards the edits.",
+		                                "refused until it is read again, which discards the edits, or you keep your "
+		                                "edits and save over what the other program saved.",
 		                                path));
 	return findings;
 }
@@ -281,10 +339,11 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		return;
 	}
 	// A plain name the archives can carry, whose extension is the kind's, landing
-	// inside the project.
+	// inside the project where it keeps a file of the kind (assets/project_layout.h: beside its
+	// files of the kind, else the top level of a flat project or the kind's folder).
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
-	const char *const folder = asset_kind_row(kind).folder;
+	const std::string folder = placement_folder(*view_.project.scan, kind);
 	if (!check_project_file_name(paths_.root, folder, request.path, kind, problem, message)) {
 		const CoreFinding code = problem == FileNameProblem::Kind   ? CoreFinding::DocumentKind
 		                         : problem == FileNameProblem::Path ? CoreFinding::DocumentPath
@@ -311,8 +370,8 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		std::vector<std::string> made{relative};
 		core_.note("Created " + relative);
 		// A new mission comes with the text table the game finds by its name (its title in the
-		// mission list, its briefing), where the project has none of that name: made beside the
-		// string tables. One that cannot be made leaves the mission made, and says so.
+		// mission list, its briefing), where the project has none of that name: made where it
+		// keeps its string tables. One that cannot be made leaves the mission made, and says so.
 		if (kind == AssetKind::Mission) {
 			const mission::Sidecar *text = mission::sidecar_for_role("text");
 			const std::string table = text ? mission::sidecar_name(request.path, *text) : std::string();
@@ -323,7 +382,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 				text_blank.role = kBlankMissionTextRole;
 				text_blank.project_title = blank.project_title;
 				text_blank.values = {{"title", blank_mission_title(blank)}};
-				const std::string text_relative = join_path(asset_kind_row(AssetKind::Strings).folder, table);
+				const std::string text_relative = placement_path(*view_.project.scan, table, AssetKind::Strings);
 				const auto text_target = path_of(paths_.root) / path_of(text_relative);
 				std::vector<uint8_t> text_bytes;
 				if (!fs::exists(system_path(utf8_of(text_target)), ec) && text_factory->make(text_blank, text_bytes, error) &&
@@ -341,13 +400,13 @@ void DocumentSet::create_file(const EditorRequest &request) {
 			}
 		}
 		// A new menu comes with the pointer its windows name (blank_companion: the original game shows
-		// no system pointer), where the project has no file of that name: made beside the textures. One
-		// on disk since the scan is left as it is; one that cannot be made leaves the menu made, and
-		// says so.
+		// no system pointer), where the project has no file of that name: made where it keeps its textures
+		// (placement_path). One on disk since the scan is left as it is; one that cannot be made leaves
+		// the menu made, and says so.
 		std::string companion;
 		const BlankFactory *beside = blank_companion(*factory, *view_.project.document, companion);
 		if (beside && !view_.project.scan->find(companion)) {
-			const std::string beside_relative = join_path(asset_kind_row(beside->kind).folder, companion);
+			const std::string beside_relative = placement_path(*view_.project.scan, companion, beside->kind);
 			const auto beside_target = path_of(paths_.root) / path_of(beside_relative);
 			if (!fs::exists(system_path(utf8_of(beside_target)), ec) && !ec) {
 				BlankRequest beside_blank;
@@ -469,9 +528,16 @@ void DocumentSet::open_document(const EditorRequest &request) {
 			refuse(error);
 			return;
 		}
+		// A Reload that names no record selects again the records selected in the document it replaces, by
+		// their places (DI-01: a reload keeps the selection, as a project reopens it).
+		const bool keep = request.kind == EditorRequestKind::ReloadDocument && !request.address.row && request.locator.empty();
 		for (auto it = documents_.begin(); it != documents_.end(); ++it)
-			if ((*it)->path() == asset.relative_path) { documents_.erase(it); break; }
-		remembered_.erase(asset.relative_path); // read again: its records have new identities
+			if ((*it)->path() == asset.relative_path) {
+				if (keep) keep_selection(**it, *document);
+				documents_.erase(it);
+				break;
+			}
+		if (!keep) remembered_.erase(asset.relative_path); // read again: its records have new identities
 		forget_file_state(asset.relative_path);
 		end_gesture_in(asset.relative_path, true); // and a gesture open in it is over
 		// A screen whose Remove waited on its prompt is named by an id of the old read: the prompt goes.
@@ -482,7 +548,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		}
 		documents_.push_back(document);
 		activate(document->path());
-		select_named(*document);
+		if (!keep) select_named(*document);
 		select_first_screen(); // no record named: a menu shows its first screen
 		core_.touch(ViewConcern::Selection);
 		say((request.kind == EditorRequestKind::ReloadDocument ? "Reloaded " : "Opened ") + document->path() + ".");
@@ -805,9 +871,9 @@ void DocumentSet::end_edit(const std::string &path) {
 	end_gesture_in(document->path(), true);
 }
 
-void DocumentSet::save(const std::string &path) {
+void DocumentSet::save(const std::string &path, bool over) {
 	if (DocumentBase *document = document_for(path)) {
-		save_documents({document->path()}, true);
+		save_documents({document->path()}, true, over);
 	} else if (view_.project.open) {
 		// A file that is not open (a Rewrite fix names one) is rewritten closed.
 		if (path.empty()) core_.refuse_request(CoreFinding::DocumentNotOpen, "Open a file before saving it.");
@@ -825,8 +891,9 @@ void DocumentSet::save_all() {
 // files written read into the scan alone (SessionCore::update_files, S13 A3: no import pass, no
 // other file read), then one finding per file that could not be, the status counting both. False
 // when one could not be. (A save while a build packs never reaches here: the busy gate refused
-// it.)
-bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rewrite) {
+// it.) `over`: written over a file changed outside the editor (DocumentBase::save's), what the other
+// program saved there lost (DI-01: a conflict's Keep my edits).
+bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rewrite, bool over) {
 	std::vector<DocumentBase *> writes;
 	for (const std::string &path : paths)
 		for (const auto &document : documents_)
@@ -843,9 +910,10 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	std::vector<std::string> written;
 	for (DocumentBase *document : writes) {
 		Diagnostic error;
-		if (!document->save(error)) {
+		const bool outside = over && !document->matches_file();
+		if (!document->save(error, over)) {
 			// A file changed outside the editor under unsaved edits: the conflict is a row
-			// until the document is read again (its Reload fix).
+			// until the document is read again (its Reload fix) or saved over it (Keep my edits).
 			if (error.row() == &finding_code(CoreFinding::DocumentConflict) && document->dirty())
 				conflicts_.insert(document->path());
 			failures.push_back(error);
@@ -854,7 +922,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		forget_file_state(document->path());
 		++saved;
 		written.push_back(document->path());
-		core_.note("Saved " + document->path());
+		core_.note("Saved " + document->path() + (outside ? " over what changed outside the editor" : ""));
 		noted += note_save(*document);
 	}
 	// A Save ends the gesture of each document it saves (its save's checkpoint ended its group): a

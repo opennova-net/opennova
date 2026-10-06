@@ -10,7 +10,6 @@
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
 #include <formats/env/env.h>
-#include <formats/particle/parser.h>
 #include <formats/scr/scr.h>
 #include <formats/score/score.h>
 #include <net/novacrypto/pubcrypto.h>
@@ -136,21 +135,14 @@ static_assert(finding_entries_well_formed(kTextEntries),
 constexpr auto kTextRows = finding_rows(kTextEntries, FindingGroup::Texts);
 static_assert(finding_rows_well_formed(kTextRows), "every row of the table takes its group");
 
-// A finding of a reader's at a line and a column (1-based; column 0 the line's start, line 0 no place:
-// the text's start).
+// A finding of the text type's at a reader's place.
 Diagnostic reader_finding(TextFinding code, DiagnosticSeverity severity, std::string message,
 		const TextDocument &document, size_t line, size_t column) {
-	size_t offset = 0;
-	if (line == 0 || !document.offset_of(line, column ? column : 1, offset)) offset = 0;
-	return text_finding(kTextRows[static_cast<size_t>(code)], severity, std::move(message), document, offset);
+	return text_finding_at(kTextRows[static_cast<size_t>(code)], severity, std::move(message), document, line, column);
 }
 
-// A reader's message as a sentence: its first letter a capital, a full stop after it.
 std::string sentence(std::string message) {
-	while (!message.empty() && (message.back() == '.' || message.back() == ' ' || message.back() == '\n'))
-		message.pop_back();
-	if (!message.empty() && message[0] >= 'a' && message[0] <= 'z') message[0] = char(message[0] - 'a' + 'A');
-	return message.empty() ? message : message + ".";
+	return reader_sentence(std::move(message));
 }
 
 // A shader the loader rejects is one it does not load, as a missing one, and the game runs: listed
@@ -183,6 +175,20 @@ Diagnostic text_finding(const FindingCodeRow &row, DiagnosticSeverity severity, 
 	return finding;
 }
 
+Diagnostic text_finding_at(const FindingCodeRow &row, DiagnosticSeverity severity, std::string message,
+		const TextDocument &document, size_t line, size_t column) {
+	size_t offset = 0;
+	if (line == 0 || !document.offset_of(line, column ? column : 1, offset)) offset = 0;
+	return text_finding(row, severity, std::move(message), document, offset);
+}
+
+std::string reader_sentence(std::string message) {
+	while (!message.empty() && (message.back() == '.' || message.back() == ' ' || message.back() == '\n'))
+		message.pop_back();
+	if (!message.empty() && message[0] >= 'a' && message[0] <= 'z') message[0] = char(message[0] - 'a' + 'A');
+	return message.empty() ? message : message + ".";
+}
+
 std::unique_ptr<DocumentBase> make_text_document() {
 	return std::make_unique<TextDocument>(decode_config);
 }
@@ -193,15 +199,6 @@ std::vector<Diagnostic> text_reader_findings(const TextDocument &document) {
 	const auto *bytes = reinterpret_cast<const uint8_t *>(text.data());
 	const char *unchecked = " The editor cannot check what the file names until it reads.";
 	switch (document.kind()) {
-	case AssetKind::Particles: {
-		particle::ParticleFile file;
-		particle::ParseError error;
-		if (!particle::load_particles_from_buffer(text.data(), text.size(), file, error))
-			findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
-					"The game's particle reader stops here: " + sentence(error.message) + unchecked, document,
-					size_t(std::max(error.line, 0)), size_t(std::max(error.column, 0))));
-		break;
-	}
 	case AssetKind::Environment: {
 		std::istringstream input(text);
 		env::Config config;

@@ -29,7 +29,8 @@ enum class FindingFix {
 	                   // a placeholder texture, or Open the file where a symbol belongs
 	UnimportedTexture, // a texture an import's model names that it did not bring: the reference's
 	                   // own fixes while the project still lacks it
-	Reload,            // an open document whose file changed outside the editor: Reload it
+	Reload,            // an open document whose file changed outside the editor: Reload it, or (with
+	                   // unsaved edits) Keep my edits and save over it (DI-01)
 	Reimport,          // an import whose output is missing: Import it again
 	Rewrite,           // input a rewrite drops or normalizes: Rewrite the file (rewrite_does)
 	TextureRows,       // a TGA stored top first (S18): Save it bottom first (texture_operation)
@@ -88,7 +89,10 @@ enum class FindingGroup {
 	Shaders,
 	Missions,
 	Textures,
-	Texts, // a text the engine's own reader reads (DI-06: a particle file, an environment, the defs)
+	Texts, // a text the engine's own reader reads (DI-06: an environment, the defs)
+	SoundBanks,
+	SoundProfiles,
+	Particles, // a particle file, through the effect system's reader (ADR 0046 DI-14)
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -241,6 +245,7 @@ enum class CoreFinding {
 	AssetNameEmpty,
 	AssetNameTooLong,
 	AssetUnreadable,
+	AssetWaveUnplayable,
 	BlankDef,
 	BlankEnvironment,
 	BlankFont,
@@ -248,6 +253,7 @@ enum class CoreFinding {
 	BlankMission,
 	BlankShader,
 	BlankStrings,
+	BlankSound,
 	BlankStyle,
 	BlankTexture,
 	BlankUnavailable,
@@ -343,6 +349,7 @@ enum class CoreFinding {
 	ImportNotFound,
 	ImportTextureNotImported,
 	ImportUnreadable,
+	ImportWave,
 	ImportWrite,
 	LocalSettingsJson,
 	LocalSettingsSchemaVersionUnsupported,

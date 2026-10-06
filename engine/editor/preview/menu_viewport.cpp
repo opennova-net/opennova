@@ -56,18 +56,45 @@ bool menu_zoom_from_token(const std::string &token, MenuZoom &out) {
 // The least and the most of the design a Scale zoom shows it at.
 constexpr float kMenuScaleMin = 0.1f, kMenuScaleMax = 8.0f;
 
-bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasShow &show, std::string &error) {
+bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasShow &show, MenuPointerShow &pointer,
+		std::string &error) {
 	if (!json.is_object()) {
 		error = "\"options\" is an object.";
 		return false;
 	}
 	MenuViewportOptions out = held;
 	MenuCanvasShow shown = show;
+	MenuPointerShow pointed = pointer;
 	for (const io::JsonMember &member : json.object) {
 		const std::string &key = member.key;
 		const JsonValue &value = member.value;
 		int64_t number = 0;
-		if (key == "zoom") {
+		if (key == "pointer") {
+			if (!value.is_bool()) {
+				error = "options.pointer is true or false.";
+				return false;
+			}
+			pointed.shown = value.boolean;
+		} else if (key == "pointer_at") {
+			// A point of the picture in design units, where the mouse can be on the game's screen; null lets
+			// go of it.
+			if (value.is_null()) {
+				pointed.held = false;
+				continue;
+			}
+			const bool point = value.is_array() && value.array.size() == 2 && value.array[0].is_number() &&
+					value.array[1].is_number() && value.array[0].number >= 0.0 &&
+					value.array[0].number < double(menu::kMenuDesignWidth) && value.array[1].number >= 0.0 &&
+					value.array[1].number < double(menu::kMenuDesignHeight);
+			if (!point) {
+				error = "options.pointer_at is a point of the picture [x, y] in design units (x from 0 to under 800, "
+				        "y from 0 to under 600), or null to let it go.";
+				return false;
+			}
+			pointed.held = true;
+			pointed.x = float(value.array[0].number);
+			pointed.y = float(value.array[1].number);
+		} else if (key == "zoom") {
 			if (!value.is_string() || !menu_zoom_from_token(value.string, shown.zoom)) {
 				error = "options.zoom is fit, scale (with scale) or device.";
 				return false;
@@ -107,12 +134,14 @@ bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasSh
 			flag = value.boolean;
 		} else {
 			error = "Unknown menu option \"" + key +
-					"\" (it takes show_hidden, force_id, force_state, checked, popup_open, focus, zoom, scale, snap).";
+					"\" (it takes show_hidden, force_id, force_state, checked, popup_open, focus, zoom, scale, snap, "
+					"pointer, pointer_at).";
 			return false;
 		}
 	}
 	held = out;
 	show = shown;
+	pointer = pointed;
 	return true;
 }
 
@@ -206,7 +235,8 @@ HandleEdges edges_moved(LayoutHandle handle) {
 
 } // namespace
 
-io::JsonValue menu_options_to_json(const MenuViewportOptions &held, const MenuCanvasShow &show) {
+io::JsonValue menu_options_to_json(
+		const MenuViewportOptions &held, const MenuCanvasShow &show, const MenuPointerShow &pointer) {
 	JsonValue options = JsonValue::make_object();
 	options.set("show_hidden", JsonValue::make_bool(held.show_hidden));
 	options.set("force_id", json_number(double(held.force_window)));
@@ -217,7 +247,68 @@ io::JsonValue menu_options_to_json(const MenuViewportOptions &held, const MenuCa
 	options.set("zoom", json_string(menu_zoom_token(show.zoom)));
 	options.set("scale", json_number(show.scale));
 	options.set("snap", JsonValue::make_bool(show.snap));
+	options.set("pointer", JsonValue::make_bool(pointer.shown));
+	if (pointer.held) {
+		JsonValue at = JsonValue::make_array();
+		at.push(json_number(pointer.x));
+		at.push(json_number(pointer.y));
+		options.set("pointer_at", std::move(at));
+	} else {
+		options.set("pointer_at", JsonValue::make_null());
+	}
 	return options;
+}
+
+namespace {
+
+// The pointer the cursor pass draws for the claim `claim` (-1 none) over the state the picture holds (its
+// windows held as the options say, never hovered by the mouse: a picture never pumps).
+MenuPointer pointer_of_claim(const MenuCanvasFrame &frame, int claim, int spin_part) {
+	MenuPointer out;
+	const menu::MenuFrameCompiler &compiler = *frame.compiler;
+	menu::MenuFrameState state = *frame.state;
+	state.cursor_claim = claim;
+	state.cursor_spin_part = spin_part;
+	const menu::MenuFrameCompiler::FrameCursor cursor = compiler.frame_cursor(state);
+	if (cursor.owner < 0) return out;
+	out.drawn = true;
+	out.owner = cursor.owner;
+	out.width = cursor.width;
+	out.height = cursor.height;
+	const std::vector<std::string> &names = compiler.texture_names();
+	if (cursor.texture >= 0 && size_t(cursor.texture) < names.size()) out.file = names[size_t(cursor.texture)];
+	if (cursor.owner < compiler.widget_count()) {
+		out.name = compiler.widget_name(cursor.owner);
+		const NodeId id = frame.document->window_at(*frame.screen, size_t(cursor.owner));
+		if (id) out.window = frame.document->address_of(id);
+	}
+	return out;
+}
+
+} // namespace
+
+MenuPointer menu_pointer_at(const MenuCanvasFrame &frame, float x, float y) {
+	if (!frame.current) return MenuPointer();
+	// The claim the pump makes there (MenuFrameCompiler::claim_at), and the cursor it stamps.
+	const menu::MenuFrameCompiler::MouseClaim claim = frame.compiler->claim_at(*frame.state, x, y, 1.0f, 1.0f);
+	return pointer_of_claim(frame, claim.hovered, claim.spin_part);
+}
+
+MenuPointer menu_screen_pointer(const MenuCanvasFrame &frame) {
+	if (!frame.current) return MenuPointer();
+	return pointer_of_claim(frame, -1, 0);
+}
+
+io::JsonValue menu_pointer_to_json(const MenuPointer &pointer) {
+	JsonValue out = JsonValue::make_object();
+	out.set("drawn", JsonValue::make_bool(pointer.drawn));
+	if (!pointer.drawn) return out;
+	out.set("file", json_string(pointer.file));
+	out.set("width", json_number(pointer.width));
+	out.set("height", json_number(pointer.height));
+	out.set("window", json_number(double(pointer.window.child)));
+	out.set("name", json_string(pointer.name));
+	return out;
 }
 
 const char *menu_force_state_token(int state) {
@@ -476,17 +567,21 @@ bool MenuViewport::check_(const io::JsonValue &json, std::string &error) const {
 	const JsonValue *options = json.get("options");
 	MenuViewportOptions held = options_;
 	MenuCanvasShow show = show_;
-	return !options || read_options(*options, held, show, error);
+	MenuPointerShow pointer = pointer_;
+	return !options || read_options(*options, held, show, pointer, error);
 }
 
 void MenuViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	const JsonValue *options = json.get("options");
 	MenuViewportOptions held = options_;
 	MenuCanvasShow show = show_;
+	MenuPointerShow pointer = pointer_;
 	std::string error;
-	if (!options || !read_options(*options, held, show, error)) return;
-	// The zoom and the snap change no picture: the screen is configured again for the held window alone.
+	if (!options || !read_options(*options, held, show, pointer, error)) return;
+	// The zoom and the snap change no picture, and the pointer only the cursor pass the device draws again
+	// (DI-08): the screen is configured again for the held window alone.
 	show_ = show;
+	pointer_ = pointer;
 	if (held == options_) return;
 	options_ = held;
 	++options_serial_;
@@ -527,6 +622,8 @@ ViewportHit MenuViewport::hit(const ViewportContext &context, float x, float y) 
 	const MenuCanvasFrame frame = canvas_frame(context);
 	out.current = frame.current;
 	if (!frame.current) return out;
+	// The pointer the game draws with the mouse there (DI-08), over a window or not.
+	out.pointer = menu_pointer_to_json(menu_pointer_at(frame, x, y));
 	out.index = render_.compiler().hit_widget(render_.state(), x, y, 1.0f, 1.0f);
 	if (out.index < 0) return out;
 	out.id = frame.document->window_at(*frame.screen, size_t(out.index));
@@ -672,7 +769,7 @@ bool MenuViewport::command(const ViewportContext &context, const std::string &na
 }
 
 io::JsonValue MenuViewport::options_json() const {
-	return menu_options_to_json(options_, show_);
+	return menu_options_to_json(options_, show_, pointer_);
 }
 
 io::JsonValue MenuViewport::body_json(const ViewportInput &input) const {

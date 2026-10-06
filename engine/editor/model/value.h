@@ -83,6 +83,8 @@ enum class ReferenceKind {
 	TilePlacement,  // a mission's tile placement, a .til by its name
 	DialogBank,     // a mission's dialog bank, a .dbf by its name (a dialog a record plays)
 	MissionStrings, // a mission's own string table, a .bin by its name (else medmssn.bin)
+	BankWave,       // a sound bank's wave by its name, in the bank the scope names (a member's)
+	SoundProfile,   // a SndProf.def profile by its name (an item's sound_profile)
 	Shader,         // a model material's shader, by the tag an effect (.fx) registers under
 };
 

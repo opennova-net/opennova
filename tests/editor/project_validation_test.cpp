@@ -194,14 +194,19 @@ static int test_rows_as_before() {
 	const PinnedRows pinned[] = {
 		// Master's D-3DI-8 fixture (threedi/synth/person_part9_trigger_scale.3di) adds one row: its
 		// texture person.tga, which the project does not have (the 238 rows before it gave 71c5737d).
+		// The sound lane adds thirteen warnings: a sound set is a bank's symbol and a sound profile
+		// SndProf.def's, so the fixture items' twelve sound_profile and sound_profile_female names and
+		// the barrel's sounddeath EXPLO_BARREL are missing in a project with neither (the 239 rows
+		// before them gave 6289b82a); and two more, a menu SOUND's trigger being a set of the bank its FILE
+		// names, MENU.LWF, which the project does not have (the 252 rows before them gave bbd5cc4e).
 		// S19's reserved item ids add four on the fixture items.def: its first row a vehicle
 		// (catalog.first_row), its Helicopter and Static Vehicle on the Co-op and deathmatch fallback
 		// starts' ids 106001 and 106002 (catalog.reserved_kind), and what the engine keeps 105305 for
-		// (catalog.reserved_id; the 239 rows before them gave 6289b82a). A model material's shader names
+		// (catalog.reserved_id; the 254 rows before them gave 8522d767). A model material's shader names
 		// the tag a shader registers (ReferenceKind::Shader): the fixture models' 118 material shaders, which
-		// no shader of the project registers (it has no .fx), add a warning each (reference.missing; the 243
-		// rows before them gave 7899f6f1).
-		{ "fixtures", fixture_files, false, 361, 0x393034149f96427full },
+		// no shader of the project registers (it has no .fx), add a warning each (reference.missing; the 258
+		// rows before them gave d8ef2f1e).
+		{ "fixtures", fixture_files, false, 376, 0x28f4c1e16fb3d6d0ull },
 		{ "styles", style_files, false, 15, 0xe39ad4219139a453ull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
 		{ "open", style_and_item_files, true, 19, 0x80eb2caf43356608ull },

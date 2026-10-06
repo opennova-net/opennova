@@ -25,19 +25,27 @@ const std::vector<FieldSchema> &text_fields(NodeKind kind);
 // where Problems opens the document.
 Diagnostic text_finding(const FindingCodeRow &row, DiagnosticSeverity severity, std::string message,
 		const TextDocument &document, size_t offset);
+// The same at a place an engine reader names: a line and a column (1-based; column 0 the line's start,
+// line 0 or a place outside the text the text's start). The text type's reader findings and the particle
+// type's (documents/particle_type) are made by it.
+Diagnostic text_finding_at(const FindingCodeRow &row, DiagnosticSeverity severity, std::string message,
+		const TextDocument &document, size_t line, size_t column);
+// An engine reader's message as a sentence: its first letter a capital, one full stop after it.
+std::string reader_sentence(std::string message);
 
 // The text type: the file is its text, but gt.ssc, which the game reads by its name decoded under a
 // key chain [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0]: the document shows the tag decoded and
 // Save writes it back encoded, as the game's own codec does (net/novacrypto/pubcrypto.h,
 // encode_key_chain). Every text kind no structured type edits yet is held by it (the deep-integration
-// plan's DI-06, "every text file opens in the editor": a configuration, a text, a particle file, an
+// plan's DI-06, "every text file opens in the editor": a configuration, a text, an
 // environment, an AI profile, the HUD layout and effects, the avatars, the character attributes, the
 // other defs, the score table, a NovaWorld screen; a kind the build leaves out, a mission text, is none of
 // its: every kind a type edits packs, assets/asset_kinds). Where the engine has a reader of
 // the kind, its validate_file is that reader's findings of the text (text_reader_findings); a kind the
-// asset graph reads through the engine's reader (graph/extractors.cpp, a native kind: a particle file,
-// an environment, the HUD layout, the avatars) has its open document read by that same reader, so its
-// names follow its edits. A kind with no reader the editor models makes no finding.
+// asset graph reads through the engine's reader (graph/extractors.cpp, a native kind: an environment,
+// the HUD layout, the avatars) has its open document read by that same reader, so its names follow its
+// edits. A kind with no reader the editor models makes no finding. A particle file is no longer the text
+// type's: its own type holds it (documents/particle_type, DI-14), the specific type owning its kind.
 std::unique_ptr<DocumentBase> make_text_document();
 std::vector<Diagnostic> validate_text_file(const DocumentBase &document);
 FindingTable text_finding_codes();
@@ -55,8 +63,7 @@ enum class TextFinding {
 };
 const FindingCodeRow &finding_code(TextFinding code);
 // The findings the engine's reader of `document`'s kind makes of its text (validate_text_file's):
-// the particle reader's (particle::load_particles, the port of the effect system's), the environment's
-// (env::load_env), the HUD layout's
+// the environment's (env::load_env), the HUD layout's
 // (def::def_parse_hudpos_memory), the avatars' (avatars::avatars_parse_memory, each diagnostic at its
 // line) and the score table's (score::parse); none for any other kind.
 std::vector<Diagnostic> text_reader_findings(const TextDocument &document);

@@ -165,6 +165,10 @@ const ReferenceRule kReferences[] = {
 	{{kAnyKind, "", "ammo_", "", "", true, "ammo_class"}, DefReference::Ammo},
 	{{kAnyKind, "item_id"}, DefReference::Item},
 	{{kAnyKind, "", "", "sound", "", true}, DefReference::Sound}, {{kAnyKind, "ai_launch", "", "", "", true}, DefReference::Sound},
+	// An item's profiles name a SndProf.def profile, not a set (a later rule than "sound"'s: the last
+	// match wins) [orig: ItemDef_ParseProperty @ 0x49fafd / @ 0x49fb76 -> SoundProfile_FindSlotByName
+	// @ 0x526e30].
+	{{kItem, "sound_profile"}, DefReference::SoundProfile}, {{kItem, "sound_profile_female"}, DefReference::SoundProfile},
 	{{kAnyKind, "particle"}, DefReference::Particle}, {{kAnyKind, "hit_effect"}, DefReference::Particle},
 	{{kAnyKind, "ai_launcheffect"}, DefReference::Particle}, {{kAnyKind, "heat_effect"}, DefReference::Particle},
 	{{kAnyKind, "", "", ".effect"}, DefReference::Particle}, {{kAnyKind, "", "", ".secondary_effect"}, DefReference::Particle},

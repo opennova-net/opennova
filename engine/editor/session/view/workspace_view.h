@@ -49,12 +49,26 @@ struct WorkspaceView {
 	// Shell reports it (ProjectSession::report_sound): Starting until the Shell has decoded it, Playing,
 	// Ended once it played through, Stopped (stop_sound, the card closing, the project closing), or Failed
 	// with why (`error`). A headless editor has no Shell to play it: its sound stays Starting.
+	// A play of a sound set or a profile's slot (the sound lane, DI-02: play_sound's values) starts a voice for
+	// each layer the game would sound, each a project wave at the pitch (Q16, 0x10000 as recorded) and the
+	// volume (0..255) the game's pick gave it (preview/sound_preview.h); a wave's play is one voice at both
+	// as recorded. `path` the first voice's wave, `set` and `bank` the set played and the bank it was
+	// found in ("" a wave's play), `words` what it plays in words.
 	enum class SoundState : uint8_t { Idle, Starting, Playing, Ended, Stopped, Failed };
+	struct Voice {
+		std::string path;
+		uint32_t pitch_q16 = 0x10000;
+		int32_t volume = 255;
+	};
 	struct Sound {
 		std::string path;
 		uint64_t serial = 0;
 		SoundState state = SoundState::Idle;
 		std::string error;
+		std::vector<Voice> voices;
+		std::string set;
+		std::string bank;
+		std::string words;
 	};
 	Sound sound;
 
@@ -154,10 +168,13 @@ struct WorkspaceView {
 	};
 	ProjectFind project_find;
 
-	// Files' filter: its text and the kind it lists alone (kCount: every kind), as the files query lists them.
+	// Files' filter: its text and the kind it lists alone (kCount: every kind), as the files query lists them;
+	// and whether the files it lists flat go by what the game's textures of each cost, the costliest first
+	// (S18, the texture budget: session/texture_budget_list).
 	struct Files {
 		std::string filter;
 		AssetKind kind = AssetKind::kCount;
+		bool by_cost = false;
 	};
 	Files files;
 

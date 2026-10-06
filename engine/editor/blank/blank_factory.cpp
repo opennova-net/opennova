@@ -104,6 +104,15 @@ const BlankFactory k_factories[] = {
 	  "the checkerboard the game draws for a missing texture, 256 by 256: the boards' fill", false },
 	{ "border_tga", AssetKind::Texture, make_blank_texture,
 	  "the checkerboard the game draws for a missing texture, 128 by 128: the boards' border pieces", false },
+	// The mission's sound banks, each slot of the bank loop that loads what it finds (the sound lane):
+	// an empty bank, which the editor's bank document fills.
+	{ "game_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the global sound bank, no set yet", false },
+	{ "gamelocl_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the localized sound bank, no set yet", false },
+	{ "game2_lwf", AssetKind::SoundBank, make_blank_sound_bank, "a further global sound bank, no set yet", false },
+	{ "game3_lwf", AssetKind::SoundBank, make_blank_sound_bank, "a further global sound bank, no set yet", false },
+	{ "expansion_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the expansion's sound bank, no set yet", false },
+	{ "expansion_locl_lwf", AssetKind::SoundBank, make_blank_sound_bank,
+	  "the expansion's localized sound bank, no set yet", false },
 	// An expansion's own (ADR 0046 S16): its text table, naming it in the Mods list, and its version text.
 	{ "expansion_table", AssetKind::Strings, make_blank_expansion_table,
 	  "the expansion's text table: its name in the Mods list (the project's title) and an empty description", false },
@@ -135,6 +144,7 @@ const BlankFactory k_factories[] = {
 	// S20: an environment a mission can be made under (a terrain made from images has none).
 	{ "", AssetKind::Environment, make_blank_environment,
 	  "a daytime environment: noon light, sky and fog colours through the day, the stock cloud maps", true },
+	{ "", AssetKind::SoundBank, make_blank_sound_bank, "a sound bank with no set yet", true },
 };
 
 const size_t k_factory_count = sizeof(k_factories) / sizeof(k_factories[0]);

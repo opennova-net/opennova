@@ -12,6 +12,7 @@
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/import/wave_source.h>
 #include <editor/session/view/session_view.h>
 #include <formats/lwf/wav_pcm.h>
 
@@ -32,6 +33,16 @@ FileCard::Sound decode_sound(const std::string &file, const AssetEntry &entry) {
 	}
 	std::vector<uint8_t> bytes;
 	if (!read_file_bytes(file, bytes, sound.error)) return sound;
+	// What the game's loader makes of it, and what it holds (the sound lane: import/wave_source.h).
+	const WaveFacts facts = wave_facts(bytes, kWaveCardBins);
+	sound.plays = facts.retail.plays;
+	sound.refusal = facts.retail.why;
+	if (facts.read) {
+		sound.format = wave_format_words(facts.format);
+		sound.peak = facts.peak;
+		sound.rms = facts.rms;
+		sound.envelope = facts.envelope;
+	}
 	lwf::WavPcm pcm;
 	if (!lwf::wav_decode_pcm16(bytes.data(), bytes.size(), pcm, sound.error)) return sound;
 	sound.decoded = true;
@@ -236,6 +247,14 @@ JsonValue file_card_json(const FileCard &card) {
 		sound.set("rate", JsonValue::make_number(card.sound.rate));
 		sound.set("channels", JsonValue::make_number(card.sound.channels));
 		sound.set("seconds", JsonValue::make_number(card.sound.seconds));
+		sound.set("plays", JsonValue::make_bool(card.sound.plays));
+		if (!card.sound.plays) sound.set("refusal", JsonValue::make_string(card.sound.refusal));
+		sound.set("format", JsonValue::make_string(card.sound.format));
+		sound.set("peak", JsonValue::make_number(card.sound.peak));
+		sound.set("rms", JsonValue::make_number(card.sound.rms));
+		JsonValue envelope = JsonValue::make_array();
+		for (const float bin : card.sound.envelope) envelope.push(JsonValue::make_number(bin));
+		sound.set("envelope", std::move(envelope));
 		out.set("sound", std::move(sound));
 	}
 	JsonValue names = JsonValue::make_array();

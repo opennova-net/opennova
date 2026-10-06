@@ -133,6 +133,9 @@ struct ViewportHit {
 	// What a kind says of the ground under the point beside the item (the mission's, DI-07:
 	// mission_ground_to_json); null for a kind with no ground.
 	io::JsonValue ground;
+	// What a kind says of the pointer the game draws with the mouse at the point (the menu's, DI-08:
+	// menu_pointer_to_json); null for a kind that draws none.
+	io::JsonValue pointer;
 };
 
 // A viewport (ADR 0046 S13 V5; CONTEXT.md "Viewport"): one document's picture as the game would
@@ -182,6 +185,11 @@ public:
 	// What the line naming it says after the file's name (" - STARTUP", a menu's screen; " on
 	// skinned.3di", the model an animation plays on; "" for nothing).
 	virtual std::string caption() const { return std::string(); }
+	// The files its picture read besides its document (a menu's stylesheets, fonts and textures, a
+	// model's textures and rig, a mission's models and terrain; PreviewFollow::files), which the session
+	// watches for another program's saves (ADR 0046 DI-01, session/disk_watch.h); null for a kind whose
+	// picture reads its document alone.
+	virtual const FileStamps *picture_reads() const { return nullptr; }
 	// The units hit and drag take: "design" (a menu's 800 x 600) or "pixels" (the picture's).
 	virtual const char *units() const = 0;
 	virtual ViewportLayout layout() const = 0;
