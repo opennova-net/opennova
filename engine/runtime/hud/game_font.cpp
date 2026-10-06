@@ -109,7 +109,8 @@ bool GameFont::parse_format_tag(const char *text, int *index,
 		GameFontState *state) {
 	// [orig: GText_ParseFormatTag @ 0x674200] — mutations land only on a
 	// well-formed (terminated) tag, exactly like the original's local-copy
-	// commit; the tags_disabled byte freezes everything but the scan.
+	// commit (@0x6743cb..0x6743ed); the inert byte, textBuffer[1]'s low byte,
+	// freezes everything but the cursor (@0x6743b0..0x6743b3).
 	GameFontState local = *state;
 	int i = *index;
 	if (text[i] != '<') {
@@ -158,18 +159,22 @@ bool GameFont::parse_format_tag(const char *text, int *index,
 					} else if (h >= 'a' && h <= 'f') {
 						value = value * 16 + (h - 'a' + 10);
 					} else if (h == 'O' || h == 'o') {
+						// The original colour, textBuffer[3] [orig: @0x674315].
 						value = local.original_color;
 					} else if (h == 'H' || h == 'h') {
-						// Half-bright: 3/4 c + 0x40 per channel
-						// [orig: 3 * (((c >> 2) & 0x3F3F3F) + 0x156B40)].
-						value = 3u * (((local.color_xor ^ 0u) >> 2 & 0x3F3F3Fu) +
+						// Half-bright of the ORIGINAL colour, textBuffer[3]
+						// [orig: 3 * (((c >> 2) & 0x3F3F3F) + 0x156B40)
+						//  @0x674321..0x674336].
+						value = 3u * (((local.original_color >> 2) & 0x3F3F3Fu) +
 								0x156B40u);
 					}
 				}
 				if (value != 0) {
-					// The original XOR-folds the new color into the low 24
-					// bits of the live color slot.
-					local.color_xor ^= (value ^ local.color_xor) & 0xFFFFFFu;
+					// A bitfield insert: the value's low 24 bits replace the
+					// live colour's, its alpha kept; a zero value changes
+					// nothing [orig: v13 ^= (value ^ v13) & 0xFFFFFF
+					// @0x674346..0x674357].
+					local.color ^= (value ^ local.color) & 0xFFFFFFu;
 				}
 				if (text[i] == 0) {
 					goto done;
@@ -190,7 +195,9 @@ bool GameFont::parse_format_tag(const char *text, int *index,
 					}
 				}
 				if (value != 0) {
-					local.timer = value;
+					// textBuffer[4], the drawer's tab width [orig: @0x67439a;
+					// CGameFont_DrawText's tab arm reads it @0x6755eb].
+					local.tab_width = value;
 				}
 				if (text[i] == 0) {
 					goto done;
@@ -203,7 +210,7 @@ bool GameFont::parse_format_tag(const char *text, int *index,
 		}
 	}
 done:
-	if (state->tags_disabled) {
+	if (state->tags_inert) {
 		*index = i;
 	} else if (ok) {
 		*index = i;
@@ -318,7 +325,13 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 	if ((flags & kFontTagsDisabled) != 0) {
 		base_state.tags_disabled = true;
 	}
-	base_state.original_color = color & 0xFFFFFFu;
+	if ((flags & kFontTagsInert) != 0) {
+		base_state.tags_inert = true; // [orig: @0x67539e]
+	}
+	// The live and original colours are the caller's colour, as retail seeds
+	// them for a null state [orig: v151 = tabWidth = color @0x675342..0x675349].
+	base_state.color = color;
+	base_state.original_color = color;
 
 	const float design = fnt_design_scale(font_->design_width);
 	const float scaled_x = design * scale_x;
@@ -364,7 +377,9 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 				cursor = x - static_cast<float>(w) * scaled_x;
 			}
 
-			for (int j = 0; line[j] != 0; ++j) {
+			// The walk runs to the line's length [orig: ++formatState >= v155
+			// @0x675660].
+			for (int j = 0; j < len; ++j) {
 				uint8_t byte = static_cast<uint8_t>(line[j]);
 				if (byte == '\\') {
 					byte = static_cast<uint8_t>(line[++j]);
@@ -373,9 +388,15 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 					}
 				} else if (byte == '<') {
 					if (!state.tags_disabled) {
+						// The parser moves the walk's own cursor: past a
+						// well-formed tag, and while inert also to where an
+						// unterminated one's scan stopped, after which the '<'
+						// still draws [orig: GText_ParseFormatTag(..,
+						// &formatState, ..) @0x67563a].
 						int idx = j;
-						if (parse_format_tag(line, &idx, &state)) {
-							j = idx;
+						const bool ok = parse_format_tag(line, &idx, &state);
+						j = idx;
+						if (ok) {
 							continue;
 						}
 					}
@@ -404,9 +425,9 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 				const float next = std::floor(cursor + glyph_w +
 						pad * scaled_x + 0.5f);
 				if (glyph->page == page) {
-					const uint32_t draw_color =
-							(color & 0xFF000000u) |
-							((color ^ state.color_xor) & 0xFFFFFFu);
+					// The vertex colour is the live colour as it stands
+					// [orig: v45 = v146, textBuffer[2], @0x675837].
+					const uint32_t draw_color = state.color;
 					// Italic shears the TOP edge by h/8; bold double-strikes
 					// at (+1, -1) [orig: the passArray skew + the second
 					// strike pass].
