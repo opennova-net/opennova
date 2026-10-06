@@ -137,7 +137,7 @@ constexpr FindingCodeEntry<StyleFinding> kFindingEntries[] = {
 	{ StyleFinding::Hangs, { "style.hangs" } },
 	{ StyleFinding::Stops, listed_code("style.stops") },
 	{ StyleFinding::OverriddenByBrand, { "style.overridden_by_brand" } },
-	{ StyleFinding::Unused, { "style.unused" } },
+	{ StyleFinding::Unused, { "style.unused", FindingFix::UnusedVariable } },
 	{ StyleFinding::NotAColor, { "style.not_a_color" } },
 	{ StyleFinding::MixedUse, { "style.mixed_use" } },
 };
