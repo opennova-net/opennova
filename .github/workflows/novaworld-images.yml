@@ -83,7 +83,12 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
 
       # Only pushes export the layer cache: a PR's layers are readable by that
-      # PR alone and crowd the repository's 10 GB Actions cache.
+      # PR alone and crowd the repository's 10 GB Actions cache. Each image
+      # keeps its own scope (one shared scope let the web build's index replace
+      # the server's), and mode=min exports the final image's layers only. The
+      # build stage's `COPY . .` and compile layers change with every commit,
+      # so mode=max wrote ~250 MB of blobs per push that no later build could
+      # hit, and they filled the cache until the 7-day expiry.
       - name: Build + push server image
         uses: docker/build-push-action@v6
         with:
@@ -92,8 +97,8 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta_server.outputs.tags }}
           labels: ${{ steps.meta_server.outputs.labels }}
-          cache-from: type=gha
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
+          cache-from: type=gha,scope=novaworld-server
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=novaworld-server,mode=min' || '' }}
 
       - name: Image metadata (web)
         id: meta_web
@@ -113,5 +118,5 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta_web.outputs.tags }}
           labels: ${{ steps.meta_web.outputs.labels }}
-          cache-from: type=gha
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
+          cache-from: type=gha,scope=novaworld-web
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=novaworld-web,mode=min' || '' }}

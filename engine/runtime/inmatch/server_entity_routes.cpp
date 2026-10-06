@@ -1,6 +1,7 @@
 #include <runtime/inmatch/server_entity_routes.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <variant>
 #include <vector>
 
@@ -83,23 +84,40 @@ void Server_FanEntityEvents(NapiNPServerCtx &ctx, world::World &world) {
 void Server_RouteWaterCrossings(NapiNPServerCtx &ctx, world::World &world) {
 	// (2d) Water-surface crossings: S2C 0x34 to every ALIVE in-match player, one
 	// message per crossing the motor recorded this tick. Retail fans the splash
-	// with send_mask 128 (alive players) the moment a hull crosses the plane, so
-	// clients spawn the same effect at the same spot; the queue is drained and
-	// cleared every tick whether or not anyone is listening, because a crossing
-	// is presentation, never simulation state.
-	// [orig: Server_SendOverlayActionToAlive @0x50a1b0, send_mask 128]
-	if (ctx.is_in_session && !world.out.water_crossings.events.empty()) {
+	// with send_mask 128 (alive players) the moment a body or a hull crosses the
+	// plane, under the authority alone (single player included), so every
+	// client plays the same set at the same spot. The authority's own player
+	// is one of those connections: its copy rides the loopback as the slot
+	// sound its 0x34 handler would play (the set at the wire's whole-unit
+	// position, no entity), the breath fan's loopback leg. The queue is drained
+	// and cleared every tick whether or not anyone is listening, because a
+	// crossing is presentation, never simulation state.
+	// [orig: Server_SendOverlayActionToAlive @0x50a1b0 — the is_authority gate
+	//  @0x50a1bf, send_mask 128 @0x50a1d3, NapiNPServer_SendFiltered over every
+	//  connection @0x50a1fb; the handler NapiNPClientMsg_PlaySoundByName
+	//  @0x4283A0 -> Entity_PlaySound3D_FullVolume @0x428499 over a zeroed
+	//  entity]
+	if (!world.out.water_crossings.events.empty()) {
 		const std::vector<std::vector<uint8_t>> splashes =
 				replication::build_water_cross_messages(world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
-			if (conn.link.mode == replication::TransportMode::Loopback) continue;
-			bool alive = true;
-			if (conn.link.owned_entity.valid()) {
-				const world::Entity *e = world.registry.get(conn.link.owned_entity);
-				alive = e != nullptr && e->health > 0;
+			if (!is_in_match(conn) || conn.link.transport == nullptr ||
+					!conn.link.owned_entity.valid())
+				continue;
+			const world::Entity *listener = world.registry.get(conn.link.owned_entity);
+			if (listener == nullptr || listener->health <= 0) continue; // the mask-128 alive filter
+			if (conn.link.mode == replication::TransportMode::Loopback) {
+				for (const world::WaterCrossEvent &ev : world.out.water_crossings.events) {
+					world::SoundSlotEvent local;
+					local.pos[0] = int32_t{static_cast<int16_t>(ev.x >> 16)} * 65536;
+					local.pos[1] = int32_t{static_cast<int16_t>(ev.y >> 16)} * 65536;
+					local.pos[2] = int32_t{static_cast<int16_t>(ev.water_z >> 16)} * 65536;
+					std::snprintf(local.set_name, sizeof(local.set_name), "%s",
+							ev.airborne ? kWaterCrossAirborneEffect : kWaterCrossWadeEffect);
+					world.out.slot_sounds.push_back(local);
+				}
+				continue;
 			}
-			if (!alive) continue; // the mask-128 alive filter
 			for (const std::vector<uint8_t> &body : splashes)
 				conn.link.transport->host_send(s2c::PLAY_SOUND, body,
 				                               /*reliable=*/false);

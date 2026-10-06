@@ -107,7 +107,8 @@ expect roughly 1.5x whole-frame cost in-game while it is installed, so never pro
 against it. The `template_release` DLL that a release export loads is not produced by
 this script at all: build it with `scripts/package_godot_windows.ps1`
 (`-ExportMode release`, without `-SkipBuild`) locally, or rely on CI's
-`build-gdextension-windows` `template_release` leg (master pushes and manual runs).
+`build-gdextension-windows` `template_release` leg (master and editor-trunk pushes, and
+manual runs).
 
 The artifacts land in `godot/bin/` alongside `godot/bin/opennova.gdextension`. **After a
 rebuild, fully restart the Godot editor.** GDExtension class registration does not
