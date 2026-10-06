@@ -703,5 +703,7 @@ void run_model_tests();
 // The project, the import, Files and the layout as a modder meets them (project_test.cpp): the UX
 // round's project lane.
 void run_project_tests();
+// Back and Forward: the menu bar's arrows, their keys and the mouse's buttons (navigation_test.cpp).
+void run_navigation_tests();
 
 } // namespace editor_ui_test

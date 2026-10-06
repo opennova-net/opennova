@@ -353,7 +353,9 @@ func test_strings_edit_round_trip() -> void:
 ## An edit leaves the validation due (S13 A3: no request runs it). Through the wire the view says
 ## so at once and the Problems rows stand until the pumps have run it, then move with the edit, and
 ## a pump after that leaves them as they are; the seam settles each request before it answers, so an
-## edit through it returns validated (ADR 0046 S9e's promise, kept by the seam).
+## edit through it returns validated (ADR 0046 S9e's promise, kept by the seam). The edit clears the
+## type of a marker of its own: the blank's first row, the Null marker, is the row the engine gives
+## every id it finds no item of, and clearing its type is a catalog.first_row finding as well (S19).
 func test_edits_validate_on_the_pumps() -> void:
 	if _app == null:
 		return
@@ -362,8 +364,10 @@ func test_edits_validate_on_the_pumps() -> void:
 	assert_true(_seam.new_project(dir, "Validated"))
 	assert_eq(_seam.create_missing_files(), 0)
 	assert_true(_seam.open_document("items.def"))
-	var marker: int = _seam.get_row_id(0)
+	var marker: int = _seam.add_record("item")
 	assert_gt(marker, 0)
+	assert_true(_seam.set_field(marker, "display_name", "Validated marker"))
+	assert_eq(_seam.get_row_id(1), marker, "a marker after the Null marker")
 	var before: int = _seam.get_problem_count()
 	var active := String(_seam.state(["documents"]).get("documents", {}).get("active", ""))
 	var answer: Variant = JSON.parse_string(_app.request_json(JSON.stringify({
@@ -372,7 +376,7 @@ func test_edits_validate_on_the_pumps() -> void:
 	})))
 	assert_true(answer is Dictionary and bool(answer.get("ok", false)), str(answer))
 	assert_true(bool(_seam.query("operation").get("validation", {}).get("running", false)),
-			"the Null marker's type cleared: the validation due")
+			"the marker's type cleared: the validation due")
 	assert_eq(_seam.get_problem_count(), before, "the rows stand until the pumps run it")
 	assert_true(_seam.settle())
 	assert_eq(_seam.get_problem_count(), before + 1, _seam.get_problems_json())

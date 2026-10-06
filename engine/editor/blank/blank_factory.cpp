@@ -20,6 +20,19 @@ const BlankParam k_mission_text_params[] = {
 	{ "title", "Title", ReferenceKind::None, false },
 };
 
+// A terrain made from images (S20): its images (files on disk, or of the project) and the importer's
+// options, the new_terrain request's values.
+const BlankParam k_terrain_params[] = {
+	{ "heightmap", "Heightmap (1024 x 1024 PNG or .raw)", ReferenceKind::None, true },
+	{ "colormap", "Colour map (1024 x 1024 image)", ReferenceKind::None, true },
+	{ "detail", "Detail (optional, power-of-two image)", ReferenceKind::None, false },
+	{ "tiles", "Tile set (optional, sides x64)", ReferenceKind::None, false },
+	{ "surface", "Surface map (optional, square 256..1024)", ReferenceKind::None, false },
+	{ "top", "Height of white (world units, 127.5)", ReferenceKind::None, false },
+	{ "water", "Water level (world units, 0 none)", ReferenceKind::None, false },
+	{ "layout", "Layout (island or tiled)", ReferenceKind::None, false },
+};
+
 const BlankFactory k_factories[] = {
 	// Boot: the string tables and definition files Game_InitSubsystems demands.
 	{ "gameerr", AssetKind::Strings, make_blank_empty_strings, "an empty error-message table", false },
@@ -54,7 +67,8 @@ const BlankFactory k_factories[] = {
 	{ "font_arial16b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_impac22b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_impac38b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
-	// Mission: what a mission's start and its screens read by name (docs/required-resources.md).
+	// Mission: what a mission's start and its screens read by name (docs/required-resources.md). Each
+	// screen names the game's pointer, the one every shipped screen names.
 	{ "ammo_def", AssetKind::AmmoDefs, make_blank_ammo_def, "an ammo table holding only the null round", true },
 	{ "powerup_def", AssetKind::PowerupDefs, make_blank_powerup_def, "a powerup table with no powerups yet", true },
 	{ "cmap_menu", AssetKind::Menu, make_blank_cmap_menu,
@@ -116,6 +130,9 @@ const BlankFactory k_factories[] = {
 	  "a mission's text table: its title and an empty briefing", false, k_mission_text_params,
 	  sizeof(k_mission_text_params) / sizeof(k_mission_text_params[0]) },
 	{ "", AssetKind::Script, make_blank_script, "an empty script", true },
+	// S20: an environment a mission can be made under (a terrain made from images has none).
+	{ "", AssetKind::Environment, make_blank_environment,
+	  "a daytime environment: noon light, sky and fog colours through the day, the stock cloud maps", true },
 	{ "", AssetKind::SoundBank, make_blank_sound_bank, "a sound bank with no set yet", true },
 };
 
@@ -152,6 +169,24 @@ bool blank_values_fit(const BlankFactory &factory, const BlankRequest &request, 
 
 size_t blank_factory_count() {
 	return k_factory_count;
+}
+
+const BlankParam *new_file_params(AssetKind kind, size_t &count, bool *offered) {
+	count = 0;
+	if (offered) *offered = false;
+	if (kind == AssetKind::Terrain) {
+		count = sizeof(k_terrain_params) / sizeof(k_terrain_params[0]);
+		if (offered) *offered = true;
+		return k_terrain_params;
+	}
+	// The kind's free-form factory of no role: what Files' New lists under its kind's label.
+	for (const BlankFactory &factory : k_factories)
+		if (factory.kind == kind && factory.free_form && factory.role[0] == '\0') {
+			if (offered) *offered = true;
+			count = factory.param_count;
+			return factory.params;
+		}
+	return nullptr;
 }
 
 const BlankFactory *blank_factory_at(size_t index) {

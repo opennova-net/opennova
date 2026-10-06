@@ -308,6 +308,14 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 		for (const RecordKindRow &kind : document.kinds())
 			if (*kind.add_label && ui_kit::tool(row, kind.add_label, true, "Adds one at the end of the file."))
 				edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
+		// The type's own Add menu (an items.def's rows the engine looks for by their ids).
+		if (spec_.list_menu && spec_.list_menu_offers && spec_.list_menu_offers(document)) {
+			if (ui_kit::tool(row, spec_.list_menu_label, true, spec_.list_menu_tip)) ImGui::OpenPopup("list_menu");
+			if (ImGui::BeginPopup("list_menu")) {
+				spec_.list_menu(workspace, document);
+				ImGui::EndPopup();
+			}
+		}
 		ui_kit::RowTools tools;
 		tools.add = nullptr;
 		tools.count = rows.size();
@@ -738,12 +746,19 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 			ImGui::TableNextColumn();
 			ImGui::AlignTextToFramePadding();
 			const size_t count = model_.uses(*graph, document, line.address);
-			if (count) ImGui::Text("%zu", count);
-			else ImGui::TextDisabled("0");
+			// A click opens its uses (DI-05): the record selected, its Referenced by in the Inspector, each a Go to.
+			if (count) {
+				if (ImGui::Selectable((std::to_string(count) + "###uses").c_str())) {
+					select(workspace, document, line.address);
+					window_requests::focus(workspace, "inspector");
+				}
+			} else {
+				ImGui::TextDisabled("0");
+			}
 			ui_kit::tooltip_lazy([&] {
 				const GraphSymbol *symbol = graph->symbol_at(document.path(), document.locator(line.address), defining->id);
 				if (!symbol || !count) return std::string("No file of the project names it.");
-				std::string tip = counted(count, "use") + ":";
+				std::string tip = counted(count, "use") + " (a click lists them in the Inspector, each a Go to):";
 				size_t listed = 0;
 				for (const GraphEdge *edge : graph->users_of(*symbol)) {
 					if (++listed > 12) {

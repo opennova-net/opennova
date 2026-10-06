@@ -15,6 +15,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <editor/documents/def_words.h>
+#include <formats/def/reserved_items.h>
 #include <runtime/hud/game_text_lookup.h>
 
 namespace opennova::editor {
@@ -25,23 +26,22 @@ namespace {
 // --- the kinds ---------------------------------------------------------------------------------------
 
 // An id no item of the file has and no file of the project names (`taken`: a mission's item, an
-// attachment's, a spawn list's, which a new item of that id would quietly become), from 100000 on (an
-// item's id is its type_id, which a mission names it by).
-int free_item_id(const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
-	int id = 100000;
-	for (;;) {
-		bool used = std::find(taken.begin(), taken.end(), int64_t(id)) != taken.end();
-		for (const void *other : others) used = used || static_cast<const DefItemDef *>(other)->id == id;
-		if (!used) return id;
-		++id;
-	}
+// attachment's, a spawn list's, which a new item of that id would quietly become), and none the engine
+// keeps (free_item_id).
+int free_item_id_beside(const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
+	return free_item_id([&](int id) {
+		if (std::find(taken.begin(), taken.end(), int64_t(id)) != taken.end()) return true;
+		for (const void *other : others)
+			if (static_cast<const DefItemDef *>(other)->id == id) return true;
+		return false;
+	});
 }
 
 // A new item is a marker with an id of its own.
 void made_item(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
 	auto &item = *static_cast<DefItemDef *>(record);
 	item.type = DEF_ITEM_TYPE_MARKER;
-	item.id = free_item_id(others, taken);
+	item.id = free_item_id_beside(others, taken);
 }
 
 // A copy of an item takes an id of its own as a new one does: the game's lookup by id finds the
@@ -51,7 +51,7 @@ void made_item(void *record, const std::vector<const void *> &others, const std:
 // @0x49EB2F..0x49EB5F]; one its file names stays.
 void duplicated_item(void *record, const std::vector<const void *> &others, const std::vector<int64_t> &taken) {
 	auto &item = *static_cast<DefItemDef *>(record);
-	item.id = free_item_id(others, taken);
+	item.id = free_item_id_beside(others, taken);
 	if (item.sid_derived) std::snprintf(item.sid, 16, "S%06i", item.id);
 }
 
@@ -708,6 +708,11 @@ const CatalogKindRow &catalog_kind_row(NodeKind kind) {
 }
 
 const char *catalog_name_field(NodeKind kind) { return catalog_kind_row(kind).name_field; }
+
+int free_item_id(const std::function<bool(int)> &used) {
+	for (int id = def::DEF_ITEM_ID_BASE;; ++id)
+		if (!def::reserved_item_by_id(id) && !used(id)) return id;
+}
 
 const RecordTable &catalog_table() {
 	static const RecordTable table = make_table();

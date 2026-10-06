@@ -6,6 +6,7 @@
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_table.h>
 #include <editor/model/document_base.h>
+#include <editor/session/request_factories.h>
 #include <editor/ui/animation_inspector.h>
 #include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_view.h>
@@ -16,6 +17,13 @@
 #include <editor/ui/sound_inspector.h>
 #include <editor/ui/styles_view.h>
 #include <editor/ui/texture_view.h>
+#include <editor/ui/ui_kit.h>
+#include <editor/ui/workspace.h>
+#include <formats/def/reserved_items.h>
+
+#include <imgui.h>
+
+#include <set>
 
 namespace opennova::editor {
 
@@ -37,13 +45,57 @@ bool catalog_file_values(const Document &document, OutlineFileValues &out) {
 	return true;
 }
 
+// An items.def's rows the engine looks for by their ids (formats/def/reserved_items.h; ADR 0046 S19,
+// "Reserved item ids"): the places and objectives (a start, a waypoint, a flag), the starts and the
+// waypoints first, each the file lacks added on its id and of its kind (reserved_item_add_edits: one
+// undo step), each it has listed as there.
+bool catalog_offers_engine_items(const Document &document) {
+	const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document);
+	return catalog && catalog->kind() == AssetKind::ItemDefs;
+}
+
+void draw_catalog_engine_items(Workspace &workspace, const Document &document) {
+	std::set<int> ids;
+	for (const auto &row : document.rows())
+		if (def_kind(row->kind) == def::DefRecordKind::Item)
+			ids.insert(static_cast<const CatalogRow &>(*row).native.as<def::DefItemDef>().id);
+	size_t count = 0;
+	const def::ReservedItem *rows = def::reserved_items(&count);
+	for (const bool places : {true, false})
+		for (size_t i = 0; i < count; ++i) {
+			const def::ReservedItem &reserved = rows[i];
+			if (reserved.rule != def::ReservedItemRule::Refuse || (reserved.type >= 6000) != places) continue;
+			const int id = def::DEF_ITEM_ID_BASE + reserved.type;
+			const bool has = ids.count(id) != 0;
+			const std::string label = std::string(reserved.label) + " (" + std::to_string(id) + ")" +
+			                          (has ? ": in the file" : "") + "###" + std::to_string(id);
+			if (ImGui::MenuItem(label.c_str(), nullptr, false, !has))
+				workspace.request(request::edit_record(document.path(), reserved_item_add_edits(reserved)));
+			ui_kit::tooltip(reserved.use);
+		}
+}
+
 // A mission's 128 waypoint paths are the file's own, most of them empty: one with no stop is not
 // listed until the outline's switch lists them.
 bool mission_row_listed(const Document &, const Node &row) {
 	return row.kind != node_kind(MissionKind::WaypointPath) || (!row.collections.empty() && !row.collections[0].empty());
 }
 
-constexpr OutlineSpec kCatalogOutline{OutlineMode::List, "", catalog_file_values};
+constexpr OutlineSpec kCatalogOutline{OutlineMode::List,
+                                      "",
+                                      catalog_file_values,
+                                      false,
+                                      nullptr,
+                                      "",
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      catalog_offers_engine_items,
+                                      draw_catalog_engine_items,
+                                      "Add engine item...",
+                                      "Adds an item the engine looks for by its id (an insertion point, a "
+                                      "waypoint, a flag), on that id and of its kind."};
 // A mission's rows as a tree (an event holding its triggers and its actions), a chip per kind of
 // row (the four pools, the paths, the areas, the events), the empty paths left out; an event's
 // triggers and actions added by type (S15: the "+" offers the types by name); under headings that

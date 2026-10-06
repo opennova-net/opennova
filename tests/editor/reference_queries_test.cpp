@@ -7,6 +7,7 @@
 // own file reads last).
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <variant>
 #include <vector>
@@ -20,7 +21,10 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
+#include <editor/session/file_card.h>
 #include <editor/session/request_factories.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -350,11 +354,113 @@ static int test_find_definition() {
 	return 0;
 }
 
+// Who names a file, one hop further (the deep-integration plan's DI-05, "who names this file, in one
+// look"): a model an item's graphic names, the item a mission places six times. The model's uses are the
+// item's field; one hop on, the six entities placing the item, through the item's id the record defines;
+// the session's builder groups them by file in words, each with where Go to opens it, and the used_by
+// query answers the same on the wire.
+static int test_file_uses() {
+	namespace fs = std::filesystem;
+	using opennova::io::JsonValue;
+	editor_test::TempProjectDir dir("opennova_reference_queries_used_by");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "UsedBy"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	const fs::path model =
+	        fs::path(__FILE__).parent_path().parent_path().parent_path() / "fixtures" / "threedi" / "synth" / "armory.3di";
+	std::error_code ec;
+	fs::copy_file(model, fs::path(root) / "oncrate1.3di", ec);
+	TEST_EXPECT(!ec);
+	const AssetEntry *items = view.project.scan->find("items.def");
+	TEST_EXPECT(items != nullptr);
+	if (!items) return 1;
+	const std::string items_path = items->relative_path;
+	TEST_EXPECT(editor_test::write_text(join_path(root, items_path),
+	                                    "begin \"Wooden supply crate\"\nid 100011\ntype object\ngraphic oncrate1\nend\n\n"
+	                                    "begin \"Unplaced crate\"\nid 100012\ntype object\ngraphic oncrate1\nend\n"));
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		for (int i = 0; i < 6; ++i)
+			opennova::mission::add_entity(mission, opennova::mission::EntityKind::Item, 100011,
+			                              opennova::mission::EntityTransform());
+		std::vector<uint8_t> bytes;
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
+		TEST_EXPECT(editor_test::write_bytes(root + "/onjo_m1.bms", bytes));
+	}
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetGraph &graph = *view.findings.graph;
+	const std::vector<FileUse> uses = file_uses(graph, "oncrate1.3di");
+	TEST_EXPECT(uses.size() == 2);
+	size_t placed = 0, unplaced = 0;
+	for (const FileUse &use : uses) {
+		TEST_EXPECT(use.edge->source == items_path && use.edge->field == "graphic");
+		if (use.edge->record.find("Wooden") != std::string::npos) placed = use.further.size();
+		else unplaced = use.further.size() + 100;
+		for (const GraphEdge *further : use.further) TEST_EXPECT(further->source == "onjo_m1.bms");
+	}
+	TEST_EXPECT(placed == 6 && unplaced == 100);
+	// The builder: one group (items.def), its two uses in words, the first's six one hop on in one group.
+	const FileUsers users = file_users(view, "oncrate1.3di");
+	TEST_EXPECT(users.found && users.count == 2 && users.further_count == 6 && users.groups.size() == 1);
+	if (users.groups.size() == 1) {
+		const FileUsers::UseGroup &group = users.groups.front();
+		TEST_EXPECT(group.file == items_path && group.uses.size() == 2);
+		const FileUsers::Use &crate = group.uses.front();
+		TEST_EXPECT(crate.line.words.find("Wooden supply crate") != std::string::npos);
+		TEST_EXPECT(crate.line.target.file == items_path && crate.line.target.editable &&
+		            !crate.line.target.locator.empty());
+		TEST_EXPECT(crate.further_count == 6 && crate.further.size() == 1 && crate.further.front().file == "onjo_m1.bms" &&
+		            crate.further.front().lines.size() == 6);
+		if (!crate.further.empty() && !crate.further.front().lines.empty()) {
+			const ReferenceTarget &entity = crate.further.front().lines.front().target;
+			TEST_EXPECT(entity.file == "onjo_m1.bms" && entity.editable && !entity.locator.empty());
+		}
+	}
+	TEST_EXPECT(file_use_count(view, "oncrate1.3di") == 2 && file_use_count(view, "onjo_m1.bms") == 0);
+	// The item table's own users: the six entities naming its first item, nothing one hop on.
+	const FileUsers table = file_users(view, items_path);
+	TEST_EXPECT(table.count == 6 && table.further_count == 0 && table.groups.size() == 1);
+	// On the wire: the used_by query, by path and by the active document.
+	std::string error;
+	JsonValue args = JsonValue::make_object();
+	args.set("path", JsonValue::make_string("oncrate1.3di"));
+	const JsonValue answer = session.query("used_by", args, error);
+	TEST_EXPECT(error.empty() && answer.get_bool("found", false) && answer.get_int("count", 0) == 2 &&
+	            answer.get_int("further_count", 0) == 6);
+	const JsonValue *files = answer.get("files");
+	TEST_EXPECT(files && files->is_array() && files->array.size() == 1);
+	if (files && files->array.size() == 1) {
+		const JsonValue *listed = files->array.front().get("uses");
+		TEST_EXPECT(listed && listed->array.size() == 2);
+		if (listed && !listed->array.empty()) {
+			const JsonValue &first = listed->array.front();
+			TEST_EXPECT(first.get_string("file", "") == items_path && !first.get_string("locator", "").empty() &&
+			            first.get_bool("editable", false));
+			const JsonValue *further = first.get("further");
+			TEST_EXPECT(further && further->array.size() == 1 &&
+			            further->array.front().get_string("file", "") == "onjo_m1.bms");
+		}
+	}
+	TEST_EXPECT(session.query("used_by", JsonValue::make_object(), error).is_null() && !error.empty());
+	editor_test::handle_to_end(session, request::open_document("oncrate1.3di"));
+	error.clear();
+	const JsonValue active = session.query("used_by", JsonValue::make_object(), error);
+	TEST_EXPECT(error.empty() && active.get_string("path", "") == "oncrate1.3di" && active.get_int("count", 0) == 2);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_menu_references();
 	failures += test_go_to_targets();
 	failures += test_find_definition();
+	failures += test_file_uses();
 	if (failures == 0) std::printf("editor_reference_queries: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
