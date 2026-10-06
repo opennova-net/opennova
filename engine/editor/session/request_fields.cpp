@@ -191,6 +191,11 @@ constexpr RequestField kFields[] = {
 			"Play's game window starts behind every other window, the editor keeping the foreground (shown without "
 			"activation, sent to the bottom while it starts, until the person brings it forward): a client driving "
 			"the editor while a person works at the machine. Windows only: elsewhere Play spawns nothing." },
+	{ F::Fresh, "fresh", J::Boolean,
+			"Play's run directory is emptied before the game starts, of what the runs before wrote there as "
+			"well as what they staged: a first run (the game install's device dialog, the game's default "
+			"profile). Left out, the run directory keeps the game's own files (its game.cfg, which names the "
+			"display adapter its device dialog chose, its saves) between Plays of the same mode." },
 	{ F::Plan, "plan", J::Integer,
 			"The import plan a planned import means (the import_preview query's plan): the one the dialog shows, or "
 			"the import is refused (planned again since: its rows are others)." },
