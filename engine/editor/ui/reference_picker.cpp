@@ -51,6 +51,17 @@ std::string choice_tip(const ReferenceChoice &choice, const AssetGraph *graph, c
 	return tip;
 }
 
+// Whether the value is missing, by the finding the graph makes of it as Problems shows it (a %NAME% the
+// stylesheets do not define: the variable's), and that finding's fixes: those Problems raises at once alone (a fix
+// that asks first, a Use fix's rename, waits in Problems' confirmation, which the picker has not: review X16).
+void missing_fixes(const SessionView &view, const Document &document, const NodeAddress &record, const FieldUse &field,
+                   const Value &value, bool &missing, std::vector<ProblemFix> &fixes) {
+	fixes.clear();
+	Diagnostic finding;
+	missing = view.findings.graph && missing_finding(*view.findings.graph, document, record, field, value, finding);
+	if (missing) fixes = fixes_raised_at_once(fixes_for(finding, view));
+}
+
 // Whether a typed text is a value the field takes as it is (the picker's "Use"): a whole number for a
 // number field, any text for a text one.
 bool typed_takes(const FieldUse &field, const std::string &typed) {
@@ -90,15 +101,50 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 		popup.choices.erase(std::remove_if(popup.choices.begin(), popup.choices.end(),
 		                                   [&](const ReferenceChoice &choice) { return choice.kind != field.reference; }),
 		                    popup.choices.end());
-	popup.fixes.clear();
-	// The finding the graph makes of this value, as Problems shows it, for its fixes (a %NAME% the
-	// stylesheets do not define: the variable's).
-	Diagnostic finding;
-	popup.missing = view.findings.graph &&
-			missing_finding(*view.findings.graph, document, record, field, value, finding);
-	// Those Problems raises at once alone: a fix that asks first (a Use fix's rename) waits in Problems'
-	// confirmation, which the picker has not (review X16).
-	if (popup.missing) popup.fixes = fixes_raised_at_once(fixes_for(finding, view));
+	missing_fixes(view, document, record, field, value, popup.missing, popup.fixes);
+}
+
+void ReferencePicker::refresh_fixes(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
+                                    const FieldUse &field, const Value &value) {
+	const ListKey key = cache_key(view, document);
+	if (popup.view == &view && popup.key == key) return;
+	popup.view = &view;
+	popup.key = key;
+	popup.field = field;
+	++lists_made_;
+	missing_fixes(view, document, record, field, value, popup.missing, popup.fixes);
+}
+
+void ReferencePicker::draw_fixes(Workspace &workspace, const Document &document, const NodeAddress &record,
+                                 const FieldUse &field, const Value &value, bool open) {
+	if (open) ImGui::OpenPopup("fixes");
+	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetID("fixes")};
+	const int frame = ImGui::GetFrameCount();
+	let_go(frame);
+	if (!ImGui::BeginPopup("fixes")) {
+		const auto kept = popups_.find(key);
+		if (kept != popups_.end() && kept->second.view) drop_list(kept->second);
+		return;
+	}
+	prune(workspace.view());
+	Popup &popup = popups_[key];
+	popup.drawn = frame;
+	if (!popup.view) held_.push_back(key);
+	refresh_fixes(popup, workspace.view(), document, record, field, value);
+	ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "%s",
+	                   !popup.missing ? "The value is no longer missing."
+	                   : popup.fixes.empty() ? "The value is missing; nothing here makes it."
+	                                         : "The value is missing:");
+	for (const ProblemFix &fix : popup.fixes) {
+		ImGui::PushID(fix.label.c_str());
+		if (ImGui::Selectable(fix.label.c_str())) {
+			workspace.request(fix.request);
+			ImGui::CloseCurrentPopup();
+		}
+		ui_kit::tooltip(fix.detail);
+		ImGui::PopID();
+	}
+	ImGui::EndPopup();
 }
 
 void ReferencePicker::drop_list(Popup &popup) {

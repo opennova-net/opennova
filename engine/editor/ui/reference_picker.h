@@ -66,6 +66,13 @@ public:
 	// `picked` its logical name. While a row is dragged over an item that does not fit, nothing
 	// is highlighted and nothing happens on release.
 	static bool accept_file(const SessionView &view, const FieldUse &field, std::string &picked);
+	// A missing value's fixes from the dot its state shows (ADR 0046 DI-15: a click on the Inspector's red dot
+	// opens them, `open`): while its popup is drawn open, what Problems offers for the value (fixes_for on the
+	// reference.missing finding the graph would make, those raised at once: Add it there, Open the file, Import,
+	// Create), each raised through the workspace, its words in its tooltip. Made as it opens, and again while it
+	// is open only when what it reads moves (lists_made counts it, as a list).
+	void draw_fixes(Workspace &workspace, const Document &document, const NodeAddress &record, const FieldUse &field,
+	                const Value &value, bool open);
 	// How many times a popup's list was made (the graph's choices, the missing value's finding and
 	// its fixes): once per opening, and again while it is open only when what it reads moves
 	// (ListKey), never for a change of anything else (a line of Output, a build's step).
@@ -117,6 +124,9 @@ private:
 	};
 	void refresh(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
 	             const FieldUse &field, const Value &value, bool others);
+	// The popup's missing value and its fixes alone (refresh's, without the choices), kept as refresh keeps them.
+	void refresh_fixes(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
+	                   const FieldUse &field, const Value &value);
 	// A popup closed: its list goes, its filter and its "Show unreachable" stay.
 	static void drop_list(Popup &popup);
 	// The lists of the popups not drawn open this frame or the last let go (held_ swept).
