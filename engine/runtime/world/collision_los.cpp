@@ -239,6 +239,17 @@ bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_
     return terrain::terrain_raycast_refined(sampler, a, b, out_hit);
 }
 
+int32_t terrain_settle_clearance(const terrain::TerrainHeightField *field, const int32_t pos[3],
+                                 int32_t capsule_bottom, bool indoors) {
+    // [orig: Entity_MovementCollisionResolver @0x4B3D6E..0x4B3DA9; the probe
+    // Entity_RaycastGroundHeightAndObject @0x4B3D95 over no candidates]
+    const int32_t feet_z = pos[2] - capsule_bottom;
+    const int32_t start[3] = {pos[0], pos[1], (pos[2] + 6143) & ~0x17FF};
+    int32_t end[3] = {start[0], start[1], start[2] - 0x20000};
+    if (field != nullptr && field->valid() && !indoors) (void)terrain_clip_segment(*field, start, end, end);
+    return feet_z - end[2];
+}
+
 namespace {
 
 // The radiused segment clip, boolean-only: does any TYPE-1 solid volume of
