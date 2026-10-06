@@ -1,0 +1,5 @@
+; A terrain set: the images the editor's terrain importer makes a terrain from (ADR 0046 S20).
+heightmap onisle1_heightmap.png
+colormap onisle1_colormap.png
+detail onisle1_detail.png
+surface onisle1_surface.png
