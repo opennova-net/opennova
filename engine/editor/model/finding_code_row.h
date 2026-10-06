@@ -379,6 +379,7 @@ enum class CoreFinding {
 	PlayRunDirectory,
 	PlayRuntimeMissing,
 	PlaySpawn,
+	PlayStart,
 	PlayStrictExpansion,
 	PlayUnsupported,
 	ProjectExists,
