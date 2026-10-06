@@ -173,10 +173,12 @@ static int test_blank_project() {
 	TEST_EXPECT(!font_file.empty() && !graph.referrers_of_file(font_file).empty());
 	TEST_EXPECT(graph.referrers_of_file("nothing.fnt").empty());
 	// The blank tables define nothing yet: the stylesheet's variables, the blank item
-	// table's null marker and the blank menus' screens and windows are the symbols.
+	// table's null marker, the blank menus' screens and windows and the blank SndProf.def's
+	// "default" profile are the symbols.
 	for (const GraphSymbol &symbol : all_symbols(graph))
 		TEST_EXPECT(symbol.kind == ReferenceKind::StyleVar || symbol.kind == ReferenceKind::Item ||
-		            symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow);
+		            symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow ||
+		            symbol.kind == ReferenceKind::SoundProfile);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuScreen, "startup", "MAIN.MNU") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuWindow, "exit", "MAIN.MNU/STARTUP") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuWindow, "EXIT", "MAIN.MNU/ELSEWHERE") == ReferenceStatus::Missing);
@@ -185,7 +187,8 @@ static int test_blank_project() {
 	for (const ReferenceChoice &choice : graph.choices(ReferenceKind::Font))
 		TEST_EXPECT(choice.kind == ReferenceKind::Font && choice.status == ReferenceStatus::Present && !choice.file.empty() &&
 		            choice.record.empty() && !choice.inert);
-	TEST_EXPECT(graph.resolve(ReferenceKind::Sound, "boom.wav") == ReferenceStatus::Unverified);
+	// A sound set is a bank's symbol (the sound lane): the blank project has no bank, so none is found.
+	TEST_EXPECT(graph.resolve(ReferenceKind::Sound, "BOOM") == ReferenceStatus::Missing);
 	TEST_EXPECT(graph.resolve(ReferenceKind::None, "x") == ReferenceStatus::NotAReference);
 	TEST_EXPECT(graph.stats().files_extracted > 0);
 	// Nothing changed: the next update reuses every extraction.
@@ -1616,7 +1619,8 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint ||
 		                       kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone ||
 		                       kind == ReferenceKind::TilePlacement || kind == ReferenceKind::DialogBank ||
-		                       kind == ReferenceKind::MissionStrings;
+		                       kind == ReferenceKind::MissionStrings || kind == ReferenceKind::Sound ||
+		                       kind == ReferenceKind::SoundProfile;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;
@@ -1624,7 +1628,8 @@ static int test_reference_kind_rows() {
 	TEST_EXPECT(reference_row(ReferenceKind::Font).file == AssetKind::Font &&
 	            reference_row(ReferenceKind::MenuTexture).file == AssetKind::Texture);
 	TEST_EXPECT(reference_row(ReferenceKind::StyleVar).resolution == ReferenceResolution::StyleVariable);
-	TEST_EXPECT(reference_row(ReferenceKind::Sound).resolution == ReferenceResolution::Unchecked);
+	TEST_EXPECT(reference_row(ReferenceKind::Sound).resolution == ReferenceResolution::Symbol &&
+	            reference_row(ReferenceKind::OtherText).resolution == ReferenceResolution::Unchecked);
 	TEST_EXPECT(reference_row(ReferenceKind::OtherText).also_offers == ReferenceKind::TextId);
 	// A model's register by its index, every whole number from 0 one; its frame row by the pose's
 	// rule, a signed byte above 0.
@@ -1794,7 +1799,7 @@ static int test_terrain_and_bank_extractors() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Missing &&
 	            graph.resolve(ReferenceKind::Texture, "isle_c.tga") == ReferenceStatus::Present);
 	const GraphEdge *shot = edge_to(graph, "game.lwf", ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav");
-	TEST_EXPECT(shot && shot->record == "SHOT" && shot->field == "wave");
+	TEST_EXPECT(shot && shot->record == "SHOT" && shot->field == "file");
 	TEST_EXPECT(graph.resolve(ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav") == ReferenceStatus::Present &&
 	            graph.resolve(ReferenceKind::Wave, "gone.wav") == ReferenceStatus::Missing &&
 	            !graph.referrers_of_file("shot.wav").empty());

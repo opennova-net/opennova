@@ -1,4 +1,17 @@
-// Sound profiles of OpenNova. An item plays the profile its sound_profile names, else "default".
-// A slot line: <slot keyword> <sound set> <param2> <param3> <param4>.
 begin "default"
+end
+begin "on_soldier"
+	SSLFootGND ON_FS_GND_L 0 0 0
+	SSRFootGND ON_FS_GND_R 0 0 0
+	SSLFootSnow ON_FS_SNOW_L 0 0 0
+	SSRFootSnow ON_FS_SNOW_R 0 0 0
+	SSLFootOBJ ON_FS_OBJ_L 0 0 0
+	SSRFootOBJ ON_FS_OBJ_R 0 0 0
+	SSFootWater ON_FS_WATER 0 0 0
+	SSAudio1 ON_FS_GND_R 0 0 0
+	SSAudio2 ON_FS_GND_R 0 0 0
+	SSAudio3 ON_FS_OBJ_L 0 0 0
+	SSAudio4 ON_FS_SWIM 0 0 0
+	SSAudio5 ON_FS_PRONE 0 0 0
+	SSAudio6 ON_FS_PRONE_ROLL 0 0 0
 end

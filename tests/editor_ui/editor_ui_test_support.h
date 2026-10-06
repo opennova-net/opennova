@@ -653,7 +653,7 @@ inline DialogsView::ImportPreview planned_import(const std::string &folder, cons
 	ImportPlan plan;
 	plan.rows = { row(State::Selected, menu, AssetKind::Menu, chosen, "menus/" + menu), table, clip,
 		font, gone, logo, cut };
-	plan.not_followed = {{ReferenceKind::Sound, AssetKind::Unknown, 1, menu},
+	plan.not_followed = {{ReferenceKind::OtherText, AssetKind::Unknown, 1, menu},
 	                     {ReferenceKind::None, AssetKind::Terrain, 1, "level" + stretch + ".trn"}};
 	plan.undefined = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 1, menu}};
 	plan.truncated = true;

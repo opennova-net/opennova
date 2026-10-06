@@ -897,6 +897,19 @@ JsonValue sound_json(const WorkspaceView::Sound &sound) {
 	out.set("state", text(sound_state_token(sound.state)));
 	out.set("serial", number(double(sound.serial)));
 	if (!sound.error.empty()) out.set("error", text(sound.error));
+	// A set's or a slot's play (the sound lane): the set, its bank, what it plays in words, and each voice.
+	if (!sound.set.empty()) out.set("set", text(sound.set));
+	if (!sound.bank.empty()) out.set("bank", text(sound.bank));
+	if (!sound.words.empty()) out.set("words", text(sound.words));
+	JsonValue voices = JsonValue::make_array();
+	for (const WorkspaceView::Voice &voice : sound.voices) {
+		JsonValue item = JsonValue::make_object();
+		item.set("path", text(voice.path));
+		item.set("pitch", number(double(voice.pitch_q16) / 65536.0));
+		item.set("volume", number(double(voice.volume)));
+		voices.push(std::move(item));
+	}
+	out.set("voices", std::move(voices));
 	return out;
 }
 
@@ -1401,6 +1414,11 @@ void play_sound(SessionCore &core, const std::string &path) {
 		                       entry->relative_path);
 	WorkspaceView::Sound &sound = core.view().workspace.sound;
 	sound.path = entry->relative_path;
+	// One voice, as recorded (a set's play has one a layer: session/sound_play.h).
+	sound.voices = {{entry->relative_path, 0x10000, 255}};
+	sound.set.clear();
+	sound.bank.clear();
+	sound.words.clear();
 	++sound.serial;
 	sound.state = WorkspaceView::SoundState::Starting;
 	sound.error.clear();

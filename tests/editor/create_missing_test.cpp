@@ -223,8 +223,11 @@ static int test_mission_rows_are_all_filled() {
 	}
 	const CreateMissingResult content = create_missing_requirements(
 	        paths, doc, after.scan, after.report,
-	        {"failsafe_bad", "game_lwf", "gamemus_sbf", "medmssn_bin", "hudpos_def", "hudfx_def", "upl_3di"});
-	TEST_EXPECT(content.created.empty() && content.diagnostics.empty() && content.unavailable.size() == 7);
+	        {"failsafe_bad", "gamemus_sbf", "medmssn_bin", "hudpos_def", "hudfx_def", "upl_3di"});
+	TEST_EXPECT(content.created.empty() && content.diagnostics.empty() && content.unavailable.size() == 6);
+	// The global sound bank has its blank (the sound documents): an empty bank the bank document fills.
+	const CreateMissingResult bank = create_missing_requirements(paths, doc, after.scan, after.report, {"game_lwf"});
+	TEST_EXPECT(bank.diagnostics.empty() && bank.unavailable.empty() && bank.created.size() == 1);
 	return 0;
 }
 

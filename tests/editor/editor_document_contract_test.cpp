@@ -99,6 +99,8 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/project_check.h>
+#include <editor/documents/sound_bank_document.h>
+#include <editor/documents/sound_profile_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
@@ -113,6 +115,7 @@
 #include <formats/cbin/binary_config.h>
 #include <formats/dds/dds.h>
 #include <formats/def/def_schema.h>
+#include <formats/lwf/lwf.h>
 #include <formats/mission/bms.h>
 #include <formats/mus/mus.h>
 #include <formats/pcx/pcx_io.h>
@@ -178,6 +181,7 @@ const RowObject kRowObjects[] = {
         {&typeid(MissionRow), sizeof(MissionRow)}, {&typeid(EntityRow), sizeof(EntityRow)},
         {&typeid(PathRow), sizeof(PathRow)},       {&typeid(AreaRow), sizeof(AreaRow)},
         {&typeid(EventRow), sizeof(EventRow)},
+        {&typeid(SoundBankRow), sizeof(SoundBankRow)}, {&typeid(SoundProfileRow), sizeof(SoundProfileRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
 // clip's bone table, a def catalog's records, a mission's header and entity slots): a longer text
@@ -349,7 +353,41 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
 	        {AssetKind::Texture, "sky.pcx", minted_pcx()},
 	        {AssetKind::Texture, "cube.dds", minted_dds()},
+	        // The sound lane: the minted bank (three waves, three sets) and a SndProf.def of two profiles.
+	        {AssetKind::SoundBank, "menu.lwf", file("lwf/menu.lwf")},
+	        {AssetKind::SoundProfileDefs, "SndProf.def",
+	         text_bytes("begin \"default\"\r\n\tSSLFootGND FSP_DIRT_L 0 0 0\r\n\tSSRFootGND FSP_DIRT_R 0 0 0\r\nend\r\n"
+	                    "begin \"SP_Truck\"\r\n\tsoundloop_1 V_TRUCK_ILP 0.8 1.2 2\r\n\tmedloopfadeinstart 20\r\nend\r\n")},
 	};
+}
+
+// A bank of two waves of one name (sound_bank.wave_name_repeated), minted by the engine's writer.
+std::vector<uint8_t> bank_with_a_wave_twice() {
+	opennova::lwf::File bank;
+	for (int i = 0; i < 2; ++i) {
+		opennova::lwf::Single wave;
+		wave.name = "TWICE";
+		wave.path = i ? "twice2.wav" : "twice.wav";
+		bank.singles.push_back(wave);
+	}
+	opennova::lwf::Multi set;
+	set.name = "PLAYS_TWICE";
+	set.pitch_base = opennova::lwf::kAuthoredSetPitchBase;
+	set.playlist_indices.push_back(0);
+	opennova::lwf::Playlist layer;
+	layer.flags = opennova::lwf::kFlagInternal | opennova::lwf::kFlagExternal;
+	layer.sndparm_indices.push_back(0);
+	opennova::lwf::Sndparm member;
+	member.pitch_scaled = opennova::lwf::kPitchUnityQ16;
+	member.volume = 255;
+	member.clamp_volume = 255;
+	bank.multis.push_back(set);
+	bank.playlists.push_back(layer);
+	bank.sndparms.push_back(member);
+	std::vector<uint8_t> out;
+	std::string error;
+	if (!opennova::lwf::encode_lwf(bank, out, error)) out.clear();
+	return out;
 }
 
 // walk.bad's frames at 25 frames per second (every retail clip plays at 30): the clip's own
@@ -429,6 +467,10 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
 	        // A 2 x 2 true-colour TGA, its origin bit set (S18: texture.tga_upside_down).
 	        {AssetKind::Texture, "top_first.tga", top_first_tga()},
+	        // The sound lane: a bank naming a wave twice, a profile named twice.
+	        {AssetKind::SoundBank, "twice.lwf", bank_with_a_wave_twice()},
+	        {AssetKind::SoundProfileDefs, "SndProf.def",
+	         text_bytes("begin \"default\"\r\nend\r\nbegin \"default\"\r\nend\r\n")},
 	};
 }
 

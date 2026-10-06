@@ -281,11 +281,12 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
 	            Tokens({ "animation_map.ignored_input", "credits.line_ending",
 	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
-	                     "shader.form", "strings.regrouped", "style.line_ending" }));
+	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "credits.line_ending", "with every line ending CR LF" },
 		{ "menu.ignored_input", "without the input the game ignores" },
+		{ "sound_bank.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
 		{ "mission.rewrite_differs", "with its sections as the game reads them" },
 		{ "script.line_ending", "with every line ending CR LF" },
@@ -301,7 +302,8 @@ static int test_columns() {
 	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "document.unserializable",
 	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input", "music_script.invalid_input",
-	                     "music_script.unserializable", "strings.invalid_input" }));
+	                     "music_script.unserializable", "sound_bank.invalid_input", "sound_bank.unserializable",
+	                     "sound_profiles.unserializable", "strings.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.expansion.mission_twice", "build.expansion.mission_untitled", "build.expansion.root_only",
@@ -319,7 +321,10 @@ static int test_columns() {
 	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
 	                     "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
-	                     "shader.form", "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
+	                     "shader.form", "sound_bank.layer_unheard", "sound_bank.set_name_repeated", "sound_bank.set_silent",
+	                     "sound_bank.wave_file_name", "sound_bank.wave_name_repeated", "sound_bank.wave_no_file",
+	                     "sound_profiles.name_repeated", "sound_profiles.no_default",
+	                     "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
 	                     "style.value_is_directive" }));

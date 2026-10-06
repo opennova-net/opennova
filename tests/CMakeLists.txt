@@ -4594,6 +4594,14 @@ target_link_libraries(editor_catalog_test PRIVATE opennova_editor)
 target_include_directories(editor_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_catalog COMMAND editor_catalog_test)
 
+# The sound lane (ADR 0046; DI-02, DI-16): the bank and SndProf.def documents, the sound names in the
+# graph by the game's bank order, the preview's picks, the session's play_sound; a SKIP-LEG without
+# OPENNOVA_JO_ASSETS (every shipped bank and SndProf.def through the documents).
+add_executable(editor_sound_documents_test editor/sound_documents_test.cpp)
+target_link_libraries(editor_sound_documents_test PRIVATE opennova_editor)
+target_include_directories(editor_sound_documents_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_sound_documents COMMAND editor_sound_documents_test)
+
 add_executable(editor_strings_test editor/strings_document_test.cpp)
 target_link_libraries(editor_strings_test PRIVATE opennova_editor)
 target_include_directories(editor_strings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
