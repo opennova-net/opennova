@@ -91,6 +91,13 @@ const BlankFactory *blank_companion(const BlankFactory &factory, const ProjectDo
 // project by whoever makes the file: the factory reads no project.)
 bool blank_values_fit(const BlankFactory &factory, const BlankRequest &request, std::string &why);
 
+// What Files' New > Terrain from images... asks (ADR 0046 S20): no blank (a terrain is an import of its
+// images, the new_terrain request: import/terrain_import.h), but the same prompt, its values the request's
+// (the images by their set keys, each a file on disk or of the project; the importer's options). The
+// prompt's params for a new file of `kind`: a free-form factory's, a terrain's these; null (count 0) for a
+// kind the prompt does not ask of. `offered` says whether the prompt asks of the kind at all.
+const BlankParam *new_file_params(AssetKind kind, size_t &count, bool *offered = nullptr);
+
 size_t blank_factory_count();
 const BlankFactory *blank_factory_at(size_t index);
 // The factory filling a manifest role; nullptr for "" or an unknown role.
