@@ -323,6 +323,22 @@ void MissionViewport::follow_ground_(const SessionView &view) const {
 			scene_.header(), mission);
 }
 
+bool MissionViewport::follow_overlay_(const SessionView &view) {
+	const MissionGroundOverlay kind = options_.overlay;
+	if (kind == MissionGroundOverlay::None) {
+		if (overlay_.kind == MissionGroundOverlay::None) return false;
+		overlay_ = MissionOverlayImage();
+		++overlay_serial_;
+		return true;
+	}
+	follow_ground_(view);
+	if (overlay_.kind == kind && overlay_reads_ == terrain_ground_.reads()) return false;
+	overlay_ = mission_ground_overlay(terrain_ground_, kind);
+	overlay_reads_ = terrain_ground_.reads();
+	++overlay_serial_;
+	return true;
+}
+
 bool MissionViewport::stand_people_(const SessionView &view, bool posed) {
 	if (poses_.posed() == 0) return false;
 	// The people stand on the mission's terrain as the game reads it (DI-38): again where a record, a pose
@@ -368,6 +384,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		bound_items_(view);
 		stand_people_(view, poses_.refresh(view, scene_));
+		follow_overlay_(view);
 		picture_.show(key, generation);
 		shown(*document);
 		if (!framed_) {
@@ -393,6 +410,8 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// Update poses them, the picture standing.
 	bool posed = poses_.refresh(view, scene_);
 	posed = stand_people_(view, posed) || posed;
+	// The overlay made again where the option or the ground moved (DI-29): an Update gives it the device.
+	const bool overlaid = follow_overlay_(view);
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
 		fog_reach_ = mission_fog_reach(files, scene_.header());
@@ -404,7 +423,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		options_moved_ = false;
 		return ViewportAction::Rebuild;
 	}
-	if (!delta.moved && !options_moved_ && !posed) return ViewportAction::Keep;
+	if (!delta.moved && !options_moved_ && !posed && !overlaid) return ViewportAction::Keep;
 	options_moved_ = false;
 	return ViewportAction::Update;
 }
@@ -1165,6 +1184,9 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	body.set("posed", json_number(double(poses_.posed())));
 	body.set("ground", JsonValue::make_bool(ground_));
 	body.set("missing", json_number(double(missing_.size())));
+	// The ground overlay the options ask (DI-29): its legend and extent, null with none asked.
+	body.set("overlay", options_.overlay == MissionGroundOverlay::None ? JsonValue::make_null()
+	                                                                    : mission_overlay_to_json(overlay_));
 	return body;
 }
 
