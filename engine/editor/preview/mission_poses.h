@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -66,6 +67,43 @@ struct MissionPose {
 	uint32_t stamp = 0; // moves when anything above does
 };
 
+// What a person's spawn reads of its item: the first row of its id in the catalog that defines it.
+struct MissionPersonItem {
+	std::string ai_function, anim_def;
+	uint32_t attrib = 0;
+};
+
+// What a person's spawn reads of its record (its item, attributes, route and SSN).
+struct MissionPoseInput {
+	NodeId row = 0;
+	int64_t item = 0;
+	uint32_t attributes = 0;
+	int route = 0;
+	int ssn = 0;
+	bool operator==(const MissionPoseInput &o) const {
+		return row == o.row && item == o.item && attributes == o.attributes && route == o.route && ssn == o.ssn;
+	}
+};
+
+// Every person of `inputs` (a mission's organics, in the file's order) posed as the game spawns it
+// (MissionPose, with the lift its rise alone; mission_pose_clearance stands it): `item_of` answers an
+// item's definition (null: no catalog defines it), `has_file` whether the project has a file of the
+// name (the .adm the game loads in place of one it lacks), `files` serves the tables and clips through
+// `motion`, every .adm read once. What MissionPoses runs, and the ground check (DI-28).
+void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
+		const std::function<const MissionPersonItem *(int64_t)> &item_of,
+		const std::function<bool(const std::string &)> &has_file, const std::shared_ptr<const StampedFiles> &files,
+		anim::AdmRootMotion &motion, std::vector<MissionPose> &out);
+
+// The warmup's ground solve over the terrain alone for a posed person whose record stands at (x, y, z):
+// its feet's height over the terrain's column there, 16.16, once the warmup has lifted it by its rise
+// (world::terrain_settle_clearance; the game sets a body down where it is under one unit [orig:
+// Entity_WarmUpOrganicAnimation @0x4B8BD8..0x4B8BF5]). INT32_MAX with no terrain read.
+int32_t mission_pose_clearance(const MissionPose &pose, double x, double y, double z,
+		const terrain::TerrainHeightField *terrain);
+// The clearance under which the warmup sets a body down: one unit [orig: `cmp eax, 10000h` @0x4B8BE7].
+inline constexpr int32_t kMissionPoseSettle = 65536;
+
 // The poses of a mission's people (MissionViewport's, ADR 0046 S14's device draws them): every
 // organic of the scene posed again where its records, the project's graph or a file the poses
 // read (a catalog, an .adm, a clip) moved; each catalog and each .adm read once while its stamp
@@ -94,24 +132,9 @@ public:
 	size_t files_read() const { return files_read_; }
 
 private:
-	struct Input {
-		NodeId row = 0;
-		int64_t item = 0;
-		uint32_t attributes = 0;
-		int route = 0;
-		int ssn = 0;
-		bool operator==(const Input &o) const {
-			return row == o.row && item == o.item && attributes == o.attributes && route == o.route && ssn == o.ssn;
-		}
-	};
-	struct Definition {
-		bool found = false;
-		std::string ai_function, anim_def;
-		uint32_t attrib = 0;
-	};
 	struct Catalog {
 		uint64_t stamp = 0;
-		std::unordered_map<int64_t, Definition> items; // each id's first row
+		std::unordered_map<int64_t, MissionPersonItem> items; // each id's first row
 	};
 	const Catalog &catalog_(const std::string &file);
 	void pose_all_();
@@ -120,7 +143,7 @@ private:
 	std::shared_ptr<StampedFiles> files_; // what the clips read, by the stamp they read it at
 	std::unique_ptr<anim::AdmRootMotion> motion_;
 	std::unordered_map<std::string, Catalog> catalogs_;
-	std::vector<Input> inputs_;
+	std::vector<MissionPoseInput> inputs_;
 	std::unordered_map<int64_t, std::string> resolved_; // each item's catalog file ("" none)
 	uint64_t graph_ = 0;
 	uint64_t files_generation_ = 0;
