@@ -55,6 +55,7 @@ enum class EditorQueryKind : uint8_t {
 	Catalog,
 	FileCard,
 	UsedBy,
+	EnvironmentUses,
 	kCount,
 };
 
