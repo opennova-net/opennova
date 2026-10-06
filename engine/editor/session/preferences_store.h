@@ -35,6 +35,9 @@ struct Preferences {
 	// the build's folder runs it (prepare_strict_install_launch_plan); off, the install's configuration
 	// and saves beside it, under /d. Read only while play_in_install is on.
 	bool play_in_install_strict = false;
+	// Play saves every file with unsaved edits first, as Save all does, instead of waiting on the unsaved-changes
+	// prompt (DI-26: the Play loop); a store that does not say reads as on. Off, Play asks, as Build does.
+	bool save_before_play = true;
 	// The import dialog's "Include the files these need" (ADR 0046 S11g): what a preview the
 	// windows raise plans with; a store that does not say reads as on.
 	bool import_dependencies = true;

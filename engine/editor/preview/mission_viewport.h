@@ -160,7 +160,9 @@ public:
 	// each selected one) set down on the device's ground under it, its z the ground's less its model's
 	// anchor height (preview/mission_items), one batch; refused with no ground under one.
 	// `select_same` (S15): one SelectRecord of every entity whose item is a named (else a selected)
-	// entity's, the primary kept where it is among them.
+	// entity's, the primary kept where it is among them. `play_from_here` (DI-26): Play started in this
+	// mission with its player on the ground under the camera, facing the way it looks (command_of takes it
+	// at a picture point too).
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
 	// The commands that take more than their records (S15): `duplicate {ids?, by?: [east, north]}`
@@ -218,6 +220,14 @@ private:
 	// the horizon the plane is tens of kilometres out); false past it, or past what the file's
 	// positions hold.
 	bool ground_of_(const ViewportContext &context, float x, float y, double out[3], bool *on_terrain = nullptr) const;
+	// The ground's height at mission (x, y): the mission's terrain as the game reads it, else the device's,
+	// else `otherwise`.
+	double ground_height_(const ViewportContext &context, double x, double y, double otherwise) const;
+	// `play_from_here {at?}` (DI-26): a Play of this mission with its player's start (play's start) on the
+	// ground under the camera's eye, or where the picture's point `at` meets the ground, facing the way the
+	// camera looks.
+	bool play_from_here_(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const;
 	// The records a drag of `record` by `handle` takes with it, as pressed: the selected entities (and
 	// areas, for a move) when it is selected, itself alone when not; `grabbed` its place among them.
 	std::vector<MissionPressed> taken_(const ViewportContext &context, const Document &document,
