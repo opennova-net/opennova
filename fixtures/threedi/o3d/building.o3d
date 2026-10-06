@@ -1,4 +1,4 @@
-o3d 1
+o3d 2
 # A small building (tests/threedi/o3d_cli_test.cpp --building): bldg LODs, a
 # wall with a slot-2 detail texture on UV1, a register-driven luminous
 # material, a part turning in a rotated MTRX frame, an omni and a spot light,
@@ -21,7 +21,7 @@ emissive 2
 rgbgen 113 0 0 255 255 255 255 255 255
 lod 200 bldg
 part 0 0 0 0
-strip 0 0
+mesh 0 0
 # the wall at x = 2 facing +x; UV1 tiles the detail texture 4 times
 v 2 -1 0 1 0 0 0 1 0 4
 v 2 1 0 1 0 0 1 1 4 4
@@ -30,7 +30,7 @@ v 2 -1 2 1 0 0 0 0 0 0
 t 0 1 2
 t 0 2 3
 part 0 1 0 1.5
-strip 1 0
+mesh 1 0
 # the bulb plate at z = 1.5 facing up
 v 0.5 -0.5 1.5 0 0 1 0 0 0 0
 v 1.5 -0.5 1.5 0 0 1 1 0 1 0

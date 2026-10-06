@@ -1,5 +1,7 @@
 #include <editor/blank/blank_factory.h>
 
+#include <base/io/strutil.h>
+
 #include "blank_makers.h"
 
 namespace opennova::editor {
@@ -39,6 +41,8 @@ const BlankFactory k_factories[] = {
 	{ "vmacros", AssetKind::Strings, make_blank_empty_strings, "an empty voice-macro table", false },
 	{ "keyhelp", AssetKind::Strings, make_blank_empty_strings, "an empty key-help table", false },
 	{ "weapon_def", AssetKind::WeaponDefs, make_blank_weapon_def, "a weapon table with no weapons", true },
+	{ "sndprof_def", AssetKind::SoundProfileDefs, make_blank_sound_profiles,
+	  "the sound profiles: one \"default\" profile, every slot silent", true },
 	{ "items_def", AssetKind::ItemDefs, make_blank_items_def, "an item table holding only the Null marker", true },
 	{ "charattr_def", AssetKind::CharAttrDefs, make_blank_charattr_def,
 	  "a character-attribute file with no classes", true },
@@ -50,7 +54,10 @@ const BlankFactory k_factories[] = {
 	  "a brand stylesheet with no variables yet, read after the menu stylesheet", false },
 	{ "nw_cdata", AssetKind::StringTableCoo, make_blank_coo, "an empty NovaWorld data table", true },
 	{ "main_menu", AssetKind::Menu, make_blank_main_menu,
-	  "the startup screen: the project's title and an Exit button", false },
+	  "the startup screen: the project's title, an Exit button and the game's mouse pointer", false },
+	// The pointer every blank menu names (kBlankPointerRole), made with the menu.
+	{ kBlankPointerRole, AssetKind::Texture, make_blank_pointer,
+	  "the game's mouse pointer, a white arrow outlined in black, which the menus name", false },
 	{ "menutxt", AssetKind::Strings, make_blank_menutxt,
 	  "a menu label table holding the common navigation labels", false },
 	{ "font_arial12b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
@@ -60,8 +67,38 @@ const BlankFactory k_factories[] = {
 	{ "font_arial16b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_impac22b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_impac38b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
-	// Mission: the rows the factories can already fill (the rest wait for their writers).
+	// Mission: what a mission's start and its screens read by name (docs/required-resources.md).
 	{ "ammo_def", AssetKind::AmmoDefs, make_blank_ammo_def, "an ammo table holding only the null round", true },
+	{ "powerup_def", AssetKind::PowerupDefs, make_blank_powerup_def, "a powerup table with no powerups yet", true },
+	{ "cmap_menu", AssetKind::Menu, make_blank_cmap_menu,
+	  "the command map screen (CMAP) with its Close button, on Esc and on V, the key that opens it", false },
+	{ "game_menu", AssetKind::Menu, make_blank_game_menu,
+	  "the in-mission menu (INGAME): Resume, on Esc, and Leave Mission with its question", false },
+	{ "weapon_menu", AssetKind::Menu, make_blank_weapon_menu,
+	  "the armory screen (WEAPON) with its Cancel button, on Esc; no weapon slots yet", false },
+	{ "vehicle_menu", AssetKind::Menu, make_blank_vehicle_menu,
+	  "the vehicle loadout screen (VEHICLE) with its Cancel button, on Esc; no weapon list yet", false },
+	{ "stat_menu", AssetKind::Menu, make_blank_stat_menu,
+	  "the end-of-round screen (STAT): Leave Mission, on Esc, with its question; no results table yet", false },
+	{ "death_menu", AssetKind::Menu, make_blank_death_menu,
+	  "the deploy screen (DEATH): the spawn list the game fills, and Leave Mission with its question", false },
+	{ "mp_menu", AssetKind::Menu, make_blank_mp_menu,
+	  "the multiplayer screen the game comes back to (NW_MULTI_PLAYER) with its Back button, on Esc", false },
+	{ "font_arials18", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
+	{ "font_arial22", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
+	{ "font_couri20b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
+	{ "game_wac", AssetKind::Script, make_blank_script,
+	  "an empty script, compiled ahead of server.wac and every mission's own", false },
+	{ "server_wac", AssetKind::Script, make_blank_script,
+	  "an empty script, compiled after game.wac and ahead of every mission's own", false },
+	{ "loadscrn_pcx", AssetKind::Texture, make_blank_loading_screen,
+	  "the checkerboard the game draws for a missing texture, 800 by 600: the loading screen's image", false },
+	{ "monogram_tga", AssetKind::Texture, make_blank_monogram,
+	  "the checkerboard the game draws for a missing texture, 512 by 256: the boards' watermark", false },
+	{ "boxtile_tga", AssetKind::Texture, make_blank_boxtile,
+	  "the checkerboard the game draws for a missing texture, 256 by 256: the boards' fill", false },
+	{ "border_tga", AssetKind::Texture, make_blank_texture,
+	  "the checkerboard the game draws for a missing texture, 128 by 128: the boards' border pieces", false },
 	// An expansion's own (ADR 0046 S16): its text table, naming it in the Mods list, and its version text.
 	{ "expansion_table", AssetKind::Strings, make_blank_expansion_table,
 	  "the expansion's text table: its name in the Mods list (the project's title) and an empty description", false },
@@ -70,7 +107,8 @@ const BlankFactory k_factories[] = {
 	// Free-form: a new file of a kind whose required files are all specific (Create
 	// menu, Create table, a font of another name, a missing texture's placeholder).
 	{ "", AssetKind::Strings, make_blank_empty_strings, "an empty string table", true },
-	{ "", AssetKind::Menu, make_blank_menu, "a menu with one screen named after the file, empty", true },
+	{ "", AssetKind::Menu, make_blank_menu,
+	  "a menu with one screen named after the file, empty but for the game's mouse pointer", true },
 	{ "", AssetKind::Font, make_blank_font, "the built-in bitmap font", true },
 	{ "", AssetKind::Texture, make_blank_texture,
 	  "the checkerboard the game draws for a missing texture, 128 by 128 gray squares", true },
@@ -159,10 +197,22 @@ const BlankFactory *find_blank_factory_for_kind(AssetKind kind) {
 	return nullptr;
 }
 
+const BlankFactory *find_blank_factory(std::string_view role, const std::string &logical_name, AssetKind kind) {
+	if (const BlankFactory *factory = find_blank_factory_for_role(role)) return factory;
+	if (kind == AssetKind::Texture && strutil::iequals(logical_name, blank_pointer_name()))
+		return find_blank_factory_for_role(kBlankPointerRole);
+	return find_blank_factory_for_kind(kind);
+}
+
+const BlankFactory *blank_companion(const BlankFactory &factory, const ProjectDocument &doc, std::string &name) {
+	if (factory.kind != AssetKind::Menu || !doc.expansion.standalone()) return nullptr;
+	name = blank_pointer_name();
+	return find_blank_factory_for_role(kBlankPointerRole);
+}
+
 bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t> &out,
                 Diagnostic &error) {
-	const BlankFactory *factory = find_blank_factory_for_role(request.role);
-	if (factory == nullptr) factory = find_blank_factory_for_kind(kind);
+	const BlankFactory *factory = find_blank_factory(request.role, request.logical_name, kind);
 	if (factory == nullptr) {
 		error = make_finding(CoreFinding::BlankUnavailable, DiagnosticSeverity::Error,
 		                     "The editor cannot create " + request.logical_name +
