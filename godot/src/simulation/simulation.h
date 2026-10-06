@@ -2338,7 +2338,8 @@ public:
 	// camera (Godot space), fog distance and g_EnvTerrainLightCombined
 	// (EnvFile.combine_terrain_light(sun, sky) — the sun+sky combine).
 	// { vertices (PackedVector3Array, Godot axes; world space for shared-ring
-	//   batches, SECTION-LOCAL for entity-ring batches), uvs, colors,
+	//   batches, SECTION-LOCAL for entity-ring batches, which world_vertices
+	//   from batch_world_first also hold in world space, -1 none), uvs, colors,
 	//   batch_owner/texture/section/flags(bit0 entity_local, bit1 building)/
 	//   first/count, batch_bms_id, batch_spawn_origin, strip_names,
 	//   slots_live, slots_culled, rings_leased }. Empty without a world.
@@ -2347,9 +2348,9 @@ public:
 	// The same list over the weapon Inset view's section masks (world/occlusion.h OcclusionView).
 	Ref<ScarDrawList> get_scar_draw_list_inset(const Vector3 &p_camera_godot, float p_fog_distance,
 			const Color &p_terrain_light) const;
-	// The Scar_RenderCache owner gate over OcclusionWorld's section masks and
-	// the entity's blink-box quad (see simulation_scars.cpp).
-	bool scar_owner_visible(uint16_t p_owner_packed) const;
+	// The Scar_RenderCache owner gate (the slot's building byte) over OcclusionWorld's
+	// section masks and the entity's blink-box quad (see simulation_scars.cpp).
+	bool scar_owner_visible(uint16_t p_owner_packed, bool p_building) const;
 
 	// The round hit-detection reality as a HitboxDebugReport
 	// (simulation/hitbox_debug_report.h) — the GUT collision oracle: the nearby entity
