@@ -26,9 +26,11 @@ bool make_blank_script(const BlankRequest &, std::vector<uint8_t> &out, Diagnost
 // mnu (blank_menu.cpp)
 bool make_blank_main_menu(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_menu(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
-// The MAIN window's FONT element every blank screen authors (the stylesheet's variables), and an
-// authored screen's bytes: parsed through the document model and written in its canonical form.
+// The MAIN window's FONT element every blank screen authors (the stylesheet's variables), its CURSOR
+// naming the game's pointer (blank_pointer_name), and an authored screen's bytes: parsed through the
+// document model and written in its canonical form.
 const char *blank_menu_font();
+std::string blank_menu_cursor();
 bool blank_menu_bytes(const std::string &xml, const BlankRequest &request, std::vector<uint8_t> &out,
                       Diagnostic &error);
 
@@ -55,16 +57,23 @@ bool make_blank_weapon_def(const BlankRequest &, std::vector<uint8_t> &out, Diag
 bool make_blank_ammo_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_powerup_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_charattr_def(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+// SndProf.def: the one "default" profile every item binds, every slot silent
+bool make_blank_sound_profiles(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+
+// env (blank_environment.cpp): the environment writer's authoring template, named after the file
+bool make_blank_environment(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // coo (blank_coo.cpp)
 bool make_blank_coo(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // texture (blank_texture.cpp): the game's missing-texture checkerboard, in the name's format; the
-// mission's fixed textures the same checkerboard at the size the game's own file has
+// mission's fixed textures the same checkerboard at the size the game's own file has; the mouse
+// pointer the blank menus name (kBlankPointerRole), a TGA
 bool make_blank_texture(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_loading_screen(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_monogram(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_boxtile(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_pointer(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // Hand-authored text goes to disk CRLF: retail's text parsers fail silently on LF.
 std::string blank_crlf(const std::string &text);

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <initializer_list>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -24,9 +25,12 @@
 #include <formats/pcx/pcx_io.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/tga/tga.h>
+#include <formats/tga/tga_read.h>
+#include <runtime/audio/sound_profile.h>
 #include <runtime/inmatch/charattr_challenge.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
+#include <runtime/menu/menu_runtime.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/wac/compiler.h>
 
@@ -230,11 +234,28 @@ static int test_startup_menu_compiles() {
 		for (const char *f : font_names) shipped = shipped || file == lower(f);
 		TEST_EXPECT(shipped);
 	}
-	TEST_EXPECT(compiler.texture_names().empty());
+	// The one texture it names is the pointer, which the root window's CURSOR names: the original
+	// game shows no system pointer (docs/mnu/menu-re.md), so a screen without one has none.
+	TEST_EXPECT(main_window.cursor.file == blank_pointer_name() && main_window.cursor.flags == "STANDARD_TRANSPARENT");
+	TEST_EXPECT(compiler.texture_names().size() == 1 && compiler.texture_names()[0] == blank_pointer_name());
 	TEST_EXPECT(compiler.widget_index("EXIT") >= 0);
 	opennova::menu::MenuFrameState state;
 	const opennova::menu::MenuDrawList &frame = compiler.compile(state, 1.0f, 1.0f);
 	TEST_EXPECT(!frame.font_runs.empty()); // the title and the button label draw text
+	// The pointer, loaded at its own size, draws last at the mouse, unscaled.
+	const std::vector<uint8_t> pointer = make(kBlankPointerRole, blank_pointer_name());
+	opennova::tga::TgaImage image;
+	std::string decode_error;
+	TEST_EXPECT(opennova::tga::tga_decode_retail(pointer.data(), pointer.size(), image, decode_error));
+	compiler.set_texture_size(0, image.width, image.height);
+	state.cursor_visible = true;
+	state.cursor_x = 100.0f;
+	state.cursor_y = 50.0f;
+	const opennova::menu::MenuDrawList &pointed = compiler.compile(state, 2.0f, 2.0f);
+	TEST_EXPECT(!pointed.quads.empty());
+	if (pointed.quads.empty()) return 1;
+	const opennova::menu::MenuQuad &last = pointed.quads.back();
+	TEST_EXPECT(last.texture == 0 && last.x0 == 100.0f && last.y0 == 50.0f && last.x1 == 132.0f && last.y1 == 82.0f);
 	opennova::fnt::fnt_free(&font);
 	return 0;
 }
@@ -243,8 +264,10 @@ static int test_startup_menu_compiles() {
 // game opens (a file without it raises the menu-open flag over nothing: an input dead end), and
 // the controls the player leaves it by, named as the game binds them, of the kind and on the keys
 // the game's commands answer; the leave-the-mission question is hidden until its button raises it.
-// Every screen stands on the required files alone (no string id, no text table, no texture) and
-// compiles through the runtime's compiler with every font resolving to a shipped one.
+// Every screen stands on the required files alone (no string id, no text table) and compiles
+// through the runtime's compiler with every font resolving to a shipped one; the one texture each
+// names is the game's pointer, its MAIN window's CURSOR, as every shipped in-mission screen's: the
+// original game shows no system pointer, so a screen naming none is clicked blind.
 struct LeaveControl {
 	const char *name;
 	opennova::mnu::WindowType type;
@@ -318,6 +341,8 @@ static int test_mission_menus() {
 		const opennova::mnu::Window &main_window = screen->roots.front();
 		TEST_EXPECT(main_window.name == "MAIN" && main_window.position.width() == 800 &&
 		            main_window.position.height() == 600);
+		TEST_EXPECT(main_window.cursor.file == blank_pointer_name() &&
+		            main_window.cursor.flags == "STANDARD_TRANSPARENT");
 		for (const LeaveControl &control : menu.controls) {
 			const opennova::mnu::Window *window = find_window(main_window, control.name);
 			TEST_EXPECT(window != nullptr && window->type == control.type && !window->hidden);
@@ -362,13 +387,186 @@ static int test_mission_menus() {
 			for (const char *f : font_names) shipped = shipped || file == lower(f);
 			TEST_EXPECT(shipped);
 		}
-		TEST_EXPECT(compiler.texture_names().empty());
+		TEST_EXPECT(compiler.texture_names().size() == 1 &&
+		            compiler.texture_names()[0] == blank_pointer_name());
 		for (const LeaveControl &control : menu.controls) TEST_EXPECT(compiler.widget_index(control.name) >= 0);
 		opennova::menu::MenuFrameState state;
 		const opennova::menu::MenuDrawList &frame = compiler.compile(state, 1.0f, 1.0f);
 		TEST_EXPECT(!frame.font_runs.empty()); // the labels draw
 	}
 	opennova::fnt::fnt_free(&font);
+	return 0;
+}
+
+// The frame seam the menu runtime drives, over the compiler alone: no geometry, no art; enough for
+// the keys and the activations (the runtime's hotkey table is the screen's, built at the show).
+class FlowSeam : public opennova::menu::MenuFrameSeam {
+public:
+	explicit FlowSeam(const opennova::mnu::Document &doc) : doc_(doc) {}
+	bool is_configured() const override { return configured_; }
+	void configure_screen(const std::string &screen) override {
+		const opennova::mnu::Screen *s = doc_.find_screen(screen);
+		compiler_.configure(s);
+		configured_ = s != nullptr;
+	}
+	void screen_configured() override {}
+	void set_widget_shown_override(int, bool) override {}
+	void set_widget_disabled(int, bool) override {}
+	void set_widget_checked(int, bool) override {}
+	void set_widget_text(int, const std::string &) override {}
+	void set_widget_items(int, const std::vector<std::string> &) override {}
+	void set_widget_selection(int, int, int, int) override {}
+	void set_widget_scroll_range(int, int, int, int, int) override {}
+	void set_widget_selected_set(int, const std::vector<int> &) override {}
+	void set_widget_table_rows(int, const std::vector<opennova::menu::MenuTableRow> &) override {}
+	void set_widget_table_columns(int, bool, const std::vector<opennova::menu::MenuTableColumn> &, int) override {}
+	void set_widget_clip_rect(int, bool, int, int, int, int) override {}
+	void set_widget_hover_item(int, int) override {}
+	void set_widget_popup_open(int, bool) override {}
+	void set_widget_focused(int, bool) override {}
+	void set_widget_rect(int, int, int, int, int) override {}
+	void set_widget_caret(int, int) override {}
+	int get_widget_caret(int) const override { return 0; }
+	std::string get_widget_text(int) const override { return std::string(); }
+	int item_count(int) const override { return 0; }
+	std::string item_display_text(int, int) const override { return std::string(); }
+	bool is_widget_disabled(int) const override { return false; }
+	opennova::menu::MenuRectF widget_rect(int) const override { return opennova::menu::MenuRectF{}; }
+	void design_scale(float &sx, float &sy) const override { sx = sy = 1.0f; }
+	int process_mouse(float, float, bool, bool &owned) override {
+		owned = false;
+		return -1;
+	}
+	bool process_popup_mouse(int, float, float, bool) override { return false; }
+	bool process_mouse_wheel(float, float, int) override { return false; }
+	void set_cursor_state(bool, float, float) override {}
+	void apply_claim_cursor() override {}
+	void reset_cursor() override {}
+	int combo_popup_row_at(int, float, float) const override { return -1; }
+	bool combo_popup_contains(int, float, float) const override { return false; }
+	int list_row_at(int, float, float) const override { return -1; }
+	int spin_arrow_at(int, float, float) const override { return 0; }
+	bool table_hit(int, float, float, int *row, int *column) const override {
+		*row = *column = -1;
+		return false;
+	}
+	std::string widget_mnemonic(int index) const override { return compiler_.widget_mnemonic(index); }
+	void set_open_popup(int) override {}
+	bool edit_char(int, int) override { return false; }
+	int edit_key(int, int, bool) override { return 0; }
+
+private:
+	const opennova::mnu::Document &doc_;
+	opennova::menu::MenuFrameCompiler compiler_;
+	bool configured_ = false;
+};
+
+// One blank in-mission screen under the menu runtime, recording what the player's keys and
+// clicks activate.
+struct FlowScreen {
+	opennova::mnu::Document doc;
+	std::unique_ptr<FlowSeam> seam;
+	opennova::menu::MenuRuntime rt;
+	std::vector<opennova::menu::MenuEvent> events;
+
+	bool open(const char *role, const char *file, const char *screen) {
+		const std::vector<uint8_t> bytes = make(role, file);
+		std::string error;
+		if (!opennova::mnu::parse(bytes.data(), bytes.size(), doc, error)) return false;
+		seam = std::make_unique<FlowSeam>(doc);
+		rt.set_frame(seam.get());
+		rt.set_sink([this](const opennova::menu::MenuEvent &e) { events.push_back(e); });
+		return rt.open_document(&doc, file, screen) && rt.current_screen() == screen;
+	}
+	// What one key press activates, by name, in order.
+	std::vector<std::string> key(int vk, int unicode = 0) {
+		events.clear();
+		opennova::menu::MenuKeyInput input;
+		input.vk = vk;
+		input.unicode = unicode;
+		rt.handle_key(input);
+		return activated();
+	}
+	std::vector<std::string> click(const char *name) {
+		events.clear();
+		rt.activate(rt.widget_id(name));
+		return activated();
+	}
+	std::vector<std::string> activated() const {
+		std::vector<std::string> names;
+		for (const opennova::menu::MenuEvent &e : events)
+			if (e.kind == opennova::menu::MenuEvent::Kind::WidgetActivated) names.push_back(e.text);
+		return names;
+	}
+	bool shown(const char *name) const { return rt.is_widget_shown(rt.widget_id(name)); }
+};
+
+static bool only(const std::vector<std::string> &names, const char *name) {
+	return names.size() == 1 && names[0] == name;
+}
+
+// The in-mission screens as the player works them, through the menu runtime's port of the game's
+// activation and key routing [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970;
+// CUIWidget_HandleScriptedAction @ 0x6497f0; UI_DispatchKeyboardEventToChildren @ 0x63ad10, the
+// first VISIBLE row wins]: Esc and Enter reach the controls the game's commands are registered on
+// (docs/required-resources.md, "What a mission's menus must hold"), and every leave-the-mission
+// question opens on its button, answers Esc with No and Enter with Yes, and puts its screen back.
+static int test_mission_menu_flows() {
+	constexpr int kVkReturn = 13, kVkEscape = 27;
+	// INGAME: Esc resumes (HIDDEN_BACK); Leave Mission (ABORT) raises the question in place of the
+	// menu, where Esc is No and the menu comes back, and Enter is Yes. No RESTART: its respawn faults
+	// the original game on a player with no body, which a new project's is (blank_mission_menus.cpp).
+	{
+		FlowScreen s;
+		TEST_EXPECT(s.open("game_menu", "game.mnu", "INGAME"));
+		TEST_EXPECT(s.shown("MAIN_WRAPPER") && !s.shown("CONFIRM_EXIT"));
+		TEST_EXPECT(only(s.key(kVkEscape), "HIDDEN_BACK"));
+		TEST_EXPECT(s.rt.widget_id("RESTART") < 0 && s.rt.widget_id("OPTIONS") < 0);
+		TEST_EXPECT(only(s.click("ABORT"), "ABORT"));
+		TEST_EXPECT(!s.shown("MAIN_WRAPPER") && s.shown("CONFIRM_EXIT"));
+		TEST_EXPECT(only(s.key(kVkEscape), "CONFIRM_NO"));
+		TEST_EXPECT(s.shown("MAIN_WRAPPER") && !s.shown("CONFIRM_EXIT"));
+		TEST_EXPECT(only(s.click("ABORT"), "ABORT"));
+		TEST_EXPECT(only(s.key(kVkReturn), "CONFIRM_YES"));
+		// Enter answers only the question: with the menu up it reaches nothing.
+		TEST_EXPECT(s.shown("MAIN_WRAPPER") && s.key(kVkReturn).empty());
+	}
+	// STAT and DEATH: Esc (HIDDEN_BACK) raises the question over the screen's own panel.
+	for (const auto &screen : {std::vector<const char *>{"stat_menu", "stat.mnu", "STAT", "STATS"},
+	                           std::vector<const char *>{"death_menu", "death.mnu", "DEATH", "DEATH_SHROUD"}}) {
+		FlowScreen s;
+		TEST_EXPECT(s.open(screen[0], screen[1], screen[2]));
+		TEST_EXPECT(s.shown(screen[3]) && !s.shown("CONFIRM_EXIT"));
+		TEST_EXPECT(only(s.key(kVkEscape), "HIDDEN_BACK"));
+		TEST_EXPECT(!s.shown(screen[3]) && s.shown("CONFIRM_EXIT"));
+		TEST_EXPECT(only(s.key(kVkEscape), "CONFIRM_NO"));
+		TEST_EXPECT(s.shown(screen[3]) && !s.shown("CONFIRM_EXIT"));
+		TEST_EXPECT(only(s.key(kVkEscape), "HIDDEN_BACK"));
+		TEST_EXPECT(only(s.key(kVkReturn), "CONFIRM_YES"));
+	}
+	// CMAP closes on Esc and on the V that opened it (a character hotkey, matched case-blind).
+	{
+		FlowScreen s;
+		TEST_EXPECT(s.open("cmap_menu", "cmap.mnu", "CMAP"));
+		TEST_EXPECT(only(s.key(kVkEscape), "OK"));
+		TEST_EXPECT(only(s.key(0, 'v'), "OK"));
+	}
+	// WEAPON and VEHICLE close on Esc (CANCEL); the multiplayer screen's Back pops the menu.
+	for (const auto &screen : {std::vector<const char *>{"weapon_menu", "weapon.mnu", "WEAPON"},
+	                           std::vector<const char *>{"vehicle_menu", "vehicle.mnu", "VEHICLE"}}) {
+		FlowScreen s;
+		TEST_EXPECT(s.open(screen[0], screen[1], screen[2]));
+		TEST_EXPECT(only(s.key(kVkEscape), "CANCEL"));
+	}
+	{
+		FlowScreen s;
+		TEST_EXPECT(s.open("mp_menu", "mp.mnu", "NW_MULTI_PLAYER"));
+		TEST_EXPECT(only(s.key(kVkEscape), "BACK"));
+		bool popped = false;
+		for (const opennova::menu::MenuEvent &e : s.events)
+			popped = popped || e.kind == opennova::menu::MenuEvent::Kind::PopRequested;
+		TEST_EXPECT(popped);
+	}
 	return 0;
 }
 
@@ -432,6 +630,57 @@ static int test_mission_start_files() {
 	return 0;
 }
 
+// The pointer the blank menus name: a 32-bit TGA in the form the menus' and the splash's readers
+// take (the 18-byte header, type 2, 8 alpha bits, the rows from the bottom up), 32 by 32 as the
+// shipped one, its tip the top-left pixel (where the game draws the texture from), opaque where
+// the arrow is and clear around it; made by its role, by its name as a new texture, and refused
+// for a name that is no TGA.
+static int test_pointer() {
+	const BlankFactory *factory = find_blank_factory_for_role(kBlankPointerRole);
+	TEST_EXPECT(factory != nullptr && factory->kind == AssetKind::Texture && !factory->free_form);
+	TEST_EXPECT(std::string(blank_pointer_name()) == "newarow1.tga");
+	const std::vector<uint8_t> bytes = make(kBlankPointerRole, blank_pointer_name());
+	TEST_EXPECT(bytes.size() == opennova::tga::TGA_HEADER_SIZE + 32u * 32u * 4u);
+	if (bytes.size() != opennova::tga::TGA_HEADER_SIZE + 32u * 32u * 4u) return 1;
+	TEST_EXPECT(bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 2 && bytes[16] == 32 && bytes[17] == 8);
+	opennova::tga::TgaImage image;
+	std::string reason;
+	TEST_EXPECT(opennova::tga::tga_decode_retail(bytes.data(), bytes.size(), image, reason));
+	TEST_EXPECT(image.width == 32 && image.height == 32);
+	const auto pixel = [&image](int x, int y) { return &image.rgba[(size_t(y) * 32 + size_t(x)) * 4]; };
+	TEST_EXPECT(pixel(0, 0)[3] == 0xFF && pixel(0, 0)[0] == 0);                      // the tip, outlined
+	TEST_EXPECT(pixel(1, 3)[3] == 0xFF && pixel(1, 3)[0] == 0xFF);                   // the body, white
+	TEST_EXPECT(pixel(31, 0)[3] == 0 && pixel(0, 31)[3] == 0 && pixel(31, 31)[3] == 0); // clear around it
+	int opaque = 0;
+	for (size_t i = 0; i < 32u * 32u; ++i) opaque += image.rgba[i * 4 + 3] == 0xFF ? 1 : 0;
+	TEST_EXPECT(opaque > 50 && opaque < 200);
+	// Asked as a new texture of its name, the pointer; any other name, the checkerboard.
+	BlankRequest request;
+	request.logical_name = "NEWAROW1.TGA";
+	std::vector<uint8_t> by_name;
+	Diagnostic error;
+	TEST_EXPECT(find_blank_factory("", request.logical_name, AssetKind::Texture) == factory);
+	TEST_EXPECT(make_blank(request, AssetKind::Texture, by_name, error) && by_name == bytes);
+	TEST_EXPECT(find_blank_factory("", "other.tga", AssetKind::Texture) == find_blank_factory_for_kind(AssetKind::Texture));
+	// The pointer is a TGA: its role refuses another format.
+	request.logical_name = "newarow1.dds";
+	request.role = kBlankPointerRole;
+	TEST_EXPECT(!make_blank(request, AssetKind::Texture, by_name, error) && error.code() == "blank.texture");
+	// A menu's blank names it and has it made with it, unless the project builds as an expansion.
+	ProjectDocument standalone;
+	std::string companion;
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("main_menu"), standalone, companion) == factory &&
+	            companion == blank_pointer_name());
+	companion.clear();
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_kind(AssetKind::Menu), standalone, companion) == factory &&
+	            companion == blank_pointer_name());
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("gametext"), standalone, companion) == nullptr);
+	ProjectDocument expansion;
+	expansion.expansion.name = "ptr";
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("main_menu"), expansion, companion) == nullptr);
+	return 0;
+}
+
 // A menu of its own (no role): one screen named after the file, upper-case, whose MAIN
 // window spans the 800x600 design frame and holds nothing.
 static int test_free_form_menu() {
@@ -449,6 +698,7 @@ static int test_free_form_menu() {
 	if (doc.screens.size() != 1 || doc.screens[0].roots.size() != 1) return 1;
 	const opennova::mnu::Window &main = doc.screens[0].roots.front();
 	TEST_EXPECT(main.name == "MAIN" && main.type == opennova::mnu::WindowType::Window && main.children.empty());
+	TEST_EXPECT(main.cursor.file == blank_pointer_name() && main.cursor.flags == "STANDARD_TRANSPARENT");
 	TEST_EXPECT(main.position.has_left && main.position.left == 0 && main.position.has_top && main.position.top == 0);
 	TEST_EXPECT(main.position.width() == 800 && main.position.height() == 600);
 	TEST_EXPECT(find_window(main, "EXIT") == nullptr && find_window(main, "TITLE") == nullptr);
@@ -534,6 +784,23 @@ static int test_defs_and_coo() {
 	opennova::inmatch::CharAttrChallengeTable table;
 	TEST_EXPECT(opennova::inmatch::parse_charattr_challenge_table(charattr.data(), charattr.size(), table));
 	TEST_EXPECT(opennova::inmatch::find_charattr_challenge_row(table, 1) == nullptr); // no classes yet
+
+	// SndProf.def: one "default" profile with every slot silent, the profile every item binds
+	// (ItemDef_AllocateWithDefaults @ 0x49E3EA asks for "default"; a miss takes the first). The
+	// game's profile table is never cleared, so with no profile an item's sounds are whatever
+	// that memory held (docs/required-resources.md).
+	const std::vector<uint8_t> profiles = make("sndprof_def", "SndProf.def");
+	TEST_EXPECT(is_crlf_text(text_of(profiles)));
+	opennova::audio::SoundProfileTable sound_profiles;
+	TEST_EXPECT(sound_profiles.parse(reinterpret_cast<const char *>(profiles.data()), profiles.size()) == 1);
+	const opennova::audio::SoundProfile &silent = sound_profiles.entries()[0];
+	TEST_EXPECT(silent.name == "default" && sound_profiles.find("an item's own") == &silent);
+	for (int slot = 0; slot < opennova::audio::kSoundProfileSlotCount; ++slot)
+		TEST_EXPECT(silent.set_names[slot].empty() && silent.param2_q16[slot] == 0 &&
+		            silent.param3_q16[slot] == 0 && silent.param4[slot] == 0);
+	for (int32_t value : silent.loop_params) TEST_EXPECT(value == 0);
+	TEST_EXPECT(text_of(profiles).find("Blank & Co") != std::string::npos);
+	TEST_EXPECT(find_blank_factory_for_role("sndprof_def")->kind == AssetKind::SoundProfileDefs);
 
 	const std::vector<uint8_t> coo = make("nw_cdata", "nw_cdata.coo");
 	const std::vector<uint8_t> expected = {0, 0, 0, 0, 'R', 'S', 'T', 'R'};
@@ -685,11 +952,13 @@ int main() {
 	failures += test_string_tables();
 	failures += test_startup_menu_compiles();
 	failures += test_mission_menus();
+	failures += test_mission_menu_flows();
 	failures += test_mission_start_files();
 	failures += test_free_form_menu();
 	failures += test_style_and_fonts();
 	failures += test_defs_and_coo();
 	failures += test_placeholder_texture();
+	failures += test_pointer();
 	if (failures == 0) std::printf("editor_blank_factory: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

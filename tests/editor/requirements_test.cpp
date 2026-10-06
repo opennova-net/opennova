@@ -233,7 +233,7 @@ static int test_expansion_rows() {
 	// The blanks: the table names the expansion by the project's title, the version text is a line.
 	doc.expansion = ProjectExpansion{ "jxm", "" };
 	const CreateMissingResult made =
-			create_missing_requirements(paths, doc, menu_only, {"expansion_table", "expansion_version"});
+			create_missing_requirements(paths, doc, empty, menu_only, {"expansion_table", "expansion_version"});
 	TEST_EXPECT(made.diagnostics.empty() && made.created.size() == 2);
 	const RequirementReport after = evaluate_requirements(doc, scan_project_assets(paths, doc));
 	TEST_EXPECT(row_named(after, "jxm.bin")->state == RequirementState::Present &&
@@ -257,8 +257,9 @@ static int test_expansion_rows() {
 	std::error_code removed;
 	std::filesystem::remove(paths.root + "/" + row_named(after, "jxm.bin")->asset_path, removed);
 	doc.title = std::string(62, 'A') + "\xc3\xa9" + "xyz";
-	const CreateMissingResult long_made = create_missing_requirements(
-			paths, doc, evaluate_requirements(doc, scan_project_assets(paths, doc)), {"expansion_table"});
+	const AssetScan long_scan = scan_project_assets(paths, doc);
+	const CreateMissingResult long_made =
+			create_missing_requirements(paths, doc, long_scan, evaluate_requirements(doc, long_scan), {"expansion_table"});
 	TEST_EXPECT(long_made.diagnostics.empty() && long_made.created.size() == 1);
 	const RequirementReport cut = evaluate_requirements(doc, scan_project_assets(paths, doc));
 	opennova::rtxt::File reparsed;

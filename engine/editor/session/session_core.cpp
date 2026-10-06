@@ -35,6 +35,7 @@
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_controller.h>
+#include <editor/session/navigation_controller.h>
 #include <editor/session/open_operation.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problems_service.h>
@@ -271,6 +272,7 @@ void SessionCore::finish_operation() {
 	problems().show_validation(); // a finish that read the files leaves their validation due
 	show_operation();
 	workspace_tidies(*this); // a refresh, an import or a rename moved the files the workspace names
+	navigation().tidy();     // and those the navigation history's places name
 }
 
 // The slot as the view shows it: the running operation (none) and what the last one came to.
@@ -354,8 +356,8 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		std::vector<std::string> roles{ expansion_file_row(ExpansionFileRole::Version).manifest_role };
 		if (doc.expansion.builds_on.empty()) roles.push_back(expansion_file_row(ExpansionFileRole::Table).manifest_role);
 		const ProjectPaths paths = ProjectPaths::for_root(dir);
-		const CreateMissingResult made =
-				create_missing_requirements(paths, doc, evaluate_requirements(doc, scan_project_assets(paths, doc)), roles);
+		const AssetScan scan = scan_project_assets(paths, doc);
+		const CreateMissingResult made = create_missing_requirements(paths, doc, scan, evaluate_requirements(doc, scan), roles);
 		for (const std::string &path : made.created) note("Created " + path);
 		for (const Diagnostic &d : made.diagnostics) report(d);
 	}
@@ -446,6 +448,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	read_install_expansions(); // the project's install's, before its requirements weigh them
 	absorb_refresh(open.refresh());
 	restore_workspace(); // the documents it was left with (the UX round's project lane)
+	navigation().clear(); // its history starts where it reopened, with no place behind it
 	const std::string &title = view_.project.document->title;
 	note("Opened " + title + ".");
 	view_.activity.status = "Opened " + title + ".";
@@ -474,6 +477,7 @@ bool SessionCore::close_project() {
 	// report of the game started in it (a later line of that game's log is ignored; the
 	// next project opens with none, even when it is this one again).
 	documents().close_all();
+	navigation().clear(); // its places are its files'
 	guard().close_prompt_if_open();
 	play().forget_project();
 	documents().activate(std::string());
@@ -885,7 +889,7 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	const ProjectDocument &doc = *view_.project.document;
 	AssetScan now = scan_project_assets(paths_, doc);
 	now.set_import_findings(view_.project.scan->import_findings());
-	const CreateMissingResult result = create_missing_requirements(paths_, doc, requirements_of(doc, now), roles);
+	const CreateMissingResult result = create_missing_requirements(paths_, doc, now, requirements_of(doc, now), roles);
 	for (const std::string &path : result.created) note("Created " + path);
 	for (const std::string &name : result.unavailable) {
 		note("The editor cannot create " + name + " yet: no writer exists for this kind of file.");

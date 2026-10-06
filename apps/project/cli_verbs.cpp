@@ -775,6 +775,37 @@ int run_reimport(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	return done(outcome) ? 0 : 1;
 }
 
+// A terrain made from images (S20, the new_terrain request): its images, files on the command line
+// taken from where the command runs, and the importer's options; then the refresh that imports it run
+// to its end, its outputs printed.
+int run_new_terrain(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
+	std::vector<std::pair<std::string, std::string>> values;
+	for (const char *image : {"heightmap", "colormap", "detail", "tiles", "surface"}) {
+		const std::string option = std::string("--") + image;
+		if (args.has(option.c_str())) values.emplace_back(image, from_here(args.value(option.c_str())));
+	}
+	for (const char *number : {"top", "water", "layout"}) {
+		const std::string option = std::string("--") + number;
+		if (args.has(option.c_str())) values.emplace_back(number, args.value(option.c_str()));
+	}
+	const std::string name = args.positional.size() > 1 ? args.positional[1] : std::string();
+	const JsonValue outcome = send(cli, editor::request::new_terrain(name, values));
+	JsonValue answer;
+	if (!answer_of(cli, row, answer)) return 2;
+	if (cli.json) {
+		print_json(cli.out, answer);
+	} else {
+		for (const JsonValue &source : items(at(answer, "import"), "imported")) {
+			if (!source.get_bool("reimported", false)) continue;
+			std::fprintf(cli.out, "imported %s -> %s%s\n", source.get_string("source", "").c_str(),
+			             words(items(source, "outputs").size(), "output").c_str(), source.get_bool("ok", true) ? "" : " (failed)");
+			for (const JsonValue &output : items(source, "outputs"))
+				if (output.is_string()) std::fprintf(cli.out, "  %s\n", output.string.c_str());
+		}
+	}
+	return done(outcome) ? 0 : 1;
+}
+
 // The project packed into a directory the runtime boots, as the editor's Build packs it: the
 // import pass first (the project opens without its own, so the build's is the only one), then the
 // build run to its end.
@@ -1107,11 +1138,13 @@ constexpr K kCreateMissingRequests[] = { K::OpenProject, K::ApplyProjectSettings
 constexpr K kImportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::PlanImport, K::PreviewInstallImport,
 	                              K::SetWorkspace, K::ImportFiles };
 constexpr K kReimportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Reimport };
+constexpr K kNewTerrainRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::NewTerrain };
 constexpr K kBuildRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Build };
 constexpr K kExportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Export };
 
 constexpr CliPositional kDir[] = { { "a project directory" } };
 constexpr CliPositional kImportArgs[] = { { "a project directory" }, { "a source file", false } };
+constexpr CliPositional kNewTerrainArgs[] = { { "a project directory" }, { "the terrain's name" } };
 constexpr CliPositional kRequestArgs[] = { { "a project directory" }, { "a request as JSON" } };
 constexpr CliPositional kQueryArgs[] = { { "a project directory" }, { "a query's name" }, { "its args as JSON", false } };
 
@@ -1127,6 +1160,10 @@ constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 	                                     { "--dry-run" },
 	                                     { "--rows" } };
 constexpr CliOption kReimportOptions[] = { { "--force" }, { "--source", "a source" } };
+constexpr CliOption kNewTerrainOptions[] = { { "--heightmap", "an image" }, { "--colormap", "an image" },
+	                                         { "--detail", "an image" },    { "--tiles", "an image" },
+	                                         { "--surface", "an image" },   { "--top", "world units" },
+	                                         { "--water", "world units" },  { "--layout", "island or tiled" } };
 constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash" } };
 
 using V = CliVerb;
@@ -1168,7 +1205,9 @@ constexpr VerbRow kRows[] = {
 	     kImportRequests, kImportArgs, run_import,
 	     "copy files in (a loose file, PFF members, or the game install's files by --entry\n"
 	     "names), the whole selection or none of it; an .o3d (a model) or an .o3a (a clip\n"
-	     "set) the Blender add-on wrote converts to the .3di or the .adm and .bad;\n"
+	     "set) the Blender add-on wrote converts to the .3di or the .adm and .bad; a .fntset\n"
+	     "(a font set) comes into fonts/ with the glyph sheet it names beside it and imports\n"
+	     "to its .fnt;\n"
 	     "--with-dependencies also copies the files they need, found beside them or in the\n"
 	     "game install (a mission's closure is most of a game install); an .o3d's textures come only with\n"
 	     "--with-dependencies; --all copies every file of the game install (its archives' and\n"
@@ -1185,6 +1224,20 @@ constexpr VerbRow kRows[] = {
 	     "run the import pass now; --force imports again every source (or the --source one)\n"
 	     "even when nothing changed (--json: the state query's import)")
 	        .takes(kReimportOptions)
+	        .opens_without_import_pass()
+	        .answers(Q::State, "{\"sections\": [\"import\"]}")
+	        .row,
+	Verb(V::NewTerrain, "new-terrain",
+	     "<dir> <name> --heightmap <file> --colormap <file> [--detail <file>] [--tiles <file>] "
+	     "[--surface <file>] [--top <units>] [--water <units>] [--layout island|tiled]",
+	     kNewTerrainRequests, kNewTerrainArgs, run_new_terrain,
+	     "make a terrain from images: a heightmap (a PNG of 1024 x 1024, any depth, or a .raw) and a\n"
+	     "colour map (1024 x 1024), a detail, a tile set and a surface map optional (square, 256 to\n"
+	     "1024 a side: an 8-bit PCX's or palette PNG's indices the surface classes 0..19, any other\n"
+	     "image each class in its legend colour); --top the heightmap's white in world units (127.5),\n"
+	     "--water the sea's height (0 none), --layout island or tiled; written as art/terrain/<name>.tset,\n"
+	     "then imported into <name>.trn, .cpt and their textures (--json: the state query's import)")
+	        .takes(kNewTerrainOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\"]}")
 	        .row,

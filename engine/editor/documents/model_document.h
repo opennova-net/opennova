@@ -205,7 +205,7 @@ protected:
 	bool reads_register_byte(const Node &row, std::string &where, int64_t &named) const;
 	// A model keeps its two rows: a step adding or removing a row is refused.
 	bool accept_step(const EditStep &step, const StagedRows &rows,
-	                 std::string &error) const override;
+	                 StepRefusal &refusal) const override;
 };
 
 bool is_model_kind(AssetKind kind);
