@@ -3,6 +3,7 @@
 // loaders make, the normal-map cap's halving, and the PCX reader every loader uses.
 
 #include <formats/pcx/pcx_io.h>
+#include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_texture_materials.h>
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -280,6 +281,11 @@ void test_material_color_stage() {
 	CHECK(material_color_stage(0x300402u) == MaterialColorStage::Other,
 			"the binocular digits' 0x300402 is family 0x400");
 	CHECK(material_color_stage(0u) == MaterialColorStage::Other, "no material draws plain");
+	// Every font page draws through 0x651 whatever loader made the font, so every
+	// glyph doubles (D-HUD-51) [orig: GameFont_LoadFromBlob @0x674825;
+	// CGameFont_Create @0x674b9c / @0x674d1e].
+	CHECK(material_color_stage(opennova::hud::kFontPageMaterialWord) == MaterialColorStage::Modulate2x,
+			"a font page's material runs MODULATE2X");
 }
 
 void test_side_caps() {

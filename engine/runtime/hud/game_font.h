@@ -16,6 +16,20 @@
 
 namespace opennova::hud {
 
+// The material word every font page draws with, whichever loader made the font:
+// colour family 0x600, MODULATE2X(TEXTURE, DIFFUSE) on a modulate-2x device and
+// alpha MODULATE(TEXTURE, DIFFUSE) (renderer::material_color_stage). The drawer
+// binds the page's material for each page run, so every glyph of every caller
+// draws at twice its texel times its vertex colour, saturated; the callers halve
+// their colour first (the HUD's half-bright drawers, the menus' text sink), so
+// a half-bright colour reads at full brightness. The underline pass is
+// untextured and doubles its colour on the CPU instead (GameFontUnderline).
+// [orig: GameFont_LoadFromBlob @0x674740 — sub_676D50(page, 0x651) @0x674825,
+//  kept at font+0xA0[page] @0x67483B; CGameFont_Create @0x674b9c / @0x674d1e,
+//  the same word; CGameFont_DrawText @0x6752c0 binds font+0xA0[page] per run,
+//  GfxShader_ApplyPassChecked @0x675a9e / @0x675d10]
+inline constexpr uint32_t kFontPageMaterialWord = 0x651u;
+
 // Layout flags — the drawer's packed flag word (v164) [orig: @ 0x6752c0].
 enum GameFontFlags : uint32_t {
 	kFontAlignCenter = 0x1,
@@ -55,7 +69,9 @@ struct GameFontQuad {
 	float v0 = 0.0f;
 	float u1 = 0.0f;
 	float v1 = 0.0f;
-	uint32_t color = 0; // 0xAARRGGBB as the caller supplied / tag-adjusted
+	// 0xAARRGGBB as the caller supplied / tag-adjusted: the raw diffuse, which
+	// the page's material doubles on the device (kFontPageMaterialWord).
+	uint32_t color = 0;
 };
 
 // The underline pass draws LINE segments under the run, at DOUBLED text color

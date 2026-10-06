@@ -907,6 +907,16 @@ void MenuFrameCompiler::emit_glyph_run_with_(int32_t font_slot,
 	const size_t underline_first = draw_list_.underlines.size();
 	const float x = emit_x(design_x, s.x);
 	const float y = emit_x(design_y, s.y);
+	// The sink halves the RGB on a modulate-2x device (the UI half-bright mode,
+	// the device caps' modulate flag) and forces the alpha opaque, menus never
+	// passing the keep-alpha flag 0x10000; the font page's MODULATE2X doubles it
+	// back on the device (hud::kFontPageMaterialWord), so a menu text reads at
+	// its colour with each channel's low bit lost [orig: CFontCache_DrawTextScaled
+	// @0x653170 — g_UIHalfBrightMode @0x31C3760 (caps dword 6, set from the
+	// adapter's TextureOpCaps unless the device's no-modulate-2x workaround,
+	// CGfxDevice_QueryAdapterCaps @0x67df72..0x67df8e) -> (c >> 1) & 0x7F7F7F
+	// @0x6531e7..0x6531eb, | 0xFF000000 @0x6531db].
+	color = ((color >> 1) & 0x7F7F7Fu) | 0xFF000000u;
 	const hud::GameFontRun run =
 			gf.layout(text.c_str(), x, y, s.x, s.y, 0u, color);
 	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),

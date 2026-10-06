@@ -6,6 +6,7 @@
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_config_tokens.h>
 #include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_lfp_panel.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_message_log.h>
 #include <runtime/world/friendly_tags.h> // the viewer gate's feed
@@ -818,8 +819,9 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 				"the distance label uses the retail pointer-slot anchor");
 	}
 	CHECK(!list.map_glyphs.empty() &&
-			list.map_glyphs.front().color == 0xFF6080FEu,
-			"map labels fold retail's half-bright then MODULATE2X color path");
+			list.map_glyphs.front().color == 0xFF30407Fu,
+			"map labels carry the half-bright drawer's raw diffuse (the page's MODULATE2X "
+			"doubles it on the device, D-HUD-51)");
 	for (const auto &tri : list.map.terrain) {
 		for (const auto *v : {&tri.a, &tri.b, &tri.c}) {
 			const float nx = (v->x - list.map.center_x) / list.map.radius_x;
@@ -1495,6 +1497,94 @@ void test_compiler_waypoint_uses_bold_slot(const fnt_font_t *font) {
 	CHECK(bold == 8 && hud == 0, "the waypoint's 5 name + 3 distance glyphs ride the bold slot");
 }
 
+// D-HUD-51: every HUD text is laid out at its drawer's raw diffuse, the halved
+// colour; the font page's material (hud::kFontPageMaterialWord, MODULATE2X)
+// doubles it on the device. The untextured lines beside it keep the raw colour.
+// [orig: GameFont_LoadFromBlob @0x674825 (0x651 per page); the waypoint's
+//  HUD_DrawTextLeft_HalfBright @0x5949fc and its wireframe box @0x594b0c; the
+//  zone marker's sub_580B80 @0x598a1b with the point colour pushed @0x598a05;
+//  the label box's HUD_DrawTextLeft_HalfBright @0x51f13a; the board's
+//  HUD_DrawTextAligned rows]
+void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
+	CHECK(opennova::hud::kFontPageMaterialWord == 0x651u, "a font page draws through 0x651");
+	// The waypoint: halved text, raw box.
+	{
+		HudFrameCompiler compiler;
+		HudLayout layout;
+		layout.wpd_info = {512, 60, 0, 0, true};
+		compiler.configure(layout, font);
+		compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+		HudFrameState state;
+		state.waypoint.present = true;
+		state.waypoint.name = "Alpha";
+		state.waypoint.distance_m = 120;
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		uint32_t box = 0;
+		for (const opennova::hud::HudQuad &q : list.quads)
+			if (!q.filled) box = q.color;
+		CHECK(box != 0, "the waypoint box draws");
+		bool halved = !list.glyphs.empty();
+		for (const opennova::hud::GameFontQuad &g : list.glyphs)
+			halved = halved && g.color == opennova::hud::half_bright_argb(box);
+		CHECK(halved, "the waypoint text is the box colour halved");
+	}
+	// The zone marker: the letter in the point colour, every text halved.
+	{
+		HudFrameCompiler compiler;
+		HudLayout layout;
+		layout.lfp_anchor_present = true;
+		layout.lfp_anchor_x = 1020;
+		layout.lfp_anchor_y = 27;
+		compiler.configure(layout, font);
+		compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+		HudFrameState state;
+		state.lfp_panel.shown = true;
+		state.lfp_panel.local_team = 1;
+		opennova::hud::HudLfpZone z;
+		z.letter_index = 0;
+		z.team = 1;
+		z.timer_present = true;
+		z.timer_team = 1;
+		z.capture_flags = 0x40;
+		z.count_owner = 2;
+		state.lfp_panel.zones = {z};
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		const uint32_t point = opennova::hud::lfp_point_color(opennova::hud::lfp_team_color(1),
+				false, true, false, false, true);
+		bool letter = false;
+		bool halved = !list.glyphs.empty();
+		for (const opennova::hud::GameFontQuad &g : list.glyphs) {
+			if (g.color == opennova::hud::half_bright_argb(point)) letter = true;
+			halved = halved && (g.color & 0x808080u) == 0u && (g.color >> 24) == 0xFFu;
+		}
+		CHECK(letter, "the zone letter draws in the point colour, halved");
+		CHECK(halved, "every marker text is a halved, opaque diffuse");
+	}
+	// The player list: the rows halved, the tagged white header lines full white.
+	{
+		HudFrameCompiler compiler;
+		compiler.configure(HudLayout{}, font);
+		HudFrameState state;
+		state.scoreboard.shown = true;
+		state.scoreboard.title = "Players";
+		state.scoreboard.server_name = "Srv";
+		opennova::hud::ScoreboardEntry e;
+		e.slot_id = 1;
+		e.has_entity = true;
+		e.name = "P";
+		state.scoreboard.rows.push_back(e);
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		size_t white = 0;
+		size_t over = 0;
+		for (const opennova::hud::GameFontQuad &g : list.glyphs) {
+			if (g.color == 0xFFFFFFFFu) ++white;
+			else if ((g.color & 0x808080u) != 0u) ++over;
+		}
+		CHECK(white == 3, "the <cFFFFFF> server name draws its tag's full white");
+		CHECK(over == 0, "every other board text is halved");
+	}
+}
+
 } // namespace
 
 // The stdbox panel geometry: pieces and the fill inset scale with the surface,
@@ -2112,11 +2202,12 @@ void test_message_log_element(const fnt_font_t *font) {
 	// right-aligned at 990 px, so its glyphs end left of 990.
 	float chat_x = 1e9f, sys_right = -1e9f;
 	for (const auto &g : list.glyphs) {
-		if (g.color == 0xFF80A0FFu) {
+		// Each ring's stored colour through the half-bright drawer (D-HUD-51).
+		if (g.color == opennova::hud::half_bright_argb(0xFF80A0FFu)) {
 			++chat_glyphs;
 			chat_x = std::min(chat_x, g.x_top_left);
 		}
-		if (g.color == 0xFFAFAFAFu) {
+		if (g.color == opennova::hud::half_bright_argb(0xFFAFAFAFu)) {
 			++sys_glyphs;
 			sys_right = std::max(sys_right, g.x_top_left);
 		}
@@ -2133,7 +2224,7 @@ void test_message_log_element(const fnt_font_t *font) {
 			15 * opennova::hud::message_log_step_px(1024));
 	float chat_y = -1.0f;
 	for (const auto &g : list.glyphs)
-		if (g.color == 0xFF80A0FFu) chat_y = g.y_top;
+		if (g.color == opennova::hud::half_bright_argb(0xFF80A0FFu)) chat_y = g.y_top;
 	CHECK(std::fabs(chat_y - (expected_y - 0.5f)) < 1.0f,
 			"a single line sits in the bottom row, not the top");
 }
@@ -2156,8 +2247,8 @@ void test_chat_feed_loop(const fnt_font_t *font) {
 		CHECK(list.glyphs.size() == 1, "a fresh chat line draws");
 		CHECK(!list.glyphs.empty() && (list.glyphs[0].color >> 24) == 0xFFu,
 				"930 ticks of life clamp the alpha at 255");
-		CHECK(!list.glyphs.empty() && (list.glyphs[0].color & 0xFFFFFFu) == 0x102030u,
-				"the stored RGB survives the alpha fold");
+		CHECK(!list.glyphs.empty() && (list.glyphs[0].color & 0xFFFFFFu) == 0x081018u,
+				"the stored RGB survives the alpha fold, halved by the drawer");
 	}
 	// 93 ticks left -> 255 * 93 / 186 = 127.
 	state.ticks = 930 - 93;
@@ -2428,7 +2519,8 @@ void test_kill_announcement(const fnt_font_t *font) {
     const auto &list = compiler.compile(state, 1024, 768);
     CHECK(list.glyphs.size() == 3, "banner remains visible at age 186");
     if (!list.glyphs.empty()) {
-        CHECK(list.glyphs[0].color == 0xFFFFFFFFu, "banner uses full white");
+        CHECK(list.glyphs[0].color == 0xFF7F7F7Fu,
+                "banner uses white through the mode-2 drawer, halved (D-HUD-51)");
         CHECK(std::abs(list.glyphs[0].x_top_left - 498.5f) < 0.01f, "banner centers its 26px text at 512 with the raster half-pixel offset");
         CHECK(std::abs(list.glyphs[0].y_top - 29.5f) < 0.01f, "banner uses design y 30 with the raster half-pixel offset");
     }
@@ -2793,6 +2885,7 @@ int main() {
 	test_compiler_label_fonts(&font);
 	test_compiler_hud_font_falls_back_to_bold(&font);
 	test_compiler_waypoint_uses_bold_slot(&font);
+	test_text_draws_the_drawers_halved_diffuse(&font);
 	test_static_frame_pick();
 	test_sights_card_element(&font);
 	test_vehicle_panel_element(&font);
