@@ -27,6 +27,7 @@ namespace opennova::editor {
 class DocumentSet;
 class EditorPreferences;
 class ImportController;
+class NavigationController;
 class OpenOperation;
 class PlayController;
 class ProblemsService;
@@ -47,12 +48,12 @@ inline constexpr int64_t kWireGestureLapseMs = 10000;
 // closes it; the one operation slot, its poll budget and the build it runs; the view (the Output
 // log and the revisions in it), which only touch() moves a counter of; the outcome of the request
 // being served; and the editor's preferences. The parts (DocumentSet, ProblemsService,
-// PlayController, ImportController, RenameController, UnsavedGuard) each hold the core and reach
-// one another through it, so a composition calls the part that serves it (a rename's close and
-// reload call DocumentSet), never the session's handle(): handle() is entered once per request
-// from outside, and that request's outcome is the one every part adds to. An operation's finish
-// absorbs its work through the core (SessionOperation::finish). Single-threaded: the session's
-// owner calls it between two frames' requests.
+// PlayController, ImportController, RenameController, UnsavedGuard, NavigationController) each hold
+// the core and reach one another through it, so a composition calls the part that serves it (a
+// rename's close and reload call DocumentSet), never the session's handle(): handle() is entered
+// once per request from outside, and that request's outcome is the one every part adds to. An
+// operation's finish absorbs its work through the core (SessionOperation::finish). Single-threaded:
+// the session's owner calls it between two frames' requests.
 class SessionCore {
 public:
 	SessionCore(ProcessPlatform &platform, EditorPreferences &preferences);
@@ -68,6 +69,7 @@ public:
 		ImportController *imports = nullptr;
 		RenameController *renames = nullptr;
 		UnsavedGuard *guard = nullptr;
+		NavigationController *navigation = nullptr;
 	};
 	void bind(const Parts &parts) { parts_ = parts; }
 	DocumentSet &documents() const { return *parts_.documents; }
@@ -76,6 +78,7 @@ public:
 	ImportController &imports() const { return *parts_.imports; }
 	RenameController &renames() const { return *parts_.renames; }
 	UnsavedGuard &guard() const { return *parts_.guard; }
+	NavigationController &navigation() const { return *parts_.navigation; }
 
 	// Once, when the session starts: the preferences read (a store that cannot be read is a finding,
 	// the defaults in effect) and shown, no project open.

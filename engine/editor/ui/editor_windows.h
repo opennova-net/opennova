@@ -28,9 +28,9 @@ class ViewportDeviceSource;
 
 // The OpenNova Editor's workspace (ADR 0046 d10, S11d): the ImGui pass with the editor's
 // six windows on it (Files on the left, Document in the centre with Preview beside it,
-// the Inspector on the right, Problems and Output along the bottom) and the File / Edit /
-// Build menus on its menu bar, which ends with the unsaved files, the problem counts, the
-// build and game state and Build / Play / Stop. The modals (the unsaved prompt, the import
+// the Inspector on the right, Problems and Output along the bottom) and on its menu bar Back and
+// Forward (the navigation history) then the File / Edit / Build menus, the bar ending with the
+// unsaved files, the problem counts, the build and game state and Build / Play / Stop. The modals (the unsaved prompt, the import
 // dialog, the project settings, a new project, a new file's name) are drawn here every
 // frame, never by a window a hidden tab would skip; so are Find in project (Edit menu,
 // Ctrl+Shift+F), beside the Document window's own find bar (Edit > Find..., Ctrl+F), and
@@ -110,6 +110,8 @@ public:
 	void draw_menu_bar_trailing(devtools::ImGuiPass &pass) override;
 
 private:
+	// Back and Forward, the menu bar's first items (the navigation history).
+	void draw_navigation(const SessionView &v);
 	void draw_file_menu(const SessionView &v);
 	void draw_edit_menu(const SessionView &v, const DocumentBase *document);
 	void draw_build_menu(const SessionView &v);

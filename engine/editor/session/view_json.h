@@ -32,6 +32,7 @@ enum class ViewSection : uint8_t {
 	Output,
 	Events,
 	Workspace,
+	Navigation,
 	kCount,
 };
 
