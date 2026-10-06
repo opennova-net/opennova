@@ -4,7 +4,8 @@
 // its owner's collection, whichever made it, byte for byte the same file; a row's after it among
 // the rows; a row selected takes a Paste into itself, at its end); the selection each open
 // document keeps while another is active (the primary and every selected record given back, a
-// document read again or closed keeping none); and a selection over several rows (S13 D7), whose
+// document read again keeping it by the records' places, one closed keeping none); and a selection
+// over several rows (S13 D7), whose
 // Duplicate and whose removal are one step each, the primary's copy the primary; records the
 // document does not hold never selected; and the Selection concern moving with the selection
 // alone.
@@ -138,8 +139,8 @@ static int test_paste_and_duplicate_agree() {
 
 // The selection each open document had when another became active comes back with it: the
 // primary and every selected record, repaired against the records as they are. A document read
-// again (its file changed outside the editor) keeps none, nor does one closed and opened again: a
-// menu then shows its first screen.
+// again (its file changed outside the editor) keeps it by the records' places (DI-01); one closed and
+// opened again keeps none: a menu then shows its first screen.
 static int test_remembered_selections() {
 	Menus menus("opennova_editor_document_set_selections");
 	const SessionView &v = menus.view();
@@ -162,8 +163,9 @@ static int test_remembered_selections() {
 	menus.session.handle(request::open_document("extra.mnu"));
 	TEST_EXPECT(v.documents.active == extra->path() && v.documents.selection.primary == extra_main && v.documents.selection.records.size() == 1);
 
-	// The menu's file changed outside the editor: a Rescan reads it again, and it keeps no
-	// selection (its records are new ones).
+	// The menu's file changed outside the editor: a Rescan reads it again, its records new ones, and
+	// the selection it kept comes back by the records' places (ADR 0046 DI-01: their locators, as a
+	// project reopens them).
 	{
 		const std::string path = menus.view().project.root + "/" + menu;
 		std::string bytes;
@@ -171,11 +173,13 @@ static int test_remembered_selections() {
 		TEST_EXPECT(read_file_text(path, bytes, error));
 		TEST_EXPECT(editor_test::write_text(path, bytes + "\r\n"));
 	}
+	const uint64_t before = menus.menu().identity();
 	menus.session.handle(request::rescan());
 	menus.session.run_operations();
+	TEST_EXPECT(menus.menu().identity() != before);
 	menus.session.handle(request::open_document(menu));
-	TEST_EXPECT(v.documents.active == menu && v.documents.selection.records.size() == 1 && v.documents.selection.primary.row == menus.menu().rows().front()->id &&
-	            !v.documents.selection.primary.child);
+	TEST_EXPECT(v.documents.active == menu && v.documents.selection.primary == menus.at(kExit) &&
+	            v.documents.selection.records == std::vector<NodeAddress>({ menus.at(kTitle), menus.at(kExit) }));
 
 	// Selected again, then closed while another is active, and opened again: none kept.
 	menus.select(menus.at(kTitle));
