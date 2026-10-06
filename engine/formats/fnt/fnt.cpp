@@ -189,6 +189,14 @@ fnt_error_t fnt_write(const fnt_font_t *font, uint8_t *out, size_t out_size, siz
 
 	uint8_t *dst_pages = out + FNT_TOTAL_HEADER;
 	size_t page_bytes = (size_t)font->num_pages * FNT_TEXTURE_SIZE;
+	if (font->keep_page_rgb) {
+		/* The colour as given: the page's mode modulates it (fnt.h keep_page_rgb). */
+		memcpy(dst_pages, font->pages, page_bytes);
+		if (written_size) {
+			*written_size = required_size;
+		}
+		return FNT_OK;
+	}
 	for (size_t i = 0; i < page_bytes; i += FNT_TEXTURE_CHANNELS) {
 		dst_pages[i + 0] = 255;
 		dst_pages[i + 1] = 255;
